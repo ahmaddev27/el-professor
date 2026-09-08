@@ -1,0 +1,1 @@
+ALTER TABLE drivers ADD COLUMN IF NOT EXISTS employment_type text NOT NULL DEFAULT 'employee';

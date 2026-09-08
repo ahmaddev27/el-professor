@@ -1,0 +1,1 @@
+ALTER TABLE drivers ADD COLUMN IF NOT EXISTS can_cover_other_drivers boolean DEFAULT true;

@@ -1,0 +1,1180 @@
+import React, { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
+import { useDatabase } from '../hooks/useDatabase';
+import { useAuth } from '../contexts/AuthContext';
+import { usePlan, Plan, PlanState } from '../contexts/PlanContext';
+import { Receipt, Driver, Income } from '../types/receipt';
+import {
+  TrendingUp, TrendingDown, DollarSign, Users, Calendar, BarChart3,
+  ArrowUpRight, ArrowDownRight, Wallet, Receipt as ReceiptIcon, Target,
+  ChevronRight, AlertTriangle, CheckCircle, Wrench, FileText, Plus,
+  AlertCircle, Info, Zap, CreditCard, Building2 as Building2Icon,
+  ShieldX, ShieldAlert,
+} from 'lucide-react';
+import { format, isWithinInterval, parseISO } from 'date-fns';
+import { de } from 'date-fns/locale';
+import { supabase } from '../lib/supabase';
+import {
+  AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell,
+  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend
+} from 'recharts';
+import {
+  FixedCostItem, SalaryRecord, DriverRecord, WerkstattCheck, UserProfileRecord,
+  PeriodMetrics, DriverPerformance, SalaryAlert, CashSummary, TrendDataPoint,
+  ExpenseItem, SmartInsight, RevenueCompositionItem,
+  getMonthRange, getPrevMonthString,
+  calcPeriodMetrics, calcDeltaPct,
+  calcDriverPerformance, calcSalaryAlerts,
+  calcCashSummary, buildTrendData,
+  getTopExpenses, generateInsights, buildRevenueComposition,
+} from '../utils/overviewHelpers';
+import { getTuevStatus } from '../types/car';
+
+const fmt = (n: number) =>
+  n.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+// ── Delta badge ───────────────────────────────────────────────────────────────
+const DeltaBadge: React.FC<{ delta: number | null; higherIsBetter?: boolean }> = ({
+  delta,
+  higherIsBetter = true,
+}) => {
+  if (delta === null) return <span className="text-xs" style={{ color: 'var(--text-tertiary)' }}>k.V.</span>;
+  const positive = higherIsBetter ? delta >= 0 : delta <= 0;
+  return (
+    <span
+      className="inline-flex items-center gap-0.5 text-xs font-semibold px-1.5 py-0.5 rounded-md"
+      style={{
+        background: positive ? 'var(--success-subtle)' : 'var(--danger-subtle)',
+        color: positive ? 'var(--success)' : 'var(--danger)',
+      }}
+    >
+      {delta >= 0 ? <ArrowUpRight size={10} /> : <ArrowDownRight size={10} />}
+      {Math.abs(delta).toFixed(1)}%
+    </span>
+  );
+};
+
+// ── KPI card ──────────────────────────────────────────────────────────────────
+const KpiCard: React.FC<{
+  label: string;
+  value: string;
+  sub?: string;
+  icon: React.ReactNode;
+  iconBg: string;
+  iconColor: string;
+  delta?: number | null;
+  higherIsBetter?: boolean;
+}> = ({ label, value, sub, icon, iconBg, iconColor, delta, higherIsBetter }) => (
+  <div
+    className="rounded-2xl p-5 flex flex-col gap-3 transition-all duration-200 cursor-default"
+    style={{
+      background: 'var(--bg-surface)',
+      border: '1px solid var(--border)',
+      boxShadow: 'var(--shadow-sm)',
+    }}
+    onMouseEnter={e => { (e.currentTarget as HTMLElement).style.boxShadow = 'var(--shadow-md)'; }}
+    onMouseLeave={e => { (e.currentTarget as HTMLElement).style.boxShadow = 'var(--shadow-sm)'; }}
+  >
+    <div className="flex items-center justify-between">
+      <span className="text-xs font-semibold uppercase tracking-widest" style={{ color: 'var(--text-tertiary)' }}>
+        {label}
+      </span>
+      <div className="rounded-xl p-2" style={{ background: iconBg, color: iconColor }}>
+        {icon}
+      </div>
+    </div>
+    <div>
+      <p className="text-2xl font-bold leading-tight" style={{ color: 'var(--text-primary)' }}>{value}</p>
+      <div className="flex items-center gap-2 mt-1">
+        {sub && <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>{sub}</p>}
+        {delta !== undefined && (
+          <DeltaBadge delta={delta ?? null} higherIsBetter={higherIsBetter} />
+        )}
+      </div>
+    </div>
+  </div>
+);
+
+// ── Custom tooltip ────────────────────────────────────────────────────────────
+const ChartTooltip: React.FC<any> = ({ active, payload, label }) => {
+  if (!active || !payload?.length) return null;
+  return (
+    <div
+      className="rounded-xl p-3 text-sm"
+      style={{
+        background: 'var(--bg-elevated)',
+        border: '1px solid var(--border)',
+        boxShadow: 'var(--shadow-lg)',
+      }}
+    >
+      <p className="font-semibold mb-1" style={{ color: 'var(--text-primary)' }}>{label}</p>
+      {payload.map((entry: any) => (
+        <p key={entry.name} style={{ color: entry.color }} className="flex justify-between gap-4">
+          <span style={{ color: 'var(--text-secondary)' }}>{entry.name}</span>
+          <span className="font-semibold" style={{ color: entry.color }}>{fmt(entry.value)} €</span>
+        </p>
+      ))}
+    </div>
+  );
+};
+
+// ── Alert row ─────────────────────────────────────────────────────────────────
+const AlertRow: React.FC<{
+  type: 'danger' | 'warning' | 'info' | 'success';
+  title: string;
+  body: string;
+}> = ({ type, title, body }) => {
+  const s = {
+    danger:  { bg: 'var(--danger-subtle)',  border: 'var(--danger)',  icon: <AlertCircle  size={16} style={{ color: 'var(--danger)'  }} className="flex-shrink-0" /> },
+    warning: { bg: 'var(--warning-subtle)', border: 'var(--warning)', icon: <AlertTriangle size={16} style={{ color: 'var(--warning)' }} className="flex-shrink-0" /> },
+    info:    { bg: 'var(--accent-subtle)',  border: 'var(--accent)',   icon: <Info          size={16} style={{ color: 'var(--accent-text)'}} className="flex-shrink-0" /> },
+    success: { bg: 'var(--success-subtle)', border: 'var(--success)', icon: <CheckCircle   size={16} style={{ color: 'var(--success)' }} className="flex-shrink-0" /> },
+  }[type];
+  return (
+    <div
+      className="flex items-start gap-2.5 p-3 rounded-xl"
+      style={{ background: s.bg, border: `1px solid ${s.border}33` }}
+    >
+      {s.icon}
+      <div>
+        <p className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>{title}</p>
+        <p className="text-xs mt-0.5" style={{ color: 'var(--text-secondary)' }}>{body}</p>
+      </div>
+    </div>
+  );
+};
+
+// ── Section header ────────────────────────────────────────────────────────────
+const SectionHeader: React.FC<{
+  title: string; sub?: string; icon: React.ReactNode; action?: React.ReactNode;
+}> = ({ title, sub, icon, action }) => (
+  <div className="flex items-center justify-between mb-5">
+    <div className="flex items-center gap-2.5">
+      <div className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ background: 'var(--bg-muted)', color: 'var(--text-tertiary)' }}>
+        {icon}
+      </div>
+      <div>
+        <h2 className="text-base font-semibold" style={{ color: 'var(--text-primary)' }}>{title}</h2>
+        {sub && <p className="text-xs mt-0.5" style={{ color: 'var(--text-tertiary)' }}>{sub}</p>}
+      </div>
+    </div>
+    {action}
+  </div>
+);
+
+// ── Panel wrapper ─────────────────────────────────────────────────────────────
+const Panel: React.FC<{ children: React.ReactNode; className?: string }> = ({ children, className = '' }) => (
+  <div
+    className={`rounded-2xl p-5 ${className}`}
+    style={{
+      background: 'var(--bg-surface)',
+      border: '1px solid var(--border)',
+      boxShadow: 'var(--shadow-sm)',
+    }}
+  >
+    {children}
+  </div>
+);
+
+// ── Plan status card ─────────────────────────────────────────────────────────
+
+const PLAN_LABEL: Record<Plan, string> = { basic: 'Basic', advanced: 'Advanced', premium: 'Premium' };
+const PLAN_COLOR: Record<Plan, string> = { basic: 'var(--accent)', advanced: '#f59e0b', premium: '#10b981' };
+const STATUS_LABEL: Record<string, string> = {
+  trial:         'Testphase',
+  active:        'Aktiv',
+  trial_expired: 'Testphase abgelaufen',
+  suspended:     'Gesperrt',
+  inactive:      'Inaktiv',
+};
+
+const PlanStatusCard: React.FC<{ planState: PlanState; effectivePlan: Plan }> = ({ planState, effectivePlan }) => {
+  const color = planState.isInTrial ? 'var(--accent)' : PLAN_COLOR[planState.plan];
+  const trialEndStr = planState.trialEnd
+    ? planState.trialEnd.toLocaleDateString('de-DE', { day: '2-digit', month: 'long', year: 'numeric' })
+    : null;
+
+  return (
+    <div
+      className="flex items-center justify-between gap-4 p-4 rounded-2xl flex-wrap"
+      style={{
+        background: `${color}12`,
+        border: `1px solid ${color}30`,
+      }}
+    >
+      <div className="flex items-center gap-3 min-w-0">
+        <div
+          className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
+          style={{ background: `${color}20` }}
+        >
+          <Zap size={18} style={{ color }} />
+        </div>
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="font-bold text-sm" style={{ color: 'var(--text-primary)' }}>
+              {planState.isInTrial
+                ? `Testphase — ${PLAN_LABEL[effectivePlan]}-Features freigeschaltet`
+                : `Plan: ${PLAN_LABEL[planState.plan]}`
+              }
+            </span>
+            <span
+              className="text-xs font-semibold px-2 py-0.5 rounded-full"
+              style={{ background: `${color}20`, color }}
+            >
+              {STATUS_LABEL[planState.status] ?? planState.status}
+            </span>
+          </div>
+          <p className="text-xs mt-0.5" style={{ color: 'var(--text-secondary)' }}>
+            {planState.isInTrial && trialEndStr
+              ? `${planState.trialDaysLeft} Tag${planState.trialDaysLeft === 1 ? '' : 'e'} verbleiben · Testphase endet am ${trialEndStr}`
+              : planState.isTrialExpired && trialEndStr
+                ? `Testphase endete am ${trialEndStr} · Nur Basic-Features verfügbar`
+                : 'Aktives Abonnement'
+            }
+          </p>
+        </div>
+      </div>
+
+      {(planState.isInTrial || planState.isTrialExpired) && (
+        <a
+          href="mailto:support@el-professor.de?subject=Plan upgraden"
+          className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold flex-shrink-0 transition-opacity hover:opacity-80"
+          style={{ background: color, color: 'white' }}
+        >
+          <Zap size={12} />
+          Plan wählen
+        </a>
+      )}
+    </div>
+  );
+};
+
+// ── Main component ────────────────────────────────────────────────────────────
+const OverviewPage: React.FC = () => {
+  const { isSuperAdmin, companyId } = useAuth();
+  const { planState, effectivePlan } = usePlan();
+  const { receipts: receiptActions, drivers: driverActions, isLoading: dbLoading } = useDatabase();
+  const [receipts, setReceipts] = useState<Receipt[]>([]);
+  const [drivers, setDrivers] = useState<Driver[]>([]);
+  const [fixedCosts, setFixedCosts] = useState<FixedCostItem[]>([]);
+  const [incomes, setIncomes] = useState<Income[]>([]);
+  const [salaries, setSalaries] = useState<SalaryRecord[]>([]);
+  const [werkstattChecks, setWerkstattChecks] = useState<WerkstattCheck[]>([]);
+  const [userProfiles, setUserProfiles] = useState<UserProfileRecord[]>([]);
+  const [cars, setCars] = useState<{ id: string; kennzeichen: string; tuev_gueltig_bis: string | null }[]>([]);
+  const [selectedMonth, setSelectedMonth] = useState<string>(format(new Date(), 'yyyy-MM'));
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!dbLoading) loadData();
+  }, [dbLoading]);
+
+  const loadData = async () => {
+    setLoading(true);
+    try {
+      const [receiptsData, driversData] = await Promise.all([
+        receiptActions.get(),
+        driverActions.get(),
+      ]);
+      setReceipts(receiptsData);
+      setDrivers(driversData);
+      await Promise.all([
+        loadFixedCosts(), loadIncomes(), loadSalaries(),
+        loadWerkstattChecks(), loadUserProfiles(), loadCars(),
+      ]);
+    } catch (err) {
+      console.error('Error loading data:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadFixedCosts = async () => {
+    const { data } = await supabase.from('fixed_costs').select('id, description, amount').eq('company_id', companyId);
+    setFixedCosts(data || []);
+  };
+  const loadIncomes = async () => {
+    const { data } = await supabase.from('income').select('*').eq('company_id', companyId);
+    setIncomes(data || []);
+  };
+  const loadSalaries = async () => {
+    const { data } = await supabase.from('salaries').select('*').eq('company_id', companyId);
+    setSalaries(data || []);
+  };
+  const loadWerkstattChecks = async () => {
+    const { data } = await supabase
+      .from('werkstatt_checks')
+      .select('id, car_id, status, check_date, notes, car:cars(kennzeichen)')
+      .eq('company_id', companyId)
+      .order('check_date', { ascending: false })
+      .limit(50);
+    setWerkstattChecks((data as WerkstattCheck[]) || []);
+  };
+  const loadUserProfiles = async () => {
+    const { data } = await supabase
+      .from('user_profiles')
+      .select('id, email, full_name, role, status, invited_at')
+      .eq('company_id', companyId);
+    setUserProfiles(data || []);
+  };
+  const loadCars = async () => {
+    const { data } = await supabase
+      .from('cars')
+      .select('id, kennzeichen, tuev_gueltig_bis')
+      .eq('company_id', companyId);
+    setCars(data || []);
+  };
+
+  // ── Derived data ─────────────────────────────────────────────────────────
+  const { start: monthStart, end: monthEnd } = getMonthRange(selectedMonth);
+  const prevMonthStr = getPrevMonthString(selectedMonth);
+  const { start: prevStart, end: prevEnd } = getMonthRange(prevMonthStr);
+
+  const driverRecords: DriverRecord[] = drivers.map(d => ({
+    id: d.id, name: d.name,
+    salary_ratio: d.salary_ratio ?? d.salaryRatio,
+    status: d.status,
+  }));
+
+  const currentMetrics = calcPeriodMetrics(incomes, salaries, receipts, fixedCosts, monthStart, monthEnd);
+  const prevMetrics    = calcPeriodMetrics(incomes, salaries, receipts, fixedCosts, prevStart, prevEnd);
+
+  const umsatzDelta   = calcDeltaPct(currentMetrics.umsatz, prevMetrics.umsatz);
+  const bargeldDelta  = calcDeltaPct(currentMetrics.bargeld, prevMetrics.bargeld);
+  const salariesDelta = calcDeltaPct(currentMetrics.salaries, prevMetrics.salaries);
+  const costsDelta    = calcDeltaPct(currentMetrics.totalCosts, prevMetrics.totalCosts);
+  const profitDelta   = calcDeltaPct(currentMetrics.profit, prevMetrics.profit);
+  const marginDelta   = prevMetrics.profitMargin !== 0
+    ? currentMetrics.profitMargin - prevMetrics.profitMargin : null;
+
+  const driverPerformance = calcDriverPerformance(driverRecords, incomes, salaries, receipts, monthStart, monthEnd);
+  const salaryAlerts      = calcSalaryAlerts(salaries, driverRecords);
+  const cashSummary       = calcCashSummary(incomes, receipts, monthStart, monthEnd);
+  const trendData         = buildTrendData(selectedMonth, incomes, salaries, receipts, fixedCosts);
+  const topExpenses       = getTopExpenses(receipts, fixedCosts, monthStart, monthEnd, 5);
+  const insights          = generateInsights(currentMetrics, prevMetrics, driverPerformance, salaryAlerts, werkstattChecks);
+  const revenueComposition = buildRevenueComposition(currentMetrics);
+
+  const recentReceipts = [...receipts]
+    .filter(r => isWithinInterval(new Date(r.date), { start: monthStart, end: monthEnd }))
+    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+    .slice(0, 5);
+
+  const currentMonthChecks = werkstattChecks.filter(c =>
+    isWithinInterval(new Date(c.check_date), { start: monthStart, end: monthEnd })
+  );
+  const fleetOk       = currentMonthChecks.filter(c => c.status === 'positive').length;
+  const fleetIssues   = currentMonthChecks.filter(c => c.status === 'negative').length;
+  const fleetRepaired = currentMonthChecks.filter(c => c.status === 'repaired').length;
+
+  const pendingInvites = userProfiles.filter(u => u.invited_at && u.status !== 'active').length;
+  const totalOpenSalary = salaryAlerts.reduce((s, a) => s + a.remaining, 0);
+  const unpaidCount     = salaryAlerts.filter(a => a.status === 'unpaid').length;
+  const partialCount    = salaryAlerts.filter(a => a.status === 'partially_paid').length;
+
+  const tuevAbgelaufen    = cars.filter(c => getTuevStatus(c.tuev_gueltig_bis).status === 'abgelaufen');
+  const tuevBaldAblaufend = cars.filter(c => getTuevStatus(c.tuev_gueltig_bis).status === 'bald_ablaufend');
+
+  const hasAlerts = salaryAlerts.length > 0 || pendingInvites > 0 || fleetIssues > 0
+    || tuevAbgelaufen.length > 0 || tuevBaldAblaufend.length > 0;
+
+  if (loading || dbLoading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="animate-spin rounded-full h-10 w-10 border-b-2" style={{ borderColor: 'var(--accent)' }} />
+      </div>
+    );
+  }
+
+  // Chart colors that work on both themes
+  const C = {
+    umsatz: '#3b82f6',
+    gewinn: '#10b981',
+    gehaelter: '#f59e0b',
+    kosten: '#ef4444',
+    grid: 'var(--border)',
+    tick: 'var(--text-tertiary)',
+  };
+
+  return (
+    <div className="space-y-5 pb-8">
+
+      {/* ── Super Admin Banner ── */}
+      {isSuperAdmin && (
+        <Link
+          to="/super-admin"
+          className="flex items-center justify-between p-4 rounded-2xl transition-all group"
+          style={{
+            background: 'linear-gradient(135deg, rgba(245,158,11,0.15) 0%, rgba(245,158,11,0.05) 100%)',
+            border: '1px solid rgba(245,158,11,0.4)',
+          }}
+        >
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
+              style={{ background: 'rgba(245,158,11,0.2)' }}>
+              <Building2Icon size={20} style={{ color: '#f59e0b' }} />
+            </div>
+            <div>
+              <p className="font-bold text-sm" style={{ color: '#f59e0b' }}>Super Admin — Plattform-Übersicht</p>
+              <p className="text-xs mt-0.5" style={{ color: 'var(--text-secondary)' }}>
+                KPIs, Trials, Plan-Verteilung und Handlungsbedarf auf einen Blick
+              </p>
+            </div>
+          </div>
+          <ChevronRight size={18} style={{ color: '#f59e0b' }} className="group-hover:translate-x-1 transition-transform" />
+        </Link>
+      )}
+
+      {/* ── Plan / Trial Status Card ── */}
+      {!isSuperAdmin && (
+        <PlanStatusCard planState={planState} effectivePlan={effectivePlan} />
+      )}
+
+      {/* ── Header ── */}
+      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>
+            Firmenübersicht
+          </h1>
+          <p className="text-sm mt-0.5" style={{ color: 'var(--text-secondary)' }}>
+            {format(parseISO(selectedMonth + '-01'), 'MMMM yyyy', { locale: de })}
+            {' · '}Vergleich mit{' '}
+            {format(parseISO(prevMonthStr + '-01'), 'MMMM yyyy', { locale: de })}
+          </p>
+        </div>
+        <div
+          className="flex items-center gap-2 rounded-xl px-3 py-2 self-start"
+          style={{
+            background: 'var(--bg-surface)',
+            border: '1px solid var(--border)',
+            boxShadow: 'var(--shadow-sm)',
+          }}
+        >
+          <Calendar size={15} style={{ color: 'var(--text-tertiary)' }} />
+          <input
+            type="month"
+            value={selectedMonth}
+            onChange={(e) => setSelectedMonth(e.target.value)}
+            className="text-sm font-medium bg-transparent focus:outline-none"
+            style={{ color: 'var(--text-primary)' }}
+          />
+        </div>
+      </div>
+
+      {/* ── Smart insights ── */}
+      {insights.length > 0 && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
+          {insights.map((ins, i) => (
+            <AlertRow key={i} type={ins.type} title={ins.title} body={ins.body} />
+          ))}
+        </div>
+      )}
+
+      {/* ── KPI Cards ── */}
+      <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
+        <KpiCard label="Umsatz" value={`${fmt(currentMetrics.umsatz)} €`} sub="vs. Vormonat"
+          icon={<TrendingUp size={18} />} iconBg="rgba(16,185,129,0.12)" iconColor="#10b981"
+          delta={umsatzDelta} higherIsBetter />
+        <KpiCard label="Bargeld" value={`${fmt(currentMetrics.bargeld)} €`} sub="vs. Vormonat"
+          icon={<Wallet size={18} />} iconBg="rgba(20,184,166,0.12)" iconColor="#14b8a6"
+          delta={bargeldDelta} higherIsBetter />
+        <KpiCard label="Gehälter" value={`${fmt(currentMetrics.salaries)} €`} sub="vs. Vormonat"
+          icon={<Users size={18} />} iconBg="rgba(245,158,11,0.12)" iconColor="#f59e0b"
+          delta={salariesDelta} higherIsBetter={false} />
+        <KpiCard label="Gesamtkosten" value={`${fmt(currentMetrics.totalCosts)} €`} sub="Belege + Fixkosten"
+          icon={<TrendingDown size={18} />} iconBg="rgba(239,68,68,0.12)" iconColor="#ef4444"
+          delta={costsDelta} higherIsBetter={false} />
+        <KpiCard label="Firmengewinn" value={`${fmt(currentMetrics.profit)} €`} sub="vs. Vormonat"
+          icon={<DollarSign size={18} />}
+          iconBg={currentMetrics.profit >= 0 ? 'rgba(59,130,246,0.12)' : 'rgba(239,68,68,0.12)'}
+          iconColor={currentMetrics.profit >= 0 ? '#3b82f6' : '#ef4444'}
+          delta={profitDelta} higherIsBetter />
+        <KpiCard label="Gewinnmarge"
+          value={`${currentMetrics.profitMargin.toFixed(1)}%`}
+          sub={marginDelta !== null ? `${marginDelta >= 0 ? '+' : ''}${marginDelta.toFixed(1)}pp` : 'Rentabilität'}
+          icon={<Target size={18} />}
+          iconBg={currentMetrics.profitMargin >= 0 ? 'rgba(14,165,233,0.12)' : 'rgba(239,68,68,0.12)'}
+          iconColor={currentMetrics.profitMargin >= 0 ? '#0ea5e9' : '#ef4444'} />
+      </div>
+
+      {/* ── Action alerts ── */}
+      {hasAlerts && (
+        <Panel>
+          <SectionHeader title="Handlungsbedarf" sub="Offene Punkte die Aufmerksamkeit erfordern" icon={<AlertTriangle size={16} />} />
+          <div className="space-y-2">
+            {unpaidCount > 0 && (
+              <div
+                className="flex items-center justify-between p-3 rounded-xl"
+                style={{ background: 'var(--danger-subtle)', border: '1px solid rgba(239,68,68,0.2)' }}
+              >
+                <div className="flex items-center gap-2.5">
+                  <AlertCircle size={16} style={{ color: 'var(--danger)' }} className="flex-shrink-0" />
+                  <div>
+                    <p className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>{unpaidCount} unbezahlte Gehälter</p>
+                    <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>Gesamt offen: {fmt(totalOpenSalary)} €</p>
+                  </div>
+                </div>
+                <Link to="/gehaelter" className="text-xs font-semibold flex items-center gap-1" style={{ color: 'var(--danger)' }}>
+                  Verwalten <ChevronRight size={12} />
+                </Link>
+              </div>
+            )}
+            {partialCount > 0 && (
+              <div
+                className="flex items-center justify-between p-3 rounded-xl"
+                style={{ background: 'var(--warning-subtle)', border: '1px solid rgba(245,158,11,0.2)' }}
+              >
+                <div className="flex items-center gap-2.5">
+                  <AlertTriangle size={16} style={{ color: 'var(--warning)' }} className="flex-shrink-0" />
+                  <div>
+                    <p className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>{partialCount} teilweise bezahlte Gehälter</p>
+                    <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>
+                      Restbetrag: {fmt(salaryAlerts.filter(a => a.status === 'partially_paid').reduce((s, a) => s + a.remaining, 0))} €
+                    </p>
+                  </div>
+                </div>
+                <Link to="/gehaelter" className="text-xs font-semibold flex items-center gap-1" style={{ color: 'var(--warning)' }}>
+                  Verwalten <ChevronRight size={12} />
+                </Link>
+              </div>
+            )}
+            {fleetIssues > 0 && (
+              <div
+                className="flex items-center justify-between p-3 rounded-xl"
+                style={{ background: 'var(--danger-subtle)', border: '1px solid rgba(239,68,68,0.2)' }}
+              >
+                <div className="flex items-center gap-2.5">
+                  <Wrench size={16} style={{ color: 'var(--danger)' }} className="flex-shrink-0" />
+                  <div>
+                    <p className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>{fleetIssues} Fahrzeug{fleetIssues > 1 ? 'e' : ''} mit negativem Check</p>
+                    <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>Werkstatt prüfen</p>
+                  </div>
+                </div>
+                <Link to="/werkstatt" className="text-xs font-semibold flex items-center gap-1" style={{ color: 'var(--danger)' }}>
+                  Werkstatt <ChevronRight size={12} />
+                </Link>
+              </div>
+            )}
+            {tuevAbgelaufen.length > 0 && (
+              <div
+                className="flex items-center justify-between p-3 rounded-xl"
+                style={{ background: 'var(--danger-subtle)', border: '1px solid rgba(239,68,68,0.2)' }}
+              >
+                <div className="flex items-center gap-2.5">
+                  <ShieldX size={16} style={{ color: 'var(--danger)' }} className="flex-shrink-0" />
+                  <div>
+                    <p className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
+                      {tuevAbgelaufen.length} Fahrzeug{tuevAbgelaufen.length > 1 ? 'e' : ''} — TÜV abgelaufen
+                    </p>
+                    <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>
+                      {tuevAbgelaufen.map(c => c.kennzeichen).join(', ')}
+                    </p>
+                  </div>
+                </div>
+                <Link to="/cars" className="text-xs font-semibold flex items-center gap-1" style={{ color: 'var(--danger)' }}>
+                  Fahrzeuge <ChevronRight size={12} />
+                </Link>
+              </div>
+            )}
+            {tuevBaldAblaufend.length > 0 && (
+              <div
+                className="flex items-center justify-between p-3 rounded-xl"
+                style={{ background: 'var(--warning-subtle)', border: '1px solid rgba(245,158,11,0.2)' }}
+              >
+                <div className="flex items-center gap-2.5">
+                  <ShieldAlert size={16} style={{ color: 'var(--warning)' }} className="flex-shrink-0" />
+                  <div>
+                    <p className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
+                      {tuevBaldAblaufend.length} Fahrzeug{tuevBaldAblaufend.length > 1 ? 'e' : ''} — TÜV läuft bald ab
+                    </p>
+                    <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>
+                      {tuevBaldAblaufend.map(c => c.kennzeichen).join(', ')}
+                    </p>
+                  </div>
+                </div>
+                <Link to="/cars" className="text-xs font-semibold flex items-center gap-1" style={{ color: 'var(--warning)' }}>
+                  Fahrzeuge <ChevronRight size={12} />
+                </Link>
+              </div>
+            )}
+            {pendingInvites > 0 && (
+              <div
+                className="flex items-center justify-between p-3 rounded-xl"
+                style={{ background: 'var(--accent-subtle)', border: '1px solid rgba(6,182,212,0.2)' }}
+              >
+                <div className="flex items-center gap-2.5">
+                  <Info size={16} style={{ color: 'var(--accent-text)' }} className="flex-shrink-0" />
+                  <div>
+                    <p className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>{pendingInvites} ausstehende Einladung{pendingInvites > 1 ? 'en' : ''}</p>
+                    <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>Benutzer hat noch nicht akzeptiert</p>
+                  </div>
+                </div>
+                <Link to="/benutzer" className="text-xs font-semibold flex items-center gap-1" style={{ color: 'var(--accent-text)' }}>
+                  Benutzer <ChevronRight size={12} />
+                </Link>
+              </div>
+            )}
+          </div>
+        </Panel>
+      )}
+
+      {/* ── Charts row 1: trend + revenue mix ── */}
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-5">
+        <Panel className="xl:col-span-2">
+          <SectionHeader title="6-Monats-Trend" sub="Umsatz, Kosten, Gehälter & Gewinn" icon={<BarChart3 size={16} />} />
+          <ResponsiveContainer width="100%" height={220}>
+            <AreaChart data={trendData} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
+              <defs>
+                <linearGradient id="gU" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor={C.umsatz} stopOpacity={0.18} />
+                  <stop offset="95%" stopColor={C.umsatz} stopOpacity={0} />
+                </linearGradient>
+                <linearGradient id="gG" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor={C.gewinn} stopOpacity={0.18} />
+                  <stop offset="95%" stopColor={C.gewinn} stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke={C.grid} />
+              <XAxis dataKey="monat" tick={{ fontSize: 12, fill: C.tick }} axisLine={false} tickLine={false} />
+              <YAxis tick={{ fontSize: 11, fill: C.tick }} axisLine={false} tickLine={false} tickFormatter={v => `${(v / 1000).toFixed(0)}k`} />
+              <Tooltip content={<ChartTooltip />} />
+              <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 12, paddingTop: 8, color: C.tick }} />
+              <Area type="monotone" dataKey="Umsatz"   stroke={C.umsatz}   strokeWidth={2} fill="url(#gU)"   dot={false} />
+              <Area type="monotone" dataKey="Gewinn"   stroke={C.gewinn}   strokeWidth={2} fill="url(#gG)"   dot={false} />
+              <Area type="monotone" dataKey="Gehälter" stroke={C.gehaelter} strokeWidth={1.5} fill="transparent" strokeDasharray="4 2" dot={false} />
+              <Area type="monotone" dataKey="Kosten"   stroke={C.kosten}   strokeWidth={1.5} fill="transparent" strokeDasharray="4 2" dot={false} />
+            </AreaChart>
+          </ResponsiveContainer>
+        </Panel>
+
+        <Panel>
+          <SectionHeader title="Einnahmen-Mix" sub="Zusammensetzung im Monat" icon={<DollarSign size={16} />} />
+          {revenueComposition.length > 0 ? (
+            <>
+              <ResponsiveContainer width="100%" height={140}>
+                <PieChart>
+                  <Pie data={revenueComposition} cx="50%" cy="50%" innerRadius={42} outerRadius={65} paddingAngle={3} dataKey="value">
+                    {revenueComposition.map((d, i) => <Cell key={i} fill={d.color} />)}
+                  </Pie>
+                  <Tooltip
+                    formatter={(v: number) => `${fmt(v)} €`}
+                    contentStyle={{
+                      background: 'var(--bg-elevated)',
+                      border: '1px solid var(--border)',
+                      borderRadius: '0.75rem',
+                      color: 'var(--text-primary)',
+                    }}
+                  />
+                </PieChart>
+              </ResponsiveContainer>
+              <div className="mt-3 space-y-2">
+                {revenueComposition.map(d => {
+                  const total = revenueComposition.reduce((s, x) => s + x.value, 0);
+                  const pct = total > 0 ? ((d.value / total) * 100).toFixed(0) : '0';
+                  return (
+                    <div key={d.name} className="flex items-center justify-between text-xs">
+                      <div className="flex items-center gap-2">
+                        <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: d.color }} />
+                        <span style={{ color: 'var(--text-secondary)' }}>{d.name}</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold" style={{ color: 'var(--text-primary)' }}>{fmt(d.value)} €</span>
+                        <span className="w-7 text-right" style={{ color: 'var(--text-tertiary)' }}>{pct}%</span>
+                      </div>
+                    </div>
+                  );
+                })}
+                <div className="flex items-center justify-between text-xs pt-2" style={{ borderTop: '1px solid var(--border)' }}>
+                  <span className="font-semibold" style={{ color: 'var(--text-secondary)' }}>Gesamt</span>
+                  <span className="font-bold" style={{ color: 'var(--text-primary)' }}>
+                    {fmt(revenueComposition.reduce((s, d) => s + d.value, 0))} €
+                  </span>
+                </div>
+              </div>
+            </>
+          ) : (
+            <div className="flex items-center justify-center h-40 text-sm" style={{ color: 'var(--text-tertiary)' }}>
+              Keine Einnahmen
+            </div>
+          )}
+        </Panel>
+      </div>
+
+      {/* ── Profit + Cash ── */}
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
+        <Panel className="flex flex-col">
+          <SectionHeader title="Gewinnberechnung" sub={format(parseISO(selectedMonth + '-01'), 'MMMM yyyy', { locale: de })} icon={<Target size={16} />} />
+          <div className="flex-1 flex flex-col gap-2">
+            {[
+              { label: 'Netto-Fahrpreis', value: currentMetrics.nettoFahrpreis, sign: '+', color: '#10b981', bg: 'rgba(16,185,129,0.08)', border: 'rgba(16,185,129,0.2)', icon: <TrendingUp size={13} /> },
+              { label: 'Aktionen',        value: currentMetrics.aktionen,       sign: '+', color: '#0ea5e9', bg: 'rgba(14,165,233,0.08)',  border: 'rgba(14,165,233,0.2)',  icon: <Zap size={13} /> },
+              { label: 'Gehälter',        value: currentMetrics.salaries,       sign: '-', color: '#f59e0b', bg: 'rgba(245,158,11,0.08)',  border: 'rgba(245,158,11,0.2)',  icon: <Users size={13} /> },
+              { label: 'Belege / Ausgaben', value: currentMetrics.expenses,     sign: '-', color: '#ef4444', bg: 'rgba(239,68,68,0.08)',   border: 'rgba(239,68,68,0.2)',   icon: <ReceiptIcon size={13} /> },
+              { label: 'Fixkosten',       value: currentMetrics.fixedCosts,     sign: '-', color: '#ef4444', bg: 'rgba(239,68,68,0.08)',   border: 'rgba(239,68,68,0.2)',   icon: <TrendingDown size={13} /> },
+            ].map(row => (
+              <div
+                key={row.label}
+                className="flex items-center justify-between p-3 rounded-xl"
+                style={{ background: row.bg, border: `1px solid ${row.border}` }}
+              >
+                <div className="flex items-center gap-2">
+                  <div className="w-6 h-6 rounded-lg flex items-center justify-center" style={{ background: row.bg, color: row.color, border: `1px solid ${row.border}` }}>
+                    {row.icon}
+                  </div>
+                  <span className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>{row.label}</span>
+                </div>
+                <span className="text-sm font-bold" style={{ color: row.color }}>
+                  {row.sign}{fmt(row.value)} €
+                </span>
+              </div>
+            ))}
+            <div
+              className="flex items-center justify-between p-4 rounded-xl mt-1"
+              style={{ background: currentMetrics.profit >= 0 ? '#1d4ed8' : '#b91c1c' }}
+            >
+              <div className="flex items-center gap-2">
+                <div className="w-7 h-7 rounded-lg bg-white/20 flex items-center justify-center">
+                  <DollarSign size={14} className="text-white" />
+                </div>
+                <span className="text-sm font-bold text-white">Firmengewinn</span>
+              </div>
+              <div className="text-right">
+                <p className="text-lg font-bold text-white">
+                  {currentMetrics.profit >= 0 ? '+' : ''}{fmt(currentMetrics.profit)} €
+                </p>
+                <p className="text-xs text-white/80">{currentMetrics.profitMargin.toFixed(1)}% Marge</p>
+              </div>
+            </div>
+            <div className="flex items-center justify-between text-xs px-1 pt-1" style={{ color: 'var(--text-tertiary)' }}>
+              <span>Vormonat: {fmt(prevMetrics.profit)} €</span>
+              <DeltaBadge delta={profitDelta} higherIsBetter />
+            </div>
+          </div>
+        </Panel>
+
+        <Panel className="flex flex-col">
+          <SectionHeader title="Bargeld-Übersicht" sub="Kassenstand & Differenzen" icon={<Wallet size={16} />} />
+          <div className="flex flex-col gap-3 flex-1">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="p-4 rounded-xl" style={{ background: 'rgba(16,185,129,0.08)', border: '1px solid rgba(16,185,129,0.2)' }}>
+                <p className="text-xs font-semibold uppercase tracking-wide mb-1" style={{ color: '#10b981' }}>Bargeld Einnahmen</p>
+                <p className="text-xl font-bold" style={{ color: '#10b981' }}>{fmt(cashSummary.cashIncome)} €</p>
+                <p className="text-xs mt-0.5" style={{ color: 'var(--text-secondary)' }}>Bargeld-Umsätze Fahrer</p>
+              </div>
+              <div className="p-4 rounded-xl" style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)' }}>
+                <p className="text-xs font-semibold uppercase tracking-wide mb-1" style={{ color: '#ef4444' }}>Beleg-Ausgaben</p>
+                <p className="text-xl font-bold" style={{ color: '#ef4444' }}>{fmt(cashSummary.cashFromExpenses)} €</p>
+                <p className="text-xs mt-0.5" style={{ color: 'var(--text-secondary)' }}>Barzahlungen Belege</p>
+              </div>
+            </div>
+
+            <div
+              className="p-4 rounded-xl"
+              style={{
+                background: cashSummary.cashRisk === 'ok'
+                  ? 'rgba(59,130,246,0.08)'
+                  : cashSummary.cashRisk === 'warning'
+                  ? 'rgba(245,158,11,0.08)'
+                  : 'rgba(239,68,68,0.08)',
+                border: `1px solid ${cashSummary.cashRisk === 'ok' ? 'rgba(59,130,246,0.2)' : cashSummary.cashRisk === 'warning' ? 'rgba(245,158,11,0.2)' : 'rgba(239,68,68,0.2)'}`,
+              }}
+            >
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wide mb-1"
+                    style={{ color: cashSummary.cashRisk === 'ok' ? '#3b82f6' : cashSummary.cashRisk === 'warning' ? '#f59e0b' : '#ef4444' }}>
+                    Bargeldbestand (netto)
+                  </p>
+                  <p className="text-2xl font-bold"
+                    style={{ color: cashSummary.cashBalance >= 0 ? '#3b82f6' : '#ef4444' }}>
+                    {cashSummary.cashBalance >= 0 ? '' : '-'}{fmt(Math.abs(cashSummary.cashBalance))} €
+                  </p>
+                </div>
+                <div
+                  className="p-2.5 rounded-xl"
+                  style={{ background: cashSummary.cashRisk === 'ok' ? 'rgba(59,130,246,0.15)' : 'rgba(245,158,11,0.15)' }}
+                >
+                  <Wallet size={22} style={{ color: cashSummary.cashRisk === 'ok' ? '#3b82f6' : '#f59e0b' }} />
+                </div>
+              </div>
+              {cashSummary.cashRisk !== 'ok' && (
+                <div className="flex items-center gap-1.5 mt-2">
+                  <AlertTriangle size={12} style={{ color: '#f59e0b' }} />
+                  <p className="text-xs font-medium" style={{ color: '#f59e0b' }}>
+                    {cashSummary.cashRisk === 'warning' ? 'Kassenbestand niedrig' : 'Negativer Kassenbestand'}
+                  </p>
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center justify-between text-xs p-3 rounded-xl" style={{ background: 'var(--bg-subtle)' }}>
+              <span style={{ color: 'var(--text-secondary)' }}>Verhältnis Einnahmen : Ausgaben</span>
+              <span className="font-semibold" style={{ color: 'var(--text-primary)' }}>
+                {cashSummary.cashIncome > 0
+                  ? `${((cashSummary.cashFromExpenses / cashSummary.cashIncome) * 100).toFixed(0)}% ausgegeben`
+                  : '—'}
+              </span>
+            </div>
+
+            <Link
+              to="/bargeldbestand"
+              className="flex items-center justify-between p-3 rounded-xl transition-colors group"
+              style={{ background: 'var(--bg-subtle)' }}
+              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'var(--bg-muted)'; }}
+              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'var(--bg-subtle)'; }}
+            >
+              <span className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>Detaillierte Bargeld-Ansicht</span>
+              <ChevronRight size={16} style={{ color: 'var(--text-tertiary)' }} />
+            </Link>
+          </div>
+        </Panel>
+      </div>
+
+      {/* ── Driver performance ── */}
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-5">
+        <Panel className="xl:col-span-2">
+          <SectionHeader title="Fahrer-Performance" sub="Nettoertrag & Umsatzvergleich" icon={<Users size={16} />} />
+          {driverPerformance.filter(d => d.umsatz > 0).length > 0 ? (
+            <ResponsiveContainer width="100%" height={Math.max(180, driverPerformance.filter(d => d.umsatz > 0).length * 40)}>
+              <BarChart
+                data={driverPerformance.filter(d => d.umsatz > 0).slice(0, 8).map(d => ({
+                  name: d.name, Umsatz: d.umsatz, Gehalt: d.salary, Ausgaben: d.expenses,
+                }))}
+                layout="vertical"
+                margin={{ top: 0, right: 10, left: 0, bottom: 0 }}
+              >
+                <CartesianGrid strokeDasharray="3 3" stroke={C.grid} horizontal={false} />
+                <XAxis type="number" tick={{ fontSize: 11, fill: C.tick }} axisLine={false} tickLine={false} tickFormatter={v => `${(v / 1000).toFixed(0)}k`} />
+                <YAxis type="category" dataKey="name" width={88} tick={{ fontSize: 11, fill: C.tick }} axisLine={false} tickLine={false} />
+                <Tooltip content={<ChartTooltip />} />
+                <Legend iconType="square" iconSize={8} wrapperStyle={{ fontSize: 12, color: C.tick }} />
+                <Bar dataKey="Umsatz"   fill={C.umsatz}   radius={[0, 3, 3, 0]} barSize={8} />
+                <Bar dataKey="Gehalt"   fill={C.gehaelter} radius={[0, 3, 3, 0]} barSize={8} />
+                <Bar dataKey="Ausgaben" fill={C.kosten}   radius={[0, 3, 3, 0]} barSize={8} />
+              </BarChart>
+            </ResponsiveContainer>
+          ) : (
+            <div className="flex items-center justify-center h-40 text-sm" style={{ color: 'var(--text-tertiary)' }}>
+              Keine Fahrerdaten für diesen Monat
+            </div>
+          )}
+        </Panel>
+
+        <Panel>
+          <SectionHeader title="Ranking" sub="Sortiert nach Nettoertrag" icon={<Target size={16} />} />
+          {driverPerformance.length > 0 ? (
+            <div className="space-y-2.5">
+              {driverPerformance.map((driver, idx) => {
+                const maxUmsatz = Math.max(...driverPerformance.map(d => d.umsatz), 1);
+                const barPct = Math.max((driver.umsatz / maxUmsatz) * 100, 0);
+                const isTop = idx === 0;
+                const isWorst = idx === driverPerformance.length - 1 && driverPerformance.length > 1;
+                return (
+                  <div
+                    key={driver.id}
+                    className="p-3 rounded-xl transition-colors cursor-default"
+                    style={{
+                      background: isTop ? 'rgba(16,185,129,0.08)' : 'transparent',
+                      border: isTop ? '1px solid rgba(16,185,129,0.2)' : '1px solid transparent',
+                    }}
+                    onMouseEnter={e => {
+                      if (!isTop) (e.currentTarget as HTMLElement).style.background = 'var(--bg-muted)';
+                    }}
+                    onMouseLeave={e => {
+                      if (!isTop) (e.currentTarget as HTMLElement).style.background = 'transparent';
+                    }}
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <span className="w-5 text-xs font-bold flex-shrink-0 text-center" style={{ color: isTop ? '#10b981' : 'var(--text-tertiary)' }}>
+                        {idx + 1}
+                      </span>
+                      <div className="w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: 'var(--accent)', color: 'white' }}>
+                        <span className="text-xs font-bold">{driver.name.charAt(0).toUpperCase()}</span>
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between mb-1">
+                          <p className="text-xs font-semibold truncate" style={{ color: 'var(--text-primary)' }}>{driver.name}</p>
+                          <span className="text-xs font-bold ml-1 flex-shrink-0" style={{ color: driver.netContribution >= 0 ? '#10b981' : '#ef4444' }}>
+                            {driver.netContribution >= 0 ? '+' : ''}{fmt(driver.netContribution)} €
+                          </span>
+                        </div>
+                        <div className="w-full h-1.5 rounded-full overflow-hidden" style={{ background: 'var(--bg-muted)' }}>
+                          <div className="h-full rounded-full" style={{ width: `${barPct}%`, background: 'var(--accent)' }} />
+                        </div>
+                        {driver.profitMargin !== null && (
+                          <p className="text-xs mt-1" style={{ color: 'var(--text-tertiary)' }}>
+                            Marge: <strong style={{ color: 'var(--text-secondary)' }}>{driver.profitMargin.toFixed(0)}%</strong>
+                            {' · '}{fmt(driver.umsatz)} € Umsatz
+                          </p>
+                        )}
+                      </div>
+                      {isTop && <span className="text-xs font-semibold px-1.5 py-0.5 rounded-md flex-shrink-0" style={{ background: 'rgba(16,185,129,0.15)', color: '#10b981' }}>Top</span>}
+                      {isWorst && driver.netContribution < 0 && <span className="text-xs font-semibold px-1.5 py-0.5 rounded-md flex-shrink-0" style={{ background: 'var(--danger-subtle)', color: 'var(--danger)' }}>Achtung</span>}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="flex items-center justify-center h-32 text-sm" style={{ color: 'var(--text-tertiary)' }}>Keine Fahrerdaten</div>
+          )}
+        </Panel>
+      </div>
+
+      {/* ── Expenses + Fleet ── */}
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
+        <Panel>
+          <SectionHeader title="Größte Ausgaben" sub="Top Kostenpositionen im Monat" icon={<TrendingDown size={16} />} />
+          {topExpenses.length > 0 ? (
+            <div className="space-y-2">
+              {topExpenses.map((item, i) => (
+                <div
+                  key={i}
+                  className="flex items-center gap-3 p-3 rounded-xl transition-colors cursor-default"
+                  onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'var(--bg-subtle)'; }}
+                  onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'transparent'; }}
+                >
+                  <div className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0"
+                    style={{ background: item.type === 'fixed' ? 'var(--bg-muted)' : 'var(--danger-subtle)' }}
+                  >
+                    {item.type === 'fixed'
+                      ? <CreditCard size={14} style={{ color: 'var(--text-tertiary)' }} />
+                      : <ReceiptIcon size={14} style={{ color: 'var(--danger)' }} />
+                    }
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium truncate" style={{ color: 'var(--text-primary)' }}>{item.description}</p>
+                    <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
+                      {item.type === 'fixed' ? 'Fixkosten' : item.driverName || 'Beleg'}
+                      {item.type === 'receipt' && ` · ${format(new Date(item.date), 'dd.MM.yyyy')}`}
+                    </p>
+                  </div>
+                  <span className="text-sm font-bold flex-shrink-0" style={{ color: 'var(--danger)' }}>-{fmt(item.amount)} €</span>
+                </div>
+              ))}
+              <div className="flex items-center justify-between text-xs px-1 pt-2" style={{ borderTop: '1px solid var(--border)', color: 'var(--text-tertiary)' }}>
+                <span>Gesamt Kosten</span>
+                <span className="font-semibold" style={{ color: 'var(--text-primary)' }}>{fmt(currentMetrics.totalCosts)} €</span>
+              </div>
+            </div>
+          ) : (
+            <div className="flex items-center justify-center h-32 text-sm" style={{ color: 'var(--text-tertiary)' }}>Keine Ausgaben erfasst</div>
+          )}
+        </Panel>
+
+        <Panel>
+          <SectionHeader
+            title="Flottenstatus" sub="Werkstatt-Checks diesen Monat" icon={<Wrench size={16} />}
+            action={
+              <Link to="/werkstatt" className="text-xs font-medium flex items-center gap-1" style={{ color: 'var(--accent-text)' }}>
+                Alle <ChevronRight size={12} />
+              </Link>
+            }
+          />
+          <div className="grid grid-cols-3 gap-3 mb-4">
+            {[
+              { label: 'OK', value: fleetOk, color: '#10b981', bg: 'rgba(16,185,129,0.08)', border: 'rgba(16,185,129,0.2)' },
+              { label: 'Probleme', value: fleetIssues, color: '#ef4444', bg: 'rgba(239,68,68,0.08)', border: 'rgba(239,68,68,0.2)' },
+              { label: 'Repariert', value: fleetRepaired, color: '#3b82f6', bg: 'rgba(59,130,246,0.08)', border: 'rgba(59,130,246,0.2)' },
+            ].map(s => (
+              <div key={s.label} className="p-3 rounded-xl text-center" style={{ background: s.bg, border: `1px solid ${s.border}` }}>
+                <p className="text-2xl font-bold" style={{ color: s.color }}>{s.value}</p>
+                <p className="text-xs font-medium mt-0.5" style={{ color: s.color }}>{s.label}</p>
+              </div>
+            ))}
+          </div>
+
+          {currentMonthChecks.length > 0 ? (
+            <div className="space-y-2">
+              {currentMonthChecks.filter(c => c.status === 'negative').slice(0, 3).map(c => (
+                <div key={c.id} className="flex items-center gap-2.5 p-2.5 rounded-lg"
+                  style={{ background: 'var(--danger-subtle)', border: '1px solid rgba(239,68,68,0.2)' }}
+                >
+                  <AlertCircle size={14} style={{ color: 'var(--danger)' }} className="flex-shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-semibold" style={{ color: 'var(--text-primary)' }}>{c.car?.kennzeichen || 'Unbekannt'}</p>
+                    <p className="text-xs truncate" style={{ color: 'var(--text-secondary)' }}>{c.notes}</p>
+                  </div>
+                  <span className="text-xs flex-shrink-0" style={{ color: 'var(--text-tertiary)' }}>
+                    {format(new Date(c.check_date), 'dd.MM')}
+                  </span>
+                </div>
+              ))}
+              {currentMonthChecks.filter(c => c.status === 'negative').length === 0 && (
+                <div className="flex items-center gap-2 p-2.5 text-xs rounded-lg"
+                  style={{ background: 'rgba(16,185,129,0.08)', color: '#10b981' }}
+                >
+                  <CheckCircle size={14} />
+                  Keine negativen Checks diesen Monat
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="flex items-center justify-center h-20 text-sm" style={{ color: 'var(--text-tertiary)' }}>
+              Keine Checks diesen Monat
+            </div>
+          )}
+        </Panel>
+      </div>
+
+      {/* ── Unpaid salaries ── */}
+      {salaryAlerts.length > 0 && (
+        <Panel>
+          <SectionHeader
+            title="Offene Gehaltsabrechnungen" sub="Unbezahlte & teilweise bezahlte Gehälter (alle Perioden)" icon={<CreditCard size={16} />}
+            action={
+              <Link to="/gehaelter" className="text-xs font-medium flex items-center gap-1" style={{ color: 'var(--accent-text)' }}>
+                Verwalten <ChevronRight size={12} />
+              </Link>
+            }
+          />
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr style={{ borderBottom: '1px solid var(--border)' }}>
+                  {['Fahrer', 'Fällig', 'Bezahlt', 'Offen', 'Status'].map((h, i) => (
+                    <th key={h} className={`py-2 px-3 text-xs font-semibold uppercase ${i === 0 ? 'text-left' : i === 4 ? 'text-center' : 'text-right'}`} style={{ color: 'var(--text-tertiary)' }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {salaryAlerts.map(alert => (
+                  <tr
+                    key={alert.id}
+                    className="transition-colors"
+                    style={{ borderBottom: '1px solid var(--border-subtle)' }}
+                    onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'var(--bg-subtle)'; }}
+                    onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'transparent'; }}
+                  >
+                    <td className="py-2.5 px-3">
+                      <div className="flex items-center gap-2">
+                        <div className="w-6 h-6 rounded-full flex items-center justify-center" style={{ background: 'var(--accent)', color: 'white' }}>
+                          <span className="text-xs font-bold">{alert.driverName.charAt(0).toUpperCase()}</span>
+                        </div>
+                        <div>
+                          <p className="font-medium" style={{ color: 'var(--text-primary)' }}>{alert.driverName}</p>
+                          <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
+                            {format(new Date(alert.periodStart), 'dd.MM')} – {format(new Date(alert.periodEnd), 'dd.MM.yy')}
+                          </p>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="py-2.5 px-3 text-right font-medium" style={{ color: 'var(--text-primary)' }}>{fmt(alert.amountDue)} €</td>
+                    <td className="py-2.5 px-3 text-right font-medium" style={{ color: '#10b981' }}>{fmt(alert.amountPaid)} €</td>
+                    <td className="py-2.5 px-3 text-right font-bold" style={{ color: 'var(--danger)' }}>{fmt(alert.remaining)} €</td>
+                    <td className="py-2.5 px-3 text-center">
+                      <span
+                        className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold"
+                        style={alert.status === 'unpaid'
+                          ? { background: 'var(--danger-subtle)', color: 'var(--danger)' }
+                          : { background: 'var(--warning-subtle)', color: 'var(--warning)' }
+                        }
+                      >
+                        {alert.status === 'unpaid' ? 'Unbezahlt' : 'Teilweise'}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr style={{ borderTop: '2px solid var(--border)' }}>
+                  <td className="py-2.5 px-3 font-bold" style={{ color: 'var(--text-primary)' }} colSpan={3}>Gesamt offen</td>
+                  <td className="py-2.5 px-3 text-right font-bold" style={{ color: 'var(--danger)' }}>{fmt(totalOpenSalary)} €</td>
+                  <td />
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        </Panel>
+      )}
+
+      {/* ── Recent receipts + quick actions ── */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+        <Panel>
+          <SectionHeader
+            title="Letzte Belege" sub="Aktuellste im Monat" icon={<ReceiptIcon size={16} />}
+            action={
+              <Link to="/belege" className="text-xs font-medium flex items-center gap-1" style={{ color: 'var(--accent-text)' }}>
+                Alle <ChevronRight size={12} />
+              </Link>
+            }
+          />
+          {recentReceipts.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-32 gap-2" style={{ color: 'var(--text-tertiary)' }}>
+              <FileText size={24} style={{ color: 'var(--border)' }} />
+              <span className="text-sm">Keine Belege im ausgewählten Zeitraum</span>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {recentReceipts.map(r => (
+                <div
+                  key={r.id}
+                  className="flex items-center gap-3 p-3 rounded-xl transition-colors cursor-default"
+                  onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'var(--bg-subtle)'; }}
+                  onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'transparent'; }}
+                >
+                  <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: 'var(--bg-muted)' }}>
+                    <FileText size={14} style={{ color: 'var(--text-tertiary)' }} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold truncate" style={{ color: 'var(--text-primary)' }}>{r.receiptNumber}</p>
+                    <p className="text-xs truncate" style={{ color: 'var(--text-tertiary)' }}>{r.description || r.driverName}</p>
+                  </div>
+                  <div className="text-right flex-shrink-0">
+                    {r.expense > 0 && <p className="text-sm font-bold" style={{ color: 'var(--danger)' }}>-{r.expense.toFixed(2)} €</p>}
+                    <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>{format(new Date(r.date), 'dd.MM.yyyy')}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </Panel>
+
+        <Panel>
+          <SectionHeader title="Schnellaktionen" sub="Häufig verwendete Bereiche" icon={<Zap size={16} />} />
+          <div className="grid grid-cols-1 gap-3">
+            {[
+              { to: '/belege',      icon: <Plus size={16} className="text-white" />,       bg: '#059669', title: 'Beleg hinzufügen',   sub: 'Neuen Beleg erfassen' },
+              { to: '/umsaetze',    icon: <TrendingUp size={16} className="text-white" />, bg: '#2563eb', title: 'Umsätze verwalten',  sub: 'Einnahmen erfassen & filtern' },
+              { to: '/abrechnung',  icon: <BarChart3 size={16} className="text-white" />,  bg: '#d97706', title: 'Abrechnung',         sub: 'Wöchentliche Abrechnungen' },
+              { to: '/statistiken', icon: <Target size={16} className="text-white" />,     bg: '#0284c7', title: 'Statistiken',        sub: 'Tiefer Einblick in Kennzahlen' },
+            ].map(item => (
+              <Link
+                key={item.to}
+                to={item.to}
+                className="flex items-center gap-3 p-3.5 rounded-xl transition-all group"
+                style={{
+                  background: 'var(--bg-subtle)',
+                  border: '1px solid var(--border)',
+                }}
+                onMouseEnter={e => {
+                  const el = e.currentTarget as HTMLElement;
+                  el.style.background = 'var(--bg-muted)';
+                  el.style.boxShadow = 'var(--shadow-md)';
+                  el.style.transform = 'translateY(-1px)';
+                }}
+                onMouseLeave={e => {
+                  const el = e.currentTarget as HTMLElement;
+                  el.style.background = 'var(--bg-subtle)';
+                  el.style.boxShadow = 'none';
+                  el.style.transform = 'translateY(0)';
+                }}
+              >
+                <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 transition-all" style={{ background: item.bg }}>
+                  {item.icon}
+                </div>
+                <div className="flex-1">
+                  <p className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>{item.title}</p>
+                  <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>{item.sub}</p>
+                </div>
+                <ChevronRight size={16} style={{ color: 'var(--text-tertiary)' }} />
+              </Link>
+            ))}
+          </div>
+        </Panel>
+      </div>
+    </div>
+  );
+};
+
+export default OverviewPage;

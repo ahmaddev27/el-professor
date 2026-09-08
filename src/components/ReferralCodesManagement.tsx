@@ -1,0 +1,336 @@
+import React, { useEffect, useState, useCallback } from 'react';
+import { supabase } from '../lib/supabase';
+import { useToast } from '../contexts/ToastContext';
+import { Plus, CreditCard as Edit2, Trash2, RefreshCw, Gift, Check, X, ToggleLeft, ToggleRight } from 'lucide-react';
+import { format } from 'date-fns';
+import { de } from 'date-fns/locale';
+
+interface ReferralCode {
+  id: string;
+  ref_code: string;
+  name: string;
+  description: string | null;
+  is_active: boolean;
+  created_at: string;
+  usage_count?: number;
+}
+
+interface CompanyRow {
+  id: string;
+  name: string;
+  referral_code_used: string | null;
+  created_at: string;
+}
+
+interface Props {
+  companies: CompanyRow[];
+}
+
+const emptyForm = { ref_code: '', name: '', description: '' };
+
+export default function ReferralCodesManagement({ companies }: Props) {
+  const { showToast } = useToast();
+  const [referrals, setReferrals] = useState<ReferralCode[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [form, setForm] = useState(emptyForm);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [showForm, setShowForm] = useState(false);
+  const [expandedCode, setExpandedCode] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from('referrals')
+        .select('id, ref_code, name, description, is_active, created_at')
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+
+      // Count usage per ref_code
+      const usageMap: Record<string, number> = {};
+      for (const c of companies) {
+        if (c.referral_code_used) {
+          usageMap[c.referral_code_used] = (usageMap[c.referral_code_used] || 0) + 1;
+        }
+      }
+
+      setReferrals((data ?? []).map(r => ({ ...r, usage_count: usageMap[r.ref_code] ?? 0 })));
+    } catch (err: any) {
+      showToast('error', err.message || 'Fehler beim Laden');
+    } finally {
+      setLoading(false);
+    }
+  }, [companies]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const handleSave = async () => {
+    const code = form.ref_code.trim().toUpperCase();
+    const name = form.name.trim();
+    if (!code || !name) return;
+    setSaving(true);
+    try {
+      if (editingId) {
+        const { error } = await supabase
+          .from('referrals')
+          .update({ ref_code: code, name, description: form.description.trim() || null, updated_at: new Date().toISOString() })
+          .eq('id', editingId);
+        if (error) throw error;
+        showToast('success', 'Empfehlungscode aktualisiert');
+      } else {
+        const { data: { user } } = await supabase.auth.getUser();
+        const { error } = await supabase
+          .from('referrals')
+          .insert({ ref_code: code, name, description: form.description.trim() || null, created_by: user?.id ?? null });
+        if (error) throw error;
+        showToast('success', 'Empfehlungscode erstellt');
+      }
+      setForm(emptyForm);
+      setEditingId(null);
+      setShowForm(false);
+      load();
+    } catch (err: any) {
+      showToast('error', err.message || 'Fehler beim Speichern');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleToggleActive = async (r: ReferralCode) => {
+    try {
+      const { error } = await supabase
+        .from('referrals')
+        .update({ is_active: !r.is_active, updated_at: new Date().toISOString() })
+        .eq('id', r.id);
+      if (error) throw error;
+      showToast('success', `${r.ref_code} ${!r.is_active ? 'aktiviert' : 'deaktiviert'}`);
+      load();
+    } catch (err: any) {
+      showToast('error', err.message || 'Fehler');
+    }
+  };
+
+  const handleDelete = async (r: ReferralCode) => {
+    if (!window.confirm(`Empfehlungscode "${r.ref_code}" wirklich löschen?`)) return;
+    try {
+      const { error } = await supabase.from('referrals').delete().eq('id', r.id);
+      if (error) throw error;
+      showToast('success', `${r.ref_code} gelöscht`);
+      load();
+    } catch (err: any) {
+      showToast('error', err.message || 'Fehler');
+    }
+  };
+
+  const cardStyle: React.CSSProperties = {
+    background: 'var(--bg-surface)',
+    border: '1px solid var(--border)',
+    borderRadius: '1rem',
+  };
+
+  const inputClass = 'w-full px-3 py-2.5 rounded-xl text-sm focus:outline-none';
+  const inputStyle: React.CSSProperties = { background: 'var(--bg-subtle)', border: '1px solid var(--border)', color: 'var(--text-primary)' };
+
+  return (
+    <div className="space-y-4">
+
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Gift size={18} style={{ color: '#10b981' }} />
+          <h2 className="text-base font-semibold" style={{ color: 'var(--text-primary)' }}>Empfehlungscodes</h2>
+          <span className="text-xs px-2 py-0.5 rounded-full font-semibold" style={{ background: 'rgba(16,185,129,0.1)', color: '#10b981' }}>
+            {referrals.length} Codes
+          </span>
+        </div>
+        <button
+          onClick={() => { setShowForm(v => !v); setEditingId(null); setForm(emptyForm); }}
+          className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold transition-opacity hover:opacity-85"
+          style={{ background: '#10b981', color: 'white' }}
+        >
+          {showForm ? <X size={14} /> : <Plus size={14} />}
+          {showForm ? 'Abbrechen' : 'Neuer Code'}
+        </button>
+      </div>
+
+      {/* Create/edit form */}
+      {showForm && (
+        <div className="p-5 space-y-4" style={cardStyle}>
+          <h3 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
+            {editingId ? 'Code bearbeiten' : 'Neuer Empfehlungscode'}
+          </h3>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-tertiary)' }}>Code *</label>
+              <input
+                type="text"
+                value={form.ref_code}
+                onChange={e => setForm(f => ({ ...f, ref_code: e.target.value.toUpperCase().replace(/[^A-Z0-9_-]/g, '') }))}
+                placeholder="PARTNER2024"
+                className={`${inputClass} font-mono`}
+                style={inputStyle}
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-tertiary)' }}>Name / Bezeichnung *</label>
+              <input
+                type="text"
+                value={form.name}
+                onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
+                placeholder="z.B. Partner ABC"
+                className={inputClass}
+                style={inputStyle}
+              />
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-tertiary)' }}>Beschreibung (optional)</label>
+            <input
+              type="text"
+              value={form.description}
+              onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
+              placeholder="z.B. Partnerschaft mit XYZ GmbH"
+              className={inputClass}
+              style={inputStyle}
+            />
+          </div>
+          <div className="flex gap-2 justify-end">
+            <button
+              onClick={() => { setShowForm(false); setEditingId(null); setForm(emptyForm); }}
+              className="px-4 py-2 rounded-xl text-sm font-semibold"
+              style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
+            >
+              Abbrechen
+            </button>
+            <button
+              onClick={handleSave}
+              disabled={saving || !form.ref_code.trim() || !form.name.trim()}
+              className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-opacity hover:opacity-85 disabled:opacity-50"
+              style={{ background: '#10b981', color: 'white' }}
+            >
+              {saving ? <RefreshCw size={13} className="animate-spin" /> : <Check size={13} />}
+              {editingId ? 'Speichern' : 'Erstellen'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Table */}
+      <div style={cardStyle} className="overflow-hidden">
+        {loading ? (
+          <div className="flex items-center justify-center py-10">
+            <RefreshCw size={20} className="animate-spin" style={{ color: 'var(--text-tertiary)' }} />
+          </div>
+        ) : referrals.length === 0 ? (
+          <div className="py-10 text-center" style={{ color: 'var(--text-tertiary)' }}>
+            <Gift size={32} className="mx-auto mb-3 opacity-30" />
+            <p className="text-sm">Noch keine Empfehlungscodes</p>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr style={{ background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)' }}>
+                  {['Code', 'Name', 'Nutzungen', 'Status', 'Erstellt', ''].map(h => (
+                    <th key={h} className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-tertiary)' }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {referrals.map(r => (
+                  <React.Fragment key={r.id}>
+                    <tr
+                      style={{ borderBottom: '1px solid var(--border)' }}
+                      onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-subtle)')}
+                      onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+                    >
+                      <td className="px-4 py-3">
+                        <span className="font-mono text-sm font-bold px-2.5 py-1 rounded-lg" style={{ background: r.is_active ? 'rgba(16,185,129,0.1)' : 'var(--bg-subtle)', color: r.is_active ? '#10b981' : 'var(--text-tertiary)' }}>
+                          {r.ref_code}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <p className="font-medium text-sm" style={{ color: 'var(--text-primary)' }}>{r.name}</p>
+                        {r.description && <p className="text-[11px] mt-0.5 truncate max-w-[200px]" style={{ color: 'var(--text-tertiary)' }}>{r.description}</p>}
+                      </td>
+                      <td className="px-4 py-3">
+                        <button
+                          onClick={() => setExpandedCode(expandedCode === r.ref_code ? null : r.ref_code)}
+                          className="flex items-center gap-1.5 text-sm font-semibold transition-colors"
+                          style={{ color: (r.usage_count ?? 0) > 0 ? '#10b981' : 'var(--text-tertiary)' }}
+                        >
+                          {r.usage_count ?? 0}
+                          {(r.usage_count ?? 0) > 0 && <span className="text-[10px] font-normal">Unternehmen</span>}
+                        </button>
+                      </td>
+                      <td className="px-4 py-3">
+                        <button
+                          onClick={() => handleToggleActive(r)}
+                          className="flex items-center gap-1.5 text-xs font-semibold transition-opacity hover:opacity-80"
+                          style={{ color: r.is_active ? '#10b981' : 'var(--text-tertiary)' }}
+                        >
+                          {r.is_active ? <ToggleRight size={18} /> : <ToggleLeft size={18} />}
+                          {r.is_active ? 'Aktiv' : 'Inaktiv'}
+                        </button>
+                      </td>
+                      <td className="px-4 py-3 text-xs" style={{ color: 'var(--text-tertiary)' }}>
+                        {format(new Date(r.created_at), 'dd.MM.yyyy', { locale: de })}
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-1 justify-end">
+                          <button
+                            onClick={() => {
+                              setEditingId(r.id);
+                              setForm({ ref_code: r.ref_code, name: r.name, description: r.description ?? '' });
+                              setShowForm(true);
+                            }}
+                            className="p-1.5 rounded-lg transition-colors"
+                            style={{ color: 'var(--text-tertiary)' }}
+                            onMouseEnter={e => { (e.currentTarget.style.background = 'var(--bg-muted)'); (e.currentTarget.style.color = 'var(--accent)'); }}
+                            onMouseLeave={e => { (e.currentTarget.style.background = 'transparent'); (e.currentTarget.style.color = 'var(--text-tertiary)'); }}
+                          >
+                            <Edit2 size={13} />
+                          </button>
+                          <button
+                            onClick={() => handleDelete(r)}
+                            className="p-1.5 rounded-lg transition-colors"
+                            style={{ color: 'var(--text-tertiary)' }}
+                            onMouseEnter={e => { (e.currentTarget.style.background = 'var(--danger-subtle)'); (e.currentTarget.style.color = 'var(--danger)'); }}
+                            onMouseLeave={e => { (e.currentTarget.style.background = 'transparent'); (e.currentTarget.style.color = 'var(--text-tertiary)'); }}
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                    {/* Expanded: companies that used this code */}
+                    {expandedCode === r.ref_code && (r.usage_count ?? 0) > 0 && (
+                      <tr style={{ borderBottom: '1px solid var(--border)', background: 'var(--bg-subtle)' }}>
+                        <td colSpan={6} className="px-6 py-3">
+                          <p className="text-[11px] font-semibold uppercase tracking-wider mb-2" style={{ color: 'var(--text-tertiary)' }}>Unternehmen mit diesem Code</p>
+                          <div className="flex flex-wrap gap-2">
+                            {companies
+                              .filter(c => c.referral_code_used === r.ref_code)
+                              .map(c => (
+                                <span key={c.id} className="px-2.5 py-1 rounded-lg text-xs font-medium" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}>
+                                  {c.name}
+                                  <span className="ml-1.5" style={{ color: 'var(--text-tertiary)' }}>
+                                    {format(new Date(c.created_at), 'dd.MM.yy', { locale: de })}
+                                  </span>
+                                </span>
+                              ))}
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </React.Fragment>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

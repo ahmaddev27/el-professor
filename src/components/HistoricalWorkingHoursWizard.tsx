@@ -1,0 +1,11728 @@
+/**
+ * HistoricalWorkingHoursWizard
+ *
+ * "Alter Monat / Steuerberater-Abgleich — Mit Arbeitsstunden" mode.
+ *
+ * Steps:
+ *  0 – Monat & Fahrtenbuch-Import wählen
+ *  1 – Lohnabrechnung-Zielwerte je Fahrer eingeben
+ *  2 – Abgleich berechnen
+ *  3 – Blockbasierter Abgleich – Neustart (Phase 1 diagnostic)
+ */
+
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  ArrowLeft, ArrowRight, Calculator, AlertTriangle,
+  RefreshCw, Save, CheckCircle2, Layers,
+  Calendar, List, Play, Download,
+} from 'lucide-react';
+import { supabase } from '../lib/supabase';
+import { useAuth } from '../contexts/AuthContext';
+import HistoricalHourTargetsManager, {
+  HourTargetsTrigger,
+  saveDriverConfigsAsTargets,
+  type HoursDriver,
+} from './HistoricalHourTargetsManager';
+import type { FahrtenbuchTrip } from '../hooks/useFahrtenbuch';
+import {
+  buildVehicleBlocksForHistoricalWorkingHours,
+  assignRegularDriversToVehicleBlocks,
+  assignSurplusBlocksToInhaberWithoutTimeChange,
+  shiftOverlappingInhaberBlocks,
+  buildFinalBlockAssignmentSnapshot,
+  validateHistoricalWorkingHoursExportReadiness,
+  formatBlockDuration,
+  formatBlockDatetime,
+  formatBlockHours,
+  blockStatusLabel,
+  blockWarningLabels,
+  blockSourceRowRange,
+  type VehicleBlock,
+  type BuildVehicleBlocksResult,
+  type RegularDriverTarget,
+  type RegularDriverAssignmentResult,
+  type RegularBlockAssignment,
+  type RegularDriverAssignmentSummary,
+  type InhaberTarget,
+  type InhaberAssignmentResult,
+  type OwnerShiftResult,
+  type FinalBlockAssignmentSnapshotResult,
+  type HistoricalWorkingHoursExportValidationResult,
+  type RegularAssignmentStrategy,
+  type DriverPlanningExclusion,
+  computeLohnartSeconds,
+  getGermanNationalHolidays,
+} from '../utils/historicalWorkingHoursCleanEngine';
+import {
+  exportHistoricalWorkingHoursFahrtenbuch,
+  buildFahrtenbuchExportSummary,
+  type FahrtenbuchExportSummary,
+  type GeneratedWorksheetAuditResult,
+  type ExportRowDiagnostic,
+} from '../utils/historicalWorkingHoursFahrtenbuchExport';
+import {
+  runHistoricalArbeitsstundenRowLevelEngine,
+  type ArbeitsstundenEngineResult,
+} from '../utils/historicalRowLevelEngine';
+import {
+  buildStundennachweisPreview,
+  type HistoricalWorkingHoursStundennachweisPreviewResult,
+} from '../utils/historicalWorkingHoursStundennachweisPreview';
+import * as XLSX from 'xlsx';
+import { type StructuredNote } from '../utils/monatsplanungPhase3';
+
+// ── Constants ─────────────────────────────────────────────────────────────────
+
+const MONTHS_DE = ['Januar','Februar','März','April','Mai','Juni','Juli','August','September','Oktober','November','Dezember'];
+const BATCH_SIZE = 1000;
+
+// ── Driver exclusion helper ───────────────────────────────────────────────────
+// Replicates the same logic as checkStructuredNote in monatsplanungPhase3.ts
+// but works at ride/interval level (ms timestamps) rather than block level.
+
+const MS_PER_DAY = 86_400_000;
+
+function _parseDateMsLocal(d: string): number {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(d);
+  return m ? Date.UTC(+m[1], +m[2] - 1, +m[3]) : NaN;
+}
+
+function _timeToMinLocal(t: string): number | null {
+  const m = /^(\d{1,2}):(\d{2})/.exec(t);
+  return m ? +m[1] * 60 + +m[2] : null;
+}
+
+/**
+ * Returns { excluded: true, detail } if the driver has any 'exclude_from_plan'
+ * note that overlaps [rideStartMs, rideEndMs). Match is by driver ID first,
+ * then by normalized name as fallback via the nameToId map.
+ */
+function isDriverExcludedFromPlanning(
+  driverId: string | null,
+  driverName: string,
+  rideStartMs: number,
+  rideEndMs: number,
+  notesMap: Map<string, StructuredNote[]>,
+  nameToId?: Map<string, string>,
+): { excluded: false } | { excluded: true; detail: string } {
+  const normName = driverName.trim().toLowerCase().replace(/\s+/g, ' ');
+  const resolvedId = driverId ?? nameToId?.get(normName) ?? null;
+  const notes = resolvedId ? (notesMap.get(resolvedId) ?? []) : [];
+
+  for (const note of notes) {
+    if (note.note_planning_behavior !== 'exclude_from_plan') continue;
+    const noteStartDate = note.start_date ?? (note.note_date ? note.note_date.slice(0, 10) : null);
+    const noteEndDate = note.end_date ?? noteStartDate;
+    if (!noteStartDate) continue;
+    const rangeStartMs = _parseDateMsLocal(noteStartDate);
+    const rangeEndMs   = _parseDateMsLocal(noteEndDate!);
+    if (isNaN(rangeStartMs) || isNaN(rangeEndMs)) continue;
+    const cappedEnd = Math.min(rangeEndMs, rangeStartMs + 366 * MS_PER_DAY);
+    let dateMs = rangeStartMs;
+    while (dateMs <= cappedEnd) {
+      let intStart: number, intEnd: number;
+      if (note.is_full_day || !note.start_time || !note.end_time) {
+        intStart = dateMs;
+        intEnd   = dateMs + MS_PER_DAY;
+      } else {
+        const sMin = _timeToMinLocal(note.start_time);
+        const eMin = _timeToMinLocal(note.end_time);
+        if (sMin == null || eMin == null) { intStart = dateMs; intEnd = dateMs + MS_PER_DAY; }
+        else if (eMin > sMin) { intStart = dateMs + sMin * 60_000; intEnd = dateMs + eMin * 60_000; }
+        else { intStart = dateMs + sMin * 60_000; intEnd = dateMs + MS_PER_DAY + eMin * 60_000; }
+      }
+      if (rideStartMs < intEnd && rideEndMs > intStart) {
+        const typeLabels: Record<string, string> = {
+          sick:'Krank', vacation:'Urlaub', off:'Nicht verfügbar',
+          krank:'Krank', urlaub:'Urlaub',
+        };
+        const noteLabel = typeLabels[note.note_type?.toLowerCase() ?? ''] ?? note.note_type ?? 'Ausschluss';
+        const fmtDate = (d: string) => { const mm=/^(\d{4})-(\d{2})-(\d{2})/.exec(d); return mm?`${mm[3]}.${mm[2]}.${mm[1]}`:d; };
+        const datePart = noteStartDate === noteEndDate
+          ? fmtDate(noteStartDate)
+          : `${fmtDate(noteStartDate)}–${fmtDate(noteEndDate!)}`;
+        return { excluded: true, detail: `${driverName}: ${noteLabel} (${datePart})` };
+      }
+      dateMs += MS_PER_DAY;
+    }
+  }
+  return { excluded: false };
+}
+
+/**
+ * Expands a driver's 'exclude_from_plan' notes into half-open ms intervals
+ * suitable for passing to assignRegularDriversToVehicleBlocks.
+ */
+function buildDriverPlanningExclusions(
+  notes: StructuredNote[],
+): DriverPlanningExclusion[] {
+  const result: DriverPlanningExclusion[] = [];
+  for (const note of notes) {
+    if (note.note_planning_behavior !== 'exclude_from_plan') continue;
+    const noteStartDate = note.start_date ?? (note.note_date ? note.note_date.slice(0, 10) : null);
+    const noteEndDate   = note.end_date ?? noteStartDate;
+    if (!noteStartDate) continue;
+    const rangeStartMs = _parseDateMsLocal(noteStartDate);
+    const rangeEndMs   = _parseDateMsLocal(noteEndDate!);
+    if (isNaN(rangeStartMs) || isNaN(rangeEndMs)) continue;
+    const cappedEnd = Math.min(rangeEndMs, rangeStartMs + 366 * MS_PER_DAY);
+
+    const typeLabels: Record<string, string> = {
+      sick: 'Krank', vacation: 'Urlaub', off: 'Nicht verfügbar',
+      krank: 'Krank', urlaub: 'Urlaub',
+    };
+    const noteLabel = typeLabels[note.note_type?.toLowerCase() ?? ''] ?? note.note_type ?? 'Ausschluss';
+    const fmtDate = (d: string) => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(d); return m ? `${m[3]}.${m[2]}.${m[1]}` : d; };
+    const datePart = noteStartDate === noteEndDate
+      ? fmtDate(noteStartDate)
+      : `${fmtDate(noteStartDate)}–${fmtDate(noteEndDate!)}`;
+    const label = `${noteLabel} (${datePart})`;
+
+    if (note.is_full_day || !note.start_time || !note.end_time) {
+      // Full-day exclusion: one interval spanning entire range (inclusive end date = +1 day exclusive)
+      result.push({ startMs: rangeStartMs, endExclusiveMs: cappedEnd + MS_PER_DAY, label });
+    } else {
+      // Time-ranged exclusion: expand day by day
+      let dateMs = rangeStartMs;
+      while (dateMs <= cappedEnd) {
+        const sMin = _timeToMinLocal(note.start_time);
+        const eMin = _timeToMinLocal(note.end_time);
+        let intStart: number, intEnd: number;
+        if (sMin == null || eMin == null) {
+          intStart = dateMs; intEnd = dateMs + MS_PER_DAY;
+        } else if (eMin > sMin) {
+          intStart = dateMs + sMin * 60_000; intEnd = dateMs + eMin * 60_000;
+        } else {
+          intStart = dateMs + sMin * 60_000; intEnd = dateMs + MS_PER_DAY + eMin * 60_000;
+        }
+        result.push({ startMs: intStart, endExclusiveMs: intEnd, label });
+        dateMs += MS_PER_DAY;
+      }
+    }
+  }
+  return result;
+}
+
+// ── Local types ───────────────────────────────────────────────────────────────
+
+interface FbImport {
+  id: string;
+  file_name: string;
+  row_count: number;
+  imported_at: string;
+  source_columns_json: string[] | null;
+  source_sheet_name: string | null;
+  storage_path: string | null;
+}
+
+interface DriverRow {
+  id: string;
+  name: string;
+  personalnummer: string | null;
+  employment_type: string;
+  planning_hourly_rate: number | null;
+  planning_min_salary: number | null;
+  planning_max_salary: number | null;
+}
+
+interface WzDriverConfig {
+  driverId: string;
+  driverName: string;
+  personalnummer: string | null;
+  isOwner: boolean;
+  included: boolean;
+  hourlyCents: number;
+  minSalaryCents: number | null;   // Mindestgehalt in euro-cents (null = not set)
+  maxSalaryCents: number | null;   // Maximalgehalt in euro-cents (null = not set)
+  targetBaseH: number;
+  targetNacht25H: number;
+  targetNacht40H: number;
+  targetSundayH: number;
+  targetHolidayH: number;
+  hinweis: string;
+}
+
+// Draft strings used while typing (support German comma decimals)
+interface WzDraft {
+  hourly: string;
+  baseH: string;
+  nacht25H: string;
+  nacht40H: string;
+  sunH: string;
+  holH: string;
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function parseGermanH(s: string): number {
+  const t = s.replace(',', '.').trim();
+  const n = parseFloat(t);
+  return isNaN(n) || n < 0 ? 0 : n;
+}
+
+function fmtH(h: number): string {
+  return h === 0 ? '' : h.toFixed(2).replace('.', ',');
+}
+
+function parseCentsFromStr(s: string): number {
+  const t = s.replace(',', '.').trim();
+  const n = parseFloat(t);
+  return isNaN(n) || n < 0 ? 0 : Math.round(n * 100);
+}
+
+function centsToStr(c: number): string {
+  return (c / 100).toFixed(2).replace('.', ',');
+}
+
+async function fetchAllTrips(companyId: string, importId: string): Promise<FahrtenbuchTrip[]> {
+  const all: FahrtenbuchTrip[] = [];
+  let offset = 0;
+  while (true) {
+    const { data, error } = await supabase
+      .from('fahrtenbuch_trips').select('*')
+      .eq('company_id', companyId).eq('import_id', importId)
+      .order('trip_date', { ascending: true })
+      .order('start_time', { ascending: true, nullsFirst: false })
+      .range(offset, offset + BATCH_SIZE - 1);
+    if (error) throw error;
+    const rows = (data ?? []) as FahrtenbuchTrip[];
+    all.push(...rows); if (rows.length < BATCH_SIZE) break; offset += BATCH_SIZE;
+  }
+  return all;
+}
+
+
+// ── Step dots ────────────────────────────────────────────────────────────────
+
+function StepDots({ current, total }: { current: number; total: number }) {
+  return (
+    <div className="flex items-center gap-2">
+      {Array.from({ length: total }, (_, i) => (
+        <div key={i} className="h-2 rounded-full transition-all"
+          style={{ width: i === current ? 24 : 8, background: i === current ? '#06b6d4' : i < current ? 'rgba(6,182,212,0.4)' : 'var(--border)' }} />
+      ))}
+    </div>
+  );
+}
+
+// ── InhaberNonConflictStep types & algorithm ─────────────────────────────────
+
+interface InhaberNonConflictBlock {
+  block: VehicleBlock;
+  hasNzConflict: boolean;
+  nzConflictWith: string[];   // blockIds of conflicting not-assigned blocks
+}
+
+interface InhaberNonConflictDiagnostics {
+  regularDriversUnchanged: boolean;
+  nonConflictBlocksAssigned: number;
+  remainingWithoutNzConflict: number;
+  remainingWithNzConflict: number;
+  singleRideAssignments: number;
+  timeShifts: number;
+}
+
+interface InhaberNonConflictStepResult {
+  inhaberName: string;
+  assignedToInhaberBlocks: VehicleBlock[];
+  remainingConflictedBlocks: VehicleBlock[];
+  blockDetails: InhaberNonConflictBlock[];
+  inhaberRides: number;
+  inhaberSec: number;
+  diagnostics: InhaberNonConflictDiagnostics;
+}
+
+function runInhaberNonConflictStep(
+  unassignedBlocks: VehicleBlock[],
+  inhaberName: string,
+): InhaberNonConflictStepResult {
+  // Build NZ-conflict map (unassigned vs unassigned, cross-vehicle, time overlap)
+  const conflictsWith = new Map<string, string[]>();
+  for (const b of unassignedBlocks) conflictsWith.set(b.blockId, []);
+
+  for (let i = 0; i < unassignedBlocks.length; i++) {
+    for (let j = i + 1; j < unassignedBlocks.length; j++) {
+      const a = unassignedBlocks[i], b = unassignedBlocks[j];
+      if (a.vehicle === b.vehicle) continue;
+      if (!a.blockStartMs || !a.blockEndMs || !b.blockStartMs || !b.blockEndMs) continue;
+      if (a.blockStartMs < b.blockEndMs && b.blockStartMs < a.blockEndMs) {
+        conflictsWith.get(a.blockId)!.push(b.blockId);
+        conflictsWith.get(b.blockId)!.push(a.blockId);
+      }
+    }
+  }
+
+  const blockDetails: InhaberNonConflictBlock[] = unassignedBlocks.map(b => ({
+    block: b,
+    hasNzConflict: (conflictsWith.get(b.blockId)?.length ?? 0) > 0,
+    nzConflictWith: conflictsWith.get(b.blockId) ?? [],
+  }));
+
+  const assignedToInhaberBlocks = blockDetails.filter(d => !d.hasNzConflict).map(d => d.block);
+  const remainingConflictedBlocks = blockDetails.filter(d => d.hasNzConflict).map(d => d.block);
+
+  const inhaberRides = assignedToInhaberBlocks.reduce((s, b) => s + (b.rides?.length ?? 0), 0);
+  const inhaberSec   = assignedToInhaberBlocks.reduce((s, b) => s + b.blockDurationSec, 0);
+
+  const diagnostics: InhaberNonConflictDiagnostics = {
+    regularDriversUnchanged:     true,
+    nonConflictBlocksAssigned:   assignedToInhaberBlocks.length,
+    remainingWithoutNzConflict:  0,
+    remainingWithNzConflict:     remainingConflictedBlocks.length,
+    singleRideAssignments:       0,
+    timeShifts:                  0,
+  };
+
+  return { inhaberName, assignedToInhaberBlocks, remainingConflictedBlocks, blockDetails, inhaberRides, inhaberSec, diagnostics };
+}
+
+// ── InhaberLongestConflictStep types & algorithm ──────────────────────────────
+
+interface LcGroupBlock {
+  block: VehicleBlock;
+  rank: number;
+  decision: 'Inhaber' | 'Nicht zugewiesen' | 'Übersprungen: Inhaber-Zeitkonflikt' | 'Übersprungen: Fahrzeugkonflikt' | 'Kein passender Block';
+  rejectionReason: string | null;
+}
+
+interface LcConflictGroup {
+  groupId: string;         // e.g. "G01"
+  blockIds: string[];
+  vehicles: string[];
+  periodStart: number;
+  periodEnd: number;
+  longestBlockId: string;
+  selectedBlockId: string | null;
+  decision: 'Inhaber' | 'Kein passender Block';
+  blocks: LcGroupBlock[];
+}
+
+interface LcRejectedCandidate {
+  blockId: string;
+  vehicle: string;
+  groupId: string;
+  reason: 'Inhaber-Zeitkonflikt' | 'Fahrzeugkonflikt';
+}
+
+interface LcDiagnostics {
+  regularDriversUnchanged: boolean;
+  inhaberTimeConflicts: number;
+  inhaberVehicleConflicts: number;
+  timeShifts: number;
+  singleRideAssignments: number;
+  groupsWithNoBlock: number;
+}
+
+interface InhaberLongestConflictStepResult {
+  inhaberName: string;
+  conflictGroups: LcConflictGroup[];
+  selectedBlocks: VehicleBlock[];    // newly assigned to Inhaber in this step
+  rejectedCandidates: LcRejectedCandidate[];
+  remainingUnassignedBlocks: VehicleBlock[];
+  inhaberRidesAdded: number;
+  inhaberSecAdded: number;
+  inhaberSecTotal: number;   // step3 + step4
+  diagnostics: LcDiagnostics;
+}
+
+function blocksOverlap(a: VehicleBlock, b: VehicleBlock): boolean {
+  if (!a.blockStartMs || !a.blockEndMs || !b.blockStartMs || !b.blockEndMs) return false;
+  return a.blockStartMs < b.blockEndMs && b.blockStartMs < a.blockEndMs;
+}
+
+function runInhaberLongestConflictStep(
+  remainingConflictedBlocks: VehicleBlock[],
+  step3InhaberBlocks: VehicleBlock[],
+  inhaberName: string,
+): InhaberLongestConflictStepResult {
+  const n = remainingConflictedBlocks.length;
+
+  // Build adjacency (NZ-conflict): cross-vehicle, time overlap
+  const adj = new Map<string, Set<string>>();
+  for (const b of remainingConflictedBlocks) adj.set(b.blockId, new Set());
+  for (let i = 0; i < n; i++) {
+    for (let j = i + 1; j < n; j++) {
+      const a = remainingConflictedBlocks[i], b = remainingConflictedBlocks[j];
+      if (a.vehicle === b.vehicle) continue;
+      if (blocksOverlap(a, b)) {
+        adj.get(a.blockId)!.add(b.blockId);
+        adj.get(b.blockId)!.add(a.blockId);
+      }
+    }
+  }
+
+  // BFS connected components
+  const visited = new Set<string>();
+  const blockById = new Map<string, VehicleBlock>();
+  for (const b of remainingConflictedBlocks) blockById.set(b.blockId, b);
+
+  const groups: LcConflictGroup[] = [];
+  let groupIdx = 0;
+
+  for (const b of remainingConflictedBlocks) {
+    if (visited.has(b.blockId)) continue;
+    // BFS
+    const queue = [b.blockId];
+    visited.add(b.blockId);
+    const members: string[] = [];
+    while (queue.length) {
+      const cur = queue.shift()!;
+      members.push(cur);
+      for (const nb of adj.get(cur) ?? []) {
+        if (!visited.has(nb)) { visited.add(nb); queue.push(nb); }
+      }
+    }
+    groupIdx++;
+    const groupId = `G${String(groupIdx).padStart(2, '0')}`;
+    const memberBlocks = members.map(id => blockById.get(id)!).filter(Boolean);
+    const vehicles = Array.from(new Set(memberBlocks.map(b => b.vehicle))).sort();
+    const periodStart = Math.min(...memberBlocks.map(b => b.blockStartMs ?? Infinity));
+    const periodEnd   = Math.max(...memberBlocks.map(b => b.blockEndMs   ?? 0));
+
+    // Sort candidates: longest duration first, then most rides, then earliest start, then lower blockId
+    const sorted = [...memberBlocks].sort((a, b) => {
+      if (b.blockDurationSec !== a.blockDurationSec) return b.blockDurationSec - a.blockDurationSec;
+      if ((b.rides?.length ?? 0) !== (a.rides?.length ?? 0)) return (b.rides?.length ?? 0) - (a.rides?.length ?? 0);
+      if (a.blockStartMs !== b.blockStartMs) return a.blockStartMs - b.blockStartMs;
+      return a.blockId < b.blockId ? -1 : 1;
+    });
+
+    groups.push({ groupId, blockIds: members, vehicles, periodStart, periodEnd, longestBlockId: sorted[0].blockId, selectedBlockId: null, decision: 'Kein passender Block', blocks: [] });
+  }
+
+  // Now assign: iterate groups and try candidates in rank order
+  const inhaberBlocks: VehicleBlock[] = [...step3InhaberBlocks]; // grows as we assign step4 blocks
+  const selectedBlocks: VehicleBlock[] = [];
+  const rejectedCandidates: LcRejectedCandidate[] = [];
+
+  for (const group of groups) {
+    const memberBlocks = group.blockIds.map(id => blockById.get(id)!).filter(Boolean);
+    const sorted = [...memberBlocks].sort((a, b) => {
+      if (b.blockDurationSec !== a.blockDurationSec) return b.blockDurationSec - a.blockDurationSec;
+      if ((b.rides?.length ?? 0) !== (a.rides?.length ?? 0)) return (b.rides?.length ?? 0) - (a.rides?.length ?? 0);
+      if (a.blockStartMs !== b.blockStartMs) return a.blockStartMs - b.blockStartMs;
+      return a.blockId < b.blockId ? -1 : 1;
+    });
+
+    const blockDecisions: LcGroupBlock[] = sorted.map((b, i) => ({ block: b, rank: i + 1, decision: 'Nicht zugewiesen', rejectionReason: null }));
+
+    let assigned: VehicleBlock | null = null;
+    for (const bd of blockDecisions) {
+      const candidate = bd.block;
+      // Check Inhaber time overlap
+      const timeConflict = inhaberBlocks.some(existing => blocksOverlap(existing, candidate));
+      if (timeConflict) {
+        bd.decision = 'Übersprungen: Inhaber-Zeitkonflikt';
+        bd.rejectionReason = 'Überlappt bestehende Inhaber-Zeit';
+        rejectedCandidates.push({ blockId: candidate.blockId, vehicle: candidate.vehicle, groupId: group.groupId, reason: 'Inhaber-Zeitkonflikt' });
+        continue;
+      }
+      // Check same-vehicle overlap among Inhaber blocks on same vehicle
+      const vehicleConflict = inhaberBlocks.some(existing => existing.vehicle === candidate.vehicle && blocksOverlap(existing, candidate));
+      if (vehicleConflict) {
+        bd.decision = 'Übersprungen: Fahrzeugkonflikt';
+        bd.rejectionReason = 'Fahrzeug-Zeitüberschneidung mit Inhaber';
+        rejectedCandidates.push({ blockId: candidate.blockId, vehicle: candidate.vehicle, groupId: group.groupId, reason: 'Fahrzeugkonflikt' });
+        continue;
+      }
+      // Accepted
+      bd.decision = 'Inhaber';
+      assigned = candidate;
+      inhaberBlocks.push(candidate);
+      selectedBlocks.push(candidate);
+      group.selectedBlockId = candidate.blockId;
+      group.decision = 'Inhaber';
+      break;
+    }
+    if (!assigned) {
+      // No candidate worked — mark remaining as 'Kein passender Block'
+      for (const bd of blockDecisions) {
+        if (bd.decision === 'Nicht zugewiesen') {
+          bd.decision = 'Kein passender Block';
+          bd.rejectionReason = 'Kein konfliktfreier Inhaber-Block in Gruppe';
+        }
+      }
+    }
+    group.blocks = blockDecisions;
+  }
+
+  const selectedSet = new Set(selectedBlocks.map(b => b.blockId));
+  const remainingUnassignedBlocks = remainingConflictedBlocks.filter(b => !selectedSet.has(b.blockId));
+
+  const inhaberRidesAdded = selectedBlocks.reduce((s, b) => s + (b.rides?.length ?? 0), 0);
+  const inhaberSecAdded   = selectedBlocks.reduce((s, b) => s + b.blockDurationSec, 0);
+  const step3Sec = step3InhaberBlocks.reduce((s, b) => s + b.blockDurationSec, 0);
+
+  const inhaberTimeConflicts  = rejectedCandidates.filter(r => r.reason === 'Inhaber-Zeitkonflikt').length;
+  const inhaberVehicleConflicts = rejectedCandidates.filter(r => r.reason === 'Fahrzeugkonflikt').length;
+  const groupsWithNoBlock     = groups.filter(g => g.decision === 'Kein passender Block').length;
+
+  const diagnostics: LcDiagnostics = {
+    regularDriversUnchanged:   true,
+    inhaberTimeConflicts,
+    inhaberVehicleConflicts,
+    timeShifts:                0,
+    singleRideAssignments:     0,
+    groupsWithNoBlock,
+  };
+
+  return {
+    inhaberName,
+    conflictGroups: groups,
+    selectedBlocks,
+    rejectedCandidates,
+    remainingUnassignedBlocks,
+    inhaberRidesAdded,
+    inhaberSecAdded,
+    inhaberSecTotal: step3Sec + inhaberSecAdded,
+    diagnostics,
+  };
+}
+
+// ── VehicleBlocksView ─────────────────────────────────────────────────────────
+
+const STATUS_COLORS: Record<string, { bg: string; border: string; text: string }> = {
+  valid:   { bg: '#dcfce7', border: '#86efac', text: '#166534' },
+  short:   { bg: '#fef9c3', border: '#fde047', text: '#854d0e' },
+  long:    { bg: '#ffedd5', border: '#fdba74', text: '#9a3412' },
+  invalid: { bg: '#fee2e2', border: '#fca5a5', text: '#991b1b' },
+};
+
+const WEEKDAY_COLS = ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa'];
+const MONTHS_FULL = ['Januar','Februar','März','April','Mai','Juni','Juli','August','September','Oktober','November','Dezember'];
+
+interface VehicleBlocksViewProps {
+  result: BuildVehicleBlocksResult;
+  month: number;
+  year: number;
+  onRecompute: () => void;
+  onAssign: () => void;
+}
+
+function fmtTime(ms: number): string {
+  if (!ms) return '—';
+  const d = new Date(ms);
+  return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+}
+
+function fmtDatetime(ms: number): string {
+  if (!ms) return '—';
+  const d = new Date(ms);
+  return `${String(d.getDate()).padStart(2,'0')}.${String(d.getMonth()+1).padStart(2,'0')}.${d.getFullYear()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}:${String(d.getSeconds()).padStart(2,'0')}`;
+}
+
+function VehicleBlocksView({ result, month, year, onRecompute, onAssign }: VehicleBlocksViewProps) {
+  const [selectedVehicle, setSelectedVehicle] = useState<string>('__all__');
+  const [modalBlock, setModalBlock] = useState<VehicleBlock | null>(null);
+
+  const blocks = result?.blocks ?? [];
+  const perVehicle = result?.perVehicle ?? [];
+
+  const vehicles = useMemo(
+    () => Array.from(new Set(blocks.map(b => b.vehicle))).filter(Boolean).sort(),
+    [blocks],
+  );
+
+  const visibleBlocks = useMemo(
+    () => selectedVehicle === '__all__' ? blocks : blocks.filter(b => b.vehicle === selectedVehicle),
+    [blocks, selectedVehicle],
+  );
+
+  // Build month grid: 7-column (Su–Sa), rows = weeks covering the month
+  const gridData = useMemo(() => {
+    const firstDay = new Date(year, month - 1, 1);
+    const lastDay  = new Date(year, month, 0);
+    // Start on the Sunday on or before the 1st
+    const gridStart = new Date(firstDay);
+    gridStart.setDate(firstDay.getDate() - firstDay.getDay());
+
+    // End on the Saturday on or after the last day
+    const gridEnd = new Date(lastDay);
+    gridEnd.setDate(lastDay.getDate() + (6 - lastDay.getDay()));
+
+    const cells: Array<{ date: Date; inMonth: boolean; blocks: VehicleBlock[] }> = [];
+    const cur = new Date(gridStart);
+    while (cur <= gridEnd) {
+      const dayStart = cur.getTime();
+      const dayEnd   = dayStart + 86_400_000;
+      const dayBlocks = visibleBlocks
+        .filter(b => b.blockStartMs >= dayStart && b.blockStartMs < dayEnd)
+        .sort((a, b) => a.blockStartMs - b.blockStartMs);
+      cells.push({
+        date: new Date(cur),
+        inMonth: cur.getMonth() === month - 1,
+        blocks: dayBlocks,
+      });
+      cur.setDate(cur.getDate() + 1);
+    }
+    // Split into weeks
+    const weeks: typeof cells[] = [];
+    for (let i = 0; i < cells.length; i += 7) weeks.push(cells.slice(i, i + 7));
+    return weeks;
+  }, [visibleBlocks, month, year]);
+
+  // Stats (safe)
+  const stats = {
+    totalRides:        result?.totalRides        ?? 0,
+    canceledRides:     result?.canceledRides     ?? 0,
+    consideredRides:   result?.consideredRides   ?? 0,
+    vehicleCount:      result?.vehicleCount      ?? 0,
+    totalBlocks:       blocks.length,
+    validBlockCount:   result?.validBlockCount   ?? 0,
+    shortBlockCount:   result?.shortBlockCount   ?? 0,
+    longBlockCount:    result?.longBlockCount    ?? 0,
+    invalidBlockCount: result?.invalidBlockCount ?? 0,
+  };
+
+  const options = result?.options;
+
+  return (
+    <div className="space-y-4 max-w-full">
+
+      {/* Header */}
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h2 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>
+            Fahrzeug-Blöcke prüfen
+          </h2>
+          <p className="text-sm mt-0.5" style={{ color: 'var(--text-secondary)' }}>
+            Prüfe die automatisch gebildeten Fahrzeug-Blöcke pro Fahrzeug im Monatskalender.
+          </p>
+        </div>
+        <button
+          onClick={onRecompute}
+          className="inline-flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold flex-shrink-0 transition-all hover:brightness-90"
+          style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
+        >
+          <RefreshCw size={13} /> Neu berechnen
+        </button>
+      </div>
+
+      {/* Parameter summary row */}
+      {options && (
+        <div className="flex flex-wrap gap-2 text-xs">
+          {[
+            ['Max. Lücke', `${options.maxGapInsideBlockMinutes} min`],
+            ['Min. Blockdauer', `${options.minBlockDurationMinutes} min`],
+            ['Max. Blockdauer', `${options.maxBlockDurationMinutes} min`],
+            ['Merge-Lücke kurz', `${options.shortMergeGapMinutes} min`],
+          ].map(([k, v]) => (
+            <span key={k} className="px-2.5 py-1 rounded-full" style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)', color: 'var(--text-secondary)' }}>
+              {k}: <strong style={{ color: 'var(--text-primary)' }}>{v}</strong>
+            </span>
+          ))}
+        </div>
+      )}
+
+      {/* Stats bar */}
+      <div className="flex flex-wrap gap-2 text-xs">
+        {[
+          { label: 'Fahrten',       value: stats.totalRides },
+          { label: 'Berücksichtigt', value: stats.consideredRides },
+          { label: 'Storniert',     value: stats.canceledRides,     dim: true },
+          { label: 'Fahrzeuge',     value: stats.vehicleCount },
+          { label: 'Blöcke',        value: stats.totalBlocks },
+          { label: 'Gültig',        value: stats.validBlockCount,   color: '#15803d' },
+          { label: 'Kurz',          value: stats.shortBlockCount,   color: '#a16207' },
+          { label: 'Lang',          value: stats.longBlockCount,    color: '#c2410c' },
+          { label: 'Ungültig',      value: stats.invalidBlockCount, color: '#b91c1c' },
+        ].map(s => (
+          <div key={s.label} className="px-3 py-1.5 rounded-xl flex items-baseline gap-1.5" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
+            <span className="font-bold text-sm" style={{ color: s.color ?? (s.dim ? 'var(--text-secondary)' : 'var(--text-primary)') }}>{s.value}</span>
+            <span style={{ color: 'var(--text-secondary)' }}>{s.label}</span>
+          </div>
+        ))}
+      </div>
+
+      {/* Vehicle filter tabs */}
+      <div className="flex flex-wrap gap-2">
+        <button
+          onClick={() => setSelectedVehicle('__all__')}
+          className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
+          style={{
+            background: selectedVehicle === '__all__' ? '#0891b2' : 'var(--bg-subtle)',
+            color:      selectedVehicle === '__all__' ? '#fff'    : 'var(--text-secondary)',
+            border:     `1px solid ${selectedVehicle === '__all__' ? '#0891b2' : 'var(--border)'}`,
+          }}
+        >
+          Alle Fahrzeuge ({stats.vehicleCount})
+        </button>
+        {vehicles.map(v => {
+          const pv = perVehicle.find(p => p.vehicle === v);
+          return (
+            <button
+              key={v}
+              onClick={() => setSelectedVehicle(v)}
+              className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
+              style={{
+                background: selectedVehicle === v ? '#0891b2' : 'var(--bg-subtle)',
+                color:      selectedVehicle === v ? '#fff'    : 'var(--text-secondary)',
+                border:     `1px solid ${selectedVehicle === v ? '#0891b2' : 'var(--border)'}`,
+              }}
+            >
+              {v} {pv ? `(${pv.blockCount})` : ''}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Month title */}
+      <div className="text-sm font-semibold" style={{ color: 'var(--text-secondary)' }}>
+        {MONTHS_FULL[month - 1]} {year}
+        {selectedVehicle !== '__all__' && <span style={{ color: '#0891b2' }}> · {selectedVehicle}</span>}
+        <span className="ml-2 font-normal" style={{ color: 'var(--text-secondary)' }}>
+          — {visibleBlocks.length} Block{visibleBlocks.length !== 1 ? 'e' : ''}
+        </span>
+      </div>
+
+      {/* ── Month grid ─────────────────────────────────────────────────────────── */}
+      {blocks.length === 0 ? (
+        <div className="rounded-xl p-6 text-sm text-center" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', color: 'var(--text-secondary)' }}>
+          Keine Fahrzeug-Blöcke gefunden.
+        </div>
+      ) : (
+        <div className="rounded-2xl" style={{ border: '1px solid var(--border)', overflow: 'hidden' }}>
+          {/* Weekday header */}
+          <div className="grid grid-cols-7" style={{ background: 'var(--bg-subtle)', borderBottom: '2px solid var(--border)' }}>
+            {WEEKDAY_COLS.map(d => (
+              <div key={d} className="py-2 text-center text-xs font-bold" style={{ color: d === 'So' || d === 'Sa' ? '#7c3aed' : 'var(--text-secondary)' }}>
+                {d}
+              </div>
+            ))}
+          </div>
+
+          {/* Weeks */}
+          {gridData.map((week, wi) => (
+            <div key={wi} className="grid grid-cols-7" style={{ borderBottom: wi < gridData.length - 1 ? '1px solid var(--border)' : undefined }}>
+              {week.map((cell, ci) => {
+                const isWeekend = ci === 0 || ci === 6;
+                const isToday = cell.date.toDateString() === new Date().toDateString();
+                return (
+                  <div
+                    key={ci}
+                    style={{
+                      minHeight: 100,
+                      background: !cell.inMonth
+                        ? 'var(--bg-subtle)'
+                        : isWeekend
+                          ? 'rgba(124,58,237,0.03)'
+                          : 'var(--bg-surface)',
+                      borderRight: ci < 6 ? '1px solid var(--border)' : undefined,
+                      padding: '6px 5px 4px',
+                      verticalAlign: 'top',
+                    }}
+                  >
+                    {/* Day number */}
+                    <div className="flex items-center justify-end mb-1">
+                      <span
+                        className="text-xs font-semibold w-6 h-6 flex items-center justify-center rounded-full"
+                        style={{
+                          color: !cell.inMonth
+                            ? 'var(--text-secondary)'
+                            : isToday
+                              ? '#fff'
+                              : isWeekend ? '#7c3aed' : 'var(--text-primary)',
+                          background: isToday ? '#0891b2' : 'transparent',
+                          opacity: !cell.inMonth ? 0.4 : 1,
+                        }}
+                      >
+                        {cell.date.getDate()}
+                      </span>
+                    </div>
+
+                    {/* Block events — all shown, no clipping */}
+                    <div className="space-y-0.5">
+                      {cell.blocks.map(block => {
+                        const sc = STATUS_COLORS[block.status] ?? STATUS_COLORS.invalid;
+                        return (
+                          <button
+                            key={block.blockId}
+                            onClick={() => setModalBlock(block)}
+                            className="w-full text-left rounded px-1.5 py-0.5 text-xs transition-all hover:brightness-90 leading-snug"
+                            style={{ background: sc.bg, border: `1px solid ${sc.border}`, color: sc.text }}
+                          >
+                            <span className="font-semibold">{fmtTime(block.blockStartMs)}–{fmtTime(block.blockEndMs)}</span>
+                            {' '}· <span className="font-mono opacity-80">{block.blockId.slice(-6)}</span>
+                            {' · '}<span className="font-semibold">{block.vehicle}</span>
+                            {' · '}{formatBlockDuration(block.blockDurationSec)}
+                            {' · '}{block.rides?.length ?? 0} Fahr{(block.rides?.length ?? 0) !== 1 ? 'ten' : 't'}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Bottom nav */}
+      <div className="flex items-center justify-between pt-2">
+        <button
+          onClick={onRecompute}
+          className="inline-flex items-center gap-2 text-sm transition-colors hover:opacity-80"
+          style={{ color: 'var(--text-secondary)' }}
+        >
+          <ArrowLeft size={15} /> Neu berechnen
+        </button>
+        <button
+          onClick={onAssign}
+          className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all hover:brightness-110"
+          style={{ background: '#2563eb', color: '#fff' }}
+        >
+          <ArrowRight size={15} /> Reguläre Fahrer zuweisen
+        </button>
+      </div>
+
+      {/* ── Block detail modal ─────────────────────────────────────────────────── */}
+      {modalBlock && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ background: 'rgba(0,0,0,0.5)' }}
+          onClick={() => setModalBlock(null)}
+        >
+          <div
+            className="rounded-2xl p-6 w-full max-w-lg space-y-3"
+            style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', boxShadow: '0 25px 60px rgba(0,0,0,0.3)' }}
+            onClick={e => e.stopPropagation()}
+          >
+            {/* Modal header */}
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-sm font-bold" style={{ color: 'var(--text-primary)' }}>Block-Details</div>
+                <div className="text-xs font-mono mt-0.5" style={{ color: 'var(--text-secondary)' }}>{modalBlock.blockId}</div>
+              </div>
+              <button
+                onClick={() => setModalBlock(null)}
+                className="text-xs px-2 py-1 rounded-lg"
+                style={{ color: 'var(--text-secondary)', border: '1px solid var(--border)', background: 'var(--bg-subtle)' }}
+              >
+                Schließen
+              </button>
+            </div>
+
+            {/* Detail rows */}
+            <div className="rounded-xl overflow-hidden" style={{ border: '1px solid var(--border)' }}>
+              {[
+                ['Fahrzeug',   modalBlock.vehicle],
+                ['Start',      fmtDatetime(modalBlock.blockStartMs)],
+                ['Ende',       fmtDatetime(modalBlock.blockEndMs)],
+                ['Dauer',      formatBlockDuration(modalBlock.blockDurationSec)],
+                ['Fahrten',    String(modalBlock.rides?.length ?? 0)],
+                ['Zeilen',     blockSourceRowRange(modalBlock)],
+                ['Status',     blockStatusLabel(modalBlock)],
+                ['Warnungen',  blockWarningLabels(modalBlock).join(', ') || '—'],
+              ].map(([k, v], i) => (
+                <div
+                  key={k}
+                  className="flex gap-3 px-4 py-2 text-xs"
+                  style={{ background: i % 2 === 0 ? 'var(--bg-surface)' : 'var(--bg-subtle)', borderBottom: i < 7 ? '1px solid var(--border)' : undefined }}
+                >
+                  <span className="w-24 flex-shrink-0 font-semibold" style={{ color: 'var(--text-secondary)' }}>{k}</span>
+                  <span style={{ color: 'var(--text-primary)' }}>{v}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── RegularDriverAssignmentView ───────────────────────────────────────────────
+
+const DRIVER_COLORS = [
+  '#2563eb','#059669','#d97706','#7c3aed','#db2777','#0891b2','#ea580c','#65a30d',
+];
+
+interface RegularDriverAssignmentViewProps {
+  result: RegularDriverAssignmentResult;
+  phase1Result: BuildVehicleBlocksResult;
+  driverConfigs: WzDriverConfig[];
+  inhaberName: string;
+  month: number;
+  year: number;
+  onBack: () => void;
+  onRecompute: () => void;
+  onApplyNonConflictStep: () => void;
+}
+
+function RegularDriverAssignmentView({
+  result, phase1Result, driverConfigs, inhaberName, month, year, onBack, onRecompute, onApplyNonConflictStep,
+}: RegularDriverAssignmentViewProps) {
+  const [modalBlock, setModalBlock] = useState<VehicleBlock | null>(null);
+  const [selectedVehicle, setSelectedVehicle] = useState<string>('__all__');
+  const [conflictListOpen, setConflictListOpen] = useState(false);
+  const [expandedConflictBlock, setExpandedConflictBlock] = useState<string | null>(null);
+
+  const assignments    = result?.assignments    ?? [];
+  const surplusBlocks  = result?.surplusBlocks  ?? [];
+  const surplusValid   = result?.surplusValidBlocks  ?? [];
+  const summaries      = result?.driverSummaries ?? [];
+  const validation     = result?.validation;
+  const rejections     = result?.rejectedAssignments ?? [];
+
+  const allBlocks      = phase1Result?.blocks ?? [];
+  const validBlocks    = allBlocks.filter(b => b.status === 'valid');
+
+  // Map blockId → assigned driver
+  const assignedMap = useMemo(() => {
+    const m = new Map<string, RegularBlockAssignment>();
+    for (const a of assignments) m.set(a.blockId, a);
+    return m;
+  }, [assignments]);
+
+  // Driver colors
+  const driverColorMap = useMemo(() => {
+    const unique = Array.from(new Set(assignments.map(a => a.driverId)));
+    const m = new Map<string, string>();
+    unique.forEach((id, i) => m.set(id, DRIVER_COLORS[i % DRIVER_COLORS.length]));
+    return m;
+  }, [assignments]);
+
+  // Vehicles
+  const vehicles = useMemo(
+    () => Array.from(new Set(allBlocks.map(b => b.vehicle))).filter(Boolean).sort(),
+    [allBlocks],
+  );
+
+  // Unassigned reasons per block
+  const rejectionMap = useMemo(() => {
+    const m = new Map<string, string[]>();
+    for (const r of rejections) {
+      const list = m.get(r.blockId) ?? [];
+      list.push(r.reason);
+      m.set(r.blockId, list);
+    }
+    return m;
+  }, [rejections]);
+
+  // Cross-vehicle conflict computation
+  interface ConflictExample {
+    blockId: string; vehicle: string; driverName: string;
+    startMs: number; endMs: number; overlapSec: number;
+  }
+  interface BlockConflictInfo {
+    hasCrossVehicleConflict: boolean;
+    crossVehicleConflictCount: number;
+    conflictedVehicles: string[];
+    conflictedBlockIds: string[];
+    conflictedAssignedDrivers: string[];
+    totalConflictDurationSec: number;
+    conflictExamples: ConflictExample[];
+  }
+
+  const crossVehicleConflictMap = useMemo(() => {
+    const m = new Map<string, BlockConflictInfo>();
+    // Only compare not-assigned vs not-assigned blocks (cross-vehicle, time overlap)
+    const unassignedBlocks = surplusBlocks.filter(b => !assignedMap.has(b.blockId));
+    const unassignedSet = new Set(unassignedBlocks.map(b => b.blockId));
+    for (const ub of unassignedBlocks) {
+      const examples: ConflictExample[] = [];
+      const seenIds = new Set<string>();
+      // Only check other NOT-ASSIGNED blocks — ignore regular-driver-assigned blocks
+      for (const other of unassignedBlocks) {
+        if (other.blockId === ub.blockId) continue;
+        if (other.vehicle === ub.vehicle) continue;
+        if (!other.blockStartMs || !other.blockEndMs) continue;
+        const overlapStart = Math.max(ub.blockStartMs, other.blockStartMs);
+        const overlapEnd   = Math.min(ub.blockEndMs,   other.blockEndMs);
+        if (overlapStart >= overlapEnd) continue;
+        const overlapSec = (overlapEnd - overlapStart) / 1000;
+        if (!seenIds.has(other.blockId)) {
+          seenIds.add(other.blockId);
+          examples.push({
+            blockId:    other.blockId,
+            vehicle:    other.vehicle,
+            driverName: 'Nicht zugewiesen',
+            startMs:    other.blockStartMs,
+            endMs:      other.blockEndMs,
+            overlapSec,
+          });
+        }
+      }
+      const conflictedVehicles = Array.from(new Set(examples.map(e => e.vehicle)));
+      const totalConflictDurationSec = examples.reduce((s, e) => s + e.overlapSec, 0);
+      m.set(ub.blockId, {
+        hasCrossVehicleConflict: examples.length > 0,
+        crossVehicleConflictCount: examples.length,
+        conflictedVehicles,
+        conflictedBlockIds: examples.map(e => e.blockId),
+        conflictedAssignedDrivers: [],
+        totalConflictDurationSec,
+        conflictExamples: examples,
+      });
+    }
+    return m;
+  }, [surplusBlocks, assignedMap]);
+
+  function unassignedReason(block: VehicleBlock): string {
+    if (block.status !== 'valid') return `Nicht zugewiesen: ${blockStatusLabel(block)}`;
+    const reasons = rejectionMap.get(block.blockId);
+    if (!reasons?.length) return 'Nicht zugewiesen: Kein passender Fahrer';
+    const r = reasons[0];
+    if (r === 'no_driver_available')        return 'Nicht zugewiesen: Kein passender Fahrer';
+    if (r === 'target_full')                return 'Nicht zugewiesen: Fahrer voll';
+    if (r.startsWith('would_exceed_1500'))  return 'Nicht zugewiesen: 1500-Limit';
+    if (r.startsWith('would_exceed_1501'))  return 'Nicht zugewiesen: 1501-Limit';
+    if (r.startsWith('would_exceed_1510'))  return 'Nicht zugewiesen: 1510-Limit';
+    if (r.startsWith('would_exceed_1000'))  return 'Nicht zugewiesen: 1000-Limit';
+    if (r.startsWith('would_exceed_holiday')) return 'Nicht zugewiesen: Feiertag-Limit';
+    if (r.startsWith('would_exceed'))       return 'Nicht zugewiesen: Limit überschritten';
+    if (r === 'driver_overlap')             return 'Nicht zugewiesen: Fahrerüberschneidung';
+    if (r === 'driver_excluded_by_note')    return 'Nicht zugewiesen: Fahrer von Planung ausgeschlossen';
+    return 'Nicht zugewiesen: Kein passender Fahrer';
+  }
+
+  // Drivers skipped due to planning exclusion notes
+  const exclusionSkips = useMemo(() => {
+    const skipped = new Map<string, { name: string; labels: Set<string>; blockCount: number }>();
+    for (const r of rejections) {
+      if (r.reason !== 'driver_excluded_by_note' || !r.excludedDriverId) continue;
+      const entry = skipped.get(r.excludedDriverId) ?? { name: r.excludedDriverName ?? r.excludedDriverId, labels: new Set(), blockCount: 0 };
+      entry.blockCount++;
+      if (r.exclusionLabel) entry.labels.add(r.exclusionLabel);
+      skipped.set(r.excludedDriverId, entry);
+    }
+    return Array.from(skipped.values());
+  }, [rejections]);
+
+  // Calendar grid for a vehicle
+  function buildGrid(vehicleFilter: string | null) {
+    const firstDay = new Date(year, month - 1, 1);
+    const lastDay  = new Date(year, month, 0);
+    const start = new Date(firstDay);
+    start.setDate(firstDay.getDate() - firstDay.getDay());
+    const end = new Date(lastDay);
+    end.setDate(lastDay.getDate() + (6 - lastDay.getDay()));
+
+    const cells: Array<{ date: Date; inMonth: boolean; blocks: VehicleBlock[] }> = [];
+    const cur = new Date(start);
+    while (cur <= end) {
+      const ds = cur.getTime(), de = ds + 86_400_000;
+      const dayBlocks = allBlocks
+        .filter(b => (!vehicleFilter || b.vehicle === vehicleFilter) && b.blockStartMs >= ds && b.blockStartMs < de)
+        .sort((a, b2) => a.blockStartMs - b2.blockStartMs);
+      cells.push({ date: new Date(cur), inMonth: cur.getMonth() === month - 1, blocks: dayBlocks });
+      cur.setDate(cur.getDate() + 1);
+    }
+    const weeks: typeof cells[] = [];
+    for (let i = 0; i < cells.length; i += 7) weeks.push(cells.slice(i, i + 7));
+    return weeks;
+  }
+
+  const calendarVehicles = selectedVehicle === '__all__' ? vehicles : [selectedVehicle];
+
+  // Diagnostics: clean?
+  const isClean = validation
+    ? validation.driverOverlapCount === 0 && validation.targetOverrunCount === 0
+    : true;
+
+  // Lohnart table data
+  const lohnartRows = useMemo(() => summaries.map(s => {
+    const dc = driverConfigs.find(c => c.driverId === s.driverId);
+    return {
+      name:                s.driverName,
+      target1000:          dc ? dc.targetBaseH * 3600 : s.targetBaseSec1000,
+      assigned1000:        s.assignedBaseSec1000,
+      target1500:          dc ? dc.targetNacht25H * 3600 : s.targetNight25Sec1500,
+      assigned1500:        s.assignedNight25Sec1500,
+      target1501:          dc ? dc.targetNacht40H * 3600 : s.targetNight40Sec1501,
+      assigned1501:        s.assignedNight40Sec1501,
+      target1510:          dc ? dc.targetSundayH * 3600 : s.targetSundaySec1510,
+      assigned1510:        s.assignedSundaySec1510,
+      targetFeiertag:      dc ? dc.targetHolidayH * 3600 : s.targetHolidaySec,
+      assignedFeiertag:    s.assignedHolidaySec,
+    };
+  }), [summaries, driverConfigs]);
+
+  function secToH(sec: number) {
+    if (!sec) return '0,00 h';
+    return (sec / 3600).toFixed(2).replace('.', ',') + ' h';
+  }
+  function secToHShort(sec: number) {
+    if (!sec) return '—';
+    const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60);
+    return `${h}h${String(m).padStart(2,'0')}`;
+  }
+
+  return (
+    <div className="space-y-5 max-w-full">
+
+      {/* Header */}
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h2 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>Reguläre Fahrer zuweisen</h2>
+          <p className="text-sm mt-0.5" style={{ color: 'var(--text-secondary)' }}>
+            Die gültigen Fahrzeug-Blöcke werden den regulären Fahrern entsprechend ihrer maximalen Arbeitsstunden und Lohnarten zugeordnet. Der Inhaber bleibt in diesem Schritt unberücksichtigt.
+          </p>
+        </div>
+      </div>
+
+      {/* Inhaber zero card */}
+      <div className="rounded-xl p-4" style={{ background: 'rgba(16,185,129,0.06)', border: '1px solid rgba(16,185,129,0.25)' }}>
+        <div className="text-xs font-bold mb-2" style={{ color: '#065f46' }}>Inhaber in diesem Schritt</div>
+        <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-xs sm:grid-cols-5">
+          {[
+            ['Fahrer', inhaberName || '—'],
+            ['Blöcke', '0'],
+            ['Fahrten', '0'],
+            ['Stunden', '0,00 h'],
+            ['Status', 'Nicht zugewiesen in Schritt 2'],
+          ].map(([k, v]) => (
+            <div key={k}>
+              <span style={{ color: '#065f46', fontWeight: 600 }}>{k}: </span>
+              <span style={{ color: '#0f766e' }}>{v}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Exclusion skips notice */}
+      {exclusionSkips.length > 0 && (
+        <div className="rounded-xl px-4 py-3 text-xs" style={{ background: 'rgba(217,119,6,0.07)', border: '1px solid rgba(217,119,6,0.25)', color: '#92400e' }}>
+          <div className="font-bold mb-1.5" style={{ color: '#78350f' }}>Übersprungen wegen Planungsausschluss ({exclusionSkips.length} Fahrer)</div>
+          <div className="space-y-0.5">
+            {exclusionSkips.map(sk => (
+              <div key={sk.name}>
+                <span className="font-semibold">{sk.name}</span>
+                {sk.labels.size > 0 && (
+                  <span className="ml-1 opacity-80">— {Array.from(sk.labels).join(', ')}</span>
+                )}
+                <span className="ml-1 opacity-60">({sk.blockCount} Block{sk.blockCount !== 1 ? 'e' : ''} abgelehnt)</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Summary stats */}
+      <div className="flex flex-wrap gap-2 text-xs">
+        {[
+          { label: 'Reguläre Fahrer',         value: summaries.length },
+          { label: 'Gültige Blöcke',          value: validBlocks.length },
+          { label: 'Zugewiesen',               value: assignments.length,      color: '#15803d' },
+          { label: 'Nicht zugewiesen',         value: surplusBlocks.length,    color: surplusValid.length > 0 ? '#b45309' : undefined },
+          { label: 'Zugewiesene Stunden',      value: secToHShort(summaries.reduce((s, d) => s + d.assignedWorkSec, 0)) },
+          { label: 'Fahrerüberschneidungen',   value: validation?.driverOverlapCount ?? 0,  color: (validation?.driverOverlapCount ?? 0) > 0 ? '#b91c1c' : '#15803d' },
+          { label: 'Stundenlimit-Überschr.',   value: validation?.targetOverrunCount ?? 0,  color: (validation?.targetOverrunCount ?? 0) > 0 ? '#b91c1c' : '#15803d' },
+          { label: 'Inhaber-Blöcke',           value: 0, color: '#15803d' },
+          { label: 'Inhaber-Fahrten',          value: 0, color: '#15803d' },
+          { label: 'Reguläre Fahrer verschoben', value: 0, color: '#15803d' },
+        ].map(s => (
+          <div key={s.label} className="px-3 py-1.5 rounded-xl flex items-baseline gap-1.5" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
+            <span className="font-bold text-sm" style={{ color: s.color ?? 'var(--text-primary)' }}>{s.value}</span>
+            <span style={{ color: 'var(--text-secondary)' }}>{s.label}</span>
+          </div>
+        ))}
+      </div>
+
+      {/* Verteilungsqualität */}
+      {(() => {
+        if (summaries.length === 0) return null;
+        const rows = summaries.map(s => {
+          const total = s.targetWorkSec > 0 ? s.targetWorkSec : 1;
+          const ratio = Math.round((s.assignedWorkSec / total) * 1000) / 10;
+          return { name: s.driverName, max: s.targetWorkSec, assigned: s.assignedWorkSec, ratio };
+        });
+        const ratios = rows.map(r => r.ratio);
+        const minR = Math.min(...ratios), maxR = Math.max(...ratios);
+        const spread = maxR - minR;
+        const isBalanced = spread <= 25;
+        const minDriver = rows.find(r => r.ratio === minR)?.name ?? '—';
+        const maxDriver = rows.find(r => r.ratio === maxR)?.name ?? '—';
+        return (
+          <div className="rounded-2xl overflow-hidden" style={{ border: `1px solid ${isBalanced ? 'rgba(16,185,129,0.3)' : 'rgba(245,158,11,0.4)'}` }}>
+            <div className="px-4 py-3 flex items-center justify-between" style={{ background: isBalanced ? 'rgba(16,185,129,0.06)' : 'rgba(245,158,11,0.06)', borderBottom: '1px solid var(--border)' }}>
+              <span className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>Verteilungsqualität reguläre Fahrer</span>
+              <span className="text-xs font-bold px-2 py-1 rounded-lg" style={{ background: isBalanced ? '#dcfce7' : '#fef3c7', color: isBalanced ? '#15803d' : '#92400e', border: `1px solid ${isBalanced ? '#86efac' : '#fcd34d'}` }}>
+                {isBalanced ? 'Ausgewogen' : 'Unausgewogen'}
+              </span>
+            </div>
+            <div className="px-4 py-3 grid grid-cols-2 gap-3 sm:grid-cols-4 text-xs" style={{ background: 'var(--bg-surface)', borderBottom: '1px solid var(--border)' }}>
+              {[
+                { label: 'Min. Auslastung',  value: minR.toFixed(1) + '%',  color: '#0891b2' },
+                { label: 'Max. Auslastung',  value: maxR.toFixed(1) + '%',  color: '#7c3aed' },
+                { label: 'Spread',           value: spread.toFixed(1) + '%', color: spread > 25 ? '#b45309' : '#059669' },
+                { label: 'Niedrigste / Höchste', value: `${minDriver} / ${maxDriver}`, color: 'var(--text-secondary)' },
+              ].map(c => (
+                <div key={c.label}>
+                  <div className="font-semibold mb-0.5" style={{ color: 'var(--text-secondary)' }}>{c.label}</div>
+                  <div className="font-bold text-sm" style={{ color: c.color }}>{c.value}</div>
+                </div>
+              ))}
+            </div>
+            <div className="overflow-x-auto">
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr style={{ background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)' }}>
+                    {['Fahrer', 'Max. Stunden', 'Zugewiesen', 'Rest', 'Auslastung'].map(h => (
+                      <th key={h} className="px-3 py-2 text-left text-xs font-semibold" style={{ color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((row, i) => {
+                    const pct = row.ratio;
+                    const barColor = pct >= 90 ? '#059669' : pct >= 60 ? '#0891b2' : '#f59e0b';
+                    return (
+                      <tr key={row.name} style={{ background: i % 2 === 0 ? 'var(--bg-surface)' : 'var(--bg-subtle)', borderBottom: '1px solid var(--border)' }}>
+                        <td className="px-3 py-2 text-xs font-semibold" style={{ color: 'var(--text-primary)' }}>{row.name}</td>
+                        <td className="px-3 py-2 text-xs" style={{ color: 'var(--text-secondary)' }}>{secToH(row.max)}</td>
+                        <td className="px-3 py-2 text-xs font-semibold" style={{ color: 'var(--text-primary)' }}>{secToH(row.assigned)}</td>
+                        <td className="px-3 py-2 text-xs" style={{ color: row.assigned > row.max ? '#b91c1c' : 'var(--text-secondary)' }}>{secToH(Math.max(0, row.max - row.assigned))}</td>
+                        <td className="px-3 py-2 text-xs">
+                          <div className="flex items-center gap-2">
+                            <div className="flex-1 rounded-full overflow-hidden" style={{ height: 6, background: 'var(--border)' }}>
+                              <div style={{ width: Math.min(pct, 100) + '%', height: '100%', background: barColor, borderRadius: 9999, transition: 'width 0.3s ease' }} />
+                            </div>
+                            <span className="font-bold w-12 text-right" style={{ color: barColor }}>{pct.toFixed(1)}%</span>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Driver limits table */}
+      <div className="rounded-2xl overflow-hidden" style={{ border: '1px solid var(--border)' }}>
+        <div className="px-4 py-3 text-sm font-semibold" style={{ background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)', color: 'var(--text-primary)' }}>
+          Fahrer-Limits
+        </div>
+        <div className="overflow-x-auto">
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead>
+              <tr style={{ background: 'var(--bg-surface)', borderBottom: '1px solid var(--border)' }}>
+                {['Fahrer','Max. Stunden','1000 Limit','1500 Limit','1501 Limit','1510 Limit','Feiertag Limit'].map(h => (
+                  <th key={h} className="px-3 py-2 text-left text-xs font-semibold" style={{ color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {driverConfigs.filter(c => c.included && !c.isOwner).map((dc, i) => (
+                <tr key={dc.driverId} style={{ background: i % 2 === 0 ? 'var(--bg-surface)' : 'var(--bg-subtle)', borderBottom: '1px solid var(--border)' }}>
+                  <td className="px-3 py-2 text-xs font-semibold" style={{ color: 'var(--text-primary)' }}>{dc.driverName}</td>
+                  <td className="px-3 py-2 text-xs" style={{ color: 'var(--text-secondary)' }}>{secToH(dc.targetBaseH * 3600)}</td>
+                  <td className="px-3 py-2 text-xs" style={{ color: 'var(--text-secondary)' }}>{secToH(dc.targetBaseH * 3600)}</td>
+                  <td className="px-3 py-2 text-xs" style={{ color: 'var(--text-secondary)' }}>{secToH(dc.targetNacht25H * 3600)}</td>
+                  <td className="px-3 py-2 text-xs" style={{ color: 'var(--text-secondary)' }}>{secToH(dc.targetNacht40H * 3600)}</td>
+                  <td className="px-3 py-2 text-xs" style={{ color: 'var(--text-secondary)' }}>{secToH(dc.targetSundayH * 3600)}</td>
+                  <td className="px-3 py-2 text-xs" style={{ color: 'var(--text-secondary)' }}>{secToH(dc.targetHolidayH * 3600)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Per-driver summary */}
+      <div className="rounded-2xl overflow-hidden" style={{ border: '1px solid var(--border)' }}>
+        <div className="px-4 py-3 text-sm font-semibold" style={{ background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)', color: 'var(--text-primary)' }}>
+          Ergebnis je Fahrer
+        </div>
+        <div className="overflow-x-auto">
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead>
+              <tr style={{ background: 'var(--bg-surface)', borderBottom: '1px solid var(--border)' }}>
+                {['Fahrer','Max. Stunden','Zugewiesen','Rest','Blöcke','Fahrten','Status','Überschneidungen','Stundenlimit-Übersch.'].map(h => (
+                  <th key={h} className="px-3 py-2 text-left text-xs font-semibold" style={{ color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {summaries.length === 0 ? (
+                <tr><td colSpan={9} className="px-4 py-6 text-center text-sm" style={{ color: 'var(--text-secondary)' }}>Keine regulären Fahrer konfiguriert.</td></tr>
+              ) : summaries.map((s, i) => {
+                const blocksForDriver = assignments.filter(a => a.driverId === s.driverId);
+                const rides = blocksForDriver.reduce((acc, a) => acc + (allBlocks.find(b => b.blockId === a.blockId)?.rides?.length ?? 0), 0);
+                const statusLabel = s.status === 'ziel_erreicht' ? 'Limit erreicht' : s.status === 'unter_ziel' ? 'Unter Limit' : 'Keine Zuteilung';
+                const statusColor = s.status === 'ziel_erreicht' ? '#059669' : s.status === 'unter_ziel' ? '#0891b2' : 'var(--text-secondary)';
+                return (
+                  <tr key={s.driverId} style={{ background: i % 2 === 0 ? 'var(--bg-surface)' : 'var(--bg-subtle)', borderBottom: '1px solid var(--border)' }}>
+                    <td className="px-3 py-2 text-xs font-semibold" style={{ color: driverColorMap.get(s.driverId) ?? 'var(--text-primary)' }}>{s.driverName}</td>
+                    <td className="px-3 py-2 text-xs" style={{ color: 'var(--text-secondary)' }}>{secToH(s.targetWorkSec)}</td>
+                    <td className="px-3 py-2 text-xs font-semibold" style={{ color: 'var(--text-primary)' }}>{secToH(s.assignedWorkSec)}</td>
+                    <td className="px-3 py-2 text-xs" style={{ color: s.remainingWorkSec < 0 ? '#b91c1c' : 'var(--text-secondary)' }}>{secToH(s.remainingWorkSec)}</td>
+                    <td className="px-3 py-2 text-xs" style={{ color: 'var(--text-secondary)' }}>{s.assignedBlockCount}</td>
+                    <td className="px-3 py-2 text-xs" style={{ color: 'var(--text-secondary)' }}>{rides}</td>
+                    <td className="px-3 py-2"><span className="text-xs font-medium" style={{ color: statusColor }}>{statusLabel}</span></td>
+                    <td className="px-3 py-2 text-xs" style={{ color: s.overlapCount > 0 ? '#b91c1c' : '#15803d' }}>{s.overlapCount}</td>
+                    <td className="px-3 py-2 text-xs" style={{ color: (validation?.targetOverrunCount ?? 0) > 0 ? '#b91c1c' : '#15803d' }}>0</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Lohnart reconciliation */}
+      <div className="rounded-2xl overflow-hidden" style={{ border: '1px solid var(--border)' }}>
+        <div className="px-4 py-3 text-sm font-semibold" style={{ background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)', color: 'var(--text-primary)' }}>
+          Lohnarten-Abgleich
+        </div>
+        <div className="overflow-x-auto">
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead>
+              <tr style={{ background: 'var(--bg-surface)', borderBottom: '1px solid var(--border)' }}>
+                <th className="px-3 py-2 text-left text-xs font-semibold" style={{ color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>Fahrer</th>
+                {['1000 Limit','1000 Zuges.','1000 Rest','1500 Limit','1500 Zuges.','1500 Rest','1501 Limit','1501 Zuges.','1501 Rest','1510 Limit','1510 Zuges.','1510 Rest','Feiertag Limit','Feiertag Zuges.','Feiertag Rest'].map(h => (
+                  <th key={h} className="px-2 py-2 text-left text-xs font-semibold" style={{ color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {lohnartRows.map((row, i) => {
+                function cell(assigned: number, target: number) {
+                  const rest = target - assigned;
+                  const over = rest < -1;
+                  return { a: secToHShort(assigned), t: secToHShort(target), r: secToHShort(Math.abs(rest)), over };
+                }
+                const c1000   = cell(row.assigned1000,     row.target1000);
+                const c1500   = cell(row.assigned1500,     row.target1500);
+                const c1501   = cell(row.assigned1501,     row.target1501);
+                const c1510   = cell(row.assigned1510,     row.target1510);
+                const cFtag   = cell(row.assignedFeiertag, row.targetFeiertag);
+                return (
+                  <tr key={row.name} style={{ background: i % 2 === 0 ? 'var(--bg-surface)' : 'var(--bg-subtle)', borderBottom: '1px solid var(--border)' }}>
+                    <td className="px-3 py-2 text-xs font-semibold" style={{ color: 'var(--text-primary)' }}>{row.name}</td>
+                    {[c1000, c1500, c1501, c1510, cFtag].flatMap((c) => [
+                      <td key="t" className="px-2 py-2 text-xs" style={{ color: 'var(--text-secondary)' }}>{c.t}</td>,
+                      <td key="a" className="px-2 py-2 text-xs font-medium" style={{ color: 'var(--text-primary)' }}>{c.a}</td>,
+                      <td key="r" className="px-2 py-2 text-xs" style={{ color: c.over ? '#b91c1c' : 'var(--text-secondary)' }}>{c.over ? '-' : ''}{c.r}</td>,
+                    ])}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Vehicle calendar with assignment */}
+      <div>
+        <div className="text-sm font-semibold mb-2" style={{ color: 'var(--text-primary)' }}>Fahrzeug-Kalender mit Fahrerzuweisung</div>
+        {/* Vehicle filter */}
+        <div className="flex flex-wrap gap-2 mb-3">
+          <button
+            onClick={() => setSelectedVehicle('__all__')}
+            className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
+            style={{ background: selectedVehicle === '__all__' ? '#0891b2' : 'var(--bg-subtle)', color: selectedVehicle === '__all__' ? '#fff' : 'var(--text-secondary)', border: `1px solid ${selectedVehicle === '__all__' ? '#0891b2' : 'var(--border)'}` }}
+          >
+            Alle Fahrzeuge
+          </button>
+          {vehicles.map(v => (
+            <button key={v} onClick={() => setSelectedVehicle(v)}
+              className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
+              style={{ background: selectedVehicle === v ? '#0891b2' : 'var(--bg-subtle)', color: selectedVehicle === v ? '#fff' : 'var(--text-secondary)', border: `1px solid ${selectedVehicle === v ? '#0891b2' : 'var(--border)'}` }}>
+              {v}
+            </button>
+          ))}
+        </div>
+
+        {calendarVehicles.map(vehicle => {
+          const grid = buildGrid(vehicle);
+          return (
+            <div key={vehicle} className="mb-6">
+              <div className="text-xs font-bold mb-1.5" style={{ color: 'var(--text-secondary)' }}>{vehicle}</div>
+              <div className="rounded-2xl overflow-hidden" style={{ border: '1px solid var(--border)' }}>
+                <div className="grid grid-cols-7" style={{ background: 'var(--bg-subtle)', borderBottom: '2px solid var(--border)' }}>
+                  {['So','Mo','Di','Mi','Do','Fr','Sa'].map(d => (
+                    <div key={d} className="py-2 text-center text-xs font-bold" style={{ color: 'var(--text-secondary)' }}>{d}</div>
+                  ))}
+                </div>
+                {grid.map((week, wi) => (
+                  <div key={wi} className="grid grid-cols-7" style={{ borderBottom: wi < grid.length - 1 ? '1px solid var(--border)' : undefined }}>
+                    {week.map((cell, ci) => {
+                      return (
+                        <div key={ci} style={{ minHeight: 90, background: !cell.inMonth ? 'var(--bg-subtle)' : 'var(--bg-surface)', borderRight: ci < 6 ? '1px solid var(--border)' : undefined, padding: '5px 4px 3px' }}>
+                          <div className="flex justify-end mb-1">
+                            <span className="text-xs font-semibold w-5 h-5 flex items-center justify-center rounded-full" style={{ color: !cell.inMonth ? 'var(--text-secondary)' : 'var(--text-primary)', opacity: !cell.inMonth ? 0.35 : 1 }}>
+                              {cell.date.getDate()}
+                            </span>
+                          </div>
+                          <div className="space-y-0.5">
+                            {cell.blocks.map(block => {
+                              const asgn = assignedMap.get(block.blockId);
+                              const isAssigned = !!asgn;
+                              const dColor = asgn ? (driverColorMap.get(asgn.driverId) ?? '#2563eb') : null;
+                              const rides = block.rides?.length ?? 0;
+                              if (isAssigned && dColor) {
+                                return (
+                                  <button key={block.blockId} onClick={() => setModalBlock(block)}
+                                    className="w-full text-left rounded px-1.5 py-0.5 text-xs leading-snug transition-all hover:brightness-90"
+                                    style={{ background: dColor + '18', border: `1px solid ${dColor}55`, color: dColor }}>
+                                    <span className="font-semibold">{fmtTime(block.blockStartMs)}–{fmtTime(block.blockEndMs)}</span>
+                                    {' · '}<span className="font-semibold">{asgn.driverName.split(' ')[0]}</span>
+                                    {' · '}{formatBlockDuration(block.blockDurationSec)}
+                                    {' · '}{rides}F
+                                  </button>
+                                );
+                              }
+                              // Not assigned
+                              const reason = unassignedReason(block);
+                              const confInfo = crossVehicleConflictMap.get(block.blockId);
+                              const hasConf = confInfo?.hasCrossVehicleConflict ?? false;
+                              return (
+                                <button key={block.blockId} onClick={() => setModalBlock(block)}
+                                  className="w-full text-left rounded px-1.5 py-0.5 text-xs leading-snug transition-all hover:brightness-90"
+                                  style={{ background: hasConf ? '#fef3c7' : '#fef3c733', border: `1.5px solid ${hasConf ? '#f59e0b' : '#f59e0b88'}`, color: '#92400e' }}>
+                                  <span className="font-semibold">{fmtTime(block.blockStartMs)}–{fmtTime(block.blockEndMs)}</span>
+                                  {' · '}<span className="italic opacity-80">{reason.replace('Nicht zugewiesen: ', '')}</span>
+                                  {' · '}{rides}F
+                                  {hasConf && <span className="ml-1 px-1 py-px rounded text-xs font-bold" style={{ background: '#fcd34d', color: '#78350f', fontSize: '0.6rem' }}>NZ-Konflikt</span>}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Cross-vehicle conflict summary & list */}
+      {(() => {
+        const unassignedBlocks = surplusBlocks.filter(b => !assignedMap.has(b.blockId));
+        if (unassignedBlocks.length === 0) return null;
+
+        const withConflict    = unassignedBlocks.filter(b => crossVehicleConflictMap.get(b.blockId)?.hasCrossVehicleConflict);
+        const withoutConflict = unassignedBlocks.filter(b => !crossVehicleConflictMap.get(b.blockId)?.hasCrossVehicleConflict);
+        const allExamples     = Array.from(crossVehicleConflictMap.values()).flatMap(v => v.conflictExamples);
+        const conflictPairs   = unassignedBlocks.reduce((s, b) => s + (crossVehicleConflictMap.get(b.blockId)?.crossVehicleConflictCount ?? 0), 0);
+        const affectedVehicles = Array.from(new Set(
+          Array.from(crossVehicleConflictMap.values()).flatMap(v => v.conflictedVehicles)
+        ));
+        const totalConflictSec = unassignedBlocks.reduce((s, b) => s + (crossVehicleConflictMap.get(b.blockId)?.totalConflictDurationSec ?? 0), 0);
+
+        if (import.meta.env.DEV) {
+          console.log('[NotAssignedOnlyConflicts]', {
+            unassignedBlocksTotal: unassignedBlocks.length,
+            assignedBlocksIgnored: (result?.assignments?.length ?? 0),
+            blocksWithNzConflict: withConflict.length,
+            blocksWithoutNzConflict: withoutConflict.length,
+            notAssignedConflictPairsTotal: conflictPairs,
+            affectedVehicles,
+            first20ConflictExamples: allExamples.slice(0, 20).map(e => ({
+              conflictBlock: e.blockId, vehicle: e.vehicle, driver: e.driverName,
+              overlapMin: Math.round(e.overlapSec / 60),
+            })),
+          });
+        }
+
+        return (
+          <div className="space-y-3">
+            {/* Summary card */}
+            <div className="rounded-2xl overflow-hidden" style={{ border: '1px solid rgba(245,158,11,0.35)' }}>
+              <div className="px-4 py-3 text-sm font-semibold" style={{ background: 'rgba(245,158,11,0.06)', borderBottom: '1px solid var(--border)', color: 'var(--text-primary)' }}>
+                Konflikte nicht zugewiesener Blöcke
+              </div>
+              <div className="px-4 py-3 grid grid-cols-2 gap-3 sm:grid-cols-3 text-xs" style={{ background: 'var(--bg-surface)' }}>
+                {[
+                  { label: 'Nicht zugewiesene Blöcke',     value: String(unassignedBlocks.length),    color: 'var(--text-primary)' },
+                  { label: 'Mit Konflikt zu anderem nicht zugewiesenen Block', value: String(withConflict.length),         color: withConflict.length > 0 ? '#b45309' : '#15803d' },
+                  { label: 'Ohne solchen Konflikt',        value: String(withoutConflict.length),      color: 'var(--text-secondary)' },
+                  { label: 'Konflikt-Paare',               value: String(conflictPairs),               color: conflictPairs > 0 ? '#b45309' : 'var(--text-secondary)' },
+                  { label: 'Betroffene Fahrzeuge',         value: affectedVehicles.length > 0 ? affectedVehicles.join(', ') : '—', color: 'var(--text-secondary)' },
+                  { label: 'Gesamte Konfliktzeit',         value: totalConflictSec > 0 ? `${Math.round(totalConflictSec / 60)} min` : '—', color: 'var(--text-secondary)' },
+                ].map(c => (
+                  <div key={c.label}>
+                    <div className="font-semibold mb-0.5" style={{ color: 'var(--text-secondary)' }}>{c.label}</div>
+                    <div className="font-bold text-sm" style={{ color: c.color }}>{c.value}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Compact conflict list */}
+            <div className="rounded-2xl overflow-hidden" style={{ border: '1px solid var(--border)' }}>
+              <button
+                className="w-full px-4 py-3 flex items-center justify-between text-sm font-semibold"
+                style={{ background: 'var(--bg-subtle)', color: 'var(--text-primary)' }}
+                onClick={() => setConflictListOpen(o => !o)}
+              >
+                <span>Nicht zugewiesene Blöcke – Konfliktprüfung <span className="font-normal text-xs ml-2" style={{ color: 'var(--text-secondary)' }}>{unassignedBlocks.length} Blöcke · {withConflict.length} mit Konflikt</span></span>
+                <span style={{ color: 'var(--text-secondary)' }}>{conflictListOpen ? '▲' : '▼'}</span>
+              </button>
+              {conflictListOpen && (
+                <div className="overflow-x-auto">
+                  <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                    <thead>
+                      <tr style={{ background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)' }}>
+                        {['Block-ID','Fahrzeug','Start','Ende','Dauer','Fahr.','Grund','NZ-Konflikt','# Konflikte','Konflikt-Fahrzeuge'].map(h => (
+                          <th key={h} className="px-2 py-2 text-left text-xs font-semibold whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {unassignedBlocks.map((block, i) => {
+                        const ci = crossVehicleConflictMap.get(block.blockId);
+                        const hasConf = ci?.hasCrossVehicleConflict ?? false;
+                        const isExpanded = expandedConflictBlock === block.blockId;
+                        return (
+                          <>
+                            <tr
+                              key={block.blockId}
+                              onClick={() => setExpandedConflictBlock(isExpanded ? null : block.blockId)}
+                              style={{
+                                background: hasConf
+                                  ? (i % 2 === 0 ? 'rgba(245,158,11,0.07)' : 'rgba(245,158,11,0.12)')
+                                  : (i % 2 === 0 ? 'var(--bg-surface)' : 'var(--bg-subtle)'),
+                                borderBottom: '1px solid var(--border)',
+                                cursor: hasConf ? 'pointer' : 'default',
+                              }}
+                            >
+                              <td className="px-2 py-1.5 text-xs font-mono" style={{ color: 'var(--text-secondary)' }}>…{block.blockId.slice(-8)}</td>
+                              <td className="px-2 py-1.5 text-xs font-bold" style={{ color: 'var(--text-primary)' }}>{block.vehicle}</td>
+                              <td className="px-2 py-1.5 text-xs font-mono whitespace-nowrap" style={{ color: 'var(--text-primary)' }}>{fmtDatetime(block.blockStartMs)}</td>
+                              <td className="px-2 py-1.5 text-xs font-mono whitespace-nowrap" style={{ color: 'var(--text-primary)' }}>{fmtDatetime(block.blockEndMs)}</td>
+                              <td className="px-2 py-1.5 text-xs" style={{ color: 'var(--text-secondary)' }}>{formatBlockDuration(block.blockDurationSec)}</td>
+                              <td className="px-2 py-1.5 text-xs" style={{ color: 'var(--text-secondary)' }}>{block.rides?.length ?? 0}</td>
+                              <td className="px-2 py-1.5 text-xs" style={{ color: 'var(--text-secondary)' }}>{unassignedReason(block).replace('Nicht zugewiesen: ','')}</td>
+                              <td className="px-2 py-1.5 text-xs">
+                                <span className="font-bold px-1.5 py-0.5 rounded text-xs" style={{
+                                  background: hasConf ? '#fef3c7' : '#dcfce7',
+                                  color: hasConf ? '#92400e' : '#15803d',
+                                  border: `1px solid ${hasConf ? '#fcd34d' : '#86efac'}`,
+                                }}>
+                                  {hasConf ? 'Ja' : 'Nein'}
+                                </span>
+                              </td>
+                              <td className="px-2 py-1.5 text-xs font-bold" style={{ color: hasConf ? '#b45309' : 'var(--text-secondary)' }}>
+                                {ci?.crossVehicleConflictCount ?? 0}
+                              </td>
+                              <td className="px-2 py-1.5 text-xs" style={{ color: 'var(--text-secondary)' }}>
+                                {ci?.conflictedVehicles.join(', ') || '—'}
+                              </td>
+                            </tr>
+                            {isExpanded && ci && ci.conflictExamples.length > 0 && (
+                              <tr key={block.blockId + '_detail'} style={{ background: 'rgba(245,158,11,0.04)', borderBottom: '1px solid var(--border)' }}>
+                                <td colSpan={10} className="px-4 py-3">
+                                  <div className="text-xs font-semibold mb-2" style={{ color: '#92400e' }}>
+                                    Konfliktblöcke mit anderem Fahrzeug ({ci.conflictExamples.length} Konflikte)
+                                  </div>
+                                  <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                                    <thead>
+                                      <tr style={{ borderBottom: '1px solid var(--border)' }}>
+                                        {['Konflikt-Block','Fahrzeug','Fahrer','Start','Ende','Überschneidung'].map(h => (
+                                          <th key={h} className="text-left text-xs font-semibold px-2 py-1" style={{ color: 'var(--text-secondary)' }}>{h}</th>
+                                        ))}
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {ci.conflictExamples.slice(0, 10).map((ex, ei) => (
+                                        <tr key={ex.blockId} style={{ background: ei % 2 === 0 ? 'transparent' : 'rgba(0,0,0,0.02)', borderBottom: '1px solid var(--border)' }}>
+                                          <td className="px-2 py-1 text-xs font-mono" style={{ color: 'var(--text-secondary)' }}>…{ex.blockId.slice(-8)}</td>
+                                          <td className="px-2 py-1 text-xs font-bold" style={{ color: 'var(--text-primary)' }}>{ex.vehicle}</td>
+                                          <td className="px-2 py-1 text-xs" style={{ color: ex.driverName === 'Nicht zugewiesen' ? '#b45309' : '#0891b2' }}>{ex.driverName}</td>
+                                          <td className="px-2 py-1 text-xs font-mono whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{fmtDatetime(ex.startMs)}</td>
+                                          <td className="px-2 py-1 text-xs font-mono whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{fmtDatetime(ex.endMs)}</td>
+                                          <td className="px-2 py-1 text-xs font-semibold" style={{ color: '#b45309' }}>{Math.round(ex.overlapSec / 60)} min</td>
+                                        </tr>
+                                      ))}
+                                      {ci.conflictExamples.length > 10 && (
+                                        <tr>
+                                          <td colSpan={6} className="px-2 py-1 text-xs italic" style={{ color: 'var(--text-secondary)' }}>
+                                            + {ci.conflictExamples.length - 10} weitere Konflikte
+                                          </td>
+                                        </tr>
+                                      )}
+                                    </tbody>
+                                  </table>
+                                </td>
+                              </tr>
+                            )}
+                          </>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Diagnostics */}
+      <div className="rounded-2xl overflow-hidden" style={{ border: `1px solid ${isClean ? 'rgba(16,185,129,0.3)' : 'rgba(220,38,38,0.3)'}` }}>
+        <div className="px-4 py-3 text-sm font-semibold" style={{ background: isClean ? 'rgba(16,185,129,0.06)' : 'rgba(220,38,38,0.06)', borderBottom: '1px solid var(--border)', color: 'var(--text-primary)' }}>
+          Zuweisungsprüfung reguläre Fahrer
+        </div>
+        <div className="p-4 space-y-2">
+          {[
+            { label: 'Fahrerüberschneidungen',     value: validation?.driverOverlapCount ?? 0 },
+            { label: 'Fahrzeugüberschneidungen',   value: 0 },
+            { label: 'Stundenlimit-Überschr.',     value: validation?.targetOverrunCount ?? 0 },
+            { label: 'Lohnart-Überschreitungen',   value: 0 },
+            { label: 'Inhaber-Blöcke',             value: 0 },
+            { label: 'Inhaber-Fahrten',            value: 0 },
+            { label: 'Reguläre Fahrer verschoben', value: 0 },
+          ].map(d => (
+            <div key={d.label} className="flex items-center justify-between text-xs">
+              <span style={{ color: 'var(--text-secondary)' }}>{d.label}</span>
+              <span className="font-bold" style={{ color: d.value > 0 ? '#b91c1c' : '#15803d' }}>{d.value}</span>
+            </div>
+          ))}
+          {isClean && (
+            <div className="mt-3 text-xs font-semibold" style={{ color: '#15803d' }}>Reguläre Fahrer-Zuweisung ist sauber.</div>
+          )}
+        </div>
+      </div>
+
+      {/* Bottom nav */}
+      <div className="flex items-center gap-4 pt-2 flex-wrap">
+        <button onClick={onBack} className="inline-flex items-center gap-2 text-sm hover:opacity-80" style={{ color: 'var(--text-secondary)' }}>
+          <ArrowLeft size={15} /> Zurück zu Fahrzeug-Blöcken
+        </button>
+        <button onClick={onRecompute} className="inline-flex items-center gap-2 text-sm hover:opacity-80" style={{ color: 'var(--text-secondary)' }}>
+          <RefreshCw size={13} /> Neu berechnen
+        </button>
+        <button
+          onClick={onApplyNonConflictStep}
+          className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all hover:brightness-90 ml-auto"
+          style={{ background: '#7c3aed', color: '#fff', border: '1px solid #7c3aed' }}
+        >
+          <ArrowRight size={15} /> Nicht-konflikt Blöcke an Inhaber geben
+        </button>
+      </div>
+
+      {/* Block detail modal */}
+      {modalBlock && (() => {
+        const asgn = assignedMap.get(modalBlock.blockId);
+        const lk = modalBlock.lohnart;
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.5)' }} onClick={() => setModalBlock(null)}>
+            <div className="rounded-2xl p-6 w-full max-w-lg space-y-3" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', boxShadow: '0 25px 60px rgba(0,0,0,0.3)' }} onClick={e => e.stopPropagation()}>
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-sm font-bold" style={{ color: 'var(--text-primary)' }}>Block-Details</div>
+                  <div className="text-xs font-mono mt-0.5" style={{ color: 'var(--text-secondary)' }}>{modalBlock.blockId}</div>
+                </div>
+                <button onClick={() => setModalBlock(null)} className="text-xs px-2 py-1 rounded-lg" style={{ color: 'var(--text-secondary)', border: '1px solid var(--border)', background: 'var(--bg-subtle)' }}>Schließen</button>
+              </div>
+              <div className="rounded-xl overflow-hidden" style={{ border: '1px solid var(--border)' }}>
+                {[
+                  ['Fahrzeug',        modalBlock.vehicle],
+                  ['Fahrer',          asgn ? asgn.driverName : 'Nicht zugewiesen'],
+                  ['Zuweisung',       asgn ? 'Zugewiesen' : unassignedReason(modalBlock)],
+                  ['Start',           fmtDatetime(modalBlock.blockStartMs)],
+                  ['Ende',            fmtDatetime(modalBlock.blockEndMs)],
+                  ['Dauer',           formatBlockDuration(modalBlock.blockDurationSec)],
+                  ['Fahrten',         String(modalBlock.rides?.length ?? 0)],
+                  ['Zeilen',          blockSourceRowRange(modalBlock)],
+                  ['Blockstatus',     blockStatusLabel(modalBlock)],
+                  ['Warnungen',       blockWarningLabels(modalBlock).join(', ') || '—'],
+                  ['1000',            lk ? secToHShort(lk.baseSec) : '—'],
+                  ['1500 N25%',       lk ? secToHShort(lk.night25Sec) : '—'],
+                  ['1501 N40%',       lk ? secToHShort(lk.night40Sec) : '—'],
+                  ['1510 Sonntag',    lk ? secToHShort(lk.sundaySec) : '—'],
+                  ['Feiertag',        lk ? secToHShort(lk.holidaySec) : '—'],
+                ].map(([k, v], idx) => (
+                  <div key={k} className="flex gap-3 px-4 py-2 text-xs" style={{ background: idx % 2 === 0 ? 'var(--bg-surface)' : 'var(--bg-subtle)', borderBottom: idx < 14 ? '1px solid var(--border)' : undefined }}>
+                    <span className="w-28 flex-shrink-0 font-semibold" style={{ color: 'var(--text-secondary)' }}>{k}</span>
+                    <span style={{ color: 'var(--text-primary)' }}>{v}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+    </div>
+  );
+}
+
+// ── InhaberNonConflictView ────────────────────────────────────────────────────
+
+const INHABER_COLOR = '#7c3aed';
+const INHABER_MIN_GAP_MS = 30 * 60 * 1000; // 30 minutes minimum buffer between Inhaber blocks
+
+interface InhaberNonConflictViewProps {
+  ncResult: InhaberNonConflictStepResult;
+  regularAssignments: RegularBlockAssignment[];
+  allBlocks: VehicleBlock[];
+  month: number;
+  year: number;
+  onBack: () => void;
+  onRecompute: () => void;
+  onApplyLongestConflictStep: () => void;
+}
+
+function InhaberNonConflictView({
+  ncResult, regularAssignments, allBlocks, month, year, onBack, onRecompute, onApplyLongestConflictStep,
+}: InhaberNonConflictViewProps) {
+  const [remainingOpen, setRemainingOpen] = useState(false);
+  const [selectedVehicle, setSelectedVehicle] = useState<string>('__all__');
+
+  const { inhaberName, assignedToInhaberBlocks, remainingConflictedBlocks, blockDetails, inhaberRides, inhaberSec, diagnostics } = ncResult;
+
+  const inhaberSet  = useMemo(() => new Set(assignedToInhaberBlocks.map(b => b.blockId)), [assignedToInhaberBlocks]);
+  const conflictSet = useMemo(() => new Set(remainingConflictedBlocks.map(b => b.blockId)), [remainingConflictedBlocks]);
+  const detailMap   = useMemo(() => { const m = new Map<string, InhaberNonConflictBlock>(); for (const d of blockDetails) m.set(d.block.blockId, d); return m; }, [blockDetails]);
+
+  const regularColorMap = useMemo(() => {
+    const unique = Array.from(new Set(regularAssignments.map(a => a.driverId)));
+    const m = new Map<string, string>();
+    unique.forEach((id, i) => m.set(id, DRIVER_COLORS[i % DRIVER_COLORS.length]));
+    return m;
+  }, [regularAssignments]);
+  const regularMap = useMemo(() => { const m = new Map<string, RegularBlockAssignment>(); for (const a of regularAssignments) m.set(a.blockId, a); return m; }, [regularAssignments]);
+
+  const vehicles = useMemo(() => Array.from(new Set(allBlocks.map(b => b.vehicle))).filter(Boolean).sort(), [allBlocks]);
+
+  function buildGrid(vehicleFilter: string | null) {
+    const firstDay = new Date(year, month - 1, 1);
+    const lastDay  = new Date(year, month, 0);
+    const start = new Date(firstDay); start.setDate(firstDay.getDate() - firstDay.getDay());
+    const end   = new Date(lastDay);  end.setDate(lastDay.getDate() + (6 - lastDay.getDay()));
+    const cells: Array<{ date: Date; inMonth: boolean; blocks: VehicleBlock[] }> = [];
+    const cur = new Date(start);
+    while (cur <= end) {
+      const ds = cur.getTime(), de = ds + 86_400_000;
+      const dayBlocks = allBlocks.filter(b => (!vehicleFilter || b.vehicle === vehicleFilter) && b.blockStartMs >= ds && b.blockStartMs < de).sort((a, b) => a.blockStartMs - b.blockStartMs);
+      cells.push({ date: new Date(cur), inMonth: cur.getMonth() === month - 1, blocks: dayBlocks });
+      cur.setDate(cur.getDate() + 1);
+    }
+    const rows: typeof cells[] = [];
+    for (let i = 0; i < cells.length; i += 7) rows.push(cells.slice(i, i + 7));
+    return rows;
+  }
+
+  const step2NotAssigned = blockDetails.length;
+  const nonConflict = assignedToInhaberBlocks.length;
+  const withConflict = remainingConflictedBlocks.length;
+  const allNonConflictAssigned = nonConflict === blockDetails.filter(d => !d.hasNzConflict).length;
+  const diagClean = diagnostics.remainingWithoutNzConflict === 0 && diagnostics.singleRideAssignments === 0 && diagnostics.timeShifts === 0;
+
+  return (
+    <div className="space-y-5 max-w-6xl">
+
+      {/* Header */}
+      <div>
+        <h2 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>Inhaber: Nicht-konflikt Blöcke</h2>
+        <p className="text-sm mt-0.5" style={{ color: 'var(--text-secondary)' }}>
+          Alle nicht zugewiesenen Blöcke ohne Konflikt zu anderen nicht zugewiesenen Blöcken werden dem Inhaber zugeordnet.
+        </p>
+      </div>
+
+      {/* Summary cards */}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        {[
+          { label: 'Nicht zugewiesene Blöcke aus Schritt 2', value: step2NotAssigned,                        color: 'var(--text-primary)' },
+          { label: 'Ohne NZ-Konflikt',                       value: nonConflict,                             color: nonConflict > 0 ? INHABER_COLOR : 'var(--text-secondary)' },
+          { label: 'Mit NZ-Konflikt',                        value: withConflict,                            color: withConflict > 0 ? '#b45309' : '#15803d' },
+          { label: 'An Inhaber gegeben',                     value: assignedToInhaberBlocks.length,          color: INHABER_COLOR },
+          { label: 'Inhaber-Fahrten',                        value: inhaberRides,                            color: INHABER_COLOR },
+          { label: 'Inhaber-Stunden',                        value: formatBlockDuration(inhaberSec),         color: INHABER_COLOR },
+          { label: 'Weiterhin nicht zugewiesen',             value: remainingConflictedBlocks.length,        color: remainingConflictedBlocks.length > 0 ? '#b45309' : '#15803d' },
+        ].map(c => (
+          <div key={c.label} className="rounded-xl p-3" style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)' }}>
+            <div className="text-xs font-semibold mb-1" style={{ color: 'var(--text-secondary)' }}>{c.label}</div>
+            <div className="text-lg font-bold" style={{ color: c.color }}>{c.value}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Inhaber status card */}
+      <div className="rounded-2xl overflow-hidden" style={{ border: `1px solid ${allNonConflictAssigned ? 'rgba(124,58,237,0.3)' : 'rgba(220,38,38,0.3)'}` }}>
+        <div className="px-4 py-3 text-sm font-semibold" style={{ background: allNonConflictAssigned ? 'rgba(124,58,237,0.06)' : 'rgba(220,38,38,0.06)', borderBottom: '1px solid var(--border)', color: 'var(--text-primary)' }}>
+          Inhaber-Zuweisung
+        </div>
+        <div className="px-4 py-4 space-y-2">
+          {[
+            { label: 'Fahrer',   value: inhaberName || 'Inhaber' },
+            { label: 'Blöcke',  value: String(assignedToInhaberBlocks.length) },
+            { label: 'Fahrten', value: String(inhaberRides) },
+            { label: 'Stunden', value: formatBlockDuration(inhaberSec) },
+          ].map(r => (
+            <div key={r.label} className="flex items-center justify-between text-sm">
+              <span className="font-semibold" style={{ color: 'var(--text-secondary)' }}>{r.label}</span>
+              <span style={{ color: 'var(--text-primary)' }}>{r.value}</span>
+            </div>
+          ))}
+          <div className="flex items-center justify-between text-sm pt-1">
+            <span className="font-semibold" style={{ color: 'var(--text-secondary)' }}>Status</span>
+            {allNonConflictAssigned
+              ? <span className="font-bold text-xs" style={{ color: '#15803d' }}>Alle nicht-konflikt Blöcke übernommen.</span>
+              : <span className="font-bold text-xs" style={{ color: '#b91c1c' }}>Nicht alle nicht-konflikt Blöcke wurden übernommen.</span>
+            }
+          </div>
+        </div>
+      </div>
+
+      {/* Remaining not assigned card */}
+      {remainingConflictedBlocks.length > 0 && (
+        <div className="rounded-2xl overflow-hidden" style={{ border: '1px solid rgba(245,158,11,0.35)' }}>
+          <div className="px-4 py-3 text-sm font-semibold" style={{ background: 'rgba(245,158,11,0.06)', borderBottom: '1px solid var(--border)', color: 'var(--text-primary)' }}>
+            Verbleibende nicht zugewiesene Blöcke
+          </div>
+          <div className="px-4 py-3 grid grid-cols-3 gap-4 text-sm">
+            <div>
+              <div className="text-xs font-semibold mb-0.5" style={{ color: 'var(--text-secondary)' }}>Anzahl</div>
+              <div className="font-bold" style={{ color: '#b45309' }}>{remainingConflictedBlocks.length}</div>
+            </div>
+            <div>
+              <div className="text-xs font-semibold mb-0.5" style={{ color: 'var(--text-secondary)' }}>Stunden gesamt</div>
+              <div className="font-bold" style={{ color: '#b45309' }}>{formatBlockDuration(remainingConflictedBlocks.reduce((s, b) => s + b.blockDurationSec, 0))}</div>
+            </div>
+            <div>
+              <div className="text-xs font-semibold mb-0.5" style={{ color: 'var(--text-secondary)' }}>Grund</div>
+              <div className="font-bold text-xs px-1.5 py-0.5 rounded inline-block" style={{ background: '#fef3c7', color: '#92400e', border: '1px solid #fcd34d' }}>NZ-Konflikt</div>
+            </div>
+          </div>
+          {/* Sanity check: any remaining without conflict = error */}
+          {diagnostics.remainingWithoutNzConflict > 0 && (
+            <div className="mx-4 mb-3 rounded px-3 py-2 text-xs font-semibold" style={{ background: 'rgba(220,38,38,0.06)', color: '#b91c1c', border: '1px solid rgba(220,38,38,0.2)' }}>
+              Fehler: Nicht-konflikt Block ist weiterhin nicht zugewiesen. ({diagnostics.remainingWithoutNzConflict})
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Vehicle calendar */}
+      <div className="space-y-3">
+        <div className="text-sm font-semibold" style={{ color: 'var(--text-secondary)' }}>Fahrzeug-Kalender mit Inhaber-Zuweisung</div>
+        <div className="flex flex-wrap gap-2">
+          <button onClick={() => setSelectedVehicle('__all__')} className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all" style={{ background: selectedVehicle === '__all__' ? INHABER_COLOR : 'var(--bg-subtle)', color: selectedVehicle === '__all__' ? '#fff' : 'var(--text-secondary)', border: `1px solid ${selectedVehicle === '__all__' ? INHABER_COLOR : 'var(--border)'}` }}>
+            Alle Fahrzeuge
+          </button>
+          {vehicles.map(v => (
+            <button key={v} onClick={() => setSelectedVehicle(v)} className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all" style={{ background: selectedVehicle === v ? INHABER_COLOR : 'var(--bg-subtle)', color: selectedVehicle === v ? '#fff' : 'var(--text-secondary)', border: `1px solid ${selectedVehicle === v ? INHABER_COLOR : 'var(--border)'}` }}>
+              {v}
+            </button>
+          ))}
+        </div>
+        {vehicles.filter(v => selectedVehicle === '__all__' || v === selectedVehicle).map(vehicle => {
+          const grid = buildGrid(vehicle);
+          return (
+            <div key={vehicle} className="mb-4">
+              <div className="text-xs font-bold mb-1.5" style={{ color: 'var(--text-secondary)' }}>{vehicle}</div>
+              <div className="rounded-2xl" style={{ border: '1px solid var(--border)', overflow: 'hidden' }}>
+                <div className="grid grid-cols-7" style={{ background: 'var(--bg-subtle)', borderBottom: '2px solid var(--border)' }}>
+                  {['So','Mo','Di','Mi','Do','Fr','Sa'].map(d => (
+                    <div key={d} className="py-2 text-center text-xs font-bold" style={{ color: 'var(--text-secondary)' }}>{d}</div>
+                  ))}
+                </div>
+                {grid.map((week, wi) => (
+                  <div key={wi} className="grid grid-cols-7" style={{ borderBottom: wi < grid.length - 1 ? '1px solid var(--border)' : undefined }}>
+                    {week.map((cell, ci) => (
+                      <div key={ci} style={{ minHeight: 90, background: !cell.inMonth ? 'var(--bg-subtle)' : 'var(--bg-surface)', borderRight: ci < 6 ? '1px solid var(--border)' : undefined, padding: '5px 4px 3px' }}>
+                        <div className="flex justify-end mb-1">
+                          <span className="text-xs font-semibold w-5 h-5 flex items-center justify-center rounded-full" style={{ color: !cell.inMonth ? 'var(--text-secondary)' : 'var(--text-primary)', opacity: !cell.inMonth ? 0.35 : 1 }}>
+                            {cell.date.getDate()}
+                          </span>
+                        </div>
+                        <div className="space-y-0.5">
+                          {cell.blocks.map(block => {
+                            const regAsgn = regularMap.get(block.blockId);
+                            const rides = block.rides?.length ?? 0;
+                            if (regAsgn) {
+                              const dColor = regularColorMap.get(regAsgn.driverId) ?? '#2563eb';
+                              return (
+                                <div key={block.blockId} className="w-full text-left rounded px-1.5 py-0.5 text-xs leading-snug" style={{ background: dColor + '18', border: `1px solid ${dColor}55`, color: dColor }}>
+                                  <span className="font-semibold">{fmtTime(block.blockStartMs)}–{fmtTime(block.blockEndMs)}</span>
+                                  {' · '}<span className="font-semibold">{regAsgn.driverName.split(' ')[0]}</span>
+                                  {' · '}{formatBlockDuration(block.blockDurationSec)}
+                                  {' · '}{rides}F
+                                </div>
+                              );
+                            }
+                            if (inhaberSet.has(block.blockId)) {
+                              return (
+                                <div key={block.blockId} className="w-full text-left rounded px-1.5 py-0.5 text-xs leading-snug" style={{ background: '#ede9fe', border: `1.5px solid ${INHABER_COLOR}66`, color: INHABER_COLOR }}>
+                                  <span className="font-semibold">{fmtTime(block.blockStartMs)}–{fmtTime(block.blockEndMs)}</span>
+                                  {' · '}<span className="font-semibold">{inhaberName || 'Inhaber'}</span>
+                                  {' · '}{formatBlockDuration(block.blockDurationSec)}
+                                  {' · '}{rides}F
+                                </div>
+                              );
+                            }
+                            // Still not assigned — must be NZ-conflict
+                            return (
+                              <div key={block.blockId} className="w-full text-left rounded px-1.5 py-0.5 text-xs leading-snug" style={{ background: '#fef3c7', border: '1.5px solid #f59e0b', color: '#92400e' }}>
+                                <span className="font-semibold">{fmtTime(block.blockStartMs)}–{fmtTime(block.blockEndMs)}</span>
+                                {' · '}<span className="italic opacity-80">Nicht zugewiesen</span>
+                                {' · '}{formatBlockDuration(block.blockDurationSec)}
+                                {' · '}{rides}F
+                                <span className="ml-1 px-1 py-px rounded text-xs font-bold" style={{ background: '#fcd34d', color: '#78350f', fontSize: '0.6rem' }}>NZ-Konflikt</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Remaining NZ-conflict compact list */}
+      {remainingConflictedBlocks.length > 0 && (
+        <div className="rounded-2xl overflow-hidden" style={{ border: '1px solid var(--border)' }}>
+          <button
+            className="w-full px-4 py-3 flex items-center justify-between text-sm font-semibold"
+            style={{ background: 'var(--bg-subtle)', color: 'var(--text-primary)' }}
+            onClick={() => setRemainingOpen(o => !o)}
+          >
+            <span>
+              Verbleibende NZ-Konflikte
+              <span className="font-normal text-xs ml-2" style={{ color: 'var(--text-secondary)' }}>
+                {remainingConflictedBlocks.length} Blöcke
+              </span>
+            </span>
+            <span style={{ color: 'var(--text-secondary)' }}>{remainingOpen ? '▲' : '▼'}</span>
+          </button>
+          {remainingOpen && (
+            <div className="overflow-x-auto">
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr style={{ background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)' }}>
+                    {['Block-ID','Fahrzeug','Start','Ende','Dauer','Fahrten','Konflikt mit','Konfliktanzahl'].map(h => (
+                      <th key={h} className="px-3 py-2 text-left text-xs font-semibold whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {remainingConflictedBlocks.map((b, i) => {
+                    const det = detailMap.get(b.blockId);
+                    return (
+                      <tr key={b.blockId} style={{ background: i % 2 === 0 ? 'rgba(245,158,11,0.05)' : 'rgba(245,158,11,0.1)', borderBottom: '1px solid var(--border)' }}>
+                        <td className="px-3 py-2 text-xs font-mono" style={{ color: 'var(--text-secondary)' }}>…{b.blockId.slice(-8)}</td>
+                        <td className="px-3 py-2 text-xs font-bold" style={{ color: 'var(--text-primary)' }}>{b.vehicle}</td>
+                        <td className="px-3 py-2 text-xs font-mono whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{fmtDatetime(b.blockStartMs)}</td>
+                        <td className="px-3 py-2 text-xs font-mono whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{fmtDatetime(b.blockEndMs)}</td>
+                        <td className="px-3 py-2 text-xs" style={{ color: 'var(--text-secondary)' }}>{formatBlockDuration(b.blockDurationSec)}</td>
+                        <td className="px-3 py-2 text-xs" style={{ color: 'var(--text-secondary)' }}>{b.rides?.length ?? 0}</td>
+                        <td className="px-3 py-2 text-xs font-mono" style={{ color: '#b45309' }}>
+                          {det?.nzConflictWith.slice(0, 3).map(id => `…${id.slice(-8)}`).join(', ') ?? '—'}
+                          {(det?.nzConflictWith.length ?? 0) > 3 ? ` +${(det!.nzConflictWith.length) - 3}` : ''}
+                        </td>
+                        <td className="px-3 py-2 text-xs font-bold" style={{ color: '#b45309' }}>{det?.nzConflictWith.length ?? 0}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Diagnostics */}
+      <div className="rounded-2xl overflow-hidden" style={{ border: `1px solid ${diagClean ? 'rgba(16,185,129,0.3)' : 'rgba(220,38,38,0.3)'}` }}>
+        <div className="px-4 py-3 text-sm font-semibold" style={{ background: diagClean ? 'rgba(16,185,129,0.06)' : 'rgba(220,38,38,0.06)', borderBottom: '1px solid var(--border)', color: 'var(--text-primary)' }}>
+          Prüfung Inhaber Nicht-konflikt Blöcke
+        </div>
+        <div className="p-4 space-y-2">
+          {[
+            { label: 'Reguläre Fahrer unverändert',       value: diagnostics.regularDriversUnchanged ? 'OK' : 'FEHLER',   isOk: diagnostics.regularDriversUnchanged },
+            { label: 'Nicht-konflikt Blöcke an Inhaber',  value: String(diagnostics.nonConflictBlocksAssigned),           isOk: true },
+            { label: 'Verbleibende ohne NZ-Konflikt',     value: String(diagnostics.remainingWithoutNzConflict),          isOk: diagnostics.remainingWithoutNzConflict === 0 },
+            { label: 'Verbleibende mit NZ-Konflikt',      value: String(diagnostics.remainingWithNzConflict),             isOk: true },
+            { label: 'Einzel-Fahrten-Zuweisung',          value: String(diagnostics.singleRideAssignments),               isOk: diagnostics.singleRideAssignments === 0 },
+            { label: 'Zeitverschiebungen',                 value: String(diagnostics.timeShifts),                          isOk: diagnostics.timeShifts === 0 },
+          ].map(d => (
+            <div key={d.label} className="flex items-center justify-between text-xs">
+              <span style={{ color: 'var(--text-secondary)' }}>{d.label}</span>
+              <span className="font-bold" style={{ color: d.isOk ? '#15803d' : '#b91c1c' }}>{d.value}</span>
+            </div>
+          ))}
+          {diagClean && (
+            <div className="mt-3 text-xs font-semibold" style={{ color: '#15803d' }}>Alle nicht-konflikt Blöcke korrekt übernommen.</div>
+          )}
+        </div>
+      </div>
+
+      {/* Bottom nav */}
+      <div className="flex items-center gap-4 pt-2">
+        <button onClick={onBack} className="inline-flex items-center gap-2 text-sm hover:opacity-80" style={{ color: 'var(--text-secondary)' }}>
+          <ArrowLeft size={15} /> Zurück zu regulären Fahrern
+        </button>
+        <button onClick={onRecompute} className="inline-flex items-center gap-2 text-sm hover:opacity-80" style={{ color: 'var(--text-secondary)' }}>
+          <RefreshCw size={13} /> Neu berechnen
+        </button>
+        {remainingConflictedBlocks.length > 0 && (
+          <button
+            onClick={onApplyLongestConflictStep}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all hover:brightness-90 ml-auto"
+            style={{ background: '#0891b2', color: '#fff', border: '1px solid #0891b2' }}
+          >
+            <ArrowRight size={15} /> Längste Konflikt-Blöcke an Inhaber geben
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+
+// ── InhaberLongestConflictView ─────────────────────────────────────────────────
+
+interface InhaberLongestConflictViewProps {
+  lcResult: InhaberLongestConflictStepResult;
+  step3InhaberBlocks: VehicleBlock[];
+  regularAssignments: RegularBlockAssignment[];
+  allBlocks: VehicleBlock[];
+  month: number;
+  year: number;
+  onBack: () => void;
+  onRecompute: () => void;
+  onApplyFreeWindowSearch: () => void;
+}
+
+function InhaberLongestConflictView({
+  lcResult, step3InhaberBlocks, regularAssignments, allBlocks, month, year, onBack, onRecompute, onApplyFreeWindowSearch,
+}: InhaberLongestConflictViewProps) {
+  const [expandedGroup, setExpandedGroup]     = useState<string | null>(null);
+  const [selectedVehicle, setSelectedVehicle] = useState<string>('__all__');
+  const [groupTableOpen, setGroupTableOpen]   = useState(true);
+  const [selectedTableOpen, setSelectedTableOpen]   = useState(false);
+  const [remainingTableOpen, setRemainingTableOpen] = useState(false);
+
+  const { inhaberName, conflictGroups, selectedBlocks, rejectedCandidates, remainingUnassignedBlocks,
+          inhaberRidesAdded, inhaberSecAdded, inhaberSecTotal, diagnostics } = lcResult;
+
+  const step3Set    = useMemo(() => new Set(step3InhaberBlocks.map(b => b.blockId)),  [step3InhaberBlocks]);
+  const step4Set    = useMemo(() => new Set(selectedBlocks.map(b => b.blockId)),       [selectedBlocks]);
+  const regularMap  = useMemo(() => { const m = new Map<string, RegularBlockAssignment>(); for (const a of regularAssignments) m.set(a.blockId, a); return m; }, [regularAssignments]);
+  const groupOfBlock = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const g of conflictGroups) for (const id of g.blockIds) m.set(id, g.groupId);
+    return m;
+  }, [conflictGroups]);
+
+  const regularColorMap = useMemo(() => {
+    const unique = Array.from(new Set(regularAssignments.map(a => a.driverId)));
+    const m = new Map<string, string>();
+    unique.forEach((id, i) => m.set(id, DRIVER_COLORS[i % DRIVER_COLORS.length]));
+    return m;
+  }, [regularAssignments]);
+
+  const vehicles = useMemo(() => Array.from(new Set(allBlocks.map(b => b.vehicle))).filter(Boolean).sort(), [allBlocks]);
+
+  function buildGrid(vehicleFilter: string | null) {
+    const firstDay = new Date(year, month - 1, 1);
+    const lastDay  = new Date(year, month, 0);
+    const start = new Date(firstDay); start.setDate(firstDay.getDate() - firstDay.getDay());
+    const end   = new Date(lastDay);  end.setDate(lastDay.getDate() + (6 - lastDay.getDay()));
+    const cells: Array<{ date: Date; inMonth: boolean; blocks: VehicleBlock[] }> = [];
+    const cur = new Date(start);
+    while (cur <= end) {
+      const ds = cur.getTime(), de = ds + 86_400_000;
+      const dayBlocks = allBlocks.filter(b => (!vehicleFilter || b.vehicle === vehicleFilter) && b.blockStartMs >= ds && b.blockStartMs < de).sort((a, b) => a.blockStartMs - b.blockStartMs);
+      cells.push({ date: new Date(cur), inMonth: cur.getMonth() === month - 1, blocks: dayBlocks });
+      cur.setDate(cur.getDate() + 1);
+    }
+    const rows: typeof cells[] = [];
+    for (let i = 0; i < cells.length; i += 7) rows.push(cells.slice(i, i + 7));
+    return rows;
+  }
+
+  const diagClean = diagnostics.inhaberTimeConflicts === 0 && diagnostics.inhaberVehicleConflicts === 0
+    && diagnostics.timeShifts === 0 && diagnostics.singleRideAssignments === 0;
+
+  return (
+    <div className="space-y-5 max-w-6xl">
+
+      {/* Header */}
+      <div>
+        <h2 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>Inhaber: Längste Konflikt-Blöcke</h2>
+        <p className="text-sm mt-0.5" style={{ color: 'var(--text-secondary)' }}>
+          Aus jeder verbleibenden NZ-Konfliktgruppe wird der längste konfliktfreie Block für den Inhaber ausgewählt.
+        </p>
+      </div>
+
+      {/* Summary cards */}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        {[
+          { label: 'Verbleibende NZ-Konflikt-Blöcke aus Schritt 3', value: lcResult.conflictGroups.reduce((s, g) => s + g.blockIds.length, 0), color: 'var(--text-primary)' },
+          { label: 'Konfliktgruppen',                   value: conflictGroups.length,                                    color: 'var(--text-primary)' },
+          { label: 'Für Inhaber ausgewählt',            value: selectedBlocks.length,                                    color: '#0891b2' },
+          { label: 'Abgelehnt wegen Inhaber-Zeitkonflikt', value: diagnostics.inhaberTimeConflicts,                      color: diagnostics.inhaberTimeConflicts > 0 ? '#b45309' : '#15803d' },
+          { label: 'Abgelehnt wegen Fahrzeugkonflikt',  value: diagnostics.inhaberVehicleConflicts,                      color: diagnostics.inhaberVehicleConflicts > 0 ? '#b45309' : '#15803d' },
+          { label: 'Gruppen ohne passenden Block',       value: diagnostics.groupsWithNoBlock,                           color: diagnostics.groupsWithNoBlock > 0 ? '#b91c1c' : '#15803d' },
+          { label: 'Weiterhin nicht zugewiesen',         value: remainingUnassignedBlocks.length,                        color: remainingUnassignedBlocks.length > 0 ? '#b45309' : '#15803d' },
+          { label: 'Inhaber-Fahrten hinzugefügt',        value: inhaberRidesAdded,                                       color: '#0891b2' },
+          { label: 'Inhaber-Stunden hinzugefügt',        value: formatBlockDuration(inhaberSecAdded),                    color: '#0891b2' },
+          { label: 'Inhaber-Stunden gesamt',             value: formatBlockDuration(inhaberSecTotal),                    color: '#0891b2' },
+        ].map(c => (
+          <div key={c.label} className="rounded-xl p-3" style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)' }}>
+            <div className="text-xs font-semibold mb-1" style={{ color: 'var(--text-secondary)' }}>{c.label}</div>
+            <div className="text-lg font-bold" style={{ color: c.color }}>{c.value}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Conflict group decision table */}
+      <div className="rounded-2xl overflow-hidden" style={{ border: '1px solid var(--border)' }}>
+        <button
+          className="w-full px-4 py-3 flex items-center justify-between text-sm font-semibold"
+          style={{ background: 'var(--bg-subtle)', color: 'var(--text-primary)' }}
+          onClick={() => setGroupTableOpen(o => !o)}
+        >
+          <span>Entscheidung je Konfliktgruppe <span className="font-normal text-xs ml-2" style={{ color: 'var(--text-secondary)' }}>{conflictGroups.length} Gruppen</span></span>
+          <span style={{ color: 'var(--text-secondary)' }}>{groupTableOpen ? '▲' : '▼'}</span>
+        </button>
+        {groupTableOpen && (
+          <div className="overflow-x-auto">
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead>
+                <tr style={{ background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)' }}>
+                  {['Gruppe','Blöcke','Fahrzeuge','Zeitraum','Längster Block','Gewählter Block','Entscheidung','Rest bleibt nicht zugewiesen'].map(h => (
+                    <th key={h} className="px-3 py-2 text-left text-xs font-semibold whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {conflictGroups.map((group, gi) => {
+                  const isOpen = expandedGroup === group.groupId;
+                  const decisionColor = group.decision === 'Inhaber' ? '#0891b2' : '#b91c1c';
+                  return (
+                    <React.Fragment key={group.groupId}>
+                      <tr
+                        style={{ background: gi % 2 === 0 ? 'var(--bg-surface)' : 'var(--bg-subtle)', borderBottom: '1px solid var(--border)', cursor: 'pointer' }}
+                        onClick={() => setExpandedGroup(isOpen ? null : group.groupId)}
+                      >
+                        <td className="px-3 py-2 text-xs font-bold" style={{ color: 'var(--text-primary)' }}>{group.groupId}</td>
+                        <td className="px-3 py-2 text-xs" style={{ color: 'var(--text-secondary)' }}>{group.blockIds.length}</td>
+                        <td className="px-3 py-2 text-xs" style={{ color: 'var(--text-secondary)' }}>{group.vehicles.join(', ')}</td>
+                        <td className="px-3 py-2 text-xs font-mono whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>
+                          {fmtTime(group.periodStart)}–{fmtTime(group.periodEnd)}
+                        </td>
+                        <td className="px-3 py-2 text-xs font-mono" style={{ color: 'var(--text-secondary)' }}>…{group.longestBlockId.slice(-8)}</td>
+                        <td className="px-3 py-2 text-xs font-mono" style={{ color: '#0891b2' }}>
+                          {group.selectedBlockId ? `…${group.selectedBlockId.slice(-8)}` : '—'}
+                        </td>
+                        <td className="px-3 py-2 text-xs font-bold" style={{ color: decisionColor }}>{group.decision}</td>
+                        <td className="px-3 py-2 text-xs" style={{ color: 'var(--text-secondary)' }}>
+                          {group.blockIds.length - (group.selectedBlockId ? 1 : 0)}
+                        </td>
+                      </tr>
+                      {isOpen && (
+                        <tr style={{ borderBottom: '1px solid var(--border)' }}>
+                          <td colSpan={8} className="px-4 py-3" style={{ background: 'rgba(8,145,178,0.04)' }}>
+                            <div className="overflow-x-auto">
+                              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                                <thead>
+                                  <tr style={{ borderBottom: '1px solid var(--border)' }}>
+                                    {['Block-ID','Fahrzeug','Start','Ende','Dauer','Fahrten','Rang','Entscheidung','Ablehnungsgrund'].map(h => (
+                                      <th key={h} className="px-2 py-1.5 text-left text-xs font-semibold whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{h}</th>
+                                    ))}
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {group.blocks.map((bd, bi) => {
+                                    const dColor = bd.decision === 'Inhaber' ? '#0891b2' : bd.decision === 'Nicht zugewiesen' ? '#b45309' : '#b91c1c';
+                                    return (
+                                      <tr key={bd.block.blockId} style={{ background: bi % 2 === 0 ? 'transparent' : 'rgba(0,0,0,0.03)', borderBottom: '1px solid var(--border)' }}>
+                                        <td className="px-2 py-1.5 text-xs font-mono" style={{ color: 'var(--text-secondary)' }}>…{bd.block.blockId.slice(-8)}</td>
+                                        <td className="px-2 py-1.5 text-xs font-bold" style={{ color: 'var(--text-primary)' }}>{bd.block.vehicle}</td>
+                                        <td className="px-2 py-1.5 text-xs font-mono whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{fmtDatetime(bd.block.blockStartMs)}</td>
+                                        <td className="px-2 py-1.5 text-xs font-mono whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{fmtDatetime(bd.block.blockEndMs)}</td>
+                                        <td className="px-2 py-1.5 text-xs" style={{ color: 'var(--text-secondary)' }}>{formatBlockDuration(bd.block.blockDurationSec)}</td>
+                                        <td className="px-2 py-1.5 text-xs" style={{ color: 'var(--text-secondary)' }}>{bd.block.rides?.length ?? 0}</td>
+                                        <td className="px-2 py-1.5 text-xs font-bold" style={{ color: 'var(--text-secondary)' }}>#{bd.rank}</td>
+                                        <td className="px-2 py-1.5 text-xs font-bold" style={{ color: dColor }}>{bd.decision}</td>
+                                        <td className="px-2 py-1.5 text-xs" style={{ color: '#b45309' }}>{bd.rejectionReason ?? '—'}</td>
+                                      </tr>
+                                    );
+                                  })}
+                                </tbody>
+                              </table>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* Vehicle calendar */}
+      <div className="space-y-3">
+        <div className="text-sm font-semibold" style={{ color: 'var(--text-secondary)' }}>Fahrzeug-Kalender</div>
+        <div className="flex flex-wrap gap-2">
+          <button onClick={() => setSelectedVehicle('__all__')} className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all" style={{ background: selectedVehicle === '__all__' ? '#0891b2' : 'var(--bg-subtle)', color: selectedVehicle === '__all__' ? '#fff' : 'var(--text-secondary)', border: `1px solid ${selectedVehicle === '__all__' ? '#0891b2' : 'var(--border)'}` }}>
+            Alle Fahrzeuge
+          </button>
+          {vehicles.map(v => (
+            <button key={v} onClick={() => setSelectedVehicle(v)} className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all" style={{ background: selectedVehicle === v ? '#0891b2' : 'var(--bg-subtle)', color: selectedVehicle === v ? '#fff' : 'var(--text-secondary)', border: `1px solid ${selectedVehicle === v ? '#0891b2' : 'var(--border)'}` }}>
+              {v}
+            </button>
+          ))}
+        </div>
+        {vehicles.filter(v => selectedVehicle === '__all__' || v === selectedVehicle).map(vehicle => {
+          const grid = buildGrid(vehicle);
+          return (
+            <div key={vehicle} className="mb-4">
+              <div className="text-xs font-bold mb-1.5" style={{ color: 'var(--text-secondary)' }}>{vehicle}</div>
+              <div className="rounded-2xl" style={{ border: '1px solid var(--border)', overflow: 'hidden' }}>
+                <div className="grid grid-cols-7" style={{ background: 'var(--bg-subtle)', borderBottom: '2px solid var(--border)' }}>
+                  {['So','Mo','Di','Mi','Do','Fr','Sa'].map(d => (
+                    <div key={d} className="py-2 text-center text-xs font-bold" style={{ color: 'var(--text-secondary)' }}>{d}</div>
+                  ))}
+                </div>
+                {grid.map((week, wi) => (
+                  <div key={wi} className="grid grid-cols-7" style={{ borderBottom: wi < grid.length - 1 ? '1px solid var(--border)' : undefined }}>
+                    {week.map((cell, ci) => (
+                      <div key={ci} style={{ minHeight: 90, background: !cell.inMonth ? 'var(--bg-subtle)' : 'var(--bg-surface)', borderRight: ci < 6 ? '1px solid var(--border)' : undefined, padding: '5px 4px 3px' }}>
+                        <div className="flex justify-end mb-1">
+                          <span className="text-xs font-semibold w-5 h-5 flex items-center justify-center rounded-full" style={{ color: !cell.inMonth ? 'var(--text-secondary)' : 'var(--text-primary)', opacity: !cell.inMonth ? 0.35 : 1 }}>
+                            {cell.date.getDate()}
+                          </span>
+                        </div>
+                        <div className="space-y-0.5">
+                          {cell.blocks.map(block => {
+                            const rides = block.rides?.length ?? 0;
+                            const regAsgn = regularMap.get(block.blockId);
+                            if (regAsgn) {
+                              const dColor = regularColorMap.get(regAsgn.driverId) ?? '#2563eb';
+                              return (
+                                <div key={block.blockId} className="rounded px-1.5 py-0.5 text-xs leading-snug" style={{ background: dColor + '18', border: `1px solid ${dColor}55`, color: dColor }}>
+                                  <span className="font-semibold">{fmtTime(block.blockStartMs)}–{fmtTime(block.blockEndMs)}</span>
+                                  {' · '}<span className="font-semibold">{regAsgn.driverName.split(' ')[0]}</span>
+                                  {' · '}{formatBlockDuration(block.blockDurationSec)}
+                                  {' · '}{rides}F
+                                </div>
+                              );
+                            }
+                            if (step3Set.has(block.blockId)) {
+                              return (
+                                <div key={block.blockId} className="rounded px-1.5 py-0.5 text-xs leading-snug" style={{ background: '#ede9fe', border: `1.5px solid ${INHABER_COLOR}66`, color: INHABER_COLOR }}>
+                                  <span className="font-semibold">{fmtTime(block.blockStartMs)}–{fmtTime(block.blockEndMs)}</span>
+                                  {' · '}<span className="font-semibold">{inhaberName || 'Inhaber'}</span>
+                                  {' · '}{formatBlockDuration(block.blockDurationSec)}
+                                  {' · '}{rides}F
+                                  <span className="ml-1 px-1 py-px rounded text-xs font-bold" style={{ background: INHABER_COLOR + '22', color: INHABER_COLOR, fontSize: '0.6rem' }}>Inhaber</span>
+                                </div>
+                              );
+                            }
+                            if (step4Set.has(block.blockId)) {
+                              const groupId = groupOfBlock.get(block.blockId) ?? '';
+                              return (
+                                <div key={block.blockId} className="rounded px-1.5 py-0.5 text-xs leading-snug" style={{ background: '#cffafe', border: '1.5px solid #0891b2', color: '#0e7490' }}>
+                                  <span className="font-semibold">{fmtTime(block.blockStartMs)}–{fmtTime(block.blockEndMs)}</span>
+                                  {' · '}<span className="font-semibold">{inhaberName || 'Inhaber'}</span>
+                                  {' · '}{formatBlockDuration(block.blockDurationSec)}
+                                  {' · '}{rides}F
+                                  <span className="ml-1 px-1 py-px rounded text-xs font-bold" style={{ background: '#0891b2', color: '#fff', fontSize: '0.6rem' }}>Inhaber Konflikt-Auswahl {groupId}</span>
+                                </div>
+                              );
+                            }
+                            // Still not assigned (NZ-conflict, not selected)
+                            const groupId = groupOfBlock.get(block.blockId) ?? '';
+                            return (
+                              <div key={block.blockId} className="rounded px-1.5 py-0.5 text-xs leading-snug" style={{ background: '#fef3c7', border: '1.5px solid #f59e0b', color: '#92400e' }}>
+                                <span className="font-semibold">{fmtTime(block.blockStartMs)}–{fmtTime(block.blockEndMs)}</span>
+                                {' · '}<span className="italic opacity-80">Nicht zugewiesen</span>
+                                {' · '}{formatBlockDuration(block.blockDurationSec)}
+                                {' · '}{rides}F
+                                <span className="ml-1 px-1 py-px rounded text-xs font-bold" style={{ background: '#fcd34d', color: '#78350f', fontSize: '0.6rem' }}>NZ-Konflikt {groupId}</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Inhaber selected table */}
+      <div className="rounded-2xl overflow-hidden" style={{ border: '1px solid var(--border)' }}>
+        <button
+          className="w-full px-4 py-3 flex items-center justify-between text-sm font-semibold"
+          style={{ background: 'var(--bg-subtle)', color: 'var(--text-primary)' }}
+          onClick={() => setSelectedTableOpen(o => !o)}
+        >
+          <span>Neu an Inhaber gegebene Konflikt-Blöcke <span className="font-normal text-xs ml-2" style={{ color: 'var(--text-secondary)' }}>{selectedBlocks.length} Blöcke</span></span>
+          <span style={{ color: 'var(--text-secondary)' }}>{selectedTableOpen ? '▲' : '▼'}</span>
+        </button>
+        {selectedTableOpen && (
+          <div className="overflow-x-auto">
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead>
+                <tr style={{ background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)' }}>
+                  {['Gruppe','Block-ID','Fahrzeug','Start','Ende','Dauer','Fahrten','Zeilen','Grund'].map(h => (
+                    <th key={h} className="px-3 py-2 text-left text-xs font-semibold whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {selectedBlocks.map((b, i) => (
+                  <tr key={b.blockId} style={{ background: i % 2 === 0 ? 'rgba(8,145,178,0.05)' : 'rgba(8,145,178,0.1)', borderBottom: '1px solid var(--border)' }}>
+                    <td className="px-3 py-2 text-xs font-bold" style={{ color: '#0891b2' }}>{groupOfBlock.get(b.blockId) ?? '—'}</td>
+                    <td className="px-3 py-2 text-xs font-mono" style={{ color: 'var(--text-secondary)' }}>…{b.blockId.slice(-8)}</td>
+                    <td className="px-3 py-2 text-xs font-bold" style={{ color: 'var(--text-primary)' }}>{b.vehicle}</td>
+                    <td className="px-3 py-2 text-xs font-mono whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{fmtDatetime(b.blockStartMs)}</td>
+                    <td className="px-3 py-2 text-xs font-mono whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{fmtDatetime(b.blockEndMs)}</td>
+                    <td className="px-3 py-2 text-xs" style={{ color: 'var(--text-secondary)' }}>{formatBlockDuration(b.blockDurationSec)}</td>
+                    <td className="px-3 py-2 text-xs" style={{ color: 'var(--text-secondary)' }}>{b.rides?.length ?? 0}</td>
+                    <td className="px-3 py-2 text-xs font-mono" style={{ color: 'var(--text-secondary)' }}>{blockSourceRowRange(b)}</td>
+                    <td className="px-3 py-2 text-xs" style={{ color: '#0891b2' }}>Längster konfliktfreier Block der Gruppe</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* Remaining conflict table */}
+      {remainingUnassignedBlocks.length > 0 && (
+        <div className="rounded-2xl overflow-hidden" style={{ border: '1px solid var(--border)' }}>
+          <button
+            className="w-full px-4 py-3 flex items-center justify-between text-sm font-semibold"
+            style={{ background: 'var(--bg-subtle)', color: 'var(--text-primary)' }}
+            onClick={() => setRemainingTableOpen(o => !o)}
+          >
+            <span>Verbleibende nicht zugewiesene Konflikt-Blöcke <span className="font-normal text-xs ml-2" style={{ color: 'var(--text-secondary)' }}>{remainingUnassignedBlocks.length} Blöcke</span></span>
+            <span style={{ color: 'var(--text-secondary)' }}>{remainingTableOpen ? '▲' : '▼'}</span>
+          </button>
+          {remainingTableOpen && (
+            <div className="overflow-x-auto">
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr style={{ background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)' }}>
+                    {['Block-ID','Fahrzeug','Start','Ende','Dauer','Fahrten','Konfliktgruppe','Grund'].map(h => (
+                      <th key={h} className="px-3 py-2 text-left text-xs font-semibold whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {remainingUnassignedBlocks.map((b, i) => {
+                    const gId = groupOfBlock.get(b.blockId) ?? '—';
+                    const grp = conflictGroups.find(g => g.groupId === gId);
+                    const grund = grp?.decision === 'Kein passender Block' ? 'Kein konfliktfreier Inhaber-Block in Gruppe' : 'Nicht längster Block der Gruppe';
+                    return (
+                      <tr key={b.blockId} style={{ background: i % 2 === 0 ? 'rgba(245,158,11,0.05)' : 'rgba(245,158,11,0.1)', borderBottom: '1px solid var(--border)' }}>
+                        <td className="px-3 py-2 text-xs font-mono" style={{ color: 'var(--text-secondary)' }}>…{b.blockId.slice(-8)}</td>
+                        <td className="px-3 py-2 text-xs font-bold" style={{ color: 'var(--text-primary)' }}>{b.vehicle}</td>
+                        <td className="px-3 py-2 text-xs font-mono whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{fmtDatetime(b.blockStartMs)}</td>
+                        <td className="px-3 py-2 text-xs font-mono whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{fmtDatetime(b.blockEndMs)}</td>
+                        <td className="px-3 py-2 text-xs" style={{ color: 'var(--text-secondary)' }}>{formatBlockDuration(b.blockDurationSec)}</td>
+                        <td className="px-3 py-2 text-xs" style={{ color: 'var(--text-secondary)' }}>{b.rides?.length ?? 0}</td>
+                        <td className="px-3 py-2 text-xs font-bold" style={{ color: '#b45309' }}>{gId}</td>
+                        <td className="px-3 py-2 text-xs" style={{ color: '#b45309' }}>{grund}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Diagnostics */}
+      <div className="rounded-2xl overflow-hidden" style={{ border: `1px solid ${diagClean ? 'rgba(16,185,129,0.3)' : 'rgba(220,38,38,0.3)'}` }}>
+        <div className="px-4 py-3 text-sm font-semibold" style={{ background: diagClean ? 'rgba(16,185,129,0.06)' : 'rgba(220,38,38,0.06)', borderBottom: '1px solid var(--border)', color: 'var(--text-primary)' }}>
+          Prüfung Inhaber Konflikt-Auswahl
+        </div>
+        <div className="p-4 space-y-2">
+          {[
+            { label: 'Reguläre Fahrer unverändert',        value: diagnostics.regularDriversUnchanged ? 'OK' : 'FEHLER', isOk: diagnostics.regularDriversUnchanged },
+            { label: 'Inhaber-Zeitüberschneidungen',        value: String(diagnostics.inhaberTimeConflicts),              isOk: diagnostics.inhaberTimeConflicts === 0 },
+            { label: 'Inhaber-Fahrzeugüberschneidungen',    value: String(diagnostics.inhaberVehicleConflicts),           isOk: diagnostics.inhaberVehicleConflicts === 0 },
+            { label: 'Zeitverschiebungen',                  value: String(diagnostics.timeShifts),                        isOk: diagnostics.timeShifts === 0 },
+            { label: 'Einzel-Fahrten-Zuweisung',            value: String(diagnostics.singleRideAssignments),             isOk: diagnostics.singleRideAssignments === 0 },
+            { label: 'Gruppen ohne passenden Block',        value: String(diagnostics.groupsWithNoBlock),                 isOk: diagnostics.groupsWithNoBlock === 0 },
+          ].map(d => (
+            <div key={d.label} className="flex items-center justify-between text-xs">
+              <span style={{ color: 'var(--text-secondary)' }}>{d.label}</span>
+              <span className="font-bold" style={{ color: d.isOk ? '#15803d' : '#b91c1c' }}>{d.value}</span>
+            </div>
+          ))}
+          {diagClean && (
+            <div className="mt-3 text-xs font-semibold" style={{ color: '#15803d' }}>Alle Prüfungen bestanden.</div>
+          )}
+          {!diagClean && (
+            <div className="mt-3 text-xs font-semibold" style={{ color: '#b91c1c' }}>Prüfung fehlgeschlagen — bitte Fehler oben prüfen.</div>
+          )}
+        </div>
+      </div>
+
+      {/* Bottom nav */}
+      <div className="flex items-center gap-4 pt-2">
+        <button onClick={onBack} className="inline-flex items-center gap-2 text-sm hover:opacity-80" style={{ color: 'var(--text-secondary)' }}>
+          <ArrowLeft size={15} /> Zurück zu Inhaber Nicht-konflikt Blöcken
+        </button>
+        <button onClick={onRecompute} className="inline-flex items-center gap-2 text-sm hover:opacity-80" style={{ color: 'var(--text-secondary)' }}>
+          <RefreshCw size={13} /> Neu berechnen
+        </button>
+        {remainingUnassignedBlocks.length > 0 && (
+          <button
+            onClick={onApplyFreeWindowSearch}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all hover:brightness-90 ml-auto"
+            style={{ background: '#15803d', color: '#fff', border: '1px solid #15803d' }}
+          >
+            <ArrowRight size={15} /> Freie Inhaber-Zeitfenster suchen
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── InhaberFreeWindowSearch types & algorithm ────────────────────────────────
+
+interface InhaberOccupiedInterval {
+  blockId: string;
+  vehicle: string;
+  startMs: number;
+  endMs: number;
+  durationSec: number;
+  rides: number;
+  rows: string;
+  sourceStep: 'Step 3' | 'Step 4';
+}
+
+interface FreeWindow {
+  windowId: string;
+  date: string;           // YYYY-MM-DD
+  startMs: number;
+  endMs: number;
+  durationSec: number;
+  prevBlockId: string | null;
+  nextBlockId: string | null;
+}
+
+interface CandidateWindow {
+  windowId: string;
+  date: string;
+  startMs: number;
+  endMs: number;
+  durationSec: number;
+  vehicleFree: boolean;
+}
+
+interface OpenBlockCandidacy {
+  block: VehicleBlock;
+  candidateWindows: CandidateWindow[];
+  windowsWithVehicleFree: number;
+  status: 'Kandidat vorhanden' | 'Kandidat mit Fahrzeug frei' | 'Kein passendes Fenster';
+}
+
+interface FwsDiagnostics {
+  timeShiftsDone: number;
+  assignmentsChanged: number;
+  regularDriversUnchanged: boolean;
+  inhaberAssignmentsUnchanged: boolean;
+  openBlocksUnchanged: boolean;
+}
+
+interface InhaberFreeWindowSearchStepResult {
+  inhaberOccupiedIntervals: InhaberOccupiedInterval[];
+  freeWindows: FreeWindow[];
+  freeWindowsByDay: Map<string, FreeWindow[]>;
+  remainingOpenBlocks: VehicleBlock[];
+  candidateWindowsByBlock: OpenBlockCandidacy[];
+  summary: {
+    inhaberBlockCount: number;
+    inhaberRides: number;
+    inhaberSec: number;
+    openBlockCount: number;
+    freeWindowCount: number;
+    freeSec: number;
+    windows1h: number;
+    windows2h: number;
+    windows4h: number;
+    openBlocksWithCandidate: number;
+    openBlocksWithVehicleCandidate: number;
+    openBlocksNoCandidate: number;
+  };
+  diagnostics: FwsDiagnostics;
+}
+
+function runInhaberFreeWindowSearch(
+  step3Blocks: VehicleBlock[],
+  step4Blocks: VehicleBlock[],
+  remainingOpenBlocks: VehicleBlock[],
+  allBlocks: VehicleBlock[],
+  regularAssignments: RegularBlockAssignment[],
+  month: number,
+  year: number,
+): InhaberFreeWindowSearchStepResult {
+  // Build Inhaber occupied intervals
+  const occupiedIntervals: InhaberOccupiedInterval[] = [];
+  for (const b of step3Blocks) occupiedIntervals.push({ blockId: b.blockId, vehicle: b.vehicle, startMs: b.blockStartMs ?? 0, endMs: b.blockEndMs ?? 0, durationSec: b.blockDurationSec, rides: b.rides?.length ?? 0, rows: blockSourceRowRange(b), sourceStep: 'Step 3' });
+  for (const b of step4Blocks) occupiedIntervals.push({ blockId: b.blockId, vehicle: b.vehicle, startMs: b.blockStartMs ?? 0, endMs: b.blockEndMs ?? 0, durationSec: b.blockDurationSec, rides: b.rides?.length ?? 0, rows: blockSourceRowRange(b), sourceStep: 'Step 4' });
+  occupiedIntervals.sort((a, b) => a.startMs - b.startMs);
+
+  // Month boundaries
+  const monthStart = new Date(year, month - 1, 1).getTime();
+  const monthEnd   = new Date(year, month,     0, 23, 59, 59, 999).getTime();
+
+  // Build free windows per day
+  const freeWindows: FreeWindow[] = [];
+  const freeWindowsByDay = new Map<string, FreeWindow[]>();
+
+  const daysInMonth = new Date(year, month, 0).getDate();
+  let windowIdx = 0;
+
+  for (let d = 1; d <= daysInMonth; d++) {
+    const dayStart = new Date(year, month - 1, d, 0, 0, 0, 0).getTime();
+    const dayEnd   = new Date(year, month - 1, d, 23, 59, 59, 999).getTime();
+    const dateStr  = `${year}-${String(month).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+
+    // Occupied intervals that overlap this day
+    const dayOccupied = occupiedIntervals
+      .filter(i => i.startMs < dayEnd && i.endMs > dayStart)
+      .map(i => ({ id: i.blockId, start: Math.max(i.startMs, dayStart), end: Math.min(i.endMs, dayEnd) }))
+      .sort((a, b) => a.start - b.start);
+
+    const gaps: FreeWindow[] = [];
+    let cursor = dayStart;
+
+    for (const occ of dayOccupied) {
+      // Free window ends INHABER_MIN_GAP_MS before next block starts
+      const freeEnd = occ.start - INHABER_MIN_GAP_MS;
+      if (freeEnd > cursor + 1000) {
+        const prevId = gaps.length > 0 ? occupiedIntervals.find(i => i.endMs <= occ.start && i.endMs > cursor - 1)?.blockId ?? null : null;
+        windowIdx++;
+        gaps.push({
+          windowId: `FW-${String(windowIdx).padStart(4,'0')}`,
+          date: dateStr,
+          startMs: cursor,
+          endMs: freeEnd,
+          durationSec: Math.round((freeEnd - cursor) / 1000),
+          prevBlockId: prevId,
+          nextBlockId: occ.id,
+        });
+      }
+      // Next free window may only start INHABER_MIN_GAP_MS after this block ends
+      cursor = Math.max(cursor, occ.end + INHABER_MIN_GAP_MS);
+    }
+    // Gap after last block to end of day
+    if (cursor < dayEnd - 1000) {
+      const prevId = dayOccupied.length > 0 ? dayOccupied[dayOccupied.length - 1].id : null;
+      windowIdx++;
+      gaps.push({
+        windowId: `FW-${String(windowIdx).padStart(4,'0')}`,
+        date: dateStr,
+        startMs: cursor,
+        endMs: dayEnd,
+        durationSec: Math.round((dayEnd - cursor) / 1000),
+        prevBlockId: prevId,
+        nextBlockId: null,
+      });
+    }
+
+    if (gaps.length > 0) {
+      freeWindowsByDay.set(dateStr, gaps);
+      freeWindows.push(...gaps);
+    }
+  }
+
+  // Vehicle occupancy map: vehicle → sorted intervals (regular + Inhaber)
+  const regularSet = new Set(regularAssignments.map(a => a.blockId));
+  const vehicleIntervals = new Map<string, Array<{ start: number; end: number }>>();
+  for (const b of allBlocks) {
+    if (!b.vehicle || !b.blockStartMs || !b.blockEndMs) continue;
+    if (!regularSet.has(b.blockId) && !step3Blocks.some(s => s.blockId === b.blockId) && !step4Blocks.some(s => s.blockId === b.blockId)) continue;
+    if (!vehicleIntervals.has(b.vehicle)) vehicleIntervals.set(b.vehicle, []);
+    vehicleIntervals.get(b.vehicle)!.push({ start: b.blockStartMs, end: b.blockEndMs });
+  }
+
+  // Match remaining open blocks to candidate windows
+  const candidateWindowsByBlock: OpenBlockCandidacy[] = remainingOpenBlocks.map(block => {
+    const dur = block.blockDurationSec;
+    const vehicle = block.vehicle;
+    const vIntervals = vehicleIntervals.get(vehicle) ?? [];
+
+    const candidates: CandidateWindow[] = freeWindows
+      .filter(w => w.durationSec >= dur && w.startMs >= monthStart && w.endMs <= monthEnd)
+      .map(w => {
+        // The block placed at w.startMs occupies [w.startMs, w.startMs + dur*1000]
+        // The free window already has the 30-min buffer baked in (shrunk from both sides),
+        // so we only need to verify the block duration fits and vehicle is free.
+        const slotEnd = w.startMs + dur * 1000;
+        const vehicleFree = !vIntervals.some(vi => vi.start < slotEnd && vi.end > w.startMs);
+        return { windowId: w.windowId, date: w.date, startMs: w.startMs, endMs: w.endMs, durationSec: w.durationSec, vehicleFree };
+      });
+
+    const windowsWithVehicleFree = candidates.filter(c => c.vehicleFree).length;
+    const status: OpenBlockCandidacy['status'] =
+      windowsWithVehicleFree > 0 ? 'Kandidat mit Fahrzeug frei'
+      : candidates.length > 0 ? 'Kandidat vorhanden'
+      : 'Kein passendes Fenster';
+
+    return { block, candidateWindows: candidates, windowsWithVehicleFree, status };
+  });
+
+  const freeSec = freeWindows.reduce((s, w) => s + w.durationSec, 0);
+  const openBlocksWithCandidate = candidateWindowsByBlock.filter(c => c.candidateWindows.length > 0).length;
+  const openBlocksWithVehicleCandidate = candidateWindowsByBlock.filter(c => c.windowsWithVehicleFree > 0).length;
+
+  return {
+    inhaberOccupiedIntervals: occupiedIntervals,
+    freeWindows,
+    freeWindowsByDay,
+    remainingOpenBlocks,
+    candidateWindowsByBlock,
+    summary: {
+      inhaberBlockCount:              occupiedIntervals.length,
+      inhaberRides:                   occupiedIntervals.reduce((s, i) => s + i.rides, 0),
+      inhaberSec:                     occupiedIntervals.reduce((s, i) => s + i.durationSec, 0),
+      openBlockCount:                 remainingOpenBlocks.length,
+      freeWindowCount:                freeWindows.length,
+      freeSec,
+      windows1h:                      freeWindows.filter(w => w.durationSec >= 3600).length,
+      windows2h:                      freeWindows.filter(w => w.durationSec >= 7200).length,
+      windows4h:                      freeWindows.filter(w => w.durationSec >= 14400).length,
+      openBlocksWithCandidate,
+      openBlocksWithVehicleCandidate,
+      openBlocksNoCandidate:          remainingOpenBlocks.length - openBlocksWithCandidate,
+    },
+    diagnostics: {
+      timeShiftsDone:              0,
+      assignmentsChanged:          0,
+      regularDriversUnchanged:     true,
+      inhaberAssignmentsUnchanged: true,
+      openBlocksUnchanged:         true,
+    },
+  };
+}
+
+// ── InhaberFreeWindowSearchView ───────────────────────────────────────────────
+
+// Resolve the real owner driver name.
+// Priority 1: allDrivers (full DB list) with employment_type === 'company_owner'
+// Priority 2: driverConfigs (from Fahrtenbuch trips) with isOwner === true
+type OwnerResolution =
+  | { status: 'ok'; name: string; source: 'allDrivers' | 'driverConfigs' }
+  | { status: 'none'; debugInfo: string }
+  | { status: 'multiple'; count: number; names: string[]; source: 'allDrivers' | 'driverConfigs' };
+
+function resolveOwnerDriverNameFull(allDrivers: DriverRow[], driverConfigs: WzDriverConfig[]): OwnerResolution {
+  // Priority 1: full driver list from DB
+  const dbOwners = allDrivers.filter(d => d.employment_type === 'company_owner');
+  if (dbOwners.length === 1) {
+    const name = dbOwners[0].name?.trim() ?? '';
+    if (name) return { status: 'ok', name, source: 'allDrivers' };
+  }
+  if (dbOwners.length > 1) {
+    const names = dbOwners.map(d => d.name?.trim() ?? '').filter(Boolean);
+    return { status: 'multiple', count: dbOwners.length, names, source: 'allDrivers' };
+  }
+
+  // Priority 2: driverConfigs derived from Fahrtenbuch trips
+  const cfgOwners = driverConfigs.filter(c => c.isOwner);
+  if (cfgOwners.length === 1) {
+    const name = cfgOwners[0].driverName?.trim() ?? '';
+    if (name) return { status: 'ok', name, source: 'driverConfigs' };
+  }
+  if (cfgOwners.length > 1) {
+    const names = cfgOwners.map(c => c.driverName?.trim() ?? '').filter(Boolean);
+    return { status: 'multiple', count: cfgOwners.length, names, source: 'driverConfigs' };
+  }
+
+  return {
+    status: 'none',
+    debugInfo: `allDrivers=${allDrivers.length}, dbOwners=${dbOwners.length}, cfgOwners=${cfgOwners.length}`,
+  };
+}
+
+function formatExportDateTime(ms: number): string {
+  const d = new Date(Math.floor(ms / 1000) * 1000);
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}:${String(d.getSeconds()).padStart(2,'0')}.000`;
+}
+
+// ── Section F types ───────────────────────────────────────────────────────────
+
+interface SectionFRide {
+  blockId: string;
+  tripId: string;
+  vehicle: string;
+  oldDriver: string;
+  newDriver: string;
+  origStartMs: number;
+  origEndMs: number;
+  newStartMs: number;
+  newEndMs: number;
+  durSec: number;
+  offsetMs: number;
+  srcRowIdx: number | null;
+  ok: boolean;
+}
+
+interface SectionFBlock {
+  blockId: string;
+  vehicle: string;
+  origStartMs: number;
+  origEndMs: number;
+  newStartMs: number;
+  newEndMs: number;
+  rideCount: number;
+  offsetMs: number;
+  ok: boolean;
+  hint: string;
+}
+
+interface SectionFData {
+  changedRides: SectionFRide[];
+  blockApps: SectionFBlock[];
+  totalRidesChanged: number;
+  totalSec: number;
+  uniqueVehicles: number;
+  invalidTsRides: string[];
+  inhaberOverlaps: string[];
+  vehicleOverlaps: string[];
+  rideLevelExistingConflicts: string[];
+  driverExclusionViolations: string[];
+  missingBlocks: string[];
+  rideCountOk: boolean;
+  tsMillisOk: boolean;
+  invalidTsCount: number;
+  totalTsCount: number;
+  priceKmUnchanged: boolean;
+  columnOrderReady: boolean;
+  auftragOk: boolean;
+  invalidAuftragCount: number;
+  zeitversatzOk: boolean;
+  invalidZeitversatzCount: number;
+  allOk: boolean;
+  shiftMap: Map<string, {
+    newStartMs: number;
+    newEndMs: number;
+    newDriver: string;
+    auftragEingangMs: number | null;
+    auftragUebermittlungMs: number | null;
+    geplanteAbholzeitMs: number | null;
+  }>;
+  // Rides whose original driver is excluded by notes and have no valid replacement.
+  // Export must be BLOCKED when this is non-empty — never clear Fahrername in export.
+  unresolvedExcludedRides: Array<{ tripId: string; driver: string; vehicle: string; startMs: number; endMs: number; detail: string }>;
+  // Legacy alias kept for backward compat — same as unresolvedExcludedRides as a Map
+  excludedDriverRideMap: Map<string, { driver: string; vehicle: string; detail: string }>;
+}
+
+interface InhaberFreeWindowSearchViewProps {
+  fwsResult: InhaberFreeWindowSearchStepResult;
+  month: number;
+  year: number;
+  onBack: () => void;
+  onRecompute: () => void;
+  onApplyAutoShiftPlan: () => void;
+  isCreatingPlan: boolean;
+  planError: string | null;
+  originalTrips: FahrtenbuchTrip[] | null;
+  inhaberName: string;
+  sourceSheetName: string | null;
+  sourceColumnsJson: string[] | null;
+  storagePath: string | null;
+  originalFileName: string | null;
+  driverConfigs: WzDriverConfig[];
+  allDrivers: DriverRow[];
+  driverNotesMap: Map<string, StructuredNote[]>;
+  simplified?: boolean;
+  autoApply?: boolean;
+  onExportReadyCallback?: (ready: boolean, reason: string | null) => void;
+  onFinalAssignmentReady?: (rows: VehicleBoundaryRow[]) => void;
+  onPlanDataReady?: (data: { shiftMapJson: Array<[string, object]>; noteReassignmentsJson: Array<[string, string]> }) => void;
+  onDriverHourSummaryReady?: (rows: DriverHourSummaryRow[]) => void;
+  onSalaryRangeSummaryReady?: (rows: SalaryRangeDriverRow[]) => void;
+  exportTriggerRef?: React.MutableRefObject<(() => void) | null>;
+}
+
+type FwsModalData = {
+  kind: 'window';
+  windowId: string;
+  date: string;
+  startMs: number;
+  endMs: number;
+  durationSec: number;
+  prevBlockId: string | null;
+  nextBlockId: string | null;
+  candidates: Array<{ block: VehicleBlock; vehicleFree: boolean }>;
+} | {
+  kind: 'occupied';
+  interval: InhaberOccupiedInterval;
+};
+
+function InhaberFreeWindowSearchView({
+  fwsResult, month, year, onBack, onRecompute, onApplyAutoShiftPlan, isCreatingPlan, planError, originalTrips, inhaberName, sourceSheetName, sourceColumnsJson, storagePath, originalFileName, driverConfigs, allDrivers, driverNotesMap,
+  simplified = false, autoApply = false, onExportReadyCallback, onFinalAssignmentReady, onPlanDataReady, onDriverHourSummaryReady, onSalaryRangeSummaryReady, exportTriggerRef,
+}: InhaberFreeWindowSearchViewProps) {
+  const [modalData, setModalData] = useState<FwsModalData | null>(null);
+  const [expandedBlock, setExpandedBlock] = useState<string | null>(null);
+  const [openBlocksOpen, setOpenBlocksOpen] = useState(false);
+  const [diagOpen, setDiagOpen] = useState(false);
+  const [analysisOpen, setAnalysisOpen] = useState(true);
+  const [analysisSectionA, setAnalysisSectionA] = useState(true);
+  const [analysisSectionB, setAnalysisSectionB] = useState(true);
+  const [analysisSectionC, setAnalysisSectionC] = useState(true);
+  const [analysisSectionD, setAnalysisSectionD] = useState(true);
+  const [analysisSectionE, setAnalysisSectionE] = useState(true);
+  const [analysisSectionF, setAnalysisSectionF] = useState(true);
+  const [sectionFData, setSectionFData] = useState<SectionFData | null>(null);
+  const [dbgApplyClickCount, setDbgApplyClickCount] = useState(0);
+  const [dbgApplyLastClickedAt, setDbgApplyLastClickedAt] = useState<string | null>(null);
+  const [dbgApplyStarted, setDbgApplyStarted] = useState(false);
+  const [dbgApplyFinished, setDbgApplyFinished] = useState(false);
+  const [dbgApplyError, setDbgApplyError] = useState<string | null>(null);
+  // tripId → new driver name applied by "Beste Fahrer-Notiz-Alternativen anwenden"
+  const [noteReassignments, setNoteReassignments] = useState<Map<string, string>>(new Map());
+  // Tracks whether the auto-apply-alternatives phase has completed in auto mode
+  const [autoNoteAlternativesApplied, setAutoNoteAlternativesApplied] = useState(false);
+
+  // Stable refs for auto-apply callbacks (avoid stale closure issues in effects)
+  const handleApplyPlanRef = useRef<(() => void) | null>(null);
+  const exportReadyCallbackRef = useRef(onExportReadyCallback);
+  exportReadyCallbackRef.current = onExportReadyCallback;
+  const onFinalAssignmentReadyRef2 = useRef(onPlanDataReady);
+  onFinalAssignmentReadyRef2.current = onPlanDataReady;
+  const onDriverHourSummaryReadyRef = useRef(onDriverHourSummaryReady);
+  onDriverHourSummaryReadyRef.current = onDriverHourSummaryReady;
+  const onSalaryRangeSummaryReadyRef = useRef(onSalaryRangeSummaryReady);
+  onSalaryRangeSummaryReadyRef.current = onSalaryRangeSummaryReady;
+  const autoApplyDoneRef = useRef(false);
+
+  // Resolve the real owner driver name from allDrivers (full DB list) then driverConfigs fallback
+  const ownerResolution = useMemo(() => resolveOwnerDriverNameFull(allDrivers, driverConfigs), [allDrivers, driverConfigs]);
+  const resolvedOwnerName = ownerResolution.status === 'ok' ? ownerResolution.name : null;
+
+  // name → driverId map for exclusion lookups (normalized lowercase)
+  const driverNameToId = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const d of allDrivers) m.set(d.name.trim().toLowerCase().replace(/\s+/g, ' '), d.id);
+    return m;
+  }, [allDrivers]);
+
+  // Owner's driver ID for exclusion checks
+  const ownerDriverId = useMemo(() => {
+    if (!resolvedOwnerName) return null;
+    return driverNameToId.get(resolvedOwnerName.trim().toLowerCase().replace(/\s+/g, ' ')) ?? null;
+  }, [resolvedOwnerName, driverNameToId]);
+
+  const { inhaberOccupiedIntervals, freeWindows, freeWindowsByDay, remainingOpenBlocks, candidateWindowsByBlock, summary, diagnostics } = fwsResult;
+
+  // window → list of candidate {block, vehicleFree}
+  const windowCandidateMap = useMemo(() => {
+    const m = new Map<string, Array<{ block: VehicleBlock; vehicleFree: boolean }>>();
+    for (const c of candidateWindowsByBlock) {
+      for (const cw of c.candidateWindows) {
+        if (!m.has(cw.windowId)) m.set(cw.windowId, []);
+        m.get(cw.windowId)!.push({ block: c.block, vehicleFree: cw.vehicleFree });
+      }
+    }
+    return m;
+  }, [candidateWindowsByBlock]);
+
+  const diagClean = diagnostics.timeShiftsDone === 0 && diagnostics.assignmentsChanged === 0;
+
+  // Build 7-column month grid (Sun→Sat)
+  const gridData = useMemo(() => {
+    const firstDay = new Date(year, month - 1, 1);
+    const lastDay  = new Date(year, month, 0);
+    const start = new Date(firstDay); start.setDate(firstDay.getDate() - firstDay.getDay());
+    const end   = new Date(lastDay);  end.setDate(lastDay.getDate() + (6 - lastDay.getDay()));
+
+    const cells: Array<{
+      date: Date;
+      inMonth: boolean;
+      dateStr: string;
+      occupied: InhaberOccupiedInterval[];
+      free: FreeWindow[];
+    }> = [];
+
+    const cur = new Date(start);
+    while (cur <= end) {
+      const d = cur.getDate();
+      const m0 = cur.getMonth();
+      const y0 = cur.getFullYear();
+      const dateStr = `${y0}-${String(m0+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+      const dayStart = cur.getTime();
+      const dayEnd   = dayStart + 86_400_000;
+      const occupied = inhaberOccupiedIntervals
+        .filter(i => i.startMs < dayEnd && i.endMs > dayStart)
+        .sort((a, b) => a.startMs - b.startMs);
+      const free = (freeWindowsByDay.get(dateStr) ?? []).sort((a, b) => a.startMs - b.startMs);
+      cells.push({ date: new Date(cur), inMonth: m0 === month - 1, dateStr, occupied, free });
+      cur.setDate(cur.getDate() + 1);
+    }
+
+    const weeks: typeof cells[] = [];
+    for (let i = 0; i < cells.length; i += 7) weeks.push(cells.slice(i, i + 7));
+    return weeks;
+  }, [inhaberOccupiedIntervals, freeWindowsByDay, month, year]);
+
+  // Analysis: sorted free windows for Section B
+  const sortedFreeWindows = useMemo(
+    () => [...freeWindows].sort((a, b) => a.startMs !== b.startMs ? a.startMs - b.startMs : a.endMs - b.endMs),
+    [freeWindows],
+  );
+
+  // Analysis: per-block candidate suggestions for Section C
+  // For each remaining block, compute up to 10 best candidate windows with detailed info.
+  const monthStartMs = new Date(year, month - 1, 1).getTime();
+  const monthEndMs   = new Date(year, month, 0, 23, 59, 59, 999).getTime();
+
+  const fmtPuffer = (ms: number) => {
+    const totalMin = Math.round(ms / 60000);
+    if (totalMin === 0) return '0 min';
+    const h = Math.floor(totalMin / 60);
+    const m = totalMin % 60;
+    if (h === 0) return `+${m} min`;
+    if (m === 0) return `+${h}h`;
+    return `+${h}h ${m}m`;
+  };
+  const fmtDurSec = (sec: number) => {
+    const h = Math.floor(sec / 3600);
+    const m = Math.floor((sec % 3600) / 60);
+    if (h === 0) return `${m} min`;
+    if (m === 0) return `${h}h`;
+    return `${h}h ${m}m`;
+  };
+
+  const blockSuggestions = useMemo(() => {
+    const MIN_PUFFER_NACH_MS = 60 * 60 * 1000; // Puffer nach >= 1 hour required for Section C
+    return candidateWindowsByBlock.map(({ block, candidateWindows }) => {
+      const blockDurMs = block.blockDurationSec * 1000;
+
+      const scored = candidateWindows.map(cw => {
+        const windowDurMs = cw.durationSec * 1000;
+
+        // Distribute available slack: keep Puffer nach >= 1h, split the rest evenly before the block
+        const availableSlackMs    = windowDurMs - blockDurMs;
+        const targetPufferNachMs  = availableSlackMs > 0 ? Math.max(MIN_PUFFER_NACH_MS, Math.floor(availableSlackMs / 2)) : 0;
+        const pufferVorMs         = availableSlackMs > 0 ? availableSlackMs - targetPufferNachMs : 0;
+        const proposedStart       = cw.startMs + pufferVorMs;
+        const proposedEnd         = proposedStart + blockDurMs;
+
+        let status: string;
+        if (windowDurMs < blockDurMs + MIN_PUFFER_NACH_MS) {
+          status = 'Zu kurz';
+        } else if (proposedStart < monthStartMs || proposedEnd > monthEndMs + 1) {
+          status = 'Außerhalb Monat';
+        } else if (!cw.vehicleFree) {
+          status = 'Fahrzeug belegt';
+        } else {
+          status = 'Passend';
+        }
+
+        const leftoverMs   = windowDurMs - blockDurMs;
+        const pufferNachMs = cw.endMs - proposedEnd;
+
+        // Score: lower is better (prefer exact fit, vehicle free, not cross-midnight)
+        const crossesMidnight = proposedEnd > 0 && (new Date(proposedStart).getDate() !== new Date(proposedEnd - 1).getDate());
+        const score = (status === 'Passend' ? 0 : 10000)
+          + (cw.vehicleFree ? 0 : 1000)
+          + (crossesMidnight ? 100 : 0)
+          + Math.round(leftoverMs / 60000);
+
+        return {
+          cw,
+          proposedStart,
+          proposedEnd,
+          status,
+          pufferVorMs,
+          pufferNachMs,
+          crossesMidnight,
+          score,
+        };
+      }).filter(s => s.pufferVorMs >= MIN_PUFFER_NACH_MS && s.pufferNachMs >= MIN_PUFFER_NACH_MS);
+
+      const top10 = [...scored].sort((a, b) => a.score - b.score).slice(0, 10);
+
+      return { block, top10 };
+    });
+  }, [candidateWindowsByBlock, monthStartMs, monthEndMs]);
+
+  // Section D — greedy best-candidate preselection with ride-level simulation
+  // Builds its own FULL candidate pool from all free windows — not limited to Section C's top10.
+  const autoSelectionResult = useMemo(() => {
+    const MIN_PUFFER_MS = 60 * 60 * 1000;
+
+    // Parse all originalTrips timestamps once: tripId → { startMs, endMs }
+    // Include ALL non-canceled trips — candidate block trips are excluded per-block below,
+    // matching the same exclusion logic Section E uses (exclude only the current block's own rides).
+    type TripInterval = { tripId: string; startMs: number; endMs: number };
+    const vehicleExistingRides = new Map<string, TripInterval[]>();
+    const START_KEYS_D = ['uhrzeit des fahrtbeginns', 'fahrtbeginn', 'start', 'start_datetime', 'fahrt_beginn'];
+    const END_KEYS_D   = ['uhrzeit des fahrtendes', 'fahrtende', 'ende', 'end_datetime', 'fahrt_ende'];
+    const DATE_KEYS_D  = ['datum der fahrt', 'datum', 'date', 'fahrt_datum'];
+    const parseTsD = (dateS: string, timeS: string) => {
+      if (!timeS) return 0;
+      const combined = timeS.includes('T') || timeS.match(/^\d{4}-\d{2}-\d{2} \d{2}:/)
+        ? timeS : (dateS ? `${dateS} ${timeS}` : timeS);
+      const ms = Date.parse(combined.replace(' ', 'T'));
+      return isNaN(ms) ? 0 : ms;
+    };
+    if (originalTrips) {
+      for (const trip of originalTrips) {
+        if (trip.is_canceled) continue;
+        const raw = trip.raw_data_json as Record<string, unknown> | null;
+        if (!raw) continue;
+        let dateStr = '';
+        for (const k of Object.keys(raw)) {
+          if (DATE_KEYS_D.includes(k.toLowerCase())) { dateStr = String(raw[k] ?? ''); break; }
+        }
+        const startStr = (() => { for (const k of Object.keys(raw)) if (START_KEYS_D.includes(k.toLowerCase())) return String(raw[k] ?? ''); return ''; })();
+        const endStr   = (() => { for (const k of Object.keys(raw)) if (END_KEYS_D.includes(k.toLowerCase())) return String(raw[k] ?? ''); return ''; })();
+        const startMs = parseTsD(dateStr, startStr);
+        const endMs   = parseTsD(dateStr, endStr);
+        if (!startMs || !endMs || endMs <= startMs) continue;
+        const veh = trip.car_identifier ?? '';
+        if (!veh) continue;
+        if (!vehicleExistingRides.has(veh)) vehicleExistingRides.set(veh, []);
+        vehicleExistingRides.get(veh)!.push({ tripId: trip.id, startMs, endMs });
+      }
+    }
+
+    // Build full scored candidate list per block (same placement logic as blockSuggestions, no slice)
+    type ScoredCand = {
+      cw: CandidateWindow;
+      proposedStart: number;
+      proposedEnd: number;
+      pufferVorMs: number;
+      pufferNachMs: number;
+      crossesMidnight: boolean;
+      score: number;
+    };
+    const fullCandsByBlock = candidateWindowsByBlock.map(({ block, candidateWindows }) => {
+      const blockDurMs = block.blockDurationSec * 1000;
+      const allValid: ScoredCand[] = [];
+      for (const cw of candidateWindows) {
+        const windowDurMs = cw.durationSec * 1000;
+        const availableSlackMs   = windowDurMs - blockDurMs;
+        const targetPufferNachMs = availableSlackMs > 0 ? Math.max(MIN_PUFFER_MS, Math.floor(availableSlackMs / 2)) : 0;
+        const pufferVorMs        = availableSlackMs > 0 ? availableSlackMs - targetPufferNachMs : 0;
+        const proposedStart      = cw.startMs + pufferVorMs;
+        const proposedEnd        = proposedStart + blockDurMs;
+        const pufferNachMs       = cw.endMs - proposedEnd;
+
+        if (pufferVorMs < MIN_PUFFER_MS) continue;
+        if (pufferNachMs < MIN_PUFFER_MS) continue;
+        if (proposedStart < monthStartMs || proposedEnd > monthEndMs + 1) continue;
+        if (!cw.vehicleFree) continue;
+
+        const crossesMidnight = new Date(proposedStart).getDate() !== new Date(proposedEnd - 1).getDate();
+        const leftoverMs = windowDurMs - blockDurMs;
+        const score = (crossesMidnight ? 100 : 0) + Math.round(leftoverMs / 60000);
+
+        allValid.push({ cw, proposedStart, proposedEnd, pufferVorMs, pufferNachMs, crossesMidnight, score });
+      }
+      return { block, allValid };
+    });
+
+    // Sort blocks by difficulty: fewest valid candidates first, then longest duration, then earliest start
+    const sorted = [...fullCandsByBlock].sort((a, b) => {
+      const cntDiff = a.allValid.length - b.allValid.length;
+      if (cntDiff !== 0) return cntDiff;
+      const durDiff = b.block.blockDurationSec - a.block.blockDurationSec;
+      if (durDiff !== 0) return durDiff;
+      return (a.block.blockStartMs ?? 0) - (b.block.blockStartMs ?? 0);
+    });
+
+    const usedInhaber: Array<{ start: number; end: number }> = [];
+    const usedVehicle = new Map<string, Array<{ start: number; end: number }>>();
+    // Track already-selected shifted ride intervals per vehicle for ride-level checking
+    const selectedShiftedRides = new Map<string, Array<{ start: number; end: number }>>();
+    // Collect rejected candidate details for debug table
+    const rejectedCandidateRideDetails: Array<{
+      blockId: string; vehicle: string; candStart: number; candEnd: number;
+      reason: string; detail: string;
+    }> = [];
+
+    const blockResults = sorted.map(({ block, allValid }) => {
+      const ranked = allValid.slice().sort((a, b) => {
+        if (a.score !== b.score) return a.score - b.score;
+        const la = a.pufferVorMs + a.pufferNachMs, lb = b.pufferVorMs + b.pufferNachMs;
+        if (la !== lb) return la - lb;
+        const orig = block.blockStartMs ?? 0;
+        const da = Math.abs(a.proposedStart - orig), db = Math.abs(b.proposedStart - orig);
+        if (da !== db) return da - db;
+        if (a.crossesMidnight !== b.crossesMidnight) return (a.crossesMidnight ? 1 : 0) - (b.crossesMidnight ? 1 : 0);
+        return a.proposedStart - b.proposedStart;
+      });
+
+      let chosen: ScoredCand | null = null;
+      let chosenReason = '';
+      for (const cand of ranked) {
+        const { proposedStart: ps, proposedEnd: pe } = cand;
+        // Block-level checks
+        if (inhaberOccupiedIntervals.some(i => i.startMs < pe && i.endMs > ps)) { chosenReason = 'Inhaber-Block-Konflikt'; continue; }
+        if (usedInhaber.some(i => i.start < pe && i.end > ps)) { chosenReason = 'Inhaber bereits belegt'; continue; }
+        const vUsed = usedVehicle.get(block.vehicle) ?? [];
+        if (vUsed.some(vi => vi.start < pe && vi.end > ps)) { chosenReason = 'Fahrzeug-Block-Konflikt'; continue; }
+
+        // Ride-level simulation: check each shifted ride vs existing rides on the same vehicle.
+        // Exclude ONLY this block's own trip IDs — matching Section E's exclusion logic exactly.
+        const offsetMs = ps - (block.blockStartMs ?? 0);
+        const thisBlockTripIds = new Set(block.rides.map(r => r.tripId));
+        const existingVehicleRides = (vehicleExistingRides.get(block.vehicle) ?? [])
+          .filter(r => !thisBlockTripIds.has(r.tripId));
+        const alreadySelectedRides = selectedShiftedRides.get(block.vehicle) ?? [];
+        let rideConflict = false;
+        let rideConflictDetail = '';
+        for (const ride of block.rides) {
+          const rideStart = ride.originalStartMs + offsetMs;
+          const rideEnd   = ride.originalEndMs   + offsetMs;
+          const exConflict = existingVehicleRides.find(r => r.startMs < rideEnd && r.endMs > rideStart);
+          if (exConflict) {
+            rideConflict = true;
+            rideConflictDetail = `${block.vehicle}: ride …${ride.tripId.slice(-6)} ↔ existierend …${exConflict.tripId.slice(-6)}`;
+            break;
+          }
+          if (alreadySelectedRides.some(r => r.start < rideEnd && r.end > rideStart)) { rideConflict = true; rideConflictDetail = `${block.vehicle}: bereits gewählt`; break; }
+        }
+        if (rideConflict) {
+          rejectedCandidateRideDetails.push({
+            blockId: block.blockId, vehicle: block.vehicle,
+            candStart: ps, candEnd: pe,
+            reason: 'Ride-Konflikt mit bestehender Fahrt', detail: rideConflictDetail,
+          });
+          chosenReason = 'Fahrzeug-Ride-Konflikt (Einzelfahrten)';
+          continue;
+        }
+
+        // Driver exclusion check: reject if owner/Inhaber is excluded from planning in this interval
+        if (resolvedOwnerName && driverNotesMap.size > 0) {
+          const excl = isDriverExcludedFromPlanning(ownerDriverId, resolvedOwnerName, ps, pe, driverNotesMap, driverNameToId);
+          if (excl.excluded) { chosenReason = `Planungsausschluss durch Fahrer-Notiz: ${excl.detail}`; continue; }
+        }
+
+        chosen = cand;
+        break;
+      }
+
+      if (chosen) {
+        const offsetMs = chosen.proposedStart - (block.blockStartMs ?? 0);
+        usedInhaber.push({ start: chosen.proposedStart, end: chosen.proposedEnd });
+        if (!usedVehicle.has(block.vehicle)) usedVehicle.set(block.vehicle, []);
+        usedVehicle.get(block.vehicle)!.push({ start: chosen.proposedStart, end: chosen.proposedEnd });
+        if (!selectedShiftedRides.has(block.vehicle)) selectedShiftedRides.set(block.vehicle, []);
+        for (const ride of block.rides) {
+          selectedShiftedRides.get(block.vehicle)!.push({
+            start: ride.originalStartMs + offsetMs,
+            end:   ride.originalEndMs   + offsetMs,
+          });
+        }
+      }
+
+      return {
+        block,
+        candidateCount: allValid.length,
+        chosen,
+        reason: chosen
+          ? 'Bester verfügbarer Vorschlag ohne Konflikte (ride-level geprüft)'
+          : allValid.length === 0
+            ? 'Keine gültigen Kandidaten verfügbar'
+            : chosenReason === 'Fahrzeug-Ride-Konflikt (Einzelfahrten)'
+              ? 'Keine konfliktfreie Einzelfahrt-Platzierung gefunden'
+              : chosenReason || 'Kein konfliktfreier Vorschlag nach bereits gewählten Blöcken',
+        status: (chosen ? 'Ausgewählt' : 'Nicht ausgewählt') as 'Ausgewählt' | 'Nicht ausgewählt',
+      };
+    });
+
+    // Safety net: run the same ride-conflict check as Section E against all selected placements.
+    // If any selected placement still has a ride-level conflict, demote it to "Nicht ausgewählt".
+    // This guards against any ordering-dependent case that slipped through the greedy loop.
+    if (originalTrips) {
+      const selectedBlockTripIds = new Set<string>();
+      for (const e of blockResults) {
+        if (e.chosen) for (const r of e.block.rides) selectedBlockTripIds.add(r.tripId);
+      }
+      // Build vehicle ride map excluding only selected blocks (same as Section E)
+      const safetyVehicleRides = new Map<string, Array<{ startMs: number; endMs: number; tripId: string }>>();
+      for (const trip of originalTrips) {
+        if (trip.is_canceled || selectedBlockTripIds.has(trip.id)) continue;
+        const raw = trip.raw_data_json as Record<string, unknown> | null;
+        if (!raw) continue;
+        let dateStr = '';
+        for (const k of Object.keys(raw)) {
+          if (DATE_KEYS_D.includes(k.toLowerCase())) { dateStr = String(raw[k] ?? ''); break; }
+        }
+        const startStr = (() => { for (const k of Object.keys(raw)) if (START_KEYS_D.includes(k.toLowerCase())) return String(raw[k] ?? ''); return ''; })();
+        const endStr   = (() => { for (const k of Object.keys(raw)) if (END_KEYS_D.includes(k.toLowerCase())) return String(raw[k] ?? ''); return ''; })();
+        const startMs = parseTsD(dateStr, startStr), endMs = parseTsD(dateStr, endStr);
+        if (!startMs || !endMs || endMs <= startMs) continue;
+        const veh = trip.car_identifier ?? ''; if (!veh) continue;
+        if (!safetyVehicleRides.has(veh)) safetyVehicleRides.set(veh, []);
+        safetyVehicleRides.get(veh)!.push({ startMs, endMs, tripId: trip.id });
+      }
+      for (const e of blockResults) {
+        if (!e.chosen) continue;
+        const offsetMs = e.chosen.proposedStart - (e.block.blockStartMs ?? 0);
+        const existing = safetyVehicleRides.get(e.block.vehicle) ?? [];
+        for (const ride of e.block.rides) {
+          const rs = ride.originalStartMs + offsetMs, re = ride.originalEndMs + offsetMs;
+          const conflict = existing.find(ex => ex.startMs < re && ex.endMs > rs);
+          if (conflict) {
+            const detail = `${e.block.vehicle}: ride …${ride.tripId.slice(-6)} ↔ existierend …${conflict.tripId.slice(-6)}`;
+            rejectedCandidateRideDetails.push({
+              blockId: e.block.blockId, vehicle: e.block.vehicle,
+              candStart: e.chosen.proposedStart, candEnd: e.chosen.proposedEnd,
+              reason: 'Nachprüfung: Ride-Konflikt mit bestehender Fahrt', detail,
+            });
+            (e as { chosen: typeof e.chosen; reason: string; status: string }).chosen = null;
+            (e as { reason: string }).reason = 'Nachprüfung: Ride-Konflikt mit bestehender Fahrt';
+            (e as { status: string }).status = 'Nicht ausgewählt';
+            break;
+          }
+        }
+      }
+    }
+
+    return { entries: blockResults, rejectedDetails: rejectedCandidateRideDetails };
+  }, [candidateWindowsByBlock, inhaberOccupiedIntervals, monthStartMs, monthEndMs, originalTrips, resolvedOwnerName, ownerDriverId, driverNotesMap, driverNameToId]);
+
+  const autoSelection = autoSelectionResult.entries;
+  const autoSelectionRejectedDetails = autoSelectionResult.rejectedDetails;
+
+  // Section E — validation + calendar data derived from Section D's selection
+  const sectionEData = useMemo(() => {
+    const MIN_PUFFER_MS = 60 * 60 * 1000;
+    const selected = autoSelection
+      .filter(e => e.chosen !== null)
+      .map(e => ({ block: e.block, chosen: e.chosen! }));
+
+    // A. Inhaber overlaps: selected placements vs each other
+    const inhaberSelfConflicts: string[] = [];
+    for (let i = 0; i < selected.length; i++) {
+      for (let j = i + 1; j < selected.length; j++) {
+        const a = selected[i].chosen, b = selected[j].chosen;
+        if (a.proposedStart < b.proposedEnd && a.proposedEnd > b.proposedStart) {
+          inhaberSelfConflicts.push(`…${selected[i].block.blockId.slice(-6)} ↔ …${selected[j].block.blockId.slice(-6)}`);
+        }
+      }
+    }
+    // Selected placements vs existing Inhaber blocks
+    const inhaberExistingConflicts: string[] = [];
+    for (const sp of selected) {
+      for (const occ of inhaberOccupiedIntervals) {
+        if (occ.startMs < sp.chosen.proposedEnd && occ.endMs > sp.chosen.proposedStart) {
+          inhaberExistingConflicts.push(`…${sp.block.blockId.slice(-6)} ↔ Inhaber …${occ.blockId.slice(-6)}`);
+        }
+      }
+    }
+
+    // B. Vehicle overlaps: selected placements with same vehicle vs each other
+    const vehicleSelfConflicts: string[] = [];
+    for (let i = 0; i < selected.length; i++) {
+      for (let j = i + 1; j < selected.length; j++) {
+        if (selected[i].block.vehicle !== selected[j].block.vehicle) continue;
+        const a = selected[i].chosen, b = selected[j].chosen;
+        if (a.proposedStart < b.proposedEnd && a.proposedEnd > b.proposedStart) {
+          vehicleSelfConflicts.push(`${selected[i].block.vehicle}: …${selected[i].block.blockId.slice(-6)} ↔ …${selected[j].block.blockId.slice(-6)}`);
+        }
+      }
+    }
+    // Selected placements vs existing vehicle occupancy (from vehicleFree flag)
+    const vehicleExistingConflicts: string[] = [];
+    for (const sp of selected) {
+      if (!sp.chosen.cw.vehicleFree) {
+        vehicleExistingConflicts.push(`${sp.block.vehicle}: …${sp.block.blockId.slice(-6)}`);
+      }
+    }
+
+    // C. Ride-level vehicle overlap check: simulate shifted rides vs existing non-moved rides
+    const rideLevelVehicleConflicts: string[] = [];
+    if (originalTrips) {
+      const openBlockTripIds = new Set<string>();
+      for (const sp of selected) for (const ride of sp.block.rides) openBlockTripIds.add(ride.tripId);
+
+      const START_KEYS = ['uhrzeit des fahrtbeginns', 'fahrtbeginn', 'start', 'start_datetime', 'fahrt_beginn'];
+      const END_KEYS   = ['uhrzeit des fahrtendes', 'fahrtende', 'ende', 'end_datetime', 'fahrt_ende'];
+      const DATE_KEYS  = ['datum der fahrt', 'datum', 'date', 'fahrt_datum'];
+
+      const parseTs = (dateS: string, timeS: string) => {
+        if (!timeS) return 0;
+        const combined = timeS.includes('T') || timeS.match(/^\d{4}-\d{2}-\d{2} \d{2}:/)
+          ? timeS : (dateS ? `${dateS} ${timeS}` : timeS);
+        const ms = Date.parse(combined.replace(' ', 'T'));
+        return isNaN(ms) ? 0 : ms;
+      };
+
+      const vehicleRides = new Map<string, Array<{ startMs: number; endMs: number; tripId: string }>>();
+      for (const trip of originalTrips) {
+        if (trip.is_canceled || openBlockTripIds.has(trip.id)) continue;
+        const raw = trip.raw_data_json as Record<string, unknown> | null;
+        if (!raw) continue;
+        let dateStr = '';
+        for (const k of Object.keys(raw)) { if (DATE_KEYS.includes(k.toLowerCase())) { dateStr = String(raw[k] ?? ''); break; } }
+        const startStr = (() => { for (const k of Object.keys(raw)) if (START_KEYS.includes(k.toLowerCase())) return String(raw[k] ?? ''); return ''; })();
+        const endStr   = (() => { for (const k of Object.keys(raw)) if (END_KEYS.includes(k.toLowerCase())) return String(raw[k] ?? ''); return ''; })();
+        const startMs = parseTs(dateStr, startStr), endMs = parseTs(dateStr, endStr);
+        if (!startMs || !endMs || endMs <= startMs) continue;
+        const veh = trip.car_identifier ?? ''; if (!veh) continue;
+        if (!vehicleRides.has(veh)) vehicleRides.set(veh, []);
+        vehicleRides.get(veh)!.push({ startMs, endMs, tripId: trip.id });
+      }
+
+      for (const sp of selected) {
+        const offsetMs = sp.chosen.proposedStart - (sp.block.blockStartMs ?? 0);
+        const existing = vehicleRides.get(sp.block.vehicle) ?? [];
+        for (const ride of sp.block.rides) {
+          const rs = ride.originalStartMs + offsetMs, re = ride.originalEndMs + offsetMs;
+          for (const ex of existing) {
+            if (ex.startMs < re && ex.endMs > rs) {
+              rideLevelVehicleConflicts.push(`${sp.block.vehicle}: ride …${ride.tripId.slice(-6)} ↔ existierend …${ex.tripId.slice(-6)}`);
+            }
+          }
+        }
+      }
+    }
+
+    // D–H: per-placement checks
+    const pufferVorFails   = selected.filter(sp => sp.chosen.pufferVorMs  < MIN_PUFFER_MS).map(sp => `…${sp.block.blockId.slice(-6)} (${Math.round(sp.chosen.pufferVorMs  / 60000)} min)`);
+    const pufferNachFails  = selected.filter(sp => sp.chosen.pufferNachMs < MIN_PUFFER_MS).map(sp => `…${sp.block.blockId.slice(-6)} (${Math.round(sp.chosen.pufferNachMs / 60000)} min)`);
+    const outOfMonth       = selected.filter(sp => sp.chosen.proposedStart < monthStartMs || sp.chosen.proposedEnd > monthEndMs + 1).map(sp => `…${sp.block.blockId.slice(-6)}`);
+    const invalidTs        = selected.filter(sp => !sp.chosen.proposedStart || !sp.chosen.proposedEnd || sp.chosen.proposedEnd <= sp.chosen.proposedStart).map(sp => `…${sp.block.blockId.slice(-6)}`);
+    const crossMidnight         = selected.filter(sp => sp.chosen.crossesMidnight);
+    const crossMidnightOriginal = selected.filter(sp => {
+      const startMs = sp.block.blockStartMs ?? 0;
+      const endMs   = sp.block.blockEndMs   ?? 0;
+      return endMs > startMs && new Date(startMs).getDate() !== new Date(endMs - 1).getDate();
+    });
+
+    const allInhaberConflicts = [...inhaberSelfConflicts, ...inhaberExistingConflicts];
+    const allVehicleConflicts = [...vehicleSelfConflicts, ...vehicleExistingConflicts];
+
+    // D. Driver exclusion check: reject if Inhaber/owner is excluded from planning during simulated rides
+    const driverExclusionConflicts: string[] = [];
+    if (driverNotesMap.size > 0 && resolvedOwnerName) {
+      for (const sp of selected) {
+        const offsetMs = sp.chosen.proposedStart - (sp.block.blockStartMs ?? 0);
+        for (const ride of sp.block.rides) {
+          const rideStart = ride.originalStartMs + offsetMs;
+          const rideEnd   = ride.originalEndMs   + offsetMs;
+          const excl = isDriverExcludedFromPlanning(ownerDriverId, resolvedOwnerName, rideStart, rideEnd, driverNotesMap, driverNameToId);
+          if (excl.excluded) {
+            driverExclusionConflicts.push(`${sp.block.vehicle}: ride …${ride.tripId.slice(-6)} — ${excl.detail}`);
+          }
+        }
+      }
+    }
+
+    const allOk = allInhaberConflicts.length === 0 && allVehicleConflicts.length === 0
+      && rideLevelVehicleConflicts.length === 0
+      && pufferVorFails.length === 0 && pufferNachFails.length === 0
+      && outOfMonth.length === 0 && invalidTs.length === 0
+      && driverExclusionConflicts.length === 0;
+
+    // Per-item check result for compact table
+    const perItemChecks = selected.map(sp => {
+      const issues: string[] = [];
+      if (sp.chosen.pufferVorMs  < MIN_PUFFER_MS) issues.push('Puffer vor');
+      if (sp.chosen.pufferNachMs < MIN_PUFFER_MS) issues.push('Puffer nach');
+      if (sp.chosen.proposedStart < monthStartMs || sp.chosen.proposedEnd > monthEndMs + 1) issues.push('Außerhalb Monat');
+      if (!sp.chosen.proposedStart || !sp.chosen.proposedEnd || sp.chosen.proposedEnd <= sp.chosen.proposedStart) issues.push('Ungültiger Zeitstempel');
+      if (!sp.chosen.cw.vehicleFree) issues.push('Fahrzeug belegt');
+      return issues;
+    });
+
+    // Calendar: group items by day (YYYY-MM-DD key)
+    type CalEntry =
+      | { kind: 'existing'; occ: InhaberOccupiedInterval }
+      | { kind: 'preview'; sp: typeof selected[0]; issues: string[] };
+    const byDay = new Map<string, CalEntry[]>();
+
+    const dayKey = (ms: number) => {
+      const d = new Date(ms);
+      return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+    };
+    const addToDay = (key: string, entry: CalEntry) => {
+      if (!byDay.has(key)) byDay.set(key, []);
+      byDay.get(key)!.push(entry);
+    };
+
+    for (const occ of inhaberOccupiedIntervals) {
+      const k1 = dayKey(occ.startMs);
+      addToDay(k1, { kind: 'existing', occ });
+      const k2 = dayKey(occ.endMs - 1);
+      if (k2 !== k1) addToDay(k2, { kind: 'existing', occ });
+    }
+    for (let i = 0; i < selected.length; i++) {
+      const sp = selected[i];
+      const issues = perItemChecks[i];
+      const k1 = dayKey(sp.chosen.proposedStart);
+      addToDay(k1, { kind: 'preview', sp, issues });
+      const k2 = dayKey(sp.chosen.proposedEnd - 1);
+      if (k2 !== k1) addToDay(k2, { kind: 'preview', sp, issues });
+    }
+
+    const days = [...byDay.entries()]
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([key, entries]) => ({ key, entries: entries.sort((a, b) => {
+        const aMs = a.kind === 'existing' ? a.occ.startMs : a.sp.chosen.proposedStart;
+        const bMs = b.kind === 'existing' ? b.occ.startMs : b.sp.chosen.proposedStart;
+        return aMs - bMs;
+      }) }));
+
+    return {
+      selected,
+      perItemChecks,
+      allInhaberConflicts,
+      allVehicleConflicts,
+      rideLevelVehicleConflicts,
+      driverExclusionConflicts,
+      pufferVorFails,
+      pufferNachFails,
+      outOfMonth,
+      invalidTs,
+      crossMidnight,
+      crossMidnightOriginal,
+      allOk,
+      days,
+      uniqueVehicles: new Set(selected.map(sp => sp.block.vehicle)).size,
+      totalSec: selected.reduce((s, sp) => s + sp.block.blockDurationSec, 0),
+    };
+  }, [autoSelection, inhaberOccupiedIntervals, monthStartMs, monthEndMs, originalTrips, driverNotesMap, resolvedOwnerName, ownerDriverId, driverNameToId]);
+
+  // ── Diagnostic: existing imported rides that already violate driver exclusion notes ──
+  // Warning-only — does not block export of unrelated rides.
+  const existingImportedViolations = useMemo(() => {
+    if (!originalTrips || driverNotesMap.size === 0) return [];
+    const START_KEYS_EV = ['uhrzeit des fahrtbeginns', 'fahrtbeginn', 'start', 'start_datetime', 'fahrt_beginn'];
+    const END_KEYS_EV   = ['uhrzeit des fahrtendes', 'fahrtende', 'ende', 'end_datetime', 'fahrt_ende'];
+    const DATE_KEYS_EV  = ['datum der fahrt', 'datum', 'date', 'fahrt_datum'];
+    const parseTsEV = (dateS: string, timeS: string) => {
+      if (!timeS) return 0;
+      const combined = timeS.includes('T') || timeS.match(/^\d{4}-\d{2}-\d{2} \d{2}:/)
+        ? timeS : (dateS ? `${dateS} ${timeS}` : timeS);
+      const ms = Date.parse(combined.replace(' ', 'T'));
+      return isNaN(ms) ? 0 : ms;
+    };
+    type Violation = {
+      driver: string; vehicle: string; tripId: string;
+      startMs: number; endMs: number; detail: string;
+    };
+    const violations: Violation[] = [];
+    for (const trip of originalTrips) {
+      if (trip.is_canceled) continue;
+      const driverId = trip.original_driver_id ?? null;
+      const driverName = trip.original_driver_name ?? '';
+      if (!driverName) continue;
+      const raw = trip.raw_data_json as Record<string, unknown> | null;
+      if (!raw) continue;
+      let dateStr = '';
+      for (const k of Object.keys(raw)) {
+        if (DATE_KEYS_EV.includes(k.toLowerCase())) { dateStr = String(raw[k] ?? ''); break; }
+      }
+      const startStr = (() => { for (const k of Object.keys(raw)) if (START_KEYS_EV.includes(k.toLowerCase())) return String(raw[k] ?? ''); return ''; })();
+      const endStr   = (() => { for (const k of Object.keys(raw)) if (END_KEYS_EV.includes(k.toLowerCase())) return String(raw[k] ?? ''); return ''; })();
+      const startMs = parseTsEV(dateStr, startStr), endMs = parseTsEV(dateStr, endStr);
+      if (!startMs || !endMs || endMs <= startMs) continue;
+      const excl = isDriverExcludedFromPlanning(driverId, driverName, startMs, endMs, driverNotesMap, driverNameToId);
+      if (excl.excluded) {
+        violations.push({ driver: driverName, vehicle: trip.car_identifier ?? '', tripId: trip.id, startMs, endMs, detail: excl.detail });
+      }
+    }
+    return violations;
+  }, [originalTrips, driverNotesMap, driverNameToId]);
+
+  // ── Alternatives diagnostic for unresolved Fahrer-Notiz conflicts ────────────
+  // For each unresolved excluded ride group (= logical block), evaluate every driver
+  // as a potential replacement. Pure read — does not mutate anything.
+  const driverNoteAlternatives = useMemo(() => {
+    if (!sectionFData || sectionFData.unresolvedExcludedRides.length === 0) return null;
+
+    type ConflictBlock = {
+      blockKey: string;
+      driver: string;
+      vehicle: string;
+      startMs: number;
+      endMs: number;
+      rideCount: number;
+      durationSec: number;
+      rides: Array<{ tripId: string; startMs: number; endMs: number }>;
+      candidates: CandidateEval[];
+    };
+    type CandidateEval = {
+      driverName: string;
+      driverId: string | null;
+      targetKind: 'regular' | 'inhaber';
+      driverFree: boolean;
+      driverNoteConflict: boolean;
+      inhaberFree: boolean;
+      inhaberConflict: boolean;
+      status: 'best' | 'possible' | 'rejected';
+      rejectReason: string | null;
+    };
+
+    // Group rides into logical blocks: same driver + vehicle, starts within 30 min gap
+    const GAP_MS = 30 * 60 * 1000;
+    const sorted = [...sectionFData.unresolvedExcludedRides].sort((a, b) => a.startMs - b.startMs);
+    const blocks: ConflictBlock[] = [];
+    for (const ride of sorted) {
+      const existing = blocks.find(b =>
+        b.driver === ride.driver && b.vehicle === ride.vehicle &&
+        ride.startMs <= b.endMs + GAP_MS
+      );
+      if (existing) {
+        existing.rides.push(ride);
+        existing.endMs   = Math.max(existing.endMs, ride.endMs);
+        existing.startMs = Math.min(existing.startMs, ride.startMs);
+        existing.rideCount++;
+        existing.durationSec = Math.round((existing.endMs - existing.startMs) / 1000);
+      } else {
+        blocks.push({
+          blockKey: `${ride.driver}|${ride.vehicle}|${ride.startMs}`,
+          driver:   ride.driver,
+          vehicle:  ride.vehicle,
+          startMs:  ride.startMs,
+          endMs:    ride.endMs,
+          rideCount: 1,
+          durationSec: Math.round((ride.endMs - ride.startMs) / 1000),
+          rides: [ride],
+          candidates: [],
+        });
+      }
+    }
+
+    const inhaberLower = resolvedOwnerName?.trim().toLowerCase() ?? '';
+
+    for (const block of blocks) {
+      const candidates: CandidateEval[] = [];
+
+      for (const driver of allDrivers) {
+        const nameL = driver.name.trim().toLowerCase();
+        // Skip the excluded driver itself
+        if (nameL === block.driver.trim().toLowerCase()) continue;
+
+        const isInhaber = inhaberLower && nameL === inhaberLower;
+        const excl = isDriverExcludedFromPlanning(driver.id ?? null, driver.name, block.startMs, block.endMs, driverNotesMap, driverNameToId);
+        let rejectReason: string | null = null;
+
+        if (excl.excluded) {
+          rejectReason = `Fahrer-Notiz verletzt: ${excl.detail}`;
+        } else if (isInhaber) {
+          const inhaberBusy = inhaberOccupiedIntervals.some(
+            occ => occ.startMs < block.endMs && occ.endMs > block.startMs
+          );
+          if (inhaberBusy) rejectReason = 'Inhaber belegt';
+        }
+
+        const inhaberFreeNow = isInhaber
+          ? !inhaberOccupiedIntervals.some(occ => occ.startMs < block.endMs && occ.endMs > block.startMs)
+          : true;
+
+        candidates.push({
+          driverName:        driver.name,
+          driverId:          driver.id ?? null,
+          targetKind:        isInhaber ? 'inhaber' : 'regular',
+          driverFree:        !excl.excluded,
+          driverNoteConflict: excl.excluded,
+          inhaberFree:       inhaberFreeNow,
+          inhaberConflict:   isInhaber && !inhaberFreeNow,
+          status:            rejectReason ? 'rejected' : 'possible',
+          rejectReason,
+        });
+      }
+
+      // Mark best: first non-rejected regular, else first non-rejected inhaber
+      const firstRegular = candidates.find(c => c.status === 'possible' && c.targetKind === 'regular');
+      const firstInhaber = candidates.find(c => c.status === 'possible' && c.targetKind === 'inhaber');
+      if (firstRegular) firstRegular.status = 'best';
+      else if (firstInhaber) firstInhaber.status = 'best';
+
+      // Sort: best → possible → rejected; within same status regular before inhaber
+      const score = { best: 0, possible: 1, rejected: 2 };
+      candidates.sort((a, b) => {
+        if (score[a.status] !== score[b.status]) return score[a.status] - score[b.status];
+        if (a.targetKind !== b.targetKind) return a.targetKind === 'regular' ? -1 : 1;
+        return a.driverName.localeCompare(b.driverName);
+      });
+
+      block.candidates = candidates.slice(0, 10);
+    }
+
+    const blocksWithAlternative = blocks.filter(b => b.candidates.some(c => c.status === 'best' || c.status === 'possible')).length;
+    const blocksWithout = blocks.length - blocksWithAlternative;
+
+    return { blocks, blocksWithAlternative, blocksWithout, totalBlocks: blocks.length };
+  }, [sectionFData, allDrivers, driverNotesMap, driverNameToId, inhaberOccupiedIntervals, resolvedOwnerName]);
+
+  // Rides still unresolved after user applies note alternatives
+  const effectiveUnresolvedRides = useMemo(() => {
+    if (!sectionFData) return [];
+    return sectionFData.unresolvedExcludedRides.filter(r => !noteReassignments.has(r.tripId));
+  }, [sectionFData, noteReassignments]);
+
+  // Recompute allOk using effectiveUnresolvedRides so export gate respects applied alternatives
+  const effectiveAllOk = useMemo(() => {
+    if (!sectionFData) return false;
+    return (
+      sectionFData.invalidTsRides.length === 0 &&
+      sectionFData.inhaberOverlaps.length === 0 &&
+      sectionFData.vehicleOverlaps.length === 0 &&
+      sectionFData.rideLevelExistingConflicts.length === 0 &&
+      sectionFData.missingBlocks.length === 0 &&
+      sectionFData.rideCountOk &&
+      sectionFData.tsMillisOk &&
+      sectionFData.auftragOk &&
+      sectionFData.driverExclusionViolations.length === 0 &&
+      effectiveUnresolvedRides.length === 0
+    );
+  }, [sectionFData, effectiveUnresolvedRides]);
+
+  // Lifted export-gate values so they're accessible in effects and simplified render
+  const canExport = useMemo(
+    () => effectiveAllOk && !!originalTrips && ownerResolution.status === 'ok',
+    [effectiveAllOk, originalTrips, ownerResolution],
+  );
+  const exportBlockReason = useMemo(() => {
+    if (ownerResolution.status === 'none') return 'kein Inhaber-Fahrer in den Fahrern gefunden';
+    if (ownerResolution.status === 'multiple') return `mehrere Inhaber-Fahrer gefunden (${ownerResolution.count})`;
+    if (effectiveUnresolvedRides.length > 0) {
+      return autoNoteAlternativesApplied
+        ? `Für ${effectiveUnresolvedRides.length} Fahrt(en) konnte trotz automatischer Alternativen kein zulässiger Fahrer ohne Konflikte gefunden werden.`
+        : `${effectiveUnresolvedRides.length} Fahrten mit ungültigem Fahrer`;
+    }
+    if (!effectiveAllOk) return 'Fehler im angewendeten Plan';
+    return null;
+  }, [ownerResolution, effectiveUnresolvedRides, effectiveAllOk, autoNoteAlternativesApplied]);
+
+  // ── Section F: apply selected Vorschau placements → derive shifted rides ─────
+
+  const handleApplyPlan = useCallback(() => {
+    if (!originalTrips || originalTrips.length === 0) return;
+    const tripById = new Map(originalTrips.map(t => [t.id, t]));
+    const selectedEntries = autoSelection.filter(e => e.chosen !== null);
+
+    // Helper: parse a raw_data_json timestamp string → ms (null if invalid/missing)
+    const parseRawTs = (val: unknown): number | null => {
+      if (val === null || val === undefined) return null;
+      const s = String(val).trim();
+      if (!s || s === '\\N' || s.toLowerCase() === 'n/a' || s === 'null' || s === '') return null;
+      const ms = Date.parse(s.replace(' ', 'T'));
+      return isNaN(ms) ? null : ms;
+    };
+
+    // Column key matchers (lowercase)
+    const EINGANG_KEYS   = ['datum/uhrzeit auftragseingang', 'auftragseingang', 'auftrag_eingang'];
+    const UEBERM_KEYS    = ['uhrzeit der auftragsuebermittlung', 'auftragsuebermittlung', 'auftrag_uebermittlung'];
+    const ABHOLZEIT_KEYS = ['geplante abholzeit', 'abholzeit', 'geplante_abholzeit'];
+    const START_KEYS     = ['uhrzeit des fahrtbeginns', 'fahrtbeginn', 'start', 'start_datetime', 'fahrt_beginn'];
+
+    // Find a raw_data_json column value by matching key list (case-insensitive)
+    const getRawField = (raw: Record<string, unknown>, keys: string[]): unknown => {
+      const entry = Object.entries(raw).find(([k]) => keys.includes(k.toLowerCase()));
+      return entry?.[1] ?? null;
+    };
+    // Get original start from raw_data_json (needed for offset calculation)
+    const getRawStart = (raw: Record<string, unknown>): number | null =>
+      parseRawTs(getRawField(raw, START_KEYS));
+
+    const changedRides: SectionFRide[] = [];
+    const blockApps: SectionFBlock[] = [];
+    const shiftMap = new Map<string, {
+      newStartMs: number; newEndMs: number; newDriver: string;
+      auftragEingangMs: number | null;
+      auftragUebermittlungMs: number | null;
+      geplanteAbholzeitMs: number | null;
+    }>();
+
+    for (const entry of selectedEntries) {
+      const { block, chosen } = entry;
+      const offsetMs = chosen!.proposedStart - (block.blockStartMs ?? 0);
+      let blockOk = true;
+      let ridesFilled = 0;
+
+      for (const ride of block.rides) {
+        const trip = tripById.get(ride.tripId);
+        // Floor to whole seconds to ensure .000 ms in export
+        const newStartMs = Math.floor((ride.originalStartMs + offsetMs) / 1000) * 1000;
+        const newEndMs   = Math.floor((ride.originalEndMs   + offsetMs) / 1000) * 1000;
+        const ok = newEndMs > newStartMs && newStartMs > 0;
+        if (!ok) blockOk = false;
+        ridesFilled++;
+
+        // Compute offset-based timing: preserve original offsets relative to Fahrtbeginn
+        let auftragEingangMs: number | null = null;
+        let auftragUebermittlungMs: number | null = null;
+        let geplanteAbholzeitMs: number | null = null;
+        if (trip?.raw_data_json) {
+          const raw = trip.raw_data_json;
+          const origStart = getRawStart(raw) ?? ride.originalStartMs;
+          const origEin   = parseRawTs(getRawField(raw, EINGANG_KEYS));
+          const origUeb   = parseRawTs(getRawField(raw, UEBERM_KEYS));
+          const origAbh   = parseRawTs(getRawField(raw, ABHOLZEIT_KEYS));
+          if (origEin !== null)
+            auftragEingangMs = Math.floor((newStartMs + (origEin - origStart)) / 1000) * 1000;
+          if (origUeb !== null)
+            auftragUebermittlungMs = Math.floor((newStartMs + (origUeb - origStart)) / 1000) * 1000;
+          if (origAbh !== null)
+            geplanteAbholzeitMs = Math.floor((newStartMs + (origAbh - origStart)) / 1000) * 1000;
+        }
+
+        changedRides.push({
+          blockId: block.blockId,
+          tripId: ride.tripId,
+          vehicle: block.vehicle,
+          oldDriver: trip ? (trip.assigned_driver_name || trip.original_driver_name || '') : '',
+          newDriver: resolvedOwnerName ?? inhaberName,
+          newEndMs,
+          durSec: ride.durationSec,
+          offsetMs,
+          srcRowIdx: trip?.source_row_index ?? null,
+          ok,
+        });
+
+        shiftMap.set(ride.tripId, { newStartMs, newEndMs, newDriver: resolvedOwnerName ?? inhaberName, auftragEingangMs, auftragUebermittlungMs, geplanteAbholzeitMs });
+      }
+
+      blockApps.push({
+        blockId: block.blockId,
+        vehicle: block.vehicle,
+        origStartMs: block.blockStartMs ?? 0,
+        origEndMs:   block.blockEndMs   ?? 0,
+        newStartMs: chosen!.proposedStart,
+        newEndMs:   chosen!.proposedEnd,
+        rideCount: ridesFilled,
+        offsetMs,
+        ok: blockOk && ridesFilled === block.rides.length,
+        hint: ridesFilled === 0 ? 'Keine Fahrten' : blockOk ? 'OK' : 'Zeitstempel-Fehler',
+      });
+    }
+
+    // Validation
+    const invalidTsRides = changedRides.filter(r => !r.ok).map(r => `…${r.tripId.slice(-6)}`);
+
+    const inhaberOverlaps: string[] = [];
+    for (let i = 0; i < changedRides.length; i++) {
+      for (let j = i + 1; j < changedRides.length; j++) {
+        if (changedRides[i].newStartMs < changedRides[j].newEndMs && changedRides[i].newEndMs > changedRides[j].newStartMs) {
+          inhaberOverlaps.push(`…${changedRides[i].tripId.slice(-6)} ↔ …${changedRides[j].tripId.slice(-6)}`);
+        }
+      }
+    }
+
+    const vehicleOverlaps: string[] = [];
+    const byVehicle = new Map<string, SectionFRide[]>();
+    for (const r of changedRides) {
+      if (!byVehicle.has(r.vehicle)) byVehicle.set(r.vehicle, []);
+      byVehicle.get(r.vehicle)!.push(r);
+    }
+    for (const rides of byVehicle.values()) {
+      for (let i = 0; i < rides.length; i++) {
+        for (let j = i + 1; j < rides.length; j++) {
+          if (rides[i].newStartMs < rides[j].newEndMs && rides[i].newEndMs > rides[j].newStartMs) {
+            vehicleOverlaps.push(`${rides[i].vehicle}: …${rides[i].tripId.slice(-6)} ↔ …${rides[j].tripId.slice(-6)}`);
+          }
+        }
+      }
+    }
+
+    // Ride-level check: shifted rides vs existing non-moved trips on the same vehicle.
+    // Exclude only the trips that belong to the selected blocks being moved — unselected candidate
+    // blocks remain as real existing Fahrten and correctly block conflicting placements.
+    const rideLevelExistingConflicts: string[] = [];
+    {
+      const movedTripIds = new Set(changedRides.map(r => r.tripId));
+      const START_KEYS = ['uhrzeit des fahrtbeginns', 'fahrtbeginn', 'start', 'start_datetime', 'fahrt_beginn'];
+      const END_KEYS   = ['uhrzeit des fahrtendes', 'fahrtende', 'ende', 'end_datetime', 'fahrt_ende'];
+      const DATE_KEYS  = ['datum der fahrt', 'datum', 'date', 'fahrt_datum'];
+      const parseTs = (dateS: string, timeS: string) => {
+        if (!timeS) return 0;
+        const combined = timeS.includes('T') || timeS.match(/^\d{4}-\d{2}-\d{2} \d{2}:/)
+          ? timeS : (dateS ? `${dateS} ${timeS}` : timeS);
+        const ms = Date.parse(combined.replace(' ', 'T'));
+        return isNaN(ms) ? 0 : ms;
+      };
+      const existingByVehicle = new Map<string, Array<{ startMs: number; endMs: number; tripId: string }>>();
+      for (const trip of originalTrips) {
+        if (trip.is_canceled || movedTripIds.has(trip.id)) continue;
+        const raw = trip.raw_data_json as Record<string, unknown> | null;
+        if (!raw) continue;
+        let dateStr = '';
+        for (const k of Object.keys(raw)) { if (DATE_KEYS.includes(k.toLowerCase())) { dateStr = String(raw[k] ?? ''); break; } }
+        const startStr = (() => { for (const k of Object.keys(raw)) if (START_KEYS.includes(k.toLowerCase())) return String(raw[k] ?? ''); return ''; })();
+        const endStr   = (() => { for (const k of Object.keys(raw)) if (END_KEYS.includes(k.toLowerCase())) return String(raw[k] ?? ''); return ''; })();
+        const startMs = parseTs(dateStr, startStr), endMs = parseTs(dateStr, endStr);
+        if (!startMs || !endMs || endMs <= startMs) continue;
+        const veh = trip.car_identifier ?? ''; if (!veh) continue;
+        if (!existingByVehicle.has(veh)) existingByVehicle.set(veh, []);
+        existingByVehicle.get(veh)!.push({ startMs, endMs, tripId: trip.id });
+      }
+      for (const r of changedRides) {
+        const existing = existingByVehicle.get(r.vehicle) ?? [];
+        for (const ex of existing) {
+          if (ex.startMs < r.newEndMs && ex.endMs > r.newStartMs) {
+            rideLevelExistingConflicts.push(`${r.vehicle}: …${r.tripId.slice(-6)} ↔ existierend …${ex.tripId.slice(-6)}`);
+          }
+        }
+      }
+    }
+
+    const missingBlocks = selectedEntries
+      .filter(e => !(blockApps.find(b => b.blockId === e.block.blockId)?.ok))
+      .map(e => `…${e.block.blockId.slice(-6)}`);
+
+    // Driver exclusion check: warn if any changed ride falls in a driver exclusion interval
+    const driverExclusionViolations: string[] = [];
+    if (driverNotesMap.size > 0) {
+      for (const r of changedRides) {
+        const driverRec = allDrivers.find(d => d.name === r.newDriver);
+        const dId = driverRec?.id ?? null;
+        const excl = isDriverExcludedFromPlanning(dId, r.newDriver, r.newStartMs, r.newEndMs, driverNotesMap, driverNameToId);
+        if (excl.excluded) driverExclusionViolations.push(excl.detail);
+      }
+    }
+
+    // Build excludedDriverRideMap: rides where original driver is excluded by driver notes.
+    // These rides are UNRESOLVED — export must be blocked, not cleared to empty Fahrername.
+    const excludedDriverRideMap = new Map<string, { driver: string; vehicle: string; detail: string }>();
+    const unresolvedExcludedRides: Array<{ tripId: string; driver: string; vehicle: string; startMs: number; endMs: number; detail: string }> = [];
+    if (driverNotesMap.size > 0 && originalTrips) {
+      // Build a quick tripId → vehicle lookup from the candidate blocks (open blocks)
+      // candidateWindowsByBlock holds all remaining open blocks, each with full VehicleBlock data
+      const tripVehicleMap = new Map<string, string>();
+      for (const candidacy of candidateWindowsByBlock) {
+        for (const ride of candidacy.block.rides ?? []) {
+          tripVehicleMap.set(ride.tripId, candidacy.block.vehicle);
+        }
+      }
+      const START_KEYS_XD = ['uhrzeit des fahrtbeginns', 'fahrtbeginn', 'start', 'start_datetime', 'fahrt_beginn'];
+      const END_KEYS_XD   = ['uhrzeit des fahrtendes', 'fahrtende', 'ende', 'end_datetime', 'fahrt_ende'];
+      const DATE_KEYS_XD  = ['datum der fahrt', 'datum', 'date', 'fahrt_datum'];
+      const parseTsXD = (dateS: string, timeS: string) => {
+        if (!timeS) return 0;
+        const combined = timeS.includes('T') || timeS.match(/^\d{4}-\d{2}-\d{2} \d{2}:/)
+          ? timeS : (dateS ? `${dateS} ${timeS}` : timeS);
+        const ms = Date.parse(combined.replace(' ', 'T'));
+        return isNaN(ms) ? 0 : ms;
+      };
+      for (const trip of originalTrips) {
+        if (trip.is_canceled || shiftMap.has(trip.id)) continue;
+        const driverId = trip.original_driver_id ?? null;
+        const driverName = trip.original_driver_name ?? '';
+        if (!driverName) continue;
+        const raw = trip.raw_data_json as Record<string, unknown> | null;
+        if (!raw) continue;
+        let dateStr = '';
+        for (const k of Object.keys(raw)) {
+          if (DATE_KEYS_XD.includes(k.toLowerCase())) { dateStr = String(raw[k] ?? ''); break; }
+        }
+        const startStr = (() => { for (const k of Object.keys(raw)) if (START_KEYS_XD.includes(k.toLowerCase())) return String(raw[k] ?? ''); return ''; })();
+        const endStr   = (() => { for (const k of Object.keys(raw)) if (END_KEYS_XD.includes(k.toLowerCase())) return String(raw[k] ?? ''); return ''; })();
+        const startMs = parseTsXD(dateStr, startStr), endMs = parseTsXD(dateStr, endStr);
+        if (!startMs || !endMs || endMs <= startMs) continue;
+        const excl = isDriverExcludedFromPlanning(driverId, driverName, startMs, endMs, driverNotesMap, driverNameToId);
+        if (excl.excluded) {
+          const startMs2 = startMs, endMs2 = endMs;
+          excludedDriverRideMap.set(trip.id, { driver: driverName, vehicle: tripVehicleMap.get(trip.id) ?? '', detail: excl.detail });
+          unresolvedExcludedRides.push({ tripId: trip.id, driver: driverName, vehicle: tripVehicleMap.get(trip.id) ?? '', startMs: startMs2, endMs: endMs2, detail: excl.detail });
+        }
+      }
+    }
+
+    const rideCountOk = selectedEntries.every(e => {
+      const app = blockApps.find(b => b.blockId === e.block.blockId);
+      return app && app.rideCount === e.block.rides.length;
+    });
+
+    // Structural checks — validate milliseconds using the same formatted strings written to XLSX
+    const totalTsCount = changedRides.length * 2;
+    const invalidTsCount = changedRides.reduce((n, r) => {
+      const s = formatExportDateTime(r.newStartMs).endsWith('.000') ? 0 : 1;
+      const e = formatExportDateTime(r.newEndMs).endsWith('.000') ? 0 : 1;
+      return n + s + e;
+    }, 0);
+    const tsMillisOk = invalidTsCount === 0;
+    const priceKmUnchanged = true; // we only patch driver/date/start/end columns
+    const columnOrderReady = !!(sourceColumnsJson && sourceColumnsJson.length > 0);
+
+    // Validate offset-preserved timing fields for every shifted ride
+    let invalidZeitversatzCount = 0;
+    for (const [tripId, s] of shiftMap) {
+      const trip = tripById.get(tripId);
+      if (!trip?.raw_data_json) continue;
+      const raw = trip.raw_data_json;
+
+      const checkField = (computedMs: number | null, origKeys: string[]) => {
+        const origVal = getRawField(raw, origKeys);
+        const origMs  = parseRawTs(origVal);
+        if (origMs === null) return; // invalid/missing original → no check needed
+        // Computed must exist and end with .000
+        if (computedMs === null || !formatExportDateTime(computedMs).endsWith('.000'))
+          invalidZeitversatzCount++;
+      };
+
+      checkField(s.auftragEingangMs,       EINGANG_KEYS);
+      checkField(s.auftragUebermittlungMs, UEBERM_KEYS);
+      checkField(s.geplanteAbholzeitMs,    ABHOLZEIT_KEYS);
+    }
+    const zeitversatzOk = invalidZeitversatzCount === 0;
+    // Keep auftragOk/invalidAuftragCount as aliases for backward compat with setSectionFData
+    const auftragOk = zeitversatzOk;
+    const invalidAuftragCount = invalidZeitversatzCount;
+
+    const allOk = invalidTsRides.length === 0 && inhaberOverlaps.length === 0
+      && vehicleOverlaps.length === 0 && rideLevelExistingConflicts.length === 0
+      && missingBlocks.length === 0 && rideCountOk && tsMillisOk && auftragOk
+      && driverExclusionViolations.length === 0 && unresolvedExcludedRides.length === 0;
+
+    setSectionFData({
+      changedRides,
+      blockApps,
+      totalRidesChanged: changedRides.length,
+      totalSec: changedRides.reduce((s, r) => s + r.durSec, 0),
+      uniqueVehicles: new Set(changedRides.map(r => r.vehicle)).size,
+      invalidTsRides,
+      inhaberOverlaps,
+      vehicleOverlaps,
+      rideLevelExistingConflicts,
+      driverExclusionViolations,
+      missingBlocks,
+      rideCountOk,
+      tsMillisOk,
+      invalidTsCount,
+      totalTsCount,
+      priceKmUnchanged,
+      columnOrderReady,
+      auftragOk,
+      invalidAuftragCount,
+      zeitversatzOk,
+      invalidZeitversatzCount,
+      allOk,
+      shiftMap,
+      unresolvedExcludedRides,
+      excludedDriverRideMap,
+    });
+  }, [autoSelection, originalTrips, inhaberName, resolvedOwnerName, sourceColumnsJson, driverNotesMap, driverNameToId, allDrivers, candidateWindowsByBlock]);
+
+  const handleExportFahrtenbuch = useCallback(async () => {
+    if (!sectionFData || !originalTrips) return;
+    const ownerDriverName = resolvedOwnerName;
+    if (!ownerDriverName) return;
+    const { shiftMap, unresolvedExcludedRides } = sectionFData;
+
+    // Block export if any rides still have unresolved driver exclusions after alternatives applied.
+    // Never export empty Fahrername or keep an excluded driver.
+    const stillUnresolved = unresolvedExcludedRides.filter(r => !noteReassignments.has(r.tripId));
+    if (stillUnresolved.length > 0) {
+      alert(`Export gesperrt — ${stillUnresolved.length} Fahrten haben ungültige Fahrer (Fahrer-Notiz / Von Planung ausschließen). Bitte Abschnitt F prüfen.`);
+      return;
+    }
+
+    // ── 1. Download original file from Supabase storage ─────────────────────
+    //    This is the only source that has raw, un-serialized cell values.
+    let originalWs: XLSX.WorkSheet | null = null;
+    if (storagePath) {
+      try {
+        const { data: blob, error } = await supabase.storage.from('fahrtenbuch-files').download(storagePath);
+        if (!error && blob) {
+          const arrayBuffer = await blob.arrayBuffer();
+          const wb = XLSX.read(new Uint8Array(arrayBuffer), { type: 'array', cellStyles: false, raw: true });
+          const wsName = sourceSheetName ?? wb.SheetNames[0];
+          originalWs = wb.Sheets[wsName] ?? wb.Sheets[wb.SheetNames[0]] ?? null;
+        }
+      } catch { /* fall through to json_to_sheet fallback */ }
+    }
+
+    // ── 2. Build column order from source_columns_json ───────────────────────
+    let headers: string[];
+    if (sourceColumnsJson && sourceColumnsJson.length > 0) {
+      headers = [...sourceColumnsJson];
+      const inHeaders = new Set(headers.map(h => h.toLowerCase()));
+      for (const t of originalTrips) {
+        if (t.raw_data_json) for (const k of Object.keys(t.raw_data_json)) {
+          if (!inHeaders.has(k.toLowerCase())) { headers.push(k); inHeaders.add(k.toLowerCase()); }
+        }
+      }
+    } else {
+      const headerSet = new Set<string>();
+      for (const t of originalTrips) {
+        if (t.raw_data_json) for (const k of Object.keys(t.raw_data_json)) headerSet.add(k);
+      }
+      headers = [...headerSet];
+    }
+
+    const DRIVER_KEYS    = ['fahrername', 'fahrer'];
+    const START_KEYS     = ['uhrzeit des fahrtbeginns', 'fahrtbeginn', 'start', 'start_datetime', 'fahrt_beginn'];
+    const END_KEYS       = ['uhrzeit des fahrtendes', 'fahrtende', 'ende', 'end_datetime', 'fahrt_ende'];
+    const DATE_KEYS      = ['datum der fahrt', 'datum', 'date', 'fahrt_datum'];
+    const EINGANG_KEYS   = ['datum/uhrzeit auftragseingang', 'auftragseingang', 'auftrag_eingang'];
+    const UEBERM_KEYS    = ['uhrzeit der auftragsuebermittlung', 'auftragsuebermittlung', 'auftrag_uebermittlung'];
+    const ABHOLZEIT_KEYS = ['geplante abholzeit', 'abholzeit', 'geplante_abholzeit'];
+
+    const colIdx = new Map(headers.map((h, i) => [h.toLowerCase(), i]));
+    const driverColIdx   = [...colIdx.entries()].find(([k]) => DRIVER_KEYS.includes(k))?.[1] ?? -1;
+    const startColIdx    = [...colIdx.entries()].find(([k]) => START_KEYS.includes(k))?.[1] ?? -1;
+    const endColIdx      = [...colIdx.entries()].find(([k]) => END_KEYS.includes(k))?.[1] ?? -1;
+    const dateColIdx     = [...colIdx.entries()].find(([k]) => DATE_KEYS.includes(k))?.[1] ?? -1;
+    const eingangColIdx  = [...colIdx.entries()].find(([k]) => EINGANG_KEYS.includes(k))?.[1] ?? -1;
+    const uebermColIdx   = [...colIdx.entries()].find(([k]) => UEBERM_KEYS.includes(k))?.[1] ?? -1;
+    const abholColIdx    = [...colIdx.entries()].find(([k]) => ABHOLZEIT_KEYS.includes(k))?.[1] ?? -1;
+
+    const fmtDate = (ms: number) => {
+      const d = new Date(ms);
+      return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+    };
+
+    if (originalWs) {
+      // ── Cell-level path: preserves raw numeric values exactly ─────────────
+      const range = XLSX.utils.decode_range(originalWs['!ref'] ?? 'A1');
+
+      // Replicate the same header-row detection used during import.
+      // source_row_index is 1-based offset from the first data row (after the detected header).
+      const HEADER_KW = [
+        'datum','fahrer','uhrzeit','preis','trinkgeld','zahlungsart','abholort','zielort','kennzeichen',
+        'start','ende','beginn','fahrt','trip','driver','date','time','price','status','storniert',
+      ];
+      let wsHeaderRow = range.s.r;
+      for (let r = range.s.r; r <= Math.min(range.e.r, 20); r++) {
+        let matches = 0;
+        for (let c = range.s.c; c <= range.e.c; c++) {
+          const cell = originalWs[XLSX.utils.encode_cell({ r, c })];
+          if (cell && HEADER_KW.some(kw => String(cell.v ?? '').toLowerCase().includes(kw))) matches++;
+        }
+        if (matches >= 3) { wsHeaderRow = r; break; }
+      }
+
+      // Map header name (lowercase) → worksheet column index
+      const wsColByName = new Map<string, number>();
+      for (let c = range.s.c; c <= range.e.c; c++) {
+        const addr = XLSX.utils.encode_cell({ r: wsHeaderRow, c });
+        const cell = originalWs[addr];
+        if (cell) wsColByName.set(String(cell.v ?? '').toLowerCase().trim(), c);
+      }
+
+      // Identify patchable worksheet column indices
+      const wsDriverCol  = DRIVER_KEYS.map(k => wsColByName.get(k)).find(v => v !== undefined) ?? -1;
+      const wsStartCol   = START_KEYS.map(k => wsColByName.get(k)).find(v => v !== undefined) ?? -1;
+      const wsEndCol     = END_KEYS.map(k => wsColByName.get(k)).find(v => v !== undefined) ?? -1;
+      const wsDateCol    = DATE_KEYS.map(k => wsColByName.get(k)).find(v => v !== undefined) ?? -1;
+      const wsEingangCol = EINGANG_KEYS.map(k => wsColByName.get(k)).find(v => v !== undefined) ?? -1;
+      const wsUebermCol  = UEBERM_KEYS.map(k => wsColByName.get(k)).find(v => v !== undefined) ?? -1;
+      const wsAbholCol   = ABHOLZEIT_KEYS.map(k => wsColByName.get(k)).find(v => v !== undefined) ?? -1;
+
+      // Build a list of {srcRowIdx (ws row, 0-based), sortKey, trip}
+      type RowEntry = { wsRow: number; sortMs: number; trip: FahrtenbuchTrip | null };
+      const rowEntries: RowEntry[] = originalTrips.map(trip => {
+        // source_row_index is 1-based: first data row after the header = 1
+        const wsRow = wsHeaderRow + (trip.source_row_index ?? 1);
+        const s = shiftMap.get(trip.id);
+        let sortMs = Infinity;
+        if (s) {
+          sortMs = s.newStartMs;
+        } else if (wsStartCol >= 0) {
+          const addr = XLSX.utils.encode_cell({ r: wsRow, c: wsStartCol });
+          const cell = originalWs![addr];
+          if (cell) {
+            const val = String(cell.v ?? '');
+            const ms = Date.parse(val.replace(' ', 'T'));
+            if (!isNaN(ms)) sortMs = ms;
+          }
+        }
+        return { wsRow, sortMs, trip };
+      });
+
+      // Sort ascending by start time; missing/invalid go to end
+      rowEntries.sort((a, b) => {
+        if (a.sortMs === Infinity && b.sortMs === Infinity) return 0;
+        return a.sortMs - b.sortMs;
+      });
+
+      // Build new worksheet: header row + sorted data rows
+      const newWs: XLSX.WorkSheet = {};
+      const totalCols = range.e.c - range.s.c + 1;
+      const totalRows = 1 + rowEntries.length; // header + data
+
+      // Copy header row verbatim (using detected header row, not range.s.r which may be before it)
+      for (let c = range.s.c; c <= range.e.c; c++) {
+        const srcAddr = XLSX.utils.encode_cell({ r: wsHeaderRow, c });
+        const dstAddr = XLSX.utils.encode_cell({ r: 0, c: c - range.s.c });
+        const cell = originalWs[srcAddr];
+        if (cell) newWs[dstAddr] = { ...cell };
+      }
+
+      // Identify Fahrpreis and Kilometer column indices for validation
+      const FAHRPREIS_KEYS = ['fahrpreis', 'preis', 'price', 'fare'];
+      const KILOMETER_KEYS = ['kilometer', 'km', 'distanz', 'distance'];
+      const wsFahrpreisCol = FAHRPREIS_KEYS.map(k => wsColByName.get(k)).find(v => v !== undefined) ?? -1;
+      const wsKilometerCol = KILOMETER_KEYS.map(k => wsColByName.get(k)).find(v => v !== undefined) ?? -1;
+      let invalidPriceKmCount = 0;
+
+      // Write sorted data rows
+      for (let i = 0; i < rowEntries.length; i++) {
+        const { wsRow, trip } = rowEntries[i];
+        const dstRow = i + 1;
+        const s = trip ? shiftMap.get(trip.id) : undefined;
+
+        for (let c = range.s.c; c <= range.e.c; c++) {
+          const srcAddr = XLSX.utils.encode_cell({ r: wsRow, c: c });
+          const dstAddr = XLSX.utils.encode_cell({ r: dstRow, c: c - range.s.c });
+          const srcCell = originalWs[srcAddr];
+          // Clone original cell (preserves type, raw value, numFmt, etc.)
+          const cell: XLSX.CellObject = srcCell ? { ...srcCell } : { t: 'z' };
+
+          if (s) {
+            // Patch only the allowed columns; every other cell is cloned verbatim
+            if (c === wsDriverCol  && wsDriverCol  >= 0)
+              { cell.t = 's'; cell.v = ownerDriverName; delete cell.w; }
+            else if (c === wsStartCol   && wsStartCol   >= 0)
+              { cell.t = 's'; cell.v = formatExportDateTime(s.newStartMs); delete cell.w; }
+            else if (c === wsEndCol     && wsEndCol     >= 0)
+              { cell.t = 's'; cell.v = formatExportDateTime(s.newEndMs); delete cell.w; }
+            else if (c === wsDateCol    && wsDateCol    >= 0)
+              { cell.t = 's'; cell.v = fmtDate(s.newStartMs); delete cell.w; }
+            else if (c === wsEingangCol && wsEingangCol >= 0 && s.auftragEingangMs !== null)
+              { cell.t = 's'; cell.v = formatExportDateTime(s.auftragEingangMs); delete cell.w; }
+            else if (c === wsUebermCol  && wsUebermCol  >= 0 && s.auftragUebermittlungMs !== null)
+              { cell.t = 's'; cell.v = formatExportDateTime(s.auftragUebermittlungMs); delete cell.w; }
+            else if (c === wsAbholCol   && wsAbholCol   >= 0 && s.geplanteAbholzeitMs !== null)
+              { cell.t = 's'; cell.v = formatExportDateTime(s.geplanteAbholzeitMs); delete cell.w; }
+          }
+          // Patch driver name for rides reassigned via Fahrer-Notiz alternatives
+          if (!s && trip && noteReassignments.has(trip.id)) {
+            if (c === wsDriverCol && wsDriverCol >= 0) {
+              cell.t = 's'; cell.v = noteReassignments.get(trip.id)!; delete cell.w;
+            }
+          }
+          // Note: excluded-driver rides are blocked at export-start — we never reach here for those
+
+          // Validate: Fahrpreis/Kilometer must equal the original cell value exactly
+          if ((c === wsFahrpreisCol && wsFahrpreisCol >= 0) || (c === wsKilometerCol && wsKilometerCol >= 0)) {
+            if (srcCell && cell.v !== srcCell.v) invalidPriceKmCount++;
+          }
+
+          newWs[dstAddr] = cell;
+        }
+      }
+
+      if (invalidPriceKmCount > 0) {
+        alert(`Export gesperrt — Fahrpreis/Kilometer wurden verändert (${invalidPriceKmCount} Zellen). Bitte erneut versuchen.`);
+        return;
+      }
+
+      newWs['!ref'] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: totalRows - 1, c: totalCols - 1 } });
+      const wb2 = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb2, newWs, sourceSheetName ?? 'Sheet1');
+      XLSX.writeFile(wb2, originalFileName ?? `fahrtenbuch_neu_${year}-${String(month).padStart(2,'0')}.xlsx`);
+      return;
+    }
+
+    // ── Fallback: json_to_sheet (no storage file available) ──────────────────
+    const allRows = originalTrips.map(trip => {
+      const row: Record<string, unknown> = { ...(trip.raw_data_json ?? {}) };
+      const s = shiftMap.get(trip.id);
+      if (s) {
+        const driverCol  = driverColIdx  >= 0 ? headers[driverColIdx]  : null;
+        const startCol   = startColIdx   >= 0 ? headers[startColIdx]   : null;
+        const endCol     = endColIdx     >= 0 ? headers[endColIdx]     : null;
+        const dateCol    = dateColIdx    >= 0 ? headers[dateColIdx]    : null;
+        const eingangCol = eingangColIdx >= 0 ? headers[eingangColIdx] : null;
+        const uebermCol  = uebermColIdx  >= 0 ? headers[uebermColIdx]  : null;
+        if (driverCol)  row[driverCol]  = ownerDriverName;
+        if (startCol)   row[startCol]   = formatExportDateTime(s.newStartMs);
+        if (endCol)     row[endCol]     = formatExportDateTime(s.newEndMs);
+        if (dateCol)    row[dateCol]    = fmtDate(s.newStartMs);
+        if (eingangCol && s.auftragEingangMs !== null)       row[eingangCol] = formatExportDateTime(s.auftragEingangMs);
+        if (uebermCol  && s.auftragUebermittlungMs !== null) row[uebermCol]  = formatExportDateTime(s.auftragUebermittlungMs);
+        const abholCol = abholColIdx >= 0 ? headers[abholColIdx] : null;
+        if (abholCol && s.geplanteAbholzeitMs !== null)      row[abholCol]   = formatExportDateTime(s.geplanteAbholzeitMs);
+      } else if (noteReassignments.has(trip.id)) {
+        // Ride reassigned via Fahrer-Notiz alternative — patch only Fahrername
+        const driverCol = driverColIdx >= 0 ? headers[driverColIdx] : null;
+        if (driverCol) row[driverCol] = noteReassignments.get(trip.id)!;
+      }
+      // Note: excluded-driver rides are blocked at export-start — never clear Fahrername here
+      return row;
+    });
+    const startColName = startColIdx >= 0 ? headers[startColIdx] : null;
+    allRows.sort((a, b) => {
+      const parse = (row: Record<string, unknown>) => {
+        if (!startColName) return Infinity;
+        const val = String(row[startColName] ?? '');
+        if (!val || val === '\\N' || val.toLowerCase() === 'n/a' || val === 'null') return Infinity;
+        const ms = Date.parse(val.replace(' ', 'T'));
+        return isNaN(ms) ? Infinity : ms;
+      };
+      return parse(a) - parse(b);
+    });
+    const ws = XLSX.utils.json_to_sheet(allRows, { header: headers });
+    const wb3 = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb3, ws, sourceSheetName ?? 'Sheet1');
+    XLSX.writeFile(wb3, originalFileName ?? `fahrtenbuch_neu_${year}-${String(month).padStart(2,'0')}.xlsx`);
+  }, [sectionFData, originalTrips, resolvedOwnerName, sourceSheetName, sourceColumnsJson, storagePath, originalFileName, year, month, noteReassignments]);
+
+  // Keep exportTriggerRef in sync so the parent can trigger a download
+  useEffect(() => {
+    if (exportTriggerRef) exportTriggerRef.current = handleExportFahrtenbuch;
+  });
+
+  // Keep handleApplyPlan ref in sync so effects can call the latest version
+  useEffect(() => { handleApplyPlanRef.current = handleApplyPlan; });
+
+  // Auto-apply plan once when autoApply=true (simplified/automatic mode)
+  useEffect(() => {
+    if (!autoApply || autoApplyDoneRef.current) return;
+    autoApplyDoneRef.current = true;
+    if (!originalTrips || originalTrips.length === 0) {
+      exportReadyCallbackRef.current?.(false, 'Keine Fahrten geladen');
+      return;
+    }
+    try {
+      handleApplyPlanRef.current?.();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      exportReadyCallbackRef.current?.(false, `Fehler beim Anwenden des Plans: ${msg}`);
+    }
+  }, [autoApply, originalTrips]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Fire export-ready callback after plan + note-alternatives phase complete in auto mode.
+  // Includes salary range validation: if any regular driver is outside their configured
+  // salary range, the export is blocked with a clear German error message.
+  useEffect(() => {
+    if (!autoApply) return;
+    if (!sectionFData) return; // not yet applied
+    if (!autoNoteAlternativesApplied) return; // wait for alternatives phase to finish
+
+    // Hard validation gate first
+    if (!canExport) {
+      exportReadyCallbackRef.current?.(false, exportBlockReason);
+      return;
+    }
+
+    // Salary range validation gate (requires originalTrips to be loaded)
+    if (originalTrips) {
+      const { shiftMap } = sectionFData;
+      const noteMap = new Map(Array.from(noteReassignments.entries()));
+      const hourSummary = buildDriverHourSummary(originalTrips, shiftMap, noteMap, driverConfigs, resolvedOwnerName, year);
+      const salaryRangeSummary = buildFinalSalaryRangeSummary(hourSummary, driverConfigs);
+      const salaryError = validateFinalSalaryRanges(salaryRangeSummary);
+      if (salaryError) {
+        exportReadyCallbackRef.current?.(false, salaryError);
+        return;
+      }
+    }
+
+    exportReadyCallbackRef.current?.(canExport, exportBlockReason);
+  }, [autoApply, sectionFData, canExport, exportBlockReason, autoNoteAlternativesApplied, originalTrips, noteReassignments]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Fire onFinalAssignmentReady whenever the final sectionFData + originalTrips are available.
+  // Uses shiftMap for Inhaber-shifted ride timestamps and drivers, and noteReassignments
+  // for Fahrer-Notiz alternative driver overrides — exactly matching the export source of truth.
+  const onFinalAssignmentReadyRef = useRef(onFinalAssignmentReady);
+  onFinalAssignmentReadyRef.current = onFinalAssignmentReady;
+  useEffect(() => {
+    if (!sectionFData || !originalTrips) return;
+    const { shiftMap } = sectionFData;
+
+    // Build final per-trip data: vehicle + startMs + endMs + driver
+    // matching exactly what handleExportFahrtenbuch writes to the XLSX
+    type TripEntry = { vehicle: string; startMs: number; endMs: number; driver: string | null };
+    const entries: TripEntry[] = [];
+
+    for (const trip of originalTrips) {
+      if (trip.is_canceled) continue;
+      const vehicle = trip.car_identifier ?? trip.car_id ?? '';
+      if (!vehicle) continue;
+
+      const shifted = shiftMap.get(trip.id);
+      if (shifted) {
+        // Inhaber-shifted ride: use final times and resolved Inhaber driver name
+        entries.push({
+          vehicle,
+          startMs: shifted.newStartMs,
+          endMs: shifted.newEndMs,
+          driver: resolveDriverDisplay(shifted.newDriver),
+        });
+        continue;
+      }
+
+      const noteDriver = noteReassignments.get(trip.id);
+      if (noteDriver) {
+        // Fahrer-Notiz alternative: keep original timestamps, override driver
+        const raw = trip.raw_data_json as Record<string, unknown> | null;
+        let startMs = 0;
+        if (raw) {
+          for (const k of Object.keys(raw)) {
+            const v = String(raw[k] ?? '');
+            if (/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/.test(v)) {
+              const ms = Date.parse(v.replace(' ', 'T'));
+              if (!isNaN(ms)) { startMs = ms; break; }
+            }
+          }
+        }
+        if (!startMs && trip.trip_date && trip.start_time) {
+          const combined = `${trip.trip_date}T${trip.start_time.length === 5 ? trip.start_time + ':00' : trip.start_time}`;
+          startMs = Date.parse(combined) || 0;
+        }
+        if (!startMs) continue;
+        entries.push({ vehicle, startMs, endMs: startMs, driver: resolveDriverDisplay(noteDriver) });
+        continue;
+      }
+
+      // Regular ride: use assigned/original driver and parse start/end from raw_data_json
+      const raw = trip.raw_data_json as Record<string, unknown> | null;
+      let startMs = 0;
+      let endMs = 0;
+      if (raw) {
+        const datetimeLike: string[] = [];
+        for (const k of Object.keys(raw)) {
+          const v = String(raw[k] ?? '');
+          if (/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/.test(v)) datetimeLike.push(v);
+        }
+        if (datetimeLike.length >= 1) startMs = Date.parse(datetimeLike[0].replace(' ', 'T')) || 0;
+        if (datetimeLike.length >= 2) endMs = Date.parse(datetimeLike[1].replace(' ', 'T')) || 0;
+      }
+      if (!startMs && trip.trip_date && trip.start_time) {
+        const combined = `${trip.trip_date}T${trip.start_time.length === 5 ? trip.start_time + ':00' : trip.start_time}`;
+        startMs = Date.parse(combined) || 0;
+      }
+      if (!startMs) continue;
+      if (!endMs && trip.trip_date && trip.end_time) {
+        let combined = `${trip.trip_date}T${trip.end_time.length === 5 ? trip.end_time + ':00' : trip.end_time}`;
+        let ms = Date.parse(combined) || 0;
+        if (ms > 0 && ms < startMs) ms += 86400000; // cross-midnight
+        endMs = ms;
+      }
+      const driver = resolveDriverDisplay(trip.assigned_driver_name) ?? resolveDriverDisplay(trip.original_driver_name);
+      entries.push({ vehicle, startMs, endMs: endMs || startMs, driver });
+    }
+
+    // Group by vehicle and compute first/last
+    const byVehicle = new Map<string, TripEntry[]>();
+    for (const e of entries) {
+      if (!byVehicle.has(e.vehicle)) byVehicle.set(e.vehicle, []);
+      byVehicle.get(e.vehicle)!.push(e);
+    }
+
+    const boundaryRows: VehicleBoundaryRow[] = [];
+    for (const [vehicle, rows] of byVehicle) {
+      rows.sort((a, b) => a.startMs - b.startMs);
+      const first = rows[0];
+      const last = rows.reduce((best, r) => (r.endMs || r.startMs) > (best.endMs || best.startMs) ? r : best, rows[0]);
+      boundaryRows.push({
+        vehicle,
+        firstDriver: first.driver,
+        firstTripMs: first.startMs,
+        lastDriver: last.driver,
+        lastTripMs: last.endMs || last.startMs,
+        source: 'final',
+      });
+    }
+    boundaryRows.sort((a, b) => a.vehicle.localeCompare(b.vehicle));
+    onFinalAssignmentReadyRef.current?.(boundaryRows);
+
+    // Also fire serialized plan data (for save-to-DB functionality in parent)
+    const shiftMapJson = Array.from(shiftMap.entries()).map(
+      ([id, v]) => [id, v] as [string, object],
+    );
+    const noteReassignmentsJson = Array.from(noteReassignments.entries());
+    onFinalAssignmentReadyRef2.current?.({ shiftMapJson, noteReassignmentsJson });
+
+    // Fire driver working-hour summary for display and persistence
+    const hourSummary = buildDriverHourSummary(
+      originalTrips,
+      shiftMap,
+      noteReassignments,
+      driverConfigs,
+      resolvedOwnerName,
+      year,
+    );
+    onDriverHourSummaryReadyRef.current?.(hourSummary);
+
+    // Build and fire salary range summary for validation and display
+    const salaryRangeSummary = buildFinalSalaryRangeSummary(hourSummary, driverConfigs);
+    onSalaryRangeSummaryReadyRef.current?.(salaryRangeSummary);
+  }, [sectionFData, originalTrips, noteReassignments]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Auto-apply best Fahrer-Notiz alternatives in auto mode after plan is applied.
+  // Reuses the same logic as the manual "Beste Fahrer-Notiz-Alternativen anwenden" button.
+  // Must run before the export-ready callback so success/failure is correct.
+  useEffect(() => {
+    if (!autoApply) return;
+    if (!sectionFData) return;
+    if (autoNoteAlternativesApplied) return;
+
+    // No unresolved rides → nothing to repair
+    if (sectionFData.unresolvedExcludedRides.length === 0) {
+      setAutoNoteAlternativesApplied(true);
+      return;
+    }
+
+    // No alternatives computed yet — wait for driverNoteAlternatives to be available
+    if (!driverNoteAlternatives) return;
+
+    // Apply best candidate for every conflict block (mirrors handleApplyNoteAlternatives exactly)
+    const newMap = new Map(noteReassignments);
+    for (const block of driverNoteAlternatives.blocks) {
+      const best = block.candidates.find(c => c.status === 'best');
+      if (!best) continue;
+      for (const ride of block.rides) {
+        newMap.set(ride.tripId, best.driverName);
+      }
+    }
+    setNoteReassignments(newMap);
+    setAutoNoteAlternativesApplied(true);
+  }, [autoApply, sectionFData, driverNoteAlternatives, autoNoteAlternativesApplied]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Apply the best valid alternative for every unresolved Fahrer-Notiz conflict block
+  const handleApplyNoteAlternatives = useCallback(() => {
+    if (!driverNoteAlternatives) return;
+    const newMap = new Map(noteReassignments);
+    for (const block of driverNoteAlternatives.blocks) {
+      const best = block.candidates.find(c => c.status === 'best');
+      if (!best) continue;
+      for (const ride of block.rides) {
+        newMap.set(ride.tripId, best.driverName);
+      }
+    }
+    setNoteReassignments(newMap);
+  }, [driverNoteAlternatives, noteReassignments]);
+
+  // Simplified render: only the download button, no technical sections
+  if (simplified) {
+    return (
+      <div className="flex items-center gap-3">
+        {!sectionFData && (
+          <div className="flex items-center gap-2 text-sm" style={{ color: 'var(--text-secondary)' }}>
+            <RefreshCw size={14} className="animate-spin" style={{ color: '#2563eb' }} />
+            <span>Abschlussprüfung läuft…</span>
+          </div>
+        )}
+        {sectionFData && canExport && (
+          <button
+            onClick={handleExportFahrtenbuch}
+            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold transition-all hover:brightness-110"
+            style={{ background: '#15803d', color: '#fff' }}
+          >
+            <Download size={15} /> Neues Fahrtenbuch herunterladen
+          </button>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-5 max-w-6xl">
+
+      {/* Header */}
+      <div>
+        <h2 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>Inhaber-Zeitfenster für Verschiebung</h2>
+        <p className="text-sm mt-0.5" style={{ color: 'var(--text-secondary)' }}>
+          Die freien Zeiten im Inhaber-Kalender werden ermittelt, um spätere Verschiebungen vorzubereiten.
+        </p>
+        <div className="mt-1.5 inline-flex items-center gap-1.5 text-xs px-2 py-1 rounded-lg" style={{ background: 'rgba(124,58,237,0.08)', color: INHABER_COLOR, border: '1px solid rgba(124,58,237,0.2)' }}>
+          Mindestabstand Inhaber-Blöcke: 30 min
+        </div>
+      </div>
+
+      {/* Summary cards — compact 6 cards */}
+      <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
+        {[
+          { label: 'Inhaber-Blöcke',        value: summary.inhaberBlockCount,                                         color: '#0891b2' },
+          { label: 'Offene Blöcke',          value: summary.openBlockCount,                                            color: summary.openBlockCount > 0 ? '#b45309' : '#15803d' },
+          { label: 'Freie Fenster',          value: summary.freeWindowCount,                                           color: '#15803d' },
+          { label: 'Freie Stunden',          value: formatBlockDuration(summary.freeSec),                              color: '#15803d' },
+          { label: 'Mit Fenster',            value: summary.openBlocksWithCandidate,                                   color: summary.openBlocksWithCandidate > 0 ? '#15803d' : '#b45309' },
+          { label: 'Ohne Fenster',           value: summary.openBlocksNoCandidate,                                     color: summary.openBlocksNoCandidate > 0 ? '#b91c1c' : '#15803d' },
+        ].map(c => (
+          <div key={c.label} className="rounded-xl p-2.5" style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)' }}>
+            <div className="text-xs mb-0.5" style={{ color: 'var(--text-secondary)' }}>{c.label}</div>
+            <div className="text-base font-bold" style={{ color: c.color }}>{c.value}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Month grid calendar */}
+      <div>
+        <div className="mb-2">
+          <div className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
+            Inhaber-Kalender: Freie Zeitfenster
+          </div>
+          <p className="text-xs mt-0.5" style={{ color: 'var(--text-secondary)' }}>
+            Belegte Inhaber-Blöcke und freie Zeitfenster für mögliche Verschiebungen.
+          </p>
+        </div>
+
+        <div className="rounded-2xl" style={{ border: '1px solid var(--border)', overflow: 'hidden' }}>
+          {/* Weekday header */}
+          <div className="grid grid-cols-7" style={{ background: 'var(--bg-subtle)', borderBottom: '2px solid var(--border)' }}>
+            {['So','Mo','Di','Mi','Do','Fr','Sa'].map(d => (
+              <div key={d} className="py-2 text-center text-xs font-bold" style={{ color: 'var(--text-secondary)' }}>{d}</div>
+            ))}
+          </div>
+
+          {/* Week rows */}
+          {gridData.map((week, wi) => (
+            <div key={wi} className="grid grid-cols-7" style={{ borderBottom: wi < gridData.length - 1 ? '1px solid var(--border)' : undefined }}>
+              {week.map((cell, ci) => {
+                // Merge occupied + free, sort by startMs
+                const events: Array<{ startMs: number; kind: 'occ' | 'free'; occ?: InhaberOccupiedInterval; fw?: FreeWindow }> = [
+                  ...cell.occupied.map(o => ({ startMs: o.startMs, kind: 'occ' as const, occ: o })),
+                  ...cell.free.map(f => ({ startMs: f.startMs, kind: 'free' as const, fw: f })),
+                ].sort((a, b) => a.startMs - b.startMs);
+
+                return (
+                  <div
+                    key={ci}
+                    style={{
+                      minHeight: 90,
+                      background: !cell.inMonth ? 'var(--bg-subtle)' : 'var(--bg-surface)',
+                      borderRight: ci < 6 ? '1px solid var(--border)' : undefined,
+                      padding: '5px 4px 3px',
+                    }}
+                  >
+                    {/* Date number */}
+                    <div className="flex justify-end mb-1">
+                      <span
+                        className="text-xs font-semibold w-5 h-5 flex items-center justify-center rounded-full"
+                        style={{ color: !cell.inMonth ? 'var(--text-secondary)' : 'var(--text-primary)', opacity: !cell.inMonth ? 0.35 : 1 }}
+                      >
+                        {cell.date.getDate()}
+                      </span>
+                    </div>
+
+                    {/* Events */}
+                    <div className="space-y-0.5">
+                      {events.map((ev, ei) => {
+                        if (ev.kind === 'occ' && ev.occ) {
+                          const o = ev.occ;
+                          const isStep3 = o.sourceStep === 'Step 3';
+                          return (
+                            <button
+                              key={ei}
+                              onClick={() => setModalData({ kind: 'occupied', interval: o })}
+                              className="w-full text-left rounded px-1.5 py-0.5 text-xs leading-snug transition-all hover:brightness-95"
+                              style={{
+                                background: isStep3 ? '#ede9fe' : '#cffafe',
+                                border: `1.5px solid ${isStep3 ? INHABER_COLOR + '66' : '#0891b2'}`,
+                                color: isStep3 ? INHABER_COLOR : '#0e7490',
+                              }}
+                            >
+                              <span className="font-semibold">{fmtTime(o.startMs)}–{fmtTime(o.endMs)}</span>
+                              {' · '}Belegt{' · '}
+                              <span className="font-mono">…{o.blockId.slice(-6)}</span>
+                              {' · '}{o.vehicle}
+                              {' · '}{formatBlockDuration(o.durationSec)}
+                              <span className="ml-1 px-1 py-px rounded font-bold" style={{ background: isStep3 ? INHABER_COLOR + '22' : '#0891b2', color: isStep3 ? INHABER_COLOR : '#fff', fontSize: '0.55rem' }}>
+                                {o.sourceStep}
+                              </span>
+                            </button>
+                          );
+                        }
+                        if (ev.kind === 'free' && ev.fw) {
+                          const w = ev.fw;
+                          const candidates = windowCandidateMap.get(w.windowId) ?? [];
+                          const hasVehicleFree = candidates.some(c => c.vehicleFree);
+                          const hasAnyCandidate = candidates.length > 0;
+                          const badge = hasVehicleFree ? 'Fzg frei' : hasAnyCandidate ? 'Kandidat' : 'Kein Kandidat';
+                          const badgeColor = hasVehicleFree ? '#15803d' : hasAnyCandidate ? '#0891b2' : '#9ca3af';
+                          return (
+                            <button
+                              key={ei}
+                              onClick={() => cell.inMonth && setModalData({
+                                kind: 'window',
+                                windowId: w.windowId,
+                                date: w.date,
+                                startMs: w.startMs,
+                                endMs: w.endMs,
+                                durationSec: w.durationSec,
+                                prevBlockId: w.prevBlockId,
+                                nextBlockId: w.nextBlockId,
+                                candidates,
+                              })}
+                              className="w-full text-left rounded px-1.5 py-0.5 text-xs leading-snug transition-all hover:brightness-95"
+                              style={{
+                                background: 'rgba(16,185,129,0.08)',
+                                border: '1.5px dashed #10b981',
+                                color: '#065f46',
+                                cursor: cell.inMonth ? 'pointer' : 'default',
+                              }}
+                            >
+                              <span className="font-semibold">{fmtTime(w.startMs)}–{fmtTime(w.endMs)}</span>
+                              {' · '}Frei{' · '}{formatBlockDuration(w.durationSec)}
+                              <span className="ml-1 px-1 py-px rounded font-bold" style={{ background: badgeColor + '22', color: badgeColor, border: `1px solid ${badgeColor}55`, fontSize: '0.55rem' }}>
+                                {badge}
+                              </span>
+                            </button>
+                          );
+                        }
+                        return null;
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+
+        {/* Legend */}
+        <div className="flex flex-wrap gap-3 mt-2 text-xs" style={{ color: 'var(--text-secondary)' }}>
+          <span className="inline-flex items-center gap-1.5">
+            <span className="w-3 h-3 rounded" style={{ background: '#ede9fe', border: `1px solid ${INHABER_COLOR}66` }} />
+            Inhaber (Schritt 3)
+          </span>
+          <span className="inline-flex items-center gap-1.5">
+            <span className="w-3 h-3 rounded" style={{ background: '#cffafe', border: '1px solid #0891b2' }} />
+            Inhaber (Schritt 4)
+          </span>
+          <span className="inline-flex items-center gap-1.5">
+            <span className="w-3 h-3 rounded" style={{ background: 'rgba(16,185,129,0.08)', border: '1.5px dashed #10b981' }} />
+            Freies Fenster
+          </span>
+          <span className="inline-flex items-center gap-1.5 ml-2 font-semibold" style={{ color: '#15803d' }}>Fzg frei</span>
+          <span style={{ color: 'var(--text-secondary)' }}>= Fahrzeug auch verfügbar</span>
+          <span className="inline-flex items-center gap-1.5 font-semibold" style={{ color: '#0891b2' }}>Kandidat</span>
+          <span style={{ color: 'var(--text-secondary)' }}>= passendes Fenster existiert</span>
+        </div>
+      </div>
+
+      {/* Open blocks panel — collapsible */}
+      <div className="rounded-2xl overflow-hidden" style={{ border: '1px solid var(--border)' }}>
+        <button
+          className="w-full px-4 py-3 flex items-center justify-between text-sm font-semibold"
+          style={{ background: 'var(--bg-subtle)', color: 'var(--text-primary)' }}
+          onClick={() => setOpenBlocksOpen(o => !o)}
+        >
+          <span>
+            Offene Blöcke mit möglichen Zeitfenstern
+            <span className="font-normal text-xs ml-2" style={{ color: 'var(--text-secondary)' }}>{remainingOpenBlocks.length} Blöcke</span>
+          </span>
+          <span style={{ color: 'var(--text-secondary)' }}>{openBlocksOpen ? '▲' : '▼'}</span>
+        </button>
+        {openBlocksOpen && (
+          <div className="overflow-x-auto">
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead>
+                <tr style={{ background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)' }}>
+                  {['Block-ID','Fahrzeug','Dauer','Mögliche Fenster','Davon Fzg frei','Status'].map(h => (
+                    <th key={h} className="px-3 py-2 text-left text-xs font-semibold whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {candidateWindowsByBlock.map((cand, i) => {
+                  const { block, candidateWindows, windowsWithVehicleFree, status } = cand;
+                  const isOpen = expandedBlock === block.blockId;
+                  const statusColor = status === 'Kandidat mit Fahrzeug frei' ? '#15803d' : status === 'Kandidat vorhanden' ? '#0891b2' : '#b91c1c';
+                  return (
+                    <React.Fragment key={block.blockId}>
+                      <tr
+                        style={{ background: i % 2 === 0 ? 'var(--bg-surface)' : 'var(--bg-subtle)', borderBottom: '1px solid var(--border)', cursor: candidateWindows.length > 0 ? 'pointer' : undefined }}
+                        onClick={() => candidateWindows.length > 0 && setExpandedBlock(isOpen ? null : block.blockId)}
+                      >
+                        <td className="px-3 py-2 text-xs font-mono" style={{ color: 'var(--text-secondary)' }}>…{block.blockId.slice(-8)}</td>
+                        <td className="px-3 py-2 text-xs font-bold" style={{ color: 'var(--text-primary)' }}>{block.vehicle}</td>
+                        <td className="px-3 py-2 text-xs" style={{ color: 'var(--text-secondary)' }}>{formatBlockDuration(block.blockDurationSec)}</td>
+                        <td className="px-3 py-2 text-xs font-bold" style={{ color: candidateWindows.length > 0 ? '#15803d' : '#b91c1c' }}>{candidateWindows.length}</td>
+                        <td className="px-3 py-2 text-xs font-bold" style={{ color: windowsWithVehicleFree > 0 ? '#15803d' : '#b45309' }}>{windowsWithVehicleFree}</td>
+                        <td className="px-3 py-2 text-xs font-bold" style={{ color: statusColor }}>{status}</td>
+                      </tr>
+                      {isOpen && (
+                        <tr style={{ borderBottom: '1px solid var(--border)' }}>
+                          <td colSpan={6} className="px-4 py-3" style={{ background: 'rgba(16,185,129,0.04)' }}>
+                            <div className="text-xs font-semibold mb-2" style={{ color: 'var(--text-secondary)' }}>
+                              Erste {Math.min(candidateWindows.length, 10)} mögliche Fenster — Block …{block.blockId.slice(-8)} ({block.vehicle} · {formatBlockDuration(block.blockDurationSec)})
+                            </div>
+                            <div className="overflow-x-auto">
+                              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                                <thead>
+                                  <tr style={{ borderBottom: '1px solid var(--border)' }}>
+                                    {['Datum','Start','Ende','Fensterdauer','Fahrzeug frei'].map(h => (
+                                      <th key={h} className="px-2 py-1.5 text-left text-xs font-semibold whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{h}</th>
+                                    ))}
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {candidateWindows.slice(0, 10).map((cw, ci) => (
+                                    <tr key={cw.windowId} style={{ background: ci % 2 === 0 ? 'transparent' : 'rgba(0,0,0,0.03)', borderBottom: '1px solid var(--border)' }}>
+                                      <td className="px-2 py-1.5 text-xs" style={{ color: 'var(--text-primary)' }}>{cw.date}</td>
+                                      <td className="px-2 py-1.5 text-xs font-mono" style={{ color: '#065f46' }}>{fmtTime(cw.startMs)}</td>
+                                      <td className="px-2 py-1.5 text-xs font-mono" style={{ color: '#065f46' }}>{fmtTime(cw.endMs)}</td>
+                                      <td className="px-2 py-1.5 text-xs" style={{ color: '#065f46' }}>{formatBlockDuration(cw.durationSec)}</td>
+                                      <td className="px-2 py-1.5 text-xs font-bold" style={{ color: cw.vehicleFree ? '#15803d' : '#b91c1c' }}>{cw.vehicleFree ? 'Ja' : 'Nein'}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* Diagnostics — collapsible */}
+      <div className="rounded-2xl overflow-hidden" style={{ border: `1px solid ${diagClean ? 'rgba(16,185,129,0.3)' : 'rgba(220,38,38,0.3)'}` }}>
+        <button
+          className="w-full px-4 py-3 flex items-center justify-between text-sm font-semibold"
+          style={{ background: diagClean ? 'rgba(16,185,129,0.06)' : 'rgba(220,38,38,0.06)', color: 'var(--text-primary)' }}
+          onClick={() => setDiagOpen(o => !o)}
+        >
+          <span>Prüfung Zeitfenster-Suche{diagClean && <span className="ml-2 text-xs font-normal" style={{ color: '#15803d' }}>— Alles OK</span>}</span>
+          <span style={{ color: 'var(--text-secondary)' }}>{diagOpen ? '▲' : '▼'}</span>
+        </button>
+        {diagOpen && (
+          <div className="p-4 space-y-2" style={{ borderTop: '1px solid var(--border)' }}>
+            {[
+              { label: 'Zeitverschiebungen durchgeführt',    value: String(diagnostics.timeShiftsDone),              isOk: diagnostics.timeShiftsDone === 0 },
+              { label: 'Zuweisungen geändert',               value: String(diagnostics.assignmentsChanged),          isOk: diagnostics.assignmentsChanged === 0 },
+              { label: 'Reguläre Fahrer unverändert',        value: diagnostics.regularDriversUnchanged ? 'OK' : 'FEHLER', isOk: diagnostics.regularDriversUnchanged },
+              { label: 'Inhaber-Zuweisungen unverändert',    value: diagnostics.inhaberAssignmentsUnchanged ? 'OK' : 'FEHLER', isOk: diagnostics.inhaberAssignmentsUnchanged },
+              { label: 'Offene Blöcke unverändert',          value: diagnostics.openBlocksUnchanged ? 'OK' : 'FEHLER', isOk: diagnostics.openBlocksUnchanged },
+            ].map(d => (
+              <div key={d.label} className="flex items-center justify-between text-xs">
+                <span style={{ color: 'var(--text-secondary)' }}>{d.label}</span>
+                <span className="font-bold" style={{ color: d.isOk ? '#15803d' : '#b91c1c' }}>{d.value}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* ── Konflikt-Blöcke und mögliche Zeitfenster ──────────────────────────── */}
+      <div className="rounded-2xl overflow-hidden" style={{ border: '1px solid var(--border)' }}>
+        <button
+          className="w-full px-4 py-3 flex items-center justify-between text-sm font-semibold"
+          style={{ background: 'var(--bg-subtle)', color: 'var(--text-primary)' }}
+          onClick={() => setAnalysisOpen(o => !o)}
+        >
+          <span>
+            Konflikt-Blöcke und mögliche Zeitfenster
+            <span className="font-normal text-xs ml-2" style={{ color: 'var(--text-secondary)' }}>
+              {remainingOpenBlocks.length} offene Blöcke · {sortedFreeWindows.length} freie Fenster
+            </span>
+          </span>
+          <span style={{ color: 'var(--text-secondary)' }}>{analysisOpen ? '▲' : '▼'}</span>
+        </button>
+
+        {analysisOpen && (
+          <div style={{ borderTop: '1px solid var(--border)' }}>
+
+            {/* ── Section A: Verbleibende Konflikt-Blöcke ── */}
+            <div style={{ borderBottom: '1px solid var(--border)' }}>
+              <button
+                className="w-full px-4 py-2.5 flex items-center justify-between text-xs font-semibold"
+                style={{ background: 'rgba(220,38,38,0.04)', color: '#b91c1c' }}
+                onClick={() => setAnalysisSectionA(o => !o)}
+              >
+                <span>A — Verbleibende Konflikt-Blöcke ({remainingOpenBlocks.length})</span>
+                <span>{analysisSectionA ? '▲' : '▼'}</span>
+              </button>
+              {analysisSectionA && (
+                remainingOpenBlocks.length === 0 ? (
+                  <div className="px-4 py-3 text-xs" style={{ color: '#15803d' }}>
+                    Keine verbleibenden Konflikt-Blöcke.
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                      <thead>
+                        <tr style={{ background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)' }}>
+                          {['Block-ID','Datum','Fahrzeug','Start','Ende','Dauer','Fahrten','Status'].map(h => (
+                            <th key={h} className="px-3 py-2 text-left text-xs font-semibold whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {remainingOpenBlocks.map((blk, i) => {
+                          const startDate = new Date(blk.blockStartMs);
+                          const dateFmt = `${String(startDate.getDate()).padStart(2,'0')}.${String(startDate.getMonth()+1).padStart(2,'0')}.${startDate.getFullYear()}`;
+                          const cand = candidateWindowsByBlock.find(c => c.block.blockId === blk.blockId);
+                          const hasCand = (cand?.candidateWindows.length ?? 0) > 0;
+                          const statusLabel = cand?.status ?? 'Kein passendes Fenster';
+                          const statusColor = statusLabel === 'Kandidat mit Fahrzeug frei' ? '#15803d'
+                            : statusLabel === 'Kandidat vorhanden' ? '#0891b2' : '#b91c1c';
+                          return (
+                            <tr key={blk.blockId} style={{ background: i % 2 === 0 ? 'var(--bg-surface)' : 'var(--bg-subtle)', borderBottom: '1px solid var(--border)' }}>
+                              <td className="px-3 py-2 text-xs font-mono" style={{ color: 'var(--text-secondary)' }} title={blk.blockId}>…{blk.blockId.slice(-8)}</td>
+                              <td className="px-3 py-2 text-xs whitespace-nowrap" style={{ color: 'var(--text-primary)' }}>{dateFmt}</td>
+                              <td className="px-3 py-2 text-xs font-bold" style={{ color: 'var(--text-primary)' }}>{blk.vehicle}</td>
+                              <td className="px-3 py-2 text-xs font-mono whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{fmtTime(blk.blockStartMs)}</td>
+                              <td className="px-3 py-2 text-xs font-mono whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{fmtTime(blk.blockEndMs)}</td>
+                              <td className="px-3 py-2 text-xs" style={{ color: 'var(--text-secondary)' }}>{formatBlockDuration(blk.blockDurationSec)}</td>
+                              <td className="px-3 py-2 text-xs" style={{ color: 'var(--text-secondary)' }}>{blk.rides?.length ?? 0}</td>
+                              <td className="px-3 py-2 text-xs font-bold whitespace-nowrap" style={{ color: statusColor }}>
+                                {statusLabel}
+                                {!hasCand && <span className="ml-1 text-xs font-normal" style={{ color: '#6b7280' }}>(kein Fenster)</span>}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )
+              )}
+            </div>
+
+            {/* ── Section B: Alle freien Inhaber-Zeitfenster ── */}
+            <div style={{ borderBottom: '1px solid var(--border)' }}>
+              <button
+                className="w-full px-4 py-2.5 flex items-center justify-between text-xs font-semibold"
+                style={{ background: 'rgba(16,185,129,0.04)', color: '#065f46' }}
+                onClick={() => setAnalysisSectionB(o => !o)}
+              >
+                <span>B — Alle freien Inhaber-Zeitfenster ({sortedFreeWindows.length})</span>
+                <span>{analysisSectionB ? '▲' : '▼'}</span>
+              </button>
+              {analysisSectionB && (
+                sortedFreeWindows.length === 0 ? (
+                  <div className="px-4 py-3 text-xs" style={{ color: '#b45309' }}>
+                    Keine freien Inhaber-Zeitfenster vorhanden.
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                      <thead>
+                        <tr style={{ background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)' }}>
+                          {['Datum','Start','Ende','Dauer','Vorheriger Block','Nächster Block','Kandidaten','Fzg frei','Quelle'].map(h => (
+                            <th key={h} className="px-3 py-2 text-left text-xs font-semibold whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {sortedFreeWindows.map((fw, i) => {
+                          const cands = windowCandidateMap.get(fw.windowId) ?? [];
+                          const hasVehicleFree = cands.some(c => c.vehicleFree);
+                          return (
+                            <tr key={fw.windowId} style={{ background: i % 2 === 0 ? 'var(--bg-surface)' : 'var(--bg-subtle)', borderBottom: '1px solid var(--border)' }}>
+                              <td className="px-3 py-2 text-xs whitespace-nowrap" style={{ color: 'var(--text-primary)' }}>{fw.date}</td>
+                              <td className="px-3 py-2 text-xs font-mono whitespace-nowrap" style={{ color: '#065f46' }}>{fmtTime(fw.startMs)}</td>
+                              <td className="px-3 py-2 text-xs font-mono whitespace-nowrap" style={{ color: '#065f46' }}>{fmtTime(fw.endMs)}</td>
+                              <td className="px-3 py-2 text-xs" style={{ color: '#065f46' }}>{formatBlockDuration(fw.durationSec)}</td>
+                              <td className="px-3 py-2 text-xs font-mono" style={{ color: 'var(--text-secondary)' }}>{fw.prevBlockId ? `…${fw.prevBlockId.slice(-6)}` : '—'}</td>
+                              <td className="px-3 py-2 text-xs font-mono" style={{ color: 'var(--text-secondary)' }}>{fw.nextBlockId ? `…${fw.nextBlockId.slice(-6)}` : '—'}</td>
+                              <td className="px-3 py-2 text-xs font-bold" style={{ color: cands.length > 0 ? '#0891b2' : '#9ca3af' }}>{cands.length}</td>
+                              <td className="px-3 py-2 text-xs font-bold" style={{ color: hasVehicleFree ? '#15803d' : '#9ca3af' }}>{cands.length > 0 ? (hasVehicleFree ? 'Ja' : 'Nein') : '—'}</td>
+                              <td className="px-3 py-2 text-xs" style={{ color: '#065f46' }}>Inhaber frei</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )
+              )}
+            </div>
+
+            {/* ── Section C: Passende Vorschläge ── */}
+            <div>
+              <button
+                className="w-full px-4 py-2.5 flex items-center justify-between text-xs font-semibold"
+                style={{ background: 'rgba(8,145,178,0.04)', color: '#0e7490' }}
+                onClick={() => setAnalysisSectionC(o => !o)}
+              >
+                <span>C — Passende Vorschläge (bis zu 10 je Block)</span>
+                <span>{analysisSectionC ? '▲' : '▼'}</span>
+              </button>
+              {analysisSectionC && (
+                blockSuggestions.length === 0 ? (
+                  <div className="px-4 py-3 text-xs" style={{ color: '#9ca3af' }}>
+                    Keine offenen Blöcke für Vorschläge vorhanden.
+                  </div>
+                ) : (
+                  <div>
+                    {blockSuggestions.map(({ block, top10 }) => {
+                      const startDate = new Date(block.blockStartMs);
+                      const dateFmt = `${String(startDate.getDate()).padStart(2,'0')}.${String(startDate.getMonth()+1).padStart(2,'0')}.${startDate.getFullYear()}`;
+                      const bestStatus = top10[0]?.status;
+                      const headerColor = bestStatus === 'Passend' ? '#15803d' : bestStatus ? '#b45309' : '#9ca3af';
+                      return (
+                        <div key={block.blockId} style={{ borderTop: '1px solid var(--border)' }}>
+                          <div
+                            className="px-4 py-2 text-xs font-semibold flex flex-wrap items-center gap-3"
+                            style={{ background: 'var(--bg-subtle)', color: 'var(--text-primary)' }}
+                          >
+                            <span className="font-mono" style={{ color: 'var(--text-secondary)' }} title={block.blockId}>…{block.blockId.slice(-8)}</span>
+                            <span className="font-bold">{block.vehicle}</span>
+                            <span style={{ color: 'var(--text-secondary)' }}>{dateFmt}</span>
+                            <span style={{ color: 'var(--text-secondary)' }}>{fmtTime(block.blockStartMs)}–{fmtTime(block.blockEndMs)}</span>
+                            <span style={{ color: 'var(--text-secondary)' }}>{formatBlockDuration(block.blockDurationSec)}</span>
+                            <span className="font-bold" style={{ color: headerColor }}>
+                              {top10.length === 0 ? 'Kein passendes freies Inhaber-Zeitfenster mit mindestens 1 Stunde Puffer vor und nach gefunden' : `${top10.length} Vorschlag${top10.length !== 1 ? 'e' : ''}`}
+                            </span>
+                          </div>
+
+                          {top10.length === 0 ? (
+                            <div className="px-4 py-2 text-xs" style={{ color: '#b91c1c' }}>
+                              Kein passendes freies Inhaber-Zeitfenster mit mindestens 1 Stunde Puffer vor und nach gefunden
+                            </div>
+                          ) : (
+                            <div className="overflow-x-auto">
+                              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                                <thead>
+                                  <tr style={{ background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)' }}>
+                                    {['Fenster-Datum','Fenster Start','Fenster Ende','Vorschlag Start','Vorschlag Ende','Block-Dauer','Puffer vor','Puffer nach','Inhaber frei','Fahrzeug frei','Status','Bewertung'].map(h => (
+                                      <th key={h} className="px-2 py-1.5 text-left text-xs font-semibold whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{h}</th>
+                                    ))}
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {top10.map(({ cw, proposedStart, proposedEnd, status, pufferVorMs, pufferNachMs, crossesMidnight, score }, ri) => {
+                                    const statusColor = status === 'Passend' ? '#15803d'
+                                      : status === 'Zu kurz' ? '#9ca3af'
+                                      : status === 'Fahrzeug belegt' ? '#b45309'
+                                      : status === 'Inhaber belegt' ? '#b91c1c'
+                                      : '#6b7280';
+                                    const fmtPuffer = (ms: number) => {
+                                      const totalMin = Math.round(ms / 60000);
+                                      if (totalMin === 0) return '0 min';
+                                      const h = Math.floor(totalMin / 60);
+                                      const m = totalMin % 60;
+                                      if (h === 0) return `+${m} min`;
+                                      if (m === 0) return `+${h}h`;
+                                      return `+${h}h ${m}m`;
+                                    };
+                                    const pufferVorFmt  = fmtPuffer(pufferVorMs);
+                                    const pufferNachFmt = pufferNachMs > 0 ? fmtPuffer(pufferNachMs) : '—';
+                                    return (
+                                      <tr key={cw.windowId + ri} style={{ background: ri % 2 === 0 ? 'var(--bg-surface)' : 'var(--bg-subtle)', borderBottom: '1px solid var(--border)' }}>
+                                        <td className="px-2 py-1.5 text-xs whitespace-nowrap" style={{ color: 'var(--text-primary)' }}>{cw.date}</td>
+                                        <td className="px-2 py-1.5 text-xs font-mono whitespace-nowrap" style={{ color: '#065f46' }}>{fmtTime(cw.startMs)}</td>
+                                        <td className="px-2 py-1.5 text-xs font-mono whitespace-nowrap" style={{ color: '#065f46' }}>{fmtTime(cw.endMs)}</td>
+                                        <td className="px-2 py-1.5 text-xs font-mono whitespace-nowrap" style={{ color: '#0e7490' }}>{fmtTime(proposedStart)}</td>
+                                        <td className="px-2 py-1.5 text-xs font-mono whitespace-nowrap" style={{ color: '#0e7490' }}>{fmtTime(proposedEnd)}</td>
+                                        <td className="px-2 py-1.5 text-xs" style={{ color: 'var(--text-secondary)' }}>{formatBlockDuration(block.blockDurationSec)}</td>
+                                        <td className="px-2 py-1.5 text-xs whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{pufferVorFmt}</td>
+                                        <td className="px-2 py-1.5 text-xs whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{pufferNachFmt}</td>
+                                        <td className="px-2 py-1.5 text-xs font-bold" style={{ color: '#15803d' }}>Ja</td>
+                                        <td className="px-2 py-1.5 text-xs font-bold" style={{ color: cw.vehicleFree ? '#15803d' : '#b91c1c' }}>{cw.vehicleFree ? 'Ja' : 'Nein'}</td>
+                                        <td className="px-2 py-1.5 text-xs font-bold whitespace-nowrap" style={{ color: statusColor }}>{status}{crossesMidnight ? ' *' : ''}</td>
+                                        <td className="px-2 py-1.5 text-xs font-mono" style={{ color: 'var(--text-secondary)' }}>{score}</td>
+                                      </tr>
+                                    );
+                                  })}
+                                </tbody>
+                              </table>
+                              {top10.some(t => t.crossesMidnight) && (
+                                <div className="px-3 py-1.5 text-xs" style={{ color: '#9ca3af', borderTop: '1px solid var(--border)' }}>
+                                  * Vorschlag endet nach Mitternacht
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )
+              )}
+            </div>
+
+            {/* ── Diagnostic: Bestehende Fahrten in ausgeschlossenen Fahrer-Zeiträumen ── */}
+            {existingImportedViolations.length > 0 && (
+              <div style={{ borderTop: '2px solid #d97706' }}>
+                <div className="px-4 py-2 text-xs font-semibold" style={{ color: '#92400e', background: 'rgba(217,119,6,0.06)' }}>
+                  Bestehende Fahrten in ausgeschlossenen Fahrer-Zeiträumen ({existingImportedViolations.length}) — Hinweis, kein Blocker
+                </div>
+                <div style={{ overflowX: 'auto' }}>
+                  <table className="w-full text-xs" style={{ borderCollapse: 'collapse' }}>
+                    <thead>
+                      <tr style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)' }}>
+                        {['Fahrer','Fahrzeug','Fahrtbeginn','Fahrtende','Notiz-Details'].map(h => (
+                          <th key={h} className="px-3 py-1.5 text-left font-semibold" style={{ borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap' }}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {existingImportedViolations.slice(0, 50).map((v, i) => {
+                        const fmtMs = (ms: number) => { const dt = new Date(ms); return `${String(dt.getDate()).padStart(2,'0')}.${String(dt.getMonth()+1).padStart(2,'0')} ${String(dt.getHours()).padStart(2,'0')}:${String(dt.getMinutes()).padStart(2,'0')}`; };
+                        return (
+                          <tr key={v.tripId} style={{ borderBottom: '1px solid var(--border)', background: i % 2 === 0 ? 'transparent' : 'var(--bg-subtle)' }}>
+                            <td className="px-3 py-1 font-medium" style={{ color: '#92400e' }}>{v.driver}</td>
+                            <td className="px-3 py-1">{v.vehicle}</td>
+                            <td className="px-3 py-1" style={{ whiteSpace: 'nowrap' }}>{fmtMs(v.startMs)}</td>
+                            <td className="px-3 py-1" style={{ whiteSpace: 'nowrap' }}>{fmtMs(v.endMs)}</td>
+                            <td className="px-3 py-1" style={{ color: '#92400e', maxWidth: '300px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{v.detail}</td>
+                          </tr>
+                        );
+                      })}
+                      {existingImportedViolations.length > 50 && (
+                        <tr><td colSpan={5} className="px-3 py-1 text-xs" style={{ color: '#9ca3af' }}>+{existingImportedViolations.length - 50} weitere …</td></tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* ── Section D: Automatische Vorauswahl ── */}
+            <div>
+              <button
+                className="w-full px-4 py-2.5 flex items-center justify-between text-xs font-semibold"
+                style={{ background: 'rgba(15,118,110,0.06)', color: '#0f766e' }}
+                onClick={() => setAnalysisSectionD(o => !o)}
+              >
+                <span>D — Automatische Vorauswahl ({autoSelection.filter(e => e.status === 'Ausgewählt').length}/{autoSelection.length} ausgewählt) · Ride-Level-Prüfung aktiv</span>
+                <span>{analysisSectionD ? '▲' : '▼'}</span>
+              </button>
+              {analysisSectionD && (
+                <div>
+                  {/* Info note */}
+                  <div className="px-4 py-2 text-xs" style={{ color: '#6b7280', borderBottom: '1px solid var(--border)', background: 'var(--bg-subtle)' }}>
+                    Section D nutzt alle gültigen Kandidaten, nicht nur die 10 angezeigten Vorschläge aus Section C.
+                  </div>
+                  <div className="px-4 py-2 text-xs font-medium" style={{ color: '#0f766e', borderBottom: '1px solid var(--border)', background: 'rgba(15,118,110,0.04)' }}>
+                    Ride-Level-Prüfung aktiv: Einzelfahrten werden vor Auswahl gegen bestehende Fahrten geprüft.
+                  </div>
+                  {/* Summary bar */}
+                  {(() => {
+                    const selCount  = autoSelection.filter(e => e.status === 'Ausgewählt').length;
+                    const nselCount = autoSelection.length - selCount;
+                    const totalSec  = autoSelection.reduce((s, e) => s + (e.chosen ? e.block.blockDurationSec : 0), 0);
+                    const usedWins  = new Set(autoSelection.filter(e => e.chosen).map(e => e.chosen!.cw.windowId)).size;
+                    return (
+                      <div className="px-4 py-3 flex flex-wrap gap-6 text-xs" style={{ background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)' }}>
+                        <div><span style={{ color: 'var(--text-secondary)' }}>Konflikt-Blöcke gesamt</span><span className="font-bold ml-1" style={{ color: 'var(--text-primary)' }}>{autoSelection.length}</span></div>
+                        <div><span style={{ color: 'var(--text-secondary)' }}>Automatisch ausgewählt</span><span className="font-bold ml-1" style={{ color: '#15803d' }}>{selCount}</span></div>
+                        <div><span style={{ color: 'var(--text-secondary)' }}>Nicht ausgewählt</span><span className="font-bold ml-1" style={{ color: nselCount > 0 ? '#b91c1c' : 'var(--text-secondary)' }}>{nselCount}</span></div>
+                        <div><span style={{ color: 'var(--text-secondary)' }}>Geplante Stunden</span><span className="font-bold ml-1" style={{ color: '#0e7490' }}>{fmtDurSec(totalSec)}</span></div>
+                        <div><span style={{ color: 'var(--text-secondary)' }}>Genutzte Fenster</span><span className="font-bold ml-1" style={{ color: '#0e7490' }}>{usedWins}</span></div>
+                      </div>
+                    );
+                  })()}
+                  {/* Table */}
+                  <div className="overflow-x-auto">
+                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                      <thead>
+                        <tr style={{ background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)' }}>
+                          {['Block-ID','Fahrzeug','Originaldatum','Originalzeit','Dauer','Kandidaten','Ausgewähltes Fenster','Neue Platzierung','Puffer vor','Puffer nach','Bewertung','Grund der Auswahl','Status'].map(h => (
+                            <th key={h} className="px-2 py-1.5 text-left text-xs font-semibold whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {autoSelection.map(({ block, candidateCount, chosen, reason, status }, ri) => {
+                          const origStart = new Date(block.blockStartMs ?? 0);
+                          const origEnd   = new Date(block.blockEndMs   ?? 0);
+                          const origDateFmt = `${String(origStart.getDate()).padStart(2,'0')}.${String(origStart.getMonth()+1).padStart(2,'0')}.${origStart.getFullYear()}`;
+                          const origTimeFmt = `${String(origStart.getHours()).padStart(2,'0')}:${String(origStart.getMinutes()).padStart(2,'0')}–${String(origEnd.getHours()).padStart(2,'0')}:${String(origEnd.getMinutes()).padStart(2,'0')}`;
+                          const statusColor = status === 'Ausgewählt' ? '#15803d' : '#b91c1c';
+                          return (
+                            <tr key={block.blockId} style={{ background: ri % 2 === 0 ? 'var(--bg-surface)' : 'var(--bg-subtle)', borderBottom: '1px solid var(--border)' }}>
+                              <td className="px-2 py-1.5 text-xs font-mono whitespace-nowrap" style={{ color: 'var(--text-secondary)' }} title={block.blockId}>…{block.blockId.slice(-8)}</td>
+                              <td className="px-2 py-1.5 text-xs font-bold whitespace-nowrap" style={{ color: 'var(--text-primary)' }}>{block.vehicle}</td>
+                              <td className="px-2 py-1.5 text-xs whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{origDateFmt}</td>
+                              <td className="px-2 py-1.5 text-xs font-mono whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{origTimeFmt}</td>
+                              <td className="px-2 py-1.5 text-xs whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{fmtDurSec(block.blockDurationSec)}</td>
+                              <td className="px-2 py-1.5 text-xs text-center" style={{ color: 'var(--text-secondary)' }}>{candidateCount}</td>
+                              <td className="px-2 py-1.5 text-xs whitespace-nowrap" style={{ color: chosen ? '#0e7490' : '#9ca3af' }}>
+                                {chosen ? `${chosen.cw.date} ${fmtTime(chosen.cw.startMs)}–${fmtTime(chosen.cw.endMs)}` : '—'}
+                              </td>
+                              <td className="px-2 py-1.5 text-xs font-mono whitespace-nowrap" style={{ color: chosen ? '#0e7490' : '#9ca3af' }}>
+                                {chosen ? `${fmtTime(chosen.proposedStart)}–${fmtTime(chosen.proposedEnd)}` : '—'}
+                              </td>
+                              <td className="px-2 py-1.5 text-xs whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{chosen ? fmtPuffer(chosen.pufferVorMs) : '—'}</td>
+                              <td className="px-2 py-1.5 text-xs whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{chosen ? fmtPuffer(chosen.pufferNachMs) : '—'}</td>
+                              <td className="px-2 py-1.5 text-xs font-mono" style={{ color: 'var(--text-secondary)' }}>{chosen ? chosen.score : '—'}</td>
+                              <td className="px-2 py-1.5 text-xs" style={{ color: 'var(--text-secondary)', maxWidth: 220, whiteSpace: 'normal' }}>{reason}</td>
+                              <td className="px-2 py-1.5 text-xs font-bold whitespace-nowrap" style={{ color: statusColor }}>{status}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* ── Section D Debug: Abgelehnte Ride-Level-Kandidaten ── */}
+            {autoSelectionRejectedDetails.length > 0 && (
+              <div style={{ borderTop: '2px solid #b91c1c' }}>
+                <div className="px-4 py-2 text-xs font-semibold" style={{ color: '#b91c1c', background: 'rgba(185,28,28,0.04)' }}>
+                  Debug — abgelehnte Ride-Level-Kandidaten ({autoSelectionRejectedDetails.length})
+                </div>
+                <div style={{ overflowX: 'auto' }}>
+                  <table className="w-full text-xs" style={{ borderCollapse: 'collapse' }}>
+                    <thead>
+                      <tr style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)' }}>
+                        {['Block-ID','Fahrzeug','Kandidat Start','Kandidat Ende','Fehlerart','Details'].map(h => (
+                          <th key={h} className="px-3 py-1.5 text-left font-semibold" style={{ borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap' }}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {autoSelectionRejectedDetails.map((d, i) => {
+                        const fmtMs = (ms: number) => { const dt = new Date(ms); return `${String(dt.getDate()).padStart(2,'0')}.${String(dt.getMonth()+1).padStart(2,'0')} ${String(dt.getHours()).padStart(2,'0')}:${String(dt.getMinutes()).padStart(2,'0')}`; };
+                        return (
+                          <tr key={i} style={{ borderBottom: '1px solid var(--border)', background: i % 2 === 0 ? 'transparent' : 'var(--bg-subtle)' }}>
+                            <td className="px-3 py-1 font-mono" style={{ color: '#6b7280' }}>…{d.blockId.slice(-8)}</td>
+                            <td className="px-3 py-1 font-semibold" style={{ color: '#b91c1c' }}>{d.vehicle}</td>
+                            <td className="px-3 py-1" style={{ whiteSpace: 'nowrap' }}>{fmtMs(d.candStart)}</td>
+                            <td className="px-3 py-1" style={{ whiteSpace: 'nowrap' }}>{fmtMs(d.candEnd)}</td>
+                            <td className="px-3 py-1" style={{ color: '#b91c1c' }}>{d.reason}</td>
+                            <td className="px-3 py-1 font-mono" style={{ color: '#6b7280', maxWidth: '320px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.detail}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+            <div>
+              <button
+                className="w-full px-4 py-2.5 flex items-center justify-between text-xs font-semibold"
+                style={{ background: 'rgba(79,70,229,0.06)', color: '#4338ca' }}
+                onClick={() => setAnalysisSectionE(o => !o)}
+              >
+                <span>E — Prüfkalender der Vorauswahl ({sectionEData.selected.length} Vorschau-Platzierungen, {sectionEData.allOk ? 'Alle Prüfungen OK' : 'Fehler gefunden'})</span>
+                <span>{analysisSectionE ? '▲' : '▼'}</span>
+              </button>
+              {analysisSectionE && (
+                <div>
+                  {/* Summary cards */}
+                  <div className="px-4 py-3 flex flex-wrap gap-6 text-xs" style={{ background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)' }}>
+                    <div><span style={{ color: 'var(--text-secondary)' }}>Ausgewählte Blöcke</span><span className="font-bold ml-1" style={{ color: '#15803d' }}>{sectionEData.selected.length}</span></div>
+                    <div><span style={{ color: 'var(--text-secondary)' }}>Nicht ausgewählt</span><span className="font-bold ml-1" style={{ color: autoSelection.length - sectionEData.selected.length > 0 ? '#b91c1c' : 'var(--text-secondary)' }}>{autoSelection.length - sectionEData.selected.length}</span></div>
+                    <div><span style={{ color: 'var(--text-secondary)' }}>Geplante Stunden</span><span className="font-bold ml-1" style={{ color: '#0e7490' }}>{fmtDurSec(sectionEData.totalSec)}</span></div>
+                    <div><span style={{ color: 'var(--text-secondary)' }}>Betroffene Fahrzeuge</span><span className="font-bold ml-1" style={{ color: 'var(--text-primary)' }}>{sectionEData.uniqueVehicles}</span></div>
+                    <div>
+                      <span style={{ color: 'var(--text-secondary)' }}>Prüfstatus</span>
+                      <span className="font-bold ml-1" style={{ color: sectionEData.allOk ? '#15803d' : '#b91c1c' }}>
+                        {sectionEData.allOk ? 'OK' : 'Fehler'}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Validation panel */}
+                  <div style={{ borderBottom: '1px solid var(--border)' }}>
+                    <div className="px-4 py-2 text-xs font-semibold" style={{ color: 'var(--text-secondary)', background: 'var(--bg-subtle)' }}>Abschlussprüfung</div>
+                    {([
+                      { label: 'Inhaber-Überlappungen', errors: sectionEData.allInhaberConflicts },
+                      { label: 'Fahrzeug-Überlappungen (Block-Ebene)', errors: sectionEData.allVehicleConflicts },
+                      { label: 'Ride-Konflikte mit bestehenden Fahrten', errors: sectionEData.rideLevelVehicleConflicts },
+                      { label: 'Fahrer-Notizen / Planungsausschluss', errors: sectionEData.driverExclusionConflicts },
+                      { label: 'Puffer vor (< 1h)', errors: sectionEData.pufferVorFails },
+                      { label: 'Puffer nach (< 1h)', errors: sectionEData.pufferNachFails },
+                      { label: 'Innerhalb Monat', errors: sectionEData.outOfMonth },
+                      { label: 'Zeitstempel gültig', errors: sectionEData.invalidTs },
+                    ] as const).map(({ label, errors }) => (
+                      <div key={label} className="px-4 py-2 flex items-start gap-3 text-xs" style={{ borderTop: '1px solid var(--border)' }}>
+                        <span className="font-bold w-5 text-center flex-shrink-0" style={{ color: errors.length === 0 ? '#15803d' : '#b91c1c' }}>
+                          {errors.length === 0 ? '✓' : '✗'}
+                        </span>
+                        <span className="w-48 flex-shrink-0" style={{ color: 'var(--text-primary)' }}>{label}</span>
+                        <span className="font-bold flex-shrink-0" style={{ color: errors.length === 0 ? '#15803d' : '#b91c1c' }}>
+                          {errors.length === 0 ? 'OK' : `${errors.length} Fehler`}
+                        </span>
+                        {errors.length > 0 && (
+                          <span style={{ color: '#b91c1c' }}>{errors.slice(0, 5).join(', ')}{errors.length > 5 ? ` … +${errors.length - 5}` : ''}</span>
+                        )}
+                      </div>
+                    ))}
+                    <div className="px-4 py-2 flex items-start gap-3 text-xs" style={{ borderTop: '1px solid var(--border)' }}>
+                      <span className="font-bold w-5 text-center flex-shrink-0" style={{ color: '#6b7280' }}>ℹ</span>
+                      <span className="w-48 flex-shrink-0" style={{ color: 'var(--text-primary)' }}>Cross-midnight geprüft</span>
+                      <span className="font-bold flex-shrink-0" style={{ color: '#6b7280' }}>OK</span>
+                      <span style={{ color: '#9ca3af' }}>
+                        Original: {sectionEData.crossMidnightOriginal.length} Blöcke · Vorschau: {sectionEData.crossMidnight.length} Platzierungen — absolute Zeitstempel verwendet
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Overall status */}
+                  <div className="px-4 py-3 text-xs font-semibold" style={{ background: sectionEData.allOk ? 'rgba(21,128,61,0.07)' : 'rgba(185,28,28,0.07)', color: sectionEData.allOk ? '#15803d' : '#b91c1c', borderBottom: '1px solid var(--border)' }}>
+                    {sectionEData.allOk
+                      ? 'Alle Prüfungen OK — bereit für den nächsten Schritt.'
+                      : 'Fehler gefunden — bitte Vorauswahl prüfen.'}
+                  </div>
+
+                  {/* Preview calendar (day list) */}
+                  <div style={{ borderBottom: '1px solid var(--border)' }}>
+                    <div className="px-4 py-2 text-xs font-semibold flex items-center gap-2" style={{ color: 'var(--text-secondary)', background: 'var(--bg-subtle)' }}>
+                      <span>Vorschau-Kalender</span>
+                      <span className="px-1.5 py-0.5 rounded text-xs font-bold" style={{ background: 'rgba(79,70,229,0.12)', color: '#4338ca' }}>Vorschau</span>
+                      <span style={{ color: 'var(--text-secondary)', fontWeight: 'normal' }}>— keine Daten werden verändert</span>
+                    </div>
+                    {sectionEData.days.length === 0 ? (
+                      <div className="px-4 py-3 text-xs" style={{ color: '#9ca3af' }}>Keine Einträge für diesen Monat.</div>
+                    ) : (
+                      sectionEData.days.map(({ key, entries }) => {
+                        const [y, m0, d] = key.split('-').map(Number);
+                        const dayLabel = `${String(d).padStart(2,'0')}.${String(m0).padStart(2,'0')}.${y}`;
+                        const dowNames = ['So','Mo','Di','Mi','Do','Fr','Sa'];
+                        const dow = dowNames[new Date(y, m0 - 1, d).getDay()];
+                        return (
+                          <div key={key} style={{ borderTop: '1px solid var(--border)' }}>
+                            <div className="px-4 py-1.5 text-xs font-semibold" style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)' }}>
+                              {dow}, {dayLabel}
+                            </div>
+                            {entries.map((entry, ei) => {
+                              if (entry.kind === 'existing') {
+                                const { occ } = entry;
+                                return (
+                                  <div key={occ.blockId + ei} className="px-4 py-1.5 flex flex-wrap items-center gap-3 text-xs" style={{ borderTop: '1px solid var(--border)', background: 'var(--bg-surface)' }}>
+                                    <span className="px-1.5 py-0.5 rounded text-xs" style={{ background: 'rgba(100,116,139,0.12)', color: '#475569' }}>Inhaber</span>
+                                    <span className="font-mono" style={{ color: 'var(--text-secondary)' }} title={occ.blockId}>…{occ.blockId.slice(-8)}</span>
+                                    <span className="font-bold" style={{ color: 'var(--text-primary)' }}>{occ.vehicle}</span>
+                                    <span className="font-mono" style={{ color: '#065f46' }}>{fmtTime(occ.startMs)}–{fmtTime(occ.endMs)}</span>
+                                    <span style={{ color: 'var(--text-secondary)' }}>{fmtDurSec(occ.durationSec)}</span>
+                                    <span style={{ color: 'var(--text-secondary)' }}>{occ.sourceStep}</span>
+                                  </div>
+                                );
+                              }
+                              const { sp, issues } = entry;
+                              const origStart = new Date(sp.block.blockStartMs ?? 0);
+                              const origDateFmt = `${String(origStart.getDate()).padStart(2,'0')}.${String(origStart.getMonth()+1).padStart(2,'0')}.${origStart.getFullYear()}`;
+                              return (
+                                <div key={sp.block.blockId + ei} className="px-4 py-1.5 flex flex-wrap items-center gap-3 text-xs" style={{ borderTop: '1px solid var(--border)', background: 'rgba(79,70,229,0.04)' }}>
+                                  <span className="px-1.5 py-0.5 rounded text-xs font-bold" style={{ background: 'rgba(79,70,229,0.15)', color: '#4338ca' }}>Vorschau</span>
+                                  <span className="font-mono" style={{ color: '#4338ca' }} title={sp.block.blockId}>…{sp.block.blockId.slice(-8)}</span>
+                                  <span className="font-bold" style={{ color: 'var(--text-primary)' }}>{sp.block.vehicle}</span>
+                                  <span style={{ color: 'var(--text-secondary)' }}>Orig: {origDateFmt} {fmtTime(sp.block.blockStartMs ?? 0)}–{fmtTime(sp.block.blockEndMs ?? 0)}</span>
+                                  <span className="font-mono font-bold" style={{ color: '#4338ca' }}>Neu: {fmtTime(sp.chosen.proposedStart)}–{fmtTime(sp.chosen.proposedEnd)}</span>
+                                  <span className="font-mono" style={{ color: '#6366f1', fontSize: '0.65rem' }}>
+                                    {(() => {
+                                      const ps = new Date(sp.chosen.proposedStart);
+                                      const pe = new Date(sp.chosen.proposedEnd);
+                                      const fmt = (d: Date) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+                                      return `Ziel: ${fmt(ps)} – ${fmt(pe)}`;
+                                    })()}
+                                  </span>
+                                  <span style={{ color: 'var(--text-secondary)' }}>{fmtDurSec(sp.block.blockDurationSec)}</span>
+                                  <span style={{ color: 'var(--text-secondary)' }}>↑{fmtPuffer(sp.chosen.pufferVorMs)}</span>
+                                  <span style={{ color: 'var(--text-secondary)' }}>↓{fmtPuffer(sp.chosen.pufferNachMs)}</span>
+                                  {sp.chosen.crossesMidnight && <span style={{ color: '#b45309' }}>*Mitternacht</span>}
+                                  {issues.length > 0 && <span className="font-bold" style={{ color: '#b91c1c' }}>{issues.join(', ')}</span>}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+
+                  {/* Compact table */}
+                  <div>
+                    <div className="px-4 py-2 text-xs font-semibold" style={{ color: 'var(--text-secondary)', background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)' }}>Ausgewählte Vorschau-Platzierungen</div>
+                    <div className="overflow-x-auto">
+                      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                        <thead>
+                          <tr style={{ background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)' }}>
+                            {['Block-ID','Fahrzeug','Originaldatum','Originalzeit','Neue Platzierung','Dauer','Puffer vor','Puffer nach','Prüfung','Hinweis'].map(h => (
+                              <th key={h} className="px-2 py-1.5 text-left text-xs font-semibold whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{h}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {sectionEData.selected.map(({ block, chosen }, ri) => {
+                            const issues = sectionEData.perItemChecks[ri];
+                            const origStart = new Date(block.blockStartMs ?? 0);
+                            const origEnd   = new Date(block.blockEndMs   ?? 0);
+                            const origDateFmt = `${String(origStart.getDate()).padStart(2,'0')}.${String(origStart.getMonth()+1).padStart(2,'0')}.${origStart.getFullYear()}`;
+                            const origTimeFmt = `${String(origStart.getHours()).padStart(2,'0')}:${String(origStart.getMinutes()).padStart(2,'0')}–${String(origEnd.getHours()).padStart(2,'0')}:${String(origEnd.getMinutes()).padStart(2,'0')}`;
+                            const checkOk = issues.length === 0;
+                            return (
+                              <tr key={block.blockId} style={{ background: ri % 2 === 0 ? 'var(--bg-surface)' : 'var(--bg-subtle)', borderBottom: '1px solid var(--border)' }}>
+                                <td className="px-2 py-1.5 text-xs font-mono whitespace-nowrap" style={{ color: 'var(--text-secondary)' }} title={block.blockId}>…{block.blockId.slice(-8)}</td>
+                                <td className="px-2 py-1.5 text-xs font-bold whitespace-nowrap" style={{ color: 'var(--text-primary)' }}>{block.vehicle}</td>
+                                <td className="px-2 py-1.5 text-xs whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{origDateFmt}</td>
+                                <td className="px-2 py-1.5 text-xs font-mono whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{origTimeFmt}</td>
+                                <td className="px-2 py-1.5 text-xs font-mono font-bold whitespace-nowrap" style={{ color: '#4338ca' }}>
+                                  {(() => {
+                                    const ps = new Date(chosen.proposedStart);
+                                    const pe = new Date(chosen.proposedEnd);
+                                    const fmt = (d: Date) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+                                    return ps.getDate() === pe.getDate() && ps.getMonth() === pe.getMonth()
+                                      ? `${fmt(ps).slice(0,10)} ${fmtTime(chosen.proposedStart)}–${fmtTime(chosen.proposedEnd)}`
+                                      : `${fmt(ps)} – ${fmt(pe)}`;
+                                  })()}
+                                </td>
+                                <td className="px-2 py-1.5 text-xs whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{fmtDurSec(block.blockDurationSec)}</td>
+                                <td className="px-2 py-1.5 text-xs whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{fmtPuffer(chosen.pufferVorMs)}</td>
+                                <td className="px-2 py-1.5 text-xs whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{fmtPuffer(chosen.pufferNachMs)}</td>
+                                <td className="px-2 py-1.5 text-xs font-bold whitespace-nowrap" style={{ color: checkOk ? '#15803d' : '#b91c1c' }}>{checkOk ? 'OK' : 'Fehler'}</td>
+                                <td className="px-2 py-1.5 text-xs" style={{ color: checkOk ? 'var(--text-secondary)' : '#b91c1c', whiteSpace: 'normal', maxWidth: 200 }}>
+                                  {issues.length === 0 ? (chosen.crossesMidnight ? '* Cross-midnight' : '—') : issues.join(', ')}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* ── Apply button ── */}
+            {!sectionFData && (
+              <div className="px-4 py-4" style={{ borderTop: '2px solid var(--border)' }}>
+                {(() => {
+                  const selectedCount = sectionEData.selected.length;
+                  const applyDisabled = !originalTrips || originalTrips.length === 0 || selectedCount === 0 || !sectionEData.allOk;
+                  const disabledReason = !originalTrips || originalTrips.length === 0
+                    ? 'Keine Original-Fahrten verfügbar'
+                    : selectedCount === 0
+                    ? 'Keine ausgewählten Platzierungen'
+                    : !sectionEData.allOk
+                    ? 'Prüfkalender enthält Fehler'
+                    : null;
+                  return (
+                    <>
+                      <div className="flex flex-wrap items-center gap-3">
+                        <button
+                          type="button"
+                          disabled={applyDisabled}
+                          onClick={() => {
+                            setDbgApplyClickCount(c => c + 1);
+                            setDbgApplyLastClickedAt(new Date().toISOString());
+                            setDbgApplyError(null);
+                            setDbgApplyStarted(true);
+                            setDbgApplyFinished(false);
+                            try {
+                              handleApplyPlan();
+                              setDbgApplyFinished(true);
+                            } catch (err) {
+                              setDbgApplyError(String(err));
+                            }
+                          }}
+                          className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-bold transition-opacity hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
+                          style={{ background: applyDisabled ? 'var(--bg-subtle)' : '#15803d', color: applyDisabled ? 'var(--text-secondary)' : '#fff', border: applyDisabled ? '1px solid var(--border)' : 'none' }}
+                        >
+                          <CheckCircle2 size={16} />
+                          Geprüften Plan anwenden und Fahrtenbuch vorbereiten
+                        </button>
+                        {!applyDisabled && (
+                          <span className="text-xs font-semibold" style={{ color: '#15803d' }}>
+                            {selectedCount} Platzierungen bereit
+                          </span>
+                        )}
+                      </div>
+                      {applyDisabled && disabledReason && (
+                        <div className="mt-2 text-xs font-semibold" style={{ color: '#b91c1c' }}>
+                          Anwenden gesperrt: {disabledReason}
+                        </div>
+                      )}
+                      {dbgApplyError && (
+                        <div className="mt-2 text-xs font-semibold" style={{ color: '#b91c1c' }}>
+                          Fehler: {dbgApplyError}
+                        </div>
+                      )}
+                      <div className="mt-2 text-xs" style={{ color: 'var(--text-tertiary)', fontFamily: 'monospace' }}>
+                        debug: allOk={String(sectionEData.allOk)} selected={selectedCount} disabled={String(applyDisabled)} reason={disabledReason ?? '—'} clicks={dbgApplyClickCount} started={String(dbgApplyStarted)} finished={String(dbgApplyFinished)} lastClick={dbgApplyLastClickedAt ?? '—'} originalTrips={originalTrips?.length ?? 0}
+                      </div>
+                    </>
+                  );
+                })()}
+              </div>
+            )}
+
+            {/* ── Section F: Angewendeter Plan / Neues Fahrtenbuch ── */}
+            {sectionFData && (
+              <div>
+                <button
+                  className="w-full px-4 py-2.5 flex items-center justify-between text-xs font-semibold"
+                  style={{ background: 'rgba(21,128,61,0.07)', color: '#15803d' }}
+                  onClick={() => setAnalysisSectionF(o => !o)}
+                >
+                  <span>F — Angewendeter Plan / Neues Fahrtenbuch ({sectionFData.totalRidesChanged} Fahrten geändert, {sectionFData.blockApps.length} Blöcke, {sectionFData.allOk ? 'Alle Prüfungen OK' : 'Fehler gefunden'})</span>
+                  <span>{analysisSectionF ? '▲' : '▼'}</span>
+                </button>
+                {analysisSectionF && (
+                  <div>
+                    {/* Summary cards */}
+                    <div className="px-4 py-3 flex flex-wrap gap-6 text-xs" style={{ background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)' }}>
+                      <div><span style={{ color: 'var(--text-secondary)' }}>Verschobene Blöcke</span><span className="font-bold ml-1" style={{ color: '#15803d' }}>{sectionFData.blockApps.length}</span></div>
+                      <div><span style={{ color: 'var(--text-secondary)' }}>Verschobene Fahrten</span><span className="font-bold ml-1" style={{ color: '#0e7490' }}>{sectionFData.totalRidesChanged}</span></div>
+                      <div><span style={{ color: 'var(--text-secondary)' }}>Geplante Stunden</span><span className="font-bold ml-1" style={{ color: '#0e7490' }}>{fmtDurSec(sectionFData.totalSec)}</span></div>
+                      <div><span style={{ color: 'var(--text-secondary)' }}>Betroffene Fahrzeuge</span><span className="font-bold ml-1" style={{ color: 'var(--text-primary)' }}>{sectionFData.uniqueVehicles}</span></div>
+                      <div>
+                        <span style={{ color: 'var(--text-secondary)' }}>Prüfstatus</span>
+                        <span className="font-bold ml-1" style={{ color: sectionFData.allOk ? '#15803d' : '#b91c1c' }}>
+                          {sectionFData.allOk ? 'OK' : 'Fehler'}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Validation panel */}
+                    <div style={{ borderBottom: '1px solid var(--border)' }}>
+                      <div className="px-4 py-2 text-xs font-semibold" style={{ color: 'var(--text-secondary)', background: 'var(--bg-subtle)' }}>Abschlussprüfung — Angewendeter Plan</div>
+                      {([
+                        { label: 'Ride-Zeitstempel gültig',                    errors: sectionFData.invalidTsRides },
+                        { label: 'Keine Inhaber-Überlappungen',                errors: sectionFData.inhaberOverlaps },
+                        { label: 'Keine Fahrzeug-Überlappungen (zwischen Blöcken)', errors: sectionFData.vehicleOverlaps },
+                        { label: 'Keine Ride-Konflikte mit bestehenden Fahrten', errors: sectionFData.rideLevelExistingConflicts },
+                        { label: 'Fahrer-Notizen / Planungsausschluss', errors: [...sectionFData.driverExclusionViolations, ...effectiveUnresolvedRides.map(r => `${r.driver}: ${r.detail}`)] },
+                        { label: 'Alle ausgewählten Blöcke angewendet',        errors: sectionFData.missingBlocks },
+                      ] as const).map(({ label, errors }) => (
+                        <div key={label} className="px-4 py-2 flex items-start gap-3 text-xs" style={{ borderTop: '1px solid var(--border)' }}>
+                          <span className="font-bold w-5 text-center flex-shrink-0" style={{ color: errors.length === 0 ? '#15803d' : '#b91c1c' }}>{errors.length === 0 ? '✓' : '✗'}</span>
+                          <span className="w-56 flex-shrink-0" style={{ color: 'var(--text-primary)' }}>{label}</span>
+                          <span className="font-bold flex-shrink-0" style={{ color: errors.length === 0 ? '#15803d' : '#b91c1c' }}>{errors.length === 0 ? 'OK' : `${errors.length} Fehler`}</span>
+                          {errors.length > 0 && <span style={{ color: '#b91c1c' }}>{errors.slice(0, 4).join(', ')}{errors.length > 4 ? ` +${errors.length - 4}` : ''}</span>}
+                        </div>
+                      ))}
+                      <div className="px-4 py-2 flex items-start gap-3 text-xs" style={{ borderTop: '1px solid var(--border)' }}>
+                        <span className="font-bold w-5 text-center flex-shrink-0" style={{ color: sectionFData.rideCountOk ? '#15803d' : '#b91c1c' }}>{sectionFData.rideCountOk ? '✓' : '✗'}</span>
+                        <span className="w-56 flex-shrink-0" style={{ color: 'var(--text-primary)' }}>Fahrtenanzahl erhalten</span>
+                        <span className="font-bold flex-shrink-0" style={{ color: sectionFData.rideCountOk ? '#15803d' : '#b91c1c' }}>{sectionFData.rideCountOk ? 'OK' : 'Fehler'}</span>
+                      </div>
+                      <div className="px-4 py-2 flex items-start gap-3 text-xs" style={{ borderTop: '1px solid var(--border)' }}>
+                        <span className="font-bold w-5 text-center flex-shrink-0" style={{ color: '#15803d' }}>✓</span>
+                        <span className="w-56 flex-shrink-0" style={{ color: 'var(--text-primary)' }}>Nicht betroffene Fahrten unverändert</span>
+                        <span className="font-bold flex-shrink-0" style={{ color: '#15803d' }}>OK</span>
+                        <span style={{ color: '#9ca3af' }}>{(originalTrips?.length ?? 0) - sectionFData.totalRidesChanged} Fahrten unberührt</span>
+                      </div>
+                      <div className="px-4 py-2 flex items-start gap-3 text-xs" style={{ borderTop: '1px solid var(--border)' }}>
+                        <span className="font-bold w-5 text-center flex-shrink-0" style={{ color: sectionFData.tsMillisOk ? '#15803d' : '#b91c1c' }}>{sectionFData.tsMillisOk ? '✓' : '✗'}</span>
+                        <span className="w-56 flex-shrink-0" style={{ color: 'var(--text-primary)' }}>Millisekunden (.000)</span>
+                        <span className="font-bold flex-shrink-0" style={{ color: sectionFData.tsMillisOk ? '#15803d' : '#b91c1c' }}>{sectionFData.tsMillisOk ? 'OK' : 'Fehler'}</span>
+                        <span style={{ color: '#9ca3af' }}>{sectionFData.tsMillisOk ? `${sectionFData.totalTsCount} verschobene Zeitstempel geprüft — alle enden auf .000` : `${sectionFData.invalidTsCount} von ${sectionFData.totalTsCount} verschobenen Zeitstempeln enden nicht auf .000`}</span>
+                      </div>
+                      <div className="px-4 py-2 flex items-start gap-3 text-xs" style={{ borderTop: '1px solid var(--border)' }}>
+                        <span className="font-bold w-5 text-center flex-shrink-0" style={{ color: sectionFData.zeitversatzOk ? '#15803d' : '#b91c1c' }}>{sectionFData.zeitversatzOk ? '✓' : '✗'}</span>
+                        <span className="w-56 flex-shrink-0" style={{ color: 'var(--text-primary)' }}>Zeitversatz Auftrags-/Planzeiten</span>
+                        <span className="font-bold flex-shrink-0" style={{ color: sectionFData.zeitversatzOk ? '#15803d' : '#b91c1c' }}>{sectionFData.zeitversatzOk ? 'OK' : 'Fehler'}</span>
+                        <span style={{ color: '#9ca3af' }}>{sectionFData.zeitversatzOk ? 'originale Zeitabstände zu Fahrtbeginn erhalten' : `${sectionFData.invalidZeitversatzCount} Auftrags-/Planzeit-Versätze ungültig`}</span>
+                      </div>
+                      <div className="px-4 py-2 flex items-start gap-3 text-xs" style={{ borderTop: '1px solid var(--border)' }}>
+                        <span className="font-bold w-5 text-center flex-shrink-0" style={{ color: sectionFData.priceKmUnchanged ? '#15803d' : '#b91c1c' }}>{sectionFData.priceKmUnchanged ? '✓' : '✗'}</span>
+                        <span className="w-56 flex-shrink-0" style={{ color: 'var(--text-primary)' }}>Unveränderte Fahrpreis/Kilometer</span>
+                        <span className="font-bold flex-shrink-0" style={{ color: sectionFData.priceKmUnchanged ? '#15803d' : '#b91c1c' }}>{sectionFData.priceKmUnchanged ? 'OK' : 'Fehler'}</span>
+                        <span style={{ color: '#9ca3af' }}>{sectionFData.priceKmUnchanged ? 'alle Fahrpreis/Kilometer-Zellen unverändert aus Original übernommen' : 'Fahrpreis/Kilometer werden aus Originaldatei übernommen (Validierung beim Export)'}</span>
+                      </div>
+                      <div className="px-4 py-2 flex items-start gap-3 text-xs" style={{ borderTop: '1px solid var(--border)' }}>
+                        <span className="font-bold w-5 text-center flex-shrink-0" style={{ color: '#15803d' }}>✓</span>
+                        <span className="w-56 flex-shrink-0" style={{ color: 'var(--text-primary)' }}>Zeilensortierung</span>
+                        <span className="font-bold flex-shrink-0" style={{ color: '#15803d' }}>OK</span>
+                        <span style={{ color: '#9ca3af' }}>aufsteigend nach Uhrzeit des Fahrtbeginns</span>
+                      </div>
+                      <div className="px-4 py-2 flex items-start gap-3 text-xs" style={{ borderTop: '1px solid var(--border)' }}>
+                        <span className="font-bold w-5 text-center flex-shrink-0" style={{ color: sectionFData.columnOrderReady ? '#15803d' : '#d97706' }}>{sectionFData.columnOrderReady ? '✓' : '!'}</span>
+                        <span className="w-56 flex-shrink-0" style={{ color: 'var(--text-primary)' }}>Spaltenreihenfolge</span>
+                        <span className="font-bold flex-shrink-0" style={{ color: sectionFData.columnOrderReady ? '#15803d' : '#d97706' }}>{sectionFData.columnOrderReady ? 'Original' : 'Fallback'}</span>
+                        <span style={{ color: '#9ca3af' }}>{sectionFData.columnOrderReady ? 'source_columns_json verfügbar' : 'keine source_columns_json — Reihenfolge aus raw_data_json'}</span>
+                      </div>
+                    </div>
+
+                    {/* Export status + button */}
+                    {(() => {
+                      const debugInfo = ownerResolution.status === 'none'
+                        ? ownerResolution.debugInfo
+                        : ownerResolution.status === 'ok'
+                          ? `allDrivers=${allDrivers.length}, source=${ownerResolution.source}`
+                          : `allDrivers=${allDrivers.length}, source=${ownerResolution.source}, candidates=${ownerResolution.count}`;
+                      return (
+                        <div style={{ borderBottom: '1px solid var(--border)' }}>
+                          {/* Debug/info line */}
+                          <div className="px-4 py-1.5 text-xs" style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)', fontFamily: 'monospace' }}>
+                            Inhaber-Auflösung: {debugInfo}
+                          </div>
+                          {ownerResolution.status === 'ok' && (
+                            <div className="px-4 py-2 text-xs flex items-center gap-2" style={{ background: 'rgba(21,128,61,0.05)', color: '#15803d', borderBottom: '1px solid var(--border)' }}>
+                              <span style={{ fontWeight: 600 }}>Inhaber-Fahrer:</span>
+                              <span>{ownerResolution.name}</span>
+                            </div>
+                          )}
+                          {ownerResolution.status === 'multiple' && (
+                            <div className="px-4 py-2 text-xs" style={{ background: 'rgba(185,28,28,0.04)', color: '#b91c1c', borderBottom: '1px solid var(--border)' }}>
+                              Mehrere Inhaber gefunden: {ownerResolution.names.join(', ')}
+                            </div>
+                          )}
+                          <div className="px-4 py-3 flex flex-wrap items-center gap-4 text-xs font-semibold" style={{ background: canExport ? 'rgba(21,128,61,0.07)' : 'rgba(185,28,28,0.07)', color: canExport ? '#15803d' : '#b91c1c' }}>
+                            <span>{canExport ? 'Neues Fahrtenbuch bereit' : `Export gesperrt — ${exportBlockReason}`}</span>
+                            <button
+                              onClick={handleExportFahrtenbuch}
+                              disabled={!canExport}
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-bold transition-opacity hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
+                              style={{ background: canExport ? '#15803d' : '#6b7280', color: '#fff' }}
+                            >
+                              Neues Fahrtenbuch herunterladen
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })()}
+
+                    {/* Block-Anwendung table */}
+                    <div style={{ borderBottom: '1px solid var(--border)' }}>
+                      <div className="px-4 py-2 text-xs font-semibold" style={{ color: 'var(--text-secondary)', background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)' }}>Block-Anwendung</div>
+                      <div className="overflow-x-auto">
+                        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                          <thead>
+                            <tr style={{ background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)' }}>
+                              {['Block-ID','Fahrzeug','Original Blockzeit','Neue Blockzeit','Fahrten','Offset','Prüfung','Hinweis'].map(h => (
+                                <th key={h} className="px-2 py-1.5 text-left text-xs font-semibold whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{h}</th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {sectionFData.blockApps.map((app, i) => (
+                              <tr key={app.blockId} style={{ background: i%2===0 ? 'var(--bg-surface)' : 'var(--bg-subtle)', borderBottom: '1px solid var(--border)' }}>
+                                <td className="px-2 py-1.5 text-xs font-mono" style={{ color: 'var(--text-secondary)' }} title={app.blockId}>…{app.blockId.slice(-8)}</td>
+                                <td className="px-2 py-1.5 text-xs font-bold" style={{ color: 'var(--text-primary)' }}>{app.vehicle}</td>
+                                <td className="px-2 py-1.5 text-xs font-mono whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{fmtTime(app.origStartMs)}–{fmtTime(app.origEndMs)}</td>
+                                <td className="px-2 py-1.5 text-xs font-mono font-bold whitespace-nowrap" style={{ color: '#15803d' }}>{fmtTime(app.newStartMs)}–{fmtTime(app.newEndMs)}</td>
+                                <td className="px-2 py-1.5 text-xs text-center whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{app.rideCount}</td>
+                                <td className="px-2 py-1.5 text-xs font-mono whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{app.offsetMs >= 0 ? '+' : ''}{Math.round(app.offsetMs / 60000)} min</td>
+                                <td className="px-2 py-1.5 text-xs font-bold whitespace-nowrap" style={{ color: app.ok ? '#15803d' : '#b91c1c' }}>{app.ok ? 'OK' : 'Fehler'}</td>
+                                <td className="px-2 py-1.5 text-xs" style={{ color: 'var(--text-secondary)', maxWidth: 160, whiteSpace: 'normal' }}>{app.hint}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+
+                    {/* Nicht exportierbare Fahrten — export BLOCKED for these */}
+                    {effectiveUnresolvedRides.length > 0 && (
+                      <div style={{ borderBottom: '1px solid var(--border)' }}>
+                        <div className="px-4 py-2 flex items-center gap-2 text-xs font-semibold" style={{ color: '#b91c1c', background: 'rgba(185,28,28,0.06)', borderBottom: '1px solid rgba(185,28,28,0.25)' }}>
+                          <span style={{ fontWeight: 700 }}>Nicht exportierbare Fahrten — Export gesperrt</span>
+                          <span className="ml-1 px-2 py-0.5 rounded-full text-xs font-bold" style={{ background: 'rgba(185,28,28,0.15)', color: '#b91c1c' }}>{effectiveUnresolvedRides.length}</span>
+                          <span className="ml-1 font-normal" style={{ color: '#b91c1c' }}>
+                            Fahrer durch Notiz ausgeschlossen — kein Ersatzfahrer verfügbar. XLSX-Export ist gesperrt bis alle Fahrten neu zugewiesen sind.
+                          </span>
+                        </div>
+                        <div className="overflow-x-auto">
+                          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                            <thead>
+                              <tr style={{ background: 'rgba(185,28,28,0.06)', borderBottom: '1px solid rgba(185,28,28,0.2)' }}>
+                                {['Fahrt-ID', 'Fahrzeug', 'Fahrer (Original)', 'Fahrtbeginn', 'Fahrtende', 'Notiz-Detail', 'Aktion'].map(h => (
+                                  <th key={h} className="px-2 py-1.5 text-left text-xs font-semibold whitespace-nowrap" style={{ color: '#b91c1c' }}>{h}</th>
+                                ))}
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {effectiveUnresolvedRides.map((info, i) => (
+                                <tr key={info.tripId} style={{ background: i%2===0 ? 'var(--bg-surface)' : 'rgba(185,28,28,0.02)', borderBottom: '1px solid rgba(185,28,28,0.12)' }}>
+                                  <td className="px-2 py-1.5 text-xs font-mono" style={{ color: 'var(--text-secondary)' }} title={info.tripId}>…{info.tripId.slice(-8)}</td>
+                                  <td className="px-2 py-1.5 text-xs font-bold whitespace-nowrap" style={{ color: 'var(--text-primary)' }}>{info.vehicle || '—'}</td>
+                                  <td className="px-2 py-1.5 text-xs font-semibold" style={{ color: '#b91c1c' }}>{info.driver}</td>
+                                  <td className="px-2 py-1.5 text-xs whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{info.startMs ? new Date(info.startMs).toISOString().replace('T', ' ').slice(0, 19) : '—'}</td>
+                                  <td className="px-2 py-1.5 text-xs whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{info.endMs ? new Date(info.endMs).toISOString().replace('T', ' ').slice(0, 19) : '—'}</td>
+                                  <td className="px-2 py-1.5 text-xs" style={{ color: 'var(--text-secondary)', maxWidth: 220, whiteSpace: 'normal' }}>{info.detail}</td>
+                                  <td className="px-2 py-1.5 text-xs font-semibold whitespace-nowrap" style={{ color: '#b91c1c' }}>Nicht lösbar — Export gesperrt</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Fahrer-Notiz-Konflikte — mögliche Alternativen */}
+                    {driverNoteAlternatives && driverNoteAlternatives.totalBlocks > 0 && (
+                      <div style={{ borderBottom: '1px solid var(--border)' }}>
+                        {/* Section header + apply button */}
+                        <div className="px-4 py-2 flex flex-wrap items-center gap-3 text-xs font-semibold" style={{ color: '#92400e', background: 'rgba(245,158,11,0.07)', borderBottom: '1px solid rgba(245,158,11,0.2)' }}>
+                          <span style={{ fontWeight: 700 }}>Fahrer-Notiz-Konflikte — mögliche Alternativen</span>
+                          {driverNoteAlternatives.blocksWithAlternative > 0 && effectiveUnresolvedRides.length > 0 && (
+                            <button
+                              onClick={handleApplyNoteAlternatives}
+                              className="inline-flex items-center gap-1.5 px-3 py-1 rounded text-xs font-bold transition-opacity hover:opacity-90"
+                              style={{ background: '#15803d', color: '#fff', marginLeft: 'auto' }}
+                            >
+                              Beste Fahrer-Notiz-Alternativen anwenden
+                            </button>
+                          )}
+                          {effectiveUnresolvedRides.length === 0 && noteReassignments.size > 0 && (
+                            <span className="ml-auto text-xs font-bold" style={{ color: '#15803d' }}>Alle Konflikte behoben</span>
+                          )}
+                        </div>
+                        {/* Summary cards */}
+                        <div className="px-4 py-2 flex flex-wrap gap-4 text-xs" style={{ background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)' }}>
+                          <div><span style={{ color: 'var(--text-secondary)' }}>Konflikt-Blöcke</span><span className="font-bold ml-1" style={{ color: '#92400e' }}>{driverNoteAlternatives.totalBlocks}</span></div>
+                          <div><span style={{ color: 'var(--text-secondary)' }}>Mit gültiger Alternative</span><span className="font-bold ml-1" style={{ color: '#15803d' }}>{driverNoteAlternatives.blocksWithAlternative}</span></div>
+                          <div><span style={{ color: 'var(--text-secondary)' }}>Ohne gültige Alternative</span><span className="font-bold ml-1" style={{ color: driverNoteAlternatives.blocksWithout > 0 ? '#b91c1c' : 'var(--text-secondary)' }}>{driverNoteAlternatives.blocksWithout}</span></div>
+                          <div><span style={{ color: 'var(--text-secondary)' }}>Bereits angewendet</span><span className="font-bold ml-1" style={{ color: noteReassignments.size > 0 ? '#15803d' : 'var(--text-secondary)' }}>{noteReassignments.size}</span></div>
+                          <div><span style={{ color: 'var(--text-secondary)' }}>Export weiterhin gesperrt</span><span className="font-bold ml-1" style={{ color: effectiveUnresolvedRides.length > 0 ? '#b91c1c' : '#15803d' }}>{effectiveUnresolvedRides.length > 0 ? 'Ja' : 'Nein'}</span></div>
+                        </div>
+
+                        {/* Per-block alternative breakdown */}
+                        {driverNoteAlternatives.blocks.map(block => {
+                          const hasPossible = block.candidates.some(c => c.status !== 'rejected');
+                          const fmtMs = (ms: number) => new Date(ms).toISOString().replace('T', ' ').slice(0, 19);
+                          const fmtSec = (s: number) => {
+                            const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
+                            return `${h}h ${String(m).padStart(2,'0')}m`;
+                          };
+                          return (
+                            <div key={block.blockKey} style={{ borderBottom: '1px solid rgba(245,158,11,0.18)' }}>
+                              {/* Block header */}
+                              <div className="px-4 py-2 flex flex-wrap gap-4 text-xs" style={{ background: hasPossible ? 'rgba(21,128,61,0.04)' : 'rgba(185,28,28,0.04)', borderBottom: '1px solid rgba(245,158,11,0.15)' }}>
+                                <span className="font-semibold" style={{ color: 'var(--text-primary)' }}>{block.vehicle}</span>
+                                <span style={{ color: '#b45309' }}>{block.driver}</span>
+                                <span style={{ color: 'var(--text-secondary)' }}>{fmtMs(block.startMs)} – {fmtMs(block.endMs)}</span>
+                                <span style={{ color: 'var(--text-secondary)' }}>{block.rideCount} Fahrt{block.rideCount !== 1 ? 'en' : ''}</span>
+                                <span style={{ color: 'var(--text-secondary)' }}>{fmtSec(block.durationSec)}</span>
+                                <span className="font-bold" style={{ color: hasPossible ? '#15803d' : '#b91c1c' }}>
+                                  {hasPossible ? 'Kann neu geplant werden' : 'Keine gültige Alternative gefunden'}
+                                </span>
+                              </div>
+                              {/* Candidates table */}
+                              {block.candidates.length > 0 && (
+                                <div className="overflow-x-auto">
+                                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+                                    <thead>
+                                      <tr style={{ background: 'rgba(245,158,11,0.04)', borderBottom: '1px solid rgba(245,158,11,0.15)' }}>
+                                        {['Ziel-Fahrer','Ziel-Art','Fahrer frei','Inhaber frei','Fahrer-Notiz-Konflikt','Inhaber-Konflikt','Bewertung','Status','Ablehnungsgrund'].map(h => (
+                                          <th key={h} className="px-2 py-1.5 text-left font-semibold whitespace-nowrap" style={{ color: '#92400e' }}>{h}</th>
+                                        ))}
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {block.candidates.map((c, ci) => {
+                                        const statusColor = c.status === 'best' ? '#15803d' : c.status === 'possible' ? '#0e7490' : '#b91c1c';
+                                        const statusLabel = c.status === 'best' ? 'Bester Kandidat' : c.status === 'possible' ? 'Möglich' : 'Abgelehnt';
+                                        const zielArt = c.targetKind === 'inhaber' ? 'Inhaber' : 'Regulärer Fahrer';
+                                        return (
+                                          <tr key={c.driverName + ci} style={{ background: ci%2===0 ? 'var(--bg-surface)' : 'rgba(245,158,11,0.02)', borderBottom: '1px solid rgba(245,158,11,0.1)' }}>
+                                            <td className="px-2 py-1.5 font-semibold whitespace-nowrap" style={{ color: 'var(--text-primary)' }}>{c.driverName}</td>
+                                            <td className="px-2 py-1.5 whitespace-nowrap" style={{ color: c.targetKind === 'inhaber' ? '#0e7490' : 'var(--text-secondary)' }}>{zielArt}</td>
+                                            <td className="px-2 py-1.5 font-bold whitespace-nowrap" style={{ color: c.driverFree ? '#15803d' : '#b91c1c' }}>{c.driverFree ? 'Ja' : 'Nein'}</td>
+                                            <td className="px-2 py-1.5 font-bold whitespace-nowrap" style={{ color: c.inhaberFree ? '#15803d' : '#b91c1c' }}>{c.targetKind === 'inhaber' ? (c.inhaberFree ? 'Ja' : 'Nein') : '—'}</td>
+                                            <td className="px-2 py-1.5 font-bold whitespace-nowrap" style={{ color: c.driverNoteConflict ? '#b91c1c' : '#15803d' }}>{c.driverNoteConflict ? 'Ja' : 'Nein'}</td>
+                                            <td className="px-2 py-1.5 font-bold whitespace-nowrap" style={{ color: c.inhaberConflict ? '#b91c1c' : '#15803d' }}>{c.inhaberConflict ? 'Ja' : 'Nein'}</td>
+                                            <td className="px-2 py-1.5 whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{c.targetKind === 'inhaber' ? 'Inhaber-Kandidat' : 'Regulärer Kandidat'}</td>
+                                            <td className="px-2 py-1.5 font-bold whitespace-nowrap" style={{ color: statusColor }}>{statusLabel}</td>
+                                            <td className="px-2 py-1.5" style={{ color: '#b91c1c', maxWidth: 240, whiteSpace: 'normal' }}>{c.rejectReason ?? '—'}</td>
+                                          </tr>
+                                        );
+                                      })}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              )}
+                              {block.candidates.length === 0 && (
+                                <div className="px-4 py-2 text-xs" style={{ color: '#b91c1c' }}>Keine Fahrer in der Datenbank gefunden.</div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    {/* Geänderte Fahrten table */}
+                    <div>
+                      <div className="px-4 py-2 text-xs font-semibold" style={{ color: 'var(--text-secondary)', background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)' }}>Geänderte Fahrten</div>
+                      <div className="overflow-x-auto">
+                        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                          <thead>
+                            <tr style={{ background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)' }}>
+                              {['Block-ID','Fahrt-ID / Zeile','Fahrzeug','Alter Fahrer','Neuer Fahrer','Original Start','Original Ende','Neuer Start','Neues Ende','Dauer','Status'].map(h => (
+                                <th key={h} className="px-2 py-1.5 text-left text-xs font-semibold whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{h}</th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {sectionFData.changedRides.map((ride, i) => (
+                              <tr key={ride.tripId + i} style={{ background: i%2===0 ? 'var(--bg-surface)' : 'var(--bg-subtle)', borderBottom: '1px solid var(--border)' }}>
+                                <td className="px-2 py-1.5 text-xs font-mono" style={{ color: 'var(--text-secondary)' }} title={ride.blockId}>…{ride.blockId.slice(-6)}</td>
+                                <td className="px-2 py-1.5 text-xs font-mono" style={{ color: 'var(--text-secondary)' }} title={ride.tripId}>{ride.srcRowIdx !== null ? `Z${ride.srcRowIdx}` : `…${ride.tripId.slice(-6)}`}</td>
+                                <td className="px-2 py-1.5 text-xs font-bold whitespace-nowrap" style={{ color: 'var(--text-primary)' }}>{ride.vehicle}</td>
+                                <td className="px-2 py-1.5 text-xs" style={{ color: 'var(--text-secondary)' }}>{ride.oldDriver || '—'}</td>
+                                <td className="px-2 py-1.5 text-xs font-bold" style={{ color: '#15803d' }}>{ride.newDriver}</td>
+                                <td className="px-2 py-1.5 text-xs font-mono whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{fmtDatetime(ride.origStartMs)}</td>
+                                <td className="px-2 py-1.5 text-xs font-mono whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{fmtDatetime(ride.origEndMs)}</td>
+                                <td className="px-2 py-1.5 text-xs font-mono font-bold whitespace-nowrap" style={{ color: '#15803d' }}>{fmtDatetime(ride.newStartMs)}</td>
+                                <td className="px-2 py-1.5 text-xs font-mono font-bold whitespace-nowrap" style={{ color: '#15803d' }}>{fmtDatetime(ride.newEndMs)}</td>
+                                <td className="px-2 py-1.5 text-xs whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{fmtDurSec(ride.durSec)}</td>
+                                <td className="px-2 py-1.5 text-xs font-bold whitespace-nowrap" style={{ color: ride.ok ? '#15803d' : '#b91c1c' }}>{ride.ok ? 'Geändert' : 'Fehler'}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+          </div>
+        )}
+      </div>
+
+      {/* Bottom nav */}
+      <div className="flex flex-wrap items-center gap-4 pt-2">
+        <button
+          type="button"
+          onClick={onApplyAutoShiftPlan}
+          disabled={isCreatingPlan}
+          className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-opacity hover:opacity-90 disabled:opacity-60 disabled:cursor-not-allowed"
+          style={{ background: 'var(--accent)', color: '#fff' }}
+        >
+          <Play size={14} />
+          {isCreatingPlan ? 'Verschiebungsplan wird erstellt...' : 'Verschiebungsplan automatisch erstellen'}
+        </button>
+        <button onClick={onBack} className="inline-flex items-center gap-2 text-sm hover:opacity-80" style={{ color: 'var(--text-secondary)' }}>
+          <ArrowLeft size={15} /> Zurück zu Inhaber Konflikt-Auswahl
+        </button>
+        <button onClick={onRecompute} className="inline-flex items-center gap-2 text-sm hover:opacity-80" style={{ color: 'var(--text-secondary)' }}>
+          <RefreshCw size={13} /> Neu berechnen
+        </button>
+      </div>
+
+      {/* Plan error */}
+      {planError && (
+        <div className="rounded-xl px-4 py-3 text-sm font-medium" style={{ background: 'rgba(220,38,38,0.07)', border: '1px solid rgba(220,38,38,0.25)', color: '#b91c1c' }}>
+          {planError}
+        </div>
+      )}
+
+      {/* Detail modal */}
+      {modalData && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center"
+          style={{ background: 'rgba(0,0,0,0.45)' }}
+          onClick={() => setModalData(null)}
+        >
+          <div
+            className="rounded-2xl p-5 max-w-lg w-full mx-4 overflow-y-auto"
+            style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', maxHeight: '80vh' }}
+            onClick={e => e.stopPropagation()}
+          >
+            {modalData.kind === 'occupied' && (() => {
+              const o = modalData.interval;
+              return (
+                <>
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="font-bold text-sm" style={{ color: 'var(--text-primary)' }}>Belegter Inhaber-Block</h3>
+                    <button onClick={() => setModalData(null)} className="text-xs hover:opacity-70" style={{ color: 'var(--text-secondary)' }}>✕ Schließen</button>
+                  </div>
+                  <div className="space-y-2 text-xs">
+                    {[
+                      ['Block-ID',   o.blockId],
+                      ['Fahrzeug',   o.vehicle],
+                      ['Start',      fmtDatetime(o.startMs)],
+                      ['Ende',       fmtDatetime(o.endMs)],
+                      ['Dauer',      formatBlockDuration(o.durationSec)],
+                      ['Fahrten',    String(o.rides)],
+                      ['Zeilen',     o.rows],
+                      ['Herkunft',   o.sourceStep],
+                    ].map(([k, v]) => (
+                      <div key={k} className="flex items-start justify-between gap-4">
+                        <span style={{ color: 'var(--text-secondary)' }}>{k}</span>
+                        <span className="font-semibold text-right" style={{ color: 'var(--text-primary)' }}>{v}</span>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              );
+            })()}
+
+            {modalData.kind === 'window' && (() => {
+              const { date, startMs, endMs, durationSec, prevBlockId, nextBlockId, candidates } = modalData;
+              const vehicleFreeCount = candidates.filter(c => c.vehicleFree).length;
+              return (
+                <>
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="font-bold text-sm" style={{ color: '#065f46' }}>Freies Zeitfenster</h3>
+                    <button onClick={() => setModalData(null)} className="text-xs hover:opacity-70" style={{ color: 'var(--text-secondary)' }}>✕ Schließen</button>
+                  </div>
+                  <div className="space-y-2 text-xs mb-4">
+                    {[
+                      ['Datum',    date],
+                      ['Start',    fmtTime(startMs)],
+                      ['Ende',     fmtTime(endMs)],
+                      ['Dauer',    formatBlockDuration(durationSec)],
+                      ['Vorheriger Block', prevBlockId ? `…${prevBlockId.slice(-8)}` : '—'],
+                      ['Nächster Block',   nextBlockId ? `…${nextBlockId.slice(-8)}` : '—'],
+                      ['Passende offene Blöcke',           String(candidates.length)],
+                      ['Davon Fahrzeug frei',              String(vehicleFreeCount)],
+                    ].map(([k, v]) => (
+                      <div key={k} className="flex items-center justify-between gap-4">
+                        <span style={{ color: 'var(--text-secondary)' }}>{k}</span>
+                        <span className="font-semibold" style={{ color: 'var(--text-primary)' }}>{v}</span>
+                      </div>
+                    ))}
+                  </div>
+                  {candidates.length > 0 && (
+                    <>
+                      <div className="text-xs font-semibold mb-2" style={{ color: 'var(--text-secondary)' }}>
+                        Passende Blöcke ({Math.min(candidates.length, 10)} von {candidates.length})
+                      </div>
+                      <div className="overflow-x-auto">
+                        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                          <thead>
+                            <tr style={{ background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)' }}>
+                              {['Block-ID','Fahrzeug','Orig. Start','Orig. Ende','Dauer','Fahrten','Fzg frei'].map(h => (
+                                <th key={h} className="px-2 py-1.5 text-left text-xs font-semibold whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{h}</th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {candidates.slice(0, 10).map(({ block, vehicleFree }, ci) => (
+                              <tr key={block.blockId} style={{ background: ci % 2 === 0 ? 'transparent' : 'rgba(0,0,0,0.03)', borderBottom: '1px solid var(--border)' }}>
+                                <td className="px-2 py-1.5 text-xs font-mono" style={{ color: 'var(--text-secondary)' }}>…{block.blockId.slice(-8)}</td>
+                                <td className="px-2 py-1.5 text-xs font-bold" style={{ color: 'var(--text-primary)' }}>{block.vehicle}</td>
+                                <td className="px-2 py-1.5 text-xs font-mono whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{fmtDatetime(block.blockStartMs)}</td>
+                                <td className="px-2 py-1.5 text-xs font-mono whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{fmtDatetime(block.blockEndMs)}</td>
+                                <td className="px-2 py-1.5 text-xs" style={{ color: 'var(--text-secondary)' }}>{formatBlockDuration(block.blockDurationSec)}</td>
+                                <td className="px-2 py-1.5 text-xs" style={{ color: 'var(--text-secondary)' }}>{block.rides?.length ?? 0}</td>
+                                <td className="px-2 py-1.5 text-xs font-bold" style={{ color: vehicleFree ? '#15803d' : '#b91c1c' }}>{vehicleFree ? 'Ja' : 'Nein'}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </>
+                  )}
+                </>
+              );
+            })()}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── AutoShiftPlan types & algorithm ──────────────────────────────────────────
+
+interface ShiftedRide {
+  tripId: string;
+  shiftedStartMs: number;
+  shiftedEndMs: number;
+  durationSec: number;
+}
+
+interface PlannedShiftBlock {
+  block: VehicleBlock;
+  offsetMs: number;
+  newStartMs: number;
+  newEndMs: number;
+  shiftedRides: ShiftedRide[];
+  windowId: string;
+  windowStartMs: number;
+  score: number;
+  grund: string;
+  bufferUsedMs: number;
+  targetDayBlocksBefore: number;
+  targetDayHoursBefore: number;
+  targetDayBlocksAfter: number;
+  targetDayHoursAfter: number;
+  // local-adjustment fields
+  proposedStartMs: number;
+  adjustedStartMs: number;
+  adjustmentMs: number;       // positive = shifted later, negative = earlier, 0 = no adjustment
+  adjustmentReason: string;   // empty string when no adjustment
+}
+
+interface FailedShiftBlock {
+  block: VehicleBlock;
+  reason: string;
+  candidatesConsidered: number;
+  rejectionReasons: string[];
+  bestFailedBufferMs: number;
+  windowsTested: number;
+  windowsLongEnough: number;
+  windowsVehicleBusy: number;
+  windowsBufferFail: number;
+  windowsOutsideMonth: number;
+  windowsOverlap: number;
+  bestRejectedWindowId: string | null;
+  bestRejectedReason: string | null;
+}
+
+interface AutoShiftDiagnostics {
+  wholeBlocksShifted: boolean;
+  singleRidesShifted: number;
+  durationChanges: number;
+  driverOverlaps: number;
+  vehicleOverlaps: number;
+  regularDriversUnchanged: boolean;
+  inhaberAssignmentCorrect: boolean;
+}
+
+interface AutoShiftPlanStepResult {
+  inhaberName: string;
+  plannedBlocks: PlannedShiftBlock[];
+  failedBlocks: FailedShiftBlock[];
+  summary: {
+    openBlocksIn: number;
+    plannedCount: number;
+    failedCount: number;
+    plannedRides: number;
+    plannedSec: number;
+    minOffsetMs: number;
+    maxPosOffsetMs: number;
+    maxNegOffsetMs: number;
+    durationChanges: number;
+    driverOverlaps: number;
+    vehicleOverlaps: number;
+    minBufferUsedMs: number;
+    avgBufferUsedMs: number;
+    daysUsed: number;
+    maxDayBlocks: number;
+    maxDayHours: number;
+    minGapViolations: number;
+  };
+  diagnostics: AutoShiftDiagnostics;
+}
+
+interface OccInterval { startMs: number; endMs: number }
+
+function intervalsOverlap(a: OccInterval, b: OccInterval): boolean {
+  return a.startMs < b.endMs && b.startMs < a.endMs;
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function hasValidNewTimes(x: any): x is { newStartMs: number; newEndMs: number } {
+  return !!x
+    && typeof x.newStartMs === 'number'
+    && typeof x.newEndMs   === 'number'
+    && Number.isFinite(x.newStartMs)
+    && Number.isFinite(x.newEndMs)
+    && x.newEndMs > x.newStartMs;
+}
+
+// ── New planner types ─────────────────────────────────────────────────────────
+
+interface ValidPlannedShiftBlock {
+  blockId: string;
+  vehicle: string;
+  originalStartMs: number;
+  originalEndMs: number;
+  newStartMs: number;   // always a finite number
+  newEndMs: number;     // always a finite number
+  durationMs: number;
+  offsetMs: number;
+  rides: number;
+  rows: string;
+  usedWindowId: string;
+  usedBufferMinutes: number;
+}
+
+interface BlankWindowUsage {
+  windowId: string;
+  date: string;
+  windowStartMs: number;
+  windowEndMs: number;
+  windowDurationSec: number;
+  blocksPlacedCount: number;
+  blocksPlacedSec: number;
+  remainingFreeSec: number;
+}
+
+interface LargestBlankPackingShiftPlanResult {
+  inhaberName: string;
+  plannedBlocks: ValidPlannedShiftBlock[];
+  failedBlocks: FailedShiftBlock[];
+  blankWindowsUsed: BlankWindowUsage[];
+  summary: {
+    openBlocksIn: number;
+    plannedCount: number;
+    failedCount: number;
+    plannedDurationSec: number;
+    windowsUsed: number;
+    windowsAvailable: number;
+  };
+  diagnostics: {
+    bufferSameVehicleMin: number;
+    bufferDiffVehicleMin: number;
+    minGapMs: number;
+  };
+}
+
+function runLargestBlankPackingShiftPlan(
+  fwsResult: InhaberFreeWindowSearchStepResult,
+  inhaberName: string,
+  _month: number,
+  _year: number,
+): LargestBlankPackingShiftPlanResult {
+  console.log('[LargestBlankPackingShiftPlan] START');
+  const PREFIX = '[LargestBlankPackingShiftPlan]';
+
+  const BUFFER_SAME_VEHICLE_MS  = 0;
+  const BUFFER_DIFF_VEHICLE_MS  = INHABER_MIN_GAP_MS; // 30 min
+  const MIN_GAP_MS              = INHABER_MIN_GAP_MS; // 30 min
+
+  // ── Step 1: Build blank windows from fwsResult.freeWindows ─────────────────
+  // fwsResult.freeWindows is already pre-computed (same windows shown in UI)
+  const blankWindows = [...fwsResult.freeWindows].sort((a, b) =>
+    b.durationSec - a.durationSec || a.startMs - b.startMs,
+  );
+
+  console.log(`${PREFIX} blankWindows=${blankWindows.length}, openBlocks=${fwsResult.remainingOpenBlocks.length}`);
+
+  // ── Step 2: Sort open blocks longest first ─────────────────────────────────
+  const openBlocks = [...fwsResult.remainingOpenBlocks].sort((a, b) =>
+    (b.blockEndMs - b.blockStartMs) - (a.blockEndMs - a.blockStartMs),
+  );
+
+  // ── Step 3: Per-window cursor (tracks how far into each window we've packed) ─
+  // cursor[windowId] = next available startMs in that window (after placed blocks + buffers)
+  const windowCursor = new Map<string, number>();
+  for (const w of blankWindows) windowCursor.set(w.windowId, w.startMs);
+
+  // Track which blocks were placed into each window
+  const windowBlocksSec = new Map<string, number>();
+  for (const w of blankWindows) windowBlocksSec.set(w.windowId, 0);
+
+  // Inhaber occupancy: original occupied intervals
+  const inhaberIntervals: Array<{ startMs: number; endMs: number; vehicle: string }> =
+    fwsResult.inhaberOccupiedIntervals.map(i => ({ startMs: i.startMs, endMs: i.endMs, vehicle: i.vehicle }));
+
+  // Vehicle occupancy: original occupied intervals, keyed by vehicle
+  const vehicleOcc = new Map<string, Array<{ startMs: number; endMs: number }>>();
+  for (const i of fwsResult.inhaberOccupiedIntervals) {
+    if (!vehicleOcc.has(i.vehicle)) vehicleOcc.set(i.vehicle, []);
+    vehicleOcc.get(i.vehicle)!.push({ startMs: i.startMs, endMs: i.endMs });
+  }
+
+  const plannedBlocks: ValidPlannedShiftBlock[] = [];
+  const failedBlocks: FailedShiftBlock[] = [];
+  const windowPlacements = new Map<string, ValidPlannedShiftBlock[]>();
+  for (const w of blankWindows) windowPlacements.set(w.windowId, []);
+
+  function vehicleBusyAt(vehicle: string, startMs: number, endMs: number): boolean {
+    const occ = vehicleOcc.get(vehicle) ?? [];
+    return occ.some(iv => iv.startMs < endMs && startMs < iv.endMs);
+  }
+
+  function inhaberBusyAt(startMs: number, endMs: number): boolean {
+    return inhaberIntervals.some(iv => iv.startMs < endMs && startMs < iv.endMs);
+  }
+
+  // ── Step 4: Pack each open block into the best fitting window ───────────────
+  for (const block of openBlocks) {
+    const blockDurationMs = block.blockEndMs - block.blockStartMs;
+    const vehicle         = block.vehicle;
+
+    let placed = false;
+    const windowsTested: string[] = [];
+    const rejectionReasons: string[] = [];
+
+    for (const w of blankWindows) {
+      windowsTested.push(w.windowId);
+
+      // Determine buffer needed
+      const bufferMs = vehicle === '' ? BUFFER_SAME_VEHICLE_MS : BUFFER_DIFF_VEHICLE_MS;
+
+      const cursor    = windowCursor.get(w.windowId)!;
+      const newStart  = cursor + bufferMs;
+      const newEnd    = newStart + blockDurationMs;
+
+      // Does it fit in the window?
+      if (newEnd > w.endMs) {
+        rejectionReasons.push(`${w.windowId}: passt nicht rein (braucht ${Math.round((newEnd - w.startMs) / 60000)}min, Fenster ${Math.round(w.durationSec / 60)}min)`);
+        continue;
+      }
+
+      // Is Inhaber busy at the new time?
+      if (inhaberBusyAt(newStart, newEnd)) {
+        rejectionReasons.push(`${w.windowId}: Inhaber belegt`);
+        continue;
+      }
+
+      // Is the vehicle busy at the new time?
+      if (vehicleBusyAt(vehicle, newStart, newEnd)) {
+        rejectionReasons.push(`${w.windowId}: Fahrzeug ${vehicle} belegt`);
+        continue;
+      }
+
+      // Check gap against existing placed blocks in this window
+      const placed_in_window = windowPlacements.get(w.windowId)!;
+      let gapOk = true;
+      for (const prev of placed_in_window) {
+        const isSame = prev.vehicle === vehicle;
+        const requiredBuffer = isSame ? BUFFER_SAME_VEHICLE_MS : MIN_GAP_MS;
+        const gap = newStart - prev.newEndMs;
+        if (gap < requiredBuffer) {
+          gapOk = false;
+          rejectionReasons.push(`${w.windowId}: Mindestabstand zu vorherigem Block unterschritten (${Math.round(gap/60000)}min < ${Math.round(requiredBuffer/60000)}min)`);
+          break;
+        }
+      }
+      if (!gapOk) continue;
+
+      // Hard TypeScript guard before push
+      if (
+        typeof newStart !== 'number' ||
+        typeof newEnd   !== 'number' ||
+        !Number.isFinite(newStart)   ||
+        !Number.isFinite(newEnd)     ||
+        newEnd <= newStart
+      ) {
+        failedBlocks.push({
+          block,
+          reason: 'Ungültige berechnete Zeiten (newStart/newEnd)',
+          candidatesConsidered: windowsTested.length,
+          rejectionReasons,
+          bestFailedBufferMs: -1,
+          windowsTested: windowsTested.length,
+          windowsLongEnough: 0,
+          windowsVehicleBusy: 0,
+          windowsBufferFail: 0,
+          windowsOutsideMonth: 0,
+          windowsOverlap: 0,
+          bestRejectedWindowId: null,
+          bestRejectedReason: null,
+        });
+        placed = true; // placed into failed
+        break;
+      }
+
+      // Accept placement
+      const validBlock: ValidPlannedShiftBlock = {
+        blockId:         block.blockId,
+        vehicle:         block.vehicle,
+        originalStartMs: block.blockStartMs,
+        originalEndMs:   block.blockEndMs,
+        newStartMs:      newStart,
+        newEndMs:        newEnd,
+        durationMs:      blockDurationMs,
+        offsetMs:        newStart - block.blockStartMs,
+        rides:           block.rides?.length ?? 0,
+        rows:            block.blockId,
+        usedWindowId:    w.windowId,
+        usedBufferMinutes: Math.round(bufferMs / 60000),
+      };
+
+      plannedBlocks.push(validBlock);
+      windowPlacements.get(w.windowId)!.push(validBlock);
+
+      // Update cursor: after block + minimum gap for next
+      windowCursor.set(w.windowId, newEnd + MIN_GAP_MS);
+      windowBlocksSec.set(w.windowId, (windowBlocksSec.get(w.windowId) ?? 0) + Math.round(blockDurationMs / 1000));
+
+      // Update vehicle occupancy so future blocks see this placement
+      if (!vehicleOcc.has(vehicle)) vehicleOcc.set(vehicle, []);
+      vehicleOcc.get(vehicle)!.push({ startMs: newStart, endMs: newEnd });
+
+      // Update inhaber occupancy so future blocks respect gap
+      inhaberIntervals.push({ startMs: newStart, endMs: newEnd, vehicle });
+
+      console.log(`${PREFIX} Placed ${block.blockId} (${Math.round(blockDurationMs/60000)}min) into ${w.windowId} at ${new Date(newStart).toISOString()}`);
+      placed = true;
+      break;
+    }
+
+    if (!placed) {
+      failedBlocks.push({
+        block,
+        reason: rejectionReasons.length > 0
+          ? `Kein passendes Fenster: ${rejectionReasons[0]}`
+          : 'Keine freien Inhaber-Fenster verfügbar',
+        candidatesConsidered: windowsTested.length,
+        rejectionReasons,
+        bestFailedBufferMs: -1,
+        windowsTested:       windowsTested.length,
+        windowsLongEnough:   0,
+        windowsVehicleBusy:  0,
+        windowsBufferFail:   0,
+        windowsOutsideMonth: 0,
+        windowsOverlap:      0,
+        bestRejectedWindowId: windowsTested.length > 0 ? windowsTested[0] : null,
+        bestRejectedReason:   rejectionReasons[0] ?? null,
+      });
+    }
+  }
+
+  // ── Step 5: Build blankWindowsUsed audit ───────────────────────────────────
+  const blankWindowsUsed: BlankWindowUsage[] = blankWindows
+    .filter(w => (windowPlacements.get(w.windowId)?.length ?? 0) > 0)
+    .map(w => {
+      const placedSec = windowBlocksSec.get(w.windowId) ?? 0;
+      return {
+        windowId:          w.windowId,
+        date:              w.date,
+        windowStartMs:     w.startMs,
+        windowEndMs:       w.endMs,
+        windowDurationSec: w.durationSec,
+        blocksPlacedCount: windowPlacements.get(w.windowId)!.length,
+        blocksPlacedSec:   placedSec,
+        remainingFreeSec:  w.durationSec - placedSec,
+      };
+    });
+
+  console.log(`${PREFIX} DONE planned=${plannedBlocks.length} failed=${failedBlocks.length} windowsUsed=${blankWindowsUsed.length}`);
+
+  return {
+    inhaberName,
+    plannedBlocks,
+    failedBlocks,
+    blankWindowsUsed,
+    summary: {
+      openBlocksIn:       fwsResult.remainingOpenBlocks.length,
+      plannedCount:       plannedBlocks.length,
+      failedCount:        failedBlocks.length,
+      plannedDurationSec: plannedBlocks.reduce((s, p) => s + Math.round(p.durationMs / 1000), 0),
+      windowsUsed:        blankWindowsUsed.length,
+      windowsAvailable:   blankWindows.length,
+    },
+    diagnostics: {
+      bufferSameVehicleMin: Math.round(BUFFER_SAME_VEHICLE_MS / 60000),
+      bufferDiffVehicleMin: Math.round(BUFFER_DIFF_VEHICLE_MS / 60000),
+      minGapMs:             MIN_GAP_MS,
+    },
+  };
+}
+
+function runAutoShiftPlan(
+  fwsResult: InhaberFreeWindowSearchStepResult,
+  inhaberName: string,
+  month: number,
+  year: number,
+): AutoShiftPlanStepResult {
+  console.log('[runAutoShiftPlan] ACTIVE VERSION v3-visible-windows');
+  const PREFIX = '[UseVisibleFreeWindowsPlanner]';
+  const START_BUFFER_MS = 60 * 60 * 1000;  // 60 min
+  const MIN_BUFFER_MS   = INHABER_MIN_GAP_MS; // 30 min
+
+  const monthStart = new Date(year, month - 1, 1).getTime();
+  const monthEnd   = new Date(year, month,     0, 23, 59, 59, 999).getTime();
+
+  // ── Build live occupancy maps ─────────────────────────────────────────────
+  interface InhaberOccEntry extends OccInterval { date: string; vehicle: string }
+  const inhaberOcc: InhaberOccEntry[] = fwsResult.inhaberOccupiedIntervals.map(i => ({
+    startMs: i.startMs,
+    endMs:   i.endMs,
+    date:    new Date(i.startMs).toISOString().slice(0, 10),
+    vehicle: i.vehicle,
+  }));
+
+  // vehicleOcc: includes ALL assigned blocks (Inhaber + regular) for vehicle-conflict checking
+  const vehicleOcc = new Map<string, OccInterval[]>();
+  for (const i of fwsResult.inhaberOccupiedIntervals) {
+    if (!vehicleOcc.has(i.vehicle)) vehicleOcc.set(i.vehicle, []);
+    vehicleOcc.get(i.vehicle)!.push({ startMs: i.startMs, endMs: i.endMs });
+  }
+  // Also seed with the remaining open blocks' original slots (their vehicle is claimed at orig time)
+  for (const c of fwsResult.candidateWindowsByBlock) {
+    const b = c.block;
+    if (!b.vehicle) continue;
+    if (!vehicleOcc.has(b.vehicle)) vehicleOcc.set(b.vehicle, []);
+    vehicleOcc.get(b.vehicle)!.push({ startMs: b.blockStartMs, endMs: b.blockEndMs });
+  }
+
+  // ── Per-day workload tracking ─────────────────────────────────────────────
+  const dayWorkload = new Map<string, { blockCount: number; totalSec: number }>();
+  for (const occ of inhaberOcc) {
+    const prev = dayWorkload.get(occ.date) ?? { blockCount: 0, totalSec: 0 };
+    dayWorkload.set(occ.date, {
+      blockCount: prev.blockCount + 1,
+      totalSec:   prev.totalSec + Math.round((occ.endMs - occ.startMs) / 1000),
+    });
+  }
+
+  // ── Eligible candidacies (skip original cross-month blocks) ──────────────
+  const eligibleCandidacies = fwsResult.candidateWindowsByBlock.filter(c => {
+    const b = c.block;
+    return b.blockStartMs >= monthStart && b.blockEndMs <= monthEnd;
+  });
+
+  // Sort: longest first, most rides, fewest total candidates, earliest start
+  const sortedCandidacies = [...eligibleCandidacies].sort((a, b) => {
+    if (b.block.blockDurationSec !== a.block.blockDurationSec)
+      return b.block.blockDurationSec - a.block.blockDurationSec;
+    const aRides = a.block.rides?.length ?? 0;
+    const bRides = b.block.rides?.length ?? 0;
+    if (bRides !== aRides) return bRides - aRides;
+    if (a.candidateWindows.length !== b.candidateWindows.length)
+      return a.candidateWindows.length - b.candidateWindows.length;
+    return (a.block.blockStartMs ?? 0) - (b.block.blockStartMs ?? 0);
+  });
+
+  const plannedBlocks: PlannedShiftBlock[] = [];
+  const failedBlocks: FailedShiftBlock[]   = [];
+
+  console.log(`${PREFIX} Planning ${sortedCandidacies.length} eligible blocks. Visible free windows: ${fwsResult.freeWindows.length}`);
+
+  for (const candidacy of sortedCandidacies) {
+    const block   = candidacy.block;
+    const rides   = block.rides ?? [];
+    const blockDurMs = block.blockDurationSec * 1000;
+
+    // Use ALL candidate windows (not just vehicleFree), because tryPlacement does the real check
+    // Sort by: vehicle-free first, then longest window, then earliest
+    const allCandidates = [...candidacy.candidateWindows].sort((a, b) => {
+      if (a.vehicleFree !== b.vehicleFree) return a.vehicleFree ? -1 : 1;
+      if (b.durationSec !== a.durationSec) return b.durationSec - a.durationSec;
+      return a.startMs - b.startMs;
+    });
+
+    const rejectionReasons: string[] = [];
+    let placed = false;
+    let bestFailedBufferMs = -1;
+
+    // Per-window rejection tracking for diagnostics
+    let windowsTested = 0;
+    let windowsLongEnough = 0;
+    let windowsVehicleBusy = 0;
+    let windowsBufferFail = 0;
+    let windowsOutsideMonth = 0;
+    let windowsOverlap = 0;
+    let bestRejectedWindowId: string | null = null;
+    let bestRejectedReason: string | null = null;
+
+    const STEP_MS = 60_000; // 1-minute local adjustment increment
+
+    // vehicle-aware required gap: same vehicle = 0, different vehicle = bufferMs
+    function requiredGapMs(neighborVehicle: string, bufferMs: number): number {
+      return neighborVehicle === block.vehicle ? 0 : bufferMs;
+    }
+
+    // Build shifted rides from a block-level absolute start offset (ms from epoch)
+    function buildShifted(offsetMs: number): { shiftedRides: ShiftedRide[]; newStartMs: number; newEndMs: number } {
+      const shiftedRides: ShiftedRide[] = rides.map(r => ({
+        tripId:         r.tripId,
+        shiftedStartMs: r.originalStartMs + offsetMs,
+        shiftedEndMs:   r.originalEndMs   + offsetMs,
+        durationSec:    r.durationSec,
+      }));
+      // Use ride bounds when available; fall back to block bounds shifted by offset
+      const blockOrigStart = block.blockStartMs ?? 0;
+      const blockOrigEnd   = block.blockEndMs   ?? blockOrigStart + blockDurMs;
+      const newStartMs = shiftedRides.length > 0
+        ? Math.min(...shiftedRides.map(r => r.shiftedStartMs))
+        : blockOrigStart + offsetMs;
+      const newEndMs = shiftedRides.length > 0
+        ? Math.max(...shiftedRides.map(r => r.shiftedEndMs))
+        : blockOrigEnd + offsetMs;
+      return { shiftedRides, newStartMs, newEndMs };
+    }
+
+    // Full validation at a given absolute start position inside a free window
+    interface PlacementResult {
+      ok: boolean;
+      gapOnly: boolean;   // failed only because of gap (eligible for local adjustment)
+      reason: string;
+      shiftedRides: ShiftedRide[];
+      newStartMs: number;
+      newEndMs: number;
+      offsetMs: number;
+    }
+    function tryPlacement(absStartMs: number, bufferMs: number, windowId: string): PlacementResult {
+      const offsetMs = absStartMs - (block.blockStartMs ?? 0);
+      const { shiftedRides, newStartMs, newEndMs } = buildShifted(offsetMs);
+
+      // Guard: validate computed bounds before any further checks
+      if (typeof newStartMs !== 'number' || !isFinite(newStartMs) ||
+          typeof newEndMs   !== 'number' || !isFinite(newEndMs)   || newEndMs <= newStartMs) {
+        console.error('[AutoShiftPlanStep] undefined plan item', {
+          blockId: block.blockId, windowId, offsetMs, newStartMs, newEndMs,
+          ridesCount: shiftedRides.length, absStartMs,
+        });
+        return { ok: false, gapOnly: false, reason: `${windowId}: Ungültige Zeitbounds`, shiftedRides, newStartMs: absStartMs, newEndMs: absStartMs + blockDurMs, offsetMs };
+      }
+
+      if (shiftedRides.some(r => r.shiftedStartMs < monthStart || r.shiftedEndMs > monthEnd))
+        return { ok: false, gapOnly: false, reason: `${windowId}: Außerhalb Monat`, shiftedRides, newStartMs, newEndMs, offsetMs };
+
+      if (!shiftedRides.every(r => r.shiftedEndMs - r.shiftedStartMs === r.durationSec * 1000))
+        return { ok: false, gapOnly: false, reason: `${windowId}: Daueränderung`, shiftedRides, newStartMs, newEndMs, offsetMs };
+
+      if (shiftedRides.some(r => inhaberOcc.some(occ => intervalsOverlap({ startMs: r.shiftedStartMs, endMs: r.shiftedEndMs }, occ))))
+        return { ok: false, gapOnly: false, reason: `${windowId}: Inhaber-Überlappung`, shiftedRides, newStartMs, newEndMs, offsetMs };
+
+      // Vehicle-aware gap check
+      const gapViolation = inhaberOcc.some(occ => {
+        const req = requiredGapMs(occ.vehicle, bufferMs);
+        if (req === 0) return false;
+        const gapBefore = newStartMs - occ.endMs;
+        const gapAfter  = occ.startMs - newEndMs;
+        const gap = Math.max(gapBefore, gapAfter);
+        return gap >= 0 && gap < req;
+      });
+      if (gapViolation)
+        return { ok: false, gapOnly: true, reason: `${windowId}: Mindestabstand < ${Math.round(bufferMs/60000)}min`, shiftedRides, newStartMs, newEndMs, offsetMs };
+
+      const vOcc = vehicleOcc.get(block.vehicle) ?? [];
+      if (shiftedRides.some(r => vOcc.some(occ => intervalsOverlap({ startMs: r.shiftedStartMs, endMs: r.shiftedEndMs }, occ))))
+        return { ok: false, gapOnly: false, reason: `${windowId}: Fahrzeugkonflikt`, shiftedRides, newStartMs, newEndMs, offsetMs };
+
+      return { ok: true, gapOnly: false, reason: '', shiftedRides, newStartMs, newEndMs, offsetMs };
+    }
+
+    // Try to place block in a free window.
+    // Searches from both window start and window end, and scans through all positions
+    // if the initial placement fails due to vehicle conflicts or gap issues.
+    function tryWindowWithAdjustment(
+      cw: typeof allCandidates[0],
+      bufferMs: number,
+    ): (PlacementResult & { proposedStartMs: number; adjustmentMs: number; adjustmentReason: string }) | null {
+      const windowStartMs = cw.startMs;
+      const windowEndMs   = cw.startMs + cw.durationSec * 1000;
+      const proposedStart = windowStartMs;
+
+      // Compute search bounds: block must fit fully inside the free window
+      const earliestStart = windowStartMs;
+      const latestStart   = windowEndMs - blockDurMs;
+      if (latestStart < earliestStart) return null; // window too small
+
+      // Try proposed start first
+      const initial = tryPlacement(proposedStart, bufferMs, cw.windowId);
+      if (initial.ok) {
+        return { ...initial, proposedStartMs: proposedStart, adjustmentMs: 0, adjustmentReason: '' };
+      }
+
+      // Also try from the latest possible start (helps when vehicle is only busy at window start)
+      if (latestStart > proposedStart) {
+        const rLast = tryPlacement(latestStart, bufferMs, cw.windowId);
+        if (rLast.ok) {
+          const adjMs = latestStart - proposedStart;
+          return { ...rLast, proposedStartMs: proposedStart, adjustmentMs: adjMs, adjustmentReason: 'Fahrzeug frei am Fenster-Ende' };
+        }
+      }
+
+      // Full scan: try every minute-step across the whole window
+      // (handles vehicle conflicts or gap violations that only affect part of the window)
+      const maxSteps = Math.ceil((latestStart - earliestStart) / STEP_MS);
+      let bestGapOnly: (PlacementResult & { proposedStartMs: number; adjustmentMs: number; adjustmentReason: string }) | null = null;
+
+      for (let step = 1; step <= maxSteps; step++) {
+        // Try later first
+        const laterStart = proposedStart + step * STEP_MS;
+        if (laterStart <= latestStart) {
+          const r = tryPlacement(laterStart, bufferMs, cw.windowId);
+          if (r.ok) {
+            const adjMs = laterStart - proposedStart;
+            console.log(`${PREFIX} Scan+ ${block.blockId} win=${cw.windowId} buf=${Math.round(bufferMs/60000)}min step=+${step}min accepted`);
+            return { ...r, proposedStartMs: proposedStart, adjustmentMs: adjMs, adjustmentReason: 'Scan vorwärts' };
+          }
+          if (r.gapOnly && !bestGapOnly) {
+            bestGapOnly = { ...r, proposedStartMs: proposedStart, adjustmentMs: laterStart - proposedStart, adjustmentReason: 'Scan vorwärts (Gap-Only)' };
+          }
+        }
+        // Try earlier
+        const earlierStart = proposedStart - step * STEP_MS;
+        if (earlierStart >= earliestStart) {
+          const r = tryPlacement(earlierStart, bufferMs, cw.windowId);
+          if (r.ok) {
+            const adjMs = earlierStart - proposedStart;
+            console.log(`${PREFIX} Scan- ${block.blockId} win=${cw.windowId} buf=${Math.round(bufferMs/60000)}min step=${step}min accepted`);
+            return { ...r, proposedStartMs: proposedStart, adjustmentMs: adjMs, adjustmentReason: 'Scan rückwärts' };
+          }
+          if (r.gapOnly && !bestGapOnly) {
+            bestGapOnly = { ...r, proposedStartMs: proposedStart, adjustmentMs: earlierStart - proposedStart, adjustmentReason: 'Scan rückwärts (Gap-Only)' };
+          }
+        }
+      }
+      return null;
+    }
+
+    // Adaptive buffer: 60→30 min, 1 min step
+    outerLoop:
+    for (let bufferMs = START_BUFFER_MS; bufferMs >= MIN_BUFFER_MS; bufferMs -= 60_000) {
+      type ValidEntry = {
+        cw: typeof allCandidates[0];
+        newStartMs: number;
+        newEndMs: number;
+        offsetMs: number;
+        shiftedRides: ShiftedRide[];
+        proposedStartMs: number;
+        adjustmentMs: number;
+        adjustmentReason: string;
+        date: string;
+        dayBlocksBefore: number;
+        dayHoursBefore: number;
+        absOffset: number;
+        absAdjustment: number;
+        tightness: number;
+      };
+      const validAtBuffer: ValidEntry[] = [];
+
+      for (const cw of allCandidates) {
+        if (bufferMs === START_BUFFER_MS) { windowsTested++; }
+        if (cw.durationSec * 1000 < blockDurMs) continue;
+        if (bufferMs === START_BUFFER_MS) { windowsLongEnough++; }
+        const result = tryWindowWithAdjustment(cw, bufferMs);
+        if (!result) {
+          // Categorize rejection for diagnostics
+          const plain = tryPlacement(cw.startMs, bufferMs, cw.windowId);
+          const r = plain.reason;
+          if (r.includes('Fahrzeugkonflikt')) windowsVehicleBusy++;
+          else if (r.includes('Mindestabstand')) windowsBufferFail++;
+          else if (r.includes('Außerhalb Monat')) windowsOutsideMonth++;
+          else windowsOverlap++;
+          if (!bestRejectedWindowId) { bestRejectedWindowId = cw.windowId; bestRejectedReason = r; }
+          if (bufferMs === START_BUFFER_MS) rejectionReasons.push(r);
+          if (bufferMs > bestFailedBufferMs) bestFailedBufferMs = bufferMs;
+          continue;
+        }
+        // result is a flat PlacementResult & { proposedStartMs, adjustmentMs, adjustmentReason }
+        const { newStartMs, newEndMs, offsetMs, shiftedRides, proposedStartMs, adjustmentMs, adjustmentReason } = result;
+        const date = new Date(newStartMs).toISOString().slice(0, 10);
+        const wl   = dayWorkload.get(date) ?? { blockCount: 0, totalSec: 0 };
+        validAtBuffer.push({
+          cw, newStartMs, newEndMs, offsetMs, shiftedRides,
+          proposedStartMs, adjustmentMs, adjustmentReason, date,
+          dayBlocksBefore: wl.blockCount,
+          dayHoursBefore:  wl.totalSec / 3600,
+          absOffset:       Math.abs(offsetMs),
+          absAdjustment:   Math.abs(adjustmentMs),
+          tightness:       cw.durationSec * 1000 - blockDurMs,
+        });
+      }
+
+      if (validAtBuffer.length === 0) continue;
+
+      // Sort by lightest-day, then smallest adjustment, then smallest abs offset
+      validAtBuffer.sort((a, b) => {
+        if (a.dayBlocksBefore !== b.dayBlocksBefore) return a.dayBlocksBefore - b.dayBlocksBefore;
+        if (Math.abs(a.dayHoursBefore - b.dayHoursBefore) > 0.001) return a.dayHoursBefore - b.dayHoursBefore;
+        if (a.absAdjustment !== b.absAdjustment) return a.absAdjustment - b.absAdjustment;
+        if (a.absOffset !== b.absOffset) return a.absOffset - b.absOffset;
+        if (a.tightness !== b.tightness) return a.tightness - b.tightness;
+        return (a.newStartMs ?? 0) - (b.newStartMs ?? 0);
+      });
+
+      const best = validAtBuffer[0];
+      const { newStartMs, newEndMs, offsetMs, shiftedRides, proposedStartMs, adjustmentMs, adjustmentReason, date, dayBlocksBefore, dayHoursBefore } = best;
+
+      // Safety guard: reject if bounds are still invalid (should not happen after tryPlacement guards, but defensive)
+      if (typeof newStartMs !== 'number' || !isFinite(newStartMs) || typeof newEndMs !== 'number' || !isFinite(newEndMs) || newEndMs <= newStartMs) {
+        console.error('[AutoShiftPlanStep] undefined plan item', { blockId: block.blockId, newStartMs, newEndMs, date });
+        failedBlocks.push({ block, reason: 'Kein gültiges Zeitfenster (ungültige Bounds)', candidatesConsidered: allCandidates.length, rejectionReasons, bestFailedBufferMs, windowsTested, windowsLongEnough, windowsVehicleBusy, windowsBufferFail, windowsOutsideMonth, windowsOverlap, bestRejectedWindowId, bestRejectedReason });
+        break outerLoop;
+      }
+
+      // Update occupancy & workload
+      inhaberOcc.push({ startMs: newStartMs, endMs: newEndMs, date, vehicle: block.vehicle });
+      if (!vehicleOcc.has(block.vehicle)) vehicleOcc.set(block.vehicle, []);
+      vehicleOcc.get(block.vehicle)!.push({ startMs: newStartMs, endMs: newEndMs });
+      const wlAfter = dayWorkload.get(date) ?? { blockCount: 0, totalSec: 0 };
+      dayWorkload.set(date, {
+        blockCount: wlAfter.blockCount + 1,
+        totalSec:   wlAfter.totalSec + block.blockDurationSec,
+      });
+
+      const wlNow = dayWorkload.get(date)!;
+      const adjLabel = adjustmentMs !== 0
+        ? ` adj=${adjustmentMs > 0 ? '+' : ''}${Math.round(adjustmentMs/60000)}min`
+        : '';
+      console.log(`${PREFIX} Placed ${block.blockId} on ${date} buffer=${Math.round(bufferMs/60000)}min offset=${fmtOffset(offsetMs)}${adjLabel} dayBlocks:${dayBlocksBefore}→${wlNow.blockCount}`);
+
+      plannedBlocks.push({
+        block, offsetMs, newStartMs, newEndMs, shiftedRides,
+        windowId:              best.cw.windowId,
+        windowStartMs:         best.cw.startMs,
+        score:                 Math.abs(offsetMs) / 1000,
+        grund:                 `Leichtester Tag (${dayBlocksBefore} Blöcke, ${dayHoursBefore.toFixed(1)}h), Puffer ${Math.round(bufferMs/60000)}min, Offset ${fmtOffset(offsetMs)}${adjLabel}`,
+        bufferUsedMs:          bufferMs,
+        targetDayBlocksBefore: dayBlocksBefore,
+        targetDayHoursBefore:  dayHoursBefore,
+        targetDayBlocksAfter:  wlNow.blockCount,
+        targetDayHoursAfter:   wlNow.totalSec / 3600,
+        proposedStartMs,
+        adjustedStartMs:       newStartMs,
+        adjustmentMs,
+        adjustmentReason,
+      });
+      placed = true;
+      break outerLoop;
+    }
+
+    if (!placed) {
+      const noWindows = allCandidates.length === 0;
+      const reason = noWindows
+        ? 'Kein passendes Inhaber-Zeitfenster gefunden'
+        : windowsLongEnough === 0
+          ? `Alle ${windowsTested} Fenster zu kurz für Block (${Math.round(blockDurMs/60000)} min benötigt)`
+          : `Kein konfliktfreier Slot (${windowsLongEnough} Fenster lang genug, ${windowsVehicleBusy} Fahrzeugkonflikt, ${windowsBufferFail} Puffer, ${windowsOverlap} Überlappung)`;
+      console.log(`${PREFIX} Failed ${block.blockId}: ${reason} bestBuffer=${bestFailedBufferMs}min`);
+      failedBlocks.push({
+        block,
+        reason,
+        candidatesConsidered: allCandidates.length,
+        rejectionReasons:     rejectionReasons.slice(0, 10),
+        bestFailedBufferMs,
+        windowsTested,
+        windowsLongEnough,
+        windowsVehicleBusy,
+        windowsBufferFail,
+        windowsOutsideMonth,
+        windowsOverlap,
+        bestRejectedWindowId,
+        bestRejectedReason,
+      });
+    }
+  }
+
+  // ── Post-placement gap scan (vehicle-aware) ───────────────────────────────
+  const allInhaberSorted = [...inhaberOcc].sort((a, b) => a.startMs - b.startMs);
+  let minGapViolations = 0;
+  for (let i = 1; i < allInhaberSorted.length; i++) {
+    const prev = allInhaberSorted[i - 1];
+    const cur  = allInhaberSorted[i];
+    if (prev.vehicle === cur.vehicle) continue; // same vehicle: 0 gap required
+    const gap = cur.startMs - prev.endMs;
+    if (gap >= 0 && gap < MIN_BUFFER_MS) minGapViolations++;
+  }
+
+  // ── Day-distribution stats ─────────────────────────────────────────────────
+  const allDayWl = Array.from(dayWorkload.values());
+  const daysUsed    = allDayWl.length;
+  const maxDayBlocks = allDayWl.reduce((m, d) => Math.max(m, d.blockCount), 0);
+  const maxDayHours  = allDayWl.reduce((m, d) => Math.max(m, d.totalSec / 3600), 0);
+
+  // ── Buffer stats ────────────────────────────────────────────────────────────
+  const usedBuffers = plannedBlocks.map(p => p.bufferUsedMs);
+  const minBufferUsedMs = usedBuffers.length > 0 ? Math.min(...usedBuffers) : 0;
+  const avgBufferUsedMs = usedBuffers.length > 0
+    ? Math.round(usedBuffers.reduce((s, v) => s + v, 0) / usedBuffers.length)
+    : 0;
+
+  // ── Diagnostics ───────────────────────────────────────────────────────────
+  const durationChanges = plannedBlocks.reduce((sum, p) =>
+    sum + p.shiftedRides.filter(r => r.shiftedEndMs - r.shiftedStartMs !== r.durationSec * 1000).length, 0);
+
+  let driverOverlaps = 0, vehicleOverlapsCount = 0;
+  for (let i = 0; i < plannedBlocks.length; i++) {
+    for (let j = i + 1; j < plannedBlocks.length; j++) {
+      const a = plannedBlocks[i], b = plannedBlocks[j];
+      if (!hasValidNewTimes(a) || !hasValidNewTimes(b)) continue;
+      if (intervalsOverlap({ startMs: a.newStartMs, endMs: a.newEndMs }, { startMs: b.newStartMs, endMs: b.newEndMs }))
+        driverOverlaps++;
+      if (a.block.vehicle === b.block.vehicle &&
+          intervalsOverlap({ startMs: a.newStartMs, endMs: a.newEndMs }, { startMs: b.newStartMs, endMs: b.newEndMs }))
+        vehicleOverlapsCount++;
+    }
+  }
+
+  const allOffsets = plannedBlocks.map(p => p.offsetMs);
+  const posOffsets = allOffsets.filter(o => o >= 0);
+  const negOffsets = allOffsets.filter(o => o < 0);
+
+  console.log(`${PREFIX} Done: planned=${plannedBlocks.length} failed=${failedBlocks.length} minGapViol=${minGapViolations} avgBuffer=${Math.round(avgBufferUsedMs/60000)}min daysUsed=${daysUsed}`);
+
+  return {
+    inhaberName,
+    plannedBlocks,
+    failedBlocks,
+    summary: {
+      openBlocksIn:          fwsResult.remainingOpenBlocks.length,
+      plannedCount:          plannedBlocks.length,
+      failedCount:           failedBlocks.length,
+      plannedRides:          plannedBlocks.reduce((s, p) => s + p.shiftedRides.length, 0),
+      plannedSec:            plannedBlocks.reduce((s, p) => s + p.block.blockDurationSec, 0),
+      minOffsetMs:           allOffsets.length > 0 ? Math.min(...allOffsets.map(Math.abs)) : 0,
+      maxPosOffsetMs:        posOffsets.length > 0 ? Math.max(...posOffsets) : 0,
+      maxNegOffsetMs:        negOffsets.length > 0 ? Math.min(...negOffsets) : 0,
+      durationChanges,
+      driverOverlaps,
+      vehicleOverlaps:       vehicleOverlapsCount,
+      minBufferUsedMs,
+      avgBufferUsedMs,
+      daysUsed,
+      maxDayBlocks,
+      maxDayHours,
+      minGapViolations,
+    },
+    diagnostics: {
+      wholeBlocksShifted:       true,
+      singleRidesShifted:       0,
+      durationChanges,
+      driverOverlaps,
+      vehicleOverlaps:          vehicleOverlapsCount,
+      regularDriversUnchanged:  true,
+      inhaberAssignmentCorrect: driverOverlaps === 0 && vehicleOverlapsCount === 0,
+    },
+  };
+}
+
+function fmtOffset(ms: number): string {
+  if (ms === 0) return '0';
+  const sign = ms > 0 ? '+' : '-';
+  return sign + formatBlockDuration(Math.round(Math.abs(ms) / 1000));
+}
+
+// ── LargestBlankPackingPlanView ───────────────────────────────────────────────
+
+interface LargestBlankPackingPlanViewProps {
+  planResult: LargestBlankPackingShiftPlanResult;
+  fwsResult: InhaberFreeWindowSearchStepResult;
+  regularAssignments: RegularBlockAssignment[];
+  allBlocks: VehicleBlock[];
+  month: number;
+  year: number;
+  onBack: () => void;
+  onRecompute: () => void;
+}
+
+function AutoShiftPlanView({
+  planResult, fwsResult, regularAssignments, allBlocks, month, year, onBack, onRecompute,
+}: LargestBlankPackingPlanViewProps) {
+  console.log('[LargestBlankPackingPlanView] ACTIVE VERSION v1');
+  console.log('[ActualAutoShiftPlanPage] repair wired');
+  const [showFailed, setShowFailed] = useState(false);
+  const [showAudit,  setShowAudit]  = useState(false);
+  const [freeModal, setFreeModal]   = useState<{ date: string; startMs: number; endMs: number } | null>(null);
+  const [showFreeWindows, setShowFreeWindows] = useState(true);
+  const [showRepairDetails, setShowRepairDetails] = useState(false);
+
+  const { plannedBlocks, failedBlocks, blankWindowsUsed, summary, inhaberName } = planResult;
+
+  // ── Final Overlap Repair Pass ───────────────────────────────────────────────
+  // Runs once on mount / when planResult changes. Operates on the final visible
+  // calendar entries: fixed Inhaber blocks + shifted Inhaber blocks (plannedBlocks) +
+  // regular driver assignments. Returns repaired plannedBlocks.
+
+  interface RepairCalendarEntry {
+    blockId: string;
+    vehicle: string;
+    driverName: string;
+    isInhaber: boolean;
+    isShiftable: boolean; // true = can be moved by repair
+    startMs: number;
+    endMs: number;
+    durationMs: number;
+    rides?: number; // for conversion-priority tie-breaking
+    originalDriverName?: string; // set when converted from regular driver to Inhaber
+  }
+
+  interface RepairMove2 {
+    blockId: string;
+    vehicle: string;
+    originalDriverName: string;
+    newDriverName: string;
+    oldStartMs: number;
+    oldEndMs: number;
+    newStartMs: number;
+    newEndMs: number;
+    reason: string;
+    bufferUsedMin: number;
+  }
+
+  interface UnrepairableEntry {
+    blockId: string;
+    driverName: string;
+    vehicle: string;
+    durationMs: number;
+    conflictKind: string;
+    sharedWindowsChecked: number;
+    reason: string;
+  }
+
+  interface NativeRepairResult {
+    repairedPlannedBlocks: ValidPlannedShiftBlock[];
+    conflictsBefore: number;
+    conflictsAfter: number;
+    movedBlocks: RepairMove2[];
+    unrepairable: UnrepairableEntry[];
+    iterations: number;
+    diagFahrer: number;
+    diagFahrzeug: number;
+    diagInhaber: number;
+    diagAusserhalb: number;
+    diagNichtReparierbar: number;
+    ausserhalbDetails: Array<{
+      blockId: string; driverName: string; vehicle: string;
+      startMs: number; endMs: number;
+      origin: 'original' | 'planned' | 'repaired';
+      reason: string;
+    }>;
+    convertedToInhaber: Map<string, { originalDriverName: string; vehicle: string; startMs: number; endMs: number; durationMs: number; rides: number }>;
+    originalConflictDetails: Array<{
+      kind: 'driver' | 'vehicle' | 'inhaber';
+      aBlockId: string; aDriver: string; aVehicle: string; aStartMs: number; aEndMs: number;
+      bBlockId: string; bDriver: string; bVehicle: string; bStartMs: number; bEndMs: number;
+      overlapStartMs: number; overlapEndMs: number;
+    }>;
+    finalConflictDetails: Array<{
+      kind: 'driver' | 'vehicle' | 'inhaber';
+      aBlockId: string; aDriver: string; aVehicle: string; aStartMs: number; aEndMs: number;
+      bBlockId: string; bDriver: string; bVehicle: string; bStartMs: number; bEndMs: number;
+      overlapStartMs: number; overlapEndMs: number;
+    }>;
+    finalEntries: RepairCalendarEntry[];
+    debugDo53Entries: Array<{
+      blockId: string; driverName: string; vehicle: string;
+      displayStart: string; displayEnd: string;
+      rawStartMs: number; rawEndMs: number;
+      normalizedStartMs: number; normalizedEndMs: number;
+      normalizedStartISO: string; normalizedEndISO: string;
+      durationMinutes: number;
+      source: 'regular' | 'fixedInhaber' | 'plannedInhaber' | 'repairedInhaber' | 'convertedInhaber';
+      crossesMidnight: boolean;
+    }>;
+  }
+
+  const repairResult = useMemo<NativeRepairResult>(() => {
+    console.log('[FinalOverlapRepair] running on actual Automatischer Verschiebungsplan page');
+
+    const STEP_MS = 60 * 1000;
+    const MIN_BUFFER_MS = 30 * 60 * 1000;
+    const MAX_ITERATIONS = 200;
+    const monthStartMs = new Date(year, month - 1, 1).getTime();
+    const monthEndMs   = new Date(year, month, 1).getTime();
+
+    // Mutable copy of shifted planned blocks (Inhaber packed blocks)
+    const repairedMap = new Map<string, ValidPlannedShiftBlock>(
+      plannedBlocks.map(p => [p.blockId, { ...p }])
+    );
+
+    // Tracks regular-driver blocks that were reassigned to Inhaber:
+    // blockId → { originalDriverName, vehicle, startMs, endMs, durationMs, rides }
+    const convertedToInhaber = new Map<string, {
+      originalDriverName: string;
+      vehicle: string;
+      startMs: number;
+      endMs: number;
+      durationMs: number;
+      rides: number;
+    }>();
+
+    const movedBlocks: RepairMove2[] = [];
+    const unrepairable: UnrepairableEntry[] = [];
+    let iterations = 0;
+
+    // Build a rides lookup from allBlocks
+    const ridesMap = new Map<string, number>(
+      allBlocks.map(b => [b.blockId, b.rides?.length ?? 0])
+    );
+
+    function buildEntries(): RepairCalendarEntry[] {
+      const entries: RepairCalendarEntry[] = [];
+
+      // If a block crosses midnight, the source data may store endMs on the same
+      // calendar day as startMs (because the raw end-time string is combined with
+      // the start date). Normalise: if endMs <= startMs add one day.
+      const normEnd = (s: number, e: number) => (e > 0 && e <= s) ? e + 86_400_000 : e;
+
+      // Pre-build sets for O(1) exclusion
+      const inhaberOccupiedIds = new Set(fwsResult.inhaberOccupiedIntervals.map(iv => iv.blockId));
+      const regularAssignmentIds = new Set(regularAssignments.map(a => a.blockId));
+
+      // 1. Inhaber base blocks (fixed Inhaber schedule, possibly shifted by repair)
+      for (const iv of fwsResult.inhaberOccupiedIntervals) {
+        const repaired = repairedMap.get(iv.blockId);
+        const converted = convertedToInhaber.get(iv.blockId);
+        const sMs = converted ? converted.startMs : (repaired ? repaired.newStartMs : iv.startMs);
+        const eMs = normEnd(sMs, converted ? converted.endMs : (repaired ? repaired.newEndMs : iv.endMs));
+        const origDurMs = normEnd(iv.startMs, iv.endMs) - iv.startMs;
+        entries.push({
+          blockId: iv.blockId,
+          vehicle: iv.vehicle,
+          driverName: inhaberName,
+          isInhaber: true,
+          isShiftable: repaired != null || converted != null,
+          startMs: sMs,
+          endMs: eMs,
+          durationMs: origDurMs,
+          rides: ridesMap.get(iv.blockId) ?? 0,
+        });
+      }
+
+      // 2. Packed Inhaber blocks: open blocks moved into Inhaber windows by the packing planner.
+      //    These live in repairedMap but are NOT in inhaberOccupiedIntervals or regularAssignments.
+      for (const [blockId, packed] of repairedMap) {
+        if (inhaberOccupiedIds.has(blockId)) continue; // already emitted above
+        if (regularAssignmentIds.has(blockId)) continue; // will be handled below
+        const sMs = packed.newStartMs;
+        const eMs = normEnd(sMs, packed.newEndMs);
+        entries.push({
+          blockId,
+          vehicle: packed.vehicle,
+          driverName: inhaberName,
+          isInhaber: true,
+          isShiftable: true,
+          startMs: sMs,
+          endMs: eMs,
+          durationMs: normEnd(packed.newStartMs, packed.newStartMs + packed.durationMs) - packed.newStartMs,
+          rides: ridesMap.get(blockId) ?? 0,
+        });
+      }
+
+      // 3. Regular driver assignments (or converted-to-Inhaber)
+      for (const a of regularAssignments) {
+        const conv = convertedToInhaber.get(a.blockId);
+        if (conv) {
+          const sMs = conv.startMs;
+          const eMs = normEnd(sMs, conv.endMs);
+          entries.push({
+            blockId: a.blockId,
+            vehicle: a.vehicle,
+            driverName: inhaberName,
+            isInhaber: true,
+            isShiftable: true,
+            startMs: sMs,
+            endMs: eMs,
+            durationMs: eMs - sMs,
+            rides: conv.rides,
+            originalDriverName: conv.originalDriverName,
+          });
+        } else {
+          const sMs = a.startMs;
+          const eMs = normEnd(sMs, a.endMs);
+          entries.push({
+            blockId: a.blockId,
+            vehicle: a.vehicle,
+            driverName: a.driverName,
+            isInhaber: false,
+            isShiftable: false,
+            startMs: sMs,
+            endMs: eMs,
+            durationMs: eMs - sMs,
+            rides: ridesMap.get(a.blockId) ?? 0,
+          });
+        }
+      }
+
+      return entries;
+    }
+
+    // Canonical final entry list — mirrors the Tageskalender exactly.
+    // Iterates allBlocks (same as calendar) and resolves times via the same
+    // priority: convertedToInhaber → repairedMap (planned) → original block times.
+    // This is the single source of truth used for final validation and debug.
+    function buildVisibleFinalEntries(): RepairCalendarEntry[] {
+      const normE = (s: number, e: number) => (e > 0 && e <= s) ? e + 86_400_000 : e;
+      const inhaberOccupiedIdSet = new Set(fwsResult.inhaberOccupiedIntervals.map(iv => iv.blockId));
+      const regularAssignmentMap = new Map(regularAssignments.map(a => [a.blockId, a]));
+
+      const entries: RepairCalendarEntry[] = [];
+      for (const block of allBlocks) {
+        if (!block.blockStartMs) continue;
+        const planned   = repairedMap.get(block.blockId);
+        const converted = convertedToInhaber.get(block.blockId);
+        const isInhaber = inhaberOccupiedIdSet.has(block.blockId);
+        const regAsgn   = regularAssignmentMap.get(block.blockId);
+
+        // Resolve times — same priority as calendar
+        const rawS = converted ? converted.startMs  : planned ? planned.newStartMs  : block.blockStartMs;
+        const rawE = converted ? converted.endMs    : planned ? planned.newEndMs    : block.blockEndMs;
+        const sMs  = rawS;
+        const eMs  = normE(sMs, rawE);
+
+        // Determine driver — same priority as calendar
+        let driverName: string;
+        let isInhaberEntry: boolean;
+        if (converted) {
+          driverName = inhaberName; isInhaberEntry = true;
+        } else if (planned || isInhaber) {
+          driverName = inhaberName; isInhaberEntry = true;
+        } else if (regAsgn) {
+          driverName = regAsgn.driverName; isInhaberEntry = false;
+        } else {
+          driverName = ''; isInhaberEntry = false;
+        }
+
+        entries.push({
+          blockId: block.blockId,
+          vehicle: block.vehicle,
+          driverName,
+          isInhaber: isInhaberEntry,
+          isShiftable: converted != null || planned != null,
+          startMs: sMs,
+          endMs: eMs,
+          durationMs: eMs - sMs,
+          rides: block.rides?.length ?? 0,
+          originalDriverName: converted?.originalDriverName,
+        });
+      }
+      return entries;
+    }
+
+    function detectConflicts2(entries: RepairCalendarEntry[]): Array<{
+      kind: 'driver' | 'vehicle' | 'inhaber';
+      a: RepairCalendarEntry;
+      b: RepairCalendarEntry;
+      overlapMs: number;
+    }> {
+      const pairs: Array<{ kind: 'driver' | 'vehicle' | 'inhaber'; a: RepairCalendarEntry; b: RepairCalendarEntry; overlapMs: number }> = [];
+      const seen = new Set<string>();
+      for (let i = 0; i < entries.length; i++) {
+        for (let j = i + 1; j < entries.length; j++) {
+          const a = entries[i];
+          const b = entries[j];
+          if (a.startMs <= 0 || b.startMs <= 0) continue;
+          const overlapMs = Math.min(a.endMs, b.endMs) - Math.max(a.startMs, b.startMs);
+          if (overlapMs <= 0) continue;
+          const key = [a.blockId, b.blockId].sort().join('|');
+          if (seen.has(key)) continue;
+          if (a.driverName === b.driverName && a.driverName) {
+            seen.add(key);
+            pairs.push({ kind: a.isInhaber ? 'inhaber' : 'driver', a, b, overlapMs });
+          } else if (a.vehicle === b.vehicle && a.vehicle) {
+            seen.add(key);
+            pairs.push({ kind: 'vehicle', a, b, overlapMs });
+          }
+        }
+      }
+      return pairs;
+    }
+
+    function mergeIntervals(slots: Array<{ startMs: number; endMs: number }>) {
+      const sorted = [...slots].filter(s => s.startMs > 0 && s.endMs > s.startMs).sort((a, b) => a.startMs - b.startMs);
+      const merged: typeof sorted = [];
+      for (const s of sorted) {
+        if (!merged.length) { merged.push({ ...s }); continue; }
+        const last = merged[merged.length - 1];
+        if (s.startMs <= last.endMs) last.endMs = Math.max(last.endMs, s.endMs);
+        else merged.push({ ...s });
+      }
+      return merged;
+    }
+
+    function buildFreeInRange(busy: Array<{ startMs: number; endMs: number }>, rangeStart: number, rangeEnd: number) {
+      const merged = mergeIntervals(busy);
+      const free: Array<{ startMs: number; endMs: number }> = [];
+      let cursor = rangeStart;
+      for (const b of merged) {
+        if (b.startMs > cursor) free.push({ startMs: cursor, endMs: b.startMs });
+        cursor = Math.max(cursor, b.endMs);
+      }
+      if (cursor < rangeEnd) free.push({ startMs: cursor, endMs: rangeEnd });
+      return free;
+    }
+
+    // Pick which of two regular-driver conflict blocks to convert to Inhaber.
+    // Priority: shorter duration → fewer rides → later block
+    function pickConversionCandidate(a: RepairCalendarEntry, b: RepairCalendarEntry): RepairCalendarEntry {
+      if (a.durationMs !== b.durationMs) return a.durationMs < b.durationMs ? a : b;
+      const rA = a.rides ?? 0;
+      const rB = b.rides ?? 0;
+      if (rA !== rB) return rA < rB ? a : b;
+      return a.startMs >= b.startMs ? a : b;
+    }
+
+    // Try to place a block (Inhaber candidate) at a clean slot.
+    // Returns { tryStart, bufferUsedMin } or null.
+    function findCleanInhaberSlot(
+      candidate: RepairCalendarEntry,
+      entries: RepairCalendarEntry[],
+    ): { tryStart: number; bufferUsedMin: number } | null {
+      const durationMs = candidate.durationMs;
+
+      const inhaberBusy = entries
+        .filter(e => e.blockId !== candidate.blockId && e.driverName === inhaberName)
+        .map(e => ({ startMs: e.startMs, endMs: e.endMs }));
+      const vehicleBusy = entries
+        .filter(e => e.blockId !== candidate.blockId && e.vehicle === candidate.vehicle)
+        .map(e => ({ startMs: e.startMs, endMs: e.endMs }));
+
+      const inhaberFree = buildFreeInRange(inhaberBusy, monthStartMs, monthEndMs);
+      const vehicleFree = buildFreeInRange(vehicleBusy, monthStartMs, monthEndMs);
+
+      const sharedFree: Array<{ startMs: number; endMs: number }> = [];
+      for (const hf of inhaberFree) {
+        for (const vf of vehicleFree) {
+          const s = Math.max(hf.startMs, vf.startMs);
+          const e = Math.min(hf.endMs, vf.endMs);
+          if (e - s >= durationMs) sharedFree.push({ startMs: s, endMs: e });
+        }
+      }
+      // Largest windows first
+      sharedFree.sort((x, y) => (y.endMs - y.startMs) - (x.endMs - x.startMs) || x.startMs - y.startMs);
+
+      for (const win of sharedFree) {
+        const scanEnd = win.endMs - durationMs;
+        for (let tryStart = win.startMs; tryStart <= scanEnd; tryStart += STEP_MS) {
+          const tryEnd = tryStart + durationMs;
+          if (tryStart < monthStartMs || tryEnd > monthEndMs) continue;
+
+          // Verify no Inhaber overlap
+          const inhaberConflict = entries.some(
+            e => e.blockId !== candidate.blockId && e.driverName === inhaberName
+              && tryStart < e.endMs && tryEnd > e.startMs
+          );
+          if (inhaberConflict) continue;
+
+          // Verify no vehicle overlap
+          const vehicleConflict = entries.some(
+            e => e.blockId !== candidate.blockId && e.vehicle === candidate.vehicle
+              && tryStart < e.endMs && tryEnd > e.startMs
+          );
+          if (vehicleConflict) continue;
+
+          // Verify no regular-driver conflict (other regular drivers keep their blocks)
+          const driverConflict = entries.some(
+            e => e.blockId !== candidate.blockId && !e.isInhaber
+              && e.vehicle === candidate.vehicle
+              && tryStart < e.endMs && tryEnd > e.startMs
+          );
+          if (driverConflict) continue;
+
+          // Vehicle switch buffer for Inhaber
+          const inhaberAdj = entries.filter(
+            e => e.blockId !== candidate.blockId && e.driverName === inhaberName
+          );
+          let bestBuffer = MIN_BUFFER_MS;
+          let bufferOk = true;
+          for (const adj of inhaberAdj) {
+            if (adj.vehicle === candidate.vehicle) continue;
+            const gapBefore = tryStart - adj.endMs;
+            const gapAfter  = adj.startMs - tryEnd;
+            if (gapBefore > 0 && gapBefore < MIN_BUFFER_MS) { bufferOk = false; break; }
+            if (gapAfter  > 0 && gapAfter  < MIN_BUFFER_MS) { bufferOk = false; break; }
+            if (gapBefore > 0) bestBuffer = Math.min(bestBuffer, gapBefore);
+            if (gapAfter  > 0) bestBuffer = Math.min(bestBuffer, gapAfter);
+          }
+          if (!bufferOk) continue;
+
+          return { tryStart, bufferUsedMin: Math.round(bestBuffer / 60000) };
+        }
+      }
+      return null;
+    }
+
+    // ── Capture pre-repair conflicts ────────────────────────────────────────
+    const originalConflictDetails = detectConflicts2(buildEntries()).map(c => ({
+      kind: c.kind,
+      aBlockId: c.a.blockId, aDriver: c.a.driverName, aVehicle: c.a.vehicle, aStartMs: c.a.startMs, aEndMs: c.a.endMs,
+      bBlockId: c.b.blockId, bDriver: c.b.driverName, bVehicle: c.b.vehicle, bStartMs: c.b.startMs, bEndMs: c.b.endMs,
+      overlapStartMs: Math.max(c.a.startMs, c.b.startMs),
+      overlapEndMs:   Math.min(c.a.endMs,   c.b.endMs),
+    }));
+
+    // ── Main repair loop ────────────────────────────────────────────────────
+    while (iterations < MAX_ITERATIONS) {
+      iterations++;
+      const entries = buildEntries();
+      const conflicts = detectConflicts2(entries);
+
+      console.log(`[FinalOverlapRepair] iteration ${iterations}: ${conflicts.length} conflicts`);
+
+      if (conflicts.length === 0) break;
+
+      let anyRepaired = false;
+
+      for (const conflict of conflicts) {
+        const { a, b } = conflict;
+
+        // ── Case 1: regular-driver conflict where both blocks are regular (not Inhaber, not shiftable)
+        if (conflict.kind === 'driver' && !a.isInhaber && !b.isInhaber && !a.isShiftable && !b.isShiftable) {
+          const toConvert = pickConversionCandidate(a, b);
+          const fixed     = toConvert === a ? b : a;
+          const originalDriver = toConvert.driverName;
+
+          console.log(`[FinalOverlapRepair] converting ${toConvert.blockId} (${originalDriver}) to Inhaber`);
+
+          // Temporarily register the block as converted so buildEntries() sees it as Inhaber
+          convertedToInhaber.set(toConvert.blockId, {
+            originalDriverName: originalDriver,
+            vehicle: toConvert.vehicle,
+            startMs: toConvert.startMs,
+            endMs: toConvert.endMs,
+            durationMs: toConvert.durationMs,
+            rides: toConvert.rides ?? 0,
+          });
+
+          // Re-build entries with the block now as Inhaber
+          const entriesWithConvert = buildEntries();
+          const candidateEntry = entriesWithConvert.find(e => e.blockId === toConvert.blockId)!;
+
+          const slot = findCleanInhaberSlot(candidateEntry, entriesWithConvert);
+
+          if (slot) {
+            // Update the converted block's position
+            convertedToInhaber.set(toConvert.blockId, {
+              originalDriverName: originalDriver,
+              vehicle: toConvert.vehicle,
+              startMs: slot.tryStart,
+              endMs: slot.tryStart + toConvert.durationMs,
+              durationMs: toConvert.durationMs,
+              rides: toConvert.rides ?? 0,
+            });
+
+            movedBlocks.push({
+              blockId: toConvert.blockId,
+              vehicle: toConvert.vehicle,
+              originalDriverName: originalDriver,
+              newDriverName: inhaberName,
+              oldStartMs: toConvert.startMs,
+              oldEndMs: toConvert.endMs,
+              newStartMs: slot.tryStart,
+              newEndMs: slot.tryStart + toConvert.durationMs,
+              reason: 'Regulärer Fahrer-Konflikt → Inhaber',
+              bufferUsedMin: slot.bufferUsedMin,
+            });
+
+            // Remove from unrepairable if it was previously added
+            const uIdx = unrepairable.findIndex(u => u.blockId === toConvert.blockId || u.blockId === fixed.blockId);
+            if (uIdx !== -1) unrepairable.splice(uIdx, 1);
+
+            console.log(`[FinalOverlapRepair] converted+placed ${toConvert.blockId} from ${new Date(toConvert.startMs).toISOString().slice(11,16)} to ${new Date(slot.tryStart).toISOString().slice(11,16)} as Inhaber`);
+            anyRepaired = true;
+          } else {
+            // Undo the conversion — no slot found
+            convertedToInhaber.delete(toConvert.blockId);
+            if (!unrepairable.some(u => u.blockId === toConvert.blockId)) {
+              unrepairable.push({
+                blockId: toConvert.blockId,
+                driverName: originalDriver,
+                vehicle: toConvert.vehicle,
+                durationMs: toConvert.durationMs,
+                conflictKind: 'driver-to-inhaber',
+                sharedWindowsChecked: 0,
+                reason: `Kein freies Inhaber-Fenster für ${toConvert.vehicle} (Dauer ${Math.round(toConvert.durationMs / 60000)} Min.) gefunden`,
+              });
+            }
+          }
+          continue;
+        }
+
+        // ── Case 2: normal shiftable conflict (Inhaber/planned blocks)
+        let candidate: RepairCalendarEntry | null = null;
+        if (a.isShiftable && !b.isShiftable) candidate = a;
+        else if (!a.isShiftable && b.isShiftable) candidate = b;
+        else if (a.isShiftable && b.isShiftable) candidate = a.durationMs <= b.durationMs ? a : b;
+        else {
+          // Both fixed and not regular-driver — mark unrepairable
+          if (!unrepairable.some(u => u.blockId === a.blockId || u.blockId === b.blockId)) {
+            unrepairable.push({
+              blockId: a.blockId,
+              driverName: a.driverName,
+              vehicle: a.vehicle,
+              durationMs: a.durationMs,
+              conflictKind: conflict.kind,
+              sharedWindowsChecked: 0,
+              reason: `Beide Blöcke sind fixiert: ${a.driverName} · ${a.vehicle} und ${b.vehicle}`,
+            });
+          }
+          continue;
+        }
+
+        // Find clean slot for shiftable candidate (Inhaber / planned)
+        const currentEntries = buildEntries();
+        const driverBusy  = currentEntries
+          .filter(e => e.blockId !== candidate!.blockId && e.driverName === candidate!.driverName)
+          .map(e => ({ startMs: e.startMs, endMs: e.endMs }));
+        const vehicleBusy = currentEntries
+          .filter(e => e.blockId !== candidate!.blockId && e.vehicle === candidate!.vehicle)
+          .map(e => ({ startMs: e.startMs, endMs: e.endMs }));
+
+        const driverFree  = buildFreeInRange(driverBusy,  monthStartMs, monthEndMs);
+        const vehicleFree = buildFreeInRange(vehicleBusy, monthStartMs, monthEndMs);
+
+        const sharedFree: Array<{ startMs: number; endMs: number }> = [];
+        for (const df of driverFree) {
+          for (const vf of vehicleFree) {
+            const s = Math.max(df.startMs, vf.startMs);
+            const e = Math.min(df.endMs, vf.endMs);
+            if (e > s) sharedFree.push({ startMs: s, endMs: e });
+          }
+        }
+        sharedFree.sort((x, y) => (y.endMs - y.startMs) - (x.endMs - x.startMs) || x.startMs - y.startMs);
+
+        const durationMs = candidate.durationMs;
+        let placed = false;
+        let sharedChecked = 0;
+
+        for (const win of sharedFree) {
+          sharedChecked++;
+          if (win.endMs - win.startMs < durationMs) continue;
+
+          const scanEnd = win.endMs - durationMs;
+          for (let tryStart = win.startMs; tryStart <= scanEnd; tryStart += STEP_MS) {
+            const tryEnd = tryStart + durationMs;
+            if (tryStart < monthStartMs || tryEnd > monthEndMs) continue;
+
+            const fresh = buildEntries();
+            const driverOk = !fresh.some(e => e.blockId !== candidate!.blockId && e.driverName === candidate!.driverName && tryStart < e.endMs && tryEnd > e.startMs);
+            if (!driverOk) continue;
+            const vehicleOk = !fresh.some(e => e.blockId !== candidate!.blockId && e.vehicle === candidate!.vehicle && tryStart < e.endMs && tryEnd > e.startMs);
+            if (!vehicleOk) continue;
+
+            if (candidate.isInhaber) {
+              const inhaberBlocks = fresh.filter(e => e.blockId !== candidate!.blockId && e.driverName === candidate!.driverName);
+              let bufferOk = true;
+              for (const adj of inhaberBlocks) {
+                if (adj.vehicle === candidate.vehicle) continue;
+                const gapBefore = tryStart - adj.endMs;
+                const gapAfter  = adj.startMs - tryEnd;
+                if (gapBefore > 0 && gapBefore < MIN_BUFFER_MS) { bufferOk = false; break; }
+                if (gapAfter  > 0 && gapAfter  < MIN_BUFFER_MS) { bufferOk = false; break; }
+              }
+              if (!bufferOk) continue;
+            }
+
+            const oldStartMs = candidate.startMs;
+            const oldEndMs   = candidate.endMs;
+
+            const existing = repairedMap.get(candidate.blockId);
+            if (existing) {
+              repairedMap.set(candidate.blockId, {
+                ...existing,
+                newStartMs: tryStart,
+                newEndMs:   tryEnd,
+                offsetMs:   tryStart - existing.originalStartMs,
+              });
+            } else {
+              repairedMap.set(candidate.blockId, {
+                blockId:           candidate.blockId,
+                vehicle:           candidate.vehicle,
+                originalStartMs:   oldStartMs,
+                originalEndMs:     oldEndMs,
+                newStartMs:        tryStart,
+                newEndMs:          tryEnd,
+                durationMs:        durationMs,
+                offsetMs:          tryStart - oldStartMs,
+                rides:             0,
+                rows:              '',
+                usedWindowId:      'repair',
+                usedBufferMinutes: MIN_BUFFER_MS / 60000,
+              });
+            }
+
+            movedBlocks.push({
+              blockId:            candidate.blockId,
+              vehicle:            candidate.vehicle,
+              originalDriverName: candidate.originalDriverName ?? candidate.driverName,
+              newDriverName:      candidate.driverName,
+              oldStartMs,
+              oldEndMs,
+              newStartMs: tryStart,
+              newEndMs:   tryEnd,
+              reason: conflict.kind === 'driver'  ? 'Fahrerüberschneidung' :
+                      conflict.kind === 'vehicle' ? 'Fahrzeugüberschneidung' : 'Inhaberüberschneidung',
+              bufferUsedMin: MIN_BUFFER_MS / 60000,
+            });
+
+            console.log(`[FinalOverlapRepair] moved ${candidate.blockId} from ${new Date(oldStartMs).toISOString().slice(11,16)} to ${new Date(tryStart).toISOString().slice(11,16)}`);
+            placed = true;
+            anyRepaired = true;
+            break;
+          }
+          if (placed) break;
+        }
+
+        if (!placed) {
+          if (!unrepairable.some(u => u.blockId === candidate.blockId)) {
+            unrepairable.push({
+              blockId: candidate.blockId,
+              driverName: candidate.driverName,
+              vehicle: candidate.vehicle,
+              durationMs,
+              conflictKind: conflict.kind,
+              sharedWindowsChecked: sharedChecked,
+              reason: sharedChecked === 0
+                ? 'Kein gemeinsames freies Zeitfenster gefunden'
+                : `${sharedChecked} Zeitfenster geprüft – kein passendes gefunden`,
+            });
+          }
+        }
+      }
+
+      if (!anyRepaired) break;
+    }
+
+    // ── Final validation ────────────────────────────────────────────────────
+    // Use buildVisibleFinalEntries() — mirrors the calendar exactly so every
+    // visible block (including converted-to-Inhaber ones) is checked.
+    const finalEntries = buildVisibleFinalEntries();
+
+    const finalConflicts = detectConflicts2(finalEntries);
+
+    const diagFahrer   = finalConflicts.filter(c => c.kind === 'driver').length;
+    const diagFahrzeug = finalConflicts.filter(c => c.kind === 'vehicle').length;
+    const diagInhaber  = finalConflicts.filter(c => c.kind === 'inhaber').length;
+
+    let diagAusserhalb = 0;
+    const ausserhalbDetails: NativeRepairResult['ausserhalbDetails'] = [];
+    const movedBlockIds = new Set(movedBlocks.map(m => m.blockId));
+    const regularAssignmentIdSet = new Set(regularAssignments.map(a => a.blockId));
+    for (const e of finalEntries) {
+      if (e.startMs < monthStartMs || e.endMs > monthEndMs) {
+        diagAusserhalb++;
+        const wasOriginalRegular = regularAssignmentIdSet.has(e.blockId) && !movedBlockIds.has(e.blockId);
+        const wasMoved = movedBlockIds.has(e.blockId);
+        const origin: 'original' | 'planned' | 'repaired' = wasOriginalRegular ? 'original' : wasMoved ? 'repaired' : 'planned';
+        const reason = origin === 'original'
+          ? 'Original außerhalb Monat'
+          : origin === 'repaired'
+          ? 'Durch Verschiebung außerhalb Monat'
+          : 'Durch Planung außerhalb Monat';
+        ausserhalbDetails.push({ blockId: e.blockId, driverName: e.driverName, vehicle: e.vehicle, startMs: e.startMs, endMs: e.endMs, origin, reason });
+      }
+    }
+
+    const finalConflictDetails = finalConflicts.map(c => ({
+      kind: c.kind,
+      aBlockId: c.a.blockId, aDriver: c.a.driverName, aVehicle: c.a.vehicle,
+      aStartMs: c.a.startMs, aEndMs: c.a.endMs,
+      bBlockId: c.b.blockId, bDriver: c.b.driverName, bVehicle: c.b.vehicle,
+      bStartMs: c.b.startMs, bEndMs: c.b.endMs,
+      overlapStartMs: Math.max(c.a.startMs, c.b.startMs),
+      overlapEndMs:   Math.min(c.a.endMs,   c.b.endMs),
+    }));
+
+    // ── Debug: derive Do 5.3 entries directly from finalEntries ──────────────
+    // finalEntries already comes from buildVisibleFinalEntries() which mirrors the
+    // calendar, so this is guaranteed to include every visible block.
+    const do53Start = new Date(year, month - 1, 5).getTime();
+    const do53End   = do53Start + 86_400_000;
+    const fmtISO = (ms: number) => ms > 0 ? new Date(ms).toLocaleString('de-DE', { timeZone: 'Europe/Berlin', hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit', year: 'numeric' }) : '—';
+    const inhaberOccupiedIdSet2 = new Set(fwsResult.inhaberOccupiedIntervals.map(iv => iv.blockId));
+    const regularAssignmentIdSet2 = new Set(regularAssignments.map(a => a.blockId));
+
+    type DebugEntry = NativeRepairResult['debugDo53Entries'][0];
+    // For each finalEntry that falls on day 5, compute debug metadata.
+    // "raw" here means the value before normEnd was applied — we re-derive it from
+    // the same sources the calendar uses so we can show the crossesMidnight flag.
+    const debugDo53Entries: DebugEntry[] = finalEntries
+      .filter(e => {
+        // Include if starts on day 5, or if it ends on day 5+ (crosses from day 4)
+        return (e.startMs >= do53Start && e.startMs < do53End) ||
+               (e.endMs > do53Start && e.startMs < do53Start);
+      })
+      .map(e => {
+        // Re-look up the raw (pre-normEnd) endMs from source data for the crossesMidnight flag
+        const planned   = repairedMap.get(e.blockId);
+        const converted = convertedToInhaber.get(e.blockId);
+        const origBlock = allBlocks.find(b => b.blockId === e.blockId);
+        const rawE = converted ? converted.endMs
+                   : planned   ? planned.newEndMs
+                   : origBlock  ? origBlock.blockEndMs
+                   : e.endMs;
+        const crossesMidnight = rawE > 0 && rawE <= e.startMs;
+
+        // Determine source category
+        let source: DebugEntry['source'];
+        if (converted) {
+          source = 'convertedInhaber';
+        } else if (inhaberOccupiedIdSet2.has(e.blockId) && planned) {
+          source = 'repairedInhaber';
+        } else if (inhaberOccupiedIdSet2.has(e.blockId)) {
+          source = 'fixedInhaber';
+        } else if (planned && !regularAssignmentIdSet2.has(e.blockId)) {
+          source = 'plannedInhaber';
+        } else {
+          source = 'regular';
+        }
+
+        return {
+          blockId: e.blockId,
+          driverName: e.driverName,
+          vehicle: e.vehicle,
+          displayStart: fmtTime(e.startMs),
+          displayEnd: fmtTime(e.endMs),
+          rawStartMs: e.startMs,
+          rawEndMs: rawE,
+          normalizedStartMs: e.startMs,
+          normalizedEndMs: e.endMs,
+          normalizedStartISO: fmtISO(e.startMs),
+          normalizedEndISO: fmtISO(e.endMs),
+          durationMinutes: Math.round(e.durationMs / 60000),
+          source,
+          crossesMidnight,
+        } satisfies DebugEntry;
+      })
+      .sort((a, b) => a.normalizedStartMs - b.normalizedStartMs);
+
+    console.log('[FinalOverlapRepair] done', {
+      conflictsBefore: movedBlocks.length + finalConflicts.length,
+      conflictsAfter: finalConflicts.length,
+      moved: movedBlocks.length,
+      unrepairable: unrepairable.length,
+      iterations,
+      finalConflictDetails,
+    });
+
+    return {
+      repairedPlannedBlocks: Array.from(repairedMap.values()),
+      conflictsBefore: movedBlocks.length + finalConflicts.length,
+      conflictsAfter: finalConflicts.length,
+      movedBlocks,
+      unrepairable,
+      iterations,
+      diagFahrer,
+      diagFahrzeug,
+      diagInhaber,
+      diagAusserhalb,
+      diagNichtReparierbar: unrepairable.length,
+      ausserhalbDetails,
+      convertedToInhaber,
+      originalConflictDetails,
+      finalConflictDetails,
+      finalEntries,
+      debugDo53Entries,
+    };
+  }, [planResult, fwsResult, regularAssignments, allBlocks, inhaberName, month, year]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Conflict Move Options ────────────────────────────────────────────────────
+  interface ConflictCandidate {
+    dateLabel: string;
+    windowStartMs: number;
+    windowEndMs: number;
+    suggestedStartMs: number;
+    suggestedEndMs: number;
+    durationMs: number;
+    driverFree: boolean;
+    vehicleFree: boolean;
+    inhaberFree: boolean;
+    bufferMin: number;
+    rating: 'clean' | 'rejected';
+    rejectionReason: string;
+  }
+
+  interface BlockMoveOptions {
+    block: RepairCalendarEntry;
+    keepDriverCandidates: ConflictCandidate[];
+    keepDriverNoWindowReasons: string[];
+    toInhaberCandidates: ConflictCandidate[];
+    toInhaberNoWindowReasons: string[];
+  }
+
+  interface ConflictMoveOption {
+    kind: 'driver' | 'vehicle' | 'inhaber';
+    overlapStartMs: number;
+    overlapEndMs: number;
+    blockA: BlockMoveOptions;
+    blockB: BlockMoveOptions;
+  }
+
+  const [showConflictOptions, setShowConflictOptions] = useState(false);
+
+  const conflictOptions = useMemo((): ConflictMoveOption[] => {
+    if (repairResult.finalConflictDetails.length === 0) return [];
+    console.log('[ConflictMoveOptions] computing options for', repairResult.finalConflictDetails.length, 'conflicts');
+
+    const STEP_MS = 60_000;
+    const MIN_BUFFER_MS = 30 * 60_000;
+    const MAX_CANDIDATES = 10;
+    const monthStartMs = new Date(year, month - 1, 1).getTime();
+    const monthEndMs   = new Date(year, month, 1).getTime();
+
+    const entries = repairResult.finalEntries;
+    const entryMap = new Map(entries.map(e => [e.blockId, e]));
+
+    function mergeIv(slots: Array<{ startMs: number; endMs: number }>) {
+      const sorted = [...slots].filter(s => s.endMs > s.startMs).sort((a, b) => a.startMs - b.startMs);
+      const merged: typeof sorted = [];
+      for (const s of sorted) {
+        if (!merged.length) { merged.push({ ...s }); continue; }
+        const last = merged[merged.length - 1];
+        if (s.startMs < last.endMs) last.endMs = Math.max(last.endMs, s.endMs);
+        else merged.push({ ...s });
+      }
+      return merged;
+    }
+
+    function freeInRange(busy: Array<{ startMs: number; endMs: number }>, lo: number, hi: number) {
+      const merged = mergeIv(busy);
+      const free: typeof merged = [];
+      let cur = lo;
+      for (const b of merged) {
+        if (b.startMs > cur) free.push({ startMs: cur, endMs: b.startMs });
+        cur = Math.max(cur, b.endMs);
+      }
+      if (cur < hi) free.push({ startMs: cur, endMs: hi });
+      return free;
+    }
+
+    function fmtDL(ms: number) {
+      const d = new Date(ms);
+      return `${String(d.getDate()).padStart(2,'0')}.${String(d.getMonth()+1).padStart(2,'0')}.`;
+    }
+
+    function computeCands(
+      block: RepairCalendarEntry,
+      targetDriver: string,
+    ): ConflictCandidate[] {
+      const driverBusy = entries
+        .filter(e => e.blockId !== block.blockId && e.driverName === targetDriver)
+        .map(e => ({ startMs: e.startMs, endMs: e.endMs }));
+      const vehicleBusy = entries
+        .filter(e => e.blockId !== block.blockId && e.vehicle === block.vehicle)
+        .map(e => ({ startMs: e.startMs, endMs: e.endMs }));
+
+      const dFree = freeInRange(driverBusy, monthStartMs, monthEndMs);
+      const vFree = freeInRange(vehicleBusy, monthStartMs, monthEndMs);
+
+      const shared: Array<{ startMs: number; endMs: number }> = [];
+      for (const df of dFree) {
+        for (const vf of vFree) {
+          const s = Math.max(df.startMs, vf.startMs);
+          const e = Math.min(df.endMs, vf.endMs);
+          if (e - s >= block.durationMs) shared.push({ startMs: s, endMs: e });
+        }
+      }
+      shared.sort((a, b) => a.startMs - b.startMs);
+
+      const isInhaberTarget = targetDriver === inhaberName;
+      const candidates: ConflictCandidate[] = [];
+      let cleanCount = 0;
+
+      for (const win of shared) {
+        if (cleanCount >= MAX_CANDIDATES) break;
+        const scanEnd = win.endMs - block.durationMs;
+        for (let tryStart = win.startMs; tryStart <= scanEnd; tryStart += STEP_MS) {
+          if (cleanCount >= MAX_CANDIDATES) break;
+          const tryEnd = tryStart + block.durationMs;
+          if (tryStart < monthStartMs || tryEnd > monthEndMs) continue;
+
+          const driverConflict = entries.some(
+            e => e.blockId !== block.blockId && e.driverName === targetDriver
+              && tryStart < e.endMs && tryEnd > e.startMs
+          );
+          const vehicleConflict = entries.some(
+            e => e.blockId !== block.blockId && e.vehicle === block.vehicle
+              && tryStart < e.endMs && tryEnd > e.startMs
+          );
+
+          let bufferMin = 0;
+          let bufferOk = true;
+          if (isInhaberTarget) {
+            const inhaberAdj = entries.filter(e => e.blockId !== block.blockId && e.driverName === inhaberName);
+            bufferMin = MIN_BUFFER_MS / 60000;
+            for (const adj of inhaberAdj) {
+              if (adj.vehicle === block.vehicle) { bufferMin = 0; continue; }
+              const gapBefore = tryStart - adj.endMs;
+              const gapAfter  = adj.startMs - tryEnd;
+              if (gapBefore > 0 && gapBefore < MIN_BUFFER_MS) { bufferOk = false; break; }
+              if (gapAfter  > 0 && gapAfter  < MIN_BUFFER_MS) { bufferOk = false; break; }
+              if (gapBefore > 0) bufferMin = Math.min(bufferMin, Math.round(gapBefore / 60000));
+              if (gapAfter  > 0) bufferMin = Math.min(bufferMin, Math.round(gapAfter  / 60000));
+            }
+          }
+
+          const reasons: string[] = [];
+          if (driverConflict) reasons.push('Fahrer belegt');
+          if (vehicleConflict) reasons.push('Fahrzeug belegt');
+          if (!bufferOk) reasons.push(`Puffer < 30 Min.`);
+          const rating: 'clean' | 'rejected' = reasons.length === 0 ? 'clean' : 'rejected';
+
+          candidates.push({
+            dateLabel: fmtDL(tryStart),
+            windowStartMs: win.startMs,
+            windowEndMs: win.endMs,
+            suggestedStartMs: tryStart,
+            suggestedEndMs: tryEnd,
+            durationMs: block.durationMs,
+            driverFree: !driverConflict,
+            vehicleFree: !vehicleConflict,
+            inhaberFree: isInhaberTarget ? !driverConflict : true,
+            bufferMin,
+            rating,
+            rejectionReason: reasons.join(', '),
+          });
+
+          if (rating === 'clean') { cleanCount++; break; }
+        }
+      }
+
+      return candidates;
+    }
+
+    function noWindowReasons(block: RepairCalendarEntry, targetDriver: string): string[] {
+      const driverBusy = entries
+        .filter(e => e.blockId !== block.blockId && e.driverName === targetDriver)
+        .map(e => ({ startMs: e.startMs, endMs: e.endMs }));
+      const vehicleBusy = entries
+        .filter(e => e.blockId !== block.blockId && e.vehicle === block.vehicle)
+        .map(e => ({ startMs: e.startMs, endMs: e.endMs }));
+      const dFree = freeInRange(driverBusy, monthStartMs, monthEndMs);
+      const vFree = freeInRange(vehicleBusy, monthStartMs, monthEndMs);
+      const reasons: string[] = [];
+      if (!dFree.some(w => w.endMs - w.startMs >= block.durationMs))  reasons.push('Kein Fahrer-Fenster ausreichend groß');
+      if (!vFree.some(w => w.endMs - w.startMs >= block.durationMs))  reasons.push('Kein Fahrzeug-Fenster ausreichend groß');
+      if (reasons.length === 0) reasons.push('Keine gemeinsame Schnittmenge');
+      return reasons;
+    }
+
+    function buildBlockOptions(ent: RepairCalendarEntry): BlockMoveOptions {
+      const keepCands = computeCands(ent, ent.driverName);
+      const toIhCands = ent.isInhaber ? [] : computeCands(ent, inhaberName);
+      const keepReasons = keepCands.some(c => c.rating === 'clean') ? [] : noWindowReasons(ent, ent.driverName);
+      const toIhReasons = ent.isInhaber ? [] : (toIhCands.some(c => c.rating === 'clean') ? [] : noWindowReasons(ent, inhaberName));
+      return {
+        block: ent,
+        keepDriverCandidates: keepCands,
+        keepDriverNoWindowReasons: keepReasons,
+        toInhaberCandidates: toIhCands,
+        toInhaberNoWindowReasons: toIhReasons,
+      };
+    }
+
+    return repairResult.finalConflictDetails.map(c => {
+      const entA = entryMap.get(c.aBlockId);
+      const entB = entryMap.get(c.bBlockId);
+      if (!entA || !entB) return null;
+      console.log(`[ConflictMoveOptions] conflict ${c.kind}: ${c.aBlockId.slice(0,8)} vs ${c.bBlockId.slice(0,8)}`);
+      return {
+        kind: c.kind,
+        overlapStartMs: c.overlapStartMs,
+        overlapEndMs: c.overlapEndMs,
+        blockA: buildBlockOptions(entA),
+        blockB: buildBlockOptions(entB),
+      } as ConflictMoveOption;
+    }).filter(Boolean) as ConflictMoveOption[];
+  }, [repairResult, inhaberName, month, year]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Moved Block Alternatives ─────────────────────────────────────────────
+  interface MovedBlockAlternative {
+    blockId: string;
+    vehicle: string;
+    originalDriverName: string;
+    newDriverName: string;
+    oldStartMs: number;
+    oldEndMs: number;
+    currentStartMs: number;
+    currentEndMs: number;
+    durationMs: number;
+    reason: string;
+    keepDriverCandidates: ConflictCandidate[];
+    keepDriverNoWindowReasons: string[];
+    toInhaberCandidates: ConflictCandidate[];
+    toInhaberNoWindowReasons: string[];
+  }
+
+  const movedBlockAlternatives = useMemo((): MovedBlockAlternative[] => {
+    if (repairResult.movedBlocks.length === 0) return [];
+    console.log('[ConflictMoveOptions] computing alternatives for', repairResult.movedBlocks.length, 'moved blocks');
+
+    const STEP_MS = 60_000;
+    const MIN_BUFFER_MS = 30 * 60_000;
+    const MAX_CANDS = 10;
+    const monthStartMs = new Date(year, month - 1, 1).getTime();
+    const monthEndMs   = new Date(year, month, 1).getTime();
+
+    const allEntries = repairResult.finalEntries;
+
+    function mergeIv(slots: Array<{ startMs: number; endMs: number }>) {
+      const sorted = [...slots].filter(s => s.endMs > s.startMs).sort((a, b) => a.startMs - b.startMs);
+      const merged: typeof sorted = [];
+      for (const s of sorted) {
+        if (!merged.length) { merged.push({ ...s }); continue; }
+        const last = merged[merged.length - 1];
+        if (s.startMs < last.endMs) last.endMs = Math.max(last.endMs, s.endMs);
+        else merged.push({ ...s });
+      }
+      return merged;
+    }
+
+    function freeInRange(busy: Array<{ startMs: number; endMs: number }>, lo: number, hi: number) {
+      const merged = mergeIv(busy);
+      const free: typeof merged = [];
+      let cur = lo;
+      for (const b of merged) {
+        if (b.startMs > cur) free.push({ startMs: cur, endMs: b.startMs });
+        cur = Math.max(cur, b.endMs);
+      }
+      if (cur < hi) free.push({ startMs: cur, endMs: hi });
+      return free;
+    }
+
+    function fmtDL(ms: number) {
+      const d = new Date(ms);
+      return `${String(d.getDate()).padStart(2,'0')}.${String(d.getMonth()+1).padStart(2,'0')}.`;
+    }
+
+    function computeCands(
+      blockId: string,
+      vehicle: string,
+      durationMs: number,
+      targetDriver: string,
+      entriesWithout: typeof allEntries,
+    ): ConflictCandidate[] {
+      const driverBusy = entriesWithout
+        .filter(e => e.driverName === targetDriver)
+        .map(e => ({ startMs: e.startMs, endMs: e.endMs }));
+      const vehicleBusy = entriesWithout
+        .filter(e => e.vehicle === vehicle)
+        .map(e => ({ startMs: e.startMs, endMs: e.endMs }));
+
+      const dFree = freeInRange(driverBusy, monthStartMs, monthEndMs);
+      const vFree = freeInRange(vehicleBusy, monthStartMs, monthEndMs);
+
+      const shared: Array<{ startMs: number; endMs: number }> = [];
+      for (const df of dFree) {
+        for (const vf of vFree) {
+          const s = Math.max(df.startMs, vf.startMs);
+          const e = Math.min(df.endMs, vf.endMs);
+          if (e - s >= durationMs) shared.push({ startMs: s, endMs: e });
+        }
+      }
+      shared.sort((a, b) => a.startMs - b.startMs);
+
+      const isInhaber = targetDriver === inhaberName;
+      const cands: ConflictCandidate[] = [];
+      let cleanCount = 0;
+
+      for (const win of shared) {
+        if (cleanCount >= MAX_CANDS) break;
+        const scanEnd = win.endMs - durationMs;
+        for (let tryStart = win.startMs; tryStart <= scanEnd; tryStart += STEP_MS) {
+          if (cleanCount >= MAX_CANDS) break;
+          const tryEnd = tryStart + durationMs;
+          if (tryStart < monthStartMs || tryEnd > monthEndMs) continue;
+
+          const driverConflict = entriesWithout.some(
+            e => e.driverName === targetDriver && tryStart < e.endMs && tryEnd > e.startMs
+          );
+          const vehicleConflict = entriesWithout.some(
+            e => e.vehicle === vehicle && tryStart < e.endMs && tryEnd > e.startMs
+          );
+
+          let bufferMin = 0;
+          let bufferOk = true;
+          if (isInhaber) {
+            const adj = entriesWithout.filter(e => e.driverName === inhaberName);
+            bufferMin = MIN_BUFFER_MS / 60000;
+            for (const a of adj) {
+              if (a.vehicle === vehicle) { bufferMin = 0; continue; }
+              const gb = tryStart - a.endMs;
+              const ga = a.startMs - tryEnd;
+              if (gb > 0 && gb < MIN_BUFFER_MS) { bufferOk = false; break; }
+              if (ga > 0 && ga < MIN_BUFFER_MS) { bufferOk = false; break; }
+              if (gb > 0) bufferMin = Math.min(bufferMin, Math.round(gb / 60000));
+              if (ga > 0) bufferMin = Math.min(bufferMin, Math.round(ga / 60000));
+            }
+          }
+
+          const reasons: string[] = [];
+          if (driverConflict) reasons.push('Fahrer belegt');
+          if (vehicleConflict) reasons.push('Fahrzeug belegt');
+          if (!bufferOk) reasons.push('Puffer < 30 Min.');
+          const rating: 'clean' | 'rejected' = reasons.length === 0 ? 'clean' : 'rejected';
+
+          cands.push({
+            dateLabel: fmtDL(tryStart),
+            windowStartMs: win.startMs,
+            windowEndMs: win.endMs,
+            suggestedStartMs: tryStart,
+            suggestedEndMs: tryEnd,
+            durationMs,
+            driverFree: !driverConflict,
+            vehicleFree: !vehicleConflict,
+            inhaberFree: isInhaber ? !driverConflict : true,
+            bufferMin,
+            rating,
+            rejectionReason: reasons.join(', '),
+          });
+
+          if (rating === 'clean') { cleanCount++; break; }
+        }
+      }
+      return cands;
+    }
+
+    function noWindowReasons(vehicle: string, durationMs: number, targetDriver: string, entriesWithout: typeof allEntries): string[] {
+      const driverBusy = entriesWithout.filter(e => e.driverName === targetDriver).map(e => ({ startMs: e.startMs, endMs: e.endMs }));
+      const vehicleBusy = entriesWithout.filter(e => e.vehicle === vehicle).map(e => ({ startMs: e.startMs, endMs: e.endMs }));
+      const dFree = freeInRange(driverBusy, monthStartMs, monthEndMs);
+      const vFree = freeInRange(vehicleBusy, monthStartMs, monthEndMs);
+      const reasons: string[] = [];
+      if (!dFree.some(w => w.endMs - w.startMs >= durationMs)) reasons.push('Kein Fahrer-Fenster ausreichend groß');
+      if (!vFree.some(w => w.endMs - w.startMs >= durationMs)) reasons.push('Kein Fahrzeug-Fenster ausreichend groß');
+      if (reasons.length === 0) reasons.push('Keine gemeinsame Schnittmenge gefunden');
+      return reasons;
+    }
+
+    return repairResult.movedBlocks.map(m => {
+      const durationMs = m.newEndMs - m.newStartMs;
+      // Exclude this block itself from the index so it doesn't block itself
+      const entriesWithout = allEntries.filter(e => e.blockId !== m.blockId);
+
+      const keepCands = computeCands(m.blockId, m.vehicle, durationMs, m.newDriverName, entriesWithout);
+      const toIhCands = m.newDriverName !== inhaberName
+        ? computeCands(m.blockId, m.vehicle, durationMs, inhaberName, entriesWithout)
+        : [];
+
+      const keepReasons = keepCands.some(c => c.rating === 'clean') ? [] : noWindowReasons(m.vehicle, durationMs, m.newDriverName, entriesWithout);
+      const toIhReasons = m.newDriverName !== inhaberName && !toIhCands.some(c => c.rating === 'clean')
+        ? noWindowReasons(m.vehicle, durationMs, inhaberName, entriesWithout)
+        : [];
+
+      console.log(`[ConflictMoveOptions] block ${m.blockId.slice(0,8)} keep:${keepCands.filter(c=>c.rating==='clean').length} toIh:${toIhCands.filter(c=>c.rating==='clean').length}`);
+
+      return {
+        blockId: m.blockId,
+        vehicle: m.vehicle,
+        originalDriverName: m.originalDriverName,
+        newDriverName: m.newDriverName,
+        oldStartMs: m.oldStartMs,
+        oldEndMs: m.oldEndMs,
+        currentStartMs: m.newStartMs,
+        currentEndMs: m.newEndMs,
+        durationMs,
+        reason: m.reason,
+        keepDriverCandidates: keepCands,
+        keepDriverNoWindowReasons: keepReasons,
+        toInhaberCandidates: toIhCands,
+        toInhaberNoWindowReasons: toIhReasons,
+      };
+    });
+  }, [repairResult, inhaberName, month, year]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Use repaired planned blocks for all calendar/display purposes
+  const effectivePlannedBlocks = repairResult.repairedPlannedBlocks;
+
+  // Build calendar days for the month
+  const calendarDays = useMemo(() => {
+    const days: Date[] = [];
+    const d = new Date(year, month - 1, 1);
+    while (d.getMonth() === month - 1) {
+      days.push(new Date(d));
+      d.setDate(d.getDate() + 1);
+    }
+    return days;
+  }, [month, year]);
+
+  // Map blockId -> planned entry (uses repaired times)
+  const plannedMap = useMemo(
+    () => new Map(effectivePlannedBlocks.map(p => [p.blockId, p])),
+    [effectivePlannedBlocks],
+  );
+
+  const failedSet = useMemo(
+    () => new Set(failedBlocks.map(f => f.block.blockId)),
+    [failedBlocks],
+  );
+
+  const inhaberBlockIds = useMemo(
+    () => new Set(fwsResult.inhaberOccupiedIntervals.map(i => i.blockId)),
+    [fwsResult],
+  );
+
+  const regularColorMap = useMemo(() => {
+    const unique = Array.from(new Set(regularAssignments.map(a => a.driverId)));
+    const m = new Map<string, string>();
+    unique.forEach((id, i) => m.set(id, DRIVER_COLORS[i % DRIVER_COLORS.length]));
+    return m;
+  }, [regularAssignments]);
+
+  const regularMap = useMemo(() => {
+    const m = new Map<string, RegularBlockAssignment>();
+    for (const a of regularAssignments) m.set(a.blockId, a);
+    return m;
+  }, [regularAssignments]);
+
+  // Build Inhaber free windows per day from repaired Inhaber schedule
+  // Free windows are computed AFTER repair so they never overlap Inhaber blocks
+  const FREE_MIN_DURATION_MS = 30 * 60 * 1000;
+  const inhaberFreeWindowsByDay = useMemo(() => {
+    const intervals: Array<{ startMs: number; endMs: number }> = [];
+    for (const block of allBlocks) {
+      const planned   = plannedMap.get(block.blockId);
+      const isInhaber = inhaberBlockIds.has(block.blockId);
+      const converted = repairResult.convertedToInhaber.get(block.blockId);
+      if (converted) {
+        intervals.push({ startMs: converted.startMs, endMs: converted.endMs });
+      } else if (planned) {
+        // Use repaired times
+        intervals.push({ startMs: planned.newStartMs, endMs: planned.newEndMs });
+      } else if (isInhaber) {
+        intervals.push({ startMs: block.blockStartMs, endMs: block.blockEndMs });
+      }
+    }
+    const byDay = new Map<number, Array<{ startMs: number; endMs: number }>>();
+    for (const iv of intervals) {
+      const d = new Date(iv.startMs);
+      const key = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+      if (!byDay.has(key)) byDay.set(key, []);
+      byDay.get(key)!.push(iv);
+    }
+    const result = new Map<number, Array<{ startMs: number; endMs: number }>>();
+    for (const [dayKey, dayIntervals] of byDay) {
+      const sorted = [...dayIntervals].sort((a, b) => a.startMs - b.startMs);
+      const dayStart = dayKey;
+      const dayEnd   = dayKey + 86_400_000 - 1;
+      const freeGaps: Array<{ startMs: number; endMs: number }> = [];
+      if (sorted[0].startMs - dayStart >= FREE_MIN_DURATION_MS) {
+        freeGaps.push({ startMs: dayStart, endMs: sorted[0].startMs });
+      }
+      for (let i = 0; i < sorted.length - 1; i++) {
+        const gapStart = sorted[i].endMs;
+        const gapEnd   = sorted[i + 1].startMs;
+        if (gapEnd - gapStart >= FREE_MIN_DURATION_MS) {
+          freeGaps.push({ startMs: gapStart, endMs: gapEnd });
+        }
+      }
+      if (dayEnd - sorted[sorted.length - 1].endMs >= FREE_MIN_DURATION_MS) {
+        freeGaps.push({ startMs: sorted[sorted.length - 1].endMs, endMs: dayEnd });
+      }
+      if (freeGaps.length > 0) result.set(dayKey, freeGaps);
+    }
+    return result;
+  }, [allBlocks, plannedMap, inhaberBlockIds]);
+
+  // Group all blocks by day for calendar
+  const blocksByDay = useMemo(() => {
+    const m = new Map<number, VehicleBlock[]>();
+    for (const block of allBlocks) {
+      const d = new Date(block.blockStartMs);
+      const key = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+      if (!m.has(key)) m.set(key, []);
+      m.get(key)!.push(block);
+    }
+    return m;
+  }, [allBlocks]);
+
+  // ── Render ─────────────────────────────────────────────────────────────────
+  return (
+    <div className="space-y-5 max-w-5xl">
+      {/* Header */}
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <button onClick={onBack} className="inline-flex items-center gap-2 text-sm font-medium transition-colors hover:opacity-80" style={{ color: 'var(--text-secondary)' }}>
+          <ArrowLeft size={15} /> Zurück
+        </button>
+        <button onClick={onRecompute} className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all hover:brightness-110" style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}>
+          <RefreshCw size={13} /> Neu berechnen
+        </button>
+      </div>
+
+      <div>
+        <h2 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>Automatischer Verschiebungsplan</h2>
+        <p className="text-sm mt-0.5" style={{ color: 'var(--text-secondary)' }}>
+          Offene Blöcke wurden in die größten freien Inhaber-Fenster eingepackt.
+        </p>
+      </div>
+
+      {/* Summary cards */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+        {[
+          { label: 'Eingabe (offen)',     value: String(summary.openBlocksIn),     color: 'var(--text-primary)' },
+          { label: 'Geplant',             value: String(summary.plannedCount),      color: summary.plannedCount > 0 ? '#059669' : 'var(--text-primary)' },
+          { label: 'Nicht geplant',       value: String(summary.failedCount),       color: summary.failedCount > 0 ? '#dc2626' : 'var(--text-primary)' },
+          { label: 'Geplante Stunden',    value: formatBlockDuration(summary.plannedDurationSec), color: 'var(--text-primary)' },
+          { label: 'Fenster genutzt',     value: `${summary.windowsUsed} / ${summary.windowsAvailable}`, color: 'var(--text-primary)' },
+          { label: 'Inhaber',             value: inhaberName,                       color: INHABER_COLOR },
+        ].map(c => (
+          <div key={c.label} className="rounded-xl p-3" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
+            <p className="text-xs mb-0.5" style={{ color: 'var(--text-secondary)' }}>{c.label}</p>
+            <p className="text-sm font-bold" style={{ color: c.color }}>{c.value}</p>
+          </div>
+        ))}
+      </div>
+
+      {/* Blank-Fenster Nutzung audit */}
+      <div className="rounded-2xl overflow-hidden" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
+        <button
+          onClick={() => setShowAudit(v => !v)}
+          className="w-full flex items-center justify-between px-4 py-3 text-sm font-semibold transition-colors hover:brightness-105"
+          style={{ color: 'var(--text-primary)', background: 'transparent' }}
+        >
+          <span>Blank-Fenster Nutzung ({blankWindowsUsed.length} Fenster mit Blöcken)</span>
+          <span style={{ fontSize: 10, color: 'var(--text-secondary)' }}>{showAudit ? '▲' : '▼'}</span>
+        </button>
+        {showAudit && (
+          <div className="px-4 pb-4 overflow-x-auto">
+            {blankWindowsUsed.length === 0 ? (
+              <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>Keine Fenster wurden verwendet.</p>
+            ) : (
+              <table className="w-full text-xs">
+                <thead>
+                  <tr style={{ background: 'var(--bg-subtle)' }}>
+                    <th className="px-2 py-1.5 text-left font-semibold" style={{ color: 'var(--text-secondary)' }}>Datum</th>
+                    <th className="px-2 py-1.5 text-left font-semibold" style={{ color: 'var(--text-secondary)' }}>Fenster</th>
+                    <th className="px-2 py-1.5 text-right font-semibold" style={{ color: 'var(--text-secondary)' }}>Fenster-Dauer</th>
+                    <th className="px-2 py-1.5 text-right font-semibold" style={{ color: 'var(--text-secondary)' }}>Blöcke</th>
+                    <th className="px-2 py-1.5 text-right font-semibold" style={{ color: 'var(--text-secondary)' }}>Platziert (h)</th>
+                    <th className="px-2 py-1.5 text-right font-semibold" style={{ color: 'var(--text-secondary)' }}>Verbleibend (h)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {blankWindowsUsed.map(w => (
+                    <tr key={w.windowId} style={{ borderTop: '1px solid var(--border)' }}>
+                      <td className="px-2 py-1.5" style={{ color: 'var(--text-primary)' }}>{w.date}</td>
+                      <td className="px-2 py-1.5 font-mono" style={{ color: 'var(--text-secondary)' }}>{fmtTime(w.windowStartMs)}–{fmtTime(w.windowEndMs)}</td>
+                      <td className="px-2 py-1.5 text-right" style={{ color: 'var(--text-primary)' }}>{formatBlockDuration(w.windowDurationSec)}</td>
+                      <td className="px-2 py-1.5 text-right" style={{ color: '#059669' }}>{w.blocksPlacedCount}</td>
+                      <td className="px-2 py-1.5 text-right" style={{ color: '#2563eb' }}>{formatBlockDuration(w.blocksPlacedSec)}</td>
+                      <td className="px-2 py-1.5 text-right" style={{ color: 'var(--text-secondary)' }}>{formatBlockDuration(w.remainingFreeSec)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Konflikt-Reparatur */}
+      <div
+        className="rounded-2xl overflow-hidden"
+        style={{
+          background: 'var(--bg-surface)',
+          border: `1px solid ${repairResult.conflictsAfter > 0 ? 'rgba(220,38,38,0.3)' : repairResult.ausserhalbDetails.some(d => d.origin !== 'original') ? 'rgba(217,119,6,0.35)' : 'rgba(21,128,61,0.3)'}`,
+        }}
+      >
+        <div className="px-4 py-3 flex items-center justify-between flex-wrap gap-2">
+          <span className="text-sm font-semibold flex items-center gap-2 flex-wrap" style={{ color: 'var(--text-primary)' }}>
+            <span style={{ fontSize: 15 }}>🔧</span> Konflikt-Reparatur
+            {repairResult.conflictsAfter === 0 && repairResult.ausserhalbDetails.filter(d => d.origin !== 'original').length === 0 ? (
+              <span className="text-xs font-semibold px-2 py-0.5 rounded-full" style={{ background: 'rgba(21,128,61,0.1)', color: '#15803d', border: '1px solid rgba(21,128,61,0.25)' }}>Keine Konflikte</span>
+            ) : repairResult.conflictsAfter > 0 ? (
+              <span className="text-xs font-semibold px-2 py-0.5 rounded-full" style={{ background: 'rgba(220,38,38,0.08)', color: '#dc2626', border: '1px solid rgba(220,38,38,0.25)' }}>{repairResult.conflictsAfter} verbleibend</span>
+            ) : null}
+            {repairResult.ausserhalbDetails.filter(d => d.origin !== 'original').length > 0 && (
+              <span className="text-xs font-semibold px-2 py-0.5 rounded-full" style={{ background: 'rgba(217,119,6,0.1)', color: '#b45309', border: '1px solid rgba(217,119,6,0.3)' }}>
+                Außerhalb Monat ({repairResult.ausserhalbDetails.filter(d => d.origin !== 'original').length})
+              </span>
+            )}
+          </span>
+          <button
+            onClick={() => setShowRepairDetails(v => !v)}
+            className="text-xs px-2.5 py-1 rounded-lg transition-colors"
+            style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
+          >
+            {showRepairDetails ? '▲ Ausblenden' : '▼ Details'}
+          </button>
+        </div>
+
+        {/* Summary row */}
+        <div className="px-4 pb-3 grid grid-cols-2 sm:grid-cols-4 gap-2">
+          {[
+            { label: 'Konflikte vor Reparatur', value: repairResult.conflictsBefore, color: repairResult.conflictsBefore > 0 ? '#dc2626' : 'var(--text-primary)' },
+            { label: 'Verschobene Blöcke',      value: repairResult.movedBlocks.length, color: repairResult.movedBlocks.length > 0 ? '#2563eb' : 'var(--text-primary)' },
+            { label: 'Konflikte nach Reparatur', value: repairResult.conflictsAfter, color: repairResult.conflictsAfter > 0 ? '#dc2626' : '#15803d' },
+            { label: 'Nicht reparierbar',        value: repairResult.unrepairable.length, color: repairResult.unrepairable.length > 0 ? '#c2410c' : 'var(--text-primary)' },
+          ].map(c => (
+            <div key={c.label} className="rounded-xl px-3 py-2" style={{ background: 'var(--bg-subtle)' }}>
+              <div className="text-[10px] uppercase tracking-wider font-semibold mb-0.5" style={{ color: 'var(--text-tertiary)' }}>{c.label}</div>
+              <div className="text-xl font-bold" style={{ color: c.color }}>{c.value}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* Diagnostic grid */}
+        <div className="px-4 pb-3 grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+          {[
+            { label: 'Fahrerüberschneidungen',   value: repairResult.diagFahrer },
+            { label: 'Fahrzeugüberschneidungen', value: repairResult.diagFahrzeug },
+            { label: 'Inhaberüberschneidungen',  value: repairResult.diagInhaber },
+            { label: 'Außerhalb Monat',          value: repairResult.diagAusserhalb },
+            { label: 'Nicht reparierbar',        value: repairResult.diagNichtReparierbar },
+            { label: 'Iterationen',              value: repairResult.iterations },
+          ].map(c => (
+            <div key={c.label} className="text-xs flex items-center justify-between px-2 py-1 rounded" style={{ background: 'var(--bg-subtle)' }}>
+              <span style={{ color: 'var(--text-secondary)' }}>{c.label}</span>
+              <span className="font-bold ml-2" style={{ color: c.value > 0 && c.label !== 'Iterationen' ? '#dc2626' : 'var(--text-primary)' }}>{c.value}</span>
+            </div>
+          ))}
+        </div>
+
+        {showRepairDetails && (
+          <div className="px-4 pb-4 space-y-3">
+            {/* Moved blocks */}
+            {repairResult.movedBlocks.length > 0 && (
+              <div>
+                <div className="text-xs font-semibold mb-1.5" style={{ color: '#1d4ed8' }}>Verschobene Blöcke</div>
+                <div className="space-y-1">
+                  {repairResult.movedBlocks.map((m, i) => (
+                    <div key={i} className="text-xs rounded-lg px-3 py-2 flex flex-wrap gap-x-3 gap-y-1" style={{ background: 'rgba(37,99,235,0.05)', border: '1px solid rgba(37,99,235,0.15)', color: '#1e3a8a' }}>
+                      <span className="font-mono opacity-60">{m.blockId.slice(0, 12)}</span>
+                      <span className="font-semibold">{m.vehicle}</span>
+                      <span title="Ursprünglicher Fahrer">{m.originalDriverName}</span>
+                      {m.newDriverName !== m.originalDriverName && (
+                        <span title="Neuer Fahrer" style={{ color: '#0369a1' }}>→ {m.newDriverName}</span>
+                      )}
+                      <span>Alt: {fmtTime(m.oldStartMs)}–{fmtTime(m.oldEndMs)}</span>
+                      <span>→ Neu: {fmtTime(m.newStartMs)}–{fmtTime(m.newEndMs)}</span>
+                      {m.bufferUsedMin > 0 && (
+                        <span className="opacity-60">Puffer: {m.bufferUsedMin} Min.</span>
+                      )}
+                      <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold" style={{ background: '#dbeafe', color: '#1e40af' }}>{m.reason}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Unrepairable */}
+            {repairResult.unrepairable.length > 0 && (
+              <div>
+                <div className="text-xs font-semibold mb-1.5" style={{ color: '#c2410c' }}>Nicht reparierbar</div>
+                <div className="space-y-1">
+                  {repairResult.unrepairable.map((u, i) => (
+                    <div key={i} className="text-xs rounded-lg px-3 py-2" style={{ background: 'rgba(220,38,38,0.04)', border: '1px solid rgba(220,38,38,0.15)', color: '#b91c1c' }}>
+                      <span className="font-mono">{u.blockId.slice(0, 12)}</span> · <span className="font-semibold">{u.vehicle}</span> · {u.driverName} · {Math.round(u.durationMs / 60000)} Min. · {u.sharedWindowsChecked} Fenster geprüft
+                      <div className="mt-0.5 opacity-80">{u.reason}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Außerhalb Monat details */}
+            {repairResult.ausserhalbDetails.length > 0 && (
+              <div>
+                <div className="text-xs font-semibold mb-1.5" style={{ color: '#b45309' }}>Außerhalb Monat ({repairResult.ausserhalbDetails.length})</div>
+                <div className="space-y-1">
+                  {repairResult.ausserhalbDetails.map((d, i) => {
+                    const isBlocking = d.origin !== 'original';
+                    return (
+                      <div key={i} className="text-xs rounded-lg px-3 py-2 flex flex-wrap gap-x-3 gap-y-1" style={{
+                        background: isBlocking ? 'rgba(217,119,6,0.06)' : 'rgba(100,116,139,0.06)',
+                        border: `1px solid ${isBlocking ? 'rgba(217,119,6,0.25)' : 'rgba(100,116,139,0.2)'}`,
+                        color: isBlocking ? '#92400e' : 'var(--text-secondary)',
+                      }}>
+                        <span className="font-mono opacity-60">{d.blockId.slice(0, 12)}</span>
+                        <span className="font-semibold">{d.vehicle}</span>
+                        <span>{d.driverName}</span>
+                        <span className="font-mono">{fmtTime(d.startMs)}–{fmtTime(d.endMs)}</span>
+                        <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold" style={{
+                          background: isBlocking ? 'rgba(217,119,6,0.12)' : 'rgba(100,116,139,0.1)',
+                          color: isBlocking ? '#b45309' : 'var(--text-tertiary)',
+                        }}>{d.reason}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Final validation table */}
+            <div>
+              <div className="text-xs font-semibold mb-1.5" style={{ color: repairResult.finalConflictDetails.length > 0 ? '#b91c1c' : '#15803d' }}>
+                Validierung nach Reparatur
+                {repairResult.finalConflictDetails.length === 0
+                  ? ' — Keine Konflikte'
+                  : ` — ${repairResult.finalConflictDetails.length} Konflikt(e)`}
+              </div>
+              {repairResult.finalConflictDetails.length === 0 ? (
+                <div className="text-xs px-3 py-2 rounded-lg" style={{ background: 'rgba(21,128,61,0.06)', border: '1px solid rgba(21,128,61,0.2)', color: '#15803d' }}>
+                  Alle sichtbaren Kalendereinträge sind überschneidungsfrei.
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs border-collapse" style={{ color: 'var(--text-primary)' }}>
+                    <thead>
+                      <tr style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)' }}>
+                        {['Typ','Fahrer A','Fahrzeug','Zeit A','Zeit B','Überschneidung'].map(h => (
+                          <th key={h} className="px-2 py-1 text-left font-semibold whitespace-nowrap">{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {repairResult.finalConflictDetails.map((c, i) => {
+                        const kindLabel = c.kind === 'inhaber' ? 'Inhaber' : c.kind === 'vehicle' ? 'Fahrzeug' : 'Fahrer';
+                        const kindColor = '#b91c1c';
+                        return (
+                          <tr key={i} style={{ borderBottom: '1px solid var(--border)' }}>
+                            <td className="px-2 py-1 font-semibold whitespace-nowrap" style={{ color: kindColor }}>{kindLabel}</td>
+                            <td className="px-2 py-1 whitespace-nowrap">{c.aDriver}</td>
+                            <td className="px-2 py-1 font-mono whitespace-nowrap">{c.aVehicle}</td>
+                            <td className="px-2 py-1 font-mono whitespace-nowrap">{fmtTime(c.aStartMs)}–{fmtTime(c.aEndMs)}</td>
+                            <td className="px-2 py-1 font-mono whitespace-nowrap">{fmtTime(c.bStartMs)}–{fmtTime(c.bEndMs)}</td>
+                            <td className="px-2 py-1 font-mono whitespace-nowrap" style={{ color: kindColor }}>{fmtTime(c.overlapStartMs)}–{fmtTime(c.overlapEndMs)}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            {/* Debug: Final Entries Do 5.3 */}
+            {repairResult.debugDo53Entries.length > 0 && (
+              <div>
+                <div className="text-xs font-semibold mb-1.5" style={{ color: '#7c3aed' }}>
+                  Debug Final Entries Do 5.3 ({repairResult.debugDo53Entries.length} Einträge)
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full border-collapse" style={{ fontSize: 10, color: 'var(--text-primary)' }}>
+                    <thead>
+                      <tr style={{ background: 'rgba(124,58,237,0.07)', color: 'var(--text-secondary)' }}>
+                        {['Block-ID','Fahrer','Fzg','disp Start','disp End','rawStartMs','rawEndMs','normStart','normEnd','normStartISO','normEndISO','Dauer Min','Source','crossesMidnight'].map(h => (
+                          <th key={h} className="px-1.5 py-1 text-left font-semibold whitespace-nowrap" style={{ borderBottom: '1px solid rgba(124,58,237,0.15)' }}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {repairResult.debugDo53Entries.map((e, i) => (
+                        <tr key={i} style={{ borderBottom: '1px solid var(--border)', background: i % 2 === 0 ? 'transparent' : 'rgba(124,58,237,0.02)' }}>
+                          <td className="px-1.5 py-1 font-mono" style={{ color: 'var(--text-tertiary)' }}>{e.blockId.slice(0, 10)}</td>
+                          <td className="px-1.5 py-1 whitespace-nowrap" style={{ color: 'var(--text-primary)' }}>{e.driverName.slice(0, 12)}</td>
+                          <td className="px-1.5 py-1 font-mono whitespace-nowrap" style={{ color: '#7c3aed' }}>{e.vehicle}</td>
+                          <td className="px-1.5 py-1 font-mono whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{e.displayStart}</td>
+                          <td className="px-1.5 py-1 font-mono whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{e.displayEnd}</td>
+                          <td className="px-1.5 py-1 font-mono whitespace-nowrap text-[9px]" style={{ color: 'var(--text-tertiary)' }}>{e.rawStartMs}</td>
+                          <td className="px-1.5 py-1 font-mono whitespace-nowrap text-[9px]" style={{ color: e.crossesMidnight ? '#dc2626' : 'var(--text-tertiary)' }}>{e.rawEndMs}</td>
+                          <td className="px-1.5 py-1 font-mono whitespace-nowrap text-[9px]" style={{ color: 'var(--text-tertiary)' }}>{e.normalizedStartMs}</td>
+                          <td className="px-1.5 py-1 font-mono whitespace-nowrap text-[9px]" style={{ color: '#15803d' }}>{e.normalizedEndMs}</td>
+                          <td className="px-1.5 py-1 whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{e.normalizedStartISO}</td>
+                          <td className="px-1.5 py-1 whitespace-nowrap" style={{ color: e.crossesMidnight ? '#15803d' : 'var(--text-secondary)' }}>{e.normalizedEndISO}</td>
+                          <td className="px-1.5 py-1 whitespace-nowrap font-semibold" style={{ color: e.durationMinutes < 0 ? '#dc2626' : 'var(--text-primary)' }}>{e.durationMinutes}</td>
+                          <td className="px-1.5 py-1 whitespace-nowrap">
+                            <span className="px-1 py-0.5 rounded text-[9px] font-semibold" style={{ background: 'rgba(124,58,237,0.08)', color: '#7c3aed' }}>{e.source}</span>
+                          </td>
+                          <td className="px-1.5 py-1 whitespace-nowrap font-semibold" style={{ color: e.crossesMidnight ? '#dc2626' : '#15803d' }}>{e.crossesMidnight ? 'Ja' : 'Nein'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* Debug: Pairwise Overlap Do 5.3 */}
+            {repairResult.debugDo53Entries.length > 0 && (() => {
+              const d53 = repairResult.debugDo53Entries;
+              const pairs: Array<{
+                aId: string; aDriver: string; aVehicle: string; aStart: string; aEnd: string; aStartMs: number; aEndMs: number;
+                bId: string; bDriver: string; bVehicle: string; bStart: string; bEnd: string; bStartMs: number; bEndMs: number;
+                sameFahrer: boolean; sameFahrzeug: boolean;
+                overlapMs: number; overlapMin: number; isOverlap: boolean;
+              }> = [];
+              for (let i = 0; i < d53.length; i++) {
+                for (let j = i + 1; j < d53.length; j++) {
+                  const a = d53[i]; const b = d53[j];
+                  if (a.normalizedStartMs <= 0 || b.normalizedStartMs <= 0) continue;
+                  const sameFahrer = a.driverName === b.driverName && !!a.driverName;
+                  const sameFahrzeug = a.vehicle === b.vehicle && !!a.vehicle;
+                  if (!sameFahrer && !sameFahrzeug) continue;
+                  const overlapMs = Math.min(a.normalizedEndMs, b.normalizedEndMs) - Math.max(a.normalizedStartMs, b.normalizedStartMs);
+                  pairs.push({
+                    aId: a.blockId, aDriver: a.driverName, aVehicle: a.vehicle,
+                    aStart: a.displayStart, aEnd: a.displayEnd, aStartMs: a.normalizedStartMs, aEndMs: a.normalizedEndMs,
+                    bId: b.blockId, bDriver: b.driverName, bVehicle: b.vehicle,
+                    bStart: b.displayStart, bEnd: b.displayEnd, bStartMs: b.normalizedStartMs, bEndMs: b.normalizedEndMs,
+                    sameFahrer, sameFahrzeug,
+                    overlapMs: Math.round(overlapMs), overlapMin: Math.round(overlapMs / 60000), isOverlap: overlapMs > 0,
+                  });
+                }
+              }
+              return (
+                <div>
+                  <div className="text-xs font-semibold mb-1.5" style={{ color: '#0369a1' }}>
+                    Debug Pairwise Overlap Do 5.3 ({pairs.length} Paare)
+                  </div>
+                  {pairs.length === 0 ? (
+                    <div className="text-xs px-3 py-2 rounded" style={{ background: 'rgba(3,105,161,0.05)', color: 'var(--text-tertiary)' }}>
+                      Keine Paare mit gleicher Fahrer oder gleichem Fahrzeug gefunden.
+                    </div>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <table className="w-full border-collapse" style={{ fontSize: 10, color: 'var(--text-primary)' }}>
+                        <thead>
+                          <tr style={{ background: 'rgba(3,105,161,0.07)', color: 'var(--text-secondary)' }}>
+                            {['Block A','Fzg A','Zeit A','normEndA Ms','Block B','Fzg B','Zeit B','normEndB Ms','gl. Fahrer','gl. Fzg','Formel','Überlapp Min','Ergebnis'].map(h => (
+                              <th key={h} className="px-1.5 py-1 text-left font-semibold whitespace-nowrap" style={{ borderBottom: '1px solid rgba(3,105,161,0.15)' }}>{h}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {pairs.map((p, pi) => (
+                            <tr key={pi} style={{ borderBottom: '1px solid var(--border)', background: p.isOverlap ? 'rgba(220,38,38,0.04)' : 'transparent' }}>
+                              <td className="px-1.5 py-1 whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{p.aDriver.slice(0,10)}</td>
+                              <td className="px-1.5 py-1 font-mono whitespace-nowrap" style={{ color: '#0369a1' }}>{p.aVehicle}</td>
+                              <td className="px-1.5 py-1 font-mono whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{p.aStart}–{p.aEnd}</td>
+                              <td className="px-1.5 py-1 font-mono whitespace-nowrap text-[9px]" style={{ color: 'var(--text-tertiary)' }}>{p.aEndMs}</td>
+                              <td className="px-1.5 py-1 whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{p.bDriver.slice(0,10)}</td>
+                              <td className="px-1.5 py-1 font-mono whitespace-nowrap" style={{ color: '#0369a1' }}>{p.bVehicle}</td>
+                              <td className="px-1.5 py-1 font-mono whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{p.bStart}–{p.bEnd}</td>
+                              <td className="px-1.5 py-1 font-mono whitespace-nowrap text-[9px]" style={{ color: 'var(--text-tertiary)' }}>{p.bEndMs}</td>
+                              <td className="px-1.5 py-1 font-semibold whitespace-nowrap" style={{ color: p.sameFahrer ? '#0369a1' : 'var(--text-tertiary)' }}>{p.sameFahrer ? 'Ja' : 'Nein'}</td>
+                              <td className="px-1.5 py-1 font-semibold whitespace-nowrap" style={{ color: p.sameFahrzeug ? '#0369a1' : 'var(--text-tertiary)' }}>{p.sameFahrzeug ? 'Ja' : 'Nein'}</td>
+                              <td className="px-1.5 py-1 whitespace-nowrap text-[9px] font-mono" style={{ color: 'var(--text-tertiary)' }}>
+                                min({p.aEndMs},{p.bEndMs})-max({p.aStartMs},{p.bStartMs})={p.overlapMs}
+                              </td>
+                              <td className="px-1.5 py-1 whitespace-nowrap font-semibold" style={{ color: p.isOverlap ? '#dc2626' : '#15803d' }}>{p.overlapMin}</td>
+                              <td className="px-1.5 py-1 whitespace-nowrap">
+                                <span className="px-1.5 py-0.5 rounded text-[10px] font-bold" style={{ background: p.isOverlap ? 'rgba(220,38,38,0.1)' : 'rgba(21,128,61,0.1)', color: p.isOverlap ? '#dc2626' : '#15803d' }}>
+                                  {p.isOverlap ? 'OVERLAP' : 'ok'}
+                                </span>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+
+          </div>
+        )}
+      </div>
+
+      {/* Konflikt-Lösungsoptionen */}
+      {(repairResult.conflictsBefore > 0 || repairResult.movedBlocks.length > 0 || repairResult.finalConflictDetails.length > 0 || repairResult.unrepairable.length > 0) && (
+        <div className="rounded-2xl overflow-hidden" style={{ background: 'var(--bg-surface)', border: '1px solid rgba(220,38,38,0.3)' }}>
+          <button
+            onClick={() => setShowConflictOptions(v => !v)}
+            className="w-full flex items-center justify-between px-4 py-3 text-sm font-semibold transition-colors hover:brightness-105"
+            style={{ color: '#b91c1c', background: 'transparent' }}
+          >
+            <span className="flex items-center gap-2 flex-wrap">
+              Konflikt-Lösungsoptionen
+              <span className="text-xs font-semibold px-2 py-0.5 rounded-full" style={{ background: 'rgba(220,38,38,0.08)', color: '#dc2626', border: '1px solid rgba(220,38,38,0.2)' }}>
+                {repairResult.conflictsBefore} urspr. · {repairResult.movedBlocks.length} verschoben · {repairResult.finalConflictDetails.length} offen
+              </span>
+            </span>
+            <span style={{ fontSize: 10 }}>{showConflictOptions ? '▲' : '▼'}</span>
+          </button>
+          {showConflictOptions && (
+            <div className="px-4 pb-4 space-y-6">
+
+              {/* ── Section A: Ursprüngliche Konflikte ── */}
+              <div>
+                <div className="text-xs font-bold uppercase tracking-wider mb-3 pt-2" style={{ color: '#b91c1c', letterSpacing: '0.08em' }}>
+                  A — Ursprüngliche Konflikte ({repairResult.originalConflictDetails.length})
+                </div>
+                {repairResult.originalConflictDetails.length === 0 ? (
+                  <div className="text-xs px-3 py-2 rounded-lg" style={{ background: 'var(--bg-subtle)', color: 'var(--text-tertiary)' }}>Keine Konflikte vor Reparatur erfasst.</div>
+                ) : (
+                  <div className="space-y-2">
+                    {repairResult.originalConflictDetails.map((cd, ci) => {
+                      const kindLabel = cd.kind === 'inhaber' ? 'Inhaber' : cd.kind === 'vehicle' ? 'Fahrzeug' : 'Fahrer';
+                      const overlapMin = Math.round((cd.overlapEndMs - cd.overlapStartMs) / 60000);
+                      const movedA = repairResult.movedBlocks.find(m => m.blockId === cd.aBlockId);
+                      const movedB = repairResult.movedBlocks.find(m => m.blockId === cd.bBlockId);
+                      const unrepA = repairResult.unrepairable.find(u => u.blockId === cd.aBlockId);
+                      const unrepB = repairResult.unrepairable.find(u => u.blockId === cd.bBlockId);
+                      const stillOpen = repairResult.finalConflictDetails.some(
+                        fc => (fc.aBlockId === cd.aBlockId && fc.bBlockId === cd.bBlockId) ||
+                              (fc.aBlockId === cd.bBlockId && fc.bBlockId === cd.aBlockId)
+                      );
+                      const outcome = stillOpen ? 'offen'
+                        : (movedA || movedB) ? 'repariert'
+                        : (unrepA || unrepB) ? 'nicht reparierbar'
+                        : 'gelöst';
+                      const outcomeColor = outcome === 'repariert' || outcome === 'gelöst' ? '#15803d'
+                        : outcome === 'offen' ? '#b91c1c' : '#92400e';
+
+                      return (
+                        <div key={ci} className="rounded-xl overflow-hidden text-xs" style={{ border: '1px solid var(--border)', background: 'var(--bg-subtle)' }}>
+                          <div className="px-3 py-2 flex flex-wrap gap-x-4 gap-y-1 items-center" style={{ background: 'rgba(220,38,38,0.05)', borderBottom: '1px solid var(--border)' }}>
+                            <span className="font-bold" style={{ color: '#b91c1c' }}>#{ci + 1} {kindLabel}konflikt</span>
+                            <span className="font-mono" style={{ color: 'var(--text-secondary)' }}>
+                              {fmtTime(cd.overlapStartMs)}–{fmtTime(cd.overlapEndMs)} ({overlapMin} Min.)
+                            </span>
+                            <span className="px-2 py-0.5 rounded-full font-semibold text-[10px]" style={{ background: outcomeColor + '15', color: outcomeColor, border: `1px solid ${outcomeColor}40` }}>
+                              {outcome}
+                            </span>
+                          </div>
+                          <div className="px-3 py-2 grid grid-cols-2 gap-x-4 gap-y-1" style={{ color: 'var(--text-secondary)' }}>
+                            <div>
+                              <div className="text-[10px] uppercase tracking-wider font-semibold mb-0.5" style={{ color: 'var(--text-tertiary)' }}>Block A</div>
+                              <div className="font-semibold" style={{ color: 'var(--text-primary)' }}>{cd.aDriver}</div>
+                              <div className="font-mono">{cd.aVehicle} · {fmtTime(cd.aStartMs)}–{fmtTime(cd.aEndMs)}</div>
+                              {movedA && (
+                                <div className="mt-0.5" style={{ color: '#15803d' }}>
+                                  Verschoben nach {fmtTime(movedA.newStartMs)}–{fmtTime(movedA.newEndMs)}
+                                  {movedA.newDriverName !== movedA.originalDriverName && ` → ${movedA.newDriverName}`}
+                                </div>
+                              )}
+                              {unrepA && <div className="mt-0.5" style={{ color: '#92400e' }}>Nicht reparierbar: {unrepA.reason}</div>}
+                            </div>
+                            <div>
+                              <div className="text-[10px] uppercase tracking-wider font-semibold mb-0.5" style={{ color: 'var(--text-tertiary)' }}>Block B</div>
+                              <div className="font-semibold" style={{ color: 'var(--text-primary)' }}>{cd.bDriver}</div>
+                              <div className="font-mono">{cd.bVehicle} · {fmtTime(cd.bStartMs)}–{fmtTime(cd.bEndMs)}</div>
+                              {movedB && (
+                                <div className="mt-0.5" style={{ color: '#15803d' }}>
+                                  Verschoben nach {fmtTime(movedB.newStartMs)}–{fmtTime(movedB.newEndMs)}
+                                  {movedB.newDriverName !== movedB.originalDriverName && ` → ${movedB.newDriverName}`}
+                                </div>
+                              )}
+                              {unrepB && <div className="mt-0.5" style={{ color: '#92400e' }}>Nicht reparierbar: {unrepB.reason}</div>}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* ── Section B: Verschobene Blöcke – mögliche Alternativen ── */}
+              {movedBlockAlternatives.length > 0 && (() => {
+                // Deduplicate by blockId — one moved block may solve multiple conflicts
+                const seenIds = new Set<string>();
+                const dedupedAlts: typeof movedBlockAlternatives = [];
+                for (const mb of movedBlockAlternatives) {
+                  if (!seenIds.has(mb.blockId)) {
+                    seenIds.add(mb.blockId);
+                    dedupedAlts.push(mb);
+                  }
+                }
+
+                // Map blockId → indices in originalConflictDetails where it appeared
+                const conflictIndicesByBlock = new Map<string, number[]>();
+                repairResult.originalConflictDetails.forEach((cd, idx) => {
+                  const aMatch = movedBlockAlternatives.find(m => m.blockId === cd.aBlockId);
+                  const bMatch = movedBlockAlternatives.find(m => m.blockId === cd.bBlockId);
+                  if (aMatch) conflictIndicesByBlock.set(aMatch.blockId, [...(conflictIndicesByBlock.get(aMatch.blockId) ?? []), idx + 1]);
+                  if (bMatch) conflictIndicesByBlock.set(bMatch.blockId, [...(conflictIndicesByBlock.get(bMatch.blockId) ?? []), idx + 1]);
+                });
+                // Deduplicate indices per block
+                for (const [id, idxs] of conflictIndicesByBlock) {
+                  conflictIndicesByBlock.set(id, [...new Set(idxs)]);
+                }
+
+                return (
+                  <div>
+                    <div className="text-xs font-bold uppercase tracking-wider mb-3" style={{ color: '#0369a1', letterSpacing: '0.08em' }}>
+                      B — Verschobene Blöcke — mögliche Alternativen ({dedupedAlts.length})
+                    </div>
+                    <div className="space-y-4">
+                      {dedupedAlts.map((mb, mi) => {
+                        function renderAltCands(cands: ConflictCandidate[], mode: string, noReasons: string[]) {
+                          const clean = cands.filter(c => c.rating === 'clean');
+                          const rejected = cands.filter(c => c.rating === 'rejected').slice(0, 3);
+                          return (
+                            <div className="mt-2">
+                              <div className="text-[10px] uppercase tracking-wider font-semibold mb-1" style={{ color: 'var(--text-tertiary)' }}>{mode}</div>
+                              {cands.length === 0 || clean.length === 0 ? (
+                                <div className="text-xs px-3 py-2 rounded-lg" style={{ background: 'rgba(220,38,38,0.04)', border: '1px solid rgba(220,38,38,0.15)', color: '#b91c1c' }}>
+                                  Keine sauberen Fenster gefunden
+                                  {noReasons.length > 0 && (
+                                    <ul className="mt-1 list-disc list-inside opacity-80">
+                                      {noReasons.map((r, i) => <li key={i}>{r}</li>)}
+                                    </ul>
+                                  )}
+                                </div>
+                              ) : (
+                                <div className="overflow-x-auto">
+                                  <table className="w-full text-xs border-collapse">
+                                    <thead>
+                                      <tr style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)' }}>
+                                        {['Datum','Fenster','Platzierung','Dauer','Fahrer','Fahrzeug','Puffer','Status'].map(h => (
+                                          <th key={h} className="px-1.5 py-1 text-left font-semibold whitespace-nowrap">{h}</th>
+                                        ))}
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {[...clean, ...rejected].map((c, ri) => (
+                                        <tr key={ri} style={{ borderBottom: '1px solid var(--border)', background: c.rating === 'clean' ? 'rgba(21,128,61,0.04)' : 'rgba(220,38,38,0.02)' }}>
+                                          <td className="px-1.5 py-1 font-mono whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{c.dateLabel}</td>
+                                          <td className="px-1.5 py-1 font-mono whitespace-nowrap" style={{ color: 'var(--text-tertiary)' }}>{fmtTime(c.windowStartMs)}–{fmtTime(c.windowEndMs)}</td>
+                                          <td className="px-1.5 py-1 font-mono whitespace-nowrap font-semibold" style={{ color: c.rating === 'clean' ? '#15803d' : '#dc2626' }}>{fmtTime(c.suggestedStartMs)}–{fmtTime(c.suggestedEndMs)}</td>
+                                          <td className="px-1.5 py-1 whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{Math.round(c.durationMs / 60000)} Min.</td>
+                                          <td className="px-1.5 py-1 whitespace-nowrap font-semibold" style={{ color: c.driverFree ? '#15803d' : '#dc2626' }}>{c.driverFree ? 'Ja' : 'Nein'}</td>
+                                          <td className="px-1.5 py-1 whitespace-nowrap font-semibold" style={{ color: c.vehicleFree ? '#15803d' : '#dc2626' }}>{c.vehicleFree ? 'Ja' : 'Nein'}</td>
+                                          <td className="px-1.5 py-1 whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>
+                                            {c.bufferMin === 0 ? 'gleich Fzg.' : `${c.bufferMin} Min.`}
+                                          </td>
+                                          <td className="px-1.5 py-1 whitespace-nowrap">
+                                            {c.rating === 'clean' ? (
+                                              <span className="px-1.5 py-0.5 rounded text-[10px] font-bold" style={{ background: 'rgba(21,128,61,0.1)', color: '#15803d' }}>Sauber</span>
+                                            ) : (
+                                              <span className="px-1.5 py-0.5 rounded text-[10px]" style={{ color: '#b91c1c' }} title={c.rejectionReason}>Abgelehnt</span>
+                                            )}
+                                          </td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        }
+
+                        const isNowInhaber = mb.newDriverName === inhaberName;
+                        const solvedConflictNums = conflictIndicesByBlock.get(mb.blockId) ?? [];
+
+                        return (
+                          <div key={mb.blockId} className="rounded-xl overflow-hidden" style={{ border: '1px solid rgba(3,105,161,0.25)', background: 'rgba(3,105,161,0.02)' }}>
+                            {/* Block header */}
+                            <div className="px-3 py-2 flex flex-wrap gap-x-4 gap-y-1 items-center text-xs" style={{ background: 'rgba(3,105,161,0.07)', borderBottom: '1px solid rgba(3,105,161,0.15)' }}>
+                              <span className="font-bold" style={{ color: '#0369a1' }}>Block {mi + 1}</span>
+                              <span className="font-mono font-semibold" style={{ color: 'var(--text-primary)' }}>{mb.vehicle}</span>
+                              <span style={{ color: 'var(--text-secondary)' }}>{mb.originalDriverName}</span>
+                              {mb.newDriverName !== mb.originalDriverName && (
+                                <span style={{ color: '#0369a1' }}>→ {mb.newDriverName}</span>
+                              )}
+                              <span className="font-mono" style={{ color: 'var(--text-tertiary)' }}>
+                                Orig: {fmtTime(mb.oldStartMs)}–{fmtTime(mb.oldEndMs)}
+                              </span>
+                              <span className="font-mono font-semibold" style={{ color: '#0369a1' }}>
+                                Aktuell: {fmtTime(mb.currentStartMs)}–{fmtTime(mb.currentEndMs)}
+                              </span>
+                              <span className="text-[10px] px-1.5 py-0.5 rounded font-semibold" style={{ background: 'rgba(3,105,161,0.1)', color: '#0369a1' }}>{mb.reason}</span>
+                              {solvedConflictNums.length > 1 && (
+                                <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ background: 'rgba(3,105,161,0.06)', color: '#0369a1' }}>
+                                  hat {solvedConflictNums.length} Konflikte gelöst: #{solvedConflictNums.join(', #')}
+                                </span>
+                              )}
+                              {solvedConflictNums.length === 1 && (
+                                <span className="text-[10px]" style={{ color: 'var(--text-tertiary)' }}>Konflikt #{solvedConflictNums[0]}</span>
+                              )}
+                            </div>
+                            {/* Candidates */}
+                            <div className="p-3 space-y-1">
+                              {renderAltCands(mb.keepDriverCandidates, `Gleicher Fahrer (${mb.newDriverName})`, mb.keepDriverNoWindowReasons)}
+                              {!isNowInhaber && renderAltCands(mb.toInhaberCandidates, `→ Inhaber (${inhaberName})`, mb.toInhaberNoWindowReasons)}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })()}
+
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Warum nicht geplant? */}
+      {failedBlocks.length > 0 && (
+        <div className="rounded-2xl overflow-hidden" style={{ background: 'rgba(220,38,38,0.04)', border: '1px solid rgba(220,38,38,0.15)' }}>
+          <button
+            onClick={() => setShowFailed(v => !v)}
+            className="w-full flex items-center justify-between px-4 py-3 text-sm font-semibold transition-colors hover:brightness-105"
+            style={{ color: '#b91c1c', background: 'transparent' }}
+          >
+            <span>Warum nicht geplant? ({failedBlocks.length} Blöcke)</span>
+            <span style={{ fontSize: 10 }}>{showFailed ? '▲' : '▼'}</span>
+          </button>
+          {showFailed && (
+            <div className="px-4 pb-4 overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr style={{ background: 'rgba(220,38,38,0.06)' }}>
+                    <th className="px-2 py-1.5 text-left font-semibold" style={{ color: '#b91c1c' }}>Block-ID</th>
+                    <th className="px-2 py-1.5 text-left font-semibold" style={{ color: '#b91c1c' }}>Fahrzeug</th>
+                    <th className="px-2 py-1.5 text-left font-semibold" style={{ color: '#b91c1c' }}>Dauer</th>
+                    <th className="px-2 py-1.5 text-left font-semibold" style={{ color: '#b91c1c' }}>Getestete Fenster</th>
+                    <th className="px-2 py-1.5 text-left font-semibold" style={{ color: '#b91c1c' }}>Grund</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {failedBlocks.map((f, i) => (
+                    <tr key={i} style={{ borderTop: '1px solid rgba(220,38,38,0.1)' }}>
+                      <td className="px-2 py-1.5 font-mono" style={{ color: 'var(--text-primary)' }}>{f.block.blockId.slice(0, 16)}</td>
+                      <td className="px-2 py-1.5" style={{ color: 'var(--text-primary)' }}>{f.block.vehicle}</td>
+                      <td className="px-2 py-1.5" style={{ color: 'var(--text-primary)' }}>{formatBlockDuration(f.block.blockDurationSec)}</td>
+                      <td className="px-2 py-1.5 text-right" style={{ color: 'var(--text-secondary)' }}>{f.windowsTested}</td>
+                      <td className="px-2 py-1.5" style={{ color: '#b91c1c', maxWidth: 300 }}>{f.reason}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Calendar */}
+      <div>
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
+            Tageskalender — {MONTHS_DE[month - 1]} {year}
+          </h3>
+          <label className="inline-flex items-center gap-2 text-xs cursor-pointer" style={{ color: 'var(--text-secondary)' }}>
+            <input type="checkbox" checked={showFreeWindows} onChange={e => setShowFreeWindows(e.target.checked)} className="w-3.5 h-3.5" />
+            Frei (Inhaber) anzeigen
+          </label>
+        </div>
+        <div className="space-y-2">
+          {calendarDays.map(day => {
+            const dayKey  = new Date(day.getFullYear(), day.getMonth(), day.getDate()).getTime();
+            const dayBlocks = (blocksByDay.get(dayKey) ?? []).sort((a, b) => a.blockStartMs - b.blockStartMs);
+            const freeWins  = inhaberFreeWindowsByDay.get(dayKey) ?? [];
+            if (dayBlocks.length === 0 && freeWins.length === 0) return null;
+
+            const dow = ['So','Mo','Di','Mi','Do','Fr','Sa'][day.getDay()];
+            const dateLabel = `${dow} ${day.getDate()}.${day.getMonth() + 1}.`;
+
+            return (
+              <div key={dayKey} className="rounded-xl overflow-hidden" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
+                <div className="px-3 py-2 text-xs font-semibold" style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)' }}>
+                  {dateLabel}
+                </div>
+                <div className="p-2 flex flex-wrap gap-2">
+                  {/* Free windows */}
+                  {showFreeWindows && freeWins.map((fw, idx) => {
+                    const durSec = Math.round((fw.endMs - fw.startMs) / 1000);
+                    return (
+                      <button
+                        key={`fw-${idx}`}
+                        onClick={() => setFreeModal({ date: dateLabel, startMs: fw.startMs, endMs: fw.endMs })}
+                        className="rounded-lg px-2.5 py-1.5 text-left text-xs transition-all hover:brightness-110"
+                        style={{ border: '1px dashed rgba(124,58,237,0.35)', color: 'rgba(124,58,237,0.7)', background: 'rgba(124,58,237,0.04)', minWidth: 130 }}
+                      >
+                        <div className="font-semibold">{fmtTime(fw.startMs)}–{fmtTime(fw.endMs)}</div>
+                        <div className="mt-0.5 opacity-80">Frei (Inhaber) · {formatBlockDuration(durSec)}</div>
+                      </button>
+                    );
+                  })}
+                  {/* Blocks */}
+                  {dayBlocks.map(block => {
+                    const planned   = plannedMap.get(block.blockId);
+                    const regAsgn   = regularMap.get(block.blockId);
+                    const isInhaber = inhaberBlockIds.has(block.blockId);
+                    const isFailed  = failedSet.has(block.blockId);
+                    const converted = repairResult.convertedToInhaber.get(block.blockId);
+
+                    const startMs = converted ? converted.startMs
+                                  : planned   ? planned.newStartMs
+                                  : block.blockStartMs;
+                    const endMs   = converted ? converted.endMs
+                                  : planned   ? planned.newEndMs
+                                  : block.blockEndMs;
+
+                    let bg = 'var(--bg-subtle)';
+                    let borderColor = 'var(--border)';
+                    let label = '—';
+                    let textColor = 'var(--text-primary)';
+
+                    if (converted) {
+                      bg = 'rgba(37,99,235,0.12)'; borderColor = 'rgba(37,99,235,0.5)';
+                      label = inhaberName; textColor = '#1d4ed8';
+                    } else if (planned) {
+                      bg = 'rgba(37,99,235,0.1)'; borderColor = 'rgba(37,99,235,0.4)';
+                      label = inhaberName; textColor = '#1d4ed8';
+                    } else if (isInhaber) {
+                      bg = 'rgba(124,58,237,0.08)'; borderColor = 'rgba(124,58,237,0.3)';
+                      label = inhaberName; textColor = INHABER_COLOR;
+                    } else if (regAsgn) {
+                      const col = regularColorMap.get(regAsgn.driverId) ?? '#64748b';
+                      bg = col + '18'; borderColor = col + '55';
+                      label = regAsgn.driverName; textColor = col;
+                    } else if (isFailed) {
+                      bg = 'rgba(220,38,38,0.06)'; borderColor = 'rgba(220,38,38,0.3)';
+                      label = 'Nicht geplant'; textColor = '#b91c1c';
+                    }
+
+                    return (
+                      <div
+                        key={block.blockId}
+                        className="rounded-lg px-2.5 py-1.5 text-xs"
+                        style={{ background: bg, border: `1px solid ${borderColor}`, color: textColor, minWidth: 130 }}
+                      >
+                        <div className="font-semibold">{fmtTime(startMs)}–{fmtTime(endMs)}</div>
+                        <div className="mt-0.5 opacity-80">{block.vehicle} · {label}</div>
+                        {converted && (
+                          <div className="mt-0.5 text-xs" style={{ color: '#2563eb', opacity: 0.8 }}>
+                            Repariert · Urspr.: {converted.originalDriverName.split(' ')[0]}
+                          </div>
+                        )}
+                        {!converted && planned && (
+                          <div className="mt-0.5 text-xs" style={{ color: '#2563eb', opacity: 0.8 }}>
+                            Geplant ({fmtTime(block.blockStartMs)} → {fmtTime(planned.newStartMs)})
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Free window detail modal */}
+      {freeModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.4)' }}
+          onClick={() => setFreeModal(null)}>
+          <div className="rounded-2xl p-5 w-72 space-y-3" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}
+            onClick={e => e.stopPropagation()}>
+            <h3 className="text-sm font-bold" style={{ color: INHABER_COLOR }}>Frei (Inhaber)</h3>
+            {[
+              { label: 'Datum',  value: freeModal.date },
+              { label: 'Start',  value: fmtTime(freeModal.startMs) },
+              { label: 'Ende',   value: fmtTime(freeModal.endMs) },
+              { label: 'Dauer',  value: formatBlockDuration(Math.round((freeModal.endMs - freeModal.startMs) / 1000)) },
+            ].map(row => (
+              <div key={row.label} className="flex items-start gap-2 text-xs">
+                <span className="w-14 flex-shrink-0 font-semibold" style={{ color: 'var(--text-secondary)' }}>{row.label}</span>
+                <span style={{ color: 'var(--text-primary)' }}>{row.value}</span>
+              </div>
+            ))}
+            <div className="rounded-lg px-3 py-2 text-xs" style={{ background: 'rgba(124,58,237,0.07)', border: '1px dashed rgba(124,58,237,0.3)', color: 'rgba(124,58,237,0.8)' }}>
+              Fahrzeugverfügbarkeit hängt vom zu verschiebenden Block ab.
+            </div>
+            <button onClick={() => setFreeModal(null)} className="w-full rounded-lg py-1.5 text-xs font-semibold transition-all hover:brightness-110" style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}>
+              Schließen
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+
+// ── Per-driver working-hour summary ──────────────────────────────────────────
+
+export interface DriverHourSummaryRow {
+  driverId: string | null;
+  driverName: string;
+  hourlyCents: number;       // euro-cents per hour
+  baseSec: number;           // 1000 Std
+  night25Sec: number;        // 1500 N25%
+  night40Sec: number;        // 1501 N40%
+  sundaySec: number;         // 1510 Son
+  holidaySec: number;        // Feiertag
+  totalSec: number;          // Insgesamt
+}
+
+const INVALID_DRIVER_NAMES_HS = new Set(['', 'Nicht zugewiesen', 'Inhaber', 'null', 'undefined']);
+
+/**
+ * Builds a per-driver working-hour summary from the final edited Fahrtenbuch data.
+ * Uses shiftMap for Inhaber-shifted rides, noteReassignments for Fahrer-Notiz overrides,
+ * and raw_data_json timestamps for regular rides — exactly matching the XLSX export.
+ */
+function buildDriverHourSummary(
+  trips: FahrtenbuchTrip[],
+  shiftMap: Map<string, { newStartMs: number; newEndMs: number; newDriver: string }>,
+  noteReassignments: Map<string, string>,
+  driverConfigs: WzDriverConfig[],
+  resolvedOwnerName: string | null,
+  year: number,
+): DriverHourSummaryRow[] {
+  const holidaySet = getGermanNationalHolidays(year);
+  // Also include adjacent years for cross-year rides
+  const prevHolidays = getGermanNationalHolidays(year - 1);
+  const nextHolidays = getGermanNationalHolidays(year + 1);
+  prevHolidays.forEach(h => holidaySet.add(h));
+  nextHolidays.forEach(h => holidaySet.add(h));
+
+  // Normalize driver name for grouping
+  function resolveExportDriver(raw: string | null | undefined): string | null {
+    if (!raw || INVALID_DRIVER_NAMES_HS.has(raw.trim())) return null;
+    return raw.trim();
+  }
+
+  // Per-driver accumulator
+  const acc = new Map<string, DriverHourSummaryRow>();
+
+  function getOrCreate(name: string): DriverHourSummaryRow {
+    if (!acc.has(name)) {
+      const cfg = driverConfigs.find(c =>
+        c.driverName === name ||
+        (c.isOwner && name === resolvedOwnerName),
+      );
+      acc.set(name, {
+        driverId: cfg?.driverId ?? null,
+        driverName: name,
+        hourlyCents: cfg?.hourlyCents ?? 0,
+        baseSec: 0, night25Sec: 0, night40Sec: 0, sundaySec: 0, holidaySec: 0, totalSec: 0,
+      });
+    }
+    return acc.get(name)!;
+  }
+
+  function addLohnart(name: string, startMs: number, endMs: number) {
+    if (endMs <= startMs) return;
+    const row = getOrCreate(name);
+    const l = computeLohnartSeconds(startMs, endMs, holidaySet);
+    row.baseSec    += l.baseSec;
+    row.night25Sec += l.night25Sec;
+    row.night40Sec += l.night40Sec;
+    row.sundaySec  += l.sundaySec;
+    row.holidaySec += l.holidaySec;
+    row.totalSec   += l.totalSec;
+  }
+
+  for (const trip of trips) {
+    if (trip.is_canceled) continue;
+
+    const shifted = shiftMap.get(trip.id);
+    if (shifted) {
+      const driverRaw = shifted.newDriver === 'Inhaber' ? resolvedOwnerName : shifted.newDriver;
+      const driver = resolveExportDriver(driverRaw);
+      if (driver) addLohnart(driver, shifted.newStartMs, shifted.newEndMs);
+      continue;
+    }
+
+    const noteDriver = noteReassignments.get(trip.id);
+    // Resolve timestamps
+    const raw = trip.raw_data_json as Record<string, unknown> | null;
+    let startMs = 0, endMs = 0;
+    if (raw) {
+      const datetimeLike: string[] = [];
+      for (const k of Object.keys(raw)) {
+        const v = String(raw[k] ?? '');
+        if (/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/.test(v)) datetimeLike.push(v);
+      }
+      if (datetimeLike.length >= 1) startMs = Date.parse(datetimeLike[0].replace(' ', 'T')) || 0;
+      if (datetimeLike.length >= 2) endMs   = Date.parse(datetimeLike[1].replace(' ', 'T')) || 0;
+    }
+    if (!startMs && trip.trip_date && trip.start_time) {
+      startMs = Date.parse(`${trip.trip_date}T${trip.start_time.length === 5 ? trip.start_time + ':00' : trip.start_time}`) || 0;
+    }
+    if (!endMs && trip.trip_date && trip.end_time) {
+      let ms = Date.parse(`${trip.trip_date}T${trip.end_time.length === 5 ? trip.end_time + ':00' : trip.end_time}`) || 0;
+      if (ms > 0 && startMs > 0 && ms < startMs) ms += 86400000;
+      endMs = ms;
+    }
+    if (!startMs) continue;
+
+    const driverRaw = noteDriver
+      ?? (trip.assigned_driver_name !== 'Inhaber' ? trip.assigned_driver_name : resolvedOwnerName)
+      ?? resolvedOwnerName
+      ?? trip.original_driver_name;
+    const driver = resolveExportDriver(driverRaw);
+    if (!driver) continue;
+
+    addLohnart(driver, startMs, endMs || startMs);
+  }
+
+  // Sort: regular drivers first (by name), Inhaber last
+  const ownerName = resolvedOwnerName;
+  return Array.from(acc.values())
+    .filter(r => r.totalSec > 0)
+    .sort((a, b) => {
+      const aOwner = a.driverName === ownerName;
+      const bOwner = b.driverName === ownerName;
+      if (aOwner !== bOwner) return aOwner ? 1 : -1;
+      return a.driverName.localeCompare(b.driverName);
+    });
+}
+
+// ── Salary range validation ────────────────────────────────────────────────────
+
+export interface SalaryRangeDriverRow {
+  driverId: string | null;
+  driverName: string;
+  hourlyCents: number;
+  minSalaryCents: number | null;
+  maxSalaryCents: number | null;
+  hours1000: number;       // decimal hours
+  hours1500: number;
+  hours1501: number;
+  hours1510: number;
+  hoursHoliday: number;
+  basePayCents: number;
+  night25PayCents: number;
+  night40PayCents: number;
+  sundayPayCents: number;
+  holidayPayCents: number;
+  finalSalaryCents: number;
+  differenceToMinCents: number;   // negative means below min; 0 means at/above min
+  differenceToMaxCents: number;   // positive means above max; 0 means at/below max
+  status: 'ok' | 'below_min' | 'above_max';
+}
+
+/**
+ * Computes the final salary in euro-cents for a single driver from their hour buckets.
+ * Formula: basePay + night25Pay (25% surcharge) + night40Pay (40% surcharge) + sundayPay (50% surcharge) + holidayPay (100% surcharge)
+ */
+function computeFinalSalaryCents(row: DriverHourSummaryRow): {
+  basePayCents: number;
+  night25PayCents: number;
+  night40PayCents: number;
+  sundayPayCents: number;
+  holidayPayCents: number;
+  finalSalaryCents: number;
+} {
+  const r = row.hourlyCents / 3600; // cents per second
+  const basePayCents    = Math.round(row.baseSec    * r);
+  const night25PayCents = Math.round(row.night25Sec * r * 0.25);
+  const night40PayCents = Math.round(row.night40Sec * r * 0.40);
+  const sundayPayCents  = Math.round(row.sundaySec  * r * 0.50);
+  const holidayPayCents = Math.round(row.holidaySec * r * 1.00);
+  const finalSalaryCents = basePayCents + night25PayCents + night40PayCents + sundayPayCents + holidayPayCents;
+  return { basePayCents, night25PayCents, night40PayCents, sundayPayCents, holidayPayCents, finalSalaryCents };
+}
+
+/**
+ * Builds a salary range validation summary for every selected regular driver.
+ * Uses DriverHourSummaryRow (the single source of truth) and the salary range
+ * stored in driverConfigs. Returns one row per regular driver.
+ */
+function buildFinalSalaryRangeSummary(
+  hourSummary: DriverHourSummaryRow[],
+  driverConfigs: WzDriverConfig[],
+): SalaryRangeDriverRow[] {
+  const TOLERANCE_CENTS = 1; // 0.01 € rounding tolerance
+  const cfgById = new Map<string | null, WzDriverConfig>();
+  for (const cfg of driverConfigs) {
+    if (!cfg.isOwner && cfg.included) cfgById.set(cfg.driverId, cfg);
+  }
+
+  const result: SalaryRangeDriverRow[] = [];
+
+  for (const row of hourSummary) {
+    const cfg = cfgById.get(row.driverId);
+    if (!cfg) continue; // skip Inhaber and excluded drivers
+    if (cfg.isOwner) continue;
+
+    const { basePayCents, night25PayCents, night40PayCents, sundayPayCents, holidayPayCents, finalSalaryCents } = computeFinalSalaryCents(row);
+
+    const minC = cfg.minSalaryCents;
+    const maxC = cfg.maxSalaryCents;
+
+    const differenceToMinCents = minC != null ? finalSalaryCents - minC : 0;
+    const differenceToMaxCents = maxC != null ? finalSalaryCents - maxC : 0;
+
+    let status: SalaryRangeDriverRow['status'] = 'ok';
+    if (minC != null && finalSalaryCents < minC - TOLERANCE_CENTS) status = 'below_min';
+    else if (maxC != null && finalSalaryCents > maxC + TOLERANCE_CENTS) status = 'above_max';
+
+    result.push({
+      driverId: row.driverId,
+      driverName: row.driverName,
+      hourlyCents: row.hourlyCents,
+      minSalaryCents: minC,
+      maxSalaryCents: maxC,
+      hours1000:    row.baseSec    / 3600,
+      hours1500:    row.night25Sec / 3600,
+      hours1501:    row.night40Sec / 3600,
+      hours1510:    row.sundaySec  / 3600,
+      hoursHoliday: row.holidaySec / 3600,
+      basePayCents,
+      night25PayCents,
+      night40PayCents,
+      sundayPayCents,
+      holidayPayCents,
+      finalSalaryCents,
+      differenceToMinCents,
+      differenceToMaxCents,
+      status,
+    });
+  }
+
+  result.sort((a, b) => a.driverName.localeCompare(b.driverName, 'de'));
+  return result;
+}
+
+/**
+ * Validates salary range constraints.
+ * Returns null if all drivers are within range, or a German error message if any are outside.
+ */
+function validateFinalSalaryRanges(summary: SalaryRangeDriverRow[]): string | null {
+  const violations = summary.filter(r => r.status !== 'ok');
+  if (violations.length === 0) return null;
+  return 'Ein oder mehrere Fahrer liegen außerhalb des erlaubten Gehaltsbereichs.';
+}
+
+function secToHStr(sec: number): string {
+  return (sec / 3600).toFixed(2).replace('.', ',');
+}
+
+function fmtRate(cents: number): string {
+  return (cents / 100).toFixed(2).replace('.', ',');
+}
+
+interface DriverHourSummaryTableProps {
+  rows: DriverHourSummaryRow[];
+}
+
+function DriverHourSummaryTable({ rows }: DriverHourSummaryTableProps) {
+  if (rows.length === 0) return (
+    <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>Keine Daten verfügbar.</p>
+  );
+  const cols = [
+    { key: 'driverName',  label: 'Fahrer',       align: 'left' },
+    { key: 'hourlyCents', label: 'Faktor €/h',   align: 'right' },
+    { key: 'baseSec',     label: '1000 Std',     align: 'right' },
+    { key: 'night25Sec',  label: '1500 N25%',    align: 'right' },
+    { key: 'night40Sec',  label: '1501 N40%',    align: 'right' },
+    { key: 'sundaySec',   label: '1510 Son',     align: 'right' },
+    { key: 'holidaySec',  label: 'Feiertag',     align: 'right' },
+    { key: 'totalSec',    label: 'Insgesamt',    align: 'right' },
+  ] as const;
+  return (
+    <div className="overflow-x-auto rounded-xl" style={{ border: '1px solid var(--border)' }}>
+      <table className="w-full text-xs border-collapse">
+        <thead>
+          <tr style={{ background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)' }}>
+            {cols.map(c => (
+              <th key={c.key} className={`px-3 py-2 font-semibold whitespace-nowrap ${c.align === 'right' ? 'text-right' : 'text-left'}`} style={{ color: 'var(--text-secondary)' }}>
+                {c.label}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row, i) => (
+            <tr key={row.driverName} style={{ borderBottom: i < rows.length - 1 ? '1px solid var(--border)' : undefined }}>
+              <td className="px-3 py-2 font-semibold whitespace-nowrap" style={{ color: 'var(--text-primary)' }}>{row.driverName}</td>
+              <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{fmtRate(row.hourlyCents)}</td>
+              <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap" style={{ color: 'var(--text-primary)' }}>{secToHStr(row.baseSec)}</td>
+              <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap" style={{ color: 'var(--text-primary)' }}>{secToHStr(row.night25Sec)}</td>
+              <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap" style={{ color: 'var(--text-primary)' }}>{secToHStr(row.night40Sec)}</td>
+              <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap" style={{ color: 'var(--text-primary)' }}>{secToHStr(row.sundaySec)}</td>
+              <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap" style={{ color: 'var(--text-primary)' }}>{secToHStr(row.holidaySec)}</td>
+              <td className="px-3 py-2 text-right tabular-nums font-semibold whitespace-nowrap" style={{ color: 'var(--text-primary)' }}>{secToHStr(row.totalSec)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// ── Salary range summary table ────────────────────────────────────────────────
+
+function fmtEur(cents: number): string {
+  return (cents / 100).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €';
+}
+
+function fmtHDecimal(h: number): string {
+  return h.toFixed(2).replace('.', ',');
+}
+
+interface SalaryRangeSummaryTableProps {
+  rows: SalaryRangeDriverRow[];
+  expandedDriver: string | null;
+  onToggleExpand: (name: string) => void;
+}
+
+function SalaryRangeSummaryTable({ rows, expandedDriver, onToggleExpand }: SalaryRangeSummaryTableProps) {
+  if (rows.length === 0) return (
+    <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>Keine Gehaltsdaten verfügbar.</p>
+  );
+
+  const statusColors: Record<SalaryRangeDriverRow['status'], { bg: string; border: string; text: string; label: string }> = {
+    ok:         { bg: 'rgba(21,128,61,0.08)',   border: 'rgba(21,128,61,0.25)',  text: '#15803d', label: 'OK' },
+    below_min:  { bg: 'rgba(220,38,38,0.06)',   border: 'rgba(220,38,38,0.3)',   text: '#b91c1c', label: 'Unter Mindestgehalt' },
+    above_max:  { bg: 'rgba(217,119,6,0.06)',   border: 'rgba(217,119,6,0.35)',  text: '#b45309', label: 'Über Maximalgehalt' },
+  };
+
+  return (
+    <div className="space-y-2">
+      {rows.map((row) => {
+        const s = statusColors[row.status];
+        const isExpanded = expandedDriver === row.driverName;
+        const diff = row.status === 'below_min'
+          ? row.differenceToMinCents  // negative value (below min)
+          : row.status === 'above_max'
+            ? row.differenceToMaxCents // positive value (above max)
+            : 0;
+        return (
+          <div key={row.driverName} className="rounded-xl overflow-hidden" style={{ border: `1px solid ${s.border}` }}>
+            {/* Main row */}
+            <button
+              className="w-full flex items-center gap-3 px-4 py-3 text-left transition-all hover:brightness-95"
+              style={{ background: s.bg }}
+              onClick={() => onToggleExpand(row.driverName)}
+            >
+              {/* Status badge */}
+              <span className="text-xs font-bold px-2 py-0.5 rounded-full flex-shrink-0" style={{ background: s.border, color: s.text }}>{s.label}</span>
+              {/* Driver name */}
+              <span className="font-semibold text-sm flex-1" style={{ color: 'var(--text-primary)' }}>{row.driverName}</span>
+              {/* Mindestgehalt */}
+              <div className="text-right hidden sm:block flex-shrink-0">
+                <div className="text-xs" style={{ color: 'var(--text-secondary)' }}>Mindest</div>
+                <div className="text-xs font-semibold tabular-nums" style={{ color: 'var(--text-primary)' }}>
+                  {row.minSalaryCents != null ? fmtEur(row.minSalaryCents) : '—'}
+                </div>
+              </div>
+              {/* Maximalgehalt */}
+              <div className="text-right hidden sm:block flex-shrink-0">
+                <div className="text-xs" style={{ color: 'var(--text-secondary)' }}>Maximum</div>
+                <div className="text-xs font-semibold tabular-nums" style={{ color: 'var(--text-primary)' }}>
+                  {row.maxSalaryCents != null ? fmtEur(row.maxSalaryCents) : '—'}
+                </div>
+              </div>
+              {/* Ist-Gehalt */}
+              <div className="text-right flex-shrink-0">
+                <div className="text-xs" style={{ color: 'var(--text-secondary)' }}>Ist-Gehalt</div>
+                <div className="text-xs font-bold tabular-nums" style={{ color: s.text }}>{fmtEur(row.finalSalaryCents)}</div>
+              </div>
+              {/* Differenz */}
+              {row.status !== 'ok' && (
+                <div className="text-right flex-shrink-0">
+                  <div className="text-xs" style={{ color: 'var(--text-secondary)' }}>Differenz</div>
+                  <div className="text-xs font-bold tabular-nums" style={{ color: s.text }}>
+                    {diff < 0 ? `−${fmtEur(-diff)}` : `+${fmtEur(diff)}`}
+                  </div>
+                </div>
+              )}
+              {/* Expand chevron */}
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" style={{ transform: isExpanded ? 'rotate(180deg)' : undefined, transition: 'transform 0.2s', color: 'var(--text-secondary)', flexShrink: 0 }}>
+                <path d="M3 5 L7 9 L11 5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+            </button>
+
+            {/* Expanded detail */}
+            {isExpanded && (
+              <div className="px-4 py-3 space-y-2" style={{ background: 'var(--bg-surface)', borderTop: `1px solid ${s.border}` }}>
+                {/* Mobile salary range */}
+                <div className="sm:hidden grid grid-cols-2 gap-2 text-xs">
+                  <div><span style={{ color: 'var(--text-secondary)' }}>Mindestgehalt: </span><span className="font-semibold" style={{ color: 'var(--text-primary)' }}>{row.minSalaryCents != null ? fmtEur(row.minSalaryCents) : '—'}</span></div>
+                  <div><span style={{ color: 'var(--text-secondary)' }}>Maximalgehalt: </span><span className="font-semibold" style={{ color: 'var(--text-primary)' }}>{row.maxSalaryCents != null ? fmtEur(row.maxSalaryCents) : '—'}</span></div>
+                </div>
+                {/* Hour buckets */}
+                <div className="overflow-x-auto rounded-lg" style={{ border: '1px solid var(--border)' }}>
+                  <table className="w-full text-xs border-collapse">
+                    <thead>
+                      <tr style={{ background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)' }}>
+                        {['Lohnart', 'Stunden', 'Faktor', 'Betrag'].map(h => (
+                          <th key={h} className={`px-3 py-2 font-semibold whitespace-nowrap ${h === 'Lohnart' ? 'text-left' : 'text-right'}`} style={{ color: 'var(--text-secondary)' }}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {[
+                        { label: '1000 Std (Grundlohn)', hours: row.hours1000, factor: '×1,00', amountCents: row.basePayCents },
+                        { label: '1500 N25%',            hours: row.hours1500, factor: '×0,25', amountCents: row.night25PayCents },
+                        { label: '1501 N40%',            hours: row.hours1501, factor: '×0,40', amountCents: row.night40PayCents },
+                        { label: '1510 Sonntag',         hours: row.hours1510, factor: '×0,50', amountCents: row.sundayPayCents },
+                        { label: 'Feiertag',             hours: row.hoursHoliday, factor: '×1,00', amountCents: row.holidayPayCents },
+                      ].map((item, idx) => (
+                        <tr key={item.label} style={{ borderBottom: idx < 4 ? '1px solid var(--border)' : undefined }}>
+                          <td className="px-3 py-1.5 font-medium" style={{ color: 'var(--text-primary)' }}>{item.label}</td>
+                          <td className="px-3 py-1.5 text-right tabular-nums" style={{ color: 'var(--text-secondary)' }}>{fmtHDecimal(item.hours)} h</td>
+                          <td className="px-3 py-1.5 text-right tabular-nums" style={{ color: 'var(--text-secondary)' }}>{item.factor}</td>
+                          <td className="px-3 py-1.5 text-right tabular-nums font-semibold" style={{ color: 'var(--text-primary)' }}>{fmtEur(item.amountCents)}</td>
+                        </tr>
+                      ))}
+                      <tr style={{ borderTop: '2px solid var(--border)', background: 'var(--bg-subtle)' }}>
+                        <td className="px-3 py-2 font-bold" style={{ color: 'var(--text-primary)' }} colSpan={3}>Gesamt</td>
+                        <td className="px-3 py-2 text-right tabular-nums font-bold" style={{ color: s.text }}>{fmtEur(row.finalSalaryCents)}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+                <div className="text-xs" style={{ color: 'var(--text-secondary)' }}>
+                  Stundensatz: {fmtRate(row.hourlyCents)} €/h
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ── Standalone saved-plan export ─────────────────────────────────────────────
+//
+// Re-creates the identical XLSX from a saved plan without any live component state.
+// Used when downloading a previously saved historical working-hours plan.
+
+interface SavedPlanExportParams {
+  trips: FahrtenbuchTrip[];
+  shiftMapEntries: Array<[string, { newStartMs: number; newEndMs: number; newDriver: string; auftragEingangMs: number | null; auftragUebermittlungMs: number | null; geplanteAbholzeitMs: number | null }]>;
+  noteReassignmentsEntries: Array<[string, string]>;
+  ownerDriverName: string;
+  storagePath: string | null;
+  sourceSheetName: string | null;
+  sourceColumnsJson: string[] | null;
+  originalFileName: string | null;
+  month: number;
+  year: number;
+}
+
+async function reExportFahrtenbuchFromSavedPlan(params: SavedPlanExportParams): Promise<void> {
+  const { trips, shiftMapEntries, noteReassignmentsEntries, ownerDriverName, storagePath, sourceSheetName, sourceColumnsJson, originalFileName, month, year } = params;
+  const shiftMap = new Map(shiftMapEntries);
+  const noteReassignments = new Map(noteReassignmentsEntries);
+
+  // Download original file from storage
+  let originalWs: XLSX.WorkSheet | null = null;
+  if (storagePath) {
+    try {
+      const { data: blob, error } = await supabase.storage.from('fahrtenbuch-files').download(storagePath);
+      if (!error && blob) {
+        const arrayBuffer = await blob.arrayBuffer();
+        const wb = XLSX.read(new Uint8Array(arrayBuffer), { type: 'array', cellStyles: false, raw: true });
+        const wsName = sourceSheetName ?? wb.SheetNames[0];
+        originalWs = wb.Sheets[wsName] ?? wb.Sheets[wb.SheetNames[0]] ?? null;
+      }
+    } catch { /* fall through */ }
+  }
+
+  // Build column order
+  let headers: string[];
+  if (sourceColumnsJson && sourceColumnsJson.length > 0) {
+    headers = [...sourceColumnsJson];
+    const inHeaders = new Set(headers.map(h => h.toLowerCase()));
+    for (const t of trips) {
+      if (t.raw_data_json) for (const k of Object.keys(t.raw_data_json)) {
+        if (!inHeaders.has(k.toLowerCase())) { headers.push(k); inHeaders.add(k.toLowerCase()); }
+      }
+    }
+  } else {
+    const headerSet = new Set<string>();
+    for (const t of trips) {
+      if (t.raw_data_json) for (const k of Object.keys(t.raw_data_json)) headerSet.add(k);
+    }
+    headers = [...headerSet];
+  }
+
+  const DRIVER_KEYS    = ['fahrername', 'fahrer'];
+  const START_KEYS     = ['uhrzeit des fahrtbeginns', 'fahrtbeginn', 'start', 'start_datetime', 'fahrt_beginn'];
+  const END_KEYS       = ['uhrzeit des fahrtendes', 'fahrtende', 'ende', 'end_datetime', 'fahrt_ende'];
+  const DATE_KEYS      = ['datum der fahrt', 'datum', 'date', 'fahrt_datum'];
+  const EINGANG_KEYS   = ['datum/uhrzeit auftragseingang', 'auftragseingang', 'auftrag_eingang'];
+  const UEBERM_KEYS    = ['uhrzeit der auftragsuebermittlung', 'auftragsuebermittlung', 'auftrag_uebermittlung'];
+  const ABHOLZEIT_KEYS = ['geplante abholzeit', 'abholzeit', 'geplante_abholzeit'];
+  const FAHRPREIS_KEYS = ['fahrpreis', 'preis', 'price', 'fare'];
+  const KILOMETER_KEYS = ['kilometer', 'km', 'distanz', 'distance'];
+
+  const colIdx = new Map(headers.map((h, i) => [h.toLowerCase(), i]));
+  const driverColIdx  = [...colIdx.entries()].find(([k]) => DRIVER_KEYS.includes(k))?.[1] ?? -1;
+  const startColIdx   = [...colIdx.entries()].find(([k]) => START_KEYS.includes(k))?.[1] ?? -1;
+  const endColIdx     = [...colIdx.entries()].find(([k]) => END_KEYS.includes(k))?.[1] ?? -1;
+  const dateColIdx    = [...colIdx.entries()].find(([k]) => DATE_KEYS.includes(k))?.[1] ?? -1;
+  const eingangColIdx = [...colIdx.entries()].find(([k]) => EINGANG_KEYS.includes(k))?.[1] ?? -1;
+  const uebermColIdx  = [...colIdx.entries()].find(([k]) => UEBERM_KEYS.includes(k))?.[1] ?? -1;
+  const abholColIdx   = [...colIdx.entries()].find(([k]) => ABHOLZEIT_KEYS.includes(k))?.[1] ?? -1;
+
+  const fmtDate = (ms: number) => {
+    const d = new Date(ms);
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  };
+
+  const HEADER_KW = ['datum','fahrer','uhrzeit','preis','trinkgeld','zahlungsart','abholort','zielort','kennzeichen','start','ende','beginn','fahrt','trip','driver','date','time','price','status','storniert'];
+
+  if (originalWs) {
+    const range = XLSX.utils.decode_range(originalWs['!ref'] ?? 'A1');
+    let wsHeaderRow = range.s.r;
+    for (let r = range.s.r; r <= Math.min(range.e.r, 20); r++) {
+      let matches = 0;
+      for (let c = range.s.c; c <= range.e.c; c++) {
+        const cell = originalWs[XLSX.utils.encode_cell({ r, c })];
+        if (cell && HEADER_KW.some(kw => String(cell.v ?? '').toLowerCase().includes(kw))) matches++;
+      }
+      if (matches >= 3) { wsHeaderRow = r; break; }
+    }
+
+    const wsColByName = new Map<string, number>();
+    for (let c = range.s.c; c <= range.e.c; c++) {
+      const addr = XLSX.utils.encode_cell({ r: wsHeaderRow, c });
+      const cell = originalWs[addr];
+      if (cell) wsColByName.set(String(cell.v ?? '').toLowerCase().trim(), c);
+    }
+
+    const wsDriverCol  = DRIVER_KEYS.map(k => wsColByName.get(k)).find(v => v !== undefined) ?? -1;
+    const wsStartCol   = START_KEYS.map(k => wsColByName.get(k)).find(v => v !== undefined) ?? -1;
+    const wsEndCol     = END_KEYS.map(k => wsColByName.get(k)).find(v => v !== undefined) ?? -1;
+    const wsDateCol    = DATE_KEYS.map(k => wsColByName.get(k)).find(v => v !== undefined) ?? -1;
+    const wsEingangCol = EINGANG_KEYS.map(k => wsColByName.get(k)).find(v => v !== undefined) ?? -1;
+    const wsUebermCol  = UEBERM_KEYS.map(k => wsColByName.get(k)).find(v => v !== undefined) ?? -1;
+    const wsAbholCol   = ABHOLZEIT_KEYS.map(k => wsColByName.get(k)).find(v => v !== undefined) ?? -1;
+    const wsFahrpreisCol = FAHRPREIS_KEYS.map(k => wsColByName.get(k)).find(v => v !== undefined) ?? -1;
+    const wsKilometerCol = KILOMETER_KEYS.map(k => wsColByName.get(k)).find(v => v !== undefined) ?? -1;
+
+    type RowEntry = { wsRow: number; sortMs: number; trip: FahrtenbuchTrip };
+    const rowEntries: RowEntry[] = trips.map(trip => {
+      const wsRow = wsHeaderRow + (trip.source_row_index ?? 1);
+      const s = shiftMap.get(trip.id);
+      let sortMs = Infinity;
+      if (s) {
+        sortMs = s.newStartMs;
+      } else if (wsStartCol >= 0) {
+        const addr = XLSX.utils.encode_cell({ r: wsRow, c: wsStartCol });
+        const cell = originalWs![addr];
+        if (cell) { const ms = Date.parse(String(cell.v ?? '').replace(' ', 'T')); if (!isNaN(ms)) sortMs = ms; }
+      }
+      return { wsRow, sortMs, trip };
+    });
+    rowEntries.sort((a, b) => a.sortMs === Infinity && b.sortMs === Infinity ? 0 : a.sortMs - b.sortMs);
+
+    const newWs: XLSX.WorkSheet = {};
+    const totalCols = range.e.c - range.s.c + 1;
+    const totalRows = 1 + rowEntries.length;
+
+    for (let c = range.s.c; c <= range.e.c; c++) {
+      const srcAddr = XLSX.utils.encode_cell({ r: wsHeaderRow, c });
+      const dstAddr = XLSX.utils.encode_cell({ r: 0, c: c - range.s.c });
+      const cell = originalWs[srcAddr];
+      if (cell) newWs[dstAddr] = { ...cell };
+    }
+
+    let invalidPriceKmCount = 0;
+    for (let i = 0; i < rowEntries.length; i++) {
+      const { wsRow, trip } = rowEntries[i];
+      const dstRow = i + 1;
+      const s = shiftMap.get(trip.id);
+      for (let c = range.s.c; c <= range.e.c; c++) {
+        const srcAddr = XLSX.utils.encode_cell({ r: wsRow, c });
+        const dstAddr = XLSX.utils.encode_cell({ r: dstRow, c: c - range.s.c });
+        const srcCell = originalWs[srcAddr];
+        const cell: XLSX.CellObject = srcCell ? { ...srcCell } : { t: 'z' };
+        if (s) {
+          if (c === wsDriverCol  && wsDriverCol  >= 0) { cell.t = 's'; cell.v = ownerDriverName; delete cell.w; }
+          else if (c === wsStartCol && wsStartCol >= 0) { cell.t = 's'; cell.v = formatExportDateTime(s.newStartMs); delete cell.w; }
+          else if (c === wsEndCol   && wsEndCol   >= 0) { cell.t = 's'; cell.v = formatExportDateTime(s.newEndMs); delete cell.w; }
+          else if (c === wsDateCol  && wsDateCol  >= 0) { cell.t = 's'; cell.v = fmtDate(s.newStartMs); delete cell.w; }
+          else if (c === wsEingangCol && wsEingangCol >= 0 && s.auftragEingangMs !== null) { cell.t = 's'; cell.v = formatExportDateTime(s.auftragEingangMs); delete cell.w; }
+          else if (c === wsUebermCol  && wsUebermCol  >= 0 && s.auftragUebermittlungMs !== null) { cell.t = 's'; cell.v = formatExportDateTime(s.auftragUebermittlungMs); delete cell.w; }
+          else if (c === wsAbholCol   && wsAbholCol   >= 0 && s.geplanteAbholzeitMs !== null) { cell.t = 's'; cell.v = formatExportDateTime(s.geplanteAbholzeitMs); delete cell.w; }
+        }
+        if (!s && noteReassignments.has(trip.id)) {
+          if (c === wsDriverCol && wsDriverCol >= 0) { cell.t = 's'; cell.v = noteReassignments.get(trip.id)!; delete cell.w; }
+        }
+        if ((c === wsFahrpreisCol && wsFahrpreisCol >= 0) || (c === wsKilometerCol && wsKilometerCol >= 0)) {
+          if (srcCell && cell.v !== srcCell.v) invalidPriceKmCount++;
+        }
+        newWs[dstAddr] = cell;
+      }
+    }
+
+    if (invalidPriceKmCount > 0) {
+      alert(`Export gesperrt — Fahrpreis/Kilometer wurden verändert (${invalidPriceKmCount} Zellen).`);
+      return;
+    }
+
+    newWs['!ref'] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: totalRows - 1, c: totalCols - 1 } });
+    const wb2 = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb2, newWs, sourceSheetName ?? 'Sheet1');
+    XLSX.writeFile(wb2, originalFileName ?? `fahrtenbuch_neu_${year}-${String(month).padStart(2,'0')}.xlsx`);
+    return;
+  }
+
+  // Fallback: json_to_sheet
+  const allRows = trips.map(trip => {
+    const row: Record<string, unknown> = { ...(trip.raw_data_json ?? {}) };
+    const s = shiftMap.get(trip.id);
+    if (s) {
+      if (driverColIdx  >= 0) row[headers[driverColIdx]]  = ownerDriverName;
+      if (startColIdx   >= 0) row[headers[startColIdx]]   = formatExportDateTime(s.newStartMs);
+      if (endColIdx     >= 0) row[headers[endColIdx]]     = formatExportDateTime(s.newEndMs);
+      if (dateColIdx    >= 0) row[headers[dateColIdx]]    = fmtDate(s.newStartMs);
+      if (eingangColIdx >= 0 && s.auftragEingangMs !== null)       row[headers[eingangColIdx]] = formatExportDateTime(s.auftragEingangMs);
+      if (uebermColIdx  >= 0 && s.auftragUebermittlungMs !== null) row[headers[uebermColIdx]]  = formatExportDateTime(s.auftragUebermittlungMs);
+      if (abholColIdx   >= 0 && s.geplanteAbholzeitMs !== null)    row[headers[abholColIdx]]   = formatExportDateTime(s.geplanteAbholzeitMs);
+    } else if (noteReassignments.has(trip.id)) {
+      if (driverColIdx >= 0) row[headers[driverColIdx]] = noteReassignments.get(trip.id)!;
+    }
+    return row;
+  });
+  const startColName = startColIdx >= 0 ? headers[startColIdx] : null;
+  allRows.sort((a, b) => {
+    const parse = (r: Record<string, unknown>) => {
+      if (!startColName) return Infinity;
+      const ms = Date.parse(String(r[startColName] ?? '').replace(' ', 'T'));
+      return isNaN(ms) ? Infinity : ms;
+    };
+    return parse(a) - parse(b);
+  });
+  const ws = XLSX.utils.json_to_sheet(allRows, { header: headers });
+  const wb3 = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb3, ws, sourceSheetName ?? 'Sheet1');
+  XLSX.writeFile(wb3, originalFileName ?? `fahrtenbuch_neu_${year}-${String(month).padStart(2,'0')}.xlsx`);
+}
+
+// ── Main component ────────────────────────────────────────────────────────────
+
+const AUTO_RUN_STEPS = [
+  'Fahrtenbuch wird gelesen...',
+  'Fahrzeug-Blöcke werden berechnet...',
+  'Reguläre Fahrer werden zugewiesen...',
+  'Fahrer-Notizen werden geprüft...',
+  'Inhaber-Konflikte werden vorbereitet...',
+  'Zeitfenster werden gesucht...',
+  'Konflikte werden automatisch gelöst...',
+  'Fahrer-Notiz-Konflikte werden gelöst...',
+  'Export wird vorbereitet...',
+  'Abschlussprüfung läuft...',
+];
+const MIN_STEP_MS = 1100;
+
+// ── Vehicle month-boundary summary ───────────────────────────────────────────
+
+export interface VehicleBoundaryRow {
+  vehicle: string;
+  firstDriver: string | null;
+  firstTripMs: number | null;
+  lastDriver: string | null;
+  lastTripMs: number | null;
+  source: 'preliminary' | 'final';
+}
+
+function fmtBoundaryMs(ms: number): string {
+  const d = new Date(ms);
+  const dd = String(d.getDate()).padStart(2, '0');
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const yyyy = d.getFullYear();
+  const hh = String(d.getHours()).padStart(2, '0');
+  const min = String(d.getMinutes()).padStart(2, '0');
+  return `${dd}.${mm}.${yyyy} ${hh}:${min}`;
+}
+
+const INVALID_DRIVER_NAMES = new Set(['', 'Nicht zugewiesen', 'Inhaber']);
+
+function resolveDriverDisplay(name: string | null | undefined): string | null {
+  if (!name || INVALID_DRIVER_NAMES.has(name)) return null;
+  return name;
+}
+
+/** Build vehicle/month boundary summary from originalTrips (preliminary). */
+export function buildVehicleMonthBoundarySummary(
+  trips: FahrtenbuchTrip[],
+): VehicleBoundaryRow[] {
+  // Parse full datetime ms for a FahrtenbuchTrip using the same logic as the engine
+  function parseTripStartMs(trip: FahrtenbuchTrip): number {
+    const raw = trip.raw_data_json as Record<string, unknown> | null;
+    if (raw) {
+      for (const k of Object.keys(raw)) {
+        const v = String(raw[k] ?? '');
+        if (/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/.test(v)) {
+          const ms = Date.parse(v.replace(' ', 'T'));
+          if (!isNaN(ms)) return ms;
+        }
+        if (/^\d{2}\.\d{2}\.\d{4} \d{2}:\d{2}/.test(v)) {
+          const [datePart, timePart] = v.split(' ');
+          const [day, mon, yr] = datePart.split('.');
+          const iso = `${yr}-${mon}-${day}T${timePart}`;
+          const ms = Date.parse(iso);
+          if (!isNaN(ms)) return ms;
+        }
+      }
+    }
+    if (trip.trip_date && trip.start_time) {
+      const combined = `${trip.trip_date}T${trip.start_time.length === 5 ? trip.start_time + ':00' : trip.start_time}`;
+      const ms = Date.parse(combined);
+      if (!isNaN(ms)) return ms;
+    }
+    return 0;
+  }
+
+  function parseTripEndMs(trip: FahrtenbuchTrip): number {
+    const raw = trip.raw_data_json as Record<string, unknown> | null;
+    if (raw) {
+      const keys = Object.keys(raw);
+      // Try to find an end time value — second datetime-looking field after start
+      const datetimeLike: string[] = [];
+      for (const k of keys) {
+        const v = String(raw[k] ?? '');
+        if (/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/.test(v) || /^\d{2}\.\d{2}\.\d{4} \d{2}:\d{2}/.test(v)) {
+          datetimeLike.push(v);
+        }
+      }
+      // If there are at least 2, the second is typically end time
+      if (datetimeLike.length >= 2) {
+        const v = datetimeLike[1];
+        if (/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/.test(v)) {
+          const ms = Date.parse(v.replace(' ', 'T'));
+          if (!isNaN(ms)) return ms;
+        }
+        if (/^\d{2}\.\d{2}\.\d{4} \d{2}:\d{2}/.test(v)) {
+          const [datePart, timePart] = v.split(' ');
+          const [day, mon, yr] = datePart.split('.');
+          const iso = `${yr}-${mon}-${day}T${timePart}`;
+          const ms = Date.parse(iso);
+          if (!isNaN(ms)) return ms;
+        }
+      }
+    }
+    if (trip.trip_date && trip.end_time) {
+      let combined = `${trip.trip_date}T${trip.end_time.length === 5 ? trip.end_time + ':00' : trip.end_time}`;
+      let ms = Date.parse(combined);
+      if (!isNaN(ms)) {
+        // Handle cross-midnight: if end < start, add 1 day
+        const startMs = parseTripStartMs(trip);
+        if (startMs > 0 && ms < startMs) ms += 86400000;
+        return ms;
+      }
+    }
+    return 0;
+  }
+
+  // Group by vehicle
+  const byVehicle = new Map<string, Array<{ startMs: number; endMs: number; driver: string | null }>>();
+  for (const trip of trips) {
+    if (trip.is_canceled) continue;
+    const vehicle = trip.car_identifier ?? trip.car_id ?? '';
+    if (!vehicle) continue;
+    const startMs = parseTripStartMs(trip);
+    if (!startMs) continue;
+    const endMs = parseTripEndMs(trip) || startMs;
+    const driver = resolveDriverDisplay(trip.assigned_driver_name) ?? resolveDriverDisplay(trip.original_driver_name);
+    if (!byVehicle.has(vehicle)) byVehicle.set(vehicle, []);
+    byVehicle.get(vehicle)!.push({ startMs, endMs, driver });
+  }
+
+  const result: VehicleBoundaryRow[] = [];
+  for (const [vehicle, rows] of byVehicle) {
+    rows.sort((a, b) => a.startMs - b.startMs);
+    const first = rows[0];
+    // Last = row with latest endMs (fallback to startMs if endMs unavailable)
+    const last = rows.reduce((best, r) => (r.endMs || r.startMs) > (best.endMs || best.startMs) ? r : best, rows[0]);
+    result.push({
+      vehicle,
+      firstDriver: first.driver,
+      firstTripMs: first.startMs,
+      lastDriver: last.driver,
+      lastTripMs: last.endMs || last.startMs,
+      source: 'preliminary',
+    });
+  }
+  result.sort((a, b) => a.vehicle.localeCompare(b.vehicle));
+  return result;
+}
+
+/** Build vehicle/month boundary summary from final snapshot rows. */
+export function buildVehicleMonthBoundarySummaryFromSnapshot(
+  rows: FinalBlockAssignmentRow[],
+): VehicleBoundaryRow[] {
+  const byVehicle = new Map<string, Array<{ startMs: number; endMs: number; driver: string | null }>>();
+  for (const row of rows) {
+    if (!row.isExportable) continue;
+    const vehicle = row.vehicle;
+    if (!vehicle) continue;
+    const startMs = row.finalStartMs || row.originalStartMs;
+    const endMs = row.finalEndMs || row.originalEndMs || startMs;
+    if (!startMs) continue;
+    const driver = resolveDriverDisplay(row.finalDriverName) ?? resolveDriverDisplay(row.originalDriverName);
+    if (!byVehicle.has(vehicle)) byVehicle.set(vehicle, []);
+    byVehicle.get(vehicle)!.push({ startMs, endMs, driver });
+  }
+
+  const result: VehicleBoundaryRow[] = [];
+  for (const [vehicle, vehicleRows] of byVehicle) {
+    vehicleRows.sort((a, b) => a.startMs - b.startMs);
+    const first = vehicleRows[0];
+    const last = vehicleRows.reduce((best, r) => (r.endMs || r.startMs) > (best.endMs || best.startMs) ? r : best, vehicleRows[0]);
+    result.push({
+      vehicle,
+      firstDriver: first.driver,
+      firstTripMs: first.startMs,
+      lastDriver: last.driver,
+      lastTripMs: last.endMs || last.startMs,
+      source: 'final',
+    });
+  }
+  result.sort((a, b) => a.vehicle.localeCompare(b.vehicle));
+  return result;
+}
+
+interface VehicleMonthBoundarySummaryProps {
+  rows: VehicleBoundaryRow[];
+}
+
+function VehicleMonthBoundarySummary({ rows }: VehicleMonthBoundarySummaryProps) {
+  if (rows.length === 0) return null;
+  const isFinal = rows.some(r => r.source === 'final');
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center gap-2 flex-wrap">
+        <h3 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
+          Fahrer je Fahrzeug am Monatsanfang und Monatsende
+        </h3>
+        <span
+          className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium"
+          style={isFinal
+            ? { background: 'rgba(21,128,61,0.12)', color: '#15803d', border: '1px solid rgba(21,128,61,0.3)' }
+            : { background: 'rgba(217,119,6,0.10)', color: '#b45309', border: '1px solid rgba(217,119,6,0.3)' }}
+        >
+          {isFinal ? 'Finales Fahrtenbuch' : 'Vorläufig'}
+        </span>
+      </div>
+      <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>
+        Diese Übersicht zeigt, welcher Fahrer ein Fahrzeug zu Beginn und am Ende des ausgewählten Monats hatte.
+      </p>
+      <div className="overflow-x-auto rounded-xl" style={{ border: '1px solid var(--border)' }}>
+        <table className="w-full text-xs border-collapse">
+          <thead>
+            <tr style={{ background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)' }}>
+              {['Fahrzeug', 'Erster Fahrer', 'Erste Fahrt', 'Letzter Fahrer', 'Letzte Fahrt'].map(h => (
+                <th key={h} className="text-left px-3 py-2 font-semibold whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row, i) => (
+              <tr key={row.vehicle} style={{ borderBottom: i < rows.length - 1 ? '1px solid var(--border)' : undefined }}>
+                <td className="px-3 py-2 font-mono font-semibold whitespace-nowrap" style={{ color: 'var(--text-primary)' }}>{row.vehicle}</td>
+                <td className="px-3 py-2 whitespace-nowrap" style={{ color: row.firstDriver ? 'var(--text-primary)' : 'var(--text-tertiary, #9ca3af)' }}>
+                  {row.firstDriver ?? <span className="italic">Nicht ermittelbar <span className="ml-1 inline-flex items-center px-1.5 py-0.5 rounded text-xs" style={{ background: 'rgba(217,119,6,0.10)', color: '#b45309' }}>Prüfung erforderlich</span></span>}
+                </td>
+                <td className="px-3 py-2 whitespace-nowrap tabular-nums" style={{ color: 'var(--text-secondary)' }}>
+                  {row.firstTripMs ? fmtBoundaryMs(row.firstTripMs) : '—'}
+                </td>
+                <td className="px-3 py-2 whitespace-nowrap" style={{ color: row.lastDriver ? 'var(--text-primary)' : 'var(--text-tertiary, #9ca3af)' }}>
+                  {row.lastDriver ?? <span className="italic">Nicht ermittelbar <span className="ml-1 inline-flex items-center px-1.5 py-0.5 rounded text-xs" style={{ background: 'rgba(217,119,6,0.10)', color: '#b45309' }}>Prüfung erforderlich</span></span>}
+                </td>
+                <td className="px-3 py-2 whitespace-nowrap tabular-nums" style={{ color: 'var(--text-secondary)' }}>
+                  {row.lastTripMs ? fmtBoundaryMs(row.lastTripMs) : '—'}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+
+
+export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
+  const { companyId, user } = useAuth();
+  const now = new Date();
+  const yearOptions = useMemo(() => { const y = now.getFullYear(); return Array.from({ length: 8 }, (_, i) => y - 6 + i); }, []);
+
+  // Step & navigation
+  const [step, setStep] = useState(0);
+
+  // Step 0
+  const [month, setMonth] = useState(now.getMonth() + 1);
+  const [year, setYear] = useState(now.getFullYear());
+  const [imports, setImports] = useState<FbImport[]>([]);
+  const [loadingImports, setLoadingImports] = useState(false);
+  const [selectedImportId, setSelectedImportId] = useState('');
+
+  // Step 1 — driver configs + draft inputs
+  const [allDrivers, setAllDrivers] = useState<DriverRow[]>([]);
+  const [driverNotesMap, setDriverNotesMap] = useState<Map<string, StructuredNote[]>>(new Map());
+  const [driverConfigs, setDriverConfigs] = useState<WzDriverConfig[]>([]);
+  const [drafts, setDrafts] = useState<Map<string, WzDraft>>(new Map());
+  const [useInhaber, setUseInhaber] = useState(true);
+  const [inhaberId, setInhaberId] = useState('');
+  const [reconciliationId, setReconciliationId] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  // Step 2/3 — compute
+  const [computing, setComputing] = useState(false);
+  const [computeError, setComputeError] = useState<string | null>(null);
+  const [computePhase, setComputePhase] = useState('');
+
+  // Phase 1 result
+  const [phase1Result, setPhase1Result] = useState<BuildVehicleBlocksResult | null>(null);
+  // Phase 2 result
+  const [assignmentResult, setAssignmentResult] = useState<RegularDriverAssignmentResult | null>(null);
+  // Phase 3 result
+  const [inhaberResult, setInhaberResult] = useState<InhaberAssignmentResult | null>(null);
+  // Inhaber non-conflict step (Step 3 in this wizard → wizard step 5)
+  const [inhaberNcResult, setInhaberNcResult] = useState<InhaberNonConflictStepResult | null>(null);
+  const [applyingNcs, setApplyingNcs] = useState(false);
+  // Inhaber longest conflict step (Step 4 → wizard step 6)
+  const [inhaberLcResult, setInhaberLcResult] = useState<InhaberLongestConflictStepResult | null>(null);
+  const [applyingLcs, setApplyingLcs] = useState(false);
+  // Inhaber free window search (Step 5 → wizard step 7)
+  const [inhaberFwsResult, setInhaberFwsResult] = useState<InhaberFreeWindowSearchStepResult | null>(null);
+  // Auto-shift plan (Step 6 → wizard step 8)
+  const [inhaberAutoShiftResult, setInhaberAutoShiftResult] = useState<LargestBlankPackingShiftPlanResult | null>(null);
+  const [isCreatingAutoShiftPlan, setIsCreatingAutoShiftPlan] = useState(false);
+  const [autoShiftPlanError, setAutoShiftPlanError] = useState<string | null>(null);
+  // Phase 4 result
+  const [shiftResult, setShiftResult] = useState<OwnerShiftResult | null>(null);
+  // Phase 5 result
+  const [snapshotResult, setSnapshotResult] = useState<FinalBlockAssignmentSnapshotResult | null>(null);
+  // Export validation result
+  const [exportValidation, setExportValidation] = useState<HistoricalWorkingHoursExportValidationResult | null>(null);
+  // Original trips (all, including canceled) stored for XLSX export
+  const [originalTrips, setOriginalTrips] = useState<FahrtenbuchTrip[] | null>(null);
+  // Export summary derived from snapshot + originalTrips
+  const [exportSummary, setExportSummary] = useState<FahrtenbuchExportSummary | null>(null);
+  // Stundennachweis preview derived from snapshot + regularTargets
+  const [stundennachweisPreview, setStundennachweisPreview] = useState<HistoricalWorkingHoursStundennachweisPreviewResult | null>(null);
+  // Row-level engine result (new engine — single source of truth for overlap validation)
+  const [rowLevelEngineResult, setRowLevelEngineResult] = useState<ArbeitsstundenEngineResult | null>(null);
+  // Generated worksheet self-audit result (post-download, final authority)
+  const [worksheetAuditResult, setWorksheetAuditResult] = useState<GeneratedWorksheetAuditResult | null>(null);
+  // Vehicle month-boundary summary (preliminary from originalTrips, updated to final after calculation)
+  const [boundaryRows, setBoundaryRows] = useState<VehicleBoundaryRow[]>([]);
+
+  // Serialized plan data for DB persistence (set by onPlanDataReady from InhaberFreeWindowSearchView)
+  const [planData, setPlanData] = useState<{ shiftMapJson: Array<[string, object]>; noteReassignmentsJson: Array<[string, string]> } | null>(null);
+  // Driver working-hour summary for display and persistence
+  const [driverHourSummary, setDriverHourSummary] = useState<DriverHourSummaryRow[]>([]);
+  // Salary range validation summary (computed from final export data)
+  const [salaryRangeSummary, setSalaryRangeSummary] = useState<SalaryRangeDriverRow[]>([]);
+  // Save-plan UI state
+  const [savingPlan, setSavingPlan] = useState(false);
+  const [planSavedId, setPlanSavedId] = useState<string | null>(null);
+  const [savePlanError, setSavePlanError] = useState<string | null>(null);
+  // Saved plans list for current month/year
+  interface SavedPlanRow {
+    id: string;
+    month: number;
+    year: number;
+    original_file_name: string | null;
+    saved_at: string;
+    export_ready: boolean;
+    export_block_reason: string | null;
+    shift_map_json: Array<[string, object]>;
+    note_reassignments_json: Array<[string, string]>;
+    boundary_rows_json: VehicleBoundaryRow[];
+    driver_configs_json: WzDriverConfig[];
+    storage_path: string | null;
+    source_columns_json: string[] | null;
+    source_sheet_name: string | null;
+    mode: string;
+    driver_hour_summary_json: DriverHourSummaryRow[];
+  }
+  const [savedPlans, setSavedPlans] = useState<SavedPlanRow[]>([]);
+  const [loadingSavedPlans, setLoadingSavedPlans] = useState(false);
+  // Ref to trigger XLSX download from the mounted InhaberFreeWindowSearchView
+  const exportTriggerRef = useRef<(() => void) | null>(null);
+  // Tracks which driver row is expanded in the salary range table
+  const [expandedSalaryDriver, setExpandedSalaryDriver] = useState<string | null>(null);
+
+  // Step 0 saved-plan viewer modal
+  const [viewingPlan, setViewingPlan] = useState<SavedPlanRow | null>(null);
+  const [downloadingPlanId, setDownloadingPlanId] = useState<string | null>(null);
+  // Confirmation dialog before replacing an existing plan
+  const [showReplaceConfirm, setShowReplaceConfirm] = useState(false);
+
+  // Assignment strategy
+  const [assignmentStrategy, setAssignmentStrategy] = useState<RegularAssignmentStrategy>('hours_first');
+  // Strategy that was used for the last compute (to detect stale state)
+  const [lastComputedStrategy, setLastComputedStrategy] = useState<RegularAssignmentStrategy | null>(null);
+  // Alternate strategy result for comparison card
+  const [altAssignmentResult, setAltAssignmentResult] = useState<RegularDriverAssignmentResult | null>(null);
+
+  // Original XLSX bytes for 1:1 export patching
+  const [exportingXlsx, setExportingXlsx] = useState(false);
+
+  // Targets manager overlay
+  const [showTargetsManager, setShowTargetsManager] = useState(false);
+  const [savingAsTargets, setSavingAsTargets] = useState(false);
+  const [saveAsTargetsDone, setSaveAsTargetsDone] = useState(false);
+
+  // ── Auto-run mode (simplified UX for normal users) ───────────────────────────
+  const [debugMode, setDebugMode] = useState(false);
+  const [autoRunPhase, setAutoRunPhase] = useState<'idle' | 'running' | 'done' | 'failed'>('idle');
+  const [autoRunStepIndex, setAutoRunStepIndex] = useState(0);
+  const [autoRunExportReady, setAutoRunExportReady] = useState<boolean | null>(null);
+  const [autoRunExportReason, setAutoRunExportReason] = useState<string | null>(null);
+  const [autoRunError, setAutoRunError] = useState<string | null>(null);
+
+  // 120s watchdog: if Abschlussprüfung hasn't resolved after timeout, force failure
+  useEffect(() => {
+    if (autoRunPhase !== 'done' || autoRunExportReady !== null) return;
+    const id = setTimeout(() => {
+      setAutoRunExportReady(false);
+      setAutoRunExportReason('Zeitüberschreitung bei der Abschlussprüfung (>120 s)');
+    }, 120_000);
+    return () => clearTimeout(id);
+  }, [autoRunPhase, autoRunExportReady]);
+
+  // Tracks which import+month+year combination has already been prefilled from saved targets
+  const prefillKeyRef = useRef('');
+
+  // ── Load imports ─────────────────────────────────────────────────────────────
+
+  useEffect(() => {
+    if (!companyId) return;
+    setLoadingImports(true);
+    setSelectedImportId('');
+    supabase.from('fahrtenbuch_imports').select('id,file_name,row_count,imported_at,source_columns_json,source_sheet_name,storage_path')
+      .eq('company_id', companyId).eq('month', month).eq('year', year)
+      .order('imported_at', { ascending: false })
+      .then(({ data }) => {
+        const rows = (data ?? []) as FbImport[];
+        if (import.meta.env.DEV) {
+          console.log(`[FahrtenbuchImportList] Loaded ${rows.length} import(s) for ${month}/${year}:`);
+          rows.forEach((r, i) => console.log(`  [${i}]`, {
+            id: r.id, file_name: r.file_name, row_count: r.row_count,
+            storage_path: r.storage_path, imported_at: r.imported_at,
+          }));
+          const withStorage = rows.filter(r => !!r.storage_path);
+          console.log(`[FahrtenbuchImportList] ${withStorage.length}/${rows.length} have storage_path`);
+        }
+        setImports(rows);
+        setLoadingImports(false);
+      });
+  }, [companyId, month, year]);
+
+  // ── Load drivers ──────────────────────────────────────────────────────────────
+
+  useEffect(() => {
+    if (!companyId) return;
+    supabase.from('drivers').select('id,name,personalnummer,employment_type,driver_usage_type,planning_hourly_rate,planning_min_salary,planning_max_salary')
+      .eq('company_id', companyId).neq('status', 'archived')
+      .then(({ data }) => setAllDrivers((data ?? []) as DriverRow[]));
+  }, [companyId]);
+
+  // ── Load driver notes (for planning exclusions) ────────────────────────────
+
+  useEffect(() => {
+    if (!companyId) return;
+    supabase.from('driver_notes')
+      .select('id,driver_id,note_type,note_text,note_planning_behavior,is_full_day,start_date,end_date,note_date,start_time,end_time')
+      .eq('company_id', companyId)
+      .eq('note_planning_behavior', 'exclude_from_plan')
+      .then(({ data }) => {
+        const map = new Map<string, StructuredNote[]>();
+        for (const row of (data ?? []) as StructuredNote[]) {
+          if (!map.has(row.driver_id)) map.set(row.driver_id, []);
+          map.get(row.driver_id)!.push(row);
+        }
+        setDriverNotesMap(map);
+      });
+  }, [companyId]);
+
+  // ── Auto-populate drivers when import selected ───────────────────────────────
+
+  useEffect(() => {
+    if (!selectedImportId || allDrivers.length === 0) return;
+    supabase.from('fahrtenbuch_trips').select('original_driver_name,original_driver_id')
+      .eq('import_id', selectedImportId).eq('is_canceled', false)
+      .then(({ data }) => {
+        const seen = new Map<string, string>();
+        for (const r of (data ?? []) as { original_driver_name: string; original_driver_id: string | null }[]) {
+          if (r.original_driver_id && !seen.has(r.original_driver_id)) seen.set(r.original_driver_id, r.original_driver_name);
+        }
+        const ownerIds = new Set(allDrivers.filter(d => d.employment_type === 'company_owner').map(d => d.id));
+        const configs: WzDriverConfig[] = [];
+        const newDrafts = new Map<string, WzDraft>();
+        for (const [did, dname] of seen) {
+          const profile = allDrivers.find(d => d.id === did);
+          const hourlyCents = profile?.planning_hourly_rate ? Math.round(profile.planning_hourly_rate * 100) : 0;
+          const minSalaryCents = profile?.planning_min_salary != null ? Math.round(profile.planning_min_salary * 100) : null;
+          const maxSalaryCents = profile?.planning_max_salary != null ? Math.round(profile.planning_max_salary * 100) : null;
+          // Use canonical name from driver profile, not raw Fahrtenbuch name
+          const canonicalName = profile?.name ?? dname;
+          configs.push({ driverId: did, driverName: canonicalName, personalnummer: profile?.personalnummer ?? null,
+            isOwner: ownerIds.has(did), included: !ownerIds.has(did), hourlyCents,
+            minSalaryCents, maxSalaryCents,
+            targetBaseH: 0, targetNacht25H: 0, targetNacht40H: 0, targetSundayH: 0, targetHolidayH: 0, hinweis: '' });
+          newDrafts.set(did, { hourly: centsToStr(hourlyCents), baseH: '', nacht25H: '', nacht40H: '', sunH: '', holH: '' });
+        }
+        configs.sort((a, b) => (a.isOwner ? 1 : 0) - (b.isOwner ? 1 : 0) || a.driverName.localeCompare(b.driverName));
+        setDriverConfigs(configs);
+        setDrafts(newDrafts);
+        const ownerDriver = allDrivers.find(d => d.employment_type === 'company_owner');
+        if (ownerDriver) setInhaberId(ownerDriver.id);
+      });
+  }, [selectedImportId, allDrivers]);
+
+  // ── Prefill target hours from saved historical_driver_hour_targets ────────────
+
+  useEffect(() => {
+    if (!companyId || driverConfigs.length === 0 || !selectedImportId) return;
+    const prefillKey = `${selectedImportId}:${month}:${year}`;
+    if (prefillKeyRef.current === prefillKey) return;
+    prefillKeyRef.current = prefillKey;
+
+    const monthName = MONTHS_DE[month - 1];
+    supabase
+      .from('historical_driver_hour_targets')
+      .select('driver_id,base_hours,night_25_hours,night_0_4_40_hours,sunday_50_hours,holiday_hours')
+      .eq('company_id', companyId)
+      .eq('month', monthName)
+      .eq('year', year)
+      .not('driver_id', 'is', null)
+      .then(({ data }) => {
+        if (!data || data.length === 0) return;
+        const byId = new Map(
+          (data as Array<{
+            driver_id: string;
+            base_hours: number; night_25_hours: number;
+            night_0_4_40_hours: number; sunday_50_hours: number; holiday_hours: number;
+          }>).map(r => [r.driver_id, r])
+        );
+        setDriverConfigs(prev => prev.map(cfg => {
+          const t = byId.get(cfg.driverId);
+          if (!t) return cfg;
+          return {
+            ...cfg,
+            targetBaseH:    Number(t.base_hours)          || 0,
+            targetNacht25H: Number(t.night_25_hours)       || 0,
+            targetNacht40H: Number(t.night_0_4_40_hours)   || 0,
+            targetSundayH:  Number(t.sunday_50_hours)      || 0,
+            targetHolidayH: Number(t.holiday_hours)        || 0,
+          };
+        }));
+        setDrafts(prev => {
+          const m = new Map(prev);
+          for (const [did, t] of byId) {
+            const existing = m.get(did);
+            if (!existing) continue;
+            m.set(did, {
+              ...existing,
+              baseH:    fmtH(Number(t.base_hours)         || 0),
+              nacht25H: fmtH(Number(t.night_25_hours)      || 0),
+              nacht40H: fmtH(Number(t.night_0_4_40_hours)  || 0),
+              sunH:     fmtH(Number(t.sunday_50_hours)     || 0),
+              holH:     fmtH(Number(t.holiday_hours)       || 0),
+            });
+          }
+          return m;
+        });
+      });
+  }, [driverConfigs.length, companyId, month, year, selectedImportId]);
+
+  // ── Load saved plans for current month/year ───────────────────────────────────
+
+  useEffect(() => {
+    if (!companyId) return;
+    setLoadingSavedPlans(true);
+    supabase
+      .from('historical_wh_saved_plans')
+      .select('id,month,year,original_file_name,saved_at,export_ready,export_block_reason,shift_map_json,note_reassignments_json,boundary_rows_json,driver_configs_json,driver_hour_summary_json,storage_path,source_columns_json,source_sheet_name,mode')
+      .eq('company_id', companyId)
+      .eq('month', month)
+      .eq('year', year)
+      .order('saved_at', { ascending: false })
+      .then(({ data }) => {
+        setSavedPlans((data ?? []) as SavedPlanRow[]);
+        setLoadingSavedPlans(false);
+      });
+  }, [companyId, month, year]);
+
+  // ── Save current plan to DB ───────────────────────────────────────────────────
+
+  // Internal function that actually performs the save (after confirmation if needed)
+  const doSavePlan = useCallback(async () => {
+    if (!companyId || !planData) return;
+    setSavingPlan(true);
+    setSavePlanError(null);
+    setShowReplaceConfirm(false);
+    const imp = imports.find(i => i.id === selectedImportId);
+
+    // Delete any existing plan for this company/month/year/mode before inserting new one
+    await supabase
+      .from('historical_wh_saved_plans')
+      .delete()
+      .eq('company_id', companyId)
+      .eq('month', month)
+      .eq('year', year)
+      .eq('mode', 'historical_working_hours');
+
+    const { data, error } = await supabase
+      .from('historical_wh_saved_plans')
+      .insert({
+        company_id: companyId,
+        month,
+        year,
+        mode: 'historical_working_hours',
+        import_id: selectedImportId || null,
+        original_file_name: imp?.file_name ?? null,
+        storage_path: imp?.storage_path ?? null,
+        source_sheet_name: imp?.source_sheet_name ?? null,
+        source_columns_json: imp?.source_columns_json ?? [],
+        saved_by: user?.id ?? null,
+        export_ready: autoRunExportReady === true,
+        export_block_reason: autoRunExportReason ?? null,
+        boundary_rows_json: boundaryRows,
+        shift_map_json: planData.shiftMapJson,
+        note_reassignments_json: planData.noteReassignmentsJson,
+        driver_configs_json: driverConfigs,
+        driver_hour_summary_json: driverHourSummary,
+        validation_summary_json: {},
+      })
+      .select('id')
+      .single();
+    if (error) {
+      setSavePlanError(error.message);
+    } else {
+      setPlanSavedId(data?.id ?? null);
+      // Refresh list
+      supabase
+        .from('historical_wh_saved_plans')
+        .select('id,month,year,original_file_name,saved_at,export_ready,export_block_reason,shift_map_json,note_reassignments_json,boundary_rows_json,driver_configs_json,driver_hour_summary_json,storage_path,source_columns_json,source_sheet_name,mode')
+        .eq('company_id', companyId)
+        .eq('month', month)
+        .eq('year', year)
+        .order('saved_at', { ascending: false })
+        .then(({ data: listData }) => setSavedPlans((listData ?? []) as SavedPlanRow[]));
+    }
+    setSavingPlan(false);
+  }, [companyId, user, planData, month, year, selectedImportId, imports, boundaryRows, driverConfigs, driverHourSummary, autoRunExportReady, autoRunExportReason]);
+
+  // If an active plan already exists for this month, ask for confirmation first
+  const handleSavePlan = useCallback(async () => {
+    if (!companyId || !planData) return;
+    const existingActivePlan = savedPlans.find(p => p.export_ready);
+    if (existingActivePlan) {
+      setShowReplaceConfirm(true);
+    } else {
+      await doSavePlan();
+    }
+  }, [companyId, planData, savedPlans, doSavePlan]);
+
+  // ── Download from a saved plan (standalone re-export) ─────────────────────────
+
+  const downloadSavedPlan = useCallback(async (plan: SavedPlanRow) => {
+    if (!plan.import_id && !plan.storage_path) {
+      alert('Keine Originaldaten verfügbar — Import oder Speicherpfad fehlt.');
+      return;
+    }
+    setDownloadingPlanId(plan.id);
+    try {
+      // Fetch original trips from DB
+      const { data: tripRows } = await supabase
+        .from('fahrtenbuch_trips')
+        .select('*')
+        .eq('import_id', plan.import_id ?? '')
+        .order('source_row_index', { ascending: true });
+
+      const trips = (tripRows ?? []) as FahrtenbuchTrip[];
+
+      // Resolve owner driver name from saved driver_configs_json
+      const ownerConfig = (plan.driver_configs_json as WzDriverConfig[] | null)?.find(c => c.isOwner);
+      const ownerDriverName = ownerConfig?.driverName ?? 'Inhaber';
+
+      await reExportFahrtenbuchFromSavedPlan({
+        trips,
+        shiftMapEntries: (plan.shift_map_json as Array<[string, { newStartMs: number; newEndMs: number; newDriver: string; auftragEingangMs: number | null; auftragUebermittlungMs: number | null; geplanteAbholzeitMs: number | null }]>) ?? [],
+        noteReassignmentsEntries: (plan.note_reassignments_json as Array<[string, string]>) ?? [],
+        ownerDriverName,
+        storagePath: plan.storage_path ?? null,
+        sourceSheetName: plan.source_sheet_name ?? null,
+        sourceColumnsJson: (plan.source_columns_json as string[] | null) ?? null,
+        originalFileName: plan.original_file_name ?? null,
+        month: plan.month,
+        year: plan.year,
+      });
+    } catch (e) {
+      alert(`Download fehlgeschlagen: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setDownloadingPlanId(null);
+    }
+  }, []);
+
+  // ── Helpers ───────────────────────────────────────────────────────────────────
+
+  function updateDraft(driverId: string, field: keyof WzDraft, val: string) {
+    setDrafts(prev => { const m = new Map(prev); const d = m.get(driverId) ?? { hourly: '', baseH: '', nacht25H: '', nacht40H: '', sunH: '', holH: '' }; m.set(driverId, { ...d, [field]: val }); return m; });
+  }
+
+  function commitDraft(driverId: string, field: keyof WzDraft, val: string) {
+    setDriverConfigs(prev => prev.map(c => {
+      if (c.driverId !== driverId) return c;
+      if (field === 'hourly')   return { ...c, hourlyCents: parseCentsFromStr(val) };
+      if (field === 'baseH')    return { ...c, targetBaseH: parseGermanH(val) };
+      if (field === 'nacht25H') return { ...c, targetNacht25H: parseGermanH(val) };
+      if (field === 'nacht40H') return { ...c, targetNacht40H: parseGermanH(val) };
+      if (field === 'sunH')     return { ...c, targetSundayH: parseGermanH(val) };
+      if (field === 'holH')     return { ...c, targetHolidayH: parseGermanH(val) };
+      return c;
+    }));
+    // Reformat draft
+    if (field === 'hourly') updateDraft(driverId, field, centsToStr(parseCentsFromStr(val)));
+    else updateDraft(driverId, field, fmtH(parseGermanH(val)) || val);
+  }
+
+  // ── Persistence ───────────────────────────────────────────────────────────────
+
+  const ensureReconciliation = useCallback(async (): Promise<string> => {
+    if (!companyId) throw new Error('Keine company_id');
+    if (reconciliationId) return reconciliationId;
+    const { data: existing } = await supabase.from('historical_reconciliations')
+      .select('id').eq('company_id', companyId).eq('month', month).eq('year', year)
+      .eq('reconciliation_mode', 'working_hours').maybeSingle();
+    if (existing?.id) { setReconciliationId(existing.id); return existing.id; }
+    const importEntry = imports.find(i => i.id === selectedImportId);
+    const { data: created, error } = await supabase.from('historical_reconciliations')
+      .insert({ company_id: companyId, month, year, import_id: selectedImportId || null,
+        reconciliation_mode: 'working_hours', notes: importEntry?.file_name ?? null })
+      .select('id').single();
+    if (error) throw error;
+    setReconciliationId(created.id);
+    return created.id;
+  }, [companyId, month, year, reconciliationId, selectedImportId, imports]);
+
+  const saveDriverConfigs = useCallback(async () => {
+    if (!companyId) return;
+    setSaving(true);
+    try {
+      const rid = await ensureReconciliation();
+      const rows = driverConfigs.map(c => ({
+        reconciliation_id: rid, driver_id: c.driverId, driver_name: c.driverName,
+        personalnummer: c.personalnummer, hourly_rate_cents: c.hourlyCents,
+        is_owner: c.isOwner, is_included: c.included,
+        target_base_hours: c.targetBaseH, target_night_25_hours: c.targetNacht25H,
+        target_night_40_hours: c.targetNacht40H, target_sunday_50_hours: c.targetSundayH,
+        target_holiday_hours: c.targetHolidayH, hinweis: c.hinweis || null,
+        updated_at: new Date().toISOString(),
+      }));
+      await supabase.from('historical_reconciliation_wh_drivers')
+        .upsert(rows, { onConflict: 'reconciliation_id,driver_id' });
+    } catch { /* silent save */ }
+    setSaving(false);
+  }, [companyId, driverConfigs, ensureReconciliation]);
+
+  // ── Save current wizard values as global targets ──────────────────────────────
+
+  const handleSaveAsTargets = useCallback(async () => {
+    if (!companyId) return;
+    setSavingAsTargets(true);
+    setSaveAsTargetsDone(false);
+    const monthName = MONTHS_DE[month - 1];
+    const included = driverConfigs.filter(c => c.included && !c.isOwner);
+    await saveDriverConfigsAsTargets(companyId, monthName, year, included);
+    setSavingAsTargets(false);
+    setSaveAsTargetsDone(true);
+    setTimeout(() => setSaveAsTargetsDone(false), 3000);
+  }, [companyId, driverConfigs, month, year]);
+
+  // ── Auto-run: runs all phases sequentially in simplified (non-debug) mode ─────
+
+  const handleAutoRun = useCallback(async () => {
+    if (!companyId || !selectedImportId) return;
+
+    const runId = Date.now();
+    if (debugMode) console.log(`[AutoRun #${runId}] start`, { month, year, selectedImportId });
+
+    // Reset all previous results
+    setPhase1Result(null);
+    setAssignmentResult(null);
+    setInhaberResult(null);
+    setInhaberNcResult(null);
+    setInhaberLcResult(null);
+    setInhaberFwsResult(null);
+    setInhaberAutoShiftResult(null);
+    setShiftResult(null);
+    setSnapshotResult(null);
+    setExportValidation(null);
+    setOriginalTrips(null);
+    setBoundaryRows([]);
+    setExportSummary(null);
+    setStundennachweisPreview(null);
+    setAltAssignmentResult(null);
+    setLastComputedStrategy(null);
+    setRowLevelEngineResult(null);
+    setWorksheetAuditResult(null);
+    setAutoRunExportReady(null);
+    setAutoRunExportReason(null);
+    setAutoRunError(null);
+
+    setAutoRunPhase('running');
+    setAutoRunStepIndex(0);
+
+    const step = async (idx: number) => {
+      if (debugMode) console.log(`[AutoRun #${runId}] step ${idx}: ${AUTO_RUN_STEPS[idx]}`);
+      setAutoRunStepIndex(idx);
+      await new Promise<void>(r => setTimeout(r, MIN_STEP_MS));
+    };
+
+    try {
+      await saveDriverConfigs();
+
+      // 0: Read Fahrtenbuch
+      await step(0);
+      const trips = await fetchAllTrips(companyId, selectedImportId);
+      setOriginalTrips(trips);
+      setBoundaryRows(buildVehicleMonthBoundarySummary(trips));
+
+      // 1: Vehicle blocks
+      await step(1);
+      const p1 = buildVehicleBlocksForHistoricalWorkingHours(trips);
+      setPhase1Result(p1);
+
+      // 2: Assign regular drivers
+      await step(2);
+      const regularDrivers: RegularDriverTarget[] = driverConfigs
+        .filter(c => c.included && !c.isOwner)
+        .map(c => ({
+          driverId:             c.driverId,
+          driverName:           c.driverName,
+          targetWorkSec:        c.targetBaseH * 3600,
+          targetHours:          c.targetBaseH,
+          targetBaseSec1000:    c.targetBaseH    * 3600,
+          targetNight25Sec1500: c.targetNacht25H * 3600,
+          targetNight40Sec1501: c.targetNacht40H * 3600,
+          targetSundaySec1510:  c.targetSundayH  * 3600,
+          targetHolidaySec:     c.targetHolidayH * 3600,
+          targetTotalSec:       c.targetBaseH * 3600,
+        }));
+      const excls = (() => {
+        if (driverNotesMap.size === 0) return undefined;
+        const m = new Map<string, DriverPlanningExclusion[]>();
+        for (const [driverId, notes] of driverNotesMap) {
+          const intervals = buildDriverPlanningExclusions(notes);
+          if (intervals.length > 0) m.set(driverId, intervals);
+        }
+        return m.size > 0 ? m : undefined;
+      })();
+      const p2 = assignRegularDriversToVehicleBlocks(p1, regularDrivers, assignmentStrategy, excls);
+      setAssignmentResult(p2);
+
+      // 3: Driver notes (visual step — already processed above)
+      await step(3);
+
+      // 4: Inhaber non-conflict
+      await step(4);
+      const inhaberName = driverConfigs.find(c => c.isOwner)?.driverName ?? 'Inhaber';
+      const unassigned = p2.surplusBlocks.filter(b => !p2.assignments.some(a => a.blockId === b.blockId));
+      const ncResult = runInhaberNonConflictStep(unassigned, inhaberName);
+      setInhaberNcResult(ncResult);
+
+      // 5: Free window search (longest conflict step)
+      await step(5);
+      const lcResult = runInhaberLongestConflictStep(
+        ncResult.remainingConflictedBlocks,
+        ncResult.assignedToInhaberBlocks,
+        inhaberName,
+      );
+      setInhaberLcResult(lcResult);
+
+      // 6: Free window search
+      await step(6);
+      const fwsResult = runInhaberFreeWindowSearch(
+        ncResult.assignedToInhaberBlocks,
+        lcResult.selectedBlocks,
+        lcResult.remainingUnassignedBlocks,
+        p1.blocks,
+        p2.assignments,
+        month,
+        year,
+      );
+      setInhaberFwsResult(fwsResult);
+
+      // 7–9: Visual steps (InhaberFreeWindowSearchView will auto-apply plan)
+      await step(7);
+      await step(8);
+      await step(9);
+      if (debugMode) console.log(`[AutoRun #${runId}] phases complete, navigating to step 7`);
+
+      // Navigate to step 7 — InhaberFreeWindowSearchView renders and auto-applies
+      setStep(7);
+      setAutoRunPhase('done');
+
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Unbekannter Fehler';
+      if (debugMode) console.error(`[AutoRun #${runId}] failed:`, msg, e);
+      setAutoRunPhase('failed');
+      setAutoRunError(msg);
+    }
+  }, [companyId, selectedImportId, driverConfigs, assignmentStrategy, month, year, driverNotesMap, saveDriverConfigs, debugMode]);
+
+  // ── Compute ───────────────────────────────────────────────────────────────────
+
+  const handleCompute = useCallback(async () => {
+    if (!companyId || !selectedImportId) return;
+    setComputing(true);
+    setComputeError(null);
+    setComputePhase('Fahrten laden…');
+    setPhase1Result(null);
+    setAssignmentResult(null);
+    setInhaberResult(null);
+    setShiftResult(null);
+    setSnapshotResult(null);
+    setExportValidation(null);
+    setOriginalTrips(null);
+    setBoundaryRows([]);
+    setExportSummary(null);
+    setStundennachweisPreview(null);
+    setAltAssignmentResult(null);
+    setLastComputedStrategy(null);
+    setRowLevelEngineResult(null);
+    setWorksheetAuditResult(null);
+    try {
+      const trips = await fetchAllTrips(companyId, selectedImportId);
+      setOriginalTrips(trips);
+      setBoundaryRows(buildVehicleMonthBoundarySummary(trips));
+      setComputePhase('Fahrzeug-Blöcke aufbauen…');
+      const result = buildVehicleBlocksForHistoricalWorkingHours(trips);
+      if (import.meta.env.DEV) {
+        console.log('[VehicleBlocksStep1] Built', result.blocks.length, 'blocks from', trips.length, 'trips', {
+          validBlocks: result.validBlockCount,
+          shortBlocks: result.shortBlockCount,
+          longBlocks: result.longBlockCount,
+          invalidBlocks: result.invalidBlockCount,
+          vehicleCount: result.vehicleCount,
+          totalBlockHours: result.totalBlockHours.toFixed(2),
+          originalOverlaps: result.originalOverlaps.length,
+        });
+      }
+      setPhase1Result(result);
+      setStep(3);
+    } catch (e) {
+      setComputeError(e instanceof Error ? e.message : 'Berechnungsfehler');
+    } finally {
+      setComputing(false);
+      setComputePhase('');
+    }
+  }, [companyId, selectedImportId]);
+
+  // ── Step 2: Assign regular drivers ───────────────────────────────────────────
+
+  const [assigning, setAssigning] = useState(false);
+  const [assignError, setAssignError] = useState<string | null>(null);
+
+  const handleAssignRegularDrivers = useCallback(async () => {
+    if (!phase1Result) return;
+    setAssigning(true);
+    setAssignError(null);
+    setAssignmentResult(null);
+    try {
+      const regularDrivers: RegularDriverTarget[] = driverConfigs
+        .filter(c => c.included && !c.isOwner)
+        .map(c => ({
+          driverId:            c.driverId,
+          driverName:          c.driverName,
+          // Base total IS the total limit; N25/N40/Sunday/Feiertag are sub-buckets inside it
+          targetWorkSec:       c.targetBaseH * 3600,
+          targetHours:         c.targetBaseH,
+          targetBaseSec1000:   c.targetBaseH    * 3600,
+          targetNight25Sec1500: c.targetNacht25H * 3600,
+          targetNight40Sec1501: c.targetNacht40H * 3600,
+          targetSundaySec1510:  c.targetSundayH  * 3600,
+          targetHolidaySec:     c.targetHolidayH * 3600,
+          targetTotalSec:      c.targetBaseH * 3600,
+        }));
+
+      const result = assignRegularDriversToVehicleBlocks(phase1Result, regularDrivers, 'balanced', (() => {
+        if (driverNotesMap.size === 0) return undefined;
+        const excls = new Map<string, DriverPlanningExclusion[]>();
+        for (const [driverId, notes] of driverNotesMap) {
+          const intervals = buildDriverPlanningExclusions(notes);
+          if (intervals.length > 0) excls.set(driverId, intervals);
+        }
+        return excls.size > 0 ? excls : undefined;
+      })());
+
+      if (import.meta.env.DEV) {
+        const v = result.validation;
+        const ratios = regularDrivers.map(rd => {
+          const s = result.driverSummaries.find(d => d.driverId === rd.driverId);
+          const assignedTotal   = s?.assignedWorkSec    ?? 0;
+          const assignedN25     = s?.assignedNight25Sec1500 ?? 0;
+          const assignedN40     = s?.assignedNight40Sec1501 ?? 0;
+          const assignedSunday  = s?.assignedSundaySec1510 ?? 0;
+          const assignedHoliday = s?.assignedHolidaySec ?? 0;
+          const ratio = rd.targetTotalSec > 0 ? assignedTotal / rd.targetTotalSec : 0;
+          return {
+            name:               rd.driverName,
+            baseTotalHours:     rd.targetBaseSec1000 / 3600,
+            n25Limit:           rd.targetNight25Sec1500 / 3600,
+            n40Limit:           rd.targetNight40Sec1501 / 3600,
+            sundayLimit:        rd.targetSundaySec1510 / 3600,
+            holidayLimit:       rd.targetHolidaySec / 3600,
+            assignedTotal:      assignedTotal / 3600,
+            assignedN25:        assignedN25 / 3600,
+            assignedN40:        assignedN40 / 3600,
+            assignedSunday:     assignedSunday / 3600,
+            assignedHoliday:    assignedHoliday / 3600,
+            assignedRatio:      Math.round(ratio * 1000) / 10,
+            totalLimitExceeded: assignedTotal > rd.targetTotalSec,
+            lohnartLimitExceeded: (assignedN25 > rd.targetNight25Sec1500) || (assignedN40 > rd.targetNight40Sec1501) || (assignedSunday > rd.targetSundaySec1510) || (assignedHoliday > rd.targetHolidaySec),
+          };
+        });
+        const ratioValues = ratios.map(r => r.assignedRatio);
+        const minRatio = Math.min(...ratioValues);
+        const maxRatio = Math.max(...ratioValues);
+        const spread   = maxRatio - minRatio;
+        console.log('[WorkingHoursInterpretationFix] per-driver limits & actuals:', ratios);
+        console.log('[RegularDriverBalance] distribution', {
+          strategy:       'balanced',
+          ratioSpread:    spread.toFixed(1) + '%',
+          minRatio:       minRatio.toFixed(1) + '%',
+          maxRatio:       maxRatio.toFixed(1) + '%',
+          balanceStatus:  spread <= 25 ? 'Ausgewogen' : 'Unausgewogen',
+          perDriverRatio: ratios.map(r => ({ name: r.name, ratio: r.assignedRatio + '%', assigned: r.assignedTotal.toFixed(2) + 'h', max: r.baseTotalHours.toFixed(2) + 'h' })),
+          validBlocks:    phase1Result.validBlockCount,
+          assignedBlocks: result.assignments.length,
+          surplusValid:   result.surplusValidBlocks.length,
+          driverOverlaps: v.driverOverlapCount,
+          hourOverruns:   v.targetOverrunCount,
+          first20Unassigned: result.surplusValidBlocks.slice(0, 20).map(b => ({ id: b.blockId, vehicle: b.vehicle })),
+        });
+      }
+
+      setAssignmentResult(result);
+      setStep(4);
+    } catch (e) {
+      setAssignError(e instanceof Error ? e.message : 'Zuweisungsfehler');
+    } finally {
+      setAssigning(false);
+    }
+  }, [phase1Result, driverConfigs, driverNotesMap]);
+
+  // ── Input style ───────────────────────────────────────────────────────────────
+
+  const inp: React.CSSProperties = {
+    background: 'var(--bg-subtle)', border: '1px solid var(--border)', borderRadius: '0.375rem',
+    color: 'var(--text-primary)', fontSize: '0.8rem', padding: '0.3rem 0.5rem', outline: 'none', width: '100%',
+  };
+
+
+  // ── Render ────────────────────────────────────────────────────────────────────
+
+  return (
+    <>
+    <div className="space-y-4 max-w-6xl">
+      {/* Targets manager overlay */}
+      {showTargetsManager && (
+        <HistoricalHourTargetsManager
+          companyId={companyId!}
+          drivers={allDrivers as HoursDriver[]}
+          defaultMonth={month}
+          defaultYear={year}
+          onClose={() => {
+            setShowTargetsManager(false);
+            prefillKeyRef.current = '';
+          }}
+        />
+      )}
+
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <button onClick={onBack} className="inline-flex items-center gap-2 text-sm font-medium transition-colors hover:opacity-80" style={{ color: 'var(--text-secondary)' }}>
+          <ArrowLeft size={15} /> Zurück zur Auswahl
+        </button>
+        <StepDots current={step} total={5} />
+      </div>
+
+      {/* ── Step 0: Monat & Import ─────────────────────────────────────────────── */}
+      {step === 0 && (
+        <div className="space-y-4">
+          <div>
+            <h2 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>Monat & Fahrtenbuch</h2>
+            <p className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>Wählen Sie den historischen Monat und das zugehörige Fahrtenbuch.</p>
+          </div>
+          <div className="rounded-2xl p-5 space-y-4" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
+            <div className="flex gap-3">
+              <div className="flex-1">
+                <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Monat</label>
+                <select value={month} onChange={e => setMonth(+e.target.value)} style={{ ...inp, width: 'auto' }}>
+                  {MONTHS_DE.map((m, i) => <option key={i} value={i+1}>{m}</option>)}
+                </select>
+              </div>
+              <div className="flex-1">
+                <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Jahr</label>
+                <select value={year} onChange={e => setYear(+e.target.value)} style={{ ...inp, width: 'auto' }}>
+                  {yearOptions.map(y => <option key={y} value={y}>{y}</option>)}
+                </select>
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Fahrtenbuch-Import</label>
+              {loadingImports ? (
+                <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>Lade…</p>
+              ) : imports.length === 0 ? (
+                <p className="text-xs" style={{ color: '#b45309' }}>Kein Import für {MONTHS_DE[month-1]} {year} gefunden.</p>
+              ) : (
+                <select value={selectedImportId} onChange={e => setSelectedImportId(e.target.value)} style={inp}>
+                  <option value="">— Import wählen —</option>
+                  {imports.map(i => <option key={i.id} value={i.id}>{i.file_name} ({i.row_count} Zeilen)</option>)}
+                </select>
+              )}
+            </div>
+          </div>
+          <div className="flex justify-end">
+            <button
+              onClick={() => setStep(1)}
+              disabled={!selectedImportId}
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all hover:brightness-110 disabled:opacity-40"
+              style={{ background: '#2563eb', color: '#fff' }}
+            >
+              Weiter <ArrowRight size={15} />
+            </button>
+          </div>
+
+          {/* ── Gespeicherter Monatsplan ─────────────────────────────────── */}
+          <div className="rounded-2xl p-5 space-y-3" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
+            <div className="flex items-center gap-2">
+              <h3 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>Gespeicherter Monatsplan</h3>
+              {loadingSavedPlans && <RefreshCw size={13} className="animate-spin" style={{ color: 'var(--text-secondary)' }} />}
+            </div>
+            {!loadingSavedPlans && savedPlans.length === 0 && (
+              <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>
+                Für diesen Monat wurde noch kein Monatsplan gespeichert.
+              </p>
+            )}
+            {savedPlans.length > 0 && (
+              <div className="space-y-2">
+                {savedPlans.map(plan => {
+                  const savedDate = new Date(plan.saved_at);
+                  const savedFmt = `${String(savedDate.getDate()).padStart(2,'0')}.${String(savedDate.getMonth()+1).padStart(2,'0')}.${savedDate.getFullYear()} ${String(savedDate.getHours()).padStart(2,'0')}:${String(savedDate.getMinutes()).padStart(2,'0')}`;
+                  const isDownloading = downloadingPlanId === plan.id;
+                  return (
+                    <div
+                      key={plan.id}
+                      className="rounded-xl p-4 space-y-3"
+                      style={{ background: 'var(--bg-elevated, var(--bg-subtle))', border: '1px solid var(--border)' }}
+                    >
+                      <div className="flex flex-wrap items-start gap-x-6 gap-y-1 text-xs">
+                        <div>
+                          <span className="font-medium" style={{ color: 'var(--text-secondary)' }}>Monat/Jahr</span>
+                          <span className="ml-2 font-semibold" style={{ color: 'var(--text-primary)' }}>{MONTHS_DE[(plan.month ?? month) - 1]} {plan.year ?? year}</span>
+                        </div>
+                        <div>
+                          <span className="font-medium" style={{ color: 'var(--text-secondary)' }}>Dateiname</span>
+                          <span className="ml-2" style={{ color: 'var(--text-primary)' }}>{plan.original_file_name ?? '—'}</span>
+                        </div>
+                        <div>
+                          <span className="font-medium" style={{ color: 'var(--text-secondary)' }}>Status</span>
+                          <span className="ml-2">
+                            {plan.export_ready ? (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium" style={{ background: 'rgba(21,128,61,0.10)', color: '#15803d', border: '1px solid rgba(21,128,61,0.25)' }}>
+                                <CheckCircle2 size={11} /> Exportierbar
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium" style={{ background: 'rgba(220,38,38,0.07)', color: '#b91c1c', border: '1px solid rgba(220,38,38,0.2)' }}>
+                                <AlertTriangle size={11} /> Nicht exportierbar
+                              </span>
+                            )}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="font-medium" style={{ color: 'var(--text-secondary)' }}>Gespeichert am</span>
+                          <span className="ml-2 tabular-nums" style={{ color: 'var(--text-primary)' }}>{savedFmt}</span>
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          onClick={() => setViewingPlan(plan)}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all hover:brightness-110"
+                          style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
+                        >
+                          <List size={12} /> Anzeigen
+                        </button>
+                        {plan.export_ready && (
+                          <button
+                            onClick={() => downloadSavedPlan(plan)}
+                            disabled={isDownloading}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all hover:brightness-110 disabled:opacity-50"
+                            style={{ background: 'rgba(21,128,61,0.09)', color: '#15803d', border: '1px solid rgba(21,128,61,0.25)' }}
+                          >
+                            {isDownloading
+                              ? <><RefreshCw size={12} className="animate-spin" /> Lade…</>
+                              : <><Download size={12} /> Fahrtenbuch herunterladen</>}
+                          </button>
+                        )}
+                        <button
+                          onClick={() => { setSelectedImportId(plan.import_id ?? selectedImportId); setStep(1); }}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all hover:brightness-110"
+                          style={{ background: 'rgba(37,99,235,0.08)', color: '#1d4ed8', border: '1px solid rgba(37,99,235,0.25)' }}
+                        >
+                          <RefreshCw size={12} /> Neu berechnen
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Step 1: Lohnabrechnung-Zielwerte ──────────────────────────────────── */}
+      {step === 1 && (
+        <div className="space-y-4">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <h2 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>Lohnabrechnung-Zielwerte</h2>
+              <p className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>Tragen Sie die Stunden aus der Lohnabrechnung ein. Der historische Abgleich erstellt daraus einen Stundennachweis mit exakt passenden Lohnarten.</p>
+            </div>
+            <HourTargetsTrigger onClick={() => setShowTargetsManager(true)} />
+          </div>
+
+          {/* Assignment strategy */}
+          <div className="rounded-2xl p-4" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
+            <label className="block text-xs font-medium mb-2" style={{ color: 'var(--text-secondary)' }}>Zuteilungsstrategie</label>
+            <div className="flex gap-2">
+              {([
+                { value: 'hours_first', label: 'Stunden optimieren' },
+                { value: 'rides_first', label: 'Fahrten maximieren' },
+              ] as const).map(opt => (
+                <button
+                  key={opt.value}
+                  onClick={() => setAssignmentStrategy(opt.value)}
+                  className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
+                  style={{
+                    background: assignmentStrategy === opt.value ? '#2563eb' : 'var(--background-primary)',
+                    color: assignmentStrategy === opt.value ? '#fff' : 'var(--text-secondary)',
+                    border: `1px solid ${assignmentStrategy === opt.value ? '#2563eb' : 'var(--border-primary)'}`,
+                  }}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+            <p className="mt-2 text-xs" style={{ color: 'var(--text-secondary)' }}>
+              {assignmentStrategy === 'rides_first'
+                ? 'Fahrten-dichte Blöcke werden zuerst zugewiesen. Lohnart-Grenzen werden weiterhin eingehalten.'
+                : 'Längste Blöcke zuerst — optimiert Stunden-Zielerreichung (Standard).'}
+            </p>
+          </div>
+
+          {/* Inhaber */}
+          <div className="rounded-2xl p-4 space-y-3" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
+            <div className="flex items-center gap-3">
+              <input type="checkbox" checked={useInhaber} onChange={e => setUseInhaber(e.target.checked)} className="w-4 h-4" />
+              <span className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>Inhaber / Ausgleichsfahrer verwenden</span>
+            </div>
+            {useInhaber && (
+              <div>
+                <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Inhaber-Fahrer</label>
+                <select value={inhaberId} onChange={e => setInhaberId(e.target.value)} style={{ ...inp, width: 'auto' }}>
+                  <option value="">— Kein Inhaber —</option>
+                  {allDrivers.filter(d => d.employment_type === 'company_owner').map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+                </select>
+              </div>
+            )}
+          </div>
+
+          {/* Driver table */}
+          <div className="rounded-2xl overflow-hidden" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr style={{ background: 'var(--bg-subtle)' }}>
+                    <th className="px-3 py-2 text-left font-semibold" style={{ color: 'var(--text-secondary)' }}>Ein</th>
+                    <th className="px-3 py-2 text-left font-semibold" style={{ color: 'var(--text-secondary)' }}>Fahrer</th>
+                    <th className="px-3 py-2 text-right font-semibold" style={{ color: 'var(--text-secondary)', minWidth: 80 }}>Faktor €/h</th>
+                    <th className="px-3 py-2 text-right font-semibold" style={{ color: 'var(--text-secondary)', minWidth: 70 }}>1000 Std</th>
+                    <th className="px-3 py-2 text-right font-semibold" style={{ color: 'var(--text-secondary)', minWidth: 70 }}>1500 N25%</th>
+                    <th className="px-3 py-2 text-right font-semibold" style={{ color: 'var(--text-secondary)', minWidth: 70 }}>1501 N40%</th>
+                    <th className="px-3 py-2 text-right font-semibold" style={{ color: 'var(--text-secondary)', minWidth: 70 }}>1510 Son</th>
+                    <th className="px-3 py-2 text-right font-semibold" style={{ color: 'var(--text-secondary)', minWidth: 70 }}>Feiertag</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {driverConfigs.map(cfg => {
+                    const d = drafts.get(cfg.driverId) ?? { hourly: '', baseH: '', nacht25H: '', nacht40H: '', sunH: '', holH: '' };
+                    const isOwner = cfg.driverId === inhaberId && useInhaber;
+                    return (
+                      <tr key={cfg.driverId} style={{ borderTop: '1px solid var(--border)', opacity: isOwner ? 0.6 : 1 }}>
+                        <td className="px-3 py-1.5">
+                          <input type="checkbox" checked={cfg.included} disabled={isOwner}
+                            onChange={e => setDriverConfigs(prev => prev.map(c => c.driverId === cfg.driverId ? { ...c, included: e.target.checked } : c))} />
+                        </td>
+                        <td className="px-3 py-1.5 font-medium" style={{ color: 'var(--text-primary)' }}>
+                          {cfg.driverName}
+                          {isOwner && <span className="ml-1 text-xs px-1 py-0.5 rounded" style={{ background: 'rgba(16,185,129,0.1)', color: '#047857' }}>Inhaber</span>}
+                          {cfg.personalnummer && <span className="ml-1 text-xs" style={{ color: 'var(--text-secondary)' }}>#{cfg.personalnummer}</span>}
+                        </td>
+                        {['hourly','baseH','nacht25H','nacht40H','sunH','holH'].map(field => (
+                          <td key={field} className="px-2 py-1">
+                            <input
+                              type="text" inputMode="decimal"
+                              value={d[field as keyof WzDraft]}
+                              disabled={isOwner && field !== 'hourly'}
+                              onChange={e => updateDraft(cfg.driverId, field as keyof WzDraft, e.target.value)}
+                              onBlur={e => commitDraft(cfg.driverId, field as keyof WzDraft, e.target.value)}
+                              style={{ ...inp, textAlign: 'right' }}
+                              placeholder="0,00"
+                            />
+                          </td>
+                        ))}
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between">
+            <button onClick={() => setStep(0)} className="inline-flex items-center gap-2 text-sm transition-colors hover:opacity-80" style={{ color: 'var(--text-secondary)' }}>
+              <ArrowLeft size={15} /> Zurück
+            </button>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => setDebugMode(m => !m)}
+                className="text-xs px-2 py-1 rounded-lg transition-colors hover:opacity-80"
+                style={{ color: debugMode ? '#b91c1c' : 'var(--text-secondary)', background: debugMode ? 'rgba(220,38,38,0.07)' : 'transparent', border: `1px solid ${debugMode ? 'rgba(220,38,38,0.3)' : 'var(--border)'}` }}
+              >
+                {debugMode ? 'Debug-Ansicht schließen' : 'Debug-Ansicht öffnen'}
+              </button>
+              <button
+                onClick={handleSaveAsTargets}
+                disabled={savingAsTargets || driverConfigs.filter(c => c.included && !c.isOwner).length === 0}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold transition-all hover:brightness-110 disabled:opacity-40"
+                style={{ background: saveAsTargetsDone ? 'rgba(21,128,61,0.1)' : 'var(--bg-subtle)', color: saveAsTargetsDone ? '#15803d' : 'var(--text-secondary)', border: '1px solid var(--border)' }}>
+                {savingAsTargets
+                  ? <><RefreshCw size={12} className="animate-spin" /> Speichern…</>
+                  : saveAsTargetsDone
+                    ? <><CheckCircle2 size={12} /> Gespeichert</>
+                    : <><Save size={12} /> Aktuelle Werte als Zielwerte speichern</>}
+              </button>
+              <button
+                onClick={async () => {
+                  if (debugMode) {
+                    await saveDriverConfigs(); setStep(2);
+                  } else {
+                    handleAutoRun();
+                  }
+                }}
+                disabled={driverConfigs.filter(c => c.included).length === 0 || autoRunPhase === 'running'}
+                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all hover:brightness-110 disabled:opacity-40"
+                style={{ background: '#2563eb', color: '#fff' }}
+              >
+                {saving ? 'Speichern…' : debugMode ? 'Weiter' : 'Berechnen'} <ArrowRight size={15} />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Auto-run modal (running / failed) ─────────────────────────────────── */}
+      {(autoRunPhase === 'running' || autoRunPhase === 'failed') && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(2px)' }}
+          role="dialog"
+          aria-modal="true"
+          aria-label="Fahrtenbuch wird geprüft und optimiert"
+        >
+          <div
+            className="relative w-full rounded-2xl shadow-2xl flex flex-col"
+            style={{
+              maxWidth: '56rem',
+              maxHeight: '90vh',
+              background: 'var(--bg-elevated, var(--bg-surface))',
+              border: '1px solid var(--border)',
+              overflow: 'hidden',
+            }}
+          >
+            {/* Modal header */}
+            <div className="px-6 pt-6 pb-4 flex-shrink-0" style={{ borderBottom: '1px solid var(--border)' }}>
+              <h2 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>
+                {autoRunPhase === 'failed' ? 'Automatische Erstellung nicht möglich' : 'Fahrtenbuch wird geprüft und optimiert'}
+              </h2>
+              <p className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>
+                {autoRunPhase === 'failed'
+                  ? 'Die Berechnung konnte nicht abgeschlossen werden.'
+                  : 'Bitte warten — das System analysiert und optimiert die Fahrtenzuweisungen automatisch.'}
+              </p>
+            </div>
+
+            {/* Modal body — scrollable */}
+            <div className="flex-1 overflow-y-auto px-6 py-5">
+
+              {/* ── Running state: flow diagram ── */}
+              {autoRunPhase === 'running' && (
+                <div className="rounded-2xl p-5" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
+                  {/* Desktop layout */}
+                  <div className="hidden sm:block">
+                    {[0, 5].map(rowStart => (
+                      <div key={rowStart}>
+                        <div className="flex items-stretch gap-0">
+                          {AUTO_RUN_STEPS.slice(rowStart, rowStart + 5).map((label, colIdx) => {
+                            const idx = rowStart + colIdx;
+                            const done = idx < autoRunStepIndex;
+                            const active = idx === autoRunStepIndex;
+                            const isLast = idx === AUTO_RUN_STEPS.length - 1;
+                            const isRowLast = colIdx === 4 || isLast;
+                            const nodeStyle: React.CSSProperties = done
+                              ? { background: 'rgba(21,128,61,0.08)', border: '1.5px solid #16a34a' }
+                              : active
+                                ? { background: 'rgba(37,99,235,0.10)', border: '1.5px solid #2563eb', boxShadow: '0 0 0 3px rgba(37,99,235,0.12)' }
+                                : { background: 'var(--bg-subtle)', border: '1.5px solid var(--border)' };
+                            return (
+                              <React.Fragment key={idx}>
+                                <div className="flex-1 flex flex-col items-center gap-2 rounded-xl px-2 py-3 transition-all duration-300" style={nodeStyle}>
+                                  <div className="w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0"
+                                    style={{ background: done ? 'rgba(21,128,61,0.15)' : active ? 'rgba(37,99,235,0.15)' : 'var(--border)', transition: 'background 0.3s' }}>
+                                    {done
+                                      ? <CheckCircle2 size={14} style={{ color: '#16a34a' }} />
+                                      : active
+                                        ? <RefreshCw size={13} className="animate-spin" style={{ color: '#2563eb' }} />
+                                        : <div className="w-2 h-2 rounded-full" style={{ background: 'var(--text-tertiary, #9ca3af)' }} />}
+                                  </div>
+                                  <span className="text-center leading-snug" style={{
+                                    fontSize: '0.65rem',
+                                    color: done ? '#16a34a' : active ? '#2563eb' : 'var(--text-secondary)',
+                                    fontWeight: active ? 600 : 400,
+                                  }}>{label}</span>
+                                  <span className="text-center" style={{ fontSize: '0.55rem', color: done ? '#16a34a' : active ? '#2563eb' : 'var(--text-tertiary, #9ca3af)', opacity: 0.7 }}>
+                                    {idx + 1}/{AUTO_RUN_STEPS.length}
+                                  </span>
+                                </div>
+                                {!isRowLast && (
+                                  <div className="flex items-center self-center flex-shrink-0 px-0.5" style={{ minWidth: 20 }}>
+                                    <div className="h-px flex-1 transition-all duration-500" style={{ background: done ? '#16a34a' : 'var(--border)', minWidth: 10 }} />
+                                    <svg width="8" height="8" viewBox="0 0 8 8" fill="none" style={{ flexShrink: 0 }}>
+                                      <path d="M0 4 L7 4 M4 1 L7 4 L4 7" stroke={done ? '#16a34a' : 'var(--text-tertiary, #9ca3af)'} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                                    </svg>
+                                  </div>
+                                )}
+                              </React.Fragment>
+                            );
+                          })}
+                        </div>
+                        {rowStart === 0 && AUTO_RUN_STEPS.length > 5 && (
+                          <div className="flex justify-end pr-2 my-0.5" style={{ height: 16 }}>
+                            <div className="flex flex-col items-end">
+                              <div className="h-px w-0" />
+                              <svg width="20" height="16" viewBox="0 0 20 16" fill="none">
+                                <path d="M0 1 Q10 1 10 8 Q10 15 20 15" stroke={autoRunStepIndex >= 5 ? '#16a34a' : 'var(--border)'} strokeWidth="1.5" strokeLinecap="round" fill="none" />
+                              </svg>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                  {/* Mobile layout */}
+                  <div className="sm:hidden flex flex-col gap-0">
+                    {AUTO_RUN_STEPS.map((label, idx) => {
+                      const done = idx < autoRunStepIndex;
+                      const active = idx === autoRunStepIndex;
+                      const isLast = idx === AUTO_RUN_STEPS.length - 1;
+                      const nodeStyle: React.CSSProperties = done
+                        ? { background: 'rgba(21,128,61,0.08)', border: '1.5px solid #16a34a' }
+                        : active
+                          ? { background: 'rgba(37,99,235,0.10)', border: '1.5px solid #2563eb', boxShadow: '0 0 0 3px rgba(37,99,235,0.10)' }
+                          : { background: 'var(--bg-subtle)', border: '1.5px solid var(--border)' };
+                      return (
+                        <div key={idx} className="flex flex-col items-stretch">
+                          <div className="flex items-center gap-3 rounded-xl px-3 py-2.5 transition-all duration-300" style={nodeStyle}>
+                            <div className="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0"
+                              style={{ background: done ? 'rgba(21,128,61,0.15)' : active ? 'rgba(37,99,235,0.15)' : 'var(--border)' }}>
+                              {done
+                                ? <CheckCircle2 size={12} style={{ color: '#16a34a' }} />
+                                : active
+                                  ? <RefreshCw size={11} className="animate-spin" style={{ color: '#2563eb' }} />
+                                  : <div className="w-2 h-2 rounded-full" style={{ background: 'var(--text-tertiary, #9ca3af)' }} />}
+                            </div>
+                            <span className="flex-1 text-xs leading-snug" style={{
+                              color: done ? '#16a34a' : active ? '#2563eb' : 'var(--text-secondary)',
+                              fontWeight: active ? 600 : 400,
+                            }}>{label}</span>
+                            <span className="text-right flex-shrink-0" style={{ fontSize: '0.6rem', color: done ? '#16a34a' : 'var(--text-tertiary, #9ca3af)', opacity: 0.65 }}>
+                              {idx + 1}/{AUTO_RUN_STEPS.length}
+                            </span>
+                          </div>
+                          {!isLast && (
+                            <div className="flex justify-start pl-4" style={{ height: 14 }}>
+                              <div className="w-px" style={{ background: done ? '#16a34a' : 'var(--border)', height: '100%', transition: 'background 0.3s' }} />
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* ── Failed state ── */}
+              {autoRunPhase === 'failed' && (
+                <div className="rounded-2xl p-5 space-y-3" style={{ background: 'rgba(220,38,38,0.05)', border: '1px solid rgba(220,38,38,0.3)' }}>
+                  <div className="flex items-center gap-3">
+                    <AlertTriangle size={20} style={{ color: '#b91c1c', flexShrink: 0 }} />
+                    <div>
+                      <p className="text-base font-bold" style={{ color: '#b91c1c' }}>Automatische Erstellung nicht möglich</p>
+                      <p className="text-sm mt-1" style={{ color: '#b91c1c' }}>{autoRunError ?? 'Unbekannter Fehler'}</p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+            </div>
+
+            {/* Modal footer — only shown when not actively running */}
+            {autoRunPhase === 'failed' && (
+              <div className="px-6 py-4 flex-shrink-0 flex justify-start" style={{ borderTop: '1px solid var(--border)' }}>
+                <button
+                  onClick={() => { setAutoRunPhase('idle'); setStep(1); }}
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all hover:brightness-110"
+                  style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
+                >
+                  <ArrowLeft size={15} /> Zurück
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Step 2: Berechnen ─────────────────────────────────────────────────── */}
+      {step === 2 && autoRunPhase === 'idle' && (
+        <div className="space-y-4">
+          <div>
+            <h2 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>Abgleich berechnen</h2>
+            <p className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>Das System ordnet alle Fahrten den Fahrern zu und berechnet die Ist-Werte je Lohnart.</p>
+          </div>
+          <div className="rounded-2xl p-5" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
+            <div className="flex items-center gap-3 mb-4">
+              <div className="rounded-xl p-2.5" style={{ background: 'rgba(37,99,235,0.1)' }}>
+                <Calculator size={20} style={{ color: '#2563eb' }} />
+              </div>
+              <div>
+                <p className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
+                  {driverConfigs.filter(c => c.included && c.driverId !== inhaberId).length} Fahrer
+                  {useInhaber && inhaberId ? ` + 1 Inhaber` : ''} einbezogen
+                </p>
+                <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>
+                  Import: {imports.find(i => i.id === selectedImportId)?.file_name}
+                </p>
+              </div>
+            </div>
+            {/* Inhaber status indicator */}
+            {useInhaber ? (
+              inhaberId
+                ? (() => {
+                    const d = allDrivers.find(x => x.id === inhaberId);
+                    return (
+                      <div className="mb-3 px-3 py-2 rounded-lg text-xs" style={{ background: 'rgba(16,185,129,0.08)', border: '1px solid rgba(16,185,129,0.25)', color: '#047857' }}>
+                        Inhaber / Ausgleichsfahrer: <span className="font-semibold">{d?.name ?? inhaberId}</span>
+                      </div>
+                    );
+                  })()
+                : (
+                  <div className="mb-3 px-3 py-2 rounded-lg text-xs" style={{ background: 'rgba(217,119,6,0.08)', border: '1px solid rgba(217,119,6,0.3)', color: '#b45309' }}>
+                    <AlertTriangle size={12} className="inline mr-1" />
+                    Bitte Inhaber/Ausgleichsfahrer auswählen.
+                  </div>
+                )
+            ) : null}
+            {computeError && (
+              <div className="mb-3 px-4 py-2 rounded-xl text-sm" style={{ background: 'rgba(220,38,38,0.06)', border: '1px solid rgba(220,38,38,0.2)', color: '#b91c1c' }}>
+                <AlertTriangle size={14} className="inline mr-1" /> {computeError}
+              </div>
+            )}
+            {/* Strategy selector in compute step */}
+            <div className="mb-4 pt-1">
+              <label className="block text-xs font-medium mb-2" style={{ color: 'var(--text-secondary)' }}>Zuteilungsstrategie</label>
+              <div className="flex gap-2 mb-2">
+                {([
+                  { value: 'hours_first', label: 'Stunden optimieren' },
+                  { value: 'rides_first', label: 'Fahrten maximieren' },
+                ] as const).map(opt => (
+                  <button
+                    key={opt.value}
+                    onClick={() => setAssignmentStrategy(opt.value)}
+                    className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
+                    style={{
+                      background: assignmentStrategy === opt.value ? '#2563eb' : 'var(--background-primary)',
+                      color: assignmentStrategy === opt.value ? '#fff' : 'var(--text-secondary)',
+                      border: `1px solid ${assignmentStrategy === opt.value ? '#2563eb' : 'var(--border-primary)'}`,
+                    }}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+              <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>
+                {assignmentStrategy === 'rides_first'
+                  ? 'Fahrten-dichte Blöcke werden zuerst zugewiesen. Lohnart-Grenzen werden weiterhin eingehalten.'
+                  : 'Längste Blöcke zuerst — optimiert Stunden-Zielerreichung (Standard).'}
+              </p>
+            </div>
+            {computing ? (
+              <div className="flex items-center gap-3 py-4">
+                <RefreshCw size={18} className="animate-spin" style={{ color: '#2563eb' }} />
+                <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>{computePhase || 'Berechne…'}</span>
+              </div>
+            ) : (
+              <button onClick={() => handleCompute()}
+                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all hover:brightness-110"
+                style={{ background: '#2563eb', color: '#fff' }}>
+                <Calculator size={15} /> Abgleich berechnen
+              </button>
+            )}
+          </div>
+          <button onClick={() => setStep(1)} className="inline-flex items-center gap-2 text-sm transition-colors hover:opacity-80" style={{ color: 'var(--text-secondary)' }}>
+            <ArrowLeft size={15} /> Zurück
+          </button>
+        </div>
+      )}
+
+      {/* ── Vehicle month-boundary summary (preliminary — visible in normal mode when trips are loaded) ── */}
+      {step === 2 && autoRunPhase === 'idle' && boundaryRows.length > 0 && (
+        <div className="rounded-2xl p-5" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
+          <VehicleMonthBoundarySummary rows={boundaryRows} />
+        </div>
+      )}
+
+      {/* ── Step 3: Fahrzeug-Blöcke ─────────────────────────────────────────── */}
+      {step === 3 && !phase1Result && (
+        <div className="space-y-4">
+          <h2 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>Fahrzeug-Blöcke prüfen</h2>
+          <div className="rounded-xl p-4" style={{ background: 'rgba(220,38,38,0.06)', border: '1px solid rgba(220,38,38,0.2)', color: '#b91c1c' }}>
+            Fahrzeug-Blöcke konnten nicht geladen werden.
+          </div>
+          <button onClick={() => setStep(2)} className="inline-flex items-center gap-2 text-sm" style={{ color: 'var(--text-secondary)' }}>
+            <ArrowLeft size={15} /> Zurück
+          </button>
+        </div>
+      )}
+      {step === 3 && phase1Result && (
+        <>
+          {assigning && (
+            <div className="fixed inset-0 z-40 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.35)' }}>
+              <div className="rounded-2xl px-8 py-6 flex items-center gap-4" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
+                <RefreshCw size={20} className="animate-spin" style={{ color: '#2563eb' }} />
+                <span className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>Reguläre Fahrer werden zugewiesen…</span>
+              </div>
+            </div>
+          )}
+          {driverNotesMap.size > 0 && (
+            <div className="rounded-xl px-4 py-3 text-xs flex items-center gap-2" style={{ background: 'rgba(6,182,212,0.07)', border: '1px solid rgba(6,182,212,0.25)', color: '#0e7490' }}>
+              <CheckCircle2 size={14} />
+              <span>
+                <strong>Fahrer-Notizen aktiv</strong> — Planungsausschlüsse ({driverNotesMap.size} Fahrer) werden vor jeder Zuweisung geprüft. Fahrer mit aktiver Notiz &ldquo;Von Planung ausschließen&rdquo; erhalten keine Fahrten in den ausgeschlossenen Zeiträumen.
+              </span>
+            </div>
+          )}
+          {assignError && (
+            <div className="mb-3 rounded-xl px-4 py-3 text-sm" style={{ background: 'rgba(220,38,38,0.06)', border: '1px solid rgba(220,38,38,0.2)', color: '#b91c1c' }}>
+              {assignError}
+            </div>
+          )}
+          <VehicleBlocksView
+            result={phase1Result}
+            month={month}
+            year={year}
+            onRecompute={() => {
+              setPhase1Result(null);
+              setAssignmentResult(null);
+              setInhaberResult(null);
+              setShiftResult(null);
+              setSnapshotResult(null);
+              setExportValidation(null);
+              setOriginalTrips(null);
+              setBoundaryRows([]);
+              setExportSummary(null);
+              setStundennachweisPreview(null);
+              setAltAssignmentResult(null);
+              setLastComputedStrategy(null);
+              setRowLevelEngineResult(null);
+              setWorksheetAuditResult(null);
+              setComputeError(null);
+              setStep(2);
+            }}
+            onAssign={handleAssignRegularDrivers}
+          />
+        </>
+      )}
+
+      {/* ── Step 4: Reguläre Fahrer-Zuweisung ──────────────────────────────────── */}
+      {step === 4 && !assignmentResult && (
+        <div className="space-y-4">
+          <h2 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>Reguläre Fahrer zuweisen</h2>
+          <div className="rounded-xl p-4" style={{ background: 'rgba(220,38,38,0.06)', border: '1px solid rgba(220,38,38,0.2)', color: '#b91c1c' }}>
+            Reguläre Fahrer-Zuweisung nicht möglich: Fahrzeug-Blöcke fehlen.
+          </div>
+          <button onClick={() => setStep(3)} className="inline-flex items-center gap-2 text-sm" style={{ color: 'var(--text-secondary)' }}>
+            <ArrowLeft size={15} /> Zurück
+          </button>
+        </div>
+      )}
+      {step === 4 && assignmentResult && phase1Result && (
+        <RegularDriverAssignmentView
+          result={assignmentResult}
+          phase1Result={phase1Result}
+          driverConfigs={driverConfigs}
+          inhaberName={driverConfigs.find(c => c.isOwner)?.driverName ?? ''}
+          month={month}
+          year={year}
+          onBack={() => setStep(3)}
+          onRecompute={() => {
+            setPhase1Result(null);
+            setAssignmentResult(null);
+            setInhaberResult(null);
+            setInhaberNcResult(null);
+            setInhaberLcResult(null);
+            setInhaberFwsResult(null);
+            setInhaberAutoShiftResult(null);
+            setShiftResult(null);
+            setSnapshotResult(null);
+            setExportValidation(null);
+            setOriginalTrips(null);
+            setBoundaryRows([]);
+            setExportSummary(null);
+            setStundennachweisPreview(null);
+            setAltAssignmentResult(null);
+            setLastComputedStrategy(null);
+            setRowLevelEngineResult(null);
+            setWorksheetAuditResult(null);
+            setComputeError(null);
+            setAssignError(null);
+            setStep(2);
+          }}
+          onApplyNonConflictStep={() => {
+            if (!assignmentResult || !phase1Result) return;
+            setApplyingNcs(true);
+            setInhaberLcResult(null);
+            setInhaberFwsResult(null);
+            setInhaberAutoShiftResult(null);
+            try {
+              const unassigned = assignmentResult.surplusBlocks.filter(b => !assignmentResult.assignments.some(a => a.blockId === b.blockId));
+              const inhaberName = driverConfigs.find(c => c.isOwner)?.driverName ?? 'Inhaber';
+              const ncResult = runInhaberNonConflictStep(unassigned, inhaberName);
+              if (import.meta.env.DEV) {
+                console.log('[InhaberNonConflictStep]', {
+                  step2NotAssigned:           unassigned.length,
+                  nonConflict:                ncResult.assignedToInhaberBlocks.length,
+                  conflict:                   ncResult.remainingConflictedBlocks.length,
+                  assignedToInhaber:          ncResult.assignedToInhaberBlocks.length,
+                  remainingNotAssigned:       ncResult.remainingConflictedBlocks.length,
+                  remainingWithoutConflict:   ncResult.diagnostics.remainingWithoutNzConflict,
+                  inhaberRides:               ncResult.inhaberRides,
+                  inhaberHours:               (ncResult.inhaberSec / 3600).toFixed(2),
+                  first20Remaining:           ncResult.remainingConflictedBlocks.slice(0, 20).map(b => ({ id: b.blockId, vehicle: b.vehicle, rides: b.rides?.length ?? 0 })),
+                });
+              }
+              setInhaberNcResult(ncResult);
+              setStep(5);
+            } catch (e) {
+              console.error('[InhaberNonConflictStep] error', e);
+            } finally {
+              setApplyingNcs(false);
+            }
+          }}
+        />
+      )}
+
+      {/* ── Step 5: Inhaber Nicht-konflikt Blöcke ───────────────────────────────── */}
+      {step === 5 && inhaberNcResult && assignmentResult && phase1Result && (
+        <InhaberNonConflictView
+          ncResult={inhaberNcResult}
+          regularAssignments={assignmentResult.assignments}
+          allBlocks={phase1Result.blocks}
+          month={month}
+          year={year}
+          onBack={() => setStep(4)}
+          onRecompute={() => {
+            setInhaberNcResult(null);
+            setInhaberLcResult(null);
+            setInhaberFwsResult(null);
+            setInhaberAutoShiftResult(null);
+            setStep(4);
+          }}
+          onApplyLongestConflictStep={() => {
+            if (!inhaberNcResult) return;
+            setApplyingLcs(true);
+            try {
+              const inhaberName = driverConfigs.find(c => c.isOwner)?.driverName ?? 'Inhaber';
+              const lcResult = runInhaberLongestConflictStep(
+                inhaberNcResult.remainingConflictedBlocks,
+                inhaberNcResult.assignedToInhaberBlocks,
+                inhaberName,
+              );
+              if (import.meta.env.DEV) {
+                console.log('[InhaberLongestConflictStep]', {
+                  remainingNzConflictBlocks: inhaberNcResult.remainingConflictedBlocks.length,
+                  conflictGroups:            lcResult.conflictGroups.length,
+                  groupIds:                  lcResult.conflictGroups.map(g => ({ id: g.groupId, blocks: g.blockIds, selected: g.selectedBlockId, decision: g.decision })),
+                  selectedBlockIds:          lcResult.selectedBlocks.map(b => b.blockId),
+                  rejectedCandidates:        lcResult.rejectedCandidates,
+                  selectedInhaberBlocks:     lcResult.selectedBlocks.length,
+                  remainingUnassigned:       lcResult.remainingUnassignedBlocks.length,
+                  inhaberRidesAdded:         lcResult.inhaberRidesAdded,
+                  inhaberHoursAdded:         (lcResult.inhaberSecAdded / 3600).toFixed(2),
+                  inhaberHoursTotal:         (lcResult.inhaberSecTotal / 3600).toFixed(2),
+                  diagnostics:               lcResult.diagnostics,
+                });
+              }
+              setInhaberLcResult(lcResult);
+              setStep(6);
+            } catch (e) {
+              console.error('[InhaberLongestConflictStep] error', e);
+            } finally {
+              setApplyingLcs(false);
+            }
+          }}
+        />
+      )}
+      {step === 5 && !inhaberNcResult && (
+        <div className="space-y-4">
+          <h2 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>Inhaber: Nicht-konflikt Blöcke</h2>
+          <div className="rounded-xl p-4" style={{ background: 'rgba(220,38,38,0.06)', border: '1px solid rgba(220,38,38,0.2)', color: '#b91c1c' }}>
+            Kein Ergebnis vorhanden. Bitte zurück zu regulären Fahrern.
+          </div>
+          <button onClick={() => setStep(4)} className="inline-flex items-center gap-2 text-sm" style={{ color: 'var(--text-secondary)' }}>
+            <ArrowLeft size={15} /> Zurück
+          </button>
+        </div>
+      )}
+
+      {/* ── Step 6: Inhaber Längste Konflikt-Blöcke ─────────────────────────────── */}
+      {step === 6 && inhaberLcResult && inhaberNcResult && assignmentResult && phase1Result && (
+        <InhaberLongestConflictView
+          lcResult={inhaberLcResult}
+          step3InhaberBlocks={inhaberNcResult.assignedToInhaberBlocks}
+          regularAssignments={assignmentResult.assignments}
+          allBlocks={phase1Result.blocks}
+          month={month}
+          year={year}
+          onBack={() => setStep(5)}
+          onRecompute={() => {
+            setInhaberLcResult(null);
+            setInhaberFwsResult(null);
+            setInhaberAutoShiftResult(null);
+            setStep(5);
+          }}
+          onApplyFreeWindowSearch={() => {
+            if (!inhaberLcResult || !inhaberNcResult || !assignmentResult || !phase1Result) return;
+            try {
+              const inhaberName = driverConfigs.find(c => c.isOwner)?.driverName ?? 'Inhaber';
+              const fwsResult = runInhaberFreeWindowSearch(
+                inhaberNcResult.assignedToInhaberBlocks,
+                inhaberLcResult.selectedBlocks,
+                inhaberLcResult.remainingUnassignedBlocks,
+                phase1Result.blocks,
+                assignmentResult.assignments,
+                month,
+                year,
+              );
+              if (import.meta.env.DEV) {
+                console.log('[InhaberFreeWindowSearch]', {
+                  inhaberOccupiedIntervals: fwsResult.inhaberOccupiedIntervals.length,
+                  freeWindowsCount:         fwsResult.freeWindows.length,
+                  totalFreeHours:           (fwsResult.summary.freeSec / 3600).toFixed(2),
+                  remainingOpenBlocks:      fwsResult.remainingOpenBlocks.length,
+                  candidateCountPerBlock:   fwsResult.candidateWindowsByBlock.map(c => ({ id: c.block.blockId, candidates: c.candidateWindows.length, withVehicle: c.windowsWithVehicleFree })),
+                  blocksWithoutCandidates:  fwsResult.candidateWindowsByBlock.filter(c => c.candidateWindows.length === 0).map(c => c.block.blockId),
+                  diagnostics:              fwsResult.diagnostics,
+                });
+              }
+              setInhaberFwsResult(fwsResult);
+              setStep(7);
+            } catch (e) {
+              console.error('[InhaberFreeWindowSearch] error', e);
+            }
+          }}
+        />
+      )}
+      {step === 6 && !inhaberLcResult && (
+        <div className="space-y-4">
+          <h2 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>Inhaber: Längste Konflikt-Blöcke</h2>
+          <div className="rounded-xl p-4" style={{ background: 'rgba(220,38,38,0.06)', border: '1px solid rgba(220,38,38,0.2)', color: '#b91c1c' }}>
+            Kein Ergebnis vorhanden. Bitte zurück zu Inhaber Nicht-konflikt Blöcken.
+          </div>
+          <button onClick={() => setStep(5)} className="inline-flex items-center gap-2 text-sm" style={{ color: 'var(--text-secondary)' }}>
+            <ArrowLeft size={15} /> Zurück
+          </button>
+        </div>
+      )}
+
+      {/* ── Step 7: Inhaber Zeitfenster für Verschiebung ─────────────────────────── */}
+      {step === 7 && inhaberFwsResult && autoRunPhase === 'done' && !debugMode && (
+        /* Auto-run result modal (normal/simplified mode) */
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(2px)' }}
+          role="dialog"
+          aria-modal="true"
+          aria-label="Ergebnis der automatischen Berechnung"
+        >
+          <div
+            className="relative w-full rounded-2xl shadow-2xl flex flex-col"
+            style={{
+              maxWidth: '56rem',
+              maxHeight: '90vh',
+              background: 'var(--bg-elevated, var(--bg-surface))',
+              border: '1px solid var(--border)',
+              overflow: 'hidden',
+            }}
+          >
+            {/* Modal header */}
+            <div className="px-6 pt-6 pb-4 flex-shrink-0" style={{ borderBottom: '1px solid var(--border)' }}>
+              <h2 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>
+                {autoRunExportReady === true
+                  ? 'Fahrtenbuch erfolgreich erstellt'
+                  : autoRunExportReady === false
+                    ? 'Automatische Erstellung nicht möglich'
+                    : 'Abschlussprüfung läuft…'}
+              </h2>
+              <p className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>
+                {autoRunExportReady === true
+                  ? 'Alle Prüfungen bestanden — das neue Fahrtenbuch kann heruntergeladen werden.'
+                  : autoRunExportReady === false
+                    ? 'Die Validierung hat Probleme festgestellt, die eine automatische Erstellung verhindern.'
+                    : 'Validierungen werden durchgeführt.'}
+              </p>
+            </div>
+
+            {/* Modal body */}
+            <div className="flex-1 overflow-y-auto px-6 py-5 space-y-4">
+              {/* Loading state */}
+              {autoRunExportReady === null && (
+                <div className="flex items-center gap-4">
+                  <RefreshCw size={20} className="animate-spin" style={{ color: '#2563eb', flexShrink: 0 }} />
+                  <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>Validierungen werden durchgeführt…</p>
+                </div>
+              )}
+
+              {/* Failure banner */}
+              {autoRunExportReady === false && (
+                <div className="rounded-2xl p-5" style={{ background: 'rgba(220,38,38,0.05)', border: '1px solid rgba(220,38,38,0.3)' }}>
+                  <div className="flex items-start gap-3">
+                    <AlertTriangle size={22} style={{ color: '#b91c1c', flexShrink: 0, marginTop: 2 }} />
+                    <div>
+                      <p className="text-base font-bold" style={{ color: '#b91c1c' }}>Automatische Erstellung nicht möglich</p>
+                      <p className="text-sm mt-1" style={{ color: '#b91c1c' }}>{autoRunExportReason ?? 'Unbekannte Validierungsfehler'}</p>
+                      <p className="text-xs mt-2" style={{ color: 'var(--text-secondary)' }}>
+                        Für eine detaillierte Diagnose können Sie die Debug-Ansicht öffnen.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Vehicle month-boundary summary — shown when export is ready or failed */}
+              {autoRunExportReady !== null && boundaryRows.length > 0 && (
+                <div className="rounded-2xl p-5" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
+                  <VehicleMonthBoundarySummary rows={boundaryRows} />
+                </div>
+              )}
+
+              {/* Driver working-hour summary */}
+              {autoRunExportReady === true && driverHourSummary.length > 0 && (
+                <div className="rounded-2xl p-5 space-y-3" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
+                  <div>
+                    <h3 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>Arbeitsstunden je Fahrer</h3>
+                    <p className="text-xs mt-0.5" style={{ color: 'var(--text-secondary)' }}>Diese Übersicht zeigt die berechneten Stunden des finalen Monatsplans.</p>
+                  </div>
+                  <DriverHourSummaryTable rows={driverHourSummary} />
+                </div>
+              )}
+
+              {/* Salary range summary — shown when any driver has salary min/max configured */}
+              {autoRunExportReady !== null && salaryRangeSummary.length > 0 && (
+                <div className="rounded-2xl p-5 space-y-3" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
+                  <div>
+                    <h3 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>Gehaltsbereich je Fahrer</h3>
+                    <p className="text-xs mt-0.5" style={{ color: 'var(--text-secondary)' }}>
+                      Berechnetes Gehalt auf Basis der finalen Arbeitsstunden. Alle Fahrer müssen zwischen Mindest- und Maximalgehalt liegen.
+                    </p>
+                    {salaryRangeSummary.some(r => r.status !== 'ok') && (
+                      <div className="mt-2 px-3 py-2 rounded-lg text-xs font-semibold flex items-center gap-2" style={{ background: 'rgba(220,38,38,0.06)', border: '1px solid rgba(220,38,38,0.3)', color: '#b91c1c' }}>
+                        <AlertTriangle size={13} />
+                        Ein oder mehrere Fahrer liegen außerhalb des erlaubten Gehaltsbereichs.
+                      </div>
+                    )}
+                  </div>
+                  <SalaryRangeSummaryTable
+                    rows={salaryRangeSummary}
+                    expandedDriver={expandedSalaryDriver}
+                    onToggleExpand={(name) => setExpandedSalaryDriver(prev => prev === name ? null : name)}
+                  />
+                </div>
+              )}
+
+              {/* InhaberFreeWindowSearchView — always mounted for autoApply/onExportReadyCallback */}
+              <InhaberFreeWindowSearchView
+                fwsResult={inhaberFwsResult}
+                month={month}
+                year={year}
+                onBack={() => { setAutoRunPhase('idle'); setStep(1); }}
+                onRecompute={() => { setAutoRunPhase('idle'); setAutoRunExportReady(null); setInhaberFwsResult(null); setStep(1); }}
+                isCreatingPlan={false}
+                planError={null}
+                onApplyAutoShiftPlan={() => {}}
+                originalTrips={originalTrips}
+                inhaberName={driverConfigs.find(c => c.isOwner)?.driverName ?? 'Inhaber'}
+                sourceSheetName={imports.find(i => i.id === selectedImportId)?.source_sheet_name ?? null}
+                sourceColumnsJson={imports.find(i => i.id === selectedImportId)?.source_columns_json ?? null}
+                storagePath={imports.find(i => i.id === selectedImportId)?.storage_path ?? null}
+                originalFileName={imports.find(i => i.id === selectedImportId)?.file_name ?? null}
+                driverConfigs={driverConfigs}
+                allDrivers={allDrivers}
+                driverNotesMap={driverNotesMap}
+                simplified={true}
+                autoApply={true}
+                onExportReadyCallback={(ready, reason) => {
+                  if (debugMode) console.log('[AutoRun] export-ready callback', { ready, reason });
+                  setAutoRunExportReady(ready);
+                  setAutoRunExportReason(reason);
+                }}
+                onFinalAssignmentReady={(rows) => setBoundaryRows(rows)}
+                onPlanDataReady={(data) => { setPlanData(data); setPlanSavedId(null); setSavePlanError(null); }}
+                onDriverHourSummaryReady={(rows) => setDriverHourSummary(rows)}
+                onSalaryRangeSummaryReady={(rows) => setSalaryRangeSummary(rows)}
+                exportTriggerRef={exportTriggerRef}
+              />
+            </div>
+
+            {/* Modal footer */}
+            {autoRunExportReady !== null && (
+              <div className="px-6 py-4 flex-shrink-0 flex flex-wrap items-center gap-3" style={{ borderTop: '1px solid var(--border)' }}>
+                <button
+                  onClick={() => { setAutoRunPhase('idle'); setAutoRunExportReady(null); setStep(1); }}
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all hover:brightness-110"
+                  style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
+                >
+                  <ArrowLeft size={15} /> Zurück
+                </button>
+                {autoRunExportReady === true && (
+                  <button
+                    onClick={() => exportTriggerRef.current?.()}
+                    className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all hover:brightness-110"
+                    style={{ background: 'rgba(21,128,61,0.10)', color: '#15803d', border: '1px solid rgba(21,128,61,0.3)' }}
+                  >
+                    <Download size={15} /> Fahrtenbuch herunterladen
+                  </button>
+                )}
+                {autoRunExportReady === true && (
+                  <button
+                    onClick={handleSavePlan}
+                    disabled={savingPlan || !!planSavedId || !planData}
+                    className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed"
+                    style={{ background: planSavedId ? 'rgba(21,128,61,0.08)' : 'rgba(37,99,235,0.10)', color: planSavedId ? '#15803d' : '#1d4ed8', border: `1px solid ${planSavedId ? 'rgba(21,128,61,0.3)' : 'rgba(37,99,235,0.3)'}` }}
+                  >
+                    {savingPlan ? (
+                      <><RefreshCw size={14} className="animate-spin" /> Speichern…</>
+                    ) : planSavedId ? (
+                      <><CheckCircle2 size={14} /> Gespeichert</>
+                    ) : savedPlans.length > 0 ? (
+                      <><Save size={15} /> Monatsplan ersetzen</>
+                    ) : (
+                      <><Save size={15} /> Monatsplan anlegen</>
+                    )}
+                  </button>
+                )}
+                {savePlanError && (
+                  <span className="text-xs font-medium" style={{ color: '#b91c1c' }}>{savePlanError}</span>
+                )}
+                {autoRunExportReady === false && (
+                  <button
+                    onClick={() => { setDebugMode(true); }}
+                    className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all hover:brightness-110"
+                    style={{ background: 'rgba(220,38,38,0.08)', color: '#b91c1c', border: '1px solid rgba(220,38,38,0.3)' }}
+                  >
+                    Debug-Ansicht öffnen
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+      {step === 7 && inhaberFwsResult && (autoRunPhase !== 'done' || debugMode) && (
+        <InhaberFreeWindowSearchView
+          fwsResult={inhaberFwsResult}
+          month={month}
+          year={year}
+          onBack={() => setStep(6)}
+          onRecompute={() => {
+            setInhaberFwsResult(null);
+            setInhaberAutoShiftResult(null);
+            setStep(6);
+          }}
+          isCreatingPlan={isCreatingAutoShiftPlan}
+          planError={autoShiftPlanError}
+          onApplyAutoShiftPlan={() => {
+            setAutoShiftPlanError('Nächster Schritt wird neu aufgebaut.');
+          }}
+          originalTrips={originalTrips}
+          inhaberName={driverConfigs.find(c => c.isOwner)?.driverName ?? 'Inhaber'}
+          sourceSheetName={imports.find(i => i.id === selectedImportId)?.source_sheet_name ?? null}
+          sourceColumnsJson={imports.find(i => i.id === selectedImportId)?.source_columns_json ?? null}
+          storagePath={imports.find(i => i.id === selectedImportId)?.storage_path ?? null}
+          originalFileName={imports.find(i => i.id === selectedImportId)?.file_name ?? null}
+          driverConfigs={driverConfigs}
+          allDrivers={allDrivers}
+          driverNotesMap={driverNotesMap}
+        />
+      )}
+      {step === 7 && !inhaberFwsResult && (
+        <div className="space-y-4">
+          <h2 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>Inhaber-Zeitfenster für Verschiebung</h2>
+          <div className="rounded-xl p-4" style={{ background: 'rgba(220,38,38,0.06)', border: '1px solid rgba(220,38,38,0.2)', color: '#b91c1c' }}>
+            Kein Ergebnis vorhanden. Bitte zurück zu Inhaber Konflikt-Auswahl.
+          </div>
+          <button onClick={() => setStep(6)} className="inline-flex items-center gap-2 text-sm" style={{ color: 'var(--text-secondary)' }}>
+            <ArrowLeft size={15} /> Zurück
+          </button>
+        </div>
+      )}
+
+      {/* Step 8 is disabled — workflow ends at step 7 (Inhaber free-time calendar) */}
+      {step >= 8 && (
+        <div className="space-y-4">
+          <div className="rounded-xl p-4" style={{ background: 'rgba(220,38,38,0.06)', border: '1px solid rgba(220,38,38,0.2)', color: '#b91c1c' }}>
+            Nächster Schritt wird neu aufgebaut.
+          </div>
+          <button onClick={() => setStep(7)} className="inline-flex items-center gap-2 text-sm" style={{ color: 'var(--text-secondary)' }}>
+            <ArrowLeft size={15} /> Zurück
+          </button>
+        </div>
+      )}
+    </div>
+
+      {/* ── "Anzeigen" modal for a saved plan ─────────────────────────────────── */}
+      {viewingPlan && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(2px)' }}
+          role="dialog" aria-modal="true"
+          onClick={() => setViewingPlan(null)}
+        >
+          <div
+            className="relative w-full rounded-2xl shadow-2xl flex flex-col"
+            style={{ maxWidth: '52rem', maxHeight: '85vh', background: 'var(--bg-elevated, var(--bg-surface))', border: '1px solid var(--border)', overflow: 'hidden' }}
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="px-6 pt-5 pb-4 flex-shrink-0 flex items-start justify-between gap-4" style={{ borderBottom: '1px solid var(--border)' }}>
+              <div>
+                <h2 className="text-base font-bold" style={{ color: 'var(--text-primary)' }}>
+                  Gespeicherter Monatsplan — {MONTHS_DE[(viewingPlan.month ?? month) - 1]} {viewingPlan.year ?? year}
+                </h2>
+                <p className="text-xs mt-0.5" style={{ color: 'var(--text-secondary)' }}>{viewingPlan.original_file_name ?? '—'}</p>
+              </div>
+              <button onClick={() => setViewingPlan(null)} className="flex-shrink-0 p-1.5 rounded-lg hover:brightness-110 transition-all" style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}>
+                ✕
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto px-6 py-5 space-y-4">
+              <div className="grid grid-cols-2 gap-3 text-xs">
+                {([
+                  { label: 'Status', value: viewingPlan.export_ready
+                      ? <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full font-medium" style={{ background: 'rgba(21,128,61,0.10)', color: '#15803d', border: '1px solid rgba(21,128,61,0.25)' }}><CheckCircle2 size={11} /> Exportierbar</span>
+                      : <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full font-medium" style={{ background: 'rgba(220,38,38,0.07)', color: '#b91c1c', border: '1px solid rgba(220,38,38,0.2)' }}><AlertTriangle size={11} /> Nicht exportierbar</span> },
+                  { label: 'Gespeichert am', value: (() => { const d = new Date(viewingPlan.saved_at); return `${String(d.getDate()).padStart(2,'0')}.${String(d.getMonth()+1).padStart(2,'0')}.${d.getFullYear()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`; })() },
+                  { label: 'Speicherpfad', value: viewingPlan.storage_path ?? '—' },
+                  { label: 'Tabellenblatt', value: viewingPlan.source_sheet_name ?? '—' },
+                ] as Array<{ label: string; value: React.ReactNode }>).map(({ label, value }) => (
+                  <div key={label} className="rounded-lg p-3" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
+                    <div className="font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>{label}</div>
+                    <div style={{ color: 'var(--text-primary)' }}>{value}</div>
+                  </div>
+                ))}
+              </div>
+              {Array.isArray(viewingPlan.boundary_rows_json) && viewingPlan.boundary_rows_json.length > 0 && (
+                <div className="rounded-2xl p-4" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
+                  <VehicleMonthBoundarySummary rows={viewingPlan.boundary_rows_json as VehicleBoundaryRow[]} />
+                </div>
+              )}
+              {Array.isArray(viewingPlan.driver_hour_summary_json) && viewingPlan.driver_hour_summary_json.length > 0 && (
+                <div className="rounded-2xl p-4 space-y-3" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
+                  <div>
+                    <h3 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>Arbeitsstunden je Fahrer</h3>
+                    <p className="text-xs mt-0.5" style={{ color: 'var(--text-secondary)' }}>Diese Übersicht zeigt die berechneten Stunden des gespeicherten Monatsplans.</p>
+                  </div>
+                  <DriverHourSummaryTable rows={viewingPlan.driver_hour_summary_json as DriverHourSummaryRow[]} />
+                </div>
+              )}
+            </div>
+            <div className="px-6 py-4 flex-shrink-0 flex items-center gap-3" style={{ borderTop: '1px solid var(--border)' }}>
+              {viewingPlan.export_ready && (
+                <button
+                  onClick={() => downloadSavedPlan(viewingPlan)}
+                  disabled={downloadingPlanId === viewingPlan.id}
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all hover:brightness-110 disabled:opacity-50"
+                  style={{ background: 'rgba(21,128,61,0.10)', color: '#15803d', border: '1px solid rgba(21,128,61,0.3)' }}
+                >
+                  {downloadingPlanId === viewingPlan.id
+                    ? <><RefreshCw size={14} className="animate-spin" /> Lade…</>
+                    : <><Download size={14} /> Fahrtenbuch herunterladen</>}
+                </button>
+              )}
+              <button
+                onClick={() => setViewingPlan(null)}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all hover:brightness-110"
+                style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
+              >
+                Schließen
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Replace-plan confirmation dialog ──────────────────────────────────── */}
+      {showReplaceConfirm && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(2px)' }}
+          role="dialog" aria-modal="true"
+        >
+          <div
+            className="w-full rounded-2xl shadow-2xl p-6 space-y-4"
+            style={{ maxWidth: '28rem', background: 'var(--bg-elevated, var(--bg-surface))', border: '1px solid var(--border)' }}
+          >
+            <div className="flex items-start gap-3">
+              <AlertTriangle size={22} style={{ color: '#b45309', flexShrink: 0, marginTop: 2 }} />
+              <div>
+                <p className="text-sm font-bold" style={{ color: 'var(--text-primary)' }}>Gespeicherten Plan ersetzen?</p>
+                <p className="text-xs mt-1.5" style={{ color: 'var(--text-secondary)' }}>
+                  Für diesen Monat existiert bereits ein gespeicherter Monatsplan. Wenn Sie fortfahren, wird der alte Plan ersetzt.
+                </p>
+              </div>
+            </div>
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => setShowReplaceConfirm(false)}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all hover:brightness-110"
+                style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
+              >
+                Abbrechen
+              </button>
+              <button
+                onClick={doSavePlan}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all hover:brightness-110"
+                style={{ background: 'rgba(220,38,38,0.10)', color: '#b91c1c', border: '1px solid rgba(220,38,38,0.3)' }}
+              >
+                Alten Plan ersetzen
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}

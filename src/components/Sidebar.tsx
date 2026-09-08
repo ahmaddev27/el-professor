@@ -1,0 +1,234 @@
+import React, { useState } from 'react';
+import { NavLink, useNavigate } from 'react-router-dom';
+import {
+  LayoutDashboard, FileText, Users, DollarSign, Plus,
+  Menu, X, UserCog, Receipt, Wallet, LogOut, Calculator,
+  StickyNote, Car, Wrench, Shield, Settings, Building2, BarChart3, Bell, CalendarDays, CreditCard,
+} from 'lucide-react';
+import { useAuth } from '../contexts/AuthContext';
+import { useCompanySettings } from '../contexts/CompanySettingsContext';
+import { useSuperAdmin } from '../contexts/SuperAdminContext';
+import { usePlan, FeatureKey } from '../contexts/PlanContext';
+
+interface SidebarProps {
+  isSupportAdmin: boolean;
+}
+
+interface NavItem {
+  path: string;
+  icon: React.ElementType;
+  label: string;
+  feature: FeatureKey;
+}
+
+const NAV_ITEMS: NavItem[] = [
+  { path: '/overview',       icon: LayoutDashboard, label: 'Übersicht',      feature: 'overview' },
+  { path: '/belege',         icon: FileText,         label: 'Belege',         feature: 'belege' },
+  { path: '/fahrer',         icon: Users,            label: 'Fahrer',         feature: 'fahrer' },
+  { path: '/cars',           icon: Car,              label: 'Fahrzeuge',      feature: 'fahrzeuge' },
+  { path: '/umsaetze',       icon: Plus,             label: 'Umsätze',        feature: 'umsaetze' },
+  { path: '/fixkosten',      icon: Receipt,          label: 'Fixkosten',      feature: 'fixkosten' },
+  { path: '/bargeldbestand', icon: DollarSign,       label: 'Bargeldbestand', feature: 'bargeldbestand' },
+  { path: '/werkstatt',      icon: Wrench,           label: 'Werkstatt',      feature: 'werkstatt' },
+  { path: '/abrechnung',     icon: Calculator,       label: 'Abrechnung',     feature: 'abrechnung' },
+  { path: '/notes',              icon: StickyNote, label: 'Notizen',            feature: 'notizen' },
+  { path: '/benachrichtigungen', icon: Bell,       label: 'Benachrichtigungen', feature: 'benachrichtigungen' },
+  { path: '/salaries',           icon: Wallet,     label: 'Gehälter',           feature: 'gehaelter' },
+  { path: '/dokumente',       icon: FileText,      label: 'Dokumente',       feature: 'dokumente' },
+  { path: '/company-planner', icon: CalendarDays,  label: 'Monatsplanung',   feature: 'dokumente' },
+];
+
+const ADMIN_ITEMS: NavItem[] = [
+  { path: '/users',    icon: UserCog,    label: 'Benutzer',      feature: 'rollen_nutzer' },
+  { path: '/roles',    icon: Shield,     label: 'Rollen',        feature: 'rollen_nutzer' },
+  { path: '/billing',  icon: CreditCard, label: 'Abonnement',    feature: 'overview' },
+  { path: '/settings', icon: Settings,   label: 'Einstellungen', feature: 'overview' },
+];
+
+const Sidebar: React.FC<SidebarProps> = ({ isSupportAdmin }) => {
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const { signOut, isSuperAdmin } = useAuth();
+  const { settings } = useCompanySettings();
+  const { isViewingAsCompany, activeCompany } = useSuperAdmin();
+  const { can } = usePlan();
+  const navigate = useNavigate();
+
+  const handleLogout = async () => {
+    await signOut();
+    setIsMobileMenuOpen(false);
+  };
+
+  const superAdminItems = [
+    { path: '/super-admin',           icon: BarChart3,  label: 'Plattform' },
+    { path: '/super-admin/companies', icon: Building2,  label: 'Unternehmen' },
+    { path: '/super-admin/billing',   icon: Receipt,    label: 'Abos & Zahlungen' },
+  ];
+
+  const renderNavItem = (item: NavItem) => {
+    const Icon = item.icon;
+    const allowed = can(item.feature);
+
+    // Hidden items are not shown at all — access is also blocked at the route level
+    if (!allowed) return null;
+
+    return (
+      <NavLink
+        key={item.path}
+        to={item.path}
+        onClick={() => setIsMobileMenuOpen(false)}
+        className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-150 w-full"
+        style={({ isActive }) =>
+          isActive
+            ? { background: 'var(--accent)', color: 'white', boxShadow: '0 2px 10px rgba(6,182,212,0.2)' }
+            : { color: 'var(--text-secondary)', background: 'transparent' }
+        }
+        onMouseEnter={e => {
+          const el = e.currentTarget as HTMLElement;
+          if (!el.getAttribute('aria-current')) {
+            el.style.background = 'var(--bg-muted)';
+            el.style.color = 'var(--text-primary)';
+          }
+        }}
+        onMouseLeave={e => {
+          const el = e.currentTarget as HTMLElement;
+          if (!el.getAttribute('aria-current')) {
+            el.style.background = 'transparent';
+            el.style.color = 'var(--text-secondary)';
+          }
+        }}
+      >
+        <Icon size={16} className="flex-shrink-0" />
+        <span>{item.label}</span>
+      </NavLink>
+    );
+  };
+
+  const SidebarContent = () => (
+    <div className="flex flex-col h-full">
+      {/* Logo */}
+      <div className="px-4 py-4 border-b flex items-center gap-3" style={{ borderColor: 'var(--border)' }}>
+        <div className="w-8 h-8 flex-shrink-0 flex items-center justify-center">
+          <img src="/professor_logo_white.svg" alt="El-Professor" className="w-8 h-8 object-contain" />
+        </div>
+        <div className="min-w-0">
+          <p className="text-sm font-bold truncate" style={{ color: 'var(--text-primary)' }}>
+            {isViewingAsCompany ? activeCompany?.name : (settings?.company_name || 'El-Professor')}
+          </p>
+          <p className="text-[10px]" style={{ color: isViewingAsCompany ? 'var(--warning)' : 'var(--text-tertiary)' }}>
+            {isViewingAsCompany ? 'Super Admin Ansicht' : 'Verwaltungssystem'}
+          </p>
+        </div>
+      </div>
+
+      {/* Nav */}
+      <nav className="flex-1 overflow-y-auto py-3 px-2 space-y-0.5">
+        {NAV_ITEMS.map(renderNavItem)}
+
+        {isSupportAdmin && (
+          <>
+            <div className="pt-3 pb-1 px-3">
+              <p className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>
+                Verwaltung
+              </p>
+            </div>
+            {ADMIN_ITEMS.map(renderNavItem)}
+          </>
+        )}
+
+        {isSuperAdmin && (
+          <>
+            <div className="pt-3 pb-1 px-3">
+              <p className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>
+                Super Admin
+              </p>
+            </div>
+            {superAdminItems.map((item) => {
+              const Icon = item.icon;
+              return (
+                <NavLink
+                  key={item.path}
+                  to={item.path}
+                  onClick={() => setIsMobileMenuOpen(false)}
+                  className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-150 w-full"
+                  style={({ isActive }) =>
+                    isActive
+                      ? { background: 'var(--warning)', color: 'white', boxShadow: '0 2px 10px rgba(245,158,11,0.2)' }
+                      : { color: 'var(--warning)', background: 'transparent' }
+                  }
+                  onMouseEnter={e => {
+                    const el = e.currentTarget as HTMLElement;
+                    if (!el.getAttribute('aria-current')) el.style.background = 'var(--warning-subtle)';
+                  }}
+                  onMouseLeave={e => {
+                    const el = e.currentTarget as HTMLElement;
+                    if (!el.getAttribute('aria-current')) el.style.background = 'transparent';
+                  }}
+                >
+                  <Icon size={16} className="flex-shrink-0" />
+                  <span>{item.label}</span>
+                </NavLink>
+              );
+            })}
+          </>
+        )}
+      </nav>
+
+      {/* Logout */}
+      <div className="p-2 border-t" style={{ borderColor: 'var(--border)' }}>
+        <button
+          onClick={handleLogout}
+          className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium w-full transition-all duration-150"
+          style={{ color: 'var(--danger)' }}
+          onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'var(--danger-subtle)'; }}
+          onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'transparent'; }}
+        >
+          <LogOut size={16} className="flex-shrink-0" />
+          <span>Abmelden</span>
+        </button>
+      </div>
+    </div>
+  );
+
+  return (
+    <>
+      {/* Mobile button */}
+      <button
+        onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+        className="lg:hidden fixed top-3 left-4 z-50 p-2 rounded-lg transition-colors"
+        style={{
+          background: 'var(--bg-surface)',
+          border: '1px solid var(--border)',
+          color: 'var(--text-secondary)',
+          boxShadow: 'var(--shadow-sm)',
+        }}
+      >
+        {isMobileMenuOpen ? <X size={18} /> : <Menu size={18} />}
+      </button>
+
+      {/* Mobile overlay */}
+      {isMobileMenuOpen && (
+        <div
+          className="lg:hidden fixed inset-0 z-30"
+          style={{ background: 'rgba(0,0,0,0.5)' }}
+          onClick={() => setIsMobileMenuOpen(false)}
+        />
+      )}
+
+      {/* Sidebar */}
+      <aside
+        className={`fixed top-0 left-0 z-40 h-full w-64 transform transition-transform duration-300 ease-in-out border-r ${
+          isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full'
+        } lg:translate-x-0`}
+        style={{
+          background: 'var(--bg-surface)',
+          borderColor: 'var(--border)',
+          boxShadow: 'var(--shadow-lg)',
+        }}
+      >
+        <SidebarContent />
+      </aside>
+    </>
+  );
+};
+
+export default Sidebar;

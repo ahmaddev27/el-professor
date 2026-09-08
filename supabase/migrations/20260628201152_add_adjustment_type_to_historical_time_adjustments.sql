@@ -1,0 +1,1 @@
+ALTER TABLE historical_time_adjustments ADD COLUMN IF NOT EXISTS adjustment_type text;

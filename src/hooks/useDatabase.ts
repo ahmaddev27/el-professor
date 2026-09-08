@@ -1,0 +1,466 @@
+import { useState, useEffect } from 'react';
+import { supabase } from '../lib/supabase';
+import { Receipt, Driver } from '../types/receipt';
+import { isSupabaseConfigured } from '../lib/supabase';
+import { useAuth } from '../contexts/AuthContext';
+import { withTimeout } from './useTimeout';
+import { DriverPlanningFields } from '../components/DriverModal';
+
+export const useDatabase = () => {
+  const { user, profile, companyId } = useAuth();
+  const [isConnected, setIsConnected] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [debugInfo, setDebugInfo] = useState<string[]>([]);
+
+  const addDebugInfo = (message: string) => {
+    console.log(message);
+    setDebugInfo(prev => [...prev.slice(-10), `${new Date().toLocaleTimeString()}: ${message}`]);
+  };
+
+  useEffect(() => {
+    checkConnection();
+  }, []);
+
+  const checkConnection = async () => {
+    setIsLoading(true);
+    setError(null);
+    addDebugInfo('🔍 Starting connection check...');
+    
+    try {
+      // Check if environment variables are available
+      if (!isSupabaseConfigured) {
+        addDebugInfo('❌ Supabase environment variables not found');
+        addDebugInfo(`VITE_SUPABASE_URL: ${import.meta.env.VITE_SUPABASE_URL ? 'SET' : 'NOT SET'}`);
+        addDebugInfo(`VITE_SUPABASE_ANON_KEY: ${import.meta.env.VITE_SUPABASE_ANON_KEY ? 'SET' : 'NOT SET'}`);
+        setError('Supabase ist nicht konfiguriert. Bitte überprüfen Sie die Umgebungsvariablen.');
+        setIsConnected(false); // Force localStorage mode
+        setIsLoading(false);
+        return;
+      }
+
+      addDebugInfo('✅ Environment variables found, testing connection...');
+      addDebugInfo(`🔗 Supabase URL: ${import.meta.env.VITE_SUPABASE_URL}`);
+      addDebugInfo(`🔑 Anon Key: ${import.meta.env.VITE_SUPABASE_ANON_KEY ? 'Present' : 'Missing'}`);
+      
+      // Test the connection with a simple query to receipts table
+      addDebugInfo('🧪 Testing connection to receipts table...');
+      addDebugInfo(`🔓 Using authenticated access: ${user ? 'Authenticated' : 'Anonymous'}`);
+      const { data, error } = await withTimeout(
+        supabase
+          .from('receipts')
+          .select('id')
+          .limit(1),
+        5000
+      );
+        
+      if (error) {
+        addDebugInfo(`❌ Connection test failed: ${error.message}`);
+        addDebugInfo(`❌ Error details: ${JSON.stringify(error)}`);
+        addDebugInfo(`❌ Error code: ${error.code}`);
+        addDebugInfo(`❌ Error hint: ${error.hint}`);
+        throw error;
+      }
+      
+      addDebugInfo(`✅ Connection test successful, sample data: ${JSON.stringify(data)}`);
+      setIsConnected(true);
+      addDebugInfo('✅ Database connected successfully');
+    } catch (error) {
+      addDebugInfo(`❌ Connection failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      addDebugInfo(`❌ Full error: ${JSON.stringify(error)}`);
+      setError(error instanceof Error ? error.message : 'Connection failed');
+      setIsConnected(false);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Driver operations
+  const getDrivers = async (): Promise<Driver[]> => {
+    if (!isConnected) {
+      addDebugInfo('📱 Loading drivers from localStorage (not connected)');
+      const saved = localStorage.getItem('drivers');
+      const result = saved ? JSON.parse(saved) : [];
+      addDebugInfo(`📱 LocalStorage drivers: ${result.length} found`);
+      return result;
+    }
+
+    try {
+      addDebugInfo('🗄️ Loading drivers from database...');
+      const { data, error } = await withTimeout(
+        supabase
+          .from('drivers')
+          .select('*')
+          .eq('company_id', companyId)
+          .order('name'),
+        8000
+      );
+      
+      if (error) {
+        addDebugInfo(`❌ Error fetching drivers: ${error.message}`);
+        throw error;
+      }
+      
+      addDebugInfo(`👥 Database drivers raw data: ${JSON.stringify(data)}`);
+      
+      if (!data || data.length === 0) {
+        addDebugInfo('📝 No drivers found in database');
+        return [];
+      }
+      
+      const mappedDrivers = data.map(d => ({
+        id: d.id,
+        name: d.name,
+        salary_ratio: d.salary_ratio,
+        salaryRatio: d.salary_ratio,
+        createdBy: d.created_by || undefined,
+        status: (d.status || 'active') as 'active' | 'inactive',
+        personalnummer: d.personalnummer || undefined,
+        gender: (d.gender ?? null) as 'male' | 'female' | null,
+        // Planning fields
+        driver_usage_type:      (d.driver_usage_type ?? 'regular') as 'regular' | 'coverage_only',
+        target_monthly_hours:   d.target_monthly_hours ?? null,
+        max_monthly_hours:      d.max_monthly_hours ?? null,
+        planning_target_salary: d.planning_target_salary ?? null,
+        planning_min_salary:    d.planning_min_salary ?? null,
+        planning_max_salary:    d.planning_max_salary ?? null,
+        planning_hourly_rate:   d.planning_hourly_rate ?? null,
+        planning_priority:      d.planning_priority ?? 100,
+        planning_enabled:       d.planning_enabled ?? true,
+        can_cover_other_drivers: d.can_cover_other_drivers ?? true,
+        allowed_weekdays:       d.allowed_weekdays ?? null,
+        work_window_start:      d.work_window_start ?? null,
+        work_window_end:        d.work_window_end ?? null,
+        allow_outside_shift_exceptions: d.allow_outside_shift_exceptions ?? false,
+        is_full_day_available:  d.is_full_day_available ?? false,
+      }));
+      
+      addDebugInfo(`✅ Mapped drivers: ${mappedDrivers.length} drivers`);
+      return mappedDrivers;
+    } catch (error) {
+      console.error('❌ Failed to get drivers from database:', error);
+      addDebugInfo(`❌ Failed to get drivers from database: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      addDebugInfo('📱 Falling back to localStorage for drivers');
+      const saved = localStorage.getItem('drivers');
+      return saved ? JSON.parse(saved) : [];
+    }
+  };
+
+  const planningToDb = (p?: DriverPlanningFields) => {
+    if (!p) return {};
+    return {
+      employment_type:        p.employment_type ?? 'employee',
+      driver_usage_type:      p.driver_usage_type,
+      target_monthly_hours:   p.target_monthly_hours !== '' ? parseFloat(p.target_monthly_hours) : null,
+      max_monthly_hours:      p.max_monthly_hours !== '' ? parseFloat(p.max_monthly_hours) : null,
+      planning_target_salary: p.planning_target_salary !== '' ? parseFloat(p.planning_target_salary) : null,
+      planning_min_salary:    p.planning_min_salary !== '' ? parseFloat(p.planning_min_salary) : null,
+      planning_max_salary:    p.planning_max_salary !== '' ? parseFloat(p.planning_max_salary) : null,
+      planning_hourly_rate:   p.planning_hourly_rate !== '' ? parseFloat(p.planning_hourly_rate) : null,
+      planning_priority:      parseInt(p.planning_priority) || 100,
+      planning_enabled:       p.planning_enabled,
+      can_cover_other_drivers: p.can_cover_other_drivers,
+      work_window_start:      p.work_window_start && p.work_window_start.trim() !== '' ? p.work_window_start.trim() : null,
+      work_window_end:        p.work_window_end && p.work_window_end.trim() !== '' ? p.work_window_end.trim() : null,
+      allowed_weekdays:       Array.isArray(p.allowed_weekdays) && p.allowed_weekdays.length > 0 ? p.allowed_weekdays : null,
+      allow_outside_shift_exceptions: !!p.allow_outside_shift_exceptions,
+      is_full_day_available:  !!p.is_full_day_available,
+    };
+  };
+
+  const addDriver = async (name: string, salaryRatio: number = 0.5, personalnummer?: string, gender?: 'male' | 'female' | null, planning?: DriverPlanningFields): Promise<Driver> => {
+    if (!isConnected) {
+      const newDriver: Driver = { id: Date.now().toString(), name, salary_ratio: salaryRatio, personalnummer, gender: gender ?? null };
+      return newDriver;
+    }
+
+    try {
+      addDebugInfo('🗄️ Adding driver to database');
+      addDebugInfo('🔓 Using authenticated access for driver insert');
+      const { data, error } = await supabase
+        .from('drivers')
+        .insert({
+          name,
+          salary_ratio: salaryRatio,
+          personalnummer: personalnummer || null,
+          gender: gender ?? null,
+          user_id: user?.id || null,
+          created_by: user?.id || null,
+          company_id: companyId,
+          ...planningToDb(planning),
+        })
+        .select()
+        .single();
+
+      if (error) {
+        console.error('Error adding driver:', error);
+        addDebugInfo(`❌ Error adding driver: ${error.message}`);
+        addDebugInfo(`❌ Error code: ${error.code}`);
+        addDebugInfo(`❌ Error hint: ${error.hint}`);
+        throw error;
+      }
+
+      return { id: data.id, name: data.name, salary_ratio: data.salary_ratio, personalnummer: data.personalnummer || undefined, gender: (data.gender ?? null) as 'male' | 'female' | null, employment_type: (data.employment_type ?? 'employee') as 'employee' | 'company_owner' };
+    } catch (error) {
+      console.error('Failed to add driver to database:', error);
+      throw error;
+    }
+  };
+
+  const updateDriver = async (id: string, name: string, salaryRatio: number = 0.5, status?: 'active' | 'inactive', personalnummer?: string, gender?: 'male' | 'female' | null, planning?: DriverPlanningFields): Promise<void> => {
+    if (!isConnected) {
+      return;
+    }
+
+    try {
+      const updateData: any = { name, salary_ratio: salaryRatio };
+      if (status !== undefined) {
+        updateData.status = status;
+      }
+      if (personalnummer !== undefined) {
+        updateData.personalnummer = personalnummer || null;
+      }
+      if (gender !== undefined) {
+        updateData.gender = gender;
+      }
+      if (planning !== undefined) {
+        Object.assign(updateData, planningToDb(planning));
+      }
+
+      const { error } = await supabase
+        .from('drivers')
+        .update(updateData)
+        .eq('id', id);
+
+      if (error) {
+        console.error('Error updating driver:', error);
+        throw error;
+      }
+    } catch (error) {
+      console.error('Failed to update driver in database:', error);
+      throw error;
+    }
+  };
+
+  const deleteDriver = async (id: string): Promise<void> => {
+    if (!isConnected) {
+      return;
+    }
+
+    try {
+      const { error } = await supabase
+        .from('drivers')
+        .delete()
+        .eq('id', id);
+      
+      if (error) {
+        console.error('Error deleting driver:', error);
+        throw error;
+      }
+    } catch (error) {
+      console.error('Failed to delete driver from database:', error);
+      throw error;
+    }
+  };
+
+  // Receipt operations
+  const getReceipts = async (): Promise<Receipt[]> => {
+    if (!isConnected) {
+      addDebugInfo('📱 Loading receipts from localStorage (not connected)');
+      const saved = localStorage.getItem('receipts');
+      let result = [];
+      try {
+        result = saved ? JSON.parse(saved) : [];
+      } catch (error) {
+        addDebugInfo('❌ Error parsing receipts from localStorage');
+        result = [];
+      }
+      addDebugInfo(`📱 LocalStorage receipts: ${result.length} found`);
+      return result;
+    }
+
+    try {
+      addDebugInfo('🗄️ Loading receipts from database...');
+      addDebugInfo('🔍 Executing query: SELECT * FROM receipts ORDER BY date');
+      addDebugInfo(`🔓 Using authenticated access: ${user ? 'Authenticated' : 'Anonymous'}`);
+
+      const { data, error } = await withTimeout(
+        supabase
+          .from('receipts')
+          .select('*')
+          .eq('company_id', companyId)
+          .order('date'),
+        8000
+      );
+      
+      if (error) {
+        addDebugInfo(`❌ Error fetching receipts: ${error.message}`);
+        addDebugInfo(`❌ Error code: ${error.code}`);
+        addDebugInfo(`❌ Error hint: ${error.hint}`);
+        addDebugInfo(`❌ Error details: ${JSON.stringify(error.details)}`);
+        throw error;
+      }
+      
+      addDebugInfo(`📊 Database receipts raw data: ${JSON.stringify(data?.slice(0, 2))}... (showing first 2)`);
+      addDebugInfo(`📊 Total receipts found: ${data?.length || 0}`);
+      
+      if (!data || data.length === 0) {
+        addDebugInfo('📝 No receipts found in database');
+        return [];
+      }
+      
+      const mappedReceipts = data.map(r => {
+        addDebugInfo(`🔄 Mapping receipt: ${r.receipt_number} (${r.id})`);
+        return {
+          id: r.id,
+          receiptNumber: r.receipt_number,
+          date: r.date,
+          description: r.description,
+          driverName: r.driver_name,
+          expense: parseFloat(r.expense?.toString() || '0') || 0,
+          postalCode: r.postal_code || undefined,
+          city: r.city || undefined,
+          createdBy: r.created_by || undefined,
+          paymentMethod: (r.payment_method as 'bar' | 'uberweisung') || 'bar'
+        };
+      });
+      
+      addDebugInfo(`✅ Mapped receipts: ${mappedReceipts.length} receipts`);
+      addDebugInfo(`📋 Sample mapped receipt: ${JSON.stringify(mappedReceipts[0])}`);
+      return mappedReceipts;
+    } catch (error) {
+      console.error('❌ Failed to get receipts from database:', error);
+      addDebugInfo(`❌ Failed to get receipts from database: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      addDebugInfo(`❌ Stack trace: ${error instanceof Error ? error.stack : 'No stack trace'}`);
+      addDebugInfo('📱 Falling back to localStorage for receipts');
+      const saved = localStorage.getItem('receipts');
+      return saved ? JSON.parse(saved) : [];
+    }
+  };
+
+  const addReceipt = async (receipt: Omit<Receipt, 'id'>): Promise<Receipt> => {
+    if (!isConnected) {
+      addDebugInfo('📱 Adding receipt to localStorage');
+      const newReceipt: Receipt = { ...receipt, id: Date.now().toString() };
+      return newReceipt;
+    }
+
+    try {
+      addDebugInfo('🗄️ Adding receipt to database');
+      addDebugInfo('🔓 Using authenticated access for insert');
+      const { data, error } = await supabase
+        .from('receipts')
+        .insert({
+          receipt_number: receipt.receiptNumber,
+          date: receipt.date,
+          description: receipt.description,
+          driver_name: receipt.driverName,
+          expense: receipt.expense,
+          postal_code: receipt.postalCode || null,
+          city: receipt.city || null,
+          user_id: user?.id || null,
+          created_by: user?.id || null,
+          payment_method: receipt.paymentMethod || 'bar',
+          company_id: companyId
+        })
+        .select()
+        .single();
+      
+      if (error) {
+        addDebugInfo(`❌ Error adding receipt: ${error.message}`);
+        addDebugInfo(`❌ Error code: ${error.code}`);
+        addDebugInfo(`❌ Error hint: ${error.hint}`);
+        throw error;
+      }
+      
+      addDebugInfo(`✅ Receipt added successfully: ${data.id}`);
+      
+      return {
+        id: data.id,
+        receiptNumber: data.receipt_number,
+        date: data.date,
+        description: data.description,
+        driverName: data.driver_name,
+        expense: parseFloat(data.expense) || 0,
+        postalCode: data.postal_code || undefined,
+        city: data.city || undefined,
+        createdBy: data.created_by || undefined,
+        paymentMethod: (data.payment_method as 'bar' | 'uberweisung') || 'bar'
+      };
+    } catch (error) {
+      console.error('Failed to add receipt to database:', error);
+      throw error;
+    }
+  };
+
+  const updateReceipt = async (id: string, receipt: Partial<Receipt>): Promise<void> => {
+    if (!isConnected) {
+      return;
+    }
+
+    try {
+      const { error } = await supabase
+        .from('receipts')
+        .update({
+          receipt_number: receipt.receiptNumber,
+          date: receipt.date,
+          description: receipt.description,
+          driver_name: receipt.driverName,
+          expense: receipt.expense,
+          postal_code: receipt.postalCode || null,
+          city: receipt.city || null,
+          payment_method: receipt.paymentMethod || 'bar'
+        })
+        .eq('id', id);
+      
+      if (error) {
+        console.error('Error updating receipt:', error);
+        throw error;
+      }
+    } catch (error) {
+      console.error('Failed to update receipt in database:', error);
+      throw error;
+    }
+  };
+
+  const deleteReceipt = async (id: string): Promise<void> => {
+    if (!isConnected) {
+      return;
+    }
+
+    try {
+      const { error } = await supabase
+        .from('receipts')
+        .delete()
+        .eq('id', id);
+      
+      if (error) {
+        console.error('Error deleting receipt:', error);
+        throw error;
+      }
+    } catch (error) {
+      console.error('Failed to delete receipt from database:', error);
+      throw error;
+    }
+  };
+
+  return {
+    isConnected,
+    isLoading,
+    error,
+    debugInfo,
+    reconnect: checkConnection,
+    drivers: {
+      get: getDrivers,
+      add: addDriver,
+      update: updateDriver,
+      delete: deleteDriver
+    },
+    receipts: {
+      get: getReceipts,
+      add: addReceipt,
+      update: updateReceipt,
+      delete: deleteReceipt
+    }
+  };
+};

@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -r '.tool_input.file_path // empty' | { read -r f; python3 /tmp/cc-agent/57153190/project/.claude/strip-prose.py \"$f\"; } 2>/dev/null || true",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}
