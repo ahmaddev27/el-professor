@@ -214,9 +214,9 @@ const DocumentCard: React.FC<DocumentCardProps> = ({
           onConfirm={handleDeleteConfirm}
           title="Dokument löschen"
           message={`Möchten Sie das Dokument "${document.title}" wirklich löschen? Diese Aktion kann nicht rückgängig gemacht werden.`}
-          confirmText="Löschen"
-          confirmButtonClass="bg-red-600 hover:bg-red-700"
-        />
+          type="confirm"
+        confirmText="Löschen"
+          />
       </>
     );
   }
@@ -351,8 +351,8 @@ const DocumentCard: React.FC<DocumentCardProps> = ({
         onConfirm={handleDeleteConfirm}
         title="Dokument löschen"
         message={`Möchten Sie das Dokument "${document.title}" wirklich löschen? Diese Aktion kann nicht rückgängig gemacht werden.`}
+        type="confirm"
         confirmText="Löschen"
-        confirmButtonClass="bg-red-600 hover:bg-red-700"
       />
     </>
   );

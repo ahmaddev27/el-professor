@@ -319,10 +319,10 @@ const RolesManagement: React.FC = () => {
           setRoleToDelete(null);
         }}
         onConfirm={handleDeleteConfirm}
+        type="confirm"
         title="Rolle löschen"
         message={`Sind Sie sicher, dass Sie die Rolle "${roleToDelete?.name}" löschen möchten? Diese Aktion kann nicht rückgängig gemacht werden.`}
         confirmText="Löschen"
-        confirmButtonClass="bg-red-600 hover:bg-red-700"
       />
     </div>
   );

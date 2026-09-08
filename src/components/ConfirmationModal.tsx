@@ -11,7 +11,6 @@ interface ConfirmationModalProps {
   type: 'confirm' | 'success' | 'error' | 'info';
   confirmText?: string;
   cancelText?: string;
-  confirmButtonClass?: string;
 }
 
 const ConfirmationModal: React.FC<ConfirmationModalProps> = ({

@@ -860,10 +860,10 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
         isOpen={!!paymentToDelete}
         onClose={() => setPaymentToDelete(null)}
         onConfirm={handleDeletePayment}
+        type="confirm"
         title="Zahlung löschen"
         message="Möchten Sie diese Zahlung wirklich löschen? Diese Aktion kann nicht rückgängig gemacht werden."
         confirmText="Löschen"
-        confirmButtonClass="bg-red-600 hover:bg-red-700"
       />
     </>
   );
