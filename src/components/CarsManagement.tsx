@@ -117,7 +117,7 @@ export default function CarsManagement() {
       setCars(carsWithDrivers);
     } catch (error: any) {
       console.error('Error loading cars:', error);
-      showToast('Fehler beim Laden der Fahrzeuge: ' + error.message, 'error');
+      showToast('error', 'Fehler beim Laden der Fahrzeuge: ' + error.message);
     } finally {
       setLoading(false);
     }
@@ -129,7 +129,7 @@ export default function CarsManagement() {
 
   const handleAddCar = () => {
     if (carLimitReached) {
-      showToast(`Fahrzeuglimit erreicht. Ihr Abonnement erlaubt maximal ${carLimit} aktive Fahrzeuge.`, 'error');
+      showToast('error', `Fahrzeuglimit erreicht. Ihr Abonnement erlaubt maximal ${carLimit} aktive Fahrzeuge.`);
       return;
     }
     setEditingCar(null);
@@ -148,11 +148,11 @@ export default function CarsManagement() {
     try {
       const { error } = await supabase.from('cars').delete().eq('id', deleteConfirmation.carId);
       if (error) throw error;
-      showToast('Fahrzeug erfolgreich gelöscht', 'success');
+      showToast('success', 'Fahrzeug erfolgreich gelöscht');
       loadCars();
     } catch (error: any) {
       console.error('Error deleting car:', error);
-      showToast('Fehler beim Löschen des Fahrzeugs: ' + error.message, 'error');
+      showToast('error', 'Fehler beim Löschen des Fahrzeugs: ' + error.message);
     } finally {
       setDeleteConfirmation({ isOpen: false, carId: null, kennzeichen: '' });
     }

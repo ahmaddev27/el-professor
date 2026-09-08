@@ -39,7 +39,7 @@ export default function PlanManagementModal({ plans, onClose, onSaved }: Props) 
 
   const handleSave = async () => {
     if (!form.name || !form.monthly_price || !form.included_cars) {
-      showToast('Bitte alle Pflichtfelder ausf\u00FCllen', 'error');
+      showToast('error', 'Bitte alle Pflichtfelder ausf\u00FCllen');
       return;
     }
     setSaving(true);
@@ -54,18 +54,18 @@ export default function PlanManagementModal({ plans, onClose, onSaved }: Props) 
       if (editId) {
         const { error } = await supabase.from('subscription_plans').update(payload).eq('id', editId);
         if (error) throw error;
-        showToast('Plan aktualisiert', 'success');
+        showToast('success', 'Plan aktualisiert');
       } else {
         const { error } = await supabase.from('subscription_plans').insert(payload);
         if (error) throw error;
-        showToast('Plan erstellt', 'success');
+        showToast('success', 'Plan erstellt');
       }
 
       setForm(emptyPlan);
       setEditId(null);
       onSaved();
     } catch (err: any) {
-      showToast('Fehler: ' + (err.message || 'Unbekannt'), 'error');
+      showToast('error', 'Fehler: ' + (err.message || 'Unbekannt'));
     } finally {
       setSaving(false);
     }
@@ -84,9 +84,9 @@ export default function PlanManagementModal({ plans, onClose, onSaved }: Props) 
   const handleToggleActive = async (plan: Plan) => {
     const { error } = await supabase.from('subscription_plans').update({ is_active: !plan.is_active }).eq('id', plan.id);
     if (error) {
-      showToast('Fehler: ' + error.message, 'error');
+      showToast('error', 'Fehler: ' + error.message);
     } else {
-      showToast(plan.is_active ? 'Plan deaktiviert' : 'Plan aktiviert', 'success');
+      showToast('success', plan.is_active ? 'Plan deaktiviert' : 'Plan aktiviert');
       onSaved();
     }
   };

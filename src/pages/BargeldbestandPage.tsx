@@ -111,7 +111,7 @@ export default function BargeldbestandPage() {
 
     } catch (error: any) {
       console.error('Error loading cash data:', error);
-      showToast('Fehler beim Laden der Bargeld-Daten', 'error');
+      showToast('error', 'Fehler beim Laden der Bargeld-Daten');
     } finally {
       setIsLoading(false);
     }

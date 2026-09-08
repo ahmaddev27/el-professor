@@ -41,7 +41,7 @@ export default function AssignSubscriptionModal({ plans, onClose, onAssigned }: 
 
   const handleSubmit = async () => {
     if (!companyId || !planId) {
-      showToast('Bitte Firma und Plan ausw\u00E4hlen', 'error');
+      showToast('error', 'Bitte Firma und Plan ausw\u00E4hlen');
       return;
     }
     const plan = activePlans.find(p => p.id === planId);
@@ -71,11 +71,11 @@ export default function AssignSubscriptionModal({ plans, onClose, onAssigned }: 
         drivers_per_car_limit: plan.drivers_per_car_limit,
       }).eq('company_id', companyId);
 
-      showToast('Abonnement zugewiesen', 'success');
+      showToast('success', 'Abonnement zugewiesen');
       onAssigned();
       onClose();
     } catch (err: any) {
-      showToast('Fehler: ' + (err.message || 'Unbekannt'), 'error');
+      showToast('error', 'Fehler: ' + (err.message || 'Unbekannt'));
     } finally {
       setSaving(false);
     }

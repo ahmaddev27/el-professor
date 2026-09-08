@@ -103,7 +103,7 @@ export default function WerkstattCheckModal({
       setCars(data || []);
     } catch (error: any) {
       console.error('Error loading cars:', error);
-      showToast('Fehler beim Laden der Fahrzeuge: ' + error.message, 'error');
+      showToast('error', 'Fehler beim Laden der Fahrzeuge: ' + error.message);
     } finally {
       setLoadingCars(false);
     }
@@ -119,17 +119,17 @@ export default function WerkstattCheckModal({
     e.preventDefault();
 
     if (!carId) {
-      showToast('Bitte wählen Sie ein Fahrzeug aus', 'error');
+      showToast('error', 'Bitte wählen Sie ein Fahrzeug aus');
       return;
     }
 
     if (!kmStand || kmStand.trim() === '' || parseInt(kmStand) < 0) {
-      showToast('Bitte geben Sie einen gültigen KM-Stand ein', 'error');
+      showToast('error', 'Bitte geben Sie einen gültigen KM-Stand ein');
       return;
     }
 
     if (!user) {
-      showToast('Sie müssen angemeldet sein', 'error');
+      showToast('error', 'Sie müssen angemeldet sein');
       return;
     }
 
@@ -138,7 +138,7 @@ export default function WerkstattCheckModal({
 
       const weekData = weeks.find(w => w.weekNumber === selectedWeek);
       if (!weekData) {
-        showToast('Ungültige Woche ausgewählt', 'error');
+        showToast('error', 'Ungültige Woche ausgewählt');
         return;
       }
 
@@ -165,23 +165,23 @@ export default function WerkstattCheckModal({
           .eq('id', check.id);
 
         if (error) throw error;
-        showToast('Werkstatt-Check erfolgreich aktualisiert', 'success');
+        showToast('success', 'Werkstatt-Check erfolgreich aktualisiert');
       } else {
         const { error } = await supabase
           .from('werkstatt_checks')
           .insert(checkData);
 
         if (error) throw error;
-        showToast('Werkstatt-Check erfolgreich erstellt', 'success');
+        showToast('success', 'Werkstatt-Check erfolgreich erstellt');
       }
 
       onSuccess();
     } catch (error: any) {
       console.error('Error saving werkstatt check:', error);
       if (error.message.includes('duplicate key')) {
-        showToast('Für dieses Fahrzeug wurde bereits ein Check in dieser Woche erstellt', 'error');
+        showToast('error', 'Für dieses Fahrzeug wurde bereits ein Check in dieser Woche erstellt');
       } else {
-        showToast('Fehler beim Speichern: ' + error.message, 'error');
+        showToast('error', 'Fehler beim Speichern: ' + error.message);
       }
     } finally {
       setLoading(false);

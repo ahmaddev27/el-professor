@@ -96,11 +96,11 @@ export default function GenerateInvoicesModal({ subscriptions, onClose, onGenera
 
       setResults({ created: created.length, skipped: skipped.length, errors });
       if (created.length > 0) {
-        showToast(`${created.length} Rechnung(en) erstellt`, 'success');
+        showToast('success', `${created.length} Rechnung(en) erstellt`);
         onGenerated();
       }
     } catch (err: any) {
-      showToast('Fehler: ' + (err.message || 'Unbekannt'), 'error');
+      showToast('error', 'Fehler: ' + (err.message || 'Unbekannt'));
     } finally {
       setGenerating(false);
     }
