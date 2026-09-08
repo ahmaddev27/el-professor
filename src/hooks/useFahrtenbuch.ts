@@ -253,17 +253,43 @@ export function useFahrtenbuch() {
       });
     }
 
+    // Trips go in batches because PostgREST caps a request, but the import row
+    // already claims row_count = params.trips.length. A batch failing partway
+    // therefore used to leave a 'confirmed' import whose row_count lied about
+    // how many trips exist — and planning would then run against a silently
+    // truncated month.
+    //
+    // There is no client-side transaction across requests, so on failure we
+    // unwind: delete the trips written so far, the import row, and the uploaded
+    // file, restoring the state from before the import was attempted.
     const batchSize = 200;
-    for (let i = 0; i < params.trips.length; i += batchSize) {
-      const batch = params.trips.slice(i, i + batchSize).map(t => ({
-        ...t,
-        import_id: importId,
-        company_id: companyId,
-      }));
-      const { error: tripErr } = await supabase
-        .from('fahrtenbuch_trips')
-        .insert(batch);
-      if (tripErr) throw tripErr;
+    let insertedBatches = 0;
+    try {
+      for (let i = 0; i < params.trips.length; i += batchSize) {
+        const batch = params.trips.slice(i, i + batchSize).map(t => ({
+          ...t,
+          import_id: importId,
+          company_id: companyId,
+        }));
+        const { error: tripErr } = await supabase
+          .from('fahrtenbuch_trips')
+          .insert(batch);
+        if (tripErr) throw tripErr;
+        insertedBatches++;
+      }
+    } catch (tripErr) {
+      const written = insertedBatches * batchSize;
+      // Best effort — if any of this also fails, the throw below still tells the
+      // user the import did not succeed.
+      await supabase.from('fahrtenbuch_trips').delete().eq('import_id', importId);
+      await supabase.from('fahrtenbuch_imports').delete().eq('id', importId);
+      await supabase.storage.from('fahrtenbuch-files').remove([storagePath]);
+      await fetchImports();
+      throw new Error(
+        `Import fehlgeschlagen nach ${written} von ${params.trips.length} Fahrten. ` +
+        'Der unvollständige Import wurde vollständig zurückgenommen. ' +
+        `Ursache: ${tripErr instanceof Error ? tripErr.message : 'Unbekannter Fehler'}`,
+      );
     }
 
     await fetchImports();
@@ -273,13 +299,26 @@ export function useFahrtenbuch() {
   const deleteImport = useCallback(async (importId: string) => {
     if (!companyId) return;
 
-    const { error: planErr } = await supabase
+    // Deleting the runs directly cascades away planning_finalizations,
+    // monthly_planning_manual_exceptions and planning_run_adjustments. Route each
+    // one through the RPC, which archives a run that still has trips attached
+    // instead of destroying its record.
+    const { data: runs, error: runsErr } = await supabase
       .from('company_planning_runs')
-      .delete()
+      .select('id')
       .eq('import_id', importId)
       .eq('company_id', companyId);
-    if (planErr) throw planErr;
+    if (runsErr) throw runsErr;
 
+    for (const run of runs ?? []) {
+      const { error: rpcErr } = await supabase.rpc('delete_or_archive_monthly_planning_run', {
+        p_run_id: run.id,
+      });
+      if (rpcErr) throw rpcErr;
+    }
+
+    // A BEFORE DELETE trigger refuses this when a finalization exists for the
+    // month, so the German message it raises reaches the user as-is.
     const { error } = await supabase
       .from('fahrtenbuch_imports')
       .delete()
