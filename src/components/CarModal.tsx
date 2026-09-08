@@ -51,7 +51,7 @@ export default function CarModal({ car, onClose, onSuccess }: CarModalProps) {
       if (error) throw error;
       setAvailableDrivers(data || []);
     } catch (error: any) {
-      showToast('Fehler beim Laden der Fahrer: ' + error.message, 'error');
+      showToast('error', 'Fehler beim Laden der Fahrer: ' + error.message);
     } finally {
       setLoadingDrivers(false);
     }
@@ -61,7 +61,7 @@ export default function CarModal({ car, onClose, onSuccess }: CarModalProps) {
     setSelectedDriverIds(prev => {
       if (prev.includes(driverId)) return prev.filter(id => id !== driverId);
       if (prev.length >= 2) {
-        showToast('Maximal 2 Fahrer können einem Fahrzeug zugewiesen werden', 'error');
+        showToast('error', 'Maximal 2 Fahrer können einem Fahrzeug zugewiesen werden');
         return prev;
       }
       return [...prev, driverId];
@@ -70,8 +70,8 @@ export default function CarModal({ car, onClose, onSuccess }: CarModalProps) {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!kennzeichen.trim()) { showToast('Bitte geben Sie ein Kennzeichen ein', 'error'); return; }
-    if (!user) { showToast('Sie müssen angemeldet sein', 'error'); return; }
+    if (!kennzeichen.trim()) { showToast('error', 'Bitte geben Sie ein Kennzeichen ein'); return; }
+    if (!user) { showToast('error', 'Sie müssen angemeldet sein'); return; }
 
     try {
       setLoading(true);
@@ -94,7 +94,7 @@ export default function CarModal({ car, onClose, onSuccess }: CarModalProps) {
           );
           if (insertError) throw insertError;
         }
-        showToast('Fahrzeug erfolgreich aktualisiert', 'success');
+        showToast('success', 'Fahrzeug erfolgreich aktualisiert');
       } else {
         const { data: newCar, error: carError } = await supabase
           .from('cars').insert({ ...carData, created_by: user.id, company_id: companyId }).select().single();
@@ -106,16 +106,16 @@ export default function CarModal({ car, onClose, onSuccess }: CarModalProps) {
           );
           if (assignmentError) throw assignmentError;
         }
-        showToast('Fahrzeug erfolgreich erstellt', 'success');
+        showToast('success', 'Fahrzeug erfolgreich erstellt');
       }
       onSuccess();
     } catch (error: any) {
       if (error.message.includes('duplicate key')) {
-        showToast('Ein Fahrzeug mit diesem Kennzeichen existiert bereits', 'error');
+        showToast('error', 'Ein Fahrzeug mit diesem Kennzeichen existiert bereits');
       } else if (error.message.includes('maximum 2 drivers')) {
-        showToast('Maximal 2 Fahrer können einem Fahrzeug zugewiesen werden', 'error');
+        showToast('error', 'Maximal 2 Fahrer können einem Fahrzeug zugewiesen werden');
       } else {
-        showToast('Fehler beim Speichern: ' + error.message, 'error');
+        showToast('error', 'Fehler beim Speichern: ' + error.message);
       }
     } finally {
       setLoading(false);

@@ -68,7 +68,7 @@ export default function WerkstattPage() {
       if (error) throw error;
       setChecks(data || []);
     } catch (error: any) {
-      showToast('Fehler beim Laden der Checks: ' + error.message, 'error');
+      showToast('error', 'Fehler beim Laden der Checks: ' + error.message);
     } finally {
       setLoading(false);
     }
@@ -94,10 +94,10 @@ export default function WerkstattPage() {
     try {
       const { error } = await supabase.from('werkstatt_checks').delete().eq('id', checkToDelete.id);
       if (error) throw error;
-      showToast('Check erfolgreich gelöscht', 'success');
+      showToast('success', 'Check erfolgreich gelöscht');
       loadChecks();
     } catch (error: any) {
-      showToast('Fehler beim Löschen: ' + error.message, 'error');
+      showToast('error', 'Fehler beim Löschen: ' + error.message);
     } finally {
       setCheckToDelete(null);
     }

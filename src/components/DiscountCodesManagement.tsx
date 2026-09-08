@@ -114,10 +114,10 @@ const DiscountCodeModal: React.FC<ModalProps> = ({ dc, companies, onClose, onSav
   const set = (k: string, v: unknown) => setForm(f => ({ ...f, [k]: v }));
 
   const handleSave = async () => {
-    if (!form.code.trim()) { showToast('Bitte Code eingeben.', 'error'); return; }
-    if (form.discount_value <= 0) { showToast('Rabattwert muss > 0 sein.', 'error'); return; }
+    if (!form.code.trim()) { showToast('error', 'Bitte Code eingeben.'); return; }
+    if (form.discount_value <= 0) { showToast('error', 'Rabattwert muss > 0 sein.'); return; }
     if (form.discount_type === 'percentage' && form.discount_value > 100) {
-      showToast('Prozentwert darf max. 100 sein.', 'error'); return;
+      showToast('error', 'Prozentwert darf max. 100 sein.'); return;
     }
     setSaving(true);
     const payload = {
@@ -141,8 +141,8 @@ const DiscountCodeModal: React.FC<ModalProps> = ({ dc, companies, onClose, onSav
       ? await supabase.from('discount_codes').update(payload).eq('id', dc.id)
       : await supabase.from('discount_codes').insert(payload);
     setSaving(false);
-    if (error) { showToast(error.message, 'error'); return; }
-    showToast(dc ? 'Rabattcode aktualisiert.' : 'Rabattcode erstellt.', 'success');
+    if (error) { showToast('error', error.message); return; }
+    showToast('success', dc ? 'Rabattcode aktualisiert.' : 'Rabattcode erstellt.');
     onSaved();
     onClose();
   };
@@ -378,7 +378,7 @@ const DiscountCodesManagement: React.FC = () => {
 
   const toggleActive = async (dc: DiscountCode) => {
     const { error } = await supabase.from('discount_codes').update({ active: !dc.active }).eq('id', dc.id);
-    if (error) { showToast(error.message, 'error'); return; }
+    if (error) { showToast('error', error.message); return; }
     setCodes(prev => prev.map(c => c.id === dc.id ? { ...c, active: !c.active } : c));
   };
 
@@ -391,9 +391,9 @@ const DiscountCodesManagement: React.FC = () => {
     setDeleteConfirm({ open: false, dc: null });
     if (!dc) return;
     const { error } = await supabase.from('discount_codes').delete().eq('id', dc.id);
-    if (error) { showToast(error.message, 'error'); return; }
+    if (error) { showToast('error', error.message); return; }
     setCodes(prev => prev.filter(c => c.id !== dc.id));
-    showToast('Rabattcode gelöscht.', 'success');
+    showToast('success', 'Rabattcode gelöscht.');
   };
 
   const formatDate = (iso: string | null) => iso ? format(new Date(iso), 'dd.MM.yy', { locale: de }) : '—';

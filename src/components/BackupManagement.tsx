@@ -12,17 +12,17 @@ export default function BackupManagement() {
 
   const handleCreateBackup = async () => {
     if (!companyId) {
-      showToast('Kein Unternehmen zugeordnet', 'error');
+      showToast('error', 'Kein Unternehmen zugeordnet');
       return;
     }
     try {
       setIsLoading(true);
       await createAndDownloadBackup(companyId);
       setLastBackupTime(new Date().toLocaleString('de-DE'));
-      showToast('Backup erfolgreich erstellt und heruntergeladen', 'success');
+      showToast('success', 'Backup erfolgreich erstellt und heruntergeladen');
     } catch (error) {
       console.error('Backup error:', error);
-      showToast('Fehler beim Erstellen des Backups', 'error');
+      showToast('error', 'Fehler beim Erstellen des Backups');
     } finally {
       setIsLoading(false);
     }

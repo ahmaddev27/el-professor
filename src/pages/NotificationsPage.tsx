@@ -226,9 +226,9 @@ export default function NotificationsPage() {
       setSavedGlobal(globalEnabled);
       setSavedSettings({ ...settings });
       setDirty(false);
-      showToast('Benachrichtigungseinstellungen gespeichert', 'success');
+      showToast('success', 'Benachrichtigungseinstellungen gespeichert');
     } catch (err: any) {
-      showToast('Fehler beim Speichern: ' + err.message, 'error');
+      showToast('error', 'Fehler beim Speichern: ' + err.message);
     } finally {
       setSaving(false);
     }

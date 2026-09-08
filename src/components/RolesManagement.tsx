@@ -46,7 +46,7 @@ const RolesManagement: React.FC = () => {
       setRoles(rolesWithPermissions);
     } catch (error: any) {
       console.error('Error fetching roles:', error);
-      showToast('Fehler beim Laden der Rollen', 'error');
+      showToast('error', 'Fehler beim Laden der Rollen');
     } finally {
       setLoading(false);
     }
@@ -88,7 +88,7 @@ const RolesManagement: React.FC = () => {
 
         if (insertPermsError) throw insertPermsError;
 
-        showToast('Rolle erfolgreich aktualisiert', 'success');
+        showToast('success', 'Rolle erfolgreich aktualisiert');
       } else {
         const { data: newRole, error: insertError } = await supabase
           .from('roles')
@@ -117,7 +117,7 @@ const RolesManagement: React.FC = () => {
 
         if (insertPermsError) throw insertPermsError;
 
-        showToast('Rolle erfolgreich erstellt', 'success');
+        showToast('success', 'Rolle erfolgreich erstellt');
       }
 
       await fetchRoles();
@@ -136,7 +136,7 @@ const RolesManagement: React.FC = () => {
 
   const handleDeleteClick = (role: Role) => {
     if (role.is_system) {
-      showToast('Systemrollen können nicht gelöscht werden', 'error');
+      showToast('error', 'Systemrollen können nicht gelöscht werden');
       return;
     }
     setRoleToDelete(role);
@@ -154,11 +154,11 @@ const RolesManagement: React.FC = () => {
 
       if (error) throw error;
 
-      showToast('Rolle erfolgreich gelöscht', 'success');
+      showToast('success', 'Rolle erfolgreich gelöscht');
       await fetchRoles();
     } catch (error: any) {
       console.error('Error deleting role:', error);
-      showToast(error.message || 'Fehler beim Löschen der Rolle', 'error');
+      showToast('error', error.message || 'Fehler beim Löschen der Rolle');
     } finally {
       setIsDeleteModalOpen(false);
       setRoleToDelete(null);

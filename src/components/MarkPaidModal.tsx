@@ -34,7 +34,7 @@ export default function MarkPaidModal({ invoice, onClose, onConfirm }: Props) {
     try {
       const parsedAmount = parseFloat(amount.replace(',', '.'));
       if (isNaN(parsedAmount) || parsedAmount <= 0) {
-        showToast('Bitte g\u00FCltigen Betrag eingeben', 'error');
+        showToast('error', 'Bitte g\u00FCltigen Betrag eingeben');
         return;
       }
 
@@ -63,11 +63,11 @@ export default function MarkPaidModal({ invoice, onClose, onConfirm }: Props) {
         note: note || `Barzahlung von ${profile?.full_name || profile?.email || 'Admin'} erfasst`,
       });
 
-      showToast('Zahlung erfolgreich erfasst', 'success');
+      showToast('success', 'Zahlung erfolgreich erfasst');
       onConfirm();
       onClose();
     } catch (err: any) {
-      showToast('Fehler: ' + (err.message || 'Unbekannt'), 'error');
+      showToast('error', 'Fehler: ' + (err.message || 'Unbekannt'));
     } finally {
       setSaving(false);
     }

@@ -45,11 +45,11 @@ const UploadDocumentModal: React.FC<UploadDocumentModalProps> = ({ isOpen, onClo
 
   const handleFileSelection = (file: File) => {
     if (!acceptedTypes.includes(file.type)) {
-      showToast('Dateityp nicht unterstützt. Bitte laden Sie PDF, DOCX oder Bild hoch.', 'error');
+      showToast('error', 'Dateityp nicht unterstützt. Bitte laden Sie PDF, DOCX oder Bild hoch.');
       return;
     }
     if (file.size > 10 * 1024 * 1024) {
-      showToast('Datei zu groß. Maximale Dateigröße: 10MB', 'error');
+      showToast('error', 'Datei zu groß. Maximale Dateigröße: 10MB');
       return;
     }
     setSelectedFile(file);
@@ -58,8 +58,8 @@ const UploadDocumentModal: React.FC<UploadDocumentModalProps> = ({ isOpen, onClo
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedFile) { showToast('Bitte wählen Sie eine Datei aus', 'error'); return; }
-    if (!formData.title.trim()) { showToast('Bitte geben Sie einen Titel ein', 'error'); return; }
+    if (!selectedFile) { showToast('error', 'Bitte wählen Sie eine Datei aus'); return; }
+    if (!formData.title.trim()) { showToast('error', 'Bitte geben Sie einen Titel ein'); return; }
 
     setLoading(true);
     try {
@@ -74,12 +74,12 @@ const UploadDocumentModal: React.FC<UploadDocumentModalProps> = ({ isOpen, onClo
         file_type: selectedFile.type,
         file_size: selectedFile.size,
       });
-      showToast('Datei erfolgreich hochgeladen', 'success');
+      showToast('success', 'Datei erfolgreich hochgeladen');
       onClose();
       setFormData({ title: '', description: '', category: 'Allgemein' });
       setSelectedFile(null);
     } catch (error: any) {
-      showToast(error.message || 'Fehler beim Hochladen', 'error');
+      showToast('error', error.message || 'Fehler beim Hochladen');
     } finally {
       setLoading(false);
     }

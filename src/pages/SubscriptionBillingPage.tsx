@@ -143,7 +143,7 @@ export default function SubscriptionBillingPage() {
       }
     } catch (err) {
       console.error(err);
-      showToast('Fehler beim Laden der Daten', 'error');
+      showToast('error', 'Fehler beim Laden der Daten');
     } finally {
       setLoading(false);
     }
@@ -192,7 +192,7 @@ export default function SubscriptionBillingPage() {
       .update({ status: 'open', paid_at: null, paid_by: null, collected_by: null, cash_received_amount: null })
       .eq('id', inv.id);
     if (error) {
-      showToast('Fehler: ' + error.message, 'error');
+      showToast('error', 'Fehler: ' + error.message);
       return;
     }
     await supabase.from('subscription_payment_audit').insert({
@@ -205,7 +205,7 @@ export default function SubscriptionBillingPage() {
       changed_by: user!.id,
       note: 'Als unbezahlt markiert',
     });
-    showToast('Rechnung als offen markiert', 'success');
+    showToast('success', 'Rechnung als offen markiert');
     loadData();
   };
 
@@ -216,7 +216,7 @@ export default function SubscriptionBillingPage() {
       .update({ status: 'canceled' })
       .eq('id', inv.id);
     if (error) {
-      showToast('Fehler: ' + error.message, 'error');
+      showToast('error', 'Fehler: ' + error.message);
       return;
     }
     await supabase.from('subscription_payment_audit').insert({
@@ -228,7 +228,7 @@ export default function SubscriptionBillingPage() {
       amount: inv.amount,
       changed_by: user!.id,
     });
-    showToast('Rechnung storniert', 'success');
+    showToast('success', 'Rechnung storniert');
     loadData();
   };
 
@@ -264,7 +264,7 @@ export default function SubscriptionBillingPage() {
     const doc = generateSubscriptionPdf(pdfData);
     const label = inv.status === 'paid' ? 'Quittung' : 'Rechnung';
     doc.save(`${label}_${inv.invoice_number}.pdf`);
-    showToast(`${label} heruntergeladen`, 'success');
+    showToast('success', `${label} heruntergeladen`);
   };
 
   // ── Status badge ──
