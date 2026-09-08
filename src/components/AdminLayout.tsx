@@ -3,6 +3,8 @@ import { Outlet, Navigate } from 'react-router-dom';
 import { Sun, Moon } from 'lucide-react';
 import AdminSidebar from './AdminSidebar';
 import { useTheme } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LanguageContext';
+import LanguageSwitcher from './LanguageSwitcher';
 import { useAuth } from '../contexts/AuthContext';
 
 /**
@@ -19,6 +21,7 @@ import { useAuth } from '../contexts/AuthContext';
  */
 const AdminLayout: React.FC = () => {
   const { toggleTheme, isDark } = useTheme();
+  const { t } = useTranslation();
   const { isSuperAdmin } = useAuth();
 
   if (!isSuperAdmin) {
@@ -48,7 +51,7 @@ const AdminLayout: React.FC = () => {
                   border: '1px solid var(--border)',
                   color: 'var(--text-secondary)',
                 }}
-                title={isDark ? 'Zum hellen Modus wechseln' : 'Zum dunklen Modus wechseln'}
+                title={isDark ? t('shell.themeToLight') : t('shell.themeToDark')}
               >
                 {isDark ? <Sun size={16} /> : <Moon size={16} />}
               </button>
@@ -60,9 +63,10 @@ const AdminLayout: React.FC = () => {
                   color: 'var(--warning)',
                 }}
               >
-                Administration
+                {t('admin.badge')}
               </span>
             </div>
+            <LanguageSwitcher />
           </div>
         </header>
 

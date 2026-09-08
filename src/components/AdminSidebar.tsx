@@ -5,11 +5,13 @@ import {
   Menu, X, LogOut, ShieldCheck,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
+import { useTranslation } from '../contexts/LanguageContext';
+import type { TranslationKey } from '../i18n';
 
 interface AdminNavItem {
   path: string;
   icon: React.ElementType;
-  label: string;
+  labelKey: TranslationKey;
   end?: boolean;
 }
 
@@ -19,15 +21,16 @@ interface AdminNavItem {
  * their own shell and are never rendered inside the company-facing sidebar.
  */
 const ADMIN_NAV_ITEMS: AdminNavItem[] = [
-  { path: '/super-admin',                     icon: BarChart3,  label: 'Plattform',        end: true },
-  { path: '/super-admin/companies',           icon: Building2,  label: 'Unternehmen' },
-  { path: '/super-admin/billing',             icon: Receipt,    label: 'Abos & Zahlungen' },
-  { path: '/super-admin/abnahme-diagnose',    icon: Stethoscope, label: 'Abnahme-Diagnose' },
+  { path: '/super-admin',                  icon: BarChart3,   labelKey: 'admin.nav.platform', end: true },
+  { path: '/super-admin/companies',        icon: Building2,   labelKey: 'admin.nav.companies' },
+  { path: '/super-admin/billing',          icon: Receipt,     labelKey: 'admin.nav.billing' },
+  { path: '/super-admin/abnahme-diagnose', icon: Stethoscope, labelKey: 'admin.nav.diagnostics' },
 ];
 
 const AdminSidebar: React.FC = () => {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const { signOut, profile } = useAuth();
+  const { t } = useTranslation();
 
   const handleLogout = async () => {
     await signOut();
@@ -47,10 +50,10 @@ const AdminSidebar: React.FC = () => {
         </div>
         <div className="min-w-0">
           <p className="text-sm font-bold truncate" style={{ color: 'var(--text-primary)' }}>
-            Administration
+            {t('admin.title')}
           </p>
           <p className="text-[10px]" style={{ color: 'var(--warning)' }}>
-            Plattformverwaltung
+            {t('admin.subtitle')}
           </p>
         </div>
       </div>
@@ -86,7 +89,7 @@ const AdminSidebar: React.FC = () => {
               }}
             >
               <Icon size={16} className="flex-shrink-0" />
-              <span>{item.label}</span>
+              <span>{t(item.labelKey)}</span>
             </NavLink>
           );
         })}
@@ -106,7 +109,7 @@ const AdminSidebar: React.FC = () => {
           onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'transparent'; }}
         >
           <LogOut size={16} className="flex-shrink-0" />
-          <span>Abmelden</span>
+          <span>{t('common.logout')}</span>
         </button>
       </div>
     </div>
