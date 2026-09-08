@@ -94,6 +94,41 @@ export const en: PartialDictionary = {
   'auth.error.network':            'Network error. Please check your internet connection.',
   'auth.error.google':             'Google sign-in failed. Please try again.',
 
+  // ── Plan gating ────────────────────────────────────────────────────────────
+  'locked.title':           '{feature} is not included in your plan',
+  'locked.body.before':     'This module is available from the',
+  'locked.body.after':      'onwards. Contact us to upgrade your plan.',
+  'locked.planSuffix':      '{plan} plan',
+  'locked.backToOverview':  'Back to overview',
+  'locked.upgrade':         'Upgrade plan',
+  'locked.availableIn':     'Included in the {plan} plan',
+  'locked.feature.rollenNutzer': 'Roles & users',
+  'locked.feature.trinkgeld':      'Trinkgeld Quittung',
+  'locked.feature.stundennachweis': 'Stundennachweis',
+  'locked.feature.allAdvanced':  '+ all Advanced features',
+
+  // ── Trial banner ───────────────────────────────────────────────────────────
+  'trial.urgent.one':       'Only {count} day left in your free trial — upgrade now to keep access.',
+  'trial.urgent.other':     'Only {count} days left in your free trial — upgrade now to keep access.',
+  'trial.warning':          'Your trial ends in {count} days. Choose a plan to continue.',
+  'trial.active.one':       'Trial active — {count} day remaining. All premium features unlocked.',
+  'trial.active.other':     'Trial active — {count} days remaining. All premium features unlocked.',
+  'trial.expired':          'Your trial has ended. Advanced and Premium features are no longer available. Please choose a plan to restore full access.',
+  'trial.choosePlan':       'Choose a plan',
+
+  // ── Account status pages ───────────────────────────────────────────────────
+  'status.pending.title':   'Registration received',
+  'status.pending.thanks':  'Thank you for signing up{name}.',
+  'status.pending.body':    'Your company account is currently being reviewed by our team. You will receive an email as soon as your access has been activated.',
+  'status.pending.contact': 'If you have any questions please contact',
+  'status.rejected.title':  'Registration declined',
+  'status.rejected.body':   'Unfortunately your registration request could not be approved.',
+  'status.rejected.reason': 'Reason',
+  'status.rejected.contact': 'For more information or questions please contact',
+  'status.suspended.title': 'Access blocked',
+  'status.suspended.body':  'Your company account has been temporarily suspended. Access to the application is currently not possible.',
+  'status.contact':         'For more information please contact',
+
   // ── Account blocked ────────────────────────────────────────────────────────
   'blocked.title':          'Access blocked',
   'blocked.contactHint':    'For more information please contact',

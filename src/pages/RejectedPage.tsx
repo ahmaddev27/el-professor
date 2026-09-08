@@ -1,9 +1,11 @@
 import React from 'react';
 import { XCircle, LogOut, Mail } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
+import { useTranslation } from '../contexts/LanguageContext';
 
 const RejectedPage: React.FC = () => {
   const { signOut, rejectionReason } = useAuth();
+  const { t } = useTranslation();
 
   return (
     <div className="min-h-screen bg-[#060a0f] flex items-center justify-center p-6 relative overflow-hidden">
@@ -20,15 +22,15 @@ const RejectedPage: React.FC = () => {
             <XCircle className="text-red-400" size={28} />
           </div>
 
-          <h1 className="text-xl font-bold text-white mb-3">Registrierung abgelehnt</h1>
+          <h1 className="text-xl font-bold text-white mb-3">{t('status.rejected.title')}</h1>
 
           <p className="text-white/55 text-sm leading-relaxed mb-4">
-            Leider konnte Ihre Registrierungsanfrage nicht genehmigt werden.
+            {t('status.rejected.body')}
           </p>
 
           {rejectionReason && (
             <div className="p-4 rounded-xl border border-red-500/20 bg-red-500/5 mb-4 text-left">
-              <p className="text-xs font-semibold text-red-400/80 uppercase tracking-wider mb-1.5">Grund</p>
+              <p className="text-xs font-semibold text-red-400/80 uppercase tracking-wider mb-1.5">{t('status.rejected.reason')}</p>
               <p className="text-sm text-white/60 leading-relaxed">{rejectionReason}</p>
             </div>
           )}
@@ -37,7 +39,7 @@ const RejectedPage: React.FC = () => {
             <div className="flex items-start gap-3">
               <Mail size={15} className="text-white/40 flex-shrink-0 mt-0.5" />
               <p className="text-xs text-white/50 text-left leading-relaxed">
-                Für weitere Informationen oder Rückfragen wenden Sie sich bitte an{' '}
+                {t('status.rejected.contact')}{' '}
                 <a
                   href="mailto:support@el-professor.de"
                   className="text-cyan-400 hover:text-cyan-300 transition-colors"
@@ -53,7 +55,7 @@ const RejectedPage: React.FC = () => {
             className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl border border-white/10 text-white/50 hover:text-white/80 hover:border-white/20 transition-all text-sm"
           >
             <LogOut size={14} />
-            Abmelden
+            {t('common.logout')}
           </button>
         </div>
       </div>
