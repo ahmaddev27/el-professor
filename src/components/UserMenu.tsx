@@ -3,12 +3,14 @@ import { useNavigate } from 'react-router-dom';
 import { LogOut, Settings, ChevronDown, Building2, X as XIcon } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
+import { useTranslation } from '../contexts/LanguageContext';
 
 const UserMenu: React.FC = () => {
   const [isOpen, setIsOpen] = useState(false);
   const { user, profile, signOut } = useAuth();
   const { isViewingAsCompany, activeCompany, exitCompany } = useSuperAdmin();
   const navigate = useNavigate();
+  const { t } = useTranslation();
 
   // Leaving the company view returns to the administration shell — a super
   // admin who is not inspecting a tenant has no business in the company UI.
@@ -75,7 +77,7 @@ const UserMenu: React.FC = () => {
           <button
             onClick={handleExitCompany}
             className="flex-shrink-0 ml-1 rounded transition-opacity hover:opacity-70"
-            title="Unternehmensansicht beenden"
+            title={t('shell.exitCompanyView')}
           >
             <XIcon size={13} />
           </button>
@@ -156,7 +158,7 @@ const UserMenu: React.FC = () => {
                 onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'transparent'; (e.currentTarget as HTMLElement).style.color = 'var(--text-secondary)'; }}
               >
                 <Settings size={14} />
-                <span>Einstellungen</span>
+                <span>{t('common.settings')}</span>
               </button>
               <button
                 onClick={handleSignOut}
@@ -166,7 +168,7 @@ const UserMenu: React.FC = () => {
                 onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'transparent'; }}
               >
                 <LogOut size={14} />
-                <span>Abmelden</span>
+                <span>{t('common.logout')}</span>
               </button>
             </div>
           </div>

@@ -1,9 +1,11 @@
 import React, { useState } from 'react';
 import { X, Clock, Zap, AlertTriangle } from 'lucide-react';
 import { usePlan } from '../contexts/PlanContext';
+import { useTranslation } from '../contexts/LanguageContext';
 
 const TrialBanner: React.FC = () => {
   const { planState } = usePlan();
+  const { t, tPlural } = useTranslation();
   const [dismissed, setDismissed] = useState(false);
 
   if (dismissed) return null;
@@ -35,10 +37,10 @@ const TrialBanner: React.FC = () => {
           <Icon size={13} className="flex-shrink-0" />
           <span>
             {urgent
-              ? `Nur noch ${days} Tag${days === 1 ? '' : 'e'} in Ihrer kostenlosen Testphase — jetzt upgraden um den Zugang zu behalten.`
+              ? tPlural({ one: 'trial.urgent.one', other: 'trial.urgent.other' }, days)
               : warning
-                ? `Ihre Testphase endet in ${days} Tagen. Wählen Sie einen Plan um weiterzumachen.`
-                : `Testphase aktiv — ${days} Tag${days === 1 ? '' : 'e'} verbleiben. Alle Premium-Features freigeschaltet.`
+                ? t('trial.warning', { count: days })
+                : tPlural({ one: 'trial.active.one', other: 'trial.active.other' }, days)
             }
           </span>
         </div>
@@ -49,7 +51,7 @@ const TrialBanner: React.FC = () => {
             style={{ background: color, color: 'white' }}
           >
             <Zap size={10} />
-            Plan wählen
+            {t('trial.choosePlan')}
           </a>
           <button
             onClick={() => setDismissed(true)}
@@ -73,8 +75,7 @@ const TrialBanner: React.FC = () => {
         <div className="flex items-center gap-2">
           <AlertTriangle size={13} className="flex-shrink-0" />
           <span>
-            Ihre Testphase ist abgelaufen. Advanced- und Premium-Features sind nicht mehr verfügbar.
-            Bitte wählen Sie einen Plan um den vollen Zugriff wiederherzustellen.
+            {t('trial.expired')}
           </span>
         </div>
         <a

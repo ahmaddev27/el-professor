@@ -9,6 +9,8 @@ import { useAuth } from '../contexts/AuthContext';
 import { useCompanySettings } from '../contexts/CompanySettingsContext';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { usePlan, FeatureKey } from '../contexts/PlanContext';
+import { useTranslation } from '../contexts/LanguageContext';
+import type { TranslationKey } from '../i18n';
 
 interface SidebarProps {
   isSupportAdmin: boolean;
@@ -17,32 +19,32 @@ interface SidebarProps {
 interface NavItem {
   path: string;
   icon: React.ElementType;
-  label: string;
+  labelKey: TranslationKey;
   feature: FeatureKey;
 }
 
 const NAV_ITEMS: NavItem[] = [
-  { path: '/overview',       icon: LayoutDashboard, label: 'Übersicht',      feature: 'overview' },
-  { path: '/belege',         icon: FileText,         label: 'Belege',         feature: 'belege' },
-  { path: '/fahrer',         icon: Users,            label: 'Fahrer',         feature: 'fahrer' },
-  { path: '/cars',           icon: Car,              label: 'Fahrzeuge',      feature: 'fahrzeuge' },
-  { path: '/umsaetze',       icon: Plus,             label: 'Umsätze',        feature: 'umsaetze' },
-  { path: '/fixkosten',      icon: Receipt,          label: 'Fixkosten',      feature: 'fixkosten' },
-  { path: '/bargeldbestand', icon: DollarSign,       label: 'Bargeldbestand', feature: 'bargeldbestand' },
-  { path: '/werkstatt',      icon: Wrench,           label: 'Werkstatt',      feature: 'werkstatt' },
-  { path: '/abrechnung',     icon: Calculator,       label: 'Abrechnung',     feature: 'abrechnung' },
-  { path: '/notes',              icon: StickyNote, label: 'Notizen',            feature: 'notizen' },
-  { path: '/benachrichtigungen', icon: Bell,       label: 'Benachrichtigungen', feature: 'benachrichtigungen' },
-  { path: '/salaries',           icon: Wallet,     label: 'Gehälter',           feature: 'gehaelter' },
-  { path: '/dokumente',       icon: FileText,      label: 'Dokumente',       feature: 'dokumente' },
-  { path: '/company-planner', icon: CalendarDays,  label: 'Monatsplanung',   feature: 'dokumente' },
+  { path: '/overview',       icon: LayoutDashboard, labelKey: 'nav.overview',       feature: 'overview' },
+  { path: '/belege',         icon: FileText,        labelKey: 'nav.belege',         feature: 'belege' },
+  { path: '/fahrer',         icon: Users,           labelKey: 'nav.fahrer',         feature: 'fahrer' },
+  { path: '/cars',           icon: Car,             labelKey: 'nav.cars',           feature: 'fahrzeuge' },
+  { path: '/umsaetze',       icon: Plus,            labelKey: 'nav.umsaetze',       feature: 'umsaetze' },
+  { path: '/fixkosten',      icon: Receipt,         labelKey: 'nav.fixkosten',      feature: 'fixkosten' },
+  { path: '/bargeldbestand', icon: DollarSign,      labelKey: 'nav.bargeldbestand', feature: 'bargeldbestand' },
+  { path: '/werkstatt',      icon: Wrench,          labelKey: 'nav.werkstatt',      feature: 'werkstatt' },
+  { path: '/abrechnung',     icon: Calculator,      labelKey: 'nav.abrechnung',     feature: 'abrechnung' },
+  { path: '/notes',              icon: StickyNote,  labelKey: 'nav.notes',          feature: 'notizen' },
+  { path: '/benachrichtigungen', icon: Bell,        labelKey: 'nav.notifications',  feature: 'benachrichtigungen' },
+  { path: '/salaries',           icon: Wallet,      labelKey: 'nav.salaries',       feature: 'gehaelter' },
+  { path: '/dokumente',       icon: FileText,       labelKey: 'nav.documents',      feature: 'dokumente' },
+  { path: '/company-planner', icon: CalendarDays,   labelKey: 'nav.planner',        feature: 'dokumente' },
 ];
 
 const ADMIN_ITEMS: NavItem[] = [
-  { path: '/users',    icon: UserCog,    label: 'Benutzer',      feature: 'rollen_nutzer' },
-  { path: '/roles',    icon: Shield,     label: 'Rollen',        feature: 'rollen_nutzer' },
-  { path: '/billing',  icon: CreditCard, label: 'Abonnement',    feature: 'overview' },
-  { path: '/settings', icon: Settings,   label: 'Einstellungen', feature: 'overview' },
+  { path: '/users',    icon: UserCog,    labelKey: 'nav.users',    feature: 'rollen_nutzer' },
+  { path: '/roles',    icon: Shield,     labelKey: 'nav.roles',    feature: 'rollen_nutzer' },
+  { path: '/billing',  icon: CreditCard, labelKey: 'nav.billing',  feature: 'overview' },
+  { path: '/settings', icon: Settings,   labelKey: 'nav.settings', feature: 'overview' },
 ];
 
 const Sidebar: React.FC<SidebarProps> = ({ isSupportAdmin }) => {
@@ -51,6 +53,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isSupportAdmin }) => {
   const { settings } = useCompanySettings();
   const { isViewingAsCompany, activeCompany, exitCompany } = useSuperAdmin();
   const { can } = usePlan();
+  const { t } = useTranslation();
   const navigate = useNavigate();
 
   const handleLogout = async () => {
@@ -92,7 +95,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isSupportAdmin }) => {
         }}
       >
         <Icon size={16} className="flex-shrink-0" />
-        <span>{item.label}</span>
+        <span>{t(item.labelKey)}</span>
       </NavLink>
     );
   };
@@ -109,7 +112,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isSupportAdmin }) => {
             {isViewingAsCompany ? activeCompany?.name : (settings?.company_name || 'El-Professor')}
           </p>
           <p className="text-[10px]" style={{ color: isViewingAsCompany ? 'var(--warning)' : 'var(--text-tertiary)' }}>
-            {isViewingAsCompany ? 'Super Admin Ansicht' : 'Verwaltungssystem'}
+            {isViewingAsCompany ? t('shell.superAdminView') : t('shell.systemName')}
           </p>
         </div>
       </div>
@@ -122,7 +125,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isSupportAdmin }) => {
           <>
             <div className="pt-3 pb-1 px-3">
               <p className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>
-                Verwaltung
+                {t('nav.section.management')}
               </p>
             </div>
             {ADMIN_ITEMS.map(renderNavItem)}
@@ -136,7 +139,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isSupportAdmin }) => {
           <>
             <div className="pt-3 pb-1 px-3">
               <p className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>
-                Super Admin
+                {t('nav.section.superAdmin')}
               </p>
             </div>
             <button
@@ -147,7 +150,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isSupportAdmin }) => {
               onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'transparent'; }}
             >
               <ArrowLeft size={16} className="flex-shrink-0" />
-              <span>Zurück zur Verwaltung</span>
+              <span>{t('nav.backToAdmin')}</span>
             </button>
           </>
         )}
@@ -163,7 +166,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isSupportAdmin }) => {
           onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'transparent'; }}
         >
           <LogOut size={16} className="flex-shrink-0" />
-          <span>Abmelden</span>
+          <span>{t('common.logout')}</span>
         </button>
       </div>
     </div>

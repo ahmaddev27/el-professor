@@ -1,7 +1,9 @@
 import React from 'react';
 import { Lock, Zap, ArrowLeft } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { Plan, PLAN_RANK } from '../contexts/PlanContext';
+import { Plan } from '../contexts/PlanContext';
+import { useTranslation } from '../contexts/LanguageContext';
+import type { TranslationKey } from '../i18n';
 
 interface LockedFeaturePageProps {
   featureName: string;
@@ -22,6 +24,19 @@ const PLAN_COLOR: Record<Plan, string> = {
 
 const LockedFeaturePage: React.FC<LockedFeaturePageProps> = ({ featureName, requiredPlan }) => {
   const navigate = useNavigate();
+  const { t } = useTranslation();
+  const planLabel = t('locked.planSuffix', { plan: PLAN_LABELS[requiredPlan] });
+
+  // Feature names shown in the plan comparison. Statutory terms (Werkstatt,
+  // Abrechnung, Stundennachweis) resolve to themselves in English.
+  const ADVANCED_FEATURES: TranslationKey[] = [
+    'nav.werkstatt', 'nav.abrechnung', 'nav.notes',
+    'locked.feature.rollenNutzer', 'nav.notifications',
+  ];
+  const PREMIUM_FEATURES: TranslationKey[] = [
+    'nav.salaries', 'locked.feature.trinkgeld', 'locked.feature.stundennachweis',
+    'locked.feature.allAdvanced',
+  ];
 
   return (
     <div
@@ -35,11 +50,11 @@ const LockedFeaturePage: React.FC<LockedFeaturePageProps> = ({ featureName, requ
       </div>
 
       <h2 className="text-xl font-bold mb-2" style={{ color: 'var(--text-primary)' }}>
-        {featureName} ist nicht in Ihrem Plan
+        {t('locked.title', { feature: featureName })}
       </h2>
 
       <p className="text-sm mb-6 max-w-sm leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
-        Dieses Modul ist ab dem{' '}
+        {t('locked.body.before')}{' '}
         <span
           className="font-semibold px-1.5 py-0.5 rounded-md"
           style={{
@@ -47,9 +62,9 @@ const LockedFeaturePage: React.FC<LockedFeaturePageProps> = ({ featureName, requ
             color: PLAN_COLOR[requiredPlan],
           }}
         >
-          {PLAN_LABELS[requiredPlan]}-Plan
+          {planLabel}
         </span>{' '}
-        verfügbar. Kontaktieren Sie uns um Ihren Plan zu upgraden.
+        {t('locked.body.after')}
       </p>
 
       <div className="flex items-center gap-3">
@@ -61,7 +76,7 @@ const LockedFeaturePage: React.FC<LockedFeaturePageProps> = ({ featureName, requ
           onMouseLeave={e => ((e.currentTarget as HTMLElement).style.background = 'transparent')}
         >
           <ArrowLeft size={14} />
-          Zurück zur Übersicht
+          {t('locked.backToOverview')}
         </button>
 
         <a
@@ -70,7 +85,7 @@ const LockedFeaturePage: React.FC<LockedFeaturePageProps> = ({ featureName, requ
           style={{ background: PLAN_COLOR[requiredPlan], color: 'white' }}
         >
           <Zap size={14} />
-          Plan upgraden
+          {t('locked.upgrade')}
         </a>
       </div>
 
@@ -80,24 +95,24 @@ const LockedFeaturePage: React.FC<LockedFeaturePageProps> = ({ featureName, requ
         style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}
       >
         <p className="text-xs font-semibold uppercase tracking-wider mb-3" style={{ color: 'var(--text-tertiary)' }}>
-          Verfügbar im {PLAN_LABELS[requiredPlan]}-Plan
+          {t('locked.availableIn', { plan: PLAN_LABELS[requiredPlan] })}
         </p>
         {requiredPlan === 'advanced' && (
           <ul className="space-y-1.5 text-sm" style={{ color: 'var(--text-secondary)' }}>
-            {['Werkstatt', 'Abrechnung', 'Notizen', 'Rollen & Nutzer', 'Benachrichtigungen'].map(f => (
-              <li key={f} className="flex items-center gap-2">
+            {ADVANCED_FEATURES.map(key => (
+              <li key={key} className="flex items-center gap-2">
                 <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: PLAN_COLOR.advanced }} />
-                {f}
+                {t(key)}
               </li>
             ))}
           </ul>
         )}
         {requiredPlan === 'premium' && (
           <ul className="space-y-1.5 text-sm" style={{ color: 'var(--text-secondary)' }}>
-            {['Gehälter', 'Trinkgeld Quittung', 'Stundennachweis', '+ alle Advanced-Features'].map(f => (
-              <li key={f} className="flex items-center gap-2">
+            {PREMIUM_FEATURES.map(key => (
+              <li key={key} className="flex items-center gap-2">
                 <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: PLAN_COLOR.premium }} />
-                {f}
+                {t(key)}
               </li>
             ))}
           </ul>

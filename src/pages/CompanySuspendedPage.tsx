@@ -1,9 +1,11 @@
 import React from 'react';
 import { ShieldOff, LogOut, Mail } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
+import { useTranslation } from '../contexts/LanguageContext';
 
 const CompanySuspendedPage: React.FC = () => {
   const { signOut } = useAuth();
+  const { t } = useTranslation();
 
   return (
     <div className="min-h-screen bg-[#060a0f] flex items-center justify-center p-6 relative overflow-hidden">
@@ -20,17 +22,17 @@ const CompanySuspendedPage: React.FC = () => {
             <ShieldOff className="text-orange-400" size={28} />
           </div>
 
-          <h1 className="text-xl font-bold text-white mb-3">Zugang gesperrt</h1>
+          <h1 className="text-xl font-bold text-white mb-3">{t('status.suspended.title')}</h1>
 
           <p className="text-white/55 text-sm leading-relaxed mb-6">
-            Ihr Unternehmenskonto wurde vorübergehend gesperrt. Der Zugriff auf die Anwendung ist derzeit nicht möglich.
+            {t('status.suspended.body')}
           </p>
 
           <div className="p-4 rounded-xl border border-orange-500/20 bg-orange-500/5 mb-6">
             <div className="flex items-start gap-3">
               <Mail size={15} className="text-orange-400 flex-shrink-0 mt-0.5" />
               <p className="text-xs text-white/50 text-left leading-relaxed">
-                Für weitere Informationen wenden Sie sich bitte an{' '}
+                {t('status.contact')}{' '}
                 <a
                   href="mailto:support@el-professor.de"
                   className="text-orange-400 hover:text-orange-300 transition-colors"
@@ -46,7 +48,7 @@ const CompanySuspendedPage: React.FC = () => {
             className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl border border-white/10 text-white/50 hover:text-white/80 hover:border-white/20 transition-all text-sm"
           >
             <LogOut size={14} />
-            Abmelden
+            {t('common.logout')}
           </button>
         </div>
       </div>

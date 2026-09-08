@@ -4,6 +4,8 @@ import Sidebar from './Sidebar';
 import UserMenu from './UserMenu';
 import TrialBanner from './TrialBanner';
 import { useTheme } from '../contexts/ThemeContext';
+import { useTranslation } from '../contexts/LanguageContext';
+import LanguageSwitcher from './LanguageSwitcher';
 import { Sun, Moon } from 'lucide-react';
 
 interface AppLayoutProps {
@@ -12,6 +14,7 @@ interface AppLayoutProps {
 
 const AppLayout: React.FC<AppLayoutProps> = ({ isSupportAdmin }) => {
   const { toggleTheme, isDark } = useTheme();
+  const { t } = useTranslation();
 
   return (
     <div className="min-h-screen" style={{ background: 'var(--bg-base)' }}>
@@ -37,12 +40,13 @@ const AppLayout: React.FC<AppLayoutProps> = ({ isSupportAdmin }) => {
                   border: '1px solid var(--border)',
                   color: 'var(--text-secondary)',
                 }}
-                title={isDark ? 'Zum hellen Modus wechseln' : 'Zum dunklen Modus wechseln'}
+                title={isDark ? t('shell.themeToLight') : t('shell.themeToDark')}
               >
                 {isDark ? <Sun size={16} /> : <Moon size={16} />}
               </button>
             </div>
             <div className="flex items-center gap-2">
+              <LanguageSwitcher />
               <UserMenu />
             </div>
           </div>

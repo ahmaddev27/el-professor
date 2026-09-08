@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { X, AlertTriangle, CheckCircle, XCircle, Info } from 'lucide-react';
+import { useTranslation } from '../contexts/LanguageContext';
 
 interface ConfirmationModalProps {
   isOpen: boolean;
@@ -20,9 +21,13 @@ const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
   title,
   message,
   type,
-  confirmText = 'Bestätigen',
-  cancelText = 'Abbrechen'
+  confirmText,
+  cancelText,
 }) => {
+  const { t } = useTranslation();
+  // Callers may override; otherwise fall back to the translated defaults.
+  const confirmLabel = confirmText ?? t('common.confirm');
+  const cancelLabel = cancelText ?? t('common.cancel');
   const [cancelHover, setCancelHover] = useState(false);
   const [closeHover, setCloseHover] = useState(false);
   const [confirmHover, setConfirmHover] = useState(false);
@@ -97,7 +102,7 @@ const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
                 onMouseEnter={() => setCancelHover(true)}
                 onMouseLeave={() => setCancelHover(false)}
               >
-                {cancelText}
+                {cancelLabel}
               </button>
             )}
             <button
@@ -113,7 +118,7 @@ const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
               onMouseEnter={() => setConfirmHover(true)}
               onMouseLeave={() => setConfirmHover(false)}
             >
-              {type === 'confirm' ? confirmText : 'OK'}
+              {type === 'confirm' ? confirmLabel : 'OK'}
             </button>
           </div>
         </div>
