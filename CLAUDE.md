@@ -10,19 +10,47 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 The domain is German payroll & compliance paperwork: import the monthly Fahrtenbuch (XLSX ride log), assign drivers to vehicle blocks, produce Stundennachweise (statutory time records) and a corrected Fahrtenbuch that reconcile with the Steuerberater's payroll figures.
 
-**All UI text is German and must stay German.** Never translate labels like `Stundennachweis`, `Fahrer`, `Schicht`, `Fahrzeugwechsel zu kurz`, `Abrechnung`, `Beleg`. Numbers use German formatting (decimal comma: `41,47`), dates `DD.MM.YYYY` in the UI and `YYYY-MM-DD` in storage. **Never use US `MM/DD/YYYY`.**
+Numbers use German formatting (decimal comma: `41,47`), dates `DD.MM.YYYY` in the UI and `YYYY-MM-DD` in storage. **Never use US `MM/DD/YYYY`.**
+
+### Language
+
+The UI is bilingual German/English; German is the source language and the fallback. `src/i18n/de.ts` is canonical and defines the key type, `en.ts` is a `Partial`, so screens convert incrementally and a missing English key renders German rather than a raw key. `useTranslation()` from `src/contexts/LanguageContext.tsx` gives you `t(key, vars)` and `tPlural({one, other}, count)`.
+
+Roughly ten screens are converted; the other ~90 files still hold German literals. Converting one means adding keys to **both** dictionaries and swapping the literals for `t(...)`.
+
+Three things stay German in both languages, and the reasoning is in the header of `src/i18n/index.ts`:
+
+- **Generated documents.** Stundennachweis PDFs and the Fahrtenbuch XLSX carry statutory German text, and the `'original'` export mode has to reproduce the imported sheet's headers byte for byte. Translating any of it breaks the export and produces invalid records. Those strings live in the export modules, never in the dictionaries.
+- **Domain vocabulary** — `Stundennachweis`, `Fahrtenbuch`, `Abrechnung`, `Beleg`, `Werkstatt`, `Monatsplanung`, `Lohnart`, `Bundesland` — so the screen and the paperwork agree.
+- **Money and date formatting**, because on-screen figures map one-to-one onto German documents.
 
 ## Commands
 
 ```bash
 npm install
-npm run dev      # Vite dev server
-npm run build    # tsc + vite build -> dist/
-npm run lint     # ESLint (flat config, typescript-eslint + react-hooks)
-npm run preview  # serve the production build
+npm run dev              # Vite dev server
+npm run build            # typecheck ratchet, then vite build -> dist/
+npm run typecheck        # raw tsc --noEmit, full error list
+npm run typecheck:update # lower the ratchet baseline after fixing errors
+npm run lint             # ESLint (flat config, typescript-eslint + react-hooks)
+npm run preview          # serve the production build
 ```
 
-There is **no test suite** — no vitest/jest, no `*.test.*` files, and no TODO/FIXME markers anywhere in `src/`. `npm run build` (TypeScript strict, `noUnusedLocals`, `noUnusedParameters`) plus `npm run lint` is the entire automated safety net. Verify behavior changes by running the app.
+There is **no test suite** — no vitest/jest, no `*.test.*` files. The typecheck plus `npm run lint` is the entire automated safety net. Verify behavior changes by running the app.
+
+### The typecheck ratchet
+
+`npm run build` used to be `vite build` alone. Vite strips types without checking them, so the project accumulated **376 TypeScript errors** that nothing ever surfaced — including undefined identifiers that threw at render, permission checks that were always true, four `ConfirmationModal` call sites using invented prop names (one dialog never rendered at all), and 71 `showToast` calls with their arguments reversed, which made every one of those notifications display the bare word "success" instead of its German message.
+
+`scripts/typecheck-ratchet.mjs` now runs before every build and compares the error count against `typecheck-baseline.json`:
+
+- **more** errors than the baseline → build fails, listing the worst files
+- **fewer** errors → build fails, asking you to run `npm run typecheck:update` and commit the lowered baseline
+- **equal** → build proceeds
+
+Failing on improvement is deliberate: a baseline that moves only by an explicit commit stays honest. Use `npm run build:novalidate` if you genuinely need the bundle without the gate.
+
+The remaining errors are not uniform. Roughly 182 are unused locals (`TS6133`, noise from `noUnusedLocals`); the rest include real type mismatches worth triaging. `TS2304` (undefined name), `TS2774` (condition always true) and `TS2367` (impossible comparison) are almost always genuine defects.
 
 Env (`.env`, see `.env.example`): `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` are required; `VITE_APP_URL` is the origin baked into auth email redirect links (`/auth/callback`) and must be the real domain in production. `VITE_API_URL` belongs to the dead PHP backend (see below) and is unused.
 
@@ -153,7 +181,12 @@ The whole `backend/` directory (10 PHP files, placeholder DB credentials) is dea
 - Large files to grep rather than read whole: `HistoricalWorkingHoursWizard.tsx` (11.7k), `CompanyPlannerPage.legacy.tsx` (4.6k, dead), `StundennachweisPage.tsx` (4.0k), `MonatsplanungStundennachweisPreview.tsx` (3.9k), `HistoricalSteuerberaterView.tsx` (3.3k, dead), `historicalWorkingHoursCleanEngine.ts` (2.8k).
 - `.claude/settings.json` registers a `PostToolUse` hook pointing at `/tmp/cc-agent/57153190/project/.claude/strip-prose.py`, a path from a different machine. It fails silently (`|| true`).
 - `project/` is empty. `.bolt/` is leftover Bolt scaffolding. Two `vite.config.ts.timestamp-*.mjs` files are Vite temp artifacts.
-- This directory is **not a git repository**, so there is no history to consult and no safety net for destructive edits.
+
+## Audit and remediation
+
+`Docs/audit/` holds the output of a 259-agent review: `FINDINGS.md` (71 findings that survived adversarial verification, with evidence and file:line) and `REMEDIATION-PLAN.md` (phased plan). Read the plan before starting security or payroll work — it explains why the payroll fixes are blocked on establishing what §3b EStG actually requires, since the app carries four competing premium tables and nobody has checked any of them against the statute.
+
+`CONTRIBUTING.md` records the branch model and the rules that must not be traded away.
 
 ## Working style for this codebase
 

@@ -5,7 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "node scripts/typecheck-ratchet.mjs && vite build",
+    "build:novalidate": "vite build",
+    "typecheck": "node node_modules/typescript/bin/tsc --noEmit -p tsconfig.app.json",
+    "typecheck:update": "node scripts/typecheck-ratchet.mjs --update",
     "lint": "eslint .",
     "preview": "vite preview"
   },
