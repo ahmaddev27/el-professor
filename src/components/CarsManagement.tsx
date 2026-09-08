@@ -480,13 +480,13 @@ export default function CarsManagement() {
       {deleteConfirmation.isOpen && (
         <ConfirmationModal
           isOpen={deleteConfirmation.isOpen}
+          type="confirm"
           title="Fahrzeug löschen"
           message={`Möchten Sie das Fahrzeug "${deleteConfirmation.kennzeichen}" wirklich löschen? Diese Aktion kann nicht rückgängig gemacht werden.`}
-          confirmLabel="Löschen"
-          cancelLabel="Abbrechen"
+          confirmText="Löschen"
+          cancelText="Abbrechen"
           onConfirm={confirmDelete}
-          onCancel={() => setDeleteConfirmation({ isOpen: false, carId: null, kennzeichen: '' })}
-          variant="danger"
+          onClose={() => setDeleteConfirmation({ isOpen: false, carId: null, kennzeichen: '' })}
         />
       )}
     </div>

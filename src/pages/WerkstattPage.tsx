@@ -372,11 +372,13 @@ export default function WerkstattPage() {
 
       {checkToDelete && (
         <ConfirmationModal
+          isOpen={!!checkToDelete}
+          type="confirm"
           title="Check löschen"
           message={`Möchten Sie den Check für ${checkToDelete.car?.kennzeichen} wirklich löschen?`}
-          confirmLabel="Löschen"
+          confirmText="Löschen"
           onConfirm={handleDelete}
-          onCancel={() => setCheckToDelete(null)}
+          onClose={() => setCheckToDelete(null)}
         />
       )}
     </div>
