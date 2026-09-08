@@ -42,9 +42,31 @@ export const BLOCK_MESSAGES: Record<BlockReason, string> = {
   company_rejected:     'Ihre Registrierung wurde abgelehnt. Bitte kontaktieren Sie den Support.',
 };
 
+/**
+ * Maps a user_profiles.status onto a BlockReason, or null when the status
+ * permits access. Shared by the sign-in path and the session-restore path so
+ * the two cannot drift apart.
+ */
+export const userStatusBlockReason = (
+  status: string | null | undefined,
+  isSuperAdmin: boolean,
+): BlockReason | null => {
+  if (isSuperAdmin) return null; // super admins are never blocked
+  if (status === 'inactive') return 'user_inactive';
+  if (status === 'suspended') return 'user_suspended';
+  if (status === 'deactivated') return 'user_deactivated';
+  return null;
+};
+
 interface AuthContextType {
   user: User | null;
   profile: UserProfile | null;
+  /**
+   * Set when the *restored* session belongs to an account that has since been
+   * revoked. Sign-in blocks are returned by signIn(); this covers the reload and
+   * OAuth paths, where signIn() is never called.
+   */
+  userBlockReason: BlockReason | null;
   session: Session | null;
   loading: boolean;
   companyId: string | null;
@@ -88,6 +110,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [rejectionReason, setRejectionReason] = useState<string | null>(null);
   const [subscriptionStatus, setSubscriptionStatus] = useState<'inactive' | 'active' | 'expired' | 'suspended' | null>(null);
   const [subscriptionExpiresAt, setSubscriptionExpiresAt] = useState<string | null>(null);
+  const [userBlockReason, setUserBlockReason] = useState<BlockReason | null>(null);
 
   const sessionTimerRef = useRef<NodeJS.Timeout | null>(null);
   const userRef = useRef<User | null>(null);
@@ -112,6 +135,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setRejectionReason(null);
     setSubscriptionStatus(null);
     setSubscriptionExpiresAt(null);
+    setUserBlockReason(null);
   };
 
   const signOutRef = useRef<() => Promise<void>>();
@@ -151,6 +175,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       setProfile(data ?? null);
 
+      // Account revocation must bite on every session, not only at sign-in.
+      // signIn() calls checkProfileAccess, but a restored session and the Google
+      // OAuth path never reach it, so a suspended or deactivated user kept working
+      // across reloads indefinitely.
+      setUserBlockReason(
+        userStatusBlockReason(data?.status, data?.is_super_admin ?? false),
+      );
+
       // Fetch company approval + subscription status if the user has a company
       if (data?.company_id && !data.is_super_admin) {
         const { data: company } = await supabase
@@ -187,12 +219,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       if (!profileData) return null; // no profile yet = new user, allow through
 
+      const statusBlock = userStatusBlockReason(
+        profileData.status as string,
+        !!profileData.is_super_admin,
+      );
+      if (statusBlock) return statusBlock;
       if (profileData.is_super_admin) return null; // super admins are never blocked
-
-      const status = profileData.status as string;
-      if (status === 'inactive') return 'user_inactive';
-      if (status === 'suspended') return 'user_suspended';
-      if (status === 'deactivated') return 'user_deactivated';
 
       // Check company status
       if (profileData.company_id) {
@@ -434,6 +466,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const value = {
     user,
     profile,
+    userBlockReason,
     session,
     loading,
     companyId,
