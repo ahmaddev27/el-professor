@@ -222,24 +222,41 @@ export default function MonatsplanungAppliedRuns({ companyId, reloadToken, stale
     setDeleteError('');
     setDeleteSuccess('');
     try {
-      const { error } = await supabase
-        .from('company_planning_runs')
-        .delete()
-        .eq('id', deleteTarget.id)
-        .eq('company_id', companyId);
+      // Never DELETE the row directly. company_planning_runs cascades to
+      // planning_finalizations, monthly_planning_manual_exceptions,
+      // planning_run_adjustments (Ausgleichsstunden) and
+      // company_planning_run_blocks, and sets fahrtenbuch_trips
+      // .assignment_planning_run_id to NULL — so a raw delete silently destroys
+      // the finalization record and the exception audit of a closed payroll
+      // month while leaving the trips assigned but unattributable.
+      //
+      // delete_or_archive_monthly_planning_run archives instead whenever trips
+      // still reference the run, and only deletes when nothing does.
+      const { data, error } = await supabase.rpc('delete_or_archive_monthly_planning_run', {
+        p_run_id: deleteTarget.id,
+      });
       if (error) {
         console.error('Delete planning run error:', error);
-        setDeleteError('Monatsplanung konnte nicht gelöscht werden.');
+        setDeleteError(`Monatsplanung konnte nicht gelöscht werden: ${error.message}`);
         return;
       }
-      setDeleteSuccess('Monatsplanung wurde endgültig gelöscht.');
-      setRuns(prev => prev.filter(r => r.id !== deleteTarget.id));
-      setFinalizations(prev => {
-        const next = new Map(prev);
-        next.delete(deleteTarget.id);
-        return next;
-      });
+
+      const action = (data as { action?: string; referenced_trips?: number } | null)?.action;
+      const referenced = (data as { referenced_trips?: number } | null)?.referenced_trips ?? 0;
+
+      if (action === 'archived') {
+        setDeleteSuccess(
+          `Monatsplanung wurde archiviert, da noch ${referenced} Fahrten dieser Planung zugeordnet sind. ` +
+          'Die Planung bleibt zur Nachvollziehbarkeit erhalten.',
+        );
+      } else {
+        setDeleteSuccess('Monatsplanung wurde gelöscht.');
+      }
+
+      // Either way the run leaves the applied list; reload so an archived run
+      // shows its real status rather than a stale local guess.
       setDeleteTarget(null);
+      await reload();
     } catch (e) {
       console.error('Delete planning run exception:', e);
       setDeleteError('Monatsplanung konnte nicht gelöscht werden.');
@@ -373,7 +390,7 @@ export default function MonatsplanungAppliedRuns({ companyId, reloadToken, stale
           >
             <div className="flex items-start justify-between px-5 py-4 border-b" style={{ borderColor: 'var(--border)' }}>
               <h3 className="text-base font-semibold flex items-center gap-2" style={{ color: '#991b1b' }}>
-                <Trash2 size={16} /> Plan endgültig löschen
+                <Trash2 size={16} /> Monatsplanung entfernen
               </h3>
               <button onClick={() => { if (!deleting) setDeleteTarget(null); }} className="p-1 rounded" style={{ color: 'var(--text-tertiary)' }}>
                 <X size={16} />
@@ -381,7 +398,9 @@ export default function MonatsplanungAppliedRuns({ companyId, reloadToken, stale
             </div>
             <div className="px-5 py-4 space-y-3">
               <p className="text-sm" style={{ color: 'var(--text-primary)' }}>
-                Diese Monatsplanung wird endgültig gelöscht. Dieser Vorgang kann nicht rückgängig gemacht werden.
+                Sind noch Fahrten dieser Planung zugeordnet, wird sie archiviert und bleibt nachvollziehbar.
+                Nur eine Planung ohne zugeordnete Fahrten wird endgültig gelöscht. Dieser Vorgang kann nicht
+                rückgängig gemacht werden.
               </p>
               <div className="text-xs px-3 py-2 rounded-lg" style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}>
                 <span className="font-semibold">{MONTHS_DE[deleteTarget.month - 1]} {deleteTarget.year}</span>
