@@ -3,7 +3,7 @@ import { NavLink, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, FileText, Users, DollarSign, Plus,
   Menu, X, UserCog, Receipt, Wallet, LogOut, Calculator,
-  StickyNote, Car, Wrench, Shield, Settings, Building2, BarChart3, Bell, CalendarDays, CreditCard,
+  StickyNote, Car, Wrench, Shield, Settings, Bell, CalendarDays, CreditCard, ArrowLeft,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useCompanySettings } from '../contexts/CompanySettingsContext';
@@ -49,7 +49,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isSupportAdmin }) => {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const { signOut, isSuperAdmin } = useAuth();
   const { settings } = useCompanySettings();
-  const { isViewingAsCompany, activeCompany } = useSuperAdmin();
+  const { isViewingAsCompany, activeCompany, exitCompany } = useSuperAdmin();
   const { can } = usePlan();
   const navigate = useNavigate();
 
@@ -57,12 +57,6 @@ const Sidebar: React.FC<SidebarProps> = ({ isSupportAdmin }) => {
     await signOut();
     setIsMobileMenuOpen(false);
   };
-
-  const superAdminItems = [
-    { path: '/super-admin',           icon: BarChart3,  label: 'Plattform' },
-    { path: '/super-admin/companies', icon: Building2,  label: 'Unternehmen' },
-    { path: '/super-admin/billing',   icon: Receipt,    label: 'Abos & Zahlungen' },
-  ];
 
   const renderNavItem = (item: NavItem) => {
     const Icon = item.icon;
@@ -135,40 +129,26 @@ const Sidebar: React.FC<SidebarProps> = ({ isSupportAdmin }) => {
           </>
         )}
 
-        {isSuperAdmin && (
+        {/* Platform administration lives in its own shell at /super-admin and is
+            deliberately absent from this sidebar. While a super admin is viewing a
+            company, this is the way back. */}
+        {isSuperAdmin && isViewingAsCompany && (
           <>
             <div className="pt-3 pb-1 px-3">
               <p className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>
                 Super Admin
               </p>
             </div>
-            {superAdminItems.map((item) => {
-              const Icon = item.icon;
-              return (
-                <NavLink
-                  key={item.path}
-                  to={item.path}
-                  onClick={() => setIsMobileMenuOpen(false)}
-                  className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-150 w-full"
-                  style={({ isActive }) =>
-                    isActive
-                      ? { background: 'var(--warning)', color: 'white', boxShadow: '0 2px 10px rgba(245,158,11,0.2)' }
-                      : { color: 'var(--warning)', background: 'transparent' }
-                  }
-                  onMouseEnter={e => {
-                    const el = e.currentTarget as HTMLElement;
-                    if (!el.getAttribute('aria-current')) el.style.background = 'var(--warning-subtle)';
-                  }}
-                  onMouseLeave={e => {
-                    const el = e.currentTarget as HTMLElement;
-                    if (!el.getAttribute('aria-current')) el.style.background = 'transparent';
-                  }}
-                >
-                  <Icon size={16} className="flex-shrink-0" />
-                  <span>{item.label}</span>
-                </NavLink>
-              );
-            })}
+            <button
+              onClick={() => { exitCompany(); setIsMobileMenuOpen(false); navigate('/super-admin'); }}
+              className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-150 w-full"
+              style={{ color: 'var(--warning)', background: 'transparent' }}
+              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'var(--warning-subtle)'; }}
+              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'transparent'; }}
+            >
+              <ArrowLeft size={16} className="flex-shrink-0" />
+              <span>Zurück zur Verwaltung</span>
+            </button>
           </>
         )}
       </nav>

@@ -41,6 +41,7 @@ import RejectedPage from './pages/RejectedPage';
 import CompanySuspendedPage from './pages/CompanySuspendedPage';
 import ActivationPage from './pages/ActivationPage';
 import AccountBlockedPage from './pages/AccountBlockedPage';
+import AdminLayout from './components/AdminLayout';
 
 // ─── Plan-gated route wrapper ─────────────────────────────────────────────────
 
@@ -176,7 +177,7 @@ function App() {
                 </SubscriptionGuard>
                 </MustChangePasswordGuard>
               }>
-                <Route index element={<Navigate to="/overview" replace />} />
+                <Route index element={<Navigate to={isSuperAdmin ? "/super-admin" : "/overview"} replace />} />
                 {/* Activation routes — inside AppLayout so sidebar is visible */}
                 <Route path="abo-aktivieren" element={<ActivationPage />} />
                 <Route path="aktivierung"    element={<ActivationPage />} />
@@ -205,12 +206,21 @@ function App() {
                 {isAdmin && <Route path="roles"    element={<PlanGate feature="rollen_nutzer"><RolesPage /></PlanGate>} />}
                 {isAdmin && <Route path="billing"  element={<CompanyBillingPage />} />}
                 {isAdmin && <Route path="settings" element={<SettingsPage />} />}
-                {isSuperAdmin && <Route path="super-admin" element={<SuperAdminDashboard />} />}
-                {isSuperAdmin && <Route path="super-admin/companies" element={<CompaniesPage />} />}
-                {isSuperAdmin && <Route path="super-admin/billing" element={<SubscriptionBillingPage />} />}
-                {isSuperAdmin && <Route path="super-admin/abnahme-diagnose" element={<AbnahmeDiagnosticPage />} />}
                 <Route path="*" element={<Navigate to="/overview" replace />} />
               </Route>
+
+              {/* Platform administration — its own shell, with no company
+                  navigation. Registered only for super admins, and AdminLayout
+                  re-checks, so a direct URL cannot land a tenant user here. */}
+              {isSuperAdmin && (
+                <Route path="/super-admin" element={<AdminLayout />}>
+                  <Route index                   element={<SuperAdminDashboard />} />
+                  <Route path="companies"        element={<CompaniesPage />} />
+                  <Route path="billing"          element={<SubscriptionBillingPage />} />
+                  <Route path="abnahme-diagnose" element={<AbnahmeDiagnosticPage />} />
+                  <Route path="*" element={<Navigate to="/super-admin" replace />} />
+                </Route>
+              )}
             </Routes>
           </BrowserRouter>
         </PlanProvider>

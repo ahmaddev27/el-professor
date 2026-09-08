@@ -1,13 +1,21 @@
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { LogOut, Settings, ChevronDown, Building2, X as XIcon } from 'lucide-react';
-import { Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
 
 const UserMenu: React.FC = () => {
   const [isOpen, setIsOpen] = useState(false);
-  const { user, profile, signOut, isSuperAdmin } = useAuth();
+  const { user, profile, signOut } = useAuth();
   const { isViewingAsCompany, activeCompany, exitCompany } = useSuperAdmin();
+  const navigate = useNavigate();
+
+  // Leaving the company view returns to the administration shell — a super
+  // admin who is not inspecting a tenant has no business in the company UI.
+  const handleExitCompany = () => {
+    exitCompany();
+    navigate('/super-admin');
+  };
 
   const handleSignOut = async () => {
     try {
@@ -65,7 +73,7 @@ const UserMenu: React.FC = () => {
           <Building2 size={13} className="flex-shrink-0" />
           <span className="hidden sm:inline truncate max-w-[120px]">{activeCompany?.name}</span>
           <button
-            onClick={exitCompany}
+            onClick={handleExitCompany}
             className="flex-shrink-0 ml-1 rounded transition-opacity hover:opacity-70"
             title="Unternehmensansicht beenden"
           >
@@ -140,25 +148,6 @@ const UserMenu: React.FC = () => {
 
             {/* Actions */}
             <div className="p-1.5">
-              {isSuperAdmin && (
-                <>
-                  <div className="px-3 py-1.5">
-                    <p className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: '#f59e0b' }}>Super Admin</p>
-                  </div>
-                  <Link
-                    to="/super-admin/companies"
-                    onClick={() => setIsOpen(false)}
-                    className="w-full px-3 py-2 text-left text-sm rounded-lg flex items-center gap-2.5 transition-colors"
-                    style={{ color: '#f59e0b', display: 'flex' }}
-                    onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'rgba(245,158,11,0.1)'; }}
-                    onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'transparent'; }}
-                  >
-                    <Building2 size={14} />
-                    <span>Firmenverwaltung</span>
-                  </Link>
-                  <div className="my-1" style={{ borderTop: '1px solid var(--border)' }} />
-                </>
-              )}
               <button
                 onClick={() => setIsOpen(false)}
                 className="w-full px-3 py-2 text-left text-sm rounded-lg flex items-center gap-2.5 transition-colors"
