@@ -116,6 +116,7 @@ const DocumentsPage: React.FC = () => {
   // Single-row delete
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState('');
 
   // Group expand/collapse — keyed by "${year}-${month}"
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
@@ -242,11 +243,21 @@ const DocumentsPage: React.FC = () => {
   };
 
   const handleDeleteConfirm = async () => {
-    if (!deleteConfirmId) return;
+    if (!deleteConfirmId || !companyId) return;
     setDeleting(true);
-    await supabase.from('saved_stundennachweise').delete().eq('id', deleteConfirmId);
-    setDeleteConfirmId(null);
+    // Scope by company as well as id: deleting a statutory record by primary key
+    // alone leaves the tenant boundary entirely to RLS.
+    const { error } = await supabase
+      .from('saved_stundennachweise')
+      .delete()
+      .eq('id', deleteConfirmId)
+      .eq('company_id', companyId);
     setDeleting(false);
+    if (error) {
+      setDeleteError(`Löschen fehlgeschlagen: ${error.message}`);
+      return;
+    }
+    setDeleteConfirmId(null);
     loadArchive();
   };
 
@@ -263,10 +274,12 @@ const DocumentsPage: React.FC = () => {
     setDeletingGroup(true);
     setGroupDeleteError('');
     const ids = group.records.map(r => r.id);
+    if (!companyId) return;
     const { error } = await supabase
       .from('saved_stundennachweise')
       .delete()
-      .in('id', ids);
+      .in('id', ids)
+      .eq('company_id', companyId);
     if (error) {
       setGroupDeleteError(error.message);
       setDeletingGroup(false);
@@ -589,7 +602,7 @@ const DocumentsPage: React.FC = () => {
                                     <FileDown size={12} /> PDF
                                   </button>
                                   <button
-                                    onClick={() => setDeleteConfirmId(rec.id)}
+                                    onClick={() => { setDeleteError(''); setDeleteConfirmId(rec.id); }}
                                     title="Löschen"
                                     className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all"
                                     style={{ background: 'var(--error-subtle)', color: 'var(--error)', border: '1px solid transparent' }}
@@ -626,9 +639,17 @@ const DocumentsPage: React.FC = () => {
             <p className="text-sm mb-6" style={{ color: 'var(--text-secondary)' }}>
               Diesen gespeicherten Stundennachweis wirklich löschen? Diese Aktion kann nicht rückgängig gemacht werden.
             </p>
+            {deleteError && (
+              <div
+                className="rounded-lg p-3 mb-4 text-sm"
+                style={{ background: 'var(--danger-subtle)', border: '1px solid var(--danger)', color: 'var(--danger)' }}
+              >
+                {deleteError}
+              </div>
+            )}
             <div className="flex gap-3 justify-end">
               <button
-                onClick={() => setDeleteConfirmId(null)}
+                onClick={() => { setDeleteConfirmId(null); setDeleteError(''); }}
                 disabled={deleting}
                 className="px-4 py-2 rounded-lg text-sm font-medium transition-colors"
                 style={{ background: 'var(--bg-muted)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
