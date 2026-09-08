@@ -40,6 +40,7 @@ import PendingApprovalPage from './pages/PendingApprovalPage';
 import RejectedPage from './pages/RejectedPage';
 import CompanySuspendedPage from './pages/CompanySuspendedPage';
 import ActivationPage from './pages/ActivationPage';
+import AccountBlockedPage from './pages/AccountBlockedPage';
 
 // ─── Plan-gated route wrapper ─────────────────────────────────────────────────
 
@@ -109,7 +110,7 @@ const SubscriptionGuard: React.FC<{ children: React.ReactNode }> = ({ children }
 // ─── App ──────────────────────────────────────────────────────────────────────
 
 function App() {
-  const { user, loading: authLoading, isAdmin, isSuperAdmin, companyApprovalStatus } = useAuth();
+  const { user, loading: authLoading, isAdmin, isSuperAdmin, companyApprovalStatus, userBlockReason } = useAuth();
 
   if (authLoading) {
     return (
@@ -137,6 +138,14 @@ function App() {
         </Routes>
       </BrowserRouter>
     );
+  }
+
+  // Account revocation gate. Runs before the company gates because it is the
+  // narrower block: a deactivated user must be stopped even while their company
+  // is perfectly healthy. signIn() already refuses these accounts; this catches
+  // the restored-session and OAuth paths, where signIn() never runs.
+  if (userBlockReason) {
+    return <AccountBlockedPage reason={userBlockReason} />;
   }
 
   // Approval status gates — only for non-super-admins with a company

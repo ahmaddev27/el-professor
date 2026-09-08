@@ -77,6 +77,32 @@ Deno.serve(async (req: Request) => {
     const callerCompanyId: string | null = callerProfile?.company_id ?? null
     const isSuperAdmin: boolean = callerProfile?.is_super_admin ?? false
 
+    // A non-super-admin with no company has no tenant to administer. Previously
+    // this state fell through every `if (!isSuperAdmin && callerCompanyId)` check
+    // as "no restriction", which turned a company-less 'admin' profile into a
+    // de-facto super admin. Deny it outright.
+    if (!isSuperAdmin && !callerCompanyId) {
+      throw new Error('Access denied: administrator account is not assigned to a company')
+    }
+
+    // Tenant check for a single target user. Never compares two NULLs as a match:
+    // both the caller's and the target's company must be present and identical.
+    const assertSameCompany = async (targetUserId: string): Promise<void> => {
+      if (isSuperAdmin) return
+
+      const { data: targetProfile } = await supabaseAdmin
+        .from('user_profiles')
+        .select('company_id')
+        .eq('user_id', targetUserId)
+        .maybeSingle()
+
+      const targetCompany: string | null = targetProfile?.company_id ?? null
+
+      if (!targetCompany || targetCompany !== callerCompanyId) {
+        throw new Error('Access denied: Cannot manage users from another company')
+      }
+    }
+
     const url = new URL(req.url)
     const method = req.method
     const path = url.pathname
@@ -96,7 +122,7 @@ Deno.serve(async (req: Request) => {
         .in('user_id', userIds)
 
       // Super admins see all users; company admins see only their company
-      if (!isSuperAdmin && callerCompanyId) {
+      if (!isSuperAdmin) {
         profileQuery = profileQuery.eq('company_id', callerCompanyId)
       }
 
@@ -243,17 +269,7 @@ Deno.serve(async (req: Request) => {
       const body: UpdateUserRequest = await req.json()
 
       // Verify caller can manage this user (same company or super admin)
-      if (!isSuperAdmin) {
-        const { data: targetProfile } = await supabaseAdmin
-          .from('user_profiles')
-          .select('company_id')
-          .eq('user_id', body.user_id)
-          .maybeSingle()
-
-        if (targetProfile?.company_id !== callerCompanyId) {
-          throw new Error('Access denied: Cannot manage users from another company')
-        }
-      }
+      await assertSameCompany(body.user_id)
 
       if (body.email || body.password) {
         const updateData: any = {}
@@ -297,17 +313,7 @@ Deno.serve(async (req: Request) => {
     if (method === 'POST' && path.includes('/activate-deactivate')) {
       const body: ActivateDeactivateRequest = await req.json()
 
-      if (!isSuperAdmin) {
-        const { data: targetProfile } = await supabaseAdmin
-          .from('user_profiles')
-          .select('company_id')
-          .eq('user_id', body.user_id)
-          .maybeSingle()
-
-        if (targetProfile?.company_id !== callerCompanyId) {
-          throw new Error('Access denied: Cannot manage users from another company')
-        }
-      }
+      await assertSameCompany(body.user_id)
 
       const updateData: any = { status: body.status }
       if (body.status === 'active') updateData.activated_at = new Date().toISOString()
@@ -330,6 +336,8 @@ Deno.serve(async (req: Request) => {
     // =========================================================================
     if (method === 'POST' && path.includes('/resend-invite')) {
       const body: ResendInviteRequest = await req.json()
+
+      await assertSameCompany(body.user_id)
 
       const { data: userData } = await supabaseAdmin.auth.admin.getUserById(body.user_id)
       if (!userData.user) throw new Error('User not found')
@@ -363,17 +371,7 @@ Deno.serve(async (req: Request) => {
         throw new Error('Passwort muss mindestens 8 Zeichen lang sein')
       }
 
-      if (!isSuperAdmin) {
-        const { data: targetProfile } = await supabaseAdmin
-          .from('user_profiles')
-          .select('company_id')
-          .eq('user_id', body.user_id)
-          .maybeSingle()
-
-        if (targetProfile?.company_id !== callerCompanyId) {
-          throw new Error('Access denied: Cannot manage users from another company')
-        }
-      }
+      await assertSameCompany(body.user_id)
 
       const { error: updateError } = await supabaseAdmin.auth.admin.updateUserById(body.user_id, {
         password: body.password,
@@ -400,17 +398,7 @@ Deno.serve(async (req: Request) => {
       const body = await req.json()
       const userId = body.user_id
 
-      if (!isSuperAdmin) {
-        const { data: targetProfile } = await supabaseAdmin
-          .from('user_profiles')
-          .select('company_id')
-          .eq('user_id', userId)
-          .maybeSingle()
-
-        if (targetProfile?.company_id !== callerCompanyId) {
-          throw new Error('Access denied: Cannot delete users from another company')
-        }
-      }
+      await assertSameCompany(userId)
 
       const { error: deleteError } = await supabaseAdmin.auth.admin.deleteUser(userId)
       if (deleteError) throw deleteError
