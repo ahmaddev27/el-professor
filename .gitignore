@@ -26,3 +26,11 @@ dist-ssr
 
 # Vite temp artifacts
 vite.config.ts.timestamp-*.mjs
+
+# Schema dumps produced during the VPS migration (may contain structure only,
+# but are large and machine-generated — never a source of truth in git).
+schema-prod.sql
+schema-chain.sql
+
+# Local deployment secrets
+deploy/.env

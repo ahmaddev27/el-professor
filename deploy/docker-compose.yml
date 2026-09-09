@@ -1,0 +1,185 @@
+# Self-hosted stack for Y&A Mobility.
+#
+# Replaces the hosted Supabase project with the same open-source components on
+# your own VPS: PostgreSQL, PostgREST (the `.from()` API), GoTrue (auth),
+# Storage, Realtime, and Kong as the single gateway.
+#
+# The point of keeping these components rather than writing a new backend is the
+# 410 RLS policies. They are enforced by PostgreSQL itself and are currently the
+# only real tenant boundary in the product — the client-side role checks were
+# found to be decorative. Swapping PostgREST for a hand-written API means
+# reimplementing all 410 as application code, which is where the audit found
+# nine authorization holes. Keeping the stack keeps the boundary.
+#
+# Usage:
+#   cp .env.example .env     # then fill in every value
+#   docker compose up -d
+#
+# Nothing here is exposed directly. Kong is the only public port, and TLS
+# terminates in Caddy in front of it (see Caddyfile).
+
+name: ya-mobility
+
+services:
+  # ── Database ───────────────────────────────────────────────────────────────
+  db:
+    image: supabase/postgres:15.8.1.060
+    restart: unless-stopped
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: postgres
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET}
+      JWT_EXP: ${JWT_EXPIRY:-3600}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+      # Applied in filename order on FIRST boot only. After that, migrations are
+      # applied with psql like any other change — see Docs/migration.
+      - ../supabase/migrations:/docker-entrypoint-initdb.d/migrations:ro
+    # Deliberately not published to the host. Reach it with
+    #   docker compose exec db psql -U postgres
+    # or an SSH tunnel. A Postgres port open to the internet is how these get
+    # ransomwared.
+    expose:
+      - '5432'
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres -h localhost']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # ── REST API — this is what supabase.from() talks to ──────────────────────
+  rest:
+    image: postgrest/postgrest:v12.2.3
+    restart: unless-stopped
+    depends_on:
+      db: { condition: service_healthy }
+    environment:
+      PGRST_DB_URI: postgres://authenticator:${POSTGRES_PASSWORD}@db:5432/postgres
+      PGRST_DB_SCHEMAS: public,storage
+      PGRST_DB_ANON_ROLE: anon
+      PGRST_JWT_SECRET: ${JWT_SECRET}
+      PGRST_DB_USE_LEGACY_GUCS: 'false'
+      # Matches the hosted default the app's pagination loops assume.
+      PGRST_DB_MAX_ROWS: 1000
+    expose:
+      - '3000'
+
+  # ── Auth ───────────────────────────────────────────────────────────────────
+  auth:
+    image: supabase/gotrue:v2.170.0
+    restart: unless-stopped
+    depends_on:
+      db: { condition: service_healthy }
+    environment:
+      GOTRUE_API_HOST: 0.0.0.0
+      GOTRUE_API_PORT: '9999'
+      API_EXTERNAL_URL: ${PUBLIC_URL:?set PUBLIC_URL}
+
+      GOTRUE_DB_DRIVER: postgres
+      GOTRUE_DB_DATABASE_URL: postgres://supabase_auth_admin:${POSTGRES_PASSWORD}@db:5432/postgres
+
+      GOTRUE_SITE_URL: ${APP_URL:?set APP_URL}
+      GOTRUE_URI_ALLOW_LIST: ${APP_URL}/auth/callback,${APP_URL}/auth/set-password
+      GOTRUE_JWT_SECRET: ${JWT_SECRET}
+      GOTRUE_JWT_EXP: ${JWT_EXPIRY:-3600}
+      GOTRUE_JWT_AUD: authenticated
+      GOTRUE_JWT_DEFAULT_GROUP_NAME: authenticated
+
+      # The app creates companies through the company-signup function, not by
+      # open registration. Keep this false unless that changes.
+      GOTRUE_DISABLE_SIGNUP: ${DISABLE_SIGNUP:-false}
+
+      # Email confirmation is expected OFF: company-signup creates users with
+      # email_confirm: true and LoginForm has a dedicated error for this being
+      # left on.
+      GOTRUE_MAILER_AUTOCONFIRM: 'true'
+
+      # Password reset and invite links depend on this. Without working SMTP,
+      # resetPasswordForEmail and generateLink fail and users cannot recover
+      # their accounts.
+      GOTRUE_SMTP_HOST: ${SMTP_HOST:?set SMTP_HOST}
+      GOTRUE_SMTP_PORT: ${SMTP_PORT:-587}
+      GOTRUE_SMTP_USER: ${SMTP_USER}
+      GOTRUE_SMTP_PASS: ${SMTP_PASS}
+      GOTRUE_SMTP_ADMIN_EMAIL: ${SMTP_SENDER}
+      GOTRUE_SMTP_SENDER_NAME: ${SMTP_SENDER_NAME:-El-Professor}
+      GOTRUE_MAILER_URLPATHS_RECOVERY: /auth/callback
+      GOTRUE_MAILER_URLPATHS_INVITE: /auth/callback
+
+      # Google sign-in — the app calls signInWithOAuth({ provider: 'google' }).
+      # Add ${PUBLIC_URL}/auth/v1/callback to the authorised redirect URIs in
+      # the Google Cloud console, or the button silently fails.
+      GOTRUE_EXTERNAL_GOOGLE_ENABLED: ${GOOGLE_ENABLED:-false}
+      GOTRUE_EXTERNAL_GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
+      GOTRUE_EXTERNAL_GOOGLE_SECRET: ${GOOGLE_SECRET}
+      GOTRUE_EXTERNAL_GOOGLE_REDIRECT_URI: ${PUBLIC_URL}/auth/v1/callback
+    expose:
+      - '9999'
+
+  # ── Storage — company-logos and fahrtenbuch-files ─────────────────────────
+  storage:
+    image: supabase/storage-api:v1.19.3
+    restart: unless-stopped
+    depends_on:
+      db: { condition: service_healthy }
+      rest: { condition: service_started }
+    environment:
+      ANON_KEY: ${ANON_KEY:?set ANON_KEY}
+      SERVICE_KEY: ${SERVICE_ROLE_KEY:?set SERVICE_ROLE_KEY}
+      POSTGREST_URL: http://rest:3000
+      PGRST_JWT_SECRET: ${JWT_SECRET}
+      DATABASE_URL: postgres://supabase_storage_admin:${POSTGRES_PASSWORD}@db:5432/postgres
+      FILE_SIZE_LIMIT: 52428800
+      STORAGE_BACKEND: file
+      FILE_STORAGE_BACKEND_PATH: /var/lib/storage
+      TENANT_ID: stub
+      REGION: stub
+      GLOBAL_S3_BUCKET: stub
+    volumes:
+      - storage-data:/var/lib/storage
+    expose:
+      - '5000'
+
+  # ── Realtime — CompanySettingsContext subscribes to postgres_changes ──────
+  realtime:
+    image: supabase/realtime:v2.34.7
+    restart: unless-stopped
+    depends_on:
+      db: { condition: service_healthy }
+    environment:
+      PORT: '4000'
+      DB_HOST: db
+      DB_PORT: '5432'
+      DB_USER: supabase_admin
+      DB_PASSWORD: ${POSTGRES_PASSWORD}
+      DB_NAME: postgres
+      DB_ENC_KEY: ${REALTIME_ENC_KEY:?set REALTIME_ENC_KEY}
+      API_JWT_SECRET: ${JWT_SECRET}
+      SECRET_KEY_BASE: ${REALTIME_SECRET_KEY_BASE:?set REALTIME_SECRET_KEY_BASE}
+      ERL_AFLAGS: -proto_dist inet_tcp
+      APP_NAME: realtime
+      SEED_SELF_HOST: 'true'
+      RLIMIT_NOFILE: '10000'
+    expose:
+      - '4000'
+
+  # ── Gateway — the single origin the browser talks to ──────────────────────
+  kong:
+    image: kong:2.8.1
+    restart: unless-stopped
+    depends_on: [rest, auth, storage, realtime]
+    environment:
+      KONG_DATABASE: 'off'
+      KONG_DECLARATIVE_CONFIG: /home/kong/kong.yml
+      KONG_DNS_ORDER: LAST,A,CNAME
+      KONG_PLUGINS: request-transformer,cors,key-auth
+    volumes:
+      - ./kong.yml:/home/kong/kong.yml:ro
+    ports:
+      # Bound to loopback: Caddy terminates TLS and proxies to it. Never expose
+      # Kong's plain HTTP port to the internet.
+      - '127.0.0.1:8000:8000'
+
+volumes:
+  db-data:
+  storage-data:
