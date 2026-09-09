@@ -1,0 +1,37 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`the two tables disagree — recorded, not endorsed > differs in 2024 1`] = `
+{
+  "onlyInCleanEngine": [
+    "2024-03-31",
+  ],
+  "onlyInGermanHolidays": [],
+}
+`;
+
+exports[`the two tables disagree — recorded, not endorsed > differs in 2025 1`] = `
+{
+  "onlyInCleanEngine": [
+    "2025-04-20",
+  ],
+  "onlyInGermanHolidays": [],
+}
+`;
+
+exports[`the two tables disagree — recorded, not endorsed > differs in 2026 1`] = `
+{
+  "onlyInCleanEngine": [
+    "2026-04-05",
+  ],
+  "onlyInGermanHolidays": [],
+}
+`;
+
+exports[`the two tables disagree — recorded, not endorsed > differs in 2027 1`] = `
+{
+  "onlyInCleanEngine": [
+    "2027-03-28",
+  ],
+  "onlyInGermanHolidays": [],
+}
+`;
