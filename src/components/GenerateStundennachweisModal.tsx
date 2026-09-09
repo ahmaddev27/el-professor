@@ -389,6 +389,7 @@ export default function GenerateStundennachweisModal({ open, onClose, importId, 
           .eq('is_canceled', false)
           .order('trip_date')
           .order('start_time', { nullsFirst: false })
+          .order('id', { ascending: true })
           .range(offset, offset + BATCH - 1);
         if (fetchErr) throw new Error(fetchErr.message);
         const rows = (data ?? []) as FahrtenbuchTrip[];

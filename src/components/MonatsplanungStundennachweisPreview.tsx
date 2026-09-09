@@ -1336,6 +1336,7 @@ function MonatsplanungStundennachweisPreview({ run, onClose, onTransferApplied }
           .eq('assignment_planning_run_id', run.id)
           .order('trip_date', { ascending: true })
           .order('start_time', { ascending: true })
+          .order('id', { ascending: true })
           .range(offset, offset + BATCH - 1);
         if (useCompanyFilter) q = q.eq('company_id', effectiveCompanyId);
 

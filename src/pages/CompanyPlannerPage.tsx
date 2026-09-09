@@ -68,6 +68,7 @@ async function fetchAllTripsForImport(companyId: string, importId: string): Prom
       .eq('import_id', importId)
       .order('trip_date', { ascending: true })
       .order('start_time', { ascending: true, nullsFirst: false })
+      .order('id', { ascending: true })
       .range(offset, offset + BATCH_SIZE - 1);
     if (error) throw error;
     const rows = (data as FahrtenbuchTrip[]) ?? [];

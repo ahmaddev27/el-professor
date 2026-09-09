@@ -9,6 +9,7 @@ import { format, getMonth, getYear } from 'date-fns';
 import ConfirmationModal from './ConfirmationModal';
 import SalaryDetailsModal from './SalaryDetailsModal';
 import { handleDatabaseError } from '../utils/errorHandler';
+import { fetchAllPaginated } from '../utils/fetchAllPaginated';
 import { exportSalariesToExcel } from '../utils/excelExport';
 import { getBusinessMonthRange } from '../utils/weekCalculations';
 import { generateDriverSalaryPdf } from '../utils/driverSalaryPdf';
@@ -72,20 +73,38 @@ const SalariesManagement: React.FC<SalariesManagementProps> = ({ drivers }) => {
         setTimeout(() => reject(new Error('Request timeout')), 10000)
       );
 
+      // Both tables are paginated: PostgREST caps a response at 1000 rows without
+      // reporting it, and a truncated income set understates a driver's revenue —
+      // a figure this screen then writes into the salaries table.
       const dataPromises = Promise.all([
-        supabase.from('salaries').select('*').eq('company_id', companyId).order('period_start', { ascending: false }),
-        supabase.from('income').select('*').eq('company_id', companyId).order('date', { ascending: false })
+        fetchAllPaginated<any>(
+          (from, to) => supabase
+            .from('salaries')
+            .select('*')
+            .eq('company_id', companyId)
+            .order('period_start', { ascending: false })
+            .order('id', { ascending: true })
+            .range(from, to),
+          { label: 'Gehälter' },
+        ),
+        fetchAllPaginated<any>(
+          (from, to) => supabase
+            .from('income')
+            .select('*')
+            .eq('company_id', companyId)
+            .order('date', { ascending: false })
+            .order('id', { ascending: true })
+            .range(from, to),
+          { label: 'Umsätze' },
+        ),
       ]);
 
-      const [salariesData, incomesData] = await Promise.race([dataPromises, timeoutPromise]) as any;
+      const [salariesRows, incomeRows] = await Promise.race([dataPromises, timeoutPromise]) as [any[], any[]];
 
-      if (salariesData.error) throw salariesData.error;
-      if (incomesData.error) throw incomesData.error;
+      setSalaries(salariesRows);
+      setIncomes(incomeRows);
 
-      setSalaries(salariesData.data || []);
-      setIncomes(incomesData.data || []);
-
-      return { salaries: salariesData.data || [], incomes: incomesData.data || [] };
+      return { salaries: salariesRows, incomes: incomeRows };
     } catch (err: any) {
       console.error('Error loading data:', err);
       showError('Fehler beim Laden', handleDatabaseError(err));

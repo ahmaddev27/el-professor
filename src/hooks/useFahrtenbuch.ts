@@ -148,6 +148,7 @@ export function useFahrtenbuch() {
           .eq('company_id', companyId)
           .order('trip_date', { ascending: true })
           .order('start_time', { ascending: true, nullsFirst: false })
+          .order('id', { ascending: true })
           .range(from, to);
         if (importId) q = q.eq('import_id', importId);
         return q;

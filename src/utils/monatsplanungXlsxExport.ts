@@ -94,6 +94,7 @@ async function fetchAllTrips(companyId: string, importId: string): Promise<TripR
       .order('source_row_index', { ascending: true, nullsFirst: false })
       .order('trip_date', { ascending: true })
       .order('start_time', { ascending: true, nullsFirst: false })
+      .order('id', { ascending: true })
       .range(offset, offset + BATCH - 1);
     if (error) throw error;
     const rows = (data ?? []) as TripRow[];
