@@ -70,6 +70,7 @@ import {
 } from '../utils/historicalWorkingHoursStundennachweisPreview';
 import * as XLSX from 'xlsx';
 import { type StructuredNote } from '../utils/monatsplanungPhase3';
+import { fetchAllPaginated } from '../utils/fetchAllPaginated';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -283,6 +284,7 @@ async function fetchAllTrips(companyId: string, importId: string): Promise<Fahrt
       .eq('company_id', companyId).eq('import_id', importId)
       .order('trip_date', { ascending: true })
       .order('start_time', { ascending: true, nullsFirst: false })
+      .order('id', { ascending: true })
       .range(offset, offset + BATCH_SIZE - 1);
     if (error) throw error;
     const rows = (data ?? []) as FahrtenbuchTrip[];
@@ -9833,6 +9835,8 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
     source_sheet_name: string | null;
     mode: string;
     driver_hour_summary_json: DriverHourSummaryRow[];
+    /** Nullable: the import may be pruned after the plan is saved. */
+    import_id: string | null;
   }
   const [savedPlans, setSavedPlans] = useState<SavedPlanRow[]>([]);
   const [loadingSavedPlans, setLoadingSavedPlans] = useState(false);
@@ -9939,11 +9943,21 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
 
   useEffect(() => {
     if (!selectedImportId || allDrivers.length === 0) return;
-    supabase.from('fahrtenbuch_trips').select('original_driver_name,original_driver_id')
-      .eq('import_id', selectedImportId).eq('is_canceled', false)
-      .then(({ data }) => {
+    // Paginated: this read was unbounded, so any driver whose rides all fell
+    // after row 1000 was silently missing from the Arbeitsstunden plan.
+    fetchAllPaginated<{ original_driver_name: string; original_driver_id: string | null }>(
+      (from, to) => supabase
+        .from('fahrtenbuch_trips')
+        .select('original_driver_name,original_driver_id')
+        .eq('import_id', selectedImportId)
+        .eq('is_canceled', false)
+        .order('id', { ascending: true })
+        .range(from, to),
+      { label: 'Fahrer' },
+    )
+      .then((data) => {
         const seen = new Map<string, string>();
-        for (const r of (data ?? []) as { original_driver_name: string; original_driver_id: string | null }[]) {
+        for (const r of data) {
           if (r.original_driver_id && !seen.has(r.original_driver_id)) seen.set(r.original_driver_id, r.original_driver_name);
         }
         const ownerIds = new Set(allDrivers.filter(d => d.employment_type === 'company_owner').map(d => d.id));
@@ -10033,7 +10047,7 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
     setLoadingSavedPlans(true);
     supabase
       .from('historical_wh_saved_plans')
-      .select('id,month,year,original_file_name,saved_at,export_ready,export_block_reason,shift_map_json,note_reassignments_json,boundary_rows_json,driver_configs_json,driver_hour_summary_json,storage_path,source_columns_json,source_sheet_name,mode')
+      .select('id,month,year,original_file_name,saved_at,export_ready,export_block_reason,shift_map_json,note_reassignments_json,boundary_rows_json,driver_configs_json,driver_hour_summary_json,storage_path,source_columns_json,source_sheet_name,mode,import_id')
       .eq('company_id', companyId)
       .eq('month', month)
       .eq('year', year)
@@ -10094,7 +10108,7 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
       // Refresh list
       supabase
         .from('historical_wh_saved_plans')
-        .select('id,month,year,original_file_name,saved_at,export_ready,export_block_reason,shift_map_json,note_reassignments_json,boundary_rows_json,driver_configs_json,driver_hour_summary_json,storage_path,source_columns_json,source_sheet_name,mode')
+        .select('id,month,year,original_file_name,saved_at,export_ready,export_block_reason,shift_map_json,note_reassignments_json,boundary_rows_json,driver_configs_json,driver_hour_summary_json,storage_path,source_columns_json,source_sheet_name,mode,import_id')
         .eq('company_id', companyId)
         .eq('month', month)
         .eq('year', year)
@@ -10124,14 +10138,20 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
     }
     setDownloadingPlanId(plan.id);
     try {
-      // Fetch original trips from DB
-      const { data: tripRows } = await supabase
-        .from('fahrtenbuch_trips')
-        .select('*')
-        .eq('import_id', plan.import_id ?? '')
-        .order('source_row_index', { ascending: true });
-
-      const trips = (tripRows ?? []) as FahrtenbuchTrip[];
+      // Fetch original trips from DB. Paginated and company-scoped: an
+      // unpaginated read silently truncated at 1000 rows, so a month with more
+      // rides than that exported a statutory Fahrtenbuch missing its tail.
+      const trips = await fetchAllPaginated<FahrtenbuchTrip>(
+        (from, to) => supabase
+          .from('fahrtenbuch_trips')
+          .select('*')
+          .eq('company_id', companyId)
+          .eq('import_id', plan.import_id ?? '')
+          .order('source_row_index', { ascending: true, nullsFirst: false })
+          .order('id', { ascending: true })
+          .range(from, to),
+        { label: 'Fahrten' },
+      );
 
       // Resolve owner driver name from saved driver_configs_json
       const ownerConfig = (plan.driver_configs_json as WzDriverConfig[] | null)?.find(c => c.isOwner);

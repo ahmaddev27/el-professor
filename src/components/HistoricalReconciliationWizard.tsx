@@ -245,6 +245,7 @@ async function fetchAllTrips(companyId: string, importId: string): Promise<Fahrt
       .eq('is_canceled', false)
       .order('trip_date', { ascending: true })
       .order('start_time', { ascending: true, nullsFirst: false })
+      .order('id', { ascending: true })
       .range(offset, offset + BATCH_SIZE - 1);
     if (error) throw error;
     const rows = (data ?? []) as FahrtenbuchTrip[];
@@ -268,6 +269,7 @@ async function fetchAllTripsForExport(companyId: string, importId: string): Prom
       .order('source_row_index', { ascending: true, nullsFirst: false })
       .order('trip_date', { ascending: true })
       .order('start_time', { ascending: true, nullsFirst: false })
+      .order('id', { ascending: true })
       .range(offset, offset + BATCH_SIZE - 1);
     if (error) throw error;
     const rows = (data ?? []) as FahrtenbuchTrip[];

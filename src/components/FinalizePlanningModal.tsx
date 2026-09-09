@@ -251,6 +251,7 @@ export default function FinalizePlanningModal({ run, companyId, userId, onClose,
           .select('id, trip_date, start_time, end_time, assigned_driver_id, assigned_driver_name, assignment_block_id, car_identifier, is_canceled, raw_data_json')
           .eq('company_id', companyId)
           .eq('assignment_planning_run_id', run.id)
+          .order('id', { ascending: true })
           .range(offset, offset + BATCH - 1);
         if (tErr) throw new Error(`Datenbankfehler beim Laden der Fahrten:\n${formatError(tErr)}`);
         allTrips.push(...(data ?? []));

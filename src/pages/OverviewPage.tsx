@@ -14,6 +14,7 @@ import {
 import { format, isWithinInterval, parseISO } from 'date-fns';
 import { de } from 'date-fns/locale';
 import { supabase } from '../lib/supabase';
+import { fetchAllPaginated } from '../utils/fetchAllPaginated';
 import {
   AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend
@@ -264,6 +265,7 @@ const OverviewPage: React.FC = () => {
   const [cars, setCars] = useState<{ id: string; kennzeichen: string; tuev_gueltig_bis: string | null }[]>([]);
   const [selectedMonth, setSelectedMonth] = useState<string>(format(new Date(), 'yyyy-MM'));
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!dbLoading) loadData();
@@ -271,6 +273,7 @@ const OverviewPage: React.FC = () => {
 
   const loadData = async () => {
     setLoading(true);
+    setLoadError(null);
     try {
       const [receiptsData, driversData] = await Promise.all([
         receiptActions.get(),
@@ -283,23 +286,52 @@ const OverviewPage: React.FC = () => {
         loadWerkstattChecks(), loadUserProfiles(), loadCars(),
       ]);
     } catch (err) {
+      // Previously swallowed: a failed query left every array empty and the
+      // dashboard rendered a confident 0,00 € instead of admitting it had no
+      // data. Say so rather than presenting a wrong number as a real one.
       console.error('Error loading data:', err);
+      setLoadError(err instanceof Error ? err.message : 'Unbekannter Fehler');
     } finally {
       setLoading(false);
     }
   };
 
+  // All three were unpaginated. PostgREST caps a response at 1000 rows without
+  // reporting it, so past that point the dashboard's Umsatz and Gewinn figures
+  // were simply wrong — computed from a partial income table. They also dropped
+  // their error, turning a failed query into a plausible-looking zero.
   const loadFixedCosts = async () => {
-    const { data } = await supabase.from('fixed_costs').select('id, description, amount').eq('company_id', companyId);
-    setFixedCosts(data || []);
+    setFixedCosts(await fetchAllPaginated<any>(
+      (from, to) => supabase
+        .from('fixed_costs')
+        .select('id, description, amount')
+        .eq('company_id', companyId)
+        .order('id', { ascending: true })
+        .range(from, to),
+      { label: 'Fixkosten' },
+    ));
   };
   const loadIncomes = async () => {
-    const { data } = await supabase.from('income').select('*').eq('company_id', companyId);
-    setIncomes(data || []);
+    setIncomes(await fetchAllPaginated<Income>(
+      (from, to) => supabase
+        .from('income')
+        .select('*')
+        .eq('company_id', companyId)
+        .order('id', { ascending: true })
+        .range(from, to),
+      { label: 'Umsätze' },
+    ));
   };
   const loadSalaries = async () => {
-    const { data } = await supabase.from('salaries').select('*').eq('company_id', companyId);
-    setSalaries(data || []);
+    setSalaries(await fetchAllPaginated<any>(
+      (from, to) => supabase
+        .from('salaries')
+        .select('*')
+        .eq('company_id', companyId)
+        .order('id', { ascending: true })
+        .range(from, to),
+      { label: 'Gehälter' },
+    ));
   };
   const loadWerkstattChecks = async () => {
     const { data } = await supabase
@@ -398,6 +430,17 @@ const OverviewPage: React.FC = () => {
 
   return (
     <div className="space-y-5 pb-8">
+
+      {/* A failed load used to render as 0,00 € everywhere. Say what happened. */}
+      {loadError && (
+        <div
+          className="p-4 rounded-2xl text-sm"
+          style={{ background: 'var(--danger-subtle)', border: '1px solid var(--danger)', color: 'var(--danger)' }}
+        >
+          <strong>Daten konnten nicht vollständig geladen werden.</strong> Die angezeigten Zahlen sind
+          möglicherweise unvollständig. ({loadError})
+        </div>
+      )}
 
       {/* ── Super Admin Banner ── */}
       {isSuperAdmin && (
