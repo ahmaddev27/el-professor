@@ -1,0 +1,73 @@
+# Kong routes the four Supabase services under one origin, matching the paths
+# @supabase/supabase-js expects. The client is configured with a single URL and
+# derives /auth/v1, /rest/v1, /storage/v1 and /realtime/v1 from it — so these
+# paths are not a convention, they are the contract.
+
+_format_version: '2.1'
+_transform: true
+
+consumers:
+  - username: anon
+    keyauth_credentials:
+      - key: $ANON_KEY
+  - username: service_role
+    keyauth_credentials:
+      - key: $SERVICE_ROLE_KEY
+
+acls:
+  - consumer: anon
+    group: anon
+  - consumer: service_role
+    group: admin
+
+services:
+  # ── Auth ──────────────────────────────────────────────────────────────────
+  # Open by design: sign-in, sign-up, password recovery and the OAuth callback
+  # all have to be reachable without a session.
+  - name: auth-v1-open
+    url: http://auth:9999/
+    routes:
+      - name: auth-v1-open
+        strip_path: true
+        paths: [/auth/v1/]
+    plugins:
+      - name: cors
+
+  # ── REST — every .from() call ─────────────────────────────────────────────
+  # key-auth only proves the request carries a publishable key. Row-level
+  # authorisation is PostgREST + RLS, driven by the JWT's claims.
+  - name: rest-v1
+    url: http://rest:3000/
+    routes:
+      - name: rest-v1-all
+        strip_path: true
+        paths: [/rest/v1/]
+    plugins:
+      - name: cors
+      - name: key-auth
+        config:
+          hide_credentials: true
+
+  # ── Storage ───────────────────────────────────────────────────────────────
+  - name: storage-v1
+    url: http://storage:5000/
+    routes:
+      - name: storage-v1-all
+        strip_path: true
+        paths: [/storage/v1/]
+    plugins:
+      - name: cors
+
+  # ── Realtime — websocket for postgres_changes ─────────────────────────────
+  - name: realtime-v1
+    url: http://realtime:4000/socket/
+    protocol: http
+    routes:
+      - name: realtime-v1-all
+        strip_path: true
+        paths: [/realtime/v1/]
+    plugins:
+      - name: cors
+      - name: key-auth
+        config:
+          hide_credentials: false

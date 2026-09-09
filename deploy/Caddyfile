@@ -1,0 +1,45 @@
+# TLS termination and static hosting.
+#
+# Caddy obtains and renews Let's Encrypt certificates automatically; there is no
+# cron job to forget. Both names must already resolve to this VPS.
+
+# ── The API gateway ────────────────────────────────────────────────────────
+api.your-domain.de {
+	encode zstd gzip
+
+	# Kong is bound to loopback in docker-compose, so this is the only way in.
+	reverse_proxy 127.0.0.1:8000
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+}
+
+# ── The SPA ────────────────────────────────────────────────────────────────
+app.your-domain.de {
+	encode zstd gzip
+	root * /srv/ya-mobility/dist
+
+	# Hashed assets are immutable; index.html must never be cached or a deploy
+	# leaves browsers on the old bundle.
+	@assets path /assets/*
+	header @assets Cache-Control "public, max-age=31536000, immutable"
+	header /index.html Cache-Control "no-cache"
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+
+	# React Router owns the paths — everything that is not a real file is
+	# index.html. This replaces the public/.htaccess rewrite.
+	try_files {path} /index.html
+	file_server
+}
