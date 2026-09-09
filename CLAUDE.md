@@ -67,7 +67,7 @@ Failing on improvement is deliberate: a baseline that moves only by an explicit 
 
 The remaining errors are not uniform. Roughly 182 are unused locals (`TS6133`, noise from `noUnusedLocals`); the rest include real type mismatches worth triaging. `TS2304` (undefined name), `TS2774` (condition always true) and `TS2367` (impossible comparison) are almost always genuine defects.
 
-Env (`.env`, see `.env.example`): `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` are required; `VITE_APP_URL` is the origin baked into auth email redirect links (`/auth/callback`) and must be the real domain in production. `VITE_API_URL` belongs to the dead PHP backend (see below) and is unused.
+Env (`.env`, see `.env.example`): `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` are required; `VITE_APP_URL` is the origin baked into auth email redirect links (`/auth/callback`) and must be the real domain in production, or reset emails point at localhost.
 
 ## Architecture
 
@@ -146,7 +146,7 @@ The `Fahrzeugwechsel zu kurz` check compares absolute millisecond timestamps and
 
 The wizard also pulls in three sibling modules: `historicalRowLevelEngine.ts` (row-level Arbeitsstunden engine + export overlap validation), `historicalWorkingHoursFahrtenbuchExport.ts` (final XLSX build + overlap validation), and `historicalWorkingHoursStundennachweisPreview.ts`.
 
-> **Do not trust `README.md` here.** It attributes the block engine to `ManualTimeCorrectionPanel.tsx` and to `historicalReconstructionSolver.ts`. Both are now **dead code, imported by nothing reachable** (see Dead code below). The `Clean Engine` module above is the live implementation.
+> **Do not trust `README.md` here.** It attributes the block engine to `ManualTimeCorrectionPanel.tsx` and to `historicalReconstructionSolver.ts`. Both were dead code and have been deleted. The `Clean Engine` module above is the live implementation.
 
 Two rules still hold:
 
@@ -171,31 +171,30 @@ The Brutto-Gehälter mode (`HistoricalReconciliationWizard.tsx`) is a different 
 ## Known defects and sharp edges
 
 - **`supabase/migrations/` cannot bootstrap a database.** `companies`, `drivers`, `receipts` and `saved_stundennachweise` are only ever `ALTER`ed and RLS-policied — they have no `CREATE TABLE` anywhere in the chain. The live schema was partly created outside version control. A fresh Supabase project will not come up from migrations alone.
-- **Duplicated constants with divergent values.** `MIN_VEHICLE_SWITCH_BUFFER_MINUTES` is `60` in `carBlockResolver.ts` and `vehicleBlockPlanner.ts` but `30` in `monatsplanungPhase3.ts`. Block-gap thresholds likewise differ across `monatsplanungPhase1.ts` (60 min) and `shiftBlockEngine.ts` (90 min). `buildVehicleBlocks`, `parseFullDatetimeMs` and `getHolidaysForYear` each exist in two modules. Always check which module the calling code actually imports.
+- **Two block-building pipelines still disagree.** `monatsplanungPhase1.ts` chains rides into a block across gaps up to `VEHICLE_BLOCK_GAP_MINUTES = 60`; `shiftBlockEngine.ts` (the Brutto-Gehälter pipeline) uses `BLOCK_SEPARATOR_GAP_MINUTES = 90`. The same month therefore produces different blocks depending on which mode processed it. The name collisions that used to compound this — `MIN_VEHICLE_SWITCH_BUFFER_MINUTES` defined as both 60 and 30, plus duplicate `buildVehicleBlocks` / `parseFullDatetimeMs` / `getHolidaysForYear` — are gone with the dead modules that held them; no exported name is defined twice any more.
+- **Two holiday tables still disagree**, and the golden-master tests pin the difference: `getGermanNationalHolidays` (clean engine) counts Ostersonntag as nationwide, `getHolidaysForYear` does not. See the test section above.
 - **Transfer application is not atomic.** `MonatsplanungStundennachweisPreview.tsx` (~line 3204) applies a multi-trip transfer by looping `reassign_fahrtenbuch_trip` once per trip. A mid-loop failure aborts and leaves the transfer **partially applied** — the error message even reports "X von Y Fahrten wurden aktualisiert". There is no rollback.
 - **Edge functions trust their request bodies.** `apply-discount-code` runs with the service-role key and takes `company_id`, `user_id`, `discount_amount` and `final_price` straight from the body without verifying the caller or recomputing the price. `extract-receipt` performs no auth check at all and spends `ANTHROPIC_API_KEY` on any request. There is no `supabase/config.toml` in the repo, so `verify_jwt` per function exists only in dashboard settings — nothing in version control enforces it.
 - **Two OCR implementations, one live.** The UI uses client-side Tesseract (`utils/receiptOcr.ts` → `ReceiptModal.tsx`). The `extract-receipt` edge function (Claude vision via the Anthropic SDK) is called by **nothing**. The README's claim that it "wraps Tesseract" is wrong on both counts.
-- `index.html` still declares `lang="en"` and serves bolt.new placeholder OG/Twitter images.
+- `index.html` still serves bolt.new placeholder OG/Twitter images. (Its `lang` attribute is now `de` and is kept in step with the chosen language at runtime.)
 
-## Dead code (~14.7k lines, ≈15% of `src/`)
+## Dead code
 
-Imported by nothing reachable. Do not extend, and read with suspicion — much of it is an earlier design that the docs still describe:
+None. 20 unreachable modules (18,063 lines) and the dead `backend/` PHP directory were removed; every file under `src/` is now reachable from `src/main.tsx`.
 
-`pages/CompanyPlannerPage.legacy.tsx` (4620) · `components/HistoricalSteuerberaterView.tsx` (3314) · `utils/historicalPlannerSolver.ts` (1986) · `components/ManualTimeCorrectionPanel.tsx` (1477) · `utils/historicalReconstructionSolver.ts` (988) · `utils/vehicleBlockPlanner.ts` (554) · `hooks/useDocuments.ts` (395) · `components/CreateDocumentModal.tsx` (371) · `components/DocumentCard.tsx` (361) · `components/DocumentBuilder.tsx` (339) · `lib/api.ts` (325) · `components/UploadDocumentModal.tsx` (261) · `components/UpdateIncomeWeeks.tsx` (79) · `pages/StatistikenPage.tsx` (50) · `pages/DruckenPage.tsx` (41)
+Keep it that way. A reachability walk lives at the end of this section's history — rebuild it in a scratch file if you need to check again: start at `src/main.tsx`, follow every static and dynamic import transitively, and anything under `src/` not visited cannot execute. Grepping for a filename is not equivalent, because a module imported only by another dead module still looks used.
 
-`vehicleBlockPlanner`, `historicalPlannerSolver`, `historicalReconstructionSolver` and `useDocuments` are *transitively* dead — their only importers are themselves dead. `StatistikenPage` and `DruckenPage` have no route in `App.tsx`.
-
-The whole `backend/` directory (10 PHP files, placeholder DB credentials) is dead too — see below.
+Deleting it did **not** shrink the bundle — Rollup was already tree-shaking it. What it removes is the far more expensive kind of cost: three of the four competing premium engines, a second `MIN_VEHICLE_SWITCH_BUFFER_MINUTES` with a different value, and several thousand lines that the older docs still describe as the live implementation.
 
 ## Repository hazards
 
-- **The docs contradict the code. The code wins.** `MIGRATION_COMPLETE.md` and `MYSQL_MIGRATION_GUIDE.md` describe a completed migration to a PHP/MySQL backend that **never happened**: `backend/` and `src/lib/api.ts` are imported by nothing and `src/lib/supabase.ts` still exports a real Supabase client. `RLS_FIX_EXPLANATION.md` claims `user_profiles.id` is a `bigint`; the first migration creates it as `uuid`. Confirm every constant, table and RPC name in source before relying on a doc.
+- **The docs contradict the code. The code wins.** `Docs/MIGRATION_COMPLETE.md` and `Docs/MYSQL_MIGRATION_GUIDE.md` describe a completed migration to a PHP/MySQL backend that **never happened**. The `backend/` directory and `src/lib/api.ts` they document have since been deleted as dead code; Supabase was always the only backend. `Docs/RLS_FIX_EXPLANATION.md` claims `user_profiles.id` is a `bigint`; the first migration creates it as `uuid`. Confirm every constant, table and RPC name in source before relying on a doc.
 - `README.md` contains **two concatenated copies** of itself. The first (§1–25) is current; the second (§1–24) is an older revision.
 - `Docs/` duplicates several root docs byte-for-byte. Editing one leaves the other stale.
 - Root-level `*.sql` fix scripts (`FIX_INCOME_POLICIES.sql`, `fix_admin_role.sql`, `apply_salaries_migration.sql`, …) are **not** part of the migration chain. Only `supabase/migrations/` is schema history — with the completeness caveat above.
-- Large files to grep rather than read whole: `HistoricalWorkingHoursWizard.tsx` (11.7k), `CompanyPlannerPage.legacy.tsx` (4.6k, dead), `StundennachweisPage.tsx` (4.0k), `MonatsplanungStundennachweisPreview.tsx` (3.9k), `HistoricalSteuerberaterView.tsx` (3.3k, dead), `historicalWorkingHoursCleanEngine.ts` (2.8k).
+- Large files to grep rather than read whole: `HistoricalWorkingHoursWizard.tsx` (11.7k), `StundennachweisPage.tsx` (4.0k), `MonatsplanungStundennachweisPreview.tsx` (3.9k), `historicalWorkingHoursCleanEngine.ts` (2.8k).
 - `.claude/settings.json` registers a `PostToolUse` hook pointing at `/tmp/cc-agent/57153190/project/.claude/strip-prose.py`, a path from a different machine. It fails silently (`|| true`).
-- `project/` is empty. `.bolt/` is leftover Bolt scaffolding. Two `vite.config.ts.timestamp-*.mjs` files are Vite temp artifacts.
+- `.bolt/` is leftover Bolt scaffolding. `vite.config.ts.timestamp-*.mjs` files are Vite temp artifacts and are gitignored.
 
 ## Audit and remediation
 
