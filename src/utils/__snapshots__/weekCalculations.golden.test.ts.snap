@@ -1,0 +1,137 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`getBusinessMonthRange — current behaviour > bounds April 2026 (month index 3) 1`] = `
+{
+  "end": "2026-05-03",
+  "start": "2026-04-06",
+}
+`;
+
+exports[`getBusinessMonthRange — current behaviour > bounds December 2026 (month index 11) 1`] = `
+{
+  "end": "2027-01-03",
+  "start": "2026-12-07",
+}
+`;
+
+exports[`getBusinessWeeksForMonth — current behaviour > enumerates April 2026 1`] = `
+[
+  {
+    "firstDay": "2026-04-06",
+    "label": "Woche 1 (06.04 - 12.04)",
+    "lastDay": "2026-04-12",
+    "weekNumber": 1,
+  },
+  {
+    "firstDay": "2026-04-13",
+    "label": "Woche 2 (13.04 - 19.04)",
+    "lastDay": "2026-04-19",
+    "weekNumber": 2,
+  },
+  {
+    "firstDay": "2026-04-20",
+    "label": "Woche 3 (20.04 - 26.04)",
+    "lastDay": "2026-04-26",
+    "weekNumber": 3,
+  },
+  {
+    "firstDay": "2026-04-27",
+    "label": "Woche 4 (27.04 - 03.05)",
+    "lastDay": "2026-05-03",
+    "weekNumber": 4,
+  },
+]
+`;
+
+exports[`getBusinessWeeksForMonth — current behaviour > enumerates December 2026 1`] = `
+[
+  {
+    "firstDay": "2026-12-07",
+    "label": "Woche 1 (07.12 - 13.12)",
+    "lastDay": "2026-12-13",
+    "weekNumber": 1,
+  },
+  {
+    "firstDay": "2026-12-14",
+    "label": "Woche 2 (14.12 - 20.12)",
+    "lastDay": "2026-12-20",
+    "weekNumber": 2,
+  },
+  {
+    "firstDay": "2026-12-21",
+    "label": "Woche 3 (21.12 - 27.12)",
+    "lastDay": "2026-12-27",
+    "weekNumber": 3,
+  },
+  {
+    "firstDay": "2026-12-28",
+    "label": "Woche 4 (28.12 - 03.01)",
+    "lastDay": "2027-01-03",
+    "weekNumber": 4,
+  },
+]
+`;
+
+exports[`getBusinessWeeksForMonth — current behaviour > enumerates January 2026 1`] = `
+[
+  {
+    "firstDay": "2026-01-05",
+    "label": "Woche 1 (05.01 - 11.01)",
+    "lastDay": "2026-01-11",
+    "weekNumber": 1,
+  },
+  {
+    "firstDay": "2026-01-12",
+    "label": "Woche 2 (12.01 - 18.01)",
+    "lastDay": "2026-01-18",
+    "weekNumber": 2,
+  },
+  {
+    "firstDay": "2026-01-19",
+    "label": "Woche 3 (19.01 - 25.01)",
+    "lastDay": "2026-01-25",
+    "weekNumber": 3,
+  },
+  {
+    "firstDay": "2026-01-26",
+    "label": "Woche 4 (26.01 - 01.02)",
+    "lastDay": "2026-02-01",
+    "weekNumber": 4,
+  },
+]
+`;
+
+exports[`getBusinessWeeksForMonth — current behaviour > enumerates June 2026 1`] = `
+[
+  {
+    "firstDay": "2026-06-01",
+    "label": "Woche 1 (01.06 - 07.06)",
+    "lastDay": "2026-06-07",
+    "weekNumber": 1,
+  },
+  {
+    "firstDay": "2026-06-08",
+    "label": "Woche 2 (08.06 - 14.06)",
+    "lastDay": "2026-06-14",
+    "weekNumber": 2,
+  },
+  {
+    "firstDay": "2026-06-15",
+    "label": "Woche 3 (15.06 - 21.06)",
+    "lastDay": "2026-06-21",
+    "weekNumber": 3,
+  },
+  {
+    "firstDay": "2026-06-22",
+    "label": "Woche 4 (22.06 - 28.06)",
+    "lastDay": "2026-06-28",
+    "weekNumber": 4,
+  },
+  {
+    "firstDay": "2026-06-29",
+    "label": "Woche 5 (29.06 - 05.07)",
+    "lastDay": "2026-07-05",
+    "weekNumber": 5,
+  },
+]
+`;

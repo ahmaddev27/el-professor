@@ -29,14 +29,29 @@ Three things stay German in both languages, and the reasoning is in the header o
 ```bash
 npm install
 npm run dev              # Vite dev server
-npm run build            # typecheck ratchet, then vite build -> dist/
+npm run build            # typecheck ratchet, tests, then vite build -> dist/
+npm run test             # vitest run
+npm run test:watch       # vitest
 npm run typecheck        # raw tsc --noEmit, full error list
 npm run typecheck:update # lower the ratchet baseline after fixing errors
 npm run lint             # ESLint (flat config, typescript-eslint + react-hooks)
 npm run preview          # serve the production build
 ```
 
-There is **no test suite** — no vitest/jest, no `*.test.*` files. The typecheck plus `npm run lint` is the entire automated safety net. Verify behavior changes by running the app.
+### Golden-master tests
+
+Coverage is narrow and deliberate: `src/utils/*.golden.test.ts` characterizes the money and calendar paths — `computeLohnartSeconds`, both German holiday tables, and the business-week rule. They run in the build gate.
+
+These are **characterization tests, not specifications.** They assert what the code does today so that Phase 3 changes become visible: correct a premium against §3b EStG and the affected snapshots fail, to be reviewed on purpose rather than discovered on a payslip. Do not "fix" a failing snapshot by regenerating it without reading the diff.
+
+Two things they already pin down:
+
+- The two holiday tables disagree every year, and the difference is always Easter Sunday: `getGermanNationalHolidays` (clean engine) counts Ostersonntag as a nationwide holiday, `getHolidaysForYear` does not. Ostersonntag is not a statutory holiday in Germany outside Brandenburg, so the clean engine grants a Feiertagszuschlag that is not owed — and since it is also a Sunday, the cumulation described in FINDINGS.md H19 compounds it.
+- **`weekCalculations` is 0-indexed throughout.** January is `0`; `getBusinessMonthRange(4, 2026)` returns the range of **May**. Nothing else in the codebase says so, and a caller passing a 1-indexed month silently reads the wrong month.
+
+`vitest.config.ts` pins `TZ=Europe/Berlin`. The payroll code walks local calendar days, so night, Sunday and holiday classification is timezone-dependent and the snapshots only mean anything in the product's own zone.
+
+Component-embedded logic — the premium models inside `FinalizePlanningModal` and `MonatsplanungStundennachweisPreview` — is **not** covered, because testing it requires extracting it, and extraction is the sort of refactor these tests exist to make safe. Cover it after Phase 3 establishes what the numbers should be.
 
 ### The typecheck ratchet
 
