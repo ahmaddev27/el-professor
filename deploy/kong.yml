@@ -58,6 +58,21 @@ services:
     plugins:
       - name: cors
 
+  # ── Edge functions ────────────────────────────────────────────────────────
+  # No key-auth here, deliberately. The functions are called with a *user's*
+  # access token, and functions/main/index.ts verifies that token against
+  # JWT_SECRET before dispatching — so requiring an apikey as well would add a
+  # second, weaker check in front of the real one. Each function then does its
+  # own role and tenant checks on top.
+  - name: functions-v1
+    url: http://functions:9000/
+    routes:
+      - name: functions-v1-all
+        strip_path: true
+        paths: [/functions/v1/]
+    plugins:
+      - name: cors
+
   # ── Realtime — websocket for postgres_changes ─────────────────────────────
   - name: realtime-v1
     url: http://realtime:4000/socket/

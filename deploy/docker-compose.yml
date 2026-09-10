@@ -36,7 +36,12 @@ name: ya-mobility
 services:
   # ── Database ───────────────────────────────────────────────────────────────
   db:
-    image: supabase/postgres:15.8.1.060
+    # Must track the hosted project's major version. Production reports
+    # PostgreSQL 17.6, and pg_dump refuses to dump from a server newer than
+    # itself — so a 15.x image here cannot even take the backup this migration
+    # depends on, let alone restore it. 17.6.1.170 is the Supabase build of
+    # that exact release.
+    image: supabase/postgres:17.6.1.170
     restart: unless-stopped
     environment:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
@@ -212,11 +217,46 @@ services:
       resources:
         limits: { memory: 512M }
 
+  # ── Edge functions ────────────────────────────────────────────────────────
+  # Four of the seven are load-bearing: manage-users (the entire Users screen —
+  # 11 call sites), company-signup, validate-discount-code and
+  # generate-activation-code. Without this service those screens fail with a
+  # network error and no explanation.
+  #
+  # extract-receipt and update-income-weeks are deployed but unreachable in
+  # practice: nothing in src/ calls either, and extract-receipt performs no auth
+  # check while spending ANTHROPIC_API_KEY, so it is left without an API key
+  # rather than merely unrouted. The live OCR is client-side Tesseract.
+  functions:
+    image: supabase/edge-runtime:v1.76.2
+    restart: unless-stopped
+    depends_on:
+      db: { condition: service_healthy }
+    environment:
+      # The functions call back through the gateway, not straight at PostgREST,
+      # so Kong's routing and CORS apply to them as they do to the browser.
+      SUPABASE_URL: http://kong:8000
+      SUPABASE_ANON_KEY: ${ANON_KEY:?set ANON_KEY}
+      SUPABASE_SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY:?set SERVICE_ROLE_KEY}
+      SUPABASE_DB_URL: postgres://supabase_admin:${POSTGRES_PASSWORD}@db:5432/postgres
+      # Read by functions/main/index.ts, which verifies every request itself.
+      # Hosted Supabase keeps this as a per-function dashboard toggle; here the
+      # decision lives in git.
+      JWT_SECRET: ${JWT_SECRET}
+    volumes:
+      - ../supabase/functions:/home/deno/functions:ro
+    command: ['start', '--main-service', '/home/deno/functions/main']
+    expose:
+      - '9000'
+    deploy:
+      resources:
+        limits: { memory: 512M }
+
   # ── Gateway — the single origin the browser talks to ──────────────────────
   kong:
     image: kong:2.8.1
     restart: unless-stopped
-    depends_on: [rest, auth, storage, realtime]
+    depends_on: [rest, auth, storage, realtime, functions]
     environment:
       KONG_DATABASE: 'off'
       KONG_DECLARATIVE_CONFIG: /home/kong/kong.yml
