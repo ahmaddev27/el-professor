@@ -48,6 +48,10 @@ services:
       # Applied in filename order on FIRST boot only. After that, migrations are
       # applied with psql like any other change — see Docs/migration.
       - ../supabase/migrations:/docker-entrypoint-initdb.d/migrations:ro
+      # supabase/postgres creates authenticator, supabase_auth_admin and
+      # supabase_storage_admin without passwords, so rest, auth and storage
+      # cannot log in and crash-loop while `db` still reports healthy.
+      - ./init-db/99-roles.sh:/docker-entrypoint-initdb.d/99-roles.sh:ro
     # Deliberately not published to the host. Reach it with
     #   docker compose exec db psql -U postgres
     # or an SSH tunnel. A Postgres port open to the internet is how these get
@@ -204,9 +208,26 @@ services:
       KONG_DATABASE: 'off'
       KONG_DECLARATIVE_CONFIG: /home/kong/kong.yml
       KONG_DNS_ORDER: LAST,A,CNAME
-      KONG_PLUGINS: request-transformer,cors,key-auth
+      # `acl` is not optional. kong.yml declares a top-level `acls` block, and
+      # that entity belongs to the acl plugin — leave it out of this list and
+      # Kong rejects the entire config with `in 'acls': unknown field`, then
+      # crash-loops.
+      KONG_PLUGINS: request-transformer,cors,key-auth,acl
+      # Read by the entrypoint below, not by Kong itself.
+      ANON_KEY: ${ANON_KEY:?set ANON_KEY}
+      SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY:?set SERVICE_ROLE_KEY}
+    # Kong's declarative loader does not interpolate environment variables, so
+    # the $$ANON_KEY / $$SERVICE_ROLE_KEY placeholders in kong.yml would be
+    # taken as literal API keys and every request would be rejected — with no
+    # error anywhere, because the config loads perfectly. Expand them at
+    # start-up instead.
+    #
+    # This is safe only because kong.yml contains no other shell metacharacter:
+    # no backticks, no double quotes, no other `$$`. Keep it that way, or the
+    # eval mangles the config.
+    entrypoint: bash -c 'eval "echo \"$$(cat /home/kong/kong.template.yml)\"" > /home/kong/kong.yml && exec /docker-entrypoint.sh kong docker-start'
     volumes:
-      - ./kong.yml:/home/kong/kong.yml:ro
+      - ./kong.yml:/home/kong/kong.template.yml:ro
     # No host port. ridy-caddy-1 reaches this over the shared network as
     # http://ya-mobility-kong-1:8000. Publishing a port would only widen the
     # attack surface — and Docker writes its own iptables rules, so a host
