@@ -31,6 +31,8 @@ import {
 } from '../utils/overviewHelpers';
 import { getTuevStatus } from '../types/car';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
+import { useTranslation } from '../contexts/LanguageContext';
+import type { TranslationKey } from '../i18n';
 
 const fmt = (n: number) =>
   n.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -182,15 +184,17 @@ const Panel: React.FC<{ children: React.ReactNode; className?: string }> = ({ ch
 
 const PLAN_LABEL: Record<Plan, string> = { basic: 'Basic', advanced: 'Advanced', premium: 'Premium' };
 const PLAN_COLOR: Record<Plan, string> = { basic: 'var(--accent)', advanced: '#f59e0b', premium: '#10b981' };
-const STATUS_LABEL: Record<string, string> = {
-  trial:         'Testphase',
-  active:        'Aktiv',
-  trial_expired: 'Testphase abgelaufen',
-  suspended:     'Gesperrt',
-  inactive:      'Inaktiv',
+// Keys, not text: this map lives outside any component, and t() is a hook value.
+const STATUS_LABEL: Record<string, TranslationKey> = {
+  trial:         'overview.status.trial',
+  active:        'overview.status.active',
+  trial_expired: 'overview.status.trialExpired',
+  suspended:     'overview.status.suspended',
+  inactive:      'overview.status.inactive',
 };
 
 const PlanStatusCard: React.FC<{ planState: PlanState; effectivePlan: Plan }> = ({ planState, effectivePlan }) => {
+  const { t } = useTranslation();
   const color = planState.isInTrial ? 'var(--accent)' : PLAN_COLOR[planState.plan];
   const trialEndStr = planState.trialEnd
     ? planState.trialEnd.toLocaleDateString('de-DE', { day: '2-digit', month: 'long', year: 'numeric' })
@@ -223,7 +227,7 @@ const PlanStatusCard: React.FC<{ planState: PlanState; effectivePlan: Plan }> = 
               className="text-xs font-semibold px-2 py-0.5 rounded-full"
               style={{ background: `${color}20`, color }}
             >
-              {STATUS_LABEL[planState.status] ?? planState.status}
+              {STATUS_LABEL[planState.status] ? t(STATUS_LABEL[planState.status]) : planState.status}
             </span>
           </div>
           <p className="text-xs mt-0.5" style={{ color: 'var(--text-secondary)' }}>
@@ -231,7 +235,7 @@ const PlanStatusCard: React.FC<{ planState: PlanState; effectivePlan: Plan }> = 
               ? `${planState.trialDaysLeft} Tag${planState.trialDaysLeft === 1 ? '' : 'e'} verbleiben · Testphase endet am ${trialEndStr}`
               : planState.isTrialExpired && trialEndStr
                 ? `Testphase endete am ${trialEndStr} · Nur Basic-Features verfügbar`
-                : 'Aktives Abonnement'
+                : t('overview.plan.activeSub')
             }
           </p>
         </div>
@@ -253,6 +257,7 @@ const PlanStatusCard: React.FC<{ planState: PlanState; effectivePlan: Plan }> = 
 
 // ── Main component ────────────────────────────────────────────────────────────
 const OverviewPage: React.FC = () => {
+  const { t } = useTranslation();
   const { isSuperAdmin } = useAuth();
   const { effectiveCompanyId: companyId } = useSuperAdmin();
   const { planState, effectivePlan } = usePlan();
@@ -292,7 +297,7 @@ const OverviewPage: React.FC = () => {
       // dashboard rendered a confident 0,00 € instead of admitting it had no
       // data. Say so rather than presenting a wrong number as a real one.
       console.error('Error loading data:', err);
-      setLoadError(err instanceof Error ? err.message : 'Unbekannter Fehler');
+      setLoadError(err instanceof Error ? err.message : t('overview.error.unknown'));
     } finally {
       setLoading(false);
     }
@@ -310,7 +315,7 @@ const OverviewPage: React.FC = () => {
         .eq('company_id', companyId)
         .order('id', { ascending: true })
         .range(from, to),
-      { label: 'Fixkosten' },
+      { label: t('overview.load.fixkosten') },
     ));
   };
   const loadIncomes = async () => {
@@ -321,7 +326,7 @@ const OverviewPage: React.FC = () => {
         .eq('company_id', companyId)
         .order('id', { ascending: true })
         .range(from, to),
-      { label: 'Umsätze' },
+      { label: t('overview.load.umsaetze') },
     ));
   };
   const loadSalaries = async () => {
@@ -332,7 +337,7 @@ const OverviewPage: React.FC = () => {
         .eq('company_id', companyId)
         .order('id', { ascending: true })
         .range(from, to),
-      { label: 'Gehälter' },
+      { label: t('overview.load.gehaelter') },
     ));
   };
   const loadWerkstattChecks = async () => {
@@ -439,7 +444,7 @@ const OverviewPage: React.FC = () => {
           className="p-4 rounded-2xl text-sm"
           style={{ background: 'var(--danger-subtle)', border: '1px solid var(--danger)', color: 'var(--danger)' }}
         >
-          <strong>Daten konnten nicht vollständig geladen werden.</strong> Die angezeigten Zahlen sind
+          <strong>{t('overview.error.partial')}</strong> Die angezeigten Zahlen sind
           möglicherweise unvollständig. ({loadError})
         </div>
       )}
@@ -460,7 +465,7 @@ const OverviewPage: React.FC = () => {
               <Building2Icon size={20} style={{ color: '#f59e0b' }} />
             </div>
             <div>
-              <p className="font-bold text-sm" style={{ color: '#f59e0b' }}>Super Admin — Plattform-Übersicht</p>
+              <p className="font-bold text-sm" style={{ color: '#f59e0b' }}>{t('overview.superAdmin.title')}</p>
               <p className="text-xs mt-0.5" style={{ color: 'var(--text-secondary)' }}>
                 KPIs, Trials, Plan-Verteilung und Handlungsbedarf auf einen Blick
               </p>
@@ -517,24 +522,24 @@ const OverviewPage: React.FC = () => {
 
       {/* ── KPI Cards ── */}
       <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
-        <KpiCard label="Umsatz" value={`${fmt(currentMetrics.umsatz)} €`} sub="vs. Vormonat"
+        <KpiCard label={t('overview.kpi.umsatz')} value={`${fmt(currentMetrics.umsatz)} €`} sub={t('overview.kpi.vsPrevMonth')}
           icon={<TrendingUp size={18} />} iconBg="rgba(16,185,129,0.12)" iconColor="#10b981"
           delta={umsatzDelta} higherIsBetter />
-        <KpiCard label="Bargeld" value={`${fmt(currentMetrics.bargeld)} €`} sub="vs. Vormonat"
+        <KpiCard label={t('overview.kpi.bargeld')} value={`${fmt(currentMetrics.bargeld)} €`} sub={t('overview.kpi.vsPrevMonth')}
           icon={<Wallet size={18} />} iconBg="rgba(20,184,166,0.12)" iconColor="#14b8a6"
           delta={bargeldDelta} higherIsBetter />
-        <KpiCard label="Gehälter" value={`${fmt(currentMetrics.salaries)} €`} sub="vs. Vormonat"
+        <KpiCard label={t('overview.load.gehaelter')} value={`${fmt(currentMetrics.salaries)} €`} sub={t('overview.kpi.vsPrevMonth')}
           icon={<Users size={18} />} iconBg="rgba(245,158,11,0.12)" iconColor="#f59e0b"
           delta={salariesDelta} higherIsBetter={false} />
-        <KpiCard label="Gesamtkosten" value={`${fmt(currentMetrics.totalCosts)} €`} sub="Belege + Fixkosten"
+        <KpiCard label={t('overview.kpi.gesamtkosten')} value={`${fmt(currentMetrics.totalCosts)} €`} sub={t('overview.kpi.costBasis')}
           icon={<TrendingDown size={18} />} iconBg="rgba(239,68,68,0.12)" iconColor="#ef4444"
           delta={costsDelta} higherIsBetter={false} />
-        <KpiCard label="Firmengewinn" value={`${fmt(currentMetrics.profit)} €`} sub="vs. Vormonat"
+        <KpiCard label={t('overview.kpi.firmengewinn')} value={`${fmt(currentMetrics.profit)} €`} sub={t('overview.kpi.vsPrevMonth')}
           icon={<DollarSign size={18} />}
           iconBg={currentMetrics.profit >= 0 ? 'rgba(59,130,246,0.12)' : 'rgba(239,68,68,0.12)'}
           iconColor={currentMetrics.profit >= 0 ? '#3b82f6' : '#ef4444'}
           delta={profitDelta} higherIsBetter />
-        <KpiCard label="Gewinnmarge"
+        <KpiCard label={t('overview.kpi.gewinnmarge')}
           value={`${currentMetrics.profitMargin.toFixed(1)}%`}
           sub={marginDelta !== null ? `${marginDelta >= 0 ? '+' : ''}${marginDelta.toFixed(1)}pp` : 'Rentabilität'}
           icon={<Target size={18} />}
@@ -545,7 +550,7 @@ const OverviewPage: React.FC = () => {
       {/* ── Action alerts ── */}
       {hasAlerts && (
         <Panel>
-          <SectionHeader title="Handlungsbedarf" sub="Offene Punkte die Aufmerksamkeit erfordern" icon={<AlertTriangle size={16} />} />
+          <SectionHeader title={t('overview.alerts.title')} sub={t('overview.alerts.sub')} icon={<AlertTriangle size={16} />} />
           <div className="space-y-2">
             {unpaidCount > 0 && (
               <div
@@ -592,7 +597,7 @@ const OverviewPage: React.FC = () => {
                   <Wrench size={16} style={{ color: 'var(--danger)' }} className="flex-shrink-0" />
                   <div>
                     <p className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>{fleetIssues} Fahrzeug{fleetIssues > 1 ? 'e' : ''} mit negativem Check</p>
-                    <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>Werkstatt prüfen</p>
+                    <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>{t('overview.alerts.checkWerkstatt')}</p>
                   </div>
                 </div>
                 <Link to="/werkstatt" className="text-xs font-semibold flex items-center gap-1" style={{ color: 'var(--danger)' }}>
@@ -651,7 +656,7 @@ const OverviewPage: React.FC = () => {
                   <Info size={16} style={{ color: 'var(--accent-text)' }} className="flex-shrink-0" />
                   <div>
                     <p className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>{pendingInvites} ausstehende Einladung{pendingInvites > 1 ? 'en' : ''}</p>
-                    <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>Benutzer hat noch nicht akzeptiert</p>
+                    <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>{t('overview.alerts.notAccepted')}</p>
                   </div>
                 </div>
                 <Link to="/benutzer" className="text-xs font-semibold flex items-center gap-1" style={{ color: 'var(--accent-text)' }}>
@@ -666,7 +671,7 @@ const OverviewPage: React.FC = () => {
       {/* ── Charts row 1: trend + revenue mix ── */}
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-5">
         <Panel className="xl:col-span-2">
-          <SectionHeader title="6-Monats-Trend" sub="Umsatz, Kosten, Gehälter & Gewinn" icon={<BarChart3 size={16} />} />
+          <SectionHeader title="6-Monats-Trend" sub={t('overview.trend.sub')} icon={<BarChart3 size={16} />} />
           <ResponsiveContainer width="100%" height={220}>
             <AreaChart data={trendData} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
               <defs>
@@ -684,16 +689,16 @@ const OverviewPage: React.FC = () => {
               <YAxis tick={{ fontSize: 11, fill: C.tick }} axisLine={false} tickLine={false} tickFormatter={v => `${(v / 1000).toFixed(0)}k`} />
               <Tooltip content={<ChartTooltip />} />
               <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 12, paddingTop: 8, color: C.tick }} />
-              <Area type="monotone" dataKey="Umsatz"   stroke={C.umsatz}   strokeWidth={2} fill="url(#gU)"   dot={false} />
-              <Area type="monotone" dataKey="Gewinn"   stroke={C.gewinn}   strokeWidth={2} fill="url(#gG)"   dot={false} />
-              <Area type="monotone" dataKey="Gehälter" stroke={C.gehaelter} strokeWidth={1.5} fill="transparent" strokeDasharray="4 2" dot={false} />
-              <Area type="monotone" dataKey="Kosten"   stroke={C.kosten}   strokeWidth={1.5} fill="transparent" strokeDasharray="4 2" dot={false} />
+              <Area type="monotone" dataKey={t('overview.kpi.umsatz')}   stroke={C.umsatz}   strokeWidth={2} fill="url(#gU)"   dot={false} />
+              <Area type="monotone" dataKey={t('overview.chart.gewinn')}   stroke={C.gewinn}   strokeWidth={2} fill="url(#gG)"   dot={false} />
+              <Area type="monotone" dataKey={t('overview.load.gehaelter')} stroke={C.gehaelter} strokeWidth={1.5} fill="transparent" strokeDasharray="4 2" dot={false} />
+              <Area type="monotone" dataKey={t('overview.chart.kosten')}   stroke={C.kosten}   strokeWidth={1.5} fill="transparent" strokeDasharray="4 2" dot={false} />
             </AreaChart>
           </ResponsiveContainer>
         </Panel>
 
         <Panel>
-          <SectionHeader title="Einnahmen-Mix" sub="Zusammensetzung im Monat" icon={<DollarSign size={16} />} />
+          <SectionHeader title={t('overview.mix.title')} sub={t('overview.mix.sub')} icon={<DollarSign size={16} />} />
           {revenueComposition.length > 0 ? (
             <>
               <ResponsiveContainer width="100%" height={140}>
@@ -730,7 +735,7 @@ const OverviewPage: React.FC = () => {
                   );
                 })}
                 <div className="flex items-center justify-between text-xs pt-2" style={{ borderTop: '1px solid var(--border)' }}>
-                  <span className="font-semibold" style={{ color: 'var(--text-secondary)' }}>Gesamt</span>
+                  <span className="font-semibold" style={{ color: 'var(--text-secondary)' }}>{t('overview.common.gesamt')}</span>
                   <span className="font-bold" style={{ color: 'var(--text-primary)' }}>
                     {fmt(revenueComposition.reduce((s, d) => s + d.value, 0))} €
                   </span>
@@ -748,14 +753,14 @@ const OverviewPage: React.FC = () => {
       {/* ── Profit + Cash ── */}
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
         <Panel className="flex flex-col">
-          <SectionHeader title="Gewinnberechnung" sub={format(parseISO(selectedMonth + '-01'), 'MMMM yyyy', { locale: de })} icon={<Target size={16} />} />
+          <SectionHeader title={t('overview.profit.title')} sub={format(parseISO(selectedMonth + '-01'), 'MMMM yyyy', { locale: de })} icon={<Target size={16} />} />
           <div className="flex-1 flex flex-col gap-2">
             {[
-              { label: 'Netto-Fahrpreis', value: currentMetrics.nettoFahrpreis, sign: '+', color: '#10b981', bg: 'rgba(16,185,129,0.08)', border: 'rgba(16,185,129,0.2)', icon: <TrendingUp size={13} /> },
-              { label: 'Aktionen',        value: currentMetrics.aktionen,       sign: '+', color: '#0ea5e9', bg: 'rgba(14,165,233,0.08)',  border: 'rgba(14,165,233,0.2)',  icon: <Zap size={13} /> },
-              { label: 'Gehälter',        value: currentMetrics.salaries,       sign: '-', color: '#f59e0b', bg: 'rgba(245,158,11,0.08)',  border: 'rgba(245,158,11,0.2)',  icon: <Users size={13} /> },
-              { label: 'Belege / Ausgaben', value: currentMetrics.expenses,     sign: '-', color: '#ef4444', bg: 'rgba(239,68,68,0.08)',   border: 'rgba(239,68,68,0.2)',   icon: <ReceiptIcon size={13} /> },
-              { label: 'Fixkosten',       value: currentMetrics.fixedCosts,     sign: '-', color: '#ef4444', bg: 'rgba(239,68,68,0.08)',   border: 'rgba(239,68,68,0.2)',   icon: <TrendingDown size={13} /> },
+              { label: t('overview.profit.netFare'), value: currentMetrics.nettoFahrpreis, sign: '+', color: '#10b981', bg: 'rgba(16,185,129,0.08)', border: 'rgba(16,185,129,0.2)', icon: <TrendingUp size={13} /> },
+              { label: t('overview.profit.aktionen'),        value: currentMetrics.aktionen,       sign: '+', color: '#0ea5e9', bg: 'rgba(14,165,233,0.08)',  border: 'rgba(14,165,233,0.2)',  icon: <Zap size={13} /> },
+              { label: t('overview.load.gehaelter'),        value: currentMetrics.salaries,       sign: '-', color: '#f59e0b', bg: 'rgba(245,158,11,0.08)',  border: 'rgba(245,158,11,0.2)',  icon: <Users size={13} /> },
+              { label: t('overview.profit.belegeExpenses'), value: currentMetrics.expenses,     sign: '-', color: '#ef4444', bg: 'rgba(239,68,68,0.08)',   border: 'rgba(239,68,68,0.2)',   icon: <ReceiptIcon size={13} /> },
+              { label: t('overview.load.fixkosten'),       value: currentMetrics.fixedCosts,     sign: '-', color: '#ef4444', bg: 'rgba(239,68,68,0.08)',   border: 'rgba(239,68,68,0.2)',   icon: <TrendingDown size={13} /> },
             ].map(row => (
               <div
                 key={row.label}
@@ -781,7 +786,7 @@ const OverviewPage: React.FC = () => {
                 <div className="w-7 h-7 rounded-lg bg-white/20 flex items-center justify-center">
                   <DollarSign size={14} className="text-white" />
                 </div>
-                <span className="text-sm font-bold text-white">Firmengewinn</span>
+                <span className="text-sm font-bold text-white">{t('overview.kpi.firmengewinn')}</span>
               </div>
               <div className="text-right">
                 <p className="text-lg font-bold text-white">
@@ -798,18 +803,18 @@ const OverviewPage: React.FC = () => {
         </Panel>
 
         <Panel className="flex flex-col">
-          <SectionHeader title="Bargeld-Übersicht" sub="Kassenstand & Differenzen" icon={<Wallet size={16} />} />
+          <SectionHeader title={t('overview.cash.title')} sub={t('overview.cash.sub')} icon={<Wallet size={16} />} />
           <div className="flex flex-col gap-3 flex-1">
             <div className="grid grid-cols-2 gap-3">
               <div className="p-4 rounded-xl" style={{ background: 'rgba(16,185,129,0.08)', border: '1px solid rgba(16,185,129,0.2)' }}>
-                <p className="text-xs font-semibold uppercase tracking-wide mb-1" style={{ color: '#10b981' }}>Bargeld Einnahmen</p>
+                <p className="text-xs font-semibold uppercase tracking-wide mb-1" style={{ color: '#10b981' }}>{t('overview.cash.income')}</p>
                 <p className="text-xl font-bold" style={{ color: '#10b981' }}>{fmt(cashSummary.cashIncome)} €</p>
-                <p className="text-xs mt-0.5" style={{ color: 'var(--text-secondary)' }}>Bargeld-Umsätze Fahrer</p>
+                <p className="text-xs mt-0.5" style={{ color: 'var(--text-secondary)' }}>{t('overview.cash.driverCash')}</p>
               </div>
               <div className="p-4 rounded-xl" style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)' }}>
-                <p className="text-xs font-semibold uppercase tracking-wide mb-1" style={{ color: '#ef4444' }}>Beleg-Ausgaben</p>
+                <p className="text-xs font-semibold uppercase tracking-wide mb-1" style={{ color: '#ef4444' }}>{t('overview.cash.belegExpenses')}</p>
                 <p className="text-xl font-bold" style={{ color: '#ef4444' }}>{fmt(cashSummary.cashFromExpenses)} €</p>
-                <p className="text-xs mt-0.5" style={{ color: 'var(--text-secondary)' }}>Barzahlungen Belege</p>
+                <p className="text-xs mt-0.5" style={{ color: 'var(--text-secondary)' }}>{t('overview.cash.belegCash')}</p>
               </div>
             </div>
 
@@ -846,14 +851,14 @@ const OverviewPage: React.FC = () => {
                 <div className="flex items-center gap-1.5 mt-2">
                   <AlertTriangle size={12} style={{ color: '#f59e0b' }} />
                   <p className="text-xs font-medium" style={{ color: '#f59e0b' }}>
-                    {cashSummary.cashRisk === 'warning' ? 'Kassenbestand niedrig' : 'Negativer Kassenbestand'}
+                    {cashSummary.cashRisk === 'warning' ? t('overview.cash.low') : t('overview.cash.negative')}
                   </p>
                 </div>
               )}
             </div>
 
             <div className="flex items-center justify-between text-xs p-3 rounded-xl" style={{ background: 'var(--bg-subtle)' }}>
-              <span style={{ color: 'var(--text-secondary)' }}>Verhältnis Einnahmen : Ausgaben</span>
+              <span style={{ color: 'var(--text-secondary)' }}>{t('overview.cash.ratio')}</span>
               <span className="font-semibold" style={{ color: 'var(--text-primary)' }}>
                 {cashSummary.cashIncome > 0
                   ? `${((cashSummary.cashFromExpenses / cashSummary.cashIncome) * 100).toFixed(0)}% ausgegeben`
@@ -868,7 +873,7 @@ const OverviewPage: React.FC = () => {
               onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'var(--bg-muted)'; }}
               onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'var(--bg-subtle)'; }}
             >
-              <span className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>Detaillierte Bargeld-Ansicht</span>
+              <span className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>{t('overview.cash.detailed')}</span>
               <ChevronRight size={16} style={{ color: 'var(--text-tertiary)' }} />
             </Link>
           </div>
@@ -878,7 +883,7 @@ const OverviewPage: React.FC = () => {
       {/* ── Driver performance ── */}
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-5">
         <Panel className="xl:col-span-2">
-          <SectionHeader title="Fahrer-Performance" sub="Nettoertrag & Umsatzvergleich" icon={<Users size={16} />} />
+          <SectionHeader title={t('overview.drivers.title')} sub={t('overview.drivers.sub')} icon={<Users size={16} />} />
           {driverPerformance.filter(d => d.umsatz > 0).length > 0 ? (
             <ResponsiveContainer width="100%" height={Math.max(180, driverPerformance.filter(d => d.umsatz > 0).length * 40)}>
               <BarChart
@@ -893,9 +898,9 @@ const OverviewPage: React.FC = () => {
                 <YAxis type="category" dataKey="name" width={88} tick={{ fontSize: 11, fill: C.tick }} axisLine={false} tickLine={false} />
                 <Tooltip content={<ChartTooltip />} />
                 <Legend iconType="square" iconSize={8} wrapperStyle={{ fontSize: 12, color: C.tick }} />
-                <Bar dataKey="Umsatz"   fill={C.umsatz}   radius={[0, 3, 3, 0]} barSize={8} />
-                <Bar dataKey="Gehalt"   fill={C.gehaelter} radius={[0, 3, 3, 0]} barSize={8} />
-                <Bar dataKey="Ausgaben" fill={C.kosten}   radius={[0, 3, 3, 0]} barSize={8} />
+                <Bar dataKey={t('overview.kpi.umsatz')}   fill={C.umsatz}   radius={[0, 3, 3, 0]} barSize={8} />
+                <Bar dataKey={t('overview.drivers.gehalt')}   fill={C.gehaelter} radius={[0, 3, 3, 0]} barSize={8} />
+                <Bar dataKey={t('overview.drivers.ausgaben')} fill={C.kosten}   radius={[0, 3, 3, 0]} barSize={8} />
               </BarChart>
             </ResponsiveContainer>
           ) : (
@@ -906,7 +911,7 @@ const OverviewPage: React.FC = () => {
         </Panel>
 
         <Panel>
-          <SectionHeader title="Ranking" sub="Sortiert nach Nettoertrag" icon={<Target size={16} />} />
+          <SectionHeader title={t('overview.drivers.ranking')} sub={t('overview.drivers.rankingSub')} icon={<Target size={16} />} />
           {driverPerformance.length > 0 ? (
             <div className="space-y-2.5">
               {driverPerformance.map((driver, idx) => {
@@ -954,14 +959,14 @@ const OverviewPage: React.FC = () => {
                         )}
                       </div>
                       {isTop && <span className="text-xs font-semibold px-1.5 py-0.5 rounded-md flex-shrink-0" style={{ background: 'rgba(16,185,129,0.15)', color: '#10b981' }}>Top</span>}
-                      {isWorst && driver.netContribution < 0 && <span className="text-xs font-semibold px-1.5 py-0.5 rounded-md flex-shrink-0" style={{ background: 'var(--danger-subtle)', color: 'var(--danger)' }}>Achtung</span>}
+                      {isWorst && driver.netContribution < 0 && <span className="text-xs font-semibold px-1.5 py-0.5 rounded-md flex-shrink-0" style={{ background: 'var(--danger-subtle)', color: 'var(--danger)' }}>{t('overview.drivers.attention')}</span>}
                     </div>
                   </div>
                 );
               })}
             </div>
           ) : (
-            <div className="flex items-center justify-center h-32 text-sm" style={{ color: 'var(--text-tertiary)' }}>Keine Fahrerdaten</div>
+            <div className="flex items-center justify-center h-32 text-sm" style={{ color: 'var(--text-tertiary)' }}>{t('overview.drivers.none')}</div>
           )}
         </Panel>
       </div>
@@ -969,7 +974,7 @@ const OverviewPage: React.FC = () => {
       {/* ── Expenses + Fleet ── */}
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
         <Panel>
-          <SectionHeader title="Größte Ausgaben" sub="Top Kostenpositionen im Monat" icon={<TrendingDown size={16} />} />
+          <SectionHeader title={t('overview.costs.title')} sub={t('overview.costs.sub')} icon={<TrendingDown size={16} />} />
           {topExpenses.length > 0 ? (
             <div className="space-y-2">
               {topExpenses.map((item, i) => (
@@ -990,7 +995,7 @@ const OverviewPage: React.FC = () => {
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium truncate" style={{ color: 'var(--text-primary)' }}>{item.description}</p>
                     <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
-                      {item.type === 'fixed' ? 'Fixkosten' : item.driverName || 'Beleg'}
+                      {item.type === 'fixed' ? t('overview.load.fixkosten') : item.driverName || 'Beleg'}
                       {item.type === 'receipt' && ` · ${format(new Date(item.date), 'dd.MM.yyyy')}`}
                     </p>
                   </div>
@@ -998,18 +1003,18 @@ const OverviewPage: React.FC = () => {
                 </div>
               ))}
               <div className="flex items-center justify-between text-xs px-1 pt-2" style={{ borderTop: '1px solid var(--border)', color: 'var(--text-tertiary)' }}>
-                <span>Gesamt Kosten</span>
+                <span>{t('overview.costs.total')}</span>
                 <span className="font-semibold" style={{ color: 'var(--text-primary)' }}>{fmt(currentMetrics.totalCosts)} €</span>
               </div>
             </div>
           ) : (
-            <div className="flex items-center justify-center h-32 text-sm" style={{ color: 'var(--text-tertiary)' }}>Keine Ausgaben erfasst</div>
+            <div className="flex items-center justify-center h-32 text-sm" style={{ color: 'var(--text-tertiary)' }}>{t('overview.costs.none')}</div>
           )}
         </Panel>
 
         <Panel>
           <SectionHeader
-            title="Flottenstatus" sub="Werkstatt-Checks diesen Monat" icon={<Wrench size={16} />}
+            title={t('overview.fleet.title')} sub={t('overview.fleet.sub')} icon={<Wrench size={16} />}
             action={
               <Link to="/werkstatt" className="text-xs font-medium flex items-center gap-1" style={{ color: 'var(--accent-text)' }}>
                 Alle <ChevronRight size={12} />
@@ -1019,8 +1024,8 @@ const OverviewPage: React.FC = () => {
           <div className="grid grid-cols-3 gap-3 mb-4">
             {[
               { label: 'OK', value: fleetOk, color: '#10b981', bg: 'rgba(16,185,129,0.08)', border: 'rgba(16,185,129,0.2)' },
-              { label: 'Probleme', value: fleetIssues, color: '#ef4444', bg: 'rgba(239,68,68,0.08)', border: 'rgba(239,68,68,0.2)' },
-              { label: 'Repariert', value: fleetRepaired, color: '#3b82f6', bg: 'rgba(59,130,246,0.08)', border: 'rgba(59,130,246,0.2)' },
+              { label: t('overview.fleet.problems'), value: fleetIssues, color: '#ef4444', bg: 'rgba(239,68,68,0.08)', border: 'rgba(239,68,68,0.2)' },
+              { label: t('overview.fleet.repaired'), value: fleetRepaired, color: '#3b82f6', bg: 'rgba(59,130,246,0.08)', border: 'rgba(59,130,246,0.2)' },
             ].map(s => (
               <div key={s.label} className="p-3 rounded-xl text-center" style={{ background: s.bg, border: `1px solid ${s.border}` }}>
                 <p className="text-2xl font-bold" style={{ color: s.color }}>{s.value}</p>
@@ -1037,7 +1042,7 @@ const OverviewPage: React.FC = () => {
                 >
                   <AlertCircle size={14} style={{ color: 'var(--danger)' }} className="flex-shrink-0" />
                   <div className="flex-1 min-w-0">
-                    <p className="text-xs font-semibold" style={{ color: 'var(--text-primary)' }}>{c.car?.kennzeichen || 'Unbekannt'}</p>
+                    <p className="text-xs font-semibold" style={{ color: 'var(--text-primary)' }}>{c.car?.kennzeichen || t('overview.common.unknown')}</p>
                     <p className="text-xs truncate" style={{ color: 'var(--text-secondary)' }}>{c.notes}</p>
                   </div>
                   <span className="text-xs flex-shrink-0" style={{ color: 'var(--text-tertiary)' }}>
@@ -1066,7 +1071,7 @@ const OverviewPage: React.FC = () => {
       {salaryAlerts.length > 0 && (
         <Panel>
           <SectionHeader
-            title="Offene Gehaltsabrechnungen" sub="Unbezahlte & teilweise bezahlte Gehälter (alle Perioden)" icon={<CreditCard size={16} />}
+            title={t('overview.salaries.title')} sub={t('overview.salaries.sub')} icon={<CreditCard size={16} />}
             action={
               <Link to="/gehaelter" className="text-xs font-medium flex items-center gap-1" style={{ color: 'var(--accent-text)' }}>
                 Verwalten <ChevronRight size={12} />
@@ -1077,7 +1082,7 @@ const OverviewPage: React.FC = () => {
             <table className="w-full text-sm">
               <thead>
                 <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                  {['Fahrer', 'Fällig', 'Bezahlt', 'Offen', 'Status'].map((h, i) => (
+                  {[t('overview.salaries.driver'), t('overview.salaries.due'), t('overview.salaries.paid'), t('overview.salaries.open'), t('overview.salaries.status')].map((h, i) => (
                     <th key={h} className={`py-2 px-3 text-xs font-semibold uppercase ${i === 0 ? 'text-left' : i === 4 ? 'text-center' : 'text-right'}`} style={{ color: 'var(--text-tertiary)' }}>{h}</th>
                   ))}
                 </tr>
@@ -1115,7 +1120,7 @@ const OverviewPage: React.FC = () => {
                           : { background: 'var(--warning-subtle)', color: 'var(--warning)' }
                         }
                       >
-                        {alert.status === 'unpaid' ? 'Unbezahlt' : 'Teilweise'}
+                        {alert.status === 'unpaid' ? t('overview.salaries.unpaid') : t('overview.salaries.partial')}
                       </span>
                     </td>
                   </tr>
@@ -1123,7 +1128,7 @@ const OverviewPage: React.FC = () => {
               </tbody>
               <tfoot>
                 <tr style={{ borderTop: '2px solid var(--border)' }}>
-                  <td className="py-2.5 px-3 font-bold" style={{ color: 'var(--text-primary)' }} colSpan={3}>Gesamt offen</td>
+                  <td className="py-2.5 px-3 font-bold" style={{ color: 'var(--text-primary)' }} colSpan={3}>{t('overview.salaries.totalOpen')}</td>
                   <td className="py-2.5 px-3 text-right font-bold" style={{ color: 'var(--danger)' }}>{fmt(totalOpenSalary)} €</td>
                   <td />
                 </tr>
@@ -1137,7 +1142,7 @@ const OverviewPage: React.FC = () => {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
         <Panel>
           <SectionHeader
-            title="Letzte Belege" sub="Aktuellste im Monat" icon={<ReceiptIcon size={16} />}
+            title={t('overview.receipts.title')} sub={t('overview.receipts.sub')} icon={<ReceiptIcon size={16} />}
             action={
               <Link to="/belege" className="text-xs font-medium flex items-center gap-1" style={{ color: 'var(--accent-text)' }}>
                 Alle <ChevronRight size={12} />
@@ -1147,7 +1152,7 @@ const OverviewPage: React.FC = () => {
           {recentReceipts.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-32 gap-2" style={{ color: 'var(--text-tertiary)' }}>
               <FileText size={24} style={{ color: 'var(--border)' }} />
-              <span className="text-sm">Keine Belege im ausgewählten Zeitraum</span>
+              <span className="text-sm">{t('overview.receipts.none')}</span>
             </div>
           ) : (
             <div className="space-y-2">
@@ -1176,13 +1181,13 @@ const OverviewPage: React.FC = () => {
         </Panel>
 
         <Panel>
-          <SectionHeader title="Schnellaktionen" sub="Häufig verwendete Bereiche" icon={<Zap size={16} />} />
+          <SectionHeader title={t('overview.quick.title')} sub={t('overview.quick.sub')} icon={<Zap size={16} />} />
           <div className="grid grid-cols-1 gap-3">
             {[
-              { to: '/belege',      icon: <Plus size={16} className="text-white" />,       bg: '#059669', title: 'Beleg hinzufügen',   sub: 'Neuen Beleg erfassen' },
-              { to: '/umsaetze',    icon: <TrendingUp size={16} className="text-white" />, bg: '#2563eb', title: 'Umsätze verwalten',  sub: 'Einnahmen erfassen & filtern' },
-              { to: '/abrechnung',  icon: <BarChart3 size={16} className="text-white" />,  bg: '#d97706', title: 'Abrechnung',         sub: 'Wöchentliche Abrechnungen' },
-              { to: '/statistiken', icon: <Target size={16} className="text-white" />,     bg: '#0284c7', title: 'Statistiken',        sub: 'Tiefer Einblick in Kennzahlen' },
+              { to: '/belege',      icon: <Plus size={16} className="text-white" />,       bg: '#059669', title: t('overview.quick.addBeleg'),   sub: t('overview.quick.addBelegSub') },
+              { to: '/umsaetze',    icon: <TrendingUp size={16} className="text-white" />, bg: '#2563eb', title: t('overview.quick.revenue'),  sub: t('overview.quick.revenueSub') },
+              { to: '/abrechnung',  icon: <BarChart3 size={16} className="text-white" />,  bg: '#d97706', title: t('overview.quick.abrechnung'),         sub: t('overview.quick.abrechnungSub') },
+              { to: '/statistiken', icon: <Target size={16} className="text-white" />,     bg: '#0284c7', title: t('overview.quick.stats'),        sub: t('overview.quick.statsSub') },
             ].map(item => (
               <Link
                 key={item.to}
