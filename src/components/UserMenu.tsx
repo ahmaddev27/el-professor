@@ -150,15 +150,17 @@ const UserMenu: React.FC = () => {
 
             {/* Actions */}
             <div className="p-1.5">
+              {/* Went nowhere before — it closed the menu and nothing else, so
+                  there was no way to change your own password inside the app. */}
               <button
-                onClick={() => setIsOpen(false)}
+                onClick={() => { setIsOpen(false); navigate('/mein-konto'); }}
                 className="w-full px-3 py-2 text-left text-sm rounded-lg flex items-center gap-2.5 transition-colors"
                 style={{ color: 'var(--text-secondary)' }}
                 onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'var(--bg-muted)'; (e.currentTarget as HTMLElement).style.color = 'var(--text-primary)'; }}
                 onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'transparent'; (e.currentTarget as HTMLElement).style.color = 'var(--text-secondary)'; }}
               >
                 <Settings size={14} />
-                <span>{t('common.settings')}</span>
+                <span>{t('account.title')}</span>
               </button>
               <button
                 onClick={handleSignOut}

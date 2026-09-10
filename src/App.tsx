@@ -14,6 +14,7 @@ import AuthCallbackPage from './pages/AuthCallbackPage';
 import SetPasswordPage from './pages/SetPasswordPage';
 import SignupPage from './pages/SignupPage';
 import OverviewPage from './pages/OverviewPage';
+import AccountPage from './pages/AccountPage';
 import BelegePage from './pages/BelegePage';
 import FahrerPage from './pages/FahrerPage';
 import CarsPage from './pages/CarsPage';
@@ -127,11 +128,20 @@ const SubscriptionGuard: React.FC<{ children: React.ReactNode }> = ({ children }
  * Outermost of the three guards, so it settles the question before
  * SubscriptionGuard can route a company-less account to /abo-aktivieren.
  */
+/**
+ * Personal pages a platform account may still reach. `/mein-konto` shows the
+ * caller's own record and no tenant data, so the reason to redirect does not
+ * apply to it — and without this the super admin would have no way to change
+ * its own password from inside the app.
+ */
+const PLATFORM_ACCOUNT_PATHS = ['/mein-konto'];
+
 const PlatformAccountGuard: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { isSuperAdmin } = useAuth();
   const { effectiveCompanyId } = useSuperAdmin();
+  const location = useLocation();
 
-  if (isSuperAdmin && !effectiveCompanyId) {
+  if (isSuperAdmin && !effectiveCompanyId && !PLATFORM_ACCOUNT_PATHS.includes(location.pathname)) {
     return <Navigate to="/super-admin" replace />;
   }
 
@@ -214,6 +224,7 @@ function App() {
                 <Route path="abo-aktivieren" element={<ActivationPage />} />
                 <Route path="aktivierung"    element={<ActivationPage />} />
                 {/* Basic features — always accessible */}
+                <Route path="mein-konto"     element={<AccountPage />} />
                 <Route path="overview"       element={<OverviewPage />} />
                 <Route path="belege"         element={<BelegePage />} />
                 <Route path="fahrer"         element={<FahrerPage />} />
