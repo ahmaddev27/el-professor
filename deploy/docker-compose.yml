@@ -11,10 +11,18 @@
 # reimplementing all 410 as application code, which is where the audit found
 # nine authorization holes. Keeping the stack keeps the boundary.
 #
-# This VPS already runs another project (ridy + OSRM). Everything here is
-# namespaced by `name: ya-mobility` — its own network, its own volumes, its own
-# Postgres container and credentials. The two stacks share the kernel and the
-# disk and nothing else. Run Docs/migration/02-COEXISTENCE-CHECK.md first.
+# Surveyed reality of the target VPS (2026-09-10):
+#   - ridy-caddy-1 (caddy:2-alpine) already owns :80 and :443
+#   - ridy runs Laravel + MySQL + OSRM + Nominatim on network `ridy_default`
+#   - 21 GB of 31 GB free, 792 GB of 1 TB free
+#   - nothing but 22/80/443 listens on 0.0.0.0 — no exposed databases
+#
+# So this stack publishes NO host ports at all. It joins ridy's network and the
+# existing Caddy reverse-proxies to it by container name. Nothing of ridy's is
+# modified except two site blocks appended to its Caddyfile.
+#
+# Everything else stays namespaced by `name: ya-mobility` — own network, own
+# volumes, own Postgres with its own credentials.
 #
 # Usage:
 #   cp .env.example .env     # then fill in every value
@@ -198,17 +206,47 @@ services:
       KONG_PLUGINS: request-transformer,cors,key-auth
     volumes:
       - ./kong.yml:/home/kong/kong.yml:ro
-    ports:
-      # Loopback only — the reverse proxy in front terminates TLS and forwards
-      # here. Never expose Kong's plain HTTP port to the internet.
-      #
-      # The host port is configurable because the other project on this box may
-      # already hold 8000. Whatever you set, point the proxy at the same value.
-      - '127.0.0.1:${KONG_BIND_PORT:-8000}:8000'
+    # No host port. ridy-caddy-1 reaches this over the shared network as
+    # http://ya-mobility-kong-1:8000. Publishing a port would only widen the
+    # attack surface — and Docker writes its own iptables rules, so a host
+    # firewall would not cover it anyway.
+    expose:
+      - '8000'
+    networks:
+      - default
+      - ridy
     deploy:
       resources:
         limits: { memory: 512M }
 
+  # ── Static SPA ────────────────────────────────────────────────────────────
+  # Serving the bundle from our own container means ridy's Caddy needs no volume
+  # mount into its filesystem — it just reverse-proxies by name. That keeps the
+  # change to ridy down to two site blocks in its Caddyfile.
+  web:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    volumes:
+      - ./dist:/usr/share/nginx/html:ro
+      - ./nginx-spa.conf:/etc/nginx/conf.d/default.conf:ro
+    expose:
+      - '80'
+    networks:
+      - default
+      - ridy
+    deploy:
+      resources:
+        limits: { memory: 128M }
+
 volumes:
   db-data:
   storage-data:
+
+networks:
+  default:
+  # ridy's existing network, created by its own compose project. Joining it lets
+  # ridy-caddy-1 resolve our containers by name. Declared external so this
+  # compose file never tries to create or remove it.
+  ridy:
+    external: true
+    name: ridy_default
