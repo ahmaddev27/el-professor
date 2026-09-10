@@ -45,24 +45,37 @@ services:
       JWT_EXP: ${JWT_EXPIRY:-3600}
     volumes:
       - db-data:/var/lib/postgresql/data
-      # Applied in filename order on FIRST boot only. After that, migrations are
-      # applied with psql like any other change — see Docs/migration.
-      - ../supabase/migrations:/docker-entrypoint-initdb.d/migrations:ro
-      # supabase/postgres creates authenticator, supabase_auth_admin and
-      # supabase_storage_admin without passwords, so rest, auth and storage
-      # cannot log in and crash-loop while `db` still reports healthy.
-      - ./init-db/99-roles.sh:/docker-entrypoint-initdb.d/99-roles.sh:ro
+      # Our application migrations are NOT mounted here. supabase/postgres runs
+      # its own /docker-entrypoint-initdb.d/migrations/*.sql — that is where
+      # every Supabase role and schema is created — and mounting a directory
+      # over that path replaces them wholesale, leaving a database with
+      # initdb's base and nothing else. Load the app schema with psql once the
+      # stack is up; see Docs/migration.
+      #
+      # Role passwords do belong in the image's own post-migration hook. The
+      # header of roles.sql explains why that exact path and no other.
+      - ./init-db/roles.sql:/etc/postgresql.schema.sql:ro
     # Deliberately not published to the host. Reach it with
     #   docker compose exec db psql -U postgres
     # or an SSH tunnel. A Postgres port open to the internet is how these get
     # ransomwared.
     expose:
       - '5432'
+    # `pg_isready` was the wrong check. It asks whether the server accepts
+    # connections; it never authenticates and never runs a query — so it
+    # reported healthy against a database whose initialisation had aborted and
+    # which had no Supabase roles at all. A check that cannot fail sends you
+    # hunting for the fault in whatever crashed next.
+    #
+    # This one connects over TCP as a real user and asserts that a role created
+    # by the image's last migration exists, so `healthy` means initialised and
+    # usable. start_period covers the minutes those migrations take.
     healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U postgres -h localhost']
-      interval: 5s
+      test: ['CMD-SHELL', 'PGPASSWORD="$$POSTGRES_PASSWORD" psql -h localhost -U "$$POSTGRES_USER" -d postgres -tAc "SELECT count(*)=1 FROM pg_roles WHERE rolname=''authenticator''" | grep -q t']
+      interval: 10s
       timeout: 5s
-      retries: 20
+      retries: 12
+      start_period: 180s
     # Capped so a Fahrtenbuch import cannot make the kernel OOM-kill the other
     # project's database. Raise deliberately after watching `docker stats`.
     deploy:
@@ -213,6 +226,13 @@ services:
       # Kong rejects the entire config with `in 'acls': unknown field`, then
       # crash-loops.
       KONG_PLUGINS: request-transformer,cors,key-auth,acl
+      # Kong defaults this to the CPU count. On a 12-core box that is 12 nginx
+      # workers, each loading its own Lua VM at roughly 80 MB — about 960 MB
+      # against the 512 MB limit below. The workers are OOM-killed as they
+      # start, the master survives, and `kong health` reports "Kong is healthy"
+      # while every connection is accepted and then never answered. Two is
+      # ample for this traffic.
+      KONG_NGINX_WORKER_PROCESSES: '2'
       # Read by the entrypoint below, not by Kong itself.
       ANON_KEY: ${ANON_KEY:?set ANON_KEY}
       SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY:?set SERVICE_ROLE_KEY}
