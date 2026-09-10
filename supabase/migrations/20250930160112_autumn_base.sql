@@ -14,6 +14,14 @@
 */
 
 -- Drop existing trigger and function
+--
+-- `create_user_profile_trigger` is the name 20250930122526_raspy_cliff.sql
+-- actually gave this trigger; `on_auth_user_created` is the name this file
+-- creates below. Dropping only the latter leaves the former in place, and the
+-- DROP FUNCTION then fails with "cannot drop function create_user_profile()
+-- because other objects depend on it" — which is where replaying this chain
+-- against an empty database stopped, at file 4 of 150.
+DROP TRIGGER IF EXISTS create_user_profile_trigger ON auth.users;
 DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
 DROP FUNCTION IF EXISTS public.create_user_profile();
 
