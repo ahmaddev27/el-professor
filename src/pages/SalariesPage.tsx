@@ -4,14 +4,14 @@ import { Driver } from '../types/receipt';
 import { supabase } from '../lib/supabase';
 import { handleDatabaseError } from '../utils/errorHandler';
 import { useToast } from '../contexts/ToastContext';
-import { useAuth } from '../contexts/AuthContext';
+import { useSuperAdmin } from '../contexts/SuperAdminContext';
 
 const SalariesPage: React.FC = () => {
   const [drivers, setDrivers] = useState<Driver[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const { error: showError } = useToast();
-  const { companyId } = useAuth();
+  const { effectiveCompanyId: companyId } = useSuperAdmin();
 
   useEffect(() => {
     if (companyId) loadDrivers();

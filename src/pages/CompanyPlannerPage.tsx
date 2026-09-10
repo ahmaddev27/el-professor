@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Play, AlertTriangle, CheckCircle2, Car as CarIcon, Clock, Info, ChevronRight, ChevronDown, ArrowLeft, CalendarDays, History, Euro, ListChecks } from 'lucide-react';
 import { supabase } from '../lib/supabase';
-import { useAuth } from '../contexts/AuthContext';
 import { useFahrtenbuch, type FahrtenbuchTrip } from '../hooks/useFahrtenbuch';
 import {
   buildPhase1VehicleBlocks,
@@ -20,6 +19,7 @@ import MonatsplanungAssignmentPreview from '../components/MonatsplanungAssignmen
 import MonatsplanungAppliedRuns from '../components/MonatsplanungAppliedRuns';
 import HistoricalReconciliationWizard from '../components/HistoricalReconciliationWizard';
 import HistoricalWorkingHoursWizard from '../components/HistoricalWorkingHoursWizard';
+import { useSuperAdmin } from '../contexts/SuperAdminContext';
 
 const MONTHS_DE = [
   'Januar', 'Februar', 'März', 'April', 'Mai', 'Juni',
@@ -80,7 +80,7 @@ async function fetchAllTripsForImport(companyId: string, importId: string): Prom
 }
 
 export default function CompanyPlannerPage() {
-  const { companyId } = useAuth();
+  const { effectiveCompanyId: companyId } = useSuperAdmin();
   const now = new Date();
   const [planningMode, setPlanningMode] = useState<'selection' | 'new_month' | 'historical' | 'hist_mode_selection' | 'historical_reconciliation' | 'hist_working_hours'>('selection');
   const [reconciliationMode, setReconciliationMode] = useState<'brutto_salary' | 'working_hours' | null>(null);

@@ -6,6 +6,7 @@ import { useToast } from '../contexts/ToastContext';
 import ConfirmationModal from './ConfirmationModal';
 import { handleDatabaseError } from '../utils/errorHandler';
 import { exportTableToExcel } from '../utils/excelExport';
+import { useSuperAdmin } from '../contexts/SuperAdminContext';
 
 interface FixedCost {
   id: string;
@@ -23,7 +24,8 @@ const FixedCostsManagement: React.FC = () => {
   const [isAdding, setIsAdding] = useState(false);
   const [formData, setFormData] = useState({ description: '', amount: '' });
   const [error, setError] = useState<string | null>(null);
-  const { canEdit, canDelete, canCreate, profile, user, companyId } = useAuth();
+  const { canEdit, canDelete, canCreate, profile, user } = useAuth();
+  const { effectiveCompanyId: companyId } = useSuperAdmin();
   const { success, error: showError, warning } = useToast();
   const [deleteConfirm, setDeleteConfirm] = useState<{ isOpen: boolean; id: string | null }>({ isOpen: false, id: null });
   const [hoveredRow, setHoveredRow] = useState<string | null>(null);

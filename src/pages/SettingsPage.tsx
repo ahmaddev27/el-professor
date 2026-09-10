@@ -20,7 +20,7 @@ import { useCompanySettings, resolveLogoUrl } from '../contexts/CompanySettingsC
 import { useToast } from '../contexts/ToastContext';
 import { CompanySettingsFormData } from '../types/settings';
 import { supabase } from '../lib/supabase';
-import { useAuth } from '../contexts/AuthContext';
+import { useSuperAdmin } from '../contexts/SuperAdminContext';
 
 const inputStyle: React.CSSProperties = {
   background: 'var(--bg-subtle)',
@@ -35,7 +35,7 @@ const inputStyle: React.CSSProperties = {
 const SettingsPage: React.FC = () => {
   const { settings, loading, updateSettings, refreshSettings } = useCompanySettings();
   const { success, error: showError } = useToast();
-  const { companyId } = useAuth();
+  const { effectiveCompanyId: companyId } = useSuperAdmin();
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [logoPreview, setLogoPreview] = useState<string | null>(null);

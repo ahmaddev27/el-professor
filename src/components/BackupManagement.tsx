@@ -2,13 +2,13 @@ import { useState } from 'react';
 import { Download, RefreshCw, Database, AlertCircle } from 'lucide-react';
 import { createAndDownloadBackup } from '../utils/backup';
 import { useToast } from '../contexts/ToastContext';
-import { useAuth } from '../contexts/AuthContext';
+import { useSuperAdmin } from '../contexts/SuperAdminContext';
 
 export default function BackupManagement() {
   const [isLoading, setIsLoading] = useState(false);
   const [lastBackupTime, setLastBackupTime] = useState<string | null>(null);
   const { showToast } = useToast();
-  const { companyId } = useAuth();
+  const { effectiveCompanyId: companyId } = useSuperAdmin();
 
   const handleCreateBackup = async () => {
     if (!companyId) {

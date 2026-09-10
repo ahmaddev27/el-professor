@@ -71,6 +71,7 @@ import {
 import * as XLSX from 'xlsx';
 import { type StructuredNote } from '../utils/monatsplanungPhase3';
 import { fetchAllPaginated } from '../utils/fetchAllPaginated';
+import { useSuperAdmin } from '../contexts/SuperAdminContext';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -9741,7 +9742,8 @@ function VehicleMonthBoundarySummary({ rows }: VehicleMonthBoundarySummaryProps)
 
 
 export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
-  const { companyId, user } = useAuth();
+  const { user } = useAuth();
+  const { effectiveCompanyId: companyId } = useSuperAdmin();
   const now = new Date();
   const yearOptions = useMemo(() => { const y = now.getFullYear(); return Array.from({ length: 8 }, (_, i) => y - 6 + i); }, []);
 

@@ -3,10 +3,10 @@ import { Plus, Search, Trash2, CreditCard as Edit2, X, StickyNote, Calendar, Che
 import * as XLSX from 'xlsx';
 import ConfirmationModal from '../components/ConfirmationModal';
 import { supabase } from '../lib/supabase';
-import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
 import { format } from 'date-fns';
 import { getWeeksOfMonth, getWeekNumberForDate } from '../utils/weekCalculations';
+import { useSuperAdmin } from '../contexts/SuperAdminContext';
 
 interface Driver {
   id: string;
@@ -127,7 +127,7 @@ export function NotesPage() {
   const [selectedWeek, setSelectedWeek]   = useState(getWeekNumberForDate(new Date()));
   const [weeks, setWeeks] = useState<any[]>([]);
   const { showToast } = useToast();
-  const { companyId }   = useAuth();
+  const { effectiveCompanyId: companyId } = useSuperAdmin();
   const [deleteConfirm, setDeleteConfirm] = useState<{ open: boolean; noteId: string }>({ open: false, noteId: '' });
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState('');

@@ -13,6 +13,7 @@ import { fetchAllPaginated } from '../utils/fetchAllPaginated';
 import { exportSalariesToExcel } from '../utils/excelExport';
 import { getBusinessMonthRange } from '../utils/weekCalculations';
 import { generateDriverSalaryPdf } from '../utils/driverSalaryPdf';
+import { useSuperAdmin } from '../contexts/SuperAdminContext';
 
 interface SalariesManagementProps {
   drivers: Driver[];
@@ -36,7 +37,8 @@ const SalariesManagement: React.FC<SalariesManagementProps> = ({ drivers }) => {
   const [selectedDriver, setSelectedDriver] = useState('');
   const [selectedStatus, setSelectedStatus] = useState<'all' | 'paid' | 'unpaid'>('all');
 
-  const { user, isAdmin, companyId } = useAuth();
+  const { user, isAdmin } = useAuth();
+  const { effectiveCompanyId: companyId } = useSuperAdmin();
   const { success, error: showError, warning } = useToast();
   const { settings } = useCompanySettings();
 

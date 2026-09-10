@@ -9,6 +9,7 @@ import ConfirmationModal from './ConfirmationModal';
 import { handleDatabaseError } from '../utils/errorHandler';
 import { exportIncomeToExcel } from '../utils/excelExport';
 import { getWeeksOfMonth, getWeekNumberForDate, WeekOfMonth, getBusinessMonthRange, getBusinessWeekRange } from '../utils/weekCalculations';
+import { useSuperAdmin } from '../contexts/SuperAdminContext';
 
 interface IncomeManagementProps {
   drivers: Driver[];
@@ -61,7 +62,8 @@ const IncomeManagement: React.FC<IncomeManagementProps> = ({ drivers }) => {
   const [selectedType, setSelectedType] = useState<string>('');
   const [hoveredRow, setHoveredRow] = useState<string | null>(null);
 
-  const { user, profile, canEdit, canDelete, canCreate, companyId } = useAuth();
+  const { user, profile, canEdit, canDelete, canCreate } = useAuth();
+  const { effectiveCompanyId: companyId } = useSuperAdmin();
   const { success, error: showError, warning } = useToast();
   const [deleteConfirm, setDeleteConfirm] = useState<{ isOpen: boolean; id: string | null }>({ isOpen: false, id: null });
 

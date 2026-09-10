@@ -5,9 +5,9 @@ import html2canvas from 'html2canvas';
 import { format } from 'date-fns';
 import { supabase } from '../lib/supabase';
 import { useCompanySettings } from '../contexts/CompanySettingsContext';
-import { useAuth } from '../contexts/AuthContext';
 import type { CompanySettings } from '../types/settings';
 import { getBusinessMonthRange } from '../utils/weekCalculations';
+import { useSuperAdmin } from '../contexts/SuperAdminContext';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -336,7 +336,7 @@ type Step = 'select' | 'preview';
 
 const TrinkgeldQuittungModal: React.FC<Props> = ({ isOpen, onClose }) => {
   const { settings } = useCompanySettings();
-  const { companyId } = useAuth();
+  const { effectiveCompanyId: companyId } = useSuperAdmin();
 
   const [drivers,   setDrivers]   = useState<Driver[]>([]);
   const [driverId,  setDriverId]  = useState('');

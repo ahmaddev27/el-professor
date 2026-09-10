@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Plus, CreditCard as Edit2, Trash2, Car as CarIcon, Users, Download, ShieldCheck, ShieldAlert, ShieldX, Shield } from 'lucide-react';
 import { supabase } from '../lib/supabase';
-import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
 import { usePlan } from '../contexts/PlanContext';
 import CarModal from './CarModal';
@@ -9,6 +8,7 @@ import ConfirmationModal from './ConfirmationModal';
 import type { CarWithDrivers, TuevStatus } from '../types/car';
 import { getTuevStatus } from '../types/car';
 import { exportTableToExcel } from '../utils/excelExport';
+import { useSuperAdmin } from '../contexts/SuperAdminContext';
 
 type TuevFilter = 'all' | TuevStatus;
 
@@ -66,7 +66,7 @@ export default function CarsManagement() {
     kennzeichen: '',
   });
 
-  const { user, companyId } = useAuth();
+  const { effectiveCompanyId: companyId } = useSuperAdmin();
   const { showToast } = useToast();
   const { planState } = usePlan();
 

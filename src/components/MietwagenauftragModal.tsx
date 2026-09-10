@@ -4,9 +4,9 @@ import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 import { format } from 'date-fns';
 import { supabase } from '../lib/supabase';
-import { useAuth } from '../contexts/AuthContext';
 import { useCompanySettings } from '../contexts/CompanySettingsContext';
 import type { CompanySettings } from '../types/settings';
+import { useSuperAdmin } from '../contexts/SuperAdminContext';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -445,7 +445,7 @@ const inputStyle: React.CSSProperties = {
 
 const MietwagenauftragModal: React.FC<Props> = ({ isOpen, onClose }) => {
   const { settings } = useCompanySettings();
-  const { companyId } = useAuth();
+  const { effectiveCompanyId: companyId } = useSuperAdmin();
 
   const [drivers, setDrivers] = useState<Driver[]>([]);
   const [cars, setCars] = useState<Car[]>([]);

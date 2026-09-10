@@ -30,6 +30,7 @@ import {
   getTopExpenses, generateInsights, buildRevenueComposition,
 } from '../utils/overviewHelpers';
 import { getTuevStatus } from '../types/car';
+import { useSuperAdmin } from '../contexts/SuperAdminContext';
 
 const fmt = (n: number) =>
   n.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -252,7 +253,8 @@ const PlanStatusCard: React.FC<{ planState: PlanState; effectivePlan: Plan }> = 
 
 // ── Main component ────────────────────────────────────────────────────────────
 const OverviewPage: React.FC = () => {
-  const { isSuperAdmin, companyId } = useAuth();
+  const { isSuperAdmin } = useAuth();
+  const { effectiveCompanyId: companyId } = useSuperAdmin();
   const { planState, effectivePlan } = usePlan();
   const { receipts: receiptActions, drivers: driverActions, isLoading: dbLoading } = useDatabase();
   const [receipts, setReceipts] = useState<Receipt[]>([]);

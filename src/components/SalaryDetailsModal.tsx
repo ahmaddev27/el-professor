@@ -10,6 +10,7 @@ import SalaryPaymentModal from './SalaryPaymentModal';
 import ConfirmationModal from './ConfirmationModal';
 import { generateDriverSalaryPdf } from '../utils/driverSalaryPdf';
 import DriverSalarySummaryCard from './DriverSalarySummaryCard';
+import { useSuperAdmin } from '../contexts/SuperAdminContext';
 
 interface SalaryDetailsModalProps {
   isOpen: boolean;
@@ -45,7 +46,8 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
   });
 
   const { showToast } = useToast();
-  const { companyId, user } = useAuth();
+  const { user } = useAuth();
+  const { effectiveCompanyId: companyId } = useSuperAdmin();
   const { settings } = useCompanySettings();
 
   // The system-calculated total salary

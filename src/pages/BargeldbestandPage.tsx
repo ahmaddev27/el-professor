@@ -5,6 +5,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
 import { format, startOfMonth, endOfMonth } from 'date-fns';
 import { exportTableToExcel } from '../utils/excelExport';
+import { useSuperAdmin } from '../contexts/SuperAdminContext';
 
 interface Transaction {
   id: string;
@@ -28,7 +29,8 @@ export default function BargeldbestandPage() {
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [drivers, setDrivers] = useState<string[]>([]);
-  const { user, loading: authLoading, companyId } = useAuth();
+  const { user, loading: authLoading } = useAuth();
+  const { effectiveCompanyId: companyId } = useSuperAdmin();
   const { showToast } = useToast();
 
   useEffect(() => {

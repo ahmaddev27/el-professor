@@ -7,10 +7,10 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useCompanySettings } from '../contexts/CompanySettingsContext';
-import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { usePlan, FeatureKey } from '../contexts/PlanContext';
 import { useTranslation } from '../contexts/LanguageContext';
 import type { TranslationKey } from '../i18n';
+import { useSuperAdmin } from '../contexts/SuperAdminContext';
 
 interface SidebarProps {
   isSupportAdmin: boolean;

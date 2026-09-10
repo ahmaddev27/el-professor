@@ -4,10 +4,10 @@ import { exportStundennachweisAsPdf } from '../utils/stundennachweisPdfExport';
 import { ChevronLeft, ChevronRight, Download, RefreshCw, ArrowRight, User, Euro, Clock, StickyNote, Moon, Sun, Star, Save, FileSpreadsheet, AlertTriangle, CalendarRange, ChevronDown } from 'lucide-react';
 import { categorizeWarnings, formatDateDE, groupByDate, type WarningGroup } from '../utils/warningCategories';
 import { supabase } from '../lib/supabase';
-import { useAuth } from '../contexts/AuthContext';
 import { useCompanySettings } from '../contexts/CompanySettingsContext';
 import { format, getDaysInMonth } from 'date-fns';
 import { exportFahreruebersichtToExcel, SavedStundennachweis, DriverSummary } from '../utils/fahreruebersichtExport';
+import { useSuperAdmin } from '../contexts/SuperAdminContext';
 
 // ─── Constants ─────────────────────────────────────────────────────────────
 
@@ -3338,7 +3338,7 @@ type StepType = 'step1' | 'step2' | 'sheet';
 const StundennachweisPage: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { companyId } = useAuth();
+  const { effectiveCompanyId: companyId } = useSuperAdmin();
   const { settings: companySettings } = useCompanySettings();
   const bundesland = parseBundesland(companySettings?.state);
 

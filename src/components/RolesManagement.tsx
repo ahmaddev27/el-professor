@@ -4,8 +4,8 @@ import { supabase } from '../lib/supabase';
 import { Role, RolePermission, RoleWithPermissions } from '../types/role';
 import RoleModal from './RoleModal';
 import ConfirmationModal from './ConfirmationModal';
-import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
+import { useSuperAdmin } from '../contexts/SuperAdminContext';
 
 const RolesManagement: React.FC = () => {
   const [roles, setRoles] = useState<RoleWithPermissions[]>([]);
@@ -15,7 +15,7 @@ const RolesManagement: React.FC = () => {
   const [selectedRole, setSelectedRole] = useState<RoleWithPermissions | undefined>();
   const [roleToDelete, setRoleToDelete] = useState<Role | null>(null);
   const { showToast } = useToast();
-  const { companyId } = useAuth();
+  const { effectiveCompanyId: companyId } = useSuperAdmin();
 
   useEffect(() => {
     fetchRoles();

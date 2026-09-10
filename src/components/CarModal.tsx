@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
 import type { CarWithDrivers } from '../types/car';
+import { useSuperAdmin } from '../contexts/SuperAdminContext';
 
 interface Driver {
   id: string;
@@ -34,7 +35,8 @@ export default function CarModal({ car, onClose, onSuccess }: CarModalProps) {
   const [availableDrivers, setAvailableDrivers] = useState<Driver[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadingDrivers, setLoadingDrivers] = useState(true);
-  const { user, companyId } = useAuth();
+  const { user } = useAuth();
+  const { effectiveCompanyId: companyId } = useSuperAdmin();
   const { showToast } = useToast();
 
   useEffect(() => { loadDrivers(); }, []);

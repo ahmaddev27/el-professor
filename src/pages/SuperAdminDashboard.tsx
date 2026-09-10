@@ -1,7 +1,6 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
-import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { useToast } from '../contexts/ToastContext';
 import {
   Building2, Users, Car, FileText, TrendingUp, AlertTriangle,
@@ -16,6 +15,7 @@ import ManualSubscriptionModal from '../components/ManualSubscriptionModal';
 import { format, differenceInDays, isAfter, isBefore, addDays, startOfMonth } from 'date-fns';
 import { de } from 'date-fns/locale';
 import { calcPricing, fmt as fmtPrice } from '../utils/pricing';
+import { useSuperAdmin } from '../contexts/SuperAdminContext';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 

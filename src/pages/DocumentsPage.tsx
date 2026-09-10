@@ -5,9 +5,9 @@ import MietwagenauftragModal from '../components/MietwagenauftragModal';
 import FahrtenbuchTripsView from '../components/FahrtenbuchTripsView';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
-import { useAuth } from '../contexts/AuthContext';
 import type { DriverOption, CarOption } from '../components/FahrtenbuchImportModal';
 import { exportStundennachweisAsPdf, toPdfDayRow } from '../utils/stundennachweisPdfExport';
+import { useSuperAdmin } from '../contexts/SuperAdminContext';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -100,7 +100,7 @@ function totalMins(rec: SavedRecord): number {
 
 const DocumentsPage: React.FC = () => {
   const navigate = useNavigate();
-  const { companyId } = useAuth();
+  const { effectiveCompanyId: companyId } = useSuperAdmin();
   const [isTrinkgeldModalOpen, setIsTrinkgeldModalOpen] = useState(false);
   const [isMietwagenModalOpen, setIsMietwagenModalOpen] = useState(false);
   const [subView, setSubView] = useState<SubView>('main');

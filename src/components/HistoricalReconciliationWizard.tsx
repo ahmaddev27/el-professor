@@ -22,7 +22,6 @@ import {
   Download, FileText, RefreshCw, Users, Clock, Info, Save,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
-import { useAuth } from '../contexts/AuthContext';
 import {
   normalizeTripServiceDate,
   groupRidesIntoBlocks,
@@ -38,6 +37,7 @@ import {
   type HistoricalPdfCorrectionEntry,
   type HistoricalGrossReconciliation,
 } from '../utils/stundennachweisPdfExport';
+import { useSuperAdmin } from '../contexts/SuperAdminContext';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -494,7 +494,7 @@ interface Props {
 }
 
 export default function HistoricalReconciliationWizard({ onBack }: Props) {
-  const { companyId } = useAuth();
+  const { effectiveCompanyId: companyId } = useSuperAdmin();
   const now = new Date();
   const yearOptions = useMemo(() => {
     const y = now.getFullYear();

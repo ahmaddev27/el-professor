@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Bell, BellOff, ShieldAlert, ShieldX, Clock, AlertTriangle, CheckCircle, Save, RotateCcw } from 'lucide-react';
 import { supabase } from '../lib/supabase';
-import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
+import { useSuperAdmin } from '../contexts/SuperAdminContext';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -117,7 +117,7 @@ const GroupHeader: React.FC<{ title: string; sub: string }> = ({ title, sub }) =
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 export default function NotificationsPage() {
-  const { companyId } = useAuth();
+  const { effectiveCompanyId: companyId } = useSuperAdmin();
   const { showToast } = useToast();
 
   const [globalEnabled, setGlobalEnabled] = useState(true);

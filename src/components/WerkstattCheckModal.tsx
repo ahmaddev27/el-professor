@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
 import { getWeekNumber, getWeeksOfMonth, getWeekNumberForDate } from '../utils/weekCalculations';
+import { useSuperAdmin } from '../contexts/SuperAdminContext';
 
 interface Car {
   id: string;
@@ -69,7 +70,8 @@ export default function WerkstattCheckModal({
   const [cars, setCars] = useState<Car[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadingCars, setLoadingCars] = useState(true);
-  const { user, companyId } = useAuth();
+  const { user } = useAuth();
+  const { effectiveCompanyId: companyId } = useSuperAdmin();
   const { showToast } = useToast();
 
   useEffect(() => {

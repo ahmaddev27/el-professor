@@ -1,13 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { Plus, Wrench, Calendar, AlertCircle, CheckCircle, CreditCard as Edit2, Trash2, Download } from 'lucide-react';
 import { supabase } from '../lib/supabase';
-import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
 import { getWeeksOfMonth, getWeekNumberForDate } from '../utils/weekCalculations';
 import WerkstattCheckModal from '../components/WerkstattCheckModal';
 import ConfirmationModal from '../components/ConfirmationModal';
 import { format } from 'date-fns';
 import { exportTableToExcel } from '../utils/excelExport';
+import { useSuperAdmin } from '../contexts/SuperAdminContext';
 
 interface WerkstattCheck {
   id: string;
@@ -35,7 +35,7 @@ export default function WerkstattPage() {
   const [selectedCheck, setSelectedCheck] = useState<WerkstattCheck | null>(null);
   const [checkToDelete, setCheckToDelete] = useState<WerkstattCheck | null>(null);
   const { showToast } = useToast();
-  const { companyId } = useAuth();
+  const { effectiveCompanyId: companyId } = useSuperAdmin();
 
   useEffect(() => {
     const weeksOfMonth = getWeeksOfMonth(selectedMonth);
