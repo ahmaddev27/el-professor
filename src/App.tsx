@@ -2,7 +2,7 @@ import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from './contexts/AuthContext';
 import { CompanySettingsProvider } from './contexts/CompanySettingsContext';
-import { SuperAdminProvider } from './contexts/SuperAdminContext';
+import { SuperAdminProvider, useSuperAdmin } from './contexts/SuperAdminContext';
 import { PlanProvider, usePlan, FeatureKey } from './contexts/PlanContext';
 import { FEATURE_MIN_PLAN } from './contexts/PlanContext';
 import AppLayout from './components/AppLayout';
@@ -108,6 +108,36 @@ const SubscriptionGuard: React.FC<{ children: React.ReactNode }> = ({ children }
   return <>{children}</>;
 };
 
+/**
+ * A super admin is a platform account, not a tenant.
+ *
+ * Detached from a company, its `effectiveCompanyId` is null until it enters
+ * one — and every tenant screen then queries `company_id = null`. PostgREST
+ * serialises that as the string "null", so Postgres answers
+ *
+ *   invalid input syntax for type uuid: "null"
+ *
+ * as a banner over zeroed figures on a page that has already rendered.
+ *
+ * Sending the account to the platform panel is not a workaround for that
+ * error, it is the model: a super admin reaches a company's screens by
+ * entering it from /super-admin, which sets effectiveCompanyId, and the same
+ * screens then work against that company.
+ *
+ * Outermost of the three guards, so it settles the question before
+ * SubscriptionGuard can route a company-less account to /abo-aktivieren.
+ */
+const PlatformAccountGuard: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { isSuperAdmin } = useAuth();
+  const { effectiveCompanyId } = useSuperAdmin();
+
+  if (isSuperAdmin && !effectiveCompanyId) {
+    return <Navigate to="/super-admin" replace />;
+  }
+
+  return <>{children}</>;
+};
+
 // ─── App ──────────────────────────────────────────────────────────────────────
 
 function App() {
@@ -171,11 +201,13 @@ function App() {
               <Route path="/set-new-password" element={<SetPasswordPage />} />
               <Route path="/auth/forgot-password" element={<ForgotPasswordPage />} />
               <Route path="/" element={
+                <PlatformAccountGuard>
                 <MustChangePasswordGuard>
                 <SubscriptionGuard>
                   <AppLayout isSupportAdmin={isAdmin} />
                 </SubscriptionGuard>
                 </MustChangePasswordGuard>
+                </PlatformAccountGuard>
               }>
                 <Route index element={<Navigate to={isSuperAdmin ? "/super-admin" : "/overview"} replace />} />
                 {/* Activation routes — inside AppLayout so sidebar is visible */}
