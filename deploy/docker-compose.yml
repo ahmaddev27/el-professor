@@ -5,10 +5,10 @@
 # Storage, Realtime, and Kong as the single gateway.
 #
 # The point of keeping these components rather than writing a new backend is the
-# 410 RLS policies. They are enforced by PostgreSQL itself and are currently the
+# 193 RLS policies. They are enforced by PostgreSQL itself and are currently the
 # only real tenant boundary in the product — the client-side role checks were
 # found to be decorative. Swapping PostgREST for a hand-written API means
-# reimplementing all 410 as application code, which is where the audit found
+# reimplementing all 193 as application code, which is where the audit found
 # nine authorization holes. Keeping the stack keeps the boundary.
 #
 # Surveyed reality of the target VPS (2026-09-10):

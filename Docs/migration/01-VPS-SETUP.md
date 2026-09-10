@@ -20,7 +20,7 @@ cannot reproduce is a stack you cannot rebuild after an incident.
 
 The client keeps talking to `@supabase/supabase-js`. Only `VITE_SUPABASE_URL`
 and `VITE_SUPABASE_ANON_KEY` change. That is the whole point of this path: the
-410 RLS policies keep doing the tenant isolation, in the database, where they
+193 RLS policies keep doing the tenant isolation, in the database, where they
 already work.
 
 ---
