@@ -1,0 +1,7 @@
+# These files are read by Linux, not by Windows, regardless of who edits them.
+# A shell script checked out with CRLF fails as `bad interpreter: /bin/bash^M`,
+# and the error names the interpreter rather than the line endings — so pin the
+# endings here instead of losing an afternoon to it later.
+*.sh            text eol=lf
+deploy/**       text eol=lf
+supabase/**.sql text eol=lf
