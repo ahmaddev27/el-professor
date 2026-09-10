@@ -113,6 +113,17 @@ Fahrtenbuch file open in the app.
 
 ## 5. TLS and the SPA
 
+**This box already runs another project.** Survey it first —
+[02-COEXISTENCE-CHECK.md](02-COEXISTENCE-CHECK.md) — because there must be
+exactly one thing terminating TLS on a host.
+
+- **If nginx / Traefik / Caddy is already running:** do not install a second
+  proxy. Add two server blocks to what is there;
+  `deploy/nginx-site.conf.example` is ready for that case.
+- **If nothing owns :80 and :443:** use the Caddyfile below.
+
+
+
 ```bash
 apt install caddy
 cp Caddyfile /etc/caddy/Caddyfile   # edit both domain names first

@@ -11,6 +11,11 @@
 # reimplementing all 410 as application code, which is where the audit found
 # nine authorization holes. Keeping the stack keeps the boundary.
 #
+# This VPS already runs another project (ridy + OSRM). Everything here is
+# namespaced by `name: ya-mobility` — its own network, its own volumes, its own
+# Postgres container and credentials. The two stacks share the kernel and the
+# disk and nothing else. Run Docs/migration/02-COEXISTENCE-CHECK.md first.
+#
 # Usage:
 #   cp .env.example .env     # then fill in every value
 #   docker compose up -d
@@ -46,6 +51,12 @@ services:
       interval: 5s
       timeout: 5s
       retries: 20
+    # Capped so a Fahrtenbuch import cannot make the kernel OOM-kill the other
+    # project's database. Raise deliberately after watching `docker stats`.
+    deploy:
+      resources:
+        limits: { memory: ${DB_MEM_LIMIT:-4G} }
+    shm_size: 256mb
 
   # ── REST API — this is what supabase.from() talks to ──────────────────────
   rest:
@@ -63,6 +74,9 @@ services:
       PGRST_DB_MAX_ROWS: 1000
     expose:
       - '3000'
+    deploy:
+      resources:
+        limits: { memory: 512M }
 
   # ── Auth ───────────────────────────────────────────────────────────────────
   auth:
@@ -115,6 +129,9 @@ services:
       GOTRUE_EXTERNAL_GOOGLE_REDIRECT_URI: ${PUBLIC_URL}/auth/v1/callback
     expose:
       - '9999'
+    deploy:
+      resources:
+        limits: { memory: 256M }
 
   # ── Storage — company-logos and fahrtenbuch-files ─────────────────────────
   storage:
@@ -139,6 +156,9 @@ services:
       - storage-data:/var/lib/storage
     expose:
       - '5000'
+    deploy:
+      resources:
+        limits: { memory: 512M }
 
   # ── Realtime — CompanySettingsContext subscribes to postgres_changes ──────
   realtime:
@@ -162,6 +182,9 @@ services:
       RLIMIT_NOFILE: '10000'
     expose:
       - '4000'
+    deploy:
+      resources:
+        limits: { memory: 512M }
 
   # ── Gateway — the single origin the browser talks to ──────────────────────
   kong:
@@ -176,9 +199,15 @@ services:
     volumes:
       - ./kong.yml:/home/kong/kong.yml:ro
     ports:
-      # Bound to loopback: Caddy terminates TLS and proxies to it. Never expose
-      # Kong's plain HTTP port to the internet.
-      - '127.0.0.1:8000:8000'
+      # Loopback only — the reverse proxy in front terminates TLS and forwards
+      # here. Never expose Kong's plain HTTP port to the internet.
+      #
+      # The host port is configurable because the other project on this box may
+      # already hold 8000. Whatever you set, point the proxy at the same value.
+      - '127.0.0.1:${KONG_BIND_PORT:-8000}:8000'
+    deploy:
+      resources:
+        limits: { memory: 512M }
 
 volumes:
   db-data:
