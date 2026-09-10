@@ -1,0 +1,99 @@
+# Use this INSTEAD of the Caddyfile when the box already has nginx serving the
+# other project.
+#
+# There must be exactly one thing terminating TLS on a host. Installing Caddy
+# next to a running nginx means both fight for :443, and the loser — possibly
+# the existing site — stops answering after the next reboot. Adding two server
+# blocks to what is already there is the safe move.
+#
+#   cp nginx-site.conf.example /etc/nginx/sites-available/ya-mobility
+#   ln -s /etc/nginx/sites-available/ya-mobility /etc/nginx/sites-enabled/
+#   certbot --nginx -d api.your-domain.de -d app.your-domain.de
+#   nginx -t && systemctl reload nginx
+#
+# `nginx -t` before reload, every time. A bad config on reload takes the other
+# project down with it.
+
+# ── API gateway ─────────────────────────────────────────────────────────────
+server {
+    listen 443 ssl http2;
+    server_name api.your-domain.de;
+
+    # certbot fills these in.
+    # ssl_certificate     /etc/letsencrypt/live/api.your-domain.de/fullchain.pem;
+    # ssl_certificate_key /etc/letsencrypt/live/api.your-domain.de/privkey.pem;
+
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "DENY" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+
+    # Fahrtenbuch XLSX uploads. The default 1m rejects a large month.
+    client_max_body_size 50m;
+
+    location / {
+        # Must match KONG_BIND_PORT in deploy/.env.
+        proxy_pass http://127.0.0.1:8000;
+
+        proxy_http_version 1.1;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # Realtime is a websocket — CompanySettingsContext subscribes to
+        # postgres_changes. Without these two the subscription silently never
+        # connects and settings changes stop propagating between tabs.
+        proxy_set_header Upgrade    $http_upgrade;
+        proxy_set_header Connection "upgrade";
+
+        # Long-running: planning applies and PDF batches outlast the 60s default.
+        proxy_read_timeout 300s;
+        proxy_send_timeout 300s;
+    }
+}
+
+# ── The SPA ─────────────────────────────────────────────────────────────────
+server {
+    listen 443 ssl http2;
+    server_name app.your-domain.de;
+
+    root /srv/ya-mobility/dist;
+    index index.html;
+
+    # ssl_certificate     /etc/letsencrypt/live/app.your-domain.de/fullchain.pem;
+    # ssl_certificate_key /etc/letsencrypt/live/app.your-domain.de/privkey.pem;
+
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "DENY" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+
+    gzip on;
+    gzip_types text/css application/javascript application/json image/svg+xml;
+    gzip_min_length 1024;
+
+    # Hashed filenames are immutable.
+    location /assets/ {
+        add_header Cache-Control "public, max-age=31536000, immutable";
+        try_files $uri =404;
+    }
+
+    # index.html must never be cached, or a deploy leaves browsers on the old
+    # bundle pointing at a changed API.
+    location = /index.html {
+        add_header Cache-Control "no-cache";
+    }
+
+    # React Router owns the paths. Replaces the old public/.htaccess rewrite.
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}
+
+# ── Redirect plain HTTP ─────────────────────────────────────────────────────
+server {
+    listen 80;
+    server_name api.your-domain.de app.your-domain.de;
+    return 301 https://$host$request_uri;
+}
