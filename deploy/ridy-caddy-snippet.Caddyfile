@@ -1,0 +1,71 @@
+# Append these two blocks to the Caddyfile that ridy-caddy-1 already serves.
+#
+# This is the ONLY change to the existing project. ridy-caddy-1 is the only
+# thing on the box that can bind :443, so our stack does not run a proxy at all
+# — it publishes no host ports and is reached over the shared docker network by
+# container name.
+#
+# ── Applying it ─────────────────────────────────────────────────────────────
+#
+#   1. Find the Caddyfile ridy mounts:
+#        docker inspect ridy-caddy-1 --format '{{range .Mounts}}{{.Source}} -> {{.Destination}}{{"\n"}}{{end}}'
+#
+#   2. Back it up before touching it:
+#        cp <that-file> <that-file>.bak-$(date +%F)
+#
+#   3. Append these blocks, with the real hostnames.
+#
+#   4. Validate BEFORE reloading — a bad Caddyfile takes ridy down with it:
+#        docker exec ridy-caddy-1 caddy validate --config /etc/caddy/Caddyfile
+#
+#   5. Reload without dropping connections:
+#        docker exec ridy-caddy-1 caddy reload --config /etc/caddy/Caddyfile
+#
+# Reverting is deleting these blocks and reloading again. ridy's own sites are
+# untouched throughout.
+#
+# ── Prerequisite ────────────────────────────────────────────────────────────
+#
+# Our containers join `ridy_default` (declared external in our compose file), so
+# Caddy resolves them by name. Confirm after `docker compose up -d`:
+#
+#   docker exec ridy-caddy-1 wget -qO- http://ya-mobility-web-1/ | head -1
+#
+# If that fails, the network join did not happen and the blocks below will 502.
+
+# ── API gateway → Kong ──────────────────────────────────────────────────────
+api.your-domain.de {
+	encode zstd gzip
+
+	# Fahrtenbuch XLSX uploads. Caddy's default body limit is generous, but the
+	# read timeout is not: a planning apply or a PDF batch outlasts it.
+	reverse_proxy ya-mobility-kong-1:8000 {
+		transport http {
+			read_timeout 300s
+			write_timeout 300s
+		}
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+}
+
+# ── SPA → our nginx ─────────────────────────────────────────────────────────
+app.your-domain.de {
+	encode zstd gzip
+
+	reverse_proxy ya-mobility-web-1:80
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+}

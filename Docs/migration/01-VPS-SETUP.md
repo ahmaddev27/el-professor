@@ -113,37 +113,33 @@ Fahrtenbuch file open in the app.
 
 ## 5. TLS and the SPA
 
-**This box already runs another project.** Survey it first —
-[02-COEXISTENCE-CHECK.md](02-COEXISTENCE-CHECK.md) — because there must be
-exactly one thing terminating TLS on a host.
+The box already runs `ridy-caddy-1`, which owns :80 and :443 — see
+[02-COEXISTENCE-CHECK.md](02-COEXISTENCE-CHECK.md). **Do not install a proxy.**
+Our stack publishes no host ports; the existing Caddy reaches it over the shared
+docker network.
 
-- **If nginx / Traefik / Caddy is already running:** do not install a second
-  proxy. Add two server blocks to what is there;
-  `deploy/nginx-site.conf.example` is ready for that case.
-- **If nothing owns :80 and :443:** use the Caddyfile below.
-
-
-
-```bash
-apt install caddy
-cp Caddyfile /etc/caddy/Caddyfile   # edit both domain names first
-systemctl reload caddy
-```
-
-Build and deploy the frontend:
+Build the SPA into `deploy/dist/`, which the `web` container serves:
 
 ```bash
 # on your machine
-VITE_SUPABASE_URL=https://api.your-domain.de \
-VITE_SUPABASE_ANON_KEY=<ANON_KEY> \
-VITE_APP_URL=https://app.your-domain.de \
-npm run build
+VITE_SUPABASE_URL=https://api.your-domain.de VITE_SUPABASE_ANON_KEY=<ANON_KEY> VITE_APP_URL=https://app.your-domain.de npm run build
 
-rsync -av --delete dist/ root@vps:/srv/ya-mobility/dist/
+rsync -av --delete dist/ root@159.195.205.30:/srv/ya-mobility/deploy/dist/
 ```
 
 The build gate runs the typecheck ratchet and the tests first. If it refuses,
-fix that before shipping rather than reaching for `build:novalidate`.
+fix that rather than reaching for `build:novalidate`.
+
+Then append the two site blocks from `deploy/ridy-caddy-snippet.Caddyfile` to
+ridy's Caddyfile. That file carries the full procedure — back up first, validate
+before reloading, and how to revert. **Validate before reload matters**: a bad
+Caddyfile takes ridy offline too.
+
+Confirm the network join worked before touching the Caddyfile at all:
+
+```bash
+docker exec ridy-caddy-1 wget -qO- http://ya-mobility-web-1/ | head -1
+```
 
 ## 6. Google sign-in
 
