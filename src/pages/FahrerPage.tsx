@@ -6,8 +6,10 @@ import { Driver } from '../types/receipt';
 import DriversManagement from '../components/DriversManagement';
 import { DriverPlanningFields } from '../components/DriverModal';
 import { handleDatabaseError } from '../utils/errorHandler';
+import { useTranslation } from '../contexts/LanguageContext';
 
 const FahrerPage: React.FC = () => {
+  const { t } = useTranslation();
   const { user, canEdit, canDelete, canCreate } = useAuth();
   const { success, error: showError } = useToast();
   const { drivers: driverActions, isLoading: dbLoading } = useDatabase();
@@ -42,17 +44,17 @@ const FahrerPage: React.FC = () => {
 
   const handleAddDriver = async (name: string, salaryRatio: number, personalnummer: string, gender: 'male' | 'female' | null, planning?: DriverPlanningFields) => {
     if (!canCreate) {
-      showError('Keine Berechtigung', 'Nur Administratoren und Ersteller können Fahrer hinzufügen');
+      showError(t('common.noPermission'), t('fahrer.noPermissionAdd'));
       return;
     }
 
     try {
       await driverActions.add(name, salaryRatio, personalnummer, gender, planning);
       await loadData();
-      success('Fahrer erstellt', 'Der Fahrer wurde erfolgreich hinzugefügt');
+      success(t('fahrer.created'), t('fahrer.createdBody'));
     } catch (err) {
       console.error('Error adding driver:', err);
-      showError('Fehler beim Erstellen', handleDatabaseError(err));
+      showError(t('common.errorCreate'), handleDatabaseError(err));
     }
   };
 
@@ -60,10 +62,10 @@ const FahrerPage: React.FC = () => {
     try {
       await driverActions.update(id, name, salaryRatio, status, personalnummer, gender, planning);
       await loadData();
-      success('Fahrer aktualisiert', 'Der Fahrer wurde erfolgreich geändert');
+      success(t('fahrer.updated'), t('fahrer.updatedBody'));
     } catch (err) {
       console.error('Error updating driver:', err);
-      showError('Fehler beim Aktualisieren', handleDatabaseError(err));
+      showError(t('common.errorUpdate'), handleDatabaseError(err));
     }
   };
 
@@ -71,10 +73,10 @@ const FahrerPage: React.FC = () => {
     try {
       await driverActions.delete(id);
       await loadData();
-      success('Fahrer gelöscht', 'Der Fahrer wurde erfolgreich entfernt');
+      success(t('fahrer.deleted'), t('fahrer.deletedBody'));
     } catch (err) {
       console.error('Error deleting driver:', err);
-      showError('Fehler beim Löschen', handleDatabaseError(err));
+      showError(t('common.errorDelete'), handleDatabaseError(err));
     }
   };
 
@@ -88,7 +90,7 @@ const FahrerPage: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      <h2 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>Fahrer</h2>
+      <h2 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>{t('nav.fahrer')}</h2>
       <DriversManagement
         drivers={drivers}
         onAddDriver={handleAddDriver}

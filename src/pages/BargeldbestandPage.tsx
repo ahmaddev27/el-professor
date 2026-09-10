@@ -6,6 +6,7 @@ import { useToast } from '../contexts/ToastContext';
 import { format, startOfMonth, endOfMonth } from 'date-fns';
 import { exportTableToExcel } from '../utils/excelExport';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
+import { useTranslation } from '../contexts/LanguageContext';
 
 interface Transaction {
   id: string;
@@ -17,6 +18,7 @@ interface Transaction {
 }
 
 export default function BargeldbestandPage() {
+  const { t } = useTranslation();
   const [totalCashIncome, setTotalCashIncome] = useState(0);
   const [totalBelegeExpenses, setTotalBelegeExpenses] = useState(0);
   const [cashBalance, setCashBalance] = useState(0);
@@ -87,7 +89,7 @@ export default function BargeldbestandPage() {
         id: item.id,
         type: 'income' as const,
         amount: Number(item.amount),
-        description: item.description || 'Bargeld Einnahme',
+        description: item.description || t('bargeld.incomeEntry'),
         driver_name: item.driver_name,
         date: item.date,
       })) || [];
@@ -113,7 +115,7 @@ export default function BargeldbestandPage() {
 
     } catch (error: any) {
       console.error('Error loading cash data:', error);
-      showToast('error', 'Fehler beim Laden der Bargeld-Daten');
+      showToast('error', t('bargeld.loadFailed'));
     } finally {
       setIsLoading(false);
     }
@@ -138,7 +140,7 @@ export default function BargeldbestandPage() {
   function handleExport() {
     const filters: string[] = [`Monat: ${selectedMonth}`];
     if (selectedDriver !== 'all') filters.push(`Fahrer: ${selectedDriver}`);
-    if (selectedType !== 'all') filters.push(`Typ: ${selectedType === 'income' ? 'Einnahmen' : 'Ausgaben'}`);
+    if (selectedType !== 'all') filters.push(`Typ: ${selectedType === 'income' ? t('common.income') : t('common.expenses')}`);
     if (startDate) filters.push(`Von: ${new Date(startDate).toLocaleDateString('de-DE')}`);
     if (endDate) filters.push(`Bis: ${new Date(endDate).toLocaleDateString('de-DE')}`);
 
@@ -151,11 +153,11 @@ export default function BargeldbestandPage() {
       moduleName: 'Bargeldbestand',
       filterSummary: filters,
       columns: [
-        { key: 'date',        label: 'Datum',        width: 14, format: v => new Date(v as string).toLocaleDateString('de-DE') },
-        { key: 'type',        label: 'Typ',          width: 14, format: v => v === 'income' ? 'Einnahme' : 'Ausgabe' },
-        { key: 'driver_name', label: 'Fahrer',        width: 22 },
-        { key: 'description', label: 'Beschreibung',  width: 36 },
-        { key: 'amount',      label: 'Betrag (€)',    width: 16, align: 'right', format: v => (v as number).toFixed(2) },
+        { key: 'date',        label: t('common.date'),        width: 14, format: v => new Date(v as string).toLocaleDateString('de-DE') },
+        { key: 'type',        label: 'Typ',          width: 14, format: v => v === 'income' ? t('bargeld.incomeCol') : t('bargeld.expenseCol') },
+        { key: 'driver_name', label: t('common.driver'),        width: 22 },
+        { key: 'description', label: t('common.description'),  width: 36 },
+        { key: 'amount',      label: t('bargeld.amountEuro'),    width: 16, align: 'right', format: v => (v as number).toFixed(2) },
       ],
       rows: filteredTransactions as unknown as Record<string, unknown>[],
       totals: {
@@ -186,7 +188,7 @@ export default function BargeldbestandPage() {
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center flex-wrap gap-3">
-        <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>Bargeldbestand</h1>
+        <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>{t('nav.bargeldbestand')}</h1>
         <div className="flex items-center gap-3 flex-wrap">
           <Calendar className="w-5 h-5" style={{ color: 'var(--text-secondary)' }} />
           <input
@@ -199,7 +201,7 @@ export default function BargeldbestandPage() {
             onClick={handleExport}
             className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-opacity hover:opacity-80"
             style={{ background: 'var(--success)', color: 'white' }}
-            title="Aktuelle Ansicht als Excel exportieren"
+            title={t('common.exportExcel')}
           >
             <Download className="w-4 h-4" />
             Excel
@@ -213,12 +215,12 @@ export default function BargeldbestandPage() {
             <div className="p-2 rounded-lg" style={{ background: 'rgba(5,150,105,0.15)' }}>
               <Wallet className="w-6 h-6" style={{ color: 'var(--success)' }} />
             </div>
-            <h3 className="text-sm font-medium" style={{ color: 'var(--success)' }}>Bargeld Einnahmen</h3>
+            <h3 className="text-sm font-medium" style={{ color: 'var(--success)' }}>{t('bargeld.cashIncome')}</h3>
           </div>
           <p className="text-3xl font-bold" style={{ color: 'var(--success)' }}>
             {totalCashIncome.toFixed(2)} €
           </p>
-          <p className="text-xs mt-2" style={{ color: 'var(--success)', opacity: 0.75 }}>Gesamt Bargeld (Umsätze)</p>
+          <p className="text-xs mt-2" style={{ color: 'var(--success)', opacity: 0.75 }}>{t('bargeld.totalCash')}</p>
         </div>
 
         <div className="rounded-xl p-6" style={{ background: 'var(--danger-subtle)', border: '1px solid rgba(220,38,38,0.25)' }}>
@@ -226,12 +228,12 @@ export default function BargeldbestandPage() {
             <div className="p-2 rounded-lg" style={{ background: 'rgba(220,38,38,0.15)' }}>
               <ReceiptIcon className="w-6 h-6" style={{ color: 'var(--danger)' }} />
             </div>
-            <h3 className="text-sm font-medium" style={{ color: 'var(--danger)' }}>Belege Ausgaben</h3>
+            <h3 className="text-sm font-medium" style={{ color: 'var(--danger)' }}>{t('bargeld.belegExpenses')}</h3>
           </div>
           <p className="text-3xl font-bold" style={{ color: 'var(--danger)' }}>
             {totalBelegeExpenses.toFixed(2)} €
           </p>
-          <p className="text-xs mt-2" style={{ color: 'var(--danger)', opacity: 0.75 }}>Gesamt Belege (alle Fahrer)</p>
+          <p className="text-xs mt-2" style={{ color: 'var(--danger)', opacity: 0.75 }}>{t('bargeld.totalBelege')}</p>
         </div>
 
         <div
@@ -261,7 +263,7 @@ export default function BargeldbestandPage() {
       <div className="rounded-xl overflow-hidden" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-sm)' }}>
         <div className="px-6 py-4 border-b" style={{ borderColor: 'var(--border)' }}>
           <div className="flex items-center justify-between">
-            <h2 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>Transaktionen</h2>
+            <h2 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>{t('bargeld.transactions')}</h2>
             <Filter className="w-5 h-5" style={{ color: 'var(--text-tertiary)' }} />
           </div>
         </div>
@@ -269,26 +271,26 @@ export default function BargeldbestandPage() {
         <div className="p-6 border-b" style={{ borderColor: 'var(--border)', background: 'var(--bg-subtle)' }}>
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <div>
-              <label className="block text-sm font-medium mb-2" style={{ color: 'var(--text-secondary)' }}>Fahrer</label>
+              <label className="block text-sm font-medium mb-2" style={{ color: 'var(--text-secondary)' }}>{t('common.driver')}</label>
               <select value={selectedDriver} onChange={(e) => setSelectedDriver(e.target.value)} style={inputStyle}>
-                <option value="all">Alle Fahrer</option>
+                <option value="all">{t('common.allDrivers')}</option>
                 {drivers.map(driver => <option key={driver} value={driver}>{driver}</option>)}
               </select>
             </div>
             <div>
               <label className="block text-sm font-medium mb-2" style={{ color: 'var(--text-secondary)' }}>Typ</label>
               <select value={selectedType} onChange={(e) => setSelectedType(e.target.value)} style={inputStyle}>
-                <option value="all">Alle</option>
-                <option value="income">Einnahmen</option>
-                <option value="expense">Ausgaben</option>
+                <option value="all">{t('common.all')}</option>
+                <option value="income">{t('common.income')}</option>
+                <option value="expense">{t('common.expenses')}</option>
               </select>
             </div>
             <div>
-              <label className="block text-sm font-medium mb-2" style={{ color: 'var(--text-secondary)' }}>Von Datum</label>
+              <label className="block text-sm font-medium mb-2" style={{ color: 'var(--text-secondary)' }}>{t('common.dateFrom')}</label>
               <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} style={inputStyle} />
             </div>
             <div>
-              <label className="block text-sm font-medium mb-2" style={{ color: 'var(--text-secondary)' }}>Bis Datum</label>
+              <label className="block text-sm font-medium mb-2" style={{ color: 'var(--text-secondary)' }}>{t('common.dateTo')}</label>
               <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} style={inputStyle} />
             </div>
           </div>
@@ -311,11 +313,11 @@ export default function BargeldbestandPage() {
           <table className="w-full">
             <thead>
               <tr style={{ background: 'var(--bg-subtle)' }}>
-                <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>Datum</th>
+                <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>{t('common.date')}</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>Typ</th>
-                <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>Fahrer</th>
-                <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>Beschreibung</th>
-                <th className="px-6 py-3 text-right text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>Betrag</th>
+                <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>{t('common.driver')}</th>
+                <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>{t('common.description')}</th>
+                <th className="px-6 py-3 text-right text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>{t('common.amount')}</th>
               </tr>
             </thead>
             <tbody>
@@ -346,7 +348,7 @@ export default function BargeldbestandPage() {
                         }}
                       >
                         {transaction.type === 'income' ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
-                        {transaction.type === 'income' ? 'Einnahme' : 'Ausgabe'}
+                        {transaction.type === 'income' ? t('bargeld.incomeCol') : t('bargeld.expenseCol')}
                       </span>
                     </td>
                     <td className="px-6 py-4 text-sm" style={{ color: 'var(--text-primary)' }}>

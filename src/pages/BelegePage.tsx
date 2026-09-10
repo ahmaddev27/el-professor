@@ -12,6 +12,7 @@ import { exportToExcel } from '../utils/excelExport';
 import { handleDatabaseError } from '../utils/errorHandler';
 import { generateReceiptPdf } from '../utils/receiptPdf';
 import { supabase } from '../lib/supabase';
+import { useTranslation } from '../contexts/LanguageContext';
 
 interface ConfirmModalState {
   isOpen: boolean;
@@ -22,6 +23,7 @@ interface ConfirmModalState {
 }
 
 const BelegePage: React.FC = () => {
+  const { t } = useTranslation();
   const { user, canEdit, canDelete, canCreate } = useAuth();
   const { success, error: showError } = useToast();
   const { receipts: receiptActions, drivers: driverActions, isLoading: dbLoading } = useDatabase();
@@ -77,7 +79,7 @@ const BelegePage: React.FC = () => {
 
   const handleAddReceipt = async (receiptData: Omit<Receipt, 'id'>) => {
     if (!canCreate) {
-      showError('Keine Berechtigung', 'Nur Administratoren und Ersteller können Belege hinzufügen');
+      showError(t('common.noPermission'), t('belege.noPermissionAdd'));
       return;
     }
     try {
@@ -85,7 +87,7 @@ const BelegePage: React.FC = () => {
       await loadData();
     } catch (err) {
       console.error('Error adding receipt:', err);
-      showError('Fehler beim Erstellen', handleDatabaseError(err));
+      showError(t('common.errorCreate'), handleDatabaseError(err));
     }
   };
 
@@ -95,10 +97,10 @@ const BelegePage: React.FC = () => {
       await loadData();
       setEditingReceipt(null);
       setIsReceiptModalOpen(false);
-      success('Beleg aktualisiert', 'Der Beleg wurde erfolgreich geändert');
+      success(t('belege.updated'), t('belege.updatedBody'));
     } catch (err) {
       console.error('Error updating receipt:', err);
-      showError('Fehler beim Aktualisieren', handleDatabaseError(err));
+      showError(t('common.errorUpdate'), handleDatabaseError(err));
     }
   };
 
@@ -108,17 +110,17 @@ const BelegePage: React.FC = () => {
 
     setConfirmModal({
       isOpen: true,
-      title: 'Beleg löschen',
+      title: t('belege.deleteTitle'),
       message: `Sind Sie sicher, dass Sie den Beleg #${receipt.receiptNumber} löschen möchten?`,
       onConfirm: async () => {
         try {
           await receiptActions.delete(id);
           await loadData();
           setConfirmModal(prev => ({ ...prev, isOpen: false }));
-          success('Beleg gelöscht', 'Der Beleg wurde erfolgreich entfernt');
+          success(t('belege.deleted'), t('belege.deletedBody'));
         } catch (err) {
           console.error('Error deleting receipt:', err);
-          showError('Fehler beim Löschen', handleDatabaseError(err));
+          showError(t('common.errorDelete'), handleDatabaseError(err));
         }
       },
       type: 'confirm'
@@ -153,7 +155,7 @@ const BelegePage: React.FC = () => {
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">
-        <h2 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>Belege</h2>
+        <h2 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>{t('nav.belege')}</h2>
         <div className="flex gap-2 sm:gap-4">
           <button
             onClick={() => {
@@ -162,23 +164,23 @@ const BelegePage: React.FC = () => {
             }}
             className="flex items-center justify-center rounded-lg transition-colors w-11 h-11 sm:w-auto sm:h-auto sm:px-4 sm:py-2"
             style={{ background: 'var(--success)', color: 'white' }}
-            title="Beleg hinzufügen"
+            title={t('belege.add')}
             onMouseEnter={e => { (e.currentTarget as HTMLElement).style.opacity = '0.9'; }}
             onMouseLeave={e => { (e.currentTarget as HTMLElement).style.opacity = '1'; }}
           >
             <Plus className="w-5 h-5 sm:mr-2" />
-            <span className="hidden sm:inline">Beleg hinzufügen</span>
+            <span className="hidden sm:inline">{t('belege.add')}</span>
           </button>
           <button
             onClick={handleExportExcel}
             className="flex items-center justify-center rounded-lg transition-colors w-11 h-11 sm:w-auto sm:h-auto sm:px-4 sm:py-2"
             style={{ background: 'var(--accent)', color: 'white' }}
-            title="Nach Excel exportieren"
+            title={t('common.exportExcelShort')}
             onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'var(--accent-hover)'; }}
             onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'var(--accent)'; }}
           >
             <Download className="w-5 h-5 sm:mr-2" />
-            <span className="hidden sm:inline">Nach Excel exportieren</span>
+            <span className="hidden sm:inline">{t('common.exportExcelShort')}</span>
           </button>
         </div>
       </div>
@@ -207,7 +209,7 @@ const BelegePage: React.FC = () => {
             : handleAddReceipt
           }
           receipt={editingReceipt}
-          title={editingReceipt ? 'Beleg bearbeiten' : 'Neuer Beleg'}
+          title={editingReceipt ? t('belege.edit') : t('belege.new')}
           drivers={drivers}
           existingReceipts={receipts}
         />

@@ -5,8 +5,10 @@ import { supabase } from '../lib/supabase';
 import { handleDatabaseError } from '../utils/errorHandler';
 import { useToast } from '../contexts/ToastContext';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
+import { useTranslation } from '../contexts/LanguageContext';
 
 const SalariesPage: React.FC = () => {
+  const { t } = useTranslation();
   const [drivers, setDrivers] = useState<Driver[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
@@ -39,7 +41,7 @@ const SalariesPage: React.FC = () => {
     } catch (err: any) {
       console.error('Error loading drivers:', err);
       setLoadError(true);
-      showError('Fehler beim Laden', handleDatabaseError(err));
+      showError(t('common.errorLoad'), handleDatabaseError(err));
       setDrivers([]);
     } finally {
       setLoading(false);
@@ -50,7 +52,7 @@ const SalariesPage: React.FC = () => {
     return (
       <div className="flex flex-col items-center justify-center h-64 space-y-4">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2" style={{ borderColor: 'var(--accent)' }}></div>
-        <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>Lade Fahrerdaten...</p>
+        <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>{t('salaries.loadingDrivers')}</p>
       </div>
     );
   }
@@ -59,8 +61,8 @@ const SalariesPage: React.FC = () => {
     return (
       <div className="flex flex-col items-center justify-center h-64 space-y-4">
         <div className="text-center">
-          <p className="text-lg font-semibold mb-2" style={{ color: 'var(--danger)' }}>Fehler beim Laden der Daten</p>
-          <p className="text-sm mb-4" style={{ color: 'var(--text-secondary)' }}>Die Verbindung zur Datenbank konnte nicht hergestellt werden.</p>
+          <p className="text-lg font-semibold mb-2" style={{ color: 'var(--danger)' }}>{t('salaries.loadFailed')}</p>
+          <p className="text-sm mb-4" style={{ color: 'var(--text-secondary)' }}>{t('salaries.noConnection')}</p>
         </div>
         <button
           onClick={loadDrivers}

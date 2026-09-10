@@ -8,6 +8,7 @@ import ConfirmationModal from '../components/ConfirmationModal';
 import { format } from 'date-fns';
 import { exportTableToExcel } from '../utils/excelExport';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
+import { useTranslation } from '../contexts/LanguageContext';
 
 interface WerkstattCheck {
   id: string;
@@ -24,6 +25,7 @@ interface WerkstattCheck {
 }
 
 export default function WerkstattPage() {
+  const { t } = useTranslation();
   const [checks, setChecks] = useState<WerkstattCheck[]>([]);
   const [filteredChecks, setFilteredChecks] = useState<WerkstattCheck[]>([]);
   const [loading, setLoading] = useState(true);
@@ -94,7 +96,7 @@ export default function WerkstattPage() {
     try {
       const { error } = await supabase.from('werkstatt_checks').delete().eq('id', checkToDelete.id);
       if (error) throw error;
-      showToast('success', 'Check erfolgreich gelöscht');
+      showToast('success', t('werkstatt.deleted'));
       loadChecks();
     } catch (error: any) {
       showToast('error', 'Fehler beim Löschen: ' + error.message);
@@ -107,15 +109,15 @@ export default function WerkstattPage() {
     switch (status) {
       case 'positive': return {
         icon: <CheckCircle className="w-5 h-5" style={{ color: 'var(--success)' }} />,
-        bg: 'var(--success-subtle)', border: 'rgba(5,150,105,0.3)', label: 'Positiv',
+        bg: 'var(--success-subtle)', border: 'rgba(5,150,105,0.3)', label: t('werkstatt.positive'),
       };
       case 'negative': return {
         icon: <AlertCircle className="w-5 h-5" style={{ color: 'var(--danger)' }} />,
-        bg: 'var(--danger-subtle)', border: 'rgba(220,38,38,0.3)', label: 'Negativ',
+        bg: 'var(--danger-subtle)', border: 'rgba(220,38,38,0.3)', label: t('werkstatt.negative'),
       };
       case 'repaired': return {
         icon: <Wrench className="w-5 h-5" style={{ color: 'var(--accent-text)' }} />,
-        bg: 'var(--accent-subtle)', border: 'rgba(37,99,235,0.3)', label: 'Repariert',
+        bg: 'var(--accent-subtle)', border: 'rgba(37,99,235,0.3)', label: t('werkstatt.repaired'),
       };
       default: return { icon: null, bg: 'var(--bg-subtle)', border: 'var(--border)', label: status };
     }
@@ -129,23 +131,23 @@ export default function WerkstattPage() {
       `Zeitraum: ${weekInfo?.label ?? `KW ${selectedWeek}`}`,
     ];
     if (statusFilter !== 'all') {
-      const labels: Record<string, string> = { positive: 'Positiv', negative: 'Negativ', repaired: 'Repariert' };
+      const labels: Record<string, string> = { positive: t('werkstatt.positive'), negative: t('werkstatt.negative'), repaired: t('werkstatt.repaired') };
       filters.push(`Status: ${labels[statusFilter] ?? statusFilter}`);
     }
 
     exportTableToExcel({
       filename: `werkstatt_${format(selectedMonth, 'yyyy-MM')}_KW${selectedWeek}`,
-      sheetTitle: 'Werkstatt-Checks',
+      sheetTitle: t('werkstatt.checksTitle'),
       moduleName: 'Werkstatt',
       filterSummary: filters,
       columns: [
-        { key: 'check_date',  label: 'Datum',         width: 14, format: v => new Date(v as string).toLocaleDateString('de-DE') },
-        { key: 'kennzeichen', label: 'Kennzeichen',    width: 16 },
-        { key: 'status',      label: 'Status',         width: 14, format: v => ({ positive: 'Positiv', negative: 'Negativ', repaired: 'Repariert' }[v as string] ?? String(v)) },
-        { key: 'km_stand',    label: 'KM-Stand',       width: 14, align: 'right', format: v => `${(v as number).toLocaleString('de-DE')} km` },
-        { key: 'oil_status',  label: 'Öl-Status',      width: 18 },
-        { key: 'notes',       label: 'Notizen',        width: 36 },
-        { key: 'repair_notes',label: 'Reparatur',      width: 36 },
+        { key: 'check_date',  label: t('common.date'),         width: 14, format: v => new Date(v as string).toLocaleDateString('de-DE') },
+        { key: 'kennzeichen', label: t('werkstatt.plate'),    width: 16 },
+        { key: 'status',      label: t('common.status'),         width: 14, format: v => ({ positive: t('werkstatt.positive'), negative: t('werkstatt.negative'), repaired: t('werkstatt.repaired') }[v as string] ?? String(v)) },
+        { key: 'km_stand',    label: t('werkstatt.odometer'),       width: 14, align: 'right', format: v => `${(v as number).toLocaleString('de-DE')} km` },
+        { key: 'oil_status',  label: t('werkstatt.oilStatus'),      width: 18 },
+        { key: 'notes',       label: t('common.notes'),        width: 36 },
+        { key: 'repair_notes',label: t('werkstatt.repair'),      width: 36 },
       ],
       rows: filteredChecks.map(c => ({
         check_date:   c.check_date,
@@ -166,10 +168,10 @@ export default function WerkstattPage() {
   };
 
   const statusButtons = [
-    { key: 'all' as const, label: 'Alle', activeColor: 'var(--text-primary)', activeBg: 'var(--bg-elevated)' },
-    { key: 'negative' as const, label: 'Negativ', activeColor: 'var(--danger)', activeBg: 'var(--danger-subtle)' },
-    { key: 'repaired' as const, label: 'Repariert', activeColor: 'var(--accent-text)', activeBg: 'var(--accent-subtle)' },
-    { key: 'positive' as const, label: 'Positiv', activeColor: 'var(--success)', activeBg: 'var(--success-subtle)' },
+    { key: 'all' as const, label: t('common.all'), activeColor: 'var(--text-primary)', activeBg: 'var(--bg-elevated)' },
+    { key: 'negative' as const, label: t('werkstatt.negative'), activeColor: 'var(--danger)', activeBg: 'var(--danger-subtle)' },
+    { key: 'repaired' as const, label: t('werkstatt.repaired'), activeColor: 'var(--accent-text)', activeBg: 'var(--accent-subtle)' },
+    { key: 'positive' as const, label: t('werkstatt.positive'), activeColor: 'var(--success)', activeBg: 'var(--success-subtle)' },
   ];
 
   return (
@@ -180,8 +182,8 @@ export default function WerkstattPage() {
             <Wrench className="w-7 h-7" style={{ color: 'var(--warning)' }} />
           </div>
           <div>
-            <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>Werkstatt</h1>
-            <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>Wöchentliche Fahrzeug-Checks verwalten</p>
+            <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>{t('nav.werkstatt')}</h1>
+            <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>{t('werkstatt.subtitle')}</p>
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -189,7 +191,7 @@ export default function WerkstattPage() {
             onClick={handleExport}
             className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-opacity hover:opacity-80"
             style={{ background: 'var(--success)', color: 'white' }}
-            title="Aktuelle Ansicht als Excel exportieren"
+            title={t('common.exportExcel')}
           >
             <Download className="w-4 h-4" />
             Excel
@@ -234,11 +236,11 @@ export default function WerkstattPage() {
               style={{ background: 'var(--bg-muted)', color: 'var(--text-secondary)' }}
               onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = 'var(--text-primary)'; }}
               onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = 'var(--text-secondary)'; }}
-            >Heute</button>
+            >{t('common.today')}</button>
           </div>
 
           <div className="flex items-center gap-2">
-            <span className="text-sm font-medium" style={{ color: 'var(--text-secondary)' }}>Zeitraum:</span>
+            <span className="text-sm font-medium" style={{ color: 'var(--text-secondary)' }}>{t('werkstatt.period')}</span>
             <select value={selectedWeek} onChange={(e) => setSelectedWeek(Number(e.target.value))} style={selectStyle}>
               {weeks.map((week) => (
                 <option key={week.weekNumber} value={week.weekNumber}>{week.label}</option>
@@ -269,15 +271,15 @@ export default function WerkstattPage() {
       {loading ? (
         <div className="text-center py-12">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 mx-auto" style={{ borderColor: 'var(--warning)' }}></div>
-          <p className="mt-4 text-sm" style={{ color: 'var(--text-secondary)' }}>Laden...</p>
+          <p className="mt-4 text-sm" style={{ color: 'var(--text-secondary)' }}>{t('werkstatt.loading')}</p>
         </div>
       ) : filteredChecks.length === 0 ? (
         <div className="rounded-xl p-12 text-center" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-sm)' }}>
           <Wrench className="w-16 h-16 mx-auto mb-4" style={{ color: 'var(--text-tertiary)' }} />
-          <h3 className="text-lg font-medium mb-2" style={{ color: 'var(--text-primary)' }}>Keine Checks vorhanden</h3>
+          <h3 className="text-lg font-medium mb-2" style={{ color: 'var(--text-primary)' }}>{t('werkstatt.none')}</h3>
           <p className="mb-4 text-sm" style={{ color: 'var(--text-secondary)' }}>
             {statusFilter === 'all'
-              ? 'Für diese Woche wurden noch keine Checks durchgeführt.'
+              ? t('werkstatt.noneWeek')
               : `Keine Checks mit Status "${getStatusConfig(statusFilter).label}".`}
           </p>
           <button
@@ -305,7 +307,7 @@ export default function WerkstattPage() {
                   <div className="flex items-center gap-2">
                     {config.icon}
                     <h3 className="font-semibold" style={{ color: 'var(--text-primary)' }}>
-                      {check.car?.kennzeichen || 'Unbekannt'}
+                      {check.car?.kennzeichen || t('common.unknown')}
                     </h3>
                   </div>
                   <div className="flex gap-1">
@@ -332,26 +334,26 @@ export default function WerkstattPage() {
 
                 <div className="space-y-1.5 text-sm">
                   <div>
-                    <span className="font-medium" style={{ color: 'var(--text-secondary)' }}>Datum: </span>
+                    <span className="font-medium" style={{ color: 'var(--text-secondary)' }}>{t('werkstatt.dateLabel')}</span>
                     <span style={{ color: 'var(--text-primary)' }}>{new Date(check.check_date).toLocaleDateString('de-DE')}</span>
                   </div>
                   {check.oil_status && (
                     <div>
-                      <span className="font-medium" style={{ color: 'var(--text-secondary)' }}>Öl: </span>
+                      <span className="font-medium" style={{ color: 'var(--text-secondary)' }}>{t('werkstatt.oilLabel')}</span>
                       <span style={{ color: 'var(--text-primary)' }}>{check.oil_status}</span>
                     </div>
                   )}
                   <div>
-                    <span className="font-medium" style={{ color: 'var(--text-secondary)' }}>KM-Stand: </span>
+                    <span className="font-medium" style={{ color: 'var(--text-secondary)' }}>{t('werkstatt.odometerLabel')}</span>
                     <span style={{ color: 'var(--text-primary)' }}>{check.km_stand.toLocaleString('de-DE')} km</span>
                   </div>
                   <div>
-                    <span className="font-medium" style={{ color: 'var(--text-secondary)' }}>Notizen: </span>
+                    <span className="font-medium" style={{ color: 'var(--text-secondary)' }}>{t('werkstatt.notesLabel')}</span>
                     <p style={{ color: 'var(--text-primary)' }}>{check.notes}</p>
                   </div>
                   {check.status === 'repaired' && check.repair_notes && (
                     <div className="mt-2 pt-2 border-t" style={{ borderColor: 'rgba(37,99,235,0.2)' }}>
-                      <span className="font-medium" style={{ color: 'var(--accent-text)' }}>Reparatur: </span>
+                      <span className="font-medium" style={{ color: 'var(--accent-text)' }}>{t('werkstatt.repairLabel')}</span>
                       <p style={{ color: 'var(--text-primary)' }}>{check.repair_notes}</p>
                     </div>
                   )}
@@ -374,9 +376,9 @@ export default function WerkstattPage() {
         <ConfirmationModal
           isOpen={!!checkToDelete}
           type="confirm"
-          title="Check löschen"
+          title={t('werkstatt.deleteTitle')}
           message={`Möchten Sie den Check für ${checkToDelete.car?.kennzeichen} wirklich löschen?`}
-          confirmText="Löschen"
+          confirmText={t('common.delete')}
           onConfirm={handleDelete}
           onClose={() => setCheckToDelete(null)}
         />
