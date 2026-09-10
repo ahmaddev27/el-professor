@@ -10,7 +10,14 @@ interface UserProfile {
   user_id: string;
   email: string;
   full_name?: string;
-  role: 'admin' | 'creator' | 'viewer';
+  /**
+   * The four names in the `roles` table. This previously read
+   * `'admin' | 'creator' | 'viewer'` — `creator` exists nowhere in the schema,
+   * and `supervisor` / `editor`, which do, were missing. Everything derived from
+   * a `role === 'creator'` test was therefore dead, and the two real middle roles
+   * fell through to the viewer branch.
+   */
+  role: 'admin' | 'supervisor' | 'editor' | 'viewer';
   role_id: string | null;
   company_id: string | null;
   is_super_admin: boolean;
@@ -19,6 +26,16 @@ interface UserProfile {
   created_at: string;
   updated_at: string;
 }
+
+/**
+ * The `page_key` values in `role_permissions`. Sixteen rows per role, and the
+ * same keys the RLS predicate `current_role_permits(page, need_edit)` reads —
+ * see 20260910120000_enforce_role_permissions_in_rls.sql.
+ */
+export type PageKey =
+  | 'accounting' | 'cars' | 'cash-balance' | 'documents' | 'drivers'
+  | 'fixed-costs' | 'income' | 'notes' | 'overview' | 'receipts'
+  | 'roles' | 'salaries' | 'settings' | 'statistics' | 'users' | 'werkstatt';
 
 // Reason codes returned when login is blocked
 export type BlockReason =
@@ -86,9 +103,24 @@ interface AuthContextType {
   isAdmin: boolean;
   isCreator: boolean;
   isViewer: boolean;
+  /**
+   * The caller's row of the `role_permissions` matrix, keyed by page. Empty
+   * until the profile loads. This is the same matrix the database now enforces
+   * through `current_role_permits()`, so the UI and RLS agree by construction.
+   */
+  permissions: Record<string, { canView: boolean; canEdit: boolean }>;
+  /** Does this role permit `action` on `page`? Super admins always pass. */
+  can: (page: PageKey, action?: 'view' | 'edit') => boolean;
   canCreate: boolean;
-  canEdit: (createdBy?: string) => boolean;
-  canDelete: (createdBy?: string) => boolean;
+  /**
+   * `page` is what actually decides. The first argument is kept only so the
+   * existing call sites still compile — record ownership never worked here: 40
+   * of the 50 call sites pass the whole record rather than its `created_by`,
+   * and `profile.id` is a bigint compared against a text column, so the
+   * comparison was false for every non-admin regardless.
+   */
+  canEdit: (createdByOrRecord?: unknown, page?: PageKey) => boolean;
+  canDelete: (createdByOrRecord?: unknown, page?: PageKey) => boolean;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -111,6 +143,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [subscriptionStatus, setSubscriptionStatus] = useState<'inactive' | 'active' | 'expired' | 'suspended' | null>(null);
   const [subscriptionExpiresAt, setSubscriptionExpiresAt] = useState<string | null>(null);
   const [userBlockReason, setUserBlockReason] = useState<BlockReason | null>(null);
+  const [permissions, setPermissions] = useState<Record<string, { canView: boolean; canEdit: boolean }>>({});
 
   const sessionTimerRef = useRef<NodeJS.Timeout | null>(null);
   const userRef = useRef<User | null>(null);
@@ -136,6 +169,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setSubscriptionStatus(null);
     setSubscriptionExpiresAt(null);
     setUserBlockReason(null);
+    setPermissions({});
   };
 
   const signOutRef = useRef<() => Promise<void>>();
@@ -182,6 +216,27 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setUserBlockReason(
         userStatusBlockReason(data?.status, data?.is_super_admin ?? false),
       );
+
+      // Load this role's page matrix. The database enforces the same rows via
+      // current_role_permits(), so a screen that hides a button here is a screen
+      // whose write RLS would have refused anyway — the UI and the boundary
+      // cannot drift.
+      //
+      // Resolved by role_id. Every profile now carries one; the migration that
+      // introduced the RLS predicate backfilled the twelve that did not.
+      if (data?.role_id) {
+        const { data: perms } = await supabase
+          .from('role_permissions')
+          .select('page_key, can_view, can_edit')
+          .eq('role_id', data.role_id);
+        setPermissions(
+          Object.fromEntries(
+            (perms ?? []).map(p => [p.page_key, { canView: !!p.can_view, canEdit: !!p.can_edit }]),
+          ),
+        );
+      } else {
+        setPermissions({});
+      }
 
       // Fetch company approval + subscription status if the user has a company
       if (data?.company_id && !data.is_super_admin) {
@@ -416,9 +471,31 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const isSuperAdmin = profile?.is_super_admin ?? false;
   const mustChangePassword = profile?.must_change_password ?? false;
   const isAdmin = profile?.role === 'admin';
-  const isCreator = profile?.role === 'creator' || isAdmin;
-  const isViewer = profile?.role === 'viewer' && !isAdmin && !isCreator;
-  const canCreate = isAdmin || isCreator;
+
+  /**
+   * Does this role permit `action` on `page`?
+   *
+   * The matrix is the authority; `isAdmin` is only the fallback for the window
+   * before it loads, and for a profile whose role resolves to no rows. Super
+   * admins pass unconditionally, matching `current_role_permits()` in the
+   * database.
+   */
+  const can = (page: PageKey, action: 'view' | 'edit' = 'edit'): boolean => {
+    if (isSuperAdmin) return true;
+    const entry = permissions[page];
+    if (!entry) return isAdmin;
+    return action === 'view' ? entry.canView : entry.canEdit;
+  };
+
+  // Kept for the public shape. `isCreator` used to test role === 'creator',
+  // a value the schema has never held; neither export is read anywhere in src/.
+  const isCreator = isAdmin;
+  const isViewer = profile?.role === 'viewer';
+
+  // Creating a record is an edit. Without a page to ask about, the honest
+  // answer is "does this role edit anything at all".
+  const canCreate = isSuperAdmin || isAdmin ||
+    Object.values(permissions).some(p => p.canEdit);
 
   // Subscription is active when status=active AND expiry is in the future (or null = no expiry set = legacy active)
   const isSubscriptionActive =
@@ -451,17 +528,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const canEdit = (createdBy?: string | number) => {
-    if (isAdmin) return true;
-    if (!createdBy) return false;
-    return profile?.id === String(createdBy);
-  };
+  /**
+   * Pass the page to get a real answer. Callers that pass a record (or nothing)
+   * fall back to `isAdmin`, which is exactly what they already did: the old body
+   * compared `profile.id` — a bigint — against `String(createdBy)`, and 40 of the
+   * 50 call sites hand it the whole record, so `String()` produced
+   * "[object Object]". It was false for every non-admin, always. Preserving that
+   * fallback keeps those screens behaving as they do today until each is given
+   * its page key.
+   */
+  const canEdit = (_createdByOrRecord?: unknown, page?: PageKey) =>
+    page ? can(page, 'edit') : (isSuperAdmin || isAdmin);
 
-  const canDelete = (createdBy?: string | number) => {
-    if (isAdmin) return true;
-    if (!createdBy) return false;
-    return profile?.id === String(createdBy);
-  };
+  const canDelete = (_createdByOrRecord?: unknown, page?: PageKey) =>
+    page ? can(page, 'edit') : (isSuperAdmin || isAdmin);
 
   const value = {
     user,
@@ -486,6 +566,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     isAdmin,
     isCreator,
     isViewer,
+    permissions,
+    can,
     canCreate,
     canEdit,
     canDelete,

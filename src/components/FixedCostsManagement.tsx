@@ -24,7 +24,12 @@ const FixedCostsManagement: React.FC = () => {
   const [isAdding, setIsAdding] = useState(false);
   const [formData, setFormData] = useState({ description: '', amount: '' });
   const [error, setError] = useState<string | null>(null);
-  const { canEdit, canDelete, canCreate, profile, user } = useAuth();
+  const { can, profile, user } = useAuth();
+  // The context exposes canEdit/canDelete as FUNCTIONS. Used bare in JSX a
+  // function object is always truthy, so the "Keine Berechtigung" warning never
+  // rendered and Edit/Delete showed for every role — including viewer, whose
+  // write the database would then also have allowed. One boolean, asked once.
+  const mayEdit = can('fixed-costs', 'edit');
   const { effectiveCompanyId: companyId } = useSuperAdmin();
   const { success, error: showError, warning } = useToast();
   const [deleteConfirm, setDeleteConfirm] = useState<{ isOpen: boolean; id: string | null }>({ isOpen: false, id: null });
@@ -67,7 +72,7 @@ const FixedCostsManagement: React.FC = () => {
       return;
     }
 
-    if (!canCreate) {
+    if (!mayEdit) {
       showError('Keine Berechtigung', 'Nur Administratoren und Ersteller können Fixkosten hinzufügen');
       return;
     }
@@ -267,12 +272,12 @@ const FixedCostsManagement: React.FC = () => {
         >
           <p className="text-sm" style={{ color: 'var(--accent-text)' }}>
             <strong>Benutzerinfo:</strong> {user?.email} | Rolle: {profile?.role || 'Nicht festgelegt'} |
-            Kann bearbeiten: {canEdit ? 'Ja' : 'Nein'} | Kann löschen: {canDelete ? 'Ja' : 'Nein'}
+            Kann bearbeiten: {mayEdit ? 'Ja' : 'Nein'}
           </p>
         </div>
       )}
 
-      {!canEdit && (
+      {!mayEdit && (
         <div
           className="rounded-lg p-4"
           style={{ background: 'var(--warning-subtle)', border: '1px solid var(--warning)' }}
@@ -284,7 +289,7 @@ const FixedCostsManagement: React.FC = () => {
         </div>
       )}
 
-      {canEdit && (
+      {mayEdit && (
         <div
           className="rounded-xl p-6"
           style={{ background: 'var(--bg-surface)', boxShadow: 'var(--shadow-md)' }}
@@ -367,7 +372,7 @@ const FixedCostsManagement: React.FC = () => {
                 <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>
                   Betrag
                 </th>
-                {(canEdit || canDelete) && (
+                {mayEdit && (
                   <th className="px-6 py-3 text-right text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>
                     Aktionen
                   </th>
@@ -440,9 +445,9 @@ const FixedCostsManagement: React.FC = () => {
                         <td className="px-6 py-4 text-sm" style={{ color: 'var(--text-primary)' }}>
                           {Number(cost.amount).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
                         </td>
-                        {(canEdit || canDelete) && (
+                        {mayEdit && (
                           <td className="px-6 py-4 text-right text-sm font-medium">
-                            {canEdit && (
+                            {mayEdit && (
                               <button
                                 onClick={() => startEdit(cost)}
                                 className="mr-3"
@@ -452,7 +457,7 @@ const FixedCostsManagement: React.FC = () => {
                                 <Edit2 size={18} />
                               </button>
                             )}
-                            {canDelete && (
+                            {mayEdit && (
                               <button
                                 onClick={() => confirmDelete(cost.id)}
                                 style={{ color: 'var(--danger)' }}
@@ -476,7 +481,7 @@ const FixedCostsManagement: React.FC = () => {
                   <td className="px-6 py-4 text-sm font-bold" style={{ color: 'var(--text-primary)' }}>
                     {totalFixedCosts.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
                   </td>
-                  {(canEdit || canDelete) && <td></td>}
+                  {mayEdit && <td></td>}
                 </tr>
               </tfoot>
             )}
