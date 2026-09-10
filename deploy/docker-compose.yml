@@ -63,7 +63,8 @@ services:
     # project's database. Raise deliberately after watching `docker stats`.
     deploy:
       resources:
-        limits: { memory: ${DB_MEM_LIMIT:-4G} }
+        limits:
+          memory: ${DB_MEM_LIMIT:-4G}
     shm_size: 256mb
 
   # ── REST API — this is what supabase.from() talks to ──────────────────────
