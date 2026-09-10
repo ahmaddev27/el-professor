@@ -74,21 +74,18 @@ discipline of not publishing ports, which is why our compose file publishes none
 If you do want host-level filtering, it has to go in the `DOCKER-USER` chain,
 not in `ufw`'s.
 
-### `ridy` has no automated backups
+### `ridy`'s backups exist, but never leave the box
 
-```
-/var/backups/       only Debian's own dpkg/apt rotations
-crontab -l          empty
-/etc/cron.daily/    apt-compat, dpkg, logrotate
-```
+An earlier version of this document said ridy had no automated backups. That was
+wrong, and the mistake is worth recording because it is easy to repeat: host
+`crontab -l` is empty and `/etc/cron.daily/` holds only Debian's own jobs, but a
+containerised Laravel app does not schedule through host cron. ridy backs up
+**daily at 03:00 via Laravel's scheduler** inside `ridy-scheduler-1`, keeping
+seven days in `backend/storage/app/backups/`.
 
-`~/ridy-backup.sql` is a single manual dump. A production Laravel app with a
-MySQL database has been running 18 days with no scheduled backup and no restore
-test.
-
-That is not our project, so this is a flag rather than a change — but it is a
-bigger operational risk than anything in our migration, and the same cron job
-that will back up our Postgres can back up their MySQL.
+The real gap is that those dumps sit on the same disk as the database. A lost
+volume or a lost VM takes both. See
+[03-BACKUP-BEFORE-TOUCHING-ANYTHING.md](03-BACKUP-BEFORE-TOUCHING-ANYTHING.md).
 
 ---
 

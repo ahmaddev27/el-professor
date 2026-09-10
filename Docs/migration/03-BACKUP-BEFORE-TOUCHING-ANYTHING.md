@@ -1,8 +1,28 @@
 # Step 1b — back up ridy before deploying anything
 
-The box runs a live Laravel application with a MySQL database and **no automated
-backups at all**: `crontab -l` is empty, `/etc/cron.daily/` holds only Debian's
-own jobs, and `~/ridy-backup.sql` is a single manual dump of unknown age.
+The box runs a live Laravel application with a MySQL database.
+
+**Correction to an earlier version of this document:** it claimed ridy had no
+automated backups, on the evidence that `crontab -l` is empty and
+`/etc/cron.daily/` holds only Debian's own jobs. That was wrong — it checked the
+wrong place. ridy backs up **daily at 03:00 from inside the container**, via
+Laravel's scheduler in `ridy-scheduler-1`, writing to
+`backend/storage/app/backups/` with seven days of retention:
+
+```
+ridy-2026-09-04_030003.sql.gz  ...  ridy-2026-09-10_030003.sql.gz
+```
+
+Host-level cron is simply not where a containerised Laravel app schedules things.
+
+The gap that remains is real, though, and it is the one that matters more: those
+dumps live on **the same disk as the database they protect**. A failed volume, a
+wrong `docker compose down -v`, or a lost VM takes the backups with it. Nothing
+leaves the box.
+
+So this step is not about compensating for missing backups. It is about
+compensating for a missing **off-box copy** — and, incidentally, our archive
+captures their seven-day history alongside our own fresh dump.
 
 Nothing in our migration modifies ridy. But we will append to its Caddyfile and
 reload its proxy, and the honest position is that any change to a shared box is a
@@ -104,22 +124,19 @@ Compare against the live count. An untested backup is a guess.
 
 ---
 
-## Then make it recurring
+## Make the off-box copy recurring
 
-ridy has been live 18 days with no scheduled backup. That is a larger
-operational risk than anything in our migration, and it is one cron job:
+ridy's own daily dump already exists. What does not exist is a copy anywhere
+else. That is the job worth adding — on **your** machine or another host, not on
+the VPS:
 
 ```bash
-cat > /etc/cron.daily/ridy-backup <<'SH'
-#!/bin/sh
-bash /root/backup-ridy.sh >> /var/log/ridy-backup.log 2>&1
-find /var/backups/ridy -maxdepth 1 -type d -mtime +14 -exec rm -rf {} +
-SH
-chmod +x /etc/cron.daily/ridy-backup
+# pulls both our archive and ridy's own rotating dumps
+rsync -avz --delete   root@159.195.205.30:/var/backups/ridy/ ./ridy-backups/
 ```
 
-Fourteen days of retention on 792 GB free is comfortable. Add an off-box copy —
-rsync to another host, or an object store — and it stops being a single point of
-failure.
+Run it on a schedule from somewhere the VPS cannot reach back into. A backup the
+compromised machine can delete is not a backup against the case that matters.
 
-The same job will cover our Postgres once it is deployed.
+Our Postgres will need the same treatment once deployed — one dump job on the
+box, one pull from outside it.
