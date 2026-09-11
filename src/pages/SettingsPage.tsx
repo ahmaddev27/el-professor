@@ -21,6 +21,7 @@ import { useToast } from '../contexts/ToastContext';
 import { CompanySettingsFormData } from '../types/settings';
 import { supabase } from '../lib/supabase';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
+import { useTranslation } from '../contexts/LanguageContext';
 
 const inputStyle: React.CSSProperties = {
   background: 'var(--bg-subtle)',
@@ -33,6 +34,7 @@ const inputStyle: React.CSSProperties = {
 };
 
 const SettingsPage: React.FC = () => {
+  const { t } = useTranslation();
   const { settings, loading, updateSettings, refreshSettings } = useCompanySettings();
   const { success, error: showError } = useToast();
   const { effectiveCompanyId: companyId } = useSuperAdmin();
@@ -122,9 +124,9 @@ const SettingsPage: React.FC = () => {
 
     try {
       await updateSettings({ ...formData, drivers_per_car_limit: driversPerCar });
-      success('Einstellungen gespeichert', 'Die Unternehmenseinstellungen wurden erfolgreich aktualisiert');
+      success(t('settings.saved'), t('settings.savedBody'));
     } catch (err: any) {
-      showError('Fehler beim Speichern', err.message || 'Die Einstellungen konnten nicht gespeichert werden');
+      showError(t('settings.saveFailed'), err.message || t('settings.saveFailedBody'));
     } finally {
       setSaving(false);
     }
@@ -137,18 +139,18 @@ const SettingsPage: React.FC = () => {
     // Validate file type
     const validTypes = ['image/png', 'image/jpeg', 'image/jpg', 'image/svg+xml', 'image/webp'];
     if (!validTypes.includes(file.type)) {
-      showError('Ungültiger Dateityp', 'Bitte laden Sie eine PNG, JPG, SVG oder WebP Datei hoch');
+      showError(t('settings.badFileType'), t('settings.badFileTypeBody'));
       return;
     }
 
     // Validate file size (max 5MB)
     if (file.size > 5 * 1024 * 1024) {
-      showError('Datei zu groß', 'Die Datei darf maximal 5MB groß sein');
+      showError(t('settings.fileTooLarge'), t('settings.fileTooLargeBody'));
       return;
     }
 
     if (!companyId) {
-      showError('Fehler', 'Keine Unternehmens-ID gefunden');
+      showError('Fehler', t('settings.noCompanyId'));
       return;
     }
 
@@ -176,7 +178,7 @@ const SettingsPage: React.FC = () => {
         .getPublicUrl(filePath);
 
       const publicUrl = urlData?.publicUrl;
-      if (!publicUrl) throw new Error('Konnte keine gültige Logo-URL erstellen');
+      if (!publicUrl) throw new Error(t('settings.logoUrlFailed'));
 
       // Step 3: Save public URL — upsert creates the settings row if it doesn't exist yet
       console.log('[Logo upload] user companyId:', companyId);
@@ -191,12 +193,12 @@ const SettingsPage: React.FC = () => {
 
       if (dbError) {
         const reason = dbError.code === '42501'
-          ? 'Keine Berechtigung zum Schreiben der Einstellungen'
+          ? t('settings.noWritePermission')
           : dbError.message;
         throw new Error(`Datenbank-Fehler: ${reason}`);
       }
       if (!savedRow) {
-        throw new Error('Logo-URL konnte nicht gespeichert werden — bitte Seite neu laden und erneut versuchen.');
+        throw new Error(t('settings.logoUrlSaveFailed'));
       }
 
       // Step 4: Update context state with the confirmed URL
@@ -205,10 +207,10 @@ const SettingsPage: React.FC = () => {
       // Step 5: Update local preview
       setLogoPreview(publicUrl);
 
-      success('Logo hochgeladen', 'Das Firmenlogo wurde erfolgreich aktualisiert');
+      success(t('settings.logoUploaded'), t('settings.logoUploadedBody'));
     } catch (err: any) {
       console.error('Logo upload error:', err);
-      showError('Fehler beim Hochladen', err.message || 'Das Logo konnte nicht hochgeladen werden');
+      showError(t('settings.logoUploadFailed'), err.message || t('settings.logoUploadFailedBody'));
     } finally {
       setUploading(false);
     }
@@ -252,10 +254,10 @@ const SettingsPage: React.FC = () => {
       await refreshSettings();
       setLogoPreview(null);
 
-      success('Logo entfernt', 'Das Firmenlogo wurde erfolgreich entfernt');
+      success(t('settings.logoRemoved'), t('settings.logoRemovedBody'));
     } catch (err: any) {
       console.error('Error removing logo:', err);
-      showError('Fehler beim Entfernen', err.message || 'Das Logo konnte nicht entfernt werden');
+      showError(t('settings.removeFailed'), err.message || t('settings.removeFailedBody'));
     } finally {
       setUploading(false);
     }
@@ -319,8 +321,8 @@ const SettingsPage: React.FC = () => {
               <SettingsIcon className="text-white" size={32} />
             </div>
             <div>
-              <h1 className="text-3xl font-bold">Einstellungen</h1>
-              <p className="mt-1" style={{ color: 'rgba(255,255,255,0.8)' }}>Unternehmenseinstellungen verwalten</p>
+              <h1 className="text-3xl font-bold">{t('nav.settings')}</h1>
+              <p className="mt-1" style={{ color: 'rgba(255,255,255,0.8)' }}>{t('settings.subtitle')}</p>
             </div>
           </div>
         </div>
@@ -334,17 +336,17 @@ const SettingsPage: React.FC = () => {
             <div className="rounded-xl p-6" style={{ background: 'var(--bg-surface)', boxShadow: 'var(--shadow-sm)', border: '1px solid var(--border)' }}>
               <div className="flex items-center space-x-2 mb-4">
                 <Upload style={{ color: 'var(--accent-text)' }} size={24} />
-                <h2 className="text-xl font-bold" style={{ color: 'var(--text-primary)' }}>Firmenlogo</h2>
+                <h2 className="text-xl font-bold" style={{ color: 'var(--text-primary)' }}>{t('settings.logo')}</h2>
               </div>
               <div className="space-y-4">
                 {logoPreview && (
                   <div className="flex items-center justify-center p-4 rounded-lg" style={{ background: 'var(--bg-subtle)' }}>
                     <img
                       src={logoPreview}
-                      alt="Firmenlogo"
+                      alt={t('settings.logo')}
                       className="h-24 object-contain"
                       onError={(e) => {
-                        console.warn('Logo konnte nicht geladen werden:', logoPreview);
+                        console.warn(t('settings.logoLoadFailed'), logoPreview);
                         (e.currentTarget as HTMLImageElement).style.display = 'none';
                         const placeholder = e.currentTarget.nextElementSibling as HTMLElement;
                         if (placeholder) placeholder.style.display = 'flex';
@@ -367,7 +369,7 @@ const SettingsPage: React.FC = () => {
                       }}
                     >
                       <AlertCircle size={20} />
-                      <span>Logo nicht verfügbar</span>
+                      <span>{t('settings.logoUnavailable')}</span>
                     </div>
                   </div>
                 )}
@@ -388,7 +390,7 @@ const SettingsPage: React.FC = () => {
                       onMouseLeave={e => (e.currentTarget.style.background = 'var(--accent)')}
                     >
                       <Upload size={20} />
-                      <span>{uploading ? 'Wird hochgeladen...' : 'Logo hochladen'}</span>
+                      <span>{uploading ? t('settings.uploading') : t('settings.uploadLogo')}</span>
                     </div>
                   </label>
                   {logoPreview && (
@@ -402,7 +404,7 @@ const SettingsPage: React.FC = () => {
                       onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
                     >
                       <X size={20} />
-                      <span>Entfernen</span>
+                      <span>{t('common.remove')}</span>
                     </button>
                   )}
                 </div>
@@ -416,7 +418,7 @@ const SettingsPage: React.FC = () => {
             <div className="rounded-xl p-6" style={{ background: 'var(--bg-surface)', boxShadow: 'var(--shadow-sm)', border: '1px solid var(--border)' }}>
               <div className="flex items-center space-x-2 mb-4">
                 <Building2 style={{ color: 'var(--accent-text)' }} size={24} />
-                <h2 className="text-xl font-bold" style={{ color: 'var(--text-primary)' }}>Unternehmensidentität</h2>
+                <h2 className="text-xl font-bold" style={{ color: 'var(--text-primary)' }}>{t('settings.identity')}</h2>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="md:col-span-2">
@@ -454,7 +456,7 @@ const SettingsPage: React.FC = () => {
                     onChange={(e) => setFormData({ ...formData, slogan: e.target.value })}
                     className="w-full"
                     style={inputStyle}
-                    placeholder="z.B. Ihr Partner für Mobilität"
+                    placeholder={t('settings.egTagline')}
                   />
                 </div>
               </div>
@@ -464,7 +466,7 @@ const SettingsPage: React.FC = () => {
             <div className="rounded-xl p-6" style={{ background: 'var(--bg-surface)', boxShadow: 'var(--shadow-sm)', border: '1px solid var(--border)' }}>
               <div className="flex items-center space-x-2 mb-4">
                 <Mail style={{ color: 'var(--accent-text)' }} size={24} />
-                <h2 className="text-xl font-bold" style={{ color: 'var(--text-primary)' }}>Kontaktinformationen</h2>
+                <h2 className="text-xl font-bold" style={{ color: 'var(--text-primary)' }}>{t('settings.contact')}</h2>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
@@ -535,7 +537,7 @@ const SettingsPage: React.FC = () => {
             <div className="rounded-xl p-6" style={{ background: 'var(--bg-surface)', boxShadow: 'var(--shadow-sm)', border: '1px solid var(--border)' }}>
               <div className="flex items-center space-x-2 mb-4">
                 <MapPin style={{ color: 'var(--accent-text)' }} size={24} />
-                <h2 className="text-xl font-bold" style={{ color: 'var(--text-primary)' }}>Adresse</h2>
+                <h2 className="text-xl font-bold" style={{ color: 'var(--text-primary)' }}>{t('common.address')}</h2>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
@@ -617,7 +619,7 @@ const SettingsPage: React.FC = () => {
             <div className="rounded-xl p-6" style={{ background: 'var(--bg-surface)', boxShadow: 'var(--shadow-sm)', border: '1px solid var(--border)' }}>
               <div className="flex items-center space-x-2 mb-4">
                 <User style={{ color: 'var(--accent-text)' }} size={24} />
-                <h2 className="text-xl font-bold" style={{ color: 'var(--text-primary)' }}>Geschäftsführung</h2>
+                <h2 className="text-xl font-bold" style={{ color: 'var(--text-primary)' }}>{t('settings.management')}</h2>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
@@ -663,7 +665,7 @@ const SettingsPage: React.FC = () => {
             <div className="rounded-xl p-6" style={{ background: 'var(--bg-surface)', boxShadow: 'var(--shadow-sm)', border: '1px solid var(--border)' }}>
               <div className="flex items-center space-x-2 mb-4">
                 <Users style={{ color: 'var(--accent-text)' }} size={24} />
-                <h2 className="text-xl font-bold" style={{ color: 'var(--text-primary)' }}>Betriebseinstellungen</h2>
+                <h2 className="text-xl font-bold" style={{ color: 'var(--text-primary)' }}>{t('settings.operations')}</h2>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
@@ -691,7 +693,7 @@ const SettingsPage: React.FC = () => {
             <div className="rounded-xl p-6" style={{ background: 'var(--bg-surface)', boxShadow: 'var(--shadow-sm)', border: '1px solid var(--border)' }}>
               <div className="flex items-center space-x-2 mb-4">
                 <FileText style={{ color: 'var(--accent-text)' }} size={24} />
-                <h2 className="text-xl font-bold" style={{ color: 'var(--text-primary)' }}>Rechtliche Daten</h2>
+                <h2 className="text-xl font-bold" style={{ color: 'var(--text-primary)' }}>{t('settings.legal')}</h2>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
@@ -742,7 +744,7 @@ const SettingsPage: React.FC = () => {
                     onChange={(e) => setFormData({ ...formData, court_of_registration: e.target.value })}
                     className="w-full"
                     style={inputStyle}
-                    placeholder="z.B. Amtsgericht Wuppertal"
+                    placeholder={t('settings.egCourt')}
                   />
                 </div>
               </div>
@@ -752,7 +754,7 @@ const SettingsPage: React.FC = () => {
             <div className="rounded-xl p-6" style={{ background: 'var(--bg-surface)', boxShadow: 'var(--shadow-sm)', border: '1px solid var(--border)' }}>
               <div className="flex items-center space-x-2 mb-4">
                 <CreditCard style={{ color: 'var(--accent-text)' }} size={24} />
-                <h2 className="text-xl font-bold" style={{ color: 'var(--text-primary)' }}>Bankverbindung</h2>
+                <h2 className="text-xl font-bold" style={{ color: 'var(--text-primary)' }}>{t('settings.bank')}</h2>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="md:col-span-2">
@@ -812,7 +814,7 @@ const SettingsPage: React.FC = () => {
             <div className="rounded-xl p-6" style={{ background: 'var(--bg-surface)', boxShadow: 'var(--shadow-sm)', border: '1px solid var(--border)' }}>
               <div className="flex items-center space-x-2 mb-4">
                 <FileText style={{ color: 'var(--accent-text)' }} size={24} />
-                <h2 className="text-xl font-bold" style={{ color: 'var(--text-primary)' }}>Dokumenteneinstellungen</h2>
+                <h2 className="text-xl font-bold" style={{ color: 'var(--text-primary)' }}>{t('settings.documents')}</h2>
               </div>
               <div className="grid grid-cols-1 gap-4">
                 <div>
@@ -825,7 +827,7 @@ const SettingsPage: React.FC = () => {
                     onChange={(e) => setFormData({ ...formData, default_signature_city: e.target.value })}
                     className="w-full"
                     style={inputStyle}
-                    placeholder="z.B. Solingen"
+                    placeholder={t('settings.egCity')}
                   />
                 </div>
                 <div>
@@ -861,7 +863,7 @@ const SettingsPage: React.FC = () => {
             <div className="rounded-xl p-6 sticky top-6" style={{ background: 'var(--bg-surface)', boxShadow: 'var(--shadow-sm)', border: '1px solid var(--border)' }}>
               <div className="flex items-center space-x-2 mb-4">
                 <Eye style={{ color: 'var(--accent-text)' }} size={24} />
-                <h2 className="text-xl font-bold" style={{ color: 'var(--text-primary)' }}>Vorschau</h2>
+                <h2 className="text-xl font-bold" style={{ color: 'var(--text-primary)' }}>{t('common.preview')}</h2>
               </div>
               <div className="space-y-4">
                 {/* Logo Preview */}
@@ -887,7 +889,7 @@ const SettingsPage: React.FC = () => {
                   {/* Address */}
                   {(formData.street || formData.city) && (
                     <div>
-                      <p className="font-medium" style={{ color: 'var(--text-secondary)' }}>Adresse:</p>
+                      <p className="font-medium" style={{ color: 'var(--text-secondary)' }}>{t('settings.addressLabel')}</p>
                       <p style={{ color: 'var(--text-tertiary)' }}>
                         {formData.street} {formData.house_number}
                         {formData.street && <br />}
@@ -899,7 +901,7 @@ const SettingsPage: React.FC = () => {
                   {/* Contact */}
                   {(formData.email || formData.phone) && (
                     <div>
-                      <p className="font-medium" style={{ color: 'var(--text-secondary)' }}>Kontakt:</p>
+                      <p className="font-medium" style={{ color: 'var(--text-secondary)' }}>{t('settings.contactLabel')}</p>
                       {formData.email && <p style={{ color: 'var(--text-tertiary)' }}>{formData.email}</p>}
                       {formData.phone && <p style={{ color: 'var(--text-tertiary)' }}>{formData.phone}</p>}
                     </div>
@@ -908,7 +910,7 @@ const SettingsPage: React.FC = () => {
                   {/* Banking */}
                   {formData.iban && (
                     <div>
-                      <p className="font-medium" style={{ color: 'var(--text-secondary)' }}>Bankverbindung:</p>
+                      <p className="font-medium" style={{ color: 'var(--text-secondary)' }}>{t('settings.bankLabel')}</p>
                       {formData.bank_name && <p style={{ color: 'var(--text-tertiary)' }}>{formData.bank_name}</p>}
                       <p className="font-mono text-xs" style={{ color: 'var(--text-tertiary)' }}>{formData.iban}</p>
                     </div>
@@ -917,7 +919,7 @@ const SettingsPage: React.FC = () => {
                   {/* Legal */}
                   {(formData.vat_id || formData.tax_number) && (
                     <div>
-                      <p className="font-medium" style={{ color: 'var(--text-secondary)' }}>Rechtliches:</p>
+                      <p className="font-medium" style={{ color: 'var(--text-secondary)' }}>{t('settings.legalLabel')}</p>
                       {formData.vat_id && (
                         <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>USt-IdNr: {formData.vat_id}</p>
                       )}
@@ -955,7 +957,7 @@ const SettingsPage: React.FC = () => {
               onMouseLeave={e => (e.currentTarget.style.background = 'var(--accent)')}
             >
               <Save size={20} />
-              <span>{saving ? 'Speichern...' : 'Speichern'}</span>
+              <span>{saving ? t('settings.savingEllipsis') : 'Speichern'}</span>
             </button>
           </div>
         </div>

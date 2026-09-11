@@ -2,8 +2,10 @@ import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Mail, ArrowLeft, AlertCircle, CheckCircle2, Send } from 'lucide-react';
 import { supabase, appOrigin } from '../lib/supabase';
+import { useTranslation } from '../contexts/LanguageContext';
 
 const ForgotPasswordPage: React.FC = () => {
+  const { t } = useTranslation();
   const [email, setEmail] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -18,12 +20,12 @@ const ForgotPasswordPage: React.FC = () => {
         redirectTo: `${appOrigin}/auth/callback`,
       });
       if (error) {
-        setError('Wir konnten keine E-Mail senden. Bitte prüfen Sie die Adresse und versuchen Sie es erneut.');
+        setError(t('forgot.sendFailed'));
       } else {
         setSent(true);
       }
     } catch {
-      setError('Ein unerwarteter Fehler ist aufgetreten. Bitte versuchen Sie es erneut.');
+      setError(t('forgot.unexpected'));
     } finally {
       setLoading(false);
     }
@@ -39,8 +41,8 @@ const ForgotPasswordPage: React.FC = () => {
           <div className="w-16 h-16 mx-auto mb-4 flex items-center justify-center">
             <img src="/professor_logo_white.svg" alt="El-Professor" className="w-16 h-16 object-contain drop-shadow-[0_0_16px_rgba(6,182,212,0.5)]" />
           </div>
-          <h1 className="text-2xl font-bold text-white mb-1">Passwort zurücksetzen</h1>
-          <p className="text-white/40 text-sm">Wir senden Ihnen einen sicheren Link per E-Mail</p>
+          <h1 className="text-2xl font-bold text-white mb-1">{t('forgot.title')}</h1>
+          <p className="text-white/40 text-sm">{t('forgot.subtitle')}</p>
         </div>
 
         <div className="bg-white/4 backdrop-blur-xl border border-white/10 rounded-2xl p-7 shadow-[0_24px_64px_rgba(0,0,0,0.5)]">
@@ -49,7 +51,7 @@ const ForgotPasswordPage: React.FC = () => {
               <div className="w-12 h-12 rounded-full bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center mx-auto mb-4">
                 <CheckCircle2 className="text-emerald-400" size={22} />
               </div>
-              <h2 className="text-white font-semibold mb-2">E-Mail versendet</h2>
+              <h2 className="text-white font-semibold mb-2">{t('forgot.sent')}</h2>
               <p className="text-white/60 text-sm leading-relaxed mb-6">
                 Wenn ein Konto mit dieser Adresse existiert, haben wir einen Link zum Zurücksetzen Ihres Passworts gesendet. Bitte prüfen Sie auch Ihren Spam-Ordner.
               </p>
@@ -98,7 +100,7 @@ const ForgotPasswordPage: React.FC = () => {
                   ) : (
                     <>
                       <Send size={15} />
-                      <span>Link senden</span>
+                      <span>{t('forgot.sendLink')}</span>
                     </>
                   )}
                 </button>

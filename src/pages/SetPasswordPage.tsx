@@ -2,10 +2,12 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Lock, Eye, EyeOff, AlertCircle, CheckCircle2, ShieldCheck } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { useTranslation } from '../contexts/LanguageContext';
 
 const MIN_LEN = 8;
 
 const SetPasswordPage: React.FC = () => {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
@@ -45,10 +47,10 @@ const SetPasswordPage: React.FC = () => {
   }, []);
 
   const isInvite = status === 'pending_invite';
-  const title = isInvite ? 'Willkommen! Legen Sie Ihr Passwort fest' : 'Neues Passwort festlegen';
+  const title = isInvite ? t('setpw.welcomeTitle') : t('setpw.newTitle');
   const subtitle = isInvite
-    ? 'Einmaliges Setup für Ihren neuen Zugang'
-    : 'Bitte wählen Sie ein sicheres neues Passwort';
+    ? t('setpw.welcomeSub')
+    : t('setpw.newSub');
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -59,7 +61,7 @@ const SetPasswordPage: React.FC = () => {
       return;
     }
     if (password !== confirm) {
-      setError('Die Passwörter stimmen nicht überein.');
+      setError(t('setpw.mismatch'));
       return;
     }
 
@@ -67,7 +69,7 @@ const SetPasswordPage: React.FC = () => {
     try {
       const { error: updErr } = await supabase.auth.updateUser({ password });
       if (updErr) {
-        setError('Das Passwort konnte nicht gespeichert werden. Bitte versuchen Sie es erneut.');
+        setError(t('setpw.saveFailed'));
         return;
       }
 
@@ -93,7 +95,7 @@ const SetPasswordPage: React.FC = () => {
       setSuccess(true);
       setTimeout(() => navigate('/', { replace: true }), 1200);
     } catch {
-      setError('Ein unerwarteter Fehler ist aufgetreten. Bitte versuchen Sie es erneut.');
+      setError(t('forgot.unexpected'));
     } finally {
       setLoading(false);
     }
@@ -114,7 +116,7 @@ const SetPasswordPage: React.FC = () => {
           <div className="w-12 h-12 rounded-full bg-red-500/15 border border-red-500/30 flex items-center justify-center mx-auto mb-4">
             <AlertCircle className="text-red-400" size={22} />
           </div>
-          <h2 className="text-white font-semibold mb-2">Sitzung abgelaufen</h2>
+          <h2 className="text-white font-semibold mb-2">{t('setpw.sessionExpired')}</h2>
           <p className="text-white/60 text-sm mb-6">
             Der Link ist ungültig oder abgelaufen. Bitte fordern Sie einen neuen Link an.
           </p>
@@ -154,7 +156,7 @@ const SetPasswordPage: React.FC = () => {
               <div className="w-12 h-12 rounded-full bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center mx-auto mb-4">
                 <CheckCircle2 className="text-emerald-400" size={22} />
               </div>
-              <h2 className="text-white font-semibold mb-2">Passwort gespeichert</h2>
+              <h2 className="text-white font-semibold mb-2">{t('setpw.saved')}</h2>
               <p className="text-white/60 text-sm">Sie werden weitergeleitet...</p>
             </div>
           ) : (
@@ -178,7 +180,7 @@ const SetPasswordPage: React.FC = () => {
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
                       className="w-full pl-10 pr-12 py-3 bg-white/5 border border-white/10 text-white placeholder-white/20 rounded-xl focus:outline-none focus:ring-2 focus:ring-cyan-500/50 focus:border-cyan-500/40 transition-all text-sm"
-                      placeholder="Mindestens 8 Zeichen"
+                      placeholder={t('setpw.minChars')}
                       required
                       minLength={MIN_LEN}
                     />
@@ -203,7 +205,7 @@ const SetPasswordPage: React.FC = () => {
                       value={confirm}
                       onChange={(e) => setConfirm(e.target.value)}
                       className="w-full pl-10 pr-4 py-3 bg-white/5 border border-white/10 text-white placeholder-white/20 rounded-xl focus:outline-none focus:ring-2 focus:ring-cyan-500/50 focus:border-cyan-500/40 transition-all text-sm"
-                      placeholder="Passwort wiederholen"
+                      placeholder={t('setpw.repeat')}
                       required
                       minLength={MIN_LEN}
                     />
@@ -220,7 +222,7 @@ const SetPasswordPage: React.FC = () => {
                   ) : (
                     <>
                       <ShieldCheck size={15} />
-                      <span>{isInvite ? 'Zugang aktivieren' : 'Passwort speichern'}</span>
+                      <span>{isInvite ? t('setpw.activate') : t('setpw.save')}</span>
                     </>
                   )}
                 </button>

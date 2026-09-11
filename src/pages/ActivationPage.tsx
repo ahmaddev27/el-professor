@@ -8,6 +8,8 @@ import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { format, differenceInDays } from 'date-fns';
 import { de } from 'date-fns/locale';
+import { useTranslation } from '../contexts/LanguageContext';
+import type { TranslationKey } from '../i18n';
 
 type SubmitState = 'idle' | 'loading' | 'success' | 'error';
 
@@ -18,14 +20,16 @@ interface CodePreview {
   seconds_remaining: number;
 }
 
-const DURATION_LABELS: Record<string, string> = {
-  '1_monat':           '1 Monat',
-  '3_monate':          '3 Monate',
-  '1_jahr':            '1 Jahr',
-  'benutzerdefiniert': 'Benutzerdefiniert',
+// Keys, not text: this map is module-level and t() is a hook value.
+const DURATION_LABELS: Record<string, TranslationKey> = {
+  '1_monat':           'activation.duration.1month',
+  '3_monate':          'activation.duration.3months',
+  '1_jahr':            'activation.duration.1year',
+  'benutzerdefiniert': 'activation.custom',
 };
 
 function CodeCountdown({ seconds }: { seconds: number }) {
+  const { t } = useTranslation();
   const [remaining, setRemaining] = useState(seconds);
 
   useEffect(() => {
@@ -36,7 +40,7 @@ function CodeCountdown({ seconds }: { seconds: number }) {
   }, [seconds]);
 
   if (remaining <= 0) {
-    return <span style={{ color: 'var(--danger)' }}>Code ist abgelaufen.</span>;
+    return <span style={{ color: 'var(--danger)' }}>{t('activation.expired')}</span>;
   }
   const mins = Math.floor(remaining / 60);
   const secs = remaining % 60;
@@ -50,6 +54,7 @@ function CodeCountdown({ seconds }: { seconds: number }) {
 }
 
 const ActivationPage: React.FC = () => {
+  const { t } = useTranslation();
   const {
     profile, refreshSubscription, subscriptionExpiresAt,
     isSubscriptionActive, effectiveSubscriptionStatus,
@@ -111,7 +116,7 @@ const ActivationPage: React.FC = () => {
     e.preventDefault();
     const clean = code.replace(/\s/g, '');
     if (clean.length !== 6 || !/^\d{6}$/.test(clean)) {
-      setErrorMsg('Bitte geben Sie genau 6 Ziffern ein.');
+      setErrorMsg(t('activation.sixDigits'));
       setSubmitState('error');
       return;
     }
@@ -123,7 +128,7 @@ const ActivationPage: React.FC = () => {
       const result = data as { success: boolean; error?: string; subscription_expires_at?: string };
       if (!result.success) {
         setAttempts(a => a + 1);
-        setErrorMsg(result.error ?? 'Aktivierungscode ist ungültig.');
+        setErrorMsg(result.error ?? t('activation.invalid'));
         setSubmitState('error');
         return;
       }
@@ -132,7 +137,7 @@ const ActivationPage: React.FC = () => {
       setSubmitState('success');
     } catch (err: any) {
       setAttempts(a => a + 1);
-      setErrorMsg(err.message || 'Ein Fehler ist aufgetreten. Bitte erneut versuchen.');
+      setErrorMsg(err.message || t('activation.genericError'));
       setSubmitState('error');
     }
   };
@@ -140,7 +145,7 @@ const ActivationPage: React.FC = () => {
   const expiryDisplay = newExpiry ?? subscriptionExpiresAt;
   const displayName = profile?.email || profile?.full_name;
   const subInactive = !isSubscriptionActive;
-  const subStatusLabel = isSubscriptionActive ? 'Aktiv' : (effectiveSubscriptionStatus === 'expired' ? 'Abgelaufen' : 'Inaktiv');
+  const subStatusLabel = isSubscriptionActive ? 'Aktiv' : (effectiveSubscriptionStatus === 'expired' ? t('activation.expiredShort') : 'Inaktiv');
 
   // ── Success view ────────────────────────────────────────────────────────────
   if (submitState === 'success') {
@@ -233,7 +238,7 @@ const ActivationPage: React.FC = () => {
             <KeyRound size={18} style={{ color: 'var(--accent)' }} />
           </div>
           <div>
-            <h2 className="font-semibold" style={{ color: 'var(--text-primary)' }}>Aktivierungscode eingeben</h2>
+            <h2 className="font-semibold" style={{ color: 'var(--text-primary)' }}>{t('activation.enterCode')}</h2>
             <p className="text-xs mt-0.5" style={{ color: 'var(--text-secondary)' }}>
               Den Code erhalten Sie von Ihrem Administrator
             </p>
@@ -291,15 +296,15 @@ const ActivationPage: React.FC = () => {
               style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)' }}>
               {previewLoading ? (
                 <><RefreshCw size={13} className="animate-spin" style={{ color: 'var(--text-tertiary)' }} />
-                <span className="text-sm" style={{ color: 'var(--text-tertiary)' }}>Prüfe Code…</span></>
+                <span className="text-sm" style={{ color: 'var(--text-tertiary)' }}>{t('activation.checking')}</span></>
               ) : preview ? (
                 <>
                   <Clock size={13} style={{ color: 'var(--text-tertiary)' }} />
-                  <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>Code gültig noch:</span>
+                  <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>{t('activation.validFor')}</span>
                   <CodeCountdown seconds={preview.seconds_remaining} />
                   <span className="text-xs px-1.5 py-0.5 rounded-md font-medium"
                     style={{ background: 'var(--accent-subtle)', color: 'var(--accent)' }}>
-                    {DURATION_LABELS[preview.duration_type] ?? preview.duration_type}
+                    {DURATION_LABELS[preview.duration_type] ? t(DURATION_LABELS[preview.duration_type]) : preview.duration_type}
                   </span>
                 </>
               ) : (
@@ -321,9 +326,9 @@ const ActivationPage: React.FC = () => {
             }}
           >
             {submitState === 'loading' ? (
-              <><RefreshCw size={15} className="animate-spin" />Code wird geprüft…</>
+              <><RefreshCw size={15} className="animate-spin" />{t('activation.beingChecked')}</>
             ) : (
-              <><KeyRound size={15} />Code einlösen</>
+              <><KeyRound size={15} />{t('activation.redeem')}</>
             )}
           </button>
         </form>

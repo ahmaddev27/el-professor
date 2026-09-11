@@ -3,6 +3,8 @@ import { Bell, BellOff, ShieldAlert, ShieldX, Clock, AlertTriangle, CheckCircle,
 import { supabase } from '../lib/supabase';
 import { useToast } from '../contexts/ToastContext';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
+import { useTranslation } from '../contexts/LanguageContext';
+import type { TranslationKey } from '../i18n';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -20,8 +22,9 @@ interface NotificationRow {
 
 interface NotificationDef {
   type: NotificationType;
-  label: string;
-  description: string;
+  // Keys, not text: NOTIFICATION_DEFS is module-level and t() is a hook value.
+  label: TranslationKey;
+  description: TranslationKey;
   icon: React.ElementType;
   iconColor: string;
   iconBg: string;
@@ -31,8 +34,8 @@ interface NotificationDef {
 const NOTIFICATION_DEFS: NotificationDef[] = [
   {
     type:        'tuev_bald_ablaufend',
-    label:       'TÜV läuft bald ab',
-    description: 'Benachrichtigung wenn der TÜV eines Fahrzeugs in den nächsten 60 Tagen abläuft.',
+    label:       'notif.tuevSoon',
+    description: 'notif.tuevSoonBody',
     icon:        ShieldAlert,
     iconColor:   'var(--warning)',
     iconBg:      'var(--warning-subtle)',
@@ -40,8 +43,8 @@ const NOTIFICATION_DEFS: NotificationDef[] = [
   },
   {
     type:        'tuev_abgelaufen',
-    label:       'TÜV abgelaufen',
-    description: 'Benachrichtigung wenn der TÜV eines Fahrzeugs bereits abgelaufen ist.',
+    label:       'notif.tuevExpired',
+    description: 'notif.tuevExpiredBody',
     icon:        ShieldX,
     iconColor:   'var(--danger)',
     iconBg:      'var(--danger-subtle)',
@@ -49,8 +52,8 @@ const NOTIFICATION_DEFS: NotificationDef[] = [
   },
   {
     type:        'trial_bald_ablaufend',
-    label:       'Testphase läuft bald ab',
-    description: 'Erinnerung 7 Tage vor Ende der Testphase.',
+    label:       'notif.trialSoon',
+    description: 'notif.trialSoonBody',
     icon:        Clock,
     iconColor:   'var(--accent-text)',
     iconBg:      'var(--accent-subtle)',
@@ -58,8 +61,8 @@ const NOTIFICATION_DEFS: NotificationDef[] = [
   },
   {
     type:        'trial_abgelaufen',
-    label:       'Testphase abgelaufen',
-    description: 'Benachrichtigung wenn die Testphase abgelaufen ist und das Konto auf Basic zurückgefallen ist.',
+    label:       'notif.trialExpired',
+    description: 'notif.trialExpiredBody',
     icon:        AlertTriangle,
     iconColor:   'var(--danger)',
     iconBg:      'var(--danger-subtle)',
@@ -117,6 +120,7 @@ const GroupHeader: React.FC<{ title: string; sub: string }> = ({ title, sub }) =
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 export default function NotificationsPage() {
+  const { t } = useTranslation();
   const { effectiveCompanyId: companyId } = useSuperAdmin();
   const { showToast } = useToast();
 
@@ -226,7 +230,7 @@ export default function NotificationsPage() {
       setSavedGlobal(globalEnabled);
       setSavedSettings({ ...settings });
       setDirty(false);
-      showToast('success', 'Benachrichtigungseinstellungen gespeichert');
+      showToast('success', t('notif.saved'));
     } catch (err: any) {
       showToast('error', 'Fehler beim Speichern: ' + err.message);
     } finally {
@@ -247,8 +251,8 @@ export default function NotificationsPage() {
   }
 
   const groups: { key: 'fahrzeuge' | 'abo'; title: string; sub: string }[] = [
-    { key: 'fahrzeuge', title: 'Fahrzeuge', sub: 'TÜV- und Fahrzeugzustand-Benachrichtigungen' },
-    { key: 'abo',       title: 'Abonnement',  sub: 'Benachrichtigungen zu Trial und Plan-Status' },
+    { key: 'fahrzeuge', title: t('notif.vehicles'), sub: t('notif.vehiclesSub') },
+    { key: 'abo',       title: t('notif.subscription'),  sub: t('notif.subscriptionSub') },
   ];
 
   return (
@@ -288,7 +292,7 @@ export default function NotificationsPage() {
               <p className="text-xs mt-0.5" style={{ color: 'var(--text-secondary)' }}>
                 {globalEnabled
                   ? `${enabledCount} von ${totalCount} Benachrichtigungen aktiv`
-                  : 'Alle E-Mail-Benachrichtigungen deaktiviert'
+                  : t('notif.allDisabled')
                 }
               </p>
             </div>
@@ -358,10 +362,10 @@ export default function NotificationsPage() {
                       </div>
                       <div>
                         <p className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
-                          {def.label}
+                          {t(def.label)}
                         </p>
                         <p className="text-xs mt-0.5" style={{ color: 'var(--text-secondary)' }}>
-                          {def.description}
+                          {t(def.description)}
                         </p>
                       </div>
                     </div>
@@ -391,7 +395,7 @@ export default function NotificationsPage() {
         }}
       >
         <p className="text-sm" style={{ color: dirty ? 'var(--accent-text)' : 'var(--text-tertiary)' }}>
-          {dirty ? 'Sie haben nicht gespeicherte Änderungen.' : 'Alle Änderungen gespeichert.'}
+          {dirty ? t('notif.unsaved') : t('notif.allSaved')}
         </p>
         <div className="flex gap-2">
           {dirty && (
@@ -417,7 +421,7 @@ export default function NotificationsPage() {
             onMouseLeave={e => (e.currentTarget.style.background = 'var(--accent)')}
           >
             <Save className="w-3.5 h-3.5" />
-            {saving ? 'Speichern...' : 'Einstellungen speichern'}
+            {saving ? t('settings.savingEllipsis') : t('notif.saveSettings')}
           </button>
         </div>
       </div>
