@@ -6,6 +6,7 @@ import { useTheme } from '../contexts/ThemeContext';
 import { format } from 'date-fns';
 import { getWeeksOfMonth, getBusinessMonthRange, getBusinessWeeksForMonth } from '../utils/weekCalculations';
 import html2canvas from 'html2canvas';
+import { useTranslation } from '../contexts/LanguageContext';
 
 interface WeeklyAbrechnung {
   year: number;
@@ -60,6 +61,7 @@ const inputStyle: React.CSSProperties = {
 };
 
 export function AbrechnungPage() {
+  const { t } = useTranslation();
   const [viewMode, setViewMode] = useState<ViewMode>('weekly');
   const [weeklyData, setWeeklyData] = useState<WeeklyAbrechnung[]>([]);
   const [monthlyData, setMonthlyData] = useState<MonthlyAbrechnung[]>([]);
@@ -101,7 +103,7 @@ export function AbrechnungPage() {
       const uniqueWeeks = Array.from(new Set(data?.map((d: WeeklyAbrechnung) => d.week_number) || []));
       setAvailableWeeks((uniqueWeeks as number[]).sort((a, b) => a - b));
     } catch (error: any) {
-      showToast('error', 'Fehler beim Laden der Daten', error.message);
+      showToast('error', t('abr.loadFailed'), error.message);
     } finally {
       setLoading(false);
     }
@@ -121,7 +123,7 @@ export function AbrechnungPage() {
       const uniqueDrivers = Array.from(new Set(data?.map((d: MonthlyAbrechnung) => d.driver_name) || []));
       setDrivers(uniqueDrivers as string[]);
     } catch (error: any) {
-      showToast('error', 'Fehler beim Laden der Daten', error.message);
+      showToast('error', t('abr.loadFailed'), error.message);
     } finally {
       setLoading(false);
     }
@@ -204,7 +206,7 @@ export function AbrechnungPage() {
       const weekInfo = weeks.find(w => w.weekNumber === item.week_number);
 
       if (!weekInfo) {
-        showToast('error', 'Wocheninformationen nicht gefunden');
+        showToast('error', t('abr.weekNotFound'));
         return;
       }
 
@@ -227,7 +229,7 @@ export function AbrechnungPage() {
 
       setDetailModalData(detailData);
     } catch (error: any) {
-      showToast('error', 'Fehler beim Laden der Details', error.message);
+      showToast('error', t('abr.detailsFailed'), error.message);
     }
   };
 
@@ -254,7 +256,7 @@ export function AbrechnungPage() {
 
       setDetailModalData(detailData);
     } catch (error: any) {
-      showToast('error', 'Fehler beim Laden der Details', error.message);
+      showToast('error', t('abr.detailsFailed'), error.message);
     }
   };
 
@@ -296,12 +298,12 @@ export function AbrechnungPage() {
   // Reusable function to generate settlement image blob
   const generateSettlementImageBlob = async (): Promise<{ blob: Blob; fileName: string } | null> => {
     if (!detailModalData) {
-      showToast('error', 'Fehler', 'Keine Daten verfügbar');
+      showToast('error', 'Fehler', t('abr.noData'));
       return null;
     }
 
     if (!shareableCardRef.current) {
-      showToast('error', 'Fehler', 'Inhaltsbereich nicht gefunden');
+      showToast('error', 'Fehler', t('abr.noContentArea'));
       return null;
     }
 
@@ -314,7 +316,7 @@ export function AbrechnungPage() {
 
       // Defensive check before accessing properties
       if (!element) {
-        showToast('error', 'Fehler', 'Element nicht verfügbar');
+        showToast('error', 'Fehler', t('abr.elementUnavailable'));
         return null;
       }
 
@@ -347,7 +349,7 @@ export function AbrechnungPage() {
 
       return { blob, fileName };
     } catch (error: any) {
-      showToast('error', 'Fehler beim Erstellen des Bildes', error.message || 'Unbekannter Fehler');
+      showToast('error', t('abr.imageFailed'), error.message || t('overview.error.unknown'));
       console.error('Image generation error:', error);
       return null;
     }
@@ -359,7 +361,7 @@ export function AbrechnungPage() {
 
     try {
       setIsSharing(true);
-      showToast('info', 'Erstelle Bild...');
+      showToast('info', t('abr.creatingImage'));
 
       const imageData = await generateSettlementImageBlob();
       if (!imageData) return;
@@ -368,7 +370,7 @@ export function AbrechnungPage() {
 
       // Check if Clipboard API is supported
       if (!navigator.clipboard || !navigator.clipboard.write) {
-        showToast('error', 'Nicht unterstützt', 'Das Kopieren von Bildern wird auf diesem Browser/Gerät nicht unterstützt.');
+        showToast('error', t('abr.notSupported'), t('abr.copyNotSupported'));
         return;
       }
 
@@ -379,13 +381,13 @@ export function AbrechnungPage() {
         });
 
         await navigator.clipboard.write([clipboardItem]);
-        showToast('success', 'Bild wurde in die Zwischenablage kopiert.');
+        showToast('success', t('abr.copiedToClipboard'));
       } catch (clipError: any) {
         console.error('Clipboard error:', clipError);
-        showToast('error', 'Fehler beim Kopieren', 'Das Kopieren von Bildern wird auf diesem Browser/Gerät nicht unterstützt.');
+        showToast('error', t('abr.copyFailed'), t('abr.copyNotSupported'));
       }
     } catch (error: any) {
-      showToast('error', 'Fehler beim Kopieren', error.message || 'Unbekannter Fehler');
+      showToast('error', t('abr.copyFailed'), error.message || t('overview.error.unknown'));
       console.error('Copy error:', error);
     } finally {
       setIsSharing(false);
@@ -398,7 +400,7 @@ export function AbrechnungPage() {
 
     try {
       setIsSharing(true);
-      showToast('info', 'Erstelle Bild...');
+      showToast('info', t('abr.creatingImage'));
 
       const imageData = await generateSettlementImageBlob();
       if (!imageData) return;
@@ -427,18 +429,18 @@ export function AbrechnungPage() {
         window.open(whatsappUrl, '_blank');
       } catch (openError) {
         console.error('Failed to open WhatsApp:', openError);
-        showToast('error', 'Fehler', 'WhatsApp Web konnte nicht geöffnet werden.');
+        showToast('error', 'Fehler', t('abr.whatsappFailed'));
         return;
       }
 
       // Show appropriate message
       if (imageCopied) {
-        showToast('success', 'Bild wurde kopiert. Bitte in WhatsApp mit Ctrl+V / Einfügen einfügen.');
+        showToast('success', t('abr.copiedPasteHint'));
       } else {
-        showToast('warning', 'Kopieren nicht unterstützt', 'Bild konnte nicht kopiert werden. Bitte verwenden Sie "Bild kopieren" oder "Download".');
+        showToast('warning', t('abr.copyUnsupported'), t('abr.copyUnsupportedBody'));
       }
     } catch (error: any) {
-      showToast('error', 'Fehler beim Teilen', error.message || 'Unbekannter Fehler');
+      showToast('error', t('abr.shareFailed'), error.message || t('overview.error.unknown'));
       console.error('Share to WhatsApp error:', error);
     } finally {
       setIsSharing(false);
@@ -451,7 +453,7 @@ export function AbrechnungPage() {
 
     try {
       setIsSharing(true);
-      showToast('info', 'Erstelle Bild...');
+      showToast('info', t('abr.creatingImage'));
 
       const imageData = await generateSettlementImageBlob();
       if (!imageData) return;
@@ -468,9 +470,9 @@ export function AbrechnungPage() {
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
 
-      showToast('success', 'Bild wurde heruntergeladen');
+      showToast('success', t('abr.downloaded'));
     } catch (error: any) {
-      showToast('error', 'Fehler beim Herunterladen', error.message || 'Unbekannter Fehler');
+      showToast('error', t('abr.downloadFailed'), error.message || t('overview.error.unknown'));
       console.error('Download error:', error);
     } finally {
       setIsSharing(false);
@@ -482,7 +484,7 @@ export function AbrechnungPage() {
       return (
         <div className="text-center py-12">
           <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2" style={{ borderColor: 'var(--accent)' }}></div>
-          <p className="mt-2" style={{ color: 'var(--text-tertiary)' }}>Laden...</p>
+          <p className="mt-2" style={{ color: 'var(--text-tertiary)' }}>{t('werkstatt.loading')}</p>
         </div>
       );
     }
@@ -518,12 +520,8 @@ export function AbrechnungPage() {
                 <table className="w-full">
                   <thead style={{ background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)' }}>
                     <tr>
-                      <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-secondary)' }}>
-                        Fahrer
-                      </th>
-                      <th className="px-6 py-3 text-right text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-secondary)' }}>
-                        Anzahl Belege
-                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-secondary)' }}>{t('common.driver')}</th>
+                      <th className="px-6 py-3 text-right text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-secondary)' }}>{t('abr.belegCount')}</th>
                       <th className="px-6 py-3 text-right text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-secondary)' }}>
                         Ausgegebene Bargeld
                       </th>
@@ -627,7 +625,7 @@ export function AbrechnungPage() {
       return (
         <div className="text-center py-12">
           <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2" style={{ borderColor: 'var(--accent)' }}></div>
-          <p className="mt-2" style={{ color: 'var(--text-tertiary)' }}>Laden...</p>
+          <p className="mt-2" style={{ color: 'var(--text-tertiary)' }}>{t('werkstatt.loading')}</p>
         </div>
       );
     }
@@ -657,12 +655,8 @@ export function AbrechnungPage() {
           <table className="w-full">
             <thead style={{ background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)' }}>
               <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-secondary)' }}>
-                  Fahrer
-                </th>
-                <th className="px-6 py-3 text-right text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-secondary)' }}>
-                  Anzahl Belege
-                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-secondary)' }}>{t('common.driver')}</th>
+                <th className="px-6 py-3 text-right text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-secondary)' }}>{t('abr.belegCount')}</th>
                 <th className="px-6 py-3 text-right text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-secondary)' }}>
                   Ausgegebene Bargeld
                 </th>
@@ -688,7 +682,7 @@ export function AbrechnungPage() {
                     <div>
                       {item.driver_name}
                       <span className="ml-2 text-xs" style={{ color: 'var(--text-tertiary)' }}>
-                        ({item.week_count} {item.week_count === 1 ? 'Woche' : 'Wochen'})
+                        ({item.week_count} {item.week_count === 1 ? t('common.week') : t('common.weeks')})
                       </span>
                     </div>
                   </td>
@@ -786,7 +780,7 @@ export function AbrechnungPage() {
               onChange={(e) => setSelectedDriver(e.target.value)}
               style={inputStyle}
             >
-              <option value="all">Alle Fahrer</option>
+              <option value="all">{t('common.allDrivers')}</option>
               {drivers.map(driver => (
                 <option key={driver} value={driver}>
                   {driver}
@@ -799,7 +793,7 @@ export function AbrechnungPage() {
                 onChange={(e) => setSelectedWeek(e.target.value === 'all' ? 'all' : Number(e.target.value))}
                 style={inputStyle}
               >
-                <option value="all">Alle Wochen</option>
+                <option value="all">{t('abr.allWeeks')}</option>
                 {availableWeeks.map(week => (
                   <option key={week} value={week}>
                     Woche {week}
@@ -865,7 +859,7 @@ export function AbrechnungPage() {
                   }}>
                     <User style={{ width: 14, height: 14, color: isDark ? '#60a5fa' : '#2563eb' }} />
                   </div>
-                  <p style={{ fontSize: 11, fontWeight: 600, color: isDark ? '#93c5fd' : '#1e40af', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Fahrer</p>
+                  <p style={{ fontSize: 11, fontWeight: 600, color: isDark ? '#93c5fd' : '#1e40af', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{t('common.driver')}</p>
                 </div>
                 <p style={{ fontSize: 17, fontWeight: 800, color: isDark ? '#f1f5f9' : '#0f172a' }}>{detailModalData.driverName}</p>
               </div>
@@ -886,7 +880,7 @@ export function AbrechnungPage() {
                     <Calendar style={{ width: 14, height: 14, color: isDark ? '#60a5fa' : '#2563eb' }} />
                   </div>
                   <p style={{ fontSize: 11, fontWeight: 600, color: isDark ? '#93c5fd' : '#1e40af', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-                    {detailModalData.weekNumber === 0 ? 'Monat' : 'Woche'}
+                    {detailModalData.weekNumber === 0 ? t('common.month') : t('common.week')}
                   </p>
                 </div>
                 <p style={{ fontSize: 17, fontWeight: 800, color: isDark ? '#f1f5f9' : '#0f172a' }}>
@@ -911,7 +905,7 @@ export function AbrechnungPage() {
                 <Calendar style={{ width: 14, height: 14, color: isDark ? '#fb923c' : '#ea580c' }} />
               </div>
               <div>
-                <p style={{ fontSize: 11, fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 3 }}>Zeitraum</p>
+                <p style={{ fontSize: 11, fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 3 }}>{t('common.period')}</p>
                 <p style={{ fontSize: 15, fontWeight: 700, color: isDark ? '#e2e8f0' : '#0f172a' }}>
                   {detailModalData.weekStartDate} – {detailModalData.weekEndDate}
                 </p>
@@ -920,7 +914,7 @@ export function AbrechnungPage() {
 
             {/* Finanzübersicht */}
             <div style={{ borderTop: isDark ? '1px solid rgba(255,255,255,0.07)' : '1px solid #e2e8f0', paddingTop: 16 }}>
-              <p style={{ fontSize: 11, fontWeight: 700, color: isDark ? '#475569' : '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 14 }}>Finanzübersicht</p>
+              <p style={{ fontSize: 11, fontWeight: 700, color: isDark ? '#475569' : '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 14 }}>{t('abr.financialOverview')}</p>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
 
                 {/* Bargeld */}
@@ -941,9 +935,9 @@ export function AbrechnungPage() {
                     </div>
                     <div>
                       <p style={{ fontSize: 13, fontWeight: 600, color: isDark ? '#4ade80' : '#15803d' }}>
-                        Gesamt Bargeld ({detailModalData.weekNumber === 0 ? 'Monat' : 'diese Woche'})
+                        Gesamt Bargeld ({detailModalData.weekNumber === 0 ? t('common.month') : t('abr.thisWeek')})
                       </p>
-                      <p style={{ fontSize: 11, color: isDark ? '#166534' : '#86efac', marginTop: 1 }}>Bargeld Einnahmen</p>
+                      <p style={{ fontSize: 11, color: isDark ? '#166534' : '#86efac', marginTop: 1 }}>{t('bargeld.cashIncome')}</p>
                     </div>
                   </div>
                   <p style={{ fontSize: 22, fontWeight: 900, color: isDark ? '#4ade80' : '#15803d', letterSpacing: '-0.02em' }}>
@@ -968,7 +962,7 @@ export function AbrechnungPage() {
                       <ReceiptIcon style={{ width: 18, height: 18, color: isDark ? '#f87171' : '#dc2626' }} />
                     </div>
                     <div>
-                      <p style={{ fontSize: 13, fontWeight: 600, color: isDark ? '#f87171' : '#b91c1c' }}>Anzahl Belege</p>
+                      <p style={{ fontSize: 13, fontWeight: 600, color: isDark ? '#f87171' : '#b91c1c' }}>{t('abr.belegCount')}</p>
                       <p style={{ fontSize: 11, color: isDark ? '#991b1b' : '#f87171', marginTop: 1 }}>{detailModalData.anzahlBelege} Belege</p>
                     </div>
                   </div>
@@ -1087,9 +1081,9 @@ export function AbrechnungPage() {
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                 {[
-                  { icon: <Share2 style={{ width: 15, height: 15 }} />, onClick: handleShareToWhatsApp, title: 'Als Bild teilen' },
-                  { icon: <Copy style={{ width: 15, height: 15 }} />, onClick: handleCopyImage, title: 'Bild kopieren' },
-                  { icon: <Download style={{ width: 15, height: 15 }} />, onClick: handleDownloadImage, title: 'Download' },
+                  { icon: <Share2 style={{ width: 15, height: 15 }} />, onClick: handleShareToWhatsApp, title: t('abr.shareAsImage') },
+                  { icon: <Copy style={{ width: 15, height: 15 }} />, onClick: handleCopyImage, title: t('abr.copyImage') },
+                  { icon: <Download style={{ width: 15, height: 15 }} />, onClick: handleDownloadImage, title: t('common.download') },
                 ].map((btn, i) => (
                   <button
                     key={i}
@@ -1197,7 +1191,7 @@ export function AbrechnungPage() {
                       }}>
                         <User style={{ width: 14, height: 14, color: isDark ? '#60a5fa' : '#2563eb' }} />
                       </div>
-                      <p style={{ fontSize: 11, fontWeight: 600, color: isDark ? '#93c5fd' : '#1e40af', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Fahrer</p>
+                      <p style={{ fontSize: 11, fontWeight: 600, color: isDark ? '#93c5fd' : '#1e40af', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{t('common.driver')}</p>
                     </div>
                     <p style={{ fontSize: 17, fontWeight: 800, color: isDark ? '#f1f5f9' : '#0f172a' }}>{detailModalData.driverName}</p>
                   </div>
@@ -1218,7 +1212,7 @@ export function AbrechnungPage() {
                         <Calendar style={{ width: 14, height: 14, color: isDark ? '#60a5fa' : '#2563eb' }} />
                       </div>
                       <p style={{ fontSize: 11, fontWeight: 600, color: isDark ? '#93c5fd' : '#1e40af', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-                        {detailModalData.weekNumber === 0 ? 'Monat' : 'Woche'}
+                        {detailModalData.weekNumber === 0 ? t('common.month') : t('common.week')}
                       </p>
                     </div>
                     <p style={{ fontSize: 17, fontWeight: 800, color: isDark ? '#f1f5f9' : '#0f172a' }}>
@@ -1245,7 +1239,7 @@ export function AbrechnungPage() {
                     <Calendar style={{ width: 14, height: 14, color: isDark ? '#fb923c' : '#ea580c' }} />
                   </div>
                   <div>
-                    <p style={{ fontSize: 11, fontWeight: 600, color: isDark ? '#64748b' : '#64748b', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 3 }}>Zeitraum</p>
+                    <p style={{ fontSize: 11, fontWeight: 600, color: isDark ? '#64748b' : '#64748b', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 3 }}>{t('common.period')}</p>
                     <p style={{ fontSize: 15, fontWeight: 700, color: isDark ? '#e2e8f0' : '#0f172a' }}>
                       {detailModalData.weekStartDate} – {detailModalData.weekEndDate}
                     </p>
@@ -1254,7 +1248,7 @@ export function AbrechnungPage() {
 
                 {/* Divider + Finanzübersicht */}
                 <div style={{ borderTop: isDark ? '1px solid rgba(255,255,255,0.07)' : '1px solid #e2e8f0', paddingTop: 16 }}>
-                  <p style={{ fontSize: 11, fontWeight: 700, color: isDark ? '#475569' : '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 14 }}>Finanzübersicht</p>
+                  <p style={{ fontSize: 11, fontWeight: 700, color: isDark ? '#475569' : '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 14 }}>{t('abr.financialOverview')}</p>
 
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
 
@@ -1276,9 +1270,9 @@ export function AbrechnungPage() {
                         </div>
                         <div>
                           <p style={{ fontSize: 13, fontWeight: 600, color: isDark ? '#4ade80' : '#15803d' }}>
-                            Gesamt Bargeld ({detailModalData.weekNumber === 0 ? 'Monat' : 'diese Woche'})
+                            Gesamt Bargeld ({detailModalData.weekNumber === 0 ? t('common.month') : t('abr.thisWeek')})
                           </p>
-                          <p style={{ fontSize: 11, color: isDark ? '#166534' : '#86efac', marginTop: 1 }}>Bargeld Einnahmen</p>
+                          <p style={{ fontSize: 11, color: isDark ? '#166534' : '#86efac', marginTop: 1 }}>{t('bargeld.cashIncome')}</p>
                         </div>
                       </div>
                       <p style={{ fontSize: 22, fontWeight: 900, color: isDark ? '#4ade80' : '#15803d', letterSpacing: '-0.02em' }}>
@@ -1303,7 +1297,7 @@ export function AbrechnungPage() {
                           <ReceiptIcon style={{ width: 18, height: 18, color: isDark ? '#f87171' : '#dc2626' }} />
                         </div>
                         <div>
-                          <p style={{ fontSize: 13, fontWeight: 600, color: isDark ? '#f87171' : '#b91c1c' }}>Anzahl Belege</p>
+                          <p style={{ fontSize: 13, fontWeight: 600, color: isDark ? '#f87171' : '#b91c1c' }}>{t('abr.belegCount')}</p>
                           <p style={{ fontSize: 11, color: isDark ? '#991b1b' : '#f87171', marginTop: 1 }}>{detailModalData.anzahlBelege} Belege</p>
                         </div>
                       </div>
@@ -1399,7 +1393,7 @@ export function AbrechnungPage() {
                 }}
               >
                 <Share2 style={{ width: 15, height: 15 }} />
-                {isSharing ? 'Erstelle Bild...' : 'Teilen'}
+                {isSharing ? t('abr.creatingImage') : t('common.share')}
               </button>
               <button
                 onClick={handleCopyImage}
@@ -1425,7 +1419,7 @@ export function AbrechnungPage() {
                 }}
               >
                 <Copy style={{ width: 15, height: 15 }} />
-                {isSharing ? 'Erstelle Bild...' : 'Kopieren'}
+                {isSharing ? t('abr.creatingImage') : t('common.copy')}
               </button>
               <button
                 onClick={handleDownloadImage}
@@ -1451,7 +1445,7 @@ export function AbrechnungPage() {
                 }}
               >
                 <Download style={{ width: 15, height: 15 }} />
-                {isSharing ? 'Erstelle Bild...' : 'Download'}
+                {isSharing ? t('abr.creatingImage') : t('common.download')}
               </button>
               <button
                 onClick={() => setDetailModalData(null)}

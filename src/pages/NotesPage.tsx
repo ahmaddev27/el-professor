@@ -7,6 +7,8 @@ import { useToast } from '../contexts/ToastContext';
 import { format } from 'date-fns';
 import { getWeeksOfMonth, getWeekNumberForDate } from '../utils/weekCalculations';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
+import { useTranslation } from '../contexts/LanguageContext';
+import type { TranslationKey } from '../i18n';
 
 interface Driver {
   id: string;
@@ -33,23 +35,25 @@ interface Note {
   drivers?: { name: string };
 }
 
+// `label` holds a TranslationKey: this list is module-level and t() is a
+// hook value. Every consumer resolves it.
 const NOTE_TYPES = [
-  { value: 'general',   label: 'Allgemeine Notiz',       behavior: 'neutral'              as NotePlanningBehavior },
-  { value: 'sick',      label: 'Krank',                  behavior: 'exclude_from_plan'    as NotePlanningBehavior },
-  { value: 'vacation',  label: 'Urlaub',                 behavior: 'exclude_from_plan'    as NotePlanningBehavior },
-  { value: 'off',       label: 'Frei / Nicht verfügbar', behavior: 'exclude_from_plan'    as NotePlanningBehavior },
-  { value: 'blitzer',   label: 'Blitzer',                behavior: 'must_include_in_plan' as NotePlanningBehavior },
-  { value: 'accident',  label: 'Unfall',                 behavior: 'must_include_in_plan' as NotePlanningBehavior },
-  { value: 'kontrolle', label: 'Kontrolle',              behavior: 'must_include_in_plan' as NotePlanningBehavior },
-  { value: 'breakdown', label: 'Panne',                  behavior: 'must_include_in_plan' as NotePlanningBehavior },
-  { value: 'wait',      label: 'Wartezeit',              behavior: 'must_include_in_plan' as NotePlanningBehavior },
-  { value: 'other',     label: 'Sonstiges',              behavior: 'neutral'              as NotePlanningBehavior },
+  { value: 'general',   label: 'notes.type.general' as TranslationKey,       behavior: 'neutral'              as NotePlanningBehavior },
+  { value: 'sick',      label: 'notes.type.sick' as TranslationKey,                  behavior: 'exclude_from_plan'    as NotePlanningBehavior },
+  { value: 'vacation',  label: 'notes.type.vacation' as TranslationKey,                 behavior: 'exclude_from_plan'    as NotePlanningBehavior },
+  { value: 'off',       label: 'notes.type.unavailable' as TranslationKey, behavior: 'exclude_from_plan'    as NotePlanningBehavior },
+  { value: 'blitzer',   label: 'notes.type.speedCamera' as TranslationKey,                behavior: 'must_include_in_plan' as NotePlanningBehavior },
+  { value: 'accident',  label: 'notes.type.accident' as TranslationKey,                 behavior: 'must_include_in_plan' as NotePlanningBehavior },
+  { value: 'kontrolle', label: 'notes.type.inspection' as TranslationKey,              behavior: 'must_include_in_plan' as NotePlanningBehavior },
+  { value: 'breakdown', label: 'notes.type.breakdown' as TranslationKey,                  behavior: 'must_include_in_plan' as NotePlanningBehavior },
+  { value: 'wait',      label: 'notes.type.waiting' as TranslationKey,              behavior: 'must_include_in_plan' as NotePlanningBehavior },
+  { value: 'other',     label: 'notes.type.other' as TranslationKey,              behavior: 'neutral'              as NotePlanningBehavior },
 ];
 
-const PLANNING_BEHAVIOR_LABELS: Record<NotePlanningBehavior, string> = {
-  neutral:              'Keine Auswirkung',
-  exclude_from_plan:    'Von Planung ausschließen',
-  must_include_in_plan: 'Muss im Plan enthalten sein',
+const PLANNING_BEHAVIOR_LABELS: Record<NotePlanningBehavior, TranslationKey> = {
+  neutral: 'notes.effect.none',
+  exclude_from_plan: 'notes.effect.exclude',
+  must_include_in_plan: 'notes.effect.require',
 };
 
 // Types that typically span multiple days (suggest date range UI)
@@ -95,10 +99,12 @@ const DEFAULT_FORM: FormData = {
   end_time:               '',
 };
 
-function noteDisplayLabel(note: Note): string {
+// Takes the translator explicitly: this is module scope, where t() is not a
+// value. Currently unreferenced, kept because it encodes the label rule.
+function noteDisplayLabel(note: Note, t: (k: TranslationKey) => string): string {
   if (note.note_text.trim()) return note.note_text;
-  const nt = NOTE_TYPES.find(t => t.value === note.note_type);
-  return nt?.label ?? 'Notiz';
+  const nt = NOTE_TYPES.find(nt => nt.value === note.note_type);
+  return nt ? t(nt.label) : t('notes.one');
 }
 
 function noteDateLabel(note: Note): string {
@@ -114,6 +120,7 @@ function noteDateLabel(note: Note): string {
 }
 
 export function NotesPage() {
+  const { t } = useTranslation();
   const [notes, setNotes]           = useState<Note[]>([]);
   const [drivers, setDrivers]       = useState<Driver[]>([]);
   const [loading, setLoading]       = useState(true);
@@ -151,7 +158,7 @@ export function NotesPage() {
       setLoading(true);
       await Promise.all([loadNotes(), loadDrivers()]);
     } catch (error: any) {
-      showToast('error', error.message || 'Fehler beim Laden der Daten');
+      showToast('error', error.message || t('salaries.loadFailed'));
     } finally {
       setLoading(false);
     }
@@ -182,13 +189,13 @@ export function NotesPage() {
     e.preventDefault();
 
     if (!formData.driver_id) {
-      showToast('error', 'Bitte Fahrer auswählen');
+      showToast('error', t('notes.selectDriver'));
       return;
     }
 
     try {
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error('Nicht authentifiziert');
+      if (!user) throw new Error(t('common.notAuthenticated'));
 
       // Resolve the canonical note_date (used for legacy queries)
       const canonicalDate = formData.use_date_range
@@ -220,19 +227,19 @@ export function NotesPage() {
           .eq('id', editingNote.id)
           .eq('company_id', companyId);
         if (error) throw error;
-        showToast('success', 'Notiz erfolgreich aktualisiert');
+        showToast('success', t('notes.updated'));
       } else {
         const { error } = await supabase
           .from('driver_notes')
           .insert([noteData]);
         if (error) throw error;
-        showToast('success', 'Notiz erfolgreich hinzugefügt');
+        showToast('success', t('notes.added'));
       }
 
       handleCloseModal();
       loadNotes();
     } catch (error: any) {
-      showToast('error', error.message || 'Fehler beim Speichern');
+      showToast('error', error.message || t('settings.saveFailed'));
     }
   };
 
@@ -270,10 +277,10 @@ export function NotesPage() {
         .eq('id', id)
         .eq('company_id', companyId);
       if (error) throw error;
-      showToast('success', 'Notiz erfolgreich gelöscht');
+      showToast('success', t('notes.deleted'));
       loadNotes();
     } catch (error: any) {
-      showToast('error', error.message || 'Fehler beim Löschen');
+      showToast('error', error.message || t('common.errorDelete'));
     }
   };
 
@@ -310,9 +317,9 @@ export function NotesPage() {
         note.drivers?.name ?? driverNameById.get(note.driver_id) ?? note.driver_id;
 
       const noteTypeLabel = (type?: string) =>
-        NOTE_TYPES.find(t => t.value === type)?.label ?? (type ?? '');
+        ((k => k ? t(k) : (type ?? ''))(NOTE_TYPES.find(nt => nt.value === type)?.label));
       const behaviorLabel = (b?: NotePlanningBehavior) =>
-        b ? PLANNING_BEHAVIOR_LABELS[b] ?? b : '';
+        b ? (PLANNING_BEHAVIOR_LABELS[b] ? t(PLANNING_BEHAVIOR_LABELS[b]) : b) : '';
       const fmtDate = (d?: string | null) => {
         if (!d) return '';
         try { return format(new Date(d), 'dd.MM.yyyy'); } catch { return d; }
@@ -325,36 +332,36 @@ export function NotesPage() {
 
       // Sheet 1: Notizen
       const notizRows = toExport.map(note => ({
-        'Fahrer': getDriverName(note),
-        'Notiz-Typ': noteTypeLabel(note.note_type),
-        'Planungsverhalten': behaviorLabel(note.note_planning_behavior),
-        'Notizdatum': fmtDate(note.note_date),
-        'Startdatum': fmtDate(note.start_date),
-        'Enddatum': fmtDate(note.end_date),
-        'Ganztägig': yesNo(note.is_full_day),
-        'Startzeit': note.start_time ?? '',
-        'Endzeit': note.end_time ?? '',
-        'Notiztext': note.note_text,
-        'Erstellt am': fmtDateTime(note.created_at),
-        'Aktualisiert am': fmtDateTime(note.updated_at),
-        'Erstellt von': note.created_by ?? '',
+        [t('common.driver')]: getDriverName(note),
+        [t('notes.noteType')]: noteTypeLabel(note.note_type),
+        [t('notes.planningBehaviour')]: behaviorLabel(note.note_planning_behavior),
+        [t('notes.noteDate')]: fmtDate(note.note_date),
+        [t('notes.startDate')]: fmtDate(note.start_date),
+        [t('notes.endDate')]: fmtDate(note.end_date),
+        [t('notes.allDay')]: yesNo(note.is_full_day),
+        [t('notes.startTime')]: note.start_time ?? '',
+        [t('notes.endTime')]: note.end_time ?? '',
+        [t('notes.text')]: note.note_text,
+        [t('notes.createdAt')]: fmtDateTime(note.created_at),
+        [t('notes.updatedAt')]: fmtDateTime(note.updated_at),
+        [t('notes.createdBy')]: note.created_by ?? '',
       }));
 
       // Sheet 2: Zusammenfassung
       const driverIds = new Set(toExport.map(n => n.driver_id));
       const countBehavior = (b: NotePlanningBehavior) => toExport.filter(n => n.note_planning_behavior === b).length;
-      const countType = (t: string) => toExport.filter(n => n.note_type === t).length;
+      const countType = (type: string) => toExport.filter(n => n.note_type === type).length;
       const summaryRows = [
-        { 'Kennzahl': 'Exportdatum', 'Wert': fmtDateTime(new Date().toISOString()) },
-        { 'Kennzahl': 'Anzahl Notizen gesamt', 'Wert': toExport.length },
-        { 'Kennzahl': 'Anzahl Fahrer mit Notizen', 'Wert': driverIds.size },
-        { 'Kennzahl': 'Anzahl Von Planung ausschließen', 'Wert': countBehavior('exclude_from_plan') },
-        { 'Kennzahl': 'Anzahl Neutral', 'Wert': countBehavior('neutral') },
-        { 'Kennzahl': 'Anzahl Muss im Plan enthalten sein', 'Wert': countBehavior('must_include_in_plan') },
-        { 'Kennzahl': 'Anzahl Krank', 'Wert': countType('sick') },
-        { 'Kennzahl': 'Anzahl Urlaub', 'Wert': countType('vacation') },
-        { 'Kennzahl': 'Anzahl Frei / Nicht verfügbar', 'Wert': countType('off') },
-        { 'Kennzahl': 'Anzahl Sonstiges', 'Wert': countType('other') },
+        { [t('notes.metric')]: t('notes.exportDate'), [t('common.value')]: fmtDateTime(new Date().toISOString()) },
+        { [t('notes.metric')]: t('notes.countTotal'), [t('common.value')]: toExport.length },
+        { [t('notes.metric')]: t('notes.countDrivers'), [t('common.value')]: driverIds.size },
+        { [t('notes.metric')]: t('notes.countExcluded'), [t('common.value')]: countBehavior('exclude_from_plan') },
+        { [t('notes.metric')]: t('notes.countNeutral'), [t('common.value')]: countBehavior('neutral') },
+        { [t('notes.metric')]: t('notes.countRequired'), [t('common.value')]: countBehavior('must_include_in_plan') },
+        { [t('notes.metric')]: t('notes.countSick'), [t('common.value')]: countType('sick') },
+        { [t('notes.metric')]: t('notes.countVacation'), [t('common.value')]: countType('vacation') },
+        { [t('notes.metric')]: t('notes.countUnavailable'), [t('common.value')]: countType('off') },
+        { [t('notes.metric')]: t('notes.countOther'), [t('common.value')]: countType('other') },
       ];
 
       // Sheet 3: Planungsrelevant
@@ -365,29 +372,29 @@ export function NotesPage() {
           const ed = fmtDate(note.end_date);
           const timeStr = note.is_full_day ? '' : [note.start_time, note.end_time].filter(Boolean).join('–');
           return {
-            'Fahrer': getDriverName(note),
+            [t('common.driver')]: getDriverName(note),
             'Typ': noteTypeLabel(note.note_type),
             'Von': sd,
             'Bis': ed,
-            'Zeit': timeStr,
-            'Ganztägig': yesNo(note.is_full_day),
-            'Notiztext': note.note_text,
-            'Wirkung': 'Ausschluss von der Planung',
+            [t('common.time')]: timeStr,
+            [t('notes.allDay')]: yesNo(note.is_full_day),
+            [t('notes.text')]: note.note_text,
+            [t('notes.effect')]: t('notes.exclusion'),
           };
         });
 
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(notizRows), 'Notizen');
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(summaryRows), 'Zusammenfassung');
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(summaryRows), t('common.summary'));
       if (planRows.length > 0) {
-        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(planRows), 'Planungsrelevant');
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(planRows), t('notes.planningRelevant'));
       }
 
       const today = format(new Date(), 'yyyy-MM-dd');
       XLSX.writeFile(wb, `Notizen_${today}.xlsx`);
     } catch (e) {
       console.error('Notizen export error:', e);
-      setExportError('Notizen konnten nicht exportiert werden.');
+      setExportError(t('notes.exportFailed'));
     } finally {
       setExporting(false);
     }
@@ -437,7 +444,7 @@ export function NotesPage() {
               onMouseLeave={e => { e.currentTarget.style.background = 'var(--bg-surface)'; }}
             >
               {exporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
-              {exporting ? 'Export wird erstellt...' : 'Notizen exportieren'}
+              {exporting ? t('notes.exporting') : t('notes.export')}
             </button>
             {exportError && (
               <span className="text-xs" style={{ color: 'var(--danger)' }}>{exportError}</span>
@@ -455,9 +462,7 @@ export function NotesPage() {
             onMouseEnter={e => (e.currentTarget.style.background = 'var(--accent-hover)')}
             onMouseLeave={e => (e.currentTarget.style.background = 'var(--accent)')}
           >
-            <Plus className="w-5 h-5" />
-            Neue Notiz
-          </button>
+            <Plus className="w-5 h-5" />{t('notes.new')}</button>
         </div>
       </div>
 
@@ -468,7 +473,7 @@ export function NotesPage() {
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5" style={{ color: 'var(--text-tertiary)' }} />
             <input
               type="text"
-              placeholder="Notizen durchsuchen..."
+              placeholder={t('notes.searchPlaceholder')}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full"
@@ -476,7 +481,7 @@ export function NotesPage() {
             />
           </div>
           <select value={selectedDriver} onChange={(e) => setSelectedDriver(e.target.value)} style={inputStyle}>
-            <option value="">Alle Fahrer</option>
+            <option value="">{t('common.allDrivers')}</option>
             {drivers.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
           </select>
         </div>
@@ -484,7 +489,7 @@ export function NotesPage() {
         <div className="flex flex-col gap-4">
           <div className="flex items-center gap-2">
             <Calendar className="w-5 h-5" style={{ color: 'var(--text-tertiary)' }} />
-            <span className="text-sm font-medium" style={{ color: 'var(--text-secondary)' }}>Zeitfilter:</span>
+            <span className="text-sm font-medium" style={{ color: 'var(--text-secondary)' }}>{t('notes.timeFilter')}</span>
             <div className="flex gap-2">
               {(['all','date','week','month'] as FilterMode[]).map(mode => (
                 <button key={mode}
@@ -494,7 +499,7 @@ export function NotesPage() {
                     ? { background: 'var(--accent)', color: 'white' }
                     : { background: 'var(--bg-muted)', color: 'var(--text-secondary)' }}
                 >
-                  {mode === 'all' ? 'Alle' : mode === 'date' ? 'Datum' : mode === 'week' ? 'Woche' : 'Monat'}
+                  {mode === 'all' ? t('common.all') : mode === 'date' ? t('common.date') : mode === 'week' ? t('common.week') : t('common.month')}
                 </button>
               ))}
             </div>
@@ -508,7 +513,7 @@ export function NotesPage() {
                 style={{ background: 'var(--bg-muted)', color: 'var(--text-secondary)' }}
                 onMouseEnter={e => (e.currentTarget.style.background = 'var(--border)')}
                 onMouseLeave={e => (e.currentTarget.style.background = 'var(--bg-muted)')}
-              >Heute</button>
+              >{t('common.today')}</button>
             </div>
           )}
 
@@ -535,7 +540,7 @@ export function NotesPage() {
                 style={{ background: 'var(--bg-muted)', color: 'var(--text-secondary)' }}
                 onMouseEnter={e => (e.currentTarget.style.background = 'var(--border)')}
                 onMouseLeave={e => (e.currentTarget.style.background = 'var(--bg-muted)')}
-              >Heute</button>
+              >{t('common.today')}</button>
               {filterMode === 'week' && (
                 <select value={selectedWeek} onChange={e => setSelectedWeek(Number(e.target.value))} style={inputStyle}>
                   {weeks.map(w => <option key={w.weekNumber} value={w.weekNumber}>{w.label}</option>)}
@@ -550,13 +555,13 @@ export function NotesPage() {
       {loading ? (
         <div className="text-center py-12">
           <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2" style={{ borderColor: 'var(--accent)' }}></div>
-          <p className="mt-2" style={{ color: 'var(--text-tertiary)' }}>Laden...</p>
+          <p className="mt-2" style={{ color: 'var(--text-tertiary)' }}>{t('werkstatt.loading')}</p>
         </div>
       ) : filteredNotes.length === 0 ? (
         <div className="text-center py-12 rounded-lg" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
           <StickyNote className="w-12 h-12 mx-auto mb-4" style={{ color: 'var(--text-tertiary)' }} />
           <p style={{ color: 'var(--text-tertiary)' }}>
-            {searchQuery || selectedDriver ? 'Keine Notizen gefunden' : 'Noch keine Notizen vorhanden'}
+            {searchQuery || selectedDriver ? t('notes.noneFound') : t('notes.noneYet')}
           </p>
         </div>
       ) : (
@@ -572,7 +577,7 @@ export function NotesPage() {
                     </h3>
                     {note.note_type && note.note_type !== 'general' && (
                       <span className="px-1.5 py-0.5 rounded text-xs" style={{ background: 'var(--bg-muted)', color: 'var(--text-tertiary)' }}>
-                        {NOTE_TYPES.find(t => t.value === note.note_type)?.label ?? note.note_type}
+                        {(k => k ? t(k) : note.note_type)(NOTE_TYPES.find(nt => nt.value === note.note_type)?.label)}
                       </span>
                     )}
                   </div>
@@ -582,7 +587,7 @@ export function NotesPage() {
                       style={note.note_planning_behavior === 'exclude_from_plan'
                         ? { background: 'var(--danger-subtle)', color: 'var(--danger)' }
                         : { background: 'var(--warning-subtle)', color: 'var(--warning)' }}>
-                      {PLANNING_BEHAVIOR_LABELS[note.note_planning_behavior]}
+                      {t(PLANNING_BEHAVIOR_LABELS[note.note_planning_behavior])}
                     </span>
                   )}
                 </div>
@@ -605,7 +610,7 @@ export function NotesPage() {
                 </p>
               ) : (
                 <p className="text-sm italic" style={{ color: 'var(--text-tertiary)' }}>
-                  {NOTE_TYPES.find(t => t.value === note.note_type)?.label ?? 'Notiz'}
+                  {(k => k ? t(k) : t('notes.one'))(NOTE_TYPES.find(nt => nt.value === note.note_type)?.label)}
                 </p>
               )}
             </div>
@@ -620,7 +625,7 @@ export function NotesPage() {
             style={{ background: 'var(--bg-surface)', boxShadow: 'var(--shadow-lg)' }}>
             <div className="flex items-center justify-between p-6" style={{ borderBottom: '1px solid var(--border)' }}>
               <h2 className="text-xl font-semibold" style={{ color: 'var(--text-primary)' }}>
-                {editingNote ? 'Notiz bearbeiten' : 'Neue Notiz'}
+                {editingNote ? t('notes.edit') : t('notes.new')}
               </h2>
               <button onClick={handleCloseModal} style={{ color: 'var(--text-tertiary)' }}
                 onMouseEnter={e => (e.currentTarget.style.color = 'var(--text-secondary)')}
@@ -638,7 +643,7 @@ export function NotesPage() {
                 <select value={formData.driver_id}
                   onChange={e => setFormData(p => ({ ...p, driver_id: e.target.value }))}
                   className="w-full" style={inputStyle} required>
-                  <option value="">Fahrer auswählen</option>
+                  <option value="">{t('notes.pickDriver')}</option>
                   {drivers.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
                 </select>
               </div>
@@ -651,19 +656,17 @@ export function NotesPage() {
                   </label>
                   <select value={formData.note_type} onChange={e => handleNoteTypeChange(e.target.value)}
                     className="w-full" style={inputStyle}>
-                    {NOTE_TYPES.map(nt => <option key={nt.value} value={nt.value}>{nt.label}</option>)}
+                    {NOTE_TYPES.map(nt => <option key={nt.value} value={nt.value}>{t(nt.label)}</option>)}
                   </select>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium mb-2" style={{ color: 'var(--text-secondary)' }}>
-                    Planungsverhalten
-                  </label>
+                  <label className="block text-sm font-medium mb-2" style={{ color: 'var(--text-secondary)' }}>{t('notes.planningBehaviour')}</label>
                   <select value={formData.note_planning_behavior}
                     onChange={e => setFormData(p => ({ ...p, note_planning_behavior: e.target.value as NotePlanningBehavior }))}
                     className="w-full" style={inputStyle}>
-                    <option value="neutral">Keine Auswirkung</option>
-                    <option value="exclude_from_plan">Von Planung ausschließen</option>
-                    <option value="must_include_in_plan">Muss im Plan enthalten sein</option>
+                    <option value="neutral">{t('notes.effect.none')}</option>
+                    <option value="exclude_from_plan">{t('notes.effect.exclude')}</option>
+                    <option value="must_include_in_plan">{t('notes.effect.require')}</option>
                   </select>
                 </div>
               </div>
@@ -680,13 +683,13 @@ export function NotesPage() {
                 {formData.use_date_range ? (
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-tertiary)' }}>Startdatum *</label>
+                      <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-tertiary)' }}>{t('notes.startDateReq')}</label>
                       <input type="date" value={formData.start_date}
                         onChange={e => setFormData(p => ({ ...p, start_date: e.target.value }))}
                         className="w-full" style={inputStyle} required />
                     </div>
                     <div>
-                      <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-tertiary)' }}>Enddatum *</label>
+                      <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-tertiary)' }}>{t('notes.endDateReq')}</label>
                       <input type="date" value={formData.end_date}
                         onChange={e => setFormData(p => ({ ...p, end_date: e.target.value }))}
                         min={formData.start_date}
@@ -695,7 +698,7 @@ export function NotesPage() {
                   </div>
                 ) : (
                   <div>
-                    <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-tertiary)' }}>Datum *</label>
+                    <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-tertiary)' }}>{t('notes.dateReq')}</label>
                     <input type="date" value={formData.start_date}
                       onChange={e => setFormData(p => ({ ...p, start_date: e.target.value, end_date: e.target.value, note_date: e.target.value + 'T' + (formData.note_date.split('T')[1] || '00:00') }))}
                       className="w-full" style={inputStyle} required />
@@ -754,7 +757,7 @@ export function NotesPage() {
                   rows={4}
                   className="w-full resize-none"
                   style={inputStyle}
-                  placeholder="Beschreibung eingeben (optional)..."
+                  placeholder={t('notes.descPlaceholder')}
                 />
               </div>
 
@@ -763,15 +766,13 @@ export function NotesPage() {
                   className="flex-1 px-4 py-2 rounded-lg transition-colors"
                   style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)', background: 'transparent' }}
                   onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-subtle)')}
-                  onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
-                  Abbrechen
-                </button>
+                  onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>{t('common.cancel')}</button>
                 <button type="submit"
                   className="flex-1 px-4 py-2 rounded-lg transition-colors"
                   style={{ background: 'var(--accent)', color: 'white' }}
                   onMouseEnter={e => (e.currentTarget.style.background = 'var(--accent-hover)')}
                   onMouseLeave={e => (e.currentTarget.style.background = 'var(--accent)')}>
-                  {editingNote ? 'Aktualisieren' : 'Hinzufügen'}
+                  {editingNote ? t('common.update') : t('common.add')}
                 </button>
               </div>
             </form>
@@ -782,11 +783,11 @@ export function NotesPage() {
         isOpen={deleteConfirm.open}
         onClose={() => setDeleteConfirm({ open: false, noteId: '' })}
         onConfirm={confirmDeleteNote}
-        title="Notiz löschen"
-        message="Sind Sie sicher, dass Sie diese Notiz löschen möchten?"
+        title={t('notes.deleteTitle')}
+        message={t('notes.deleteConfirm')}
         type="confirm"
-        confirmText="Löschen"
-        cancelText="Abbrechen"
+        confirmText={t('common.delete')}
+        cancelText={t('common.cancel')}
       />
     </div>
   );
