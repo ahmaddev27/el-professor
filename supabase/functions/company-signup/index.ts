@@ -19,8 +19,13 @@ interface SignupRequest {
   plan?: Plan;
   billing_cycle?: BillingCycle;
   subscription_car_limit?: number;
-  discount_code_id?: string | null;
-  discount_usage_mode?: string | null;
+  /**
+   * The code the user typed. The previous fields — discount_code_id and
+   * discount_usage_mode — were taken from the browser and written straight
+   * onto the company, so a modified client could name any code it liked and
+   * no redemption was ever recorded. Both are ignored now.
+   */
+  discount_code?: string | null;
   referral_code?: string | null;
 }
 
@@ -131,12 +136,6 @@ Deno.serve(async (req: Request) => {
       subscription_status: "inactive",
     };
 
-    if (body.discount_code_id) {
-      companyInsert.active_discount_code_id = body.discount_code_id;
-      companyInsert.active_discount_usage_mode = body.discount_usage_mode ?? null;
-      companyInsert.active_discount_started_at = now.toISOString();
-    }
-
     if (referralId) {
       companyInsert.referral_id = referralId;
       companyInsert.referral_code_used = rawReferralCode;
@@ -150,6 +149,33 @@ Deno.serve(async (req: Request) => {
       .single();
 
     if (companyError) throw new Error(`Unternehmen konnte nicht erstellt werden: ${companyError.message}`);
+
+    // 3b. Redeem the discount code, if one was entered.
+    //
+    // redeem_discount_code re-runs every check against a locked row, records
+    // the redemption, increments used_count and returns the price IT computed —
+    // so neither the code's identity nor the amount comes from the browser.
+    // Runs after the insert because it needs the new company's id.
+    //
+    // A code that fails here does not fail the signup: the account is already
+    // created, and refusing it over a discount would be worse than charging
+    // full price. The reason is returned so the client can say so.
+    let discountResult: Record<string, unknown> | null = null;
+    if (body.discount_code?.trim()) {
+      const { data: redeemed, error: redeemError } = await supabaseAdmin.rpc(
+        "redeem_discount_code",
+        {
+          p_code:          body.discount_code.trim(),
+          p_company_id:    company.id,
+          p_plan:          plan,
+          p_billing_cycle: billingCycle,
+          p_car_limit:     carLimit,
+        },
+      );
+      discountResult = redeemError
+        ? { success: false, german_message: "Der Rabattcode konnte nicht eingelöst werden." }
+        : (redeemed as Record<string, unknown>);
+    }
 
     // 4. Upsert the user profile with admin role + company link
     //    The handle_new_user trigger may have already inserted a minimal row.
@@ -189,6 +215,9 @@ Deno.serve(async (req: Request) => {
           trial_end: company.trial_end,
           approval_status: company.approval_status,
         },
+        // Present only when a code was entered. `success: false` here means the
+        // account exists and the code did not apply — the signup itself stands.
+        discount: discountResult,
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 }
     );

@@ -292,8 +292,11 @@ const SignupPage: React.FC = () => {
             plan: selectedPlan,
             billing_cycle: billingCycle,
             subscription_car_limit: carLimit,
-            discount_code_id: appliedDiscount?.discount_code_id ?? null,
-            discount_usage_mode: appliedDiscount?.usage_mode ?? null,
+            // The code the user typed, not the id the validation returned.
+            // The server redeems it against a locked row and computes the
+            // price itself; anything we sent about the amount was advisory and
+            // is now ignored.
+            discount_code: appliedDiscount?.code ?? null,
             referral_code: referralCode.trim() || null,
           }),
         }
