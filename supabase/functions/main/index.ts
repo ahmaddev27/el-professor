@@ -29,8 +29,25 @@ import * as jose from 'https://deno.land/x/jose@v4.14.4/index.ts'
 const JWT_SECRET = Deno.env.get('JWT_SECRET')
 const FUNCTIONS_ROOT = '/home/deno/functions'
 
-/** Functions reachable without a token. Keep empty unless a reason is written down. */
-const PUBLIC_FUNCTIONS = new Set<string>([])
+/**
+ * Functions reachable without a user token, and why.
+ *
+ * `company-signup` creates the company and its first user, so by definition
+ * nobody holds a session yet. Requiring one made the signup form return 401
+ * before the request ever reached the function — the page rendered, the button
+ * worked, and every submission failed.
+ *
+ * These are not unauthenticated: the publishable anon key must still be
+ * presented, exactly as hosted Supabase requires, so arbitrary traffic without
+ * the key is refused at the door. What that does NOT give you is rate limiting
+ * — the anon key ships in the browser bundle and is therefore public. Anyone
+ * holding it can call this endpoint repeatedly, so signup abuse has to be
+ * bounded somewhere else (a captcha, or a limit in front of Kong) before this
+ * is exposed to the open internet for long.
+ */
+const PUBLIC_FUNCTIONS = new Set<string>(['company-signup'])
+
+const ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY')
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -73,7 +90,14 @@ Deno.serve(async (req: Request) => {
     return json(404, { error: 'No function named in the request path' })
   }
 
-  if (!PUBLIC_FUNCTIONS.has(name)) {
+  if (PUBLIC_FUNCTIONS.has(name)) {
+    // The publishable key, not a session. Kong does not enforce one on this
+    // route, so the check lives here.
+    const apikey = req.headers.get('apikey') ?? bearer(req)
+    if (!ANON_KEY || apikey !== ANON_KEY) {
+      return json(401, { error: 'Missing or invalid API key' })
+    }
+  } else {
     const token = bearer(req)
     if (!token || !(await tokenIsValid(token))) {
       return json(401, { error: 'Missing or invalid authorization token' })

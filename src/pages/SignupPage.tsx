@@ -276,7 +276,14 @@ const SignupPage: React.FC = () => {
         `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/company-signup`,
         {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            // Nobody has a session yet — this call creates the first one. The
+            // publishable key is what the edge router checks for the public
+            // signup path; without it the request is refused before reaching
+            // the function.
+            'Apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
+          },
           body: JSON.stringify({
             company_name: companyName.trim(),
             full_name: fullName.trim(),
