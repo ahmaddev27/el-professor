@@ -73,10 +73,26 @@ import * as XLSX from 'xlsx';
 import { type StructuredNote } from '../utils/monatsplanungPhase3';
 import { fetchAllPaginated } from '../utils/fetchAllPaginated';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
+import { useTranslation } from '../contexts/LanguageContext';
+import type { TranslationKey, TranslationVars } from '../i18n';
+
+/** Signature of the `t` from useTranslation(), for helpers that take it. */
+type Translate = (key: TranslationKey, vars?: TranslationVars) => string;
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
+// German month names are the stored value of `historical_driver_hour_targets.month`
+// and the argument to saveDriverConfigsAsTargets — data, never a label.
 const MONTHS_DE = ['Januar','Februar','März','April','Mai','Juni','Juli','August','September','Oktober','November','Dezember'];
+
+// Display counterpart of MONTHS_DE. Holds TranslationKeys because this list is
+// module-level and t() is a hook value; every consumer resolves it.
+const MONTH_KEYS = [
+  'hwh.monthJanuary', 'hwh.monthFebruary', 'hwh.monthMarch', 'hwh.monthApril',
+  'hwh.monthMay', 'hwh.monthJune', 'hwh.monthJuly', 'hwh.monthAugust',
+  'hwh.monthSeptember', 'hwh.monthOctober', 'hwh.monthNovember', 'hwh.monthDecember',
+] as const;
+
 const BATCH_SIZE = 1000;
 
 // ── Driver exclusion helper ───────────────────────────────────────────────────
@@ -85,13 +101,23 @@ const BATCH_SIZE = 1000;
 
 const MS_PER_DAY = 86_400_000;
 
+// Keyed on the stored `note_type` value; the values are TranslationKeys resolved
+// by the caller, because this map is module-level.
+const NOTE_TYPE_LABEL_KEYS: Record<string, TranslationKey> = {
+  sick: 'hwh.noteTypeSick',
+  vacation: 'hwh.noteTypeVacation',
+  off: 'hwh.noteTypeUnavailable',
+  krank: 'hwh.noteTypeSick',
+  urlaub: 'hwh.noteTypeVacation',
+};
+
 function _parseDateMsLocal(d: string): number {
   const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(d);
   return m ? Date.UTC(+m[1], +m[2] - 1, +m[3]) : NaN;
 }
 
-function _timeToMinLocal(t: string): number | null {
-  const m = /^(\d{1,2}):(\d{2})/.exec(t);
+function _timeToMinLocal(time: string): number | null {
+  const m = /^(\d{1,2}):(\d{2})/.exec(time);
   return m ? +m[1] * 60 + +m[2] : null;
 }
 
@@ -106,7 +132,8 @@ function isDriverExcludedFromPlanning(
   rideStartMs: number,
   rideEndMs: number,
   notesMap: Map<string, StructuredNote[]>,
-  nameToId?: Map<string, string>,
+  nameToId: Map<string, string> | undefined,
+  t: Translate,
 ): { excluded: false } | { excluded: true; detail: string } {
   const normName = driverName.trim().toLowerCase().replace(/\s+/g, ' ');
   const resolvedId = driverId ?? nameToId?.get(normName) ?? null;
@@ -135,11 +162,8 @@ function isDriverExcludedFromPlanning(
         else { intStart = dateMs + sMin * 60_000; intEnd = dateMs + MS_PER_DAY + eMin * 60_000; }
       }
       if (rideStartMs < intEnd && rideEndMs > intStart) {
-        const typeLabels: Record<string, string> = {
-          sick:'Krank', vacation:'Urlaub', off:'Nicht verfügbar',
-          krank:'Krank', urlaub:'Urlaub',
-        };
-        const noteLabel = typeLabels[note.note_type?.toLowerCase() ?? ''] ?? note.note_type ?? 'Ausschluss';
+        const labelKey = NOTE_TYPE_LABEL_KEYS[note.note_type?.toLowerCase() ?? ''];
+        const noteLabel = labelKey ? t(labelKey) : (note.note_type ?? t('hwh.noteTypeExclusion'));
         const fmtDate = (d: string) => { const mm=/^(\d{4})-(\d{2})-(\d{2})/.exec(d); return mm?`${mm[3]}.${mm[2]}.${mm[1]}`:d; };
         const datePart = noteStartDate === noteEndDate
           ? fmtDate(noteStartDate)
@@ -158,6 +182,7 @@ function isDriverExcludedFromPlanning(
  */
 function buildDriverPlanningExclusions(
   notes: StructuredNote[],
+  t: Translate,
 ): DriverPlanningExclusion[] {
   const result: DriverPlanningExclusion[] = [];
   for (const note of notes) {
@@ -170,11 +195,8 @@ function buildDriverPlanningExclusions(
     if (isNaN(rangeStartMs) || isNaN(rangeEndMs)) continue;
     const cappedEnd = Math.min(rangeEndMs, rangeStartMs + 366 * MS_PER_DAY);
 
-    const typeLabels: Record<string, string> = {
-      sick: 'Krank', vacation: 'Urlaub', off: 'Nicht verfügbar',
-      krank: 'Krank', urlaub: 'Urlaub',
-    };
-    const noteLabel = typeLabels[note.note_type?.toLowerCase() ?? ''] ?? note.note_type ?? 'Ausschluss';
+    const labelKey = NOTE_TYPE_LABEL_KEYS[note.note_type?.toLowerCase() ?? ''];
+    const noteLabel = labelKey ? t(labelKey) : (note.note_type ?? t('hwh.noteTypeExclusion'));
     const fmtDate = (d: string) => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(d); return m ? `${m[3]}.${m[2]}.${m[1]}` : d; };
     const datePart = noteStartDate === noteEndDate
       ? fmtDate(noteStartDate)
@@ -258,8 +280,8 @@ interface WzDraft {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function parseGermanH(s: string): number {
-  const t = s.replace(',', '.').trim();
-  const n = parseFloat(t);
+  const normalized = s.replace(',', '.').trim();
+  const n = parseFloat(normalized);
   return isNaN(n) || n < 0 ? 0 : n;
 }
 
@@ -268,8 +290,8 @@ function fmtH(h: number): string {
 }
 
 function parseCentsFromStr(s: string): number {
-  const t = s.replace(',', '.').trim();
-  const n = parseFloat(t);
+  const normalized = s.replace(',', '.').trim();
+  const n = parseFloat(normalized);
   return isNaN(n) || n < 0 ? 0 : Math.round(n * 100);
 }
 
@@ -382,11 +404,29 @@ function runInhaberNonConflictStep(
 
 // ── InhaberLongestConflictStep types & algorithm ──────────────────────────────
 
+// `decision` values are internal identifiers: the algorithm branches on them with
+// ===. They are mapped to labels at render time via LC_DECISION_KEYS.
+type LcDecision =
+  | 'Inhaber'
+  | 'Nicht zugewiesen'
+  | 'Übersprungen: Inhaber-Zeitkonflikt'
+  | 'Übersprungen: Fahrzeugkonflikt'
+  | 'Kein passender Block';
+
+const LC_DECISION_KEYS: Record<LcDecision, TranslationKey> = {
+  'Inhaber':                              'hwh.lcDecisionOwner',
+  'Nicht zugewiesen':                     'hwh.unassigned',
+  'Übersprungen: Inhaber-Zeitkonflikt':   'hwh.lcDecisionSkippedOwnerTime',
+  'Übersprungen: Fahrzeugkonflikt':       'hwh.lcDecisionSkippedVehicle',
+  'Kein passender Block':                 'hwh.lcDecisionNoSuitableBlock',
+};
+
 interface LcGroupBlock {
   block: VehicleBlock;
   rank: number;
-  decision: 'Inhaber' | 'Nicht zugewiesen' | 'Übersprungen: Inhaber-Zeitkonflikt' | 'Übersprungen: Fahrzeugkonflikt' | 'Kein passender Block';
-  rejectionReason: string | null;
+  decision: LcDecision;
+  // A TranslationKey, resolved where the row is rendered.
+  rejectionReason: TranslationKey | null;
 }
 
 interface LcConflictGroup {
@@ -517,7 +557,7 @@ function runInhaberLongestConflictStep(
       const timeConflict = inhaberBlocks.some(existing => blocksOverlap(existing, candidate));
       if (timeConflict) {
         bd.decision = 'Übersprungen: Inhaber-Zeitkonflikt';
-        bd.rejectionReason = 'Überlappt bestehende Inhaber-Zeit';
+        bd.rejectionReason = 'hwh.lcRejectOwnerTimeOverlap';
         rejectedCandidates.push({ blockId: candidate.blockId, vehicle: candidate.vehicle, groupId: group.groupId, reason: 'Inhaber-Zeitkonflikt' });
         continue;
       }
@@ -525,7 +565,7 @@ function runInhaberLongestConflictStep(
       const vehicleConflict = inhaberBlocks.some(existing => existing.vehicle === candidate.vehicle && blocksOverlap(existing, candidate));
       if (vehicleConflict) {
         bd.decision = 'Übersprungen: Fahrzeugkonflikt';
-        bd.rejectionReason = 'Fahrzeug-Zeitüberschneidung mit Inhaber';
+        bd.rejectionReason = 'hwh.lcRejectVehicleOverlap';
         rejectedCandidates.push({ blockId: candidate.blockId, vehicle: candidate.vehicle, groupId: group.groupId, reason: 'Fahrzeugkonflikt' });
         continue;
       }
@@ -543,7 +583,7 @@ function runInhaberLongestConflictStep(
       for (const bd of blockDecisions) {
         if (bd.decision === 'Nicht zugewiesen') {
           bd.decision = 'Kein passender Block';
-          bd.rejectionReason = 'Kein konfliktfreier Inhaber-Block in Gruppe';
+          bd.rejectionReason = 'hwh.lcRejectNoConflictFreeBlockInGroup';
         }
       }
     }
@@ -592,8 +632,12 @@ const STATUS_COLORS: Record<string, { bg: string; border: string; text: string }
   invalid: { bg: '#fee2e2', border: '#fca5a5', text: '#991b1b' },
 };
 
-const WEEKDAY_COLS = ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa'];
-const MONTHS_FULL = ['Januar','Februar','März','April','Mai','Juni','Juli','August','September','Oktober','November','Dezember'];
+// Sunday-first column headers. Holds TranslationKeys (module-level list); the
+// weekend tint is driven by the column index, not by the rendered abbreviation.
+const WEEKDAY_COLS = [
+  'hwh.weekdaySun', 'hwh.weekdayMon', 'hwh.weekdayTue', 'hwh.weekdayWed',
+  'hwh.weekdayThu', 'hwh.weekdayFri', 'hwh.weekdaySat',
+] as const;
 
 interface VehicleBlocksViewProps {
   result: BuildVehicleBlocksResult;
@@ -616,6 +660,7 @@ function fmtDatetime(ms: number): string {
 }
 
 function VehicleBlocksView({ result, month, year, onRecompute, onAssign }: VehicleBlocksViewProps) {
+  const { t, tPlural } = useTranslation();
   const [selectedVehicle, setSelectedVehicle] = useState<string>('__all__');
   const [modalBlock, setModalBlock] = useState<VehicleBlock | null>(null);
 
@@ -687,10 +732,10 @@ function VehicleBlocksView({ result, month, year, onRecompute, onAssign }: Vehic
       <div className="flex items-start justify-between gap-4">
         <div>
           <h2 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>
-            Fahrzeug-Blöcke prüfen
+            {t('hwh.vehicleBlocksTitle')}
           </h2>
           <p className="text-sm mt-0.5" style={{ color: 'var(--text-secondary)' }}>
-            Prüfe die automatisch gebildeten Fahrzeug-Blöcke pro Fahrzeug im Monatskalender.
+            {t('hwh.vehicleBlocksSubtitle')}
           </p>
         </div>
         <button
@@ -698,7 +743,7 @@ function VehicleBlocksView({ result, month, year, onRecompute, onAssign }: Vehic
           className="inline-flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold flex-shrink-0 transition-all hover:brightness-90"
           style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
         >
-          <RefreshCw size={13} /> Neu berechnen
+          <RefreshCw size={13} /> {t('hwh.recompute')}
         </button>
       </div>
 
@@ -706,10 +751,10 @@ function VehicleBlocksView({ result, month, year, onRecompute, onAssign }: Vehic
       {options && (
         <div className="flex flex-wrap gap-2 text-xs">
           {[
-            ['Max. Lücke', `${options.maxGapInsideBlockMinutes} min`],
-            ['Min. Blockdauer', `${options.minBlockDurationMinutes} min`],
-            ['Max. Blockdauer', `${options.maxBlockDurationMinutes} min`],
-            ['Merge-Lücke kurz', `${options.shortMergeGapMinutes} min`],
+            [t('hwh.optMaxGap'), `${options.maxGapInsideBlockMinutes} min`],
+            [t('hwh.optMinBlockDuration'), `${options.minBlockDurationMinutes} min`],
+            [t('hwh.optMaxBlockDuration'), `${options.maxBlockDurationMinutes} min`],
+            [t('hwh.optShortMergeGap'), `${options.shortMergeGapMinutes} min`],
           ].map(([k, v]) => (
             <span key={k} className="px-2.5 py-1 rounded-full" style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)', color: 'var(--text-secondary)' }}>
               {k}: <strong style={{ color: 'var(--text-primary)' }}>{v}</strong>
@@ -721,15 +766,15 @@ function VehicleBlocksView({ result, month, year, onRecompute, onAssign }: Vehic
       {/* Stats bar */}
       <div className="flex flex-wrap gap-2 text-xs">
         {[
-          { label: 'Fahrten',       value: stats.totalRides },
-          { label: 'Berücksichtigt', value: stats.consideredRides },
-          { label: 'Storniert',     value: stats.canceledRides,     dim: true },
-          { label: 'Fahrzeuge',     value: stats.vehicleCount },
-          { label: 'Blöcke',        value: stats.totalBlocks },
-          { label: 'Gültig',        value: stats.validBlockCount,   color: '#15803d' },
-          { label: 'Kurz',          value: stats.shortBlockCount,   color: '#a16207' },
-          { label: 'Lang',          value: stats.longBlockCount,    color: '#c2410c' },
-          { label: 'Ungültig',      value: stats.invalidBlockCount, color: '#b91c1c' },
+          { label: t('hwh.statRides'),      value: stats.totalRides },
+          { label: t('hwh.statConsidered'), value: stats.consideredRides },
+          { label: t('hwh.statCanceled'),   value: stats.canceledRides,     dim: true },
+          { label: t('hwh.statVehicles'),   value: stats.vehicleCount },
+          { label: t('hwh.statBlocks'),     value: stats.totalBlocks },
+          { label: t('hwh.statValid'),      value: stats.validBlockCount,   color: '#15803d' },
+          { label: t('hwh.statShort'),      value: stats.shortBlockCount,   color: '#a16207' },
+          { label: t('hwh.statLong'),       value: stats.longBlockCount,    color: '#c2410c' },
+          { label: t('hwh.statInvalid'),    value: stats.invalidBlockCount, color: '#b91c1c' },
         ].map(s => (
           <div key={s.label} className="px-3 py-1.5 rounded-xl flex items-baseline gap-1.5" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
             <span className="font-bold text-sm" style={{ color: s.color ?? (s.dim ? 'var(--text-secondary)' : 'var(--text-primary)') }}>{s.value}</span>
@@ -749,7 +794,7 @@ function VehicleBlocksView({ result, month, year, onRecompute, onAssign }: Vehic
             border:     `1px solid ${selectedVehicle === '__all__' ? '#0891b2' : 'var(--border)'}`,
           }}
         >
-          Alle Fahrzeuge ({stats.vehicleCount})
+          {t('hwh.allVehiclesCount', { count: stats.vehicleCount })}
         </button>
         {vehicles.map(v => {
           const pv = perVehicle.find(p => p.vehicle === v);
@@ -772,25 +817,25 @@ function VehicleBlocksView({ result, month, year, onRecompute, onAssign }: Vehic
 
       {/* Month title */}
       <div className="text-sm font-semibold" style={{ color: 'var(--text-secondary)' }}>
-        {MONTHS_FULL[month - 1]} {year}
+        {t(MONTH_KEYS[month - 1])} {year}
         {selectedVehicle !== '__all__' && <span style={{ color: '#0891b2' }}> · {selectedVehicle}</span>}
         <span className="ml-2 font-normal" style={{ color: 'var(--text-secondary)' }}>
-          — {visibleBlocks.length} Block{visibleBlocks.length !== 1 ? 'e' : ''}
+          — {tPlural({ one: 'hwh.blockCountOne', other: 'hwh.blockCountOther' }, visibleBlocks.length)}
         </span>
       </div>
 
       {/* ── Month grid ─────────────────────────────────────────────────────────── */}
       {blocks.length === 0 ? (
         <div className="rounded-xl p-6 text-sm text-center" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', color: 'var(--text-secondary)' }}>
-          Keine Fahrzeug-Blöcke gefunden.
+          {t('hwh.noVehicleBlocks')}
         </div>
       ) : (
         <div className="rounded-2xl" style={{ border: '1px solid var(--border)', overflow: 'hidden' }}>
           {/* Weekday header */}
           <div className="grid grid-cols-7" style={{ background: 'var(--bg-subtle)', borderBottom: '2px solid var(--border)' }}>
-            {WEEKDAY_COLS.map(d => (
-              <div key={d} className="py-2 text-center text-xs font-bold" style={{ color: d === 'So' || d === 'Sa' ? '#7c3aed' : 'var(--text-secondary)' }}>
-                {d}
+            {WEEKDAY_COLS.map((dayKey, di) => (
+              <div key={dayKey} className="py-2 text-center text-xs font-bold" style={{ color: di === 0 || di === 6 ? '#7c3aed' : 'var(--text-secondary)' }}>
+                {t(dayKey)}
               </div>
             ))}
           </div>
@@ -849,7 +894,7 @@ function VehicleBlocksView({ result, month, year, onRecompute, onAssign }: Vehic
                             {' '}· <span className="font-mono opacity-80">{block.blockId.slice(-6)}</span>
                             {' · '}<span className="font-semibold">{block.vehicle}</span>
                             {' · '}{formatBlockDuration(block.blockDurationSec)}
-                            {' · '}{block.rides?.length ?? 0} Fahr{(block.rides?.length ?? 0) !== 1 ? 'ten' : 't'}
+                            {' · '}{tPlural({ one: 'hwh.rideCountOne', other: 'hwh.rideCountOther' }, block.rides?.length ?? 0)}
                           </button>
                         );
                       })}
@@ -869,14 +914,14 @@ function VehicleBlocksView({ result, month, year, onRecompute, onAssign }: Vehic
           className="inline-flex items-center gap-2 text-sm transition-colors hover:opacity-80"
           style={{ color: 'var(--text-secondary)' }}
         >
-          <ArrowLeft size={15} /> Neu berechnen
+          <ArrowLeft size={15} /> {t('hwh.recompute')}
         </button>
         <button
           onClick={onAssign}
           className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all hover:brightness-110"
           style={{ background: '#2563eb', color: '#fff' }}
         >
-          <ArrowRight size={15} /> Reguläre Fahrer zuweisen
+          <ArrowRight size={15} /> {t('hwh.assignRegularDrivers')}
         </button>
       </div>
 
@@ -895,7 +940,7 @@ function VehicleBlocksView({ result, month, year, onRecompute, onAssign }: Vehic
             {/* Modal header */}
             <div className="flex items-center justify-between">
               <div>
-                <div className="text-sm font-bold" style={{ color: 'var(--text-primary)' }}>Block-Details</div>
+                <div className="text-sm font-bold" style={{ color: 'var(--text-primary)' }}>{t('hwh.blockDetails')}</div>
                 <div className="text-xs font-mono mt-0.5" style={{ color: 'var(--text-secondary)' }}>{modalBlock.blockId}</div>
               </div>
               <button
@@ -903,21 +948,23 @@ function VehicleBlocksView({ result, month, year, onRecompute, onAssign }: Vehic
                 className="text-xs px-2 py-1 rounded-lg"
                 style={{ color: 'var(--text-secondary)', border: '1px solid var(--border)', background: 'var(--bg-subtle)' }}
               >
-                Schließen
+                {t('common.close')}
               </button>
             </div>
 
             {/* Detail rows */}
+            {/* blockStatusLabel / blockWarningLabels come from the clean engine and
+                return German; translating them belongs with that module. */}
             <div className="rounded-xl overflow-hidden" style={{ border: '1px solid var(--border)' }}>
               {[
-                ['Fahrzeug',   modalBlock.vehicle],
-                ['Start',      fmtDatetime(modalBlock.blockStartMs)],
-                ['Ende',       fmtDatetime(modalBlock.blockEndMs)],
-                ['Dauer',      formatBlockDuration(modalBlock.blockDurationSec)],
-                ['Fahrten',    String(modalBlock.rides?.length ?? 0)],
-                ['Zeilen',     blockSourceRowRange(modalBlock)],
-                ['Status',     blockStatusLabel(modalBlock)],
-                ['Warnungen',  blockWarningLabels(modalBlock).join(', ') || '—'],
+                [t('hwh.colVehicle'),  modalBlock.vehicle],
+                [t('hwh.colStart'),    fmtDatetime(modalBlock.blockStartMs)],
+                [t('hwh.colEnd'),      fmtDatetime(modalBlock.blockEndMs)],
+                [t('hwh.colDuration'), formatBlockDuration(modalBlock.blockDurationSec)],
+                [t('hwh.colRides'),    String(modalBlock.rides?.length ?? 0)],
+                [t('hwh.colRows'),     blockSourceRowRange(modalBlock)],
+                [t('common.status'),   blockStatusLabel(modalBlock)],
+                [t('hwh.colWarnings'), blockWarningLabels(modalBlock).join(', ') || '—'],
               ].map(([k, v], i) => (
                 <div
                   key={k}
@@ -957,6 +1004,7 @@ interface RegularDriverAssignmentViewProps {
 function RegularDriverAssignmentView({
   result, phase1Result, driverConfigs, inhaberName, month, year, onBack, onRecompute, onApplyNonConflictStep,
 }: RegularDriverAssignmentViewProps) {
+  const { t, tPlural } = useTranslation();
   const [modalBlock, setModalBlock] = useState<VehicleBlock | null>(null);
   const [selectedVehicle, setSelectedVehicle] = useState<string>('__all__');
   const [conflictListOpen, setConflictListOpen] = useState(false);
@@ -1006,7 +1054,7 @@ function RegularDriverAssignmentView({
 
   // Cross-vehicle conflict computation
   interface ConflictExample {
-    blockId: string; vehicle: string; driverName: string;
+    blockId: string; vehicle: string; driverName: string; isUnassigned: boolean;
     startMs: number; endMs: number; overlapSec: number;
   }
   interface BlockConflictInfo {
@@ -1041,7 +1089,8 @@ function RegularDriverAssignmentView({
           examples.push({
             blockId:    other.blockId,
             vehicle:    other.vehicle,
-            driverName: 'Nicht zugewiesen',
+            driverName: t('hwh.unassigned'),
+            isUnassigned: true,
             startMs:    other.blockStartMs,
             endMs:      other.blockEndMs,
             overlapSec,
@@ -1061,24 +1110,31 @@ function RegularDriverAssignmentView({
       });
     }
     return m;
-  }, [surplusBlocks, assignedMap]);
+  }, [surplusBlocks, assignedMap, t]);
 
+  /** Just the reason, without the "not assigned" prefix. */
   function unassignedReason(block: VehicleBlock): string {
-    if (block.status !== 'valid') return `Nicht zugewiesen: ${blockStatusLabel(block)}`;
+    // blockStatusLabel is the clean engine's German status text.
+    if (block.status !== 'valid') return blockStatusLabel(block);
     const reasons = rejectionMap.get(block.blockId);
-    if (!reasons?.length) return 'Nicht zugewiesen: Kein passender Fahrer';
+    if (!reasons?.length) return t('hwh.rejectNoSuitableDriver');
     const r = reasons[0];
-    if (r === 'no_driver_available')        return 'Nicht zugewiesen: Kein passender Fahrer';
-    if (r === 'target_full')                return 'Nicht zugewiesen: Fahrer voll';
-    if (r.startsWith('would_exceed_1500'))  return 'Nicht zugewiesen: 1500-Limit';
-    if (r.startsWith('would_exceed_1501'))  return 'Nicht zugewiesen: 1501-Limit';
-    if (r.startsWith('would_exceed_1510'))  return 'Nicht zugewiesen: 1510-Limit';
-    if (r.startsWith('would_exceed_1000'))  return 'Nicht zugewiesen: 1000-Limit';
-    if (r.startsWith('would_exceed_holiday')) return 'Nicht zugewiesen: Feiertag-Limit';
-    if (r.startsWith('would_exceed'))       return 'Nicht zugewiesen: Limit überschritten';
-    if (r === 'driver_overlap')             return 'Nicht zugewiesen: Fahrerüberschneidung';
-    if (r === 'driver_excluded_by_note')    return 'Nicht zugewiesen: Fahrer von Planung ausgeschlossen';
-    return 'Nicht zugewiesen: Kein passender Fahrer';
+    if (r === 'no_driver_available')          return t('hwh.rejectNoSuitableDriver');
+    if (r === 'target_full')                  return t('hwh.rejectDriverFull');
+    if (r.startsWith('would_exceed_1500'))    return t('hwh.rejectLimit1500');
+    if (r.startsWith('would_exceed_1501'))    return t('hwh.rejectLimit1501');
+    if (r.startsWith('would_exceed_1510'))    return t('hwh.rejectLimit1510');
+    if (r.startsWith('would_exceed_1000'))    return t('hwh.rejectLimit1000');
+    if (r.startsWith('would_exceed_holiday')) return t('hwh.rejectLimitHoliday');
+    if (r.startsWith('would_exceed'))         return t('hwh.rejectLimitExceeded');
+    if (r === 'driver_overlap')               return t('hwh.rejectDriverOverlap');
+    if (r === 'driver_excluded_by_note')      return t('hwh.rejectDriverExcluded');
+    return t('hwh.rejectNoSuitableDriver');
+  }
+
+  /** "Nicht zugewiesen: <reason>" for places that show the full sentence. */
+  function unassignedLabel(block: VehicleBlock): string {
+    return t('hwh.unassignedWithReason', { reason: unassignedReason(block) });
   }
 
   // Drivers skipped due to planning exclusion notes
@@ -1159,23 +1215,23 @@ function RegularDriverAssignmentView({
       {/* Header */}
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h2 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>Reguläre Fahrer zuweisen</h2>
+          <h2 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>{t('hwh.assignRegularDrivers')}</h2>
           <p className="text-sm mt-0.5" style={{ color: 'var(--text-secondary)' }}>
-            Die gültigen Fahrzeug-Blöcke werden den regulären Fahrern entsprechend ihrer maximalen Arbeitsstunden und Lohnarten zugeordnet. Der Inhaber bleibt in diesem Schritt unberücksichtigt.
+            {t('hwh.assignRegularDriversSubtitle')}
           </p>
         </div>
       </div>
 
-      {/* Inhaber zero card */}
+      {/* Owner zero card */}
       <div className="rounded-xl p-4" style={{ background: 'rgba(16,185,129,0.06)', border: '1px solid rgba(16,185,129,0.25)' }}>
-        <div className="text-xs font-bold mb-2" style={{ color: '#065f46' }}>Inhaber in diesem Schritt</div>
+        <div className="text-xs font-bold mb-2" style={{ color: '#065f46' }}>{t('hwh.ownerInThisStep')}</div>
         <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-xs sm:grid-cols-5">
           {[
-            ['Fahrer', inhaberName || '—'],
-            ['Blöcke', '0'],
-            ['Fahrten', '0'],
-            ['Stunden', '0,00 h'],
-            ['Status', 'Nicht zugewiesen in Schritt 2'],
+            [t('common.driver'),  inhaberName || '—'],
+            [t('hwh.colBlocks'),  '0'],
+            [t('hwh.colRides'),   '0'],
+            [t('hwh.colHours'),   '0,00 h'],
+            [t('common.status'),  t('hwh.notAssignedInStep2')],
           ].map(([k, v]) => (
             <div key={k}>
               <span style={{ color: '#065f46', fontWeight: 600 }}>{k}: </span>
@@ -1188,7 +1244,7 @@ function RegularDriverAssignmentView({
       {/* Exclusion skips notice */}
       {exclusionSkips.length > 0 && (
         <div className="rounded-xl px-4 py-3 text-xs" style={{ background: 'rgba(217,119,6,0.07)', border: '1px solid rgba(217,119,6,0.25)', color: '#92400e' }}>
-          <div className="font-bold mb-1.5" style={{ color: '#78350f' }}>Übersprungen wegen Planungsausschluss ({exclusionSkips.length} Fahrer)</div>
+          <div className="font-bold mb-1.5" style={{ color: '#78350f' }}>{t('hwh.skippedDueToExclusion', { count: exclusionSkips.length })}</div>
           <div className="space-y-0.5">
             {exclusionSkips.map(sk => (
               <div key={sk.name}>
@@ -1196,7 +1252,7 @@ function RegularDriverAssignmentView({
                 {sk.labels.size > 0 && (
                   <span className="ml-1 opacity-80">— {Array.from(sk.labels).join(', ')}</span>
                 )}
-                <span className="ml-1 opacity-60">({sk.blockCount} Block{sk.blockCount !== 1 ? 'e' : ''} abgelehnt)</span>
+                <span className="ml-1 opacity-60">({tPlural({ one: 'hwh.blocksRejectedOne', other: 'hwh.blocksRejectedOther' }, sk.blockCount)})</span>
               </div>
             ))}
           </div>
@@ -1206,16 +1262,16 @@ function RegularDriverAssignmentView({
       {/* Summary stats */}
       <div className="flex flex-wrap gap-2 text-xs">
         {[
-          { label: 'Reguläre Fahrer',         value: summaries.length },
-          { label: 'Gültige Blöcke',          value: validBlocks.length },
-          { label: 'Zugewiesen',               value: assignments.length,      color: '#15803d' },
-          { label: 'Nicht zugewiesen',         value: surplusBlocks.length,    color: surplusValid.length > 0 ? '#b45309' : undefined },
-          { label: 'Zugewiesene Stunden',      value: secToHShort(summaries.reduce((s, d) => s + d.assignedWorkSec, 0)) },
-          { label: 'Fahrerüberschneidungen',   value: validation?.driverOverlapCount ?? 0,  color: (validation?.driverOverlapCount ?? 0) > 0 ? '#b91c1c' : '#15803d' },
-          { label: 'Stundenlimit-Überschr.',   value: validation?.targetOverrunCount ?? 0,  color: (validation?.targetOverrunCount ?? 0) > 0 ? '#b91c1c' : '#15803d' },
-          { label: 'Inhaber-Blöcke',           value: 0, color: '#15803d' },
-          { label: 'Inhaber-Fahrten',          value: 0, color: '#15803d' },
-          { label: 'Reguläre Fahrer verschoben', value: 0, color: '#15803d' },
+          { label: t('hwh.statRegularDrivers'),   value: summaries.length },
+          { label: t('hwh.statValidBlocks'),      value: validBlocks.length },
+          { label: t('hwh.statAssigned'),         value: assignments.length,      color: '#15803d' },
+          { label: t('hwh.unassigned'),           value: surplusBlocks.length,    color: surplusValid.length > 0 ? '#b45309' : undefined },
+          { label: t('hwh.statAssignedHours'),    value: secToHShort(summaries.reduce((s, d) => s + d.assignedWorkSec, 0)) },
+          { label: t('hwh.statDriverOverlaps'),   value: validation?.driverOverlapCount ?? 0,  color: (validation?.driverOverlapCount ?? 0) > 0 ? '#b91c1c' : '#15803d' },
+          { label: t('hwh.statHourLimitOverrun'), value: validation?.targetOverrunCount ?? 0,  color: (validation?.targetOverrunCount ?? 0) > 0 ? '#b91c1c' : '#15803d' },
+          { label: t('hwh.statOwnerBlocks'),      value: 0, color: '#15803d' },
+          { label: t('hwh.statOwnerRides'),       value: 0, color: '#15803d' },
+          { label: t('hwh.statRegularDriversMoved'), value: 0, color: '#15803d' },
         ].map(s => (
           <div key={s.label} className="px-3 py-1.5 rounded-xl flex items-baseline gap-1.5" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
             <span className="font-bold text-sm" style={{ color: s.color ?? 'var(--text-primary)' }}>{s.value}</span>
@@ -1241,17 +1297,17 @@ function RegularDriverAssignmentView({
         return (
           <div className="rounded-2xl overflow-hidden" style={{ border: `1px solid ${isBalanced ? 'rgba(16,185,129,0.3)' : 'rgba(245,158,11,0.4)'}` }}>
             <div className="px-4 py-3 flex items-center justify-between" style={{ background: isBalanced ? 'rgba(16,185,129,0.06)' : 'rgba(245,158,11,0.06)', borderBottom: '1px solid var(--border)' }}>
-              <span className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>Verteilungsqualität reguläre Fahrer</span>
+              <span className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>{t('hwh.distributionQuality')}</span>
               <span className="text-xs font-bold px-2 py-1 rounded-lg" style={{ background: isBalanced ? '#dcfce7' : '#fef3c7', color: isBalanced ? '#15803d' : '#92400e', border: `1px solid ${isBalanced ? '#86efac' : '#fcd34d'}` }}>
-                {isBalanced ? 'Ausgewogen' : 'Unausgewogen'}
+                {isBalanced ? t('hwh.balanced') : t('hwh.unbalanced')}
               </span>
             </div>
             <div className="px-4 py-3 grid grid-cols-2 gap-3 sm:grid-cols-4 text-xs" style={{ background: 'var(--bg-surface)', borderBottom: '1px solid var(--border)' }}>
               {[
-                { label: 'Min. Auslastung',  value: minR.toFixed(1) + '%',  color: '#0891b2' },
-                { label: 'Max. Auslastung',  value: maxR.toFixed(1) + '%',  color: '#7c3aed' },
-                { label: 'Spread',           value: spread.toFixed(1) + '%', color: spread > 25 ? '#b45309' : '#059669' },
-                { label: 'Niedrigste / Höchste', value: `${minDriver} / ${maxDriver}`, color: 'var(--text-secondary)' },
+                { label: t('hwh.minUtilization'), value: minR.toFixed(1) + '%',  color: '#0891b2' },
+                { label: t('hwh.maxUtilization'), value: maxR.toFixed(1) + '%',  color: '#7c3aed' },
+                { label: t('hwh.spread'),         value: spread.toFixed(1) + '%', color: spread > 25 ? '#b45309' : '#059669' },
+                { label: t('hwh.lowestHighest'),  value: `${minDriver} / ${maxDriver}`, color: 'var(--text-secondary)' },
               ].map(c => (
                 <div key={c.label}>
                   <div className="font-semibold mb-0.5" style={{ color: 'var(--text-secondary)' }}>{c.label}</div>
@@ -1263,7 +1319,7 @@ function RegularDriverAssignmentView({
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead>
                   <tr style={{ background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)' }}>
-                    {['Fahrer', 'Max. Stunden', 'Zugewiesen', 'Rest', 'Auslastung'].map(h => (
+                    {[t('common.driver'), t('hwh.colMaxHours'), t('hwh.statAssigned'), t('hwh.colRemainder'), t('hwh.colUtilization')].map(h => (
                       <th key={h} className="px-3 py-2 text-left text-xs font-semibold" style={{ color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>{h}</th>
                     ))}
                   </tr>
@@ -1299,13 +1355,13 @@ function RegularDriverAssignmentView({
       {/* Driver limits table */}
       <div className="rounded-2xl overflow-hidden" style={{ border: '1px solid var(--border)' }}>
         <div className="px-4 py-3 text-sm font-semibold" style={{ background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)', color: 'var(--text-primary)' }}>
-          Fahrer-Limits
+          {t('hwh.driverLimits')}
         </div>
         <div className="overflow-x-auto">
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
               <tr style={{ background: 'var(--bg-surface)', borderBottom: '1px solid var(--border)' }}>
-                {['Fahrer','Max. Stunden','1000 Limit','1500 Limit','1501 Limit','1510 Limit','Feiertag Limit'].map(h => (
+                {[t('common.driver'), t('hwh.colMaxHours'), t('hwh.colLimit1000'), t('hwh.colLimit1500'), t('hwh.colLimit1501'), t('hwh.colLimit1510'), t('hwh.colLimitHoliday')].map(h => (
                   <th key={h} className="px-3 py-2 text-left text-xs font-semibold" style={{ color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>{h}</th>
                 ))}
               </tr>
@@ -1330,24 +1386,25 @@ function RegularDriverAssignmentView({
       {/* Per-driver summary */}
       <div className="rounded-2xl overflow-hidden" style={{ border: '1px solid var(--border)' }}>
         <div className="px-4 py-3 text-sm font-semibold" style={{ background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)', color: 'var(--text-primary)' }}>
-          Ergebnis je Fahrer
+          {t('hwh.resultPerDriver')}
         </div>
         <div className="overflow-x-auto">
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
               <tr style={{ background: 'var(--bg-surface)', borderBottom: '1px solid var(--border)' }}>
-                {['Fahrer','Max. Stunden','Zugewiesen','Rest','Blöcke','Fahrten','Status','Überschneidungen','Stundenlimit-Übersch.'].map(h => (
+                {[t('common.driver'), t('hwh.colMaxHours'), t('hwh.statAssigned'), t('hwh.colRemainder'), t('hwh.colBlocks'), t('hwh.colRides'), t('common.status'), t('hwh.colOverlaps'), t('hwh.statHourLimitOverrun')].map(h => (
                   <th key={h} className="px-3 py-2 text-left text-xs font-semibold" style={{ color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {summaries.length === 0 ? (
-                <tr><td colSpan={9} className="px-4 py-6 text-center text-sm" style={{ color: 'var(--text-secondary)' }}>Keine regulären Fahrer konfiguriert.</td></tr>
+                <tr><td colSpan={9} className="px-4 py-6 text-center text-sm" style={{ color: 'var(--text-secondary)' }}>{t('hwh.noRegularDriversConfigured')}</td></tr>
               ) : summaries.map((s, i) => {
                 const blocksForDriver = assignments.filter(a => a.driverId === s.driverId);
                 const rides = blocksForDriver.reduce((acc, a) => acc + (allBlocks.find(b => b.blockId === a.blockId)?.rides?.length ?? 0), 0);
-                const statusLabel = s.status === 'ziel_erreicht' ? 'Limit erreicht' : s.status === 'unter_ziel' ? 'Unter Limit' : 'Keine Zuteilung';
+                // `status` is the engine's stored value, not a label.
+                const statusLabel = s.status === 'ziel_erreicht' ? t('hwh.statusLimitReached') : s.status === 'unter_ziel' ? t('hwh.statusUnderLimit') : t('hwh.statusNoAllocation');
                 const statusColor = s.status === 'ziel_erreicht' ? '#059669' : s.status === 'unter_ziel' ? '#0891b2' : 'var(--text-secondary)';
                 return (
                   <tr key={s.driverId} style={{ background: i % 2 === 0 ? 'var(--bg-surface)' : 'var(--bg-subtle)', borderBottom: '1px solid var(--border)' }}>
@@ -1371,14 +1428,22 @@ function RegularDriverAssignmentView({
       {/* Lohnart reconciliation */}
       <div className="rounded-2xl overflow-hidden" style={{ border: '1px solid var(--border)' }}>
         <div className="px-4 py-3 text-sm font-semibold" style={{ background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)', color: 'var(--text-primary)' }}>
-          Lohnarten-Abgleich
+          {t('hwh.lohnartReconciliation')}
         </div>
         <div className="overflow-x-auto">
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
               <tr style={{ background: 'var(--bg-surface)', borderBottom: '1px solid var(--border)' }}>
-                <th className="px-3 py-2 text-left text-xs font-semibold" style={{ color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>Fahrer</th>
-                {['1000 Limit','1000 Zuges.','1000 Rest','1500 Limit','1500 Zuges.','1500 Rest','1501 Limit','1501 Zuges.','1501 Rest','1510 Limit','1510 Zuges.','1510 Rest','Feiertag Limit','Feiertag Zuges.','Feiertag Rest'].map(h => (
+                <th className="px-3 py-2 text-left text-xs font-semibold" style={{ color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>{t('common.driver')}</th>
+                {(['1000', '1500', '1501', '1510'] as const).flatMap(code => [
+                  `${code} ${t('hwh.colLimitShort')}`,
+                  `${code} ${t('hwh.colAssignedShort')}`,
+                  `${code} ${t('hwh.colRemainder')}`,
+                ]).concat([
+                  t('hwh.colLimitHoliday'),
+                  t('hwh.colHolidayAssignedShort'),
+                  t('hwh.colHolidayRemainder'),
+                ]).map(h => (
                   <th key={h} className="px-2 py-2 text-left text-xs font-semibold" style={{ color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>{h}</th>
                 ))}
               </tr>
@@ -1413,7 +1478,7 @@ function RegularDriverAssignmentView({
 
       {/* Vehicle calendar with assignment */}
       <div>
-        <div className="text-sm font-semibold mb-2" style={{ color: 'var(--text-primary)' }}>Fahrzeug-Kalender mit Fahrerzuweisung</div>
+        <div className="text-sm font-semibold mb-2" style={{ color: 'var(--text-primary)' }}>{t('hwh.vehicleCalendarWithDrivers')}</div>
         {/* Vehicle filter */}
         <div className="flex flex-wrap gap-2 mb-3">
           <button
@@ -1421,7 +1486,7 @@ function RegularDriverAssignmentView({
             className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
             style={{ background: selectedVehicle === '__all__' ? '#0891b2' : 'var(--bg-subtle)', color: selectedVehicle === '__all__' ? '#fff' : 'var(--text-secondary)', border: `1px solid ${selectedVehicle === '__all__' ? '#0891b2' : 'var(--border)'}` }}
           >
-            Alle Fahrzeuge
+            {t('hwh.allVehicles')}
           </button>
           {vehicles.map(v => (
             <button key={v} onClick={() => setSelectedVehicle(v)}
@@ -1439,8 +1504,8 @@ function RegularDriverAssignmentView({
               <div className="text-xs font-bold mb-1.5" style={{ color: 'var(--text-secondary)' }}>{vehicle}</div>
               <div className="rounded-2xl overflow-hidden" style={{ border: '1px solid var(--border)' }}>
                 <div className="grid grid-cols-7" style={{ background: 'var(--bg-subtle)', borderBottom: '2px solid var(--border)' }}>
-                  {['So','Mo','Di','Mi','Do','Fr','Sa'].map(d => (
-                    <div key={d} className="py-2 text-center text-xs font-bold" style={{ color: 'var(--text-secondary)' }}>{d}</div>
+                  {WEEKDAY_COLS.map(dayKey => (
+                    <div key={dayKey} className="py-2 text-center text-xs font-bold" style={{ color: 'var(--text-secondary)' }}>{t(dayKey)}</div>
                   ))}
                 </div>
                 {grid.map((week, wi) => (
@@ -1467,7 +1532,7 @@ function RegularDriverAssignmentView({
                                     <span className="font-semibold">{fmtTime(block.blockStartMs)}–{fmtTime(block.blockEndMs)}</span>
                                     {' · '}<span className="font-semibold">{asgn.driverName.split(' ')[0]}</span>
                                     {' · '}{formatBlockDuration(block.blockDurationSec)}
-                                    {' · '}{rides}F
+                                    {' · '}{rides}{t('hwh.ridesSuffix')}
                                   </button>
                                 );
                               }
@@ -1480,9 +1545,9 @@ function RegularDriverAssignmentView({
                                   className="w-full text-left rounded px-1.5 py-0.5 text-xs leading-snug transition-all hover:brightness-90"
                                   style={{ background: hasConf ? '#fef3c7' : '#fef3c733', border: `1.5px solid ${hasConf ? '#f59e0b' : '#f59e0b88'}`, color: '#92400e' }}>
                                   <span className="font-semibold">{fmtTime(block.blockStartMs)}–{fmtTime(block.blockEndMs)}</span>
-                                  {' · '}<span className="italic opacity-80">{reason.replace('Nicht zugewiesen: ', '')}</span>
-                                  {' · '}{rides}F
-                                  {hasConf && <span className="ml-1 px-1 py-px rounded text-xs font-bold" style={{ background: '#fcd34d', color: '#78350f', fontSize: '0.6rem' }}>NZ-Konflikt</span>}
+                                  {' · '}<span className="italic opacity-80">{reason}</span>
+                                  {' · '}{rides}{t('hwh.ridesSuffix')}
+                                  {hasConf && <span className="ml-1 px-1 py-px rounded text-xs font-bold" style={{ background: '#fcd34d', color: '#78350f', fontSize: '0.6rem' }}>{t('hwh.unassignedConflictBadge')}</span>}
                                 </button>
                               );
                             })}
@@ -1532,16 +1597,16 @@ function RegularDriverAssignmentView({
             {/* Summary card */}
             <div className="rounded-2xl overflow-hidden" style={{ border: '1px solid rgba(245,158,11,0.35)' }}>
               <div className="px-4 py-3 text-sm font-semibold" style={{ background: 'rgba(245,158,11,0.06)', borderBottom: '1px solid var(--border)', color: 'var(--text-primary)' }}>
-                Konflikte nicht zugewiesener Blöcke
+                {t('hwh.unassignedBlockConflicts')}
               </div>
               <div className="px-4 py-3 grid grid-cols-2 gap-3 sm:grid-cols-3 text-xs" style={{ background: 'var(--bg-surface)' }}>
                 {[
-                  { label: 'Nicht zugewiesene Blöcke',     value: String(unassignedBlocks.length),    color: 'var(--text-primary)' },
-                  { label: 'Mit Konflikt zu anderem nicht zugewiesenen Block', value: String(withConflict.length),         color: withConflict.length > 0 ? '#b45309' : '#15803d' },
-                  { label: 'Ohne solchen Konflikt',        value: String(withoutConflict.length),      color: 'var(--text-secondary)' },
-                  { label: 'Konflikt-Paare',               value: String(conflictPairs),               color: conflictPairs > 0 ? '#b45309' : 'var(--text-secondary)' },
-                  { label: 'Betroffene Fahrzeuge',         value: affectedVehicles.length > 0 ? affectedVehicles.join(', ') : '—', color: 'var(--text-secondary)' },
-                  { label: 'Gesamte Konfliktzeit',         value: totalConflictSec > 0 ? `${Math.round(totalConflictSec / 60)} min` : '—', color: 'var(--text-secondary)' },
+                  { label: t('hwh.statUnassignedBlocks'),   value: String(unassignedBlocks.length),    color: 'var(--text-primary)' },
+                  { label: t('hwh.statWithConflictToOther'), value: String(withConflict.length),       color: withConflict.length > 0 ? '#b45309' : '#15803d' },
+                  { label: t('hwh.statWithoutSuchConflict'), value: String(withoutConflict.length),    color: 'var(--text-secondary)' },
+                  { label: t('hwh.statConflictPairs'),      value: String(conflictPairs),              color: conflictPairs > 0 ? '#b45309' : 'var(--text-secondary)' },
+                  { label: t('hwh.statAffectedVehicles'),   value: affectedVehicles.length > 0 ? affectedVehicles.join(', ') : '—', color: 'var(--text-secondary)' },
+                  { label: t('hwh.statTotalConflictTime'),  value: totalConflictSec > 0 ? `${Math.round(totalConflictSec / 60)} min` : '—', color: 'var(--text-secondary)' },
                 ].map(c => (
                   <div key={c.label}>
                     <div className="font-semibold mb-0.5" style={{ color: 'var(--text-secondary)' }}>{c.label}</div>
@@ -1558,7 +1623,7 @@ function RegularDriverAssignmentView({
                 style={{ background: 'var(--bg-subtle)', color: 'var(--text-primary)' }}
                 onClick={() => setConflictListOpen(o => !o)}
               >
-                <span>Nicht zugewiesene Blöcke – Konfliktprüfung <span className="font-normal text-xs ml-2" style={{ color: 'var(--text-secondary)' }}>{unassignedBlocks.length} Blöcke · {withConflict.length} mit Konflikt</span></span>
+                <span>{t('hwh.unassignedBlocksConflictCheck')} <span className="font-normal text-xs ml-2" style={{ color: 'var(--text-secondary)' }}>{t('hwh.blocksWithConflictSummary', { blocks: unassignedBlocks.length, conflicts: withConflict.length })}</span></span>
                 <span style={{ color: 'var(--text-secondary)' }}>{conflictListOpen ? '▲' : '▼'}</span>
               </button>
               {conflictListOpen && (
@@ -1566,7 +1631,7 @@ function RegularDriverAssignmentView({
                   <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                     <thead>
                       <tr style={{ background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)' }}>
-                        {['Block-ID','Fahrzeug','Start','Ende','Dauer','Fahr.','Grund','NZ-Konflikt','# Konflikte','Konflikt-Fahrzeuge'].map(h => (
+                        {[t('hwh.colBlockId'), t('hwh.colVehicle'), t('hwh.colStart'), t('hwh.colEnd'), t('hwh.colDuration'), t('hwh.colRidesShort'), t('hwh.colReason'), t('hwh.unassignedConflictBadge'), t('hwh.colConflictCount'), t('hwh.colConflictVehicles')].map(h => (
                           <th key={h} className="px-2 py-2 text-left text-xs font-semibold whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{h}</th>
                         ))}
                       </tr>
@@ -1595,14 +1660,14 @@ function RegularDriverAssignmentView({
                               <td className="px-2 py-1.5 text-xs font-mono whitespace-nowrap" style={{ color: 'var(--text-primary)' }}>{fmtDatetime(block.blockEndMs)}</td>
                               <td className="px-2 py-1.5 text-xs" style={{ color: 'var(--text-secondary)' }}>{formatBlockDuration(block.blockDurationSec)}</td>
                               <td className="px-2 py-1.5 text-xs" style={{ color: 'var(--text-secondary)' }}>{block.rides?.length ?? 0}</td>
-                              <td className="px-2 py-1.5 text-xs" style={{ color: 'var(--text-secondary)' }}>{unassignedReason(block).replace('Nicht zugewiesen: ','')}</td>
+                              <td className="px-2 py-1.5 text-xs" style={{ color: 'var(--text-secondary)' }}>{unassignedReason(block)}</td>
                               <td className="px-2 py-1.5 text-xs">
                                 <span className="font-bold px-1.5 py-0.5 rounded text-xs" style={{
                                   background: hasConf ? '#fef3c7' : '#dcfce7',
                                   color: hasConf ? '#92400e' : '#15803d',
                                   border: `1px solid ${hasConf ? '#fcd34d' : '#86efac'}`,
                                 }}>
-                                  {hasConf ? 'Ja' : 'Nein'}
+                                  {hasConf ? t('common.yes') : t('common.no')}
                                 </span>
                               </td>
                               <td className="px-2 py-1.5 text-xs font-bold" style={{ color: hasConf ? '#b45309' : 'var(--text-secondary)' }}>
@@ -1616,12 +1681,12 @@ function RegularDriverAssignmentView({
                               <tr key={block.blockId + '_detail'} style={{ background: 'rgba(245,158,11,0.04)', borderBottom: '1px solid var(--border)' }}>
                                 <td colSpan={10} className="px-4 py-3">
                                   <div className="text-xs font-semibold mb-2" style={{ color: '#92400e' }}>
-                                    Konfliktblöcke mit anderem Fahrzeug ({ci.conflictExamples.length} Konflikte)
+                                    {t('hwh.conflictBlocksOtherVehicle', { count: ci.conflictExamples.length })}
                                   </div>
                                   <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                                     <thead>
                                       <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                                        {['Konflikt-Block','Fahrzeug','Fahrer','Start','Ende','Überschneidung'].map(h => (
+                                        {[t('hwh.colConflictBlock'), t('hwh.colVehicle'), t('common.driver'), t('hwh.colStart'), t('hwh.colEnd'), t('hwh.colOverlap')].map(h => (
                                           <th key={h} className="text-left text-xs font-semibold px-2 py-1" style={{ color: 'var(--text-secondary)' }}>{h}</th>
                                         ))}
                                       </tr>
@@ -1631,7 +1696,7 @@ function RegularDriverAssignmentView({
                                         <tr key={ex.blockId} style={{ background: ei % 2 === 0 ? 'transparent' : 'rgba(0,0,0,0.02)', borderBottom: '1px solid var(--border)' }}>
                                           <td className="px-2 py-1 text-xs font-mono" style={{ color: 'var(--text-secondary)' }}>…{ex.blockId.slice(-8)}</td>
                                           <td className="px-2 py-1 text-xs font-bold" style={{ color: 'var(--text-primary)' }}>{ex.vehicle}</td>
-                                          <td className="px-2 py-1 text-xs" style={{ color: ex.driverName === 'Nicht zugewiesen' ? '#b45309' : '#0891b2' }}>{ex.driverName}</td>
+                                          <td className="px-2 py-1 text-xs" style={{ color: ex.isUnassigned ? '#b45309' : '#0891b2' }}>{ex.driverName}</td>
                                           <td className="px-2 py-1 text-xs font-mono whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{fmtDatetime(ex.startMs)}</td>
                                           <td className="px-2 py-1 text-xs font-mono whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{fmtDatetime(ex.endMs)}</td>
                                           <td className="px-2 py-1 text-xs font-semibold" style={{ color: '#b45309' }}>{Math.round(ex.overlapSec / 60)} min</td>
@@ -1640,7 +1705,7 @@ function RegularDriverAssignmentView({
                                       {ci.conflictExamples.length > 10 && (
                                         <tr>
                                           <td colSpan={6} className="px-2 py-1 text-xs italic" style={{ color: 'var(--text-secondary)' }}>
-                                            + {ci.conflictExamples.length - 10} weitere Konflikte
+                                            + {t('hwh.moreConflicts', { count: ci.conflictExamples.length - 10 })}
                                           </td>
                                         </tr>
                                       )}
@@ -1664,17 +1729,17 @@ function RegularDriverAssignmentView({
       {/* Diagnostics */}
       <div className="rounded-2xl overflow-hidden" style={{ border: `1px solid ${isClean ? 'rgba(16,185,129,0.3)' : 'rgba(220,38,38,0.3)'}` }}>
         <div className="px-4 py-3 text-sm font-semibold" style={{ background: isClean ? 'rgba(16,185,129,0.06)' : 'rgba(220,38,38,0.06)', borderBottom: '1px solid var(--border)', color: 'var(--text-primary)' }}>
-          Zuweisungsprüfung reguläre Fahrer
+          {t('hwh.regularAssignmentCheck')}
         </div>
         <div className="p-4 space-y-2">
           {[
-            { label: 'Fahrerüberschneidungen',     value: validation?.driverOverlapCount ?? 0 },
-            { label: 'Fahrzeugüberschneidungen',   value: 0 },
-            { label: 'Stundenlimit-Überschr.',     value: validation?.targetOverrunCount ?? 0 },
-            { label: 'Lohnart-Überschreitungen',   value: 0 },
-            { label: 'Inhaber-Blöcke',             value: 0 },
-            { label: 'Inhaber-Fahrten',            value: 0 },
-            { label: 'Reguläre Fahrer verschoben', value: 0 },
+            { label: t('hwh.statDriverOverlaps'),       value: validation?.driverOverlapCount ?? 0 },
+            { label: t('hwh.statVehicleOverlaps'),      value: 0 },
+            { label: t('hwh.statHourLimitOverrun'),     value: validation?.targetOverrunCount ?? 0 },
+            { label: t('hwh.statLohnartOverrun'),       value: 0 },
+            { label: t('hwh.statOwnerBlocks'),          value: 0 },
+            { label: t('hwh.statOwnerRides'),           value: 0 },
+            { label: t('hwh.statRegularDriversMoved'),  value: 0 },
           ].map(d => (
             <div key={d.label} className="flex items-center justify-between text-xs">
               <span style={{ color: 'var(--text-secondary)' }}>{d.label}</span>
@@ -1682,7 +1747,7 @@ function RegularDriverAssignmentView({
             </div>
           ))}
           {isClean && (
-            <div className="mt-3 text-xs font-semibold" style={{ color: '#15803d' }}>Reguläre Fahrer-Zuweisung ist sauber.</div>
+            <div className="mt-3 text-xs font-semibold" style={{ color: '#15803d' }}>{t('hwh.regularAssignmentClean')}</div>
           )}
         </div>
       </div>
@@ -1690,17 +1755,17 @@ function RegularDriverAssignmentView({
       {/* Bottom nav */}
       <div className="flex items-center gap-4 pt-2 flex-wrap">
         <button onClick={onBack} className="inline-flex items-center gap-2 text-sm hover:opacity-80" style={{ color: 'var(--text-secondary)' }}>
-          <ArrowLeft size={15} /> Zurück zu Fahrzeug-Blöcken
+          <ArrowLeft size={15} /> {t('hwh.backToVehicleBlocks')}
         </button>
         <button onClick={onRecompute} className="inline-flex items-center gap-2 text-sm hover:opacity-80" style={{ color: 'var(--text-secondary)' }}>
-          <RefreshCw size={13} /> Neu berechnen
+          <RefreshCw size={13} /> {t('hwh.recompute')}
         </button>
         <button
           onClick={onApplyNonConflictStep}
           className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all hover:brightness-90 ml-auto"
           style={{ background: '#7c3aed', color: '#fff', border: '1px solid #7c3aed' }}
         >
-          <ArrowRight size={15} /> Nicht-konflikt Blöcke an Inhaber geben
+          <ArrowRight size={15} /> {t('hwh.giveNonConflictToOwner')}
         </button>
       </div>
 
@@ -1713,28 +1778,28 @@ function RegularDriverAssignmentView({
             <div className="rounded-2xl p-6 w-full max-w-lg space-y-3" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', boxShadow: '0 25px 60px rgba(0,0,0,0.3)' }} onClick={e => e.stopPropagation()}>
               <div className="flex items-center justify-between">
                 <div>
-                  <div className="text-sm font-bold" style={{ color: 'var(--text-primary)' }}>Block-Details</div>
+                  <div className="text-sm font-bold" style={{ color: 'var(--text-primary)' }}>{t('hwh.blockDetails')}</div>
                   <div className="text-xs font-mono mt-0.5" style={{ color: 'var(--text-secondary)' }}>{modalBlock.blockId}</div>
                 </div>
-                <button onClick={() => setModalBlock(null)} className="text-xs px-2 py-1 rounded-lg" style={{ color: 'var(--text-secondary)', border: '1px solid var(--border)', background: 'var(--bg-subtle)' }}>Schließen</button>
+                <button onClick={() => setModalBlock(null)} className="text-xs px-2 py-1 rounded-lg" style={{ color: 'var(--text-secondary)', border: '1px solid var(--border)', background: 'var(--bg-subtle)' }}>{t('common.close')}</button>
               </div>
               <div className="rounded-xl overflow-hidden" style={{ border: '1px solid var(--border)' }}>
                 {[
-                  ['Fahrzeug',        modalBlock.vehicle],
-                  ['Fahrer',          asgn ? asgn.driverName : 'Nicht zugewiesen'],
-                  ['Zuweisung',       asgn ? 'Zugewiesen' : unassignedReason(modalBlock)],
-                  ['Start',           fmtDatetime(modalBlock.blockStartMs)],
-                  ['Ende',            fmtDatetime(modalBlock.blockEndMs)],
-                  ['Dauer',           formatBlockDuration(modalBlock.blockDurationSec)],
-                  ['Fahrten',         String(modalBlock.rides?.length ?? 0)],
-                  ['Zeilen',          blockSourceRowRange(modalBlock)],
-                  ['Blockstatus',     blockStatusLabel(modalBlock)],
-                  ['Warnungen',       blockWarningLabels(modalBlock).join(', ') || '—'],
-                  ['1000',            lk ? secToHShort(lk.baseSec) : '—'],
-                  ['1500 N25%',       lk ? secToHShort(lk.night25Sec) : '—'],
-                  ['1501 N40%',       lk ? secToHShort(lk.night40Sec) : '—'],
-                  ['1510 Sonntag',    lk ? secToHShort(lk.sundaySec) : '—'],
-                  ['Feiertag',        lk ? secToHShort(lk.holidaySec) : '—'],
+                  [t('hwh.colVehicle'),     modalBlock.vehicle],
+                  [t('common.driver'),      asgn ? asgn.driverName : t('hwh.unassigned')],
+                  [t('hwh.colAssignment'),  asgn ? t('hwh.statAssigned') : unassignedLabel(modalBlock)],
+                  [t('hwh.colStart'),       fmtDatetime(modalBlock.blockStartMs)],
+                  [t('hwh.colEnd'),         fmtDatetime(modalBlock.blockEndMs)],
+                  [t('hwh.colDuration'),    formatBlockDuration(modalBlock.blockDurationSec)],
+                  [t('hwh.colRides'),       String(modalBlock.rides?.length ?? 0)],
+                  [t('hwh.colRows'),        blockSourceRowRange(modalBlock)],
+                  [t('hwh.colBlockStatus'), blockStatusLabel(modalBlock)],
+                  [t('hwh.colWarnings'),    blockWarningLabels(modalBlock).join(', ') || '—'],
+                  ['1000',                  lk ? secToHShort(lk.baseSec) : '—'],
+                  ['1500 N25%',             lk ? secToHShort(lk.night25Sec) : '—'],
+                  ['1501 N40%',             lk ? secToHShort(lk.night40Sec) : '—'],
+                  [`1510 ${t('hwh.sunday')}`, lk ? secToHShort(lk.sundaySec) : '—'],
+                  [t('hwh.holiday'),        lk ? secToHShort(lk.holidaySec) : '—'],
                 ].map(([k, v], idx) => (
                   <div key={k} className="flex gap-3 px-4 py-2 text-xs" style={{ background: idx % 2 === 0 ? 'var(--bg-surface)' : 'var(--bg-subtle)', borderBottom: idx < 14 ? '1px solid var(--border)' : undefined }}>
                     <span className="w-28 flex-shrink-0 font-semibold" style={{ color: 'var(--text-secondary)' }}>{k}</span>
@@ -1769,6 +1834,7 @@ interface InhaberNonConflictViewProps {
 function InhaberNonConflictView({
   ncResult, regularAssignments, allBlocks, month, year, onBack, onRecompute, onApplyLongestConflictStep,
 }: InhaberNonConflictViewProps) {
+  const { t } = useTranslation();
   const [remainingOpen, setRemainingOpen] = useState(false);
   const [selectedVehicle, setSelectedVehicle] = useState<string>('__all__');
 
@@ -1817,22 +1883,22 @@ function InhaberNonConflictView({
 
       {/* Header */}
       <div>
-        <h2 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>Inhaber: Nicht-konflikt Blöcke</h2>
+        <h2 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>{t('hwh.ncTitle')}</h2>
         <p className="text-sm mt-0.5" style={{ color: 'var(--text-secondary)' }}>
-          Alle nicht zugewiesenen Blöcke ohne Konflikt zu anderen nicht zugewiesenen Blöcken werden dem Inhaber zugeordnet.
+          {t('hwh.ncSubtitle')}
         </p>
       </div>
 
       {/* Summary cards */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         {[
-          { label: 'Nicht zugewiesene Blöcke aus Schritt 2', value: step2NotAssigned,                        color: 'var(--text-primary)' },
-          { label: 'Ohne NZ-Konflikt',                       value: nonConflict,                             color: nonConflict > 0 ? INHABER_COLOR : 'var(--text-secondary)' },
-          { label: 'Mit NZ-Konflikt',                        value: withConflict,                            color: withConflict > 0 ? '#b45309' : '#15803d' },
-          { label: 'An Inhaber gegeben',                     value: assignedToInhaberBlocks.length,          color: INHABER_COLOR },
-          { label: 'Inhaber-Fahrten',                        value: inhaberRides,                            color: INHABER_COLOR },
-          { label: 'Inhaber-Stunden',                        value: formatBlockDuration(inhaberSec),         color: INHABER_COLOR },
-          { label: 'Weiterhin nicht zugewiesen',             value: remainingConflictedBlocks.length,        color: remainingConflictedBlocks.length > 0 ? '#b45309' : '#15803d' },
+          { label: t('hwh.statUnassignedFromStep2'), value: step2NotAssigned,                 color: 'var(--text-primary)' },
+          { label: t('hwh.statWithoutNzConflict'),   value: nonConflict,                      color: nonConflict > 0 ? INHABER_COLOR : 'var(--text-secondary)' },
+          { label: t('hwh.statWithNzConflict'),      value: withConflict,                     color: withConflict > 0 ? '#b45309' : '#15803d' },
+          { label: t('hwh.statGivenToOwner'),        value: assignedToInhaberBlocks.length,   color: INHABER_COLOR },
+          { label: t('hwh.statOwnerRides'),          value: inhaberRides,                     color: INHABER_COLOR },
+          { label: t('hwh.statOwnerHours'),          value: formatBlockDuration(inhaberSec),  color: INHABER_COLOR },
+          { label: t('hwh.statStillUnassigned'),     value: remainingConflictedBlocks.length, color: remainingConflictedBlocks.length > 0 ? '#b45309' : '#15803d' },
         ].map(c => (
           <div key={c.label} className="rounded-xl p-3" style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)' }}>
             <div className="text-xs font-semibold mb-1" style={{ color: 'var(--text-secondary)' }}>{c.label}</div>
@@ -1844,14 +1910,14 @@ function InhaberNonConflictView({
       {/* Inhaber status card */}
       <div className="rounded-2xl overflow-hidden" style={{ border: `1px solid ${allNonConflictAssigned ? 'rgba(124,58,237,0.3)' : 'rgba(220,38,38,0.3)'}` }}>
         <div className="px-4 py-3 text-sm font-semibold" style={{ background: allNonConflictAssigned ? 'rgba(124,58,237,0.06)' : 'rgba(220,38,38,0.06)', borderBottom: '1px solid var(--border)', color: 'var(--text-primary)' }}>
-          Inhaber-Zuweisung
+          {t('hwh.ownerAssignment')}
         </div>
         <div className="px-4 py-4 space-y-2">
           {[
-            { label: 'Fahrer',   value: inhaberName || 'Inhaber' },
-            { label: 'Blöcke',  value: String(assignedToInhaberBlocks.length) },
-            { label: 'Fahrten', value: String(inhaberRides) },
-            { label: 'Stunden', value: formatBlockDuration(inhaberSec) },
+            { label: t('common.driver'),  value: inhaberName || t('hwh.owner') },
+            { label: t('hwh.colBlocks'),  value: String(assignedToInhaberBlocks.length) },
+            { label: t('hwh.colRides'),   value: String(inhaberRides) },
+            { label: t('hwh.colHours'),   value: formatBlockDuration(inhaberSec) },
           ].map(r => (
             <div key={r.label} className="flex items-center justify-between text-sm">
               <span className="font-semibold" style={{ color: 'var(--text-secondary)' }}>{r.label}</span>
@@ -1859,10 +1925,10 @@ function InhaberNonConflictView({
             </div>
           ))}
           <div className="flex items-center justify-between text-sm pt-1">
-            <span className="font-semibold" style={{ color: 'var(--text-secondary)' }}>Status</span>
+            <span className="font-semibold" style={{ color: 'var(--text-secondary)' }}>{t('common.status')}</span>
             {allNonConflictAssigned
-              ? <span className="font-bold text-xs" style={{ color: '#15803d' }}>Alle nicht-konflikt Blöcke übernommen.</span>
-              : <span className="font-bold text-xs" style={{ color: '#b91c1c' }}>Nicht alle nicht-konflikt Blöcke wurden übernommen.</span>
+              ? <span className="font-bold text-xs" style={{ color: '#15803d' }}>{t('hwh.ncAllTaken')}</span>
+              : <span className="font-bold text-xs" style={{ color: '#b91c1c' }}>{t('hwh.ncNotAllTaken')}</span>
             }
           </div>
         </div>
@@ -1872,26 +1938,26 @@ function InhaberNonConflictView({
       {remainingConflictedBlocks.length > 0 && (
         <div className="rounded-2xl overflow-hidden" style={{ border: '1px solid rgba(245,158,11,0.35)' }}>
           <div className="px-4 py-3 text-sm font-semibold" style={{ background: 'rgba(245,158,11,0.06)', borderBottom: '1px solid var(--border)', color: 'var(--text-primary)' }}>
-            Verbleibende nicht zugewiesene Blöcke
+            {t('hwh.remainingUnassignedBlocks')}
           </div>
           <div className="px-4 py-3 grid grid-cols-3 gap-4 text-sm">
             <div>
-              <div className="text-xs font-semibold mb-0.5" style={{ color: 'var(--text-secondary)' }}>Anzahl</div>
+              <div className="text-xs font-semibold mb-0.5" style={{ color: 'var(--text-secondary)' }}>{t('common.count')}</div>
               <div className="font-bold" style={{ color: '#b45309' }}>{remainingConflictedBlocks.length}</div>
             </div>
             <div>
-              <div className="text-xs font-semibold mb-0.5" style={{ color: 'var(--text-secondary)' }}>Stunden gesamt</div>
+              <div className="text-xs font-semibold mb-0.5" style={{ color: 'var(--text-secondary)' }}>{t('hwh.totalHours')}</div>
               <div className="font-bold" style={{ color: '#b45309' }}>{formatBlockDuration(remainingConflictedBlocks.reduce((s, b) => s + b.blockDurationSec, 0))}</div>
             </div>
             <div>
-              <div className="text-xs font-semibold mb-0.5" style={{ color: 'var(--text-secondary)' }}>Grund</div>
-              <div className="font-bold text-xs px-1.5 py-0.5 rounded inline-block" style={{ background: '#fef3c7', color: '#92400e', border: '1px solid #fcd34d' }}>NZ-Konflikt</div>
+              <div className="text-xs font-semibold mb-0.5" style={{ color: 'var(--text-secondary)' }}>{t('hwh.colReason')}</div>
+              <div className="font-bold text-xs px-1.5 py-0.5 rounded inline-block" style={{ background: '#fef3c7', color: '#92400e', border: '1px solid #fcd34d' }}>{t('hwh.unassignedConflictBadge')}</div>
             </div>
           </div>
           {/* Sanity check: any remaining without conflict = error */}
           {diagnostics.remainingWithoutNzConflict > 0 && (
             <div className="mx-4 mb-3 rounded px-3 py-2 text-xs font-semibold" style={{ background: 'rgba(220,38,38,0.06)', color: '#b91c1c', border: '1px solid rgba(220,38,38,0.2)' }}>
-              Fehler: Nicht-konflikt Block ist weiterhin nicht zugewiesen. ({diagnostics.remainingWithoutNzConflict})
+              {t('hwh.ncErrorStillUnassigned', { count: diagnostics.remainingWithoutNzConflict })}
             </div>
           )}
         </div>
@@ -1899,10 +1965,10 @@ function InhaberNonConflictView({
 
       {/* Vehicle calendar */}
       <div className="space-y-3">
-        <div className="text-sm font-semibold" style={{ color: 'var(--text-secondary)' }}>Fahrzeug-Kalender mit Inhaber-Zuweisung</div>
+        <div className="text-sm font-semibold" style={{ color: 'var(--text-secondary)' }}>{t('hwh.vehicleCalendarWithOwner')}</div>
         <div className="flex flex-wrap gap-2">
           <button onClick={() => setSelectedVehicle('__all__')} className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all" style={{ background: selectedVehicle === '__all__' ? INHABER_COLOR : 'var(--bg-subtle)', color: selectedVehicle === '__all__' ? '#fff' : 'var(--text-secondary)', border: `1px solid ${selectedVehicle === '__all__' ? INHABER_COLOR : 'var(--border)'}` }}>
-            Alle Fahrzeuge
+            {t('hwh.allVehicles')}
           </button>
           {vehicles.map(v => (
             <button key={v} onClick={() => setSelectedVehicle(v)} className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all" style={{ background: selectedVehicle === v ? INHABER_COLOR : 'var(--bg-subtle)', color: selectedVehicle === v ? '#fff' : 'var(--text-secondary)', border: `1px solid ${selectedVehicle === v ? INHABER_COLOR : 'var(--border)'}` }}>
@@ -1917,8 +1983,8 @@ function InhaberNonConflictView({
               <div className="text-xs font-bold mb-1.5" style={{ color: 'var(--text-secondary)' }}>{vehicle}</div>
               <div className="rounded-2xl" style={{ border: '1px solid var(--border)', overflow: 'hidden' }}>
                 <div className="grid grid-cols-7" style={{ background: 'var(--bg-subtle)', borderBottom: '2px solid var(--border)' }}>
-                  {['So','Mo','Di','Mi','Do','Fr','Sa'].map(d => (
-                    <div key={d} className="py-2 text-center text-xs font-bold" style={{ color: 'var(--text-secondary)' }}>{d}</div>
+                  {WEEKDAY_COLS.map(dayKey => (
+                    <div key={dayKey} className="py-2 text-center text-xs font-bold" style={{ color: 'var(--text-secondary)' }}>{t(dayKey)}</div>
                   ))}
                 </div>
                 {grid.map((week, wi) => (
@@ -1941,7 +2007,7 @@ function InhaberNonConflictView({
                                   <span className="font-semibold">{fmtTime(block.blockStartMs)}–{fmtTime(block.blockEndMs)}</span>
                                   {' · '}<span className="font-semibold">{regAsgn.driverName.split(' ')[0]}</span>
                                   {' · '}{formatBlockDuration(block.blockDurationSec)}
-                                  {' · '}{rides}F
+                                  {' · '}{rides}{t('hwh.ridesSuffix')}
                                 </div>
                               );
                             }
@@ -1949,9 +2015,9 @@ function InhaberNonConflictView({
                               return (
                                 <div key={block.blockId} className="w-full text-left rounded px-1.5 py-0.5 text-xs leading-snug" style={{ background: '#ede9fe', border: `1.5px solid ${INHABER_COLOR}66`, color: INHABER_COLOR }}>
                                   <span className="font-semibold">{fmtTime(block.blockStartMs)}–{fmtTime(block.blockEndMs)}</span>
-                                  {' · '}<span className="font-semibold">{inhaberName || 'Inhaber'}</span>
+                                  {' · '}<span className="font-semibold">{inhaberName || t('hwh.owner')}</span>
                                   {' · '}{formatBlockDuration(block.blockDurationSec)}
-                                  {' · '}{rides}F
+                                  {' · '}{rides}{t('hwh.ridesSuffix')}
                                 </div>
                               );
                             }
@@ -1959,10 +2025,10 @@ function InhaberNonConflictView({
                             return (
                               <div key={block.blockId} className="w-full text-left rounded px-1.5 py-0.5 text-xs leading-snug" style={{ background: '#fef3c7', border: '1.5px solid #f59e0b', color: '#92400e' }}>
                                 <span className="font-semibold">{fmtTime(block.blockStartMs)}–{fmtTime(block.blockEndMs)}</span>
-                                {' · '}<span className="italic opacity-80">Nicht zugewiesen</span>
+                                {' · '}<span className="italic opacity-80">{t('hwh.unassigned')}</span>
                                 {' · '}{formatBlockDuration(block.blockDurationSec)}
-                                {' · '}{rides}F
-                                <span className="ml-1 px-1 py-px rounded text-xs font-bold" style={{ background: '#fcd34d', color: '#78350f', fontSize: '0.6rem' }}>NZ-Konflikt</span>
+                                {' · '}{rides}{t('hwh.ridesSuffix')}
+                                <span className="ml-1 px-1 py-px rounded text-xs font-bold" style={{ background: '#fcd34d', color: '#78350f', fontSize: '0.6rem' }}>{t('hwh.unassignedConflictBadge')}</span>
                               </div>
                             );
                           })}
@@ -1986,9 +2052,9 @@ function InhaberNonConflictView({
             onClick={() => setRemainingOpen(o => !o)}
           >
             <span>
-              Verbleibende NZ-Konflikte
+              {t('hwh.remainingNzConflicts')}
               <span className="font-normal text-xs ml-2" style={{ color: 'var(--text-secondary)' }}>
-                {remainingConflictedBlocks.length} Blöcke
+                {t('hwh.blocksCount', { count: remainingConflictedBlocks.length })}
               </span>
             </span>
             <span style={{ color: 'var(--text-secondary)' }}>{remainingOpen ? '▲' : '▼'}</span>
@@ -1998,7 +2064,7 @@ function InhaberNonConflictView({
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead>
                   <tr style={{ background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)' }}>
-                    {['Block-ID','Fahrzeug','Start','Ende','Dauer','Fahrten','Konflikt mit','Konfliktanzahl'].map(h => (
+                    {[t('hwh.colBlockId'), t('hwh.colVehicle'), t('hwh.colStart'), t('hwh.colEnd'), t('hwh.colDuration'), t('hwh.colRides'), t('hwh.colConflictWith'), t('hwh.colConflictCountLong')].map(h => (
                       <th key={h} className="px-3 py-2 text-left text-xs font-semibold whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{h}</th>
                     ))}
                   </tr>
@@ -2032,16 +2098,16 @@ function InhaberNonConflictView({
       {/* Diagnostics */}
       <div className="rounded-2xl overflow-hidden" style={{ border: `1px solid ${diagClean ? 'rgba(16,185,129,0.3)' : 'rgba(220,38,38,0.3)'}` }}>
         <div className="px-4 py-3 text-sm font-semibold" style={{ background: diagClean ? 'rgba(16,185,129,0.06)' : 'rgba(220,38,38,0.06)', borderBottom: '1px solid var(--border)', color: 'var(--text-primary)' }}>
-          Prüfung Inhaber Nicht-konflikt Blöcke
+          {t('hwh.ncCheckTitle')}
         </div>
         <div className="p-4 space-y-2">
           {[
-            { label: 'Reguläre Fahrer unverändert',       value: diagnostics.regularDriversUnchanged ? 'OK' : 'FEHLER',   isOk: diagnostics.regularDriversUnchanged },
-            { label: 'Nicht-konflikt Blöcke an Inhaber',  value: String(diagnostics.nonConflictBlocksAssigned),           isOk: true },
-            { label: 'Verbleibende ohne NZ-Konflikt',     value: String(diagnostics.remainingWithoutNzConflict),          isOk: diagnostics.remainingWithoutNzConflict === 0 },
-            { label: 'Verbleibende mit NZ-Konflikt',      value: String(diagnostics.remainingWithNzConflict),             isOk: true },
-            { label: 'Einzel-Fahrten-Zuweisung',          value: String(diagnostics.singleRideAssignments),               isOk: diagnostics.singleRideAssignments === 0 },
-            { label: 'Zeitverschiebungen',                 value: String(diagnostics.timeShifts),                          isOk: diagnostics.timeShifts === 0 },
+            { label: t('hwh.chkRegularDriversUnchanged'), value: diagnostics.regularDriversUnchanged ? t('hwh.ok') : t('hwh.failed'), isOk: diagnostics.regularDriversUnchanged },
+            { label: t('hwh.chkNonConflictToOwner'),      value: String(diagnostics.nonConflictBlocksAssigned),   isOk: true },
+            { label: t('hwh.chkRemainingWithoutNz'),      value: String(diagnostics.remainingWithoutNzConflict),  isOk: diagnostics.remainingWithoutNzConflict === 0 },
+            { label: t('hwh.chkRemainingWithNz'),         value: String(diagnostics.remainingWithNzConflict),     isOk: true },
+            { label: t('hwh.chkSingleRideAssignments'),   value: String(diagnostics.singleRideAssignments),       isOk: diagnostics.singleRideAssignments === 0 },
+            { label: t('hwh.chkTimeShifts'),              value: String(diagnostics.timeShifts),                  isOk: diagnostics.timeShifts === 0 },
           ].map(d => (
             <div key={d.label} className="flex items-center justify-between text-xs">
               <span style={{ color: 'var(--text-secondary)' }}>{d.label}</span>
@@ -2049,7 +2115,7 @@ function InhaberNonConflictView({
             </div>
           ))}
           {diagClean && (
-            <div className="mt-3 text-xs font-semibold" style={{ color: '#15803d' }}>Alle nicht-konflikt Blöcke korrekt übernommen.</div>
+            <div className="mt-3 text-xs font-semibold" style={{ color: '#15803d' }}>{t('hwh.ncAllTakenCorrectly')}</div>
           )}
         </div>
       </div>
@@ -2057,10 +2123,10 @@ function InhaberNonConflictView({
       {/* Bottom nav */}
       <div className="flex items-center gap-4 pt-2">
         <button onClick={onBack} className="inline-flex items-center gap-2 text-sm hover:opacity-80" style={{ color: 'var(--text-secondary)' }}>
-          <ArrowLeft size={15} /> Zurück zu regulären Fahrern
+          <ArrowLeft size={15} /> {t('hwh.backToRegularDrivers')}
         </button>
         <button onClick={onRecompute} className="inline-flex items-center gap-2 text-sm hover:opacity-80" style={{ color: 'var(--text-secondary)' }}>
-          <RefreshCw size={13} /> Neu berechnen
+          <RefreshCw size={13} /> {t('hwh.recompute')}
         </button>
         {remainingConflictedBlocks.length > 0 && (
           <button
@@ -2068,7 +2134,7 @@ function InhaberNonConflictView({
             className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all hover:brightness-90 ml-auto"
             style={{ background: '#0891b2', color: '#fff', border: '1px solid #0891b2' }}
           >
-            <ArrowRight size={15} /> Längste Konflikt-Blöcke an Inhaber geben
+            <ArrowRight size={15} /> {t('hwh.giveLongestConflictToOwner')}
           </button>
         )}
       </div>
@@ -2094,6 +2160,7 @@ interface InhaberLongestConflictViewProps {
 function InhaberLongestConflictView({
   lcResult, step3InhaberBlocks, regularAssignments, allBlocks, month, year, onBack, onRecompute, onApplyFreeWindowSearch,
 }: InhaberLongestConflictViewProps) {
+  const { t } = useTranslation();
   const [expandedGroup, setExpandedGroup]     = useState<string | null>(null);
   const [selectedVehicle, setSelectedVehicle] = useState<string>('__all__');
   const [groupTableOpen, setGroupTableOpen]   = useState(true);
@@ -2147,25 +2214,25 @@ function InhaberLongestConflictView({
 
       {/* Header */}
       <div>
-        <h2 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>Inhaber: Längste Konflikt-Blöcke</h2>
+        <h2 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>{t('hwh.lcTitle')}</h2>
         <p className="text-sm mt-0.5" style={{ color: 'var(--text-secondary)' }}>
-          Aus jeder verbleibenden NZ-Konfliktgruppe wird der längste konfliktfreie Block für den Inhaber ausgewählt.
+          {t('hwh.lcSubtitle')}
         </p>
       </div>
 
       {/* Summary cards */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         {[
-          { label: 'Verbleibende NZ-Konflikt-Blöcke aus Schritt 3', value: lcResult.conflictGroups.reduce((s, g) => s + g.blockIds.length, 0), color: 'var(--text-primary)' },
-          { label: 'Konfliktgruppen',                   value: conflictGroups.length,                                    color: 'var(--text-primary)' },
-          { label: 'Für Inhaber ausgewählt',            value: selectedBlocks.length,                                    color: '#0891b2' },
-          { label: 'Abgelehnt wegen Inhaber-Zeitkonflikt', value: diagnostics.inhaberTimeConflicts,                      color: diagnostics.inhaberTimeConflicts > 0 ? '#b45309' : '#15803d' },
-          { label: 'Abgelehnt wegen Fahrzeugkonflikt',  value: diagnostics.inhaberVehicleConflicts,                      color: diagnostics.inhaberVehicleConflicts > 0 ? '#b45309' : '#15803d' },
-          { label: 'Gruppen ohne passenden Block',       value: diagnostics.groupsWithNoBlock,                           color: diagnostics.groupsWithNoBlock > 0 ? '#b91c1c' : '#15803d' },
-          { label: 'Weiterhin nicht zugewiesen',         value: remainingUnassignedBlocks.length,                        color: remainingUnassignedBlocks.length > 0 ? '#b45309' : '#15803d' },
-          { label: 'Inhaber-Fahrten hinzugefügt',        value: inhaberRidesAdded,                                       color: '#0891b2' },
-          { label: 'Inhaber-Stunden hinzugefügt',        value: formatBlockDuration(inhaberSecAdded),                    color: '#0891b2' },
-          { label: 'Inhaber-Stunden gesamt',             value: formatBlockDuration(inhaberSecTotal),                    color: '#0891b2' },
+          { label: t('hwh.statRemainingNzFromStep3'), value: lcResult.conflictGroups.reduce((s, g) => s + g.blockIds.length, 0), color: 'var(--text-primary)' },
+          { label: t('hwh.statConflictGroups'),       value: conflictGroups.length,                 color: 'var(--text-primary)' },
+          { label: t('hwh.statSelectedForOwner'),     value: selectedBlocks.length,                 color: '#0891b2' },
+          { label: t('hwh.statRejectedOwnerTime'),    value: diagnostics.inhaberTimeConflicts,      color: diagnostics.inhaberTimeConflicts > 0 ? '#b45309' : '#15803d' },
+          { label: t('hwh.statRejectedVehicle'),      value: diagnostics.inhaberVehicleConflicts,   color: diagnostics.inhaberVehicleConflicts > 0 ? '#b45309' : '#15803d' },
+          { label: t('hwh.statGroupsNoSuitableBlock'), value: diagnostics.groupsWithNoBlock,        color: diagnostics.groupsWithNoBlock > 0 ? '#b91c1c' : '#15803d' },
+          { label: t('hwh.statStillUnassigned'),      value: remainingUnassignedBlocks.length,      color: remainingUnassignedBlocks.length > 0 ? '#b45309' : '#15803d' },
+          { label: t('hwh.statOwnerRidesAdded'),      value: inhaberRidesAdded,                     color: '#0891b2' },
+          { label: t('hwh.statOwnerHoursAdded'),      value: formatBlockDuration(inhaberSecAdded),  color: '#0891b2' },
+          { label: t('hwh.statOwnerHoursTotal'),      value: formatBlockDuration(inhaberSecTotal),  color: '#0891b2' },
         ].map(c => (
           <div key={c.label} className="rounded-xl p-3" style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)' }}>
             <div className="text-xs font-semibold mb-1" style={{ color: 'var(--text-secondary)' }}>{c.label}</div>
@@ -2181,7 +2248,7 @@ function InhaberLongestConflictView({
           style={{ background: 'var(--bg-subtle)', color: 'var(--text-primary)' }}
           onClick={() => setGroupTableOpen(o => !o)}
         >
-          <span>Entscheidung je Konfliktgruppe <span className="font-normal text-xs ml-2" style={{ color: 'var(--text-secondary)' }}>{conflictGroups.length} Gruppen</span></span>
+          <span>{t('hwh.decisionPerConflictGroup')} <span className="font-normal text-xs ml-2" style={{ color: 'var(--text-secondary)' }}>{t('hwh.groupsCount', { count: conflictGroups.length })}</span></span>
           <span style={{ color: 'var(--text-secondary)' }}>{groupTableOpen ? '▲' : '▼'}</span>
         </button>
         {groupTableOpen && (
@@ -2189,7 +2256,7 @@ function InhaberLongestConflictView({
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead>
                 <tr style={{ background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)' }}>
-                  {['Gruppe','Blöcke','Fahrzeuge','Zeitraum','Längster Block','Gewählter Block','Entscheidung','Rest bleibt nicht zugewiesen'].map(h => (
+                  {[t('hwh.colGroup'), t('hwh.colBlocks'), t('hwh.statVehicles'), t('common.period'), t('hwh.colLongestBlock'), t('hwh.colSelectedBlock'), t('hwh.colDecision'), t('hwh.colRestStaysUnassigned')].map(h => (
                     <th key={h} className="px-3 py-2 text-left text-xs font-semibold whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{h}</th>
                   ))}
                 </tr>
@@ -2214,7 +2281,7 @@ function InhaberLongestConflictView({
                         <td className="px-3 py-2 text-xs font-mono" style={{ color: '#0891b2' }}>
                           {group.selectedBlockId ? `…${group.selectedBlockId.slice(-8)}` : '—'}
                         </td>
-                        <td className="px-3 py-2 text-xs font-bold" style={{ color: decisionColor }}>{group.decision}</td>
+                        <td className="px-3 py-2 text-xs font-bold" style={{ color: decisionColor }}>{t(LC_DECISION_KEYS[group.decision])}</td>
                         <td className="px-3 py-2 text-xs" style={{ color: 'var(--text-secondary)' }}>
                           {group.blockIds.length - (group.selectedBlockId ? 1 : 0)}
                         </td>
@@ -2226,7 +2293,7 @@ function InhaberLongestConflictView({
                               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                                 <thead>
                                   <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                                    {['Block-ID','Fahrzeug','Start','Ende','Dauer','Fahrten','Rang','Entscheidung','Ablehnungsgrund'].map(h => (
+                                    {[t('hwh.colBlockId'), t('hwh.colVehicle'), t('hwh.colStart'), t('hwh.colEnd'), t('hwh.colDuration'), t('hwh.colRides'), t('hwh.colRank'), t('hwh.colDecision'), t('hwh.colRejectionReason')].map(h => (
                                       <th key={h} className="px-2 py-1.5 text-left text-xs font-semibold whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{h}</th>
                                     ))}
                                   </tr>
@@ -2243,8 +2310,8 @@ function InhaberLongestConflictView({
                                         <td className="px-2 py-1.5 text-xs" style={{ color: 'var(--text-secondary)' }}>{formatBlockDuration(bd.block.blockDurationSec)}</td>
                                         <td className="px-2 py-1.5 text-xs" style={{ color: 'var(--text-secondary)' }}>{bd.block.rides?.length ?? 0}</td>
                                         <td className="px-2 py-1.5 text-xs font-bold" style={{ color: 'var(--text-secondary)' }}>#{bd.rank}</td>
-                                        <td className="px-2 py-1.5 text-xs font-bold" style={{ color: dColor }}>{bd.decision}</td>
-                                        <td className="px-2 py-1.5 text-xs" style={{ color: '#b45309' }}>{bd.rejectionReason ?? '—'}</td>
+                                        <td className="px-2 py-1.5 text-xs font-bold" style={{ color: dColor }}>{t(LC_DECISION_KEYS[bd.decision])}</td>
+                                        <td className="px-2 py-1.5 text-xs" style={{ color: '#b45309' }}>{bd.rejectionReason ? t(bd.rejectionReason) : '—'}</td>
                                       </tr>
                                     );
                                   })}
@@ -2265,10 +2332,10 @@ function InhaberLongestConflictView({
 
       {/* Vehicle calendar */}
       <div className="space-y-3">
-        <div className="text-sm font-semibold" style={{ color: 'var(--text-secondary)' }}>Fahrzeug-Kalender</div>
+        <div className="text-sm font-semibold" style={{ color: 'var(--text-secondary)' }}>{t('hwh.vehicleCalendar')}</div>
         <div className="flex flex-wrap gap-2">
           <button onClick={() => setSelectedVehicle('__all__')} className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all" style={{ background: selectedVehicle === '__all__' ? '#0891b2' : 'var(--bg-subtle)', color: selectedVehicle === '__all__' ? '#fff' : 'var(--text-secondary)', border: `1px solid ${selectedVehicle === '__all__' ? '#0891b2' : 'var(--border)'}` }}>
-            Alle Fahrzeuge
+            {t('hwh.allVehicles')}
           </button>
           {vehicles.map(v => (
             <button key={v} onClick={() => setSelectedVehicle(v)} className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all" style={{ background: selectedVehicle === v ? '#0891b2' : 'var(--bg-subtle)', color: selectedVehicle === v ? '#fff' : 'var(--text-secondary)', border: `1px solid ${selectedVehicle === v ? '#0891b2' : 'var(--border)'}` }}>
@@ -2283,8 +2350,8 @@ function InhaberLongestConflictView({
               <div className="text-xs font-bold mb-1.5" style={{ color: 'var(--text-secondary)' }}>{vehicle}</div>
               <div className="rounded-2xl" style={{ border: '1px solid var(--border)', overflow: 'hidden' }}>
                 <div className="grid grid-cols-7" style={{ background: 'var(--bg-subtle)', borderBottom: '2px solid var(--border)' }}>
-                  {['So','Mo','Di','Mi','Do','Fr','Sa'].map(d => (
-                    <div key={d} className="py-2 text-center text-xs font-bold" style={{ color: 'var(--text-secondary)' }}>{d}</div>
+                  {WEEKDAY_COLS.map(dayKey => (
+                    <div key={dayKey} className="py-2 text-center text-xs font-bold" style={{ color: 'var(--text-secondary)' }}>{t(dayKey)}</div>
                   ))}
                 </div>
                 {grid.map((week, wi) => (
@@ -2307,7 +2374,7 @@ function InhaberLongestConflictView({
                                   <span className="font-semibold">{fmtTime(block.blockStartMs)}–{fmtTime(block.blockEndMs)}</span>
                                   {' · '}<span className="font-semibold">{regAsgn.driverName.split(' ')[0]}</span>
                                   {' · '}{formatBlockDuration(block.blockDurationSec)}
-                                  {' · '}{rides}F
+                                  {' · '}{rides}{t('hwh.ridesSuffix')}
                                 </div>
                               );
                             }
@@ -2315,10 +2382,10 @@ function InhaberLongestConflictView({
                               return (
                                 <div key={block.blockId} className="rounded px-1.5 py-0.5 text-xs leading-snug" style={{ background: '#ede9fe', border: `1.5px solid ${INHABER_COLOR}66`, color: INHABER_COLOR }}>
                                   <span className="font-semibold">{fmtTime(block.blockStartMs)}–{fmtTime(block.blockEndMs)}</span>
-                                  {' · '}<span className="font-semibold">{inhaberName || 'Inhaber'}</span>
+                                  {' · '}<span className="font-semibold">{inhaberName || t('hwh.owner')}</span>
                                   {' · '}{formatBlockDuration(block.blockDurationSec)}
-                                  {' · '}{rides}F
-                                  <span className="ml-1 px-1 py-px rounded text-xs font-bold" style={{ background: INHABER_COLOR + '22', color: INHABER_COLOR, fontSize: '0.6rem' }}>Inhaber</span>
+                                  {' · '}{rides}{t('hwh.ridesSuffix')}
+                                  <span className="ml-1 px-1 py-px rounded text-xs font-bold" style={{ background: INHABER_COLOR + '22', color: INHABER_COLOR, fontSize: '0.6rem' }}>{t('hwh.owner')}</span>
                                 </div>
                               );
                             }
@@ -2327,10 +2394,10 @@ function InhaberLongestConflictView({
                               return (
                                 <div key={block.blockId} className="rounded px-1.5 py-0.5 text-xs leading-snug" style={{ background: '#cffafe', border: '1.5px solid #0891b2', color: '#0e7490' }}>
                                   <span className="font-semibold">{fmtTime(block.blockStartMs)}–{fmtTime(block.blockEndMs)}</span>
-                                  {' · '}<span className="font-semibold">{inhaberName || 'Inhaber'}</span>
+                                  {' · '}<span className="font-semibold">{inhaberName || t('hwh.owner')}</span>
                                   {' · '}{formatBlockDuration(block.blockDurationSec)}
-                                  {' · '}{rides}F
-                                  <span className="ml-1 px-1 py-px rounded text-xs font-bold" style={{ background: '#0891b2', color: '#fff', fontSize: '0.6rem' }}>Inhaber Konflikt-Auswahl {groupId}</span>
+                                  {' · '}{rides}{t('hwh.ridesSuffix')}
+                                  <span className="ml-1 px-1 py-px rounded text-xs font-bold" style={{ background: '#0891b2', color: '#fff', fontSize: '0.6rem' }}>{t('hwh.ownerConflictPick', { group: groupId })}</span>
                                 </div>
                               );
                             }
@@ -2339,10 +2406,10 @@ function InhaberLongestConflictView({
                             return (
                               <div key={block.blockId} className="rounded px-1.5 py-0.5 text-xs leading-snug" style={{ background: '#fef3c7', border: '1.5px solid #f59e0b', color: '#92400e' }}>
                                 <span className="font-semibold">{fmtTime(block.blockStartMs)}–{fmtTime(block.blockEndMs)}</span>
-                                {' · '}<span className="italic opacity-80">Nicht zugewiesen</span>
+                                {' · '}<span className="italic opacity-80">{t('hwh.unassigned')}</span>
                                 {' · '}{formatBlockDuration(block.blockDurationSec)}
-                                {' · '}{rides}F
-                                <span className="ml-1 px-1 py-px rounded text-xs font-bold" style={{ background: '#fcd34d', color: '#78350f', fontSize: '0.6rem' }}>NZ-Konflikt {groupId}</span>
+                                {' · '}{rides}{t('hwh.ridesSuffix')}
+                                <span className="ml-1 px-1 py-px rounded text-xs font-bold" style={{ background: '#fcd34d', color: '#78350f', fontSize: '0.6rem' }}>{t('hwh.unassignedConflictBadge')} {groupId}</span>
                               </div>
                             );
                           })}
@@ -2364,7 +2431,7 @@ function InhaberLongestConflictView({
           style={{ background: 'var(--bg-subtle)', color: 'var(--text-primary)' }}
           onClick={() => setSelectedTableOpen(o => !o)}
         >
-          <span>Neu an Inhaber gegebene Konflikt-Blöcke <span className="font-normal text-xs ml-2" style={{ color: 'var(--text-secondary)' }}>{selectedBlocks.length} Blöcke</span></span>
+          <span>{t('hwh.newlyGivenToOwner')} <span className="font-normal text-xs ml-2" style={{ color: 'var(--text-secondary)' }}>{t('hwh.blocksCount', { count: selectedBlocks.length })}</span></span>
           <span style={{ color: 'var(--text-secondary)' }}>{selectedTableOpen ? '▲' : '▼'}</span>
         </button>
         {selectedTableOpen && (
@@ -2372,7 +2439,7 @@ function InhaberLongestConflictView({
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead>
                 <tr style={{ background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)' }}>
-                  {['Gruppe','Block-ID','Fahrzeug','Start','Ende','Dauer','Fahrten','Zeilen','Grund'].map(h => (
+                  {[t('hwh.colGroup'), t('hwh.colBlockId'), t('hwh.colVehicle'), t('hwh.colStart'), t('hwh.colEnd'), t('hwh.colDuration'), t('hwh.colRides'), t('hwh.colRows'), t('hwh.colReason')].map(h => (
                     <th key={h} className="px-3 py-2 text-left text-xs font-semibold whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{h}</th>
                   ))}
                 </tr>
@@ -2388,7 +2455,7 @@ function InhaberLongestConflictView({
                     <td className="px-3 py-2 text-xs" style={{ color: 'var(--text-secondary)' }}>{formatBlockDuration(b.blockDurationSec)}</td>
                     <td className="px-3 py-2 text-xs" style={{ color: 'var(--text-secondary)' }}>{b.rides?.length ?? 0}</td>
                     <td className="px-3 py-2 text-xs font-mono" style={{ color: 'var(--text-secondary)' }}>{blockSourceRowRange(b)}</td>
-                    <td className="px-3 py-2 text-xs" style={{ color: '#0891b2' }}>Längster konfliktfreier Block der Gruppe</td>
+                    <td className="px-3 py-2 text-xs" style={{ color: '#0891b2' }}>{t('hwh.longestConflictFreeInGroup')}</td>
                   </tr>
                 ))}
               </tbody>
@@ -2405,7 +2472,7 @@ function InhaberLongestConflictView({
             style={{ background: 'var(--bg-subtle)', color: 'var(--text-primary)' }}
             onClick={() => setRemainingTableOpen(o => !o)}
           >
-            <span>Verbleibende nicht zugewiesene Konflikt-Blöcke <span className="font-normal text-xs ml-2" style={{ color: 'var(--text-secondary)' }}>{remainingUnassignedBlocks.length} Blöcke</span></span>
+            <span>{t('hwh.remainingUnassignedConflictBlocks')} <span className="font-normal text-xs ml-2" style={{ color: 'var(--text-secondary)' }}>{t('hwh.blocksCount', { count: remainingUnassignedBlocks.length })}</span></span>
             <span style={{ color: 'var(--text-secondary)' }}>{remainingTableOpen ? '▲' : '▼'}</span>
           </button>
           {remainingTableOpen && (
@@ -2413,7 +2480,7 @@ function InhaberLongestConflictView({
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead>
                   <tr style={{ background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)' }}>
-                    {['Block-ID','Fahrzeug','Start','Ende','Dauer','Fahrten','Konfliktgruppe','Grund'].map(h => (
+                    {[t('hwh.colBlockId'), t('hwh.colVehicle'), t('hwh.colStart'), t('hwh.colEnd'), t('hwh.colDuration'), t('hwh.colRides'), t('hwh.colConflictGroup'), t('hwh.colReason')].map(h => (
                       <th key={h} className="px-3 py-2 text-left text-xs font-semibold whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{h}</th>
                     ))}
                   </tr>
@@ -2422,7 +2489,8 @@ function InhaberLongestConflictView({
                   {remainingUnassignedBlocks.map((b, i) => {
                     const gId = groupOfBlock.get(b.blockId) ?? '—';
                     const grp = conflictGroups.find(g => g.groupId === gId);
-                    const grund = grp?.decision === 'Kein passender Block' ? 'Kein konfliktfreier Inhaber-Block in Gruppe' : 'Nicht längster Block der Gruppe';
+                    // `decision` is the algorithm's internal value, not a label.
+                    const grund = grp?.decision === 'Kein passender Block' ? t('hwh.lcRejectNoConflictFreeBlockInGroup') : t('hwh.lcRejectNotLongestInGroup');
                     return (
                       <tr key={b.blockId} style={{ background: i % 2 === 0 ? 'rgba(245,158,11,0.05)' : 'rgba(245,158,11,0.1)', borderBottom: '1px solid var(--border)' }}>
                         <td className="px-3 py-2 text-xs font-mono" style={{ color: 'var(--text-secondary)' }}>…{b.blockId.slice(-8)}</td>
@@ -2446,16 +2514,16 @@ function InhaberLongestConflictView({
       {/* Diagnostics */}
       <div className="rounded-2xl overflow-hidden" style={{ border: `1px solid ${diagClean ? 'rgba(16,185,129,0.3)' : 'rgba(220,38,38,0.3)'}` }}>
         <div className="px-4 py-3 text-sm font-semibold" style={{ background: diagClean ? 'rgba(16,185,129,0.06)' : 'rgba(220,38,38,0.06)', borderBottom: '1px solid var(--border)', color: 'var(--text-primary)' }}>
-          Prüfung Inhaber Konflikt-Auswahl
+          {t('hwh.lcCheckTitle')}
         </div>
         <div className="p-4 space-y-2">
           {[
-            { label: 'Reguläre Fahrer unverändert',        value: diagnostics.regularDriversUnchanged ? 'OK' : 'FEHLER', isOk: diagnostics.regularDriversUnchanged },
-            { label: 'Inhaber-Zeitüberschneidungen',        value: String(diagnostics.inhaberTimeConflicts),              isOk: diagnostics.inhaberTimeConflicts === 0 },
-            { label: 'Inhaber-Fahrzeugüberschneidungen',    value: String(diagnostics.inhaberVehicleConflicts),           isOk: diagnostics.inhaberVehicleConflicts === 0 },
-            { label: 'Zeitverschiebungen',                  value: String(diagnostics.timeShifts),                        isOk: diagnostics.timeShifts === 0 },
-            { label: 'Einzel-Fahrten-Zuweisung',            value: String(diagnostics.singleRideAssignments),             isOk: diagnostics.singleRideAssignments === 0 },
-            { label: 'Gruppen ohne passenden Block',        value: String(diagnostics.groupsWithNoBlock),                 isOk: diagnostics.groupsWithNoBlock === 0 },
+            { label: t('hwh.chkRegularDriversUnchanged'), value: diagnostics.regularDriversUnchanged ? t('hwh.ok') : t('hwh.failed'), isOk: diagnostics.regularDriversUnchanged },
+            { label: t('hwh.chkOwnerTimeOverlaps'),       value: String(diagnostics.inhaberTimeConflicts),     isOk: diagnostics.inhaberTimeConflicts === 0 },
+            { label: t('hwh.chkOwnerVehicleOverlaps'),    value: String(diagnostics.inhaberVehicleConflicts),  isOk: diagnostics.inhaberVehicleConflicts === 0 },
+            { label: t('hwh.chkTimeShifts'),              value: String(diagnostics.timeShifts),               isOk: diagnostics.timeShifts === 0 },
+            { label: t('hwh.chkSingleRideAssignments'),   value: String(diagnostics.singleRideAssignments),    isOk: diagnostics.singleRideAssignments === 0 },
+            { label: t('hwh.statGroupsNoSuitableBlock'),  value: String(diagnostics.groupsWithNoBlock),        isOk: diagnostics.groupsWithNoBlock === 0 },
           ].map(d => (
             <div key={d.label} className="flex items-center justify-between text-xs">
               <span style={{ color: 'var(--text-secondary)' }}>{d.label}</span>
@@ -2463,10 +2531,10 @@ function InhaberLongestConflictView({
             </div>
           ))}
           {diagClean && (
-            <div className="mt-3 text-xs font-semibold" style={{ color: '#15803d' }}>Alle Prüfungen bestanden.</div>
+            <div className="mt-3 text-xs font-semibold" style={{ color: '#15803d' }}>{t('hwh.allChecksPassed')}</div>
           )}
           {!diagClean && (
-            <div className="mt-3 text-xs font-semibold" style={{ color: '#b91c1c' }}>Prüfung fehlgeschlagen — bitte Fehler oben prüfen.</div>
+            <div className="mt-3 text-xs font-semibold" style={{ color: '#b91c1c' }}>{t('hwh.checkFailed')}</div>
           )}
         </div>
       </div>
@@ -2474,10 +2542,10 @@ function InhaberLongestConflictView({
       {/* Bottom nav */}
       <div className="flex items-center gap-4 pt-2">
         <button onClick={onBack} className="inline-flex items-center gap-2 text-sm hover:opacity-80" style={{ color: 'var(--text-secondary)' }}>
-          <ArrowLeft size={15} /> Zurück zu Inhaber Nicht-konflikt Blöcken
+          <ArrowLeft size={15} /> {t('hwh.backToOwnerNonConflict')}
         </button>
         <button onClick={onRecompute} className="inline-flex items-center gap-2 text-sm hover:opacity-80" style={{ color: 'var(--text-secondary)' }}>
-          <RefreshCw size={13} /> Neu berechnen
+          <RefreshCw size={13} /> {t('hwh.recompute')}
         </button>
         {remainingUnassignedBlocks.length > 0 && (
           <button
@@ -2485,7 +2553,7 @@ function InhaberLongestConflictView({
             className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all hover:brightness-90 ml-auto"
             style={{ background: '#15803d', color: '#fff', border: '1px solid #15803d' }}
           >
-            <ArrowRight size={15} /> Freie Inhaber-Zeitfenster suchen
+            <ArrowRight size={15} /> {t('hwh.searchFreeOwnerWindows')}
           </button>
         )}
       </div>
@@ -2525,11 +2593,37 @@ interface CandidateWindow {
   vehicleFree: boolean;
 }
 
+// The status strings below are internal identifiers the algorithms branch on
+// with ===; the *_KEYS maps turn them into labels at render time.
+type FwsCandidacyStatus = 'Kandidat vorhanden' | 'Kandidat mit Fahrzeug frei' | 'Kein passendes Fenster';
+
+const FWS_STATUS_KEYS: Record<FwsCandidacyStatus, TranslationKey> = {
+  'Kandidat vorhanden':         'hwh.fwsStatusCandidate',
+  'Kandidat mit Fahrzeug frei': 'hwh.fwsStatusCandidateVehicleFree',
+  'Kein passendes Fenster':     'hwh.fwsStatusNoWindow',
+};
+
+const SUGGESTION_STATUS_KEYS: Record<string, TranslationKey> = {
+  'Zu kurz':         'hwh.sugStatusTooShort',
+  'Außerhalb Monat': 'hwh.sugStatusOutsideMonth',
+  'Fahrzeug belegt': 'hwh.sugStatusVehicleBusy',
+  'Passend':         'hwh.sugStatusFits',
+};
+
+const SELECTION_STATUS_KEYS: Record<string, TranslationKey> = {
+  'Ausgewählt':       'hwh.selStatusSelected',
+  'Nicht ausgewählt': 'hwh.selStatusNotSelected',
+};
+
+// Internal marker distinguishing "rejected for a ride-level conflict" from the
+// other rejection reasons, which are user-facing strings.
+const RIDE_CONFLICT_SENTINEL = '__ride_conflict__';
+
 interface OpenBlockCandidacy {
   block: VehicleBlock;
   candidateWindows: CandidateWindow[];
   windowsWithVehicleFree: number;
-  status: 'Kandidat vorhanden' | 'Kandidat mit Fahrzeug frei' | 'Kein passendes Fenster';
+  status: FwsCandidacyStatus;
 }
 
 interface FwsDiagnostics {
@@ -2873,6 +2967,7 @@ function InhaberFreeWindowSearchView({
   fwsResult, month, year, onBack, onRecompute, onApplyAutoShiftPlan, isCreatingPlan, planError, originalTrips, inhaberName, sourceSheetName, sourceColumnsJson, storagePath, originalFileName, driverConfigs, allDrivers, driverNotesMap,
   simplified = false, autoApply = false, onExportReadyCallback, onFinalAssignmentReady, onPlanDataReady, onDriverHourSummaryReady, onSalaryRangeSummaryReady, exportTriggerRef,
 }: InhaberFreeWindowSearchViewProps) {
+  const { t, tPlural } = useTranslation();
   const [modalData, setModalData] = useState<FwsModalData | null>(null);
   const [expandedBlock, setExpandedBlock] = useState<string | null>(null);
   const [openBlocksOpen, setOpenBlocksOpen] = useState(false);
@@ -3171,10 +3266,10 @@ function InhaberFreeWindowSearchView({
       for (const cand of ranked) {
         const { proposedStart: ps, proposedEnd: pe } = cand;
         // Block-level checks
-        if (inhaberOccupiedIntervals.some(i => i.startMs < pe && i.endMs > ps)) { chosenReason = 'Inhaber-Block-Konflikt'; continue; }
-        if (usedInhaber.some(i => i.start < pe && i.end > ps)) { chosenReason = 'Inhaber bereits belegt'; continue; }
+        if (inhaberOccupiedIntervals.some(i => i.startMs < pe && i.endMs > ps)) { chosenReason = t('hwh.reasonOwnerBlockConflict'); continue; }
+        if (usedInhaber.some(i => i.start < pe && i.end > ps)) { chosenReason = t('hwh.reasonOwnerAlreadyBusy'); continue; }
         const vUsed = usedVehicle.get(block.vehicle) ?? [];
-        if (vUsed.some(vi => vi.start < pe && vi.end > ps)) { chosenReason = 'Fahrzeug-Block-Konflikt'; continue; }
+        if (vUsed.some(vi => vi.start < pe && vi.end > ps)) { chosenReason = t('hwh.reasonVehicleBlockConflict'); continue; }
 
         // Ride-level simulation: check each shifted ride vs existing rides on the same vehicle.
         // Exclude ONLY this block's own trip IDs — matching Section E's exclusion logic exactly.
@@ -3191,25 +3286,25 @@ function InhaberFreeWindowSearchView({
           const exConflict = existingVehicleRides.find(r => r.startMs < rideEnd && r.endMs > rideStart);
           if (exConflict) {
             rideConflict = true;
-            rideConflictDetail = `${block.vehicle}: ride …${ride.tripId.slice(-6)} ↔ existierend …${exConflict.tripId.slice(-6)}`;
+            rideConflictDetail = `${block.vehicle}: ${t('hwh.detailRideVsExisting', { ride: ride.tripId.slice(-6), existing: exConflict.tripId.slice(-6) })}`;
             break;
           }
-          if (alreadySelectedRides.some(r => r.start < rideEnd && r.end > rideStart)) { rideConflict = true; rideConflictDetail = `${block.vehicle}: bereits gewählt`; break; }
+          if (alreadySelectedRides.some(r => r.start < rideEnd && r.end > rideStart)) { rideConflict = true; rideConflictDetail = `${block.vehicle}: ${t('hwh.detailAlreadyChosen')}`; break; }
         }
         if (rideConflict) {
           rejectedCandidateRideDetails.push({
             blockId: block.blockId, vehicle: block.vehicle,
             candStart: ps, candEnd: pe,
-            reason: 'Ride-Konflikt mit bestehender Fahrt', detail: rideConflictDetail,
+            reason: t('hwh.reasonRideConflictExisting'), detail: rideConflictDetail,
           });
-          chosenReason = 'Fahrzeug-Ride-Konflikt (Einzelfahrten)';
+          chosenReason = RIDE_CONFLICT_SENTINEL;
           continue;
         }
 
         // Driver exclusion check: reject if owner/Inhaber is excluded from planning in this interval
         if (resolvedOwnerName && driverNotesMap.size > 0) {
-          const excl = isDriverExcludedFromPlanning(ownerDriverId, resolvedOwnerName, ps, pe, driverNotesMap, driverNameToId);
-          if (excl.excluded) { chosenReason = `Planungsausschluss durch Fahrer-Notiz: ${excl.detail}`; continue; }
+          const excl = isDriverExcludedFromPlanning(ownerDriverId, resolvedOwnerName, ps, pe, driverNotesMap, driverNameToId, t);
+          if (excl.excluded) { chosenReason = t('hwh.reasonPlanningExclusionNote', { detail: excl.detail }); continue; }
         }
 
         chosen = cand;
@@ -3235,12 +3330,13 @@ function InhaberFreeWindowSearchView({
         candidateCount: allValid.length,
         chosen,
         reason: chosen
-          ? 'Bester verfügbarer Vorschlag ohne Konflikte (ride-level geprüft)'
+          ? t('hwh.reasonBestAvailable')
           : allValid.length === 0
-            ? 'Keine gültigen Kandidaten verfügbar'
-            : chosenReason === 'Fahrzeug-Ride-Konflikt (Einzelfahrten)'
-              ? 'Keine konfliktfreie Einzelfahrt-Platzierung gefunden'
-              : chosenReason || 'Kein konfliktfreier Vorschlag nach bereits gewählten Blöcken',
+            ? t('hwh.reasonNoValidCandidates')
+            : chosenReason === RIDE_CONFLICT_SENTINEL
+              ? t('hwh.reasonNoConflictFreeSingleRide')
+              : chosenReason || t('hwh.reasonNoConflictFreeAfterChosen'),
+        // 'Ausgewählt' / 'Nicht ausgewählt' are compared with === downstream.
         status: (chosen ? 'Ausgewählt' : 'Nicht ausgewählt') as 'Ausgewählt' | 'Nicht ausgewählt',
       };
     });
@@ -3279,14 +3375,14 @@ function InhaberFreeWindowSearchView({
           const rs = ride.originalStartMs + offsetMs, re = ride.originalEndMs + offsetMs;
           const conflict = existing.find(ex => ex.startMs < re && ex.endMs > rs);
           if (conflict) {
-            const detail = `${e.block.vehicle}: ride …${ride.tripId.slice(-6)} ↔ existierend …${conflict.tripId.slice(-6)}`;
+            const detail = `${e.block.vehicle}: ${t('hwh.detailRideVsExisting', { ride: ride.tripId.slice(-6), existing: conflict.tripId.slice(-6) })}`;
             rejectedCandidateRideDetails.push({
               blockId: e.block.blockId, vehicle: e.block.vehicle,
               candStart: e.chosen.proposedStart, candEnd: e.chosen.proposedEnd,
-              reason: 'Nachprüfung: Ride-Konflikt mit bestehender Fahrt', detail,
+              reason: t('hwh.reasonRecheckRideConflict'), detail,
             });
             (e as { chosen: typeof e.chosen; reason: string; status: string }).chosen = null;
-            (e as { reason: string }).reason = 'Nachprüfung: Ride-Konflikt mit bestehender Fahrt';
+            (e as { reason: string }).reason = t('hwh.reasonRecheckRideConflict');
             (e as { status: string }).status = 'Nicht ausgewählt';
             break;
           }
@@ -3295,7 +3391,7 @@ function InhaberFreeWindowSearchView({
     }
 
     return { entries: blockResults, rejectedDetails: rejectedCandidateRideDetails };
-  }, [candidateWindowsByBlock, inhaberOccupiedIntervals, monthStartMs, monthEndMs, originalTrips, resolvedOwnerName, ownerDriverId, driverNotesMap, driverNameToId]);
+  }, [candidateWindowsByBlock, inhaberOccupiedIntervals, monthStartMs, monthEndMs, originalTrips, resolvedOwnerName, ownerDriverId, driverNotesMap, driverNameToId, t]);
 
   const autoSelection = autoSelectionResult.entries;
   const autoSelectionRejectedDetails = autoSelectionResult.rejectedDetails;
@@ -3417,9 +3513,9 @@ function InhaberFreeWindowSearchView({
         for (const ride of sp.block.rides) {
           const rideStart = ride.originalStartMs + offsetMs;
           const rideEnd   = ride.originalEndMs   + offsetMs;
-          const excl = isDriverExcludedFromPlanning(ownerDriverId, resolvedOwnerName, rideStart, rideEnd, driverNotesMap, driverNameToId);
+          const excl = isDriverExcludedFromPlanning(ownerDriverId, resolvedOwnerName, rideStart, rideEnd, driverNotesMap, driverNameToId, t);
           if (excl.excluded) {
-            driverExclusionConflicts.push(`${sp.block.vehicle}: ride …${ride.tripId.slice(-6)} — ${excl.detail}`);
+            driverExclusionConflicts.push(`${sp.block.vehicle}: ${t('hwh.detailRide', { ride: ride.tripId.slice(-6) })} — ${excl.detail}`);
           }
         }
       }
@@ -3434,11 +3530,11 @@ function InhaberFreeWindowSearchView({
     // Per-item check result for compact table
     const perItemChecks = selected.map(sp => {
       const issues: string[] = [];
-      if (sp.chosen.pufferVorMs  < MIN_PUFFER_MS) issues.push('Puffer vor');
-      if (sp.chosen.pufferNachMs < MIN_PUFFER_MS) issues.push('Puffer nach');
-      if (sp.chosen.proposedStart < monthStartMs || sp.chosen.proposedEnd > monthEndMs + 1) issues.push('Außerhalb Monat');
-      if (!sp.chosen.proposedStart || !sp.chosen.proposedEnd || sp.chosen.proposedEnd <= sp.chosen.proposedStart) issues.push('Ungültiger Zeitstempel');
-      if (!sp.chosen.cw.vehicleFree) issues.push('Fahrzeug belegt');
+      if (sp.chosen.pufferVorMs  < MIN_PUFFER_MS) issues.push(t('hwh.colBufferBefore'));
+      if (sp.chosen.pufferNachMs < MIN_PUFFER_MS) issues.push(t('hwh.colBufferAfter'));
+      if (sp.chosen.proposedStart < monthStartMs || sp.chosen.proposedEnd > monthEndMs + 1) issues.push(t('hwh.sugStatusOutsideMonth'));
+      if (!sp.chosen.proposedStart || !sp.chosen.proposedEnd || sp.chosen.proposedEnd <= sp.chosen.proposedStart) issues.push(t('hwh.issueInvalidTimestamp'));
+      if (!sp.chosen.cw.vehicleFree) issues.push(t('hwh.sugStatusVehicleBusy'));
       return issues;
     });
 
@@ -3498,7 +3594,7 @@ function InhaberFreeWindowSearchView({
       uniqueVehicles: new Set(selected.map(sp => sp.block.vehicle)).size,
       totalSec: selected.reduce((s, sp) => s + sp.block.blockDurationSec, 0),
     };
-  }, [autoSelection, inhaberOccupiedIntervals, monthStartMs, monthEndMs, originalTrips, driverNotesMap, resolvedOwnerName, ownerDriverId, driverNameToId]);
+  }, [autoSelection, inhaberOccupiedIntervals, monthStartMs, monthEndMs, originalTrips, driverNotesMap, resolvedOwnerName, ownerDriverId, driverNameToId, t]);
 
   // ── Diagnostic: existing imported rides that already violate driver exclusion notes ──
   // Warning-only — does not block export of unrelated rides.
@@ -3534,13 +3630,13 @@ function InhaberFreeWindowSearchView({
       const endStr   = (() => { for (const k of Object.keys(raw)) if (END_KEYS_EV.includes(k.toLowerCase())) return String(raw[k] ?? ''); return ''; })();
       const startMs = parseTsEV(dateStr, startStr), endMs = parseTsEV(dateStr, endStr);
       if (!startMs || !endMs || endMs <= startMs) continue;
-      const excl = isDriverExcludedFromPlanning(driverId, driverName, startMs, endMs, driverNotesMap, driverNameToId);
+      const excl = isDriverExcludedFromPlanning(driverId, driverName, startMs, endMs, driverNotesMap, driverNameToId, t);
       if (excl.excluded) {
         violations.push({ driver: driverName, vehicle: trip.car_identifier ?? '', tripId: trip.id, startMs, endMs, detail: excl.detail });
       }
     }
     return violations;
-  }, [originalTrips, driverNotesMap, driverNameToId]);
+  }, [originalTrips, driverNotesMap, driverNameToId, t]);
 
   // ── Alternatives diagnostic for unresolved Fahrer-Notiz conflicts ────────────
   // For each unresolved excluded ride group (= logical block), evaluate every driver
@@ -3612,16 +3708,16 @@ function InhaberFreeWindowSearchView({
         if (nameL === block.driver.trim().toLowerCase()) continue;
 
         const isInhaber = inhaberLower && nameL === inhaberLower;
-        const excl = isDriverExcludedFromPlanning(driver.id ?? null, driver.name, block.startMs, block.endMs, driverNotesMap, driverNameToId);
+        const excl = isDriverExcludedFromPlanning(driver.id ?? null, driver.name, block.startMs, block.endMs, driverNotesMap, driverNameToId, t);
         let rejectReason: string | null = null;
 
         if (excl.excluded) {
-          rejectReason = `Fahrer-Notiz verletzt: ${excl.detail}`;
+          rejectReason = t('hwh.reasonDriverNoteViolated', { detail: excl.detail });
         } else if (isInhaber) {
           const inhaberBusy = inhaberOccupiedIntervals.some(
             occ => occ.startMs < block.endMs && occ.endMs > block.startMs
           );
-          if (inhaberBusy) rejectReason = 'Inhaber belegt';
+          if (inhaberBusy) rejectReason = t('hwh.reasonOwnerBusy');
         }
 
         const inhaberFreeNow = isInhaber
@@ -3662,7 +3758,7 @@ function InhaberFreeWindowSearchView({
     const blocksWithout = blocks.length - blocksWithAlternative;
 
     return { blocks, blocksWithAlternative, blocksWithout, totalBlocks: blocks.length };
-  }, [sectionFData, allDrivers, driverNotesMap, driverNameToId, inhaberOccupiedIntervals, resolvedOwnerName]);
+  }, [sectionFData, allDrivers, driverNotesMap, driverNameToId, inhaberOccupiedIntervals, resolvedOwnerName, t]);
 
   // Rides still unresolved after user applies note alternatives
   const effectiveUnresolvedRides = useMemo(() => {
@@ -3693,22 +3789,22 @@ function InhaberFreeWindowSearchView({
     [effectiveAllOk, originalTrips, ownerResolution],
   );
   const exportBlockReason = useMemo(() => {
-    if (ownerResolution.status === 'none') return 'kein Inhaber-Fahrer in den Fahrern gefunden';
-    if (ownerResolution.status === 'multiple') return `mehrere Inhaber-Fahrer gefunden (${ownerResolution.count})`;
+    if (ownerResolution.status === 'none') return t('hwh.exportBlockNoOwnerDriver');
+    if (ownerResolution.status === 'multiple') return t('hwh.exportBlockMultipleOwners', { count: ownerResolution.count });
     if (effectiveUnresolvedRides.length > 0) {
       return autoNoteAlternativesApplied
-        ? `Für ${effectiveUnresolvedRides.length} Fahrt(en) konnte trotz automatischer Alternativen kein zulässiger Fahrer ohne Konflikte gefunden werden.`
-        : `${effectiveUnresolvedRides.length} Fahrten mit ungültigem Fahrer`;
+        ? t('hwh.exportBlockNoValidDriverDespiteAlternatives', { count: effectiveUnresolvedRides.length })
+        : t('hwh.exportBlockRidesWithInvalidDriver', { count: effectiveUnresolvedRides.length });
     }
-    if (!effectiveAllOk) return 'Fehler im angewendeten Plan';
+    if (!effectiveAllOk) return t('hwh.exportBlockPlanError');
     return null;
-  }, [ownerResolution, effectiveUnresolvedRides, effectiveAllOk, autoNoteAlternativesApplied]);
+  }, [ownerResolution, effectiveUnresolvedRides, effectiveAllOk, autoNoteAlternativesApplied, t]);
 
   // ── Section F: apply selected Vorschau placements → derive shifted rides ─────
 
   const handleApplyPlan = useCallback(() => {
     if (!originalTrips || originalTrips.length === 0) return;
-    const tripById = new Map(originalTrips.map(t => [t.id, t]));
+    const tripById = new Map(originalTrips.map(trip => [trip.id, trip]));
     const selectedEntries = autoSelection.filter(e => e.chosen !== null);
 
     // Helper: parse a raw_data_json timestamp string → ms (null if invalid/missing)
@@ -3803,7 +3899,7 @@ function InhaberFreeWindowSearchView({
         rideCount: ridesFilled,
         offsetMs,
         ok: blockOk && ridesFilled === block.rides.length,
-        hint: ridesFilled === 0 ? 'Keine Fahrten' : blockOk ? 'OK' : 'Zeitstempel-Fehler',
+        hint: ridesFilled === 0 ? t('hwh.hintNoRides') : blockOk ? t('hwh.ok') : t('hwh.hintTimestampError'),
       });
     }
 
@@ -3870,7 +3966,7 @@ function InhaberFreeWindowSearchView({
         const existing = existingByVehicle.get(r.vehicle) ?? [];
         for (const ex of existing) {
           if (ex.startMs < r.newEndMs && ex.endMs > r.newStartMs) {
-            rideLevelExistingConflicts.push(`${r.vehicle}: …${r.tripId.slice(-6)} ↔ existierend …${ex.tripId.slice(-6)}`);
+            rideLevelExistingConflicts.push(`${r.vehicle}: …${r.tripId.slice(-6)} ↔ ${t('hwh.existingShort')} …${ex.tripId.slice(-6)}`);
           }
         }
       }
@@ -3886,7 +3982,7 @@ function InhaberFreeWindowSearchView({
       for (const r of changedRides) {
         const driverRec = allDrivers.find(d => d.name === r.newDriver);
         const dId = driverRec?.id ?? null;
-        const excl = isDriverExcludedFromPlanning(dId, r.newDriver, r.newStartMs, r.newEndMs, driverNotesMap, driverNameToId);
+        const excl = isDriverExcludedFromPlanning(dId, r.newDriver, r.newStartMs, r.newEndMs, driverNotesMap, driverNameToId, t);
         if (excl.excluded) driverExclusionViolations.push(excl.detail);
       }
     }
@@ -3929,7 +4025,7 @@ function InhaberFreeWindowSearchView({
         const endStr   = (() => { for (const k of Object.keys(raw)) if (END_KEYS_XD.includes(k.toLowerCase())) return String(raw[k] ?? ''); return ''; })();
         const startMs = parseTsXD(dateStr, startStr), endMs = parseTsXD(dateStr, endStr);
         if (!startMs || !endMs || endMs <= startMs) continue;
-        const excl = isDriverExcludedFromPlanning(driverId, driverName, startMs, endMs, driverNotesMap, driverNameToId);
+        const excl = isDriverExcludedFromPlanning(driverId, driverName, startMs, endMs, driverNotesMap, driverNameToId, t);
         if (excl.excluded) {
           const startMs2 = startMs, endMs2 = endMs;
           excludedDriverRideMap.set(trip.id, { driver: driverName, vehicle: tripVehicleMap.get(trip.id) ?? '', detail: excl.detail });
@@ -4011,7 +4107,7 @@ function InhaberFreeWindowSearchView({
       unresolvedExcludedRides,
       excludedDriverRideMap,
     });
-  }, [autoSelection, originalTrips, inhaberName, resolvedOwnerName, sourceColumnsJson, driverNotesMap, driverNameToId, allDrivers, candidateWindowsByBlock]);
+  }, [autoSelection, originalTrips, inhaberName, resolvedOwnerName, sourceColumnsJson, driverNotesMap, driverNameToId, allDrivers, candidateWindowsByBlock, t]);
 
   const handleExportFahrtenbuch = useCallback(async () => {
     if (!sectionFData || !originalTrips) return;
@@ -4023,7 +4119,9 @@ function InhaberFreeWindowSearchView({
     // Never export empty Fahrername or keep an excluded driver.
     const stillUnresolved = unresolvedExcludedRides.filter(r => !noteReassignments.has(r.tripId));
     if (stillUnresolved.length > 0) {
-      alert(`Export gesperrt — ${stillUnresolved.length} Fahrten haben ungültige Fahrer (Fahrer-Notiz / Von Planung ausschließen). Bitte Abschnitt F prüfen.`);
+      // Screen message, not document text — the byte-for-byte export rules below
+      // cover the workbook contents, not this alert.
+      alert(t('hwh.exportLockedInvalidDrivers', { count: stillUnresolved.length }));
       return;
     }
 
@@ -4047,15 +4145,15 @@ function InhaberFreeWindowSearchView({
     if (sourceColumnsJson && sourceColumnsJson.length > 0) {
       headers = [...sourceColumnsJson];
       const inHeaders = new Set(headers.map(h => h.toLowerCase()));
-      for (const t of originalTrips) {
-        if (t.raw_data_json) for (const k of Object.keys(t.raw_data_json)) {
+      for (const trip of originalTrips) {
+        if (trip.raw_data_json) for (const k of Object.keys(trip.raw_data_json)) {
           if (!inHeaders.has(k.toLowerCase())) { headers.push(k); inHeaders.add(k.toLowerCase()); }
         }
       }
     } else {
       const headerSet = new Set<string>();
-      for (const t of originalTrips) {
-        if (t.raw_data_json) for (const k of Object.keys(t.raw_data_json)) headerSet.add(k);
+      for (const trip of originalTrips) {
+        if (trip.raw_data_json) for (const k of Object.keys(trip.raw_data_json)) headerSet.add(k);
       }
       headers = [...headerSet];
     }
@@ -4214,7 +4312,8 @@ function InhaberFreeWindowSearchView({
       }
 
       if (invalidPriceKmCount > 0) {
-        alert(`Export gesperrt — Fahrpreis/Kilometer wurden verändert (${invalidPriceKmCount} Zellen). Bitte erneut versuchen.`);
+        // Screen alert, not workbook content.
+        alert(t('hwh.exportLockedPriceKmChanged', { count: invalidPriceKmCount }));
         return;
       }
 
@@ -4267,7 +4366,7 @@ function InhaberFreeWindowSearchView({
     const wb3 = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb3, ws, sourceSheetName ?? 'Sheet1');
     XLSX.writeFile(wb3, originalFileName ?? `fahrtenbuch_neu_${year}-${String(month).padStart(2,'0')}.xlsx`);
-  }, [sectionFData, originalTrips, resolvedOwnerName, sourceSheetName, sourceColumnsJson, storagePath, originalFileName, year, month, noteReassignments]);
+  }, [sectionFData, originalTrips, resolvedOwnerName, sourceSheetName, sourceColumnsJson, storagePath, originalFileName, year, month, noteReassignments, t]);
 
   // Keep exportTriggerRef in sync so the parent can trigger a download
   useEffect(() => {
@@ -4282,14 +4381,14 @@ function InhaberFreeWindowSearchView({
     if (!autoApply || autoApplyDoneRef.current) return;
     autoApplyDoneRef.current = true;
     if (!originalTrips || originalTrips.length === 0) {
-      exportReadyCallbackRef.current?.(false, 'Keine Fahrten geladen');
+      exportReadyCallbackRef.current?.(false, t('hwh.noTripsLoaded'));
       return;
     }
     try {
       handleApplyPlanRef.current?.();
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      exportReadyCallbackRef.current?.(false, `Fehler beim Anwenden des Plans: ${msg}`);
+      exportReadyCallbackRef.current?.(false, t('hwh.errorApplyingPlan', { message: msg }));
     }
   }, [autoApply, originalTrips]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -4313,7 +4412,7 @@ function InhaberFreeWindowSearchView({
       const noteMap = new Map(Array.from(noteReassignments.entries()));
       const hourSummary = buildDriverHourSummary(originalTrips, shiftMap, noteMap, driverConfigs, resolvedOwnerName, year);
       const salaryRangeSummary = buildFinalSalaryRangeSummary(hourSummary, driverConfigs);
-      const salaryError = validateFinalSalaryRanges(salaryRangeSummary);
+      const salaryError = validateFinalSalaryRanges(salaryRangeSummary, t);
       if (salaryError) {
         exportReadyCallbackRef.current?.(false, salaryError);
         return;
@@ -4503,7 +4602,7 @@ function InhaberFreeWindowSearchView({
         {!sectionFData && (
           <div className="flex items-center gap-2 text-sm" style={{ color: 'var(--text-secondary)' }}>
             <RefreshCw size={14} className="animate-spin" style={{ color: '#2563eb' }} />
-            <span>Abschlussprüfung läuft…</span>
+            <span>{t('hwh.finalCheckRunning')}</span>
           </div>
         )}
         {sectionFData && canExport && (
@@ -4512,7 +4611,7 @@ function InhaberFreeWindowSearchView({
             className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold transition-all hover:brightness-110"
             style={{ background: '#15803d', color: '#fff' }}
           >
-            <Download size={15} /> Neues Fahrtenbuch herunterladen
+            <Download size={15} /> {t('hwh.downloadNewFahrtenbuch')}
           </button>
         )}
       </div>
@@ -4524,24 +4623,24 @@ function InhaberFreeWindowSearchView({
 
       {/* Header */}
       <div>
-        <h2 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>Inhaber-Zeitfenster für Verschiebung</h2>
+        <h2 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>{t('hwh.fwsTitle')}</h2>
         <p className="text-sm mt-0.5" style={{ color: 'var(--text-secondary)' }}>
-          Die freien Zeiten im Inhaber-Kalender werden ermittelt, um spätere Verschiebungen vorzubereiten.
+          {t('hwh.fwsSubtitle')}
         </p>
         <div className="mt-1.5 inline-flex items-center gap-1.5 text-xs px-2 py-1 rounded-lg" style={{ background: 'rgba(124,58,237,0.08)', color: INHABER_COLOR, border: '1px solid rgba(124,58,237,0.2)' }}>
-          Mindestabstand Inhaber-Blöcke: 30 min
+          {t('hwh.minOwnerBlockGap')}
         </div>
       </div>
 
       {/* Summary cards — compact 6 cards */}
       <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
         {[
-          { label: 'Inhaber-Blöcke',        value: summary.inhaberBlockCount,                                         color: '#0891b2' },
-          { label: 'Offene Blöcke',          value: summary.openBlockCount,                                            color: summary.openBlockCount > 0 ? '#b45309' : '#15803d' },
-          { label: 'Freie Fenster',          value: summary.freeWindowCount,                                           color: '#15803d' },
-          { label: 'Freie Stunden',          value: formatBlockDuration(summary.freeSec),                              color: '#15803d' },
-          { label: 'Mit Fenster',            value: summary.openBlocksWithCandidate,                                   color: summary.openBlocksWithCandidate > 0 ? '#15803d' : '#b45309' },
-          { label: 'Ohne Fenster',           value: summary.openBlocksNoCandidate,                                     color: summary.openBlocksNoCandidate > 0 ? '#b91c1c' : '#15803d' },
+          { label: t('hwh.statOwnerBlocks'),      value: summary.inhaberBlockCount,             color: '#0891b2' },
+          { label: t('hwh.statOpenBlocks'),       value: summary.openBlockCount,                color: summary.openBlockCount > 0 ? '#b45309' : '#15803d' },
+          { label: t('hwh.statFreeWindows'),      value: summary.freeWindowCount,               color: '#15803d' },
+          { label: t('hwh.statFreeHours'),        value: formatBlockDuration(summary.freeSec),  color: '#15803d' },
+          { label: t('hwh.statWithWindow'),       value: summary.openBlocksWithCandidate,       color: summary.openBlocksWithCandidate > 0 ? '#15803d' : '#b45309' },
+          { label: t('hwh.statWithoutWindow'),    value: summary.openBlocksNoCandidate,         color: summary.openBlocksNoCandidate > 0 ? '#b91c1c' : '#15803d' },
         ].map(c => (
           <div key={c.label} className="rounded-xl p-2.5" style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)' }}>
             <div className="text-xs mb-0.5" style={{ color: 'var(--text-secondary)' }}>{c.label}</div>
@@ -4554,18 +4653,18 @@ function InhaberFreeWindowSearchView({
       <div>
         <div className="mb-2">
           <div className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
-            Inhaber-Kalender: Freie Zeitfenster
+            {t('hwh.ownerCalendarFreeWindows')}
           </div>
           <p className="text-xs mt-0.5" style={{ color: 'var(--text-secondary)' }}>
-            Belegte Inhaber-Blöcke und freie Zeitfenster für mögliche Verschiebungen.
+            {t('hwh.ownerCalendarFreeWindowsHint')}
           </p>
         </div>
 
         <div className="rounded-2xl" style={{ border: '1px solid var(--border)', overflow: 'hidden' }}>
           {/* Weekday header */}
           <div className="grid grid-cols-7" style={{ background: 'var(--bg-subtle)', borderBottom: '2px solid var(--border)' }}>
-            {['So','Mo','Di','Mi','Do','Fr','Sa'].map(d => (
-              <div key={d} className="py-2 text-center text-xs font-bold" style={{ color: 'var(--text-secondary)' }}>{d}</div>
+            {WEEKDAY_COLS.map(dayKey => (
+              <div key={dayKey} className="py-2 text-center text-xs font-bold" style={{ color: 'var(--text-secondary)' }}>{t(dayKey)}</div>
             ))}
           </div>
 
@@ -4617,7 +4716,7 @@ function InhaberFreeWindowSearchView({
                               }}
                             >
                               <span className="font-semibold">{fmtTime(o.startMs)}–{fmtTime(o.endMs)}</span>
-                              {' · '}Belegt{' · '}
+                              {' · '}{t('hwh.occupied')}{' · '}
                               <span className="font-mono">…{o.blockId.slice(-6)}</span>
                               {' · '}{o.vehicle}
                               {' · '}{formatBlockDuration(o.durationSec)}
@@ -4632,7 +4731,7 @@ function InhaberFreeWindowSearchView({
                           const candidates = windowCandidateMap.get(w.windowId) ?? [];
                           const hasVehicleFree = candidates.some(c => c.vehicleFree);
                           const hasAnyCandidate = candidates.length > 0;
-                          const badge = hasVehicleFree ? 'Fzg frei' : hasAnyCandidate ? 'Kandidat' : 'Kein Kandidat';
+                          const badge = hasVehicleFree ? t('hwh.badgeVehicleFree') : hasAnyCandidate ? t('hwh.badgeCandidate') : t('hwh.badgeNoCandidate');
                           const badgeColor = hasVehicleFree ? '#15803d' : hasAnyCandidate ? '#0891b2' : '#9ca3af';
                           return (
                             <button
@@ -4657,7 +4756,7 @@ function InhaberFreeWindowSearchView({
                               }}
                             >
                               <span className="font-semibold">{fmtTime(w.startMs)}–{fmtTime(w.endMs)}</span>
-                              {' · '}Frei{' · '}{formatBlockDuration(w.durationSec)}
+                              {' · '}{t('hwh.free')}{' · '}{formatBlockDuration(w.durationSec)}
                               <span className="ml-1 px-1 py-px rounded font-bold" style={{ background: badgeColor + '22', color: badgeColor, border: `1px solid ${badgeColor}55`, fontSize: '0.55rem' }}>
                                 {badge}
                               </span>
@@ -4678,20 +4777,20 @@ function InhaberFreeWindowSearchView({
         <div className="flex flex-wrap gap-3 mt-2 text-xs" style={{ color: 'var(--text-secondary)' }}>
           <span className="inline-flex items-center gap-1.5">
             <span className="w-3 h-3 rounded" style={{ background: '#ede9fe', border: `1px solid ${INHABER_COLOR}66` }} />
-            Inhaber (Schritt 3)
+            {t('hwh.legendOwnerStep3')}
           </span>
           <span className="inline-flex items-center gap-1.5">
             <span className="w-3 h-3 rounded" style={{ background: '#cffafe', border: '1px solid #0891b2' }} />
-            Inhaber (Schritt 4)
+            {t('hwh.legendOwnerStep4')}
           </span>
           <span className="inline-flex items-center gap-1.5">
             <span className="w-3 h-3 rounded" style={{ background: 'rgba(16,185,129,0.08)', border: '1.5px dashed #10b981' }} />
-            Freies Fenster
+            {t('hwh.legendFreeWindow')}
           </span>
-          <span className="inline-flex items-center gap-1.5 ml-2 font-semibold" style={{ color: '#15803d' }}>Fzg frei</span>
-          <span style={{ color: 'var(--text-secondary)' }}>= Fahrzeug auch verfügbar</span>
-          <span className="inline-flex items-center gap-1.5 font-semibold" style={{ color: '#0891b2' }}>Kandidat</span>
-          <span style={{ color: 'var(--text-secondary)' }}>= passendes Fenster existiert</span>
+          <span className="inline-flex items-center gap-1.5 ml-2 font-semibold" style={{ color: '#15803d' }}>{t('hwh.badgeVehicleFree')}</span>
+          <span style={{ color: 'var(--text-secondary)' }}>{t('hwh.legendVehicleAlsoAvailable')}</span>
+          <span className="inline-flex items-center gap-1.5 font-semibold" style={{ color: '#0891b2' }}>{t('hwh.badgeCandidate')}</span>
+          <span style={{ color: 'var(--text-secondary)' }}>{t('hwh.legendMatchingWindowExists')}</span>
         </div>
       </div>
 
@@ -4703,8 +4802,8 @@ function InhaberFreeWindowSearchView({
           onClick={() => setOpenBlocksOpen(o => !o)}
         >
           <span>
-            Offene Blöcke mit möglichen Zeitfenstern
-            <span className="font-normal text-xs ml-2" style={{ color: 'var(--text-secondary)' }}>{remainingOpenBlocks.length} Blöcke</span>
+            {t('hwh.openBlocksWithWindows')}
+            <span className="font-normal text-xs ml-2" style={{ color: 'var(--text-secondary)' }}>{t('hwh.blocksCount', { count: remainingOpenBlocks.length })}</span>
           </span>
           <span style={{ color: 'var(--text-secondary)' }}>{openBlocksOpen ? '▲' : '▼'}</span>
         </button>
@@ -4713,7 +4812,7 @@ function InhaberFreeWindowSearchView({
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead>
                 <tr style={{ background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)' }}>
-                  {['Block-ID','Fahrzeug','Dauer','Mögliche Fenster','Davon Fzg frei','Status'].map(h => (
+                  {[t('hwh.colBlockId'), t('hwh.colVehicle'), t('hwh.colDuration'), t('hwh.colPossibleWindows'), t('hwh.colOfWhichVehicleFree'), t('common.status')].map(h => (
                     <th key={h} className="px-3 py-2 text-left text-xs font-semibold whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{h}</th>
                   ))}
                 </tr>
@@ -4734,19 +4833,19 @@ function InhaberFreeWindowSearchView({
                         <td className="px-3 py-2 text-xs" style={{ color: 'var(--text-secondary)' }}>{formatBlockDuration(block.blockDurationSec)}</td>
                         <td className="px-3 py-2 text-xs font-bold" style={{ color: candidateWindows.length > 0 ? '#15803d' : '#b91c1c' }}>{candidateWindows.length}</td>
                         <td className="px-3 py-2 text-xs font-bold" style={{ color: windowsWithVehicleFree > 0 ? '#15803d' : '#b45309' }}>{windowsWithVehicleFree}</td>
-                        <td className="px-3 py-2 text-xs font-bold" style={{ color: statusColor }}>{status}</td>
+                        <td className="px-3 py-2 text-xs font-bold" style={{ color: statusColor }}>{t(FWS_STATUS_KEYS[status])}</td>
                       </tr>
                       {isOpen && (
                         <tr style={{ borderBottom: '1px solid var(--border)' }}>
                           <td colSpan={6} className="px-4 py-3" style={{ background: 'rgba(16,185,129,0.04)' }}>
                             <div className="text-xs font-semibold mb-2" style={{ color: 'var(--text-secondary)' }}>
-                              Erste {Math.min(candidateWindows.length, 10)} mögliche Fenster — Block …{block.blockId.slice(-8)} ({block.vehicle} · {formatBlockDuration(block.blockDurationSec)})
+                              {t('hwh.firstNPossibleWindows', { count: Math.min(candidateWindows.length, 10) })} — {t('hwh.blockLabel')} …{block.blockId.slice(-8)} ({block.vehicle} · {formatBlockDuration(block.blockDurationSec)})
                             </div>
                             <div className="overflow-x-auto">
                               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                                 <thead>
                                   <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                                    {['Datum','Start','Ende','Fensterdauer','Fahrzeug frei'].map(h => (
+                                    {[t('common.date'), t('hwh.colStart'), t('hwh.colEnd'), t('hwh.colWindowDuration'), t('hwh.colVehicleFree')].map(h => (
                                       <th key={h} className="px-2 py-1.5 text-left text-xs font-semibold whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{h}</th>
                                     ))}
                                   </tr>
@@ -4758,7 +4857,7 @@ function InhaberFreeWindowSearchView({
                                       <td className="px-2 py-1.5 text-xs font-mono" style={{ color: '#065f46' }}>{fmtTime(cw.startMs)}</td>
                                       <td className="px-2 py-1.5 text-xs font-mono" style={{ color: '#065f46' }}>{fmtTime(cw.endMs)}</td>
                                       <td className="px-2 py-1.5 text-xs" style={{ color: '#065f46' }}>{formatBlockDuration(cw.durationSec)}</td>
-                                      <td className="px-2 py-1.5 text-xs font-bold" style={{ color: cw.vehicleFree ? '#15803d' : '#b91c1c' }}>{cw.vehicleFree ? 'Ja' : 'Nein'}</td>
+                                      <td className="px-2 py-1.5 text-xs font-bold" style={{ color: cw.vehicleFree ? '#15803d' : '#b91c1c' }}>{cw.vehicleFree ? t('common.yes') : t('common.no')}</td>
                                     </tr>
                                   ))}
                                 </tbody>
@@ -4783,17 +4882,17 @@ function InhaberFreeWindowSearchView({
           style={{ background: diagClean ? 'rgba(16,185,129,0.06)' : 'rgba(220,38,38,0.06)', color: 'var(--text-primary)' }}
           onClick={() => setDiagOpen(o => !o)}
         >
-          <span>Prüfung Zeitfenster-Suche{diagClean && <span className="ml-2 text-xs font-normal" style={{ color: '#15803d' }}>— Alles OK</span>}</span>
+          <span>{t('hwh.fwsCheckTitle')}{diagClean && <span className="ml-2 text-xs font-normal" style={{ color: '#15803d' }}>— {t('hwh.allOk')}</span>}</span>
           <span style={{ color: 'var(--text-secondary)' }}>{diagOpen ? '▲' : '▼'}</span>
         </button>
         {diagOpen && (
           <div className="p-4 space-y-2" style={{ borderTop: '1px solid var(--border)' }}>
             {[
-              { label: 'Zeitverschiebungen durchgeführt',    value: String(diagnostics.timeShiftsDone),              isOk: diagnostics.timeShiftsDone === 0 },
-              { label: 'Zuweisungen geändert',               value: String(diagnostics.assignmentsChanged),          isOk: diagnostics.assignmentsChanged === 0 },
-              { label: 'Reguläre Fahrer unverändert',        value: diagnostics.regularDriversUnchanged ? 'OK' : 'FEHLER', isOk: diagnostics.regularDriversUnchanged },
-              { label: 'Inhaber-Zuweisungen unverändert',    value: diagnostics.inhaberAssignmentsUnchanged ? 'OK' : 'FEHLER', isOk: diagnostics.inhaberAssignmentsUnchanged },
-              { label: 'Offene Blöcke unverändert',          value: diagnostics.openBlocksUnchanged ? 'OK' : 'FEHLER', isOk: diagnostics.openBlocksUnchanged },
+              { label: t('hwh.chkTimeShiftsDone'),          value: String(diagnostics.timeShiftsDone),      isOk: diagnostics.timeShiftsDone === 0 },
+              { label: t('hwh.chkAssignmentsChanged'),      value: String(diagnostics.assignmentsChanged),  isOk: diagnostics.assignmentsChanged === 0 },
+              { label: t('hwh.chkRegularDriversUnchanged'), value: diagnostics.regularDriversUnchanged ? t('hwh.ok') : t('hwh.failed'), isOk: diagnostics.regularDriversUnchanged },
+              { label: t('hwh.chkOwnerAssignmentsUnchanged'), value: diagnostics.inhaberAssignmentsUnchanged ? t('hwh.ok') : t('hwh.failed'), isOk: diagnostics.inhaberAssignmentsUnchanged },
+              { label: t('hwh.chkOpenBlocksUnchanged'),     value: diagnostics.openBlocksUnchanged ? t('hwh.ok') : t('hwh.failed'), isOk: diagnostics.openBlocksUnchanged },
             ].map(d => (
               <div key={d.label} className="flex items-center justify-between text-xs">
                 <span style={{ color: 'var(--text-secondary)' }}>{d.label}</span>
@@ -4812,9 +4911,9 @@ function InhaberFreeWindowSearchView({
           onClick={() => setAnalysisOpen(o => !o)}
         >
           <span>
-            Konflikt-Blöcke und mögliche Zeitfenster
+            {t('hwh.conflictBlocksAndWindows')}
             <span className="font-normal text-xs ml-2" style={{ color: 'var(--text-secondary)' }}>
-              {remainingOpenBlocks.length} offene Blöcke · {sortedFreeWindows.length} freie Fenster
+              {t('hwh.openBlocksFreeWindowsSummary', { blocks: remainingOpenBlocks.length, windows: sortedFreeWindows.length })}
             </span>
           </span>
           <span style={{ color: 'var(--text-secondary)' }}>{analysisOpen ? '▲' : '▼'}</span>
@@ -4830,20 +4929,20 @@ function InhaberFreeWindowSearchView({
                 style={{ background: 'rgba(220,38,38,0.04)', color: '#b91c1c' }}
                 onClick={() => setAnalysisSectionA(o => !o)}
               >
-                <span>A — Verbleibende Konflikt-Blöcke ({remainingOpenBlocks.length})</span>
+                <span>{t('hwh.sectionATitle', { count: remainingOpenBlocks.length })}</span>
                 <span>{analysisSectionA ? '▲' : '▼'}</span>
               </button>
               {analysisSectionA && (
                 remainingOpenBlocks.length === 0 ? (
                   <div className="px-4 py-3 text-xs" style={{ color: '#15803d' }}>
-                    Keine verbleibenden Konflikt-Blöcke.
+                    {t('hwh.noRemainingConflictBlocks')}
                   </div>
                 ) : (
                   <div className="overflow-x-auto">
                     <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                       <thead>
                         <tr style={{ background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)' }}>
-                          {['Block-ID','Datum','Fahrzeug','Start','Ende','Dauer','Fahrten','Status'].map(h => (
+                          {[t('hwh.colBlockId'), t('common.date'), t('hwh.colVehicle'), t('hwh.colStart'), t('hwh.colEnd'), t('hwh.colDuration'), t('hwh.colRides'), t('common.status')].map(h => (
                             <th key={h} className="px-3 py-2 text-left text-xs font-semibold whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{h}</th>
                           ))}
                         </tr>
@@ -4867,8 +4966,8 @@ function InhaberFreeWindowSearchView({
                               <td className="px-3 py-2 text-xs" style={{ color: 'var(--text-secondary)' }}>{formatBlockDuration(blk.blockDurationSec)}</td>
                               <td className="px-3 py-2 text-xs" style={{ color: 'var(--text-secondary)' }}>{blk.rides?.length ?? 0}</td>
                               <td className="px-3 py-2 text-xs font-bold whitespace-nowrap" style={{ color: statusColor }}>
-                                {statusLabel}
-                                {!hasCand && <span className="ml-1 text-xs font-normal" style={{ color: '#6b7280' }}>(kein Fenster)</span>}
+                                {t(FWS_STATUS_KEYS[statusLabel])}
+                                {!hasCand && <span className="ml-1 text-xs font-normal" style={{ color: '#6b7280' }}>({t('hwh.noWindowShort')})</span>}
                               </td>
                             </tr>
                           );
@@ -4887,20 +4986,20 @@ function InhaberFreeWindowSearchView({
                 style={{ background: 'rgba(16,185,129,0.04)', color: '#065f46' }}
                 onClick={() => setAnalysisSectionB(o => !o)}
               >
-                <span>B — Alle freien Inhaber-Zeitfenster ({sortedFreeWindows.length})</span>
+                <span>{t('hwh.sectionBTitle', { count: sortedFreeWindows.length })}</span>
                 <span>{analysisSectionB ? '▲' : '▼'}</span>
               </button>
               {analysisSectionB && (
                 sortedFreeWindows.length === 0 ? (
                   <div className="px-4 py-3 text-xs" style={{ color: '#b45309' }}>
-                    Keine freien Inhaber-Zeitfenster vorhanden.
+                    {t('hwh.noFreeOwnerWindows')}
                   </div>
                 ) : (
                   <div className="overflow-x-auto">
                     <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                       <thead>
                         <tr style={{ background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)' }}>
-                          {['Datum','Start','Ende','Dauer','Vorheriger Block','Nächster Block','Kandidaten','Fzg frei','Quelle'].map(h => (
+                          {[t('common.date'), t('hwh.colStart'), t('hwh.colEnd'), t('hwh.colDuration'), t('hwh.colPrevBlock'), t('hwh.colNextBlock'), t('hwh.colCandidates'), t('hwh.badgeVehicleFree'), t('hwh.colSource')].map(h => (
                             <th key={h} className="px-3 py-2 text-left text-xs font-semibold whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{h}</th>
                           ))}
                         </tr>
@@ -4918,8 +5017,8 @@ function InhaberFreeWindowSearchView({
                               <td className="px-3 py-2 text-xs font-mono" style={{ color: 'var(--text-secondary)' }}>{fw.prevBlockId ? `…${fw.prevBlockId.slice(-6)}` : '—'}</td>
                               <td className="px-3 py-2 text-xs font-mono" style={{ color: 'var(--text-secondary)' }}>{fw.nextBlockId ? `…${fw.nextBlockId.slice(-6)}` : '—'}</td>
                               <td className="px-3 py-2 text-xs font-bold" style={{ color: cands.length > 0 ? '#0891b2' : '#9ca3af' }}>{cands.length}</td>
-                              <td className="px-3 py-2 text-xs font-bold" style={{ color: hasVehicleFree ? '#15803d' : '#9ca3af' }}>{cands.length > 0 ? (hasVehicleFree ? 'Ja' : 'Nein') : '—'}</td>
-                              <td className="px-3 py-2 text-xs" style={{ color: '#065f46' }}>Inhaber frei</td>
+                              <td className="px-3 py-2 text-xs font-bold" style={{ color: hasVehicleFree ? '#15803d' : '#9ca3af' }}>{cands.length > 0 ? (hasVehicleFree ? t('common.yes') : t('common.no')) : '—'}</td>
+                              <td className="px-3 py-2 text-xs" style={{ color: '#065f46' }}>{t('hwh.colOwnerFree')}</td>
                             </tr>
                           );
                         })}
@@ -4937,13 +5036,13 @@ function InhaberFreeWindowSearchView({
                 style={{ background: 'rgba(8,145,178,0.04)', color: '#0e7490' }}
                 onClick={() => setAnalysisSectionC(o => !o)}
               >
-                <span>C — Passende Vorschläge (bis zu 10 je Block)</span>
+                <span>{t('hwh.sectionCTitle')}</span>
                 <span>{analysisSectionC ? '▲' : '▼'}</span>
               </button>
               {analysisSectionC && (
                 blockSuggestions.length === 0 ? (
                   <div className="px-4 py-3 text-xs" style={{ color: '#9ca3af' }}>
-                    Keine offenen Blöcke für Vorschläge vorhanden.
+                    {t('hwh.noOpenBlocksForSuggestions')}
                   </div>
                 ) : (
                   <div>
@@ -4964,20 +5063,20 @@ function InhaberFreeWindowSearchView({
                             <span style={{ color: 'var(--text-secondary)' }}>{fmtTime(block.blockStartMs)}–{fmtTime(block.blockEndMs)}</span>
                             <span style={{ color: 'var(--text-secondary)' }}>{formatBlockDuration(block.blockDurationSec)}</span>
                             <span className="font-bold" style={{ color: headerColor }}>
-                              {top10.length === 0 ? 'Kein passendes freies Inhaber-Zeitfenster mit mindestens 1 Stunde Puffer vor und nach gefunden' : `${top10.length} Vorschlag${top10.length !== 1 ? 'e' : ''}`}
+                              {top10.length === 0 ? t('hwh.noMatchingFreeWindow') : tPlural({ one: 'hwh.suggestionCountOne', other: 'hwh.suggestionCountOther' }, top10.length)}
                             </span>
                           </div>
 
                           {top10.length === 0 ? (
                             <div className="px-4 py-2 text-xs" style={{ color: '#b91c1c' }}>
-                              Kein passendes freies Inhaber-Zeitfenster mit mindestens 1 Stunde Puffer vor und nach gefunden
+                              {t('hwh.noMatchingFreeWindow')}
                             </div>
                           ) : (
                             <div className="overflow-x-auto">
                               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                                 <thead>
                                   <tr style={{ background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)' }}>
-                                    {['Fenster-Datum','Fenster Start','Fenster Ende','Vorschlag Start','Vorschlag Ende','Block-Dauer','Puffer vor','Puffer nach','Inhaber frei','Fahrzeug frei','Status','Bewertung'].map(h => (
+                                    {[t('hwh.colWindowDate'), t('hwh.colWindowStart'), t('hwh.colWindowEnd'), t('hwh.colProposalStart'), t('hwh.colProposalEnd'), t('hwh.colBlockDuration'), t('hwh.colBufferBefore'), t('hwh.colBufferAfter'), t('hwh.colOwnerFree'), t('hwh.colVehicleFree'), t('common.status'), t('hwh.colScore')].map(h => (
                                       <th key={h} className="px-2 py-1.5 text-left text-xs font-semibold whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{h}</th>
                                     ))}
                                   </tr>
@@ -5010,18 +5109,18 @@ function InhaberFreeWindowSearchView({
                                         <td className="px-2 py-1.5 text-xs" style={{ color: 'var(--text-secondary)' }}>{formatBlockDuration(block.blockDurationSec)}</td>
                                         <td className="px-2 py-1.5 text-xs whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{pufferVorFmt}</td>
                                         <td className="px-2 py-1.5 text-xs whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{pufferNachFmt}</td>
-                                        <td className="px-2 py-1.5 text-xs font-bold" style={{ color: '#15803d' }}>Ja</td>
-                                        <td className="px-2 py-1.5 text-xs font-bold" style={{ color: cw.vehicleFree ? '#15803d' : '#b91c1c' }}>{cw.vehicleFree ? 'Ja' : 'Nein'}</td>
-                                        <td className="px-2 py-1.5 text-xs font-bold whitespace-nowrap" style={{ color: statusColor }}>{status}{crossesMidnight ? ' *' : ''}</td>
+                                        <td className="px-2 py-1.5 text-xs font-bold" style={{ color: '#15803d' }}>{t('common.yes')}</td>
+                                        <td className="px-2 py-1.5 text-xs font-bold" style={{ color: cw.vehicleFree ? '#15803d' : '#b91c1c' }}>{cw.vehicleFree ? t('common.yes') : t('common.no')}</td>
+                                        <td className="px-2 py-1.5 text-xs font-bold whitespace-nowrap" style={{ color: statusColor }}>{SUGGESTION_STATUS_KEYS[status] ? t(SUGGESTION_STATUS_KEYS[status]) : status}{crossesMidnight ? ' *' : ''}</td>
                                         <td className="px-2 py-1.5 text-xs font-mono" style={{ color: 'var(--text-secondary)' }}>{score}</td>
                                       </tr>
                                     );
                                   })}
                                 </tbody>
                               </table>
-                              {top10.some(t => t.crossesMidnight) && (
+                              {top10.some(candidate => candidate.crossesMidnight) && (
                                 <div className="px-3 py-1.5 text-xs" style={{ color: '#9ca3af', borderTop: '1px solid var(--border)' }}>
-                                  * Vorschlag endet nach Mitternacht
+                                  * {t('hwh.proposalEndsAfterMidnight')}
                                 </div>
                               )}
                             </div>
@@ -5038,13 +5137,13 @@ function InhaberFreeWindowSearchView({
             {existingImportedViolations.length > 0 && (
               <div style={{ borderTop: '2px solid #d97706' }}>
                 <div className="px-4 py-2 text-xs font-semibold" style={{ color: '#92400e', background: 'rgba(217,119,6,0.06)' }}>
-                  Bestehende Fahrten in ausgeschlossenen Fahrer-Zeiträumen ({existingImportedViolations.length}) — Hinweis, kein Blocker
+                  {t('hwh.existingRidesInExcludedPeriods', { count: existingImportedViolations.length })}
                 </div>
                 <div style={{ overflowX: 'auto' }}>
                   <table className="w-full text-xs" style={{ borderCollapse: 'collapse' }}>
                     <thead>
                       <tr style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)' }}>
-                        {['Fahrer','Fahrzeug','Fahrtbeginn','Fahrtende','Notiz-Details'].map(h => (
+                        {[t('common.driver'), t('hwh.colVehicle'), t('hwh.colRideStart'), t('hwh.colRideEnd'), t('hwh.colNoteDetails')].map(h => (
                           <th key={h} className="px-3 py-1.5 text-left font-semibold" style={{ borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap' }}>{h}</th>
                         ))}
                       </tr>
@@ -5063,7 +5162,7 @@ function InhaberFreeWindowSearchView({
                         );
                       })}
                       {existingImportedViolations.length > 50 && (
-                        <tr><td colSpan={5} className="px-3 py-1 text-xs" style={{ color: '#9ca3af' }}>+{existingImportedViolations.length - 50} weitere …</td></tr>
+                        <tr><td colSpan={5} className="px-3 py-1 text-xs" style={{ color: '#9ca3af' }}>+{t('hwh.moreEntries', { count: existingImportedViolations.length - 50 })}</td></tr>
                       )}
                     </tbody>
                   </table>
@@ -5078,17 +5177,17 @@ function InhaberFreeWindowSearchView({
                 style={{ background: 'rgba(15,118,110,0.06)', color: '#0f766e' }}
                 onClick={() => setAnalysisSectionD(o => !o)}
               >
-                <span>D — Automatische Vorauswahl ({autoSelection.filter(e => e.status === 'Ausgewählt').length}/{autoSelection.length} ausgewählt) · Ride-Level-Prüfung aktiv</span>
+                <span>{t('hwh.sectionDTitle', { selected: autoSelection.filter(e => e.status === 'Ausgewählt').length, total: autoSelection.length })}</span>
                 <span>{analysisSectionD ? '▲' : '▼'}</span>
               </button>
               {analysisSectionD && (
                 <div>
                   {/* Info note */}
                   <div className="px-4 py-2 text-xs" style={{ color: '#6b7280', borderBottom: '1px solid var(--border)', background: 'var(--bg-subtle)' }}>
-                    Section D nutzt alle gültigen Kandidaten, nicht nur die 10 angezeigten Vorschläge aus Section C.
+                    {t('hwh.sectionDNote')}
                   </div>
                   <div className="px-4 py-2 text-xs font-medium" style={{ color: '#0f766e', borderBottom: '1px solid var(--border)', background: 'rgba(15,118,110,0.04)' }}>
-                    Ride-Level-Prüfung aktiv: Einzelfahrten werden vor Auswahl gegen bestehende Fahrten geprüft.
+                    {t('hwh.rideLevelCheckActive')}
                   </div>
                   {/* Summary bar */}
                   {(() => {
@@ -5098,11 +5197,11 @@ function InhaberFreeWindowSearchView({
                     const usedWins  = new Set(autoSelection.filter(e => e.chosen).map(e => e.chosen!.cw.windowId)).size;
                     return (
                       <div className="px-4 py-3 flex flex-wrap gap-6 text-xs" style={{ background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)' }}>
-                        <div><span style={{ color: 'var(--text-secondary)' }}>Konflikt-Blöcke gesamt</span><span className="font-bold ml-1" style={{ color: 'var(--text-primary)' }}>{autoSelection.length}</span></div>
-                        <div><span style={{ color: 'var(--text-secondary)' }}>Automatisch ausgewählt</span><span className="font-bold ml-1" style={{ color: '#15803d' }}>{selCount}</span></div>
-                        <div><span style={{ color: 'var(--text-secondary)' }}>Nicht ausgewählt</span><span className="font-bold ml-1" style={{ color: nselCount > 0 ? '#b91c1c' : 'var(--text-secondary)' }}>{nselCount}</span></div>
-                        <div><span style={{ color: 'var(--text-secondary)' }}>Geplante Stunden</span><span className="font-bold ml-1" style={{ color: '#0e7490' }}>{fmtDurSec(totalSec)}</span></div>
-                        <div><span style={{ color: 'var(--text-secondary)' }}>Genutzte Fenster</span><span className="font-bold ml-1" style={{ color: '#0e7490' }}>{usedWins}</span></div>
+                        <div><span style={{ color: 'var(--text-secondary)' }}>{t('hwh.statTotalConflictBlocks')}</span><span className="font-bold ml-1" style={{ color: 'var(--text-primary)' }}>{autoSelection.length}</span></div>
+                        <div><span style={{ color: 'var(--text-secondary)' }}>{t('hwh.statAutoSelected')}</span><span className="font-bold ml-1" style={{ color: '#15803d' }}>{selCount}</span></div>
+                        <div><span style={{ color: 'var(--text-secondary)' }}>{t('hwh.selStatusNotSelected')}</span><span className="font-bold ml-1" style={{ color: nselCount > 0 ? '#b91c1c' : 'var(--text-secondary)' }}>{nselCount}</span></div>
+                        <div><span style={{ color: 'var(--text-secondary)' }}>{t('hwh.statPlannedHours')}</span><span className="font-bold ml-1" style={{ color: '#0e7490' }}>{fmtDurSec(totalSec)}</span></div>
+                        <div><span style={{ color: 'var(--text-secondary)' }}>{t('hwh.statUsedWindows')}</span><span className="font-bold ml-1" style={{ color: '#0e7490' }}>{usedWins}</span></div>
                       </div>
                     );
                   })()}
@@ -5111,7 +5210,7 @@ function InhaberFreeWindowSearchView({
                     <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                       <thead>
                         <tr style={{ background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)' }}>
-                          {['Block-ID','Fahrzeug','Originaldatum','Originalzeit','Dauer','Kandidaten','Ausgewähltes Fenster','Neue Platzierung','Puffer vor','Puffer nach','Bewertung','Grund der Auswahl','Status'].map(h => (
+                          {[t('hwh.colBlockId'), t('hwh.colVehicle'), t('hwh.colOriginalDate'), t('hwh.colOriginalTime'), t('hwh.colDuration'), t('hwh.colCandidates'), t('hwh.colSelectedWindow'), t('hwh.colNewPlacement'), t('hwh.colBufferBefore'), t('hwh.colBufferAfter'), t('hwh.colScore'), t('hwh.colSelectionReason'), t('common.status')].map(h => (
                             <th key={h} className="px-2 py-1.5 text-left text-xs font-semibold whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{h}</th>
                           ))}
                         </tr>
@@ -5141,7 +5240,7 @@ function InhaberFreeWindowSearchView({
                               <td className="px-2 py-1.5 text-xs whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{chosen ? fmtPuffer(chosen.pufferNachMs) : '—'}</td>
                               <td className="px-2 py-1.5 text-xs font-mono" style={{ color: 'var(--text-secondary)' }}>{chosen ? chosen.score : '—'}</td>
                               <td className="px-2 py-1.5 text-xs" style={{ color: 'var(--text-secondary)', maxWidth: 220, whiteSpace: 'normal' }}>{reason}</td>
-                              <td className="px-2 py-1.5 text-xs font-bold whitespace-nowrap" style={{ color: statusColor }}>{status}</td>
+                              <td className="px-2 py-1.5 text-xs font-bold whitespace-nowrap" style={{ color: statusColor }}>{t(SELECTION_STATUS_KEYS[status])}</td>
                             </tr>
                           );
                         })}
@@ -5156,13 +5255,13 @@ function InhaberFreeWindowSearchView({
             {autoSelectionRejectedDetails.length > 0 && (
               <div style={{ borderTop: '2px solid #b91c1c' }}>
                 <div className="px-4 py-2 text-xs font-semibold" style={{ color: '#b91c1c', background: 'rgba(185,28,28,0.04)' }}>
-                  Debug — abgelehnte Ride-Level-Kandidaten ({autoSelectionRejectedDetails.length})
+                  {t('hwh.debugRejectedRideCandidates', { count: autoSelectionRejectedDetails.length })}
                 </div>
                 <div style={{ overflowX: 'auto' }}>
                   <table className="w-full text-xs" style={{ borderCollapse: 'collapse' }}>
                     <thead>
                       <tr style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)' }}>
-                        {['Block-ID','Fahrzeug','Kandidat Start','Kandidat Ende','Fehlerart','Details'].map(h => (
+                        {[t('hwh.colBlockId'), t('hwh.colVehicle'), t('hwh.colCandidateStart'), t('hwh.colCandidateEnd'), t('hwh.colErrorType'), t('hwh.colDetails')].map(h => (
                           <th key={h} className="px-3 py-1.5 text-left font-semibold" style={{ borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap' }}>{h}</th>
                         ))}
                       </tr>
@@ -5192,37 +5291,37 @@ function InhaberFreeWindowSearchView({
                 style={{ background: 'rgba(79,70,229,0.06)', color: '#4338ca' }}
                 onClick={() => setAnalysisSectionE(o => !o)}
               >
-                <span>E — Prüfkalender der Vorauswahl ({sectionEData.selected.length} Vorschau-Platzierungen, {sectionEData.allOk ? 'Alle Prüfungen OK' : 'Fehler gefunden'})</span>
+                <span>{t('hwh.sectionETitle', { count: sectionEData.selected.length, verdict: sectionEData.allOk ? t('hwh.allChecksOk') : t('hwh.errorsFound') })}</span>
                 <span>{analysisSectionE ? '▲' : '▼'}</span>
               </button>
               {analysisSectionE && (
                 <div>
                   {/* Summary cards */}
                   <div className="px-4 py-3 flex flex-wrap gap-6 text-xs" style={{ background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)' }}>
-                    <div><span style={{ color: 'var(--text-secondary)' }}>Ausgewählte Blöcke</span><span className="font-bold ml-1" style={{ color: '#15803d' }}>{sectionEData.selected.length}</span></div>
-                    <div><span style={{ color: 'var(--text-secondary)' }}>Nicht ausgewählt</span><span className="font-bold ml-1" style={{ color: autoSelection.length - sectionEData.selected.length > 0 ? '#b91c1c' : 'var(--text-secondary)' }}>{autoSelection.length - sectionEData.selected.length}</span></div>
-                    <div><span style={{ color: 'var(--text-secondary)' }}>Geplante Stunden</span><span className="font-bold ml-1" style={{ color: '#0e7490' }}>{fmtDurSec(sectionEData.totalSec)}</span></div>
-                    <div><span style={{ color: 'var(--text-secondary)' }}>Betroffene Fahrzeuge</span><span className="font-bold ml-1" style={{ color: 'var(--text-primary)' }}>{sectionEData.uniqueVehicles}</span></div>
+                    <div><span style={{ color: 'var(--text-secondary)' }}>{t('hwh.statSelectedBlocks')}</span><span className="font-bold ml-1" style={{ color: '#15803d' }}>{sectionEData.selected.length}</span></div>
+                    <div><span style={{ color: 'var(--text-secondary)' }}>{t('hwh.selStatusNotSelected')}</span><span className="font-bold ml-1" style={{ color: autoSelection.length - sectionEData.selected.length > 0 ? '#b91c1c' : 'var(--text-secondary)' }}>{autoSelection.length - sectionEData.selected.length}</span></div>
+                    <div><span style={{ color: 'var(--text-secondary)' }}>{t('hwh.statPlannedHours')}</span><span className="font-bold ml-1" style={{ color: '#0e7490' }}>{fmtDurSec(sectionEData.totalSec)}</span></div>
+                    <div><span style={{ color: 'var(--text-secondary)' }}>{t('hwh.statAffectedVehicles')}</span><span className="font-bold ml-1" style={{ color: 'var(--text-primary)' }}>{sectionEData.uniqueVehicles}</span></div>
                     <div>
-                      <span style={{ color: 'var(--text-secondary)' }}>Prüfstatus</span>
+                      <span style={{ color: 'var(--text-secondary)' }}>{t('hwh.statCheckStatus')}</span>
                       <span className="font-bold ml-1" style={{ color: sectionEData.allOk ? '#15803d' : '#b91c1c' }}>
-                        {sectionEData.allOk ? 'OK' : 'Fehler'}
+                        {sectionEData.allOk ? t('hwh.ok') : t('common.error')}
                       </span>
                     </div>
                   </div>
 
                   {/* Validation panel */}
                   <div style={{ borderBottom: '1px solid var(--border)' }}>
-                    <div className="px-4 py-2 text-xs font-semibold" style={{ color: 'var(--text-secondary)', background: 'var(--bg-subtle)' }}>Abschlussprüfung</div>
+                    <div className="px-4 py-2 text-xs font-semibold" style={{ color: 'var(--text-secondary)', background: 'var(--bg-subtle)' }}>{t('hwh.finalCheck')}</div>
                     {([
-                      { label: 'Inhaber-Überlappungen', errors: sectionEData.allInhaberConflicts },
-                      { label: 'Fahrzeug-Überlappungen (Block-Ebene)', errors: sectionEData.allVehicleConflicts },
-                      { label: 'Ride-Konflikte mit bestehenden Fahrten', errors: sectionEData.rideLevelVehicleConflicts },
-                      { label: 'Fahrer-Notizen / Planungsausschluss', errors: sectionEData.driverExclusionConflicts },
-                      { label: 'Puffer vor (< 1h)', errors: sectionEData.pufferVorFails },
-                      { label: 'Puffer nach (< 1h)', errors: sectionEData.pufferNachFails },
-                      { label: 'Innerhalb Monat', errors: sectionEData.outOfMonth },
-                      { label: 'Zeitstempel gültig', errors: sectionEData.invalidTs },
+                      { label: t('hwh.checkOwnerOverlaps'),        errors: sectionEData.allInhaberConflicts },
+                      { label: t('hwh.checkVehicleOverlapsBlock'), errors: sectionEData.allVehicleConflicts },
+                      { label: t('hwh.checkRideConflictsExisting'), errors: sectionEData.rideLevelVehicleConflicts },
+                      { label: t('hwh.checkDriverNotes'),          errors: sectionEData.driverExclusionConflicts },
+                      { label: t('hwh.checkBufferBefore'),         errors: sectionEData.pufferVorFails },
+                      { label: t('hwh.checkBufferAfter'),          errors: sectionEData.pufferNachFails },
+                      { label: t('hwh.checkWithinMonth'),          errors: sectionEData.outOfMonth },
+                      { label: t('hwh.checkTimestampValid'),       errors: sectionEData.invalidTs },
                     ] as const).map(({ label, errors }) => (
                       <div key={label} className="px-4 py-2 flex items-start gap-3 text-xs" style={{ borderTop: '1px solid var(--border)' }}>
                         <span className="font-bold w-5 text-center flex-shrink-0" style={{ color: errors.length === 0 ? '#15803d' : '#b91c1c' }}>
@@ -5230,7 +5329,7 @@ function InhaberFreeWindowSearchView({
                         </span>
                         <span className="w-48 flex-shrink-0" style={{ color: 'var(--text-primary)' }}>{label}</span>
                         <span className="font-bold flex-shrink-0" style={{ color: errors.length === 0 ? '#15803d' : '#b91c1c' }}>
-                          {errors.length === 0 ? 'OK' : `${errors.length} Fehler`}
+                          {errors.length === 0 ? t('hwh.ok') : t('hwh.errorCount', { count: errors.length })}
                         </span>
                         {errors.length > 0 && (
                           <span style={{ color: '#b91c1c' }}>{errors.slice(0, 5).join(', ')}{errors.length > 5 ? ` … +${errors.length - 5}` : ''}</span>
@@ -5239,10 +5338,10 @@ function InhaberFreeWindowSearchView({
                     ))}
                     <div className="px-4 py-2 flex items-start gap-3 text-xs" style={{ borderTop: '1px solid var(--border)' }}>
                       <span className="font-bold w-5 text-center flex-shrink-0" style={{ color: '#6b7280' }}>ℹ</span>
-                      <span className="w-48 flex-shrink-0" style={{ color: 'var(--text-primary)' }}>Cross-midnight geprüft</span>
-                      <span className="font-bold flex-shrink-0" style={{ color: '#6b7280' }}>OK</span>
+                      <span className="w-48 flex-shrink-0" style={{ color: 'var(--text-primary)' }}>{t('hwh.checkCrossMidnight')}</span>
+                      <span className="font-bold flex-shrink-0" style={{ color: '#6b7280' }}>{t('hwh.ok')}</span>
                       <span style={{ color: '#9ca3af' }}>
-                        Original: {sectionEData.crossMidnightOriginal.length} Blöcke · Vorschau: {sectionEData.crossMidnight.length} Platzierungen — absolute Zeitstempel verwendet
+                        {t('hwh.crossMidnightDetail', { original: sectionEData.crossMidnightOriginal.length, preview: sectionEData.crossMidnight.length })}
                       </span>
                     </div>
                   </div>
@@ -5250,25 +5349,24 @@ function InhaberFreeWindowSearchView({
                   {/* Overall status */}
                   <div className="px-4 py-3 text-xs font-semibold" style={{ background: sectionEData.allOk ? 'rgba(21,128,61,0.07)' : 'rgba(185,28,28,0.07)', color: sectionEData.allOk ? '#15803d' : '#b91c1c', borderBottom: '1px solid var(--border)' }}>
                     {sectionEData.allOk
-                      ? 'Alle Prüfungen OK — bereit für den nächsten Schritt.'
-                      : 'Fehler gefunden — bitte Vorauswahl prüfen.'}
+                      ? t('hwh.allChecksOkReadyNext')
+                      : t('hwh.errorsFoundCheckPreselection')}
                   </div>
 
                   {/* Preview calendar (day list) */}
                   <div style={{ borderBottom: '1px solid var(--border)' }}>
                     <div className="px-4 py-2 text-xs font-semibold flex items-center gap-2" style={{ color: 'var(--text-secondary)', background: 'var(--bg-subtle)' }}>
-                      <span>Vorschau-Kalender</span>
-                      <span className="px-1.5 py-0.5 rounded text-xs font-bold" style={{ background: 'rgba(79,70,229,0.12)', color: '#4338ca' }}>Vorschau</span>
-                      <span style={{ color: 'var(--text-secondary)', fontWeight: 'normal' }}>— keine Daten werden verändert</span>
+                      <span>{t('hwh.previewCalendar')}</span>
+                      <span className="px-1.5 py-0.5 rounded text-xs font-bold" style={{ background: 'rgba(79,70,229,0.12)', color: '#4338ca' }}>{t('common.preview')}</span>
+                      <span style={{ color: 'var(--text-secondary)', fontWeight: 'normal' }}>— {t('hwh.noDataChanged')}</span>
                     </div>
                     {sectionEData.days.length === 0 ? (
-                      <div className="px-4 py-3 text-xs" style={{ color: '#9ca3af' }}>Keine Einträge für diesen Monat.</div>
+                      <div className="px-4 py-3 text-xs" style={{ color: '#9ca3af' }}>{t('hwh.noEntriesThisMonth')}</div>
                     ) : (
                       sectionEData.days.map(({ key, entries }) => {
                         const [y, m0, d] = key.split('-').map(Number);
                         const dayLabel = `${String(d).padStart(2,'0')}.${String(m0).padStart(2,'0')}.${y}`;
-                        const dowNames = ['So','Mo','Di','Mi','Do','Fr','Sa'];
-                        const dow = dowNames[new Date(y, m0 - 1, d).getDay()];
+                        const dow = t(WEEKDAY_COLS[new Date(y, m0 - 1, d).getDay()]);
                         return (
                           <div key={key} style={{ borderTop: '1px solid var(--border)' }}>
                             <div className="px-4 py-1.5 text-xs font-semibold" style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)' }}>
@@ -5279,7 +5377,7 @@ function InhaberFreeWindowSearchView({
                                 const { occ } = entry;
                                 return (
                                   <div key={occ.blockId + ei} className="px-4 py-1.5 flex flex-wrap items-center gap-3 text-xs" style={{ borderTop: '1px solid var(--border)', background: 'var(--bg-surface)' }}>
-                                    <span className="px-1.5 py-0.5 rounded text-xs" style={{ background: 'rgba(100,116,139,0.12)', color: '#475569' }}>Inhaber</span>
+                                    <span className="px-1.5 py-0.5 rounded text-xs" style={{ background: 'rgba(100,116,139,0.12)', color: '#475569' }}>{t('hwh.owner')}</span>
                                     <span className="font-mono" style={{ color: 'var(--text-secondary)' }} title={occ.blockId}>…{occ.blockId.slice(-8)}</span>
                                     <span className="font-bold" style={{ color: 'var(--text-primary)' }}>{occ.vehicle}</span>
                                     <span className="font-mono" style={{ color: '#065f46' }}>{fmtTime(occ.startMs)}–{fmtTime(occ.endMs)}</span>
@@ -5293,23 +5391,23 @@ function InhaberFreeWindowSearchView({
                               const origDateFmt = `${String(origStart.getDate()).padStart(2,'0')}.${String(origStart.getMonth()+1).padStart(2,'0')}.${origStart.getFullYear()}`;
                               return (
                                 <div key={sp.block.blockId + ei} className="px-4 py-1.5 flex flex-wrap items-center gap-3 text-xs" style={{ borderTop: '1px solid var(--border)', background: 'rgba(79,70,229,0.04)' }}>
-                                  <span className="px-1.5 py-0.5 rounded text-xs font-bold" style={{ background: 'rgba(79,70,229,0.15)', color: '#4338ca' }}>Vorschau</span>
+                                  <span className="px-1.5 py-0.5 rounded text-xs font-bold" style={{ background: 'rgba(79,70,229,0.15)', color: '#4338ca' }}>{t('common.preview')}</span>
                                   <span className="font-mono" style={{ color: '#4338ca' }} title={sp.block.blockId}>…{sp.block.blockId.slice(-8)}</span>
                                   <span className="font-bold" style={{ color: 'var(--text-primary)' }}>{sp.block.vehicle}</span>
-                                  <span style={{ color: 'var(--text-secondary)' }}>Orig: {origDateFmt} {fmtTime(sp.block.blockStartMs ?? 0)}–{fmtTime(sp.block.blockEndMs ?? 0)}</span>
-                                  <span className="font-mono font-bold" style={{ color: '#4338ca' }}>Neu: {fmtTime(sp.chosen.proposedStart)}–{fmtTime(sp.chosen.proposedEnd)}</span>
+                                  <span style={{ color: 'var(--text-secondary)' }}>{t('hwh.origPrefix')} {origDateFmt} {fmtTime(sp.block.blockStartMs ?? 0)}–{fmtTime(sp.block.blockEndMs ?? 0)}</span>
+                                  <span className="font-mono font-bold" style={{ color: '#4338ca' }}>{t('hwh.newPrefix')} {fmtTime(sp.chosen.proposedStart)}–{fmtTime(sp.chosen.proposedEnd)}</span>
                                   <span className="font-mono" style={{ color: '#6366f1', fontSize: '0.65rem' }}>
                                     {(() => {
                                       const ps = new Date(sp.chosen.proposedStart);
                                       const pe = new Date(sp.chosen.proposedEnd);
                                       const fmt = (d: Date) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
-                                      return `Ziel: ${fmt(ps)} – ${fmt(pe)}`;
+                                      return `${t('hwh.targetPrefix')} ${fmt(ps)} – ${fmt(pe)}`;
                                     })()}
                                   </span>
                                   <span style={{ color: 'var(--text-secondary)' }}>{fmtDurSec(sp.block.blockDurationSec)}</span>
                                   <span style={{ color: 'var(--text-secondary)' }}>↑{fmtPuffer(sp.chosen.pufferVorMs)}</span>
                                   <span style={{ color: 'var(--text-secondary)' }}>↓{fmtPuffer(sp.chosen.pufferNachMs)}</span>
-                                  {sp.chosen.crossesMidnight && <span style={{ color: '#b45309' }}>*Mitternacht</span>}
+                                  {sp.chosen.crossesMidnight && <span style={{ color: '#b45309' }}>*{t('hwh.midnight')}</span>}
                                   {issues.length > 0 && <span className="font-bold" style={{ color: '#b91c1c' }}>{issues.join(', ')}</span>}
                                 </div>
                               );
@@ -5322,12 +5420,12 @@ function InhaberFreeWindowSearchView({
 
                   {/* Compact table */}
                   <div>
-                    <div className="px-4 py-2 text-xs font-semibold" style={{ color: 'var(--text-secondary)', background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)' }}>Ausgewählte Vorschau-Platzierungen</div>
+                    <div className="px-4 py-2 text-xs font-semibold" style={{ color: 'var(--text-secondary)', background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)' }}>{t('hwh.selectedPreviewPlacements')}</div>
                     <div className="overflow-x-auto">
                       <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                         <thead>
                           <tr style={{ background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)' }}>
-                            {['Block-ID','Fahrzeug','Originaldatum','Originalzeit','Neue Platzierung','Dauer','Puffer vor','Puffer nach','Prüfung','Hinweis'].map(h => (
+                            {[t('hwh.colBlockId'), t('hwh.colVehicle'), t('hwh.colOriginalDate'), t('hwh.colOriginalTime'), t('hwh.colNewPlacement'), t('hwh.colDuration'), t('hwh.colBufferBefore'), t('hwh.colBufferAfter'), t('hwh.colCheck'), t('hwh.colHint')].map(h => (
                               <th key={h} className="px-2 py-1.5 text-left text-xs font-semibold whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{h}</th>
                             ))}
                           </tr>
@@ -5359,9 +5457,9 @@ function InhaberFreeWindowSearchView({
                                 <td className="px-2 py-1.5 text-xs whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{fmtDurSec(block.blockDurationSec)}</td>
                                 <td className="px-2 py-1.5 text-xs whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{fmtPuffer(chosen.pufferVorMs)}</td>
                                 <td className="px-2 py-1.5 text-xs whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{fmtPuffer(chosen.pufferNachMs)}</td>
-                                <td className="px-2 py-1.5 text-xs font-bold whitespace-nowrap" style={{ color: checkOk ? '#15803d' : '#b91c1c' }}>{checkOk ? 'OK' : 'Fehler'}</td>
+                                <td className="px-2 py-1.5 text-xs font-bold whitespace-nowrap" style={{ color: checkOk ? '#15803d' : '#b91c1c' }}>{checkOk ? t('hwh.ok') : t('common.error')}</td>
                                 <td className="px-2 py-1.5 text-xs" style={{ color: checkOk ? 'var(--text-secondary)' : '#b91c1c', whiteSpace: 'normal', maxWidth: 200 }}>
-                                  {issues.length === 0 ? (chosen.crossesMidnight ? '* Cross-midnight' : '—') : issues.join(', ')}
+                                  {issues.length === 0 ? (chosen.crossesMidnight ? `* ${t('hwh.crossMidnight')}` : '—') : issues.join(', ')}
                                 </td>
                               </tr>
                             );
@@ -5381,11 +5479,11 @@ function InhaberFreeWindowSearchView({
                   const selectedCount = sectionEData.selected.length;
                   const applyDisabled = !originalTrips || originalTrips.length === 0 || selectedCount === 0 || !sectionEData.allOk;
                   const disabledReason = !originalTrips || originalTrips.length === 0
-                    ? 'Keine Original-Fahrten verfügbar'
+                    ? t('hwh.applyBlockedNoOriginalTrips')
                     : selectedCount === 0
-                    ? 'Keine ausgewählten Platzierungen'
+                    ? t('hwh.applyBlockedNoPlacements')
                     : !sectionEData.allOk
-                    ? 'Prüfkalender enthält Fehler'
+                    ? t('hwh.applyBlockedCheckCalendarErrors')
                     : null;
                   return (
                     <>
@@ -5410,22 +5508,22 @@ function InhaberFreeWindowSearchView({
                           style={{ background: applyDisabled ? 'var(--bg-subtle)' : '#15803d', color: applyDisabled ? 'var(--text-secondary)' : '#fff', border: applyDisabled ? '1px solid var(--border)' : 'none' }}
                         >
                           <CheckCircle2 size={16} />
-                          Geprüften Plan anwenden und Fahrtenbuch vorbereiten
+                          {t('hwh.applyCheckedPlan')}
                         </button>
                         {!applyDisabled && (
                           <span className="text-xs font-semibold" style={{ color: '#15803d' }}>
-                            {selectedCount} Platzierungen bereit
+                            {t('hwh.placementsReady', { count: selectedCount })}
                           </span>
                         )}
                       </div>
                       {applyDisabled && disabledReason && (
                         <div className="mt-2 text-xs font-semibold" style={{ color: '#b91c1c' }}>
-                          Anwenden gesperrt: {disabledReason}
+                          {t('hwh.applyLocked')}: {disabledReason}
                         </div>
                       )}
                       {dbgApplyError && (
                         <div className="mt-2 text-xs font-semibold" style={{ color: '#b91c1c' }}>
-                          Fehler: {dbgApplyError}
+                          {t('common.error')}: {dbgApplyError}
                         </div>
                       )}
                       <div className="mt-2 text-xs" style={{ color: 'var(--text-tertiary)', fontFamily: 'monospace' }}>
@@ -5445,83 +5543,83 @@ function InhaberFreeWindowSearchView({
                   style={{ background: 'rgba(21,128,61,0.07)', color: '#15803d' }}
                   onClick={() => setAnalysisSectionF(o => !o)}
                 >
-                  <span>F — Angewendeter Plan / Neues Fahrtenbuch ({sectionFData.totalRidesChanged} Fahrten geändert, {sectionFData.blockApps.length} Blöcke, {sectionFData.allOk ? 'Alle Prüfungen OK' : 'Fehler gefunden'})</span>
+                  <span>{t('hwh.sectionFTitle', { rides: sectionFData.totalRidesChanged, blocks: sectionFData.blockApps.length, verdict: sectionFData.allOk ? t('hwh.allChecksOk') : t('hwh.errorsFound') })}</span>
                   <span>{analysisSectionF ? '▲' : '▼'}</span>
                 </button>
                 {analysisSectionF && (
                   <div>
                     {/* Summary cards */}
                     <div className="px-4 py-3 flex flex-wrap gap-6 text-xs" style={{ background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)' }}>
-                      <div><span style={{ color: 'var(--text-secondary)' }}>Verschobene Blöcke</span><span className="font-bold ml-1" style={{ color: '#15803d' }}>{sectionFData.blockApps.length}</span></div>
-                      <div><span style={{ color: 'var(--text-secondary)' }}>Verschobene Fahrten</span><span className="font-bold ml-1" style={{ color: '#0e7490' }}>{sectionFData.totalRidesChanged}</span></div>
-                      <div><span style={{ color: 'var(--text-secondary)' }}>Geplante Stunden</span><span className="font-bold ml-1" style={{ color: '#0e7490' }}>{fmtDurSec(sectionFData.totalSec)}</span></div>
-                      <div><span style={{ color: 'var(--text-secondary)' }}>Betroffene Fahrzeuge</span><span className="font-bold ml-1" style={{ color: 'var(--text-primary)' }}>{sectionFData.uniqueVehicles}</span></div>
+                      <div><span style={{ color: 'var(--text-secondary)' }}>{t('hwh.statShiftedBlocks')}</span><span className="font-bold ml-1" style={{ color: '#15803d' }}>{sectionFData.blockApps.length}</span></div>
+                      <div><span style={{ color: 'var(--text-secondary)' }}>{t('hwh.statShiftedRides')}</span><span className="font-bold ml-1" style={{ color: '#0e7490' }}>{sectionFData.totalRidesChanged}</span></div>
+                      <div><span style={{ color: 'var(--text-secondary)' }}>{t('hwh.statPlannedHours')}</span><span className="font-bold ml-1" style={{ color: '#0e7490' }}>{fmtDurSec(sectionFData.totalSec)}</span></div>
+                      <div><span style={{ color: 'var(--text-secondary)' }}>{t('hwh.statAffectedVehicles')}</span><span className="font-bold ml-1" style={{ color: 'var(--text-primary)' }}>{sectionFData.uniqueVehicles}</span></div>
                       <div>
-                        <span style={{ color: 'var(--text-secondary)' }}>Prüfstatus</span>
+                        <span style={{ color: 'var(--text-secondary)' }}>{t('hwh.statCheckStatus')}</span>
                         <span className="font-bold ml-1" style={{ color: sectionFData.allOk ? '#15803d' : '#b91c1c' }}>
-                          {sectionFData.allOk ? 'OK' : 'Fehler'}
+                          {sectionFData.allOk ? t('hwh.ok') : t('common.error')}
                         </span>
                       </div>
                     </div>
 
                     {/* Validation panel */}
                     <div style={{ borderBottom: '1px solid var(--border)' }}>
-                      <div className="px-4 py-2 text-xs font-semibold" style={{ color: 'var(--text-secondary)', background: 'var(--bg-subtle)' }}>Abschlussprüfung — Angewendeter Plan</div>
+                      <div className="px-4 py-2 text-xs font-semibold" style={{ color: 'var(--text-secondary)', background: 'var(--bg-subtle)' }}>{t('hwh.finalCheckAppliedPlan')}</div>
                       {([
-                        { label: 'Ride-Zeitstempel gültig',                    errors: sectionFData.invalidTsRides },
-                        { label: 'Keine Inhaber-Überlappungen',                errors: sectionFData.inhaberOverlaps },
-                        { label: 'Keine Fahrzeug-Überlappungen (zwischen Blöcken)', errors: sectionFData.vehicleOverlaps },
-                        { label: 'Keine Ride-Konflikte mit bestehenden Fahrten', errors: sectionFData.rideLevelExistingConflicts },
-                        { label: 'Fahrer-Notizen / Planungsausschluss', errors: [...sectionFData.driverExclusionViolations, ...effectiveUnresolvedRides.map(r => `${r.driver}: ${r.detail}`)] },
-                        { label: 'Alle ausgewählten Blöcke angewendet',        errors: sectionFData.missingBlocks },
+                        { label: t('hwh.checkRideTimestampValid'),      errors: sectionFData.invalidTsRides },
+                        { label: t('hwh.checkNoOwnerOverlaps'),         errors: sectionFData.inhaberOverlaps },
+                        { label: t('hwh.checkNoVehicleOverlapsBetween'), errors: sectionFData.vehicleOverlaps },
+                        { label: t('hwh.checkNoRideConflictsExisting'), errors: sectionFData.rideLevelExistingConflicts },
+                        { label: t('hwh.checkDriverNotes'), errors: [...sectionFData.driverExclusionViolations, ...effectiveUnresolvedRides.map(r => `${r.driver}: ${r.detail}`)] },
+                        { label: t('hwh.checkAllSelectedBlocksApplied'), errors: sectionFData.missingBlocks },
                       ] as const).map(({ label, errors }) => (
                         <div key={label} className="px-4 py-2 flex items-start gap-3 text-xs" style={{ borderTop: '1px solid var(--border)' }}>
                           <span className="font-bold w-5 text-center flex-shrink-0" style={{ color: errors.length === 0 ? '#15803d' : '#b91c1c' }}>{errors.length === 0 ? '✓' : '✗'}</span>
                           <span className="w-56 flex-shrink-0" style={{ color: 'var(--text-primary)' }}>{label}</span>
-                          <span className="font-bold flex-shrink-0" style={{ color: errors.length === 0 ? '#15803d' : '#b91c1c' }}>{errors.length === 0 ? 'OK' : `${errors.length} Fehler`}</span>
+                          <span className="font-bold flex-shrink-0" style={{ color: errors.length === 0 ? '#15803d' : '#b91c1c' }}>{errors.length === 0 ? t('hwh.ok') : t('hwh.errorCount', { count: errors.length })}</span>
                           {errors.length > 0 && <span style={{ color: '#b91c1c' }}>{errors.slice(0, 4).join(', ')}{errors.length > 4 ? ` +${errors.length - 4}` : ''}</span>}
                         </div>
                       ))}
                       <div className="px-4 py-2 flex items-start gap-3 text-xs" style={{ borderTop: '1px solid var(--border)' }}>
                         <span className="font-bold w-5 text-center flex-shrink-0" style={{ color: sectionFData.rideCountOk ? '#15803d' : '#b91c1c' }}>{sectionFData.rideCountOk ? '✓' : '✗'}</span>
-                        <span className="w-56 flex-shrink-0" style={{ color: 'var(--text-primary)' }}>Fahrtenanzahl erhalten</span>
-                        <span className="font-bold flex-shrink-0" style={{ color: sectionFData.rideCountOk ? '#15803d' : '#b91c1c' }}>{sectionFData.rideCountOk ? 'OK' : 'Fehler'}</span>
+                        <span className="w-56 flex-shrink-0" style={{ color: 'var(--text-primary)' }}>{t('hwh.checkRideCountPreserved')}</span>
+                        <span className="font-bold flex-shrink-0" style={{ color: sectionFData.rideCountOk ? '#15803d' : '#b91c1c' }}>{sectionFData.rideCountOk ? t('hwh.ok') : t('common.error')}</span>
                       </div>
                       <div className="px-4 py-2 flex items-start gap-3 text-xs" style={{ borderTop: '1px solid var(--border)' }}>
                         <span className="font-bold w-5 text-center flex-shrink-0" style={{ color: '#15803d' }}>✓</span>
-                        <span className="w-56 flex-shrink-0" style={{ color: 'var(--text-primary)' }}>Nicht betroffene Fahrten unverändert</span>
-                        <span className="font-bold flex-shrink-0" style={{ color: '#15803d' }}>OK</span>
-                        <span style={{ color: '#9ca3af' }}>{(originalTrips?.length ?? 0) - sectionFData.totalRidesChanged} Fahrten unberührt</span>
+                        <span className="w-56 flex-shrink-0" style={{ color: 'var(--text-primary)' }}>{t('hwh.checkUnaffectedRidesUnchanged')}</span>
+                        <span className="font-bold flex-shrink-0" style={{ color: '#15803d' }}>{t('hwh.ok')}</span>
+                        <span style={{ color: '#9ca3af' }}>{t('hwh.ridesUntouched', { count: (originalTrips?.length ?? 0) - sectionFData.totalRidesChanged })}</span>
                       </div>
                       <div className="px-4 py-2 flex items-start gap-3 text-xs" style={{ borderTop: '1px solid var(--border)' }}>
                         <span className="font-bold w-5 text-center flex-shrink-0" style={{ color: sectionFData.tsMillisOk ? '#15803d' : '#b91c1c' }}>{sectionFData.tsMillisOk ? '✓' : '✗'}</span>
-                        <span className="w-56 flex-shrink-0" style={{ color: 'var(--text-primary)' }}>Millisekunden (.000)</span>
-                        <span className="font-bold flex-shrink-0" style={{ color: sectionFData.tsMillisOk ? '#15803d' : '#b91c1c' }}>{sectionFData.tsMillisOk ? 'OK' : 'Fehler'}</span>
-                        <span style={{ color: '#9ca3af' }}>{sectionFData.tsMillisOk ? `${sectionFData.totalTsCount} verschobene Zeitstempel geprüft — alle enden auf .000` : `${sectionFData.invalidTsCount} von ${sectionFData.totalTsCount} verschobenen Zeitstempeln enden nicht auf .000`}</span>
+                        <span className="w-56 flex-shrink-0" style={{ color: 'var(--text-primary)' }}>{t('hwh.checkMilliseconds')}</span>
+                        <span className="font-bold flex-shrink-0" style={{ color: sectionFData.tsMillisOk ? '#15803d' : '#b91c1c' }}>{sectionFData.tsMillisOk ? t('hwh.ok') : t('common.error')}</span>
+                        <span style={{ color: '#9ca3af' }}>{sectionFData.tsMillisOk ? t('hwh.millisAllOk', { count: sectionFData.totalTsCount }) : t('hwh.millisSomeBad', { bad: sectionFData.invalidTsCount, total: sectionFData.totalTsCount })}</span>
                       </div>
                       <div className="px-4 py-2 flex items-start gap-3 text-xs" style={{ borderTop: '1px solid var(--border)' }}>
                         <span className="font-bold w-5 text-center flex-shrink-0" style={{ color: sectionFData.zeitversatzOk ? '#15803d' : '#b91c1c' }}>{sectionFData.zeitversatzOk ? '✓' : '✗'}</span>
-                        <span className="w-56 flex-shrink-0" style={{ color: 'var(--text-primary)' }}>Zeitversatz Auftrags-/Planzeiten</span>
-                        <span className="font-bold flex-shrink-0" style={{ color: sectionFData.zeitversatzOk ? '#15803d' : '#b91c1c' }}>{sectionFData.zeitversatzOk ? 'OK' : 'Fehler'}</span>
-                        <span style={{ color: '#9ca3af' }}>{sectionFData.zeitversatzOk ? 'originale Zeitabstände zu Fahrtbeginn erhalten' : `${sectionFData.invalidZeitversatzCount} Auftrags-/Planzeit-Versätze ungültig`}</span>
+                        <span className="w-56 flex-shrink-0" style={{ color: 'var(--text-primary)' }}>{t('hwh.checkOrderTimeOffsets')}</span>
+                        <span className="font-bold flex-shrink-0" style={{ color: sectionFData.zeitversatzOk ? '#15803d' : '#b91c1c' }}>{sectionFData.zeitversatzOk ? t('hwh.ok') : t('common.error')}</span>
+                        <span style={{ color: '#9ca3af' }}>{sectionFData.zeitversatzOk ? t('hwh.offsetsPreserved') : t('hwh.offsetsInvalid', { count: sectionFData.invalidZeitversatzCount })}</span>
                       </div>
                       <div className="px-4 py-2 flex items-start gap-3 text-xs" style={{ borderTop: '1px solid var(--border)' }}>
                         <span className="font-bold w-5 text-center flex-shrink-0" style={{ color: sectionFData.priceKmUnchanged ? '#15803d' : '#b91c1c' }}>{sectionFData.priceKmUnchanged ? '✓' : '✗'}</span>
-                        <span className="w-56 flex-shrink-0" style={{ color: 'var(--text-primary)' }}>Unveränderte Fahrpreis/Kilometer</span>
-                        <span className="font-bold flex-shrink-0" style={{ color: sectionFData.priceKmUnchanged ? '#15803d' : '#b91c1c' }}>{sectionFData.priceKmUnchanged ? 'OK' : 'Fehler'}</span>
-                        <span style={{ color: '#9ca3af' }}>{sectionFData.priceKmUnchanged ? 'alle Fahrpreis/Kilometer-Zellen unverändert aus Original übernommen' : 'Fahrpreis/Kilometer werden aus Originaldatei übernommen (Validierung beim Export)'}</span>
+                        <span className="w-56 flex-shrink-0" style={{ color: 'var(--text-primary)' }}>{t('hwh.checkPriceKmUnchanged')}</span>
+                        <span className="font-bold flex-shrink-0" style={{ color: sectionFData.priceKmUnchanged ? '#15803d' : '#b91c1c' }}>{sectionFData.priceKmUnchanged ? t('hwh.ok') : t('common.error')}</span>
+                        <span style={{ color: '#9ca3af' }}>{sectionFData.priceKmUnchanged ? t('hwh.priceKmAllCopied') : t('hwh.priceKmFromOriginal')}</span>
                       </div>
                       <div className="px-4 py-2 flex items-start gap-3 text-xs" style={{ borderTop: '1px solid var(--border)' }}>
                         <span className="font-bold w-5 text-center flex-shrink-0" style={{ color: '#15803d' }}>✓</span>
-                        <span className="w-56 flex-shrink-0" style={{ color: 'var(--text-primary)' }}>Zeilensortierung</span>
-                        <span className="font-bold flex-shrink-0" style={{ color: '#15803d' }}>OK</span>
-                        <span style={{ color: '#9ca3af' }}>aufsteigend nach Uhrzeit des Fahrtbeginns</span>
+                        <span className="w-56 flex-shrink-0" style={{ color: 'var(--text-primary)' }}>{t('hwh.checkRowSorting')}</span>
+                        <span className="font-bold flex-shrink-0" style={{ color: '#15803d' }}>{t('hwh.ok')}</span>
+                        <span style={{ color: '#9ca3af' }}>{t('hwh.rowSortingDetail')}</span>
                       </div>
                       <div className="px-4 py-2 flex items-start gap-3 text-xs" style={{ borderTop: '1px solid var(--border)' }}>
                         <span className="font-bold w-5 text-center flex-shrink-0" style={{ color: sectionFData.columnOrderReady ? '#15803d' : '#d97706' }}>{sectionFData.columnOrderReady ? '✓' : '!'}</span>
-                        <span className="w-56 flex-shrink-0" style={{ color: 'var(--text-primary)' }}>Spaltenreihenfolge</span>
-                        <span className="font-bold flex-shrink-0" style={{ color: sectionFData.columnOrderReady ? '#15803d' : '#d97706' }}>{sectionFData.columnOrderReady ? 'Original' : 'Fallback'}</span>
-                        <span style={{ color: '#9ca3af' }}>{sectionFData.columnOrderReady ? 'source_columns_json verfügbar' : 'keine source_columns_json — Reihenfolge aus raw_data_json'}</span>
+                        <span className="w-56 flex-shrink-0" style={{ color: 'var(--text-primary)' }}>{t('hwh.checkColumnOrder')}</span>
+                        <span className="font-bold flex-shrink-0" style={{ color: sectionFData.columnOrderReady ? '#15803d' : '#d97706' }}>{sectionFData.columnOrderReady ? t('hwh.columnOrderOriginal') : t('hwh.columnOrderFallback')}</span>
+                        <span style={{ color: '#9ca3af' }}>{sectionFData.columnOrderReady ? t('hwh.sourceColumnsAvailable') : t('hwh.sourceColumnsMissing')}</span>
                       </div>
                     </div>
 
@@ -5536,28 +5634,28 @@ function InhaberFreeWindowSearchView({
                         <div style={{ borderBottom: '1px solid var(--border)' }}>
                           {/* Debug/info line */}
                           <div className="px-4 py-1.5 text-xs" style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)', borderBottom: '1px solid var(--border)', fontFamily: 'monospace' }}>
-                            Inhaber-Auflösung: {debugInfo}
+                            {t('hwh.ownerResolution')}: {debugInfo}
                           </div>
                           {ownerResolution.status === 'ok' && (
                             <div className="px-4 py-2 text-xs flex items-center gap-2" style={{ background: 'rgba(21,128,61,0.05)', color: '#15803d', borderBottom: '1px solid var(--border)' }}>
-                              <span style={{ fontWeight: 600 }}>Inhaber-Fahrer:</span>
+                              <span style={{ fontWeight: 600 }}>{t('hwh.ownerDriver')}:</span>
                               <span>{ownerResolution.name}</span>
                             </div>
                           )}
                           {ownerResolution.status === 'multiple' && (
                             <div className="px-4 py-2 text-xs" style={{ background: 'rgba(185,28,28,0.04)', color: '#b91c1c', borderBottom: '1px solid var(--border)' }}>
-                              Mehrere Inhaber gefunden: {ownerResolution.names.join(', ')}
+                              {t('hwh.multipleOwnersFound')}: {ownerResolution.names.join(', ')}
                             </div>
                           )}
                           <div className="px-4 py-3 flex flex-wrap items-center gap-4 text-xs font-semibold" style={{ background: canExport ? 'rgba(21,128,61,0.07)' : 'rgba(185,28,28,0.07)', color: canExport ? '#15803d' : '#b91c1c' }}>
-                            <span>{canExport ? 'Neues Fahrtenbuch bereit' : `Export gesperrt — ${exportBlockReason}`}</span>
+                            <span>{canExport ? t('hwh.newFahrtenbuchReady') : t('hwh.exportLockedReason', { reason: exportBlockReason ?? '' })}</span>
                             <button
                               onClick={handleExportFahrtenbuch}
                               disabled={!canExport}
                               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-bold transition-opacity hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
                               style={{ background: canExport ? '#15803d' : '#6b7280', color: '#fff' }}
                             >
-                              Neues Fahrtenbuch herunterladen
+                              {t('hwh.downloadNewFahrtenbuch')}
                             </button>
                           </div>
                         </div>
@@ -5566,12 +5664,12 @@ function InhaberFreeWindowSearchView({
 
                     {/* Block-Anwendung table */}
                     <div style={{ borderBottom: '1px solid var(--border)' }}>
-                      <div className="px-4 py-2 text-xs font-semibold" style={{ color: 'var(--text-secondary)', background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)' }}>Block-Anwendung</div>
+                      <div className="px-4 py-2 text-xs font-semibold" style={{ color: 'var(--text-secondary)', background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)' }}>{t('hwh.blockApplication')}</div>
                       <div className="overflow-x-auto">
                         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                           <thead>
                             <tr style={{ background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)' }}>
-                              {['Block-ID','Fahrzeug','Original Blockzeit','Neue Blockzeit','Fahrten','Offset','Prüfung','Hinweis'].map(h => (
+                              {[t('hwh.colBlockId'), t('hwh.colVehicle'), t('hwh.colOrigBlockTime'), t('hwh.colNewBlockTime'), t('hwh.colRides'), t('hwh.colOffset'), t('hwh.colCheck'), t('hwh.colHint')].map(h => (
                                 <th key={h} className="px-2 py-1.5 text-left text-xs font-semibold whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{h}</th>
                               ))}
                             </tr>
@@ -5585,7 +5683,7 @@ function InhaberFreeWindowSearchView({
                                 <td className="px-2 py-1.5 text-xs font-mono font-bold whitespace-nowrap" style={{ color: '#15803d' }}>{fmtTime(app.newStartMs)}–{fmtTime(app.newEndMs)}</td>
                                 <td className="px-2 py-1.5 text-xs text-center whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{app.rideCount}</td>
                                 <td className="px-2 py-1.5 text-xs font-mono whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{app.offsetMs >= 0 ? '+' : ''}{Math.round(app.offsetMs / 60000)} min</td>
-                                <td className="px-2 py-1.5 text-xs font-bold whitespace-nowrap" style={{ color: app.ok ? '#15803d' : '#b91c1c' }}>{app.ok ? 'OK' : 'Fehler'}</td>
+                                <td className="px-2 py-1.5 text-xs font-bold whitespace-nowrap" style={{ color: app.ok ? '#15803d' : '#b91c1c' }}>{app.ok ? t('hwh.ok') : t('common.error')}</td>
                                 <td className="px-2 py-1.5 text-xs" style={{ color: 'var(--text-secondary)', maxWidth: 160, whiteSpace: 'normal' }}>{app.hint}</td>
                               </tr>
                             ))}
@@ -5598,17 +5696,17 @@ function InhaberFreeWindowSearchView({
                     {effectiveUnresolvedRides.length > 0 && (
                       <div style={{ borderBottom: '1px solid var(--border)' }}>
                         <div className="px-4 py-2 flex items-center gap-2 text-xs font-semibold" style={{ color: '#b91c1c', background: 'rgba(185,28,28,0.06)', borderBottom: '1px solid rgba(185,28,28,0.25)' }}>
-                          <span style={{ fontWeight: 700 }}>Nicht exportierbare Fahrten — Export gesperrt</span>
+                          <span style={{ fontWeight: 700 }}>{t('hwh.nonExportableRides')}</span>
                           <span className="ml-1 px-2 py-0.5 rounded-full text-xs font-bold" style={{ background: 'rgba(185,28,28,0.15)', color: '#b91c1c' }}>{effectiveUnresolvedRides.length}</span>
                           <span className="ml-1 font-normal" style={{ color: '#b91c1c' }}>
-                            Fahrer durch Notiz ausgeschlossen — kein Ersatzfahrer verfügbar. XLSX-Export ist gesperrt bis alle Fahrten neu zugewiesen sind.
+                            {t('hwh.nonExportableRidesHint')}
                           </span>
                         </div>
                         <div className="overflow-x-auto">
                           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                             <thead>
                               <tr style={{ background: 'rgba(185,28,28,0.06)', borderBottom: '1px solid rgba(185,28,28,0.2)' }}>
-                                {['Fahrt-ID', 'Fahrzeug', 'Fahrer (Original)', 'Fahrtbeginn', 'Fahrtende', 'Notiz-Detail', 'Aktion'].map(h => (
+                                {[t('hwh.colTripId'), t('hwh.colVehicle'), t('hwh.colDriverOriginal'), t('hwh.colRideStart'), t('hwh.colRideEnd'), t('hwh.colNoteDetail'), t('hwh.colAction')].map(h => (
                                   <th key={h} className="px-2 py-1.5 text-left text-xs font-semibold whitespace-nowrap" style={{ color: '#b91c1c' }}>{h}</th>
                                 ))}
                               </tr>
@@ -5622,7 +5720,7 @@ function InhaberFreeWindowSearchView({
                                   <td className="px-2 py-1.5 text-xs whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{info.startMs ? new Date(info.startMs).toISOString().replace('T', ' ').slice(0, 19) : '—'}</td>
                                   <td className="px-2 py-1.5 text-xs whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{info.endMs ? new Date(info.endMs).toISOString().replace('T', ' ').slice(0, 19) : '—'}</td>
                                   <td className="px-2 py-1.5 text-xs" style={{ color: 'var(--text-secondary)', maxWidth: 220, whiteSpace: 'normal' }}>{info.detail}</td>
-                                  <td className="px-2 py-1.5 text-xs font-semibold whitespace-nowrap" style={{ color: '#b91c1c' }}>Nicht lösbar — Export gesperrt</td>
+                                  <td className="px-2 py-1.5 text-xs font-semibold whitespace-nowrap" style={{ color: '#b91c1c' }}>{t('hwh.unresolvableExportLocked')}</td>
                                 </tr>
                               ))}
                             </tbody>
@@ -5636,27 +5734,27 @@ function InhaberFreeWindowSearchView({
                       <div style={{ borderBottom: '1px solid var(--border)' }}>
                         {/* Section header + apply button */}
                         <div className="px-4 py-2 flex flex-wrap items-center gap-3 text-xs font-semibold" style={{ color: '#92400e', background: 'rgba(245,158,11,0.07)', borderBottom: '1px solid rgba(245,158,11,0.2)' }}>
-                          <span style={{ fontWeight: 700 }}>Fahrer-Notiz-Konflikte — mögliche Alternativen</span>
+                          <span style={{ fontWeight: 700 }}>{t('hwh.driverNoteConflictsAlternatives')}</span>
                           {driverNoteAlternatives.blocksWithAlternative > 0 && effectiveUnresolvedRides.length > 0 && (
                             <button
                               onClick={handleApplyNoteAlternatives}
                               className="inline-flex items-center gap-1.5 px-3 py-1 rounded text-xs font-bold transition-opacity hover:opacity-90"
                               style={{ background: '#15803d', color: '#fff', marginLeft: 'auto' }}
                             >
-                              Beste Fahrer-Notiz-Alternativen anwenden
+                              {t('hwh.applyBestNoteAlternatives')}
                             </button>
                           )}
                           {effectiveUnresolvedRides.length === 0 && noteReassignments.size > 0 && (
-                            <span className="ml-auto text-xs font-bold" style={{ color: '#15803d' }}>Alle Konflikte behoben</span>
+                            <span className="ml-auto text-xs font-bold" style={{ color: '#15803d' }}>{t('hwh.allConflictsResolved')}</span>
                           )}
                         </div>
                         {/* Summary cards */}
                         <div className="px-4 py-2 flex flex-wrap gap-4 text-xs" style={{ background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)' }}>
-                          <div><span style={{ color: 'var(--text-secondary)' }}>Konflikt-Blöcke</span><span className="font-bold ml-1" style={{ color: '#92400e' }}>{driverNoteAlternatives.totalBlocks}</span></div>
-                          <div><span style={{ color: 'var(--text-secondary)' }}>Mit gültiger Alternative</span><span className="font-bold ml-1" style={{ color: '#15803d' }}>{driverNoteAlternatives.blocksWithAlternative}</span></div>
-                          <div><span style={{ color: 'var(--text-secondary)' }}>Ohne gültige Alternative</span><span className="font-bold ml-1" style={{ color: driverNoteAlternatives.blocksWithout > 0 ? '#b91c1c' : 'var(--text-secondary)' }}>{driverNoteAlternatives.blocksWithout}</span></div>
-                          <div><span style={{ color: 'var(--text-secondary)' }}>Bereits angewendet</span><span className="font-bold ml-1" style={{ color: noteReassignments.size > 0 ? '#15803d' : 'var(--text-secondary)' }}>{noteReassignments.size}</span></div>
-                          <div><span style={{ color: 'var(--text-secondary)' }}>Export weiterhin gesperrt</span><span className="font-bold ml-1" style={{ color: effectiveUnresolvedRides.length > 0 ? '#b91c1c' : '#15803d' }}>{effectiveUnresolvedRides.length > 0 ? 'Ja' : 'Nein'}</span></div>
+                          <div><span style={{ color: 'var(--text-secondary)' }}>{t('hwh.statConflictBlocks')}</span><span className="font-bold ml-1" style={{ color: '#92400e' }}>{driverNoteAlternatives.totalBlocks}</span></div>
+                          <div><span style={{ color: 'var(--text-secondary)' }}>{t('hwh.statWithValidAlternative')}</span><span className="font-bold ml-1" style={{ color: '#15803d' }}>{driverNoteAlternatives.blocksWithAlternative}</span></div>
+                          <div><span style={{ color: 'var(--text-secondary)' }}>{t('hwh.statWithoutValidAlternative')}</span><span className="font-bold ml-1" style={{ color: driverNoteAlternatives.blocksWithout > 0 ? '#b91c1c' : 'var(--text-secondary)' }}>{driverNoteAlternatives.blocksWithout}</span></div>
+                          <div><span style={{ color: 'var(--text-secondary)' }}>{t('hwh.statAlreadyApplied')}</span><span className="font-bold ml-1" style={{ color: noteReassignments.size > 0 ? '#15803d' : 'var(--text-secondary)' }}>{noteReassignments.size}</span></div>
+                          <div><span style={{ color: 'var(--text-secondary)' }}>{t('hwh.statExportStillLocked')}</span><span className="font-bold ml-1" style={{ color: effectiveUnresolvedRides.length > 0 ? '#b91c1c' : '#15803d' }}>{effectiveUnresolvedRides.length > 0 ? t('common.yes') : t('common.no')}</span></div>
                         </div>
 
                         {/* Per-block alternative breakdown */}
@@ -5674,10 +5772,10 @@ function InhaberFreeWindowSearchView({
                                 <span className="font-semibold" style={{ color: 'var(--text-primary)' }}>{block.vehicle}</span>
                                 <span style={{ color: '#b45309' }}>{block.driver}</span>
                                 <span style={{ color: 'var(--text-secondary)' }}>{fmtMs(block.startMs)} – {fmtMs(block.endMs)}</span>
-                                <span style={{ color: 'var(--text-secondary)' }}>{block.rideCount} Fahrt{block.rideCount !== 1 ? 'en' : ''}</span>
+                                <span style={{ color: 'var(--text-secondary)' }}>{tPlural({ one: 'hwh.rideCountOne', other: 'hwh.rideCountOther' }, block.rideCount)}</span>
                                 <span style={{ color: 'var(--text-secondary)' }}>{fmtSec(block.durationSec)}</span>
                                 <span className="font-bold" style={{ color: hasPossible ? '#15803d' : '#b91c1c' }}>
-                                  {hasPossible ? 'Kann neu geplant werden' : 'Keine gültige Alternative gefunden'}
+                                  {hasPossible ? t('hwh.canBeReplanned') : t('hwh.noValidAlternativeFound')}
                                 </span>
                               </div>
                               {/* Candidates table */}
@@ -5686,7 +5784,7 @@ function InhaberFreeWindowSearchView({
                                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
                                     <thead>
                                       <tr style={{ background: 'rgba(245,158,11,0.04)', borderBottom: '1px solid rgba(245,158,11,0.15)' }}>
-                                        {['Ziel-Fahrer','Ziel-Art','Fahrer frei','Inhaber frei','Fahrer-Notiz-Konflikt','Inhaber-Konflikt','Bewertung','Status','Ablehnungsgrund'].map(h => (
+                                        {[t('hwh.colTargetDriver'), t('hwh.colTargetKind'), t('hwh.colDriverFree'), t('hwh.colOwnerFree'), t('hwh.colDriverNoteConflict'), t('hwh.colOwnerConflict'), t('hwh.colScore'), t('common.status'), t('hwh.colRejectionReason')].map(h => (
                                           <th key={h} className="px-2 py-1.5 text-left font-semibold whitespace-nowrap" style={{ color: '#92400e' }}>{h}</th>
                                         ))}
                                       </tr>
@@ -5694,17 +5792,18 @@ function InhaberFreeWindowSearchView({
                                     <tbody>
                                       {block.candidates.map((c, ci) => {
                                         const statusColor = c.status === 'best' ? '#15803d' : c.status === 'possible' ? '#0e7490' : '#b91c1c';
-                                        const statusLabel = c.status === 'best' ? 'Bester Kandidat' : c.status === 'possible' ? 'Möglich' : 'Abgelehnt';
-                                        const zielArt = c.targetKind === 'inhaber' ? 'Inhaber' : 'Regulärer Fahrer';
+                                        // `status` / `targetKind` are internal values, not labels.
+                                        const statusLabel = c.status === 'best' ? t('hwh.candBest') : c.status === 'possible' ? t('hwh.candPossible') : t('hwh.candRejected');
+                                        const zielArt = c.targetKind === 'inhaber' ? t('hwh.owner') : t('hwh.regularDriver');
                                         return (
                                           <tr key={c.driverName + ci} style={{ background: ci%2===0 ? 'var(--bg-surface)' : 'rgba(245,158,11,0.02)', borderBottom: '1px solid rgba(245,158,11,0.1)' }}>
                                             <td className="px-2 py-1.5 font-semibold whitespace-nowrap" style={{ color: 'var(--text-primary)' }}>{c.driverName}</td>
                                             <td className="px-2 py-1.5 whitespace-nowrap" style={{ color: c.targetKind === 'inhaber' ? '#0e7490' : 'var(--text-secondary)' }}>{zielArt}</td>
-                                            <td className="px-2 py-1.5 font-bold whitespace-nowrap" style={{ color: c.driverFree ? '#15803d' : '#b91c1c' }}>{c.driverFree ? 'Ja' : 'Nein'}</td>
-                                            <td className="px-2 py-1.5 font-bold whitespace-nowrap" style={{ color: c.inhaberFree ? '#15803d' : '#b91c1c' }}>{c.targetKind === 'inhaber' ? (c.inhaberFree ? 'Ja' : 'Nein') : '—'}</td>
-                                            <td className="px-2 py-1.5 font-bold whitespace-nowrap" style={{ color: c.driverNoteConflict ? '#b91c1c' : '#15803d' }}>{c.driverNoteConflict ? 'Ja' : 'Nein'}</td>
-                                            <td className="px-2 py-1.5 font-bold whitespace-nowrap" style={{ color: c.inhaberConflict ? '#b91c1c' : '#15803d' }}>{c.inhaberConflict ? 'Ja' : 'Nein'}</td>
-                                            <td className="px-2 py-1.5 whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{c.targetKind === 'inhaber' ? 'Inhaber-Kandidat' : 'Regulärer Kandidat'}</td>
+                                            <td className="px-2 py-1.5 font-bold whitespace-nowrap" style={{ color: c.driverFree ? '#15803d' : '#b91c1c' }}>{c.driverFree ? t('common.yes') : t('common.no')}</td>
+                                            <td className="px-2 py-1.5 font-bold whitespace-nowrap" style={{ color: c.inhaberFree ? '#15803d' : '#b91c1c' }}>{c.targetKind === 'inhaber' ? (c.inhaberFree ? t('common.yes') : t('common.no')) : '—'}</td>
+                                            <td className="px-2 py-1.5 font-bold whitespace-nowrap" style={{ color: c.driverNoteConflict ? '#b91c1c' : '#15803d' }}>{c.driverNoteConflict ? t('common.yes') : t('common.no')}</td>
+                                            <td className="px-2 py-1.5 font-bold whitespace-nowrap" style={{ color: c.inhaberConflict ? '#b91c1c' : '#15803d' }}>{c.inhaberConflict ? t('common.yes') : t('common.no')}</td>
+                                            <td className="px-2 py-1.5 whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{c.targetKind === 'inhaber' ? t('hwh.ownerCandidate') : t('hwh.regularCandidate')}</td>
                                             <td className="px-2 py-1.5 font-bold whitespace-nowrap" style={{ color: statusColor }}>{statusLabel}</td>
                                             <td className="px-2 py-1.5" style={{ color: '#b91c1c', maxWidth: 240, whiteSpace: 'normal' }}>{c.rejectReason ?? '—'}</td>
                                           </tr>
@@ -5715,7 +5814,7 @@ function InhaberFreeWindowSearchView({
                                 </div>
                               )}
                               {block.candidates.length === 0 && (
-                                <div className="px-4 py-2 text-xs" style={{ color: '#b91c1c' }}>Keine Fahrer in der Datenbank gefunden.</div>
+                                <div className="px-4 py-2 text-xs" style={{ color: '#b91c1c' }}>{t('hwh.noDriversInDatabase')}</div>
                               )}
                             </div>
                           );
@@ -5725,12 +5824,12 @@ function InhaberFreeWindowSearchView({
 
                     {/* Geänderte Fahrten table */}
                     <div>
-                      <div className="px-4 py-2 text-xs font-semibold" style={{ color: 'var(--text-secondary)', background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)' }}>Geänderte Fahrten</div>
+                      <div className="px-4 py-2 text-xs font-semibold" style={{ color: 'var(--text-secondary)', background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)' }}>{t('hwh.changedRides')}</div>
                       <div className="overflow-x-auto">
                         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                           <thead>
                             <tr style={{ background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)' }}>
-                              {['Block-ID','Fahrt-ID / Zeile','Fahrzeug','Alter Fahrer','Neuer Fahrer','Original Start','Original Ende','Neuer Start','Neues Ende','Dauer','Status'].map(h => (
+                              {[t('hwh.colBlockId'), t('hwh.colTripIdRow'), t('hwh.colVehicle'), t('hwh.colOldDriver'), t('hwh.colNewDriver'), t('hwh.colOrigStart'), t('hwh.colOrigEnd'), t('hwh.colNewStart'), t('hwh.colNewEnd'), t('hwh.colDuration'), t('common.status')].map(h => (
                                 <th key={h} className="px-2 py-1.5 text-left text-xs font-semibold whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{h}</th>
                               ))}
                             </tr>
@@ -5748,7 +5847,7 @@ function InhaberFreeWindowSearchView({
                                 <td className="px-2 py-1.5 text-xs font-mono font-bold whitespace-nowrap" style={{ color: '#15803d' }}>{fmtDatetime(ride.newStartMs)}</td>
                                 <td className="px-2 py-1.5 text-xs font-mono font-bold whitespace-nowrap" style={{ color: '#15803d' }}>{fmtDatetime(ride.newEndMs)}</td>
                                 <td className="px-2 py-1.5 text-xs whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{fmtDurSec(ride.durSec)}</td>
-                                <td className="px-2 py-1.5 text-xs font-bold whitespace-nowrap" style={{ color: ride.ok ? '#15803d' : '#b91c1c' }}>{ride.ok ? 'Geändert' : 'Fehler'}</td>
+                                <td className="px-2 py-1.5 text-xs font-bold whitespace-nowrap" style={{ color: ride.ok ? '#15803d' : '#b91c1c' }}>{ride.ok ? t('hwh.changed') : t('common.error')}</td>
                               </tr>
                             ))}
                           </tbody>
@@ -5774,13 +5873,13 @@ function InhaberFreeWindowSearchView({
           style={{ background: 'var(--accent)', color: '#fff' }}
         >
           <Play size={14} />
-          {isCreatingPlan ? 'Verschiebungsplan wird erstellt...' : 'Verschiebungsplan automatisch erstellen'}
+          {isCreatingPlan ? t('hwh.shiftPlanCreating') : t('hwh.shiftPlanCreateAuto')}
         </button>
         <button onClick={onBack} className="inline-flex items-center gap-2 text-sm hover:opacity-80" style={{ color: 'var(--text-secondary)' }}>
-          <ArrowLeft size={15} /> Zurück zu Inhaber Konflikt-Auswahl
+          <ArrowLeft size={15} /> {t('hwh.backToOwnerConflictPick')}
         </button>
         <button onClick={onRecompute} className="inline-flex items-center gap-2 text-sm hover:opacity-80" style={{ color: 'var(--text-secondary)' }}>
-          <RefreshCw size={13} /> Neu berechnen
+          <RefreshCw size={13} /> {t('hwh.recompute')}
         </button>
       </div>
 
@@ -5808,19 +5907,19 @@ function InhaberFreeWindowSearchView({
               return (
                 <>
                   <div className="flex items-center justify-between mb-4">
-                    <h3 className="font-bold text-sm" style={{ color: 'var(--text-primary)' }}>Belegter Inhaber-Block</h3>
-                    <button onClick={() => setModalData(null)} className="text-xs hover:opacity-70" style={{ color: 'var(--text-secondary)' }}>✕ Schließen</button>
+                    <h3 className="font-bold text-sm" style={{ color: 'var(--text-primary)' }}>{t('hwh.occupiedOwnerBlock')}</h3>
+                    <button onClick={() => setModalData(null)} className="text-xs hover:opacity-70" style={{ color: 'var(--text-secondary)' }}>✕ {t('common.close')}</button>
                   </div>
                   <div className="space-y-2 text-xs">
                     {[
-                      ['Block-ID',   o.blockId],
-                      ['Fahrzeug',   o.vehicle],
-                      ['Start',      fmtDatetime(o.startMs)],
-                      ['Ende',       fmtDatetime(o.endMs)],
-                      ['Dauer',      formatBlockDuration(o.durationSec)],
-                      ['Fahrten',    String(o.rides)],
-                      ['Zeilen',     o.rows],
-                      ['Herkunft',   o.sourceStep],
+                      [t('hwh.colBlockId'),   o.blockId],
+                      [t('hwh.colVehicle'),   o.vehicle],
+                      [t('hwh.colStart'),      fmtDatetime(o.startMs)],
+                      [t('hwh.colEnd'),       fmtDatetime(o.endMs)],
+                      [t('hwh.colDuration'),      formatBlockDuration(o.durationSec)],
+                      [t('hwh.colRides'),    String(o.rides)],
+                      [t('hwh.colRows'),     o.rows],
+                      [t('hwh.colOrigin'),   o.sourceStep],
                     ].map(([k, v]) => (
                       <div key={k} className="flex items-start justify-between gap-4">
                         <span style={{ color: 'var(--text-secondary)' }}>{k}</span>
@@ -5838,19 +5937,19 @@ function InhaberFreeWindowSearchView({
               return (
                 <>
                   <div className="flex items-center justify-between mb-4">
-                    <h3 className="font-bold text-sm" style={{ color: '#065f46' }}>Freies Zeitfenster</h3>
-                    <button onClick={() => setModalData(null)} className="text-xs hover:opacity-70" style={{ color: 'var(--text-secondary)' }}>✕ Schließen</button>
+                    <h3 className="font-bold text-sm" style={{ color: '#065f46' }}>{t('hwh.freeTimeWindow')}</h3>
+                    <button onClick={() => setModalData(null)} className="text-xs hover:opacity-70" style={{ color: 'var(--text-secondary)' }}>✕ {t('common.close')}</button>
                   </div>
                   <div className="space-y-2 text-xs mb-4">
                     {[
-                      ['Datum',    date],
-                      ['Start',    fmtTime(startMs)],
-                      ['Ende',     fmtTime(endMs)],
-                      ['Dauer',    formatBlockDuration(durationSec)],
-                      ['Vorheriger Block', prevBlockId ? `…${prevBlockId.slice(-8)}` : '—'],
-                      ['Nächster Block',   nextBlockId ? `…${nextBlockId.slice(-8)}` : '—'],
-                      ['Passende offene Blöcke',           String(candidates.length)],
-                      ['Davon Fahrzeug frei',              String(vehicleFreeCount)],
+                      [t('common.date'),    date],
+                      [t('hwh.colStart'),    fmtTime(startMs)],
+                      [t('hwh.colEnd'),     fmtTime(endMs)],
+                      [t('hwh.colDuration'),    formatBlockDuration(durationSec)],
+                      [t('hwh.colPrevBlock'), prevBlockId ? `…${prevBlockId.slice(-8)}` : '—'],
+                      [t('hwh.colNextBlock'),   nextBlockId ? `…${nextBlockId.slice(-8)}` : '—'],
+                      [t('hwh.colMatchingOpenBlocks'),           String(candidates.length)],
+                      [t('hwh.colOfWhichVehicleFree'),              String(vehicleFreeCount)],
                     ].map(([k, v]) => (
                       <div key={k} className="flex items-center justify-between gap-4">
                         <span style={{ color: 'var(--text-secondary)' }}>{k}</span>
@@ -5861,13 +5960,13 @@ function InhaberFreeWindowSearchView({
                   {candidates.length > 0 && (
                     <>
                       <div className="text-xs font-semibold mb-2" style={{ color: 'var(--text-secondary)' }}>
-                        Passende Blöcke ({Math.min(candidates.length, 10)} von {candidates.length})
+                        {t('hwh.matchingBlocksOfTotal', { shown: Math.min(candidates.length, 10), total: candidates.length })}
                       </div>
                       <div className="overflow-x-auto">
                         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                           <thead>
                             <tr style={{ background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)' }}>
-                              {['Block-ID','Fahrzeug','Orig. Start','Orig. Ende','Dauer','Fahrten','Fzg frei'].map(h => (
+                              {[t('hwh.colBlockId'), t('hwh.colVehicle'), t('hwh.colOrigStart'), t('hwh.colOrigEnd'), t('hwh.colDuration'), t('hwh.colRides'), t('hwh.badgeVehicleFree')].map(h => (
                                 <th key={h} className="px-2 py-1.5 text-left text-xs font-semibold whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{h}</th>
                               ))}
                             </tr>
@@ -5881,7 +5980,7 @@ function InhaberFreeWindowSearchView({
                                 <td className="px-2 py-1.5 text-xs font-mono whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{fmtDatetime(block.blockEndMs)}</td>
                                 <td className="px-2 py-1.5 text-xs" style={{ color: 'var(--text-secondary)' }}>{formatBlockDuration(block.blockDurationSec)}</td>
                                 <td className="px-2 py-1.5 text-xs" style={{ color: 'var(--text-secondary)' }}>{block.rides?.length ?? 0}</td>
-                                <td className="px-2 py-1.5 text-xs font-bold" style={{ color: vehicleFree ? '#15803d' : '#b91c1c' }}>{vehicleFree ? 'Ja' : 'Nein'}</td>
+                                <td className="px-2 py-1.5 text-xs font-bold" style={{ color: vehicleFree ? '#15803d' : '#b91c1c' }}>{vehicleFree ? t('common.yes') : t('common.no')}</td>
                               </tr>
                             ))}
                           </tbody>
@@ -5900,6 +5999,14 @@ function InhaberFreeWindowSearchView({
 }
 
 // ── AutoShiftPlan types & algorithm ──────────────────────────────────────────
+//
+// UNREACHABLE. `runLargestBlankPackingShiftPlan`, `runAutoShiftPlan` and
+// `AutoShiftPlanView` (below, down to the "Per-driver working-hour summary"
+// section) have no caller anywhere under src/: `inhaberAutoShiftResult` is only
+// ever set to null and <AutoShiftPlanView> is never rendered. Their German text
+// is therefore left untranslated — it reaches no screen, and adding ~150 keys to
+// the shared dictionaries for it would be pure cost. Translate this block in the
+// same change that makes it reachable again, or delete it.
 
 interface ShiftedRide {
   tripId: string;
@@ -9087,12 +9194,12 @@ function buildFinalSalaryRangeSummary(
 
 /**
  * Validates salary range constraints.
- * Returns null if all drivers are within range, or a German error message if any are outside.
+ * Returns null if all drivers are within range, or a message if any are outside.
  */
-function validateFinalSalaryRanges(summary: SalaryRangeDriverRow[]): string | null {
+function validateFinalSalaryRanges(summary: SalaryRangeDriverRow[], t: Translate): string | null {
   const violations = summary.filter(r => r.status !== 'ok');
   if (violations.length === 0) return null;
-  return 'Ein oder mehrere Fahrer liegen außerhalb des erlaubten Gehaltsbereichs.';
+  return t('hwh.salaryOutsideRange');
 }
 
 function secToHStr(sec: number): string {
@@ -9108,18 +9215,19 @@ interface DriverHourSummaryTableProps {
 }
 
 function DriverHourSummaryTable({ rows }: DriverHourSummaryTableProps) {
+  const { t } = useTranslation();
   if (rows.length === 0) return (
-    <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>Keine Daten verfügbar.</p>
+    <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>{t('hwh.noDataAvailable')}</p>
   );
   const cols = [
-    { key: 'driverName',  label: 'Fahrer',       align: 'left' },
-    { key: 'hourlyCents', label: 'Faktor €/h',   align: 'right' },
-    { key: 'baseSec',     label: '1000 Std',     align: 'right' },
-    { key: 'night25Sec',  label: '1500 N25%',    align: 'right' },
-    { key: 'night40Sec',  label: '1501 N40%',    align: 'right' },
-    { key: 'sundaySec',   label: '1510 Son',     align: 'right' },
-    { key: 'holidaySec',  label: 'Feiertag',     align: 'right' },
-    { key: 'totalSec',    label: 'Insgesamt',    align: 'right' },
+    { key: 'driverName',  label: t('common.driver'),       align: 'left' },
+    { key: 'hourlyCents', label: t('hwh.colRatePerHour'),  align: 'right' },
+    { key: 'baseSec',     label: t('hwh.colHours1000'),    align: 'right' },
+    { key: 'night25Sec',  label: '1500 N25%',              align: 'right' },
+    { key: 'night40Sec',  label: '1501 N40%',              align: 'right' },
+    { key: 'sundaySec',   label: t('hwh.colHours1510'),    align: 'right' },
+    { key: 'holidaySec',  label: t('hwh.holiday'),         align: 'right' },
+    { key: 'totalSec',    label: t('hwh.colTotal'),        align: 'right' },
   ] as const;
   return (
     <div className="overflow-x-auto rounded-xl" style={{ border: '1px solid var(--border)' }}>
@@ -9169,14 +9277,16 @@ interface SalaryRangeSummaryTableProps {
 }
 
 function SalaryRangeSummaryTable({ rows, expandedDriver, onToggleExpand }: SalaryRangeSummaryTableProps) {
+  const { t } = useTranslation();
   if (rows.length === 0) return (
-    <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>Keine Gehaltsdaten verfügbar.</p>
+    <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>{t('hwh.noSalaryData')}</p>
   );
 
+  // Keyed on the stored status value; only `label` renders.
   const statusColors: Record<SalaryRangeDriverRow['status'], { bg: string; border: string; text: string; label: string }> = {
-    ok:         { bg: 'rgba(21,128,61,0.08)',   border: 'rgba(21,128,61,0.25)',  text: '#15803d', label: 'OK' },
-    below_min:  { bg: 'rgba(220,38,38,0.06)',   border: 'rgba(220,38,38,0.3)',   text: '#b91c1c', label: 'Unter Mindestgehalt' },
-    above_max:  { bg: 'rgba(217,119,6,0.06)',   border: 'rgba(217,119,6,0.35)',  text: '#b45309', label: 'Über Maximalgehalt' },
+    ok:         { bg: 'rgba(21,128,61,0.08)',   border: 'rgba(21,128,61,0.25)',  text: '#15803d', label: t('hwh.ok') },
+    below_min:  { bg: 'rgba(220,38,38,0.06)',   border: 'rgba(220,38,38,0.3)',   text: '#b91c1c', label: t('hwh.belowMinSalary') },
+    above_max:  { bg: 'rgba(217,119,6,0.06)',   border: 'rgba(217,119,6,0.35)',  text: '#b45309', label: t('hwh.aboveMaxSalary') },
   };
 
   return (
@@ -9203,27 +9313,27 @@ function SalaryRangeSummaryTable({ rows, expandedDriver, onToggleExpand }: Salar
               <span className="font-semibold text-sm flex-1" style={{ color: 'var(--text-primary)' }}>{row.driverName}</span>
               {/* Mindestgehalt */}
               <div className="text-right hidden sm:block flex-shrink-0">
-                <div className="text-xs" style={{ color: 'var(--text-secondary)' }}>Mindest</div>
+                <div className="text-xs" style={{ color: 'var(--text-secondary)' }}>{t('hwh.minShort')}</div>
                 <div className="text-xs font-semibold tabular-nums" style={{ color: 'var(--text-primary)' }}>
                   {row.minSalaryCents != null ? fmtEur(row.minSalaryCents) : '—'}
                 </div>
               </div>
               {/* Maximalgehalt */}
               <div className="text-right hidden sm:block flex-shrink-0">
-                <div className="text-xs" style={{ color: 'var(--text-secondary)' }}>Maximum</div>
+                <div className="text-xs" style={{ color: 'var(--text-secondary)' }}>{t('hwh.maxShort')}</div>
                 <div className="text-xs font-semibold tabular-nums" style={{ color: 'var(--text-primary)' }}>
                   {row.maxSalaryCents != null ? fmtEur(row.maxSalaryCents) : '—'}
                 </div>
               </div>
               {/* Ist-Gehalt */}
               <div className="text-right flex-shrink-0">
-                <div className="text-xs" style={{ color: 'var(--text-secondary)' }}>Ist-Gehalt</div>
+                <div className="text-xs" style={{ color: 'var(--text-secondary)' }}>{t('hwh.actualSalary')}</div>
                 <div className="text-xs font-bold tabular-nums" style={{ color: s.text }}>{fmtEur(row.finalSalaryCents)}</div>
               </div>
               {/* Differenz */}
               {row.status !== 'ok' && (
                 <div className="text-right flex-shrink-0">
-                  <div className="text-xs" style={{ color: 'var(--text-secondary)' }}>Differenz</div>
+                  <div className="text-xs" style={{ color: 'var(--text-secondary)' }}>{t('hwh.difference')}</div>
                   <div className="text-xs font-bold tabular-nums" style={{ color: s.text }}>
                     {diff < 0 ? `−${fmtEur(-diff)}` : `+${fmtEur(diff)}`}
                   </div>
@@ -9240,26 +9350,26 @@ function SalaryRangeSummaryTable({ rows, expandedDriver, onToggleExpand }: Salar
               <div className="px-4 py-3 space-y-2" style={{ background: 'var(--bg-surface)', borderTop: `1px solid ${s.border}` }}>
                 {/* Mobile salary range */}
                 <div className="sm:hidden grid grid-cols-2 gap-2 text-xs">
-                  <div><span style={{ color: 'var(--text-secondary)' }}>Mindestgehalt: </span><span className="font-semibold" style={{ color: 'var(--text-primary)' }}>{row.minSalaryCents != null ? fmtEur(row.minSalaryCents) : '—'}</span></div>
-                  <div><span style={{ color: 'var(--text-secondary)' }}>Maximalgehalt: </span><span className="font-semibold" style={{ color: 'var(--text-primary)' }}>{row.maxSalaryCents != null ? fmtEur(row.maxSalaryCents) : '—'}</span></div>
+                  <div><span style={{ color: 'var(--text-secondary)' }}>{t('hwh.minSalary')}: </span><span className="font-semibold" style={{ color: 'var(--text-primary)' }}>{row.minSalaryCents != null ? fmtEur(row.minSalaryCents) : '—'}</span></div>
+                  <div><span style={{ color: 'var(--text-secondary)' }}>{t('hwh.maxSalary')}: </span><span className="font-semibold" style={{ color: 'var(--text-primary)' }}>{row.maxSalaryCents != null ? fmtEur(row.maxSalaryCents) : '—'}</span></div>
                 </div>
                 {/* Hour buckets */}
                 <div className="overflow-x-auto rounded-lg" style={{ border: '1px solid var(--border)' }}>
                   <table className="w-full text-xs border-collapse">
                     <thead>
                       <tr style={{ background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)' }}>
-                        {['Lohnart', 'Stunden', 'Faktor', 'Betrag'].map(h => (
-                          <th key={h} className={`px-3 py-2 font-semibold whitespace-nowrap ${h === 'Lohnart' ? 'text-left' : 'text-right'}`} style={{ color: 'var(--text-secondary)' }}>{h}</th>
+                        {['Lohnart', t('hwh.colHours'), t('hwh.colFactor'), t('common.amount')].map((h, hi) => (
+                          <th key={h} className={`px-3 py-2 font-semibold whitespace-nowrap ${hi === 0 ? 'text-left' : 'text-right'}`} style={{ color: 'var(--text-secondary)' }}>{h}</th>
                         ))}
                       </tr>
                     </thead>
                     <tbody>
                       {[
-                        { label: '1000 Std (Grundlohn)', hours: row.hours1000, factor: '×1,00', amountCents: row.basePayCents },
-                        { label: '1500 N25%',            hours: row.hours1500, factor: '×0,25', amountCents: row.night25PayCents },
-                        { label: '1501 N40%',            hours: row.hours1501, factor: '×0,40', amountCents: row.night40PayCents },
-                        { label: '1510 Sonntag',         hours: row.hours1510, factor: '×0,50', amountCents: row.sundayPayCents },
-                        { label: 'Feiertag',             hours: row.hoursHoliday, factor: '×1,00', amountCents: row.holidayPayCents },
+                        { label: `1000 ${t('hwh.baseWage')}`,  hours: row.hours1000, factor: '×1,00', amountCents: row.basePayCents },
+                        { label: '1500 N25%',                 hours: row.hours1500, factor: '×0,25', amountCents: row.night25PayCents },
+                        { label: '1501 N40%',                 hours: row.hours1501, factor: '×0,40', amountCents: row.night40PayCents },
+                        { label: `1510 ${t('hwh.sunday')}`,   hours: row.hours1510, factor: '×0,50', amountCents: row.sundayPayCents },
+                        { label: t('hwh.holiday'),            hours: row.hoursHoliday, factor: '×1,00', amountCents: row.holidayPayCents },
                       ].map((item, idx) => (
                         <tr key={item.label} style={{ borderBottom: idx < 4 ? '1px solid var(--border)' : undefined }}>
                           <td className="px-3 py-1.5 font-medium" style={{ color: 'var(--text-primary)' }}>{item.label}</td>
@@ -9269,14 +9379,14 @@ function SalaryRangeSummaryTable({ rows, expandedDriver, onToggleExpand }: Salar
                         </tr>
                       ))}
                       <tr style={{ borderTop: '2px solid var(--border)', background: 'var(--bg-subtle)' }}>
-                        <td className="px-3 py-2 font-bold" style={{ color: 'var(--text-primary)' }} colSpan={3}>Gesamt</td>
+                        <td className="px-3 py-2 font-bold" style={{ color: 'var(--text-primary)' }} colSpan={3}>{t('hwh.total')}</td>
                         <td className="px-3 py-2 text-right tabular-nums font-bold" style={{ color: s.text }}>{fmtEur(row.finalSalaryCents)}</td>
                       </tr>
                     </tbody>
                   </table>
                 </div>
                 <div className="text-xs" style={{ color: 'var(--text-secondary)' }}>
-                  Stundensatz: {fmtRate(row.hourlyCents)} €/h
+                  {t('hwh.hourlyRate')}: {fmtRate(row.hourlyCents)} €/h
                 </div>
               </div>
             )}
@@ -9303,10 +9413,12 @@ interface SavedPlanExportParams {
   originalFileName: string | null;
   month: number;
   year: number;
+  /** Only for the on-screen alert below; the workbook itself stays German. */
+  t: Translate;
 }
 
 async function reExportFahrtenbuchFromSavedPlan(params: SavedPlanExportParams): Promise<void> {
-  const { trips, shiftMapEntries, noteReassignmentsEntries, ownerDriverName, storagePath, sourceSheetName, sourceColumnsJson, originalFileName, month, year } = params;
+  const { trips, shiftMapEntries, noteReassignmentsEntries, ownerDriverName, storagePath, sourceSheetName, sourceColumnsJson, originalFileName, month, year, t } = params;
   const shiftMap = new Map(shiftMapEntries);
   const noteReassignments = new Map(noteReassignmentsEntries);
 
@@ -9329,15 +9441,15 @@ async function reExportFahrtenbuchFromSavedPlan(params: SavedPlanExportParams): 
   if (sourceColumnsJson && sourceColumnsJson.length > 0) {
     headers = [...sourceColumnsJson];
     const inHeaders = new Set(headers.map(h => h.toLowerCase()));
-    for (const t of trips) {
-      if (t.raw_data_json) for (const k of Object.keys(t.raw_data_json)) {
+    for (const trip of trips) {
+      if (trip.raw_data_json) for (const k of Object.keys(trip.raw_data_json)) {
         if (!inHeaders.has(k.toLowerCase())) { headers.push(k); inHeaders.add(k.toLowerCase()); }
       }
     }
   } else {
     const headerSet = new Set<string>();
-    for (const t of trips) {
-      if (t.raw_data_json) for (const k of Object.keys(t.raw_data_json)) headerSet.add(k);
+    for (const trip of trips) {
+      if (trip.raw_data_json) for (const k of Object.keys(trip.raw_data_json)) headerSet.add(k);
     }
     headers = [...headerSet];
   }
@@ -9454,7 +9566,8 @@ async function reExportFahrtenbuchFromSavedPlan(params: SavedPlanExportParams): 
     }
 
     if (invalidPriceKmCount > 0) {
-      alert(`Export gesperrt — Fahrpreis/Kilometer wurden verändert (${invalidPriceKmCount} Zellen).`);
+      // Screen alert, not workbook content.
+      alert(t('hwh.exportLockedPriceKmChangedShort', { count: invalidPriceKmCount }));
       return;
     }
 
@@ -9499,18 +9612,20 @@ async function reExportFahrtenbuchFromSavedPlan(params: SavedPlanExportParams): 
 
 // ── Main component ────────────────────────────────────────────────────────────
 
+// Progress messages, held as TranslationKeys because this list is module-level;
+// the wizard resolves the current one with t(...).
 const AUTO_RUN_STEPS = [
-  'Fahrtenbuch wird gelesen...',
-  'Fahrzeug-Blöcke werden berechnet...',
-  'Reguläre Fahrer werden zugewiesen...',
-  'Fahrer-Notizen werden geprüft...',
-  'Inhaber-Konflikte werden vorbereitet...',
-  'Zeitfenster werden gesucht...',
-  'Konflikte werden automatisch gelöst...',
-  'Fahrer-Notiz-Konflikte werden gelöst...',
-  'Export wird vorbereitet...',
-  'Abschlussprüfung läuft...',
-];
+  'hwh.autoStepReadFahrtenbuch',
+  'hwh.autoStepBuildBlocks',
+  'hwh.autoStepAssignRegularDrivers',
+  'hwh.autoStepCheckDriverNotes',
+  'hwh.autoStepPrepareOwnerConflicts',
+  'hwh.autoStepSearchWindows',
+  'hwh.autoStepResolveConflicts',
+  'hwh.autoStepResolveNoteConflicts',
+  'hwh.autoStepPrepareExport',
+  'hwh.autoStepFinalCheck',
+] as const;
 const MIN_STEP_MS = 1100;
 
 // ── Vehicle month-boundary summary ───────────────────────────────────────────
@@ -9686,13 +9801,14 @@ interface VehicleMonthBoundarySummaryProps {
 }
 
 function VehicleMonthBoundarySummary({ rows }: VehicleMonthBoundarySummaryProps) {
+  const { t } = useTranslation();
   if (rows.length === 0) return null;
   const isFinal = rows.some(r => r.source === 'final');
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-2 flex-wrap">
         <h3 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
-          Fahrer je Fahrzeug am Monatsanfang und Monatsende
+          {t('hwh.boundaryTitle')}
         </h3>
         <span
           className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium"
@@ -9700,17 +9816,17 @@ function VehicleMonthBoundarySummary({ rows }: VehicleMonthBoundarySummaryProps)
             ? { background: 'rgba(21,128,61,0.12)', color: '#15803d', border: '1px solid rgba(21,128,61,0.3)' }
             : { background: 'rgba(217,119,6,0.10)', color: '#b45309', border: '1px solid rgba(217,119,6,0.3)' }}
         >
-          {isFinal ? 'Finales Fahrtenbuch' : 'Vorläufig'}
+          {isFinal ? t('hwh.boundaryFinal') : t('hwh.boundaryPreliminary')}
         </span>
       </div>
       <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>
-        Diese Übersicht zeigt, welcher Fahrer ein Fahrzeug zu Beginn und am Ende des ausgewählten Monats hatte.
+        {t('hwh.boundaryHint')}
       </p>
       <div className="overflow-x-auto rounded-xl" style={{ border: '1px solid var(--border)' }}>
         <table className="w-full text-xs border-collapse">
           <thead>
             <tr style={{ background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)' }}>
-              {['Fahrzeug', 'Erster Fahrer', 'Erste Fahrt', 'Letzter Fahrer', 'Letzte Fahrt'].map(h => (
+              {[t('hwh.colVehicle'), t('hwh.colFirstDriver'), t('hwh.colFirstTrip'), t('hwh.colLastDriver'), t('hwh.colLastTrip')].map(h => (
                 <th key={h} className="text-left px-3 py-2 font-semibold whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{h}</th>
               ))}
             </tr>
@@ -9720,13 +9836,13 @@ function VehicleMonthBoundarySummary({ rows }: VehicleMonthBoundarySummaryProps)
               <tr key={row.vehicle} style={{ borderBottom: i < rows.length - 1 ? '1px solid var(--border)' : undefined }}>
                 <td className="px-3 py-2 font-mono font-semibold whitespace-nowrap" style={{ color: 'var(--text-primary)' }}>{row.vehicle}</td>
                 <td className="px-3 py-2 whitespace-nowrap" style={{ color: row.firstDriver ? 'var(--text-primary)' : 'var(--text-tertiary, #9ca3af)' }}>
-                  {row.firstDriver ?? <span className="italic">Nicht ermittelbar <span className="ml-1 inline-flex items-center px-1.5 py-0.5 rounded text-xs" style={{ background: 'rgba(217,119,6,0.10)', color: '#b45309' }}>Prüfung erforderlich</span></span>}
+                  {row.firstDriver ?? <span className="italic">{t('hwh.notDeterminable')} <span className="ml-1 inline-flex items-center px-1.5 py-0.5 rounded text-xs" style={{ background: 'rgba(217,119,6,0.10)', color: '#b45309' }}>{t('hwh.checkRequired')}</span></span>}
                 </td>
                 <td className="px-3 py-2 whitespace-nowrap tabular-nums" style={{ color: 'var(--text-secondary)' }}>
                   {row.firstTripMs ? fmtBoundaryMs(row.firstTripMs) : '—'}
                 </td>
                 <td className="px-3 py-2 whitespace-nowrap" style={{ color: row.lastDriver ? 'var(--text-primary)' : 'var(--text-tertiary, #9ca3af)' }}>
-                  {row.lastDriver ?? <span className="italic">Nicht ermittelbar <span className="ml-1 inline-flex items-center px-1.5 py-0.5 rounded text-xs" style={{ background: 'rgba(217,119,6,0.10)', color: '#b45309' }}>Prüfung erforderlich</span></span>}
+                  {row.lastDriver ?? <span className="italic">{t('hwh.notDeterminable')} <span className="ml-1 inline-flex items-center px-1.5 py-0.5 rounded text-xs" style={{ background: 'rgba(217,119,6,0.10)', color: '#b45309' }}>{t('hwh.checkRequired')}</span></span>}
                 </td>
                 <td className="px-3 py-2 whitespace-nowrap tabular-nums" style={{ color: 'var(--text-secondary)' }}>
                   {row.lastTripMs ? fmtBoundaryMs(row.lastTripMs) : '—'}
@@ -9753,6 +9869,7 @@ interface Props {
 }
 
 export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
+  const { t } = useTranslation();
   const { user } = useAuth();
   const { effectiveCompanyId: companyId } = useSuperAdmin();
   const now = new Date();
@@ -9892,10 +10009,10 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
     if (autoRunPhase !== 'done' || autoRunExportReady !== null) return;
     const id = setTimeout(() => {
       setAutoRunExportReady(false);
-      setAutoRunExportReason('Zeitüberschreitung bei der Abschlussprüfung (>120 s)');
+      setAutoRunExportReason(t('hwh.finalCheckTimeout'));
     }, 120_000);
     return () => clearTimeout(id);
-  }, [autoRunPhase, autoRunExportReady]);
+  }, [autoRunPhase, autoRunExportReady, t]);
 
   // Tracks which import+month+year combination has already been prefilled from saved targets
   const prefillKeyRef = useRef('');
@@ -9966,6 +10083,7 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
         .eq('is_canceled', false)
         .order('id', { ascending: true })
         .range(from, to),
+      // Interpolated into fetchAllPaginated's own German error text.
       { label: 'Fahrer' },
     )
       .then((data) => {
@@ -10023,29 +10141,29 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
           }>).map(r => [r.driver_id, r])
         );
         setDriverConfigs(prev => prev.map(cfg => {
-          const t = byId.get(cfg.driverId);
-          if (!t) return cfg;
+          const target = byId.get(cfg.driverId);
+          if (!target) return cfg;
           return {
             ...cfg,
-            targetBaseH:    Number(t.base_hours)          || 0,
-            targetNacht25H: Number(t.night_25_hours)       || 0,
-            targetNacht40H: Number(t.night_0_4_40_hours)   || 0,
-            targetSundayH:  Number(t.sunday_50_hours)      || 0,
-            targetHolidayH: Number(t.holiday_hours)        || 0,
+            targetBaseH:    Number(target.base_hours)          || 0,
+            targetNacht25H: Number(target.night_25_hours)       || 0,
+            targetNacht40H: Number(target.night_0_4_40_hours)   || 0,
+            targetSundayH:  Number(target.sunday_50_hours)      || 0,
+            targetHolidayH: Number(target.holiday_hours)        || 0,
           };
         }));
         setDrafts(prev => {
           const m = new Map(prev);
-          for (const [did, t] of byId) {
+          for (const [did, target] of byId) {
             const existing = m.get(did);
             if (!existing) continue;
             m.set(did, {
               ...existing,
-              baseH:    fmtH(Number(t.base_hours)         || 0),
-              nacht25H: fmtH(Number(t.night_25_hours)      || 0),
-              nacht40H: fmtH(Number(t.night_0_4_40_hours)  || 0),
-              sunH:     fmtH(Number(t.sunday_50_hours)     || 0),
-              holH:     fmtH(Number(t.holiday_hours)       || 0),
+              baseH:    fmtH(Number(target.base_hours)         || 0),
+              nacht25H: fmtH(Number(target.night_25_hours)      || 0),
+              nacht40H: fmtH(Number(target.night_0_4_40_hours)  || 0),
+              sunH:     fmtH(Number(target.sunday_50_hours)     || 0),
+              holH:     fmtH(Number(target.holiday_hours)       || 0),
             });
           }
           return m;
@@ -10146,7 +10264,7 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
 
   const downloadSavedPlan = useCallback(async (plan: SavedPlanRow) => {
     if (!plan.import_id && !plan.storage_path) {
-      alert('Keine Originaldaten verfügbar — Import oder Speicherpfad fehlt.');
+      alert(t('hwh.noOriginalData'));
       return;
     }
     setDownloadingPlanId(plan.id);
@@ -10163,11 +10281,13 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
           .order('source_row_index', { ascending: true, nullsFirst: false })
           .order('id', { ascending: true })
           .range(from, to),
+        // Interpolated into fetchAllPaginated's own German error text.
         { label: 'Fahrten' },
       );
 
       // Resolve owner driver name from saved driver_configs_json
       const ownerConfig = (plan.driver_configs_json as WzDriverConfig[] | null)?.find(c => c.isOwner);
+      // Written into the Fahrername column of the exported Fahrtenbuch.
       const ownerDriverName = ownerConfig?.driverName ?? 'Inhaber';
 
       await reExportFahrtenbuchFromSavedPlan({
@@ -10181,13 +10301,14 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
         originalFileName: plan.original_file_name ?? null,
         month: plan.month,
         year: plan.year,
+        t,
       });
     } catch (e) {
-      alert(`Download fehlgeschlagen: ${e instanceof Error ? e.message : String(e)}`);
+      alert(t('hwh.downloadFailed', { message: e instanceof Error ? e.message : String(e) }));
     } finally {
       setDownloadingPlanId(null);
     }
-  }, []);
+  }, [companyId, t]);
 
   // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -10214,7 +10335,7 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
   // ── Persistence ───────────────────────────────────────────────────────────────
 
   const ensureReconciliation = useCallback(async (): Promise<string> => {
-    if (!companyId) throw new Error('Keine company_id');
+    if (!companyId) throw new Error(t('hwh.errorNoCompanyId'));
     if (reconciliationId) return reconciliationId;
     const { data: existing } = await supabase.from('historical_reconciliations')
       .select('id').eq('company_id', companyId).eq('month', month).eq('year', year)
@@ -10228,7 +10349,7 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
     if (error) throw error;
     setReconciliationId(created.id);
     return created.id;
-  }, [companyId, month, year, reconciliationId, selectedImportId, imports]);
+  }, [companyId, month, year, reconciliationId, selectedImportId, imports, t]);
 
   const saveDriverConfigs = useCallback(async () => {
     if (!companyId) return;
@@ -10338,7 +10459,7 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
         if (driverNotesMap.size === 0) return undefined;
         const m = new Map<string, DriverPlanningExclusion[]>();
         for (const [driverId, notes] of driverNotesMap) {
-          const intervals = buildDriverPlanningExclusions(notes);
+          const intervals = buildDriverPlanningExclusions(notes, t);
           if (intervals.length > 0) m.set(driverId, intervals);
         }
         return m.size > 0 ? m : undefined;
@@ -10389,12 +10510,12 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
       setAutoRunPhase('done');
 
     } catch (e) {
-      const msg = e instanceof Error ? e.message : 'Unbekannter Fehler';
+      const msg = e instanceof Error ? e.message : t('hwh.unknownError');
       if (debugMode) console.error(`[AutoRun #${runId}] failed:`, msg, e);
       setAutoRunPhase('failed');
       setAutoRunError(msg);
     }
-  }, [companyId, selectedImportId, driverConfigs, assignmentStrategy, month, year, driverNotesMap, saveDriverConfigs, debugMode]);
+  }, [companyId, selectedImportId, driverConfigs, assignmentStrategy, month, year, driverNotesMap, saveDriverConfigs, debugMode, t]);
 
   // ── Compute ───────────────────────────────────────────────────────────────────
 
@@ -10402,7 +10523,7 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
     if (!companyId || !selectedImportId) return;
     setComputing(true);
     setComputeError(null);
-    setComputePhase('Fahrten laden…');
+    setComputePhase(t('hwh.phaseLoadingTrips'));
     setPhase1Result(null);
     setAssignmentResult(null);
     setInhaberResult(null);
@@ -10421,7 +10542,7 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
       const trips = await fetchAllTrips(companyId, selectedImportId);
       setOriginalTrips(trips);
       setBoundaryRows(buildVehicleMonthBoundarySummary(trips));
-      setComputePhase('Fahrzeug-Blöcke aufbauen…');
+      setComputePhase(t('hwh.phaseBuildingBlocks'));
       const result = buildVehicleBlocksForHistoricalWorkingHours(trips);
       if (import.meta.env.DEV) {
         console.log('[VehicleBlocksStep1] Built', result.blocks.length, 'blocks from', trips.length, 'trips', {
@@ -10442,7 +10563,7 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
       setComputing(false);
       setComputePhase('');
     }
-  }, [companyId, selectedImportId]);
+  }, [companyId, selectedImportId, t]);
 
   // ── Step 2: Assign regular drivers ───────────────────────────────────────────
 
@@ -10475,7 +10596,7 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
         if (driverNotesMap.size === 0) return undefined;
         const excls = new Map<string, DriverPlanningExclusion[]>();
         for (const [driverId, notes] of driverNotesMap) {
-          const intervals = buildDriverPlanningExclusions(notes);
+          const intervals = buildDriverPlanningExclusions(notes, t);
           if (intervals.length > 0) excls.set(driverId, intervals);
         }
         return excls.size > 0 ? excls : undefined;
@@ -10536,7 +10657,7 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
     } finally {
       setAssigning(false);
     }
-  }, [phase1Result, driverConfigs, driverNotesMap]);
+  }, [phase1Result, driverConfigs, driverNotesMap, t]);
 
   // ── Input style ───────────────────────────────────────────────────────────────
 
@@ -10568,7 +10689,7 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
       {/* Header */}
       <div className="flex items-center justify-between">
         <button onClick={onBack} className="inline-flex items-center gap-2 text-sm font-medium transition-colors hover:opacity-80" style={{ color: 'var(--text-secondary)' }}>
-          <ArrowLeft size={15} /> Zurück zur Auswahl
+          <ArrowLeft size={15} /> {t('hwh.backToSelection')}
         </button>
         <StepDots current={step} total={5} />
       </div>
@@ -10577,34 +10698,34 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
       {step === 0 && (
         <div className="space-y-4">
           <div>
-            <h2 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>Monat & Fahrtenbuch</h2>
-            <p className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>Wählen Sie den historischen Monat und das zugehörige Fahrtenbuch.</p>
+            <h2 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>{t('hwh.step0Title')}</h2>
+            <p className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>{t('hwh.step0Subtitle')}</p>
           </div>
           <div className="rounded-2xl p-5 space-y-4" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
             <div className="flex gap-3">
               <div className="flex-1">
-                <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Monat</label>
+                <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>{t('common.month')}</label>
                 <select value={month} onChange={e => setMonth(+e.target.value)} style={{ ...inp, width: 'auto' }}>
-                  {MONTHS_DE.map((m, i) => <option key={i} value={i+1}>{m}</option>)}
+                  {MONTH_KEYS.map((k, i) => <option key={i} value={i+1}>{t(k)}</option>)}
                 </select>
               </div>
               <div className="flex-1">
-                <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Jahr</label>
+                <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>{t('hwh.year')}</label>
                 <select value={year} onChange={e => setYear(+e.target.value)} style={{ ...inp, width: 'auto' }}>
                   {yearOptions.map(y => <option key={y} value={y}>{y}</option>)}
                 </select>
               </div>
             </div>
             <div>
-              <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Fahrtenbuch-Import</label>
+              <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>{t('hwh.fahrtenbuchImport')}</label>
               {loadingImports ? (
-                <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>Lade…</p>
+                <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>{t('common.loading')}</p>
               ) : imports.length === 0 ? (
-                <p className="text-xs" style={{ color: '#b45309' }}>Kein Import für {MONTHS_DE[month-1]} {year} gefunden.</p>
+                <p className="text-xs" style={{ color: '#b45309' }}>{t('hwh.noImportForMonth', { month: t(MONTH_KEYS[month-1]), year })}</p>
               ) : (
                 <select value={selectedImportId} onChange={e => setSelectedImportId(e.target.value)} style={inp}>
-                  <option value="">— Import wählen —</option>
-                  {imports.map(i => <option key={i.id} value={i.id}>{i.file_name} ({i.row_count} Zeilen)</option>)}
+                  <option value="">{t('hwh.chooseImport')}</option>
+                  {imports.map(i => <option key={i.id} value={i.id}>{i.file_name} ({t('hwh.rowsCount', { count: i.row_count })})</option>)}
                 </select>
               )}
             </div>
@@ -10616,19 +10737,19 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
               className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all hover:brightness-110 disabled:opacity-40"
               style={{ background: '#2563eb', color: '#fff' }}
             >
-              Weiter <ArrowRight size={15} />
+              {t('hwh.next')} <ArrowRight size={15} />
             </button>
           </div>
 
           {/* ── Gespeicherter Monatsplan ─────────────────────────────────── */}
           <div className="rounded-2xl p-5 space-y-3" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
             <div className="flex items-center gap-2">
-              <h3 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>Gespeicherter Monatsplan</h3>
+              <h3 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>{t('hwh.savedMonthlyPlan')}</h3>
               {loadingSavedPlans && <RefreshCw size={13} className="animate-spin" style={{ color: 'var(--text-secondary)' }} />}
             </div>
             {!loadingSavedPlans && savedPlans.length === 0 && (
               <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>
-                Für diesen Monat wurde noch kein Monatsplan gespeichert.
+                {t('hwh.noSavedPlanForMonth')}
               </p>
             )}
             {savedPlans.length > 0 && (
@@ -10645,29 +10766,29 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
                     >
                       <div className="flex flex-wrap items-start gap-x-6 gap-y-1 text-xs">
                         <div>
-                          <span className="font-medium" style={{ color: 'var(--text-secondary)' }}>Monat/Jahr</span>
-                          <span className="ml-2 font-semibold" style={{ color: 'var(--text-primary)' }}>{MONTHS_DE[(plan.month ?? month) - 1]} {plan.year ?? year}</span>
+                          <span className="font-medium" style={{ color: 'var(--text-secondary)' }}>{t('hwh.monthYear')}</span>
+                          <span className="ml-2 font-semibold" style={{ color: 'var(--text-primary)' }}>{t(MONTH_KEYS[(plan.month ?? month) - 1])} {plan.year ?? year}</span>
                         </div>
                         <div>
-                          <span className="font-medium" style={{ color: 'var(--text-secondary)' }}>Dateiname</span>
+                          <span className="font-medium" style={{ color: 'var(--text-secondary)' }}>{t('hwh.fileName')}</span>
                           <span className="ml-2" style={{ color: 'var(--text-primary)' }}>{plan.original_file_name ?? '—'}</span>
                         </div>
                         <div>
-                          <span className="font-medium" style={{ color: 'var(--text-secondary)' }}>Status</span>
+                          <span className="font-medium" style={{ color: 'var(--text-secondary)' }}>{t('common.status')}</span>
                           <span className="ml-2">
                             {plan.export_ready ? (
                               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium" style={{ background: 'rgba(21,128,61,0.10)', color: '#15803d', border: '1px solid rgba(21,128,61,0.25)' }}>
-                                <CheckCircle2 size={11} /> Exportierbar
+                                <CheckCircle2 size={11} /> {t('hwh.exportable')}
                               </span>
                             ) : (
                               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium" style={{ background: 'rgba(220,38,38,0.07)', color: '#b91c1c', border: '1px solid rgba(220,38,38,0.2)' }}>
-                                <AlertTriangle size={11} /> Nicht exportierbar
+                                <AlertTriangle size={11} /> {t('hwh.notExportable')}
                               </span>
                             )}
                           </span>
                         </div>
                         <div>
-                          <span className="font-medium" style={{ color: 'var(--text-secondary)' }}>Gespeichert am</span>
+                          <span className="font-medium" style={{ color: 'var(--text-secondary)' }}>{t('hwh.savedAt')}</span>
                           <span className="ml-2 tabular-nums" style={{ color: 'var(--text-primary)' }}>{savedFmt}</span>
                         </div>
                       </div>
@@ -10677,7 +10798,7 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
                           className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all hover:brightness-110"
                           style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
                         >
-                          <List size={12} /> Anzeigen
+                          <List size={12} /> {t('hwh.show')}
                         </button>
                         {plan.export_ready && (
                           <button
@@ -10687,8 +10808,8 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
                             style={{ background: 'rgba(21,128,61,0.09)', color: '#15803d', border: '1px solid rgba(21,128,61,0.25)' }}
                           >
                             {isDownloading
-                              ? <><RefreshCw size={12} className="animate-spin" /> Lade…</>
-                              : <><Download size={12} /> Fahrtenbuch herunterladen</>}
+                              ? <><RefreshCw size={12} className="animate-spin" /> {t('common.loading')}</>
+                              : <><Download size={12} /> {t('hwh.downloadFahrtenbuch')}</>}
                           </button>
                         )}
                         <button
@@ -10696,7 +10817,7 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
                           className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all hover:brightness-110"
                           style={{ background: 'rgba(37,99,235,0.08)', color: '#1d4ed8', border: '1px solid rgba(37,99,235,0.25)' }}
                         >
-                          <RefreshCw size={12} /> Neu berechnen
+                          <RefreshCw size={12} /> {t('hwh.recompute')}
                         </button>
                       </div>
                     </div>
@@ -10713,19 +10834,19 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
         <div className="space-y-4">
           <div className="flex items-start justify-between gap-4">
             <div>
-              <h2 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>Lohnabrechnung-Zielwerte</h2>
-              <p className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>Tragen Sie die Stunden aus der Lohnabrechnung ein. Der historische Abgleich erstellt daraus einen Stundennachweis mit exakt passenden Lohnarten.</p>
+              <h2 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>{t('hwh.step1Title')}</h2>
+              <p className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>{t('hwh.step1Subtitle')}</p>
             </div>
             <HourTargetsTrigger onClick={() => setShowTargetsManager(true)} />
           </div>
 
           {/* Assignment strategy */}
           <div className="rounded-2xl p-4" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
-            <label className="block text-xs font-medium mb-2" style={{ color: 'var(--text-secondary)' }}>Zuteilungsstrategie</label>
+            <label className="block text-xs font-medium mb-2" style={{ color: 'var(--text-secondary)' }}>{t('hwh.assignmentStrategy')}</label>
             <div className="flex gap-2">
               {([
-                { value: 'hours_first', label: 'Stunden optimieren' },
-                { value: 'rides_first', label: 'Fahrten maximieren' },
+                { value: 'hours_first', label: t('hwh.strategyHoursFirst') },
+                { value: 'rides_first', label: t('hwh.strategyRidesFirst') },
               ] as const).map(opt => (
                 <button
                   key={opt.value}
@@ -10743,8 +10864,8 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
             </div>
             <p className="mt-2 text-xs" style={{ color: 'var(--text-secondary)' }}>
               {assignmentStrategy === 'rides_first'
-                ? 'Fahrten-dichte Blöcke werden zuerst zugewiesen. Lohnart-Grenzen werden weiterhin eingehalten.'
-                : 'Längste Blöcke zuerst — optimiert Stunden-Zielerreichung (Standard).'}
+                ? t('hwh.strategyRidesFirstHint')
+                : t('hwh.strategyHoursFirstHint')}
             </p>
           </div>
 
@@ -10752,13 +10873,13 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
           <div className="rounded-2xl p-4 space-y-3" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
             <div className="flex items-center gap-3">
               <input type="checkbox" checked={useInhaber} onChange={e => setUseInhaber(e.target.checked)} className="w-4 h-4" />
-              <span className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>Inhaber / Ausgleichsfahrer verwenden</span>
+              <span className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>{t('hwh.useOwnerBalancingDriver')}</span>
             </div>
             {useInhaber && (
               <div>
-                <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Inhaber-Fahrer</label>
+                <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>{t('hwh.ownerDriver')}</label>
                 <select value={inhaberId} onChange={e => setInhaberId(e.target.value)} style={{ ...inp, width: 'auto' }}>
-                  <option value="">— Kein Inhaber —</option>
+                  <option value="">{t('hwh.noOwner')}</option>
                   {allDrivers.filter(d => d.employment_type === 'company_owner').map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
                 </select>
               </div>
@@ -10771,14 +10892,14 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
               <table className="w-full text-xs">
                 <thead>
                   <tr style={{ background: 'var(--bg-subtle)' }}>
-                    <th className="px-3 py-2 text-left font-semibold" style={{ color: 'var(--text-secondary)' }}>Ein</th>
-                    <th className="px-3 py-2 text-left font-semibold" style={{ color: 'var(--text-secondary)' }}>Fahrer</th>
-                    <th className="px-3 py-2 text-right font-semibold" style={{ color: 'var(--text-secondary)', minWidth: 80 }}>Faktor €/h</th>
-                    <th className="px-3 py-2 text-right font-semibold" style={{ color: 'var(--text-secondary)', minWidth: 70 }}>1000 Std</th>
+                    <th className="px-3 py-2 text-left font-semibold" style={{ color: 'var(--text-secondary)' }}>{t('hwh.colIncluded')}</th>
+                    <th className="px-3 py-2 text-left font-semibold" style={{ color: 'var(--text-secondary)' }}>{t('common.driver')}</th>
+                    <th className="px-3 py-2 text-right font-semibold" style={{ color: 'var(--text-secondary)', minWidth: 80 }}>{t('hwh.colRatePerHour')}</th>
+                    <th className="px-3 py-2 text-right font-semibold" style={{ color: 'var(--text-secondary)', minWidth: 70 }}>{t('hwh.colHours1000')}</th>
                     <th className="px-3 py-2 text-right font-semibold" style={{ color: 'var(--text-secondary)', minWidth: 70 }}>1500 N25%</th>
                     <th className="px-3 py-2 text-right font-semibold" style={{ color: 'var(--text-secondary)', minWidth: 70 }}>1501 N40%</th>
-                    <th className="px-3 py-2 text-right font-semibold" style={{ color: 'var(--text-secondary)', minWidth: 70 }}>1510 Son</th>
-                    <th className="px-3 py-2 text-right font-semibold" style={{ color: 'var(--text-secondary)', minWidth: 70 }}>Feiertag</th>
+                    <th className="px-3 py-2 text-right font-semibold" style={{ color: 'var(--text-secondary)', minWidth: 70 }}>{t('hwh.colHours1510')}</th>
+                    <th className="px-3 py-2 text-right font-semibold" style={{ color: 'var(--text-secondary)', minWidth: 70 }}>{t('hwh.holiday')}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -10793,7 +10914,7 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
                         </td>
                         <td className="px-3 py-1.5 font-medium" style={{ color: 'var(--text-primary)' }}>
                           {cfg.driverName}
-                          {isOwner && <span className="ml-1 text-xs px-1 py-0.5 rounded" style={{ background: 'rgba(16,185,129,0.1)', color: '#047857' }}>Inhaber</span>}
+                          {isOwner && <span className="ml-1 text-xs px-1 py-0.5 rounded" style={{ background: 'rgba(16,185,129,0.1)', color: '#047857' }}>{t('hwh.owner')}</span>}
                           {cfg.personalnummer && <span className="ml-1 text-xs" style={{ color: 'var(--text-secondary)' }}>#{cfg.personalnummer}</span>}
                         </td>
                         {['hourly','baseH','nacht25H','nacht40H','sunH','holH'].map(field => (
@@ -10819,7 +10940,7 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
 
           <div className="flex items-center justify-between">
             <button onClick={() => setStep(0)} className="inline-flex items-center gap-2 text-sm transition-colors hover:opacity-80" style={{ color: 'var(--text-secondary)' }}>
-              <ArrowLeft size={15} /> Zurück
+              <ArrowLeft size={15} /> {t('common.back')}
             </button>
             <div className="flex items-center gap-3">
               <button
@@ -10827,7 +10948,7 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
                 className="text-xs px-2 py-1 rounded-lg transition-colors hover:opacity-80"
                 style={{ color: debugMode ? '#b91c1c' : 'var(--text-secondary)', background: debugMode ? 'rgba(220,38,38,0.07)' : 'transparent', border: `1px solid ${debugMode ? 'rgba(220,38,38,0.3)' : 'var(--border)'}` }}
               >
-                {debugMode ? 'Debug-Ansicht schließen' : 'Debug-Ansicht öffnen'}
+                {debugMode ? t('hwh.closeDebugView') : t('hwh.openDebugView')}
               </button>
               <button
                 onClick={handleSaveAsTargets}
@@ -10835,10 +10956,10 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
                 className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold transition-all hover:brightness-110 disabled:opacity-40"
                 style={{ background: saveAsTargetsDone ? 'rgba(21,128,61,0.1)' : 'var(--bg-subtle)', color: saveAsTargetsDone ? '#15803d' : 'var(--text-secondary)', border: '1px solid var(--border)' }}>
                 {savingAsTargets
-                  ? <><RefreshCw size={12} className="animate-spin" /> Speichern…</>
+                  ? <><RefreshCw size={12} className="animate-spin" /> {t('common.saving')}</>
                   : saveAsTargetsDone
-                    ? <><CheckCircle2 size={12} /> Gespeichert</>
-                    : <><Save size={12} /> Aktuelle Werte als Zielwerte speichern</>}
+                    ? <><CheckCircle2 size={12} /> {t('hwh.saved')}</>
+                    : <><Save size={12} /> {t('hwh.saveCurrentAsTargets')}</>}
               </button>
               <button
                 onClick={async () => {
@@ -10852,7 +10973,7 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
                 className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all hover:brightness-110 disabled:opacity-40"
                 style={{ background: '#2563eb', color: '#fff' }}
               >
-                {saving ? 'Speichern…' : debugMode ? 'Weiter' : 'Berechnen'} <ArrowRight size={15} />
+                {saving ? t('common.saving') : debugMode ? t('hwh.next') : t('hwh.calculate')} <ArrowRight size={15} />
               </button>
             </div>
           </div>
@@ -10866,7 +10987,7 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
           style={{ background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(2px)' }}
           role="dialog"
           aria-modal="true"
-          aria-label="Fahrtenbuch wird geprüft und optimiert"
+          aria-label={t('hwh.autoRunTitle')}
         >
           <div
             className="relative w-full rounded-2xl shadow-2xl flex flex-col"
@@ -10881,12 +11002,12 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
             {/* Modal header */}
             <div className="px-6 pt-6 pb-4 flex-shrink-0" style={{ borderBottom: '1px solid var(--border)' }}>
               <h2 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>
-                {autoRunPhase === 'failed' ? 'Automatische Erstellung nicht möglich' : 'Fahrtenbuch wird geprüft und optimiert'}
+                {autoRunPhase === 'failed' ? t('hwh.autoRunFailedTitle') : t('hwh.autoRunTitle')}
               </h2>
               <p className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>
                 {autoRunPhase === 'failed'
-                  ? 'Die Berechnung konnte nicht abgeschlossen werden.'
-                  : 'Bitte warten — das System analysiert und optimiert die Fahrtenzuweisungen automatisch.'}
+                  ? t('hwh.autoRunFailedHint')
+                  : t('hwh.autoRunWaitHint')}
               </p>
             </div>
 
@@ -10901,7 +11022,7 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
                     {[0, 5].map(rowStart => (
                       <div key={rowStart}>
                         <div className="flex items-stretch gap-0">
-                          {AUTO_RUN_STEPS.slice(rowStart, rowStart + 5).map((label, colIdx) => {
+                          {AUTO_RUN_STEPS.slice(rowStart, rowStart + 5).map((labelKey, colIdx) => {
                             const idx = rowStart + colIdx;
                             const done = idx < autoRunStepIndex;
                             const active = idx === autoRunStepIndex;
@@ -10927,7 +11048,7 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
                                     fontSize: '0.65rem',
                                     color: done ? '#16a34a' : active ? '#2563eb' : 'var(--text-secondary)',
                                     fontWeight: active ? 600 : 400,
-                                  }}>{label}</span>
+                                  }}>{t(labelKey)}</span>
                                   <span className="text-center" style={{ fontSize: '0.55rem', color: done ? '#16a34a' : active ? '#2563eb' : 'var(--text-tertiary, #9ca3af)', opacity: 0.7 }}>
                                     {idx + 1}/{AUTO_RUN_STEPS.length}
                                   </span>
@@ -10959,7 +11080,7 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
                   </div>
                   {/* Mobile layout */}
                   <div className="sm:hidden flex flex-col gap-0">
-                    {AUTO_RUN_STEPS.map((label, idx) => {
+                    {AUTO_RUN_STEPS.map((labelKey, idx) => {
                       const done = idx < autoRunStepIndex;
                       const active = idx === autoRunStepIndex;
                       const isLast = idx === AUTO_RUN_STEPS.length - 1;
@@ -10982,7 +11103,7 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
                             <span className="flex-1 text-xs leading-snug" style={{
                               color: done ? '#16a34a' : active ? '#2563eb' : 'var(--text-secondary)',
                               fontWeight: active ? 600 : 400,
-                            }}>{label}</span>
+                            }}>{t(labelKey)}</span>
                             <span className="text-right flex-shrink-0" style={{ fontSize: '0.6rem', color: done ? '#16a34a' : 'var(--text-tertiary, #9ca3af)', opacity: 0.65 }}>
                               {idx + 1}/{AUTO_RUN_STEPS.length}
                             </span>
@@ -11005,8 +11126,8 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
                   <div className="flex items-center gap-3">
                     <AlertTriangle size={20} style={{ color: '#b91c1c', flexShrink: 0 }} />
                     <div>
-                      <p className="text-base font-bold" style={{ color: '#b91c1c' }}>Automatische Erstellung nicht möglich</p>
-                      <p className="text-sm mt-1" style={{ color: '#b91c1c' }}>{autoRunError ?? 'Unbekannter Fehler'}</p>
+                      <p className="text-base font-bold" style={{ color: '#b91c1c' }}>{t('hwh.autoRunFailedTitle')}</p>
+                      <p className="text-sm mt-1" style={{ color: '#b91c1c' }}>{autoRunError ?? t('hwh.unknownError')}</p>
                     </div>
                   </div>
                 </div>
@@ -11022,7 +11143,7 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
                   className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all hover:brightness-110"
                   style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
                 >
-                  <ArrowLeft size={15} /> Zurück
+                  <ArrowLeft size={15} /> {t('common.back')}
                 </button>
               </div>
             )}
@@ -11034,8 +11155,8 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
       {step === 2 && autoRunPhase === 'idle' && (
         <div className="space-y-4">
           <div>
-            <h2 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>Abgleich berechnen</h2>
-            <p className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>Das System ordnet alle Fahrten den Fahrern zu und berechnet die Ist-Werte je Lohnart.</p>
+            <h2 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>{t('hwh.step2Title')}</h2>
+            <p className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>{t('hwh.step2Subtitle')}</p>
           </div>
           <div className="rounded-2xl p-5" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
             <div className="flex items-center gap-3 mb-4">
@@ -11044,11 +11165,12 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
               </div>
               <div>
                 <p className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
-                  {driverConfigs.filter(c => c.included && c.driverId !== inhaberId).length} Fahrer
-                  {useInhaber && inhaberId ? ` + 1 Inhaber` : ''} einbezogen
+                  {useInhaber && inhaberId
+                    ? t('hwh.driversIncludedWithOwner', { count: driverConfigs.filter(c => c.included && c.driverId !== inhaberId).length })
+                    : t('hwh.driversIncluded', { count: driverConfigs.filter(c => c.included && c.driverId !== inhaberId).length })}
                 </p>
                 <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>
-                  Import: {imports.find(i => i.id === selectedImportId)?.file_name}
+                  {t('hwh.importLabel')}: {imports.find(i => i.id === selectedImportId)?.file_name}
                 </p>
               </div>
             </div>
@@ -11059,14 +11181,14 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
                     const d = allDrivers.find(x => x.id === inhaberId);
                     return (
                       <div className="mb-3 px-3 py-2 rounded-lg text-xs" style={{ background: 'rgba(16,185,129,0.08)', border: '1px solid rgba(16,185,129,0.25)', color: '#047857' }}>
-                        Inhaber / Ausgleichsfahrer: <span className="font-semibold">{d?.name ?? inhaberId}</span>
+                        {t('hwh.ownerBalancingDriver')}: <span className="font-semibold">{d?.name ?? inhaberId}</span>
                       </div>
                     );
                   })()
                 : (
                   <div className="mb-3 px-3 py-2 rounded-lg text-xs" style={{ background: 'rgba(217,119,6,0.08)', border: '1px solid rgba(217,119,6,0.3)', color: '#b45309' }}>
                     <AlertTriangle size={12} className="inline mr-1" />
-                    Bitte Inhaber/Ausgleichsfahrer auswählen.
+                    {t('hwh.pleaseSelectOwner')}
                   </div>
                 )
             ) : null}
@@ -11077,11 +11199,11 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
             )}
             {/* Strategy selector in compute step */}
             <div className="mb-4 pt-1">
-              <label className="block text-xs font-medium mb-2" style={{ color: 'var(--text-secondary)' }}>Zuteilungsstrategie</label>
+              <label className="block text-xs font-medium mb-2" style={{ color: 'var(--text-secondary)' }}>{t('hwh.assignmentStrategy')}</label>
               <div className="flex gap-2 mb-2">
                 {([
-                  { value: 'hours_first', label: 'Stunden optimieren' },
-                  { value: 'rides_first', label: 'Fahrten maximieren' },
+                  { value: 'hours_first', label: t('hwh.strategyHoursFirst') },
+                  { value: 'rides_first', label: t('hwh.strategyRidesFirst') },
                 ] as const).map(opt => (
                   <button
                     key={opt.value}
@@ -11099,25 +11221,25 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
               </div>
               <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>
                 {assignmentStrategy === 'rides_first'
-                  ? 'Fahrten-dichte Blöcke werden zuerst zugewiesen. Lohnart-Grenzen werden weiterhin eingehalten.'
-                  : 'Längste Blöcke zuerst — optimiert Stunden-Zielerreichung (Standard).'}
+                  ? t('hwh.strategyRidesFirstHint')
+                  : t('hwh.strategyHoursFirstHint')}
               </p>
             </div>
             {computing ? (
               <div className="flex items-center gap-3 py-4">
                 <RefreshCw size={18} className="animate-spin" style={{ color: '#2563eb' }} />
-                <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>{computePhase || 'Berechne…'}</span>
+                <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>{computePhase || t('hwh.calculating')}</span>
               </div>
             ) : (
               <button onClick={() => handleCompute()}
                 className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all hover:brightness-110"
                 style={{ background: '#2563eb', color: '#fff' }}>
-                <Calculator size={15} /> Abgleich berechnen
+                <Calculator size={15} /> {t('hwh.step2Title')}
               </button>
             )}
           </div>
           <button onClick={() => setStep(1)} className="inline-flex items-center gap-2 text-sm transition-colors hover:opacity-80" style={{ color: 'var(--text-secondary)' }}>
-            <ArrowLeft size={15} /> Zurück
+            <ArrowLeft size={15} /> {t('common.back')}
           </button>
         </div>
       )}
@@ -11132,12 +11254,12 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
       {/* ── Step 3: Fahrzeug-Blöcke ─────────────────────────────────────────── */}
       {step === 3 && !phase1Result && (
         <div className="space-y-4">
-          <h2 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>Fahrzeug-Blöcke prüfen</h2>
+          <h2 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>{t('hwh.vehicleBlocksTitle')}</h2>
           <div className="rounded-xl p-4" style={{ background: 'rgba(220,38,38,0.06)', border: '1px solid rgba(220,38,38,0.2)', color: '#b91c1c' }}>
-            Fahrzeug-Blöcke konnten nicht geladen werden.
+            {t('hwh.vehicleBlocksLoadFailed')}
           </div>
           <button onClick={() => setStep(2)} className="inline-flex items-center gap-2 text-sm" style={{ color: 'var(--text-secondary)' }}>
-            <ArrowLeft size={15} /> Zurück
+            <ArrowLeft size={15} /> {t('common.back')}
           </button>
         </div>
       )}
@@ -11147,7 +11269,7 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
             <div className="fixed inset-0 z-40 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.35)' }}>
               <div className="rounded-2xl px-8 py-6 flex items-center gap-4" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
                 <RefreshCw size={20} className="animate-spin" style={{ color: '#2563eb' }} />
-                <span className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>Reguläre Fahrer werden zugewiesen…</span>
+                <span className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>{t('hwh.autoStepAssignRegularDrivers')}</span>
               </div>
             </div>
           )}
@@ -11155,7 +11277,7 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
             <div className="rounded-xl px-4 py-3 text-xs flex items-center gap-2" style={{ background: 'rgba(6,182,212,0.07)', border: '1px solid rgba(6,182,212,0.25)', color: '#0e7490' }}>
               <CheckCircle2 size={14} />
               <span>
-                <strong>Fahrer-Notizen aktiv</strong> — Planungsausschlüsse ({driverNotesMap.size} Fahrer) werden vor jeder Zuweisung geprüft. Fahrer mit aktiver Notiz &ldquo;Von Planung ausschließen&rdquo; erhalten keine Fahrten in den ausgeschlossenen Zeiträumen.
+                <strong>{t('hwh.driverNotesActive')}</strong> — {t('hwh.driverNotesActiveHint', { count: driverNotesMap.size })}
               </span>
             </div>
           )}
@@ -11194,12 +11316,12 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
       {/* ── Step 4: Reguläre Fahrer-Zuweisung ──────────────────────────────────── */}
       {step === 4 && !assignmentResult && (
         <div className="space-y-4">
-          <h2 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>Reguläre Fahrer zuweisen</h2>
+          <h2 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>{t('hwh.assignRegularDrivers')}</h2>
           <div className="rounded-xl p-4" style={{ background: 'rgba(220,38,38,0.06)', border: '1px solid rgba(220,38,38,0.2)', color: '#b91c1c' }}>
-            Reguläre Fahrer-Zuweisung nicht möglich: Fahrzeug-Blöcke fehlen.
+            {t('hwh.regularAssignmentImpossible')}
           </div>
           <button onClick={() => setStep(3)} className="inline-flex items-center gap-2 text-sm" style={{ color: 'var(--text-secondary)' }}>
-            <ArrowLeft size={15} /> Zurück
+            <ArrowLeft size={15} /> {t('common.back')}
           </button>
         </div>
       )}
@@ -11322,12 +11444,12 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
       )}
       {step === 5 && !inhaberNcResult && (
         <div className="space-y-4">
-          <h2 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>Inhaber: Nicht-konflikt Blöcke</h2>
+          <h2 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>{t('hwh.ncTitle')}</h2>
           <div className="rounded-xl p-4" style={{ background: 'rgba(220,38,38,0.06)', border: '1px solid rgba(220,38,38,0.2)', color: '#b91c1c' }}>
-            Kein Ergebnis vorhanden. Bitte zurück zu regulären Fahrern.
+            {t('hwh.noResultBackToRegular')}
           </div>
           <button onClick={() => setStep(4)} className="inline-flex items-center gap-2 text-sm" style={{ color: 'var(--text-secondary)' }}>
-            <ArrowLeft size={15} /> Zurück
+            <ArrowLeft size={15} /> {t('common.back')}
           </button>
         </div>
       )}
@@ -11382,12 +11504,12 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
       )}
       {step === 6 && !inhaberLcResult && (
         <div className="space-y-4">
-          <h2 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>Inhaber: Längste Konflikt-Blöcke</h2>
+          <h2 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>{t('hwh.lcTitle')}</h2>
           <div className="rounded-xl p-4" style={{ background: 'rgba(220,38,38,0.06)', border: '1px solid rgba(220,38,38,0.2)', color: '#b91c1c' }}>
-            Kein Ergebnis vorhanden. Bitte zurück zu Inhaber Nicht-konflikt Blöcken.
+            {t('hwh.noResultBackToNonConflict')}
           </div>
           <button onClick={() => setStep(5)} className="inline-flex items-center gap-2 text-sm" style={{ color: 'var(--text-secondary)' }}>
-            <ArrowLeft size={15} /> Zurück
+            <ArrowLeft size={15} /> {t('common.back')}
           </button>
         </div>
       )}
@@ -11400,7 +11522,7 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
           style={{ background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(2px)' }}
           role="dialog"
           aria-modal="true"
-          aria-label="Ergebnis der automatischen Berechnung"
+          aria-label={t('hwh.autoRunResultTitle')}
         >
           <div
             className="relative w-full rounded-2xl shadow-2xl flex flex-col"
@@ -11416,17 +11538,17 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
             <div className="px-6 pt-6 pb-4 flex-shrink-0" style={{ borderBottom: '1px solid var(--border)' }}>
               <h2 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>
                 {autoRunExportReady === true
-                  ? 'Fahrtenbuch erfolgreich erstellt'
+                  ? t('hwh.fahrtenbuchCreated')
                   : autoRunExportReady === false
-                    ? 'Automatische Erstellung nicht möglich'
-                    : 'Abschlussprüfung läuft…'}
+                    ? t('hwh.autoRunFailedTitle')
+                    : t('hwh.finalCheckRunning')}
               </h2>
               <p className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>
                 {autoRunExportReady === true
-                  ? 'Alle Prüfungen bestanden — das neue Fahrtenbuch kann heruntergeladen werden.'
+                  ? t('hwh.allChecksPassedDownload')
                   : autoRunExportReady === false
-                    ? 'Die Validierung hat Probleme festgestellt, die eine automatische Erstellung verhindern.'
-                    : 'Validierungen werden durchgeführt.'}
+                    ? t('hwh.validationFoundProblems')
+                    : t('hwh.validationsRunning')}
               </p>
             </div>
 
@@ -11436,7 +11558,7 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
               {autoRunExportReady === null && (
                 <div className="flex items-center gap-4">
                   <RefreshCw size={20} className="animate-spin" style={{ color: '#2563eb', flexShrink: 0 }} />
-                  <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>Validierungen werden durchgeführt…</p>
+                  <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>{t('hwh.validationsRunningEllipsis')}</p>
                 </div>
               )}
 
@@ -11446,10 +11568,10 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
                   <div className="flex items-start gap-3">
                     <AlertTriangle size={22} style={{ color: '#b91c1c', flexShrink: 0, marginTop: 2 }} />
                     <div>
-                      <p className="text-base font-bold" style={{ color: '#b91c1c' }}>Automatische Erstellung nicht möglich</p>
-                      <p className="text-sm mt-1" style={{ color: '#b91c1c' }}>{autoRunExportReason ?? 'Unbekannte Validierungsfehler'}</p>
+                      <p className="text-base font-bold" style={{ color: '#b91c1c' }}>{t('hwh.autoRunFailedTitle')}</p>
+                      <p className="text-sm mt-1" style={{ color: '#b91c1c' }}>{autoRunExportReason ?? t('hwh.unknownValidationErrors')}</p>
                       <p className="text-xs mt-2" style={{ color: 'var(--text-secondary)' }}>
-                        Für eine detaillierte Diagnose können Sie die Debug-Ansicht öffnen.
+                        {t('hwh.openDebugForDiagnosis')}
                       </p>
                     </div>
                   </div>
@@ -11467,8 +11589,8 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
               {autoRunExportReady === true && driverHourSummary.length > 0 && (
                 <div className="rounded-2xl p-5 space-y-3" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
                   <div>
-                    <h3 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>Arbeitsstunden je Fahrer</h3>
-                    <p className="text-xs mt-0.5" style={{ color: 'var(--text-secondary)' }}>Diese Übersicht zeigt die berechneten Stunden des finalen Monatsplans.</p>
+                    <h3 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>{t('hwh.workingHoursPerDriver')}</h3>
+                    <p className="text-xs mt-0.5" style={{ color: 'var(--text-secondary)' }}>{t('hwh.hoursFromFinalPlan')}</p>
                   </div>
                   <DriverHourSummaryTable rows={driverHourSummary} />
                 </div>
@@ -11478,14 +11600,14 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
               {autoRunExportReady !== null && salaryRangeSummary.length > 0 && (
                 <div className="rounded-2xl p-5 space-y-3" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
                   <div>
-                    <h3 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>Gehaltsbereich je Fahrer</h3>
+                    <h3 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>{t('hwh.salaryRangePerDriver')}</h3>
                     <p className="text-xs mt-0.5" style={{ color: 'var(--text-secondary)' }}>
-                      Berechnetes Gehalt auf Basis der finalen Arbeitsstunden. Alle Fahrer müssen zwischen Mindest- und Maximalgehalt liegen.
+                      {t('hwh.salaryRangeHint')}
                     </p>
                     {salaryRangeSummary.some(r => r.status !== 'ok') && (
                       <div className="mt-2 px-3 py-2 rounded-lg text-xs font-semibold flex items-center gap-2" style={{ background: 'rgba(220,38,38,0.06)', border: '1px solid rgba(220,38,38,0.3)', color: '#b91c1c' }}>
                         <AlertTriangle size={13} />
-                        Ein oder mehrere Fahrer liegen außerhalb des erlaubten Gehaltsbereichs.
+                        {t('hwh.salaryOutsideRange')}
                       </div>
                     )}
                   </div>
@@ -11539,7 +11661,7 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
                   className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all hover:brightness-110"
                   style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
                 >
-                  <ArrowLeft size={15} /> Zurück
+                  <ArrowLeft size={15} /> {t('common.back')}
                 </button>
                 {autoRunExportReady === true && (
                   <button
@@ -11547,7 +11669,7 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
                     className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all hover:brightness-110"
                     style={{ background: 'rgba(21,128,61,0.10)', color: '#15803d', border: '1px solid rgba(21,128,61,0.3)' }}
                   >
-                    <Download size={15} /> Fahrtenbuch herunterladen
+                    <Download size={15} /> {t('hwh.downloadFahrtenbuch')}
                   </button>
                 )}
                 {autoRunExportReady === true && (
@@ -11558,13 +11680,13 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
                     style={{ background: planSavedId ? 'rgba(21,128,61,0.08)' : 'rgba(37,99,235,0.10)', color: planSavedId ? '#15803d' : '#1d4ed8', border: `1px solid ${planSavedId ? 'rgba(21,128,61,0.3)' : 'rgba(37,99,235,0.3)'}` }}
                   >
                     {savingPlan ? (
-                      <><RefreshCw size={14} className="animate-spin" /> Speichern…</>
+                      <><RefreshCw size={14} className="animate-spin" /> {t('common.saving')}</>
                     ) : planSavedId ? (
-                      <><CheckCircle2 size={14} /> Gespeichert</>
+                      <><CheckCircle2 size={14} /> {t('hwh.saved')}</>
                     ) : savedPlans.length > 0 ? (
-                      <><Save size={15} /> Monatsplan ersetzen</>
+                      <><Save size={15} /> {t('hwh.replaceMonthlyPlan')}</>
                     ) : (
-                      <><Save size={15} /> Monatsplan anlegen</>
+                      <><Save size={15} /> {t('hwh.createMonthlyPlan')}</>
                     )}
                   </button>
                 )}
@@ -11577,7 +11699,7 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
                     className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all hover:brightness-110"
                     style={{ background: 'rgba(220,38,38,0.08)', color: '#b91c1c', border: '1px solid rgba(220,38,38,0.3)' }}
                   >
-                    Debug-Ansicht öffnen
+                    {t('hwh.openDebugView')}
                   </button>
                 )}
               </div>
@@ -11599,7 +11721,7 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
           isCreatingPlan={isCreatingAutoShiftPlan}
           planError={autoShiftPlanError}
           onApplyAutoShiftPlan={() => {
-            setAutoShiftPlanError('Nächster Schritt wird neu aufgebaut.');
+            setAutoShiftPlanError(t('hwh.nextStepRebuilding'));
           }}
           originalTrips={originalTrips}
           inhaberName={driverConfigs.find(c => c.isOwner)?.driverName ?? 'Inhaber'}
@@ -11614,12 +11736,12 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
       )}
       {step === 7 && !inhaberFwsResult && (
         <div className="space-y-4">
-          <h2 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>Inhaber-Zeitfenster für Verschiebung</h2>
+          <h2 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>{t('hwh.fwsTitle')}</h2>
           <div className="rounded-xl p-4" style={{ background: 'rgba(220,38,38,0.06)', border: '1px solid rgba(220,38,38,0.2)', color: '#b91c1c' }}>
-            Kein Ergebnis vorhanden. Bitte zurück zu Inhaber Konflikt-Auswahl.
+            {t('hwh.noResultBackToConflictPick')}
           </div>
           <button onClick={() => setStep(6)} className="inline-flex items-center gap-2 text-sm" style={{ color: 'var(--text-secondary)' }}>
-            <ArrowLeft size={15} /> Zurück
+            <ArrowLeft size={15} /> {t('common.back')}
           </button>
         </div>
       )}
@@ -11628,10 +11750,10 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
       {step >= 8 && (
         <div className="space-y-4">
           <div className="rounded-xl p-4" style={{ background: 'rgba(220,38,38,0.06)', border: '1px solid rgba(220,38,38,0.2)', color: '#b91c1c' }}>
-            Nächster Schritt wird neu aufgebaut.
+            {t('hwh.nextStepRebuilding')}
           </div>
           <button onClick={() => setStep(7)} className="inline-flex items-center gap-2 text-sm" style={{ color: 'var(--text-secondary)' }}>
-            <ArrowLeft size={15} /> Zurück
+            <ArrowLeft size={15} /> {t('common.back')}
           </button>
         </div>
       )}
@@ -11653,7 +11775,7 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
             <div className="px-6 pt-5 pb-4 flex-shrink-0 flex items-start justify-between gap-4" style={{ borderBottom: '1px solid var(--border)' }}>
               <div>
                 <h2 className="text-base font-bold" style={{ color: 'var(--text-primary)' }}>
-                  Gespeicherter Monatsplan — {MONTHS_DE[(viewingPlan.month ?? month) - 1]} {viewingPlan.year ?? year}
+                  {t('hwh.savedMonthlyPlan')} — {t(MONTH_KEYS[(viewingPlan.month ?? month) - 1])} {viewingPlan.year ?? year}
                 </h2>
                 <p className="text-xs mt-0.5" style={{ color: 'var(--text-secondary)' }}>{viewingPlan.original_file_name ?? '—'}</p>
               </div>
@@ -11664,12 +11786,12 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
             <div className="flex-1 overflow-y-auto px-6 py-5 space-y-4">
               <div className="grid grid-cols-2 gap-3 text-xs">
                 {([
-                  { label: 'Status', value: viewingPlan.export_ready
-                      ? <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full font-medium" style={{ background: 'rgba(21,128,61,0.10)', color: '#15803d', border: '1px solid rgba(21,128,61,0.25)' }}><CheckCircle2 size={11} /> Exportierbar</span>
-                      : <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full font-medium" style={{ background: 'rgba(220,38,38,0.07)', color: '#b91c1c', border: '1px solid rgba(220,38,38,0.2)' }}><AlertTriangle size={11} /> Nicht exportierbar</span> },
-                  { label: 'Gespeichert am', value: (() => { const d = new Date(viewingPlan.saved_at); return `${String(d.getDate()).padStart(2,'0')}.${String(d.getMonth()+1).padStart(2,'0')}.${d.getFullYear()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`; })() },
-                  { label: 'Speicherpfad', value: viewingPlan.storage_path ?? '—' },
-                  { label: 'Tabellenblatt', value: viewingPlan.source_sheet_name ?? '—' },
+                  { label: t('common.status'), value: viewingPlan.export_ready
+                      ? <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full font-medium" style={{ background: 'rgba(21,128,61,0.10)', color: '#15803d', border: '1px solid rgba(21,128,61,0.25)' }}><CheckCircle2 size={11} /> {t('hwh.exportable')}</span>
+                      : <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full font-medium" style={{ background: 'rgba(220,38,38,0.07)', color: '#b91c1c', border: '1px solid rgba(220,38,38,0.2)' }}><AlertTriangle size={11} /> {t('hwh.notExportable')}</span> },
+                  { label: t('hwh.savedAt'), value: (() => { const d = new Date(viewingPlan.saved_at); return `${String(d.getDate()).padStart(2,'0')}.${String(d.getMonth()+1).padStart(2,'0')}.${d.getFullYear()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`; })() },
+                  { label: t('hwh.storagePath'), value: viewingPlan.storage_path ?? '—' },
+                  { label: t('hwh.sheetName'), value: viewingPlan.source_sheet_name ?? '—' },
                 ] as Array<{ label: string; value: React.ReactNode }>).map(({ label, value }) => (
                   <div key={label} className="rounded-lg p-3" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
                     <div className="font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>{label}</div>
@@ -11685,8 +11807,8 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
               {Array.isArray(viewingPlan.driver_hour_summary_json) && viewingPlan.driver_hour_summary_json.length > 0 && (
                 <div className="rounded-2xl p-4 space-y-3" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
                   <div>
-                    <h3 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>Arbeitsstunden je Fahrer</h3>
-                    <p className="text-xs mt-0.5" style={{ color: 'var(--text-secondary)' }}>Diese Übersicht zeigt die berechneten Stunden des gespeicherten Monatsplans.</p>
+                    <h3 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>{t('hwh.workingHoursPerDriver')}</h3>
+                    <p className="text-xs mt-0.5" style={{ color: 'var(--text-secondary)' }}>{t('hwh.hoursFromSavedPlan')}</p>
                   </div>
                   <DriverHourSummaryTable rows={viewingPlan.driver_hour_summary_json as DriverHourSummaryRow[]} />
                 </div>
@@ -11701,8 +11823,8 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
                   style={{ background: 'rgba(21,128,61,0.10)', color: '#15803d', border: '1px solid rgba(21,128,61,0.3)' }}
                 >
                   {downloadingPlanId === viewingPlan.id
-                    ? <><RefreshCw size={14} className="animate-spin" /> Lade…</>
-                    : <><Download size={14} /> Fahrtenbuch herunterladen</>}
+                    ? <><RefreshCw size={14} className="animate-spin" /> {t('common.loading')}</>
+                    : <><Download size={14} /> {t('hwh.downloadFahrtenbuch')}</>}
                 </button>
               )}
               <button
@@ -11710,7 +11832,7 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
                 className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all hover:brightness-110"
                 style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
               >
-                Schließen
+                {t('common.close')}
               </button>
             </div>
           </div>
@@ -11731,9 +11853,9 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
             <div className="flex items-start gap-3">
               <AlertTriangle size={22} style={{ color: '#b45309', flexShrink: 0, marginTop: 2 }} />
               <div>
-                <p className="text-sm font-bold" style={{ color: 'var(--text-primary)' }}>Gespeicherten Plan ersetzen?</p>
+                <p className="text-sm font-bold" style={{ color: 'var(--text-primary)' }}>{t('hwh.replaceSavedPlanQuestion')}</p>
                 <p className="text-xs mt-1.5" style={{ color: 'var(--text-secondary)' }}>
-                  Für diesen Monat existiert bereits ein gespeicherter Monatsplan. Wenn Sie fortfahren, wird der alte Plan ersetzt.
+                  {t('hwh.replaceSavedPlanHint')}
                 </p>
               </div>
             </div>
@@ -11743,14 +11865,14 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
                 className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all hover:brightness-110"
                 style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
               >
-                Abbrechen
+                {t('common.cancel')}
               </button>
               <button
                 onClick={doSavePlan}
                 className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all hover:brightness-110"
                 style={{ background: 'rgba(220,38,38,0.10)', color: '#b91c1c', border: '1px solid rgba(220,38,38,0.3)' }}
               >
-                Alten Plan ersetzen
+                {t('hwh.replaceOldPlan')}
               </button>
             </div>
           </div>

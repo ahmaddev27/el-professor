@@ -13,7 +13,7 @@
  * Only write: one INSERT into planning_finalizations.
  */
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   AlertTriangle,
   CheckCircle2,
@@ -41,6 +41,8 @@ import {
   fmtAbsDate,
 } from '../utils/planningQualityChecks';
 import MonatsplanungStundennachweisPreview from './MonatsplanungStundennachweisPreview';
+import { useTranslation } from '../contexts/LanguageContext';
+import type { TranslationKey } from '../i18n';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -55,8 +57,32 @@ interface Props {
   onFinalized: (finalizationId: string) => void;
 }
 
+/**
+ * Stable, language-independent identity of a pre-flight check.
+ *
+ * The check name used to be its own identity: it was pushed as `label`, matched
+ * with `===` in the blocked banner, and used to index `CHECK_SUGGESTIONS`.
+ * Translating the name would have made those lookups miss silently, and a check
+ * whose suggestions or banner text disappear is a check that stops protecting.
+ * The id carries identity; the name is only ever rendered, via `CHECK_LABEL_KEYS`.
+ */
+type CheckId =
+  | 'runPresent'
+  | 'runStatus'
+  | 'tripCount'
+  | 'noDuplicateTrips'
+  | 'driverAssigned'
+  | 'blockIdPresent'
+  | 'timesPresent'
+  | 'maxThreeShifts'
+  | 'vehicleSwitchGap'
+  | 'driverOverlap'
+  | 'vehicleOverlap'
+  | 'stundennachweisCoverage'
+  | 'stundennachweisPreview';
+
 interface CheckResult {
-  label: string;
+  id: CheckId;
   ok: boolean;
   detail: string;
 }
@@ -100,58 +126,98 @@ function formatError(err: unknown): string {
   return String(err);
 }
 
+/**
+ * Month names for the generated Stundennachweis PDF and its filename. These
+ * reach the Steuerberater on a statutory document, so they stay German in both
+ * UI languages — the on-screen month uses `MONTH_KEYS` instead.
+ */
 const MONTHS_DE = [
   'Januar', 'Februar', 'März', 'April', 'Mai', 'Juni',
   'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember',
 ];
 
-const CHECK_SUGGESTIONS: Record<string, string[]> = {
-  'Fahrzeugwechsel zu kurz': [
-    'Diese Fahrten liegen auf unterschiedlichen Fahrzeugen zu nah beieinander. Zwischen zwei verschiedenen Fahrzeugen muss der konfigurierte Fahrzeugwechsel-Puffer eingehalten werden.',
-    'Prüfen Sie in der Transfer-Analyse, ob einer der betroffenen Blöcke auf einen anderen passenden Fahrer verschoben werden kann.',
-    'Wenn viele Konflikte am selben Tag entstehen, planen Sie den Tag erneut mit „Ein Fahrzeug pro Fahrer/Tag" oder verschieben Sie ganze Blöcke statt einzelner Fahrten.',
-    'Blöcke mit unterschiedlichen Fahrzeugen dürfen nicht zusammengeführt werden, um diese Prüfung zu umgehen.',
+/** Month names as rendered on screen. Resolved with t() at the call site. */
+const MONTH_KEYS: readonly TranslationKey[] = [
+  'doc.month.january', 'doc.month.february', 'doc.month.march',     'doc.month.april',
+  'doc.month.may',     'doc.month.june',     'doc.month.july',      'doc.month.august',
+  'doc.month.september', 'doc.month.october', 'doc.month.november', 'doc.month.december',
+];
+
+/** Display name per check. Identity lives in the `CheckId`, never in this text. */
+const CHECK_LABEL_KEYS: Record<CheckId, TranslationKey> = {
+  runPresent:              'fin.check.runPresent',
+  runStatus:               'fin.check.runStatus',
+  tripCount:               'fin.check.tripCount',
+  noDuplicateTrips:        'fin.check.noDuplicateTrips',
+  driverAssigned:          'fin.check.driverAssigned',
+  blockIdPresent:          'fin.check.blockIdPresent',
+  timesPresent:            'fin.check.timesPresent',
+  maxThreeShifts:          'fin.check.maxThreeShifts',
+  vehicleSwitchGap:        'fin.check.vehicleSwitchGap',
+  driverOverlap:           'fin.check.driverOverlap',
+  vehicleOverlap:          'fin.check.vehicleOverlap',
+  stundennachweisCoverage: 'fin.check.stundennachweisCoverage',
+  stundennachweisPreview:  'fin.check.stundennachweisPreview',
+};
+
+/**
+ * Remediation hints per failed check, keyed by the stable id. Values are
+ * TranslationKeys resolved where they are rendered.
+ */
+const CHECK_SUGGESTIONS: Partial<Record<CheckId, readonly TranslationKey[]>> = {
+  vehicleSwitchGap: [
+    'fin.suggest.vehicleSwitchGap.1',
+    'fin.suggest.vehicleSwitchGap.2',
+    'fin.suggest.vehicleSwitchGap.3',
+    'fin.suggest.vehicleSwitchGap.4',
   ],
-  'Fahrer-Überschneidung': [
-    'Ein Fahrer ist im gleichen Zeitraum mehrfach verplant. Prüfen Sie die betroffenen Fahrten in der Monatsplanung.',
-    'Stellen Sie sicher, dass der Fahrer nicht zwei überlappenden Fahrten oder Blöcken zugewiesen ist.',
-    'Kehren Sie zur Monatsplanung zurück und korrigieren Sie die Zuweisung bevor Sie die Finalisierung durchführen.',
+  driverOverlap: [
+    'fin.suggest.driverOverlap.1',
+    'fin.suggest.driverOverlap.2',
+    'fin.suggest.driverOverlap.3',
   ],
-  'Fahrzeug-Überschneidungen': [
-    'Dieses Fahrzeug ist im gleichen Zeitraum mehrfach verplant. Bitte prüfen Sie die betroffenen Fahrten im Fahrtenbuch.',
-    'Ein Fahrerwechsel löst diesen Konflikt meistens nicht, weil das Fahrzeug selbst zeitlich überschneidet.',
-    'Prüfen Sie, ob eine Fahrt doppelt importiert wurde, falsche Zeiten hat oder eigentlich storniert ist.',
-    'Falls die Quelldaten falsch sind, korrigieren Sie die Fahrtenbuch-Datei und importieren Sie sie erneut.',
+  vehicleOverlap: [
+    'fin.suggest.vehicleOverlap.1',
+    'fin.suggest.vehicleOverlap.2',
+    'fin.suggest.vehicleOverlap.3',
+    'fin.suggest.vehicleOverlap.4',
   ],
-  'Max. 3 Schichten pro Fahrer/Tag': [
-    'Der Stundennachweis darf pro Fahrer und Tag maximal 3 Schichten ausweisen.',
-    'Prüfen Sie, ob einzelne Blöcke auf andere Fahrer verteilt werden können.',
-    'Die Komprimierung betrifft nur die Anzeige und den Export — das Fahrtenbuch darf dadurch nicht verändert werden.',
-    'Erstellen Sie keine künstlichen Fahrten und ändern Sie keine Fahrtenbuch-Daten für diesen Zweck.',
+  maxThreeShifts: [
+    'fin.suggest.maxThreeShifts.1',
+    'fin.suggest.maxThreeShifts.2',
+    'fin.suggest.maxThreeShifts.3',
+    'fin.suggest.maxThreeShifts.4',
   ],
-  'Alle Fahrten haben Fahrerzuordnung': [
-    'Öffnen Sie die Monatsplanung erneut und wenden Sie die Planung vollständig an, damit alle Fahrten einem Fahrer zugewiesen sind.',
+  driverAssigned: [
+    'fin.suggest.driverAssigned.1',
   ],
-  'Alle Fahrten haben Block-ID': [
-    'Die Planung muss erneut angewendet werden, damit alle Fahrten mit einem Block verknüpft sind.',
-    'Falls einzelne Fahrten nachträglich hinzugefügt wurden, müssen sie ebenfalls in einem gültigen Block enthalten sein.',
+  blockIdPresent: [
+    'fin.suggest.blockIdPresent.1',
+    'fin.suggest.blockIdPresent.2',
   ],
-  'Alle Fahrten haben Zeitangaben': [
-    'Prüfen Sie den Fahrtenbuch-Import. Fahrten ohne Start- oder Endzeit können nicht finalisiert werden.',
-    'Fahrten ohne vollständige Zeitangaben müssen in der Quelldatei korrigiert und erneut importiert werden.',
+  timesPresent: [
+    'fin.suggest.timesPresent.1',
+    'fin.suggest.timesPresent.2',
   ],
-  'Stundennachweis Preview generierbar': [
-    'Für einen oder mehrere Fahrer konnten keine Stundennachweis-Daten ermittelt werden.',
-    'Stellen Sie sicher, dass alle Fahrten korrekt einem Block zugewiesen sind und gültige Zeitangaben haben.',
-    'Führen Sie danach die Prüfung erneut aus.',
+  stundennachweisPreview: [
+    'fin.suggest.stundennachweisPreview.1',
+    'fin.suggest.stundennachweisPreview.2',
+    'fin.suggest.stundennachweisPreview.3',
   ],
-  'Stundennachweis Abdeckung': [
-    'Einige Fahrten aus dem Fahrtenbuch sind in keinem Stundennachweis-Zeitraum enthalten.',
-    'Ursache: Diese Fahrten haben keine Block-Zuordnung (assignment_block_id fehlt) oder ihr Block hat keine gültigen Zeitangaben.',
-    'Kehren Sie zur Monatsplanung zurück und stellen Sie sicher, dass alle Fahrten korrekt einem Schichtblock zugewiesen sind.',
-    'Nach einem erneuten Anwenden der Planung alle Checks erneut ausführen.',
+  stundennachweisCoverage: [
+    'fin.suggest.stundennachweisCoverage.1',
+    'fin.suggest.stundennachweisCoverage.2',
+    'fin.suggest.stundennachweisCoverage.3',
+    'fin.suggest.stundennachweisCoverage.4',
   ],
 };
+
+/**
+ * Sentinel for "this check passed and the detail adds nothing" — it is compared
+ * with `===` when deciding whether to render the detail, so it is a value, not
+ * a label. It reads identically in German and English.
+ */
+const DETAIL_OK = 'OK';
 
 function minsToHHMM(m: number): string {
   if (m <= 0) return '0:00';
@@ -169,6 +235,16 @@ function fmtDateTime(iso: string): string {
 // ── Main component ─────────────────────────────────────────────────────────
 
 export default function FinalizePlanningModal({ run, companyId, userId, onClose, onFinalized }: Props) {
+  const { t, tPlural } = useTranslation();
+
+  // `runChecks` reads the translator through a ref rather than taking it as a
+  // dependency: it is re-run by an effect keyed on its own identity, so a new
+  // `t` after a language switch would re-query the database and reset a
+  // finished run back to 'checking', discarding the downloadable snapshot.
+  const tRef = useRef(t);
+  const tPluralRef = useRef(tPlural);
+  useEffect(() => { tRef.current = t; tPluralRef.current = tPlural; }, [t, tPlural]);
+
   const [step, setStep] = useState<'idle' | 'checking' | 'ready' | 'finalizing' | 'done' | 'blocked'>('idle');
   const [checks, setChecks] = useState<CheckResult[]>([]);
   const [snapshot, setSnapshot] = useState<FinalSnapshot | null>(null);
@@ -198,6 +274,9 @@ export default function FinalizePlanningModal({ run, companyId, userId, onClose,
     setChecks([]);
     setSnapshot(null);
 
+    const tr = tRef.current;
+    const trPlural = tPluralRef.current;
+
     try {
       // Resolve the vehicle switch buffer from the applied run settings.
       // Falls back to the default if not stored (older runs).
@@ -218,15 +297,16 @@ export default function FinalizePlanningModal({ run, companyId, userId, onClose,
         .single();
 
       if (runErr || !runRow) {
-        results.push({ label: 'Planning Run vorhanden', ok: false, detail: runErr ? formatError(runErr) : 'Nicht gefunden' });
+        results.push({ id: 'runPresent', ok: false, detail: runErr ? formatError(runErr) : tr('fin.detail.runNotFound') });
         setChecks(results);
         setStep('blocked');
         return;
       }
       results.push({
-        label: 'Planning Run Status',
+        id: 'runStatus',
         ok: runRow.status === 'applied',
-        detail: runRow.status === 'applied' ? 'applied' : `Erwartet "applied", gefunden "${runRow.status}"`,
+        // 'applied' is the stored run status, not a label.
+        detail: runRow.status === 'applied' ? 'applied' : tr('fin.detail.runStatusMismatch', { status: String(runRow.status) }),
       });
 
       // 2. Load all trips for this run (batched)
@@ -253,67 +333,67 @@ export default function FinalizePlanningModal({ run, companyId, userId, onClose,
           .eq('assignment_planning_run_id', run.id)
           .order('id', { ascending: true })
           .range(offset, offset + BATCH - 1);
-        if (tErr) throw new Error(`Datenbankfehler beim Laden der Fahrten:\n${formatError(tErr)}`);
+        if (tErr) throw new Error(`${tr('fin.error.loadTrips')}\n${formatError(tErr)}`);
         allTrips.push(...(data ?? []));
         if ((data?.length ?? 0) < BATCH) break;
         offset += BATCH;
       }
 
-      const nonCanceled = allTrips.filter(t => !t.is_canceled);
+      const nonCanceled = allTrips.filter(trip => !trip.is_canceled);
       const expectedUpdated = (runRow.apply_summary_json as Record<string, unknown> | null)?.updated_trips;
       const expectedCount = typeof expectedUpdated === 'number' ? expectedUpdated : null;
 
       // 3. Trip count
       results.push({
-        label: 'Fahrten-Anzahl',
+        id: 'tripCount',
         ok: expectedCount === null || nonCanceled.length === expectedCount,
         detail: expectedCount !== null
-          ? `${nonCanceled.length} von ${expectedCount} erwartet`
-          : `${nonCanceled.length} Fahrten`,
+          ? tr('fin.detail.tripCountExpected', { actual: nonCanceled.length, expected: expectedCount })
+          : tr('fin.detail.tripCount', { count: nonCanceled.length }),
       });
 
       // 4. No duplicate trip IDs
       const idSet = new Set<string>();
       const dups: string[] = [];
-      for (const t of allTrips) {
-        if (idSet.has(t.id)) dups.push(t.id);
-        idSet.add(t.id);
+      for (const trip of allTrips) {
+        if (idSet.has(trip.id)) dups.push(trip.id);
+        idSet.add(trip.id);
       }
       results.push({
-        label: 'Keine doppelten Trip-IDs',
+        id: 'noDuplicateTrips',
         ok: dups.length === 0,
-        detail: dups.length === 0 ? 'OK' : `${dups.length} Duplikate`,
+        detail: dups.length === 0 ? DETAIL_OK : tr('fin.detail.duplicates', { count: dups.length }),
       });
 
       // 5. No trips without driver
-      const missingDriver = nonCanceled.filter(t => !t.assigned_driver_id).length;
+      const missingDriver = nonCanceled.filter(trip => !trip.assigned_driver_id).length;
       results.push({
-        label: 'Alle Fahrten haben Fahrerzuordnung',
+        id: 'driverAssigned',
         ok: missingDriver === 0,
-        detail: missingDriver === 0 ? 'OK' : `${missingDriver} ohne Fahrer`,
+        detail: missingDriver === 0 ? DETAIL_OK : tr('fin.detail.withoutDriver', { count: missingDriver }),
       });
 
       // 6. No trips without block ID
-      const missingBlock = nonCanceled.filter(t => !t.assignment_block_id).length;
+      const missingBlock = nonCanceled.filter(trip => !trip.assignment_block_id).length;
       results.push({
-        label: 'Alle Fahrten haben Block-ID',
+        id: 'blockIdPresent',
         ok: missingBlock === 0,
-        detail: missingBlock === 0 ? 'OK' : `${missingBlock} ohne Block-ID`,
+        detail: missingBlock === 0 ? DETAIL_OK : tr('fin.detail.withoutBlockId', { count: missingBlock }),
       });
 
       // 7. No trips without times
-      const missingTime = nonCanceled.filter(t => !t.start_time || !t.end_time).length;
+      const missingTime = nonCanceled.filter(trip => !trip.start_time || !trip.end_time).length;
       results.push({
-        label: 'Alle Fahrten haben Zeitangaben',
+        id: 'timesPresent',
         ok: missingTime === 0,
-        detail: missingTime === 0 ? 'OK' : `${missingTime} ohne Start/End-Zeit`,
+        detail: missingTime === 0 ? DETAIL_OK : tr('fin.detail.withoutTimes', { count: missingTime }),
       });
 
       // 8. Max-3-Schichten-Regel per driver per day (compressed view)
       const MAX_SHIFT = 270; // 4:30
       const MAX_DAY = 510;   // 8:30
-      function toMins(t: string): number {
-        const [h, m] = t.split(':').map(Number);
+      function toMins(time: string): number {
+        const [h, m] = time.split(':').map(Number);
         return h * 60 + m;
       }
       function segDur(s: string, e: string): number {
@@ -322,11 +402,11 @@ export default function FinalizePlanningModal({ run, companyId, userId, onClose,
       }
       type DayKey = string; // "driverId_date"
       const dayShifts = new Map<DayKey, Array<{ s: number; e: number }>>();
-      for (const t of nonCanceled) {
-        if (!t.start_time || !t.end_time || !t.assigned_driver_id) continue;
-        const key: DayKey = `${t.assigned_driver_id}_${t.trip_date}`;
+      for (const trip of nonCanceled) {
+        if (!trip.start_time || !trip.end_time || !trip.assigned_driver_id) continue;
+        const key: DayKey = `${trip.assigned_driver_id}_${trip.trip_date}`;
         const arr = dayShifts.get(key) ?? [];
-        arr.push({ s: toMins(t.start_time.slice(0, 5)), e: toMins(t.end_time.slice(0, 5)) });
+        arr.push({ s: toMins(trip.start_time.slice(0, 5)), e: toMins(trip.end_time.slice(0, 5)) });
         dayShifts.set(key, arr);
       }
       let compressedDayCount = 0;
@@ -357,18 +437,18 @@ export default function FinalizePlanningModal({ run, companyId, userId, onClose,
         if (merged.length > 3) {
           max3HardViolations++;
           const [dId, date] = dayKey.split('_');
-          const dName = nonCanceled.find(t => t.assigned_driver_id === dId)?.assigned_driver_name ?? dId;
-          max3ViolationDetails.push(`${dName} · ${date} · ${merged.length} Schichten`);
+          const dName = nonCanceled.find(trip => trip.assigned_driver_id === dId)?.assigned_driver_name ?? dId;
+          max3ViolationDetails.push(tr('fin.detail.shiftViolationLine', { driver: dName, date, count: merged.length }));
         }
       }
       results.push({
-        label: 'Max. 3 Schichten pro Fahrer/Tag',
+        id: 'maxThreeShifts',
         ok: max3HardViolations === 0,
         detail: max3HardViolations === 0
           ? compressedDayCount > 0
-            ? `OK · ${compressedDayCount} Fahrer-Tag${compressedDayCount === 1 ? '' : 'e'} auf maximal 3 Schichten komprimiert`
-            : 'OK'
-          : `${max3HardViolations} Fahrer-Tage konnten nicht auf ≤3 Schichten komprimiert werden:\n${max3ViolationDetails.slice(0, 10).join('\n')}${max3ViolationDetails.length > 10 ? `\n… und ${max3ViolationDetails.length - 10} weitere` : ''}`,
+            ? trPlural({ one: 'fin.detail.compressedDays.one', other: 'fin.detail.compressedDays.other' }, compressedDayCount)
+            : DETAIL_OK
+          : `${tr('fin.detail.shiftCompressionFailed', { count: max3HardViolations })}\n${max3ViolationDetails.slice(0, 10).join('\n')}${max3ViolationDetails.length > 10 ? `\n${tr('fin.detail.andMore', { count: max3ViolationDetails.length - 10 })}` : ''}`,
       });
 
       // ── Inner helpers: full-timestamp math (avoids HH:MM wrap-around) ────
@@ -417,11 +497,11 @@ export default function FinalizePlanningModal({ run, companyId, userId, onClose,
       };
       const switchViolations: string[] = [];
       const byDriver = new Map<string, TripForSwitch[]>();
-      for (const t of nonCanceled) {
-        if (!t.assigned_driver_id || !t.car_identifier || !t.start_time || !t.end_time) continue;
-        const key = t.assigned_driver_id;
+      for (const trip of nonCanceled) {
+        if (!trip.assigned_driver_id || !trip.car_identifier || !trip.start_time || !trip.end_time) continue;
+        const key = trip.assigned_driver_id;
         if (!byDriver.has(key)) byDriver.set(key, []);
-        byDriver.get(key)!.push(t as TripForSwitch);
+        byDriver.get(key)!.push(trip as TripForSwitch);
       }
       for (const trips of byDriver.values()) {
         trips.sort((a, b) => {
@@ -439,15 +519,22 @@ export default function FinalizePlanningModal({ run, companyId, userId, onClose,
           const gapMinutes = gapMs / 60000;
           if (gapMinutes < 0 || gapMinutes >= MIN_CAR_SWITCH_GAP_MINUTES) continue;
           const driverName = prev.assigned_driver_name ?? prev.assigned_driver_id;
-          switchViolations.push(
-            `${driverName} · ${fmtAbsDate(prevRw.actualEndMs)} · ${prev.car_identifier} → ${curr.car_identifier} · Ende ${fmtAbsTime(prevRw.actualEndMs)} → Start ${fmtAbsTime(currRw.actualStartMs)} · Abstand ${gapMinutes.toFixed(1).replace('.', ',')} Min`
-          );
+          switchViolations.push(tr('fin.detail.vehicleSwitchLine', {
+            driver: driverName,
+            date: fmtAbsDate(prevRw.actualEndMs),
+            fromCar: prev.car_identifier,
+            toCar: curr.car_identifier,
+            end: fmtAbsTime(prevRw.actualEndMs),
+            start: fmtAbsTime(currRw.actualStartMs),
+            // German decimal comma is kept in both languages.
+            gap: gapMinutes.toFixed(1).replace('.', ','),
+          }));
         }
       }
       results.push({
-        label: 'Fahrzeugwechsel zu kurz',
+        id: 'vehicleSwitchGap',
         ok: switchViolations.length === 0,
-        detail: switchViolations.length === 0 ? 'OK' : switchViolations.join('\n'),
+        detail: switchViolations.length === 0 ? DETAIL_OK : switchViolations.join('\n'),
       });
 
       // 10. Fahrer-Überschneidungen — same assigned driver, overlapping trips (negative gap)
@@ -465,17 +552,21 @@ export default function FinalizePlanningModal({ run, companyId, userId, onClose,
             const driverName = prev.assigned_driver_name ?? prev.assigned_driver_id;
             const prevCar = prev.car_identifier ?? '?';
             const currCar = curr.car_identifier ?? '?';
-            driverOverlapViolations.push(
-              `${driverName} · ${prevCar} ${fmtAbsDateTime(prevRw.actualStartMs)}–${fmtAbsTime(prevRw.actualEndMs)} ↔ ` +
-              `${currCar} ${fmtAbsDateTime(currRw.actualStartMs)}–${fmtAbsTime(currRw.actualEndMs)} · Überschneidung ${overlapMin} Min`
-            );
+            driverOverlapViolations.push(tr('fin.detail.driverOverlapLine', {
+              driver: driverName,
+              firstCar: prevCar,
+              firstWindow: `${fmtAbsDateTime(prevRw.actualStartMs)}–${fmtAbsTime(prevRw.actualEndMs)}`,
+              secondCar: currCar,
+              secondWindow: `${fmtAbsDateTime(currRw.actualStartMs)}–${fmtAbsTime(currRw.actualEndMs)}`,
+              minutes: overlapMin,
+            }));
           }
         }
       }
       results.push({
-        label: 'Fahrer-Überschneidung',
+        id: 'driverOverlap',
         ok: driverOverlapViolations.length === 0,
-        detail: driverOverlapViolations.length === 0 ? 'OK' : driverOverlapViolations.join('\n'),
+        detail: driverOverlapViolations.length === 0 ? DETAIL_OK : driverOverlapViolations.join('\n'),
       });
 
       // 11. Fahrzeug-Überschneidungen — same car, different drivers, overlapping times
@@ -485,11 +576,11 @@ export default function FinalizePlanningModal({ run, companyId, userId, onClose,
         assigned_driver_id: string; assigned_driver_name: string | null;
         raw_data_json: Record<string, unknown> | null;
       }>>();
-      for (const t of nonCanceled) {
-        if (!t.car_identifier || !t.start_time || !t.end_time || !t.assigned_driver_id) continue;
-        const arr = byCar.get(t.car_identifier) ?? [];
-        arr.push({ trip_date: t.trip_date, start_time: t.start_time, end_time: t.end_time, assigned_driver_id: t.assigned_driver_id, assigned_driver_name: t.assigned_driver_name, raw_data_json: t.raw_data_json });
-        byCar.set(t.car_identifier, arr);
+      for (const trip of nonCanceled) {
+        if (!trip.car_identifier || !trip.start_time || !trip.end_time || !trip.assigned_driver_id) continue;
+        const arr = byCar.get(trip.car_identifier) ?? [];
+        arr.push({ trip_date: trip.trip_date, start_time: trip.start_time, end_time: trip.end_time, assigned_driver_id: trip.assigned_driver_id, assigned_driver_name: trip.assigned_driver_name, raw_data_json: trip.raw_data_json });
+        byCar.set(trip.car_identifier, arr);
       }
       for (const [carId, carTrips] of byCar) {
         carTrips.sort((a, b) => {
@@ -507,16 +598,22 @@ export default function FinalizePlanningModal({ run, companyId, userId, onClose,
             const pd = prev.assigned_driver_name ?? prev.assigned_driver_id;
             const cd = curr.assigned_driver_name ?? curr.assigned_driver_id;
             const overlapMin = Math.round((prevRw.actualEndMs - currRw.actualStartMs) / 60000);
-            overlapViolations.push(
-              `${carId} · ${fmtAbsDate(prevRw.actualStartMs)} · ${pd} ${fmtAbsTime(prevRw.actualStartMs)}–${fmtAbsTime(prevRw.actualEndMs)} ↔ ${cd} ${fmtAbsTime(currRw.actualStartMs)}–${fmtAbsTime(currRw.actualEndMs)} · Überschneidung ${overlapMin} Min`
-            );
+            overlapViolations.push(tr('fin.detail.vehicleOverlapLine', {
+              vehicle: carId,
+              date: fmtAbsDate(prevRw.actualStartMs),
+              firstDriver: pd,
+              firstWindow: `${fmtAbsTime(prevRw.actualStartMs)}–${fmtAbsTime(prevRw.actualEndMs)}`,
+              secondDriver: cd,
+              secondWindow: `${fmtAbsTime(currRw.actualStartMs)}–${fmtAbsTime(currRw.actualEndMs)}`,
+              minutes: overlapMin,
+            }));
           }
         }
       }
       results.push({
-        label: 'Fahrzeug-Überschneidungen',
+        id: 'vehicleOverlap',
         ok: overlapViolations.length === 0,
-        detail: overlapViolations.length === 0 ? 'OK' : overlapViolations.join('\n'),
+        detail: overlapViolations.length === 0 ? DETAIL_OK : overlapViolations.join('\n'),
       });
 
       // 11. Build blocks from trips (time-interval based — no assignment_block_id dependency).
@@ -535,22 +632,22 @@ export default function FinalizePlanningModal({ run, companyId, userId, onClose,
         driverId: string; driverName: string; serviceDate: string;
       }
       const finIntervals: FinInterval[] = [];
-      for (const t of nonCanceled) {
-        if (!t.start_time || !t.end_time || !t.assigned_driver_id) continue;
+      for (const trip of nonCanceled) {
+        if (!trip.start_time || !trip.end_time || !trip.assigned_driver_id) continue;
         const rw = resolveActualRideWindow({
-          trip_date: t.trip_date,
-          start_time: t.start_time,
-          end_time: t.end_time,
-          raw_data_json: t.raw_data_json,
+          trip_date: trip.trip_date,
+          start_time: trip.start_time,
+          end_time: trip.end_time,
+          raw_data_json: trip.raw_data_json,
         });
-        const sMs = rw.actualStartMs > 0 ? rw.actualStartMs : parseTsMs(t.trip_date, t.start_time);
-        let eMs = rw.actualEndMs > 0 ? rw.actualEndMs : parseTsMs(t.trip_date, t.end_time);
+        const sMs = rw.actualStartMs > 0 ? rw.actualStartMs : parseTsMs(trip.trip_date, trip.start_time);
+        let eMs = rw.actualEndMs > 0 ? rw.actualEndMs : parseTsMs(trip.trip_date, trip.end_time);
         if (eMs <= sMs) eMs += 86400000;
         finIntervals.push({
           sMs, eMs,
-          driverId: t.assigned_driver_id,
-          driverName: t.assigned_driver_name ?? t.assigned_driver_id,
-          serviceDate: t.trip_date,
+          driverId: trip.assigned_driver_id,
+          driverName: trip.assigned_driver_name ?? trip.assigned_driver_id,
+          serviceDate: trip.trip_date,
         });
       }
 
@@ -603,25 +700,25 @@ export default function FinalizePlanningModal({ run, companyId, userId, onClose,
       }
       interface UncoveredEntry { tripId: string; driverName: string; date: string; vehicle: string; start: string; end: string; }
       const uncoveredTrips: UncoveredEntry[] = [];
-      for (const t of nonCanceled) {
-        if (!t.start_time || !t.end_time || !t.assigned_driver_id) continue;
+      for (const trip of nonCanceled) {
+        if (!trip.start_time || !trip.end_time || !trip.assigned_driver_id) continue;
         const rw = resolveActualRideWindow({
-          trip_date: t.trip_date, start_time: t.start_time, end_time: t.end_time, raw_data_json: t.raw_data_json,
+          trip_date: trip.trip_date, start_time: trip.start_time, end_time: trip.end_time, raw_data_json: trip.raw_data_json,
         });
-        const tSMs = rw.actualStartMs > 0 ? rw.actualStartMs : parseTsMs(t.trip_date, t.start_time);
-        let tEMs = rw.actualEndMs > 0 ? rw.actualEndMs : parseTsMs(t.trip_date, t.end_time);
+        const tSMs = rw.actualStartMs > 0 ? rw.actualStartMs : parseTsMs(trip.trip_date, trip.start_time);
+        let tEMs = rw.actualEndMs > 0 ? rw.actualEndMs : parseTsMs(trip.trip_date, trip.end_time);
         if (tEMs <= tSMs) tEMs += 86400000;
-        const driverBlocks = blocksByDriverForCoverage.get(t.assigned_driver_id) ?? [];
+        const driverBlocks = blocksByDriverForCoverage.get(trip.assigned_driver_id) ?? [];
         const isCovered = driverBlocks.some(b =>
           b.sMs <= tSMs + COVERAGE_TOLERANCE_MS &&
           b.eMs >= tEMs - COVERAGE_TOLERANCE_MS,
         );
         if (!isCovered) {
           uncoveredTrips.push({
-            tripId: t.id,
-            driverName: t.assigned_driver_name ?? t.assigned_driver_id,
-            date: t.trip_date,
-            vehicle: t.car_identifier ?? '—',
+            tripId: trip.id,
+            driverName: trip.assigned_driver_name ?? trip.assigned_driver_id,
+            date: trip.trip_date,
+            vehicle: trip.car_identifier ?? '—',
             start: msToHHMM(tSMs),
             end: msToHHMM(tEMs),
           });
@@ -632,34 +729,34 @@ export default function FinalizePlanningModal({ run, companyId, userId, onClose,
       }
       const coverageLines: string[] = [];
       if (uncoveredTrips.length > 0) {
-        coverageLines.push(
-          `${uncoveredTrips.length} Fahrt${uncoveredTrips.length === 1 ? '' : 'en'} aus dem Fahrtenbuch ` +
-          `${uncoveredTrips.length === 1 ? 'ist' : 'sind'} in keinem Stundennachweis-Zeitraum enthalten:`,
-        );
+        coverageLines.push(trPlural(
+          { one: 'fin.detail.uncoveredHeading.one', other: 'fin.detail.uncoveredHeading.other' },
+          uncoveredTrips.length,
+        ));
         for (const u of uncoveredTrips.slice(0, 20)) {
           coverageLines.push(`${u.driverName} · ${u.date} · ${u.vehicle} · ${u.start}–${u.end}`);
         }
         if (uncoveredTrips.length > 20) {
-          coverageLines.push(`… und ${uncoveredTrips.length - 20} weitere Fahrten`);
+          coverageLines.push(tr('fin.detail.andMoreTrips', { count: uncoveredTrips.length - 20 }));
         }
       }
       results.push({
-        label: 'Stundennachweis Abdeckung',
+        id: 'stundennachweisCoverage',
         ok: uncoveredTrips.length === 0,
         detail: uncoveredTrips.length === 0
-          ? `OK · alle ${nonCanceled.length} Fahrten durch Stundennachweis-Blöcke abgedeckt`
+          ? tr('fin.detail.coverageOk', { count: nonCanceled.length })
           : coverageLines.join('\n'),
       });
       const driverMap = new Map<string, DriverSummary & { blockSet: Set<string> }>();
-      for (const t of nonCanceled) {
-        const name = t.assigned_driver_name ?? '(unbekannt)';
-        const key = t.assigned_driver_id ?? name;
+      for (const trip of nonCanceled) {
+        const name = trip.assigned_driver_name ?? tr('fin.unknownDriver');
+        const key = trip.assigned_driver_id ?? name;
         if (!driverMap.has(key)) {
           driverMap.set(key, { id: key, name, trips: 0, blocks: 0, blockSet: new Set(), workMinutes: 0, nightMinutes: 0, sundayMinutes: 0, expectedBrutto: null });
         }
         const d = driverMap.get(key)!;
         d.trips++;
-        if (t.assignment_block_id) d.blockSet.add(t.assignment_block_id);
+        if (trip.assignment_block_id) d.blockSet.add(trip.assignment_block_id);
       }
       // Accumulate block-level time data (uses ms arithmetic, handles overnight correctly)
       for (const b of finBlocks) {
@@ -680,6 +777,7 @@ export default function FinalizePlanningModal({ run, companyId, userId, onClose,
         arr.push(b);
         dateMap.set(b.service_date, arr);
       }
+      // Weekday column of the Stundennachweis PDF — statutory German, never translated.
       const WDAY_SHORT = ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa'];
       const driverPdfMap = new Map<string, { rows: PdfDayRow[]; totals: PdfTotals }>();
       for (const [driverId, dateMap] of driverDateBlocks) {
@@ -755,11 +853,11 @@ export default function FinalizePlanningModal({ run, companyId, userId, onClose,
       // Check: Stundennachweis Preview generierbar for all assigned drivers
       const snMissing = drivers.filter(d => !d.pdfData || d.pdfData.rows.length === 0).map(d => d.name);
       results.push({
-        label: 'Stundennachweis Preview generierbar',
+        id: 'stundennachweisPreview',
         ok: snMissing.length === 0,
         detail: snMissing.length === 0
-          ? `OK · ${drivers.length} Fahrer`
-          : `Fahrer ohne Stundennachweis-Daten: ${snMissing.join(', ')}`,
+          ? tr('fin.detail.previewOk', { count: drivers.length })
+          : tr('fin.detail.driversWithoutData', { drivers: snMissing.join(', ') }),
       });
 
       const snap: FinalSnapshot = {
@@ -813,7 +911,11 @@ export default function FinalizePlanningModal({ run, companyId, userId, onClose,
         .select('id, finalized_at')
         .single();
 
-      if (finErr || !finRow) throw new Error(finErr ? `Datenbankfehler:\n${formatError(finErr)}` : 'Finalisierung konnte nicht gespeichert werden');
+      if (finErr || !finRow) {
+        throw new Error(finErr
+          ? `${t('fin.error.database')}\n${formatError(finErr)}`
+          : t('fin.error.notSaved'));
+      }
 
       setFinalizationId(finRow.id as string);
       setFinalizedAt(finRow.finalized_at as string);
@@ -825,7 +927,7 @@ export default function FinalizePlanningModal({ run, companyId, userId, onClose,
       setError(formatError(e));
       setStep('ready');
     }
-  }, [snapshot, run, companyId, userId, onFinalized]);
+  }, [snapshot, run, companyId, userId, onFinalized, t]);
 
   // ── Re-download Fahrtenbuch ──────────────────────────────────────────
 
@@ -846,6 +948,8 @@ export default function FinalizePlanningModal({ run, companyId, userId, onClose,
     setDownloadingStundenDriverId(driver.id);
     try {
       const safeName = driver.name.replace(/[/\\:*?"<>|]/g, '_');
+      // Banner and filename belong to the statutory Stundennachweis PDF and stay
+      // German in both UI languages.
       exportStundennachweisAsPdf(
         {
           driver: { name: driver.name },
@@ -866,6 +970,7 @@ export default function FinalizePlanningModal({ run, companyId, userId, onClose,
 
   const allChecksOk = checks.length > 0 && checks.every(c => c.ok);
   const criticalFails = checks.filter(c => !c.ok);
+  const coverageFailed = criticalFails.some(f => f.id === 'stundennachweisCoverage');
 
   return (
     <div
@@ -883,10 +988,10 @@ export default function FinalizePlanningModal({ run, companyId, userId, onClose,
           <div>
             <h3 className="text-base font-bold flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
               <Sparkles size={16} style={{ color: '#f59e0b' }} />
-              Finale Dokumente erstellen
+              {t('fin.title')}
             </h3>
             <p className="text-xs mt-1" style={{ color: 'var(--text-tertiary)' }}>
-              {MONTHS_DE[run.month - 1]} {run.year} · {run.file_name || run.id.slice(0, 8)}
+              {t(MONTH_KEYS[run.month - 1])} {run.year} · {run.file_name || run.id.slice(0, 8)}
             </p>
           </div>
           <button
@@ -906,22 +1011,24 @@ export default function FinalizePlanningModal({ run, companyId, userId, onClose,
           <div>
             <div className="flex items-center gap-2 mb-3">
               <span className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>
-                Konsistenzprüfung
+                {t('fin.checksHeading')}
               </span>
               {step === 'checking' && <Loader2 size={12} className="animate-spin" style={{ color: 'var(--text-tertiary)' }} />}
             </div>
             <div className="space-y-1.5">
               {step === 'checking' && checks.length === 0 && (
-                <div className="text-sm py-2" style={{ color: 'var(--text-tertiary)' }}>Prüfung läuft…</div>
+                <div className="text-sm py-2" style={{ color: 'var(--text-tertiary)' }}>{t('fin.checksRunning')}</div>
               )}
-              {checks.map((c, i) => (
-                <div key={i} className="flex items-start gap-2.5 text-sm">
+              {checks.map((c, i) => {
+                const suggestions = CHECK_SUGGESTIONS[c.id];
+                return (
+                <div key={c.id} className="flex items-start gap-2.5 text-sm">
                   {c.ok
                     ? <CheckCircle2 size={15} className="shrink-0 mt-0.5" style={{ color: '#22c55e' }} />
                     : <AlertTriangle size={15} className="shrink-0 mt-0.5" style={{ color: '#dc2626' }} />
                   }
                   <div className="min-w-0 flex-1">
-                    <span className="font-medium" style={{ color: 'var(--text-primary)' }}>{c.label}</span>
+                    <span className="font-medium" style={{ color: 'var(--text-primary)' }}>{t(CHECK_LABEL_KEYS[c.id])}</span>
                     {!c.ok && (
                       <div className="mt-0.5 space-y-0.5">
                         {c.detail.split('\n').map((line, li) => (
@@ -929,11 +1036,11 @@ export default function FinalizePlanningModal({ run, companyId, userId, onClose,
                         ))}
                       </div>
                     )}
-                    {c.ok && c.detail !== 'OK' && (
+                    {c.ok && c.detail !== DETAIL_OK && (
                       <span className="ml-2 text-xs" style={{ color: 'var(--text-tertiary)' }}>{c.detail}</span>
                     )}
                     {/* Suggestions for failed checks */}
-                    {!c.ok && CHECK_SUGGESTIONS[c.label] && (
+                    {!c.ok && suggestions && (
                       <div className="mt-1.5">
                         <button
                           className="inline-flex items-center gap-1 text-xs font-semibold transition-colors hover:opacity-80"
@@ -941,15 +1048,17 @@ export default function FinalizePlanningModal({ run, companyId, userId, onClose,
                           onClick={() => toggleSuggestions(i)}
                         >
                           {expandedSuggestions.has(i)
-                            ? <><ChevronUp size={11} /> Vorschläge ausblenden</>
-                            : <><ChevronDown size={11} /> Vorschläge anzeigen</>
+                            ? <><ChevronUp size={11} /> {t('fin.hideSuggestions')}</>
+                            : <><ChevronDown size={11} /> {t('fin.showSuggestions')}</>
                           }
                         </button>
                         {expandedSuggestions.has(i) && (
                           <ul className="mt-1.5 space-y-1 pl-3 border-l-2" style={{ borderColor: 'rgba(37,99,235,0.3)' }}>
-                            {CHECK_SUGGESTIONS[c.label].map((s, si) => (
-                              <li key={si} className="text-xs" style={{ color: 'var(--text-secondary)' }}>
-                                <span className="font-semibold" style={{ color: '#2563eb' }}>Vorschlag {si + 1}:</span>{' '}{s}
+                            {suggestions.map((suggestionKey, si) => (
+                              <li key={suggestionKey} className="text-xs" style={{ color: 'var(--text-secondary)' }}>
+                                <span className="font-semibold" style={{ color: '#2563eb' }}>
+                                  {t('fin.suggestionNumber', { index: si + 1 })}
+                                </span>{' '}{t(suggestionKey)}
                               </li>
                             ))}
                           </ul>
@@ -958,7 +1067,8 @@ export default function FinalizePlanningModal({ run, companyId, userId, onClose,
                     )}
                   </div>
                 </div>
-              ))}
+                );
+              })}
             </div>
           </div>
 
@@ -967,22 +1077,18 @@ export default function FinalizePlanningModal({ run, companyId, userId, onClose,
             <div className="px-4 py-3 rounded-lg text-sm" style={{ background: 'rgba(220,38,38,0.08)', border: '1px solid rgba(220,38,38,0.35)', color: '#991b1b' }}>
               <div className="font-bold flex items-center gap-2 mb-1">
                 <Lock size={14} />
-                {criticalFails.some(f => f.label === 'Stundennachweis Abdeckung')
-                  ? 'Stundennachweis unvollständig — Finalisierung blockiert'
-                  : 'Finalisierung blockiert'}
+                {coverageFailed ? t('fin.blockedCoverageTitle') : t('fin.blockedTitle')}
               </div>
               <p className="text-xs">
-                {criticalFails.length} Prüfung{criticalFails.length > 1 ? 'en haben' : ' hat'} Probleme gefunden.
+                {tPlural({ one: 'fin.blockedCount.one', other: 'fin.blockedCount.other' }, criticalFails.length)}
               </p>
-              {criticalFails.some(f => f.label === 'Stundennachweis Abdeckung') && (
+              {coverageFailed && (
                 <p className="text-xs mt-1" style={{ color: '#991b1b', fontWeight: 600 }}>
-                  Einige Fahrten aus dem Fahrtenbuch sind in keinem Stundennachweis-Zeitraum enthalten. Die Finale Dokumente können erst erstellt werden, wenn alle Fahrten vollständig abgedeckt sind.
+                  {t('fin.blockedCoverageBody')}
                 </p>
               )}
               <p className="text-xs mt-1.5" style={{ color: '#7f1d1d' }}>
-                {criticalFails.some(f => f.label === 'Stundennachweis Abdeckung')
-                  ? 'Kehren Sie zur Monatsplanung zurück und stellen Sie sicher, dass alle Fahrten einem gültigen Schichtblock zugewiesen sind.'
-                  : 'Diese Konflikte sollten bereits vor dem Anwenden der Planung behoben werden. Bitte kehren Sie zur Monatsplanung zurück, passen Sie die Planung an und prüfen Sie die Planqualität erneut.'}
+                {coverageFailed ? t('fin.blockedCoverageHint') : t('fin.blockedGenericHint')}
               </p>
             </div>
           )}
@@ -991,15 +1097,15 @@ export default function FinalizePlanningModal({ run, companyId, userId, onClose,
           {snapshot && (step === 'ready' || step === 'finalizing' || step === 'done') && (
             <div className="rounded-lg px-4 py-3 space-y-2" style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)' }}>
               <div className="text-xs font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--text-tertiary)' }}>
-                Snapshot-Übersicht
+                {t('fin.snapshotHeading')}
               </div>
               <div className="grid grid-cols-2 gap-2 text-sm">
                 <div>
-                  <span style={{ color: 'var(--text-tertiary)' }}>Fahrten gesamt: </span>
+                  <span style={{ color: 'var(--text-tertiary)' }}>{t('fin.totalTrips')}: </span>
                   <strong style={{ color: 'var(--text-primary)' }}>{snapshot.totalTrips}</strong>
                 </div>
                 <div>
-                  <span style={{ color: 'var(--text-tertiary)' }}>Fahrer: </span>
+                  <span style={{ color: 'var(--text-tertiary)' }}>{t('common.driver')}: </span>
                   <strong style={{ color: 'var(--text-primary)' }}>{snapshot.driverCount}</strong>
                 </div>
               </div>
@@ -1011,8 +1117,8 @@ export default function FinalizePlanningModal({ run, companyId, userId, onClose,
                       <span className="font-medium" style={{ color: 'var(--text-primary)' }}>{d.name}</span>
                     </div>
                     <div className="flex gap-3" style={{ color: 'var(--text-secondary)' }}>
-                      <span>{d.trips} Fahrten</span>
-                      <span>{d.blocks} Blöcke</span>
+                      <span>{tPlural({ one: 'fin.tripsCount.one', other: 'fin.tripsCount.other' }, d.trips)}</span>
+                      <span>{tPlural({ one: 'fin.blocksCount.one', other: 'fin.blocksCount.other' }, d.blocks)}</span>
                       <span>{minsToHHMM(d.workMinutes)} h</span>
                     </div>
                   </div>
@@ -1026,13 +1132,13 @@ export default function FinalizePlanningModal({ run, companyId, userId, onClose,
             <div className="rounded-lg px-4 py-4 space-y-3" style={{ background: 'rgba(34,197,94,0.08)', border: '1px solid rgba(34,197,94,0.3)' }}>
               <div className="flex items-center gap-2 font-bold" style={{ color: '#15803d' }}>
                 <CheckCircle2 size={16} />
-                Finale Dokumente erstellt
+                {t('fin.doneTitle')}
               </div>
               <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs" style={{ color: 'var(--text-secondary)' }}>
-                <div>Fahrtenbuch: <strong style={{ color: 'var(--text-primary)' }}>bereit</strong></div>
-                <div>Stundennachweise: <strong style={{ color: 'var(--text-primary)' }}>{snapshot?.driverCount ?? 0} Fahrer</strong></div>
-                <div>Fahrten: <strong style={{ color: 'var(--text-primary)' }}>{snapshot?.totalTrips ?? 0}</strong></div>
-                <div>Finalisiert am: <strong style={{ color: 'var(--text-primary)' }}>{fmtDateTime(finalizedAt)}</strong></div>
+                <div>{t('fin.labelFahrtenbuch')}: <strong style={{ color: 'var(--text-primary)' }}>{t('fin.ready')}</strong></div>
+                <div>{t('fin.labelStundennachweise')}: <strong style={{ color: 'var(--text-primary)' }}>{t('fin.driverCount', { count: snapshot?.driverCount ?? 0 })}</strong></div>
+                <div>{t('fin.labelTrips')}: <strong style={{ color: 'var(--text-primary)' }}>{snapshot?.totalTrips ?? 0}</strong></div>
+                <div>{t('fin.finalizedAt')}: <strong style={{ color: 'var(--text-primary)' }}>{fmtDateTime(finalizedAt)}</strong></div>
               </div>
               {/* Fahrtenbuch download */}
               <div className="flex flex-wrap gap-2 pt-1">
@@ -1043,7 +1149,7 @@ export default function FinalizePlanningModal({ run, companyId, userId, onClose,
                   style={{ background: 'rgba(34,197,94,0.15)', color: '#15803d', border: '1px solid rgba(34,197,94,0.4)' }}
                 >
                   {xlsxDownloading ? <Loader2 size={14} className="animate-spin" /> : <FileSpreadsheet size={14} />}
-                  Fahrtenbuch herunterladen
+                  {t('fin.downloadFahrtenbuch')}
                 </button>
                 <button
                   onClick={() => setShowStundenPreview(true)}
@@ -1051,14 +1157,14 @@ export default function FinalizePlanningModal({ run, companyId, userId, onClose,
                   style={{ background: 'rgba(6,182,212,0.12)', color: '#0e7490', border: '1px solid rgba(6,182,212,0.35)' }}
                 >
                   <FileText size={14} />
-                  Stundennachweis Preview anzeigen
+                  {t('fin.showStundennachweisPreview')}
                 </button>
               </div>
               {/* Per-driver Stundennachweis downloads (from the same finalized snapshot) */}
               {snapshot && snapshot.drivers.some(d => d.pdfData) && (
                 <div className="space-y-1.5 pt-1">
                   <div className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>
-                    Stundennachweise herunterladen
+                    {t('fin.downloadStundennachweise')}
                   </div>
                   <div className="flex flex-wrap gap-1.5">
                     {snapshot.drivers.map(d => d.pdfData ? (
@@ -1078,7 +1184,7 @@ export default function FinalizePlanningModal({ run, companyId, userId, onClose,
                     ) : null)}
                   </div>
                   <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
-                    Alle Stundennachweise stammen aus dem finalisierten Snapshot. Bitte jetzt herunterladen — nach einem Transfer wird die Finalisierung als veraltet markiert.
+                    {t('fin.snapshotNote')}
                   </p>
                 </div>
               )}
@@ -1088,8 +1194,7 @@ export default function FinalizePlanningModal({ run, companyId, userId, onClose,
           {/* Note about what finalization does */}
           {(step === 'ready') && (
             <div className="text-xs px-3 py-2 rounded-lg" style={{ background: 'rgba(6,182,212,0.07)', border: '1px solid rgba(6,182,212,0.2)', color: 'var(--text-secondary)' }}>
-              Fahrtenbuch und Stundennachweise werden aus demselben aktuellen Daten-Snapshot generiert.
-              Nach Abschluss kann der Finalisierungs-Status durch weitere Transfers als veraltet markiert werden.
+              {t('fin.readyNote')}
             </div>
           )}
 
@@ -1108,7 +1213,7 @@ export default function FinalizePlanningModal({ run, companyId, userId, onClose,
             className="px-3 py-2 rounded-lg text-sm font-semibold disabled:opacity-50"
             style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
           >
-            {step === 'done' ? 'Schließen' : 'Abbrechen'}
+            {step === 'done' ? t('common.close') : t('common.cancel')}
           </button>
 
           {step !== 'done' && (
@@ -1119,7 +1224,7 @@ export default function FinalizePlanningModal({ run, companyId, userId, onClose,
                   className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold"
                   style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
                 >
-                  Erneut prüfen
+                  {t('fin.recheck')}
                 </button>
               )}
               <button
@@ -1133,8 +1238,8 @@ export default function FinalizePlanningModal({ run, companyId, userId, onClose,
                 }}
               >
                 {step === 'finalizing'
-                  ? <><Loader2 size={14} className="animate-spin" /> Wird erstellt…</>
-                  : <><Sparkles size={14} /> Finale Dokumente erstellen</>
+                  ? <><Loader2 size={14} className="animate-spin" /> {t('fin.creating')}</>
+                  : <><Sparkles size={14} /> {t('fin.title')}</>
                 }
               </button>
             </div>

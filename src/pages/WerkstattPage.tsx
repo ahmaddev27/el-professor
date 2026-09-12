@@ -99,7 +99,7 @@ export default function WerkstattPage() {
       showToast('success', t('werkstatt.deleted'));
       loadChecks();
     } catch (error: any) {
-      showToast('error', 'Fehler beim Löschen: ' + error.message);
+      showToast('error', t('werkstatt.deleteFailedReason', { error: error.message }));
     } finally {
       setCheckToDelete(null);
     }

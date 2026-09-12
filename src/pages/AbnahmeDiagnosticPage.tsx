@@ -9,6 +9,8 @@
 import React, { useState, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 import { CheckCircle, AlertTriangle, XCircle, RefreshCw, ClipboardList } from 'lucide-react';
+import { useTranslation } from '../contexts/LanguageContext';
+import type { TranslationKey } from '../i18n';
 
 // ── Constants ──────────────────────────────────────────────────────────────
 const STABLE_RUN_ID = '74b45e4d-9fa9-444d-8fbc-995274269148';
@@ -22,10 +24,22 @@ const EXPECTED = {
   distinctDrivers: 9,
 };
 
+// These column lists are module-level and t() is a hook value, so they hold
+// TranslationKeys and the call site resolves them.
+const DRIVER_TABLE_KEYS: TranslationKey[] = [
+  'common.driver', 'diag.colTrips', 'diag.colBlocks', 'diag.colMinutes',
+  'diag.colHours', 'diag.colFirstDay', 'diag.colLastDay',
+];
+
+const SHEET_TABLE_KEYS: TranslationKey[] = [
+  'common.driver', 'diag.colTrips', 'diag.colShiftsRaw', 'diag.colShiftsCompressed',
+  'diag.colHoursTotal', 'diag.colNight', 'diag.colSunday', 'diag.colMaxShiftsStatus',
+];
+
 // ── Time helpers (duplicated from StundennachweisPage for independence) ────
-function toMins(t: string): number {
-  if (!t || !t.includes(':')) return 0;
-  const [h, m] = t.split(':').map(Number);
+function toMins(time: string): number {
+  if (!time || !time.includes(':')) return 0;
+  const [h, m] = time.split(':').map(Number);
   if (isNaN(h) || isNaN(m)) return 0;
   return h * 60 + m;
 }
@@ -37,14 +51,14 @@ function minsToHHMM(mins: number): string {
 
 function segDuration(from: string | null, to: string | null): number {
   if (!from || !to) return 0;
-  const f = toMins(from), t = toMins(to);
-  return t >= f ? t - f : 1440 - f + t;
+  const startMin = toMins(from), endMin = toMins(to);
+  return endMin >= startMin ? endMin - startMin : 1440 - startMin + endMin;
 }
 
 function nightMinsForSeg(from: string | null, to: string | null): number {
   if (!from || !to) return 0;
-  const f = toMins(from), t = toMins(to);
-  const absTo = t >= f ? t : t + 1440;
+  const f = toMins(from), endMin = toMins(to);
+  const absTo = endMin >= f ? endMin : endMin + 1440;
   const seg1 = Math.max(0, Math.min(absTo, 24 * 60) - Math.max(f, 20 * 60));
   const seg2 = Math.max(0, Math.min(absTo, 30 * 60) - Math.max(f, 24 * 60));
   return seg1 + seg2;
@@ -79,10 +93,10 @@ function compressShiftsForDay(trips: RawTrip[]): { von1: string; bis1: string; v
 
   // Collect valid time windows
   const windows: ShiftWindow[] = [];
-  for (const t of trips) {
-    if (!t.start_time || !t.end_time) continue;
-    const s = toMins(t.start_time.slice(0, 5));
-    let e = toMins(t.end_time.slice(0, 5));
+  for (const trip of trips) {
+    if (!trip.start_time || !trip.end_time) continue;
+    const s = toMins(trip.start_time.slice(0, 5));
+    let e = toMins(trip.end_time.slice(0, 5));
     if (e < s) e += 1440;
     windows.push({ start: s, end: e });
   }
@@ -220,6 +234,7 @@ function Row({ label, value, ok, warn, error }: { label: string; value: string |
 
 // ── Main Page ─────────────────────────────────────────────────────────────
 export default function AbnahmeDiagnosticPage() {
+  const { t } = useTranslation();
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<DiagResult | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -241,7 +256,7 @@ export default function AbnahmeDiagnosticPage() {
         .single();
 
       if (runErr || !runData) {
-        criticalErrors.push(`Planning Run nicht gefunden: ${runErr?.message ?? 'kein Ergebnis'}`);
+        criticalErrors.push(t('diag.errRunNotFound', { message: runErr?.message ?? t('diag.noResult') }));
       }
 
       const run: PlanningRunInfo | null = runData ? {
@@ -253,7 +268,8 @@ export default function AbnahmeDiagnosticPage() {
       } : null;
 
       if (run && run.status !== 'applied') {
-        criticalErrors.push(`Planning Run Status ist "${run.status}", erwartet "applied"`);
+        // `status` and `applied` are database values, not labels.
+        criticalErrors.push(t('diag.errRunStatus', { status: run.status, expected: 'applied' }));
       }
 
       // ── 2. Load all trips for this planning run ────────────────────────────
@@ -265,83 +281,89 @@ export default function AbnahmeDiagnosticPage() {
         .order('start_time', { ascending: true });
 
       if (tripsErr) {
-        criticalErrors.push(`Fahrtenbuch-Abfrage fehlgeschlagen: ${tripsErr.message}`);
+        criticalErrors.push(t('diag.errTripQueryFailed', { message: tripsErr.message }));
       }
 
       const trips: RawTrip[] = (tripsRaw ?? []) as RawTrip[];
-      const nonCanceled = trips.filter(t => !t.is_canceled);
+      const nonCanceled = trips.filter(trip => !trip.is_canceled);
       const totalTrips = trips.length;
 
       // Expected trip count
       if (totalTrips === 0) {
-        criticalErrors.push('Keine Fahrten gefunden für diese Planning Run ID');
+        criticalErrors.push(t('diag.errNoTrips'));
       } else if (totalTrips !== EXPECTED.totalFahrten) {
-        criticalErrors.push(`Fahrten-Anzahl: ${totalTrips}, erwartet: ${EXPECTED.totalFahrten}`);
+        criticalErrors.push(t('diag.errTripCount', { actual: totalTrips, expected: EXPECTED.totalFahrten }));
       }
 
       // Duplicate trip IDs
       const idSet = new Set<string>();
       const duplicateTripIds: string[] = [];
-      for (const t of trips) {
-        if (idSet.has(t.id)) duplicateTripIds.push(t.id);
-        idSet.add(t.id);
+      for (const trip of trips) {
+        if (idSet.has(trip.id)) duplicateTripIds.push(trip.id);
+        idSet.add(trip.id);
       }
       if (duplicateTripIds.length > 0) {
-        criticalErrors.push(`${duplicateTripIds.length} doppelte Trip-IDs gefunden`);
+        criticalErrors.push(t('diag.errDuplicateTripIds', { count: duplicateTripIds.length }));
       }
 
       // Missing fields (non-canceled only)
-      const missingDriverId    = nonCanceled.filter(t => !t.assigned_driver_id).length;
-      const missingDriverName  = nonCanceled.filter(t => !t.assigned_driver_name).length;
-      const missingBlockId     = nonCanceled.filter(t => !t.assignment_block_id).length;
+      const missingDriverId    = nonCanceled.filter(trip => !trip.assigned_driver_id).length;
+      const missingDriverName  = nonCanceled.filter(trip => !trip.assigned_driver_name).length;
+      const missingBlockId     = nonCanceled.filter(trip => !trip.assignment_block_id).length;
 
-      if (missingDriverId > 0)   criticalErrors.push(`${missingDriverId} Fahrten ohne assigned_driver_id`);
-      if (missingDriverName > 0) criticalErrors.push(`${missingDriverName} Fahrten ohne assigned_driver_name`);
-      if (missingBlockId > 0)    criticalErrors.push(`${missingBlockId} Fahrten ohne assignment_block_id`);
+      // The interpolated names are database columns, not labels.
+      if (missingDriverId > 0)   criticalErrors.push(t('diag.errTripsMissingColumn', { count: missingDriverId, column: 'assigned_driver_id' }));
+      if (missingDriverName > 0) criticalErrors.push(t('diag.errTripsMissingColumn', { count: missingDriverName, column: 'assigned_driver_name' }));
+      if (missingBlockId > 0)    criticalErrors.push(t('diag.errTripsMissingColumn', { count: missingBlockId, column: 'assignment_block_id' }));
 
       // Distinct blocks and drivers
-      const blockSet = new Set(nonCanceled.map(t => t.assignment_block_id).filter(Boolean));
-      const driverSet = new Set(nonCanceled.map(t => t.assigned_driver_name).filter(Boolean));
+      const blockSet = new Set(nonCanceled.map(trip => trip.assignment_block_id).filter(Boolean));
+      // `.filter(Boolean)` drops the nulls but does not narrow the type, so the
+      // Set read as `Set<string | null>` and every consumer had to pretend a
+      // null could arrive. A real type guard states what the filter already does.
+      const driverSet = new Set(
+        nonCanceled.map(trip => trip.assigned_driver_name).filter((n): n is string => Boolean(n)),
+      );
       const distinctBlocks  = blockSet.size;
       const distinctDrivers = driverSet.size;
 
       if (distinctBlocks !== EXPECTED.distinctBlocks) {
-        warnings.push(`Distinct Blocks: ${distinctBlocks}, erwartet: ${EXPECTED.distinctBlocks}`);
+        warnings.push(t('diag.warnDistinctBlocks', { actual: distinctBlocks, expected: EXPECTED.distinctBlocks }));
       }
       if (distinctDrivers !== EXPECTED.distinctDrivers) {
-        warnings.push(`Distinct Drivers: ${distinctDrivers}, erwartet: ${EXPECTED.distinctDrivers}`);
+        warnings.push(t('diag.warnDistinctDrivers', { actual: distinctDrivers, expected: EXPECTED.distinctDrivers }));
       }
 
       // Invalid times
-      const tripsWithNoTime = nonCanceled.filter(t => !t.start_time || !t.end_time).length;
+      const tripsWithNoTime = nonCanceled.filter(trip => !trip.start_time || !trip.end_time).length;
       if (tripsWithNoTime > 0) {
-        criticalErrors.push(`${tripsWithNoTime} Fahrten ohne start_time oder end_time`);
+        criticalErrors.push(t('diag.errTripsWithoutTimes', { count: tripsWithNoTime }));
       }
 
       // Negative/zero actual_work_minutes (only for non-canceled with times)
-      const tripsNegativeMinutes = nonCanceled.filter(t =>
-        t.start_time && t.end_time && t.actual_work_minutes !== null && (t.actual_work_minutes ?? 0) <= 0
+      const tripsNegativeMinutes = nonCanceled.filter(trip =>
+        trip.start_time && trip.end_time && trip.actual_work_minutes !== null && (trip.actual_work_minutes ?? 0) <= 0
       ).length;
       if (tripsNegativeMinutes > 0) {
-        warnings.push(`${tripsNegativeMinutes} Fahrten mit actual_work_minutes ≤ 0`);
+        warnings.push(t('diag.warnNonPositiveMinutes', { count: tripsNegativeMinutes }));
       }
 
       // ── 3. Driver Distribution ─────────────────────────────────────────────
       const driverMap = new Map<string, DriverStat>();
-      for (const t of nonCanceled) {
-        const name = t.assigned_driver_name ?? '(unbekannt)';
+      for (const trip of nonCanceled) {
+        const name = trip.assigned_driver_name ?? t('diag.unknownDriver');
         if (!driverMap.has(name)) {
-          driverMap.set(name, { name, fahrten: 0, blocks: new Set(), workMinutes: 0, firstDate: t.trip_date, lastDate: t.trip_date });
+          driverMap.set(name, { name, fahrten: 0, blocks: new Set(), workMinutes: 0, firstDate: trip.trip_date, lastDate: trip.trip_date });
         }
         const stat = driverMap.get(name)!;
         stat.fahrten++;
-        if (t.assignment_block_id) stat.blocks.add(t.assignment_block_id);
-        stat.workMinutes += t.actual_work_minutes ?? segDuration(
-          t.start_time?.slice(0, 5) ?? null,
-          t.end_time?.slice(0, 5) ?? null,
+        if (trip.assignment_block_id) stat.blocks.add(trip.assignment_block_id);
+        stat.workMinutes += trip.actual_work_minutes ?? segDuration(
+          trip.start_time?.slice(0, 5) ?? null,
+          trip.end_time?.slice(0, 5) ?? null,
         );
-        if (t.trip_date < stat.firstDate) stat.firstDate = t.trip_date;
-        if (t.trip_date > stat.lastDate)  stat.lastDate  = t.trip_date;
+        if (trip.trip_date < stat.firstDate) stat.firstDate = trip.trip_date;
+        if (trip.trip_date > stat.lastDate)  stat.lastDate  = trip.trip_date;
       }
       const driverStats = [...driverMap.values()].sort((a, b) => b.fahrten - a.fahrten);
 
@@ -349,13 +371,13 @@ export default function AbnahmeDiagnosticPage() {
       const stundennachweis: StundennachweisDriverSummary[] = [];
 
       for (const driverName of [...driverSet].sort()) {
-        const driverTrips = nonCanceled.filter(t => t.assigned_driver_name === driverName);
+        const driverTrips = nonCanceled.filter(trip => trip.assigned_driver_name === driverName);
 
         // Group by date
         const byDate = new Map<string, RawTrip[]>();
-        for (const t of driverTrips) {
-          if (!byDate.has(t.trip_date)) byDate.set(t.trip_date, []);
-          byDate.get(t.trip_date)!.push(t);
+        for (const trip of driverTrips) {
+          if (!byDate.has(trip.trip_date)) byDate.set(trip.trip_date, []);
+          byDate.get(trip.trip_date)!.push(trip);
         }
 
         let totalMins = 0;
@@ -367,7 +389,7 @@ export default function AbnahmeDiagnosticPage() {
 
         for (const [date, dayTrips] of byDate.entries()) {
           // Before compression: count individual trips with times
-          const validTrips = dayTrips.filter(t => t.start_time && t.end_time);
+          const validTrips = dayTrips.filter(trip => trip.start_time && trip.end_time);
           shiftsBeforeCompression += validTrips.length;
 
           // After compression
@@ -397,7 +419,7 @@ export default function AbnahmeDiagnosticPage() {
 
         const maxShiftsViolation = daysWith4Plus.length > 0;
         if (maxShiftsViolation) {
-          warnings.push(`${driverName}: ${daysWith4Plus.length} Tag(e) mit >3 Schichten nach Kompression`);
+          warnings.push(t('diag.warnMaxShifts', { driver: driverName, count: daysWith4Plus.length }));
         }
 
         stundennachweis.push({
@@ -416,7 +438,7 @@ export default function AbnahmeDiagnosticPage() {
       // ── 6. Totals Consistency ──────────────────────────────────────────────
       const snTotal = stundennachweis.reduce((s, d) => s + d.fahrten, 0);
       if (snTotal !== nonCanceled.length) {
-        criticalErrors.push(`Stundennachweis-Fahrten (${snTotal}) ≠ zugewiesene Fahrten (${nonCanceled.length})`);
+        criticalErrors.push(t('diag.errTotalsMismatch', { sheet: snTotal, assigned: nonCanceled.length }));
       }
 
       setResult({
@@ -441,7 +463,7 @@ export default function AbnahmeDiagnosticPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [t]);
 
   const fmtDate = (s: string) => {
     const [y, mo, d] = s.split('-');
@@ -464,12 +486,12 @@ export default function AbnahmeDiagnosticPage() {
             <ClipboardList style={{ width: 20, height: 20, color: '#06b6d4' }} />
           </div>
           <div>
-            <h1 style={{ fontSize: 20, fontWeight: 800, color: '#f1f5f9', margin: 0 }}>Abnahme-Diagnose (Read-Only)</h1>
-            <p style={{ fontSize: 12, color: '#475569', margin: 0 }}>V1 Planning Run · {STABLE_RUN_ID}</p>
+            <h1 style={{ fontSize: 20, fontWeight: 800, color: '#f1f5f9', margin: 0 }}>{t('diag.pageTitle')}</h1>
+            <p style={{ fontSize: 12, color: '#475569', margin: 0 }}>{t('diag.pageSubtitle')} · {STABLE_RUN_ID}</p>
           </div>
         </div>
         <p style={{ fontSize: 13, color: '#64748b', margin: 0 }}>
-          Liest nur Daten. Keine Schreiboperationen. Keine Veränderungen an Trips, Planung oder Gehältern.
+          {t('diag.readOnlyNote')}
         </p>
       </div>
 
@@ -489,7 +511,7 @@ export default function AbnahmeDiagnosticPage() {
         }}
       >
         <RefreshCw style={{ width: 16, height: 16, animation: loading ? 'spin 1s linear infinite' : 'none' }} />
-        {loading ? 'Analyse läuft...' : 'Diagnose starten'}
+        {loading ? t('diag.running') : t('diag.start')}
       </button>
       <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
 
@@ -497,7 +519,7 @@ export default function AbnahmeDiagnosticPage() {
         <Card style={{ border: '1px solid rgba(220,38,38,0.35)', background: 'rgba(220,38,38,0.06)' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#f87171' }}>
             <XCircle style={{ width: 16, height: 16 }} />
-            <strong>Fehler:</strong> {error}
+            <strong>{t('common.error')}:</strong> {error}
           </div>
         </Card>
       )}
@@ -506,34 +528,34 @@ export default function AbnahmeDiagnosticPage() {
         <>
           {/* ── Final Summary ─────────────────────────────────────────────── */}
           <Card style={{ background: 'rgba(6,182,212,0.04)', border: '1px solid rgba(6,182,212,0.15)' }}>
-            <SectionTitle>Zusammenfassung</SectionTitle>
+            <SectionTitle>{t('common.summary')}</SectionTitle>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
-              {[
-                { label: 'Fahrtenbuch sauber', val: result.criticalErrors.length === 0 && result.duplicateTripIds.length === 0 && result.missingBlockId === 0 },
-                { label: 'Stundennachweis sauber', val: result.stundennachweis.every(s => !s.maxShiftsViolation) },
-              ].map(({ label, val }) => (
+              {([
+                { label: 'diag.fahrtenbuchClean', val: result.criticalErrors.length === 0 && result.duplicateTripIds.length === 0 && result.missingBlockId === 0 },
+                { label: 'diag.stundennachweisClean', val: result.stundennachweis.every(s => !s.maxShiftsViolation) },
+              ] as const).map(({ label, val }) => (
                 <div key={label} style={{ background: val ? 'rgba(22,163,74,0.08)' : 'rgba(220,38,38,0.08)', border: `1px solid ${val ? 'rgba(22,163,74,0.25)' : 'rgba(220,38,38,0.25)'}`, borderRadius: 10, padding: '14px 16px' }}>
-                  <p style={{ fontSize: 11, color: '#64748b', margin: '0 0 6px' }}>{label}</p>
-                  <Badge ok={val} label={val ? 'JA' : 'NEIN'} />
+                  <p style={{ fontSize: 11, color: '#64748b', margin: '0 0 6px' }}>{t(label)}</p>
+                  <Badge ok={val} label={val ? t('diag.yes') : t('diag.no')} />
                 </div>
               ))}
               <div style={{ background: 'rgba(220,38,38,0.08)', border: '1px solid rgba(220,38,38,0.25)', borderRadius: 10, padding: '14px 16px' }}>
-                <p style={{ fontSize: 11, color: '#64748b', margin: '0 0 6px' }}>Kritische Fehler</p>
+                <p style={{ fontSize: 11, color: '#64748b', margin: '0 0 6px' }}>{t('diag.criticalErrors')}</p>
                 <span style={{ fontSize: 22, fontWeight: 900, color: result.criticalErrors.length > 0 ? '#f87171' : '#4ade80' }}>{result.criticalErrors.length}</span>
               </div>
               <div style={{ background: 'rgba(234,179,8,0.06)', border: '1px solid rgba(234,179,8,0.2)', borderRadius: 10, padding: '14px 16px' }}>
-                <p style={{ fontSize: 11, color: '#64748b', margin: '0 0 6px' }}>Warnungen</p>
+                <p style={{ fontSize: 11, color: '#64748b', margin: '0 0 6px' }}>{t('diag.warnings')}</p>
                 <span style={{ fontSize: 22, fontWeight: 900, color: result.warnings.length > 0 ? '#facc15' : '#4ade80' }}>{result.warnings.length}</span>
               </div>
               <div style={{ background: 'rgba(6,182,212,0.06)', border: '1px solid rgba(6,182,212,0.2)', borderRadius: 10, padding: '14px 16px' }}>
-                <p style={{ fontSize: 11, color: '#64748b', margin: '0 0 6px' }}>Produktionsbereitschaft</p>
+                <p style={{ fontSize: 11, color: '#64748b', margin: '0 0 6px' }}>{t('diag.productionReadiness')}</p>
                 <span style={{ fontSize: 22, fontWeight: 900, color: productionReadiness >= 95 ? '#4ade80' : productionReadiness >= 70 ? '#facc15' : '#f87171' }}>{productionReadiness} %</span>
               </div>
             </div>
 
             {result.criticalErrors.length > 0 && (
               <div style={{ marginTop: 16, background: 'rgba(220,38,38,0.07)', border: '1px solid rgba(220,38,38,0.25)', borderRadius: 8, padding: '12px 14px' }}>
-                <p style={{ fontSize: 12, fontWeight: 700, color: '#f87171', margin: '0 0 8px', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Kritische Fehler</p>
+                <p style={{ fontSize: 12, fontWeight: 700, color: '#f87171', margin: '0 0 8px', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{t('diag.criticalErrors')}</p>
                 {result.criticalErrors.map((e, i) => (
                   <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: '#fca5a5', marginBottom: 4 }}>
                     <XCircle style={{ width: 13, height: 13, flexShrink: 0 }} />
@@ -544,7 +566,7 @@ export default function AbnahmeDiagnosticPage() {
             )}
             {result.warnings.length > 0 && (
               <div style={{ marginTop: 12, background: 'rgba(234,179,8,0.06)', border: '1px solid rgba(234,179,8,0.2)', borderRadius: 8, padding: '12px 14px' }}>
-                <p style={{ fontSize: 12, fontWeight: 700, color: '#facc15', margin: '0 0 8px', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Warnungen</p>
+                <p style={{ fontSize: 12, fontWeight: 700, color: '#facc15', margin: '0 0 8px', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{t('diag.warnings')}</p>
                 {result.warnings.map((w, i) => (
                   <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: '#fde68a', marginBottom: 4 }}>
                     <AlertTriangle style={{ width: 13, height: 13, flexShrink: 0 }} />
@@ -557,34 +579,35 @@ export default function AbnahmeDiagnosticPage() {
 
           {/* ── 1. Planning Run Integrity ──────────────────────────────────── */}
           <Card>
-            <SectionTitle>1. Planning Run Integrity</SectionTitle>
+            <SectionTitle>{t('diag.section1')}</SectionTitle>
             {result.run && (
               <>
-                <Row label="Planning Run ID" value={result.run.id} />
-                <Row label="Status" value={result.run.status} ok={result.run.status === 'applied'} error={result.run.status !== 'applied'} />
-                <Row label="Company ID" value={result.run.company_id} />
-                <Row label="Applied At" value={result.run.applied_at ? new Date(result.run.applied_at).toLocaleString('de-DE') : '—'} />
+                {/* Run ID, company ID and the apply-summary keys are raw database values. */}
+                <Row label={t('diag.rowRunId')} value={result.run.id} />
+                <Row label={t('common.status')} value={result.run.status} ok={result.run.status === 'applied'} error={result.run.status !== 'applied'} />
+                <Row label={t('diag.rowCompanyId')} value={result.run.company_id} />
+                <Row label={t('diag.rowAppliedAt')} value={result.run.applied_at ? new Date(result.run.applied_at).toLocaleString('de-DE') : '—'} />
                 {result.run.apply_summary_json && Object.entries(result.run.apply_summary_json).map(([k, v]) => (
                   <Row key={k} label={k} value={v} />
                 ))}
                 <div style={{ marginTop: 12, borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: 12 }}>
-                  <Row label="Gesamte Fahrten (inkl. storniert)" value={result.totalTrips}
+                  <Row label={t('diag.rowTotalTrips')} value={result.totalTrips}
                     ok={result.totalTrips === EXPECTED.totalFahrten}
                     error={result.totalTrips !== EXPECTED.totalFahrten} />
-                  <Row label="Fahrten zugewiesen (nicht storniert)" value={result.nonCanceled} />
-                  <Row label="Fehlend: assigned_driver_id" value={result.missingDriverId}
+                  <Row label={t('diag.rowAssignedTrips')} value={result.nonCanceled} />
+                  <Row label={t('diag.rowMissingColumn', { column: 'assigned_driver_id' })} value={result.missingDriverId}
                     ok={result.missingDriverId === EXPECTED.missingDriverId}
                     error={result.missingDriverId > 0} />
-                  <Row label="Fehlend: assigned_driver_name" value={result.missingDriverName}
+                  <Row label={t('diag.rowMissingColumn', { column: 'assigned_driver_name' })} value={result.missingDriverName}
                     ok={result.missingDriverName === EXPECTED.missingDriverName}
                     error={result.missingDriverName > 0} />
-                  <Row label="Fehlend: assignment_block_id" value={result.missingBlockId}
+                  <Row label={t('diag.rowMissingColumn', { column: 'assignment_block_id' })} value={result.missingBlockId}
                     ok={result.missingBlockId === EXPECTED.missingBlockId}
                     error={result.missingBlockId > 0} />
-                  <Row label="Distinct assignment_block_id" value={result.distinctBlocks}
+                  <Row label={t('diag.rowDistinctColumn', { column: 'assignment_block_id' })} value={result.distinctBlocks}
                     ok={result.distinctBlocks === EXPECTED.distinctBlocks}
                     warn={result.distinctBlocks !== EXPECTED.distinctBlocks} />
-                  <Row label="Distinct Fahrer" value={result.distinctDrivers}
+                  <Row label={t('diag.rowDistinctDrivers')} value={result.distinctDrivers}
                     ok={result.distinctDrivers === EXPECTED.distinctDrivers}
                     warn={result.distinctDrivers !== EXPECTED.distinctDrivers} />
                 </div>
@@ -594,31 +617,31 @@ export default function AbnahmeDiagnosticPage() {
 
           {/* ── 2. Fahrtenbuch Integrity ───────────────────────────────────── */}
           <Card>
-            <SectionTitle>2. Fahrtenbuch Integrity</SectionTitle>
-            <Row label="Doppelte Trip-IDs"
+            <SectionTitle>{t('diag.section2')}</SectionTitle>
+            <Row label={t('diag.rowDuplicateTripIds')}
               value={result.duplicateTripIds.length}
               ok={result.duplicateTripIds.length === 0}
               error={result.duplicateTripIds.length > 0} />
-            <Row label="Fahrten ohne Uhrzeit (start/end)"
+            <Row label={t('diag.rowTripsWithoutTimes')}
               value={result.tripsWithNoTime}
               ok={result.tripsWithNoTime === 0}
               warn={result.tripsWithNoTime > 0} />
-            <Row label="Fahrten mit Minuten ≤ 0"
+            <Row label={t('diag.rowTripsNonPositiveMinutes')}
               value={result.tripsNegativeMinutes}
               ok={result.tripsNegativeMinutes === 0}
               warn={result.tripsNegativeMinutes > 0} />
-            <Row label="Fahrten ohne Fahrerzuordnung (nicht storniert)"
+            <Row label={t('diag.rowTripsWithoutDriver')}
               value={result.missingDriverId}
               ok={result.missingDriverId === 0}
               error={result.missingDriverId > 0} />
-            <Row label="Fahrten ohne Block-ID (nicht storniert)"
+            <Row label={t('diag.rowTripsWithoutBlock')}
               value={result.missingBlockId}
               ok={result.missingBlockId === 0}
               error={result.missingBlockId > 0} />
 
             {result.duplicateTripIds.length > 0 && (
               <div style={{ marginTop: 10, padding: '10px 12px', background: 'rgba(220,38,38,0.07)', border: '1px solid rgba(220,38,38,0.2)', borderRadius: 8 }}>
-                <p style={{ fontSize: 12, fontWeight: 700, color: '#f87171', margin: '0 0 6px' }}>Doppelte IDs (Stichprobe):</p>
+                <p style={{ fontSize: 12, fontWeight: 700, color: '#f87171', margin: '0 0 6px' }}>{t('diag.duplicateIdsSample')}</p>
                 {result.duplicateTripIds.slice(0, 5).map(id => (
                   <p key={id} style={{ fontSize: 11, color: '#fca5a5', margin: '2px 0', fontFamily: 'monospace' }}>{id}</p>
                 ))}
@@ -629,20 +652,22 @@ export default function AbnahmeDiagnosticPage() {
               <Badge
                 ok={result.criticalErrors.length === 0 && result.duplicateTripIds.length === 0 && result.missingBlockId === 0}
                 warn={result.warnings.length > 0 && result.criticalErrors.length === 0}
-                label={result.criticalErrors.length === 0 && result.duplicateTripIds.length === 0 && result.missingBlockId === 0 ? 'Fahrtenbuch OK' : result.criticalErrors.length > 0 ? 'Fehler gefunden' : 'Warnungen vorhanden'}
+                label={result.criticalErrors.length === 0 && result.duplicateTripIds.length === 0 && result.missingBlockId === 0
+                  ? t('diag.fahrtenbuchOk')
+                  : result.criticalErrors.length > 0 ? t('diag.errorsFound') : t('diag.warningsPresent')}
               />
             </div>
           </Card>
 
           {/* ── 3. Driver Distribution ─────────────────────────────────────── */}
           <Card>
-            <SectionTitle>3. Fahrer-Verteilung</SectionTitle>
+            <SectionTitle>{t('diag.section3')}</SectionTitle>
             <div style={{ overflowX: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
                 <thead>
                   <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
-                    {['Fahrer', 'Fahrten', 'Blocks', 'Minuten', 'Stunden', 'Erster Tag', 'Letzter Tag'].map(h => (
-                      <th key={h} style={{ textAlign: 'left', padding: '6px 10px', color: '#64748b', fontWeight: 600, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{h}</th>
+                    {DRIVER_TABLE_KEYS.map(h => (
+                      <th key={h} style={{ textAlign: 'left', padding: '6px 10px', color: '#64748b', fontWeight: 600, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t(h)}</th>
                     ))}
                   </tr>
                 </thead>
@@ -661,7 +686,7 @@ export default function AbnahmeDiagnosticPage() {
                     </tr>
                   ))}
                   <tr style={{ borderTop: '1px solid rgba(255,255,255,0.1)', background: 'rgba(6,182,212,0.04)' }}>
-                    <td style={{ padding: '7px 10px', fontWeight: 800, color: '#06b6d4' }}>Gesamt</td>
+                    <td style={{ padding: '7px 10px', fontWeight: 800, color: '#06b6d4' }}>{t('diag.total')}</td>
                     <td style={{ padding: '7px 10px', fontWeight: 700, color: '#06b6d4' }}>
                       {result.driverStats.reduce((s, d) => s + d.fahrten, 0)}
                     </td>
@@ -683,13 +708,13 @@ export default function AbnahmeDiagnosticPage() {
 
           {/* ── 4. Stundennachweis Integrity ───────────────────────────────── */}
           <Card>
-            <SectionTitle>4. Stundennachweis-Integrität</SectionTitle>
+            <SectionTitle>{t('diag.section4')}</SectionTitle>
             <div style={{ overflowX: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
                 <thead>
                   <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
-                    {['Fahrer', 'Fahrten', 'Schichten (roh)', 'Schichten (komprimiert)', 'Stunden gesamt', 'Nacht', 'Sonntag', 'Max-3 Status'].map(h => (
-                      <th key={h} style={{ textAlign: 'left', padding: '6px 10px', color: '#64748b', fontWeight: 600, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{h}</th>
+                    {SHEET_TABLE_KEYS.map(h => (
+                      <th key={h} style={{ textAlign: 'left', padding: '6px 10px', color: '#64748b', fontWeight: 600, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t(h)}</th>
                     ))}
                   </tr>
                 </thead>
@@ -706,7 +731,8 @@ export default function AbnahmeDiagnosticPage() {
                       <td style={{ padding: '7px 10px', color: '#94a3b8' }}>{d.nightMins > 0 ? minsToHHMM(d.nightMins) : '—'}</td>
                       <td style={{ padding: '7px 10px', color: '#94a3b8' }}>{d.sundayMins > 0 ? minsToHHMM(d.sundayMins) : '—'}</td>
                       <td style={{ padding: '7px 10px' }}>
-                        <Badge ok={!d.maxShiftsViolation} label={d.maxShiftsViolation ? `VERLETZT (${d.daysWith4Plus.length} Tage)` : 'OK'} />
+                        <Badge ok={!d.maxShiftsViolation}
+                          label={d.maxShiftsViolation ? t('diag.violated', { count: d.daysWith4Plus.length }) : t('diag.ok')} />
                       </td>
                     </tr>
                   ))}
@@ -717,11 +743,11 @@ export default function AbnahmeDiagnosticPage() {
 
           {/* ── 5. Max-3-Schichten Check ───────────────────────────────────── */}
           <Card>
-            <SectionTitle>5. Max-3-Schichten-Regel</SectionTitle>
+            <SectionTitle>{t('diag.section5')}</SectionTitle>
             {result.stundennachweis.every(d => !d.maxShiftsViolation) ? (
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px', background: 'rgba(22,163,74,0.08)', border: '1px solid rgba(22,163,74,0.25)', borderRadius: 8 }}>
                 <CheckCircle style={{ width: 18, height: 18, color: '#4ade80' }} />
-                <span style={{ fontSize: 14, fontWeight: 700, color: '#4ade80' }}>Alle Fahrer-Tage haben ≤ 3 Schichten nach Kompression — OK</span>
+                <span style={{ fontSize: 14, fontWeight: 700, color: '#4ade80' }}>{t('diag.maxShiftsAllOk')}</span>
               </div>
             ) : (
               <div>
@@ -729,11 +755,11 @@ export default function AbnahmeDiagnosticPage() {
                   <div key={d.name} style={{ marginBottom: 12 }}>
                     <p style={{ fontSize: 13, fontWeight: 700, color: '#f87171', marginBottom: 6 }}>
                       <XCircle style={{ width: 13, height: 13, display: 'inline', marginRight: 6 }} />
-                      {d.name} — {d.daysWith4Plus.length} Tag(e) mit Verletzung
+                      {t('diag.driverViolationDays', { driver: d.name, count: d.daysWith4Plus.length })}
                     </p>
                     {d.daysWith4Plus.map(day => (
                       <p key={day.date} style={{ fontSize: 12, color: '#fca5a5', margin: '2px 0 2px 20px' }}>
-                        {fmtDate(day.date)}: {day.shifts} Schichten
+                        {t('diag.dayShiftCount', { date: fmtDate(day.date), count: day.shifts })}
                       </p>
                     ))}
                   </div>
@@ -744,19 +770,18 @@ export default function AbnahmeDiagnosticPage() {
 
           {/* ── 6. Totals Consistency ─────────────────────────────────────── */}
           <Card>
-            <SectionTitle>6. Totals-Konsistenz</SectionTitle>
-            <Row label="Fahrten im Fahrtenbuch (gesamt)" value={result.totalTrips} />
-            <Row label="Fahrten im Fahrtenbuch (nicht storniert)" value={result.nonCanceled} />
-            <Row label="Fahrten in Stundennachweis" value={result.stundennachweis.reduce((s, d) => s + d.fahrten, 0)}
+            <SectionTitle>{t('diag.section6')}</SectionTitle>
+            <Row label={t('diag.rowTripsTotal')} value={result.totalTrips} />
+            <Row label={t('diag.rowTripsNotCanceled')} value={result.nonCanceled} />
+            <Row label={t('diag.rowTripsInStundennachweis')} value={result.stundennachweis.reduce((s, d) => s + d.fahrten, 0)}
               ok={result.stundennachweis.reduce((s, d) => s + d.fahrten, 0) === result.nonCanceled}
               error={result.stundennachweis.reduce((s, d) => s + d.fahrten, 0) !== result.nonCanceled} />
-            <Row label="Schichten gesamt (vor Kompression)" value={result.stundennachweis.reduce((s, d) => s + d.shiftsBeforeCompression, 0)} />
-            <Row label="Schichten gesamt (nach Kompression)" value={result.stundennachweis.reduce((s, d) => s + d.shiftsAfterCompression, 0)} />
-            <Row label="Kompression ändert Fahrten-Anzahl" value="NEIN (Fahrten unveränderlich)" ok={true} />
+            <Row label={t('diag.rowShiftsBeforeCompression')} value={result.stundennachweis.reduce((s, d) => s + d.shiftsBeforeCompression, 0)} />
+            <Row label={t('diag.rowShiftsAfterCompression')} value={result.stundennachweis.reduce((s, d) => s + d.shiftsAfterCompression, 0)} />
+            <Row label={t('diag.rowCompressionChangesTripCount')} value={t('diag.compressionNeverChangesTrips')} ok={true} />
             <div style={{ marginTop: 12, padding: '10px 12px', background: 'rgba(6,182,212,0.05)', border: '1px solid rgba(6,182,212,0.15)', borderRadius: 8 }}>
               <p style={{ fontSize: 12, color: '#64748b', margin: 0 }}>
-                Hinweis: Die Kompression reduziert nur die Anzahl sichtbarer Schichten im Stundennachweis-PDF.
-                Fahrtenbuch, Zuordnungen und tatsächliche Minuten bleiben unverändert.
+                {t('diag.compressionNote')}
               </p>
             </div>
           </Card>

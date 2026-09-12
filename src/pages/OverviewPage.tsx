@@ -541,7 +541,7 @@ const OverviewPage: React.FC = () => {
           delta={profitDelta} higherIsBetter />
         <KpiCard label={t('overview.kpi.gewinnmarge')}
           value={`${currentMetrics.profitMargin.toFixed(1)}%`}
-          sub={marginDelta !== null ? `${marginDelta >= 0 ? '+' : ''}${marginDelta.toFixed(1)}pp` : 'Rentabilität'}
+          sub={marginDelta !== null ? `${marginDelta >= 0 ? '+' : ''}${marginDelta.toFixed(1)}pp` : t('overview.kpi.profitability')}
           icon={<Target size={18} />}
           iconBg={currentMetrics.profitMargin >= 0 ? 'rgba(14,165,233,0.12)' : 'rgba(239,68,68,0.12)'}
           iconColor={currentMetrics.profitMargin >= 0 ? '#0ea5e9' : '#ef4444'} />

@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Users, UserCheck, AlertTriangle, Clock, CalendarDays, Target, Wallet, StickyNote, Filter } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { useTranslation } from '../contexts/LanguageContext';
+import type { TranslationKey } from '../i18n';
 
 export interface PlanningDriver {
   id: string;
@@ -96,30 +98,46 @@ interface DriverPoolProps {
   onDriversLoaded?: (drivers: PlanningDriver[]) => void;
 }
 
-const WEEKDAY_LABELS = ['', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'];
+// Indexed by ISO weekday (1 = Monday); slot 0 is an unused placeholder. The
+// entries are TranslationKeys because this list is module-level and t() is a
+// hook value — every consumer resolves it.
+const WEEKDAY_LABELS: (TranslationKey | null)[] = [
+  null,
+  'fleet.weekday.mon',
+  'fleet.weekday.tue',
+  'fleet.weekday.wed',
+  'fleet.weekday.thu',
+  'fleet.weekday.fri',
+  'fleet.weekday.sat',
+  'fleet.weekday.sun',
+];
 
 function normName(s: string): string {
   return s.trim().toLowerCase().replace(/\s+/g, ' ');
 }
 
-function formatWeekdays(days: number[] | null): string {
+function formatWeekdays(days: number[] | null, t: (key: TranslationKey) => string): string {
   if (!days || days.length === 0) return '—';
   const sorted = [...days].sort();
-  return sorted.map(d => WEEKDAY_LABELS[d] ?? '?').join(', ');
+  return sorted.map(d => {
+    const key = WEEKDAY_LABELS[d];
+    return key ? t(key) : '?';
+  }).join(', ');
 }
 
-function formatTime(t: string | null): string {
-  if (!t) return '—';
-  const m = /^(\d{1,2}):(\d{2})/.exec(t);
-  return m ? `${m[1].padStart(2, '0')}:${m[2]}` : t;
+function formatTime(time: string | null): string {
+  if (!time) return '—';
+  const m = /^(\d{1,2}):(\d{2})/.exec(time);
+  return m ? `${m[1].padStart(2, '0')}:${m[2]}` : time;
 }
 
-function driverMissing(d: PlanningDriver): string[] {
-  const out: string[] = [];
-  if (!d.is_full_day_available && (!d.work_window_start || !d.work_window_end)) out.push('Arbeitszeitfenster fehlt');
-  if (!d.allowed_weekdays || d.allowed_weekdays.length === 0) out.push('Arbeitstage fehlen');
-  if (d.max_daily_hours == null) out.push('Max. Tagesstunden fehlt');
-  if (d.employment_type !== 'company_owner' && d.target_monthly_hours == null) out.push('Monatsziel fehlt');
+// Returns TranslationKeys; the badge that renders them resolves each with t().
+function driverMissing(d: PlanningDriver): TranslationKey[] {
+  const out: TranslationKey[] = [];
+  if (!d.is_full_day_available && (!d.work_window_start || !d.work_window_end)) out.push('mp.pool.missingWorkWindow');
+  if (!d.allowed_weekdays || d.allowed_weekdays.length === 0) out.push('mp.pool.missingWorkDays');
+  if (d.max_daily_hours == null) out.push('mp.pool.missingMaxDaily');
+  if (d.employment_type !== 'company_owner' && d.target_monthly_hours == null) out.push('mp.pool.missingMonthlyTarget');
   return out;
 }
 
@@ -131,6 +149,7 @@ export default function MonatsplanungDriverPool({
   onSelectedChange,
   onDriversLoaded,
 }: DriverPoolProps) {
+  const { t } = useTranslation();
   const [drivers, setDrivers] = useState<PlanningDriver[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -231,52 +250,52 @@ export default function MonatsplanungDriverPool({
         <div className="flex items-start justify-between gap-4 mb-4">
           <div>
             <h2 className="text-base font-semibold flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
-              <Users size={16} /> Phase 2: Fahrer-Auswahl
+              <Users size={16} /> {t('mp.pool.title')}
             </h2>
             <p className="text-xs mt-1" style={{ color: 'var(--text-tertiary)' }}>
-              Wähle den Fahrer-Pool für die spätere Block-Zuweisung. In dieser Phase wird noch nichts zugewiesen.
+              {t('mp.pool.subtitle')}
             </p>
           </div>
         </div>
 
         {/* Quick actions */}
         <div className="flex flex-wrap items-center gap-2 mb-4">
-          <ChipBtn onClick={selectAll}>Alle auswählen</ChipBtn>
-          <ChipBtn onClick={selectNone}>Alle abwählen</ChipBtn>
+          <ChipBtn onClick={selectAll}>{t('mp.pool.selectAll')}</ChipBtn>
+          <ChipBtn onClick={selectNone}>{t('mp.pool.selectNone')}</ChipBtn>
           <ChipBtn onClick={selectFahrtenbuchOnly} icon={<Filter size={12} />}>
-            Nur Fahrer mit Fahrten im Fahrtenbuch ({matchedDriverIds.size})
+            {t('mp.pool.onlyWithTrips', { count: matchedDriverIds.size })}
           </ChipBtn>
           <ChipBtn onClick={selectRegularOnly} icon={<Filter size={12} />}>
-            Nur reguläre Fahrer
+            {t('mp.pool.onlyRegular')}
           </ChipBtn>
         </div>
 
         {/* Summary */}
         <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4 mb-4">
-          <Stat label="Fahrer gesamt" value={total} />
-          <Stat label="Ausgewählt" value={selectedCount} tone="primary" />
-          <Stat label="Nicht ausgewählt" value={notSelected} />
-          <Stat label="Im Fahrtenbuch" value={inFahrtenbuch} />
-          <Stat label="Ausgew. reguläre" value={selectedRegular} />
-          <Stat label="Ohne Arbeitszeit" value={missingWindow} tone={missingWindow > 0 ? 'warning' : undefined} />
-          <Stat label="Ohne Arbeitstage" value={missingDays} tone={missingDays > 0 ? 'warning' : undefined} />
+          <Stat label={t('mp.pool.statTotal')} value={total} />
+          <Stat label={t('mp.pool.statSelected')} value={selectedCount} tone="primary" />
+          <Stat label={t('mp.pool.statNotSelected')} value={notSelected} />
+          <Stat label={t('mp.pool.inFahrtenbuch')} value={inFahrtenbuch} />
+          <Stat label={t('mp.pool.statSelectedRegular')} value={selectedRegular} />
+          <Stat label={t('mp.pool.statNoWorkTime')} value={missingWindow} tone={missingWindow > 0 ? 'warning' : undefined} />
+          <Stat label={t('mp.pool.statNoWorkDays')} value={missingDays} tone={missingDays > 0 ? 'warning' : undefined} />
         </div>
 
         {loading && (
-          <div className="text-sm" style={{ color: 'var(--text-secondary)' }}>Lade Fahrer…</div>
+          <div className="text-sm" style={{ color: 'var(--text-secondary)' }}>{t('mp.pool.loading')}</div>
         )}
         {error && (
           <div
             className="px-3 py-2 rounded-lg text-sm flex items-center gap-2"
             style={{ background: 'var(--bg-danger-subtle, #fef2f2)', color: 'var(--danger, #b91c1c)' }}
           >
-            <AlertTriangle size={15} /> Fehler beim Laden der Fahrer: {error}
+            <AlertTriangle size={15} /> {t('mp.pool.loadError', { error })}
           </div>
         )}
 
         {!loading && !error && drivers.length === 0 && (
           <div className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-            Keine Fahrer für diese Firma gefunden.
+            {t('mp.pool.noDrivers')}
           </div>
         )}
 
@@ -309,45 +328,45 @@ export default function MonatsplanungDriverPool({
                         </span>
                         {d.driver_usage_type && (
                           <Tag>
-                            {d.driver_usage_type === 'regular' ? 'Regulär' : 'Aushilfe'}
+                            {d.driver_usage_type === 'regular' ? t('mp.pool.typeRegular') : t('mp.pool.typeCoverage')}
                           </Tag>
                         )}
                         {d.employment_type === 'company_owner' && (
-                          <Tag tone="owner">Inhaber</Tag>
+                          <Tag tone="owner">{t('mp.pool.owner')}</Tag>
                         )}
                         {matched && (
                           <Tag tone="primary">
-                            <UserCheck size={10} /> Im Fahrtenbuch
+                            <UserCheck size={10} /> {t('mp.pool.inFahrtenbuch')}
                           </Tag>
                         )}
-                        {d.planning_enabled === false && <Tag tone="warning">Planung deaktiviert</Tag>}
+                        {d.planning_enabled === false && <Tag tone="warning">{t('mp.pool.planningDisabled')}</Tag>}
                       </div>
 
                       <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-x-3 gap-y-1 text-xs" style={{ color: 'var(--text-secondary)' }}>
-                        <Field icon={<Clock size={11} />} label="Arbeitszeit">
+                        <Field icon={<Clock size={11} />} label={t('mp.pool.fieldWorkTime')}>
                           {d.is_full_day_available
-                            ? 'Ganztägig'
+                            ? t('mp.pool.allDay')
                             : `${formatTime(d.work_window_start)}–${formatTime(d.work_window_end)}`}
                         </Field>
-                        <Field icon={<CalendarDays size={11} />} label="Tage">
-                          {formatWeekdays(d.allowed_weekdays)}
+                        <Field icon={<CalendarDays size={11} />} label={t('mp.pool.fieldDays')}>
+                          {formatWeekdays(d.allowed_weekdays, t)}
                         </Field>
-                        <Field icon={<Target size={11} />} label="Max./Tag">
+                        <Field icon={<Target size={11} />} label={t('mp.pool.fieldMaxPerDay')}>
                           {d.max_daily_hours != null ? `${d.max_daily_hours}h` : '—'}
                         </Field>
-                        <Field icon={<Target size={11} />} label="Monatsziel">
+                        <Field icon={<Target size={11} />} label={t('mp.pool.fieldMonthlyTarget')}>
                           {d.target_monthly_hours != null ? `${d.target_monthly_hours}h` : '—'}
-                          {d.max_monthly_hours != null && ` (max ${d.max_monthly_hours}h)`}
+                          {d.max_monthly_hours != null && ` ${t('mp.pool.maxSuffix', { hours: d.max_monthly_hours })}`}
                         </Field>
                         {(d.planning_min_salary != null || d.planning_max_salary != null) && (
-                          <Field icon={<Wallet size={11} />} label="Gehaltsbereich">
+                          <Field icon={<Wallet size={11} />} label={t('mp.pool.fieldSalaryRange')}>
                             {d.planning_min_salary != null ? `${d.planning_min_salary.toFixed(2)} €` : '—'}
                             {' – '}
                             {d.planning_max_salary != null ? `${d.planning_max_salary.toFixed(2)} €` : '—'}
                           </Field>
                         )}
                         {d.notes && d.notes.trim() && (
-                          <Field icon={<StickyNote size={11} />} label="Notizen" full>
+                          <Field icon={<StickyNote size={11} />} label={t('common.notes')} full>
                             {d.notes}
                           </Field>
                         )}
@@ -361,7 +380,7 @@ export default function MonatsplanungDriverPool({
                               className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold"
                               style={{ background: 'rgba(234,179,8,0.12)', color: '#a16207' }}
                             >
-                              <AlertTriangle size={10} /> {m}
+                              <AlertTriangle size={10} /> {t(m)}
                             </span>
                           ))}
                         </div>

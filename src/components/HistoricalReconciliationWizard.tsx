@@ -38,15 +38,47 @@ import {
   type HistoricalGrossReconciliation,
 } from '../utils/stundennachweisPdfExport';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
+import { useTranslation } from '../contexts/LanguageContext';
+import type { TranslationKey } from '../i18n';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
+// There are deliberately two month-name tables.
+//
+// MONTHS_DE is document text: it names the Stundennachweis PDF and the edited
+// Fahrtenbuch XLSX handed to the Steuerberater, so it must stay German in both
+// UI languages and must never be routed through the dictionary.
 const MONTHS_DE = [
   'Januar', 'Februar', 'März', 'April', 'Mai', 'Juni',
   'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember',
 ];
 
+// MONTH_NAME_KEYS is the screen-text counterpart, used for the month picker and
+// the step headings. It holds TranslationKeys because this list is module-level
+// and t() is a hook value; every consumer resolves it at the call site.
+const MONTH_NAME_KEYS: TranslationKey[] = [
+  'doc.month.january',   'doc.month.february', 'doc.month.march',    'doc.month.april',
+  'doc.month.may',       'doc.month.june',     'doc.month.july',     'doc.month.august',
+  'doc.month.september', 'doc.month.october',  'doc.month.november', 'doc.month.december',
+];
+
+// Document text: the only consumer is PdfDayRow.weekday, which is printed into
+// the Stundennachweis PDF. It never reaches the screen.
 const WEEKDAY_SHORT = ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa'];
+
+// Result-table column headers, resolved with t() where the table is rendered.
+const RESULT_COLUMN_KEYS: TranslationKey[] = [
+  'common.driver', 'rec2.colActualHours', 'rec2.colActualBaseWage', 'rec2.colActualPremiums',
+  'rec2.colActualGross', 'rec2.colBalancingHours', 'rec2.colFinalGross', 'rec2.colTargetGross',
+  'common.status',
+];
+
+/**
+ * An export failure whose message is already a complete, user-facing sentence.
+ * Other failures get wrapped with a prefix; this marker replaces a substring
+ * check against German text, which would have broken under translation.
+ */
+class PreformattedExportError extends Error {}
 
 const BATCH_SIZE = 1000;
 const AUTOSAVE_DELAY_MS = 800;
@@ -172,8 +204,8 @@ function getHolidaysForYear(y: number): Set<string> {
 
 function nightMinsForSeg(from: string, to: string): number {
   if (!from || !to) return 0;
-  const f = timeToMinutes(from), t = timeToMinutes(to);
-  const absTo = t >= f ? t : t + 1440;
+  const f = timeToMinutes(from), endMin = timeToMinutes(to);
+  const absTo = endMin >= f ? endMin : endMin + 1440;
   const seg1 = Math.max(0, Math.min(absTo, 24 * 60) - Math.max(f, 20 * 60));
   const seg2 = Math.max(0, Math.min(absTo, 30 * 60) - Math.max(f, 24 * 60));
   return seg1 + seg2;
@@ -181,8 +213,8 @@ function nightMinsForSeg(from: string, to: string): number {
 
 function night0to4MinsForSeg(from: string, to: string): number {
   if (!from || !to) return 0;
-  const f = timeToMinutes(from), t = timeToMinutes(to);
-  const absTo = t >= f ? t : t + 1440;
+  const f = timeToMinutes(from), endMin = timeToMinutes(to);
+  const absTo = endMin >= f ? endMin : endMin + 1440;
   const seg1 = Math.max(0, Math.min(absTo, 240) - Math.max(f, 0));
   const seg2 = Math.max(0, Math.min(absTo, 1680) - Math.max(f, 1440));
   return seg1 + seg2;
@@ -190,8 +222,8 @@ function night0to4MinsForSeg(from: string, to: string): number {
 
 function segDuration(from: string, to: string): number {
   if (!from || !to) return 0;
-  const f = timeToMinutes(from), t = timeToMinutes(to);
-  return t >= f ? t - f : 1440 - f + t;
+  const startMin = timeToMinutes(from), endMin = timeToMinutes(to);
+  return endMin >= startMin ? endMin - startMin : 1440 - startMin + endMin;
 }
 
 function minutesToTimeStr(m: number): string {
@@ -214,11 +246,11 @@ function centsToDisplay(cents: number): string {
 
 /** Parse a German-style decimal string to euro-cents, or null if empty/invalid. */
 function parseGermanDecimal(s: string): number | null {
-  const t = s.trim();
-  if (!t) return null;
-  const normalized = t.includes(',')
-    ? t.replace(/\./g, '').replace(',', '.')
-    : t;
+  const trimmed = s.trim();
+  if (!trimmed) return null;
+  const normalized = trimmed.includes(',')
+    ? trimmed.replace(/\./g, '').replace(',', '.')
+    : trimmed;
   const n = parseFloat(normalized);
   if (isNaN(n) || n < 0) return null;
   return Math.round(n * 100);
@@ -282,21 +314,21 @@ async function fetchAllTripsForExport(companyId: string, importId: string): Prom
 
 function buildDayBlocks(trips: FahrtenbuchTrip[]): DayBlock[] {
   const byDate = new Map<string, FahrtenbuchTrip[]>();
-  for (const t of trips) {
-    const segs = normalizeTripServiceDate(t);
+  for (const trip of trips) {
+    const segs = normalizeTripServiceDate(trip);
     for (const seg of segs) {
       if (!byDate.has(seg.serviceDate)) byDate.set(seg.serviceDate, []);
-      byDate.get(seg.serviceDate)!.push(t);
+      byDate.get(seg.serviceDate)!.push(trip);
     }
   }
 
   const blocks: DayBlock[] = [];
   for (const [date, dayTrips] of byDate) {
-    const unique = Array.from(new Map(dayTrips.map(t => [t.id, t])).values());
+    const unique = Array.from(new Map(dayTrips.map(trip => [trip.id, trip])).values());
     let minStart = Infinity, maxEnd = -Infinity;
-    for (const t of unique) {
-      const sm = timeToMinutes(t.start_time);
-      const em = timeToMinutes(t.end_time);
+    for (const trip of unique) {
+      const sm = timeToMinutes(trip.start_time);
+      const em = timeToMinutes(trip.end_time);
       if (sm < minStart) minStart = sm;
       if (em > maxEnd) maxEnd = em;
     }
@@ -308,8 +340,8 @@ function buildDayBlocks(trips: FahrtenbuchTrip[]): DayBlock[] {
 
 function buildOccupied(trips: FahrtenbuchTrip[]): OccupiedMap {
   const map: OccupiedMap = new Map();
-  for (const t of trips) {
-    const segs = normalizeTripServiceDate(t);
+  for (const trip of trips) {
+    const segs = normalizeTripServiceDate(trip);
     for (const seg of segs) {
       if (!map.has(seg.serviceDate)) map.set(seg.serviceDate, []);
       map.get(seg.serviceDate)!.push({ startMin: seg.startMinutes, endMin: seg.endMinutes });
@@ -495,6 +527,7 @@ interface Props {
 
 export default function HistoricalReconciliationWizard({ onBack }: Props) {
   const { effectiveCompanyId: companyId } = useSuperAdmin();
+  const { t } = useTranslation();
   const now = new Date();
   const yearOptions = useMemo(() => {
     const y = now.getFullYear();
@@ -635,10 +668,10 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
       .then(({ data }) => {
         const ids = new Set<string>();
         const names: string[] = [];
-        for (const t of data ?? []) {
-          if (t.original_driver_id) ids.add(t.original_driver_id);
-          if (t.original_driver_name && !names.includes(t.original_driver_name)) {
-            names.push(t.original_driver_name);
+        for (const trip of data ?? []) {
+          if (trip.original_driver_id) ids.add(trip.original_driver_id);
+          if (trip.original_driver_name && !names.includes(trip.original_driver_name)) {
+            names.push(trip.original_driver_name);
           }
         }
         setFbDriverIds(ids);
@@ -829,8 +862,8 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
   // Autosave Inhaber config when it changes
   useEffect(() => {
     if (!reconciliationId || step !== 1) return;
-    const t = setTimeout(() => saveInhaberConfig(reconciliationId), AUTOSAVE_DELAY_MS);
-    return () => clearTimeout(t);
+    const timer = setTimeout(() => saveInhaberConfig(reconciliationId), AUTOSAVE_DELAY_MS);
+    return () => clearTimeout(timer);
   }, [useInhaber, inhaberId, inhaberGeneratePdf, reconciliationId, step]);
 
   // ── Step 0 → Step 1: upsert reconciliation and load saved data ─────────────
@@ -855,7 +888,7 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
 
     try {
       const included = driverConfigs.filter(c => c.included);
-      if (included.length === 0) throw new Error('Keine Fahrer ausgewählt.');
+      if (included.length === 0) throw new Error(t('rec2.errNoDriversSelected'));
 
       const allTrips = await fetchAllTrips(companyId, selectedImportId);
       const holidays = getHolidaysForYear(year);
@@ -866,6 +899,8 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
       const ownerCfg: DriverConfig | null = useInhaber && inhaberId
         ? {
             driverId: inhaberId,
+            // Stays German: this name is written into the edited Fahrtenbuch
+            // XLSX as the Fahrername, so it is document text, not a label.
             driverName: allDrivers.find(d => d.id === inhaberId)?.name ?? 'Inhaber',
             personalnummer: allDrivers.find(d => d.id === inhaberId)?.personalnummer ?? null,
             isOwner: true,
@@ -917,8 +952,8 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
           if (cfg.targetGrossCents <= 0 || cfg.hourlyCents <= 0) continue;
 
           let currentGross = (() => {
-            const { totals: t } = buildDriverPdfRows(driverTrips.get(cfg.driverId) ?? [], cfg.driverId, month, year, holidays);
-            return computeGrossBreakdown(t, cfg.hourlyCents).grossCents;
+            const { totals } = buildDriverPdfRows(driverTrips.get(cfg.driverId) ?? [], cfg.driverId, month, year, holidays);
+            return computeGrossBreakdown(totals, cfg.hourlyCents).grossCents;
           })();
 
           if (currentGross <= cfg.targetGrossCents) continue;
@@ -934,39 +969,39 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
             if (!canMoveToOwner(block, ownerOccupied)) {
               diag.unmovableGroups++;
               diag.unmovableReasons.push(
-                `${cfg.driverName} @ ${block.date}: Überlappung mit Inhaber-Schicht`,
+                t('rec2.unmovableOwnerOverlap', { driver: cfg.driverName, date: block.date }),
               );
               continue;
             }
 
-            const tripIds = new Set(block.trips.map(t => t.id));
-            const remaining = (driverTrips.get(cfg.driverId) ?? []).filter(t => !tripIds.has(t.id));
+            const tripIds = new Set(block.trips.map(trip => trip.id));
+            const remaining = (driverTrips.get(cfg.driverId) ?? []).filter(trip => !tripIds.has(trip.id));
             driverTrips.set(cfg.driverId, remaining);
 
             const ownerTrips = driverTrips.get(ownerCfg.driverId) ?? [];
-            for (const t of block.trips) {
-              if (!ownerTrips.find(ot => ot.id === t.id)) ownerTrips.push(t);
+            for (const trip of block.trips) {
+              if (!ownerTrips.find(ot => ot.id === trip.id)) ownerTrips.push(trip);
             }
             driverTrips.set(ownerCfg.driverId, ownerTrips);
 
-            for (const t of block.trips) {
-              const segs = normalizeTripServiceDate(t);
+            for (const trip of block.trips) {
+              const segs = normalizeTripServiceDate(trip);
               for (const seg of segs) {
                 if (!ownerOccupied.has(seg.serviceDate)) ownerOccupied.set(seg.serviceDate, []);
                 ownerOccupied.get(seg.serviceDate)!.push({ startMin: seg.startMinutes, endMin: seg.endMinutes });
               }
             }
 
-            const blockMins = block.trips.reduce((acc, t) => {
-              const segs = normalizeTripServiceDate(t);
+            const blockMins = block.trips.reduce((acc, trip) => {
+              const segs = normalizeTripServiceDate(trip);
               return acc + segs.reduce((s, seg) => s + (seg.endMinutes - seg.startMinutes), 0);
             }, 0);
             diag.movedGroups++;
             diag.movedMinutes += blockMins;
 
             currentGross = (() => {
-              const { totals: t } = buildDriverPdfRows(driverTrips.get(cfg.driverId) ?? [], cfg.driverId, month, year, holidays);
-              return computeGrossBreakdown(t, cfg.hourlyCents).grossCents;
+              const { totals } = buildDriverPdfRows(driverTrips.get(cfg.driverId) ?? [], cfg.driverId, month, year, holidays);
+              return computeGrossBreakdown(totals, cfg.hourlyCents).grossCents;
             })();
           }
 
@@ -1027,6 +1062,8 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
 
         const corrections: HistoricalPdfCorrectionEntry[] = !isOwner || cfg.targetGrossCents > 0 ? [{
           wageCode: '1000',
+          // Document text: this label is printed in the Stundennachweis PDF's
+          // correction table.
           wageLabel: 'Grundlohn (Ist)',
           planActualMins: grundlohnMinutes,
           correctionMins: ausgleichMinutes,
@@ -1079,14 +1116,16 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
       setRepairDiag(diag);
       setStep(3);
     } catch (e) {
-      setComputeError(e instanceof Error ? e.message : 'Berechnungsfehler');
+      setComputeError(e instanceof Error ? e.message : t('rec2.errComputeFailed'));
     } finally {
       setComputing(false);
     }
-  }, [companyId, selectedImportId, driverConfigs, allDrivers, month, year, useInhaber, inhaberId, reconciliationId]);
+  }, [companyId, selectedImportId, driverConfigs, allDrivers, month, year, useInhaber, inhaberId, reconciliationId, t]);
 
   // ── Export helpers ─────────────────────────────────────────────────────────
 
+  // Document text: the whole filename, including the fallback name and the
+  // German month, identifies the Stundennachweis PDF for the Steuerberater.
   function buildExportFilename(driverName: string, m: number, y: number): string {
     const safeName = (driverName ?? 'Fahrer').replace(/[/\\:*?"<>|\s]+/g, '_');
     return `Historischer_Stundennachweis_${safeName}_${MONTHS_DE[m - 1]}_${y}.pdf`;
@@ -1104,7 +1143,7 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
       const allTrips = await fetchAllTripsForExport(companyId, selectedImportId);
 
       if (allTrips.length === 0) {
-        throw new Error('Keine Fahrten im Import gefunden.');
+        throw new Error(t('rec2.errNoTripsInImport'));
       }
 
       const { data: importMeta } = await supabase
@@ -1116,8 +1155,8 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
       // Validate row count against stored import metadata
       const storedRowCount: number | null = (importMeta as { row_count?: number } | null)?.row_count ?? null;
       if (storedRowCount !== null && allTrips.length !== storedRowCount) {
-        throw new Error(
-          `Bearbeitetes Fahrtenbuch konnte nicht erstellt werden: Zeilenanzahl stimmt nicht mit dem Original überein (Original: ${storedRowCount}, Export: ${allTrips.length}).`
+        throw new PreformattedExportError(
+          t('rec2.errRowCountMismatch', { original: storedRowCount, exported: allTrips.length }),
         );
       }
 
@@ -1172,18 +1211,21 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
         trips: editedTrips,
         month,
         year,
+        // Document text: names the Fahrtenbuch XLSX handed to the Steuerberater.
         importFileName: `Historischer_Abgleich_Fahrtenbuch_${MONTHS_DE[month - 1]}_${year}.xlsx`,
         sourceColumns,
         sourceSheetName: importMeta?.source_sheet_name ?? null,
         skipSort: true,
       });
     } catch (e) {
-      const msg = e instanceof Error ? e.message : 'Unbekannter Fehler';
-      setExportError(msg.includes('Zeilenanzahl') ? msg : `Bearbeitetes Fahrtenbuch konnte nicht erstellt werden: ${msg}`);
+      const msg = e instanceof Error ? e.message : t('rec2.errUnknown');
+      setExportError(e instanceof PreformattedExportError
+        ? msg
+        : t('rec2.errFahrtenbuchExport', { message: msg }));
     } finally {
       setExportingFahrtenbuch(false);
     }
-  }, [companyId, selectedImportId, tripAssignments, month, year]);
+  }, [companyId, selectedImportId, tripAssignments, month, year, t]);
 
   // ── All PDFs export ────────────────────────────────────────────────────────
 
@@ -1213,10 +1255,12 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
       }
     }
     if (failed.length > 0) {
-      setExportError(`PDF-Fehler für: ${failed.map(n => `PDF für ${n} konnte nicht erstellt werden`).join('; ')}`);
+      setExportError(t('rec2.errPdfExportList', {
+        list: failed.map(n => t('rec2.errPdfExportFor', { driver: n })).join('; '),
+      }));
     }
     setExportingAllPdfs(false);
-  }, [results, month, year, inhaberGeneratePdf]);
+  }, [results, month, year, inhaberGeneratePdf, t]);
 
   // ── All items export (XLSX + all PDFs) ─────────────────────────────────────
 
@@ -1250,6 +1294,7 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
             trips: editedTrips,
             month,
             year,
+            // Document text: names the Fahrtenbuch XLSX handed to the Steuerberater.
             importFileName: `Historischer_Abgleich_Fahrtenbuch_${MONTHS_DE[month - 1]}_${year}.xlsx`,
             sourceColumns: Array.isArray(importMeta?.source_columns_json)
               ? (importMeta.source_columns_json as string[])
@@ -1259,7 +1304,7 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
           });
         }
       } catch {
-        setExportError('Fahrtenbuch-Export fehlgeschlagen.');
+        setExportError(t('rec2.errFahrtenbuchExportFailed'));
       }
     }
 
@@ -1288,10 +1333,12 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
       }
     }
     if (failed.length > 0) {
-      setExportError(`PDF-Fehler für: ${failed.map(n => `PDF für ${n} konnte nicht erstellt werden`).join('; ')}`);
+      setExportError(t('rec2.errPdfExportList', {
+        list: failed.map(n => t('rec2.errPdfExportFor', { driver: n })).join('; '),
+      }));
     }
     setExportingAll(false);
-  }, [results, companyId, selectedImportId, tripAssignments, month, year, inhaberGeneratePdf]);
+  }, [results, companyId, selectedImportId, tripAssignments, month, year, inhaberGeneratePdf, t]);
 
   const handleExport = useCallback(async (r: DriverResult) => {
     setExporting(true);
@@ -1309,12 +1356,12 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
         historicalGrossReconciliation: r.historicalGrossReconciliation ?? undefined,
       }, filename);
     } catch (e) {
-      const msg = e instanceof Error ? e.message : 'Unbekannter Fehler';
-      setExportError(`PDF für ${r.driverName} konnte nicht erstellt werden: ${msg}`);
+      const msg = e instanceof Error ? e.message : t('rec2.errUnknown');
+      setExportError(t('rec2.errPdfExportForWithReason', { driver: r.driverName, message: msg }));
     } finally {
       setExporting(false);
     }
-  }, [month, year]);
+  }, [month, year, t]);
 
   // ── Helper: is a driver exportable? ───────────────────────────────────────
 
@@ -1334,6 +1381,7 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
 
   const selectedImport = imports.find(i => i.id === selectedImportId);
   const inhaberDriver = allDrivers.find(d => d.id === inhaberId);
+  const monthLabel = t(MONTH_NAME_KEYS[month - 1]);
 
   // Whether any regular driver remains over target after the repair pass.
   // This determines if unmovable groups are export-blocking or just informational.
@@ -1348,7 +1396,7 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
       return (
         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold"
           style={{ background: 'rgba(16,185,129,0.1)', color: '#047857' }}>
-          Inhaber / Ausgleichsfahrer
+          {t('rec2.ownerBalancingDriver')}
         </span>
       );
     }
@@ -1356,7 +1404,7 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
       return (
         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold"
           style={{ background: 'rgba(220,38,38,0.1)', color: '#b91c1c' }}>
-          <AlertTriangle size={11} /> Stundensatz fehlt
+          <AlertTriangle size={11} /> {t('rec2.badgeMissingHourlyRate')}
         </span>
       );
     }
@@ -1364,7 +1412,7 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
       return (
         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold"
           style={{ background: 'rgba(220,38,38,0.1)', color: '#b91c1c' }}>
-          <AlertTriangle size={11} /> Über Ziel-Brutto
+          <AlertTriangle size={11} /> {t('rec2.badgeOverTarget')}
         </span>
       );
     }
@@ -1373,7 +1421,7 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
       return (
         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold"
           style={{ background: 'rgba(234,179,8,0.1)', color: '#a16207' }}>
-          <AlertTriangle size={11} /> Differenz vorhanden
+          <AlertTriangle size={11} /> {t('rec2.badgeDifference')}
         </span>
       );
     }
@@ -1381,14 +1429,14 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
       return (
         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold"
           style={{ background: 'rgba(124,58,237,0.1)', color: '#6d28d9' }}>
-          <CheckCircle2 size={11} /> Ausgleich nötig
+          <CheckCircle2 size={11} /> {t('rec2.badgeBalancingNeeded')}
         </span>
       );
     }
     return (
       <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold"
         style={{ background: 'rgba(21,128,61,0.1)', color: '#15803d' }}>
-        <CheckCircle2 size={11} /> Ziel erreicht
+        <CheckCircle2 size={11} /> {t('rec2.badgeTargetReached')}
       </span>
     );
   }
@@ -1397,16 +1445,16 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
 
   function SaveBadge() {
     if (saveStatus === 'idle') return null;
-    const cfg = {
-      saving:  { label: 'Speichern…', color: '#6b7280' },
-      saved:   { label: 'Gespeichert', color: '#15803d' },
-      unsaved: { label: 'Ungespeicherte Änderungen', color: '#b45309' },
-    }[saveStatus];
+    const cfg = ({
+      saving:  { label: 'common.saving',          color: '#6b7280' },
+      saved:   { label: 'rec2.saveStatusSaved',   color: '#15803d' },
+      unsaved: { label: 'rec2.saveStatusUnsaved', color: '#b45309' },
+    } as const)[saveStatus];
     if (!cfg) return null;
     return (
       <span className="inline-flex items-center gap-1 text-xs" style={{ color: cfg.color }}>
         <Save size={11} />
-        {cfg.label}
+        {t(cfg.label)}
       </span>
     );
   }
@@ -1423,7 +1471,7 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
           style={{ color: 'var(--text-secondary)' }}
         >
           <ArrowLeft size={15} />
-          {step === 0 ? 'Zurück zur Auswahl' : 'Zurück'}
+          {step === 0 ? t('rec2.backToSelection') : t('common.back')}
         </button>
         <div className="flex items-center gap-4">
           {step === 1 && <SaveBadge />}
@@ -1440,25 +1488,25 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
                 <Clock size={18} style={{ color: '#7c3aed' }} />
               </div>
               <div>
-                <h2 className="font-bold text-base" style={{ color: 'var(--text-primary)' }}>Schritt 1 — Monat & Fahrtenbuch</h2>
-                <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>Wähle den abzugleichenden Monat und den zugehörigen Import.</p>
+                <h2 className="font-bold text-base" style={{ color: 'var(--text-primary)' }}>{t('rec2.step1Title')}</h2>
+                <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>{t('rec2.step1Subtitle')}</p>
               </div>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div>
-                <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-tertiary)' }}>Monat</label>
+                <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-tertiary)' }}>{t('common.month')}</label>
                 <select
                   value={month}
                   onChange={e => setMonth(Number(e.target.value))}
                   className="w-full px-3 py-2.5 rounded-xl text-sm focus:outline-none"
                   style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
                 >
-                  {MONTHS_DE.map((m, i) => <option key={i} value={i + 1}>{m}</option>)}
+                  {MONTH_NAME_KEYS.map((key, i) => <option key={key} value={i + 1}>{t(key)}</option>)}
                 </select>
               </div>
               <div>
-                <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-tertiary)' }}>Jahr</label>
+                <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-tertiary)' }}>{t('rec2.year')}</label>
                 <select
                   value={year}
                   onChange={e => setYear(Number(e.target.value))}
@@ -1469,7 +1517,7 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
                 </select>
               </div>
               <div>
-                <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-tertiary)' }}>Fahrtenbuch-Import</label>
+                <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-tertiary)' }}>{t('rec2.fahrtenbuchImport')}</label>
                 <select
                   value={selectedImportId}
                   onChange={e => setSelectedImportId(e.target.value)}
@@ -1478,10 +1526,14 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
                   style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
                 >
                   {imports.length === 0 ? (
-                    <option value="">Kein Import für {MONTHS_DE[month - 1]} {year}</option>
+                    <option value="">{t('rec2.noImportForMonth', { month: monthLabel, year })}</option>
                   ) : imports.map(i => (
                     <option key={i.id} value={i.id}>
-                      {i.file_name} ({i.row_count} Zeilen, {new Date(i.imported_at).toLocaleDateString('de-DE')})
+                      {t('rec2.importOption', {
+                        fileName: i.file_name,
+                        rows: i.row_count,
+                        date: new Date(i.imported_at).toLocaleDateString('de-DE'),
+                      })}
                     </option>
                   ))}
                 </select>
@@ -1492,7 +1544,7 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
               <div className="mt-4 px-4 py-3 rounded-xl flex items-center gap-2 text-sm"
                 style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.2)', color: '#b45309' }}>
                 <AlertTriangle size={14} />
-                Kein Import für {MONTHS_DE[month - 1]} {year} gefunden. Bitte zuerst importieren.
+                {t('rec2.noImportHint', { month: monthLabel, year })}
               </div>
             )}
           </div>
@@ -1504,7 +1556,7 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
               className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all hover:brightness-110 active:scale-[0.98] disabled:opacity-40"
               style={{ background: 'linear-gradient(135deg, #7c3aed, #6d28d9)', color: '#fff' }}
             >
-              Weiter <ArrowRight size={15} />
+              {t('rec2.next')} <ArrowRight size={15} />
             </button>
           </div>
         </div>
@@ -1522,9 +1574,9 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
                     <Users size={18} style={{ color: '#7c3aed' }} />
                   </div>
                   <div>
-                    <h2 className="font-bold text-base" style={{ color: 'var(--text-primary)' }}>Schritt 2 — Fahrer & Steuerberater-Zielwerte</h2>
+                    <h2 className="font-bold text-base" style={{ color: 'var(--text-primary)' }}>{t('rec2.step2Title')}</h2>
                     <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
-                      {MONTHS_DE[month - 1]} {year} · {selectedImport?.file_name}
+                      {monthLabel} {year} · {selectedImport?.file_name}
                     </p>
                   </div>
                 </div>
@@ -1533,7 +1585,7 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
 
             <div className="px-6 pt-3 pb-1">
               <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
-                Der Stundensatz wird aus dem Fahrerprofil übernommen und kann für diesen Abgleich angepasst werden.
+                {t('rec2.hourlyRateHint')}
               </p>
             </div>
 
@@ -1548,14 +1600,14 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
                           checked={driverConfigs.length > 0 && driverConfigs.every(c => c.included)}
                           onChange={e => setDriverConfigs(prev => prev.map(c => ({ ...c, included: e.target.checked })))}
                         />
-                        Fahrer (Angestellt)
+                        {t('rec2.colDriverEmployed')}
                       </label>
                     </th>
                     <th className="px-4 py-2.5 text-right text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-tertiary)', minWidth: 140 }}>
-                      Stundensatz (€/h)
+                      {t('rec2.colHourlyRateEur')}
                     </th>
                     <th className="px-4 py-2.5 text-right text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-tertiary)', minWidth: 160 }}>
-                      Ziel-Brutto (€)
+                      {t('rec2.colTargetGrossEur')}
                     </th>
                   </tr>
                 </thead>
@@ -1660,7 +1712,7 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
                   {driverConfigs.length === 0 && (
                     <tr>
                       <td colSpan={3} className="px-4 py-8 text-center text-sm" style={{ color: 'var(--text-tertiary)' }}>
-                        Keine angestellten Fahrer gefunden.
+                        {t('rec2.noEmployedDrivers')}
                       </td>
                     </tr>
                   )}
@@ -1672,17 +1724,17 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
           {/* Inhaber / Ausgleichsfahrer section */}
           <div className="rounded-2xl p-5" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
             <h3 className="font-bold text-sm mb-1" style={{ color: 'var(--text-primary)' }}>
-              Inhaber / Ausgleichsfahrer
+              {t('rec2.ownerBalancingDriver')}
             </h3>
             <p className="text-xs mb-4" style={{ color: 'var(--text-tertiary)' }}>
-              Der Inhaber kann überschüssige Fahrten übernehmen, damit angestellte Fahrer ihr Steuerberater-Ziel nicht überschreiten.
+              {t('rec2.ownerBalancingHint')}
             </p>
 
             {ownerDrivers.length === 0 && (
               <div className="mb-4 px-4 py-3 rounded-xl flex items-center gap-2 text-sm"
                 style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.2)', color: '#b45309' }}>
                 <AlertTriangle size={14} />
-                Kein Inhaber gefunden. Bitte wählen Sie einen Ausgleichsfahrer aus.
+                {t('rec2.noOwnerFound')}
               </div>
             )}
 
@@ -1695,7 +1747,7 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
                   className="w-4 h-4"
                 />
                 <span className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
-                  Inhaber als Ausgleichsfahrer verwenden
+                  {t('rec2.useOwnerAsBalancingDriver')}
                 </span>
               </label>
 
@@ -1703,7 +1755,7 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pl-6">
                   <div>
                     <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-tertiary)' }}>
-                      Inhaber auswählen
+                      {t('rec2.selectOwner')}
                     </label>
                     <select
                       value={inhaberId}
@@ -1711,9 +1763,9 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
                       className="w-full px-3 py-2 rounded-xl text-sm focus:outline-none"
                       style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
                     >
-                      <option value="">— Bitte wählen —</option>
+                      <option value="">{t('rec2.pleaseSelect')}</option>
                       {ownerDrivers.map(d => (
-                        <option key={d.id} value={d.id}>{d.name} (Inhaber)</option>
+                        <option key={d.id} value={d.id}>{t('rec2.driverIsOwnerOption', { name: d.name })}</option>
                       ))}
                       {regularDrivers.filter(d => !driverConfigs.find(c => c.driverId === d.id)?.included).map(d => (
                         <option key={d.id} value={d.id}>{d.name}</option>
@@ -1721,17 +1773,17 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
                     </select>
                     {inhaberId && (
                       <p className="text-xs mt-1" style={{ color: 'var(--text-tertiary)' }}>
-                        {inhaberDriver?.name ?? ''} wird als Ausgleichsfahrer verwendet.
+                        {t('rec2.balancingDriverIs', { name: inhaberDriver?.name ?? '' })}
                       </p>
                     )}
                   </div>
                   <div>
                     <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-tertiary)' }}>
-                      Ziel-Brutto für Inhaber (optional)
+                      {t('rec2.ownerTargetGross')}
                     </label>
                     <div className="flex items-center gap-1.5">
                       <input
-                        type="text" inputMode="decimal" placeholder="— kein Limit —"
+                        type="text" inputMode="decimal" placeholder={t('rec2.noLimitPlaceholder')}
                         value={
                           inhaberTargetDraft !== null
                             ? inhaberTargetDraft
@@ -1773,7 +1825,7 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
                       <span className="text-xs" style={{ color: 'var(--text-tertiary)' }}>€</span>
                     </div>
                     <p className="text-xs mt-1" style={{ color: 'var(--text-tertiary)' }}>
-                      Wenn leer, wird kein Export blockiert.
+                      {t('rec2.ownerTargetGrossHint')}
                     </p>
                   </div>
                 </div>
@@ -1788,7 +1840,7 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
                     className="w-4 h-4"
                   />
                   <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-                    Stundennachweis für Inhaber erstellen
+                    {t('rec2.createOwnerStundennachweis')}
                   </span>
                 </label>
               )}
@@ -1799,7 +1851,7 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
             <div className="px-4 py-3 rounded-xl flex items-center gap-2 text-sm"
               style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.2)', color: '#b45309' }}>
               <AlertTriangle size={14} />
-              Bitte Stundensatz und Ziel-Brutto für alle ausgewählten Fahrer eingeben.
+              {t('rec2.enterRateAndTarget')}
             </div>
           )}
 
@@ -1816,7 +1868,7 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
               className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all hover:brightness-110 active:scale-[0.98] disabled:opacity-40"
               style={{ background: 'linear-gradient(135deg, #7c3aed, #6d28d9)', color: '#fff' }}
             >
-              Weiter zur Berechnung <ArrowRight size={15} />
+              {t('rec2.nextToCalculation')} <ArrowRight size={15} />
             </button>
           </div>
         </div>
@@ -1831,9 +1883,9 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
                 <Calculator size={18} style={{ color: '#7c3aed' }} />
               </div>
               <div>
-                <h2 className="font-bold text-base" style={{ color: 'var(--text-primary)' }}>Schritt 3 — Abgleich berechnen</h2>
+                <h2 className="font-bold text-base" style={{ color: 'var(--text-primary)' }}>{t('rec2.step3Title')}</h2>
                 <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
-                  Fahrten auswerten, Brutto berechnen, Ausgleichsstunden ermitteln.
+                  {t('rec2.step3Subtitle')}
                 </p>
               </div>
             </div>
@@ -1845,7 +1897,10 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
                   <div>
                     <span className="font-medium text-sm" style={{ color: 'var(--text-primary)' }}>{cfg.driverName}</span>
                     <span className="text-xs ml-2" style={{ color: 'var(--text-tertiary)' }}>
-                      {centsToDisplay(cfg.hourlyCents)} €/h · Ziel: {centsToDisplay(cfg.targetGrossCents)} €
+                      {t('rec2.rateAndTargetSummary', {
+                        rate: centsToDisplay(cfg.hourlyCents),
+                        target: centsToDisplay(cfg.targetGrossCents),
+                      })}
                     </span>
                   </div>
                   <CheckCircle2 size={15} style={{ color: '#15803d' }} />
@@ -1856,9 +1911,9 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
                   style={{ background: 'rgba(16,185,129,0.06)', border: '1px solid rgba(16,185,129,0.2)' }}>
                   <div>
                     <span className="font-medium text-sm" style={{ color: '#047857' }}>
-                      {inhaberDriver?.name ?? 'Inhaber'}
+                      {inhaberDriver?.name ?? t('rec2.owner')}
                     </span>
-                    <span className="text-xs ml-2" style={{ color: '#15803d' }}>Ausgleichsfahrer</span>
+                    <span className="text-xs ml-2" style={{ color: '#15803d' }}>{t('rec2.balancingDriver')}</span>
                   </div>
                   <CheckCircle2 size={15} style={{ color: '#15803d' }} />
                 </div>
@@ -1870,9 +1925,8 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
                 style={{ background: 'rgba(124,58,237,0.06)', border: '1px solid rgba(124,58,237,0.2)', color: '#6d28d9' }}>
                 <Info size={14} className="mt-0.5 shrink-0" />
                 <span>
-                  <strong>Inhaber-Ausgleichs-Reparatur aktiv:</strong> Überschüssige Fahrten werden
-                  automatisch an {inhaberDriver?.name ?? 'Inhaber'} übertragen, sofern keine Überlappung
-                  mit bestehenden Inhaber-Schichten besteht.
+                  <strong>{t('rec2.ownerRepairActiveTitle')}</strong>{' '}
+                  {t('rec2.ownerRepairActiveBody', { name: inhaberDriver?.name ?? t('rec2.owner') })}
                 </span>
               </div>
             )}
@@ -1891,7 +1945,7 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
               style={{ background: 'linear-gradient(135deg, #7c3aed, #6d28d9)', color: '#fff' }}
             >
               {computing ? <RefreshCw size={14} className="animate-spin" /> : <Calculator size={14} />}
-              {computing ? 'Berechne…' : 'Abgleich jetzt berechnen'}
+              {computing ? t('rec2.calculating') : t('rec2.calculateNow')}
             </button>
           </div>
         </div>
@@ -1902,24 +1956,24 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
         <div className="space-y-5">
           {repairDiag && useInhaber && inhaberId && (
             <div className="rounded-2xl p-5" style={{ background: 'rgba(124,58,237,0.05)', border: '1px solid rgba(124,58,237,0.2)' }}>
-              <h3 className="font-bold text-sm mb-3" style={{ color: '#6d28d9' }}>Inhaber-Ausgleich</h3>
+              <h3 className="font-bold text-sm mb-3" style={{ color: '#6d28d9' }}>{t('rec2.ownerBalancing')}</h3>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <div>
-                  <div className="text-xs uppercase tracking-wider font-semibold mb-1" style={{ color: 'var(--text-tertiary)' }}>Übernommene Gruppen</div>
+                  <div className="text-xs uppercase tracking-wider font-semibold mb-1" style={{ color: 'var(--text-tertiary)' }}>{t('rec2.movedGroups')}</div>
                   <div className="text-xl font-bold" style={{ color: '#7c3aed' }}>{repairDiag.movedGroups}</div>
                 </div>
                 <div>
-                  <div className="text-xs uppercase tracking-wider font-semibold mb-1" style={{ color: 'var(--text-tertiary)' }}>Übernommene Zeit</div>
+                  <div className="text-xs uppercase tracking-wider font-semibold mb-1" style={{ color: 'var(--text-tertiary)' }}>{t('rec2.movedTime')}</div>
                   <div className="text-xl font-bold" style={{ color: '#7c3aed' }}>
                     {(repairDiag.movedMinutes / 60).toFixed(2).replace('.', ',')} h
                   </div>
                 </div>
                 <div>
-                  <div className="text-xs uppercase tracking-wider font-semibold mb-1" style={{ color: 'var(--text-tertiary)' }}>Reduzierte Über-Ziel</div>
+                  <div className="text-xs uppercase tracking-wider font-semibold mb-1" style={{ color: 'var(--text-tertiary)' }}>{t('rec2.reducedOverTarget')}</div>
                   <div className="text-xl font-bold" style={{ color: '#15803d' }}>{repairDiag.reducedOverTargetCount}</div>
                 </div>
                 <div>
-                  <div className="text-xs uppercase tracking-wider font-semibold mb-1" style={{ color: 'var(--text-tertiary)' }}>Nicht verschiebbar</div>
+                  <div className="text-xs uppercase tracking-wider font-semibold mb-1" style={{ color: 'var(--text-tertiary)' }}>{t('rec2.unmovable')}</div>
                   <div className="text-xl font-bold" style={{
                     color: unmovableIsBlocking ? '#b91c1c'
                       : unmovableIsNonBlocking ? '#b45309'
@@ -1935,9 +1989,9 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
                   style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.2)', color: '#b45309' }}>
                   <Info size={14} className="mt-0.5 shrink-0" />
                   <div>
-                    <div className="font-semibold">Nicht verschiebbar, aber kein Export-Blocker</div>
+                    <div className="font-semibold">{t('rec2.unmovableNonBlockingTitle')}</div>
                     <div className="mt-0.5 text-xs opacity-80">
-                      Diese Gruppen konnten wegen Inhaber-Überlappungen nicht verschoben werden. Da alle Fahrer unter Ziel-Brutto liegen, verhindert dies den Export nicht.
+                      {t('rec2.unmovableNonBlockingBody')}
                     </div>
                   </div>
                 </div>
@@ -1948,9 +2002,9 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
                   style={{ background: 'rgba(220,38,38,0.08)', border: '1px solid rgba(220,38,38,0.2)', color: '#b91c1c' }}>
                   <AlertTriangle size={14} className="mt-0.5 shrink-0" />
                   <div>
-                    <div className="font-semibold">Nicht verschiebbar — Export blockiert</div>
+                    <div className="font-semibold">{t('rec2.unmovableBlockingTitle')}</div>
                     <div className="mt-0.5 text-xs opacity-80">
-                      Diese Gruppen konnten nicht verschoben werden und mindestens ein Fahrer bleibt über Ziel-Brutto.
+                      {t('rec2.unmovableBlockingBody')}
                     </div>
                   </div>
                 </div>
@@ -1959,14 +2013,14 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
               {repairDiag.unmovableReasons.length > 0 && (
                 <details className="mt-3">
                   <summary className="text-xs cursor-pointer" style={{ color: 'var(--text-tertiary)' }}>
-                    Nicht verschiebbare Gruppen ({repairDiag.unmovableReasons.length})
+                    {t('rec2.unmovableGroupsCount', { count: repairDiag.unmovableReasons.length })}
                   </summary>
                   <ul className="mt-2 space-y-1 text-xs" style={{ color: 'var(--text-secondary)' }}>
                     {repairDiag.unmovableReasons.slice(0, 20).map((r, i) => (
-                      <li key={i}>• {r} — {unmovableIsBlocking ? 'Export-Blocker' : 'kein Export-Blocker'}</li>
+                      <li key={i}>• {r} — {unmovableIsBlocking ? t('rec2.exportBlocker') : t('rec2.notExportBlocker')}</li>
                     ))}
                     {repairDiag.unmovableReasons.length > 20 && (
-                      <li>… und {repairDiag.unmovableReasons.length - 20} weitere</li>
+                      <li>{t('rec2.andMore', { count: repairDiag.unmovableReasons.length - 20 })}</li>
                     )}
                   </ul>
                 </details>
@@ -1981,10 +2035,10 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
                   <CheckCircle2 size={18} style={{ color: '#7c3aed' }} />
                 </div>
                 <div>
-                  <h2 className="font-bold text-base" style={{ color: 'var(--text-primary)' }}>Schritt 4 — Ergebnis prüfen</h2>
+                  <h2 className="font-bold text-base" style={{ color: 'var(--text-primary)' }}>{t('rec2.step4Title')}</h2>
                   <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
-                    {MONTHS_DE[month - 1]} {year} · {exportableResults.length} exportierbar
-                    {blockedResults.length > 0 ? `, ${blockedResults.length} gesperrt` : ''}
+                    {monthLabel} {year} · {t('rec2.exportableCount', { count: exportableResults.length })}
+                    {blockedResults.length > 0 ? t('rec2.blockedCountSuffix', { count: blockedResults.length }) : ''}
                   </p>
                 </div>
               </div>
@@ -1994,9 +2048,9 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
               <table className="w-full text-sm">
                 <thead>
                   <tr style={{ background: 'var(--bg-subtle)' }}>
-                    {['Fahrer', 'Stunden Ist', 'Grundlohn Ist', 'Zuschläge Ist', 'Brutto Ist inkl. Zuschläge', 'Ausgleich H', 'Finales Brutto', 'Ziel-Brutto', 'Status'].map(h => (
+                    {RESULT_COLUMN_KEYS.map(h => (
                       <th key={h} className="px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wider whitespace-nowrap" style={{ color: 'var(--text-tertiary)' }}>
-                        {h}
+                        {t(h)}
                       </th>
                     ))}
                   </tr>
@@ -2020,7 +2074,7 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
                               {r.isOwner && (
                                 <span className="ml-1.5 text-xs px-1.5 py-0.5 rounded-full"
                                   style={{ background: 'rgba(16,185,129,0.12)', color: '#047857' }}>
-                                  Inhaber
+                                  {t('rec2.owner')}
                                 </span>
                               )}
                             </div>
@@ -2056,33 +2110,33 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
                           <tr style={{ borderTop: '1px solid var(--border)' }}>
                             <td colSpan={9} className="px-6 py-3" style={{ background: 'var(--bg-subtle)' }}>
                               <div className="text-xs font-semibold mb-2" style={{ color: 'var(--text-secondary)' }}>
-                                Brutto-Aufschlüsselung — {r.driverName}
+                                {t('rec2.grossBreakdownFor', { driver: r.driverName })}
                               </div>
                               <div className="grid grid-cols-2 gap-x-8 gap-y-1 text-xs max-w-xl" style={{ color: 'var(--text-secondary)' }}>
-                                {[
-                                  ['Grundlohn aus Fahrten', `${r.historicalGrossReconciliation.grundlohnH.toFixed(2).replace('.', ',')}h`, `${centsToDisplay(r.historicalGrossReconciliation.grundlohnCents)} €`],
-                                  ['Nachtarbeit-Zuschlag (25%)', `${r.historicalGrossReconciliation.nachtarbeitH.toFixed(2).replace('.', ',')}h`, `${centsToDisplay(r.historicalGrossReconciliation.nachtarbeitCents)} €`],
-                                  ['Nacht 0–4-Zuschlag (+25%)', `${r.historicalGrossReconciliation.nacht04H.toFixed(2).replace('.', ',')}h`, `${centsToDisplay(r.historicalGrossReconciliation.nacht04Cents)} €`],
-                                  ['Sonntag-Zuschlag (50%)', `${r.historicalGrossReconciliation.sonntagH.toFixed(2).replace('.', ',')}h`, `${centsToDisplay(r.historicalGrossReconciliation.sonntagCents)} €`],
-                                  ['Feiertag-Zuschlag (100%)', `${r.historicalGrossReconciliation.feiertagH.toFixed(2).replace('.', ',')}h`, `${centsToDisplay(r.historicalGrossReconciliation.feiertagCents)} €`],
-                                  ['Ausgleichsstunden', `${r.historicalGrossReconciliation.ausgleichH.toFixed(2).replace('.', ',')}h`, `${centsToDisplay(r.historicalGrossReconciliation.ausgleichCents)} €`],
-                                ].map(([label, hours, amount]) => (
-                                  <React.Fragment key={label}>
-                                    <span>{label}</span>
+                                {([
+                                  ['rec2.breakdownBaseWage',   `${r.historicalGrossReconciliation.grundlohnH.toFixed(2).replace('.', ',')}h`, `${centsToDisplay(r.historicalGrossReconciliation.grundlohnCents)} €`],
+                                  ['rec2.breakdownNight25',    `${r.historicalGrossReconciliation.nachtarbeitH.toFixed(2).replace('.', ',')}h`, `${centsToDisplay(r.historicalGrossReconciliation.nachtarbeitCents)} €`],
+                                  ['rec2.breakdownNight04',    `${r.historicalGrossReconciliation.nacht04H.toFixed(2).replace('.', ',')}h`, `${centsToDisplay(r.historicalGrossReconciliation.nacht04Cents)} €`],
+                                  ['rec2.breakdownSunday50',   `${r.historicalGrossReconciliation.sonntagH.toFixed(2).replace('.', ',')}h`, `${centsToDisplay(r.historicalGrossReconciliation.sonntagCents)} €`],
+                                  ['rec2.breakdownHoliday100', `${r.historicalGrossReconciliation.feiertagH.toFixed(2).replace('.', ',')}h`, `${centsToDisplay(r.historicalGrossReconciliation.feiertagCents)} €`],
+                                  ['rec2.breakdownBalancing',  `${r.historicalGrossReconciliation.ausgleichH.toFixed(2).replace('.', ',')}h`, `${centsToDisplay(r.historicalGrossReconciliation.ausgleichCents)} €`],
+                                ] as const).map(([labelKey, hours, amount]) => (
+                                  <React.Fragment key={labelKey}>
+                                    <span>{t(labelKey)}</span>
                                     <span className="font-mono text-right" style={{ color: 'var(--text-primary)' }}>
                                       {hours} · {amount}
                                     </span>
                                   </React.Fragment>
                                 ))}
-                                <span className="font-semibold pt-1 border-t" style={{ color: 'var(--text-primary)', borderColor: 'var(--border)' }}>Finales Brutto</span>
+                                <span className="font-semibold pt-1 border-t" style={{ color: 'var(--text-primary)', borderColor: 'var(--border)' }}>{t('rec2.colFinalGross')}</span>
                                 <span className="font-semibold font-mono text-right pt-1 border-t" style={{ color: 'var(--text-primary)', borderColor: 'var(--border)' }}>
                                   {centsToDisplay(r.historicalGrossReconciliation.finalGrossCents)} €
                                 </span>
-                                <span style={{ color: 'var(--text-secondary)' }}>Steuerberater Ziel-Brutto</span>
+                                <span style={{ color: 'var(--text-secondary)' }}>{t('rec2.advisorTargetGross')}</span>
                                 <span className="font-mono text-right" style={{ color: 'var(--text-secondary)' }}>
                                   {r.historicalGrossReconciliation.targetGrossCents > 0 ? `${centsToDisplay(r.historicalGrossReconciliation.targetGrossCents)} €` : '—'}
                                 </span>
-                                <span style={{ color: 'var(--text-secondary)' }}>Differenz</span>
+                                <span style={{ color: 'var(--text-secondary)' }}>{t('rec2.difference')}</span>
                                 <span className="font-mono text-right font-semibold" style={{
                                   color: r.historicalGrossReconciliation.differenzCents === 0 ? '#047857'
                                     : r.historicalGrossReconciliation.differenzCents > 0 ? '#dc2626' : '#b45309',
@@ -2106,12 +2160,12 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
               style={{ background: 'rgba(220,38,38,0.08)', border: '1px solid rgba(220,38,38,0.2)', color: '#b91c1c' }}>
               <AlertTriangle size={14} className="mt-0.5 shrink-0" />
               <div>
-                <span className="font-semibold">{blockedResults.length} Fahrer gesperrt:</span>
+                <span className="font-semibold">{t('rec2.blockedDrivers', { count: blockedResults.length })}</span>
                 {blockedResults.filter(r => r.overTarget).length > 0 && (
-                  <> Über Ziel-Brutto: {blockedResults.filter(r => r.overTarget).map(r => r.driverName).join(', ')}.</>
+                  <> {t('rec2.blockedOverTarget', { names: blockedResults.filter(r => r.overTarget).map(r => r.driverName).join(', ') })}</>
                 )}
                 {blockedResults.filter(r => r.missingHourlyRate).length > 0 && (
-                  <> Fehlender Stundensatz: {blockedResults.filter(r => r.missingHourlyRate).map(r => r.driverName).join(', ')}.</>
+                  <> {t('rec2.blockedMissingRate', { names: blockedResults.filter(r => r.missingHourlyRate).map(r => r.driverName).join(', ') })}</>
                 )}
               </div>
             </div>
@@ -2124,7 +2178,7 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
               className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all hover:brightness-110 active:scale-[0.98] disabled:opacity-40"
               style={{ background: 'linear-gradient(135deg, #7c3aed, #6d28d9)', color: '#fff' }}
             >
-              Weiter zu Dokumente <ArrowRight size={15} />
+              {t('rec2.nextToDocuments')} <ArrowRight size={15} />
             </button>
           </div>
         </div>
@@ -2140,9 +2194,9 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
                   <FileText size={18} style={{ color: '#7c3aed' }} />
                 </div>
                 <div>
-                  <h2 className="font-bold text-base" style={{ color: 'var(--text-primary)' }}>Schritt 5 — Dokumente erstellen</h2>
+                  <h2 className="font-bold text-base" style={{ color: 'var(--text-primary)' }}>{t('rec2.step5Title')}</h2>
                   <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
-                    Stundennachweise mit Ist-Stunden + Ausgleichsstunden für {MONTHS_DE[month - 1]} {year}
+                    {t('rec2.step5Subtitle', { month: monthLabel, year })}
                   </p>
                 </div>
               </div>
@@ -2151,7 +2205,7 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
             {/* ── Export actions ────────────────────────────────────────────── */}
             <div className="px-6 py-4 border-b" style={{ borderColor: 'var(--border)', background: 'var(--bg-subtle)' }}>
               <div className="text-xs font-semibold uppercase tracking-wider mb-3" style={{ color: 'var(--text-tertiary)' }}>
-                Export
+                {t('rec2.export')}
               </div>
               <div className="flex flex-wrap gap-2">
                 <button
@@ -2163,7 +2217,7 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
                   {exportingFahrtenbuch
                     ? <RefreshCw size={13} className="animate-spin" />
                     : <Download size={13} />}
-                  {exportingFahrtenbuch ? 'Fahrtenbuch wird erstellt…' : 'Bearbeitetes Fahrtenbuch'}
+                  {exportingFahrtenbuch ? t('rec2.creatingFahrtenbuch') : t('rec2.editedFahrtenbuch')}
                 </button>
 
                 <button
@@ -2176,8 +2230,8 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
                     ? <RefreshCw size={13} className="animate-spin" />
                     : <Download size={13} />}
                   {exportingAllPdfs
-                    ? 'Stundennachweise werden erstellt…'
-                    : `Alle Stundennachweise (${exportableResults.length})`}
+                    ? t('rec2.creatingStundennachweise')
+                    : t('rec2.allStundennachweise', { count: exportableResults.length })}
                 </button>
 
                 <button
@@ -2189,13 +2243,13 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
                   {exportingAll
                     ? <RefreshCw size={13} className="animate-spin" />
                     : <Download size={13} />}
-                  {exportingAll ? 'Export wird vorbereitet…' : 'Alles herunterladen'}
+                  {exportingAll ? t('rec2.preparingExport') : t('rec2.downloadAll')}
                 </button>
               </div>
 
               {!tripAssignments && (
                 <p className="mt-2 text-xs" style={{ color: 'var(--text-tertiary)' }}>
-                  Fahrtenbuch-Export verfügbar nach Ausführen der Berechnung.
+                  {t('rec2.fahrtenbuchExportAfterCalc')}
                 </p>
               )}
 
@@ -2203,29 +2257,29 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
                 <div className="mt-3 px-4 py-3 rounded-xl text-xs space-y-1"
                   style={{ background: 'rgba(16,185,129,0.06)', border: '1px solid rgba(16,185,129,0.18)' }}>
                   <div className="font-semibold mb-1" style={{ color: '#047857' }}>
-                    Fahrtenbuch-Prüfung
+                    {t('rec2.fahrtenbuchCheck')}
                   </div>
                   <div className="grid grid-cols-2 gap-x-6 gap-y-0.5" style={{ color: 'var(--text-secondary)' }}>
-                    <span>Original-Zeilen</span>
+                    <span>{t('rec2.checkOriginalRows')}</span>
                     <span className="font-medium" style={{ color: 'var(--text-primary)' }}>{fbValidation.originalCount}</span>
-                    <span>Export-Zeilen</span>
+                    <span>{t('rec2.checkExportRows')}</span>
                     <span className="font-medium" style={{ color: fbValidation.exportCount === fbValidation.originalCount ? 'var(--text-primary)' : '#b91c1c' }}>{fbValidation.exportCount}</span>
-                    <span>Reihenfolge geprüft</span>
+                    <span>{t('rec2.checkRowOrder')}</span>
                     <span className="font-medium" style={{ color: fbValidation.reihenfolgeOk ? '#047857' : '#b91c1c' }}>
-                      {fbValidation.reihenfolgeOk ? 'OK' : 'Abweichung'}
+                      {fbValidation.reihenfolgeOk ? t('rec2.ok') : t('rec2.deviation')}
                     </span>
-                    <span>Geänderte Fahrer-Zuordnungen</span>
+                    <span>{t('rec2.checkChangedAssignments')}</span>
                     <span className="font-medium" style={{ color: 'var(--text-primary)' }}>{fbValidation.changedCount}</span>
-                    <span>Unveränderte Zeilen</span>
+                    <span>{t('rec2.checkUnchangedRows')}</span>
                     <span className="font-medium" style={{ color: 'var(--text-primary)' }}>{fbValidation.unchangedCount}</span>
-                    <span>Stornierte (unverändert)</span>
+                    <span>{t('rec2.checkCanceledRows')}</span>
                     <span className="font-medium" style={{ color: 'var(--text-primary)' }}>{fbValidation.canceledCount}</span>
-                    <span>Nicht zuordenbare Zeilen</span>
+                    <span>{t('rec2.checkUnassignedRows')}</span>
                     <span className="font-medium" style={{ color: fbValidation.unassignedCount > 0 ? '#92400e' : 'var(--text-primary)' }}>{fbValidation.unassignedCount}</span>
                   </div>
                   {fbValidation.ok && (
                     <div className="mt-1 font-medium" style={{ color: '#047857' }}>
-                      Fahrtenbuch vollständig geprüft.
+                      {t('rec2.fahrtenbuchFullyChecked')}
                     </div>
                   )}
                 </div>
@@ -2250,19 +2304,19 @@ export default function HistoricalReconciliationWizard({ onBack }: Props) {
                         {r.isOwner && (
                           <span className="text-xs px-1.5 py-0.5 rounded-full"
                             style={{ background: 'rgba(16,185,129,0.12)', color: '#047857' }}>
-                            Inhaber
+                            {t('rec2.owner')}
                           </span>
                         )}
                       </div>
                       <div className="text-xs mt-0.5" style={{ color: 'var(--text-tertiary)' }}>
-                        Ist: {(r.totals.grundlohn / 60).toFixed(2).replace('.', ',')}h
+                        {t('rec2.actualHoursValue', { hours: (r.totals.grundlohn / 60).toFixed(2).replace('.', ',') })}
                         {r.ausgleichMinutes > 0 && (
-                          <> + Ausgleich: {(r.ausgleichMinutes / 60).toFixed(2).replace('.', ',')}h</>
+                          <> {t('rec2.plusBalancingValue', { hours: (r.ausgleichMinutes / 60).toFixed(2).replace('.', ',') })}</>
                         )}
                         {' = '}
                         {((r.totals.grundlohn + r.ausgleichMinutes) / 60).toFixed(2).replace('.', ',')}h
                         {r.hourlyCents > 0 && (
-                          <> · Brutto: {centsToDisplay(r.finalGrossCents)} €</>
+                          <> {t('rec2.grossValue', { amount: centsToDisplay(r.finalGrossCents) })}</>
                         )}
                       </div>
                     </div>

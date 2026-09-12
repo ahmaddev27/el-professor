@@ -30,10 +30,17 @@ import { isPublicHoliday } from '../utils/germanHolidays';
 import { exportStundennachweisAsPdf, type PdfDayRow, type PdfTotals, getStundennachweisBlob } from '../utils/stundennachweisPdfExport';
 import { exportAppliedRunXlsx, type AppliedRunSummary } from '../utils/monatsplanungXlsxExport';
 import { exportFahreruebersichtImportFormat, type FahreruebersichtImportRow } from '../utils/fahreruebersichtExport';
+import { useTranslation } from '../contexts/LanguageContext';
+import type { TranslationKey, TranslationVars } from '../i18n';
 
-const MONTHS_DE = [
-  'Januar', 'Februar', 'März', 'April', 'Mai', 'Juni',
-  'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember',
+// Screen-text month names for the preview heading. TranslationKeys, because
+// this table is module-level and t() is a hook value. The PDF keeps its own
+// German table (MONTHS_DE_PDF, inside exportDriverPdf) — that one names the
+// document handed to the Steuerberater and must not follow the UI language.
+const MONTH_NAME_KEYS: TranslationKey[] = [
+  'doc.month.january',   'doc.month.february', 'doc.month.march',    'doc.month.april',
+  'doc.month.may',       'doc.month.june',     'doc.month.july',     'doc.month.august',
+  'doc.month.september', 'doc.month.october',  'doc.month.november', 'doc.month.december',
 ];
 
 interface AppliedRunRef {
@@ -172,7 +179,12 @@ interface ValidationIssue {
     | 'trip_count_mismatch'
     | 'negative_duration'
     | 'negative_night';
-  detail: string;
+  // Issues are raised in pure module-level helpers where t() is not available,
+  // so they carry a key and its variables and are resolved where they render.
+  detailKey: TranslationKey;
+  detailVars?: TranslationVars;
+  /** Already-formatted data lines (names, dates, plates) appended under the message. */
+  detailLines?: string[];
 }
 
 const BATCH = 1000;
@@ -253,31 +265,31 @@ function buildBlocks(
   }
 
   const rawIntervals: RawInterval[] = [];
-  for (const t of trips) {
-    if (!t.assigned_driver_id) continue;
-    if (!t.start_time || !t.end_time || !t.trip_date) {
-      issues.push({ type: 'block_missing_times', detail: `Fahrt ${t.id} fehlt Zeit-Angabe` });
+  for (const trip of trips) {
+    if (!trip.assigned_driver_id) continue;
+    if (!trip.start_time || !trip.end_time || !trip.trip_date) {
+      issues.push({ type: 'block_missing_times', detailKey: 'stn.issue.tripMissingTime', detailVars: { tripId: trip.id } });
       continue;
     }
     const rw = resolveActualRideWindow({
-      trip_date: t.trip_date,
-      start_time: t.start_time,
-      end_time: t.end_time,
-      raw_data_json: t.raw_data_json,
+      trip_date: trip.trip_date,
+      start_time: trip.start_time,
+      end_time: trip.end_time,
+      raw_data_json: trip.raw_data_json,
     });
-    const startMs = rw.actualStartMs > 0 ? rw.actualStartMs : parseTimestamp(t.trip_date, t.start_time);
-    let endMs = rw.actualEndMs > 0 ? rw.actualEndMs : parseTimestamp(t.trip_date, t.end_time);
+    const startMs = rw.actualStartMs > 0 ? rw.actualStartMs : parseTimestamp(trip.trip_date, trip.start_time);
+    let endMs = rw.actualEndMs > 0 ? rw.actualEndMs : parseTimestamp(trip.trip_date, trip.end_time);
     if (endMs <= startMs) endMs += 24 * 60 * 60 * 1000;
     rawIntervals.push({
-      tripId: t.id,
-      driverId: t.assigned_driver_id,
-      driverName: t.assigned_driver_name?.trim() || `Fahrer ${t.assigned_driver_id.slice(0, 8)}`,
-      vehicle: t.car_identifier ?? '',
-      serviceDate: t.trip_date,
+      tripId: trip.id,
+      driverId: trip.assigned_driver_id,
+      driverName: trip.assigned_driver_name?.trim() || `Fahrer ${trip.assigned_driver_id.slice(0, 8)}`,
+      vehicle: trip.car_identifier ?? '',
+      serviceDate: trip.trip_date,
       startMs,
       endMs,
-      blockId: t.assignment_block_id,
-      assignmentSource: t.assignment_source ?? 'auto',
+      blockId: trip.assignment_block_id,
+      assignmentSource: trip.assignment_source ?? 'auto',
     });
   }
 
@@ -350,12 +362,12 @@ function buildBlocks(
 
       const vehicle = span.vehicles.join(', ') || grp.intervals[0]?.vehicle || '';
       if (!vehicle) {
-        issues.push({ type: 'block_missing_vehicle', detail: `Block ${blockId} ohne Fahrzeug` });
+        issues.push({ type: 'block_missing_vehicle', detailKey: 'stn.issue.blockNoVehicle', detailVars: { blockId } });
       }
 
       const actualDurationMinutes = Math.floor((span.endMs - span.startMs) / 60000);
       if (actualDurationMinutes <= 0) {
-        issues.push({ type: 'negative_duration', detail: `Block ${blockId} hat negative/null Dauer` });
+        issues.push({ type: 'negative_duration', detailKey: 'stn.issue.blockBadDuration', detailVars: { blockId } });
         continue;
       }
       const paidDurationMinutes = Math.max(actualDurationMinutes, MIN_STUNDENNACHWEIS_SHIFT_MINUTES);
@@ -917,6 +929,11 @@ function exportDriverPdf(group: DriverGroup, month: number, year: number, bundes
   );
 }
 
+/**
+ * Audit-trail workbook for the Steuerberater. Every sheet name, header and
+ * warning label in here stays German in both UI languages — the export is a
+ * record, not a screen, and it has to read the same whoever produced it.
+ */
 function buildPruefExportXlsx(
   driverGroups: DriverGroup[],
   trips: TripRow[],
@@ -1053,31 +1070,31 @@ function buildPruefExportXlsx(
   ];
   const tripRows: (string | number | boolean)[][] = [tripHeaders];
 
-  for (const t of trips) {
+  for (const trip of trips) {
     const rw = resolveActualRideWindow({
-      trip_date: t.trip_date,
-      start_time: t.start_time,
-      end_time: t.end_time,
-      raw_data_json: t.raw_data_json,
+      trip_date: trip.trip_date,
+      start_time: trip.start_time,
+      end_time: trip.end_time,
+      raw_data_json: trip.raw_data_json,
     });
     const actualStart = rw.actualStartMs > 0 ? fmtMs(rw.actualStartMs) : '—';
     const actualEnd   = rw.actualEndMs   > 0 ? fmtMs(rw.actualEndMs)   : '—';
-    const dispStart   = rw.displayStart || t.start_time || '—';
-    const dispEnd     = rw.displayEnd   || t.end_time   || '—';
+    const dispStart   = rw.displayStart || trip.start_time || '—';
+    const dispEnd     = rw.displayEnd   || trip.end_time   || '—';
 
     tripRows.push([
-      t.assigned_driver_name || '—',
-      t.trip_date,
-      t.car_identifier || '—',
+      trip.assigned_driver_name || '—',
+      trip.trip_date,
+      trip.car_identifier || '—',
       actualStart,
       actualEnd,
       dispStart,
       dispEnd,
-      t.id,
-      t.assignment_block_id || '—',
+      trip.id,
+      trip.assignment_block_id || '—',
       '—',
-      t.assigned_driver_name || '—',
-      t.is_canceled ? 'Ja' : 'Nein',
+      trip.assigned_driver_name || '—',
+      trip.is_canceled ? 'Ja' : 'Nein',
     ]);
   }
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(tripRows), 'Fahrten');
@@ -1156,6 +1173,7 @@ function buildPruefExportXlsx(
 }
 
 function MonatsplanungStundennachweisPreview({ run, onClose, onTransferApplied }: Props) {
+  const { t, tPlural } = useTranslation();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [trips, setTrips] = useState<TripRow[]>([]);
@@ -1267,13 +1285,13 @@ function MonatsplanungStundennachweisPreview({ run, onClose, onTransferApplied }
       if (runErr) {
         dbg.planning_run_query_error = fmtPgErr(runErr);
         setDebug(dbg);
-        setError(`Planning Run Query Error: ${dbg.planning_run_query_error}`);
+        setError(t('stn.err.runQuery', { detail: dbg.planning_run_query_error }));
         return;
       }
       if (!runRow) {
         dbg.planning_run_query_error = 'NOT FOUND in company_planning_runs';
         setDebug(dbg);
-        setIssues([{ type: 'run_missing', detail: `Planung ${run.id} wurde nicht in company_planning_runs gefunden.` }]);
+        setIssues([{ type: 'run_missing', detailKey: 'stn.issue.runMissing', detailVars: { runId: run.id } }]);
         return;
       }
 
@@ -1286,14 +1304,14 @@ function MonatsplanungStundennachweisPreview({ run, onClose, onTransferApplied }
 
       if (dbg.planning_run_status !== 'applied') {
         setDebug(dbg);
-        setIssues([{ type: 'wrong_status', detail: `Planung hat Status "${dbg.planning_run_status}", benötigt "applied".` }]);
+        setIssues([{ type: 'wrong_status', detailKey: 'stn.issue.wrongStatus', detailVars: { status: dbg.planning_run_status } }]);
         return;
       }
 
       const effectiveCompanyId = dbg.db_company_id || dbg.selected_run_company_id_prop;
       if (!effectiveCompanyId) {
         setDebug(dbg);
-        setError('Fehler: selected planning run has no company_id');
+        setError(t('stn.err.runNoCompany'));
         return;
       }
 
@@ -1353,10 +1371,10 @@ function MonatsplanungStundennachweisPreview({ run, onClose, onTransferApplied }
         offset += BATCH;
       }
 
-      const usableTrips = allTrips.filter(t => !t.is_canceled);
-      const missingBlockIdCount = usableTrips.filter(t => !t.assignment_block_id).length;
-      const distinctBlockIds = new Set(usableTrips.map(t => t.assignment_block_id).filter((x): x is string => !!x)).size;
-      const distinctDrivers = new Set(usableTrips.map(t => t.assigned_driver_id).filter((x): x is string => !!x)).size;
+      const usableTrips = allTrips.filter(trip => !trip.is_canceled);
+      const missingBlockIdCount = usableTrips.filter(trip => !trip.assignment_block_id).length;
+      const distinctBlockIds = new Set(usableTrips.map(trip => trip.assignment_block_id).filter((x): x is string => !!x)).size;
+      const distinctDrivers = new Set(usableTrips.map(trip => trip.assigned_driver_id).filter((x): x is string => !!x)).size;
 
       dbg.loaded_trips = allTrips.length;
       dbg.trips_after_cancel_filter = usableTrips.length;
@@ -1368,20 +1386,26 @@ function MonatsplanungStundennachweisPreview({ run, onClose, onTransferApplied }
         if ((dbg.trips_count_without_company_filter ?? 0) > 0 && !useCompanyFilter === false) {
           setIssues([{
             type: 'no_trips_for_run',
-            detail: `company_id Mismatch: 0 Treffer mit company_id Filter, aber ${dbg.trips_count_without_company_filter} ohne. Erwartete company_id: ${effectiveCompanyId}.`,
+            detailKey: 'stn.issue.companyIdMismatch',
+            detailVars: {
+              withoutFilter: dbg.trips_count_without_company_filter ?? 0,
+              companyId: effectiveCompanyId,
+            },
           }]);
         } else {
-          setIssues([{ type: 'no_trips_for_run', detail: 'Keine zugewiesenen Fahrten für diese Monatsplanung gefunden.' }]);
+          setIssues([{ type: 'no_trips_for_run', detailKey: 'stn.issue.noTrips' }]);
         }
       } else if (missingBlockIdCount > 0 && distinctBlockIds === 0) {
         setIssues([{
           type: 'orphan_trip_without_block',
-          detail: `Stundennachweis kann nicht erstellt werden: Alle ${missingBlockIdCount} zugewiesenen Fahrten haben keine assignment_block_id.`,
+          detailKey: 'stn.issue.allTripsWithoutBlock',
+          detailVars: { count: missingBlockIdCount },
         }]);
       } else if (missingBlockIdCount > 0) {
         setIssues([{
           type: 'orphan_trip_without_block',
-          detail: `Hinweis: ${missingBlockIdCount} zugewiesene Fahrten haben keine assignment_block_id.`,
+          detailKey: 'stn.issue.someTripsWithoutBlock',
+          detailVars: { count: missingBlockIdCount },
         }]);
       }
       setTrips(usableTrips);
@@ -1398,7 +1422,7 @@ function MonatsplanungStundennachweisPreview({ run, onClose, onTransferApplied }
       }
 
       // 5. Driver wage data
-      const driverIds = Array.from(new Set(usableTrips.map(t => t.assigned_driver_id).filter((x): x is string => !!x)));
+      const driverIds = Array.from(new Set(usableTrips.map(trip => trip.assigned_driver_id).filter((x): x is string => !!x)));
       if (driverIds.length > 0) {
         const { data: wd, error: we } = await supabase
           .from('drivers')
@@ -1426,13 +1450,13 @@ function MonatsplanungStundennachweisPreview({ run, onClose, onTransferApplied }
 
       setDebug(dbg);
     } catch (e) {
-      const msg = e instanceof Error ? e.message : 'Stundennachweis konnte nicht geladen werden.';
+      const msg = e instanceof Error ? e.message : t('stn.err.loadFailed');
       setError(msg);
       setDebug(dbg);
     } finally {
       setLoading(false);
     }
-  }, [run.id, run.company_id, run.status]);
+  }, [run.id, run.company_id, run.status, t]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -1467,7 +1491,8 @@ function MonatsplanungStundennachweisPreview({ run, onClose, onTransferApplied }
     if (expectedTripCount != null && sumBlockTrips !== expectedTripCount) {
       localIssues.push({
         type: 'trip_count_mismatch',
-        detail: `Summe der Fahrten in Blöcken (${sumBlockTrips}) weicht von Planungssumme (${expectedTripCount}) ab.`,
+        detailKey: 'stn.issue.tripCountMismatch',
+        detailVars: { blockSum: sumBlockTrips, planSum: expectedTripCount },
       });
     }
 
@@ -1485,13 +1510,13 @@ function MonatsplanungStundennachweisPreview({ run, onClose, onTransferApplied }
     }
     const uncoveredForDisplay: string[] = [];
     let uncoveredCount = 0;
-    for (const t of trips) {
-      if (!t.assigned_driver_id || !t.start_time || !t.end_time || !t.trip_date) continue;
-      const rw = resolveActualRideWindow({ trip_date: t.trip_date, start_time: t.start_time, end_time: t.end_time, raw_data_json: t.raw_data_json });
-      const tSMs = rw.actualStartMs > 0 ? rw.actualStartMs : new Date(`${t.trip_date}T${t.start_time}`).getTime();
-      let tEMs = rw.actualEndMs > 0 ? rw.actualEndMs : new Date(`${t.trip_date}T${t.end_time}`).getTime();
+    for (const trip of trips) {
+      if (!trip.assigned_driver_id || !trip.start_time || !trip.end_time || !trip.trip_date) continue;
+      const rw = resolveActualRideWindow({ trip_date: trip.trip_date, start_time: trip.start_time, end_time: trip.end_time, raw_data_json: trip.raw_data_json });
+      const tSMs = rw.actualStartMs > 0 ? rw.actualStartMs : new Date(`${trip.trip_date}T${trip.start_time}`).getTime();
+      let tEMs = rw.actualEndMs > 0 ? rw.actualEndMs : new Date(`${trip.trip_date}T${trip.end_time}`).getTime();
       if (tEMs <= tSMs) tEMs += 86400000;
-      const driverBlocks = compressedByDriverId.get(t.assigned_driver_id) ?? [];
+      const driverBlocks = compressedByDriverId.get(trip.assigned_driver_id) ?? [];
       const isCovered = driverBlocks.some(b =>
         b.sMs <= tSMs + COVERAGE_TOL_MS &&
         b.eMs >= tEMs - COVERAGE_TOL_MS,
@@ -1501,22 +1526,27 @@ function MonatsplanungStundennachweisPreview({ run, onClose, onTransferApplied }
         if (uncoveredForDisplay.length < 20) {
           const startStr = new Date(tSMs).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
           const endStr   = new Date(tEMs).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
-          uncoveredForDisplay.push(`${t.assigned_driver_name ?? '?'} · ${t.trip_date} · ${t.car_identifier ?? '—'} · ${startStr}–${endStr}`);
+          uncoveredForDisplay.push(`${trip.assigned_driver_name ?? '?'} · ${trip.trip_date} · ${trip.car_identifier ?? '—'} · ${startStr}–${endStr}`);
         }
       }
     }
     if (uncoveredCount > 0) {
       const extra = uncoveredCount - uncoveredForDisplay.length;
-      const detail = [
-        `${uncoveredCount} Fahrt${uncoveredCount === 1 ? '' : 'en'} nicht durch einen Stundennachweis-Zeitraum abgedeckt:`,
-        ...uncoveredForDisplay,
-        ...(extra > 0 ? [`… und ${extra} weitere Fahrten`] : []),
-      ].join('\n');
-      localIssues.push({ type: 'orphan_trip_without_block', detail });
+      localIssues.push({
+        type: 'orphan_trip_without_block',
+        detailKey: uncoveredCount === 1
+          ? 'stn.issue.uncoveredTrips.one'
+          : 'stn.issue.uncoveredTrips.other',
+        detailVars: { count: uncoveredCount },
+        detailLines: [
+          ...uncoveredForDisplay,
+          ...(extra > 0 ? [t('stn.issue.andMoreTrips', { count: extra })] : []),
+        ],
+      });
     }
 
     return { blocks: built, compressedBlocks: compressed, compressionInfo: compression, validationIssues: localIssues };
-  }, [trips, excMap, issues, expectedTripCount]);
+  }, [trips, excMap, issues, expectedTripCount, t]);
 
   const driverGroups = useMemo(() => {
     const groups = groupByDriver(compressedBlocks, wageMap, companyBundesland);
@@ -1583,7 +1613,7 @@ function MonatsplanungStundennachweisPreview({ run, onClose, onTransferApplied }
       setPdfExporting(true);
       exportDriverPdf(target, run.month, run.year, companyBundesland);
     } catch (e) {
-      setExportError(e instanceof Error ? e.message : 'PDF-Export fehlgeschlagen.');
+      setExportError(e instanceof Error ? e.message : t('stn.err.pdfExportFailed'));
     } finally {
       setPdfExporting(false);
     }
@@ -1593,15 +1623,11 @@ function MonatsplanungStundennachweisPreview({ run, onClose, onTransferApplied }
     setExportError('');
     const targetGroups = driverGroups.filter(g => selectedPdfDriverIds.has(g.driver_id));
     if (targetGroups.length === 0) {
-      setExportError('Bitte mindestens einen Fahrer auswählen.');
+      setExportError(t('stn.err.selectAtLeastOneDriver'));
       return;
     }
     if (targetGroups.length > 5) {
-      setExportError(
-        `Hinweis: Der Browser blockiert möglicherweise ${targetGroups.length} gleichzeitige Downloads. ` +
-        'Bitte wählen Sie in der Dropdown-Liste einen einzelnen Fahrer aus und laden Sie PDFs einzeln herunter, ' +
-        'oder erlauben Sie mehrfache Downloads für diese Seite in den Browsereinstellungen.',
-      );
+      setExportError(t('stn.err.tooManyDownloads', { count: targetGroups.length }));
     }
     try {
       setPdfExporting(true);
@@ -1609,7 +1635,7 @@ function MonatsplanungStundennachweisPreview({ run, onClose, onTransferApplied }
         exportDriverPdf(g, run.month, run.year, companyBundesland);
       }
     } catch (e) {
-      setExportError(e instanceof Error ? e.message : 'PDF-Export fehlgeschlagen.');
+      setExportError(e instanceof Error ? e.message : t('stn.err.pdfExportFailed'));
     } finally {
       setPdfExporting(false);
     }
@@ -1718,7 +1744,7 @@ function MonatsplanungStundennachweisPreview({ run, onClose, onTransferApplied }
       if (error) throw error;
       setSaveSuccessCount(targetGroups.length);
     } catch (e) {
-      setSaveError(e instanceof Error ? e.message : 'Speichern fehlgeschlagen.');
+      setSaveError(e instanceof Error ? e.message : t('stn.err.saveFailed'));
     } finally {
       setSavingStundennachweise(false);
     }
@@ -1730,7 +1756,7 @@ function MonatsplanungStundennachweisPreview({ run, onClose, onTransferApplied }
       setXlsxExporting(true);
       buildPruefExportXlsx(driverGroups, trips, run.month, run.year);
     } catch (e) {
-      setExportError(e instanceof Error ? e.message : 'XLSX-Export fehlgeschlagen.');
+      setExportError(e instanceof Error ? e.message : t('stn.err.xlsxExportFailed'));
     } finally {
       setXlsxExporting(false);
     }
@@ -1739,7 +1765,7 @@ function MonatsplanungStundennachweisPreview({ run, onClose, onTransferApplied }
   const handleExportFahreruebersicht = () => {
     setExportError('');
     if (driverGroups.length === 0) {
-      setExportError('Finaler Snapshot nicht verfügbar.');
+      setExportError(t('stn.err.noFinalSnapshot'));
       return;
     }
     setFahreruebersichtExporting(true);
@@ -1747,11 +1773,11 @@ function MonatsplanungStundennachweisPreview({ run, onClose, onTransferApplied }
       // Build per-driver rows from the final snapshot (driverGroups + trips).
       // Compute Fahrpreise, Trinkgeld, Gesammeltes_Bargeld from raw_data_json of assigned trips.
       const tripsByDriver = new Map<string, TripRow[]>();
-      for (const t of trips) {
-        if (t.is_canceled || !t.assigned_driver_id) continue;
-        const arr = tripsByDriver.get(t.assigned_driver_id) ?? [];
-        arr.push(t);
-        tripsByDriver.set(t.assigned_driver_id, arr);
+      for (const trip of trips) {
+        if (trip.is_canceled || !trip.assigned_driver_id) continue;
+        const arr = tripsByDriver.get(trip.assigned_driver_id) ?? [];
+        arr.push(trip);
+        tripsByDriver.set(trip.assigned_driver_id, arr);
       }
 
       const rows: FahreruebersichtImportRow[] = driverGroups.map(g => {
@@ -1759,8 +1785,8 @@ function MonatsplanungStundennachweisPreview({ run, onClose, onTransferApplied }
         let fahrpreise = 0;
         let trinkgeld = 0;
         let bargeld = 0;
-        for (const t of dTrips) {
-          const raw = t.raw_data_json ?? {};
+        for (const trip of dTrips) {
+          const raw = trip.raw_data_json ?? {};
           const fp = parseFloat(String(raw['Fahrpreis'] ?? '0').replace(',', '.')) || 0;
           const tg = parseFloat(String(raw['Trinkgeld'] ?? '0').replace(',', '.')) || 0;
           const za = String(raw['Zahlungsart'] ?? '').toLowerCase();
@@ -1787,7 +1813,7 @@ function MonatsplanungStundennachweisPreview({ run, onClose, onTransferApplied }
         rows,
       });
     } catch (e) {
-      setExportError(e instanceof Error ? e.message : 'Fahrerübersicht konnte nicht erstellt werden.');
+      setExportError(e instanceof Error ? e.message : t('stn.err.driverOverviewFailed'));
     } finally {
       setFahreruebersichtExporting(false);
     }
@@ -1796,7 +1822,7 @@ function MonatsplanungStundennachweisPreview({ run, onClose, onTransferApplied }
   const handleExportFinalFahrtenbuch = async () => {
     setExportError('');
     if (!run.import_id) {
-      setExportError('Fahrtenbuch-Export nicht möglich: Import-ID fehlt. Bitte Seite neu laden.');
+      setExportError(t('stn.err.fahrtenbuchNoImportId'));
       return;
     }
     setFahrtenbuchExporting(true);
@@ -1818,9 +1844,11 @@ function MonatsplanungStundennachweisPreview({ run, onClose, onTransferApplied }
         source_sheet_name: run.source_sheet_name ?? null,
         imported_at: '',
       };
+      // 'original' reproduces the imported sheet byte for byte — nothing handed
+      // to exportAppliedRunXlsx may be translated.
       await exportAppliedRunXlsx(runSummary, 'original');
     } catch (e) {
-      setExportError(e instanceof Error ? e.message : 'Fahrtenbuch-Export fehlgeschlagen.');
+      setExportError(e instanceof Error ? e.message : t('stn.err.fahrtenbuchExportFailed'));
     } finally {
       setFahrtenbuchExporting(false);
     }
@@ -1840,10 +1868,10 @@ function MonatsplanungStundennachweisPreview({ run, onClose, onTransferApplied }
         <div className="flex items-start justify-between px-5 py-4 border-b" style={{ borderColor: 'var(--border)' }}>
           <div className="min-w-0">
             <h3 className="text-base font-semibold flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
-              <CalendarClock size={16} /> Stundennachweis Preview · {MONTHS_DE[run.month - 1]} {run.year}
+              <CalendarClock size={16} /> {t('stn.preview.title')} · {t(MONTH_NAME_KEYS[run.month - 1])} {run.year}
             </h3>
             <div className="text-xs mt-1 font-mono" style={{ color: 'var(--text-tertiary)' }}>
-              Planning Run {run.id}
+              {t('stn.preview.runId', { id: run.id })}
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -1853,7 +1881,7 @@ function MonatsplanungStundennachweisPreview({ run, onClose, onTransferApplied }
               className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold disabled:opacity-50"
               style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
             >
-              <RefreshCw size={12} className={loading ? 'animate-spin' : ''} /> Neu laden
+              <RefreshCw size={12} className={loading ? 'animate-spin' : ''} /> {t('stn.preview.reload')}
             </button>
             <button onClick={onClose} className="p-1 rounded" style={{ color: 'var(--text-tertiary)' }}>
               <X size={16} />
@@ -1864,17 +1892,17 @@ function MonatsplanungStundennachweisPreview({ run, onClose, onTransferApplied }
         <div className="px-5 py-3 border-b flex flex-wrap items-center gap-3" style={{ borderColor: 'var(--border)' }}>
           <div className="flex items-center gap-2">
             <Users size={14} style={{ color: 'var(--text-tertiary)' }} />
-            <label className="text-xs font-semibold" style={{ color: 'var(--text-secondary)' }}>Fahrer:</label>
+            <label className="text-xs font-semibold" style={{ color: 'var(--text-secondary)' }}>{t('stn.preview.driverLabel')}</label>
             <select
               value={selectedDriverId}
               onChange={e => setSelectedDriverId(e.target.value)}
               className="px-2 py-1 rounded-lg text-sm"
               style={{ background: 'var(--bg-subtle)', color: 'var(--text-primary)', border: '1px solid var(--border)' }}
             >
-              <option value="__all__">Alle Fahrer ({driverGroups.length})</option>
+              <option value="__all__">{t('common.allDrivers')} ({driverGroups.length})</option>
               {driverGroups.map(g => (
                 <option key={g.driver_id} value={g.driver_id}>
-                  {g.driver_name} ({g.shifts.length} Schichten)
+                  {g.driver_name} ({t('stn.preview.shiftCount', { count: g.shifts.length })})
                 </option>
               ))}
             </select>
@@ -1887,7 +1915,7 @@ function MonatsplanungStundennachweisPreview({ run, onClose, onTransferApplied }
                 className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold disabled:opacity-50 transition-opacity"
                 style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
               >
-                <Download size={12} /> {pdfExporting ? 'Exportiere…' : 'PDF herunterladen'}
+                <Download size={12} /> {pdfExporting ? t('stn.preview.exporting') : t('stn.preview.downloadPdf')}
               </button>
             )}
             {import.meta.env.DEV && localStorage.getItem('showPlanningDebug') === '1' && (
@@ -1897,7 +1925,7 @@ function MonatsplanungStundennachweisPreview({ run, onClose, onTransferApplied }
                 className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold disabled:opacity-50 transition-opacity"
                 style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
               >
-                <FileSpreadsheet size={12} /> {xlsxExporting ? 'Exportiere…' : 'Prüf-Export XLSX'}
+                <FileSpreadsheet size={12} /> {xlsxExporting ? t('stn.preview.exporting') : t('stn.preview.auditExportXlsx')}
               </button>
             )}
             <button
@@ -1905,27 +1933,27 @@ function MonatsplanungStundennachweisPreview({ run, onClose, onTransferApplied }
               disabled={fahrtenbuchExporting || loading || !run.import_id}
               className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold disabled:opacity-50 transition-opacity"
               style={{ background: 'rgba(34,197,94,0.1)', color: '#15803d', border: '1px solid rgba(34,197,94,0.3)' }}
-              title="Exportiert das finale Fahrtenbuch mit aktuellen Fahrerzuweisungen"
+              title={t('stn.preview.fahrtenbuchTitle')}
             >
-              <FileSpreadsheet size={12} /> {fahrtenbuchExporting ? 'Exportiere…' : 'Finales Fahrtenbuch herunterladen'}
+              <FileSpreadsheet size={12} /> {fahrtenbuchExporting ? t('stn.preview.exporting') : t('stn.preview.downloadFahrtenbuch')}
             </button>
             <button
               onClick={handleExportFahreruebersicht}
               disabled={fahreruebersichtExporting || loading || driverGroups.length === 0}
               className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold disabled:opacity-50 transition-opacity"
               style={{ background: 'rgba(59,130,246,0.1)', color: '#1d4ed8', border: '1px solid rgba(59,130,246,0.3)' }}
-              title="Exportiert Fahrerübersicht im Import-Format (ID, Monat, Name, Online_Stunden, Fahrten, …)"
+              title={t('stn.preview.driverOverviewTitle')}
             >
-              <FileSpreadsheet size={12} /> {fahreruebersichtExporting ? 'Fahrerübersicht wird erstellt…' : 'Fahrerübersicht herunterladen'}
+              <FileSpreadsheet size={12} /> {fahreruebersichtExporting ? t('stn.preview.driverOverviewBuilding') : t('stn.preview.downloadDriverOverview')}
             </button>
             <span className="text-xs pl-2" style={{ color: 'var(--text-secondary)', borderLeft: '1px solid var(--border)' }}>
-              <strong style={{ color: 'var(--text-primary)' }}>{totalShifts}</strong> Schichten
+              <strong style={{ color: 'var(--text-primary)' }}>{totalShifts}</strong> {t('stn.label.shifts')}
             </span>
             <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>
-              <strong style={{ color: 'var(--text-primary)' }}>{totalTrips}</strong> Fahrten
+              <strong style={{ color: 'var(--text-primary)' }}>{totalTrips}</strong> {t('stn.label.trips')}
             </span>
             <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>
-              <strong style={{ color: 'var(--text-primary)' }}>{fmtHours(totalMinutes)}</strong> gesamt
+              <strong style={{ color: 'var(--text-primary)' }}>{fmtHours(totalMinutes)}</strong> {t('stn.label.totalSuffix')}
             </span>
           </div>
         </div>
@@ -1939,7 +1967,7 @@ function MonatsplanungStundennachweisPreview({ run, onClose, onTransferApplied }
               onClick={() => setShowPdfDriverSelect(v => !v)}
             >
               <Download size={12} />
-              Stundennachweise auswählen
+              {t('stn.select.title')}
               {showPdfDriverSelect ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
             </button>
             {showPdfDriverSelect && (
@@ -1965,7 +1993,7 @@ function MonatsplanungStundennachweisPreview({ run, onClose, onTransferApplied }
                     }}
                     className="rounded"
                   />
-                  <span className="font-semibold" style={{ color: 'var(--text-primary)' }}>Alle auswählen</span>
+                  <span className="font-semibold" style={{ color: 'var(--text-primary)' }}>{t('stn.select.all')}</span>
                 </label>
                 <div className="pl-1 flex flex-wrap gap-x-5 gap-y-1.5">
                   {driverGroups.map(g => (
@@ -1984,13 +2012,13 @@ function MonatsplanungStundennachweisPreview({ run, onClose, onTransferApplied }
                         className="rounded"
                       />
                       <span style={{ color: 'var(--text-primary)' }}>{g.driver_name}</span>
-                      <span style={{ color: 'var(--text-tertiary)' }}>({g.shifts.length} Schichten)</span>
+                      <span style={{ color: 'var(--text-tertiary)' }}>({t('stn.preview.shiftCount', { count: g.shifts.length })})</span>
                     </label>
                   ))}
                 </div>
                 <div className="flex items-center gap-3 pt-1 flex-wrap">
                   {selectedPdfDriverIds.size === 0 && (
-                    <span className="text-xs" style={{ color: '#dc2626' }}>Bitte mindestens einen Fahrer auswählen.</span>
+                    <span className="text-xs" style={{ color: '#dc2626' }}>{t('stn.err.selectAtLeastOneDriver')}</span>
                   )}
                   <button
                     onClick={handleExportAllPdfs}
@@ -1998,7 +2026,7 @@ function MonatsplanungStundennachweisPreview({ run, onClose, onTransferApplied }
                     className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold disabled:opacity-50 transition-opacity"
                     style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
                   >
-                    <Download size={12} /> {pdfExporting ? 'Exportiere…' : `Ausgewählte PDFs herunterladen (${selectedPdfDriverIds.size})`}
+                    <Download size={12} /> {pdfExporting ? t('stn.preview.exporting') : t('stn.select.downloadSelectedPdfs', { count: selectedPdfDriverIds.size })}
                   </button>
                   <button
                     onClick={() => void handleSaveStundennachweise()}
@@ -2007,10 +2035,10 @@ function MonatsplanungStundennachweisPreview({ run, onClose, onTransferApplied }
                     style={{ background: 'rgba(34,197,94,0.1)', color: '#15803d', border: '1px solid rgba(34,197,94,0.3)' }}
                   >
                     <Save size={12} /> {savingStundennachweise
-                      ? 'Stundennachweise werden gespeichert...'
+                      ? t('stn.select.saving')
                       : saveSuccessCount > 0
-                        ? 'Stundennachweise gespeichert'
-                        : 'Ausgewählte Stundennachweise speichern'}
+                        ? t('stn.select.saved')
+                        : t('stn.select.saveSelected')}
                   </button>
                 </div>
                 {saveError && (
@@ -2018,7 +2046,10 @@ function MonatsplanungStundennachweisPreview({ run, onClose, onTransferApplied }
                 )}
                 {saveSuccessCount > 0 && !savingStundennachweise && (
                   <p className="text-xs mt-1.5" style={{ color: '#16a34a' }}>
-                    {saveSuccessCount} Stundennachweis{saveSuccessCount !== 1 ? 'e' : ''} wurden in Dokumente gespeichert.
+                    {tPlural(
+                      { one: 'stn.select.savedToDocuments.one', other: 'stn.select.savedToDocuments.other' },
+                      saveSuccessCount,
+                    )}
                   </p>
                 )}
               </div>
@@ -2039,13 +2070,13 @@ function MonatsplanungStundennachweisPreview({ run, onClose, onTransferApplied }
         <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
           {loading && (
             <div className="px-3 py-6 rounded-lg text-sm flex items-center justify-center gap-2" style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)' }}>
-              <Loader2 size={14} className="animate-spin" /> Lade zugewiesene Blöcke…
+              <Loader2 size={14} className="animate-spin" /> {t('stn.preview.loadingBlocks')}
             </div>
           )}
 
           {error && (
             <div className="px-3 py-2 rounded-lg text-sm" style={{ background: 'rgba(239,68,68,0.1)', color: '#fca5a5', border: '1px solid rgba(239,68,68,0.35)' }}>
-              Stundennachweis konnte nicht geladen werden. {error}
+              {t('stn.err.loadFailed')} {error}
             </div>
           )}
 
@@ -2056,8 +2087,10 @@ function MonatsplanungStundennachweisPreview({ run, onClose, onTransferApplied }
               style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
             >
               <summary className="px-3 py-2 cursor-pointer font-semibold select-none" style={{ color: 'var(--text-primary)' }}>
-                Debug / Diagnose
+                {t('stn.preview.debugTitle')}
               </summary>
+              {/* DebugRow labels name DB columns and props verbatim — technical
+                  identifiers, not UI copy, so they are not translated. */}
               <div className="px-3 pb-3 pt-1 font-mono leading-relaxed">
                 <DebugRow label="Planning Run ID" value={debug.planning_run_id} />
                 <DebugRow label="Planning Run Status" value={debug.planning_run_status} />
@@ -2086,20 +2119,24 @@ function MonatsplanungStundennachweisPreview({ run, onClose, onTransferApplied }
               style={{ background: 'rgba(245,158,11,0.1)', color: '#fcd34d', border: '1px solid rgba(245,158,11,0.35)' }}
             >
               <div className="font-semibold inline-flex items-center gap-1">
-                <AlertTriangle size={13} /> Validierungs-Hinweise ({validationIssues.length})
+                <AlertTriangle size={13} /> {t('stn.issue.title')} ({validationIssues.length})
               </div>
               <ul className="list-disc pl-5 space-y-0.5">
-                {validationIssues.slice(0, 50).map((i, idx) => <li key={idx}>{i.detail}</li>)}
+                {validationIssues.slice(0, 50).map((issue, idx) => (
+                  <li key={idx} style={{ whiteSpace: 'pre-wrap' }}>
+                    {[t(issue.detailKey, issue.detailVars), ...(issue.detailLines ?? [])].join('\n')}
+                  </li>
+                ))}
               </ul>
               {validationIssues.length > 50 && (
-                <div className="opacity-70">… {validationIssues.length - 50} weitere</div>
+                <div className="opacity-70">{t('stn.issue.andMore', { count: validationIssues.length - 50 })}</div>
               )}
             </div>
           )}
 
           {!loading && isValid && driverGroups.length > 0 && (
             <div className="px-3 py-2 rounded-lg text-xs inline-flex items-center gap-1.5" style={{ background: 'rgba(34,197,94,0.1)', color: '#86efac', border: '1px solid rgba(34,197,94,0.35)' }}>
-              <CheckCircle2 size={13} /> Datenintegrität OK · {driverGroups.length} Fahrer · {compressedBlocks.length} Schichten.
+              <CheckCircle2 size={13} /> {t('stn.preview.integrityOk', { drivers: driverGroups.length, shifts: compressedBlocks.length })}
             </div>
           )}
 
@@ -2118,7 +2155,7 @@ function MonatsplanungStundennachweisPreview({ run, onClose, onTransferApplied }
 
           {!loading && visibleGroups.length === 0 && !error && validationIssues.length === 0 && (
             <div className="px-3 py-8 text-center text-sm rounded-lg" style={{ background: 'var(--bg-subtle)', color: 'var(--text-tertiary)' }}>
-              Keine zugewiesenen Blöcke für diese Monatsplanung gefunden.
+              {t('stn.preview.noBlocks')}
             </div>
           )}
 
@@ -2140,14 +2177,14 @@ function MonatsplanungStundennachweisPreview({ run, onClose, onTransferApplied }
 
         <div className="flex items-center justify-between gap-2 px-5 py-3 border-t" style={{ borderColor: 'var(--border)' }}>
           <div className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
-            Quelle: Zugewiesene Blöcke aus Planning Run <span className="font-mono">{run.id.slice(0, 8)}…</span>
+            {t('stn.preview.sourceFooter')} <span className="font-mono">{run.id.slice(0, 8)}…</span>
           </div>
           <button
             onClick={onClose}
             className="px-3 py-2 rounded-lg text-sm font-semibold"
             style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
           >
-            Schließen
+            {t('common.close')}
           </button>
         </div>
       </div>
@@ -2172,6 +2209,7 @@ function DriverCard({
   expandedAllShifts: Set<string>;
   onToggleAllShifts: (key: string) => void;
 }) {
+  const { t } = useTranslation();
   const days = useMemo(() => {
     const m = new Map<string, ShiftBlock[]>();
     for (const s of group.shifts) {
@@ -2202,44 +2240,44 @@ function DriverCard({
               {group.driver_name}
             </div>
             <div className="text-[11px] mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5" style={{ color: 'var(--text-secondary)' }}>
-              <span>Schichten: <strong style={{ color: 'var(--text-primary)' }}>{group.shifts.length}</strong></span>
-              <span>Fahrten: <strong style={{ color: 'var(--text-primary)' }}>{group.trips}</strong></span>
+              <span>{t('stn.card.shifts')} <strong style={{ color: 'var(--text-primary)' }}>{group.shifts.length}</strong></span>
+              <span>{t('stn.card.trips')} <strong style={{ color: 'var(--text-primary)' }}>{group.trips}</strong></span>
               <span>
-                Arbeitsstunden: <strong style={{ color: 'var(--text-primary)' }}>
+                {t('stn.card.workedHours')} <strong style={{ color: 'var(--text-primary)' }}>
                   {fmtHours(group.total_minutes)}
                 </strong>
               </span>
               {group.ausgleich_hours != null && group.ausgleich_hours > 0 && (
                 <span>
-                  Ausgleichsstunden: <strong style={{ color: '#86efac' }}>
+                  {t('stn.card.ausgleichHours')} <strong style={{ color: '#86efac' }}>
                     +{group.ausgleich_hours.toFixed(2).replace('.', ',')} h
                   </strong>
                 </span>
               )}
               {group.ausgleich_hours != null && group.ausgleich_hours > 0 && (
                 <span>
-                  Gesamtstunden: <strong style={{ color: 'var(--text-primary)' }}>
+                  {t('stn.card.totalHours')} <strong style={{ color: 'var(--text-primary)' }}>
                     {((group.total_minutes / 60) + group.ausgleich_hours).toFixed(2).replace('.', ',')} h
                   </strong>
                 </span>
               )}
-              <span>Tage: <strong style={{ color: 'var(--text-primary)' }}>{group.work_days}</strong></span>
-              <span>Brutto erwartet: <strong style={{ color: group.expected_brutto != null ? '#86efac' : 'var(--text-tertiary)' }}>{fmtEuro(group.expected_brutto)}</strong></span>
+              <span>{t('stn.card.days')} <strong style={{ color: 'var(--text-primary)' }}>{group.work_days}</strong></span>
+              <span>{t('stn.card.expectedGross')} <strong style={{ color: group.expected_brutto != null ? '#86efac' : 'var(--text-tertiary)' }}>{fmtEuro(group.expected_brutto)}</strong></span>
               {group.manual_exceptions > 0 && (
-                <span>Manuelle Ausnahmen: <strong style={{ color: '#fcd34d' }}>{group.manual_exceptions}</strong></span>
+                <span>{t('stn.card.manualExceptions')} <strong style={{ color: '#fcd34d' }}>{group.manual_exceptions}</strong></span>
               )}
             </div>
             <div className="text-[11px] mt-0.5 flex flex-wrap items-center gap-x-3" style={{ color: 'var(--text-tertiary)' }}>
-              <span>Nacht gesamt: <strong style={{ color: 'var(--text-secondary)' }}>{fmtHours(group.night_total)}</strong></span>
+              <span>{t('stn.card.nightTotal')} <strong style={{ color: 'var(--text-secondary)' }}>{fmtHours(group.night_total)}</strong></span>
               <span>23–00: <strong style={{ color: 'var(--text-secondary)' }}>{fmtHours(group.night_23_00)}</strong></span>
               <span>00–04: <strong style={{ color: 'var(--text-secondary)' }}>{fmtHours(group.night_00_04)}</strong></span>
               <span>04–06: <strong style={{ color: 'var(--text-secondary)' }}>{fmtHours(group.night_04_06)}</strong></span>
               {group.hourly_rate != null && (
-                <span>Stundensatz: <strong style={{ color: 'var(--text-secondary)' }}>{group.hourly_rate.toFixed(2).replace('.', ',')} €</strong></span>
+                <span>{t('stn.card.hourlyRate')} <strong style={{ color: 'var(--text-secondary)' }}>{group.hourly_rate.toFixed(2).replace('.', ',')} €</strong></span>
               )}
               {(group.min_salary != null || group.max_salary != null) && (
                 <span>
-                  Gehaltsbereich:{' '}
+                  {t('stn.card.salaryRange')}{' '}
                   <strong style={{ color: 'var(--text-secondary)' }}>
                     {group.min_salary != null ? fmtEuro(group.min_salary) : '—'}
                     {' – '}
@@ -2248,10 +2286,10 @@ function DriverCard({
                 </span>
               )}
               {group.expected_brutto != null && group.min_salary != null && group.expected_brutto < group.min_salary - 0.01 && (
-                <span style={{ color: '#fcd34d', fontWeight: 600 }}>Unter Mindestgehalt</span>
+                <span style={{ color: '#fcd34d', fontWeight: 600 }}>{t('stn.summary.belowMinSalary')}</span>
               )}
               {group.expected_brutto != null && group.max_salary != null && group.expected_brutto > group.max_salary + 0.01 && (
-                <span style={{ color: '#f87171', fontWeight: 600 }}>Über Maximalgehalt</span>
+                <span style={{ color: '#f87171', fontWeight: 600 }}>{t('stn.summary.aboveMaxSalary')}</span>
               )}
             </div>
           </div>
@@ -2277,23 +2315,23 @@ function DriverCard({
             className="mt-2 px-3 py-2 rounded text-xs flex flex-wrap items-center gap-x-4 gap-y-1"
             style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
           >
-            <strong style={{ color: 'var(--text-primary)' }}>Monatssumme</strong>
+            <strong style={{ color: 'var(--text-primary)' }}>{t('stn.card.monthTotal')}</strong>
             <span>{fmtDuration(group.total_minutes)}</span>
-            <span>{group.trips} Fahrten</span>
-            <span>{group.shifts.length} Schichten</span>
-            <span>{group.work_days} Arbeitstage</span>
-            <span>Nacht ges.: {fmtHours(group.night_total)}</span>
+            <span>{group.trips} {t('stn.label.trips')}</span>
+            <span>{group.shifts.length} {t('stn.label.shifts')}</span>
+            <span>{group.work_days} {t('stn.label.workingDays')}</span>
+            <span>{t('stn.card.nightShort')} {fmtHours(group.night_total)}</span>
             <span>23–00: {fmtHours(group.night_23_00)}</span>
             <span>00–04: {fmtHours(group.night_00_04)}</span>
             <span>04–06: {fmtHours(group.night_04_06)}</span>
             <span style={{ color: group.expected_brutto != null ? '#86efac' : 'var(--text-tertiary)' }}>
-              Brutto erwartet: {fmtEuro(group.expected_brutto)}
+              {t('stn.card.expectedGross')} {fmtEuro(group.expected_brutto)}
             </span>
             {group.expected_brutto != null && group.min_salary != null && group.expected_brutto < group.min_salary - 0.01 && (
-              <span style={{ color: '#fcd34d', fontWeight: 600 }}>Unter Mindestgehalt ({fmtEuro(group.min_salary)})</span>
+              <span style={{ color: '#fcd34d', fontWeight: 600 }}>{t('stn.summary.belowMinSalary')} ({fmtEuro(group.min_salary)})</span>
             )}
             {group.expected_brutto != null && group.max_salary != null && group.expected_brutto > group.max_salary + 0.01 && (
-              <span style={{ color: '#f87171', fontWeight: 600 }}>Über Maximalgehalt ({fmtEuro(group.max_salary)})</span>
+              <span style={{ color: '#f87171', fontWeight: 600 }}>{t('stn.summary.aboveMaxSalary')} ({fmtEuro(group.max_salary)})</span>
             )}
           </div>
         </div>
@@ -2318,6 +2356,7 @@ function DayBlock({
   onToggle: () => void;
   onToggleAllShifts: () => void;
 }) {
+  const { t } = useTranslation();
   const dayMinutes = shifts.reduce((s, x) => s + x.duration_minutes, 0);
   const dayTrips = shifts.reduce((s, x) => s + x.trip_count, 0);
   const dayN23 = shifts.reduce((s, x) => s + x.night_23_00, 0);
@@ -2344,14 +2383,14 @@ function DayBlock({
         <div className="flex items-center gap-2 min-w-0">
           {expanded ? <ChevronDown size={13} style={{ color: 'var(--text-secondary)' }} /> : <ChevronRight size={13} style={{ color: 'var(--text-secondary)' }} />}
           <span className="text-xs font-semibold" style={{ color: 'var(--text-primary)' }}>
-            {fmtDate(date)} · Tagesgesamt {fmtDuration(dayMinutes)}
+            {fmtDate(date)} · {t('stn.day.dayTotal')} {fmtDuration(dayMinutes)}
           </span>
         </div>
         <div className="text-[11px] flex flex-wrap items-center gap-x-3" style={{ color: 'var(--text-secondary)' }}>
-          <span>{shifts.length} Schichten</span>
-          <span>{dayTrips} Fahrten</span>
-          <span>Nacht {fmtHours(dayNTotal)}</span>
-          {dayExceptions > 0 && <span style={{ color: '#fcd34d' }}>Ausnahmen: {dayExceptions}</span>}
+          <span>{shifts.length} {t('stn.label.shifts')}</span>
+          <span>{dayTrips} {t('stn.label.trips')}</span>
+          <span>{t('stn.day.night')} {fmtHours(dayNTotal)}</span>
+          {dayExceptions > 0 && <span style={{ color: '#fcd34d' }}>{t('stn.day.exceptions')} {dayExceptions}</span>}
         </div>
       </button>
 
@@ -2360,16 +2399,16 @@ function DayBlock({
           <table className="w-full text-xs">
             <thead>
               <tr className="text-[10px] uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>
-                <th className="px-2 py-1 text-left">Start</th>
-                <th className="px-2 py-1 text-left">Ende</th>
-                <th className="px-2 py-1 text-right">Dauer</th>
-                <th className="px-2 py-1 text-left">Kennzeichen</th>
-                <th className="px-2 py-1 text-right">Fahrten</th>
-                <th className="px-2 py-1 text-left">Quelle</th>
+                <th className="px-2 py-1 text-left">{t('stn.day.col.start')}</th>
+                <th className="px-2 py-1 text-left">{t('stn.day.col.end')}</th>
+                <th className="px-2 py-1 text-right">{t('stn.day.col.duration')}</th>
+                <th className="px-2 py-1 text-left">{t('stn.day.col.plate')}</th>
+                <th className="px-2 py-1 text-right">{t('stn.label.trips')}</th>
+                <th className="px-2 py-1 text-left">{t('stn.day.col.source')}</th>
                 <th className="px-2 py-1 text-right">23–00</th>
                 <th className="px-2 py-1 text-right">00–04</th>
                 <th className="px-2 py-1 text-right">04–06</th>
-                <th className="px-2 py-1 text-left">Ausnahme</th>
+                <th className="px-2 py-1 text-left">{t('stn.day.col.exception')}</th>
               </tr>
             </thead>
             <tbody>
@@ -2387,14 +2426,14 @@ function DayBlock({
                         <span
                           className="ml-1.5 inline-block px-1 py-0 rounded text-[9px] font-bold uppercase"
                           style={{ background: 'rgba(59,130,246,0.2)', color: '#93c5fd', border: '1px solid rgba(59,130,246,0.4)', verticalAlign: 'middle' }}
-                          title={`Ist: ${fmtDuration(s.duration_minutes)} · +${s.minimum_added_minutes} Min. durch Mindest-Schichtdauer`}
+                          title={t('stn.day.minimumTitle', { actual: fmtDuration(s.duration_minutes), added: s.minimum_added_minutes })}
                         >
-                          Mindest
+                          {t('stn.day.minimumBadge')}
                         </span>
                       )}
                       {s.minimum_applied && (
                         <div className="text-[9px] mt-0.5" style={{ color: 'var(--text-tertiary)' }}>
-                          Ist: {fmtDuration(s.duration_minutes)} · Bezahlt: {fmtDuration(s.paid_duration_minutes)}
+                          {t('stn.day.actual')} {fmtDuration(s.duration_minutes)} · {t('stn.day.paid')} {fmtDuration(s.paid_duration_minutes)}
                         </div>
                       )}
                     </td>
@@ -2417,7 +2456,7 @@ function DayBlock({
               className="mt-2 text-xs font-semibold px-2 py-1 rounded"
               style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
             >
-              + {hidden} weitere Schichten anzeigen
+              {t('stn.day.showMoreShifts', { count: hidden })}
             </button>
           )}
           {allShiftsExpanded && shifts.length > MAX_SHOWN && (
@@ -2427,7 +2466,7 @@ function DayBlock({
               className="mt-2 ml-2 text-xs font-semibold px-2 py-1 rounded"
               style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
             >
-              Weniger anzeigen
+              {t('stn.day.showLess')}
             </button>
           )}
         </div>
@@ -2436,43 +2475,53 @@ function DayBlock({
   );
 }
 
+// `label` holds a TranslationKey: this map is module-level and t() is a hook
+// value, so the badge resolves it at render.
+const SOURCE_BADGES: Record<string, { bg: string; fg: string; label: TranslationKey }> = {
+  auto:             { bg: 'rgba(34,197,94,0.15)',  fg: '#86efac', label: 'stn.source.auto' },
+  repair:           { bg: 'rgba(59,130,246,0.15)', fg: '#93c5fd', label: 'stn.source.repair' },
+  manual_exception: { bg: 'rgba(245,158,11,0.18)', fg: '#fcd34d', label: 'stn.source.manual' },
+  manual:           { bg: 'rgba(245,158,11,0.18)', fg: '#fcd34d', label: 'stn.source.manual' },
+};
+
 function SourceBadge({ source }: { source: string }) {
-  const map: Record<string, { bg: string; fg: string; label: string }> = {
-    auto: { bg: 'rgba(34,197,94,0.15)', fg: '#86efac', label: 'auto' },
-    repair: { bg: 'rgba(59,130,246,0.15)', fg: '#93c5fd', label: 'repair' },
-    manual_exception: { bg: 'rgba(245,158,11,0.18)', fg: '#fcd34d', label: 'manuell' },
-    manual: { bg: 'rgba(245,158,11,0.18)', fg: '#fcd34d', label: 'manuell' },
-  };
-  const cfg = map[source] ?? { bg: 'var(--bg-subtle)', fg: 'var(--text-secondary)', label: source || 'auto' };
+  const { t } = useTranslation();
+  const cfg = SOURCE_BADGES[source];
+  // An unknown source is raw DB data, not a label — show it verbatim.
+  const label = cfg ? t(cfg.label) : (source || t('stn.source.auto'));
   return (
-    <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold" style={{ background: cfg.bg, color: cfg.fg }}>
-      {cfg.label}
+    <span
+      className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold"
+      style={{ background: cfg?.bg ?? 'var(--bg-subtle)', color: cfg?.fg ?? 'var(--text-secondary)' }}
+    >
+      {label}
     </span>
   );
 }
 
 function ExceptionBadges({ shift }: { shift: ShiftBlock }) {
+  const { t } = useTranslation();
   if (!shift.manual_exception && !shift.dienstzeit_exception && !shift.tageslimit_exception && !shift.monatslimit_exception) {
     return <span style={{ color: 'var(--text-tertiary)' }}>—</span>;
   }
-  const badges: Array<{ label: string }> = [];
-  if (shift.dienstzeit_exception) badges.push({ label: 'Dienstzeit' });
-  if (shift.tageslimit_exception) badges.push({ label: 'Tageslimit' });
-  if (shift.monatslimit_exception) badges.push({ label: 'Monatslimit' });
+  const badgeKeys: TranslationKey[] = [];
+  if (shift.dienstzeit_exception) badgeKeys.push('stn.exception.dutyTime');
+  if (shift.tageslimit_exception) badgeKeys.push('stn.exception.dailyLimit');
+  if (shift.monatslimit_exception) badgeKeys.push('stn.exception.monthlyLimit');
   return (
     <span className="inline-flex flex-wrap items-center gap-1" title={shift.exception_reason}>
-      {badges.map(b => (
+      {badgeKeys.map(key => (
         <span
-          key={b.label}
+          key={key}
           className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold"
           style={{ background: 'rgba(245,158,11,0.18)', color: '#fcd34d' }}
         >
-          {b.label}
+          {t(key)}
         </span>
       ))}
-      {badges.length === 0 && (
+      {badgeKeys.length === 0 && (
         <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold" style={{ background: 'rgba(245,158,11,0.18)', color: '#fcd34d' }}>
-          Manuell
+          {t('stn.exception.manual')}
         </span>
       )}
     </span>
@@ -2513,7 +2562,10 @@ type TransferType = 'single' | 'multi_day' | 'full_day';
 interface TransferCandidate {
   shifts: ShiftBlock[];
   transfer_type: TransferType;
-  label: string;
+  // Candidates are built in a pure module-level helper where t() is not
+  // available, so the label is carried as a key plus its variables.
+  labelKey: TranslationKey;
+  labelVars: TranslationVars;
   brutto_at_source_rate: number;
   duration_minutes: number;
 }
@@ -2523,6 +2575,13 @@ type ValidationStatus = 'gueltig' | 'nicht_moeglich' | 'pruefung_erforderlich';
 interface ValidationResult {
   status: ValidationStatus;
   reasons: string[];
+  /**
+   * Explicit outcome flags. Callers used to re-derive these by substring-matching
+   * the German reason text, which stops matching as soon as the reasons are
+   * translated — and would silently let a note-blocked transfer through.
+   */
+  noteBlocked: boolean;
+  overlapDetected: boolean;
 }
 
 interface TransferSuggestion {
@@ -2645,7 +2704,8 @@ function buildCandidates(src: DriverDeviation, bundesland?: string | null): Tran
       candidates.push({
         shifts: [s],
         transfer_type: 'single',
-        label: `Einzelschicht ${fmtTime(s.block_start_ms)}–${fmtTime(s.block_end_ms)}`,
+        labelKey: 'stn.candidate.single',
+        labelVars: { from: fmtTime(s.block_start_ms), to: fmtTime(s.block_end_ms) },
         brutto_at_source_rate: brutto,
         duration_minutes: s.duration_minutes,
       });
@@ -2662,7 +2722,8 @@ function buildCandidates(src: DriverDeviation, bundesland?: string | null): Tran
           candidates.push({
             shifts: combo,
             transfer_type: 'multi_day',
-            label: `Mehrere Schichten am selben Tag (${fmtDate(date)})`,
+            labelKey: 'stn.candidate.multiSameDay',
+            labelVars: { date: fmtDate(date) },
             brutto_at_source_rate: Math.round(brutto * 100) / 100,
             duration_minutes: dur,
           });
@@ -2678,7 +2739,8 @@ function buildCandidates(src: DriverDeviation, bundesland?: string | null): Tran
         candidates.push({
           shifts: dayShifts,
           transfer_type: 'full_day',
-          label: `Ganzer Tag (${fmtDate(date)}, ${dayShifts.length} Schicht${dayShifts.length !== 1 ? 'en' : ''})`,
+          labelKey: dayShifts.length === 1 ? 'stn.candidate.fullDay.one' : 'stn.candidate.fullDay.other',
+          labelVars: { date: fmtDate(date), count: dayShifts.length },
           brutto_at_source_rate: Math.round(allBrutto * 100) / 100,
           duration_minutes: dur,
         });
@@ -2781,7 +2843,14 @@ function buildTransferSuggestions(
             source_after: sourceAfter,
             target_after: targetAfter,
             impact_score: impact,
-            validation: { status: 'pruefung_erforderlich' as ValidationStatus, reasons: ['Noch nicht validiert'] },
+            // Placeholder: every suggestion is replaced by validateTransfer's
+            // result before it reaches the UI, so this text never renders.
+            validation: {
+              status: 'pruefung_erforderlich' as ValidationStatus,
+              reasons: [],
+              noteBlocked: false,
+              overlapDetected: false,
+            },
           },
         });
       }
@@ -2793,7 +2862,7 @@ function buildTransferSuggestions(
     let count = 0;
     for (const { suggestion } of ranked) {
       if (count >= MAX_PER_SOURCE) break;
-      const key = `${suggestion.candidate.label}|${suggestion.target_driver_id}`;
+      const key = `${suggestion.candidate.labelKey}|${JSON.stringify(suggestion.candidate.labelVars)}|${suggestion.target_driver_id}`;
       if (seen.has(key)) continue;
       seen.add(key);
       allSuggestions.push(suggestion);
@@ -2809,7 +2878,14 @@ function buildTransferSuggestions(
 // ─── Validation ───────────────────────────────────────────────────────────────
 
 const WEEKDAY_CODES: Record<number, string> = { 0: 'sun', 1: 'mon', 2: 'tue', 3: 'wed', 4: 'thu', 5: 'fri', 6: 'sat' };
-const WEEKDAY_NAMES: Record<string, string> = { mon: 'Mo', tue: 'Di', wed: 'Mi', thu: 'Do', fri: 'Fr', sat: 'Sa', sun: 'So' };
+
+// Weekday codes are data (they index the tables above); the names shown next to
+// them are TranslationKeys, resolved wherever the reason text is built.
+const WEEKDAY_NAME_KEYS: Record<string, TranslationKey> = {
+  mon: 'fleet.weekday.mon', tue: 'fleet.weekday.tue', wed: 'fleet.weekday.wed',
+  thu: 'fleet.weekday.thu', fri: 'fleet.weekday.fri', sat: 'fleet.weekday.sat',
+  sun: 'fleet.weekday.sun',
+};
 
 const ALL_WEEK = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
 const WEEKDAYS_ONLY = ['mon', 'tue', 'wed', 'thu', 'fri'];
@@ -2818,7 +2894,7 @@ const WEEKEND_ONLY = ['sat', 'sun'];
 interface EffectiveWeekdays {
   codes: string[];
   source: 'business_rule_ahmed' | 'business_rule_alev' | 'business_rule_all_week';
-  label: string;
+  labelKey: TranslationKey;
 }
 
 // Transfer Analysis weekday availability — DB data is intentionally bypassed here
@@ -2829,15 +2905,15 @@ function getTransferAnalysisWeekdayAvailability(driverName: string): EffectiveWe
   const n = driverName.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
 
   if (n.includes('ahmed') && n.includes('hemaid')) {
-    return { codes: WEEKEND_ONLY, source: 'business_rule_ahmed', label: 'Sa, So (Business Rule Ahmed)' };
+    return { codes: WEEKEND_ONLY, source: 'business_rule_ahmed', labelKey: 'stn.weekdayRule.weekendOnly' };
   }
 
   // Match "alev" + ("buyukay" or "büyükay" — accent already stripped above)
   if (n.includes('alev') && (n.includes('buyukay') || n.includes('b yukay'))) {
-    return { codes: WEEKDAYS_ONLY, source: 'business_rule_alev', label: 'Mo, Di, Mi, Do, Fr (Business Rule Alev)' };
+    return { codes: WEEKDAYS_ONLY, source: 'business_rule_alev', labelKey: 'stn.weekdayRule.weekdaysOnly' };
   }
 
-  return { codes: ALL_WEEK, source: 'business_rule_all_week', label: 'ganze Woche (Business Rule)' };
+  return { codes: ALL_WEEK, source: 'business_rule_all_week', labelKey: 'stn.weekdayRule.allWeek' };
 }
 
 function timeHHMMtoMinutes(hhmm: string): number {
@@ -2857,10 +2933,13 @@ function validateTransfer(
   wageMap: Map<string, DriverWage>,
   tolerance: number,
   driverNotesMap: Map<string, DriverNote[]>,
+  translate: (key: TranslationKey, vars?: TranslationVars) => string,
 ): ValidationResult {
   const reasons: string[] = [];
   let hardFail = false;
   let needsReview = false;
+  let noteBlocked = false;
+  let overlapDetected = false;
 
   const candidate = suggestion.candidate;
   const tgtDev = deviations.find(d => d.driver_id === suggestion.target_driver_id);
@@ -2869,7 +2948,12 @@ function validateTransfer(
   const tgtWage = wageMap.get(suggestion.target_driver_id);
 
   if (!tgtDev || !srcDev || !tgtGroup || !tgtWage) {
-    return { status: 'pruefung_erforderlich', reasons: ['Fahrerdaten nicht vollständig geladen'] };
+    return {
+      status: 'pruefung_erforderlich',
+      reasons: [translate('stn.reason.driverDataIncomplete')],
+      noteBlocked: false,
+      overlapDetected: false,
+    };
   }
 
   // ── Check 0: Target driver note constraint ────────────────────────────────
@@ -2878,9 +2962,8 @@ function validateTransfer(
     for (const candidateShift of candidate.shifts) {
       if (isNoteBlockingTransfer(tgtNotes, candidateShift.block_start_ms, candidateShift.block_end_ms)) {
         hardFail = true;
-        reasons.push(
-          `Transfer nicht möglich: Zielfahrer ist durch Notiz gesperrt (Krank/Urlaub/Frei) am ${fmtDate(candidateShift.service_date)}`,
-        );
+        noteBlocked = true;
+        reasons.push(translate('stn.reason.noteBlocked', { date: fmtDate(candidateShift.service_date) }));
         break;
       }
     }
@@ -2893,10 +2976,12 @@ function validateTransfer(
     for (const tgtShift of tgtGroup.shifts) {
       if (tgtShift.block_start_ms < csEnd && tgtShift.block_end_ms > csStart) {
         hardFail = true;
-        reasons.push(
-          `Ziel-Fahrer hat Überschneidung ${fmtDate(candidateShift.service_date)} ` +
-          `${fmtTime(tgtShift.block_start_ms)}–${fmtTime(tgtShift.block_end_ms)}`,
-        );
+        overlapDetected = true;
+        reasons.push(translate('stn.reason.targetOverlap', {
+          date: fmtDate(candidateShift.service_date),
+          from: fmtTime(tgtShift.block_start_ms),
+          to: fmtTime(tgtShift.block_end_ms),
+        }));
         break;
       }
     }
@@ -2910,14 +2995,14 @@ function validateTransfer(
     const remainingMinutes = remaining.reduce((s, sh) => s + sh.duration_minutes, 0);
     if (remainingMinutes < 0) {
       hardFail = true;
-      reasons.push('Quelle nach Transfer: negative Gesamtdauer');
+      reasons.push(translate('stn.reason.sourceNegativeDuration'));
     } else if (suggestion.source_after < 0) {
       hardFail = true;
-      reasons.push('Quelle nach Transfer: negatives Brutto');
+      reasons.push(translate('stn.reason.sourceNegativeGross'));
     }
   } else {
     needsReview = true;
-    reasons.push('Prüfung erforderlich: Quelldaten nicht vollständig verfügbar');
+    reasons.push(translate('stn.reason.sourceDataUnavailable'));
   }
 
   // ── Check 3: Vehicle overlap ──────────────────────────────────────────────
@@ -2934,17 +3019,20 @@ function validateTransfer(
           if (otherShift.block_start_ms < candidateShift.block_end_ms &&
               otherShift.block_end_ms > candidateShift.block_start_ms) {
             hardFail = true;
-            reasons.push(
-              `Fahrzeug-Überschneidung: ${candidateShift.vehicle} bereits bei ${g.driver_name} ` +
-              `${fmtTime(otherShift.block_start_ms)}–${fmtTime(otherShift.block_end_ms)}`,
-            );
+            overlapDetected = true;
+            reasons.push(translate('stn.reason.vehicleOverlap', {
+              vehicle: candidateShift.vehicle,
+              driver: g.driver_name,
+              from: fmtTime(otherShift.block_start_ms),
+              to: fmtTime(otherShift.block_end_ms),
+            }));
           }
         }
       }
     }
   } else {
     needsReview = true;
-    reasons.push('Prüfung erforderlich: Fahrzeug-ID nicht verfügbar, Fahrzeug-Überschneidung kann nicht geprüft werden');
+    reasons.push(translate('stn.reason.vehicleIdUnavailable'));
   }
 
   // ── Check 4: Target driver max 3 Schichten/day ────────────────────────────
@@ -2960,14 +3048,20 @@ function validateTransfer(
           // compression merges adjacent pairs — can reduce by 1 per merge
           const mergesNeeded = totalAfter - MAX_SCHICHTEN_PER_DAY;
           if (mergesNeeded <= Math.floor(totalAfter / 2)) {
-            reasons.push(`Ziel-Tag wird auf max. 3 Schichten komprimiert (${fmtDate(date)}: ${totalAfter} → 3)`);
+            reasons.push(translate('stn.reason.willCompress', {
+              date: fmtDate(date), total: totalAfter, max: MAX_SCHICHTEN_PER_DAY,
+            }));
           } else {
             hardFail = true;
-            reasons.push(`Ziel-Fahrer hätte mehr als 3 Schichten am ${fmtDate(date)} (${totalAfter} Schichten)`);
+            reasons.push(translate('stn.reason.tooManyShifts', {
+              date: fmtDate(date), total: totalAfter, max: MAX_SCHICHTEN_PER_DAY,
+            }));
           }
         } else {
           hardFail = true;
-          reasons.push(`Ziel-Fahrer hätte mehr als 3 Schichten am ${fmtDate(date)} (${totalAfter} Schichten)`);
+          reasons.push(translate('stn.reason.tooManyShifts', {
+            date: fmtDate(date), total: totalAfter, max: MAX_SCHICHTEN_PER_DAY,
+          }));
         }
       }
     }
@@ -2975,7 +3069,7 @@ function validateTransfer(
 
   // ── Check 5: Target driver Arbeitszeit ───────────────────────────────────
   if (tgtWage.is_full_day_available) {
-    reasons.push('Arbeitszeit: ganztägig verfügbar');
+    reasons.push(translate('stn.reason.fullDayAvailable'));
   } else if (tgtWage.planned_shift_start_time && tgtWage.planned_shift_end_time) {
     const windowStart = timeHHMMtoMinutes(tgtWage.planned_shift_start_time);
     const windowEnd = timeHHMMtoMinutes(tgtWage.planned_shift_end_time);
@@ -2995,18 +3089,23 @@ function validateTransfer(
 
       if (!fits) {
         hardFail = true;
-        reasons.push(
-          `Außerhalb Arbeitszeit ${tgtWage.planned_shift_start_time}–${tgtWage.planned_shift_end_time} ` +
-          `(Schicht ${fmtTime(candidateShift.block_start_ms)}–${fmtTime(candidateShift.block_end_ms)})`,
-        );
+        reasons.push(translate('stn.reason.outsideWorkWindow', {
+          windowFrom: tgtWage.planned_shift_start_time,
+          windowTo: tgtWage.planned_shift_end_time,
+          shiftFrom: fmtTime(candidateShift.block_start_ms),
+          shiftTo: fmtTime(candidateShift.block_end_ms),
+        }));
       }
     }
     if (!hardFail) {
-      reasons.push(`Arbeitszeit passt (${tgtWage.planned_shift_start_time}–${tgtWage.planned_shift_end_time})`);
+      reasons.push(translate('stn.reason.withinWorkWindow', {
+        windowFrom: tgtWage.planned_shift_start_time,
+        windowTo: tgtWage.planned_shift_end_time,
+      }));
     }
   } else {
     needsReview = true;
-    reasons.push('Prüfung erforderlich: Arbeitszeit für Ziel-Fahrer nicht konfiguriert');
+    reasons.push(translate('stn.reason.workWindowNotConfigured'));
   }
 
   // ── Check 6: Allowed weekdays ─────────────────────────────────────────────
@@ -3020,16 +3119,23 @@ function validateTransfer(
       if (!allowedCodes.has(dayCode)) {
         hardFail = true;
         weekdayFailed = true;
-        const dayName = WEEKDAY_NAMES[dayCode] ?? dayCode;
-        reasons.push(`Wochentag nicht erlaubt: ${dayName} (Wochentage: ${effectiveWeekdays.label})`);
+        const nameKey = WEEKDAY_NAME_KEYS[dayCode];
+        reasons.push(translate('stn.reason.weekdayNotAllowed', {
+          day: nameKey ? translate(nameKey) : dayCode,
+          allowed: translate(effectiveWeekdays.labelKey),
+        }));
       }
     }
     if (!weekdayFailed) {
       const transferDays = [...new Set(candidate.shifts.map(s => {
         const d = new Date(`${s.service_date}T12:00`);
-        return WEEKDAY_NAMES[WEEKDAY_CODES[d.getDay()]] ?? '';
+        const nameKey = WEEKDAY_NAME_KEYS[WEEKDAY_CODES[d.getDay()]];
+        return nameKey ? translate(nameKey) : '';
       }))].join(', ');
-      reasons.push(`Wochentage: ${effectiveWeekdays.label} — ${transferDays} erlaubt`);
+      reasons.push(translate('stn.reason.weekdaysAllowed', {
+        allowed: translate(effectiveWeekdays.labelKey),
+        days: transferDays,
+      }));
     }
   }
 
@@ -3039,20 +3145,20 @@ function validateTransfer(
 
   if (targetNewDiff > tolerance) {
     hardFail = true;
-    reasons.push(
-      `Ziel-Fahrer wäre über Toleranz nach Transfer: +${targetNewDiff.toFixed(2)} € ` +
-      `(Toleranz: ±${tolerance} €)`,
-    );
+    reasons.push(translate('stn.reason.targetOverTolerance', {
+      amount: targetNewDiff.toFixed(2), tolerance,
+    }));
   } else {
-    reasons.push(`Ziel bleibt innerhalb Toleranz (${targetNewDiff >= 0 ? '+' : ''}${targetNewDiff.toFixed(2)} €)`);
+    reasons.push(translate('stn.reason.targetWithinTolerance', {
+      amount: `${targetNewDiff >= 0 ? '+' : ''}${targetNewDiff.toFixed(2)}`,
+    }));
   }
 
   if (sourceNewDiff < -tolerance) {
     needsReview = true;
-    reasons.push(
-      `Quelle fällt unter Zielbereich nach Transfer: ${sourceNewDiff.toFixed(2)} € ` +
-      `(Toleranz: ±${tolerance} €)`,
-    );
+    reasons.push(translate('stn.reason.sourceBelowTarget', {
+      amount: sourceNewDiff.toFixed(2), tolerance,
+    }));
   }
 
   // ── Final status ──────────────────────────────────────────────────────────
@@ -3063,12 +3169,12 @@ function validateTransfer(
     status = 'pruefung_erforderlich';
   } else {
     status = 'gueltig';
-    if (!reasons.some(r => r.includes('Überschneidung') || r.includes('Ziel-Fahrer hat'))) {
-      reasons.unshift('Keine Ziel-Fahrer-Überschneidung erkannt');
+    if (!overlapDetected) {
+      reasons.unshift(translate('stn.reason.noTargetOverlap'));
     }
   }
 
-  return { status, reasons };
+  return { status, reasons, noteBlocked, overlapDetected };
 }
 
 interface PendingApply {
@@ -3106,6 +3212,7 @@ function GehaltsabweichungSection({
   onTransferApplied?: () => void;
   bundesland?: string | null;
 }) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [pendingApply, setPendingApply] = useState<PendingApply | null>(null);
   const [applying, setApplying] = useState(false);
@@ -3116,6 +3223,9 @@ function GehaltsabweichungSection({
   const [ausgleichError, setAusgleichError] = useState<string>('');
   const [isApplyingAllAusgleich, setIsApplyingAllAusgleich] = useState(false);
   const [applyAllMessage, setApplyAllMessage] = useState<string>('');
+  // Tracked explicitly: the banner used to decide its colour by testing whether
+  // the message started with "Fehler", which stops working once it is translated.
+  const [applyAllHasError, setApplyAllHasError] = useState(false);
   const [driverNotesMap, setDriverNotesMap] = useState<Map<string, DriverNote[]>>(new Map());
   const tolerance = SALARY_TOLERANCE_DEFAULT;
 
@@ -3145,8 +3255,8 @@ function GehaltsabweichungSection({
   const deviations = useMemo(() => buildDeviations(groups, tolerance), [groups, tolerance]);
   const rawSuggestions = useMemo(() => buildTransferSuggestions(deviations, tolerance, bundesland), [deviations, tolerance, bundesland]);
   const validatedSuggestions = useMemo(
-    () => rawSuggestions.map(s => ({ ...s, validation: validateTransfer(s, deviations, groups, wageMap, tolerance, driverNotesMap) })),
-    [rawSuggestions, deviations, groups, wageMap, tolerance, driverNotesMap],
+    () => rawSuggestions.map(s => ({ ...s, validation: validateTransfer(s, deviations, groups, wageMap, tolerance, driverNotesMap, t) })),
+    [rawSuggestions, deviations, groups, wageMap, tolerance, driverNotesMap, t],
   );
 
   const statusOrder: Record<ValidationStatus, number> = { gueltig: 0, pruefung_erforderlich: 1, nicht_moeglich: 2 };
@@ -3161,11 +3271,11 @@ function GehaltsabweichungSection({
   // Build a lookup from block_id → trip IDs using raw trip rows
   const blockToTripIds = useMemo(() => {
     const m = new Map<string, string[]>();
-    for (const t of rawTrips) {
-      if (!t.assignment_block_id || t.is_canceled) continue;
-      const arr = m.get(t.assignment_block_id) ?? [];
-      arr.push(t.id);
-      m.set(t.assignment_block_id, arr);
+    for (const trip of rawTrips) {
+      if (!trip.assignment_block_id || trip.is_canceled) continue;
+      const arr = m.get(trip.assignment_block_id) ?? [];
+      arr.push(trip.id);
+      m.set(trip.assignment_block_id, arr);
     }
     return m;
   }, [rawTrips]);
@@ -3174,7 +3284,7 @@ function GehaltsabweichungSection({
     if (suggestion.validation.status !== 'gueltig') return;
     const tripIds = suggestion.candidate.shifts.flatMap(s => blockToTripIds.get(s.block_id) ?? []);
     if (tripIds.length === 0) {
-      setApplyError('Keine Fahrten für diesen Transfer gefunden.');
+      setApplyError(t('stn.transfer.noTripsFound'));
       return;
     }
     setApplyError('');
@@ -3186,14 +3296,13 @@ function GehaltsabweichungSection({
     const { suggestion, tripIds } = pendingApply;
 
     // Re-run validation before writing (includes note check)
-    const freshValidation = validateTransfer(suggestion, deviations, groups, wageMap, tolerance, driverNotesMap);
+    const freshValidation = validateTransfer(suggestion, deviations, groups, wageMap, tolerance, driverNotesMap, t);
     if (freshValidation.status !== 'gueltig') {
       setPendingApply(null);
-      const noteBlocked = freshValidation.reasons.some(r => r.includes('Notiz gesperrt'));
       setApplyError(
-        noteBlocked
-          ? 'Transfer nicht möglich: Zielfahrer ist durch Notiz gesperrt (Krank/Urlaub/Frei).'
-          : 'Transfer kann nicht angewendet werden, da die Prüfung nicht mehr gültig ist.',
+        freshValidation.noteBlocked
+          ? t('stn.transfer.blockedByNote')
+          : t('stn.transfer.validationStale'),
       );
       return;
     }
@@ -3208,14 +3317,18 @@ function GehaltsabweichungSection({
         p_new_driver_id: suggestion.target_driver_id,
         p_new_driver_name: suggestion.target_driver_name,
         p_plausibility_status: 'planned_reassignment',
+        // p_reason / p_note are persisted as the trip's audit trail, not shown
+        // as a label — they stay German so the record reads consistently.
         p_reason: `Gehaltsausgleich: Transfer von ${suggestion.source_driver_name}`,
         p_note: `Transfer angewendet via Gehaltsabweichung-Analyse`,
       });
       if (error || (data && data.success === false)) {
-        setApplyError(
-          `Fehler bei Fahrt ${tripId}: ${error?.message ?? data?.error ?? 'Unbekannter Fehler'}. ` +
-          `${updatedCount} von ${tripIds.length} Fahrten wurden aktualisiert.`,
-        );
+        setApplyError(t('stn.transfer.applyFailed', {
+          tripId,
+          error: error?.message ?? data?.error ?? t('stn.transfer.unknownError'),
+          updated: updatedCount,
+          total: tripIds.length,
+        }));
         setApplying(false);
         setPendingApply(null);
         return;
@@ -3237,6 +3350,7 @@ function GehaltsabweichungSection({
     // Mark active finalization for this run as stale
     void supabase
       .from('planning_finalizations')
+      // stale_reason is stored audit text, not a label — it stays German.
       .update({ is_stale: true, stale_reason: 'Transfer nach Finalisierung angewendet', stale_at: new Date().toISOString() })
       .eq('planning_run_id', runId)
       .eq('is_stale', false);
@@ -3264,7 +3378,7 @@ function GehaltsabweichungSection({
     });
     setSavingAusgleich(null);
     if (error) {
-      setAusgleichError(`Fehler beim Speichern: ${error.message}`);
+      setAusgleichError(t('stn.ausgleich.saveFailed', { error: error.message }));
     } else {
       onAdjustmentSaved();
     }
@@ -3281,7 +3395,7 @@ function GehaltsabweichungSection({
       .in('id', adjs.map(a => a.id));
     setSavingAusgleich(null);
     if (error) {
-      setAusgleichError(`Fehler beim Entfernen: ${error.message}`);
+      setAusgleichError(t('stn.ausgleich.removeFailed', { error: error.message }));
     } else {
       onAdjustmentSaved();
     }
@@ -3292,11 +3406,13 @@ function GehaltsabweichungSection({
     // Only drivers without an existing adjustment
     const pending = underDrivers.filter(dev => (adjustmentMap.get(dev.driver_id) ?? []).length === 0);
     if (pending.length === 0) {
-      setApplyAllMessage('Alle Vorschläge wurden bereits übernommen.');
+      setApplyAllMessage(t('stn.ausgleich.allAlreadyApplied'));
+      setApplyAllHasError(false);
       return;
     }
     setIsApplyingAllAusgleich(true);
     setApplyAllMessage('');
+    setApplyAllHasError(false);
     setAusgleichError('');
 
     const applied: string[] = [];
@@ -3330,10 +3446,11 @@ function GehaltsabweichungSection({
     setIsApplyingAllAusgleich(false);
 
     const parts: string[] = [];
-    if (applied.length > 0) parts.push(`Ausgleichsstunden wurden übernommen für: ${applied.join(', ')}.`);
-    if (skipped.length > 0) parts.push(`Einige Vorschläge wurden übersprungen, weil sie bereits übernommen wurden.`);
-    if (failed.length > 0) parts.push(`Fehler: ${failed.join('; ')}`);
+    if (applied.length > 0) parts.push(t('stn.ausgleich.appliedFor', { drivers: applied.join(', ') }));
+    if (skipped.length > 0) parts.push(t('stn.ausgleich.someSkipped'));
+    if (failed.length > 0) parts.push(t('stn.ausgleich.errors', { errors: failed.join('; ') }));
     setApplyAllMessage(parts.join(' '));
+    setApplyAllHasError(failed.length > 0);
 
     if (applied.length > 0) {
       onAdjustmentSaved();
@@ -3359,10 +3476,14 @@ function GehaltsabweichungSection({
   const statusColor = (s: DeviationStatus) =>
     s === 'over' ? '#f87171' : s === 'under' ? '#fcd34d' : '#86efac';
   const statusLabel = (s: DeviationStatus) =>
-    s === 'over' ? 'Über Maximalgehalt' : s === 'under' ? 'Unter Mindestgehalt' : 'Im Gehaltsbereich';
+    s === 'over' ? t('stn.summary.aboveMaxSalary')
+      : s === 'under' ? t('stn.summary.belowMinSalary')
+        : t('stn.summary.inSalaryRange');
 
-  const transferTypeLabel = (t: TransferType) =>
-    t === 'single' ? 'Einzelschicht' : t === 'multi_day' ? 'Mehrere Schichten' : 'Ganzer Tag';
+  const transferTypeLabel = (type: TransferType) =>
+    type === 'single' ? t('stn.transferType.single')
+      : type === 'multi_day' ? t('stn.transferType.multiDay')
+        : t('stn.transferType.fullDay');
 
   return (
     <>
@@ -3372,18 +3493,18 @@ function GehaltsabweichungSection({
         <div className="rounded-xl shadow-2xl p-6 max-w-sm w-full space-y-4" style={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }}>
           <div className="flex items-center gap-2">
             <ArrowRightLeft size={16} style={{ color: '#86efac' }} />
-            <h3 className="font-semibold text-sm" style={{ color: 'var(--text-primary)' }}>Transfer wirklich anwenden?</h3>
+            <h3 className="font-semibold text-sm" style={{ color: 'var(--text-primary)' }}>{t('stn.transfer.confirmTitle')}</h3>
           </div>
           <div className="text-xs space-y-1.5 rounded-lg px-3 py-2.5" style={{ background: 'var(--bg-surface)', color: 'var(--text-secondary)' }}>
-            <div className="flex gap-2"><span style={{ color: 'var(--text-tertiary)' }}>Von:</span><strong>{pendingApply.suggestion.source_driver_name}</strong></div>
-            <div className="flex gap-2"><span style={{ color: 'var(--text-tertiary)' }}>An:</span><strong>{pendingApply.suggestion.target_driver_name}</strong></div>
-            <div className="flex gap-2"><span style={{ color: 'var(--text-tertiary)' }}>Datum:</span><span>{pendingApply.suggestion.candidate.shifts.map(s => fmtDate(s.service_date)).join(', ')}</span></div>
-            <div className="flex gap-2"><span style={{ color: 'var(--text-tertiary)' }}>Typ:</span><span>{transferTypeLabel(pendingApply.suggestion.candidate.transfer_type)}</span></div>
-            <div className="flex gap-2"><span style={{ color: 'var(--text-tertiary)' }}>Transfer-Brutto:</span><strong style={{ color: '#86efac' }}>{pendingApply.suggestion.shift_brutto.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €</strong></div>
-            <div className="flex gap-2"><span style={{ color: 'var(--text-tertiary)' }}>Fahrten:</span><span>{pendingApply.tripIds.length} Fahrt(en)</span></div>
+            <div className="flex gap-2"><span style={{ color: 'var(--text-tertiary)' }}>{t('stn.transfer.from')}</span><strong>{pendingApply.suggestion.source_driver_name}</strong></div>
+            <div className="flex gap-2"><span style={{ color: 'var(--text-tertiary)' }}>{t('stn.transfer.to')}</span><strong>{pendingApply.suggestion.target_driver_name}</strong></div>
+            <div className="flex gap-2"><span style={{ color: 'var(--text-tertiary)' }}>{t('common.date')}:</span><span>{pendingApply.suggestion.candidate.shifts.map(s => fmtDate(s.service_date)).join(', ')}</span></div>
+            <div className="flex gap-2"><span style={{ color: 'var(--text-tertiary)' }}>{t('stn.transfer.type')}</span><span>{transferTypeLabel(pendingApply.suggestion.candidate.transfer_type)}</span></div>
+            <div className="flex gap-2"><span style={{ color: 'var(--text-tertiary)' }}>{t('stn.transfer.gross')}</span><strong style={{ color: '#86efac' }}>{pendingApply.suggestion.shift_brutto.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €</strong></div>
+            <div className="flex gap-2"><span style={{ color: 'var(--text-tertiary)' }}>{t('stn.label.trips')}:</span><span>{t('stn.transfer.tripCount', { count: pendingApply.tripIds.length })}</span></div>
           </div>
           <p className="text-[11px]" style={{ color: 'var(--text-tertiary)' }}>
-            Diese Aktion ändert die Fahrer-Zuordnung der betroffenen Fahrten. Fahrzeug, Datum, Zeit und Tarifdaten bleiben unverändert.
+            {t('stn.transfer.confirmHint')}
           </p>
           {applyError && (
             <div className="text-[11px] rounded px-2 py-1.5" style={{ background: 'rgba(248,113,113,0.1)', color: '#f87171', border: '1px solid rgba(248,113,113,0.3)' }}>
@@ -3398,7 +3519,7 @@ function GehaltsabweichungSection({
               className="flex-1 px-3 py-2 rounded text-xs font-medium transition-all hover:brightness-110 disabled:opacity-50"
               style={{ background: 'var(--bg-surface)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
             >
-              Abbrechen
+              {t('common.cancel')}
             </button>
             <button
               type="button"
@@ -3408,7 +3529,7 @@ function GehaltsabweichungSection({
               style={{ background: 'rgba(134,239,172,0.2)', color: '#86efac', border: '1px solid rgba(134,239,172,0.4)' }}
             >
               {applying ? <Loader2 size={12} className="animate-spin" /> : <ArrowRightLeft size={12} />}
-              {applying ? 'Wird angewendet…' : 'Transfer anwenden'}
+              {applying ? t('stn.transfer.applying') : t('stn.transfer.apply')}
             </button>
           </div>
         </div>
@@ -3424,22 +3545,22 @@ function GehaltsabweichungSection({
       >
         <div className="flex items-center gap-2">
           <span className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
-            Gehaltsabweichung / Ausgleichsanalyse
+            {t('stn.dev.title')}
           </span>
           <div className="flex items-center gap-1.5 text-[11px]">
             {overCount > 0 && (
               <span className="px-1.5 py-0.5 rounded font-semibold" style={{ background: 'rgba(248,113,113,0.15)', color: '#f87171' }}>
-                {overCount} über Ziel
+                {t('stn.dev.badgeOverTarget', { count: overCount })}
               </span>
             )}
             {underCount > 0 && (
               <span className="px-1.5 py-0.5 rounded font-semibold" style={{ background: 'rgba(252,211,77,0.15)', color: '#fcd34d' }}>
-                {underCount} unter Ziel
+                {t('stn.dev.badgeUnderTarget', { count: underCount })}
               </span>
             )}
             {adjustmentMap.size > 0 && (
               <span className="px-1.5 py-0.5 rounded font-semibold" style={{ background: 'rgba(134,239,172,0.15)', color: '#86efac' }}>
-                {adjustmentMap.size} Ausgleich
+                {t('stn.dev.badgeAdjustments', { count: adjustmentMap.size })}
               </span>
             )}
             {suggestions.length > 0 && (() => {
@@ -3449,17 +3570,17 @@ function GehaltsabweichungSection({
                 <>
                   {valid > 0 && (
                     <span className="px-1.5 py-0.5 rounded font-semibold" style={{ background: 'rgba(134,239,172,0.15)', color: '#86efac' }}>
-                      {valid} Gültig
+                      {t('stn.dev.badgeValid', { count: valid })}
                     </span>
                   )}
                   {invalid > 0 && (
                     <span className="px-1.5 py-0.5 rounded font-semibold" style={{ background: 'rgba(248,113,113,0.15)', color: '#f87171' }}>
-                      {invalid} Nicht möglich
+                      {t('stn.dev.badgeImpossible', { count: invalid })}
                     </span>
                   )}
                   {suggestions.length - valid - invalid > 0 && (
                     <span className="px-1.5 py-0.5 rounded font-semibold" style={{ background: 'rgba(147,197,253,0.15)', color: '#93c5fd' }}>
-                      {suggestions.length - valid - invalid} Prüfung
+                      {t('stn.dev.badgeReview', { count: suggestions.length - valid - invalid })}
                     </span>
                   )}
                 </>
@@ -3476,17 +3597,17 @@ function GehaltsabweichungSection({
           {/* Section 1: Deviation table */}
           <div>
             <p className="text-xs font-semibold mb-2" style={{ color: 'var(--text-secondary)' }}>
-              Fahrer-Gehaltsabweichung (Toleranz: ±{tolerance} €)
+              {t('stn.dev.tableTitle', { tolerance })}
             </p>
             <div className="overflow-x-auto rounded-lg" style={{ border: '1px solid var(--border)' }}>
               <table className="w-full text-xs">
                 <thead>
                   <tr style={{ background: 'var(--bg-surface)', borderBottom: '1px solid var(--border)' }}>
-                    <th className="px-3 py-2 text-left font-semibold" style={{ color: 'var(--text-secondary)' }}>Fahrer</th>
-                    <th className="px-3 py-2 text-right font-semibold" style={{ color: 'var(--text-secondary)' }}>Gehaltsbereich</th>
-                    <th className="px-3 py-2 text-right font-semibold" style={{ color: 'var(--text-secondary)' }}>Brutto erwartet</th>
-                    <th className="px-3 py-2 text-right font-semibold" style={{ color: 'var(--text-secondary)' }}>Differenz</th>
-                    <th className="px-3 py-2 text-left font-semibold" style={{ color: 'var(--text-secondary)' }}>Status</th>
+                    <th className="px-3 py-2 text-left font-semibold" style={{ color: 'var(--text-secondary)' }}>{t('common.driver')}</th>
+                    <th className="px-3 py-2 text-right font-semibold" style={{ color: 'var(--text-secondary)' }}>{t('stn.dev.col.salaryRange')}</th>
+                    <th className="px-3 py-2 text-right font-semibold" style={{ color: 'var(--text-secondary)' }}>{t('stn.dev.col.expectedGross')}</th>
+                    <th className="px-3 py-2 text-right font-semibold" style={{ color: 'var(--text-secondary)' }}>{t('stn.dev.col.difference')}</th>
+                    <th className="px-3 py-2 text-left font-semibold" style={{ color: 'var(--text-secondary)' }}>{t('common.status')}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -3517,23 +3638,23 @@ function GehaltsabweichungSection({
           {/* Section 2: Summary */}
           <div className="rounded-lg px-4 py-3 text-xs grid grid-cols-2 sm:grid-cols-5 gap-3" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
             <div>
-              <div style={{ color: 'var(--text-tertiary)' }}>Über Ziel</div>
-              <div className="font-bold mt-0.5" style={{ color: '#f87171' }}>{overCount} Fahrer</div>
+              <div style={{ color: 'var(--text-tertiary)' }}>{t('stn.dev.overTarget')}</div>
+              <div className="font-bold mt-0.5" style={{ color: '#f87171' }}>{t('stn.dev.driverCount', { count: overCount })}</div>
             </div>
             <div>
-              <div style={{ color: 'var(--text-tertiary)' }}>Unter Ziel</div>
-              <div className="font-bold mt-0.5" style={{ color: '#fcd34d' }}>{underCount} Fahrer</div>
+              <div style={{ color: 'var(--text-tertiary)' }}>{t('stn.dev.underTarget')}</div>
+              <div className="font-bold mt-0.5" style={{ color: '#fcd34d' }}>{t('stn.dev.driverCount', { count: underCount })}</div>
             </div>
             <div>
-              <div style={{ color: 'var(--text-tertiary)' }}>Überdeckung gesamt</div>
+              <div style={{ color: 'var(--text-tertiary)' }}>{t('stn.dev.totalOver')}</div>
               <div className="font-bold mt-0.5" style={{ color: '#f87171' }}>{fmtEuroVal(Math.round(totalOver * 100) / 100)}</div>
             </div>
             <div>
-              <div style={{ color: 'var(--text-tertiary)' }}>Unterdeckung gesamt</div>
+              <div style={{ color: 'var(--text-tertiary)' }}>{t('stn.dev.totalUnder')}</div>
               <div className="font-bold mt-0.5" style={{ color: '#fcd34d' }}>{fmtEuroVal(Math.round(totalUnder * 100) / 100)}</div>
             </div>
             <div>
-              <div style={{ color: 'var(--text-tertiary)' }}>Netto-Abweichung</div>
+              <div style={{ color: 'var(--text-tertiary)' }}>{t('stn.dev.netDeviation')}</div>
               <div className="font-bold mt-0.5" style={{ color: netDiff > 0 ? '#f87171' : netDiff < 0 ? '#fcd34d' : '#86efac' }}>
                 {fmtDiff(netDiff)}
               </div>
@@ -3548,7 +3669,7 @@ function GehaltsabweichungSection({
               <div>
                 <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
                   <p className="text-xs font-semibold" style={{ color: 'var(--text-secondary)' }}>
-                    Ausgleichsstunden Vorschläge ({underDrivers.length} Fahrer unter Ziel)
+                    {t('stn.ausgleich.suggestionsTitle', { count: underDrivers.length })}
                   </p>
                   {underDrivers.filter(dev => (adjustmentMap.get(dev.driver_id) ?? []).length === 0).length > 1 && (
                     <button
@@ -3559,7 +3680,7 @@ function GehaltsabweichungSection({
                       style={{ background: 'rgba(252,211,77,0.15)', color: '#fcd34d', border: '1px solid rgba(252,211,77,0.35)' }}
                     >
                       {isApplyingAllAusgleich ? <Loader2 size={11} className="animate-spin" /> : <CheckCircle2 size={11} />}
-                      {isApplyingAllAusgleich ? 'Ausgleichsstunden werden übernommen…' : 'Alle Ausgleichsstunden übernehmen'}
+                      {isApplyingAllAusgleich ? t('stn.ausgleich.applyingAll') : t('stn.ausgleich.applyAll')}
                     </button>
                   )}
                 </div>
@@ -3581,12 +3702,12 @@ function GehaltsabweichungSection({
                           <div>
                             <span className="font-semibold" style={{ color: 'var(--text-primary)' }}>{dev.driver_name}</span>
                             <span className="ml-2" style={{ color: '#fcd34d' }}>
-                              Unter Ziel: {fmtDiff(dev.diff)}
+                              {t('stn.dev.underTarget')}: {fmtDiff(dev.diff)}
                             </span>
                           </div>
                           {hasAdj && (
                             <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold" style={{ background: 'rgba(134,239,172,0.15)', color: '#86efac' }}>
-                              Ausgleichsstunden übernommen
+                              {t('stn.ausgleich.applied')}
                             </span>
                           )}
                         </div>
@@ -3594,15 +3715,15 @@ function GehaltsabweichungSection({
                           <div className="space-y-1.5">
                             <div className="grid grid-cols-3 gap-3 text-[11px]">
                               <div>
-                                <div style={{ color: 'var(--text-tertiary)' }}>Ausgleichsstunden</div>
+                                <div style={{ color: 'var(--text-tertiary)' }}>{t('stn.ausgleich.hours')}</div>
                                 <div className="font-semibold" style={{ color: '#86efac' }}>{existingAdj.hours.toFixed(2).replace('.', ',')} h</div>
                               </div>
                               <div>
-                                <div style={{ color: 'var(--text-tertiary)' }}>Betrag</div>
+                                <div style={{ color: 'var(--text-tertiary)' }}>{t('common.amount')}</div>
                                 <div className="font-semibold" style={{ color: '#86efac' }}>{fmtEuroVal(existingAdj.amount)}</div>
                               </div>
                               <div>
-                                <div style={{ color: 'var(--text-tertiary)' }}>Brutto danach</div>
+                                <div style={{ color: 'var(--text-tertiary)' }}>{t('stn.ausgleich.grossAfter')}</div>
                                 <div className="font-semibold" style={{ color: '#86efac' }}>{fmtEuroVal(afterBrutto)}</div>
                               </div>
                             </div>
@@ -3614,23 +3735,23 @@ function GehaltsabweichungSection({
                               style={{ background: 'rgba(248,113,113,0.12)', color: '#f87171', border: '1px solid rgba(248,113,113,0.3)' }}
                             >
                               {isSaving ? <Loader2 size={11} className="animate-spin" /> : <X size={11} />}
-                              Ausgleichsstunden entfernen
+                              {t('stn.ausgleich.remove')}
                             </button>
                           </div>
                         ) : (
                           <div className="space-y-1.5">
                             <div className="grid grid-cols-3 gap-3 text-[11px]">
                               <div>
-                                <div style={{ color: 'var(--text-tertiary)' }}>Benötigte Stunden</div>
+                                <div style={{ color: 'var(--text-tertiary)' }}>{t('stn.ausgleich.neededHours')}</div>
                                 <div className="font-semibold" style={{ color: 'var(--text-primary)' }}>{neededHours.toFixed(2).replace('.', ',')} h</div>
-                                <div style={{ color: 'var(--text-tertiary)', fontSize: 10 }}>bei {dev.hourly_rate!.toFixed(2).replace('.', ',')} €/h</div>
+                                <div style={{ color: 'var(--text-tertiary)', fontSize: 10 }}>{t('stn.ausgleich.atRate', { rate: dev.hourly_rate!.toFixed(2).replace('.', ',') })}</div>
                               </div>
                               <div>
-                                <div style={{ color: 'var(--text-tertiary)' }}>Fehlbetrag</div>
+                                <div style={{ color: 'var(--text-tertiary)' }}>{t('stn.ausgleich.shortfall')}</div>
                                 <div className="font-semibold" style={{ color: '#fcd34d' }}>{fmtEuroVal(missingAmount)}</div>
                               </div>
                               <div>
-                                <div style={{ color: 'var(--text-tertiary)' }}>Brutto danach</div>
+                                <div style={{ color: 'var(--text-tertiary)' }}>{t('stn.ausgleich.grossAfter')}</div>
                                 <div className="font-semibold" style={{ color: 'var(--text-primary)' }}>{fmtEuroVal(afterBrutto)}</div>
                               </div>
                             </div>
@@ -3642,7 +3763,7 @@ function GehaltsabweichungSection({
                               style={{ background: 'rgba(252,211,77,0.15)', color: '#fcd34d', border: '1px solid rgba(252,211,77,0.35)' }}
                             >
                               {isSaving ? <Loader2 size={11} className="animate-spin" /> : <CheckCircle2 size={11} />}
-                              Ausgleichsstunden übernehmen
+                              {t('stn.ausgleich.apply')}
                             </button>
                           </div>
                         )}
@@ -3656,7 +3777,7 @@ function GehaltsabweichungSection({
                   </div>
                 )}
                 {applyAllMessage && (
-                  <div className="mt-2 text-[11px] rounded px-2 py-1.5" style={{ background: applyAllMessage.startsWith('Fehler') ? 'rgba(248,113,113,0.1)' : 'rgba(134,239,172,0.1)', color: applyAllMessage.startsWith('Fehler') ? '#f87171' : '#86efac', border: `1px solid ${applyAllMessage.startsWith('Fehler') ? 'rgba(248,113,113,0.3)' : 'rgba(134,239,172,0.3)'}` }}>
+                  <div className="mt-2 text-[11px] rounded px-2 py-1.5" style={{ background: applyAllHasError ? 'rgba(248,113,113,0.1)' : 'rgba(134,239,172,0.1)', color: applyAllHasError ? '#f87171' : '#86efac', border: `1px solid ${applyAllHasError ? 'rgba(248,113,113,0.3)' : 'rgba(134,239,172,0.3)'}` }}>
                     {applyAllMessage}
                   </div>
                 )}
@@ -3679,7 +3800,7 @@ function GehaltsabweichungSection({
             if (suggestions.length === 0 && !allCandidatesSmall) {
               return (
                 <div className="text-xs py-2" style={{ color: 'var(--text-tertiary)' }}>
-                  Keine automatischen Transfer-Vorschläge gefunden. Manuelle Analyse empfohlen.
+                  {t('stn.suggest.none')}
                 </div>
               );
             }
@@ -3687,7 +3808,7 @@ function GehaltsabweichungSection({
             if (allCandidatesSmall) {
               return (
                 <div className="rounded-lg px-3 py-2.5 text-xs" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', color: 'var(--text-tertiary)' }}>
-                  Nur kleine Transfers gefunden (&lt;{MIN_TRANSFER_BRUTTO} €). Manuelle Analyse empfohlen.
+                  {t('stn.suggest.onlySmall', { min: MIN_TRANSFER_BRUTTO })}
                 </div>
               );
             }
@@ -3711,9 +3832,9 @@ function GehaltsabweichungSection({
                 return (
                   <div key={srcId}>
                     <div className="text-[11px] font-semibold mb-1.5 flex items-center gap-2" style={{ color: '#f87171' }}>
-                      <span>Von: {srcSuggestions[0].source_driver_name}</span>
+                      <span>{t('stn.transfer.from')} {srcSuggestions[0].source_driver_name}</span>
                       <span className="font-normal" style={{ color: 'var(--text-tertiary)' }}>
-                        ({fmtDiff(srcSuggestions[0].source_diff)} aktuell)
+                        ({t('stn.suggest.currentValue', { value: fmtDiff(srcSuggestions[0].source_diff) })})
                       </span>
                     </div>
                     <div className="space-y-2">
@@ -3724,38 +3845,40 @@ function GehaltsabweichungSection({
                         const vs = s.validation.status;
                         const vColor = vs === 'gueltig' ? '#86efac' : vs === 'nicht_moeglich' ? '#f87171' : '#fcd34d';
                         const vBg = vs === 'gueltig' ? 'rgba(134,239,172,0.15)' : vs === 'nicht_moeglich' ? 'rgba(248,113,113,0.15)' : 'rgba(245,158,11,0.18)';
-                        const vLabel = vs === 'gueltig' ? 'Gültig' : vs === 'nicht_moeglich' ? 'Nicht möglich' : 'Prüfung erforderlich';
+                        const vLabel = vs === 'gueltig' ? t('stn.validity.valid')
+                          : vs === 'nicht_moeglich' ? t('stn.validity.impossible')
+                            : t('stn.validity.review');
                         return (
                           <div key={i} className="rounded-lg px-3 py-2.5 text-xs space-y-1.5" style={{ background: 'var(--bg-surface)', border: `1px solid ${vs === 'nicht_moeglich' ? 'rgba(248,113,113,0.25)' : 'var(--border)'}` }}>
                             <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
                               <span className="font-semibold" style={{ color: '#fcd34d' }}>
-                                An: {s.target_driver_name}
+                                {t('stn.transfer.to')} {s.target_driver_name}
                               </span>
                               <span style={{ color: 'var(--text-tertiary)', fontSize: 10 }}>
-                                ({fmtDiff(s.target_diff)} aktuell)
+                                ({t('stn.suggest.currentValue', { value: fmtDiff(s.target_diff) })})
                               </span>
                               <span className="ml-auto px-1.5 py-0.5 rounded text-[10px] font-semibold" style={{ background: 'rgba(134,239,172,0.12)', color: '#86efac' }}>
-                                Impact {s.impact_score.toFixed(0)} €
+                                {t('stn.suggest.impact', { value: s.impact_score.toFixed(0) })}
                               </span>
                             </div>
                             <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5" style={{ color: 'var(--text-secondary)' }}>
                               <span className="px-1.5 py-0.5 rounded text-[10px] font-medium" style={{ background: 'rgba(147,197,253,0.12)', color: '#93c5fd' }}>
                                 {transferTypeLabel(s.candidate.transfer_type)}
                               </span>
-                              <span style={{ color: 'var(--text-tertiary)' }}>{s.candidate.label}</span>
+                              <span style={{ color: 'var(--text-tertiary)' }}>{t(s.candidate.labelKey, s.candidate.labelVars)}</span>
                             </div>
                             <div className="flex flex-wrap items-center gap-x-4 gap-y-0.5" style={{ color: 'var(--text-secondary)' }}>
-                              <span>Schichten: <strong style={{ color: 'var(--text-primary)' }}>{s.candidate.shifts.length}</strong></span>
-                              <span>Transfer-Brutto: <strong style={{ color: '#86efac' }}>{fmtEuroVal(s.shift_brutto)}</strong></span>
+                              <span>{t('stn.card.shifts')} <strong style={{ color: 'var(--text-primary)' }}>{s.candidate.shifts.length}</strong></span>
+                              <span>{t('stn.transfer.gross')} <strong style={{ color: '#86efac' }}>{fmtEuroVal(s.shift_brutto)}</strong></span>
                             </div>
                             <div className="flex flex-wrap items-center gap-x-4 gap-y-0.5 text-[11px]" style={{ color: 'var(--text-tertiary)' }}>
                               <span>
-                                {s.source_driver_name} danach:{' '}
+                                {t('stn.suggest.after', { driver: s.source_driver_name })}{' '}
                                 <strong style={{ color: 'var(--text-secondary)' }}>{fmtEuroVal(s.source_after)}</strong>
                                 {' '}({fmtDiff(sourceNewDiff)})
                               </span>
                               <span>
-                                {s.target_driver_name} danach:{' '}
+                                {t('stn.suggest.after', { driver: s.target_driver_name })}{' '}
                                 <strong style={{ color: 'var(--text-secondary)' }}>{fmtEuroVal(s.target_after)}</strong>
                                 {' '}({fmtDiff(targetNewDiff)})
                               </span>
@@ -3783,7 +3906,7 @@ function GehaltsabweichungSection({
                                   style={{ background: 'rgba(134,239,172,0.15)', color: '#86efac', border: '1px solid rgba(134,239,172,0.35)' }}
                                 >
                                   <ArrowRightLeft size={11} />
-                                  Transfer anwenden
+                                  {t('stn.transfer.apply')}
                                 </button>
                               </div>
                             )}
@@ -3801,11 +3924,11 @@ function GehaltsabweichungSection({
                 {/* Beste Ausgleichsrichtung */}
                 {bestActionable && (
                   <div className="rounded-lg px-3 py-2.5 text-xs" style={{ background: 'rgba(134,239,172,0.08)', border: '1px solid rgba(134,239,172,0.25)' }}>
-                    <span className="font-semibold mr-2" style={{ color: '#86efac' }}>Beste Ausgleichsrichtung:</span>
+                    <span className="font-semibold mr-2" style={{ color: '#86efac' }}>{t('stn.suggest.bestDirection')}</span>
                     <span style={{ color: 'var(--text-secondary)' }}>
                       {bestActionable.source_driver_name} → {bestActionable.target_driver_name}
-                      {' '}(Impact: <span className="font-mono">{bestActionable.impact_score.toFixed(0)} €</span>)
-                      {' '}· {bestActionable.candidate.label}
+                      {' '}({t('stn.suggest.impactLabel')} <span className="font-mono">{bestActionable.impact_score.toFixed(0)} €</span>)
+                      {' '}· {t(bestActionable.candidate.labelKey, bestActionable.candidate.labelVars)}
                     </span>
                   </div>
                 )}
@@ -3814,7 +3937,7 @@ function GehaltsabweichungSection({
                 {actionable.length > 0 && (
                   <div>
                     <p className="text-xs font-semibold mb-2" style={{ color: 'var(--text-secondary)' }}>
-                      Mögliche Transfer-Vorschläge ({actionable.length})
+                      {t('stn.suggest.possible', { count: actionable.length })}
                     </p>
                     <div className="space-y-4">
                       {renderSuggestionGroup(actionable)}
@@ -3827,7 +3950,7 @@ function GehaltsabweichungSection({
                   <details className="group">
                     <summary className="cursor-pointer text-xs font-semibold select-none flex items-center gap-1.5" style={{ color: '#f87171' }}>
                       <span className="group-open:rotate-90 inline-block transition-transform">▶</span>
-                      Nicht mögliche Vorschläge ({impossible.length})
+                      {t('stn.suggest.impossible', { count: impossible.length })}
                     </summary>
                     <div className="mt-2 space-y-4">
                       {renderSuggestionGroup(impossible)}
@@ -3852,9 +3975,9 @@ function GehaltsabweichungSection({
               <div className="flex items-start gap-2 rounded-lg px-3 py-2.5 text-xs" style={{ background: 'rgba(134,239,172,0.08)', border: '1px solid rgba(134,239,172,0.25)' }}>
                 <CheckCircle2 size={13} style={{ color: '#86efac', flexShrink: 0, marginTop: 1 }} />
                 <div style={{ color: 'var(--text-secondary)' }}>
-                  <div className="font-semibold mb-0.5" style={{ color: '#86efac' }}>Transfer angewendet. Bitte Planqualität und Stundennachweis erneut prüfen.</div>
+                  <div className="font-semibold mb-0.5" style={{ color: '#86efac' }}>{t('stn.applied.banner')}</div>
                   <div>{lastApplied.source} → {lastApplied.target}</div>
-                  <div style={{ color: 'var(--text-tertiary)' }}>{lastApplied.date} · {lastApplied.tripCount} Fahrt(en) aktualisiert</div>
+                  <div style={{ color: 'var(--text-tertiary)' }}>{lastApplied.date} · {t('stn.applied.tripsUpdated', { count: lastApplied.tripCount })}</div>
                 </div>
               </div>
 
@@ -3863,12 +3986,12 @@ function GehaltsabweichungSection({
                 <div className="rounded-lg px-3 py-3 text-xs space-y-2" style={{ background: 'rgba(234,179,8,0.07)', border: '1px solid rgba(234,179,8,0.35)', color: '#92400e' }}>
                   <div className="font-semibold flex items-center gap-1.5">
                     <AlertTriangle size={12} />
-                    Nach Transfer erneute Prüfung erforderlich
+                    {t('stn.applied.recheckTitle')}
                   </div>
                   <ul className="space-y-1 pl-1" style={{ color: 'var(--text-secondary)' }}>
-                    <li>• Planqualität prüfen (Fahrzeug-Überschneidungen, Fahrer-Überschneidung, Fahrzeugwechsel zu kurz)</li>
-                    <li>• Stundennachweis neu laden — Brutto erwartet beider Fahrer hat sich geändert</li>
-                    <li>• Finale Dokumente neu erstellen — vorherige Finalisierung ist nicht mehr aktuell</li>
+                    <li>• {t('stn.applied.recheckQuality')}</li>
+                    <li>• {t('stn.applied.recheckStundennachweis')}</li>
+                    <li>• {t('stn.applied.recheckDocuments')}</li>
                   </ul>
                 </div>
               )}

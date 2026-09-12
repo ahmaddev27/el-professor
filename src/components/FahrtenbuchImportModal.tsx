@@ -4,6 +4,8 @@ import { Upload, X, ChevronRight, ChevronLeft, Check, AlertTriangle, User, Car a
 import { useFahrtenbuch, TripInsertRow, FahrtenbuchImport } from '../hooks/useFahrtenbuch';
 import { useToast } from '../contexts/ToastContext';
 import { format } from 'date-fns';
+import { useTranslation } from '../contexts/LanguageContext';
+import type { TranslationKey } from '../i18n';
 
 // ── Driver / Car types passed in from parent ──────────────────────────────────
 export interface DriverOption { id: string; name: string; }
@@ -41,18 +43,22 @@ interface ColMap {
 
 const REQUIRED_COLS: (keyof ColMap)[] = ['trip_date', 'start_time', 'end_time', 'driver_name'];
 
-const COL_LABELS: Record<keyof ColMap, string> = {
-  trip_date:      'Datum der Fahrt *',
-  start_time:     'Uhrzeit Fahrtbeginn *',
-  end_time:       'Uhrzeit Fahrtende *',
-  driver_name:    'Fahrername *',
-  car_identifier: 'Kennzeichen',
-  price_amount:   'Fahrpreis',
-  tip_amount:     'Trinkgeld',
-  payment_method: 'Zahlungsart',
-  route_start:    'Abholort',
-  route_end:      'Zielort',
-  description:    'Beschreibung / Fahrzeugtyp',
+// Mapping-UI labels for the system fields. These name our own fields, not the
+// uploaded workbook's headers, so they follow the UI language. Values are
+// TranslationKeys resolved with t() where they are rendered; the required-field
+// marker is appended from REQUIRED_COLS rather than baked into the text.
+const COL_LABEL_KEYS: Record<keyof ColMap, TranslationKey> = {
+  trip_date:      'imp.col.tripDate',
+  start_time:     'imp.col.startTime',
+  end_time:       'imp.col.endTime',
+  driver_name:    'imp.col.driverName',
+  car_identifier: 'imp.col.plate',
+  price_amount:   'imp.col.price',
+  tip_amount:     'imp.col.tip',
+  payment_method: 'imp.col.paymentMethod',
+  route_start:    'imp.col.routeStart',
+  route_end:      'imp.col.routeEnd',
+  description:    'imp.col.description',
 };
 
 // Candidate column headers.
@@ -359,16 +365,24 @@ function detectHeaderRow(sheet: XLSX.WorkSheet): number {
   return 0; // default: row 0 is header
 }
 
-const STEPS = ['Datei', 'Spalten', 'Fahrer', 'Fahrzeuge', 'Vorschau & Import'] as const;
+// Wizard step names. Resolved with t() where they are rendered.
+const STEP_KEYS: readonly TranslationKey[] = [
+  'imp.step.file', 'imp.step.columns', 'imp.step.drivers', 'imp.step.vehicles', 'imp.step.preview',
+];
 
 // ── Component ─────────────────────────────────────────────────────────────────
-const MONTHS_DE = ['Januar','Februar','März','April','Mai','Juni','Juli','August','September','Oktober','November','Dezember'];
+const MONTH_KEYS: readonly TranslationKey[] = [
+  'doc.month.january', 'doc.month.february', 'doc.month.march',     'doc.month.april',
+  'doc.month.may',     'doc.month.june',     'doc.month.july',      'doc.month.august',
+  'doc.month.september', 'doc.month.october', 'doc.month.november', 'doc.month.december',
+];
 
 const FahrtenbuchImportModal: React.FC<Props> = ({
   isOpen, onClose, onImported, drivers, cars, existingImports, onDeleteImport,
 }) => {
   const { createImport } = useFahrtenbuch();
   const { success, error: showError } = useToast();
+  const { t } = useTranslation();
 
   const [step, setStep] = useState(0);
   const [importing, setImporting] = useState(false);
@@ -448,7 +462,7 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
         }) as RawRow[];
 
         console.log('[Fahrtenbuch] Raw rows count:', json.length);
-        if (json.length === 0) { setParseError('Die Datei enthält keine Daten.'); return; }
+        if (json.length === 0) { setParseError(t('imp.error.noData')); return; }
 
         const hdrs = Object.keys(json[0]);
         console.log('[Fahrtenbuch] Headers detected:', hdrs);
@@ -476,11 +490,11 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
         setStatusColName(detectedStatusCol);
       } catch (err: any) {
         console.error('[Fahrtenbuch] Parse error:', err);
-        setParseError('Fehler beim Lesen der Datei: ' + (err.message || String(err)));
+        setParseError(t('imp.error.readFile', { message: err.message || String(err) }));
       }
     };
     reader.readAsArrayBuffer(file);
-  }, []);
+  }, [t]);
 
   const onDrop = (e: React.DragEvent) => {
     e.preventDefault();
@@ -572,6 +586,8 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
         // Need at least a trip date to anchor the canceled row; if missing use
         // a best-effort fallback of today so the row is still preservable.
         const effectiveDate = tripDate ?? new Date().toISOString().slice(0, 10);
+        // Stored in fahrtenbuch_trips.original_driver_name — a persisted value,
+        // not a label, so it stays German regardless of the UI language.
         const effectiveDriver = rawDriver || 'Unbekannt';
         const driverMatch = driverMap.get(rawDriver);
 
@@ -709,7 +725,7 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
   const handleImport = async () => {
     const result = builtResult ?? buildTripRows();
     if (result.rows.length === 0) {
-      showError('Fehler', 'Keine gültigen Fahrten gefunden. Bitte Spaltenzuordnung prüfen.');
+      showError(t('common.error'), t('imp.error.noValidTrips'));
       return;
     }
     // Check for duplicate month/year imports
@@ -723,7 +739,7 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
   const doImport = async (rows: TripInsertRow[], deleteFirstId: string | null) => {
     // Pre-check: original XLSX bytes must be present
     if (!rawXlsxBytes || rawXlsxBytes.length === 0) {
-      showError('Import blockiert', 'Original-XLSX-Datei konnte nicht gelesen werden. Bitte die Datei erneut auswählen.');
+      showError(t('imp.error.blockedTitle'), t('imp.error.rawXlsxMissing'));
       return;
     }
     setImporting(true);
@@ -734,7 +750,7 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
         try {
           await onDeleteImport(deleteFirstId);
         } catch (err: any) {
-          showError('Fehler', `Alter Import konnte nicht gelöscht werden: ${err.message || 'Unbekannter Fehler'}`);
+          showError(t('common.error'), t('imp.error.deleteOldImport', { message: err.message || t('imp.error.unknown') }));
           setReplacingImport(false);
           setImporting(false);
           return;
@@ -742,11 +758,11 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
         setReplacingImport(false);
       }
       const importId = await createImport({ month, year, fileName, trips: rows, sourceSheetName, sourceColumns: headers, xlsxBytes: rawXlsxBytes ?? undefined });
-      success('Import erfolgreich', `${rows.length} Fahrten wurden importiert.`);
+      success(t('imp.toast.successTitle'), t('imp.toast.successBody', { count: rows.length }));
       reset();
       onImported(importId);
     } catch (err: any) {
-      showError('Import fehlgeschlagen', err.message || String(err));
+      showError(t('imp.toast.failedTitle'), err.message || String(err));
     } finally {
       setImporting(false);
     }
@@ -786,10 +802,10 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
             </div>
             <div>
               <h2 className="font-semibold text-base" style={{ color: 'var(--text-primary)' }}>
-                Fahrtenbuch importieren
+                {t('imp.title')}
               </h2>
               <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
-                Schritt {step + 1} von {STEPS.length}: {STEPS[step]}
+                {t('imp.stepIndicator', { current: step + 1, total: STEP_KEYS.length, label: t(STEP_KEYS[step]) })}
               </p>
             </div>
           </div>
@@ -800,13 +816,13 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
 
         {/* Step progress */}
         <div className="flex gap-1 px-6 pt-4">
-          {STEPS.map((label, i) => (
-            <div key={i} className="flex-1 flex flex-col items-center gap-1">
+          {STEP_KEYS.map((stepKey, i) => (
+            <div key={stepKey} className="flex-1 flex flex-col items-center gap-1">
               <div className="h-1.5 w-full rounded-full"
                 style={{ background: i <= step ? 'var(--accent)' : 'var(--border)' }} />
               <span className="text-xs hidden sm:block"
                 style={{ color: i === step ? 'var(--accent-text)' : 'var(--text-tertiary)' }}>
-                {label}
+                {t(stepKey)}
               </span>
             </div>
           ))}
@@ -820,14 +836,13 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
             <div className="space-y-5">
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Monat</label>
+                  <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>{t('common.month')}</label>
                   <select value={month} onChange={e => setMonth(Number(e.target.value))} style={selectSt}>
-                    {['Januar','Februar','März','April','Mai','Juni','Juli','August','September','Oktober','November','Dezember']
-                      .map((m, i) => <option key={i} value={i + 1}>{m}</option>)}
+                    {MONTH_KEYS.map((monthKey, i) => <option key={monthKey} value={i + 1}>{t(monthKey)}</option>)}
                   </select>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Jahr</label>
+                  <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>{t('imp.year')}</label>
                   <select value={year} onChange={e => setYear(Number(e.target.value))} style={selectSt}>
                     {[2024, 2025, 2026, 2027].map(y => <option key={y} value={y}>{y}</option>)}
                   </select>
@@ -847,13 +862,13 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
                       <Check size={28} style={{ color: 'var(--success)' }} />
                     </div>
                     <p className="font-medium" style={{ color: 'var(--success)' }}>{fileName}</p>
-                    <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>{rawRows.length} Zeilen gelesen</p>
+                    <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>{t('imp.rowsRead', { count: rawRows.length })}</p>
                   </>
                 ) : (
                   <>
                     <Upload size={32} style={{ color: 'var(--text-tertiary)' }} />
-                    <p className="font-medium" style={{ color: 'var(--text-primary)' }}>Excel oder CSV hier ablegen</p>
-                    <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>oder klicken zum Auswählen (.xlsx, .xls, .csv)</p>
+                    <p className="font-medium" style={{ color: 'var(--text-primary)' }}>{t('imp.dropzoneTitle')}</p>
+                    <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>{t('imp.dropzoneHint')}</p>
                   </>
                 )}
               </div>
@@ -871,7 +886,7 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
               {rawRows.length > 0 && (
                 <div>
                   <p className="text-xs font-medium mb-2 flex items-center gap-1" style={{ color: 'var(--text-tertiary)' }}>
-                    <Eye size={13} /> Vorschau (erste 5 Zeilen, Rohwerte)
+                    <Eye size={13} /> {t('imp.previewRaw')}
                   </p>
                   <div className="overflow-x-auto rounded-lg" style={{ border: '1px solid var(--border)' }}>
                     <table className="w-full text-xs">
@@ -906,21 +921,21 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
           {step === 1 && (
             <div className="space-y-4">
               <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-                Ordnen Sie die Spalten aus Ihrer Datei den Systemfeldern zu. Pflichtfelder sind mit * markiert.
+                {t('imp.mappingIntro')}
               </p>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {(Object.keys(COL_LABELS) as (keyof ColMap)[]).map(key => (
+                {(Object.keys(COL_LABEL_KEYS) as (keyof ColMap)[]).map(key => (
                   <div key={key}>
                     <label className="block text-xs font-medium mb-1"
                       style={{ color: REQUIRED_COLS.includes(key) ? 'var(--accent-text)' : 'var(--text-secondary)' }}>
-                      {COL_LABELS[key]}
+                      {t(COL_LABEL_KEYS[key])}{REQUIRED_COLS.includes(key) ? ' *' : ''}
                     </label>
                     <select
                       value={colMap[key]}
                       onChange={e => setColMap(prev => ({ ...prev, [key]: e.target.value }))}
                       style={selectSt}
                     >
-                      <option value="">— nicht zugeordnet —</option>
+                      <option value="">{t('imp.optionUnmapped')}</option>
                       {headers.map(h => <option key={h} value={h}>{h}</option>)}
                     </select>
                   </div>
@@ -931,7 +946,7 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
                   style={{ background: 'var(--warning-subtle)', border: '1px solid var(--warning)' }}>
                   <AlertTriangle size={14} style={{ color: 'var(--warning)' }} />
                   <span className="text-sm" style={{ color: 'var(--warning)' }}>
-                    Bitte alle Pflichtfelder (*) zuordnen.
+                    {t('imp.warnRequiredCols')}
                   </span>
                 </div>
               )}
@@ -940,20 +955,20 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
               {rawRows.length > 0 && (() => {
                 const sampleRows = rawRows.slice(0, 3);
 
-                const fields: Array<{ key: keyof ColMap; label: string; parser: (v: CellValue) => string | null }> = [
-                  { key: 'trip_date',   label: 'Datum der Fahrt',    parser: parseDate },
-                  { key: 'start_time',  label: 'Uhrzeit Fahrtbeginn', parser: parseTime },
-                  { key: 'end_time',    label: 'Uhrzeit Fahrtende',   parser: parseTime },
-                  { key: 'driver_name', label: 'Fahrername',
+                const fields: Array<{ key: keyof ColMap; parser: (v: CellValue) => string | null }> = [
+                  { key: 'trip_date',   parser: parseDate },
+                  { key: 'start_time',  parser: parseTime },
+                  { key: 'end_time',    parser: parseTime },
+                  { key: 'driver_name',
                     parser: v => { const s = String(v ?? '').trim(); return s || null; } },
                 ];
 
                 return (
                   <div className="space-y-2">
                     <p className="text-xs font-medium" style={{ color: 'var(--text-tertiary)' }}>
-                      Spaltenzuordnung — Vorschau Rohwerte &amp; Parsing
+                      {t('imp.mappingDebugHeading')}
                     </p>
-                    {fields.map(({ key, label, parser }) => {
+                    {fields.map(({ key, parser }) => {
                       const col = colMap[key];
                       const samples = col
                         ? sampleRows.map(r => r[col])
@@ -967,19 +982,19 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
                         <div key={key} className="rounded-lg p-3 text-xs"
                           style={{ background: bg, border: `1px solid ${bdr}` }}>
                           <div className="flex items-center justify-between mb-1">
-                            <span className="font-medium" style={{ color: tc }}>{label}</span>
+                            <span className="font-medium" style={{ color: tc }}>{t(COL_LABEL_KEYS[key])}</span>
                             <span style={{ color: 'var(--text-tertiary)' }}>
-                              {col ? `Spalte: "${col}"` : 'nicht zugeordnet'}
+                              {col ? t('imp.columnNamed', { column: col }) : t('imp.unmapped')}
                             </span>
                           </div>
                           {col && (
                             <div className="space-y-0.5" style={{ color: 'var(--text-secondary)' }}>
                               {samples.map((raw, i) => (
                                 <div key={i}>
-                                  Rohwert: <code className="font-mono">{String(raw ?? 'null')}</code>
+                                  {t('imp.rawValue')}: <code className="font-mono">{String(raw ?? 'null')}</code>
                                   {' → '}
                                   <b style={{ color: parsed[i] ? 'var(--success)' : 'var(--danger)' }}>
-                                    {parsed[i] ?? 'Fehler: nicht erkannt'}
+                                    {parsed[i] ?? t('imp.parseFailed')}
                                   </b>
                                 </div>
                               ))}
@@ -998,11 +1013,10 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
           {step === 2 && (
             <div className="space-y-4">
               <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-                Ordnen Sie den importierten Fahrernamen die vorhandenen Fahrer zu.
-                Nicht zugeordnete Fahrer werden ohne Fahrer-ID gespeichert.
+                {t('imp.driversIntro')}
               </p>
               {driverMatches.length === 0 && (
-                <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>Keine Fahrernamen in der Datei gefunden.</p>
+                <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>{t('imp.noDriverNames')}</p>
               )}
               {driverMatches.map((dm, idx) => (
                 <div key={dm.importedName} className="rounded-lg p-4 flex items-center gap-4"
@@ -1012,7 +1026,7 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>{dm.importedName}</p>
-                    <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>In Datei gefundener Name</p>
+                    <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>{t('imp.nameFoundInFile')}</p>
                   </div>
                   <ChevronRight size={16} style={{ color: 'var(--text-tertiary)', flexShrink: 0 }} />
                   <div className="flex-1 min-w-0">
@@ -1029,7 +1043,7 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
                       }}
                       style={selectSt}
                     >
-                      <option value="">— Kein Fahrer zugeordnet —</option>
+                      <option value="">{t('imp.optionNoDriver')}</option>
                       {drivers.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
                     </select>
                   </div>
@@ -1050,7 +1064,7 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
                   style={{ background: 'var(--warning-subtle)', border: '1px solid var(--warning)' }}>
                   <AlertTriangle size={14} style={{ color: 'var(--warning)' }} />
                   <span className="text-sm" style={{ color: 'var(--warning)' }}>
-                    Bitte alle Fahrer bestätigen (auch nicht zugeordnete).
+                    {t('imp.warnConfirmDrivers')}
                   </span>
                 </div>
               )}
@@ -1061,7 +1075,7 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
           {step === 3 && (
             <div className="space-y-4">
               <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-                Fahrzeugzuordnung (optional). Kennzeichen werden immer gespeichert.
+                {t('imp.carsIntro')}
               </p>
               {carMatches.length === 0 && (
                 <div className="flex items-start gap-3 p-4 rounded-lg"
@@ -1069,13 +1083,13 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
                   <CarIcon size={18} style={{ color: 'var(--text-tertiary)', flexShrink: 0, marginTop: 2 }} />
                   <div>
                     <p className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
-                      Keine Kennzeichen-Spalte erkannt
+                      {t('imp.noPlateColumnTitle')}
                     </p>
                     <p className="text-sm mt-1" style={{ color: 'var(--text-tertiary)' }}>
                       {colMap.car_identifier
-                        ? `Die Spalte "${colMap.car_identifier}" enthält keine gültigen Kennzeichen (GPS-Koordinaten und leere Werte werden ignoriert).`
-                        : 'Es wurde keine Kennzeichen-Spalte zugeordnet.'}
-                      {' '}Die Fahrten werden ohne Fahrzeugzuordnung importiert.
+                        ? t('imp.noPlateColumnMapped', { column: colMap.car_identifier })
+                        : t('imp.noPlateColumnUnmapped')}
+                      {' '}{t('imp.noPlateColumnEffect')}
                     </p>
                   </div>
                 </div>
@@ -1088,7 +1102,7 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>{cm.importedPlate}</p>
-                    <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>Kennzeichen aus Datei</p>
+                    <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>{t('imp.plateFromFile')}</p>
                   </div>
                   <ChevronRight size={16} style={{ color: 'var(--text-tertiary)', flexShrink: 0 }} />
                   <div className="flex-1 min-w-0">
@@ -1101,7 +1115,7 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
                       }}
                       style={selectSt}
                     >
-                      <option value="">— Kein Fahrzeug zugeordnet —</option>
+                      <option value="">{t('imp.optionNoCar')}</option>
                       {cars.map(c => <option key={c.id} value={c.id}>{c.plate}{c.model ? ` — ${c.model}` : ''}</option>)}
                     </select>
                   </div>
@@ -1119,15 +1133,15 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
                 const skipped = stats ? (stats.total - stats.valid - canceledCount) : 0;
                 return (
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                    {[
-                      { label: 'Gültige Fahrten', value: stats?.valid ?? validRows.filter(r => !r.is_canceled).length, color: 'var(--accent)' },
-                      { label: 'Stornierte Fahrten', value: canceledCount, color: canceledCount > 0 ? 'var(--warning)' : 'var(--text-tertiary)' },
-                      { label: 'Übersprungene Zeilen', value: skipped, color: skipped > 0 ? 'var(--danger)' : 'var(--success)' },
-                      { label: 'Monat/Jahr', value: `${month}/${year}`, color: 'var(--text-primary)' },
-                    ].map(card => (
-                      <div key={card.label} className="rounded-lg p-3"
+                    {([
+                      { labelKey: 'imp.card.validTrips' as TranslationKey, value: stats?.valid ?? validRows.filter(r => !r.is_canceled).length, color: 'var(--accent)' },
+                      { labelKey: 'imp.card.canceledTrips' as TranslationKey, value: canceledCount, color: canceledCount > 0 ? 'var(--warning)' : 'var(--text-tertiary)' },
+                      { labelKey: 'imp.card.skippedRows' as TranslationKey, value: skipped, color: skipped > 0 ? 'var(--danger)' : 'var(--success)' },
+                      { labelKey: 'imp.card.monthYear' as TranslationKey, value: `${month}/${year}`, color: 'var(--text-primary)' },
+                    ]).map(card => (
+                      <div key={card.labelKey} className="rounded-lg p-3"
                         style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)' }}>
-                        <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>{card.label}</p>
+                        <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>{t(card.labelKey)}</p>
                         <p className="text-xl font-bold mt-1" style={{ color: card.color }}>{card.value}</p>
                       </div>
                     ))}
@@ -1144,23 +1158,23 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
                     </div>
                     <div>
                       <h4 className="font-semibold text-sm" style={{ color: 'var(--text-primary)' }}>
-                        Für diesen Monat existiert bereits ein Fahrtenbuch-Import.
+                        {t('imp.duplicateTitle')}
                       </h4>
                       <p className="text-xs mt-0.5" style={{ color: 'var(--text-tertiary)' }}>
-                        {MONTHS_DE[month - 1]} {year}
+                        {t(MONTH_KEYS[month - 1])} {year}
                       </p>
                     </div>
                   </div>
 
                   <div className="space-y-2">
-                    <p className="text-xs font-medium" style={{ color: 'var(--text-tertiary)' }}>Bestehende Importe:</p>
+                    <p className="text-xs font-medium" style={{ color: 'var(--text-tertiary)' }}>{t('imp.existingImports')}</p>
                     {conflictingImports.map(imp => (
                       <div key={imp.id} className="flex items-center justify-between rounded-lg px-3 py-2 text-sm"
                         style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)' }}>
                         <div>
                           <span className="font-medium" style={{ color: 'var(--text-primary)' }}>{imp.file_name}</span>
                           <span className="text-xs ml-2" style={{ color: 'var(--text-tertiary)' }}>
-                            {imp.row_count} Fahrten -- {format(new Date(imp.imported_at), 'dd.MM.yyyy HH:mm')}
+                            {t('imp.tripCount', { count: imp.row_count })} — {format(new Date(imp.imported_at), 'dd.MM.yyyy HH:mm')}
                           </span>
                         </div>
                         {onDeleteImport && (
@@ -1172,7 +1186,7 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
                               onChange={() => setReplaceImportId(replaceImportId === imp.id ? null : imp.id)}
                               className="w-3.5 h-3.5"
                             />
-                            <span className="text-xs" style={{ color: 'var(--danger)' }}>Ersetzen</span>
+                            <span className="text-xs" style={{ color: 'var(--danger)' }}>{t('imp.replace')}</span>
                           </label>
                         )}
                       </div>
@@ -1181,7 +1195,7 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
 
                   {replaceImportId && (
                     <div className="rounded-lg px-3 py-2.5 text-xs" style={{ background: 'var(--danger-subtle)', color: 'var(--danger)' }}>
-                      Der ausgewählte alte Import inklusive Fahrten und Planentwürfe wird gelöscht. Danach wird die neue Datei importiert.
+                      {t('imp.replaceWarning')}
                     </div>
                   )}
 
@@ -1191,7 +1205,7 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
                       className="flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-medium"
                       style={{ background: 'var(--bg-muted)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
                     >
-                      Abbrechen
+                      {t('common.cancel')}
                     </button>
                     <button
                       onClick={() => {
@@ -1204,7 +1218,7 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
                       className="flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-medium"
                       style={{ background: 'var(--accent)', color: 'white' }}
                     >
-                      <Plus size={14} /> Zusätzlich importieren
+                      <Plus size={14} /> {t('imp.importAdditionally')}
                     </button>
                     {replaceImportId && onDeleteImport && (
                       <button
@@ -1218,7 +1232,7 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
                         style={{ background: 'var(--danger)', color: 'white' }}
                       >
                         <RefreshCw size={14} />
-                        {replacingImport ? 'Wird ersetzt...' : 'Bestehenden Import ersetzen'}
+                        {replacingImport ? t('imp.replacing') : t('imp.replaceExisting')}
                       </button>
                     )}
                   </div>
@@ -1231,8 +1245,8 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
                   style={{ background: 'var(--warning-subtle)', border: '1px solid var(--warning)' }}>
                   <AlertTriangle size={14} style={{ color: 'var(--warning)', flexShrink: 0, marginTop: 2 }} />
                   <p className="text-sm" style={{ color: 'var(--warning)' }}>
-                    {stats.canceled} stornierte Fahrten werden mitimportiert, aber nicht für den Stundennachweis verwendet.
-                    {stats.statusColName ? ` (Spalte: "${stats.statusColName}")` : ''}
+                    {t('imp.canceledNotice', { count: stats.canceled })}
+                    {stats.statusColName ? ` (${t('imp.columnNamed', { column: stats.statusColName })})` : ''}
                   </p>
                 </div>
               )}
@@ -1242,35 +1256,35 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
                 <div className="p-3 rounded-lg space-y-2"
                   style={{ background: 'var(--warning-subtle)', border: '1px solid var(--warning)' }}>
                   <p className="text-sm font-medium" style={{ color: 'var(--warning)' }}>
-                    {stats.total - stats.valid - stats.canceled} Zeilen wurden übersprungen
+                    {t('imp.skippedRows', { count: stats.total - stats.valid - stats.canceled })}
                   </p>
                   <div className="text-xs space-y-1" style={{ color: 'var(--text-secondary)' }}>
                     {stats.badDate > 0 && (
                       <div>
-                        <p>Ungültiges Datum ({stats.badDate} Zeilen) — Spalte: <b>"{stats.dateColName}"</b></p>
+                        <p>{t('imp.reject.badDate', { count: stats.badDate })} — {t('imp.column')}: <b>"{stats.dateColName}"</b></p>
                         {stats.sampleBadDate.length > 0 && (
                           <p className="font-mono pl-2" style={{ color: 'var(--danger)' }}>
-                            Beispiele: {stats.sampleBadDate.map(v => `"${v}"`).join(', ')}
+                            {t('imp.examples')}: {stats.sampleBadDate.map(v => `"${v}"`).join(', ')}
                           </p>
                         )}
                       </div>
                     )}
                     {stats.badStartTime > 0 && (
                       <div>
-                        <p>Ungültige Startzeit ({stats.badStartTime} Zeilen) — Spalte: <b>"{stats.startTimeColName}"</b></p>
+                        <p>{t('imp.reject.badStartTime', { count: stats.badStartTime })} — {t('imp.column')}: <b>"{stats.startTimeColName}"</b></p>
                         {stats.sampleBadStartTime.length > 0 && (
                           <p className="font-mono pl-2" style={{ color: 'var(--danger)' }}>
-                            Beispiele: {stats.sampleBadStartTime.map(v => `"${v}"`).join(', ')}
+                            {t('imp.examples')}: {stats.sampleBadStartTime.map(v => `"${v}"`).join(', ')}
                           </p>
                         )}
                         <p className="pl-2" style={{ color: 'var(--text-tertiary)' }}>
-                          Bitte in Schritt 2 prüfen ob die richtige Spalte zugeordnet ist.
+                          {t('imp.reject.checkColumnHint')}
                         </p>
                       </div>
                     )}
-                    {stats.badEndTime    > 0 && <p>Ungültige Endzeit: {stats.badEndTime}</p>}
-                    {stats.missingDriver > 0 && <p>Fehlender Fahrername: {stats.missingDriver}</p>}
-                    {stats.other         > 0 && <p>Sonstige Fehler: {stats.other}</p>}
+                    {stats.badEndTime    > 0 && <p>{t('imp.reject.badEndTime')}: {stats.badEndTime}</p>}
+                    {stats.missingDriver > 0 && <p>{t('imp.reject.missingDriver')}: {stats.missingDriver}</p>}
+                    {stats.other         > 0 && <p>{t('imp.reject.other')}: {stats.other}</p>}
                   </div>
                 </div>
               )}
@@ -1280,8 +1294,7 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
                   style={{ background: 'var(--warning-subtle)', border: '1px solid var(--warning)' }}>
                   <AlertTriangle size={14} style={{ color: 'var(--warning)', flexShrink: 0, marginTop: 2 }} />
                   <p className="text-sm" style={{ color: 'var(--warning)' }}>
-                    {unmatchedDrivers} Fahrername(n) wurden keinem Fahrer zugeordnet.
-                    original_driver_id wird leer gespeichert, der Name bleibt erhalten.
+                    {t('imp.unmatchedDriversNotice', { count: unmatchedDrivers })}
                   </p>
                 </div>
               )}
@@ -1292,11 +1305,10 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
                   <AlertTriangle size={16} style={{ color: 'var(--danger)', flexShrink: 0, marginTop: 2 }} />
                   <div>
                     <p className="text-sm font-medium" style={{ color: 'var(--danger)' }}>
-                      Keine gültigen Fahrten erkannt
+                      {t('imp.noValidTripsTitle')}
                     </p>
                     <p className="text-xs mt-1" style={{ color: 'var(--text-secondary)' }}>
-                      Bitte gehen Sie zu Schritt 2 zurück und überprüfen Sie die Spaltenzuordnung.
-                      Achten Sie besonders auf die Felder Datum, Startzeit und Endzeit.
+                      {t('imp.noValidTripsHint')}
                     </p>
                   </div>
                 </div>
@@ -1306,15 +1318,18 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
               {validRows.length > 0 && (
                 <div>
                   <p className="text-xs font-medium mb-2" style={{ color: 'var(--text-tertiary)' }}>
-                    Vorschau (erste 10 Fahrten)
+                    {t('imp.previewTrips')}
                   </p>
                   <div className="overflow-x-auto rounded-lg" style={{ border: '1px solid var(--border)' }}>
                     <table className="w-full text-xs">
                       <thead style={{ background: 'var(--bg-subtle)' }}>
                         <tr>
-                          {['Datum','Start','Ende','Originalfahrer','Kennzeichen','Preis','Trinkgeld'].map(h => (
-                            <th key={h} className="px-2 py-2 text-left font-medium whitespace-nowrap"
-                              style={{ color: 'var(--text-tertiary)' }}>{h}</th>
+                          {([
+                            'common.date', 'imp.th.start', 'imp.th.end', 'imp.th.originalDriver',
+                            'imp.th.plate', 'imp.th.price', 'imp.th.tip',
+                          ] as TranslationKey[]).map(headerKey => (
+                            <th key={headerKey} className="px-2 py-2 text-left font-medium whitespace-nowrap"
+                              style={{ color: 'var(--text-tertiary)' }}>{t(headerKey)}</th>
                           ))}
                         </tr>
                       </thead>
@@ -1338,8 +1353,7 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
 
               <div className="p-3 rounded-lg text-sm"
                 style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)', color: 'var(--text-secondary)' }}>
-                Datum, Zeiten, Beträge und Originalfahrer sind nach dem Import unveränderlich.
-                Nur die Fahrerzuordnung kann später angepasst werden.
+                {t('imp.immutableNote')}
               </div>
             </div>
           )}
@@ -1354,10 +1368,10 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
             style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
           >
             <ChevronLeft size={16} />
-            {step === 0 ? 'Abbrechen' : 'Zurück'}
+            {step === 0 ? t('common.cancel') : t('common.back')}
           </button>
 
-          {step < STEPS.length - 1 ? (
+          {step < STEP_KEYS.length - 1 ? (
             <button
               onClick={() => {
                 if (step === 1) buildDriverMatches();
@@ -1374,7 +1388,7 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
               className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-opacity"
               style={{ background: 'var(--accent)', color: 'white', opacity: canGoNext() ? 1 : 0.45 }}
             >
-              Weiter <ChevronRight size={16} />
+              {t('imp.next')} <ChevronRight size={16} />
             </button>
           ) : (
             <button
@@ -1383,11 +1397,11 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
               className="flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-semibold transition-opacity"
               style={{ background: 'var(--success)', color: 'white', opacity: importing || validRows.length === 0 ? 0.5 : 1 }}
             >
-              {importing ? 'Wird importiert…' : (() => {
+              {importing ? t('imp.importing') : (() => {
                 const valid    = validRows.filter(r => !r.is_canceled).length;
                 const canceled = validRows.filter(r =>  r.is_canceled).length;
-                if (canceled > 0) return `${valid} Fahrten + ${canceled} stornierte importieren`;
-                return `${valid} Fahrten importieren`;
+                if (canceled > 0) return t('imp.importWithCanceled', { valid, canceled });
+                return t('imp.importTrips', { count: valid });
               })()}
             </button>
           )}

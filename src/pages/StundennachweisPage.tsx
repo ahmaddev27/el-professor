@@ -8,14 +8,33 @@ import { useCompanySettings } from '../contexts/CompanySettingsContext';
 import { format, getDaysInMonth } from 'date-fns';
 import { exportFahreruebersichtToExcel, SavedStundennachweis, DriverSummary } from '../utils/fahreruebersichtExport';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
+import { useTranslation } from '../contexts/LanguageContext';
+import type { TranslationKey } from '../i18n';
 
 // ─── Constants ─────────────────────────────────────────────────────────────
 
+// Printed in the date column of the Stundennachweis PDF, so it stays German in
+// both UI languages.
 const WEEKDAY_SHORT = ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa'];
 
+// There are deliberately two month-name tables.
+//
+// MONTH_NAMES_DE is document text: it names the Stundennachweis PDF handed to
+// the Steuerberater, so it must stay German in both UI languages and must never
+// be routed through the dictionary.
 const MONTH_NAMES_DE = [
   'Januar', 'Februar', 'März', 'April', 'Mai', 'Juni',
   'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember',
+];
+
+// MONTH_NAME_KEYS is the screen-text counterpart, used for the month picker and
+// the on-screen headings. It holds TranslationKeys because this list is
+// module-level and t() is a hook value; every consumer resolves it at the call
+// site.
+const MONTH_NAME_KEYS: TranslationKey[] = [
+  'doc.month.january',   'doc.month.february', 'doc.month.march',    'doc.month.april',
+  'doc.month.may',       'doc.month.june',     'doc.month.july',     'doc.month.august',
+  'doc.month.september', 'doc.month.october',  'doc.month.november', 'doc.month.december',
 ];
 
 // Additive premium rates (premium-only model — Option B)
@@ -268,9 +287,9 @@ function hhmm(h: number, m: number): string {
   return `${String(Math.floor(h)).padStart(2, '0')}:${String(Math.floor(m)).padStart(2, '0')}`;
 }
 
-function toMins(t: string): number {
-  if (!t || t.length < 4 || !t.includes(':')) return 0;
-  const [h, m] = t.split(':').map(Number);
+function toMins(time: string): number {
+  if (!time || time.length < 4 || !time.includes(':')) return 0;
+  const [h, m] = time.split(':').map(Number);
   if (isNaN(h) || isNaN(m)) return 0;
   return h * 60 + m;
 }
@@ -376,17 +395,19 @@ function calcTotals(rows: DayRow[]): Totals {
 //   - The day total (Schicht 1 + 2 + 3) must be ≤ MAX_DAILY_DURATION_MINUTES (8:30).
 // Violations BLOCK save and PDF export.
 
+// The violation carries the shift number rather than a label, and the date
+// rather than a weekday name, so the list can be rendered in either language.
 type DurationViolation =
-  | { type: 'shift'; dayIndex: number; date: Date; weekday: string; shiftLabel: 'Schicht 1' | 'Schicht 2' | 'Schicht 3'; von: string; bis: string; durationMinutes: number; limit: number }
-  | { type: 'daily'; dayIndex: number; date: Date; weekday: string; durationMinutes: number; limit: number };
+  | { type: 'shift'; dayIndex: number; date: Date; shiftNumber: 1 | 2 | 3; von: string; bis: string; durationMinutes: number; limit: number }
+  | { type: 'daily'; dayIndex: number; date: Date; durationMinutes: number; limit: number };
 
 function validateRowDurations(rows: DayRow[]): DurationViolation[] {
   const violations: DurationViolation[] = [];
   for (const row of rows) {
-    const segs: Array<{ label: 'Schicht 1' | 'Schicht 2' | 'Schicht 3'; von: string; bis: string }> = [
-      { label: 'Schicht 1', von: row.von1, bis: row.bis1 },
-      { label: 'Schicht 2', von: row.von2, bis: row.bis2 },
-      { label: 'Schicht 3', von: row.von3, bis: row.bis3 },
+    const segs: Array<{ shiftNumber: 1 | 2 | 3; von: string; bis: string }> = [
+      { shiftNumber: 1, von: row.von1, bis: row.bis1 },
+      { shiftNumber: 2, von: row.von2, bis: row.bis2 },
+      { shiftNumber: 3, von: row.von3, bis: row.bis3 },
     ];
     let dailyTotal = 0;
     for (const s of segs) {
@@ -398,8 +419,7 @@ function validateRowDurations(rows: DayRow[]): DurationViolation[] {
           type: 'shift',
           dayIndex: row.dayIndex,
           date: row.date,
-          weekday: row.weekday,
-          shiftLabel: s.label,
+          shiftNumber: s.shiftNumber,
           von: s.von,
           bis: s.bis,
           durationMinutes: dur,
@@ -412,7 +432,6 @@ function validateRowDurations(rows: DayRow[]): DurationViolation[] {
         type: 'daily',
         dayIndex: row.dayIndex,
         date: row.date,
-        weekday: row.weekday,
         durationMinutes: dailyTotal,
         limit: MAX_DAILY_DURATION_MINUTES,
       });
@@ -1904,10 +1923,10 @@ function generatePlanFromTotals(
       }
       if (chosenDelta <= 0) continue;
       // Apply uniform shift to all four slots
-      const shift = (t: string) => {
-        if (!t) return t;
-        const m = toMins(t) - chosenDelta;
-        if (m < 0) return t;
+      const shift = (time: string) => {
+        if (!time) return time;
+        const m = toMins(time) - chosenDelta;
+        if (m < 0) return time;
         return hhmm(Math.floor(m / 60), m % 60);
       };
       const newVon1 = shift(r.von1);
@@ -2018,17 +2037,17 @@ function generatePlanFromTotals(
   // Log a warning if any category total drifted from its target.  The caller
   // (handleStep2Totals) can use this to decide whether to warn the user.
   if (typeof console !== 'undefined') {
-    const t = calcTotals(rows);
+    const actual = calcTotals(rows);
     const check = (name: string, got: number, want: number) => {
       if (Math.abs(got - want) > 1) {
         console.warn(`[generatePlanFromTotals] ${name}: got ${got} min, wanted ${want} min`);
       }
     };
-    check('grundlohn',   t.grundlohn,   targets.grundlohn);
-    check('nachtarbeit', t.nachtarbeit, targets.nachtarbeit);
-    check('nacht04',     t.nacht04,     targets.nacht04);
-    check('sonntag',     t.sonntag,     targets.sonntag);
-    check('feiertag',    t.feiertag,    targets.feiertag);
+    check('grundlohn',   actual.grundlohn,   targets.grundlohn);
+    check('nachtarbeit', actual.nachtarbeit, targets.nachtarbeit);
+    check('nacht04',     actual.nacht04,     targets.nacht04);
+    check('sonntag',     actual.sonntag,     targets.sonntag);
+    check('feiertag',    actual.feiertag,    targets.feiertag);
   }
 
   enforceMandatorySplit(rows, seed);
@@ -2048,7 +2067,11 @@ interface PdfData {
   warnings?: string[];
 }
 
-/** Map planning behavior to a human-readable German label. */
+/**
+ * Map planning behavior to a German label. Stays German in both UI languages:
+ * the value is passed to exportStundennachweisAsPdf as `note_type` and is
+ * printed in the notes block of the Stundennachweis handed to the Steuerberater.
+ */
 function behaviorLabel(n: Note): string | null {
   const beh = n.note_planning_behavior
     ?? (['krank','urlaub','frei','nicht verfügbar','gesperrt','ausfall','abwesend'].some(k => n.note_text.toLowerCase().includes(k)) ? 'exclude_from_plan'
@@ -2203,6 +2226,7 @@ const Step1: React.FC<{
   drivers: DriverOption[];
   onNext: (driverId: string, month: number, year: number) => void;
 }> = ({ drivers, onNext }) => {
+  const { t } = useTranslation();
   const [driverId, setDriverId] = useState('');
   const [month, setMonth]       = useState(new Date().getMonth() + 1);
   const [year,  setYear]        = useState(new Date().getFullYear());
@@ -2216,34 +2240,34 @@ const Step1: React.FC<{
           <div className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold text-white"
             style={{ background: 'var(--accent)' }}>1</div>
           <div>
-            <h2 className="font-bold" style={{ color: 'var(--text-primary)' }}>Fahrer &amp; Zeitraum</h2>
-            <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>Fahrer, Monat und Jahr auswählen</p>
+            <h2 className="font-bold" style={{ color: 'var(--text-primary)' }}>{t('stn.step1.title')}</h2>
+            <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>{t('stn.step1.subtitle')}</p>
           </div>
         </div>
 
         <div className="space-y-4">
           <div>
             <label className="block text-sm font-medium mb-1.5" style={{ color: 'var(--text-secondary)' }}>
-              <User size={13} className="inline mr-1" />Fahrer *
+              <User size={13} className="inline mr-1" />{t('stn.step1.driverLabel')}
             </label>
             <select value={driverId} onChange={e => setDriverId(e.target.value)} style={IS}>
-              <option value="">Fahrer auswählen …</option>
+              <option value="">{t('stn.step1.driverPlaceholder')}</option>
               {drivers.map(d => (
                 <option key={d.id} value={d.id}>
-                  {d.name}{d.personalnummer ? ` — Pers.-Nr. ${d.personalnummer}` : ''}
+                  {d.name}{d.personalnummer ? ` — ${t('stn.step1.personnelNoShort', { value: d.personalnummer })}` : ''}
                 </option>
               ))}
             </select>
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium mb-1.5" style={{ color: 'var(--text-secondary)' }}>Monat *</label>
+              <label className="block text-sm font-medium mb-1.5" style={{ color: 'var(--text-secondary)' }}>{t('stn.step1.monthLabel')}</label>
               <select value={month} onChange={e => setMonth(Number(e.target.value))} style={IS}>
-                {MONTH_NAMES_DE.map((m, i) => <option key={i+1} value={i+1}>{m}</option>)}
+                {MONTH_NAME_KEYS.map((key, i) => <option key={i+1} value={i+1}>{t(key)}</option>)}
               </select>
             </div>
             <div>
-              <label className="block text-sm font-medium mb-1.5" style={{ color: 'var(--text-secondary)' }}>Jahr *</label>
+              <label className="block text-sm font-medium mb-1.5" style={{ color: 'var(--text-secondary)' }}>{t('stn.step1.yearLabel')}</label>
               <select value={year} onChange={e => setYear(Number(e.target.value))} style={IS}>
                 {years.map(y => <option key={y} value={y}>{y}</option>)}
               </select>
@@ -2258,7 +2282,7 @@ const Step1: React.FC<{
           style={driverId
             ? { background: 'var(--accent)', color: 'white' }
             : { background: 'var(--bg-muted)', color: 'var(--text-tertiary)', cursor: 'not-allowed' }}>
-          Weiter <ArrowRight size={15} />
+          {t('stn.step1.next')} <ArrowRight size={15} />
         </button>
       </div>
     </div>
@@ -2320,19 +2344,28 @@ function hhmmToMins(s: string): number {
   return isNaN(m) ? 0 : m;
 }
 
-// Weekday short labels keyed by JS getDay() value (0=Sun..6=Sat).
-const WEEKDAY_SHORT_BY_JS: Record<number, string> = {
-  1: 'Mo', 2: 'Di', 3: 'Mi', 4: 'Do', 5: 'Fr', 6: 'Sa', 0: 'So',
+// Weekday short labels keyed by JS getDay() value (0=Sun..6=Sat). These are
+// TranslationKeys because the table is module-level and t() is a hook value.
+const WEEKDAY_SHORT_KEYS_BY_JS: Record<number, TranslationKey> = {
+  1: 'fleet.weekday.mon', 2: 'fleet.weekday.tue', 3: 'fleet.weekday.wed',
+  4: 'fleet.weekday.thu', 5: 'fleet.weekday.fri', 6: 'fleet.weekday.sat',
+  0: 'fleet.weekday.sun',
 };
 
 // Render a compact summary like "Mo–Fr" / "Mo, Mi, Fr" from JS-getDay values.
-function formatProfileWeekdays(jsDays: number[]): string {
-  if (!jsDays || jsDays.length === 0) return 'Keine Arbeitstage hinterlegt';
+// The translator is passed in because this helper sits at module scope.
+function formatProfileWeekdays(
+  jsDays: number[],
+  translateKey: (key: TranslationKey) => string,
+): string {
+  if (!jsDays || jsDays.length === 0) return translateKey('stn.step2.noWorkdaysStored');
   const order = [1, 2, 3, 4, 5, 6, 0]; // Mo..So
   const ordered = order.filter(d => jsDays.includes(d));
-  if (ordered.length === 5 && ordered.every((d, i) => d === [1,2,3,4,5][i])) return 'Mo–Fr';
-  if (ordered.length === 7) return 'Mo–So';
-  return ordered.map(d => WEEKDAY_SHORT_BY_JS[d]).join(', ');
+  const dash = (from: number, to: number) =>
+    `${translateKey(WEEKDAY_SHORT_KEYS_BY_JS[from])}–${translateKey(WEEKDAY_SHORT_KEYS_BY_JS[to])}`;
+  if (ordered.length === 5 && ordered.every((d, i) => d === [1,2,3,4,5][i])) return dash(1, 5);
+  if (ordered.length === 7) return dash(1, 0);
+  return ordered.map(d => translateKey(WEEKDAY_SHORT_KEYS_BY_JS[d])).join(', ');
 }
 
 const Step2: React.FC<Step2Props> = ({
@@ -2340,6 +2373,7 @@ const Step2: React.FC<Step2Props> = ({
   initialState, onStateChange,
   onGenerateSalary, onGenerateTotals, onBack,
 }) => {
+  const { t } = useTranslation();
   // All form state is initialized from the parent-persisted snapshot.
   // Every setter also calls onStateChange so the parent always has the latest values.
   const [tab,        setTabRaw]        = useState(initialState.tab);
@@ -2395,27 +2429,27 @@ const Step2: React.FC<Step2Props> = ({
   const goSalary = () => {
     const s = parseDE(salary);
     const r = parseDE(rate);
-    if (!s || s <= 0) { setErr('Bitte einen gültigen Zielbetrag eingeben.'); return; }
-    if (!r || r <= 0) { setErr('Bitte einen gültigen Stundensatz eingeben.'); return; }
+    if (!s || s <= 0) { setErr(t('stn.step2.errTargetAmount')); return; }
+    if (!r || r <= 0) { setErr(t('stn.step2.errHourlyRate')); return; }
     // Grundlohn-Anteil is optional — empty → default 85 %
     let g = GL_RATIO_DEFAULT;
     if (glRatio.trim() !== '') {
       const parsed = parseDE(glRatio);
       if (isNaN(parsed) || parsed < 1 || parsed > 99) {
-        setErr('Grundlohn-Anteil muss zwischen 1 und 99 liegen (oder leer lassen für Standard 85 %).'); return;
+        setErr(t('stn.step2.errBaseWageShare')); return;
       }
       g = parsed / 100;
     }
-    if (!hasProfileWindow) { setErr('Kein Arbeitszeitfenster im Fahrerprofil hinterlegt. Bitte im Fahrerprofil ergänzen.'); return; }
-    if (allowedDows.length === 0) { setErr('Im Fahrerprofil sind keine Arbeitstage hinterlegt. Bitte im Fahrerprofil ergänzen.'); return; }
+    if (!hasProfileWindow) { setErr(t('stn.step2.errNoWorkWindow')); return; }
+    if (allowedDows.length === 0) { setErr(t('stn.step2.errNoWorkdays')); return; }
     setErr(''); onGenerateSalary(s, r, g, buildWorkWindow());
   };
 
   const goTotals = () => {
     const gl = decToMins(tGrundlohn);
-    if (gl <= 0) { setErr('Grundlohn-Stunden müssen größer als 0 sein.'); return; }
-    if (!hasProfileWindow) { setErr('Kein Arbeitszeitfenster im Fahrerprofil hinterlegt. Bitte im Fahrerprofil ergänzen.'); return; }
-    if (allowedDows.length === 0) { setErr('Im Fahrerprofil sind keine Arbeitstage hinterlegt. Bitte im Fahrerprofil ergänzen.'); return; }
+    if (gl <= 0) { setErr(t('stn.step2.errBaseWageHours')); return; }
+    if (!hasProfileWindow) { setErr(t('stn.step2.errNoWorkWindow')); return; }
+    if (allowedDows.length === 0) { setErr(t('stn.step2.errNoWorkdays')); return; }
     setErr('');
     onGenerateTotals({
       grundlohn:   gl,
@@ -2450,9 +2484,9 @@ const Step2: React.FC<Step2Props> = ({
           <div className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold text-white"
             style={{ background: 'var(--accent)' }}>2</div>
           <div>
-            <h2 className="font-bold" style={{ color: 'var(--text-primary)' }}>Lohnparameter</h2>
+            <h2 className="font-bold" style={{ color: 'var(--text-primary)' }}>{t('stn.step2.title')}</h2>
             <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
-              {driver.name} — {MONTH_NAMES_DE[month - 1]} {year}
+              {driver.name} — {t(MONTH_NAME_KEYS[month - 1])} {year}
             </p>
           </div>
         </div>
@@ -2460,10 +2494,10 @@ const Step2: React.FC<Step2Props> = ({
         {/* ── Tab switcher ── */}
         <div className="flex gap-1 p-1 rounded-lg" style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)' }}>
           <button style={tabBtn(tab === 'salary')} onClick={() => { setTab('salary'); setErr(''); }}>
-            Aus Gehalt
+            {t('stn.step2.tabSalary')}
           </button>
           <button style={tabBtn(tab === 'totals')} onClick={() => { setTab('totals'); setErr(''); }}>
-            Aus Stunden-Summen
+            {t('stn.step2.tabTotals')}
           </button>
         </div>
 
@@ -2473,39 +2507,36 @@ const Step2: React.FC<Step2Props> = ({
             <div className="rounded-lg p-3.5 text-sm space-y-1.5"
               style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)' }}>
               <p style={{ color: 'var(--text-secondary)' }}>
-                Generiert einen realistischen Monatsplan — der Gesamtlohn (Grundlohn + Zuschläge)
-                trifft genau den eingegebenen Zielbetrag.
+                {t('stn.step2.salaryIntro')}
               </p>
               <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
-                Zuschläge (additiv): Nachtarbeit 20–06 Uhr: +40% &nbsp;|&nbsp; Sonntag: +50% &nbsp;|&nbsp;
-                Feiertag: +125% &nbsp;|&nbsp; Samstag: kein Zuschlag
+                {t('stn.step2.premiumHint')}
               </p>
             </div>
 
             <div>
               <label className="block text-sm font-medium mb-1.5" style={{ color: 'var(--text-secondary)' }}>
-                <Euro size={13} className="inline mr-1" />Grundlohn Zielbetrag (€) *
+                <Euro size={13} className="inline mr-1" />{t('stn.step2.targetAmountLabel')}
               </label>
-              <input type="text" inputMode="decimal" placeholder="z.B. 2500,00"
+              <input type="text" inputMode="decimal" placeholder={t('stn.step2.targetAmountPlaceholder')}
                 value={salary} onChange={e => setSalary(e.target.value)} style={IS} />
             </div>
             <div>
               <label className="block text-sm font-medium mb-1.5" style={{ color: 'var(--text-secondary)' }}>
-                <Clock size={13} className="inline mr-1" />Stundensatz Fahrer (€/Std.) *
+                <Clock size={13} className="inline mr-1" />{t('stn.step2.hourlyRateLabel')}
               </label>
-              <input type="text" inputMode="decimal" placeholder="z.B. 14,00"
+              <input type="text" inputMode="decimal" placeholder={t('stn.step2.hourlyRatePlaceholder')}
                 value={rate} onChange={e => setRate(e.target.value)} style={IS} />
-              <p className="text-xs mt-1" style={{ color: 'var(--text-tertiary)' }}>Basis-Stundensatz ohne Zuschläge</p>
+              <p className="text-xs mt-1" style={{ color: 'var(--text-tertiary)' }}>{t('stn.step2.hourlyRateHint')}</p>
             </div>
             <div>
               <label className="block text-sm font-medium mb-1.5" style={{ color: 'var(--text-secondary)' }}>
-                Grundlohn-Anteil (%)
+                {t('stn.step2.baseWageShareLabel')}
               </label>
               <input type="text" inputMode="numeric" placeholder="85"
                 value={glRatio} onChange={e => setGlRatio(e.target.value)} style={IS} />
               <p className="text-xs mt-1" style={{ color: 'var(--text-tertiary)' }}>
-                Optional – Standard: 85 %. Anteil der Stunden als normaler Werktag-Grundlohn;
-                der Rest verteilt sich auf Nacht-, Sonntags- und Feiertagszuschläge.
+                {t('stn.step2.baseWageShareHint')}
               </p>
             </div>
           </div>
@@ -2517,46 +2548,45 @@ const Step2: React.FC<Step2Props> = ({
             <div className="rounded-lg p-3.5 text-sm"
               style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)' }}>
               <p style={{ color: 'var(--text-secondary)' }}>
-                Gib die Ziel-Stundensummen direkt ein (Dezimalstunden, z.B. <strong>143,00</strong>).
-                Das System generiert einen Monatsplan der diese Summen möglichst genau trifft.
+                {t('stn.step2.totalsIntro')}
               </p>
             </div>
 
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="block text-sm font-medium mb-1.5" style={{ color: 'var(--text-secondary)' }}>
-                  Grundlohn (Std.) *
+                  {t('stn.step2.baseWageHoursLabel')}
                 </label>
-                <input type="text" inputMode="decimal" placeholder="z.B. 143,00"
+                <input type="text" inputMode="decimal" placeholder={t('stn.step2.hoursPlaceholder143')}
                   value={tGrundlohn} onChange={e => setTGrundlohn(e.target.value)} style={IS} />
               </div>
               <div>
                 <label className="block text-sm font-medium mb-1.5" style={{ color: 'var(--text-secondary)' }}>
-                  Nachtarbeit (Std.)
+                  {t('stn.step2.nightHoursLabel')}
                 </label>
-                <input type="text" inputMode="decimal" placeholder="z.B. 4,00"
+                <input type="text" inputMode="decimal" placeholder={t('stn.step2.hoursPlaceholder4')}
                   value={tNacht} onChange={e => setTNacht(e.target.value)} style={IS} />
-                <p className="text-xs mt-1" style={{ color: 'var(--text-tertiary)' }}>20–06 Uhr</p>
+                <p className="text-xs mt-1" style={{ color: 'var(--text-tertiary)' }}>{t('stn.step2.nightWindowHint')}</p>
               </div>
               <div>
                 <label className="block text-sm font-medium mb-1.5" style={{ color: 'var(--text-secondary)' }}>
-                  Nacht 0–4 Uhr (Std.)
+                  {t('stn.step2.night04HoursLabel')}
                 </label>
-                <input type="text" inputMode="decimal" placeholder="z.B. 2,00"
+                <input type="text" inputMode="decimal" placeholder={t('stn.step2.hoursPlaceholder2')}
                   value={tNacht04} onChange={e => setTNacht04(e.target.value)} style={IS} />
               </div>
               <div>
                 <label className="block text-sm font-medium mb-1.5" style={{ color: 'var(--text-secondary)' }}>
-                  Sonntag (Std.)
+                  {t('stn.step2.sundayHoursLabel')}
                 </label>
-                <input type="text" inputMode="decimal" placeholder="z.B. 1,00"
+                <input type="text" inputMode="decimal" placeholder={t('stn.step2.hoursPlaceholder1')}
                   value={tSonntag} onChange={e => setTSonntag(e.target.value)} style={IS} />
               </div>
               <div>
                 <label className="block text-sm font-medium mb-1.5" style={{ color: 'var(--text-secondary)' }}>
-                  Feiertag (Std.)
+                  {t('stn.step2.holidayHoursLabel')}
                 </label>
-                <input type="text" inputMode="decimal" placeholder="z.B. 1,00"
+                <input type="text" inputMode="decimal" placeholder={t('stn.step2.hoursPlaceholder1')}
                   value={tFeiertag} onChange={e => setTFeiertag(e.target.value)} style={IS} />
               </div>
             </div>
@@ -2568,7 +2598,7 @@ const Step2: React.FC<Step2Props> = ({
           <div className="flex items-center gap-2">
             <Clock size={14} style={{ color: 'var(--accent-text)' }} />
             <span className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
-              Arbeitszeitfenster aus Fahrerprofil
+              {t('stn.step2.workWindowTitle')}
             </span>
           </div>
 
@@ -2579,12 +2609,11 @@ const Step2: React.FC<Step2Props> = ({
               color: 'var(--text-primary)',
             }}>
               <div className="font-medium">
-                {formatProfileWeekdays(allowedDows)}
+                {formatProfileWeekdays(allowedDows, t)}
                 {profileStart && profileEnd && ` · ${profileStart}–${profileEnd}`}
               </div>
               <p className="text-xs mt-1" style={{ color: 'var(--text-tertiary)' }}>
-                Diese Werte stammen aus dem Fahrerprofil und werden automatisch verwendet.
-                Änderungen erfolgen ausschließlich in der Fahrerverwaltung.
+                {t('stn.step2.workWindowHint')}
               </p>
             </div>
           ) : (
@@ -2593,9 +2622,9 @@ const Step2: React.FC<Step2Props> = ({
               border: '1px solid var(--warning)',
               color: 'var(--warning)',
             }}>
-              <div className="font-semibold">Kein Arbeitszeitfenster im Fahrerprofil hinterlegt.</div>
+              <div className="font-semibold">{t('stn.step2.noWorkWindowTitle')}</div>
               <p className="text-xs mt-1" style={{ color: 'var(--text-secondary)' }}>
-                Bitte im Fahrerprofil ergänzen, bevor ein Stundennachweis erstellt wird.
+                {t('stn.step2.noWorkWindowHint')}
               </p>
             </div>
           )}
@@ -2613,7 +2642,7 @@ const Step2: React.FC<Step2Props> = ({
             style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)', background: 'transparent' }}
             onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-subtle)')}
             onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
-            Zurück
+            {t('common.back')}
           </button>
           <button
             onClick={tab === 'salary' ? goSalary : goTotals}
@@ -2621,7 +2650,7 @@ const Step2: React.FC<Step2Props> = ({
             style={{ background: 'var(--accent)', color: 'white', flex: 2 }}
             onMouseEnter={e => (e.currentTarget.style.background = 'var(--accent-hover)')}
             onMouseLeave={e => (e.currentTarget.style.background = 'var(--accent)')}>
-            Plan generieren <ArrowRight size={15} />
+            {t('stn.step2.generate')} <ArrowRight size={15} />
           </button>
         </div>
       </div>
@@ -2867,7 +2896,13 @@ const Timesheet: React.FC<{
 
 // ─── Notes carousel ─────────────────────────────────────────────────────────
 
-const WEEKDAY_FULL = ['Sonntag', 'Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag'];
+// Screen-only weekday names for the note card. TranslationKeys, because the
+// table is module-level and t() is a hook value.
+const WEEKDAY_FULL_KEYS: TranslationKey[] = [
+  'stn.weekday.sunday', 'stn.weekday.monday',   'stn.weekday.tuesday',
+  'stn.weekday.wednesday', 'stn.weekday.thursday', 'stn.weekday.friday',
+  'stn.weekday.saturday',
+];
 
 function noteIsNight(noteDate: string): boolean {
   const d = new Date(noteDate);
@@ -2889,6 +2924,7 @@ const NotesCarousel: React.FC<{
   rows: DayRow[];
   onHighlightDay?: (dayIndex: number | null) => void;
 }> = ({ notes, rows, onHighlightDay }) => {
+  const { t } = useTranslation();
   const [idx, setIdx] = useState(0);
 
   // Sort chronologically
@@ -2917,10 +2953,10 @@ const NotesCarousel: React.FC<{
         </div>
         <div>
           <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)' }}>
-            Keine Notizen für diesen Fahrer in diesem Monat
+            {t('stn.notes.empty')}
           </p>
           <p style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 2 }}>
-            Notizen werden automatisch geladen, sobald sie für den gewählten Monat vorhanden sind.
+            {t('stn.notes.emptyHint')}
           </p>
         </div>
       </div>
@@ -2931,7 +2967,7 @@ const NotesCarousel: React.FC<{
   const noteD   = new Date(note.note_date);
   const dayNum  = noteD.getDate();
   const dow     = noteD.getDay();
-  const weekday = WEEKDAY_FULL[dow];
+  const weekday = t(WEEKDAY_FULL_KEYS[dow]);
   const dateStr = format(noteD, 'dd.MM.yyyy');
   const timeStr = format(noteD, 'HH:mm');
 
@@ -2940,6 +2976,9 @@ const NotesCarousel: React.FC<{
 
   // For must_include_in_plan notes: verify the note's ±30 min window is actually
   // covered by a shift (not just that the day has any worked hours).
+  //
+  // The keyword lists below stay German in both languages: they are matched
+  // against note_text the operator typed, so they are data, not labels.
   const behavior2 = note.note_planning_behavior
     ?? (['krank','urlaub','frei','nicht verfügbar','gesperrt','ausfall','abwesend'].some(k => note.note_text.toLowerCase().includes(k)) ? 'exclude_from_plan'
       : ['blitzer','unfall','panne','kontrolle','wartezeit'].some(k => note.note_text.toLowerCase().includes(k)) ? 'must_include_in_plan'
@@ -2973,17 +3012,17 @@ const NotesCarousel: React.FC<{
 
   // Badge helpers
   const badges: { label: string; icon: React.ReactNode; color: string; bg: string; border: string }[] = [];
-  if (isHol)     badges.push({ label: 'Feiertag', icon: <Star size={10} />,    color: '#d97706', bg: 'rgba(217,119,6,0.1)',   border: 'rgba(217,119,6,0.25)' });
-  if (isWeekend) badges.push({ label: dow === 0 ? 'Sonntag' : 'Samstag', icon: <Sun size={10} />,  color: '#0891b2', bg: 'rgba(8,145,178,0.1)',  border: 'rgba(8,145,178,0.25)' });
-  if (isNight)   badges.push({ label: 'Nacht',    icon: <Moon size={10} />,    color: '#6366f1', bg: 'rgba(99,102,241,0.1)', border: 'rgba(99,102,241,0.25)' });
-  if (inPlan)    badges.push({ label: 'Im Plan',  icon: <StickyNote size={10} />, color: '#16a34a', bg: 'rgba(22,163,74,0.1)',  border: 'rgba(22,163,74,0.25)' });
+  if (isHol)     badges.push({ label: t('stn.badge.holiday'), icon: <Star size={10} />,    color: '#d97706', bg: 'rgba(217,119,6,0.1)',   border: 'rgba(217,119,6,0.25)' });
+  if (isWeekend) badges.push({ label: dow === 0 ? t('stn.weekday.sunday') : t('stn.weekday.saturday'), icon: <Sun size={10} />,  color: '#0891b2', bg: 'rgba(8,145,178,0.1)',  border: 'rgba(8,145,178,0.25)' });
+  if (isNight)   badges.push({ label: t('stn.badge.night'),   icon: <Moon size={10} />,    color: '#6366f1', bg: 'rgba(99,102,241,0.1)', border: 'rgba(99,102,241,0.25)' });
+  if (inPlan)    badges.push({ label: t('stn.badge.inPlan'),  icon: <StickyNote size={10} />, color: '#16a34a', bg: 'rgba(22,163,74,0.1)',  border: 'rgba(22,163,74,0.25)' });
 
   const behavior = note.note_planning_behavior
     ?? (['krank','urlaub','frei','nicht verfügbar','gesperrt','ausfall','abwesend'].some(k => note.note_text.toLowerCase().includes(k)) ? 'exclude_from_plan'
       : ['blitzer','unfall','panne','kontrolle','wartezeit'].some(k => note.note_text.toLowerCase().includes(k)) ? 'must_include_in_plan'
       : null);
-  if (behavior === 'exclude_from_plan')    badges.push({ label: 'Abwesenheit',  icon: <AlertTriangle size={10} />, color: '#dc2626', bg: 'rgba(220,38,38,0.08)', border: 'rgba(220,38,38,0.25)' });
-  if (behavior === 'must_include_in_plan') badges.push({ label: 'Pflichtnotiz', icon: <AlertTriangle size={10} />, color: '#d97706', bg: 'rgba(217,119,6,0.08)', border: 'rgba(217,119,6,0.25)' });
+  if (behavior === 'exclude_from_plan')    badges.push({ label: t('stn.badge.absence'),      icon: <AlertTriangle size={10} />, color: '#dc2626', bg: 'rgba(220,38,38,0.08)', border: 'rgba(220,38,38,0.25)' });
+  if (behavior === 'must_include_in_plan') badges.push({ label: t('stn.badge.mandatoryNote'), icon: <AlertTriangle size={10} />, color: '#d97706', bg: 'rgba(217,119,6,0.08)', border: 'rgba(217,119,6,0.25)' });
   if (note.start_date && note.end_date && note.start_date !== note.end_date) {
     badges.push({ label: `${note.start_date.slice(8,10)}.${note.start_date.slice(5,7)} – ${note.end_date.slice(8,10)}.${note.end_date.slice(5,7)}`, icon: <CalendarRange size={10} />, color: 'var(--text-secondary)', bg: 'var(--bg-subtle)', border: 'var(--border)' });
   }
@@ -3012,7 +3051,7 @@ const NotesCarousel: React.FC<{
             <StickyNote size={14} style={{ color: 'var(--accent)' }} />
           </div>
           <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)', letterSpacing: '0.04em', textTransform: 'uppercase' }}>
-            Notizen dieses Monats
+            {t('stn.notes.title')}
           </span>
           <span style={{
             fontSize: 11, fontWeight: 600,
@@ -3092,7 +3131,7 @@ const NotesCarousel: React.FC<{
             color: 'var(--text-secondary)',
             border: '1px solid var(--border)',
           }}>
-            {timeStr} Uhr
+            {t('stn.notes.timeSuffix', { time: timeStr })}
           </span>
           {/* Badges */}
           {badges.map((b, bi) => (
@@ -3121,7 +3160,7 @@ const NotesCarousel: React.FC<{
         {/* Click hint when note has a matching plan row */}
         {matchRow && (
           <p style={{ fontSize: 10, color: 'var(--text-tertiary)', marginTop: 8, marginBottom: 0 }}>
-            ↓ Klicken um den {weekday} im Plan zu markieren
+            {t('stn.notes.clickHint', { weekday })}
           </p>
         )}
       </div>
@@ -3161,6 +3200,7 @@ function DateGroupRow({ dateKey, items, color }: {
   items: { text: string; date: string | null }[];
   color: string;
 }) {
+  const { t } = useTranslation();
   const [open, setOpen] = React.useState(false);
 
   return (
@@ -3179,7 +3219,7 @@ function DateGroupRow({ dateKey, items, color }: {
           transition: 'transform 0.15s ease',
         }} />
         <span style={{ fontSize: 12, fontWeight: 600, color }}>
-          {dateKey !== '_no_date' ? formatDateDE(dateKey) : 'Allgemein'}
+          {dateKey !== '_no_date' ? formatDateDE(dateKey) : t('stn.warn.general')}
         </span>
         <span style={{
           fontSize: 10, fontWeight: 600,
@@ -3234,6 +3274,7 @@ function WarningGroupCard({ group }: { group: WarningGroup }) {
         }}
       >
         <AlertTriangle size={14} style={{ color: group.color, flexShrink: 0 }} />
+        {/* group.label and the warning texts are produced by utils/warningCategories.ts */}
         <span style={{ fontSize: 12, fontWeight: 700, color: group.color, flex: 1 }}>
           {group.label}
         </span>
@@ -3299,6 +3340,7 @@ function WarningGroupCard({ group }: { group: WarningGroup }) {
 }
 
 function StructuredWarnings({ warnings }: { warnings: string[] }) {
+  const { t } = useTranslation();
   const groups = categorizeWarnings(warnings);
   const hasCritical = groups.some(g => g.category === 'critical');
 
@@ -3311,7 +3353,7 @@ function StructuredWarnings({ warnings }: { warnings: string[] }) {
           color: hasCritical ? '#dc2626' : '#d97706',
           textTransform: 'uppercase', letterSpacing: '0.04em',
         }}>
-          Generierungswarnungen
+          {t('stn.warn.title')}
         </span>
         {groups.map(g => (
           <span key={g.category} style={{
@@ -3336,6 +3378,7 @@ function StructuredWarnings({ warnings }: { warnings: string[] }) {
 type StepType = 'step1' | 'step2' | 'sheet';
 
 const StundennachweisPage: React.FC = () => {
+  const { t, tPlural } = useTranslation();
   const navigate = useNavigate();
   const location = useLocation();
   const { effectiveCompanyId: companyId } = useSuperAdmin();
@@ -3710,29 +3753,32 @@ const StundennachweisPage: React.FC = () => {
             </button>
             <div>
               <div className="flex items-center gap-2 flex-wrap">
+                {/* "Stundennachweis" is domain vocabulary and stays German. */}
                 <h1 className="text-2xl font-bold">Stundennachweis</h1>
                 {step === 'sheet' && isFromArchive && (
                   <span className="px-2 py-0.5 rounded-full text-xs font-semibold"
                     style={{ background: 'rgba(255,255,255,0.2)', color: 'white', border: '1px solid rgba(255,255,255,0.35)' }}>
-                    Gespeicherte Version
+                    {t('stn.header.savedVersion')}
                   </span>
                 )}
                 {step === 'sheet' && generationSource === 'fahrtenbuch' && (
                   <span className="px-2 py-0.5 rounded-full text-xs font-semibold"
                     style={{ background: 'rgba(255,255,255,0.15)', color: 'rgba(255,255,255,0.9)', border: '1px solid rgba(255,255,255,0.25)' }}>
-                    Quelle: Fahrtenbuch
+                    {t('stn.header.sourceFahrtenbuch')}
                   </span>
                 )}
               </div>
               <p className="text-sm mt-0.5" style={{ color: 'rgba(255,255,255,0.8)' }}>
-                {step === 'step1' && 'Schritt 1 von 2 — Fahrer & Zeitraum'}
-                {step === 'step2' && 'Schritt 2 von 2 — Lohnparameter'}
+                {step === 'step1' && t('stn.header.step1')}
+                {step === 'step2' && t('stn.header.step2')}
                 {step === 'sheet' && selDriver && (
                   <>
-                    {`${selDriver.name} — ${MONTH_NAMES_DE[selMonth-1]} ${selYear}`}
+                    {`${selDriver.name} — ${t(MONTH_NAME_KEYS[selMonth-1])} ${selYear}`}
                     {isFromArchive && savedAt && (
                       <span className="ml-2" style={{ color: 'rgba(255,255,255,0.65)' }}>
-                        · Zuletzt gespeichert: {new Date(savedAt).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                        {t('stn.header.lastSaved', {
+                          timestamp: new Date(savedAt).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }),
+                        })}
                       </span>
                     )}
                   </>
@@ -3743,24 +3789,24 @@ const StundennachweisPage: React.FC = () => {
           {step === 'sheet' && (
             <div className="flex items-center gap-2 flex-wrap">
               <button onClick={handleSave} disabled={saving || hasDurationViolations}
-                title={hasDurationViolations ? 'Speichern blockiert: Schicht- oder Tageslimit überschritten' : undefined}
+                title={hasDurationViolations ? t('stn.action.saveBlocked') : undefined}
                 className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all hover:bg-white/20 disabled:opacity-50 disabled:cursor-not-allowed"
                 style={{ border: '1px solid rgba(255,255,255,0.4)', color: 'white' }}>
                 <Save size={14} />
-                {saving ? 'Speichert …' : saveSuccess ? 'Gespeichert ✓' : isFromArchive ? 'Aktualisieren' : 'Speichern'}
+                {saving ? t('stn.action.saving') : saveSuccess ? t('stn.action.saved') : isFromArchive ? t('common.update') : t('common.save')}
               </button>
               <button onClick={handleRegenerate} disabled={generating}
                 className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all hover:bg-white/20"
                 style={{ border: '1px solid rgba(255,255,255,0.4)', color: 'white' }}>
                 <RefreshCw size={14} className={generating ? 'animate-spin' : ''} />
-                {generating ? 'Generiere …' : 'Neuen Plan generieren'}
+                {generating ? t('stn.action.generating') : t('stn.action.regenerate')}
               </button>
               <button onClick={handleExport} disabled={exporting || hasDurationViolations}
-                title={hasDurationViolations ? 'PDF-Export blockiert: Schicht- oder Tageslimit überschritten' : undefined}
+                title={hasDurationViolations ? t('stn.action.exportBlocked') : undefined}
                 className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
                 style={{ background: 'white', color: 'var(--accent)' }}>
                 <Download size={14} />
-                {exporting ? 'Exportiert …' : 'Als PDF exportieren'}
+                {exporting ? t('stn.action.exporting') : t('stn.action.exportPdf')}
               </button>
             </div>
           )}
@@ -3802,18 +3848,18 @@ const StundennachweisPage: React.FC = () => {
             {noSalaryMeta ? (
               <>
                 <div className="text-sm">
-                  <span style={{ color: 'var(--text-tertiary)' }}>Gehaltsbereich: </span>
+                  <span style={{ color: 'var(--text-tertiary)' }}>{t('stn.summary.salaryRange')} </span>
                   <span className="font-bold" style={{ color: 'var(--text-tertiary)' }}>—</span>
                 </div>
                 <div className="text-sm">
-                  <span style={{ color: 'var(--text-tertiary)' }}>Berechnet: </span>
+                  <span style={{ color: 'var(--text-tertiary)' }}>{t('stn.summary.calculated')} </span>
                   <span className="font-bold" style={{ color: 'var(--text-tertiary)' }}>—</span>
                 </div>
               </>
             ) : genMode === 'salary' ? (
               <>
                 <div className="text-sm">
-                  <span style={{ color: 'var(--text-tertiary)' }}>Gehaltsbereich: </span>
+                  <span style={{ color: 'var(--text-tertiary)' }}>{t('stn.summary.salaryRange')} </span>
                   {(minSalary != null || maxSalary != null) ? (
                     <span className="font-bold" style={{ color: 'var(--text-primary)' }}>
                       {minSalary != null ? `${minSalary.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €` : '—'}
@@ -3829,13 +3875,13 @@ const StundennachweisPage: React.FC = () => {
                   )}
                 </div>
                 <div className="text-sm">
-                  <span style={{ color: 'var(--text-tertiary)' }}>Berechnet: </span>
+                  <span style={{ color: 'var(--text-tertiary)' }}>{t('stn.summary.calculated')} </span>
                   {hourlyRate > 0 ? (
                     <span className="font-bold" style={{ color: 'var(--text-primary)' }}>
                       {calcSal.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
                     </span>
                   ) : (
-                    <span className="font-bold text-xs" style={{ color: 'var(--text-tertiary)' }}>Stundensatz fehlt</span>
+                    <span className="font-bold text-xs" style={{ color: 'var(--text-tertiary)' }}>{t('stn.summary.hourlyRateMissing')}</span>
                   )}
                 </div>
                 {hourlyRate > 0 && (() => {
@@ -3847,7 +3893,7 @@ const StundennachweisPage: React.FC = () => {
                     return (
                       <span className="text-xs font-semibold px-2 py-0.5 rounded-full"
                         style={{ background: '#fff3e0', color: '#e65100', border: '1px solid #ffcc80' }}>
-                        Unter Mindestgehalt
+                        {t('stn.summary.belowMinSalary')}
                       </span>
                     );
                   }
@@ -3855,14 +3901,14 @@ const StundennachweisPage: React.FC = () => {
                     return (
                       <span className="text-xs font-semibold px-2 py-0.5 rounded-full"
                         style={{ background: '#e8f5e9', color: '#2e7d32', border: '1px solid #a5d6a7' }}>
-                        Über Maximalgehalt
+                        {t('stn.summary.aboveMaxSalary')}
                       </span>
                     );
                   }
                   return (
                     <span className="text-xs font-semibold px-2 py-0.5 rounded-full"
                       style={{ background: '#e8f5e9', color: '#2e7d32', border: '1px solid #a5d6a7' }}>
-                      Im Gehaltsbereich
+                      {t('stn.summary.inSalaryRange')}
                     </span>
                   );
                 })()}
@@ -3870,27 +3916,27 @@ const StundennachweisPage: React.FC = () => {
             ) : (
               <>
                 <div className="text-sm">
-                  <span style={{ color: 'var(--text-tertiary)' }}>Modus: </span>
-                  <span className="font-bold" style={{ color: 'var(--text-primary)' }}>Aus Stunden-Summen</span>
+                  <span style={{ color: 'var(--text-tertiary)' }}>{t('stn.summary.mode')} </span>
+                  <span className="font-bold" style={{ color: 'var(--text-primary)' }}>{t('stn.step2.tabTotals')}</span>
                 </div>
                 {totalsTarget && (
                   <div className="text-sm">
-                    <span style={{ color: 'var(--text-tertiary)' }}>Ziel Grundlohn: </span>
+                    <span style={{ color: 'var(--text-tertiary)' }}>{t('stn.summary.targetBaseWage')} </span>
                     <span className="font-bold" style={{ color: 'var(--text-primary)' }}>
-                      {fmtDec(minsToDecimal(totalsTarget.grundlohn))} Std.
+                      {t('stn.summary.hoursValue', { value: fmtDec(minsToDecimal(totalsTarget.grundlohn)) })}
                     </span>
                   </div>
                 )}
               </>
             )}
             <div className="text-sm">
-              <span style={{ color: 'var(--text-tertiary)' }}>Gesamt-Stunden: </span>
+              <span style={{ color: 'var(--text-tertiary)' }}>{t('stn.summary.totalHours')} </span>
               <span className="font-bold" style={{ color: 'var(--text-primary)' }}>
-                {fmtDec(minsToDecimal(totals.grundlohn))} Std.
+                {t('stn.summary.hoursValue', { value: fmtDec(minsToDecimal(totals.grundlohn)) })}
               </span>
             </div>
             <div className="text-sm">
-              <span style={{ color: 'var(--text-tertiary)' }}>Arbeitstage: </span>
+              <span style={{ color: 'var(--text-tertiary)' }}>{t('stn.summary.workingDays')} </span>
               <span className="font-bold" style={{ color: 'var(--text-primary)' }}>
                 {rows.filter(r => r.grundlohn).length}
               </span>
@@ -3899,7 +3945,7 @@ const StundennachweisPage: React.FC = () => {
               <div className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full"
                 style={{ background: '#fffde7', color: '#e65100', border: '1px solid #ffcc80' }}>
                 <span style={{ fontWeight: 'bold' }}>●</span>
-                Notizen-Zeilen automatisch befüllt — bearbeitbar
+                {t('stn.summary.noteRowsAutofilled')}
               </div>
             )}
           </div>
@@ -3918,23 +3964,26 @@ const StundennachweisPage: React.FC = () => {
                 <AlertTriangle size={20} style={{ color: '#b91c1c', flexShrink: 0, marginTop: 2 }} />
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-semibold" style={{ color: '#991b1b' }}>
-                    Stundennachweis kann nicht gespeichert oder exportiert werden — {durationViolations.length} Verstoß
-                    {durationViolations.length === 1 ? '' : 'e'} gegen die Schicht- bzw. Tageslimits.
+                    {tPlural(
+                      { one: 'stn.violation.headline.one', other: 'stn.violation.headline.other' },
+                      durationViolations.length,
+                    )}
                   </p>
                   <p className="text-xs mt-1" style={{ color: '#991b1b', opacity: 0.85 }}>
-                    Eine einzelne Schicht darf höchstens 4:30 Std. dauern, der Tagesgesamt höchstens 8:30 Std.
-                    Bitte die folgenden Zeilen anpassen:
+                    {t('stn.violation.limitsHint')}
                   </p>
                   <ul className="mt-2 space-y-1 text-xs" style={{ color: '#991b1b' }}>
                     {durationViolations.map((v, idx) => {
-                      const dateLabel = `${v.weekday} ${String(v.dayIndex).padStart(2, '0')}.${String(v.date.getMonth() + 1).padStart(2, '0')}.${v.date.getFullYear()}`;
+                      const dateLabel = `${t(WEEKDAY_SHORT_KEYS_BY_JS[v.date.getDay()])} ${String(v.dayIndex).padStart(2, '0')}.${String(v.date.getMonth() + 1).padStart(2, '0')}.${v.date.getFullYear()}`;
+                      const limitSuffix = ` (${t('stn.violation.limit', { value: minsToHHMM(v.limit) })})`;
                       if (v.type === 'shift') {
                         return (
                           <li key={idx} className="flex items-start gap-2">
                             <span style={{ fontWeight: 'bold' }}>•</span>
                             <span>
-                              {dateLabel} — {v.shiftLabel} {v.von}–{v.bis}: <strong>{minsToHHMM(v.durationMinutes)} Std.</strong>
-                              {' '}(Limit {minsToHHMM(v.limit)} Std.)
+                              {dateLabel} — {t('stn.violation.shift', { number: v.shiftNumber })} {v.von}–{v.bis}:{' '}
+                              <strong>{t('stn.summary.hoursValue', { value: minsToHHMM(v.durationMinutes) })}</strong>
+                              {limitSuffix}
                             </span>
                           </li>
                         );
@@ -3943,8 +3992,9 @@ const StundennachweisPage: React.FC = () => {
                         <li key={idx} className="flex items-start gap-2">
                           <span style={{ fontWeight: 'bold' }}>•</span>
                           <span>
-                            {dateLabel} — Tagesgesamt: <strong>{minsToHHMM(v.durationMinutes)} Std.</strong>
-                            {' '}(Limit {minsToHHMM(v.limit)} Std.)
+                            {dateLabel} — {t('stn.violation.dailyTotal')}{' '}
+                            <strong>{t('stn.summary.hoursValue', { value: minsToHHMM(v.durationMinutes) })}</strong>
+                            {limitSuffix}
                           </span>
                         </li>
                       );

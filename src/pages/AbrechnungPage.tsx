@@ -45,6 +45,9 @@ interface DetailedAbrechnungData {
 
 type ViewMode = 'weekly' | 'monthly';
 
+// Stays German: this array also builds the filename of the exported Abrechnung
+// image (`abrechnung-<fahrer>-<monat>-<jahr>.png`). A filename that shifted with
+// the UI language would give the same period two different names across users.
 const MONTH_NAMES = [
   'Januar', 'Februar', 'März', 'April', 'Mai', 'Juni',
   'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember'

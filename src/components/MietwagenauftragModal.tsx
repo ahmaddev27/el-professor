@@ -7,6 +7,7 @@ import { supabase } from '../lib/supabase';
 import { useCompanySettings } from '../contexts/CompanySettingsContext';
 import type { CompanySettings } from '../types/settings';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
+import { useTranslation } from '../contexts/LanguageContext';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -446,6 +447,7 @@ const inputStyle: React.CSSProperties = {
 const MietwagenauftragModal: React.FC<Props> = ({ isOpen, onClose }) => {
   const { settings } = useCompanySettings();
   const { effectiveCompanyId: companyId } = useSuperAdmin();
+  const { t } = useTranslation();
 
   const [drivers, setDrivers] = useState<Driver[]>([]);
   const [cars, setCars] = useState<Car[]>([]);
@@ -453,6 +455,8 @@ const MietwagenauftragModal: React.FC<Props> = ({ isOpen, onClose }) => {
   const [selectedDriverId, setSelectedDriverId] = useState('');
   const [selectedCarId, setSelectedCarId] = useState('');
 
+  // Document content, not UI labels: every value here is printed on the
+  // Mietwagenauftrag, so the German defaults stay German in both languages.
   const [data, setData] = useState<MietwagenData>(() => ({
     auftragNr: generateAuftragNr(),
     datumAuftragseingang: todayStr(),
@@ -503,6 +507,7 @@ const MietwagenauftragModal: React.FC<Props> = ({ isOpen, onClose }) => {
   // Reset on open
   useEffect(() => {
     if (isOpen) {
+      // Same document defaults as the initial state above — German by design.
       setData({
         auftragNr: generateAuftragNr(),
         datumAuftragseingang: todayStr(),
@@ -576,10 +581,10 @@ const MietwagenauftragModal: React.FC<Props> = ({ isOpen, onClose }) => {
             </div>
             <div>
               <h2 className="text-xl font-semibold" style={{ color: 'var(--text-primary)' }}>
-                Mietwagenauftrag / Fahrtennachweis
+                {t('a4.mwTitle')}
               </h2>
               <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
-                Personenbeförderung — Nachweis des Auftragseingangs
+                {t('a4.mwSubtitle')}
               </p>
             </div>
           </div>
@@ -604,39 +609,39 @@ const MietwagenauftragModal: React.FC<Props> = ({ isOpen, onClose }) => {
             {/* Auftragsdaten */}
             <section>
               <h3 className="text-xs font-semibold uppercase tracking-wider mb-3" style={{ color: 'var(--text-tertiary)' }}>
-                Auftragsdaten
+                {t('a4.mwSectionOrder')}
               </h3>
               <div className="space-y-3">
                 <div>
-                  <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Auftrags-Nr.</label>
+                  <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>{t('a4.mwFieldOrderNo')}</label>
                   <input style={inputStyle} value={data.auftragNr} onChange={set('auftragNr')} />
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Datum Eingang</label>
+                    <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>{t('a4.mwFieldReceivedDate')}</label>
                     <input type="date" style={inputStyle} value={data.datumAuftragseingang} onChange={set('datumAuftragseingang')} />
                   </div>
                   <div>
-                    <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Uhrzeit</label>
+                    <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>{t('a4.mwFieldTime')}</label>
                     <input type="time" style={inputStyle} value={data.uhrzeitAuftragseingang} onChange={set('uhrzeitAuftragseingang')} />
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Fahrtbeginn Datum</label>
+                    <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>{t('a4.mwFieldTripStartDate')}</label>
                     <input type="date" style={inputStyle} value={data.fahrtbeginnDatum} onChange={set('fahrtbeginnDatum')} />
                   </div>
                   <div>
-                    <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Fahrtbeginn Uhrzeit</label>
+                    <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>{t('a4.mwFieldTripStartTime')}</label>
                     <input type="time" style={inputStyle} value={data.fahrtbeginnUhrzeit} onChange={set('fahrtbeginnUhrzeit')} />
                   </div>
                 </div>
                 <div>
-                  <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Angenommen durch</label>
+                  <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>{t('a4.mwFieldAcceptedBy')}</label>
                   <input style={inputStyle} value={data.angenommenDurch} onChange={set('angenommenDurch')} />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Art des Auftrags</label>
+                  <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>{t('a4.mwFieldOrderType')}</label>
                   <input style={inputStyle} value={data.artDesAuftrags} onChange={set('artDesAuftrags')} />
                 </div>
               </div>
@@ -645,28 +650,28 @@ const MietwagenauftragModal: React.FC<Props> = ({ isOpen, onClose }) => {
             {/* Fahrer & Fahrzeug */}
             <section>
               <h3 className="text-xs font-semibold uppercase tracking-wider mb-3" style={{ color: 'var(--text-tertiary)' }}>
-                Fahrer &amp; Fahrzeug
+                {t('a4.mwSectionDriverVehicle')}
               </h3>
               <div className="space-y-3">
                 <div>
-                  <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Fahrer</label>
+                  <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>{t('common.driver')}</label>
                   <select style={{ ...inputStyle, appearance: 'none' }} value={selectedDriverId} onChange={e => handleDriverChange(e.target.value)}>
-                    <option value="">Fahrer wählen</option>
+                    <option value="">{t('a4.mwSelectDriver')}</option>
                     {drivers.map(d => (
                       <option key={d.id} value={d.id}>{d.name}</option>
                     ))}
                   </select>
                 </div>
                 <div>
-                  <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Fahrzeug / Kennzeichen</label>
+                  <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>{t('a4.mwFieldVehiclePlate')}</label>
                   <select style={{ ...inputStyle, appearance: 'none' }} value={selectedCarId} onChange={e => handleCarChange(e.target.value)}>
-                    <option value="">Fahrzeug wählen</option>
+                    <option value="">{t('a4.mwSelectVehicle')}</option>
                     {cars.map(c => (
                       <option key={c.id} value={c.id}>{c.kennzeichen}</option>
                     ))}
                   </select>
                   {data.kennzeichen && (
-                    <p className="text-xs mt-1" style={{ color: 'var(--text-tertiary)' }}>Kennzeichen: {data.kennzeichen}</p>
+                    <p className="text-xs mt-1" style={{ color: 'var(--text-tertiary)' }}>{t('a4.mwPlateHint', { plate: data.kennzeichen })}</p>
                   )}
                 </div>
               </div>
@@ -675,20 +680,20 @@ const MietwagenauftragModal: React.FC<Props> = ({ isOpen, onClose }) => {
             {/* Fahrgast */}
             <section>
               <h3 className="text-xs font-semibold uppercase tracking-wider mb-3" style={{ color: 'var(--text-tertiary)' }}>
-                Fahrgast / Auftraggeber
+                {t('a4.mwSectionPassenger')}
               </h3>
               <div className="space-y-3">
                 <div>
-                  <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Name</label>
-                  <input style={inputStyle} value={data.fahrgast} onChange={set('fahrgast')} placeholder="Fahrgast / Auftraggeber" />
+                  <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>{t('a4.mwFieldName')}</label>
+                  <input style={inputStyle} value={data.fahrgast} onChange={set('fahrgast')} placeholder={t('a4.mwSectionPassenger')} />
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Telefon</label>
+                    <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>{t('a4.mwFieldPhone')}</label>
                     <input style={inputStyle} value={data.telefon} onChange={set('telefon')} />
                   </div>
                   <div>
-                    <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Anzahl Fahrgäste</label>
+                    <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>{t('a4.mwFieldPassengerCount')}</label>
                     <input type="number" min="1" style={inputStyle} value={data.anzahlFahrgaeste} onChange={set('anzahlFahrgaeste')} />
                   </div>
                 </div>
@@ -698,20 +703,20 @@ const MietwagenauftragModal: React.FC<Props> = ({ isOpen, onClose }) => {
             {/* Route */}
             <section>
               <h3 className="text-xs font-semibold uppercase tracking-wider mb-3" style={{ color: 'var(--text-tertiary)' }}>
-                Fahrtstrecke
+                {t('a4.mwSectionRoute')}
               </h3>
               <div className="space-y-3">
                 <div>
-                  <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Abholadresse</label>
-                  <input style={inputStyle} value={data.abholadresse} onChange={set('abholadresse')} placeholder="Straße, PLZ Ort" />
+                  <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>{t('a4.mwFieldPickup')}</label>
+                  <input style={inputStyle} value={data.abholadresse} onChange={set('abholadresse')} placeholder={t('a4.mwAddressPlaceholder')} />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Zieladresse</label>
-                  <input style={inputStyle} value={data.zieladresse} onChange={set('zieladresse')} placeholder="Straße, PLZ Ort" />
+                  <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>{t('a4.mwFieldDestination')}</label>
+                  <input style={inputStyle} value={data.zieladresse} onChange={set('zieladresse')} placeholder={t('a4.mwAddressPlaceholder')} />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Zwischenziel(e)</label>
-                  <input style={inputStyle} value={data.zwischenziele} onChange={set('zwischenziele')} placeholder="Optional" />
+                  <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>{t('a4.mwFieldStopovers')}</label>
+                  <input style={inputStyle} value={data.zwischenziele} onChange={set('zwischenziele')} placeholder={t('a4.mwOptional')} />
                 </div>
               </div>
             </section>
@@ -719,11 +724,13 @@ const MietwagenauftragModal: React.FC<Props> = ({ isOpen, onClose }) => {
             {/* Zahlung */}
             <section>
               <h3 className="text-xs font-semibold uppercase tracking-wider mb-3" style={{ color: 'var(--text-tertiary)' }}>
-                Zahlungsart / Entgelt
+                {t('a4.mwSectionPayment')}
               </h3>
               <div className="space-y-3">
                 <div>
-                  <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Zahlungsart</label>
+                  <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>{t('a4.mwFieldPaymentMethod')}</label>
+                  {/* The option is also the value, and that value is printed verbatim on the
+                      Mietwagenauftrag — so these stay German in both languages. */}
                   <select style={{ ...inputStyle, appearance: 'none' }} value={data.zahlungsart} onChange={set('zahlungsart')}>
                     {['Bargeld', 'Karte', 'Überweisung', 'Rechnung', 'Sonstiges'].map(z => (
                       <option key={z} value={z}>{z}</option>
@@ -731,13 +738,14 @@ const MietwagenauftragModal: React.FC<Props> = ({ isOpen, onClose }) => {
                   </select>
                 </div>
                 <div>
-                  <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Betrag / Entgelt (€)</label>
+                  <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>{t('a4.mwFieldFare')}</label>
                   <input type="number" min="0" step="0.01" style={inputStyle} value={data.betrag} onChange={set('betrag')} placeholder="0,00" />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Bemerkungen</label>
+                  <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>{t('a4.mwFieldRemarks')}</label>
                   <select style={{ ...inputStyle, appearance: 'none' }} value={data.bemerkungen} onChange={set('bemerkungen')}>
-                    <option value="">— keine —</option>
+                    <option value="">{t('a4.mwRemarkNone')}</option>
+                    {/* Printed verbatim on the Mietwagenauftrag — German in both languages. */}
                     {['Auslandsfahrt', 'Flughafenfahrt', 'Wartezeit', 'Sonderfahrt', 'Sonstiges'].map(b => (
                       <option key={b} value={b}>{b}</option>
                     ))}
@@ -775,7 +783,7 @@ const MietwagenauftragModal: React.FC<Props> = ({ isOpen, onClose }) => {
             onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-subtle)')}
             onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
           >
-            Schließen
+            {t('common.close')}
           </button>
           <button
             onClick={handleExport}
@@ -786,7 +794,7 @@ const MietwagenauftragModal: React.FC<Props> = ({ isOpen, onClose }) => {
             onMouseLeave={e => (e.currentTarget.style.background = 'var(--accent)')}
           >
             <Download className="w-4 h-4" />
-            {exporting ? 'Exportiere...' : 'PDF exportieren'}
+            {exporting ? t('a4.mwExporting') : t('a4.mwExportPdf')}
           </button>
         </div>
       </div>

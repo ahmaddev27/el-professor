@@ -26,35 +26,43 @@ import {
 } from '../utils/monatsplanungXlsxExport';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
+import { useTranslation } from '../contexts/LanguageContext';
+import type { TranslationKey } from '../i18n';
+
+/** A class component cannot call the hook, so the resolver arrives as a prop. */
+type Translate = (key: TranslationKey, vars?: Record<string, string | number>) => string;
+
+interface ErrorBoundaryProps { children: ReactNode; onBack: () => void; t: Translate }
 
 class StundennachweisErrorBoundary extends Component<
-  { children: ReactNode; onBack: () => void },
+  ErrorBoundaryProps,
   { error: Error | null }
 > {
-  constructor(props: { children: ReactNode; onBack: () => void }) {
+  constructor(props: ErrorBoundaryProps) {
     super(props);
     this.state = { error: null };
   }
   static getDerivedStateFromError(error: Error) { return { error }; }
   componentDidCatch(error: Error, info: ErrorInfo) { console.error('[StundennachweisPreview]', error, info); }
   render() {
+    const { t } = this.props;
     if (this.state.error) {
       return (
         <div className="fixed inset-0 z-[55] flex items-center justify-center p-4" style={{ background: 'rgba(15,23,42,0.7)' }}>
           <div className="rounded-xl shadow-2xl w-full max-w-md p-6 space-y-4" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
             <div className="flex items-center gap-2">
               <AlertTriangle size={18} style={{ color: '#f87171' }} />
-              <h3 className="text-base font-semibold" style={{ color: '#f87171' }}>Technischer Fehler im Stundennachweis Preview</h3>
+              <h3 className="text-base font-semibold" style={{ color: '#f87171' }}>{t('mp.runs.previewCrashTitle')}</h3>
             </div>
             <p className="text-xs rounded px-3 py-2.5 font-mono break-all" style={{ background: 'rgba(248,113,113,0.08)', color: '#fca5a5', border: '1px solid rgba(248,113,113,0.2)' }}>
               {this.state.error.message}
             </p>
             <div className="flex gap-2 pt-1">
               <button onClick={this.props.onBack} className="flex-1 px-3 py-2 rounded text-sm font-medium" style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}>
-                Zurück
+                {t('common.back')}
               </button>
               <button onClick={() => { this.setState({ error: null }); }} className="flex-1 px-3 py-2 rounded text-sm font-medium" style={{ background: 'rgba(248,113,113,0.12)', color: '#f87171', border: '1px solid rgba(248,113,113,0.3)' }}>
-                Neu laden
+                {t('mp.runs.reload')}
               </button>
             </div>
           </div>
@@ -88,9 +96,12 @@ interface FinalizationRecord {
   stale_reason: string | null;
 }
 
-const MONTHS_DE = [
-  'Januar', 'Februar', 'März', 'April', 'Mai', 'Juni',
-  'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember',
+// Month names are TranslationKeys: this list is module-level and t() is a hook
+// value. Every consumer resolves it.
+const MONTH_KEYS: TranslationKey[] = [
+  'doc.month.january', 'doc.month.february', 'doc.month.march', 'doc.month.april',
+  'doc.month.may', 'doc.month.june', 'doc.month.july', 'doc.month.august',
+  'doc.month.september', 'doc.month.october', 'doc.month.november', 'doc.month.december',
 ];
 
 function fmtDateTime(iso: string | null): string {
@@ -116,6 +127,7 @@ function readBoolFromJson(obj: Record<string, unknown> | null, key: string): boo
 
 export default function MonatsplanungAppliedRuns({ companyId, reloadToken, staleRunId }: Props) {
   const { user } = useAuth();
+  const { t } = useTranslation();
   const [runs, setRuns] = useState<AppliedRunSummary[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>('');
@@ -159,11 +171,11 @@ export default function MonatsplanungAppliedRuns({ companyId, reloadToken, stale
       }
       setFinalizations(finMap);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Unbekannter Fehler');
+      setError(e instanceof Error ? e.message : t('mp.unknownError'));
     } finally {
       setLoading(false);
     }
-  }, [companyId]);
+  }, [companyId, t]);
 
   useEffect(() => { void reload(); }, [reload, reloadToken]);
 
@@ -185,7 +197,7 @@ export default function MonatsplanungAppliedRuns({ companyId, reloadToken, stale
       const { validation } = await validateAppliedRun(run);
       setValidation(validation);
     } catch (e) {
-      setExportError(e instanceof Error ? e.message : 'Validierung fehlgeschlagen');
+      setExportError(e instanceof Error ? e.message : t('mp.runs.validationFailed'));
     } finally {
       setValidating(false);
     }
@@ -206,7 +218,7 @@ export default function MonatsplanungAppliedRuns({ companyId, reloadToken, stale
       setValidation(result.validation);
       if (result.blocked) setExportError(result.blocked.reason);
     } catch (e) {
-      setExportError(e instanceof Error ? e.message : 'Export fehlgeschlagen');
+      setExportError(e instanceof Error ? e.message : t('mp.runs.exportFailed'));
     } finally {
       setExporting(false);
     }
@@ -237,7 +249,7 @@ export default function MonatsplanungAppliedRuns({ companyId, reloadToken, stale
       });
       if (error) {
         console.error('Delete planning run error:', error);
-        setDeleteError(`Monatsplanung konnte nicht gelöscht werden: ${error.message}`);
+        setDeleteError(t('mp.runs.deleteFailedDetail', { error: error.message }));
         return;
       }
 
@@ -245,12 +257,9 @@ export default function MonatsplanungAppliedRuns({ companyId, reloadToken, stale
       const referenced = (data as { referenced_trips?: number } | null)?.referenced_trips ?? 0;
 
       if (action === 'archived') {
-        setDeleteSuccess(
-          `Monatsplanung wurde archiviert, da noch ${referenced} Fahrten dieser Planung zugeordnet sind. ` +
-          'Die Planung bleibt zur Nachvollziehbarkeit erhalten.',
-        );
+        setDeleteSuccess(t('mp.runs.archivedInstead', { count: referenced }));
       } else {
-        setDeleteSuccess('Monatsplanung wurde gelöscht.');
+        setDeleteSuccess(t('mp.runs.deleted'));
       }
 
       // Either way the run leaves the applied list; reload so an archived run
@@ -259,7 +268,7 @@ export default function MonatsplanungAppliedRuns({ companyId, reloadToken, stale
       await reload();
     } catch (e) {
       console.error('Delete planning run exception:', e);
-      setDeleteError('Monatsplanung konnte nicht gelöscht werden.');
+      setDeleteError(t('mp.runs.deleteFailed'));
     } finally {
       setDeleting(false);
     }
@@ -270,10 +279,10 @@ export default function MonatsplanungAppliedRuns({ companyId, reloadToken, stale
       <div className="flex items-start justify-between gap-4 mb-4">
         <div>
           <h2 className="text-base font-semibold flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
-            <Archive size={16} /> Gespeicherte Monatsplanungen
+            <Archive size={16} /> {t('mp.runs.title')}
           </h2>
           <p className="text-xs mt-1" style={{ color: 'var(--text-tertiary)' }}>
-            Read-only Ansicht angewendeter Planungen · Fahrtenbuch als XLSX exportieren.
+            {t('mp.runs.subtitle')}
           </p>
         </div>
       </div>
@@ -292,7 +301,7 @@ export default function MonatsplanungAppliedRuns({ companyId, reloadToken, stale
 
       {!loading && runs.length === 0 && !error && (
         <div className="px-3 py-6 text-center text-sm rounded-lg" style={{ background: 'var(--bg-subtle)', color: 'var(--text-tertiary)' }}>
-          Noch keine Monatsplanung angewendet.
+          {t('mp.runs.none')}
         </div>
       )}
 
@@ -331,22 +340,22 @@ export default function MonatsplanungAppliedRuns({ companyId, reloadToken, stale
               <div className="rounded-xl shadow-2xl w-full max-w-md p-6 space-y-3" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
                 <div className="flex items-center gap-2">
                   <AlertTriangle size={18} style={{ color: '#fcd34d' }} />
-                  <h3 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>Stundennachweis Preview kann nicht geöffnet werden</h3>
+                  <h3 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>{t('mp.runs.previewUnavailableTitle')}</h3>
                 </div>
                 <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>
-                  Die Daten der finalisierten Planung konnten nicht vollständig geladen werden.
-                  {!stundenRun.id && ' (Run-ID fehlt)'}
-                  {!stundenRun.company_id && ' (Unternehmens-ID fehlt)'}
+                  {t('mp.runs.previewUnavailableBody')}
+                  {!stundenRun.id && ` ${t('mp.runs.missingRunId')}`}
+                  {!stundenRun.company_id && ` ${t('mp.runs.missingCompanyId')}`}
                 </p>
                 <button onClick={() => setStundenRun(null)} className="w-full px-3 py-2 rounded text-sm font-medium" style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}>
-                  Zurück
+                  {t('common.back')}
                 </button>
               </div>
             </div>
           );
         }
         return (
-          <StundennachweisErrorBoundary onBack={() => setStundenRun(null)}>
+          <StundennachweisErrorBoundary onBack={() => setStundenRun(null)} t={t}>
             <MonatsplanungStundennachweisPreview
               run={{
                 id: stundenRun.id,
@@ -390,7 +399,7 @@ export default function MonatsplanungAppliedRuns({ companyId, reloadToken, stale
           >
             <div className="flex items-start justify-between px-5 py-4 border-b" style={{ borderColor: 'var(--border)' }}>
               <h3 className="text-base font-semibold flex items-center gap-2" style={{ color: '#991b1b' }}>
-                <Trash2 size={16} /> Monatsplanung entfernen
+                <Trash2 size={16} /> {t('mp.runs.deleteTitle')}
               </h3>
               <button onClick={() => { if (!deleting) setDeleteTarget(null); }} className="p-1 rounded" style={{ color: 'var(--text-tertiary)' }}>
                 <X size={16} />
@@ -398,12 +407,10 @@ export default function MonatsplanungAppliedRuns({ companyId, reloadToken, stale
             </div>
             <div className="px-5 py-4 space-y-3">
               <p className="text-sm" style={{ color: 'var(--text-primary)' }}>
-                Sind noch Fahrten dieser Planung zugeordnet, wird sie archiviert und bleibt nachvollziehbar.
-                Nur eine Planung ohne zugeordnete Fahrten wird endgültig gelöscht. Dieser Vorgang kann nicht
-                rückgängig gemacht werden.
+                {t('mp.runs.deleteBody')}
               </p>
               <div className="text-xs px-3 py-2 rounded-lg" style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}>
-                <span className="font-semibold">{MONTHS_DE[deleteTarget.month - 1]} {deleteTarget.year}</span>
+                <span className="font-semibold">{t(MONTH_KEYS[deleteTarget.month - 1])} {deleteTarget.year}</span>
                 {deleteTarget.file_name ? ` · ${deleteTarget.file_name}` : ''}
               </div>
               {deleteError && (
@@ -419,7 +426,7 @@ export default function MonatsplanungAppliedRuns({ companyId, reloadToken, stale
                 className="px-3 py-2 rounded-lg text-sm font-semibold disabled:opacity-50"
                 style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
               >
-                Abbrechen
+                {t('common.cancel')}
               </button>
               <button
                 onClick={() => void handleDeleteRun()}
@@ -428,7 +435,7 @@ export default function MonatsplanungAppliedRuns({ companyId, reloadToken, stale
                 style={{ background: '#b91c1c', color: '#fff' }}
               >
                 {deleting ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
-                {deleting ? 'Lösche…' : 'Endgültig löschen'}
+                {deleting ? t('common.deleting') : t('mp.runs.deleteConfirm')}
               </button>
             </div>
           </div>
@@ -446,6 +453,7 @@ function RunGroups({ runs, finalizations, onOpen, onStundennachweis, onFinalize,
   onFinalize: (run: AppliedRunSummary) => void;
   onDelete: (run: AppliedRunSummary) => void;
 }) {
+  const { t } = useTranslation();
   // Group by year-month, sort newest first
   const grouped = useMemo(() => {
     const map = new Map<string, AppliedRunSummary[]>();
@@ -469,7 +477,7 @@ function RunGroups({ runs, finalizations, onOpen, onStundennachweis, onFinalize,
               className="text-xs font-semibold uppercase tracking-widest mb-2 pb-1.5 border-b"
               style={{ color: 'var(--text-tertiary)', borderColor: 'var(--border)' }}
             >
-              {MONTHS_DE[month - 1]} {year}
+              {t(MONTH_KEYS[month - 1])} {year}
             </div>
             <div className="space-y-2">
               {group.map(run => (
@@ -499,6 +507,7 @@ function RunRow({ run, finalization, onOpen, onStundennachweis, onFinalize, onDe
   onFinalize: () => void;
   onDelete: () => void;
 }) {
+  const { t } = useTranslation();
   const apply = run.apply_summary_json ?? null;
   const summary = run.summary_json ?? null;
   const updated = readNumberFromJson(apply, 'updated_trips');
@@ -534,7 +543,7 @@ function RunRow({ run, finalization, onOpen, onStundennachweis, onFinalize, onDe
                 className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold"
                 style={{ background: 'rgba(34,197,94,0.08)', color: '#15803d' }}
               >
-                <CheckCircle2 size={9} /> Aktiv
+                <CheckCircle2 size={9} /> {t('mp.runs.statusActive')}
               </span>
             )}
             {finalization && (
@@ -544,21 +553,21 @@ function RunRow({ run, finalization, onOpen, onStundennachweis, onFinalize, onDe
                   ? { background: 'rgba(234,179,8,0.12)', color: '#92400e', border: '1px solid rgba(234,179,8,0.35)' }
                   : { background: 'rgba(34,197,94,0.1)', color: '#15803d', border: '1px solid rgba(34,197,94,0.3)' }
                 }
-                title={finalization.is_stale ? (finalization.stale_reason ?? 'Veraltet') : 'Finalisiert'}
+                title={finalization.is_stale ? (finalization.stale_reason ?? t('mp.runs.outdated')) : t('mp.runs.finalized')}
               >
                 {finalization.is_stale ? <AlertCircle size={9} /> : <CheckCircle2 size={9} />}
-                {finalization.is_stale ? 'Nicht aktuell' : 'Finalisiert'}
+                {finalization.is_stale ? t('mp.runs.notCurrent') : t('mp.runs.finalized')}
               </span>
             )}
           </div>
           <div className="flex items-center gap-4 mt-1 text-[11px]" style={{ color: 'var(--text-secondary)' }}>
             <span><Clock size={10} className="inline mr-1" />{fmtDateTime(run.applied_at)}</span>
-            {updated != null && <span>Fahrten: <strong>{updated}</strong></span>}
-            {assignedBlocks != null && <span>Blöcke: <strong>{assignedBlocks}</strong></span>}
+            {updated != null && <span>{t('mp.trips')}: <strong>{updated}</strong></span>}
+            {assignedBlocks != null && <span>{t('mp.blocks')}: <strong>{assignedBlocks}</strong></span>}
             {hasExceptions && (
               <span style={{ color: '#d97706' }}>
                 <AlertTriangle size={10} className="inline mr-1" />
-                {dienst! > 0 ? `${dienst} Dienstzeit` : ''}{dienst! > 0 && tag! > 0 ? ' · ' : ''}{tag! > 0 ? `${tag} Tageslimit` : ''}
+                {dienst! > 0 ? `${dienst} ${t('mp.workingTime')}` : ''}{dienst! > 0 && tag! > 0 ? ' · ' : ''}{tag! > 0 ? `${tag} ${t('mp.dailyLimit')}` : ''}
               </span>
             )}
           </div>
@@ -571,9 +580,9 @@ function RunRow({ run, finalization, onOpen, onStundennachweis, onFinalize, onDe
               onClick={onStundennachweis}
               className="inline-flex items-center gap-1 px-2 py-1.5 rounded text-[11px] font-semibold transition-colors hover:brightness-110"
               style={{ background: 'rgba(59,130,246,0.12)', color: '#2563eb', border: '1px solid rgba(59,130,246,0.35)' }}
-              title="Stundennachweis Preview anzeigen"
+              title={t('mp.runs.previewTooltip')}
             >
-              <CalendarClock size={12} /> Preview
+              <CalendarClock size={12} /> {t('common.preview')}
             </button>
           )}
           {run.status === 'applied' && (
@@ -586,19 +595,19 @@ function RunRow({ run, finalization, onOpen, onStundennachweis, onFinalize, onDe
                   ? { background: 'var(--bg-surface)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }
                   : { background: 'rgba(245,158,11,0.12)', color: '#b45309', border: '1px solid rgba(245,158,11,0.4)' }
               }
-              title="Finale Dokumente erstellen"
+              title={t('mp.runs.createFinalDocs')}
             >
               <Sparkles size={12} />
-              {finalization?.is_stale ? 'Neu finalisieren' : finalization ? 'Erneut finalisieren' : 'Finalisieren'}
+              {finalization?.is_stale ? t('mp.runs.refinalize') : finalization ? t('mp.runs.finalizeAgain') : t('mp.runs.finalize')}
             </button>
           )}
           <button
             onClick={onDelete}
             className="inline-flex items-center gap-1 px-2 py-1.5 rounded text-[11px] font-semibold transition-colors hover:brightness-110"
             style={{ background: 'rgba(185,28,28,0.07)', color: '#991b1b', border: '1px solid rgba(185,28,28,0.22)' }}
-            title="Plan endgültig löschen"
+            title={t('mp.runs.deletePlan')}
           >
-            <Trash2 size={12} /> Plan endgültig löschen
+            <Trash2 size={12} /> {t('mp.runs.deletePlan')}
           </button>
         </div>
       </div>
@@ -610,7 +619,7 @@ function RunRow({ run, finalization, onOpen, onStundennachweis, onFinalize, onDe
           style={{ background: 'rgba(234,179,8,0.08)', borderTop: '1px solid rgba(234,179,8,0.25)', color: '#92400e' }}
         >
           <AlertCircle size={11} />
-          Dokumente nicht aktuell — {finalization.stale_reason ?? 'Nachträgliche Änderungen vorgenommen'}. Bitte neu finalisieren.
+          {t('mp.runs.staleStrip', { reason: finalization.stale_reason ?? t('mp.runs.staleDefaultReason') })}
         </div>
       )}
     </div>
@@ -644,6 +653,7 @@ function RunDetailModal({
   onStundennachweis: () => void;
   onFinalize: () => void;
 }) {
+  const { t } = useTranslation();
   const [showTechnical, setShowTechnical] = useState(false);
 
   const apply = run.apply_summary_json ?? null;
@@ -690,7 +700,7 @@ function RunDetailModal({
         <div className="flex items-start justify-between px-5 py-4 border-b shrink-0" style={{ borderColor: 'var(--border)' }}>
           <div className="min-w-0">
             <h3 className="text-base font-semibold flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
-              <Archive size={16} /> {MONTHS_DE[run.month - 1]} {run.year}
+              <Archive size={16} /> {t(MONTH_KEYS[run.month - 1])} {run.year}
             </h3>
             <div className="text-xs mt-0.5 truncate" style={{ color: 'var(--text-tertiary)' }}>
               {run.file_name || '—'}
@@ -718,10 +728,10 @@ function RunDetailModal({
               }
               <div>
                 {finalization.is_stale
-                  ? <><strong>Dokumente nicht aktuell:</strong> {finalization.stale_reason ?? 'Nachträgliche Änderungen wurden vorgenommen.'}
-                      {' '}Bitte finale Dokumente neu erstellen.</>
-                  : <><strong>Finalisiert</strong> — {new Date(finalization.finalized_at).toLocaleString('de-DE', { dateStyle: 'medium', timeStyle: 'short' })}
-                      {' · '}{finalization.trip_count} Fahrten · {finalization.driver_count} Fahrer</>
+                  ? <><strong>{t('mp.runs.staleBannerLabel')}</strong> {finalization.stale_reason ?? t('mp.runs.staleBannerDefaultReason')}
+                      {' '}{t('mp.runs.staleBannerAction')}</>
+                  : <><strong>{t('mp.runs.finalized')}</strong> — {new Date(finalization.finalized_at).toLocaleString('de-DE', { dateStyle: 'medium', timeStyle: 'short' })}
+                      {' · '}{t('mp.runs.finalizedCounts', { trips: finalization.trip_count, drivers: finalization.driver_count })}</>
                 }
               </div>
             </div>
@@ -731,22 +741,22 @@ function RunDetailModal({
             <div className="px-3 py-2 rounded-lg text-xs flex items-center gap-2"
               style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.3)', color: '#92400e' }}>
               <AlertTriangle size={12} className="shrink-0" />
-              Noch nicht finalisiert. Klicken Sie auf „Finale Dokumente erstellen" um Fahrtenbuch und Stundennachweise aus demselben Snapshot zu generieren.
+              {t('mp.runs.notFinalizedHint')}
             </div>
           )}
 
           {/* Main info — user-relevant fields */}
           <dl className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
-            <Row label="Monat / Jahr" value={`${MONTHS_DE[run.month - 1]} ${run.year}`} />
-            <Row label="Status" value={run.status === 'applied' ? 'Aktiv' : run.status === 'replaced' ? 'Ersetzt' : run.status === 'archived' ? 'Archiviert' : run.status} />
-            <Row label="Angewendet am" value={fmtDateTime(run.applied_at)} />
-            <Row label="Dateiname" value={<span className="text-xs truncate block" title={run.file_name}>{run.file_name || '—'}</span>} />
-            <Row label="Zugewiesene Fahrten" value={expectedAssigned ?? '—'} />
-            <Row label="Zugewiesene Blöcke" value={assignedBlocks ?? '—'} />
-            <Row label="Manuelle Ausnahmen" value={manualExc ?? 0} />
-            <Row label="Dienstzeit-Ausnahmen" value={dienst ?? 0} />
-            <Row label="Tageslimit-Ausnahmen" value={tag ?? 0} />
-            <Row label="Ein Fahrzeug pro Fahrer/Tag" value={oneVehiclePerDay == null ? '—' : oneVehiclePerDay ? 'Ja' : 'Nein'} />
+            <Row label={t('mp.runs.monthYear')} value={`${t(MONTH_KEYS[run.month - 1])} ${run.year}`} />
+            <Row label={t('common.status')} value={run.status === 'applied' ? t('mp.runs.statusActive') : run.status === 'replaced' ? t('mp.runs.statusReplaced') : run.status === 'archived' ? t('mp.runs.statusArchived') : run.status} />
+            <Row label={t('mp.appliedAt')} value={fmtDateTime(run.applied_at)} />
+            <Row label={t('mp.runs.fileName')} value={<span className="text-xs truncate block" title={run.file_name}>{run.file_name || '—'}</span>} />
+            <Row label={t('mp.assignedTrips')} value={expectedAssigned ?? '—'} />
+            <Row label={t('mp.assignedBlocks')} value={assignedBlocks ?? '—'} />
+            <Row label={t('mp.manualExceptions')} value={manualExc ?? 0} />
+            <Row label={t('mp.workingTimeExceptions')} value={dienst ?? 0} />
+            <Row label={t('mp.dailyLimitExceptions')} value={tag ?? 0} />
+            <Row label={t('mp.oneVehiclePerDriverDay')} value={oneVehiclePerDay == null ? '—' : oneVehiclePerDay ? t('common.yes') : t('common.no')} />
           </dl>
 
           {/* Technical details (collapsed) */}
@@ -757,25 +767,25 @@ function RunDetailModal({
               onClick={() => setShowTechnical(v => !v)}
             >
               <Hash size={11} />
-              {showTechnical ? 'Technische Details ausblenden' : 'Technische Details anzeigen'}
+              {showTechnical ? t('mp.runs.hideTechnical') : t('mp.runs.showTechnical')}
               <span className="ml-0.5">{showTechnical ? '▲' : '▼'}</span>
             </button>
             {showTechnical && (
               <dl className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm mt-2 pt-2 border-t" style={{ borderColor: 'var(--border)' }}>
-                <Row label="Planning Run ID" value={<span className="font-mono text-xs break-all">{run.id}</span>} />
-                <Row label="Importiert am" value={fmtDateTime(run.imported_at)} />
-                <Row label="Applied by" value={<span className="font-mono text-xs">{run.applied_by ?? '—'}</span>} />
-                <Row label="Block-Trenner" value={blockSep != null ? `${blockSep} Min` : '—'} />
-                <Row label="Min Blockdauer" value={minBlock != null ? `${minBlock} Min${minBlock === 0 ? ' (aus)' : ''}` : '—'} />
-                <Row label="Max Blockdauer" value={maxBlock != null ? `${maxBlock} Min` : '—'} />
-                <Row label="Vehicle Blocks gesamt" value={vehicleBlocks ?? '—'} />
+                <Row label={t('mp.planningRunId')} value={<span className="font-mono text-xs break-all">{run.id}</span>} />
+                <Row label={t('mp.runs.importedAt')} value={fmtDateTime(run.imported_at)} />
+                <Row label={t('mp.appliedBy')} value={<span className="font-mono text-xs">{run.applied_by ?? '—'}</span>} />
+                <Row label={t('mp.planner.blockSeparator')} value={blockSep != null ? `${blockSep} ${t('mp.minShortNoDot')}` : '—'} />
+                <Row label={t('mp.planner.minBlockDuration')} value={minBlock != null ? `${minBlock} ${t('mp.minShortNoDot')}${minBlock === 0 ? ` ${t('mp.runs.offSuffix')}` : ''}` : '—'} />
+                <Row label={t('mp.planner.maxBlockDuration')} value={maxBlock != null ? `${maxBlock} ${t('mp.minShortNoDot')}` : '—'} />
+                <Row label={t('mp.runs.vehicleBlocksTotal')} value={vehicleBlocks ?? '—'} />
               </dl>
             )}
           </div>
 
           {validating && (
             <div className="px-3 py-2 rounded-lg text-sm flex items-center gap-2" style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)' }}>
-              <Loader2 size={14} className="animate-spin" /> Validiere Daten…
+              <Loader2 size={14} className="animate-spin" /> {t('mp.runs.validating')}
             </div>
           )}
 
@@ -790,15 +800,15 @@ function RunDetailModal({
             >
               <div className="font-semibold inline-flex items-center gap-1">
                 {validation.ok ? <CheckCircle2 size={13} /> : <AlertTriangle size={13} />}
-                {validation.ok ? 'Export bereit' : 'Abweichungen erkannt'}
+                {validation.ok ? t('mp.runs.exportReady') : t('mp.runs.deviationsDetected')}
               </div>
               <div className="grid grid-cols-2 gap-x-3 gap-y-0.5">
-                <div>Fahrten gesamt: <strong>{validation.total_rows}</strong></div>
-                <div>Abgeschlossen: <strong>{validation.abgeschlossen_total}</strong></div>
-                <div>Mit Zuweisung: <strong>{validation.abgeschlossen_with_assignment}</strong></div>
-                <div>Storniert: <strong>{validation.storniert_total}</strong></div>
-                <div>Manuelle Ausnahmen: <strong>{validation.exceptions_in_run}</strong></div>
-                <div>Fahrername-Spalte: <strong>{validation.driver_column ?? '—'}</strong></div>
+                <div>{t('mp.totalTrips')}: <strong>{validation.total_rows}</strong></div>
+                <div>{t('mp.completed')}: <strong>{validation.abgeschlossen_total}</strong></div>
+                <div>{t('mp.runs.withAssignment')}: <strong>{validation.abgeschlossen_with_assignment}</strong></div>
+                <div>{t('mp.canceled')}: <strong>{validation.storniert_total}</strong></div>
+                <div>{t('mp.manualExceptions')}: <strong>{validation.exceptions_in_run}</strong></div>
+                <div>{t('mp.runs.driverColumn')}: <strong>{validation.driver_column ?? '—'}</strong></div>
               </div>
               {actionableWarnings.length > 0 && (
                 <ul className="mt-1 list-disc pl-4">
@@ -809,7 +819,7 @@ function RunDetailModal({
           )}
 
           <div className="rounded-lg px-3 py-3" style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)' }}>
-            <div className="text-xs font-semibold mb-2" style={{ color: 'var(--text-primary)' }}>Exportformat</div>
+            <div className="text-xs font-semibold mb-2" style={{ color: 'var(--text-primary)' }}>{t('mp.runs.exportFormat')}</div>
             <div className="flex flex-col gap-1.5 text-sm">
               <label className="flex items-start gap-2 cursor-pointer">
                 <input
@@ -822,9 +832,9 @@ function RunDetailModal({
                   disabled={exporting}
                 />
                 <span>
-                  <span className="font-semibold" style={{ color: 'var(--text-primary)' }}>Originalformat</span>
+                  <span className="font-semibold" style={{ color: 'var(--text-primary)' }}>{t('mp.runs.modeOriginal')}</span>
                   <span className="block text-xs" style={{ color: 'var(--text-tertiary)' }}>
-                    Exakt das Original-Fahrtenbuch. Nur die Spalte „Fahrername" wird bei abgeschlossenen Fahrten durch den zugewiesenen Fahrer ersetzt. Stornierte Fahrten bleiben unverändert.
+                    {t('mp.runs.modeOriginalDesc')}
                   </span>
                 </span>
               </label>
@@ -839,9 +849,9 @@ function RunDetailModal({
                   disabled={exporting}
                 />
                 <span>
-                  <span className="font-semibold" style={{ color: 'var(--text-primary)' }}>Auditformat</span>
+                  <span className="font-semibold" style={{ color: 'var(--text-primary)' }}>{t('mp.runs.modeAudit')}</span>
                   <span className="block text-xs" style={{ color: 'var(--text-tertiary)' }}>
-                    Original-Fahrtenbuch wie oben + zusätzliches Sheet „Planung_Audit" mit Original Fahrer, Zugewiesenem Fahrer, Assignment Source, Planning Run ID, Block ID und Ausnahme-Flags.
+                    {t('mp.runs.modeAuditDesc')}
                   </span>
                 </span>
               </label>
@@ -863,9 +873,9 @@ function RunDetailModal({
                 disabled={exporting}
                 className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold disabled:opacity-50"
                 style={{ background: 'rgba(59,130,246,0.15)', color: '#1d4ed8', border: '1px solid rgba(59,130,246,0.45)' }}
-                title="Stundennachweis Preview anzeigen"
+                title={t('mp.runs.previewTooltip')}
               >
-                <CalendarClock size={13} /> Stundennachweis Preview
+                <CalendarClock size={13} /> {t('mp.stundennachweisPreview')}
               </button>
             )}
             {run.status === 'applied' && (
@@ -874,10 +884,10 @@ function RunDetailModal({
                 disabled={exporting}
                 className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-bold disabled:opacity-50 transition-all hover:brightness-110"
                 style={{ background: finalization?.is_stale ? 'rgba(234,179,8,0.2)' : 'rgba(245,158,11,0.2)', color: '#b45309', border: '1px solid rgba(245,158,11,0.5)' }}
-                title="Finale Dokumente aus aktuellem Snapshot erstellen"
+                title={t('mp.runs.createFinalDocsTooltip')}
               >
                 <Sparkles size={13} />
-                {finalization?.is_stale ? 'Finale Dokumente neu erstellen' : finalization ? 'Erneut finalisieren' : 'Finale Dokumente erstellen'}
+                {finalization?.is_stale ? t('mp.runs.recreateFinalDocs') : finalization ? t('mp.runs.finalizeAgain') : t('mp.runs.createFinalDocs')}
               </button>
             )}
             <button
@@ -886,17 +896,17 @@ function RunDetailModal({
               className="px-3 py-2 rounded-lg text-sm font-semibold disabled:opacity-50"
               style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
             >
-              Schließen
+              {t('common.close')}
             </button>
             <button
               onClick={onExport}
               disabled={exporting || validating || !canExport}
               className="inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold disabled:opacity-50"
               style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
-              title="Rohdaten-Export (nicht final) — für finale Dokumente bitte Finale Dokumente erstellen verwenden"
+              title={t('mp.runs.rawExportTooltip')}
             >
               {exporting ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
-              {exporting ? 'Exportiere…' : 'Rohdaten-Export (nicht final)'}
+              {exporting ? t('mp.runs.exporting') : t('mp.runs.rawExport')}
             </button>
           </div>
         </div>

@@ -20,10 +20,15 @@ import MonatsplanungAppliedRuns from '../components/MonatsplanungAppliedRuns';
 import HistoricalReconciliationWizard from '../components/HistoricalReconciliationWizard';
 import HistoricalWorkingHoursWizard from '../components/HistoricalWorkingHoursWizard';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
+import { useTranslation } from '../contexts/LanguageContext';
+import type { TranslationKey } from '../i18n';
 
-const MONTHS_DE = [
-  'Januar', 'Februar', 'März', 'April', 'Mai', 'Juni',
-  'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember',
+// Month names are TranslationKeys: this list is module-level and t() is a hook
+// value. Every consumer resolves it.
+const MONTH_KEYS: TranslationKey[] = [
+  'doc.month.january', 'doc.month.february', 'doc.month.march', 'doc.month.april',
+  'doc.month.may', 'doc.month.june', 'doc.month.july', 'doc.month.august',
+  'doc.month.september', 'doc.month.october', 'doc.month.november', 'doc.month.december',
 ];
 
 const BATCH_SIZE = 1000;
@@ -47,13 +52,19 @@ function formatDate(d: string): string {
   return m ? `${m[3]}.${m[2]}.${m[1]}` : d;
 }
 
-function splitReasonLabel(reason: string, blockSeparatorMin: number, maxBlockMin: number): string {
-  if (reason === 'gap_gt_60') return `Gap > ${blockSeparatorMin} Min.`;
+// `reason` is a Phase 1 split code — data. Only the rendered label is translated.
+function splitReasonLabel(
+  reason: string,
+  blockSeparatorMin: number,
+  maxBlockMin: number,
+  t: (key: TranslationKey, vars?: Record<string, string | number>) => string,
+): string {
+  if (reason === 'gap_gt_60') return t('mp.planner.splitGap', { minutes: blockSeparatorMin });
   if (reason === 'max_duration_4_5h') {
-    if (maxBlockMin % 60 === 0) return `Max. ${maxBlockMin / 60}h`;
-    return `Max. ${maxBlockMin} Min`;
+    if (maxBlockMin % 60 === 0) return t('mp.planner.splitMaxHours', { hours: maxBlockMin / 60 });
+    return t('mp.planner.splitMaxMinutes', { minutes: maxBlockMin });
   }
-  if (reason === 'end_of_vehicle_day') return 'Ende Tag';
+  if (reason === 'end_of_vehicle_day') return t('mp.planner.splitEndOfDay');
   return reason;
 }
 
@@ -81,6 +92,7 @@ async function fetchAllTripsForImport(companyId: string, importId: string): Prom
 
 export default function CompanyPlannerPage() {
   const { effectiveCompanyId: companyId } = useSuperAdmin();
+  const { t } = useTranslation();
   const now = new Date();
   const [planningMode, setPlanningMode] = useState<'selection' | 'new_month' | 'historical' | 'hist_mode_selection' | 'historical_reconciliation' | 'hist_working_hours'>('selection');
   const [reconciliationMode, setReconciliationMode] = useState<'brutto_salary' | 'working_hours' | null>(null);
@@ -140,11 +152,11 @@ export default function CompanyPlannerPage() {
 
   const handleRun = async () => {
     if (!companyId) {
-      setError('Keine Firma ausgewählt.');
+      setError(t('mp.planner.noCompany'));
       return;
     }
     if (!selectedImportId) {
-      setError('Bitte zuerst einen Fahrtenbuch-Import auswählen.');
+      setError(t('mp.planner.noImportSelected'));
       return;
     }
     setRunning(true);
@@ -161,29 +173,29 @@ export default function CompanyPlannerPage() {
 
       // Pre-compute actual ride timestamps from raw_data_json so Phase 1 can
       // sort and group by real calendar dates instead of service date + HH:MM.
-      const phase1Trips: Phase1Trip[] = rawTrips.map(t => {
-        if (t.is_canceled) {
+      const phase1Trips: Phase1Trip[] = rawTrips.map(trip => {
+        if (trip.is_canceled) {
           return {
-            id: t.id,
-            trip_date: t.trip_date,
-            start_time: t.start_time,
-            end_time: t.end_time,
-            car_id: t.car_id,
-            car_identifier: t.car_identifier,
+            id: trip.id,
+            trip_date: trip.trip_date,
+            start_time: trip.start_time,
+            end_time: trip.end_time,
+            car_id: trip.car_id,
+            car_identifier: trip.car_identifier,
             is_canceled: true,
-            source_row_index: t.source_row_index,
+            source_row_index: trip.source_row_index,
           };
         }
-        const rw = resolveActualRideWindow(t);
+        const rw = resolveActualRideWindow(trip);
         return {
-          id: t.id,
-          trip_date: t.trip_date,
-          start_time: t.start_time,
-          end_time: t.end_time,
-          car_id: t.car_id,
-          car_identifier: t.car_identifier,
+          id: trip.id,
+          trip_date: trip.trip_date,
+          start_time: trip.start_time,
+          end_time: trip.end_time,
+          car_id: trip.car_id,
+          car_identifier: trip.car_identifier,
           is_canceled: false,
-          source_row_index: t.source_row_index,
+          source_row_index: trip.source_row_index,
           actual_start_ms: rw.actualStartMs > 0 ? rw.actualStartMs : undefined,
           actual_end_ms:   rw.actualEndMs   > 0 ? rw.actualEndMs   : undefined,
         };
@@ -198,17 +210,17 @@ export default function CompanyPlannerPage() {
 
       const names = new Set<string>();
       const ids = new Set<string>();
-      for (const t of rawTrips) {
-        if (t.is_canceled) continue;
-        if (t.original_driver_name && t.original_driver_name.trim()) {
-          names.add(t.original_driver_name.trim());
+      for (const trip of rawTrips) {
+        if (trip.is_canceled) continue;
+        if (trip.original_driver_name && trip.original_driver_name.trim()) {
+          names.add(trip.original_driver_name.trim());
         }
-        if (t.original_driver_id) ids.add(t.original_driver_id);
+        if (trip.original_driver_id) ids.add(trip.original_driver_id);
       }
       setOriginalDriverNames(Array.from(names));
       setOriginalDriverIds(Array.from(ids));
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Unbekannter Fehler');
+      setError(e instanceof Error ? e.message : t('mp.unknownError'));
     } finally {
       setRunning(false);
     }
@@ -218,21 +230,21 @@ export default function CompanyPlannerPage() {
     <div className="p-6 max-w-7xl mx-auto">
       <div className="mb-6">
         <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>
-          Monatsplanung
+          {t('mp.title')}
         </h1>
         {planningMode === 'selection' && (
           <p className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>
-            Wähle einen Planungsmodus aus.
+            {t('mp.planner.pickMode')}
           </p>
         )}
         {planningMode === 'new_month' && (
           <p className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>
-            Phase 1: Fahrzeug-Blöcke
+            {t('mp.planner.phase1Title')}
           </p>
         )}
         {planningMode === 'historical' && (
           <p className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>
-            Historischer Steuerberater-Abgleich
+            {t('mp.planner.historicalTitle')}
           </p>
         )}
       </div>
@@ -250,11 +262,11 @@ export default function CompanyPlannerPage() {
                 <CalendarDays size={22} style={{ color: '#2563eb' }} />
               </div>
               <h2 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>
-                Neue Monatsplanung
+                {t('mp.planner.newPlanTitle')}
               </h2>
             </div>
             <p className="text-sm leading-relaxed flex-1" style={{ color: 'var(--text-secondary)' }}>
-              Für aktuelle oder zukünftige Monate. Fahrten importieren, Planung erstellen, finale Fahrtenbücher und Stundennachweise erzeugen.
+              {t('mp.planner.newPlanDesc')}
             </p>
             <button
               onClick={() => setPlanningMode('new_month')}
@@ -262,7 +274,7 @@ export default function CompanyPlannerPage() {
               style={{ background: '#2563eb', color: '#fff' }}
             >
               <Play size={15} />
-              Neue Planung starten
+              {t('mp.planner.newPlanStart')}
             </button>
           </div>
 
@@ -276,11 +288,11 @@ export default function CompanyPlannerPage() {
                 <History size={22} style={{ color: '#7c3aed' }} />
               </div>
               <h2 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>
-                Alter Monat / Steuerberater-Abgleich
+                {t('mp.planner.oldMonthTitle')}
               </h2>
             </div>
             <p className="text-sm leading-relaxed flex-1" style={{ color: 'var(--text-secondary)' }}>
-              Für bereits gemeldete Monate. Steuerberater-Zielwerte eingeben und Stundennachweise exakt dagegen abgleichen.
+              {t('mp.planner.oldMonthDesc')}
             </p>
             <button
               onClick={() => setPlanningMode('hist_mode_selection')}
@@ -288,7 +300,7 @@ export default function CompanyPlannerPage() {
               style={{ background: '#7c3aed', color: '#fff' }}
             >
               <History size={15} />
-              Historischen Abgleich starten
+              {t('mp.planner.historicalStart')}
             </button>
           </div>
         </div>
@@ -308,15 +320,15 @@ export default function CompanyPlannerPage() {
             style={{ color: 'var(--text-secondary)' }}
           >
             <ArrowLeft size={15} />
-            Zurück zur Auswahl
+            {t('mp.planner.backToSelection')}
           </button>
 
           <div className="mb-6">
             <h2 className="text-xl font-bold mb-1" style={{ color: 'var(--text-primary)' }}>
-              Art des historischen Abgleichs wählen
+              {t('mp.planner.histModeTitle')}
             </h2>
             <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-              Wählen Sie, ob der Abgleich über Brutto-Gehälter oder über Arbeitsstunden/Lohnarten erfolgen soll.
+              {t('mp.planner.histModeDesc')}
             </p>
           </div>
 
@@ -332,18 +344,18 @@ export default function CompanyPlannerPage() {
                 </div>
                 <div className="flex flex-col gap-1">
                   <h3 className="text-base font-bold" style={{ color: 'var(--text-primary)' }}>
-                    Mit Brutto-Gehältern
+                    {t('mp.planner.bruttoTitle')}
                   </h3>
                   <span
                     className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold self-start"
                     style={{ background: 'rgba(21,128,61,0.1)', color: '#15803d' }}
                   >
-                    Aktuell verfügbar
+                    {t('mp.planner.badgeAvailable')}
                   </span>
                 </div>
               </div>
               <p className="text-sm leading-relaxed flex-1" style={{ color: 'var(--text-secondary)' }}>
-                Verwenden Sie diese Option, wenn Sie pro Fahrer ein exaktes Ziel-Brutto eingeben möchten. Das System verteilt Fahrten und ergänzt fehlende Beträge über Ausgleichsstunden, damit das finale Brutto erreicht wird.
+                {t('mp.planner.bruttoDesc')}
               </p>
               <button
                 onClick={() => {
@@ -354,7 +366,7 @@ export default function CompanyPlannerPage() {
                 style={{ background: '#7c3aed', color: '#fff' }}
               >
                 <Euro size={15} />
-                Mit Brutto-Gehältern starten
+                {t('mp.planner.bruttoStart')}
               </button>
             </div>
 
@@ -369,18 +381,18 @@ export default function CompanyPlannerPage() {
                 </div>
                 <div className="flex flex-col gap-1">
                   <h3 className="text-base font-bold" style={{ color: 'var(--text-primary)' }}>
-                    Mit Arbeitsstunden
+                    {t('mp.planner.hoursTitle')}
                   </h3>
                   <span
                     className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold self-start"
                     style={{ background: 'rgba(37,99,235,0.1)', color: '#1d4ed8' }}
                   >
-                    Neu
+                    {t('mp.planner.badgeNew')}
                   </span>
                 </div>
               </div>
               <p className="text-sm leading-relaxed flex-1" style={{ color: 'var(--text-secondary)' }}>
-                Verwenden Sie diese Option, wenn Sie die Werte aus der Lohnabrechnung pro Lohnart exakt nachbauen möchten, z.B. Stundenlohn, Nachtzuschlag 25%, Nachtzuschlag 40% und Sonntagszuschlag.
+                {t('mp.planner.hoursDesc')}
               </p>
               <button
                 onClick={() => {
@@ -391,7 +403,7 @@ export default function CompanyPlannerPage() {
                 style={{ background: '#2563eb', color: '#fff' }}
               >
                 <ListChecks size={15} />
-                Mit Arbeitsstunden starten
+                {t('mp.planner.hoursStart')}
               </button>
             </div>
           </div>
@@ -400,8 +412,8 @@ export default function CompanyPlannerPage() {
             className="rounded-xl px-4 py-3 text-xs"
             style={{ background: 'rgba(124,58,237,0.06)', border: '1px solid rgba(124,58,237,0.15)', color: 'var(--text-secondary)' }}
           >
-            <span className="font-semibold" style={{ color: 'var(--text-primary)' }}>Hinweis:</span>{' '}
-            Der Brutto-Modus gleicht gegen ein finales Brutto ab. Der Arbeitsstunden-Modus wird später die einzelnen Lohnarten aus der Lohnabrechnung exakt abgleichen.
+            <span className="font-semibold" style={{ color: 'var(--text-primary)' }}>{t('mp.planner.noteLabel')}</span>{' '}
+            {t('mp.planner.histModeHint')}
           </div>
         </div>
       )}
@@ -420,7 +432,7 @@ export default function CompanyPlannerPage() {
             style={{ color: 'var(--text-secondary)' }}
           >
             <ArrowLeft size={15} />
-            Zurück zur Auswahl
+            {t('mp.planner.backToSelection')}
           </button>
 
       <div
@@ -431,7 +443,7 @@ export default function CompanyPlannerPage() {
           <div>
             <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5"
               style={{ color: 'var(--text-tertiary)' }}>
-              Monat
+              {t('common.month')}
             </label>
             <select
               value={month}
@@ -439,15 +451,15 @@ export default function CompanyPlannerPage() {
               className="w-full px-3 py-2 rounded-lg text-sm"
               style={{ background: 'var(--bg-input)', color: 'var(--text-primary)', border: '1px solid var(--border)' }}
             >
-              {MONTHS_DE.map((m, i) => (
-                <option key={i} value={i + 1}>{m}</option>
+              {MONTH_KEYS.map((key, i) => (
+                <option key={key} value={i + 1}>{t(key)}</option>
               ))}
             </select>
           </div>
           <div>
             <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5"
               style={{ color: 'var(--text-tertiary)' }}>
-              Jahr
+              {t('mp.planner.year')}
             </label>
             <select
               value={year}
@@ -463,7 +475,7 @@ export default function CompanyPlannerPage() {
           <div className="md:col-span-2">
             <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5"
               style={{ color: 'var(--text-tertiary)' }}>
-              Fahrtenbuch-Datei / Import
+              {t('mp.planner.importFile')}
             </label>
             <select
               value={selectedImportId}
@@ -473,11 +485,11 @@ export default function CompanyPlannerPage() {
               style={{ background: 'var(--bg-input)', color: 'var(--text-primary)', border: '1px solid var(--border)' }}
             >
               {filteredImports.length === 0 ? (
-                <option value="">Kein Import für {MONTHS_DE[month - 1]} {year} gefunden</option>
+                <option value="">{t('mp.planner.noImportFound', { month: t(MONTH_KEYS[month - 1]), year })}</option>
               ) : (
                 filteredImports.map(i => (
                   <option key={i.id} value={i.id}>
-                    {i.file_name} ({i.row_count} Zeilen, {new Date(i.imported_at).toLocaleDateString('de-DE')})
+                    {i.file_name} ({t('mp.planner.importRows', { rows: i.row_count })}, {new Date(i.imported_at).toLocaleDateString('de-DE')})
                   </option>
                 ))
               )}
@@ -493,11 +505,11 @@ export default function CompanyPlannerPage() {
             style={{ background: 'var(--primary, #2563eb)', color: 'var(--primary-contrast, #fff)' }}
           >
             <Play size={16} />
-            {running ? 'Lade Fahrten…' : 'Fahrzeug-Blöcke erstellen'}
+            {running ? t('mp.planner.loadingTrips') : t('mp.planner.buildBlocks')}
           </button>
           <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg" style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)' }}>
             <span className="text-xs font-semibold" style={{ color: 'var(--text-secondary)' }}>
-              Block-Trenner:
+              {t('mp.planner.blockSeparator')}:
             </span>
             <input
               type="number"
@@ -512,11 +524,11 @@ export default function CompanyPlannerPage() {
               className="w-16 px-2 py-1 rounded text-sm text-right"
               style={{ background: 'var(--bg-input)', color: 'var(--text-primary)', border: '1px solid var(--border)' }}
             />
-            <span className="text-xs" style={{ color: 'var(--text-tertiary)' }}>Min.</span>
+            <span className="text-xs" style={{ color: 'var(--text-tertiary)' }}>{t('mp.minShort')}</span>
           </div>
           <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg" style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)' }}>
             <span className="text-xs font-semibold" style={{ color: 'var(--text-secondary)' }}>
-              Min Blockdauer:
+              {t('mp.planner.minBlockDuration')}:
             </span>
             <input
               type="number"
@@ -536,12 +548,12 @@ export default function CompanyPlannerPage() {
               style={{ background: 'var(--bg-input)', color: 'var(--text-primary)', border: '1px solid var(--border)' }}
             />
             <span className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
-              Min.{minBlockDuration === 0 ? ' (deaktiviert)' : ''}
+              {t('mp.minShort')}{minBlockDuration === 0 ? ` ${t('mp.planner.disabledSuffix')}` : ''}
             </span>
           </div>
           <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg" style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)' }}>
             <span className="text-xs font-semibold" style={{ color: 'var(--text-secondary)' }}>
-              Max Blockdauer:
+              {t('mp.planner.maxBlockDuration')}:
             </span>
             <input
               type="number"
@@ -560,11 +572,11 @@ export default function CompanyPlannerPage() {
               className="w-20 px-2 py-1 rounded text-sm text-right"
               style={{ background: 'var(--bg-input)', color: 'var(--text-primary)', border: '1px solid var(--border)' }}
             />
-            <span className="text-xs" style={{ color: 'var(--text-tertiary)' }}>Min.</span>
+            <span className="text-xs" style={{ color: 'var(--text-tertiary)' }}>{t('mp.minShort')}</span>
           </div>
           <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg" style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)' }}>
             <span className="text-xs font-semibold" style={{ color: 'var(--text-secondary)' }}>
-              Fahrzeugwechsel-Puffer:
+              {t('mp.vehicleSwitchBuffer')}:
             </span>
             <input
               type="number"
@@ -579,17 +591,24 @@ export default function CompanyPlannerPage() {
               className="w-16 px-2 py-1 rounded text-sm text-right"
               style={{ background: 'var(--bg-input)', color: 'var(--text-primary)', border: '1px solid var(--border)' }}
             />
-            <span className="text-xs" style={{ color: 'var(--text-tertiary)' }}>Min.</span>
+            <span className="text-xs" style={{ color: 'var(--text-tertiary)' }}>{t('mp.minShort')}</span>
           </div>
           <div className="text-xs flex items-center gap-1.5" style={{ color: 'var(--text-tertiary)' }}>
             <Info size={13} />
-            Block-Trenner Default {VEHICLE_BLOCK_GAP_MINUTES} Min · Min Blockdauer Default {MIN_VEHICLE_BLOCK_DURATION_MINUTES} Min (0 = aus) · Max Blockdauer Default {DEFAULT_MAX_VEHICLE_BLOCK_DURATION_MINUTES} Min (4,5h, Bereich {MAX_BLOCK_DURATION_LOWER_BOUND}–{MAX_BLOCK_DURATION_UPPER_BOUND} Min) · Fahrzeugwechsel-Puffer Default {DEFAULT_VEHICLE_SWITCH_BUFFER_MINUTES} Min.
+            {t('mp.planner.defaultsHint', {
+              gap: VEHICLE_BLOCK_GAP_MINUTES,
+              minBlock: MIN_VEHICLE_BLOCK_DURATION_MINUTES,
+              maxBlock: DEFAULT_MAX_VEHICLE_BLOCK_DURATION_MINUTES,
+              lower: MAX_BLOCK_DURATION_LOWER_BOUND,
+              upper: MAX_BLOCK_DURATION_UPPER_BOUND,
+              buffer: DEFAULT_VEHICLE_SWITCH_BUFFER_MINUTES,
+            })}
           </div>
           <div className="text-xs flex items-start gap-1.5 mt-1 px-3 py-2 rounded-lg w-full" style={{ background: 'rgba(37,99,235,0.06)', color: '#1e40af', border: '1px solid rgba(37,99,235,0.18)' }}>
             <Info size={13} className="shrink-0 mt-0.5" />
             <span>
-              <strong>Sicherheitsregeln aktiv:</strong> Fahrzeugwechsel-Puffer {vehicleSwitchBuffer} Min · Ein Fahrzeug pro Fahrer/Tag (konfigurierbar in Phase 3).
-              Diese Regeln helfen, spätere Konflikte in den finalen Dokumenten zu vermeiden. Mindestabstand, wenn ein Fahrer zwischen zwei verschiedenen Fahrzeugen wechselt.
+              <strong>{t('mp.planner.safetyRulesLabel')}</strong>{' '}
+              {t('mp.planner.safetyRulesBody', { buffer: vehicleSwitchBuffer })}
             </span>
           </div>
         </div>
@@ -635,7 +654,7 @@ export default function CompanyPlannerPage() {
             vehicleSwitchBufferMinutes={vehicleSwitchBuffer}
             sourceFileName={filteredImports.find(i => i.id === selectedImportId)?.file_name ?? ''}
             companyId={companyId}
-            onApplied={() => setAppliedRunsReloadToken(t => t + 1)}
+            onApplied={() => setAppliedRunsReloadToken(token => token + 1)}
           />
         </div>
       )}
@@ -652,6 +671,7 @@ export default function CompanyPlannerPage() {
 }
 
 function BlockStatusBanner({ result }: { result: Phase1Result }) {
+  const { t } = useTranslation();
   const s = result.summary;
   const observedMax = s.observed_max_block_duration_minutes;
   const hasProblems = s.coverage_issues > 0 || observedMax > s.max_block_duration_minutes;
@@ -667,11 +687,14 @@ function BlockStatusBanner({ result }: { result: Phase1Result }) {
     >
       <CheckCircle2 size={16} style={{ color: '#15803d', flexShrink: 0 }} />
       <span className="text-sm">
-        <span className="font-semibold" style={{ color: '#15803d' }}>Fahrzeug-Blöcke wurden erstellt.</span>
+        <span className="font-semibold" style={{ color: '#15803d' }}>{t('mp.planner.blocksCreated')}</span>
         {' '}
         <span style={{ color: 'var(--text-secondary)' }}>
-          {s.blocks_total} Blöcke · {s.vehicles} Fahrzeuge · {s.abgeschlossen} Fahrten.
-          Sie können mit der Planung fortfahren.
+          {t('mp.planner.blocksCreatedDetail', {
+            blocks: s.blocks_total,
+            vehicles: s.vehicles,
+            trips: s.abgeschlossen,
+          })}
         </span>
       </span>
     </div>
@@ -679,6 +702,7 @@ function BlockStatusBanner({ result }: { result: Phase1Result }) {
 }
 
 function ResultPanels({ result, blockSeparatorMin, maxBlockMin }: { result: Phase1Result; blockSeparatorMin: number; maxBlockMin: number }) {
+  const { t } = useTranslation();
   const s = result.summary;
   const observedMax = s.observed_max_block_duration_minutes;
   const validationOk = s.coverage_issues === 0 && observedMax <= s.max_block_duration_minutes;
@@ -692,33 +716,33 @@ function ResultPanels({ result, blockSeparatorMin, maxBlockMin }: { result: Phas
         style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}
       >
         <h2 className="text-base font-semibold mb-4" style={{ color: 'var(--text-primary)' }}>
-          Übersicht
+          {t('mp.planner.overview')}
         </h2>
         <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-          <StatCard label="Block-Trenner" value={`${s.block_separator_gap_minutes} Min.`} highlight />
-          <StatCard label="Min Blockdauer" value={s.min_block_duration_minutes === 0 ? 'aus' : `${s.min_block_duration_minutes} Min.`} highlight />
-          <StatCard label="Max Blockdauer" value={`${s.max_block_duration_minutes} Min.`} highlight />
-          <StatCard label="Gesamt Fahrten" value={s.total_trips} />
-          <StatCard label="Abgeschlossen" value={s.abgeschlossen} />
-          <StatCard label="Storniert" value={s.storniert} />
-          <StatCard label="Fahrzeuge" value={s.vehicles} />
-          <StatCard label="Vehicle Blocks" value={s.blocks_total} highlight />
-          <StatCard label={`Split: Gap > ${blockSeparatorMin}`} value={s.blocks_split_by_gap} />
-          <StatCard label={`Split: Max ${maxBlockMin} Min`} value={s.blocks_split_by_max_duration} />
+          <StatCard label={t('mp.planner.blockSeparator')} value={`${s.block_separator_gap_minutes} ${t('mp.minShort')}`} highlight />
+          <StatCard label={t('mp.planner.minBlockDuration')} value={s.min_block_duration_minutes === 0 ? t('mp.planner.off') : `${s.min_block_duration_minutes} ${t('mp.minShort')}`} highlight />
+          <StatCard label={t('mp.planner.maxBlockDuration')} value={`${s.max_block_duration_minutes} ${t('mp.minShort')}`} highlight />
+          <StatCard label={t('mp.totalTrips')} value={s.total_trips} />
+          <StatCard label={t('mp.completed')} value={s.abgeschlossen} />
+          <StatCard label={t('mp.canceled')} value={s.storniert} />
+          <StatCard label={t('mp.vehicles')} value={s.vehicles} />
+          <StatCard label={t('mp.vehicleBlocks')} value={s.blocks_total} highlight />
+          <StatCard label={t('mp.planner.splitByGap', { minutes: blockSeparatorMin })} value={s.blocks_split_by_gap} />
+          <StatCard label={t('mp.planner.splitByMax', { minutes: maxBlockMin })} value={s.blocks_split_by_max_duration} />
           <StatCard
-            label="Beob. max. Blockdauer"
+            label={t('mp.planner.observedMaxDuration')}
             value={formatDuration(observedMax)}
             tone={observedMax > s.max_block_duration_minutes ? 'danger' : undefined}
           />
-          <StatCard label="Kurze Blöcke erkannt" value={s.short_blocks_detected} />
-          <StatCard label="Kurze Blöcke zusammengeführt" value={s.short_blocks_merged} tone={s.short_blocks_merged > 0 ? 'ok' : undefined} />
+          <StatCard label={t('mp.planner.shortBlocksDetected')} value={s.short_blocks_detected} />
+          <StatCard label={t('mp.planner.shortBlocksMerged')} value={s.short_blocks_merged} tone={s.short_blocks_merged > 0 ? 'ok' : undefined} />
           <StatCard
-            label="Kurze Blöcke verbleibend"
+            label={t('mp.planner.shortBlocksRemaining')}
             value={s.short_blocks_remaining}
             tone={s.short_blocks_remaining > 0 ? 'warning' : 'ok'}
           />
           <StatCard
-            label="Coverage Issues"
+            label={t('mp.planner.coverageIssues')}
             value={s.coverage_issues}
             tone={s.coverage_issues > 0 ? 'danger' : 'ok'}
           />
@@ -726,12 +750,12 @@ function ResultPanels({ result, blockSeparatorMin, maxBlockMin }: { result: Phas
             {validationOk ? (
               <span className="inline-flex items-center gap-1.5 text-sm font-semibold"
                 style={{ color: 'var(--success, #15803d)' }}>
-                <CheckCircle2 size={16} /> Validierung OK
+                <CheckCircle2 size={16} /> {t('mp.validationOk')}
               </span>
             ) : (
               <span className="inline-flex items-center gap-1.5 text-sm font-semibold"
                 style={{ color: 'var(--danger, #b91c1c)' }}>
-                <AlertTriangle size={16} /> Probleme erkannt
+                <AlertTriangle size={16} /> {t('mp.planner.problemsDetected')}
               </span>
             )}
           </div>
@@ -740,14 +764,14 @@ function ResultPanels({ result, blockSeparatorMin, maxBlockMin }: { result: Phas
         {result.coverageIssues.length > 0 && (
           <details className="mt-4">
             <summary className="text-sm cursor-pointer" style={{ color: 'var(--text-secondary)' }}>
-              Coverage-Issues anzeigen ({result.coverageIssues.length})
+              {t('mp.planner.showCoverageIssues', { count: result.coverageIssues.length })}
             </summary>
             <ul className="mt-2 space-y-1 text-xs" style={{ color: 'var(--text-secondary)' }}>
               {result.coverageIssues.slice(0, 50).map((c, i) => (
                 <li key={i}>• [{c.type}] {c.detail}</li>
               ))}
               {result.coverageIssues.length > 50 && (
-                <li>… und {result.coverageIssues.length - 50} weitere</li>
+                <li>{t('mp.andMore', { count: result.coverageIssues.length - 50 })}</li>
               )}
             </ul>
           </details>
@@ -756,11 +780,11 @@ function ResultPanels({ result, blockSeparatorMin, maxBlockMin }: { result: Phas
         {result.skippedTrips.length > 0 && (
           <details className="mt-3">
             <summary className="text-sm cursor-pointer" style={{ color: 'var(--text-secondary)' }}>
-              Übersprungene Fahrten ({result.skippedTrips.length})
+              {t('mp.planner.skippedTrips', { count: result.skippedTrips.length })}
             </summary>
             <ul className="mt-2 space-y-1 text-xs" style={{ color: 'var(--text-secondary)' }}>
-              {result.skippedTrips.slice(0, 30).map((t, i) => (
-                <li key={i}>• {t.id}: {t.reason}</li>
+              {result.skippedTrips.slice(0, 30).map((trip, i) => (
+                <li key={i}>• {trip.id}: {trip.reason}</li>
               ))}
             </ul>
           </details>
@@ -774,19 +798,19 @@ function ResultPanels({ result, blockSeparatorMin, maxBlockMin }: { result: Phas
       >
         <div className="px-5 py-4 border-b" style={{ borderColor: 'var(--border)' }}>
           <h2 className="text-base font-semibold flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
-            <CarIcon size={16} /> Pro Fahrzeug
+            <CarIcon size={16} /> {t('mp.planner.perVehicle')}
           </h2>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr style={{ background: 'var(--bg-subtle)' }}>
-                <Th>Kennzeichen</Th>
-                <Th align="right">Blocks</Th>
-                <Th align="right">Fahrten</Th>
-                <Th align="right">Ø Fahrten/Block</Th>
-                <Th align="right">Ø Blockdauer</Th>
-                <Th align="right">Max Blockdauer</Th>
+                <Th>{t('mp.licensePlate')}</Th>
+                <Th align="right">{t('mp.planner.colBlocks')}</Th>
+                <Th align="right">{t('mp.trips')}</Th>
+                <Th align="right">{t('mp.planner.colAvgTripsPerBlock')}</Th>
+                <Th align="right">{t('mp.planner.colAvgBlockDuration')}</Th>
+                <Th align="right">{t('mp.planner.maxBlockDuration')}</Th>
               </tr>
             </thead>
             <tbody>
@@ -819,10 +843,10 @@ function ResultPanels({ result, blockSeparatorMin, maxBlockMin }: { result: Phas
         >
           <h2 className="text-base font-semibold flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
             {blocksOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-            <Clock size={16} /> Vehicle Blocks ({result.blocks.length})
+            <Clock size={16} /> {t('mp.vehicleBlocks')} ({result.blocks.length})
           </h2>
           <span className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
-            {blocksOpen ? 'Einklappen' : 'Ausklappen'}
+            {blocksOpen ? t('mp.collapse') : t('mp.expand')}
           </span>
         </button>
         {blocksOpen && (
@@ -830,15 +854,15 @@ function ResultPanels({ result, blockSeparatorMin, maxBlockMin }: { result: Phas
           <table className="w-full text-xs">
             <thead className="sticky top-0" style={{ background: 'var(--bg-subtle)' }}>
               <tr>
-                <Th>Akt. Datum</Th>
-                <Th>Kennzeichen</Th>
-                <Th>Akt. Start</Th>
-                <Th>Akt. Ende</Th>
-                <Th align="right">Dauer</Th>
-                <Th align="right">Fahrten</Th>
-                <Th>Split</Th>
-                <Th>Min Blockdauer</Th>
-                <Th>Excel-Rows / Trip-IDs</Th>
+                <Th>{t('mp.planner.colActualDate')}</Th>
+                <Th>{t('mp.licensePlate')}</Th>
+                <Th>{t('mp.planner.colActualStart')}</Th>
+                <Th>{t('mp.planner.colActualEnd')}</Th>
+                <Th align="right">{t('mp.duration')}</Th>
+                <Th align="right">{t('mp.trips')}</Th>
+                <Th>{t('mp.planner.colSplit')}</Th>
+                <Th>{t('mp.planner.minBlockDuration')}</Th>
+                <Th>{t('mp.planner.colExcelRows')}</Th>
               </tr>
             </thead>
             <tbody>
@@ -849,7 +873,7 @@ function ResultPanels({ result, blockSeparatorMin, maxBlockMin }: { result: Phas
                 return (
                 <tr key={b.block_id} style={{ borderTop: '1px solid var(--border)' }}>
                   <Td>
-                    <span title={crossMidnight ? `Endet ${formatDate(endDate)}` : undefined}>
+                    <span title={crossMidnight ? t('mp.planner.endsOn', { date: formatDate(endDate) }) : undefined}>
                       {formatDate(b.service_date)}
                       {crossMidnight && (
                         <span className="ml-1 text-[9px] font-semibold px-1 rounded"
@@ -882,7 +906,7 @@ function ResultPanels({ result, blockSeparatorMin, maxBlockMin }: { result: Phas
                             : 'var(--text-tertiary)',
                       }}
                     >
-                      {splitReasonLabel(b.split_reason, blockSeparatorMin, maxBlockMin)}
+                      {splitReasonLabel(b.split_reason, blockSeparatorMin, maxBlockMin, t)}
                     </span>
                   </Td>
                   <Td>
@@ -891,15 +915,15 @@ function ResultPanels({ result, blockSeparatorMin, maxBlockMin }: { result: Phas
                         className="px-1.5 py-0.5 rounded text-[10px] font-semibold"
                         style={{ background: 'rgba(21, 128, 61, 0.12)', color: '#15803d' }}
                       >
-                        Short merged
+                        {t('mp.planner.shortMerged')}
                       </span>
                     ) : b.merge_status === 'short_warning' ? (
                       <span
                         className="px-1.5 py-0.5 rounded text-[10px] font-semibold"
                         style={{ background: 'rgba(234, 88, 12, 0.12)', color: '#c2410c' }}
-                        title={`Block < ${result.summary.min_block_duration_minutes} Min.`}
+                        title={t('mp.planner.shortBlockTitle', { minutes: result.summary.min_block_duration_minutes })}
                       >
-                        Short &lt; {result.summary.min_block_duration_minutes} Min
+                        {t('mp.planner.shortBelow', { minutes: result.summary.min_block_duration_minutes })}
                       </span>
                     ) : (
                       <span className="text-[10px]" style={{ color: 'var(--text-tertiary)' }}>—</span>
@@ -908,7 +932,7 @@ function ResultPanels({ result, blockSeparatorMin, maxBlockMin }: { result: Phas
                   <Td>
                     <span className="font-mono text-[10px]" style={{ color: 'var(--text-tertiary)' }}>
                       {b.first_excel_row != null && b.last_excel_row != null
-                        ? `Rows ${b.first_excel_row}–${b.last_excel_row}`
+                        ? t('mp.planner.rowsRange', { from: b.first_excel_row, to: b.last_excel_row })
                         : `${b.first_trip_id.slice(0, 8)}…${b.last_trip_id.slice(0, 8)}`}
                     </span>
                   </Td>

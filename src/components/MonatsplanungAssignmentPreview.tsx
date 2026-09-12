@@ -34,6 +34,8 @@ import { type AppliedRunSummary } from '../utils/monatsplanungXlsxExport';
 import MonatsplanungStundennachweisPreview from './MonatsplanungStundennachweisPreview';
 import FinalizePlanningModal from './FinalizePlanningModal';
 import { useAuth } from '../contexts/AuthContext';
+import { useTranslation } from '../contexts/LanguageContext';
+import type { TranslationKey } from '../i18n';
 import {
   validateDriverNotesForPlanStep,
   buildRideIntervalsFromBlocks,
@@ -74,15 +76,38 @@ interface ApplyResultSummary {
   message?: string;
 }
 
-const REASON_LABEL: Record<RejectReason, string> = {
-  wrong_weekday: 'Arbeitstag nicht erlaubt',
-  outside_working_time_window: 'Außerhalb Dienstzeit',
-  daily_max_exceeded: 'Tageslimit überschritten',
-  monthly_max_exceeded: 'Monatslimit überschritten',
-  driver_overlap: 'Fahrer-Überlappung',
-  vehicle_switch_buffer_violation: 'Fahrzeugwechsel-Puffer',
-  one_vehicle_per_day: 'Fahrer nutzt bereits anderes Fahrzeug an diesem Tag',
-  note_constraint: 'Notiz-Einschränkung',
+// The RejectReason codes are Phase 3 data — hard constraints (wrong_weekday,
+// driver_overlap, vehicle_switch_buffer_violation, one_vehicle_per_day,
+// note_constraint) and bypassable ones (outside_working_time_window,
+// daily_max_exceeded, monthly_max_exceeded) are told apart by these codes and
+// audited under them. Only the labels are translated; every consumer resolves
+// the TranslationKey with t().
+const REASON_LABEL: Record<RejectReason, TranslationKey> = {
+  wrong_weekday: 'mp.reason.wrongWeekday',
+  outside_working_time_window: 'mp.reason.outsideWorkingTime',
+  daily_max_exceeded: 'mp.reason.dailyMaxExceeded',
+  monthly_max_exceeded: 'mp.reason.monthlyMaxExceeded',
+  driver_overlap: 'mp.reason.driverOverlap',
+  vehicle_switch_buffer_violation: 'mp.reason.vehicleSwitchBuffer',
+  one_vehicle_per_day: 'mp.reason.oneVehiclePerDay',
+  note_constraint: 'mp.reason.noteConstraint',
+};
+
+// `evaluateManualCandidate` in monatsplanungPhase3.ts returns its blocking
+// checks as German strings. Those strings are the engine's output — they are
+// compared against, not shown — so they stay verbatim here and only the
+// rendered label is translated.
+const BLOCKING_CHECK_LABEL: Record<string, TranslationKey> = {
+  'Arbeitstag nicht erlaubt': 'mp.reason.wrongWeekday',
+  'Außerhalb Dienstzeit': 'mp.reason.outsideWorkingTime',
+  'Tageslimit überschritten': 'mp.reason.dailyMaxExceeded',
+  'Monatslimit überschritten': 'mp.reason.monthlyMaxExceeded',
+  'Fahrer-Überlappung': 'mp.reason.driverOverlap',
+  'Fahrzeugwechsel-Puffer': 'mp.reason.vehicleSwitchBuffer',
+  'Fahrer nutzt bereits anderes Fahrzeug an diesem Tag': 'mp.reason.oneVehiclePerDay',
+  'Notiz-Einschränkung': 'mp.reason.noteConstraint',
+  'Nicht ausgewählter Fahrer': 'mp.reason.driverNotSelected',
+  'Fahrer nicht in Auswahl': 'mp.reason.driverNotInPool',
 };
 
 function fmtTime(iso: string): string {
@@ -115,6 +140,7 @@ export default function MonatsplanungAssignmentPreview({
   onApplied,
 }: Props) {
   const { user } = useAuth();
+  const { t, tPlural } = useTranslation();
   const [result, setResult] = useState<Phase3Result | null>(null);
   const [running, setRunning] = useState(false);
   const [runError, setRunError] = useState<string>('');
@@ -145,7 +171,7 @@ export default function MonatsplanungAssignmentPreview({
   const [replacing, setReplacing] = useState(false);
   const [replaceError, setReplaceError] = useState('');
 
-  const canceledCount = useMemo(() => trips.filter(t => t.is_canceled).length, [trips]);
+  const canceledCount = useMemo(() => trips.filter(trip => trip.is_canceled).length, [trips]);
 
   // Detect cross-month blocks: block starts in this month but ends in the next
   const crossMonthBlocks = useMemo(() => {
@@ -185,12 +211,12 @@ export default function MonatsplanungAssignmentPreview({
   const noteViolations = useMemo<NoteViolation[]>(() => {
     if (!result) return [];
     return validateDriverNotesForPlanStep({
-      stepName: 'Phase 3: Fahrer-Zuweisung',
+      stepName: t('mp.phase3Step'),
       rides: buildRideIntervalsFromBlocks(result.assigned),
       driverNotesMap,
       driverProfiles: selectedDrivers,
     }).violations;
-  }, [result, driverNotesMap, selectedDrivers]);
+  }, [result, driverNotesMap, selectedDrivers, t]);
 
   const noteViolationsOk = noteViolations.length === 0;
 
@@ -209,12 +235,12 @@ export default function MonatsplanungAssignmentPreview({
         endMs: parseLocalDatetime(r.block_end_datetime),
       }));
     return validateDriverNotesForPlanStep({
-      stepName: 'Section E: Anwenden',
+      stepName: t('mp.sectionEStep'),
       rides,
       driverNotesMap,
       driverProfiles: selectedDrivers,
     }).violations;
-  }, [phase4, driverNotesMap, selectedDrivers]);
+  }, [phase4, driverNotesMap, selectedDrivers, t]);
 
   // ── Planqualität: early pre-apply quality checks ─────────────────────────
   // car_identifier, trip_date, start_time, end_time are immutable source fields.
@@ -249,28 +275,30 @@ export default function MonatsplanungAssignmentPreview({
     startColUsed: string;
     endColUsed: string;
   }
-  interface QualityIssue { label: string; details: string[]; vehicleOverlaps?: VehicleOverlapDetail[] }
+  // `label` is the internal discriminator the Prüf-Export and the detail
+  // renderer switch on — data, never shown. `labelKey` is what renders.
+  interface QualityIssue { label: string; labelKey: TranslationKey; details: string[]; vehicleOverlaps?: VehicleOverlapDetail[] }
 
   const planQualitaet = useMemo<{ issues: QualityIssue[]; vehicleOverlaps: VehicleOverlapDetail[] } | null>(() => {
     const issues: QualityIssue[] = [];
 
-    const nonCanceled = trips.filter(t => !t.is_canceled);
+    const nonCanceled = trips.filter(trip => !trip.is_canceled);
 
     // ── Vehicle overlaps ──────────────────────────────────────────────────────
     const byCar = new Map<string, typeof nonCanceled>();
-    for (const t of nonCanceled) {
-      if (!t.car_identifier || !t.start_time || !t.end_time) continue;
-      const arr = byCar.get(t.car_identifier) ?? [];
-      arr.push(t);
-      byCar.set(t.car_identifier, arr);
+    for (const trip of nonCanceled) {
+      if (!trip.car_identifier || !trip.start_time || !trip.end_time) continue;
+      const arr = byCar.get(trip.car_identifier) ?? [];
+      arr.push(trip);
+      byCar.set(trip.car_identifier, arr);
     }
 
     const vehicleOverlaps: VehicleOverlapDetail[] = [];
 
     for (const [carId, carTrips] of byCar) {
-      const withTs = carTrips.map(t => {
-        const rw = resolveActualRideWindow(t);
-        return { t, rw };
+      const withTs = carTrips.map(trip => {
+        const rw = resolveActualRideWindow(trip);
+        return { t: trip, rw };
       });
       withTs.sort((a, b) => a.rw.actualStartMs - b.rw.actualStartMs);
 
@@ -320,11 +348,12 @@ export default function MonatsplanungAssignmentPreview({
     if (vehicleOverlaps.length > 0) {
       issues.push({
         label: 'Fahrzeug-Überschneidungen',
+        labelKey: 'mp.quality.vehicleOverlaps',
         details: vehicleOverlaps.map(o => {
           const aDate = fmtAbsDate(o.tripA.tsStart);
           const bDate = fmtAbsDate(o.tripB.tsStart);
           const dateLabel = aDate === bDate ? aDate : `${aDate}→${bDate}`;
-          return `${o.carId} · ${dateLabel} · Überschneidung ${o.overlapMin} Min`;
+          return `${o.carId} · ${dateLabel} · ${t('mp.quality.overlapMinutes', { minutes: o.overlapMin })}`;
         }),
         vehicleOverlaps,
       });
@@ -346,15 +375,15 @@ export default function MonatsplanungAssignmentPreview({
     }
 
     const byDriver = new Map<string, Array<{ t: typeof nonCanceled[number]; rw: ActualRideWindow }>>();
-    for (const t of nonCanceled) {
+    for (const trip of nonCanceled) {
       const driverKey = result
-        ? (plannedDriverByTripId.get(t.id) ?? null)
-        : (t.assigned_driver_name || t.original_driver_name || null);
-      if (!driverKey || !t.start_time || !t.end_time) continue;
-      const rw = resolveActualRideWindow(t);
+        ? (plannedDriverByTripId.get(trip.id) ?? null)
+        : (trip.assigned_driver_name || trip.original_driver_name || null);
+      if (!driverKey || !trip.start_time || !trip.end_time) continue;
+      const rw = resolveActualRideWindow(trip);
       if (rw.actualStartMs <= 0) continue;
       const arr = byDriver.get(driverKey) ?? [];
-      arr.push({ t, rw });
+      arr.push({ t: trip, rw });
       byDriver.set(driverKey, arr);
     }
 
@@ -378,7 +407,7 @@ export default function MonatsplanungAssignmentPreview({
             const prevRange = `${fmtAbsDateTime(prev.rw.actualStartMs)}–${fmtAbsTime(prev.rw.actualEndMs)}`;
             const currRange = `${fmtAbsDateTime(curr.rw.actualStartMs)}–${fmtAbsTime(curr.rw.actualEndMs)}`;
             driverOverlapDetails.push(
-              `${driverName} · ${prevCar} ${prevRange} ↔ ${currCar} ${currRange} · Überschneidung ${overlapMin} Min`
+              `${driverName} · ${prevCar} ${prevRange} ↔ ${currCar} ${currRange} · ${t('mp.quality.overlapMinutes', { minutes: overlapMin })}`
             );
           }
         } else if (prev.t.car_identifier !== curr.t.car_identifier && gapMin < DRIVER_SWITCH_MIN) {
@@ -387,17 +416,21 @@ export default function MonatsplanungAssignmentPreview({
           const endDisp   = `${fmtAbsDate(prev.rw.actualEndMs)} ${fmtAbsTime(prev.rw.actualEndMs)}`;
           const startDisp = `${fmtAbsDate(curr.rw.actualStartMs)} ${fmtAbsTime(curr.rw.actualStartMs)}`;
           driverSwitchDetails.push(
-            `${driverName} · ${prevCar} → ${currCar} · Ende ${endDisp} → Start ${startDisp} · Abstand ${gapMin.toFixed(1).replace('.', ',')} Min`
+            `${driverName} · ${prevCar} → ${currCar} · ${t('mp.quality.switchDetail', {
+              end: endDisp,
+              start: startDisp,
+              gap: gapMin.toFixed(1).replace('.', ','),
+            })}`
           );
         }
       }
     }
 
     if (driverOverlapDetails.length > 0) {
-      issues.push({ label: 'Fahrer-Überschneidung', details: driverOverlapDetails });
+      issues.push({ label: 'Fahrer-Überschneidung', labelKey: 'mp.quality.driverOverlap', details: driverOverlapDetails });
     }
     if (driverSwitchDetails.length > 0) {
-      issues.push({ label: 'Fahrzeugwechsel zu kurz', details: driverSwitchDetails });
+      issues.push({ label: 'Fahrzeugwechsel zu kurz', labelKey: 'mp.quality.vehicleSwitchTooShort', details: driverSwitchDetails });
     }
 
     // Part D: Max 3 Schichten — based on proposed assignments from phase4 or result
@@ -440,11 +473,12 @@ export default function MonatsplanungAssignmentPreview({
         }
       }
       if (max3Details.length > 0) {
-        issues.push({ label: 'Max. 3 Schichten pro Fahrer/Tag', details: max3Details });
+        issues.push({ label: 'Max. 3 Schichten pro Fahrer/Tag', labelKey: 'mp.quality.maxThreeShifts', details: max3Details });
       }
     }
 
     return { issues, vehicleOverlaps };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [trips, result]);
 
   const qualityHardBlockers = planQualitaet?.issues.length ?? 0;
@@ -471,31 +505,27 @@ export default function MonatsplanungAssignmentPreview({
       const tb = o.tripB;
       const aDateDisp = fmtAbsDate(ta.tsStart);
       const bDateDisp = fmtAbsDate(tb.tsStart);
-      lines.push('Fahrzeug-Überschneidung');
-      lines.push(`Fahrzeug: ${o.carId}`);
-      lines.push(`Service-/Audit-Datum: ${o.date.split('-').reverse().join('.')}`);
-      lines.push(`Tatsächliches Datum: ${aDateDisp}${aDateDisp !== bDateDisp ? ' → ' + bDateDisp : ''}`);
-      lines.push(`Überschneidung: ${o.overlapMin} Min`);
-      lines.push('Zeitvergleich: Fahrtbeginn → Fahrtende');
-      lines.push(`Verwendete Spalten: ${o.startColUsed} / ${o.endColUsed}`);
-      lines.push(`Berechnung: ${(ta.usedFullDatetime && tb.usedFullDatetime) ? 'echte Zeitstempel aus Fahrtbeginn/Fahrtende' : 'normalisierte Zeiten (Fallback)'}`);
-      lines.push(
-        `Fahrt A: ${ta.rowIndex != null ? `Zeile ${ta.rowIndex}` : 'Zeile unbekannt'}, ` +
-        `Original Fahrer: ${ta.originalDriver}, Zugewiesen: ${ta.assignedDriver}, ` +
-        `Tatsächlich: ${fmtAbsDateTime(ta.tsStart)}–${fmtAbsTime(ta.tsEnd)}, ` +
-        `Quelle: ${ta.srcStart || '?'}–${ta.srcEnd || '?'}, ` +
-        `Normalisiert: ${ta.normStart}–${ta.normEnd}, ` +
-        `Storniert: ${ta.isCanceled ? 'Ja' : 'Nein'}`
-      );
-      lines.push(
-        `Fahrt B: ${tb.rowIndex != null ? `Zeile ${tb.rowIndex}` : 'Zeile unbekannt'}, ` +
-        `Original Fahrer: ${tb.originalDriver}, Zugewiesen: ${tb.assignedDriver}, ` +
-        `Tatsächlich: ${fmtAbsDateTime(tb.tsStart)}–${fmtAbsTime(tb.tsEnd)}, ` +
-        `Quelle: ${tb.srcStart || '?'}–${tb.srcEnd || '?'}, ` +
-        `Normalisiert: ${tb.normStart}–${tb.normEnd}, ` +
-        `Storniert: ${tb.isCanceled ? 'Ja' : 'Nein'}`
-      );
-      lines.push(`Diagnose: ${o.diagnosis === 'source' ? 'Quelle enthält Überschneidung' : 'Möglicher Prüfungsfehler'}`);
+      const describeTrip = (label: string, trip: typeof ta) =>
+        `${label}: ${trip.rowIndex != null
+          ? t('mp.overlap.rowNumber', { row: trip.rowIndex })
+          : t('mp.overlap.rowUnknown')}, ` +
+        `${t('mp.overlap.originalDriver')}: ${trip.originalDriver}, ${t('mp.overlap.assigned')}: ${trip.assignedDriver}, ` +
+        `${t('mp.overlap.actual')}: ${fmtAbsDateTime(trip.tsStart)}–${fmtAbsTime(trip.tsEnd)}, ` +
+        `${t('mp.overlap.source')}: ${trip.srcStart || '?'}–${trip.srcEnd || '?'}, ` +
+        `${t('mp.overlap.normalized')}: ${trip.normStart}–${trip.normEnd}, ` +
+        `${t('mp.overlap.canceled')}: ${trip.isCanceled ? t('common.yes') : t('common.no')}`;
+
+      lines.push(t('mp.overlap.heading'));
+      lines.push(`${t('mp.vehicle')}: ${o.carId}`);
+      lines.push(`${t('mp.overlap.serviceDate')}: ${o.date.split('-').reverse().join('.')}`);
+      lines.push(`${t('mp.overlap.actualDate')}: ${aDateDisp}${aDateDisp !== bDateDisp ? ' → ' + bDateDisp : ''}`);
+      lines.push(`${t('mp.overlap.overlap')}: ${t('mp.minutes', { minutes: o.overlapMin })}`);
+      lines.push(t('mp.overlap.timeComparison'));
+      lines.push(`${t('mp.overlap.columnsUsed')}: ${o.startColUsed} / ${o.endColUsed}`);
+      lines.push(`${t('mp.overlap.calculation')}: ${(ta.usedFullDatetime && tb.usedFullDatetime) ? t('mp.overlap.calcRealTimestamps') : t('mp.overlap.calcFallback')}`);
+      lines.push(describeTrip(t('mp.overlap.tripA'), ta));
+      lines.push(describeTrip(t('mp.overlap.tripB'), tb));
+      lines.push(`${t('mp.overlap.diagnosis')}: ${o.diagnosis === 'source' ? t('mp.overlap.diagSource') : t('mp.overlap.diagChecker')}`);
       lines.push('');
     }
     void navigator.clipboard.writeText(lines.join('\n')).then(() => {
@@ -639,7 +669,7 @@ export default function MonatsplanungAssignmentPreview({
         }
       }
     } catch (e) {
-      setApplyError(e instanceof Error ? e.message : 'Unbekannter Fehler');
+      setApplyError(e instanceof Error ? e.message : t('mp.unknownError'));
     } finally {
       setApplying(false);
     }
@@ -707,7 +737,7 @@ export default function MonatsplanungAssignmentPreview({
       setReplaceConfirmed(false);
       onApplied?.();
     } catch (e) {
-      setReplaceError(e instanceof Error ? e.message : 'Unbekannter Fehler');
+      setReplaceError(e instanceof Error ? e.message : t('mp.unknownError'));
     } finally {
       setReplacing(false);
     }
@@ -779,20 +809,20 @@ export default function MonatsplanungAssignmentPreview({
         'Geändert',
       ];
       const fahrtRows: (string | number | null)[][] = [fahrtHeaders];
-      for (const t of trips.filter(t => !t.is_canceled)) {
-        const origDriver = t.original_driver_name ?? '';
-        const planDriver = t.assigned_driver_name || origDriver;
-        const rw = resolveActualRideWindow(t);
+      for (const trip of trips.filter(candidate => !candidate.is_canceled)) {
+        const origDriver = trip.original_driver_name ?? '';
+        const planDriver = trip.assigned_driver_name || origDriver;
+        const rw = resolveActualRideWindow(trip);
         fahrtRows.push([
-          t.trip_date,
-          rw.actualStartMs > 0 ? rw.displayStart : (t.start_time ?? ''),
-          rw.actualEndMs   > 0 ? rw.displayEnd   : (t.end_time   ?? ''),
+          trip.trip_date,
+          rw.actualStartMs > 0 ? rw.displayStart : (trip.start_time ?? ''),
+          rw.actualEndMs   > 0 ? rw.displayEnd   : (trip.end_time   ?? ''),
           rw.sourceStartColumn,
           rw.sourceEndColumn,
           rw.usedFallback ? 'Ja' : 'Nein',
-          t.start_time ?? '',
-          t.end_time   ?? '',
-          t.car_identifier ?? '',
+          trip.start_time ?? '',
+          trip.end_time   ?? '',
+          trip.car_identifier ?? '',
           origDriver,
           planDriver,
           origDriver !== planDriver ? 'Ja' : 'Nein',
@@ -849,15 +879,15 @@ export default function MonatsplanungAssignmentPreview({
           }
         } else if (issue.label === 'Fahrer-Überschneidung' || issue.label === 'Fahrzeugwechsel zu kurz') {
           // Rebuild structured rows from trip data for driver-level conflicts
-          const nonCancelledForXlsx = trips.filter(t => !t.is_canceled);
+          const nonCancelledForXlsx = trips.filter(candidate => !candidate.is_canceled);
           const byDriverForXlsx = new Map<string, Array<{ t: typeof nonCancelledForXlsx[number]; rw: ActualRideWindow }>>();
-          for (const t of nonCancelledForXlsx) {
-            const dk = t.assigned_driver_name || t.original_driver_name;
-            if (!dk || !t.start_time || !t.end_time) continue;
-            const rw = resolveActualRideWindow(t);
+          for (const trip of nonCancelledForXlsx) {
+            const dk = trip.assigned_driver_name || trip.original_driver_name;
+            if (!dk || !trip.start_time || !trip.end_time) continue;
+            const rw = resolveActualRideWindow(trip);
             if (rw.actualStartMs <= 0) continue;
             const arr = byDriverForXlsx.get(dk) ?? [];
-            arr.push({ t, rw });
+            arr.push({ t: trip, rw });
             byDriverForXlsx.set(dk, arr);
           }
           for (const [driverName, driverTrips] of byDriverForXlsx) {
@@ -1104,6 +1134,9 @@ export default function MonatsplanungAssignmentPreview({
   // the current block. Reasons are split into hard blockers (never bypassable)
   // and exception-possible reasons (Dienstzeit / Tageslimit / Monatslimit).
   // Color group is decided by the most severe non-hard reason.
+  // These strings are what monatsplanungPhase3.ts emits in `blockingChecks`;
+  // they are matched against, never rendered — BLOCKING_CHECK_LABEL supplies
+  // the text that is shown.
   const HARD_BLOCKERS = [
     'Fahrer-Überlappung',
     'Fahrzeugwechsel-Puffer',
@@ -1133,7 +1166,7 @@ export default function MonatsplanungAssignmentPreview({
     requiresMonatslimit: boolean;
     group: Group;
     groupOrder: number;
-    badge: string;
+    badge: TranslationKey;
   };
   const classifyDriver = (driver: PlanningDriver): DriverClass => {
     // Evaluate with NO bypass flags so every blocking reason surfaces.
@@ -1154,20 +1187,20 @@ export default function MonatsplanungAssignmentPreview({
     const requiresMonatslimit = reasons.includes('Monatslimit überschritten');
 
     let group: Group;
-    let badge: string;
+    let badge: TranslationKey;
     if (hardBlockers.length > 0) {
       group = 'red';
-      badge = primaryHardBlocker ?? 'Nicht möglich';
+      badge = (primaryHardBlocker ? BLOCKING_CHECK_LABEL[primaryHardBlocker] : undefined) ?? 'mp.resolver.notPossible';
     } else if (requiresTageslimit && requiresMonatslimit) {
-      group = 'orange'; badge = 'Tageslimit + Monatslimit überschritten';
+      group = 'orange'; badge = 'mp.resolver.dailyAndMonthlyExceeded';
     } else if (requiresMonatslimit) {
-      group = 'orange'; badge = 'Monatslimit überschritten';
+      group = 'orange'; badge = 'mp.reason.monthlyMaxExceeded';
     } else if (requiresTageslimit) {
-      group = 'orange'; badge = 'Tageslimit überschritten';
+      group = 'orange'; badge = 'mp.reason.dailyMaxExceeded';
     } else if (requiresDienstzeit) {
-      group = 'blue'; badge = 'Außerhalb Dienstzeit';
+      group = 'blue'; badge = 'mp.reason.outsideWorkingTime';
     } else {
-      group = 'green'; badge = 'Möglich';
+      group = 'green'; badge = 'mp.resolver.possible';
     }
     const groupOrder = group === 'green' ? 0 : group === 'blue' ? 1 : group === 'orange' ? 2 : 3;
     return {
@@ -1216,10 +1249,12 @@ export default function MonatsplanungAssignmentPreview({
     if (!allRed) return [] as string[];
     const set = new Set<string>();
     for (const c of resolverCandidates) {
-      if (c.primaryHardBlocker) set.add(c.primaryHardBlocker);
+      if (!c.primaryHardBlocker) continue;
+      const key = BLOCKING_CHECK_LABEL[c.primaryHardBlocker];
+      set.add(key ? t(key) : c.primaryHardBlocker);
     }
     return [...set];
-  }, [allRed, resolverCandidates]);
+  }, [allRed, resolverCandidates, t]);
 
   /**
    * Derived validation that strips out Inhaber-only working-time violations.
@@ -1253,13 +1288,16 @@ export default function MonatsplanungAssignmentPreview({
       v.monthly_max_violations > 0 ||
       v.non_selected_assignments > 0 ||
       v.multiple_vehicles_per_day_violations > 0;
-    if (hasViolation) return { kind: 'failed', label: 'Validierung fehlgeschlagen' };
+    if (hasViolation) return { kind: 'failed', label: t('mp.status.validationFailed') };
     if (v.unassigned_blocks > 0 || v.unassigned_trips > 0)
-      return { kind: 'incomplete', label: `Unvollständig: ${v.unassigned_blocks} Block${v.unassigned_blocks !== 1 ? 'e' : ''} / ${v.unassigned_trips} Fahrt${v.unassigned_trips !== 1 ? 'en' : ''} nicht zugewiesen` };
+      return {
+        kind: 'incomplete',
+        label: t('mp.status.incomplete', { blocks: v.unassigned_blocks, trips: v.unassigned_trips }),
+      };
     if (result.manual_summary.resolved_blocks > 0 || result.manual_summary.intentionally_open > 0)
-      return { kind: 'ok_manual', label: 'Validierung OK mit manuellen Ausnahmen' };
-    return { kind: 'ok', label: 'Validierung OK' };
-  }, [result, blockingValidation]);
+      return { kind: 'ok_manual', label: t('mp.status.okManual') };
+    return { kind: 'ok', label: t('mp.validationOk') };
+  }, [result, blockingValidation, t]);
 
   return (
     <div className="space-y-6">
@@ -1267,10 +1305,10 @@ export default function MonatsplanungAssignmentPreview({
         <div className="flex items-start justify-between gap-4 mb-4">
           <div>
             <h2 className="text-base font-semibold flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
-              <ListChecks size={16} /> Phase 3: Fahrer-Zuweisung Preview
+              <ListChecks size={16} /> {t('mp.phase3.title')}
             </h2>
             <p className="text-xs mt-1" style={{ color: 'var(--text-tertiary)' }}>
-              Read-only Vorschlag: jeder Block wird einem ausgewählten Fahrer zugewiesen. Keine DB-Änderungen.
+              {t('mp.phase3.subtitle')}
             </p>
           </div>
         </div>
@@ -1283,11 +1321,16 @@ export default function MonatsplanungAssignmentPreview({
             style={{ background: 'var(--primary, #2563eb)', color: 'var(--primary-contrast, #fff)' }}
           >
             <Play size={16} />
-            {running ? 'Berechne…' : 'Fahrer-Zuweisung berechnen'}
+            {running ? t('mp.phase3.calculating') : t('mp.phase3.calculate')}
           </button>
           <div className="text-xs flex items-center gap-1.5" style={{ color: 'var(--text-tertiary)' }}>
             <Info size={13} />
-            Default Max./Tag: {DEFAULT_MAX_DAILY_HOURS}h · Fahrzeugwechsel-Puffer: {vehicleSwitchBufferMinutes} Min · {blocks.length} Blöcke · {selectedDrivers.length} Fahrer
+            {t('mp.phase3.defaultsHint', {
+              maxDaily: DEFAULT_MAX_DAILY_HOURS,
+              buffer: vehicleSwitchBufferMinutes,
+              blocks: blocks.length,
+              drivers: selectedDrivers.length,
+            })}
           </div>
         </div>
 
@@ -1296,7 +1339,7 @@ export default function MonatsplanungAssignmentPreview({
           <div className="mt-4 pt-4 border-t" style={{ borderColor: 'var(--border)' }}>
             <div className="flex items-center gap-3 flex-wrap">
               <label className="text-xs font-semibold" style={{ color: 'var(--text-secondary)' }}>
-                Inhaber-Anteil an Gesamtstunden (%)
+                {t('mp.phase3.ownerShareLabel')}
               </label>
               <input
                 type="number"
@@ -1306,7 +1349,7 @@ export default function MonatsplanungAssignmentPreview({
                 onChange={e => {
                   const v = Number(e.target.value);
                   if (isNaN(v) || v < 0 || v > 100) {
-                    setInhaberShareError('Inhaber-Anteil muss zwischen 0 und 100 liegen.');
+                    setInhaberShareError(t('mp.phase3.ownerShareError'));
                   } else {
                     setInhaberShareError('');
                     setInhaberSharePercent(v);
@@ -1316,7 +1359,7 @@ export default function MonatsplanungAssignmentPreview({
                 style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
               />
               <span className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
-                Ziel: Inhaber erhält ca. {inhaberSharePercent}% der Gesamtstunden
+                {t('mp.phase3.ownerShareHint', { percent: inhaberSharePercent })}
               </span>
               {inhaberShareError && (
                 <span className="text-xs font-medium" style={{ color: '#dc2626' }}>{inhaberShareError}</span>
@@ -1332,12 +1375,15 @@ export default function MonatsplanungAssignmentPreview({
           <Info size={16} style={{ color: '#3b82f6', flexShrink: 0, marginTop: 2 }} />
           <div>
             <p className="text-sm font-semibold" style={{ color: '#1d4ed8' }}>
-              Monatswechsel-Block erkannt ({crossMonthBlocks.length})
+              {t('mp.crossMonth.title', { count: crossMonthBlocks.length })}
             </p>
             <p className="text-xs mt-0.5" style={{ color: '#1e40af' }}>
               {crossMonthBlocks.length === 1
-                ? `1 Block startet in diesem Monat und endet im Folgemonat (${fmtTime(crossMonthBlocks[0].block_start_datetime)}–${fmtTime(crossMonthBlocks[0].block_end_datetime)}). Der Block gehört diesem Monat. Vorherigen Monat auf offene Fahrzeugwechsel-Puffer prüfen.`
-                : `${crossMonthBlocks.length} Blöcke überqueren die Monatsgrenze. Diese Blöcke gehören dem Monat, in dem sie starten. Vorherigen Monat auf offene Fahrzeugwechsel-Puffer prüfen.`
+                ? t('mp.crossMonth.one', {
+                    start: fmtTime(crossMonthBlocks[0].block_start_datetime),
+                    end: fmtTime(crossMonthBlocks[0].block_end_datetime),
+                  })
+                : t('mp.crossMonth.many', { count: crossMonthBlocks.length })
               }
             </p>
           </div>
@@ -1348,7 +1394,7 @@ export default function MonatsplanungAssignmentPreview({
         <div className="rounded-lg px-4 py-3 text-sm flex items-start gap-2" style={{ background: '#fef2f2', border: '1px solid #fecaca', color: '#991b1b' }}>
           <AlertTriangle size={15} className="mt-0.5 shrink-0" />
           <div>
-            <div className="font-semibold">Planung konnte nicht berechnet werden</div>
+            <div className="font-semibold">{t('mp.phase3.runError')}</div>
             <div className="text-xs mt-0.5" style={{ color: '#b91c1c' }}>{runError}</div>
           </div>
         </div>
@@ -1358,28 +1404,28 @@ export default function MonatsplanungAssignmentPreview({
         <>
           {/* Validation summary */}
           <div className="rounded-xl p-5" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
-            <h3 className="text-base font-semibold mb-4" style={{ color: 'var(--text-primary)' }}>Validierung</h3>
+            <h3 className="text-base font-semibold mb-4" style={{ color: 'var(--text-primary)' }}>{t('mp.validation')}</h3>
             <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
-              <Stat label="Vehicle Blocks" value={result.validation.vehicle_blocks_total} />
-              <Stat label="Zugewiesen" value={result.validation.assigned_blocks} tone="primary" />
-              <Stat label="Nicht zugewiesen" value={result.validation.unassigned_blocks} tone={result.validation.unassigned_blocks > 0 ? 'warning' : undefined} />
-              <Stat label="Resolved Fahrten" value={result.validation.resolved_trips} />
-              <Stat label="Offene Fahrten" value={result.validation.unassigned_trips} tone={result.validation.unassigned_trips > 0 ? 'warning' : undefined} />
-              <Stat label="Überlappungen" value={result.validation.driver_overlaps} tone={result.validation.driver_overlaps > 0 ? 'danger' : 'ok'} />
-              <Stat label="Wechsel-Verstöße" value={result.validation.vehicle_switch_violations} tone={result.validation.vehicle_switch_violations > 0 ? 'danger' : 'ok'} />
-              <Stat label="Dienstzeit-Verstöße" value={blockingValidation?.working_time_window_violations ?? result.validation.working_time_window_violations} tone={(blockingValidation?.working_time_window_violations ?? result.validation.working_time_window_violations) > 0 ? 'danger' : 'ok'} />
-              <Stat label="Tageslimit-Verstöße" value={blockingValidation?.daily_max_violations ?? result.validation.daily_max_violations} tone={(blockingValidation?.daily_max_violations ?? result.validation.daily_max_violations) > 0 ? 'danger' : 'ok'} />
-              <Stat label="Monatslimit-Verstöße" value={blockingValidation?.monthly_max_violations ?? result.validation.monthly_max_violations} tone={(blockingValidation?.monthly_max_violations ?? result.validation.monthly_max_violations) > 0 ? 'danger' : 'ok'} />
-              <Stat label="Nicht-ausgew. Fahrer" value={result.validation.non_selected_assignments} tone={result.validation.non_selected_assignments > 0 ? 'danger' : 'ok'} />
+              <Stat label={t('mp.vehicleBlocks')} value={result.validation.vehicle_blocks_total} />
+              <Stat label={t('mp.assigned')} value={result.validation.assigned_blocks} tone="primary" />
+              <Stat label={t('mp.unassigned')} value={result.validation.unassigned_blocks} tone={result.validation.unassigned_blocks > 0 ? 'warning' : undefined} />
+              <Stat label={t('mp.resolvedTrips')} value={result.validation.resolved_trips} />
+              <Stat label={t('mp.openTrips')} value={result.validation.unassigned_trips} tone={result.validation.unassigned_trips > 0 ? 'warning' : undefined} />
+              <Stat label={t('mp.overlaps')} value={result.validation.driver_overlaps} tone={result.validation.driver_overlaps > 0 ? 'danger' : 'ok'} />
+              <Stat label={t('mp.switchViolations')} value={result.validation.vehicle_switch_violations} tone={result.validation.vehicle_switch_violations > 0 ? 'danger' : 'ok'} />
+              <Stat label={t('mp.workingTimeViolations')} value={blockingValidation?.working_time_window_violations ?? result.validation.working_time_window_violations} tone={(blockingValidation?.working_time_window_violations ?? result.validation.working_time_window_violations) > 0 ? 'danger' : 'ok'} />
+              <Stat label={t('mp.dailyLimitViolations')} value={blockingValidation?.daily_max_violations ?? result.validation.daily_max_violations} tone={(blockingValidation?.daily_max_violations ?? result.validation.daily_max_violations) > 0 ? 'danger' : 'ok'} />
+              <Stat label={t('mp.monthlyLimitViolations')} value={blockingValidation?.monthly_max_violations ?? result.validation.monthly_max_violations} tone={(blockingValidation?.monthly_max_violations ?? result.validation.monthly_max_violations) > 0 ? 'danger' : 'ok'} />
+              <Stat label={t('mp.nonSelectedDrivers')} value={result.validation.non_selected_assignments} tone={result.validation.non_selected_assignments > 0 ? 'danger' : 'ok'} />
               {result.options.oneVehiclePerDriverDay && (
                 <Stat
-                  label="Mehrere Fahrzeuge/Tag"
+                  label={t('mp.multipleVehiclesPerDay')}
                   value={result.validation.multiple_vehicles_per_day_violations}
                   tone={result.validation.multiple_vehicles_per_day_violations > 0 ? 'danger' : 'ok'}
                 />
               )}
               <Stat
-                label="Fahrer-Notizen Verstöße"
+                label={t('mp.driverNoteViolations')}
                 value={noteViolations.length}
                 tone={noteViolations.length > 0 ? 'danger' : 'ok'}
               />
@@ -1411,37 +1457,41 @@ export default function MonatsplanungAssignmentPreview({
             <div className="mt-3 flex items-center gap-2 text-xs px-3 py-1.5 rounded" style={{ background: noteViolationsOk ? 'rgba(21,128,61,0.07)' : 'rgba(220,38,38,0.07)', color: noteViolationsOk ? '#166534' : '#991b1b' }}>
               <Shield size={12} />
               {noteViolationsOk
-                ? 'Fahrer-Notizen geprüft: OK — keine Fahrten in ausgeschlossenen Fahrer-Zeiträumen'
-                : `Fahrer-Notizen geprüft: Fehler (${noteViolations.length}) — ${noteViolations.length} Fahrt${noteViolations.length !== 1 ? 'en' : ''} verletzt Fahrer-Notizen oder hat keinen gültigen Fahrer`}
+                ? t('mp.notes.checkedOk')
+                : tPlural({ one: 'mp.notes.checkedError.one', other: 'mp.notes.checkedError.other' }, noteViolations.length)}
             </div>
 
             {result.repair_summary.attempted > 0 && (
               <div className="mt-4 flex items-center gap-2 text-xs px-3 py-2 rounded-lg" style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)' }}>
                 <Wrench size={13} />
-                Reparatur-Pass: {result.repair_summary.attempted} Versuche · {result.repair_summary.resolved} aufgelöst · {result.repair_summary.moved_blocks} verschoben
+                {t('mp.repairPassSummary', {
+                  attempted: result.repair_summary.attempted,
+                  resolved: result.repair_summary.resolved,
+                  moved: result.repair_summary.moved_blocks,
+                })}
               </div>
             )}
 
             {(result.manual_summary.resolved_blocks > 0 || result.manual_summary.intentionally_open > 0 || result.manual_summary.dienstzeit_exceptions > 0 || result.manual_summary.daily_exceptions > 0 || result.manual_summary.monthly_exceptions > 0) && (
               <div className="mt-4 grid grid-cols-2 md:grid-cols-5 gap-3 px-3 py-3 rounded-lg" style={{ background: '#eff6ff', border: '1px solid #bfdbfe' }}>
                 <div>
-                  <div className="text-[10px] uppercase tracking-wider font-semibold mb-1" style={{ color: '#1e40af' }}>Manuell gelöste Blöcke</div>
+                  <div className="text-[10px] uppercase tracking-wider font-semibold mb-1" style={{ color: '#1e40af' }}>{t('mp.manuallyResolvedBlocks')}</div>
                   <div className="text-lg font-bold" style={{ color: '#1e3a8a' }}>{result.manual_summary.resolved_blocks}</div>
                 </div>
                 <div>
-                  <div className="text-[10px] uppercase tracking-wider font-semibold mb-1" style={{ color: '#1e40af' }}>Dienstzeit-Ausnahmen</div>
+                  <div className="text-[10px] uppercase tracking-wider font-semibold mb-1" style={{ color: '#1e40af' }}>{t('mp.workingTimeExceptions')}</div>
                   <div className="text-lg font-bold" style={{ color: '#1e3a8a' }}>{result.manual_summary.dienstzeit_exceptions}</div>
                 </div>
                 <div>
-                  <div className="text-[10px] uppercase tracking-wider font-semibold mb-1" style={{ color: '#1e40af' }}>Tageslimit-Ausnahmen</div>
+                  <div className="text-[10px] uppercase tracking-wider font-semibold mb-1" style={{ color: '#1e40af' }}>{t('mp.dailyLimitExceptions')}</div>
                   <div className="text-lg font-bold" style={{ color: '#1e3a8a' }}>{result.manual_summary.daily_exceptions}</div>
                 </div>
                 <div>
-                  <div className="text-[10px] uppercase tracking-wider font-semibold mb-1" style={{ color: '#1e40af' }}>Monatslimit-Ausnahmen</div>
+                  <div className="text-[10px] uppercase tracking-wider font-semibold mb-1" style={{ color: '#1e40af' }}>{t('mp.monthlyLimitExceptions')}</div>
                   <div className="text-lg font-bold" style={{ color: '#1e3a8a' }}>{result.manual_summary.monthly_exceptions}</div>
                 </div>
                 <div>
-                  <div className="text-[10px] uppercase tracking-wider font-semibold mb-1" style={{ color: '#1e40af' }}>Bewusst offen gelassen</div>
+                  <div className="text-[10px] uppercase tracking-wider font-semibold mb-1" style={{ color: '#1e40af' }}>{t('mp.intentionallyOpen')}</div>
                   <div className="text-lg font-bold" style={{ color: '#1e3a8a' }}>{result.manual_summary.intentionally_open}</div>
                 </div>
               </div>
@@ -1451,15 +1501,20 @@ export default function MonatsplanungAssignmentPreview({
               <div className="mt-4 rounded-lg px-3 py-3" style={{ background: '#fffbeb', border: '1px solid #fde68a' }}>
                 <div className="flex items-center gap-2 mb-2">
                   <Info size={13} style={{ color: '#92400e' }} />
-                  <span className="text-xs font-semibold" style={{ color: '#92400e' }}>Inhaber-Hinweise (nicht blockierend)</span>
+                  <span className="text-xs font-semibold" style={{ color: '#92400e' }}>{t('mp.owner.warningsTitle')}</span>
                 </div>
                 <div className="space-y-1">
                   {result.inhaber_time_warnings.map((w, i) => {
-                    const kindLabel = w.kind === 'dienstzeit' ? 'außerhalb Dienstzeit' : w.kind === 'tageslimit' ? 'Tageslimit überschritten' : 'Monatslimit überschritten';
+                    // `w.kind` is Phase 3 data; only the label is translated.
+                    const kindLabel = w.kind === 'dienstzeit'
+                      ? t('mp.owner.kindWorkingTime')
+                      : w.kind === 'tageslimit'
+                        ? t('mp.reason.dailyMaxExceeded')
+                        : t('mp.reason.monthlyMaxExceeded');
                     return (
                       <div key={i} className="text-xs flex items-center gap-2" style={{ color: '#78350f' }}>
                         <span className="font-medium">{w.driver_name}:</span>
-                        <span>{kindLabel} – nicht blockierend</span>
+                        <span>{t('mp.owner.nonBlockingSuffix', { label: kindLabel })}</span>
                         {w.detail && <span className="opacity-60">({w.detail})</span>}
                       </div>
                     );
@@ -1473,9 +1528,9 @@ export default function MonatsplanungAssignmentPreview({
               <div className="mt-4 rounded-lg overflow-hidden" style={{ border: '1px solid #fca5a5', background: '#fef2f2' }}>
                 <div className="flex items-center gap-2 px-4 py-3" style={{ borderBottom: '1px solid #fca5a5' }}>
                   <XCircle size={14} style={{ color: '#dc2626' }} />
-                  <span className="text-sm font-semibold" style={{ color: '#991b1b' }}>Phase-4-Blocker</span>
+                  <span className="text-sm font-semibold" style={{ color: '#991b1b' }}>{t('mp.phase4Blocker')}</span>
                   <span className="text-xs ml-1" style={{ color: '#b91c1c' }}>
-                    — {result.window_violation_details.length} Dienstzeit-Verstoß{result.window_violation_details.length !== 1 ? 'e' : ''} (blockierend)
+                    — {tPlural({ one: 'mp.phase4BlockerCount.one', other: 'mp.phase4BlockerCount.other' }, result.window_violation_details.length)}
                   </span>
                 </div>
                 <div className="divide-y" style={{ borderColor: '#fecaca' }}>
@@ -1492,7 +1547,7 @@ export default function MonatsplanungAssignmentPreview({
                           <div className="text-xs" style={{ color: '#991b1b' }}>
                             {v.detail}
                             {v.work_window_start && v.work_window_end && (
-                              <span className="ml-1 opacity-70">(Dienstzeit {v.work_window_start}–{v.work_window_end})</span>
+                              <span className="ml-1 opacity-70">({t('mp.workingTime')} {v.work_window_start}–{v.work_window_end})</span>
                             )}
                           </div>
                         </div>
@@ -1501,19 +1556,19 @@ export default function MonatsplanungAssignmentPreview({
                             onClick={() => handleAcceptDienstzeitException(v.block_id)}
                             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-semibold transition-colors hover:brightness-95"
                             style={{ background: '#fee2e2', color: '#991b1b', border: '1px solid #fca5a5' }}
-                            title="Akzeptiert diese Dienstzeit-Ausnahme nur für diesen Block"
+                            title={t('mp.acceptWorkingTimeExceptionTooltip')}
                           >
                             <CheckCircle2 size={12} />
-                            Dienstzeit-Ausnahme akzeptieren
+                            {t('mp.acceptWorkingTimeException')}
                           </button>
                           <button
                             onClick={() => handleManuellLoesen(v.block_id)}
                             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-semibold transition-colors hover:brightness-95"
                             style={{ background: '#fff7ed', color: '#9a3412', border: '1px solid #fdba74' }}
-                            title="Block zurück in offene Liste — manuell einem anderen Fahrer zuweisen"
+                            title={t('mp.resolveManuallyTooltip')}
                           >
                             <Hand size={12} />
-                            Manuell lösen
+                            {t('mp.resolveManually')}
                           </button>
                         </div>
                       </div>
@@ -1526,7 +1581,7 @@ export default function MonatsplanungAssignmentPreview({
             {result.noteWarnings.length > 0 && (
               <details className="mt-4">
                 <summary className="text-sm cursor-pointer" style={{ color: 'var(--text-secondary)' }}>
-                  Notiz-Warnungen ({result.noteWarnings.length})
+                  {t('mp.noteWarnings', { count: result.noteWarnings.length })}
                 </summary>
                 <ul className="mt-2 space-y-1 text-xs" style={{ color: 'var(--text-secondary)' }}>
                   {result.noteWarnings.map((w, i) => (
@@ -1541,16 +1596,16 @@ export default function MonatsplanungAssignmentPreview({
           {(result.inhaber_summary.inhaber_trips > 0 || result.inhaber_summary.employee_trips > 0 || result.inhaber_summary.blocks_inhaber_could_not_take > 0) && (
             <div className="rounded-xl p-5" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
               <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
-                <h3 className="text-base font-semibold" style={{ color: 'var(--text-primary)' }}>Inhaber-Priorität</h3>
+                <h3 className="text-base font-semibold" style={{ color: 'var(--text-primary)' }}>{t('mp.owner.priorityTitle')}</h3>
                 <span className="text-xs font-semibold px-2.5 py-1 rounded-full"
                   style={{
                     background: result.inhaber_summary.inhaber_status === 'on_target' ? '#f0fdf4' : result.inhaber_summary.inhaber_status === 'below_target' ? '#fff7ed' : '#eff6ff',
                     color: result.inhaber_summary.inhaber_status === 'on_target' ? '#15803d' : result.inhaber_summary.inhaber_status === 'below_target' ? '#c2410c' : '#1d4ed8',
                     border: `1px solid ${result.inhaber_summary.inhaber_status === 'on_target' ? '#bbf7d0' : result.inhaber_summary.inhaber_status === 'below_target' ? '#fed7aa' : '#bfdbfe'}`,
                   }}>
-                  Zielanteil {result.inhaber_summary.inhaber_share_percent}% · {
-                    result.inhaber_summary.inhaber_status === 'on_target' ? 'Im Zielbereich' :
-                    result.inhaber_summary.inhaber_status === 'below_target' ? 'Unter Ziel' : 'Über Ziel'
+                  {t('mp.owner.targetShare', { percent: result.inhaber_summary.inhaber_share_percent })} · {
+                    result.inhaber_summary.inhaber_status === 'on_target' ? t('mp.owner.onTarget') :
+                    result.inhaber_summary.inhaber_status === 'below_target' ? t('mp.owner.belowTarget') : t('mp.owner.aboveTarget')
                   }
                 </span>
               </div>
@@ -1558,20 +1613,20 @@ export default function MonatsplanungAssignmentPreview({
               {/* Target vs actual row */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4 p-3 rounded-lg" style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)' }}>
                 <div>
-                  <div className="text-[10px] uppercase tracking-wider font-semibold mb-0.5" style={{ color: 'var(--text-tertiary)' }}>Inhaber-Zielanteil</div>
+                  <div className="text-[10px] uppercase tracking-wider font-semibold mb-0.5" style={{ color: 'var(--text-tertiary)' }}>{t('mp.owner.targetShareLabel')}</div>
                   <div className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>{result.inhaber_summary.inhaber_share_percent}%</div>
                 </div>
                 <div>
-                  <div className="text-[10px] uppercase tracking-wider font-semibold mb-0.5" style={{ color: 'var(--text-tertiary)' }}>Inhaber-Zielstunden</div>
+                  <div className="text-[10px] uppercase tracking-wider font-semibold mb-0.5" style={{ color: 'var(--text-tertiary)' }}>{t('mp.owner.targetHours')}</div>
                   <div className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>{result.inhaber_summary.inhaber_target_hours.toFixed(1)} h</div>
-                  <div className="text-[10px] mt-0.5" style={{ color: 'var(--text-tertiary)' }}>von {result.inhaber_summary.total_planned_hours.toFixed(1)} h gesamt</div>
+                  <div className="text-[10px] mt-0.5" style={{ color: 'var(--text-tertiary)' }}>{t('mp.owner.ofTotalHours', { hours: result.inhaber_summary.total_planned_hours.toFixed(1) })}</div>
                 </div>
                 <div>
-                  <div className="text-[10px] uppercase tracking-wider font-semibold mb-0.5" style={{ color: 'var(--text-tertiary)' }}>Inhaber-Iststunden</div>
+                  <div className="text-[10px] uppercase tracking-wider font-semibold mb-0.5" style={{ color: 'var(--text-tertiary)' }}>{t('mp.owner.actualHours')}</div>
                   <div className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>{result.inhaber_summary.inhaber_hours.toFixed(1)} h</div>
                 </div>
                 <div>
-                  <div className="text-[10px] uppercase tracking-wider font-semibold mb-0.5" style={{ color: 'var(--text-tertiary)' }}>Abweichung</div>
+                  <div className="text-[10px] uppercase tracking-wider font-semibold mb-0.5" style={{ color: 'var(--text-tertiary)' }}>{t('mp.deviation')}</div>
                   <div className="text-lg font-bold" style={{
                     color: result.inhaber_summary.inhaber_status === 'on_target' ? '#15803d' :
                            result.inhaber_summary.inhaber_status === 'below_target' ? '#ea580c' : '#1d4ed8',
@@ -1582,59 +1637,61 @@ export default function MonatsplanungAssignmentPreview({
                     color: result.inhaber_summary.inhaber_status === 'on_target' ? '#166534' :
                            result.inhaber_summary.inhaber_status === 'below_target' ? '#c2410c' : '#1d4ed8',
                   }}>
-                    {result.inhaber_summary.inhaber_status === 'on_target' ? 'Im Zielbereich' :
-                     result.inhaber_summary.inhaber_status === 'below_target' ? 'Unter Ziel' : 'Über Ziel'}
+                    {result.inhaber_summary.inhaber_status === 'on_target' ? t('mp.owner.onTarget') :
+                     result.inhaber_summary.inhaber_status === 'below_target' ? t('mp.owner.belowTarget') : t('mp.owner.aboveTarget')}
                   </div>
                 </div>
               </div>
 
               <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-4">
                 <div className="rounded-lg p-3" style={{ background: '#f0fdf4', border: '1px solid #bbf7d0' }}>
-                  <div className="text-[10px] uppercase tracking-wider font-semibold mb-1" style={{ color: '#166534' }}>Inhaber-Fahrten</div>
+                  <div className="text-[10px] uppercase tracking-wider font-semibold mb-1" style={{ color: '#166534' }}>{t('mp.owner.ownerTrips')}</div>
                   <div className="text-2xl font-bold" style={{ color: '#15803d' }}>{result.inhaber_summary.inhaber_trips}</div>
-                  <div className="text-xs mt-0.5" style={{ color: '#166534' }}>{result.inhaber_summary.inhaber_hours.toFixed(1)} Std.</div>
+                  <div className="text-xs mt-0.5" style={{ color: '#166534' }}>{result.inhaber_summary.inhaber_hours.toFixed(1)} {t('mp.hoursShort')}</div>
                 </div>
                 <div className="rounded-lg p-3" style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)' }}>
-                  <div className="text-[10px] uppercase tracking-wider font-semibold mb-1" style={{ color: 'var(--text-tertiary)' }}>Angestellten-Fahrten</div>
+                  <div className="text-[10px] uppercase tracking-wider font-semibold mb-1" style={{ color: 'var(--text-tertiary)' }}>{t('mp.owner.employeeTrips')}</div>
                   <div className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>{result.inhaber_summary.employee_trips}</div>
-                  <div className="text-xs mt-0.5" style={{ color: 'var(--text-tertiary)' }}>{result.inhaber_summary.employee_hours.toFixed(1)} Std.</div>
+                  <div className="text-xs mt-0.5" style={{ color: 'var(--text-tertiary)' }}>{result.inhaber_summary.employee_hours.toFixed(1)} {t('mp.hoursShort')}</div>
                 </div>
                 <div className="rounded-lg p-3" style={{ background: result.inhaber_summary.drivers_below_min > 0 ? '#fff7ed' : '#f0fdf4', border: `1px solid ${result.inhaber_summary.drivers_below_min > 0 ? '#fed7aa' : '#bbf7d0'}` }}>
-                  <div className="text-[10px] uppercase tracking-wider font-semibold mb-1" style={{ color: result.inhaber_summary.drivers_below_min > 0 ? '#c2410c' : '#166534' }}>Unter Mindestgehalt</div>
+                  <div className="text-[10px] uppercase tracking-wider font-semibold mb-1" style={{ color: result.inhaber_summary.drivers_below_min > 0 ? '#c2410c' : '#166534' }}>{t('mp.belowMinSalary')}</div>
                   <div className="text-2xl font-bold" style={{ color: result.inhaber_summary.drivers_below_min > 0 ? '#ea580c' : '#15803d' }}>{result.inhaber_summary.drivers_below_min}</div>
-                  <div className="text-xs mt-0.5" style={{ color: 'var(--text-tertiary)' }}>Fahrer</div>
+                  <div className="text-xs mt-0.5" style={{ color: 'var(--text-tertiary)' }}>{t('common.driver')}</div>
                 </div>
                 <div className="rounded-lg p-3" style={{ background: '#f0fdf4', border: '1px solid #bbf7d0' }}>
-                  <div className="text-[10px] uppercase tracking-wider font-semibold mb-1" style={{ color: '#166534' }}>Im Gehaltsbereich</div>
+                  <div className="text-[10px] uppercase tracking-wider font-semibold mb-1" style={{ color: '#166534' }}>{t('mp.inSalaryRange')}</div>
                   <div className="text-2xl font-bold" style={{ color: '#15803d' }}>{result.inhaber_summary.drivers_in_range}</div>
-                  <div className="text-xs mt-0.5" style={{ color: 'var(--text-tertiary)' }}>Über Max: {result.inhaber_summary.drivers_above_max}</div>
+                  <div className="text-xs mt-0.5" style={{ color: 'var(--text-tertiary)' }}>{t('mp.aboveMaxCount', { count: result.inhaber_summary.drivers_above_max })}</div>
                 </div>
                 <div className="rounded-lg p-3" style={{ background: result.inhaber_summary.blocks_inhaber_could_not_take > 0 ? '#fff7ed' : 'var(--bg-subtle)', border: `1px solid ${result.inhaber_summary.blocks_inhaber_could_not_take > 0 ? '#fed7aa' : 'var(--border)'}` }}>
-                  <div className="text-[10px] uppercase tracking-wider font-semibold mb-1" style={{ color: result.inhaber_summary.blocks_inhaber_could_not_take > 0 ? '#c2410c' : 'var(--text-tertiary)' }}>Nicht an Inhaber möglich</div>
+                  <div className="text-[10px] uppercase tracking-wider font-semibold mb-1" style={{ color: result.inhaber_summary.blocks_inhaber_could_not_take > 0 ? '#c2410c' : 'var(--text-tertiary)' }}>{t('mp.owner.notPossibleForOwner')}</div>
                   <div className="text-2xl font-bold" style={{ color: result.inhaber_summary.blocks_inhaber_could_not_take > 0 ? '#ea580c' : 'var(--text-tertiary)' }}>{result.inhaber_summary.blocks_inhaber_could_not_take}</div>
-                  <div className="text-xs mt-0.5" style={{ color: 'var(--text-tertiary)' }}>Blöcke</div>
+                  <div className="text-xs mt-0.5" style={{ color: 'var(--text-tertiary)' }}>{t('mp.blocks')}</div>
                 </div>
               </div>
               {Object.keys(result.inhaber_summary.inhaber_rejection_reasons).length > 0 && (
                 <div>
-                  <div className="text-xs font-semibold mb-2" style={{ color: 'var(--text-secondary)' }}>Warum Inhaber Blöcke nicht nehmen konnte:</div>
+                  <div className="text-xs font-semibold mb-2" style={{ color: 'var(--text-secondary)' }}>{t('mp.owner.rejectionReasonsTitle')}</div>
                   <div className="flex flex-wrap gap-2">
                     {Object.entries(result.inhaber_summary.inhaber_rejection_reasons).map(([reason, count]) => {
-                      const labels: Record<string, string> = {
-                        driver_overlap: 'Überlappung',
-                        vehicle_switch_buffer_violation: 'Wechsel-Puffer',
-                        note_constraint: 'Notiz (Krank/Urlaub/Frei)',
-                        outside_working_time_window: 'Außerhalb Dienstzeit',
-                        daily_max_exceeded: 'Tageslimit',
-                        monthly_max_exceeded: 'Monatslimit',
-                        one_vehicle_per_day: 'Fahrzeug-Wechsel/Tag',
-                        wrong_weekday: 'Falsche Wochentage',
-                        not_in_pool: 'Kein Inhaber konfiguriert',
+                      // The keys of this map are Phase 3 reason codes — data.
+                      const labels: Record<string, TranslationKey> = {
+                        driver_overlap: 'mp.owner.rejectOverlap',
+                        vehicle_switch_buffer_violation: 'mp.owner.rejectSwitchBuffer',
+                        note_constraint: 'mp.owner.rejectNote',
+                        outside_working_time_window: 'mp.reason.outsideWorkingTime',
+                        daily_max_exceeded: 'mp.dailyLimit',
+                        monthly_max_exceeded: 'mp.monthlyLimit',
+                        one_vehicle_per_day: 'mp.owner.rejectVehicleSwitchPerDay',
+                        wrong_weekday: 'mp.owner.rejectWrongWeekdays',
+                        not_in_pool: 'mp.owner.rejectNoOwner',
                       };
+                      const labelKey = labels[reason];
                       return (
                         <span key={reason} className="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-full font-medium"
                           style={{ background: '#fef9c3', color: '#854d0e', border: '1px solid #fde68a' }}>
-                          {labels[reason] ?? reason}: {count}
+                          {labelKey ? t(labelKey) : reason}: {count}
                         </span>
                       );
                     })}
@@ -1649,10 +1706,10 @@ export default function MonatsplanungAssignmentPreview({
             <div className="rounded-xl p-5" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
               <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
                 <h3 className="text-base font-semibold flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
-                  <Wrench size={16} /> Austausch-Reparatur
+                  <Wrench size={16} /> {t('mp.swapRepair.title')}
                 </h3>
                 <span className="text-xs font-semibold px-2.5 py-1 rounded-full" style={{ background: '#f0fdf4', color: '#15803d', border: '1px solid #bbf7d0' }}>
-                  {result.austausch_summary.resolved} Block{result.austausch_summary.resolved !== 1 ? 'e' : ''} durch Inhaber-Tausch freigemacht
+                  {tPlural({ one: 'mp.swapRepair.freedCount.one', other: 'mp.swapRepair.freedCount.other' }, result.austausch_summary.resolved)}
                 </span>
               </div>
               <div className="space-y-2">
@@ -1660,7 +1717,7 @@ export default function MonatsplanungAssignmentPreview({
                   <div key={i} className="text-xs rounded-lg px-3 py-2 flex flex-wrap gap-x-3 gap-y-1" style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', color: '#166534' }}>
                     <span className="font-semibold">{sw.open_block_desc}</span>
                     <span>→ {sw.freed_driver}</span>
-                    <span className="opacity-75">· Geberblock: {sw.donor_block_desc} an Inhaber</span>
+                    <span className="opacity-75">· {t('mp.swapRepair.donorBlock', { block: sw.donor_block_desc })}</span>
                   </div>
                 ))}
               </div>
@@ -1678,21 +1735,21 @@ export default function MonatsplanungAssignmentPreview({
             >
               <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
                 <h3 className="text-base font-semibold flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
-                  <Shield size={16} /> Konflikt-Reparatur
+                  <Shield size={16} /> {t('mp.repair.title')}
                 </h3>
                 <div className="flex items-center gap-2 flex-wrap">
                   {repairResult.movedBlocks.length > 0 && (
                     <span className="text-xs font-semibold px-2.5 py-1 rounded-full" style={{ background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe' }}>
-                      {repairResult.movedBlocks.length} Block{repairResult.movedBlocks.length !== 1 ? 'e' : ''} verschoben
+                      {tPlural({ one: 'mp.repair.movedCount.one', other: 'mp.repair.movedCount.other' }, repairResult.movedBlocks.length)}
                     </span>
                   )}
                   {repairResult.diagnostics.fahrerUeberschneidungen === 0 && repairResult.diagnostics.fahrzeugUeberschneidungen === 0 && repairResult.diagnostics.inhaberUeberschneidungen === 0 ? (
                     <span className="text-xs font-semibold px-2.5 py-1 rounded-full" style={{ background: '#f0fdf4', color: '#15803d', border: '1px solid #bbf7d0' }}>
-                      Keine Konflikte
+                      {t('mp.repair.noConflicts')}
                     </span>
                   ) : (
                     <span className="text-xs font-semibold px-2.5 py-1 rounded-full" style={{ background: '#fef2f2', color: '#dc2626', border: '1px solid #fecaca' }}>
-                      {repairResult.diagnostics.fahrerUeberschneidungen + repairResult.diagnostics.fahrzeugUeberschneidungen + repairResult.diagnostics.inhaberUeberschneidungen} Konflikte verbleibend
+                      {tPlural({ one: 'mp.repair.conflictsRemaining.one', other: 'mp.repair.conflictsRemaining.other' }, repairResult.diagnostics.fahrerUeberschneidungen + repairResult.diagnostics.fahrzeugUeberschneidungen + repairResult.diagnostics.inhaberUeberschneidungen)}
                     </span>
                   )}
                   <button
@@ -1701,7 +1758,7 @@ export default function MonatsplanungAssignmentPreview({
                     style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
                   >
                     {showRepairDetails ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
-                    Details
+                    {t('mp.details')}
                   </button>
                 </div>
               </div>
@@ -1709,38 +1766,38 @@ export default function MonatsplanungAssignmentPreview({
               {/* Summary grid */}
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
                 <div className="rounded-lg px-3 py-2" style={{ background: 'var(--bg-subtle)' }}>
-                  <div className="text-[10px] uppercase tracking-wider font-semibold mb-0.5" style={{ color: 'var(--text-tertiary)' }}>Konflikte vor Reparatur</div>
+                  <div className="text-[10px] uppercase tracking-wider font-semibold mb-0.5" style={{ color: 'var(--text-tertiary)' }}>{t('mp.repair.conflictsBefore')}</div>
                   <div className="text-xl font-bold" style={{ color: 'var(--text-primary)' }}>{repairResult.conflictsBefore}</div>
                 </div>
                 <div className="rounded-lg px-3 py-2" style={{ background: repairResult.movedBlocks.length > 0 ? 'rgba(37,99,235,0.06)' : 'var(--bg-subtle)', border: repairResult.movedBlocks.length > 0 ? '1px solid rgba(37,99,235,0.2)' : '1px solid transparent' }}>
-                  <div className="text-[10px] uppercase tracking-wider font-semibold mb-0.5" style={{ color: repairResult.movedBlocks.length > 0 ? '#1d4ed8' : 'var(--text-tertiary)' }}>Verschobene Blöcke</div>
+                  <div className="text-[10px] uppercase tracking-wider font-semibold mb-0.5" style={{ color: repairResult.movedBlocks.length > 0 ? '#1d4ed8' : 'var(--text-tertiary)' }}>{t('mp.repair.movedBlocks')}</div>
                   <div className="text-xl font-bold" style={{ color: repairResult.movedBlocks.length > 0 ? '#1d4ed8' : 'var(--text-primary)' }}>{repairResult.movedBlocks.length}</div>
                 </div>
                 <div className="rounded-lg px-3 py-2" style={{ background: repairResult.conflictsAfter > 0 ? 'rgba(220,38,38,0.06)' : 'rgba(21,128,61,0.06)', border: repairResult.conflictsAfter > 0 ? '1px solid rgba(220,38,38,0.2)' : '1px solid rgba(21,128,61,0.2)' }}>
-                  <div className="text-[10px] uppercase tracking-wider font-semibold mb-0.5" style={{ color: repairResult.conflictsAfter > 0 ? '#dc2626' : '#15803d' }}>Konflikte nach Reparatur</div>
+                  <div className="text-[10px] uppercase tracking-wider font-semibold mb-0.5" style={{ color: repairResult.conflictsAfter > 0 ? '#dc2626' : '#15803d' }}>{t('mp.repair.conflictsAfter')}</div>
                   <div className="text-xl font-bold" style={{ color: repairResult.conflictsAfter > 0 ? '#dc2626' : '#15803d' }}>{repairResult.conflictsAfter}</div>
                 </div>
                 <div className="rounded-lg px-3 py-2" style={{ background: repairResult.unrepairable.length > 0 ? 'rgba(234,88,12,0.06)' : 'var(--bg-subtle)', border: repairResult.unrepairable.length > 0 ? '1px solid rgba(234,88,12,0.2)' : '1px solid transparent' }}>
-                  <div className="text-[10px] uppercase tracking-wider font-semibold mb-0.5" style={{ color: repairResult.unrepairable.length > 0 ? '#c2410c' : 'var(--text-tertiary)' }}>Nicht reparierbar</div>
+                  <div className="text-[10px] uppercase tracking-wider font-semibold mb-0.5" style={{ color: repairResult.unrepairable.length > 0 ? '#c2410c' : 'var(--text-tertiary)' }}>{t('mp.repair.unrepairable')}</div>
                   <div className="text-xl font-bold" style={{ color: repairResult.unrepairable.length > 0 ? '#c2410c' : 'var(--text-primary)' }}>{repairResult.unrepairable.length}</div>
                 </div>
               </div>
 
               {/* Final diagnostics */}
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-4">
-                {[
-                  { label: 'Fahrerüberschneidungen', value: repairResult.diagnostics.fahrerUeberschneidungen },
-                  { label: 'Fahrzeugüberschneidungen', value: repairResult.diagnostics.fahrzeugUeberschneidungen },
-                  { label: 'Inhaberüberschneidungen', value: repairResult.diagnostics.inhaberUeberschneidungen },
-                  { label: 'Daueränderungen', value: repairResult.diagnostics.daueraenderungen },
-                  { label: 'Außerhalb Monat', value: repairResult.diagnostics.ausserhalb },
-                  { label: 'Puffer verletzt', value: repairResult.diagnostics.pufferVerletzt },
-                  { label: 'Nicht reparierbar', value: repairResult.diagnostics.nichtReparierbar },
-                  { label: 'Iterationen', value: repairResult.iterations },
-                ].map(({ label, value }) => (
-                  <div key={label} className="text-xs flex items-center justify-between px-2 py-1 rounded" style={{ background: 'var(--bg-subtle)' }}>
-                    <span style={{ color: 'var(--text-secondary)' }}>{label}</span>
-                    <span className="font-bold ml-2" style={{ color: value > 0 && label !== 'Iterationen' ? '#dc2626' : 'var(--text-primary)' }}>{value}</span>
+                {([
+                  { key: 'mp.repair.diagDriverOverlaps' as TranslationKey, value: repairResult.diagnostics.fahrerUeberschneidungen, neutral: false },
+                  { key: 'mp.repair.diagVehicleOverlaps' as TranslationKey, value: repairResult.diagnostics.fahrzeugUeberschneidungen, neutral: false },
+                  { key: 'mp.repair.diagOwnerOverlaps' as TranslationKey, value: repairResult.diagnostics.inhaberUeberschneidungen, neutral: false },
+                  { key: 'mp.repair.diagDurationChanges' as TranslationKey, value: repairResult.diagnostics.daueraenderungen, neutral: false },
+                  { key: 'mp.repair.diagOutsideMonth' as TranslationKey, value: repairResult.diagnostics.ausserhalb, neutral: false },
+                  { key: 'mp.repair.diagBufferViolated' as TranslationKey, value: repairResult.diagnostics.pufferVerletzt, neutral: false },
+                  { key: 'mp.repair.unrepairable' as TranslationKey, value: repairResult.diagnostics.nichtReparierbar, neutral: false },
+                  { key: 'mp.repair.diagIterations' as TranslationKey, value: repairResult.iterations, neutral: true },
+                ]).map(({ key, value, neutral }) => (
+                  <div key={key} className="text-xs flex items-center justify-between px-2 py-1 rounded" style={{ background: 'var(--bg-subtle)' }}>
+                    <span style={{ color: 'var(--text-secondary)' }}>{t(key)}</span>
+                    <span className="font-bold ml-2" style={{ color: value > 0 && !neutral ? '#dc2626' : 'var(--text-primary)' }}>{value}</span>
                   </div>
                 ))}
               </div>
@@ -1750,7 +1807,7 @@ export default function MonatsplanungAssignmentPreview({
                   {/* Moved blocks */}
                   {repairResult.movedBlocks.length > 0 && (
                     <div>
-                      <div className="text-xs font-semibold mb-2" style={{ color: '#1d4ed8' }}>Verschobene Konflikt-Blöcke</div>
+                      <div className="text-xs font-semibold mb-2" style={{ color: '#1d4ed8' }}>{t('mp.repair.movedConflictBlocks')}</div>
                       <div className="space-y-1.5">
                         {repairResult.movedBlocks.map((m, i) => (
                           <div key={i} className="text-xs rounded-lg px-3 py-2 flex flex-wrap gap-x-4 gap-y-1" style={{ background: 'rgba(37,99,235,0.04)', border: '1px solid rgba(37,99,235,0.15)', color: '#1e3a8a' }}>
@@ -1758,14 +1815,14 @@ export default function MonatsplanungAssignmentPreview({
                             <span className="font-semibold">{m.vehicle}</span>
                             <span>{m.driverName}</span>
                             <span className="flex items-center gap-1">
-                              <span className="opacity-70">Alt:</span> {fmtRepairMs(m.oldStartMs)}–{fmtRepairMs(m.oldEndMs)}
+                              <span className="opacity-70">{t('mp.repair.old')}:</span> {fmtRepairMs(m.oldStartMs)}–{fmtRepairMs(m.oldEndMs)}
                             </span>
                             <span className="flex items-center gap-1">
                               <ArrowRight size={10} />
-                              <span className="opacity-70">Neu:</span> {fmtRepairMs(m.newStartMs)}–{fmtRepairMs(m.newEndMs)}
+                              <span className="opacity-70">{t('mp.repair.new')}:</span> {fmtRepairMs(m.newStartMs)}–{fmtRepairMs(m.newEndMs)}
                             </span>
                             <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold" style={{ background: '#dbeafe', color: '#1e40af' }}>{m.reason}</span>
-                            <span className="opacity-60">Puffer {m.bufferUsedMin} Min.</span>
+                            <span className="opacity-60">{t('mp.repair.bufferUsed', { minutes: m.bufferUsedMin })}</span>
                           </div>
                         ))}
                       </div>
@@ -1775,19 +1832,19 @@ export default function MonatsplanungAssignmentPreview({
                   {/* Unrepairable blocks */}
                   {repairResult.unrepairable.length > 0 && (
                     <div>
-                      <div className="text-xs font-semibold mb-2" style={{ color: '#c2410c' }}>Nicht reparierbar — Warum?</div>
+                      <div className="text-xs font-semibold mb-2" style={{ color: '#c2410c' }}>{t('mp.repair.unrepairableWhy')}</div>
                       <div className="overflow-x-auto">
                         <table className="w-full text-xs border-collapse">
                           <thead>
                             <tr style={{ background: 'var(--bg-subtle)' }}>
-                              <Th>Block-ID</Th>
-                              <Th>Fahrer</Th>
-                              <Th>Fahrzeug</Th>
-                              <Th align="right">Dauer</Th>
-                              <Th align="right">Fahrer-Fenster</Th>
-                              <Th align="right">Fahrzeug-Fenster</Th>
-                              <Th align="right">Gemeinsame Fenster</Th>
-                              <Th>Grund</Th>
+                              <Th>{t('mp.blockId')}</Th>
+                              <Th>{t('common.driver')}</Th>
+                              <Th>{t('mp.vehicle')}</Th>
+                              <Th align="right">{t('mp.duration')}</Th>
+                              <Th align="right">{t('mp.repair.driverWindows')}</Th>
+                              <Th align="right">{t('mp.repair.vehicleWindows')}</Th>
+                              <Th align="right">{t('mp.repair.sharedWindows')}</Th>
+                              <Th>{t('mp.reasonColumn')}</Th>
                             </tr>
                           </thead>
                           <tbody>
@@ -1796,7 +1853,7 @@ export default function MonatsplanungAssignmentPreview({
                                 <Td><span className="font-mono text-[10px]">{u.blockId.slice(0, 8)}</span></Td>
                                 <Td>{u.driverName}</Td>
                                 <Td><span className="font-mono">{u.vehicle}</span></Td>
-                                <Td align="right">{Math.round(u.durationMs / 60000)} Min.</Td>
+                                <Td align="right">{Math.round(u.durationMs / 60000)} {t('mp.minShort')}</Td>
                                 <Td align="right">{u.freeDriverWindowsChecked}</Td>
                                 <Td align="right">{u.freeVehicleWindowsChecked}</Td>
                                 <Td align="right">{u.sharedWindowsChecked}</Td>
@@ -1817,21 +1874,21 @@ export default function MonatsplanungAssignmentPreview({
           <div className="rounded-xl overflow-hidden" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
             <div className="px-5 py-4 border-b" style={{ borderColor: 'var(--border)' }}>
               <h3 className="text-base font-semibold flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
-                <UserCheck size={16} /> Pro Fahrer
+                <UserCheck size={16} /> {t('mp.perDriver')}
               </h3>
             </div>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
                   <tr style={{ background: 'var(--bg-subtle)' }}>
-                    <Th>Fahrer</Th>
-                    <Th align="right">Blöcke</Th>
-                    <Th align="right">Stunden</Th>
-                    <Th align="right">Monatsziel</Th>
-                    <Th align="right">Max./Monat</Th>
-                    <Th align="right">Max./Tag</Th>
-                    <Th>Dienstzeit</Th>
-                    <Th>Gehaltsstatus</Th>
+                    <Th>{t('common.driver')}</Th>
+                    <Th align="right">{t('mp.blocks')}</Th>
+                    <Th align="right">{t('mp.hours')}</Th>
+                    <Th align="right">{t('mp.monthlyTarget')}</Th>
+                    <Th align="right">{t('mp.maxPerMonth')}</Th>
+                    <Th align="right">{t('mp.maxPerDay')}</Th>
+                    <Th>{t('mp.workingTime')}</Th>
+                    <Th>{t('mp.salaryStatus')}</Th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1848,14 +1905,14 @@ export default function MonatsplanungAssignmentPreview({
                     const brutto = hourlyRate != null && hourlyRate > 0 ? (s.monthly_minutes / 60) * hourlyRate : null;
                     let salaryBadge: React.ReactNode = null;
                     if (isOwner) {
-                      salaryBadge = <span className="text-xs font-semibold px-2 py-0.5 rounded-full" style={{ background: '#f0fdf4', color: '#15803d', border: '1px solid #bbf7d0' }}>Inhaber</span>;
+                      salaryBadge = <span className="text-xs font-semibold px-2 py-0.5 rounded-full" style={{ background: '#f0fdf4', color: '#15803d', border: '1px solid #bbf7d0' }}>{t('mp.owner.owner')}</span>;
                     } else if (brutto != null && minSal != null && maxSal != null) {
                       if (brutto < minSal - 0.01) {
-                        salaryBadge = <span className="text-xs font-semibold px-2 py-0.5 rounded-full" style={{ background: '#fff3e0', color: '#e65100', border: '1px solid #ffcc80' }}>Unter Mindestgehalt</span>;
+                        salaryBadge = <span className="text-xs font-semibold px-2 py-0.5 rounded-full" style={{ background: '#fff3e0', color: '#e65100', border: '1px solid #ffcc80' }}>{t('mp.belowMinSalary')}</span>;
                       } else if (brutto > maxSal + 0.01) {
-                        salaryBadge = <span className="text-xs font-semibold px-2 py-0.5 rounded-full" style={{ background: '#e3f2fd', color: '#0369a1', border: '1px solid #bfdbfe' }}>Über Maximalgehalt</span>;
+                        salaryBadge = <span className="text-xs font-semibold px-2 py-0.5 rounded-full" style={{ background: '#e3f2fd', color: '#0369a1', border: '1px solid #bfdbfe' }}>{t('mp.aboveMaxSalary')}</span>;
                       } else {
-                        salaryBadge = <span className="text-xs font-semibold px-2 py-0.5 rounded-full" style={{ background: '#f0fdf4', color: '#15803d', border: '1px solid #bbf7d0' }}>Im Gehaltsbereich</span>;
+                        salaryBadge = <span className="text-xs font-semibold px-2 py-0.5 rounded-full" style={{ background: '#f0fdf4', color: '#15803d', border: '1px solid #bbf7d0' }}>{t('mp.inSalaryRange')}</span>;
                       }
                     }
                     return (
@@ -1872,7 +1929,7 @@ export default function MonatsplanungAssignmentPreview({
                         <Td align="right">
                           {s.effective_max_daily_hours}h
                           {s.used_default_max_daily && (
-                            <span className="ml-1 text-[10px]" style={{ color: 'var(--text-tertiary)' }}>(Default)</span>
+                            <span className="ml-1 text-[10px]" style={{ color: 'var(--text-tertiary)' }}>({t('mp.defaultLabel')})</span>
                           )}
                         </Td>
                         <Td>
@@ -1894,20 +1951,20 @@ export default function MonatsplanungAssignmentPreview({
             <div className="rounded-xl overflow-hidden" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
               <div className="px-5 py-4 border-b" style={{ borderColor: 'var(--border)' }}>
                 <h3 className="text-base font-semibold flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
-                  <XCircle size={16} /> Nicht zugewiesene Blöcke ({result.unassigned.length})
+                  <XCircle size={16} /> {t('mp.unassignedBlocks')} ({result.unassigned.length})
                 </h3>
               </div>
               <div className="overflow-x-auto max-h-[500px]">
                 <table className="w-full text-xs">
                   <thead className="sticky top-0" style={{ background: 'var(--bg-subtle)' }}>
                     <tr>
-                      <Th>Datum</Th>
-                      <Th>Kennzeichen</Th>
-                      <Th>Start</Th>
-                      <Th>Ende</Th>
-                      <Th align="right">Dauer (Min)</Th>
-                      <Th>Ablehnungen</Th>
-                      <Th>Aktion</Th>
+                      <Th>{t('common.date')}</Th>
+                      <Th>{t('mp.licensePlate')}</Th>
+                      <Th>{t('mp.start')}</Th>
+                      <Th>{t('mp.end')}</Th>
+                      <Th align="right">{t('mp.durationMinutes')}</Th>
+                      <Th>{t('mp.rejections')}</Th>
+                      <Th>{t('mp.action')}</Th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1921,20 +1978,20 @@ export default function MonatsplanungAssignmentPreview({
                         <Td>
                           <div className="space-y-0.5">
                             {b.rejected.length === 0 && (
-                              <span style={{ color: 'var(--text-tertiary)' }}>Keine geeigneten Fahrer</span>
+                              <span style={{ color: 'var(--text-tertiary)' }}>{t('mp.noSuitableDrivers')}</span>
                             )}
                             {b.rejected.slice(0, 4).map((r, i) => (
                               <div key={i} className="text-[11px]">
-                                <span className="font-semibold">{r.driver_name}</span>: <span style={{ color: 'var(--text-tertiary)' }}>{REASON_LABEL[r.reason]}</span> – {r.detail}
+                                <span className="font-semibold">{r.driver_name}</span>: <span style={{ color: 'var(--text-tertiary)' }}>{t(REASON_LABEL[r.reason])}</span> – {r.detail}
                               </div>
                             ))}
                             {b.rejected.length > 4 && (
-                              <div className="text-[10px]" style={{ color: 'var(--text-tertiary)' }}>… und {b.rejected.length - 4} weitere</div>
+                              <div className="text-[10px]" style={{ color: 'var(--text-tertiary)' }}>{t('mp.andMore', { count: b.rejected.length - 4 })}</div>
                             )}
                             {b.repair_attempted && (
                               <div className="mt-1 space-y-0.5">
                                 <div className="text-[11px] inline-flex items-center gap-1" style={{ color: '#a16207' }}>
-                                  <Wrench size={11} /> Repair attempted: yes · {b.repair_reason}
+                                  <Wrench size={11} /> {t('mp.repairAttempted', { reason: b.repair_reason ?? '' })}
                                 </div>
                                 {b.repair_attempts.slice(0, 5).map((ra, k) => (
                                   <div key={k} className="text-[10px] pl-4" style={{ color: 'var(--text-tertiary)' }}>
@@ -1943,29 +2000,33 @@ export default function MonatsplanungAssignmentPreview({
                                 ))}
                                 {b.repair_attempts.length > 5 && (
                                   <div className="text-[10px] pl-4" style={{ color: 'var(--text-tertiary)' }}>
-                                    … und {b.repair_attempts.length - 5} weitere abgelehnte Versuche
+                                    {t('mp.andMoreRejectedAttempts', { count: b.repair_attempts.length - 5 })}
                                   </div>
                                 )}
                               </div>
                             )}
                             {b.inhaber_rejection && (
                               <div className="mt-1 text-[11px] inline-flex items-center gap-1 px-1.5 py-0.5 rounded" style={{ background: '#fff7ed', color: '#c2410c' }}>
-                                Inhaber versucht: {REASON_LABEL[b.inhaber_rejection.reason]} – {b.inhaber_rejection.detail}
+                                {t('mp.owner.attempted')}: {t(REASON_LABEL[b.inhaber_rejection.reason])} – {b.inhaber_rejection.detail}
                               </div>
                             )}
                             {b.repair_reason?.includes('Deckungspass') && (
                               <div className="mt-1 text-[11px] inline-flex items-center gap-1 px-1.5 py-0.5 rounded" style={{ background: '#fef9c3', color: '#854d0e' }}>
-                                Deckungspass versucht (entspannte Dienstzeit) – kein gültiger Kandidat
+                                {t('mp.coveragePassAttempted')}
                               </div>
                             )}
                             {b.austausch_log && (
                               <div className="mt-1 text-[11px] inline-flex items-center gap-1 px-1.5 py-0.5 rounded" style={{ background: '#f0fdf4', color: '#166534', border: '1px solid #bbf7d0' }}>
-                                <Wrench size={11} /> Austausch-Reparatur versucht ({b.austausch_log.donor_driver_name} · {b.austausch_log.donor_block_desc}) – {b.austausch_log.reason}
+                                <Wrench size={11} /> {t('mp.swapRepair.attempted', {
+                                  donor: b.austausch_log.donor_driver_name,
+                                  block: b.austausch_log.donor_block_desc,
+                                  reason: b.austausch_log.reason,
+                                })}
                               </div>
                             )}
                             {b.intentionally_open && (
                               <div className="mt-1 text-[11px] inline-flex items-center gap-1 px-1.5 py-0.5 rounded font-semibold" style={{ background: '#e0e7ff', color: '#3730a3' }}>
-                                <ShieldAlert size={11} /> Vom Benutzer offen gelassen
+                                <ShieldAlert size={11} /> {t('mp.leftOpenByUser')}
                               </div>
                             )}
                           </div>
@@ -1977,7 +2038,7 @@ export default function MonatsplanungAssignmentPreview({
                               className="inline-flex items-center gap-1 px-2 py-1 rounded text-[11px] font-semibold"
                               style={{ background: 'var(--bg-subtle)', color: 'var(--text-primary)', border: '1px solid var(--border)' }}
                             >
-                              <RotateCcw size={11} /> Zurücksetzen
+                              <RotateCcw size={11} /> {t('mp.reset')}
                             </button>
                           ) : (
                             <div className="flex flex-col gap-1">
@@ -1986,14 +2047,14 @@ export default function MonatsplanungAssignmentPreview({
                                 className="inline-flex items-center gap-1 px-2 py-1 rounded text-[11px] font-semibold"
                                 style={{ background: 'var(--primary)', color: 'var(--primary-contrast, #fff)' }}
                               >
-                                <Hand size={11} /> Manuell lösen
+                                <Hand size={11} /> {t('mp.resolveManually')}
                               </button>
                               <button
                                 onClick={() => handleLeaveOpen(b.block_id)}
                                 className="inline-flex items-center gap-1 px-2 py-1 rounded text-[11px] font-semibold"
                                 style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
                               >
-                                Bewusst offen lassen
+                                {t('mp.leaveOpen')}
                               </button>
                             </div>
                           )}
@@ -2011,20 +2072,20 @@ export default function MonatsplanungAssignmentPreview({
           <div className="rounded-xl overflow-hidden" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
             <div className="px-5 py-4 border-b" style={{ borderColor: 'var(--border)' }}>
               <h3 className="text-base font-semibold flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
-                <CheckCircle2 size={16} /> Zugewiesene Blöcke ({result.assigned.length})
+                <CheckCircle2 size={16} /> {t('mp.assignedBlocks')} ({result.assigned.length})
               </h3>
             </div>
             <div className="overflow-x-auto max-h-[600px]">
               <table className="w-full text-xs">
                 <thead className="sticky top-0" style={{ background: 'var(--bg-subtle)' }}>
                   <tr>
-                    <Th>Datum</Th>
-                    <Th>Kennzeichen</Th>
-                    <Th>Start</Th>
-                    <Th>Ende</Th>
-                    <Th align="right">Dauer (Min)</Th>
-                    <Th>Fahrer</Th>
-                    <Th>Grund</Th>
+                    <Th>{t('common.date')}</Th>
+                    <Th>{t('mp.licensePlate')}</Th>
+                    <Th>{t('mp.start')}</Th>
+                    <Th>{t('mp.end')}</Th>
+                    <Th align="right">{t('mp.durationMinutes')}</Th>
+                    <Th>{t('common.driver')}</Th>
+                    <Th>{t('mp.reasonColumn')}</Th>
                   </tr>
                 </thead>
                 <tbody>
@@ -2043,26 +2104,26 @@ export default function MonatsplanungAssignmentPreview({
                       <Td>
                         <span className="font-semibold">{b.driver_name}</span>
                         {b.used_default_max_daily && (
-                          <span className="ml-1 text-[10px]" style={{ color: 'var(--text-tertiary)' }}>(Default 8h)</span>
+                          <span className="ml-1 text-[10px]" style={{ color: 'var(--text-tertiary)' }}>({t('mp.defaultHours', { hours: 8 })})</span>
                         )}
                         {isRepairedMove && (
                           <span className="ml-1 inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded" style={{ background: '#dbeafe', color: '#1e40af', border: '1px solid #bfdbfe' }}>
-                            <Wrench size={10} /> Repariert
+                            <Wrench size={10} /> {t('mp.repaired')}
                           </span>
                         )}
                         {!isRepairedMove && (b.repair_applied || b.repair_moved) && (
                           <span className="ml-1 inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded" style={{ background: '#fef3c7', color: '#92400e' }}>
-                            <Wrench size={10} /> {b.repair_moved ? 'verschoben' : 'repariert'}
+                            <Wrench size={10} /> {b.repair_moved ? t('mp.movedLower') : t('mp.repairedLower')}
                           </span>
                         )}
                         {hasConflict && (
                           <span className="ml-1 inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded font-semibold" style={{ background: '#fef2f2', color: '#dc2626', border: '1px solid #fecaca' }}>
-                            <AlertTriangle size={10} /> Konflikt
+                            <AlertTriangle size={10} /> {t('mp.conflict')}
                           </span>
                         )}
                         {b.manual_exception?.confirmed_by_user && (
                           <span className="ml-1 inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded font-semibold" style={{ background: '#dbeafe', color: '#1e40af' }} title={b.manual_exception.reason}>
-                            <ShieldAlert size={10} /> Manuelle Ausnahme
+                            <ShieldAlert size={10} /> {t('mp.manualException')}
                           </span>
                         )}
                       </Td>
@@ -2074,9 +2135,9 @@ export default function MonatsplanungAssignmentPreview({
                               onClick={() => handleUndoManual(b.block_id)}
                               className="shrink-0 inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold"
                               style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
-                              title="Manuelle Ausnahme zurücksetzen"
+                              title={t('mp.undoManualExceptionTooltip')}
                             >
-                              <RotateCcw size={10} /> Undo
+                              <RotateCcw size={10} /> {t('mp.undo')}
                             </button>
                           )}
                         </div>
@@ -2093,10 +2154,10 @@ export default function MonatsplanungAssignmentPreview({
             <div className="flex items-start justify-between gap-4 mb-4">
               <div>
                 <h2 className="text-base font-semibold flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
-                  <FileDiff size={16} /> Phase 4: Änderungs-Vorschau
+                  <FileDiff size={16} /> {t('mp.phase4.title')}
                 </h2>
                 <p className="text-xs mt-1" style={{ color: 'var(--text-tertiary)' }}>
-                  Preview, was beim späteren Anwenden geändert würde. Keine DB-Schreibvorgänge.
+                  {t('mp.phase4.subtitle')}
                 </p>
               </div>
             </div>
@@ -2105,8 +2166,8 @@ export default function MonatsplanungAssignmentPreview({
               <div className="px-3 py-2 rounded-lg text-sm flex items-start gap-2" style={{ background: '#fef3c7', color: '#92400e', border: '1px solid #fde68a' }}>
                 <Lock size={15} className="mt-0.5" />
                 {result.options.oneVehiclePerDriverDay && result.validation.multiple_vehicles_per_day_violations > 0
-                  ? 'Phase 4 kann erst erstellt werden, wenn keine Fahrzeug-pro-Tag-Verstöße existieren.'
-                  : 'Phase 4 kann erst erstellt werden, wenn alle Fahrten zugewiesen sind und keine Validierungsfehler existieren.'}
+                  ? t('mp.phase4.lockedVehiclePerDay')
+                  : t('mp.phase4.lockedGeneral')}
               </div>
             )}
 
@@ -2118,7 +2179,7 @@ export default function MonatsplanungAssignmentPreview({
                 style={{ background: 'var(--primary, #2563eb)', color: 'var(--primary-contrast, #fff)' }}
               >
                 <FileDiff size={16} />
-                {building4 ? 'Erstelle…' : 'Änderungs-Vorschau erstellen'}
+                {building4 ? t('mp.phase4.building') : t('mp.phase4.build')}
               </button>
               {(() => {
                 const v = blockingValidation ?? result.validation;
@@ -2133,14 +2194,14 @@ export default function MonatsplanungAssignmentPreview({
                 const hasQualityBlockers = qualityHardBlockers > 0;
                 const hasNoteViolations = sectionENoteViolations.length > 0;
                 const canApply = phase3Ok && phase4Ok && !hasOpen && !hasViolations && !hasQualityBlockers && !hasNoteViolations && !!importId && !applyResult?.success;
-                const disabledReason = !phase3Ok ? 'Planung nicht abgeschlossen'
-                  : !phase4Ok ? 'Änderungs-Vorschau erforderlich'
-                  : hasOpen ? 'Offene Blöcke / Fahrten vorhanden'
-                  : hasViolations ? 'Planungsvalidierung fehlgeschlagen'
-                  : hasQualityBlockers ? 'Planqualitäts-Blocker vorhanden'
-                  : hasNoteViolations ? 'Fahrer-Notizen in ausgewählten Platzierungen verletzt'
-                  : !importId ? 'Import-ID fehlt'
-                  : applyResult?.success ? 'Plan bereits angewendet'
+                const disabledReason = !phase3Ok ? t('mp.apply.blockedNotComplete')
+                  : !phase4Ok ? t('mp.apply.blockedNeedsChangeSet')
+                  : hasOpen ? t('mp.apply.blockedOpenBlocks')
+                  : hasViolations ? t('mp.apply.blockedValidation')
+                  : hasQualityBlockers ? t('mp.apply.blockedQuality')
+                  : hasNoteViolations ? t('mp.apply.blockedNotes')
+                  : !importId ? t('mp.apply.blockedNoImportId')
+                  : applyResult?.success ? t('mp.apply.blockedAlreadyApplied')
                   : null;
                 return (
                   <>
@@ -2150,25 +2211,25 @@ export default function MonatsplanungAssignmentPreview({
                       disabled={!canApply}
                       className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
                       style={{ background: canApply ? '#15803d' : 'var(--bg-subtle)', color: canApply ? '#fff' : 'var(--text-secondary)', border: canApply ? '1px solid #15803d' : '1px solid var(--border)' }}
-                      title={canApply ? 'Plan in die Datenbank schreiben' : `Anwenden gesperrt: ${disabledReason}`}
+                      title={canApply ? t('mp.apply.tooltipReady') : t('mp.apply.lockedWithReason', { reason: disabledReason ?? '' })}
                     >
-                      {canApply ? <Database size={14} /> : <Lock size={14} />} Plan anwenden
+                      {canApply ? <Database size={14} /> : <Lock size={14} />} {t('mp.apply.applyPlan')}
                     </button>
                     {canApply && (
                       <span className="inline-flex items-center gap-1 text-xs font-semibold" style={{ color: '#15803d' }}>
-                        <CheckCircle2 size={13} /> Bereit zum Anwenden
+                        <CheckCircle2 size={13} /> {t('mp.apply.readyToApply')}
                       </span>
                     )}
                     {!canApply && disabledReason && (
                       <span className="inline-flex items-center gap-1 text-xs font-semibold" style={{ color: '#dc2626' }}>
-                        <XCircle size={13} /> Anwenden gesperrt: {disabledReason}
+                        <XCircle size={13} /> {t('mp.apply.lockedWithReason', { reason: disabledReason })}
                       </span>
                     )}
                   </>
                 );
               })()}
               <div className="text-xs flex items-center gap-1.5" style={{ color: 'var(--text-tertiary)' }}>
-                <Info size={13} /> Preview-only · keine DB-Schreibvorgänge · {trips.length} Fahrten in Quelle
+                <Info size={13} /> {t('mp.phase4.previewOnly', { count: trips.length })}
               </div>
             </div>
 
@@ -2182,12 +2243,13 @@ export default function MonatsplanungAssignmentPreview({
                   style={{ background: 'rgba(37,99,235,0.08)', color: '#1d4ed8', border: '1px solid rgba(37,99,235,0.25)' }}
                 >
                   {pruefExporting
-                    ? <><Loader2 size={14} className="animate-spin" /> Wird erstellt…</>
-                    : <><Download size={14} /> Prüf-Export XLSX herunterladen</>
+                    ? <><Loader2 size={14} className="animate-spin" /> {t('mp.pruefExport.building')}</>
+                    : <><Download size={14} /> {t('mp.pruefExport.download')}</>
                   }
                 </button>
                 <span className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
-                  5 Tabellen: Vehicle_Blocks, Geplante Fahrten, Konflikte, Nicht_zugewiesene_Bloecke, Zusammenfassung · keine DB-Schreibvorgänge
+                  {/* The five sheet names are the workbook's own tabs — data, not labels. */}
+                  {t('mp.pruefExport.sheetsHint')}
                 </span>
               </div>
             )}
@@ -2205,21 +2267,21 @@ export default function MonatsplanungAssignmentPreview({
                       : <CheckCircle2 size={15} style={{ color: '#16a34a' }} />
                     }
                     <span className="text-sm font-semibold" style={{ color: qualityHardBlockers > 0 ? '#991b1b' : '#15803d' }}>
-                      Planqualität
+                      {t('mp.quality.title')}
                     </span>
                     {qualityHardBlockers > 0 && (
                       <span className="text-xs" style={{ color: '#b91c1c' }}>
-                        — {qualityHardBlockers} Konflikt{qualityHardBlockers > 1 ? 'e' : ''} gefunden
+                        — {tPlural({ one: 'mp.quality.conflictsFound.one', other: 'mp.quality.conflictsFound.other' }, qualityHardBlockers)}
                       </span>
                     )}
                     {qualityHardBlockers === 0 && (
-                      <span className="text-xs" style={{ color: '#15803d' }}>— Keine Konflikte gefunden</span>
+                      <span className="text-xs" style={{ color: '#15803d' }}>— {t('mp.quality.noConflictsFound')}</span>
                     )}
                   </div>
                   {/* Purge notice: shown when blocks were moved to unassigned by the safety purge */}
                   {qualityHardBlockers === 0 && result && (result.final_purge_debug.evicted_blocks_count > 0) && (
                     <p className="text-xs px-4 pb-2" style={{ color: '#92400e' }}>
-                      Einige Blöcke konnten nicht sicher zugewiesen werden und wurden als offen markiert. Bitte manuell prüfen.
+                      {t('mp.quality.purgeNotice')}
                     </p>
                   )}
                   {qualityHardBlockers > 0 && (
@@ -2229,21 +2291,21 @@ export default function MonatsplanungAssignmentPreview({
                       style={{ background: 'transparent', color: '#991b1b', border: '1px solid #fca5a5' }}
                     >
                       {showQualityDetails ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
-                      Details {showQualityDetails ? 'ausblenden' : 'anzeigen'}
+                      {showQualityDetails ? t('mp.hideDetails') : t('mp.showDetails')}
                     </button>
                   )}
                 </div>
                 {qualityHardBlockers > 0 && (
                   <div className="px-4 pb-3" style={{ color: '#7f1d1d' }}>
                     <p className="text-xs mb-2">
-                      Diese Planung kann noch nicht angewendet werden. Bitte passen Sie die Planung an, bevor Sie fortfahren.
+                      {t('mp.quality.cannotApplyYet')}
                     </p>
                     {showQualityDetails && (
                       <div className="space-y-4 mt-3">
                         {planQualitaet.issues.map((issue, i) => (
                           <div key={i}>
                             <div className="text-xs font-semibold mb-1.5" style={{ color: '#991b1b' }}>
-                              {issue.label}
+                              {t(issue.labelKey)}
                             </div>
 
                             {/* ── Fahrzeug-Überschneidungen: rich pair diagnostics ── */}
@@ -2251,8 +2313,7 @@ export default function MonatsplanungAssignmentPreview({
                               <div className="space-y-2">
                                 {/* Method note */}
                                 <p className="text-[11px] px-2 py-1.5 rounded" style={{ background: 'rgba(185,28,28,0.06)', color: '#7f1d1d', border: '1px solid rgba(185,28,28,0.15)' }}>
-                                  Die Planung ändert nur den Fahrer. Fahrzeug und Zeiten bleiben unverändert.
-                                  Für diese Prüfung werden Fahrtbeginn und Fahrtende verglichen, nicht Auftragseingang oder Auftragsübermittlung.
+                                  {t('mp.quality.methodNote')}
                                 </p>
 
                                 {/* Copy button */}
@@ -2262,7 +2323,7 @@ export default function MonatsplanungAssignmentPreview({
                                     className="inline-flex items-center gap-1.5 px-2 py-1 rounded text-[11px] font-semibold"
                                     style={{ background: 'rgba(185,28,28,0.08)', color: '#991b1b', border: '1px solid rgba(185,28,28,0.25)' }}
                                   >
-                                    {copiedOverlaps ? <><ClipboardCheck size={11} /> Kopiert!</> : <><Clipboard size={11} /> Konfliktliste kopieren</>}
+                                    {copiedOverlaps ? <><ClipboardCheck size={11} /> {t('mp.copied')}</> : <><Clipboard size={11} /> {t('mp.copyConflictList')}</>}
                                   </button>
                                 </div>
 
@@ -2270,8 +2331,8 @@ export default function MonatsplanungAssignmentPreview({
                                 {issue.vehicleOverlaps.map((o, oi) => {
                                   const expanded = expandedOverlaps.has(oi);
                                   const diagLabel = o.diagnosis === 'source'
-                                    ? 'Quelle enthält Überschneidung'
-                                    : 'Möglicher Prüfungsfehler';
+                                    ? t('mp.overlap.diagSource')
+                                    : t('mp.overlap.diagChecker');
                                   const diagColor = o.diagnosis === 'source' ? '#991b1b' : '#92400e';
                                   const diagBg = o.diagnosis === 'source' ? 'rgba(185,28,28,0.07)' : 'rgba(234,179,8,0.1)';
                                   return (
@@ -2284,12 +2345,12 @@ export default function MonatsplanungAssignmentPreview({
                                               const aDate = fmtAbsDate(o.tripA.tsStart);
                                               const bDate = fmtAbsDate(o.tripB.tsStart);
                                               const dateLabel = aDate === bDate ? aDate : `${aDate}→${bDate}`;
-                                              return `${o.carId} · ${dateLabel} · Überschneidung ${o.overlapMin} Min`;
+                                              return `${o.carId} · ${dateLabel} · ${t('mp.quality.overlapMinutes', { minutes: o.overlapMin })}`;
                                             })()}
                                           </div>
                                           <div className="flex items-center gap-3 text-[10px]" style={{ color: '#b91c1c' }}>
-                                            <span>Zeitvergleich: Fahrtbeginn → Fahrtende</span>
-                                            <span>Spalten: {o.startColUsed} / {o.endColUsed}</span>
+                                            <span>{t('mp.overlap.timeComparison')}</span>
+                                            <span>{t('mp.overlap.columns')}: {o.startColUsed} / {o.endColUsed}</span>
                                           </div>
                                           <span className="inline-block px-1.5 py-0.5 rounded text-[10px] font-semibold" style={{ background: diagBg, color: diagColor }}>
                                             {diagLabel}
@@ -2301,29 +2362,29 @@ export default function MonatsplanungAssignmentPreview({
                                           style={{ background: 'transparent', color: '#991b1b', border: '1px solid rgba(185,28,28,0.3)' }}
                                         >
                                           {expanded ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
-                                          {expanded ? 'Ausblenden' : 'Details anzeigen'}
+                                          {expanded ? t('mp.hide') : t('mp.showDetails')}
                                         </button>
                                       </div>
 
                                       {/* Expanded pair detail */}
                                       {expanded && (() => {
                                         const bothFull = o.tripA.usedFullDatetime && o.tripB.usedFullDatetime;
-                                        const renderTrip = (t: typeof o.tripA, label: string) => (
+                                        const renderTrip = (trip: typeof o.tripA, label: string) => (
                                           <div className="px-3 py-2 text-[11px] space-y-0.5" style={{ borderTop: '1px solid rgba(185,28,28,0.15)', background: 'rgba(254,242,242,0.5)' }}>
                                             <div className="font-semibold" style={{ color: '#991b1b' }}>{label}</div>
                                             <div className="grid grid-cols-2 gap-x-4 gap-y-0.5" style={{ color: '#7f1d1d' }}>
-                                              {t.rowIndex != null && <div>Excel-Zeile: <span className="font-mono font-semibold">{t.rowIndex}</span></div>}
-                                              <div>Original Fahrer: <span className="font-semibold">{t.originalDriver}</span></div>
-                                              <div>Zugewiesen: <span className="font-semibold">{t.assignedDriver}</span></div>
-                                              <div>Storniert: <span className="font-semibold">{t.isCanceled ? 'Ja' : 'Nein'}</span></div>
-                                              {(t.srcStart || t.srcEnd) && (
+                                              {trip.rowIndex != null && <div>{t('mp.overlap.excelRow')}: <span className="font-mono font-semibold">{trip.rowIndex}</span></div>}
+                                              <div>{t('mp.overlap.originalDriver')}: <span className="font-semibold">{trip.originalDriver}</span></div>
+                                              <div>{t('mp.overlap.assigned')}: <span className="font-semibold">{trip.assignedDriver}</span></div>
+                                              <div>{t('mp.overlap.canceled')}: <span className="font-semibold">{trip.isCanceled ? t('common.yes') : t('common.no')}</span></div>
+                                              {(trip.srcStart || trip.srcEnd) && (
                                                 <div className="col-span-2">
-                                                  Quelle: <span className="font-mono">{t.srcStart || '?'}–{t.srcEnd || '?'}</span>
-                                                  {t.usedFullDatetime && <span className="ml-1" style={{ color: '#15803d' }}>✓ voller Zeitstempel</span>}
+                                                  {t('mp.overlap.source')}: <span className="font-mono">{trip.srcStart || '?'}–{trip.srcEnd || '?'}</span>
+                                                  {trip.usedFullDatetime && <span className="ml-1" style={{ color: '#15803d' }}>✓ {t('mp.overlap.fullTimestamp')}</span>}
                                                 </div>
                                               )}
                                               <div className="col-span-2">
-                                                Normalisiert: <span className="font-mono">{t.normStart || '?'}–{t.normEnd || '?'}</span>
+                                                {t('mp.overlap.normalized')}: <span className="font-mono">{trip.normStart || '?'}–{trip.normEnd || '?'}</span>
                                               </div>
                                             </div>
                                           </div>
@@ -2331,15 +2392,15 @@ export default function MonatsplanungAssignmentPreview({
                                         return (
                                           <>
                                             <div className="px-3 py-1.5 text-[10px]" style={{ borderTop: '1px solid rgba(185,28,28,0.15)', background: 'rgba(254,242,242,0.3)', color: '#7f1d1d' }}>
-                                              Berechnung: {bothFull ? 'echte Zeitstempel aus Fahrtbeginn/Fahrtende' : 'normalisierte Zeiten (keine vollständigen Zeitstempel in Quelle)'}
+                                              {t('mp.overlap.calculation')}: {bothFull ? t('mp.overlap.calcRealTimestamps') : t('mp.overlap.calcNormalized')}
                                             </div>
                                             {!bothFull && (
                                               <div className="px-3 py-1.5 text-[10px]" style={{ background: 'rgba(234,179,8,0.08)', borderTop: '1px solid rgba(234,179,8,0.2)', color: '#92400e' }}>
-                                                Hinweis: Für diese Prüfung wurden normalisierte Zeiten verwendet, weil keine vollständigen Zeitstempel verfügbar waren. Die Überschneidung könnte ein Berechnungsartefakt sein.
+                                                {t('mp.overlap.normalizedHint')}
                                               </div>
                                             )}
-                                            {renderTrip(o.tripA, 'Fahrt A')}
-                                            {renderTrip(o.tripB, 'Fahrt B')}
+                                            {renderTrip(o.tripA, t('mp.overlap.tripA'))}
+                                            {renderTrip(o.tripB, t('mp.overlap.tripB'))}
                                           </>
                                         );
                                       })()}
@@ -2354,7 +2415,7 @@ export default function MonatsplanungAssignmentPreview({
                                   <li key={j} className="text-[11px] font-mono pl-2" style={{ color: '#991b1b' }}>• {d}</li>
                                 ))}
                                 {issue.details.length > 10 && (
-                                  <li className="text-[11px] pl-2" style={{ color: '#b91c1c' }}>… und {issue.details.length - 10} weitere</li>
+                                  <li className="text-[11px] pl-2" style={{ color: '#b91c1c' }}>{t('mp.andMore', { count: issue.details.length - 10 })}</li>
                                 )}
                               </ul>
                             )}
@@ -2363,7 +2424,7 @@ export default function MonatsplanungAssignmentPreview({
                       </div>
                     )}
                     <p className="text-[11px] mt-2" style={{ color: '#b91c1c' }}>
-                      Diese Sicherheitsregeln helfen, spätere Konflikte in den finalen Dokumenten zu vermeiden.
+                      {t('mp.quality.safetyRulesNote')}
                     </p>
                   </div>
                 )}
@@ -2374,24 +2435,24 @@ export default function MonatsplanungAssignmentPreview({
               <div className="mt-5 space-y-5">
                 {/* Summary */}
                 <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4">
-                  <Stat label="Gesamt Fahrten" value={phase4.summary.total_trips} />
-                  <Stat label="Abgeschlossene Fahrten" value={phase4.summary.abgeschlossen} />
-                  <Stat label="Zu ändernde/zugewiesene Fahrten" value={phase4.summary.zu_aendern} tone="primary" />
-                  <Stat label="Unveränderte Fahrten" value={phase4.summary.unveraendert} />
-                  <Stat label="Zugewiesene Blöcke" value={phase4.summary.zugewiesene_bloecke} />
-                  <Stat label="Manuelle Ausnahmen" value={phase4.summary.manuelle_ausnahmen} tone={phase4.summary.manuelle_ausnahmen > 0 ? 'warning' : undefined} />
-                  <Stat label="Dienstzeit-Ausnahmen" value={phase4.summary.dienstzeit_ausnahmen} />
-                  <Stat label="Tageslimit-Ausnahmen" value={phase4.summary.tageslimit_ausnahmen} />
-                  <Stat label="Monatslimit-Ausnahmen" value={phase4.summary.monatslimit_ausnahmen} />
-                  <Stat label="Offene Fahrten" value={phase4.summary.offene_fahrten} tone={phase4.summary.offene_fahrten > 0 ? 'warning' : 'ok'} />
+                  <Stat label={t('mp.totalTrips')} value={phase4.summary.total_trips} />
+                  <Stat label={t('mp.completedTrips')} value={phase4.summary.abgeschlossen} />
+                  <Stat label={t('mp.phase4.tripsToChange')} value={phase4.summary.zu_aendern} tone="primary" />
+                  <Stat label={t('mp.phase4.unchangedTrips')} value={phase4.summary.unveraendert} />
+                  <Stat label={t('mp.assignedBlocks')} value={phase4.summary.zugewiesene_bloecke} />
+                  <Stat label={t('mp.manualExceptions')} value={phase4.summary.manuelle_ausnahmen} tone={phase4.summary.manuelle_ausnahmen > 0 ? 'warning' : undefined} />
+                  <Stat label={t('mp.workingTimeExceptions')} value={phase4.summary.dienstzeit_ausnahmen} />
+                  <Stat label={t('mp.dailyLimitExceptions')} value={phase4.summary.tageslimit_ausnahmen} />
+                  <Stat label={t('mp.monthlyLimitExceptions')} value={phase4.summary.monatslimit_ausnahmen} />
+                  <Stat label={t('mp.openTrips')} value={phase4.summary.offene_fahrten} tone={phase4.summary.offene_fahrten > 0 ? 'warning' : 'ok'} />
                   <div className="flex items-center">
                     {phase4.valid ? (
                       <span className="inline-flex items-center gap-1.5 text-sm font-semibold" style={{ color: 'var(--success, #15803d)' }}>
-                        <CheckCircle2 size={16} /> Change Set konsistent
+                        <CheckCircle2 size={16} /> {t('mp.phase4.consistent')}
                       </span>
                     ) : (
                       <span className="inline-flex items-center gap-1.5 text-sm font-semibold" style={{ color: 'var(--danger, #b91c1c)' }}>
-                        <XCircle size={16} /> Konsistenzprüfung fehlgeschlagen
+                        <XCircle size={16} /> {t('mp.phase4.inconsistent')}
                       </span>
                     )}
                   </div>
@@ -2400,14 +2461,14 @@ export default function MonatsplanungAssignmentPreview({
                 {phase4.consistencyIssues.length > 0 && (
                   <details className="rounded-lg" style={{ background: '#fef2f2', border: '1px solid #fecaca' }}>
                     <summary className="px-3 py-2 text-sm font-semibold cursor-pointer" style={{ color: '#991b1b' }}>
-                      Konsistenz-Probleme ({phase4.consistencyIssues.length})
+                      {t('mp.phase4.consistencyIssues', { count: phase4.consistencyIssues.length })}
                     </summary>
                     <ul className="px-4 pb-3 space-y-1 text-xs" style={{ color: '#991b1b' }}>
                       {phase4.consistencyIssues.slice(0, 50).map((c, i) => (
                         <li key={i}>• [{c.type}] {c.detail}</li>
                       ))}
                       {phase4.consistencyIssues.length > 50 && (
-                        <li>… und {phase4.consistencyIssues.length - 50} weitere</li>
+                        <li>{t('mp.andMore', { count: phase4.consistencyIssues.length - 50 })}</li>
                       )}
                     </ul>
                   </details>
@@ -2418,20 +2479,20 @@ export default function MonatsplanungAssignmentPreview({
                   <div className="rounded-xl overflow-hidden" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
                     <div className="px-5 py-3 border-b" style={{ borderColor: 'var(--border)' }}>
                       <h3 className="text-sm font-semibold flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
-                        <ShieldAlert size={14} /> Manuelle Ausnahmen ({phase4.manual_exceptions.length})
+                        <ShieldAlert size={14} /> {t('mp.manualExceptions')} ({phase4.manual_exceptions.length})
                       </h3>
                     </div>
                     <div className="overflow-x-auto">
                       <table className="w-full text-xs">
                         <thead style={{ background: 'var(--bg-subtle)' }}>
                           <tr>
-                            <Th>Datum</Th>
-                            <Th>Kennzeichen</Th>
-                            <Th>Start</Th>
-                            <Th>Ende</Th>
-                            <Th>Fahrer</Th>
-                            <Th>Ausnahme-Typ</Th>
-                            <Th>Begründung</Th>
+                            <Th>{t('common.date')}</Th>
+                            <Th>{t('mp.licensePlate')}</Th>
+                            <Th>{t('mp.start')}</Th>
+                            <Th>{t('mp.end')}</Th>
+                            <Th>{t('common.driver')}</Th>
+                            <Th>{t('mp.exceptionType')}</Th>
+                            <Th>{t('mp.justification')}</Th>
                           </tr>
                         </thead>
                         <tbody>
@@ -2443,7 +2504,7 @@ export default function MonatsplanungAssignmentPreview({
                               <Td>{fmtTime(m.block_end_datetime)}</Td>
                               <Td>{m.driver_name}</Td>
                               <Td>
-                                {[m.dienstzeit && 'Dienstzeit', m.tageslimit && 'Tageslimit'].filter(Boolean).join(' + ') || '—'}
+                                {[m.dienstzeit && t('mp.workingTime'), m.tageslimit && t('mp.dailyLimit')].filter(Boolean).join(' + ') || '—'}
                               </Td>
                               <Td><span style={{ color: 'var(--text-tertiary)' }}>{m.reason}</span></Td>
                             </tr>
@@ -2458,20 +2519,20 @@ export default function MonatsplanungAssignmentPreview({
                 <div className="rounded-xl overflow-hidden" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
                   <div className="px-5 py-3 border-b" style={{ borderColor: 'var(--border)' }}>
                     <h3 className="text-sm font-semibold flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
-                      <UserCheck size={14} /> Summary pro Fahrer
+                      <UserCheck size={14} /> {t('mp.summaryPerDriver')}
                     </h3>
                   </div>
                   <div className="overflow-x-auto">
                     <table className="w-full text-xs">
                       <thead style={{ background: 'var(--bg-subtle)' }}>
                         <tr>
-                          <Th>Fahrer</Th>
-                          <Th align="right">Fahrten</Th>
-                          <Th align="right">Blöcke</Th>
-                          <Th align="right">Stunden</Th>
-                          <Th align="right">Dienstzeit-Ausn.</Th>
-                          <Th align="right">Tageslimit-Ausn.</Th>
-                          <Th align="right">Monatslimit-Ausn.</Th>
+                          <Th>{t('common.driver')}</Th>
+                          <Th align="right">{t('mp.trips')}</Th>
+                          <Th align="right">{t('mp.blocks')}</Th>
+                          <Th align="right">{t('mp.hours')}</Th>
+                          <Th align="right">{t('mp.workingTimeExceptionsShort')}</Th>
+                          <Th align="right">{t('mp.dailyLimitExceptionsShort')}</Th>
+                          <Th align="right">{t('mp.monthlyLimitExceptionsShort')}</Th>
                         </tr>
                       </thead>
                       <tbody>
@@ -2495,25 +2556,25 @@ export default function MonatsplanungAssignmentPreview({
                 <div className="rounded-xl overflow-hidden" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
                   <div className="px-5 py-3 border-b flex items-center justify-between" style={{ borderColor: 'var(--border)' }}>
                     <h3 className="text-sm font-semibold flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
-                      <FileDiff size={14} /> Change Set pro Fahrt ({phase4.change_rows.length})
+                      <FileDiff size={14} /> {t('mp.changeSetPerTrip')} ({phase4.change_rows.length})
                     </h3>
                     <span className="text-[11px]" style={{ color: 'var(--text-tertiary)' }}>
-                      zeigt erste 500 Zeilen
+                      {t('mp.showsFirstRows', { count: 500 })}
                     </span>
                   </div>
                   <div className="overflow-x-auto max-h-[600px]">
                     <table className="w-full text-xs">
                       <thead className="sticky top-0" style={{ background: 'var(--bg-subtle)' }}>
                         <tr>
-                          <Th>Row</Th>
-                          <Th>Datum</Th>
-                          <Th>Zeit</Th>
-                          <Th>Kennzeichen</Th>
-                          <Th>Original Fahrer</Th>
-                          <Th>Neuer Fahrer</Th>
-                          <Th>Block</Th>
-                          <Th>Quelle</Th>
-                          <Th>Ausnahme</Th>
+                          <Th>{t('mp.row')}</Th>
+                          <Th>{t('common.date')}</Th>
+                          <Th>{t('common.time')}</Th>
+                          <Th>{t('mp.licensePlate')}</Th>
+                          <Th>{t('mp.overlap.originalDriver')}</Th>
+                          <Th>{t('mp.newDriver')}</Th>
+                          <Th>{t('mp.block')}</Th>
+                          <Th>{t('mp.overlap.source')}</Th>
+                          <Th>{t('mp.exception')}</Th>
                         </tr>
                       </thead>
                       <tbody>
@@ -2527,7 +2588,7 @@ export default function MonatsplanungAssignmentPreview({
                             <Td>
                               <span className="font-semibold">{r.new_driver_name}</span>
                               {r.changed && (
-                                <span className="ml-1 text-[10px] px-1 py-0.5 rounded" style={{ background: '#fef3c7', color: '#92400e' }}>geändert</span>
+                                <span className="ml-1 text-[10px] px-1 py-0.5 rounded" style={{ background: '#fef3c7', color: '#92400e' }}>{t('mp.changed')}</span>
                               )}
                             </Td>
                             <Td><span className="font-mono text-[10px]" style={{ color: 'var(--text-tertiary)' }}>{r.block_id.slice(0, 10)}…</span></Td>
@@ -2542,7 +2603,7 @@ export default function MonatsplanungAssignmentPreview({
                             <Td>
                               {(r.dienstzeit_exception || r.tageslimit_exception || r.monatslimit_exception) ? (
                                 <span className="text-[10px]" style={{ color: '#1e40af' }}>
-                                  {[r.dienstzeit_exception && 'Dienstzeit', r.tageslimit_exception && 'Tageslimit', r.monatslimit_exception && 'Monatslimit'].filter(Boolean).join(' + ')}
+                                  {[r.dienstzeit_exception && t('mp.workingTime'), r.tageslimit_exception && t('mp.dailyLimit'), r.monatslimit_exception && t('mp.monthlyLimit')].filter(Boolean).join(' + ')}
                                 </span>
                               ) : <span style={{ color: 'var(--text-tertiary)' }}>—</span>}
                             </Td>
@@ -2567,12 +2628,12 @@ export default function MonatsplanungAssignmentPreview({
                     : <AlertTriangle size={15} style={{ color: '#dc2626' }} />
                   }
                   <span className="text-sm font-semibold" style={{ color: noteViolationsOk ? '#15803d' : '#991b1b' }}>
-                    Fahrer-Notizen / Planungsausschluss
+                    {t('mp.notes.sectionTitle')}
                   </span>
                   <span className="text-xs ml-1" style={{ color: noteViolationsOk ? '#166534' : '#b91c1c' }}>
                     {noteViolationsOk
-                      ? '— keine Fahrten in ausgeschlossenen Fahrer-Zeiträumen'
-                      : `— ${noteViolations.length} Fahrt${noteViolations.length !== 1 ? 'en' : ''} verletzt Fahrer-Notizen oder hat keinen gültigen Fahrer`}
+                      ? `— ${t('mp.notes.noneExcluded')}`
+                      : `— ${tPlural({ one: 'mp.notes.violationCount.one', other: 'mp.notes.violationCount.other' }, noteViolations.length)}`}
                   </span>
                 </div>
 
@@ -2581,12 +2642,14 @@ export default function MonatsplanungAssignmentPreview({
                     <div className="grid grid-cols-1 gap-3 mb-3">
                       {/* Row A: Fahrer vollständig zugewiesen */}
                       {(() => {
+                        // `reason` is produced by driverNoteValidation.ts; these
+                        // substrings are what it emits, so they stay verbatim.
                         const emptyCount = noteViolations.filter(v => v.reason.includes('leer') || v.reason.includes('Nicht zugewiesen')).length;
                         return (
                           <div className="flex items-center gap-3 text-xs px-3 py-2 rounded" style={{ background: emptyCount > 0 ? 'rgba(220,38,38,0.06)' : 'rgba(21,128,61,0.06)', color: emptyCount > 0 ? '#991b1b' : '#166534' }}>
                             {emptyCount > 0 ? <XCircle size={13} /> : <CheckCircle2 size={13} />}
-                            <span className="font-semibold">Fahrer vollständig zugewiesen:</span>
-                            <span>{emptyCount > 0 ? `${emptyCount} Fahrt${emptyCount !== 1 ? 'en' : ''} ohne gültigen Fahrer` : 'alle exportierten Fahrten haben gültige Fahrer'}</span>
+                            <span className="font-semibold">{t('mp.notes.rowADriversAssigned')}</span>
+                            <span>{emptyCount > 0 ? tPlural({ one: 'mp.notes.rowABad.one', other: 'mp.notes.rowABad.other' }, emptyCount) : t('mp.notes.rowAGood')}</span>
                           </div>
                         );
                       })()}
@@ -2596,8 +2659,8 @@ export default function MonatsplanungAssignmentPreview({
                         return (
                           <div className="flex items-center gap-3 text-xs px-3 py-2 rounded" style={{ background: noteCount > 0 ? 'rgba(220,38,38,0.06)' : 'rgba(21,128,61,0.06)', color: noteCount > 0 ? '#991b1b' : '#166534' }}>
                             {noteCount > 0 ? <XCircle size={13} /> : <CheckCircle2 size={13} />}
-                            <span className="font-semibold">Fahrer-Notizen im Export:</span>
-                            <span>{noteCount > 0 ? `${noteCount} exportierte Fahrt${noteCount !== 1 ? 'en' : ''} verletzt Fahrer-Notizen` : 'keine exportierten Fahrten verletzen Fahrer-Notizen'}</span>
+                            <span className="font-semibold">{t('mp.notes.rowBNotesInExport')}</span>
+                            <span>{noteCount > 0 ? tPlural({ one: 'mp.notes.rowBBad.one', other: 'mp.notes.rowBBad.other' }, noteCount) : t('mp.notes.rowBGood')}</span>
                           </div>
                         );
                       })()}
@@ -2607,29 +2670,29 @@ export default function MonatsplanungAssignmentPreview({
                         return (
                           <div className="flex items-center gap-3 text-xs px-3 py-2 rounded" style={{ background: invalidCount > 0 ? 'rgba(220,38,38,0.06)' : 'rgba(21,128,61,0.06)', color: invalidCount > 0 ? '#991b1b' : '#166534' }}>
                             {invalidCount > 0 ? <XCircle size={13} /> : <CheckCircle2 size={13} />}
-                            <span className="font-semibold">Export-Fahrer gegen Planung:</span>
-                            <span>{invalidCount > 0 ? `${invalidCount} Export-Zeile${invalidCount !== 1 ? 'n' : ''} verwenden alten/ungültigen Fahrer` : 'Export verwendet korrigierte Fahrer aus der Planung'}</span>
+                            <span className="font-semibold">{t('mp.notes.rowCExportVsPlan')}</span>
+                            <span>{invalidCount > 0 ? tPlural({ one: 'mp.notes.rowCBad.one', other: 'mp.notes.rowCBad.other' }, invalidCount) : t('mp.notes.rowCGood')}</span>
                           </div>
                         );
                       })()}
                     </div>
 
                     {/* Diagnostic table */}
-                    <div className="text-xs font-semibold mb-2" style={{ color: '#991b1b' }}>Fahrer-Notizen Prüfung — Verletzungen</div>
+                    <div className="text-xs font-semibold mb-2" style={{ color: '#991b1b' }}>{t('mp.notes.violationsTableTitle')}</div>
                     <div className="overflow-x-auto">
                       <table className="w-full text-xs border-collapse">
                         <thead>
                           <tr style={{ background: 'rgba(220,38,38,0.08)' }}>
-                            <Th>Schritt</Th>
-                            <Th>Fahrer</Th>
-                            <Th>Fahrzeug</Th>
-                            <Th>Block-ID</Th>
-                            <Th>Fahrtbeginn</Th>
-                            <Th>Fahrtende</Th>
-                            <Th>Notiz</Th>
-                            <Th>Zeitraum</Th>
-                            <Th>Fehler</Th>
-                            <Th>Aktion</Th>
+                            <Th>{t('mp.step')}</Th>
+                            <Th>{t('common.driver')}</Th>
+                            <Th>{t('mp.vehicle')}</Th>
+                            <Th>{t('mp.blockId')}</Th>
+                            <Th>{t('mp.rideStart')}</Th>
+                            <Th>{t('mp.rideEnd')}</Th>
+                            <Th>{t('mp.note')}</Th>
+                            <Th>{t('common.period')}</Th>
+                            <Th>{t('common.error')}</Th>
+                            <Th>{t('mp.action')}</Th>
                           </tr>
                         </thead>
                         <tbody>
@@ -2659,7 +2722,7 @@ export default function MonatsplanungAssignmentPreview({
 
                     <div className="mt-3 flex items-start gap-2 px-3 py-2 rounded text-xs font-semibold" style={{ background: '#fef2f2', color: '#991b1b', border: '1px solid #fecaca' }}>
                       <Lock size={13} className="mt-0.5 shrink-0" />
-                      Export gesperrt — Fahrer-Notizen oder fehlende Fahrer. Bitte die oben gelisteten Verletzungen manuell lösen, bevor der Plan angewendet wird.
+                      {t('mp.notes.exportLocked')}
                     </div>
                   </div>
                 )}
@@ -2683,10 +2746,10 @@ export default function MonatsplanungAssignmentPreview({
             <div className="flex items-start justify-between px-5 py-4 border-b" style={{ borderColor: 'var(--border)' }}>
               <div>
                 <h3 className="text-base font-semibold flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
-                  <Database size={16} /> Plan wirklich anwenden?
+                  <Database size={16} /> {t('mp.apply.confirmTitle')}
                 </h3>
                 <div className="text-xs mt-1" style={{ color: 'var(--text-tertiary)' }}>
-                  Diese Aktion schreibt die Zuweisung in die Datenbank. Stornierte Fahrten bleiben unverändert.
+                  {t('mp.apply.confirmSubtitle')}
                 </div>
               </div>
               <button onClick={closeApplyModal} className="p-1 rounded" style={{ color: 'var(--text-tertiary)' }} disabled={applying}>
@@ -2699,7 +2762,7 @@ export default function MonatsplanungAssignmentPreview({
                 <div className="px-5 py-4">
                   <dl className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
                     <Row
-                      label="Fahrtenbuch-Datei"
+                      label={t('mp.fahrtenbuchFile')}
                       value={
                         <span
                           className="block truncate font-mono text-xs"
@@ -2710,18 +2773,18 @@ export default function MonatsplanungAssignmentPreview({
                         </span>
                       }
                     />
-                    <Row label="Monat / Jahr" value={`${month}/${year}`} />
-                    <Row label="Block-Trenner" value={`${blockSeparatorMinutes} Min`} />
-                    <Row label="Min Blockdauer" value={`${minBlockDurationMinutes} Min${minBlockDurationMinutes === 0 ? ' (aus)' : ''}`} />
-                    <Row label="Max Blockdauer" value={`${maxBlockDurationMinutes} Min`} />
-                    <Row label="Abgeschlossene Fahrten" value={phase4.summary.abgeschlossen} />
-                    <Row label="Zu aktualisierende Fahrten" value={phase4.summary.zu_aendern} />
-                    <Row label="Stornierte Fahrten (unverändert)" value={canceledCount} />
-                    <Row label="Zugewiesene Blöcke" value={phase4.summary.zugewiesene_bloecke} />
-                    <Row label="Manuelle Ausnahmen" value={phase4.summary.manuelle_ausnahmen} />
-                    <Row label="Dienstzeit-Ausnahmen" value={phase4.summary.dienstzeit_ausnahmen} />
-                    <Row label="Tageslimit-Ausnahmen" value={phase4.summary.tageslimit_ausnahmen} />
-                    <Row label="Monatslimit-Ausnahmen" value={phase4.summary.monatslimit_ausnahmen} />
+                    <Row label={t('mp.runs.monthYear')} value={`${month}/${year}`} />
+                    <Row label={t('mp.planner.blockSeparator')} value={`${blockSeparatorMinutes} ${t('mp.minShortNoDot')}`} />
+                    <Row label={t('mp.planner.minBlockDuration')} value={`${minBlockDurationMinutes} ${t('mp.minShortNoDot')}${minBlockDurationMinutes === 0 ? ` ${t('mp.runs.offSuffix')}` : ''}`} />
+                    <Row label={t('mp.planner.maxBlockDuration')} value={`${maxBlockDurationMinutes} ${t('mp.minShortNoDot')}`} />
+                    <Row label={t('mp.completedTrips')} value={phase4.summary.abgeschlossen} />
+                    <Row label={t('mp.apply.tripsToUpdate')} value={phase4.summary.zu_aendern} />
+                    <Row label={t('mp.apply.canceledTripsUnchanged')} value={canceledCount} />
+                    <Row label={t('mp.assignedBlocks')} value={phase4.summary.zugewiesene_bloecke} />
+                    <Row label={t('mp.manualExceptions')} value={phase4.summary.manuelle_ausnahmen} />
+                    <Row label={t('mp.workingTimeExceptions')} value={phase4.summary.dienstzeit_ausnahmen} />
+                    <Row label={t('mp.dailyLimitExceptions')} value={phase4.summary.tageslimit_ausnahmen} />
+                    <Row label={t('mp.monthlyLimitExceptions')} value={phase4.summary.monatslimit_ausnahmen} />
                   </dl>
 
                   <label className="mt-4 flex items-start gap-2 text-sm cursor-pointer">
@@ -2733,7 +2796,7 @@ export default function MonatsplanungAssignmentPreview({
                       disabled={applying}
                     />
                     <span style={{ color: 'var(--text-primary)' }}>
-                      Ich bestätige, dass diese Monatsplanung angewendet werden soll.
+                      {t('mp.apply.confirmCheckbox')}
                     </span>
                   </label>
 
@@ -2750,7 +2813,7 @@ export default function MonatsplanungAssignmentPreview({
                     className="px-3 py-2 rounded-lg text-sm font-semibold"
                     style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
                   >
-                    Abbrechen
+                    {t('common.cancel')}
                   </button>
                   <button
                     onClick={handleApply}
@@ -2758,7 +2821,7 @@ export default function MonatsplanungAssignmentPreview({
                     className="inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold disabled:opacity-50"
                     style={{ background: '#15803d', color: '#fff' }}
                   >
-                    <Database size={14} /> {applying ? 'Wende an…' : 'Endgültig anwenden'}
+                    <Database size={14} /> {applying ? t('mp.apply.applying') : t('mp.apply.applyFinal')}
                   </button>
                 </div>
               </>
@@ -2769,17 +2832,17 @@ export default function MonatsplanungAssignmentPreview({
                 {applyResult.already_applied ? (
                   <div className="space-y-3">
                     <div className="px-3 py-2 rounded-lg text-sm" style={{ background: '#fef3c7', color: '#92400e', border: '1px solid #fde68a' }}>
-                      Für diesen Monat wurde bereits eine Planung angewendet (Planning Run <span className="font-mono">{applyResult.planning_run_id}</span>, am {applyResult.applied_at}). Eine zweite Anwendung wird verhindert.
+                      {t('mp.apply.alreadyAppliedPrefix')} <span className="font-mono">{applyResult.planning_run_id}</span>{t('mp.apply.alreadyAppliedSuffix', { date: applyResult.applied_at ?? '—' })}
                     </div>
                     <button
                       onClick={() => { setReplaceOpen(true); setReplaceTyped(''); setReplaceConfirmed(false); setReplaceError(''); }}
                       className="inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold transition-colors hover:brightness-110"
                       style={{ background: '#b91c1c', color: '#fff' }}
                     >
-                      <ShieldAlert size={14} /> Bestehende Planung ersetzen
+                      <ShieldAlert size={14} /> {t('mp.replace.button')}
                     </button>
                     <div className="text-[11px]" style={{ color: 'var(--text-tertiary)' }}>
-                      Beim Ersetzen wird die alte Planung archiviert (status='replaced'), Fahrten werden auf die neue Planung umgehängt, und alle Validierungs- und Bestätigungsschritte durchlaufen.
+                      {t('mp.replace.explanation')}
                     </div>
                   </div>
                 ) : applyResult.success ? (
@@ -2795,22 +2858,24 @@ export default function MonatsplanungAssignmentPreview({
                     return (
                       <>
                         <div className="px-3 py-2 rounded-lg text-sm font-semibold flex items-center gap-2" style={{ background: '#ecfdf5', color: '#065f46', border: '1px solid #a7f3d0' }}>
-                          <CheckCircle2 size={15} /> Plan erfolgreich angewendet
+                          <CheckCircle2 size={15} /> {t('mp.apply.successTitle')}
                         </div>
                         <dl className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
-                          <Row label="Planning Run ID" value={<span className="font-mono text-xs">{applyResult.planning_run_id}</span>} />
-                          <Row label="Updated Fahrten" value={applyResult.updated_trips ?? 0} />
-                          <Row label="Skipped stornierte Fahrten" value={applyResult.skipped_canceled ?? 0} />
-                          <Row label="Manual exceptions saved" value={applyResult.manual_exceptions_saved ?? 0} />
-                          <Row label="Applied at" value={applyResult.applied_at ?? '—'} />
-                          <Row label="Applied by" value={<span className="font-mono text-xs">{applyResult.applied_by ?? '—'}</span>} />
+                          <Row label={t('mp.planningRunId')} value={<span className="font-mono text-xs">{applyResult.planning_run_id}</span>} />
+                          <Row label={t('mp.apply.updatedTrips')} value={applyResult.updated_trips ?? 0} />
+                          <Row label={t('mp.apply.skippedCanceledTrips')} value={applyResult.skipped_canceled ?? 0} />
+                          <Row label={t('mp.apply.manualExceptionsSaved')} value={applyResult.manual_exceptions_saved ?? 0} />
+                          <Row label={t('mp.appliedAt')} value={applyResult.applied_at ?? '—'} />
+                          <Row label={t('mp.appliedBy')} value={<span className="font-mono text-xs">{applyResult.applied_by ?? '—'}</span>} />
                         </dl>
                         <div className="text-xs px-3 py-2 rounded-lg" style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)' }}>
-                          <div className="font-semibold mb-1" style={{ color: 'var(--text-primary)' }}>Nachprüfung im Import:</div>
-                          Abgeschlossene mit Zuweisung: {applyResult.verify_assigned_in_import} ·
-                          Stornierte unverändert: {applyResult.verify_canceled_in_import} ·
-                          Mit Planning Run verknüpft: {applyResult.verify_rows_with_run} ·
-                          Manuelle Ausnahmen im Run: {applyResult.verify_exceptions_in_run}
+                          <div className="font-semibold mb-1" style={{ color: 'var(--text-primary)' }}>{t('mp.apply.verifyTitle')}</div>
+                          {t('mp.apply.verifyLine', {
+                            assigned: applyResult.verify_assigned_in_import ?? 0,
+                            canceled: applyResult.verify_canceled_in_import ?? 0,
+                            withRun: applyResult.verify_rows_with_run ?? 0,
+                            exceptions: applyResult.verify_exceptions_in_run ?? 0,
+                          })}
                         </div>
                         {!verifyOk && (() => {
                           // Only a real mismatch if expected values are defined and non-null
@@ -2823,16 +2888,19 @@ export default function MonatsplanungAssignmentPreview({
                             <div className="px-3 py-2 rounded-lg text-xs" style={{ background: '#fef3c7', color: '#92400e', border: '1px solid #fde68a' }}>
                               {isRealMismatch ? (
                                 <>
-                                  <strong>Nachprüfung: Abweichung festgestellt.</strong>
+                                  <strong>{t('mp.apply.mismatchTitle')}</strong>
                                   <div className="mt-1">
-                                    Erwartet: updated={expectedUpdated}, exceptions={expectedExceptions}.{' '}
-                                    Tatsächlich: updated={applyResult.updated_trips}, exceptions={applyResult.manual_exceptions_saved}.
+                                    {t('mp.apply.mismatchDetail', {
+                                      expectedUpdated,
+                                      expectedExceptions,
+                                      actualUpdated: applyResult.updated_trips ?? 0,
+                                      actualExceptions: applyResult.manual_exceptions_saved ?? 0,
+                                    })}
                                   </div>
                                 </>
                               ) : (
                                 <span>
-                                  Plan angewendet. Einige Nachprüfungswerte konnten nicht vollständig ermittelt werden.
-                                  Bitte prüfen Sie die Planung in der Vorschau.
+                                  {t('mp.apply.verifyIncomplete')}
                                 </span>
                               )}
                             </div>
@@ -2843,7 +2911,7 @@ export default function MonatsplanungAssignmentPreview({
                   })()
                 ) : (
                   <div className="px-3 py-2 rounded-lg text-sm" style={{ background: '#fef2f2', color: '#991b1b', border: '1px solid #fecaca' }}>
-                    {applyResult.message ?? 'Apply fehlgeschlagen.'}
+                    {applyResult.message ?? t('mp.apply.failed')}
                   </div>
                 )}
                 {applyResult.success && !applyResult.already_applied && applyResult.planning_run_id && (
@@ -2851,21 +2919,21 @@ export default function MonatsplanungAssignmentPreview({
                     <div className="flex items-start gap-2 mb-2">
                       <Info size={14} className="mt-0.5 shrink-0" style={{ color: 'var(--accent)' }} />
                       <div className="text-xs font-semibold" style={{ color: 'var(--text-primary)' }}>
-                        Plan wurde angewendet
+                        {t('mp.apply.appliedTitle')}
                       </div>
                     </div>
                     <p className="text-[11px] mb-2" style={{ color: 'var(--text-secondary)' }}>
-                      Bitte prüfen Sie jetzt die folgenden Bereiche, bevor Sie finale Dokumente erstellen:
+                      {t('mp.apply.nextStepsIntro')}
                     </p>
                     <ul className="text-[11px] space-y-1 mb-2" style={{ color: 'var(--text-secondary)' }}>
-                      <li className="flex items-center gap-1.5"><CheckCircle2 size={11} style={{ color: 'var(--accent)' }} /> Transfer Analysis</li>
-                      <li className="flex items-center gap-1.5"><CheckCircle2 size={11} style={{ color: 'var(--accent)' }} /> Fahrer-Überschneidungen</li>
-                      <li className="flex items-center gap-1.5"><CheckCircle2 size={11} style={{ color: 'var(--accent)' }} /> Fahrzeug-Überschneidungen</li>
-                      <li className="flex items-center gap-1.5"><CheckCircle2 size={11} style={{ color: 'var(--accent)' }} /> Gehaltsabweichung</li>
-                      <li className="flex items-center gap-1.5"><CheckCircle2 size={11} style={{ color: 'var(--accent)' }} /> Stundennachweis Preview</li>
+                      <li className="flex items-center gap-1.5"><CheckCircle2 size={11} style={{ color: 'var(--accent)' }} /> {t('mp.apply.checkTransferAnalysis')}</li>
+                      <li className="flex items-center gap-1.5"><CheckCircle2 size={11} style={{ color: 'var(--accent)' }} /> {t('mp.quality.driverOverlap')}</li>
+                      <li className="flex items-center gap-1.5"><CheckCircle2 size={11} style={{ color: 'var(--accent)' }} /> {t('mp.quality.vehicleOverlaps')}</li>
+                      <li className="flex items-center gap-1.5"><CheckCircle2 size={11} style={{ color: 'var(--accent)' }} /> {t('mp.apply.checkSalaryDeviation')}</li>
+                      <li className="flex items-center gap-1.5"><CheckCircle2 size={11} style={{ color: 'var(--accent)' }} /> {t('mp.stundennachweisPreview')}</li>
                     </ul>
                     <p className="text-[11px]" style={{ color: 'var(--text-tertiary)' }}>
-                      Finale Dokumente können erst nach erfolgreicher Finalisierung erstellt und heruntergeladen werden.
+                      {t('mp.apply.finalDocsAfterFinalization')}
                     </p>
                   </div>
                 )}
@@ -2883,9 +2951,9 @@ export default function MonatsplanungAssignmentPreview({
                           }}
                           className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold disabled:opacity-40 transition-all hover:brightness-110"
                           style={{ background: 'rgba(6,182,212,0.12)', color: '#0891b2', border: '1px solid rgba(6,182,212,0.3)' }}
-                          title={!hasRunId ? 'Planning Run ID fehlt.' : undefined}
+                          title={!hasRunId ? t('mp.missingRunIdTooltip') : undefined}
                         >
-                          <CalendarClock size={14} /> Stundennachweis Preview öffnen
+                          <CalendarClock size={14} /> {t('mp.openStundennachweisPreview')}
                         </button>
                         <button
                           disabled={!hasRunId}
@@ -2895,9 +2963,9 @@ export default function MonatsplanungAssignmentPreview({
                           }}
                           className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold disabled:opacity-40 transition-all hover:brightness-110"
                           style={{ background: 'rgba(245,158,11,0.12)', color: '#d97706', border: '1px solid rgba(245,158,11,0.3)' }}
-                          title={!hasRunId ? 'Planning Run ID fehlt.' : undefined}
+                          title={!hasRunId ? t('mp.missingRunIdTooltip') : undefined}
                         >
-                          <Sparkles size={14} /> Finale Dokumente erstellen
+                          <Sparkles size={14} /> {t('mp.runs.createFinalDocs')}
                         </button>
                       </div>
                       <button
@@ -2905,7 +2973,7 @@ export default function MonatsplanungAssignmentPreview({
                         className="px-3 py-2 rounded-lg text-sm font-semibold"
                         style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
                       >
-                        Schließen
+                        {t('common.close')}
                       </button>
                     </div>
                   );
@@ -2955,10 +3023,10 @@ export default function MonatsplanungAssignmentPreview({
             <div className="flex items-start justify-between px-5 py-4 border-b" style={{ borderColor: 'var(--border)' }}>
               <div>
                 <h3 className="text-base font-semibold flex items-center gap-2" style={{ color: '#991b1b' }}>
-                  <ShieldAlert size={16} /> Bestehende Planung ersetzen?
+                  <ShieldAlert size={16} /> {t('mp.replace.title')}
                 </h3>
                 <div className="text-xs mt-1" style={{ color: 'var(--text-tertiary)' }}>
-                  Die alte Planung wird unwiderruflich auf „replaced" gesetzt. Alle Fahrten werden auf die neue Planung umgehängt.
+                  {t('mp.replace.subtitle')}
                 </div>
               </div>
               <button onClick={() => setReplaceOpen(false)} className="p-1 rounded" style={{ color: 'var(--text-tertiary)' }} disabled={replacing}>
@@ -2967,13 +3035,15 @@ export default function MonatsplanungAssignmentPreview({
             </div>
             <div className="px-5 py-4 space-y-3">
               <div className="text-xs px-3 py-2 rounded-lg" style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)' }}>
-                Alte Planning Run ID: <span className="font-mono">{applyResult.planning_run_id}</span><br />
-                Datei: <span className="font-mono">{sourceFileName || '—'}</span><br />
-                Monat/Jahr: {month}/{year}
+                {t('mp.replace.oldRunId')}: <span className="font-mono">{applyResult.planning_run_id}</span><br />
+                {t('mp.replace.file')}: <span className="font-mono">{sourceFileName || '—'}</span><br />
+                {t('mp.runs.monthYear')}: {month}/{year}
               </div>
               <div>
+                {/* ERSETZEN is the literal the user has to type; it is compared
+                    verbatim below, so it is data and stays German. */}
                 <label className="block text-xs font-semibold mb-1" style={{ color: 'var(--text-secondary)' }}>
-                  Tippen Sie zur Bestätigung <span className="font-mono font-bold">ERSETZEN</span>:
+                  {t('mp.replace.typeToConfirm')} <span className="font-mono font-bold">ERSETZEN</span>:
                 </label>
                 <input
                   type="text"
@@ -2994,7 +3064,7 @@ export default function MonatsplanungAssignmentPreview({
                   disabled={replacing}
                 />
                 <span style={{ color: 'var(--text-primary)' }}>
-                  Ich verstehe, dass die alte Planung archiviert wird und die neue Planung sofort angewendet wird.
+                  {t('mp.replace.confirmCheckbox')}
                 </span>
               </label>
               {replaceError && (
@@ -3010,7 +3080,7 @@ export default function MonatsplanungAssignmentPreview({
                 className="px-3 py-2 rounded-lg text-sm font-semibold"
                 style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
               >
-                Abbrechen
+                {t('common.cancel')}
               </button>
               <button
                 onClick={handleReplace}
@@ -3019,7 +3089,7 @@ export default function MonatsplanungAssignmentPreview({
                 style={{ background: '#b91c1c', color: '#fff' }}
               >
                 {replacing ? <Loader2 size={14} className="animate-spin" /> : <ShieldAlert size={14} />}
-                {replacing ? 'Ersetze…' : 'Endgültig ersetzen'}
+                {replacing ? t('mp.replace.replacing') : t('mp.replace.replaceFinal')}
               </button>
             </div>
           </div>
@@ -3040,10 +3110,10 @@ export default function MonatsplanungAssignmentPreview({
             <div className="flex items-start justify-between px-5 py-4 border-b" style={{ borderColor: 'var(--border)' }}>
               <div>
                 <h3 className="text-base font-semibold flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
-                  <Hand size={16} /> Manuell zuweisen
+                  <Hand size={16} /> {t('mp.resolver.title')}
                 </h3>
                 <div className="text-xs mt-1" style={{ color: 'var(--text-tertiary)' }}>
-                  {fmtDate(resolverBlock.service_date)} · <span className="font-mono">{resolverBlock.vehicle_identifier}</span> · {fmtTime(resolverBlock.block_start_datetime)}–{fmtTime(resolverBlock.block_end_datetime)} · {resolverBlock.duration_minutes} Min · {resolverBlock.trip_count} Fahrten
+                  {fmtDate(resolverBlock.service_date)} · <span className="font-mono">{resolverBlock.vehicle_identifier}</span> · {fmtTime(resolverBlock.block_start_datetime)}–{fmtTime(resolverBlock.block_end_datetime)} · {t('mp.minutes', { minutes: resolverBlock.duration_minutes })} · {t('mp.tripsCount', { count: resolverBlock.trip_count })}
                 </div>
               </div>
               <button onClick={closeResolver} className="p-1 rounded" style={{ color: 'var(--text-tertiary)' }}>
@@ -3053,11 +3123,11 @@ export default function MonatsplanungAssignmentPreview({
 
             <div className="px-5 py-4 space-y-4">
               <div>
-                <label className="block text-xs font-semibold mb-1.5" style={{ color: 'var(--text-secondary)' }}>Fahrer</label>
+                <label className="block text-xs font-semibold mb-1.5" style={{ color: 'var(--text-secondary)' }}>{t('common.driver')}</label>
                 <div className="rounded-lg overflow-hidden" style={{ border: '1px solid var(--border)' }}>
                   <div className="max-h-72 overflow-y-auto">
                     {resolverCandidates.length === 0 && (
-                      <div className="px-3 py-3 text-xs" style={{ color: 'var(--text-tertiary)' }}>Keine Fahrer verfügbar.</div>
+                      <div className="px-3 py-3 text-xs" style={{ color: 'var(--text-tertiary)' }}>{t('mp.resolver.noDrivers')}</div>
                     )}
                     {resolverCandidates.map(c => {
                       const sel = resolverDriverId === c.driver.id;
@@ -3072,14 +3142,14 @@ export default function MonatsplanungAssignmentPreview({
                       const subline: string[] = [];
                       if (monthlyH != null && target != null) {
                         const delta = target - parseFloat(monthlyH);
-                        if (delta > 0) subline.push(`${delta.toFixed(2)}h unter Monatsziel`);
-                        else if (delta < 0) subline.push(`${Math.abs(delta).toFixed(2)}h über Monatsziel`);
-                        else subline.push('Monatsziel erreicht');
+                        if (delta > 0) subline.push(t('mp.resolver.belowMonthlyTarget', { hours: delta.toFixed(2) }));
+                        else if (delta < 0) subline.push(t('mp.resolver.aboveMonthlyTarget', { hours: Math.abs(delta).toFixed(2) }));
+                        else subline.push(t('mp.resolver.monthlyTargetReached'));
                       } else if (monthlyH != null) {
-                        subline.push(`${monthlyH}h diesen Monat`);
+                        subline.push(t('mp.resolver.hoursThisMonth', { hours: monthlyH }));
                       }
                       if (dailyH != null && maxDaily != null) {
-                        subline.push(`Tag ${dailyH}h/${maxDaily}h`);
+                        subline.push(t('mp.resolver.dayHours', { hours: dailyH, max: maxDaily }));
                       }
                       return (
                         <button
@@ -3108,9 +3178,9 @@ export default function MonatsplanungAssignmentPreview({
                           <span
                             className="shrink-0 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider"
                             style={{ background: col.badgeBg, color: col.badgeFg }}
-                            title={c.badge}
+                            title={t(c.badge)}
                           >
-                            {c.badge}
+                            {t(c.badge)}
                           </span>
                         </button>
                       );
@@ -3118,16 +3188,16 @@ export default function MonatsplanungAssignmentPreview({
                   </div>
                 </div>
                 <div className="mt-2 text-[10px] flex flex-wrap gap-x-3 gap-y-1" style={{ color: 'var(--text-tertiary)' }}>
-                  <span className="inline-flex items-center gap-1"><span className="w-2 h-2 rounded-full" style={{ background: groupColors.green.dot }}/> Möglich</span>
-                  <span className="inline-flex items-center gap-1"><span className="w-2 h-2 rounded-full" style={{ background: groupColors.blue.dot }}/> Dienstzeit-Ausnahme möglich</span>
-                  <span className="inline-flex items-center gap-1"><span className="w-2 h-2 rounded-full" style={{ background: groupColors.orange.dot }}/> Limit-Ausnahme möglich</span>
-                  <span className="inline-flex items-center gap-1"><span className="w-2 h-2 rounded-full" style={{ background: groupColors.red.dot }}/> Nicht möglich</span>
+                  <span className="inline-flex items-center gap-1"><span className="w-2 h-2 rounded-full" style={{ background: groupColors.green.dot }}/> {t('mp.resolver.possible')}</span>
+                  <span className="inline-flex items-center gap-1"><span className="w-2 h-2 rounded-full" style={{ background: groupColors.blue.dot }}/> {t('mp.resolver.legendWorkingTime')}</span>
+                  <span className="inline-flex items-center gap-1"><span className="w-2 h-2 rounded-full" style={{ background: groupColors.orange.dot }}/> {t('mp.resolver.legendLimit')}</span>
+                  <span className="inline-flex items-center gap-1"><span className="w-2 h-2 rounded-full" style={{ background: groupColors.red.dot }}/> {t('mp.resolver.notPossible')}</span>
                 </div>
               </div>
 
               {selectedClass && selectedClass.hardBlockers.length === 0 && (selectedClass.requiresDienstzeit || selectedClass.requiresTageslimit || selectedClass.requiresMonatslimit) && (
                 <div className="space-y-2">
-                  <div className="text-xs font-semibold" style={{ color: 'var(--text-secondary)' }}>Erforderliche Ausnahmen</div>
+                  <div className="text-xs font-semibold" style={{ color: 'var(--text-secondary)' }}>{t('mp.resolver.requiredExceptions')}</div>
                   {selectedClass.requiresDienstzeit && (
                     <label className="flex items-start gap-2 text-sm cursor-pointer">
                       <input
@@ -3137,9 +3207,9 @@ export default function MonatsplanungAssignmentPreview({
                         className="mt-1"
                       />
                       <span>
-                        <span className="font-semibold" style={{ color: 'var(--text-primary)' }}>Dienstzeit-Ausnahme</span>
+                        <span className="font-semibold" style={{ color: 'var(--text-primary)' }}>{t('mp.workingTimeException')}</span>
                         <span className="block text-xs" style={{ color: 'var(--text-tertiary)' }}>
-                          Block darf außerhalb der Dienstzeit liegen.
+                          {t('mp.resolver.workingTimeExceptionDesc')}
                         </span>
                       </span>
                     </label>
@@ -3153,9 +3223,9 @@ export default function MonatsplanungAssignmentPreview({
                         className="mt-1"
                       />
                       <span>
-                        <span className="font-semibold" style={{ color: 'var(--text-primary)' }}>Tageslimit-Ausnahme</span>
+                        <span className="font-semibold" style={{ color: 'var(--text-primary)' }}>{t('mp.dailyLimitException')}</span>
                         <span className="block text-xs" style={{ color: 'var(--text-tertiary)' }}>
-                          Block darf das tägliche Maximum überschreiten.
+                          {t('mp.resolver.dailyLimitExceptionDesc')}
                         </span>
                       </span>
                     </label>
@@ -3169,9 +3239,9 @@ export default function MonatsplanungAssignmentPreview({
                         className="mt-1"
                       />
                       <span>
-                        <span className="font-semibold" style={{ color: 'var(--text-primary)' }}>Monatslimit-Ausnahme</span>
+                        <span className="font-semibold" style={{ color: 'var(--text-primary)' }}>{t('mp.monthlyLimitException')}</span>
                         <span className="block text-xs" style={{ color: 'var(--text-tertiary)' }}>
-                          Block darf das monatliche Maximum überschreiten.
+                          {t('mp.resolver.monthlyLimitExceptionDesc')}
                         </span>
                       </span>
                     </label>
@@ -3183,13 +3253,18 @@ export default function MonatsplanungAssignmentPreview({
                 const col = groupColors[selectedClass.group];
                 let msg: string;
                 const required: string[] = [];
-                if (selectedClass.requiresDienstzeit) required.push('Dienstzeit-Ausnahme');
-                if (selectedClass.requiresTageslimit) required.push('Tageslimit-Ausnahme');
-                if (selectedClass.requiresMonatslimit) required.push('Monatslimit-Ausnahme');
-                if (selectedClass.group === 'green') msg = 'Möglich: Fahrer kann zugewiesen werden.';
-                else if (selectedClass.group === 'blue') msg = 'Dienstzeit-Ausnahme erforderlich.';
-                else if (selectedClass.group === 'orange') msg = `Ausnahme erforderlich: ${required.join(', ')}.`;
-                else msg = `Nicht möglich: ${selectedClass.primaryHardBlocker ?? 'Hard blocker'}`;
+                if (selectedClass.requiresDienstzeit) required.push(t('mp.workingTimeException'));
+                if (selectedClass.requiresTageslimit) required.push(t('mp.dailyLimitException'));
+                if (selectedClass.requiresMonatslimit) required.push(t('mp.monthlyLimitException'));
+                const hardBlockerKey = selectedClass.primaryHardBlocker
+                  ? BLOCKING_CHECK_LABEL[selectedClass.primaryHardBlocker]
+                  : undefined;
+                if (selectedClass.group === 'green') msg = t('mp.resolver.msgPossible');
+                else if (selectedClass.group === 'blue') msg = t('mp.resolver.msgWorkingTimeRequired');
+                else if (selectedClass.group === 'orange') msg = t('mp.resolver.msgExceptionRequired', { list: required.join(', ') });
+                else msg = t('mp.resolver.msgNotPossible', {
+                  reason: hardBlockerKey ? t(hardBlockerKey) : (selectedClass.primaryHardBlocker ?? t('mp.resolver.hardBlocker')),
+                });
                 const isRed = selectedClass.group === 'red';
                 return (
                   <div
@@ -3202,7 +3277,7 @@ export default function MonatsplanungAssignmentPreview({
                     </span>
                     {isRed && (
                       <div className="mt-1" style={{ color: 'var(--text-tertiary)' }}>
-                        Diese Auswahl kann nicht manuell bestätigt werden.
+                        {t('mp.resolver.cannotConfirm')}
                       </div>
                     )}
                   </div>
@@ -3216,19 +3291,26 @@ export default function MonatsplanungAssignmentPreview({
                 >
                   <div className="font-semibold inline-flex items-start gap-1.5">
                     <XCircle size={12} className="mt-0.5" />
-                    Keine manuell zuweisbare Fahreroption verfügbar.
+                    {t('mp.resolver.noAssignableDriver')}
                   </div>
                   {redBlockerSummary.length > 0 && (
                     <div className="mt-1" style={{ color: 'var(--text-tertiary)' }}>
-                      Hard-Blocker: {redBlockerSummary.join(' · ')}
+                      {t('mp.resolver.hardBlockers')}: {redBlockerSummary.join(' · ')}
                     </div>
                   )}
                 </div>
               )}
 
               <div className="text-[11px] px-3 py-2 rounded-lg" style={{ background: 'var(--bg-subtle)', color: 'var(--text-tertiary)' }}>
-                <div className="font-semibold mb-0.5" style={{ color: 'var(--text-secondary)' }}>Niemals umgehbar:</div>
-                Fahrer-Überlappung · Fahrzeugwechsel-Puffer{result?.options.oneVehiclePerDriverDay ? ' · Fahrer nutzt bereits anderes Fahrzeug an diesem Tag' : ''} · Arbeitstag nicht erlaubt · Nicht ausgewählter Fahrer · Notiz-Einschränkung
+                <div className="font-semibold mb-0.5" style={{ color: 'var(--text-secondary)' }}>{t('mp.resolver.neverBypassable')}:</div>
+                {[
+                  t('mp.reason.driverOverlap'),
+                  t('mp.reason.vehicleSwitchBuffer'),
+                  ...(result?.options.oneVehiclePerDriverDay ? [t('mp.reason.oneVehiclePerDay')] : []),
+                  t('mp.reason.wrongWeekday'),
+                  t('mp.reason.driverNotSelected'),
+                  t('mp.reason.noteConstraint'),
+                ].join(' · ')}
               </div>
 
               {resolverError && (
@@ -3244,7 +3326,7 @@ export default function MonatsplanungAssignmentPreview({
                 className="px-3 py-2 rounded-lg text-sm font-semibold"
                 style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
               >
-                Abbrechen
+                {t('common.cancel')}
               </button>
               <button
                 onClick={handleConfirmManual}
@@ -3252,7 +3334,7 @@ export default function MonatsplanungAssignmentPreview({
                 className="px-3 py-2 rounded-lg text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
                 style={{ background: 'var(--primary)', color: 'var(--primary-contrast, #fff)' }}
               >
-                Bestätigen
+                {t('common.confirm')}
               </button>
             </div>
           </div>

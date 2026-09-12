@@ -8,6 +8,7 @@ import { useCompanySettings } from '../contexts/CompanySettingsContext';
 import type { CompanySettings } from '../types/settings';
 import { getBusinessMonthRange } from '../utils/weekCalculations';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
+import { useTranslation } from '../contexts/LanguageContext';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -337,6 +338,7 @@ type Step = 'select' | 'preview';
 const TrinkgeldQuittungModal: React.FC<Props> = ({ isOpen, onClose }) => {
   const { settings } = useCompanySettings();
   const { effectiveCompanyId: companyId } = useSuperAdmin();
+  const { t } = useTranslation();
 
   const [drivers,   setDrivers]   = useState<Driver[]>([]);
   const [driverId,  setDriverId]  = useState('');
@@ -460,6 +462,7 @@ const TrinkgeldQuittungModal: React.FC<Props> = ({ isOpen, onClose }) => {
 
     setExporting(true);
     try {
+      // Every field below is printed on the Quittung, so the fallbacks stay German.
       await exportQuittungPDF(
         {
           driverName:   driver.name,
@@ -483,6 +486,7 @@ const TrinkgeldQuittungModal: React.FC<Props> = ({ isOpen, onClose }) => {
 
   const selectedDriver = drivers.find(d => d.id === driverId);
 
+  // Printed on the Quittung — German fallbacks, same as the export payload above.
   const previewData: QuittungData | null = selectedDriver
     ? {
         driverName:   selectedDriver.name,
@@ -526,10 +530,10 @@ const TrinkgeldQuittungModal: React.FC<Props> = ({ isOpen, onClose }) => {
             </div>
             <div>
               <h2 className="font-bold text-base" style={{ color: 'var(--text-primary)' }}>
-                Trinkgeld Quittung
+                {t('a4.tqTitle')}
               </h2>
               <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
-                {step === 'select' ? 'Fahrer und Zeitraum wählen' : 'Vorschau und Export'}
+                {step === 'select' ? t('a4.tqStepSelect') : t('a4.tqStepPreview')}
               </p>
             </div>
           </div>
@@ -544,10 +548,10 @@ const TrinkgeldQuittungModal: React.FC<Props> = ({ isOpen, onClose }) => {
             <div className="p-6 space-y-5">
               <div>
                 <label className="block text-sm font-medium mb-1.5" style={{ color: 'var(--text-secondary)' }}>
-                  Fahrer *
+                  {t('common.driver')} *
                 </label>
                 <select value={driverId} onChange={e => setDriverId(e.target.value)} style={IS}>
-                  <option value="">Fahrer auswählen …</option>
+                  <option value="">{t('a4.tqDriverPlaceholder')}</option>
                   {drivers.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
                 </select>
               </div>
@@ -555,7 +559,7 @@ const TrinkgeldQuittungModal: React.FC<Props> = ({ isOpen, onClose }) => {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium mb-1.5" style={{ color: 'var(--text-secondary)' }}>
-                    Monat *
+                    {t('common.month')} *
                   </label>
                   <select value={month} onChange={e => setMonth(Number(e.target.value))} style={IS}>
                     {MONTH_NAMES_DE.map((m, i) => <option key={i + 1} value={i + 1}>{m}</option>)}
@@ -563,7 +567,7 @@ const TrinkgeldQuittungModal: React.FC<Props> = ({ isOpen, onClose }) => {
                 </div>
                 <div>
                   <label className="block text-sm font-medium mb-1.5" style={{ color: 'var(--text-secondary)' }}>
-                    Jahr *
+                    {t('bill.field.year')} *
                   </label>
                   <select value={year} onChange={e => setYear(Number(e.target.value))} style={IS}>
                     {years.map(y => <option key={y} value={y}>{y}</option>)}
@@ -576,8 +580,7 @@ const TrinkgeldQuittungModal: React.FC<Props> = ({ isOpen, onClose }) => {
                 style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)' }}
               >
                 <p style={{ color: 'var(--text-secondary)' }}>
-                  Das System summiert automatisch alle Trinkgeld-Einnahmen des gewählten Fahrers
-                  für den ausgewählten Monat. Andere Einnahmetypen werden nicht berücksichtigt.
+                  {t('a4.tqHint')}
                 </p>
               </div>
             </div>
@@ -614,13 +617,13 @@ const TrinkgeldQuittungModal: React.FC<Props> = ({ isOpen, onClose }) => {
                 padding: '24px 20px',
               }}>
                 <p className="text-xs font-semibold uppercase tracking-wide mb-4" style={{ color: 'var(--text-tertiary)' }}>
-                  Felder anpassen
+                  {t('a4.tqAdjustFields')}
                 </p>
 
                 <div className="space-y-4">
                   <div>
                     <label className="block text-sm font-medium mb-1.5" style={{ color: 'var(--text-secondary)' }}>
-                      Fahrer
+                      {t('common.driver')}
                     </label>
                     <select
                       value={driverId}
@@ -634,7 +637,7 @@ const TrinkgeldQuittungModal: React.FC<Props> = ({ isOpen, onClose }) => {
                   </div>
                   <div>
                     <label className="block text-sm font-medium mb-1.5" style={{ color: 'var(--text-secondary)' }}>
-                      Monat
+                      {t('common.month')}
                     </label>
                     <div className="grid grid-cols-2 gap-2">
                       <select
@@ -658,6 +661,8 @@ const TrinkgeldQuittungModal: React.FC<Props> = ({ isOpen, onClose }) => {
                     </div>
                   </div>
                   <div>
+                    {/* Reproduces the "Betrag (EUR)" caption printed on the Quittung sheet
+                        itself, so the editor and the document read identically. */}
                     <label className="block text-sm font-medium mb-1.5" style={{ color: 'var(--text-secondary)' }}>
                       Betrag (EUR)
                     </label>
@@ -671,7 +676,7 @@ const TrinkgeldQuittungModal: React.FC<Props> = ({ isOpen, onClose }) => {
                   </div>
                   <div>
                     <label className="block text-sm font-medium mb-1.5" style={{ color: 'var(--text-secondary)' }}>
-                      Dokumentdatum
+                      {t('a4.tqFieldDocDate')}
                     </label>
                     <input
                       type="text"
@@ -683,7 +688,7 @@ const TrinkgeldQuittungModal: React.FC<Props> = ({ isOpen, onClose }) => {
                   </div>
                   <div>
                     <label className="block text-sm font-medium mb-1.5" style={{ color: 'var(--text-secondary)' }}>
-                      Ort
+                      {t('a4.tqFieldCity')}
                     </label>
                     <input
                       type="text"
@@ -693,6 +698,8 @@ const TrinkgeldQuittungModal: React.FC<Props> = ({ isOpen, onClose }) => {
                     />
                   </div>
                   <div>
+                    {/* Reproduces the "Arbeitgeber" signature caption printed on the Quittung
+                        sheet itself, so the editor and the document read identically. */}
                     <label className="block text-sm font-medium mb-1.5" style={{ color: 'var(--text-secondary)' }}>
                       Arbeitgeber (Unterschrift)
                     </label>
@@ -723,7 +730,7 @@ const TrinkgeldQuittungModal: React.FC<Props> = ({ isOpen, onClose }) => {
                 onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-muted)')}
                 onMouseLeave={e => (e.currentTarget.style.background = 'var(--bg-subtle)')}
               >
-                Abbrechen
+                {t('common.cancel')}
               </button>
               <button
                 onClick={handleGenerate}
@@ -734,8 +741,8 @@ const TrinkgeldQuittungModal: React.FC<Props> = ({ isOpen, onClose }) => {
                   : { background: 'var(--bg-muted)', color: 'var(--text-tertiary)', cursor: 'not-allowed' }}
               >
                 {loading
-                  ? <><RefreshCw size={14} className="animate-spin" /> Lädt …</>
-                  : <>Vorschau generieren <ChevronRight size={14} /></>}
+                  ? <><RefreshCw size={14} className="animate-spin" /> {t('a4.tqLoading')}</>
+                  : <>{t('a4.tqGeneratePreview')} <ChevronRight size={14} /></>}
               </button>
             </>
           ) : (
@@ -747,7 +754,7 @@ const TrinkgeldQuittungModal: React.FC<Props> = ({ isOpen, onClose }) => {
                 onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-muted)')}
                 onMouseLeave={e => (e.currentTarget.style.background = 'var(--bg-subtle)')}
               >
-                <ArrowLeft size={14} /> Zurück
+                <ArrowLeft size={14} /> {t('common.back')}
               </button>
               <button
                 onClick={handleExport}
@@ -756,7 +763,7 @@ const TrinkgeldQuittungModal: React.FC<Props> = ({ isOpen, onClose }) => {
                 style={{ background: 'var(--accent)', color: 'white' }}
               >
                 <Download size={14} />
-                {exporting ? 'Exportiert …' : 'Als PDF exportieren'}
+                {exporting ? t('a4.tqExporting') : t('a4.tqExportPdf')}
               </button>
             </>
           )}

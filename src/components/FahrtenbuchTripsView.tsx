@@ -7,17 +7,29 @@ import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
 import FahrtenbuchImportModal, { DriverOption, CarOption } from './FahrtenbuchImportModal';
 import { exportFahrtenbuch } from '../utils/fahrtenbuchExport';
+import { useTranslation } from '../contexts/LanguageContext';
+import type { TranslationKey } from '../i18n';
 
 interface Props {
   drivers: DriverOption[];
   cars: CarOption[];
 }
 
-const MONTHS = ['Januar','Februar','März','April','Mai','Juni','Juli','August','September','Oktober','November','Dezember'];
+const MONTH_KEYS: readonly TranslationKey[] = [
+  'doc.month.january', 'doc.month.february', 'doc.month.march',     'doc.month.april',
+  'doc.month.may',     'doc.month.june',     'doc.month.july',      'doc.month.august',
+  'doc.month.september', 'doc.month.october', 'doc.month.november', 'doc.month.december',
+];
 
-const STATUS_LABELS: Record<string, string> = {
-  pending: 'Ausstehend', ok: 'OK', uncovered: 'Nicht abgedeckt', overlap: 'Überschneidung',
-  canceled: 'Storniert',
+// The record keys are `plausibility_status` values stored on the trip — data, so
+// they stay as they are. Only the labels follow the UI language; they hold
+// TranslationKeys resolved with t() at the call site.
+const STATUS_LABEL_KEYS: Record<string, TranslationKey> = {
+  pending:   'imp.trips.status.pending',
+  ok:        'imp.trips.status.ok',
+  uncovered: 'imp.trips.status.uncovered',
+  overlap:   'imp.trips.status.overlap',
+  canceled:  'imp.trips.status.canceled',
 };
 const STATUS_COLORS: Record<string, { bg: string; text: string }> = {
   pending:   { bg: 'var(--bg-muted)',      text: 'var(--text-tertiary)' },
@@ -30,6 +42,7 @@ const STATUS_COLORS: Record<string, { bg: string; text: string }> = {
 const FahrtenbuchTripsView: React.FC<Props> = ({ drivers, cars }) => {
   const { isAdmin, isSuperAdmin } = useAuth();
   const { success, error: showError } = useToast();
+  const { t } = useTranslation();
   const {
     imports, trips,
     loadingImports, loadingTrips,
@@ -72,34 +85,34 @@ const FahrtenbuchTripsView: React.FC<Props> = ({ drivers, cars }) => {
   useEffect(() => { setPage(0); }, [searchTerm, filterDriver, filterPlate, filterStatus, selectedImportId, filterMonth, filterYear]);
 
   const filteredTrips = useMemo(() => {
-    return trips.filter(t => {
+    return trips.filter(trip => {
       const matchSearch = !searchTerm || (
-        t.original_driver_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        t.assigned_driver_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (t.car_identifier || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (t.route_start || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (t.route_end || '').toLowerCase().includes(searchTerm.toLowerCase())
+        trip.original_driver_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        trip.assigned_driver_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (trip.car_identifier || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (trip.route_start || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (trip.route_end || '').toLowerCase().includes(searchTerm.toLowerCase())
       );
-      const matchDriver = !filterDriver || t.original_driver_name === filterDriver || t.assigned_driver_name === filterDriver;
-      const matchPlate  = !filterPlate  || (t.car_identifier || '').toLowerCase().includes(filterPlate.toLowerCase());
+      const matchDriver = !filterDriver || trip.original_driver_name === filterDriver || trip.assigned_driver_name === filterDriver;
+      const matchPlate  = !filterPlate  || (trip.car_identifier || '').toLowerCase().includes(filterPlate.toLowerCase());
       const matchStatus = !filterStatus
-        || (filterStatus === 'active' ? !t.is_canceled : t.plausibility_status === filterStatus);
+        || (filterStatus === 'active' ? !trip.is_canceled : trip.plausibility_status === filterStatus);
       return matchSearch && matchDriver && matchPlate && matchStatus;
     });
   }, [trips, searchTerm, filterDriver, filterPlate, filterStatus]);
 
   const uniqueDrivers = useMemo(() =>
-    [...new Set(trips.map(t => t.original_driver_name))].sort(), [trips]);
+    [...new Set(trips.map(trip => trip.original_driver_name))].sort(), [trips]);
 
   const uniquePlates = useMemo(() =>
-    [...new Set(trips.map(t => t.car_identifier).filter(Boolean))].sort() as string[], [trips]);
+    [...new Set(trips.map(trip => trip.car_identifier).filter(Boolean))].sort() as string[], [trips]);
 
   const handleImported = (importId: string) => {
     setShowImportModal(false);
     setSelectedImportId(importId);
     fetchImports();
     fetchTrips(importId);
-    success('Importiert', 'Das Fahrtenbuch wurde erfolgreich importiert.');
+    success(t('imp.trips.toastImportedTitle'), t('imp.trips.toastImportedBody'));
   };
 
   const handleDeleteImport = async (id: string) => {
@@ -111,17 +124,17 @@ const FahrtenbuchTripsView: React.FC<Props> = ({ drivers, cars }) => {
         setSelectedImportId('all');
         fetchTrips(undefined, filterMonth, filterYear);
       }
-      success('Gelöscht', 'Fahrtenbuch-Import wurde gelöscht.');
+      success(t('imp.trips.toastDeletedTitle'), t('imp.trips.toastDeletedBody'));
     } catch (err: any) {
-      showError('Fehler', `Import konnte nicht gelöscht werden: ${err.message || 'Unbekannter Fehler'}`);
+      showError(t('common.error'), t('imp.trips.errDelete', { message: err.message || t('imp.error.unknown') }));
     } finally {
       setDeleting(false);
     }
   };
 
-  const totalPrice = filteredTrips.reduce((s, t) => s + t.price_amount, 0);
-  const totalTip   = filteredTrips.reduce((s, t) => s + t.tip_amount, 0);
-  const canceledCount = filteredTrips.filter(t => t.is_canceled).length;
+  const totalPrice = filteredTrips.reduce((sum, trip) => sum + trip.price_amount, 0);
+  const totalTip   = filteredTrips.reduce((sum, trip) => sum + trip.tip_amount, 0);
+  const canceledCount = filteredTrips.filter(trip => trip.is_canceled).length;
   const activeCount   = filteredTrips.length - canceledCount;
 
   const totalPages = Math.max(1, Math.ceil(filteredTrips.length / pageSize));
@@ -129,6 +142,12 @@ const FahrtenbuchTripsView: React.FC<Props> = ({ drivers, cars }) => {
   const pageTrips  = filteredTrips.slice(safePage * pageSize, (safePage + 1) * pageSize);
   const showFrom   = filteredTrips.length > 0 ? safePage * pageSize + 1 : 0;
   const showTo     = Math.min((safePage + 1) * pageSize, filteredTrips.length);
+
+  // Falls back to the raw stored status so an unmapped value stays visible.
+  const statusLabel = (status: string): string => {
+    const labelKey = STATUS_LABEL_KEYS[status];
+    return labelKey ? t(labelKey) : status;
+  };
 
   const inputSt: React.CSSProperties = {
     background: 'var(--bg-subtle)', border: '1px solid var(--border)',
@@ -144,7 +163,7 @@ const FahrtenbuchTripsView: React.FC<Props> = ({ drivers, cars }) => {
           <Search className="absolute left-3 top-1/2 -translate-y-1/2" size={16} style={{ color: 'var(--text-tertiary)' }} />
           <input
             type="text"
-            placeholder="Fahrer, Kennzeichen, Route suchen…"
+            placeholder={t('imp.trips.searchPlaceholder')}
             value={searchTerm}
             onChange={e => setSearchTerm(e.target.value)}
             style={{ ...inputSt, paddingLeft: '2.25rem', width: '100%' }}
@@ -157,10 +176,10 @@ const FahrtenbuchTripsView: React.FC<Props> = ({ drivers, cars }) => {
           onChange={e => setSelectedImportId(e.target.value)}
           style={{ ...inputSt, minWidth: 180 }}
         >
-          <option value="all">Alle Importe</option>
+          <option value="all">{t('imp.trips.allImports')}</option>
           {imports.map(imp => (
             <option key={imp.id} value={imp.id}>
-              {MONTHS[imp.month - 1]} {imp.year} — {imp.file_name.slice(0, 20)}
+              {t(MONTH_KEYS[imp.month - 1])} {imp.year} — {imp.file_name.slice(0, 20)}
             </option>
           ))}
         </select>
@@ -168,7 +187,7 @@ const FahrtenbuchTripsView: React.FC<Props> = ({ drivers, cars }) => {
         {selectedImportId === 'all' && (
           <>
             <select value={filterMonth} onChange={e => setFilterMonth(Number(e.target.value))} style={inputSt}>
-              {MONTHS.map((m, i) => <option key={i} value={i + 1}>{m}</option>)}
+              {MONTH_KEYS.map((monthKey, i) => <option key={monthKey} value={i + 1}>{t(monthKey)}</option>)}
             </select>
             <select value={filterYear} onChange={e => setFilterYear(Number(e.target.value))} style={inputSt}>
               {[2024, 2025, 2026, 2027].map(y => <option key={y} value={y}>{y}</option>)}
@@ -181,7 +200,7 @@ const FahrtenbuchTripsView: React.FC<Props> = ({ drivers, cars }) => {
           className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm"
           style={{ background: showFilters ? 'var(--accent-subtle)' : 'var(--bg-surface)', border: '1px solid var(--border)', color: showFilters ? 'var(--accent-text)' : 'var(--text-secondary)' }}
         >
-          <Filter size={15} /> Filter
+          <Filter size={15} /> {t('imp.trips.filter')}
         </button>
 
         {trips.length > 0 && (
@@ -202,7 +221,7 @@ const FahrtenbuchTripsView: React.FC<Props> = ({ drivers, cars }) => {
             className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium"
             style={{ background: 'var(--success-subtle)', color: 'var(--success)', border: '1px solid var(--success)' }}
           >
-            <Download size={15} /> Fahrtenbuch herunterladen
+            <Download size={15} /> {t('imp.trips.downloadFahrtenbuch')}
           </button>
         )}
 
@@ -211,7 +230,7 @@ const FahrtenbuchTripsView: React.FC<Props> = ({ drivers, cars }) => {
           className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium"
           style={{ background: 'var(--accent)', color: 'white' }}
         >
-          <Upload size={15} /> Import
+          <Upload size={15} /> {t('imp.trips.import')}
         </button>
       </div>
 
@@ -219,31 +238,33 @@ const FahrtenbuchTripsView: React.FC<Props> = ({ drivers, cars }) => {
       {showFilters && (
         <div className="p-4 rounded-lg grid grid-cols-1 sm:grid-cols-3 gap-4" style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)' }}>
           <div>
-            <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Fahrer</label>
+            <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>{t('common.driver')}</label>
             <select value={filterDriver} onChange={e => setFilterDriver(e.target.value)} style={{ ...inputSt, width: '100%' }}>
-              <option value="">Alle Fahrer</option>
+              <option value="">{t('common.allDrivers')}</option>
               {uniqueDrivers.map(d => <option key={d} value={d}>{d}</option>)}
             </select>
           </div>
           <div>
-            <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Kennzeichen</label>
+            <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>{t('imp.trips.plate')}</label>
             <select value={filterPlate} onChange={e => setFilterPlate(e.target.value)} style={{ ...inputSt, width: '100%' }}>
-              <option value="">Alle Kennzeichen</option>
+              <option value="">{t('imp.trips.allPlates')}</option>
               {uniquePlates.map(p => <option key={p} value={p}>{p}</option>)}
             </select>
           </div>
           <div>
-            <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Status</label>
+            <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>{t('common.status')}</label>
             <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} style={{ ...inputSt, width: '100%' }}>
-              <option value="">Alle Status</option>
-              <option value="active">Nur aktive Fahrten</option>
-              {Object.entries(STATUS_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+              <option value="">{t('imp.trips.allStatuses')}</option>
+              <option value="active">{t('imp.trips.onlyActive')}</option>
+              {Object.entries(STATUS_LABEL_KEYS).map(([status, labelKey]) => (
+                <option key={status} value={status}>{t(labelKey)}</option>
+              ))}
             </select>
           </div>
           {(filterDriver || filterPlate || filterStatus) && (
             <button onClick={() => { setFilterDriver(''); setFilterPlate(''); setFilterStatus(''); }}
               className="flex items-center gap-1 text-xs" style={{ color: 'var(--text-secondary)' }}>
-              <X size={12} /> Zurücksetzen
+              <X size={12} /> {t('imp.trips.reset')}
             </button>
           )}
         </div>
@@ -252,17 +273,17 @@ const FahrtenbuchTripsView: React.FC<Props> = ({ drivers, cars }) => {
       {/* Imports list (when "all") */}
       {selectedImportId === 'all' && imports.length > 0 && (
         <div className="space-y-2">
-          <p className="text-xs font-medium" style={{ color: 'var(--text-tertiary)' }}>Importierte Fahrtenbücher</p>
+          <p className="text-xs font-medium" style={{ color: 'var(--text-tertiary)' }}>{t('imp.trips.importedFahrtenbuecher')}</p>
           {imports.map(imp => (
             <div key={imp.id} className="flex items-center justify-between rounded-lg px-4 py-3" style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)' }}>
               <div className="flex items-center gap-3">
                 <Calendar size={15} style={{ color: 'var(--accent-text)' }} />
                 <div>
                   <p className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
-                    {MONTHS[imp.month - 1]} {imp.year}
+                    {t(MONTH_KEYS[imp.month - 1])} {imp.year}
                   </p>
                   <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
-                    {imp.file_name} · {imp.row_count} Fahrten ·{' '}
+                    {imp.file_name} · {t('imp.trips.tripCount', { count: imp.row_count })} ·{' '}
                     {format(new Date(imp.imported_at), 'dd.MM.yyyy HH:mm')}
                   </p>
                 </div>
@@ -273,7 +294,7 @@ const FahrtenbuchTripsView: React.FC<Props> = ({ drivers, cars }) => {
                   className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg transition-all"
                   style={{ background: 'var(--accent-subtle)', color: 'var(--accent-text)', border: '1px solid var(--accent)' }}
                 >
-                  <Eye size={13} /> Anzeigen
+                  <Eye size={13} /> {t('imp.trips.view')}
                 </button>
                 {(isAdmin || isSuperAdmin) && (
                   <button
@@ -283,7 +304,7 @@ const FahrtenbuchTripsView: React.FC<Props> = ({ drivers, cars }) => {
                     onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--danger)'; }}
                     onMouseLeave={e => { e.currentTarget.style.borderColor = 'transparent'; }}
                   >
-                    <Trash2 size={13} /> Löschen
+                    <Trash2 size={13} /> {t('common.delete')}
                   </button>
                 )}
               </div>
@@ -295,16 +316,16 @@ const FahrtenbuchTripsView: React.FC<Props> = ({ drivers, cars }) => {
       {/* Summary bar */}
       {filteredTrips.length > 0 && (
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          {[
-            { label: 'Fahrten gesamt', value: String(filteredTrips.length), sub: canceledCount > 0 ? `${activeCount} aktiv + ${canceledCount} storniert` : undefined, color: 'var(--accent-text)' },
-            { label: 'Gesamtpreis', value: totalPrice.toLocaleString('de-DE', { minimumFractionDigits: 2 }) + ' \u20AC', color: 'var(--success)' },
-            { label: 'Gesamttrinkgeld', value: totalTip.toLocaleString('de-DE', { minimumFractionDigits: 2 }) + ' \u20AC', color: 'var(--text-secondary)' },
-            { label: 'Seite', value: `${showFrom}\u2013${showTo}`, sub: `von ${filteredTrips.length}`, color: 'var(--text-primary)' },
-          ].map(c => (
-            <div key={c.label} className="rounded-lg p-3 text-center" style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)' }}>
-              <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>{c.label}</p>
+          {([
+            { labelKey: 'imp.trips.cardTotal' as TranslationKey, value: String(filteredTrips.length), sub: canceledCount > 0 ? t('imp.trips.activeAndCanceled', { active: activeCount, canceled: canceledCount }) : undefined, color: 'var(--accent-text)' },
+            { labelKey: 'imp.trips.cardTotalPrice' as TranslationKey, value: totalPrice.toLocaleString('de-DE', { minimumFractionDigits: 2 }) + ' \u20AC', sub: undefined, color: 'var(--success)' },
+            { labelKey: 'imp.trips.cardTotalTip' as TranslationKey, value: totalTip.toLocaleString('de-DE', { minimumFractionDigits: 2 }) + ' \u20AC', sub: undefined, color: 'var(--text-secondary)' },
+            { labelKey: 'imp.trips.cardPage' as TranslationKey, value: `${showFrom}\u2013${showTo}`, sub: t('imp.trips.ofTotal', { count: filteredTrips.length }), color: 'var(--text-primary)' },
+          ]).map(c => (
+            <div key={c.labelKey} className="rounded-lg p-3 text-center" style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)' }}>
+              <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>{t(c.labelKey)}</p>
               <p className="text-lg font-bold" style={{ color: c.color }}>{c.value}</p>
-              {'sub' in c && c.sub && <p className="text-xs mt-0.5" style={{ color: 'var(--text-tertiary)' }}>{c.sub}</p>}
+              {c.sub && <p className="text-xs mt-0.5" style={{ color: 'var(--text-tertiary)' }}>{c.sub}</p>}
             </div>
           ))}
         </div>
@@ -319,14 +340,10 @@ const FahrtenbuchTripsView: React.FC<Props> = ({ drivers, cars }) => {
         <div className="text-center py-16 rounded-xl" style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)' }}>
           <Upload size={36} className="mx-auto mb-3 opacity-30" style={{ color: 'var(--text-tertiary)' }} />
           <p className="font-medium" style={{ color: 'var(--text-secondary)' }}>
-            {imports.length === 0
-              ? 'Noch kein Fahrtenbuch importiert'
-              : 'Keine Fahrten für den ausgewählten Zeitraum gefunden.'}
+            {imports.length === 0 ? t('imp.trips.emptyNoImport') : t('imp.trips.emptyNoTrips')}
           </p>
           <p className="text-sm mt-1 max-w-md mx-auto" style={{ color: 'var(--text-tertiary)' }}>
-            {imports.length === 0
-              ? 'Klicken Sie auf "Import" um eine Excel- oder CSV-Datei hochzuladen.'
-              : 'Wählen Sie einen passenden Monat/Jahr oder klicken Sie bei einem Import auf "Anzeigen".'}
+            {imports.length === 0 ? t('imp.trips.emptyHintImport') : t('imp.trips.emptyHintSelect')}
           </p>
           {imports.length === 0 && (
             <button
@@ -334,7 +351,7 @@ const FahrtenbuchTripsView: React.FC<Props> = ({ drivers, cars }) => {
               className="mt-4 px-4 py-2 rounded-lg text-sm font-medium"
               style={{ background: 'var(--accent)', color: 'white' }}
             >
-              Fahrtenbuch importieren
+              {t('imp.trips.importFahrtenbuch')}
             </button>
           )}
         </div>
@@ -345,8 +362,12 @@ const FahrtenbuchTripsView: React.FC<Props> = ({ drivers, cars }) => {
             <table className="w-full text-sm">
               <thead style={{ background: 'var(--bg-subtle)' }}>
                 <tr>
-                  {['Datum','Start','Ende','Originalfahrer','Zugeordneter Fahrer','Kennzeichen','Fahrpreis','Trinkgeld','Abholort','Zielort','Status'].map(h => (
-                    <th key={h} className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider whitespace-nowrap" style={{ color: 'var(--text-tertiary)' }}>{h}</th>
+                  {([
+                    'common.date', 'imp.th.start', 'imp.th.end', 'imp.th.originalDriver',
+                    'imp.trips.th.assignedDriver', 'imp.th.plate', 'imp.trips.th.fare',
+                    'imp.th.tip', 'imp.trips.th.pickup', 'imp.trips.th.destination', 'common.status',
+                  ] as TranslationKey[]).map(headerKey => (
+                    <th key={headerKey} className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider whitespace-nowrap" style={{ color: 'var(--text-tertiary)' }}>{t(headerKey)}</th>
                   ))}
                   <th className="px-4 py-3" style={{ color: 'var(--text-tertiary)' }}></th>
                 </tr>
@@ -384,11 +405,11 @@ const FahrtenbuchTripsView: React.FC<Props> = ({ drivers, cars }) => {
                       <td className="px-4 py-3 max-w-32 truncate" style={{ color: 'var(--text-secondary)' }}>{trip.route_end || '—'}</td>
                       <td className="px-4 py-3 whitespace-nowrap">
                         <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium" style={{ background: st.bg, color: st.text }}>
-                          {STATUS_LABELS[trip.plausibility_status]}
+                          {statusLabel(trip.plausibility_status)}
                         </span>
                       </td>
                       <td className="px-4 py-3 whitespace-nowrap">
-                        <Lock size={13} style={{ color: 'var(--text-tertiary)' }} title="Zeiten und Beträge sind unveränderlich" />
+                        <Lock size={13} style={{ color: 'var(--text-tertiary)' }} title={t('imp.trips.immutableTitle')} />
                       </td>
                     </tr>
                   );
@@ -414,14 +435,14 @@ const FahrtenbuchTripsView: React.FC<Props> = ({ drivers, cars }) => {
                       </p>
                     </div>
                     <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium" style={{ background: st.bg, color: st.text }}>
-                      {STATUS_LABELS[trip.plausibility_status]}
+                      {statusLabel(trip.plausibility_status)}
                     </span>
                   </div>
                   <div className="grid grid-cols-2 gap-2 text-xs">
-                    <div><span style={{ color: 'var(--text-tertiary)' }}>Kennzeichen: </span><span style={{ color: 'var(--text-primary)' }}>{trip.car_identifier || '—'}</span></div>
-                    <div><span style={{ color: 'var(--text-tertiary)' }}>Preis: </span><span style={{ color: 'var(--success)' }}>{trip.price_amount.toFixed(2)} €</span></div>
-                    {trip.route_start && <div><span style={{ color: 'var(--text-tertiary)' }}>Von: </span>{trip.route_start}</div>}
-                    {trip.route_end   && <div><span style={{ color: 'var(--text-tertiary)' }}>Nach: </span>{trip.route_end}</div>}
+                    <div><span style={{ color: 'var(--text-tertiary)' }}>{t('imp.trips.plate')}: </span><span style={{ color: 'var(--text-primary)' }}>{trip.car_identifier || '—'}</span></div>
+                    <div><span style={{ color: 'var(--text-tertiary)' }}>{t('imp.trips.price')}: </span><span style={{ color: 'var(--success)' }}>{trip.price_amount.toFixed(2)} €</span></div>
+                    {trip.route_start && <div><span style={{ color: 'var(--text-tertiary)' }}>{t('imp.trips.from')}: </span>{trip.route_start}</div>}
+                    {trip.route_end   && <div><span style={{ color: 'var(--text-tertiary)' }}>{t('imp.trips.to')}: </span>{trip.route_end}</div>}
                   </div>
                 </div>
               );
@@ -433,7 +454,7 @@ const FahrtenbuchTripsView: React.FC<Props> = ({ drivers, cars }) => {
             <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
               <div className="flex items-center gap-2">
                 <span className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
-                  Zeige {showFrom}–{showTo} von {filteredTrips.length} Fahrten
+                  {t('imp.trips.paginationRange', { from: showFrom, to: showTo, total: filteredTrips.length })}
                 </span>
                 <select
                   value={pageSize}
@@ -442,7 +463,7 @@ const FahrtenbuchTripsView: React.FC<Props> = ({ drivers, cars }) => {
                   style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
                 >
                   {[50, 100, 200, 500].map(n => (
-                    <option key={n} value={n}>{n} pro Seite</option>
+                    <option key={n} value={n}>{t('imp.trips.perPage', { count: n })}</option>
                   ))}
                 </select>
               </div>
@@ -453,7 +474,7 @@ const FahrtenbuchTripsView: React.FC<Props> = ({ drivers, cars }) => {
                   className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-opacity"
                   style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)', color: 'var(--text-secondary)', opacity: safePage === 0 ? 0.4 : 1 }}
                 >
-                  <ChevronLeft size={14} /> Zurück
+                  <ChevronLeft size={14} /> {t('common.back')}
                 </button>
                 <span className="px-3 py-1.5 text-xs font-medium" style={{ color: 'var(--text-primary)' }}>
                   {safePage + 1} / {totalPages}
@@ -464,7 +485,7 @@ const FahrtenbuchTripsView: React.FC<Props> = ({ drivers, cars }) => {
                   className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-opacity"
                   style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)', color: 'var(--text-secondary)', opacity: safePage >= totalPages - 1 ? 0.4 : 1 }}
                 >
-                  Weiter <ChevronRight size={14} />
+                  {t('imp.next')} <ChevronRight size={14} />
                 </button>
               </div>
             </div>
@@ -483,16 +504,16 @@ const FahrtenbuchTripsView: React.FC<Props> = ({ drivers, cars }) => {
                   <AlertTriangle size={20} style={{ color: 'var(--danger)' }} />
                 </div>
                 <h3 className="font-semibold text-base" style={{ color: 'var(--text-primary)' }}>
-                  Diesen Fahrtenbuch-Import wirklich löschen?
+                  {t('imp.trips.deleteConfirmTitle')}
                 </h3>
               </div>
               {targetImport && (
                 <div className="rounded-lg px-3 py-2 text-sm" style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}>
-                  {MONTHS[targetImport.month - 1]} {targetImport.year} -- {targetImport.file_name} ({targetImport.row_count} Fahrten)
+                  {t(MONTH_KEYS[targetImport.month - 1])} {targetImport.year} — {targetImport.file_name} ({t('imp.trips.tripCount', { count: targetImport.row_count })})
                 </div>
               )}
               <div className="rounded-lg px-3 py-2.5 text-sm" style={{ background: 'var(--danger-subtle)', color: 'var(--danger)' }}>
-                Alle zugehörigen Fahrten und Planentwürfe zu diesem Import werden gelöscht. Diese Aktion kann nicht rückgängig gemacht werden.
+                {t('imp.trips.deleteConfirmBody')}
               </div>
               <div className="flex gap-3 justify-end pt-1">
                 <button
@@ -501,7 +522,7 @@ const FahrtenbuchTripsView: React.FC<Props> = ({ drivers, cars }) => {
                   className="px-4 py-2 rounded-lg text-sm font-medium transition-colors"
                   style={{ background: 'var(--bg-muted)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
                 >
-                  Abbrechen
+                  {t('common.cancel')}
                 </button>
                 <button
                   onClick={() => handleDeleteImport(confirmDeleteId)}
@@ -510,7 +531,7 @@ const FahrtenbuchTripsView: React.FC<Props> = ({ drivers, cars }) => {
                   style={{ background: 'var(--danger)', color: 'white' }}
                 >
                   <Trash2 size={14} />
-                  {deleting ? 'Löschen…' : 'Endgültig löschen'}
+                  {deleting ? t('common.deleting') : t('imp.trips.deleteForever')}
                 </button>
               </div>
             </div>
