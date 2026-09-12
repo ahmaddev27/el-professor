@@ -182,9 +182,11 @@ The Brutto-Gehälter mode (`HistoricalReconciliationWizard.tsx`) is a different 
 
 ## Dead code
 
-None. 20 unreachable modules (18,063 lines) and the dead `backend/` PHP directory were removed; every file under `src/` is now reachable from `src/main.tsx`.
+No dead **files**. 20 unreachable modules (18,063 lines) and the dead `backend/` PHP directory were removed; every file under `src/` is reachable from `src/main.tsx`.
 
-Keep it that way. A reachability walk lives at the end of this section's history — rebuild it in a scratch file if you need to check again: start at `src/main.tsx`, follow every static and dynamic import transitively, and anything under `src/` not visited cannot execute. Grepping for a filename is not equivalent, because a module imported only by another dead module still looks used.
+**That claim is per file, and it hides things.** `AutoShiftPlanView` in `HistoricalWorkingHoursWizard.tsx` (lines ~6001–8957, about 2,100 lines with its two algorithms `runAutoShiftPlan` and `runLargestBlankPackingShiftPlan`) is never rendered: the tag appears nowhere, `inhaberAutoShiftResult` is set to `null` at all six call sites and never read, and `onApplyAutoShiftPlan` is a no-op. It sits inside a live file, so the file-level walk passes it. Its German text is deliberately untranslated — a note at line 6001 says so — because keys for text no user can reach are pure cost. Translate it in the same change that makes it reachable, or delete it.
+
+Keep it that way, and check at both granularities. A reachability walk lives at the end of this section's history — rebuild it in a scratch file if you need to check again: start at `src/main.tsx`, follow every static and dynamic import transitively, and anything under `src/` not visited cannot execute. Grepping for a filename is not equivalent, because a module imported only by another dead module still looks used. Within a file, the equivalent question is whether a component is ever used as a JSX tag and whether the state feeding it is ever read.
 
 Deleting it did **not** shrink the bundle — Rollup was already tree-shaking it. What it removes is the far more expensive kind of cost: three of the four competing premium engines, a second `MIN_VEHICLE_SWITCH_BUFFER_MINUTES` with a different value, and several thousand lines that the older docs still describe as the live implementation.
 
