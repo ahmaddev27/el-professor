@@ -243,6 +243,11 @@ services:
       # Hosted Supabase keeps this as a per-function dashboard toggle; here the
       # decision lives in git.
       JWT_SECRET: ${JWT_SECRET}
+      # The CORS allow-list in _shared/http.ts. Without it the functions fall
+      # back to `*`, which was the old behaviour and is worth avoiding now that
+      # company-signup answers unauthenticated callers.
+      APP_URL: ${APP_URL:?set APP_URL}
+      EXTRA_CORS_ORIGINS: ${EXTRA_CORS_ORIGINS:-}
     volumes:
       - ../supabase/functions:/home/deno/functions:ro
     command: ['start', '--main-service', '/home/deno/functions/main']
@@ -276,6 +281,10 @@ services:
       # Read by the entrypoint below, not by Kong itself.
       ANON_KEY: ${ANON_KEY:?set ANON_KEY}
       SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY:?set SERVICE_ROLE_KEY}
+      # The cors plugin's origin list. Kong answers the browser preflight
+      # itself, so this is where CORS is actually decided — an unconfigured
+      # plugin replies `*` and the upstream never sees the request.
+      APP_URL: ${APP_URL:?set APP_URL}
     # Kong's declarative loader does not interpolate environment variables, so
     # the $$ANON_KEY / $$SERVICE_ROLE_KEY placeholders in kong.yml would be
     # taken as literal API keys and every request would be rejected — with no

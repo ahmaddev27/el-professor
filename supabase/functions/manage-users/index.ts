@@ -1,11 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from 'npm:@supabase/supabase-js@2'
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Client-Info, Apikey",
-}
+import { corsFor, errorResponse, UserError } from '../_shared/http.ts'
 
 interface CreateUserRequest {
   email: string
@@ -40,7 +35,7 @@ interface ResetPasswordRequest {
 
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') {
-    return new Response(null, { status: 200, headers: corsHeaders })
+    return new Response(null, { status: 200, headers: corsFor(req) })
   }
 
   try {
@@ -56,12 +51,12 @@ Deno.serve(async (req: Request) => {
     )
 
     const authHeader = req.headers.get('Authorization')
-    if (!authHeader) throw new Error('No authorization header')
+    if (!authHeader) throw new UserError('Nicht authentifiziert.', 401)
 
     const { data: { user }, error: authError } = await supabaseClient.auth.getUser(
       authHeader.replace('Bearer ', '')
     )
-    if (authError || !user) throw new Error('Authentication failed')
+    if (authError || !user) throw new UserError('Nicht authentifiziert.', 401)
 
     // Load caller's profile: company_id, role, is_super_admin
     const { data: callerProfile } = await supabaseAdmin
@@ -71,7 +66,7 @@ Deno.serve(async (req: Request) => {
       .single()
 
     if (callerProfile?.role !== 'admin' && !callerProfile?.is_super_admin) {
-      throw new Error('Access denied: Only administrators can manage users')
+      throw new UserError('Keine Berechtigung: Nur Administratoren dürfen Benutzer verwalten.', 403)
     }
 
     const callerCompanyId: string | null = callerProfile?.company_id ?? null
@@ -82,7 +77,7 @@ Deno.serve(async (req: Request) => {
     // as "no restriction", which turned a company-less 'admin' profile into a
     // de-facto super admin. Deny it outright.
     if (!isSuperAdmin && !callerCompanyId) {
-      throw new Error('Access denied: administrator account is not assigned to a company')
+      throw new UserError('Keine Berechtigung: Dieses Administratorkonto ist keinem Unternehmen zugeordnet.', 403)
     }
 
     // Tenant check for a single target user. Never compares two NULLs as a match:
@@ -99,7 +94,7 @@ Deno.serve(async (req: Request) => {
       const targetCompany: string | null = targetProfile?.company_id ?? null
 
       if (!targetCompany || targetCompany !== callerCompanyId) {
-        throw new Error('Access denied: Cannot manage users from another company')
+        throw new UserError('Keine Berechtigung: Dieser Benutzer gehört zu einem anderen Unternehmen.', 403)
       }
     }
 
@@ -155,7 +150,7 @@ Deno.serve(async (req: Request) => {
         })
 
       return new Response(JSON.stringify(usersWithProfiles), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        headers: { ...corsFor(req), 'Content-Type': 'application/json' },
         status: 200,
       })
     }
@@ -173,7 +168,7 @@ Deno.serve(async (req: Request) => {
         : callerCompanyId
 
       if (!targetCompanyId) {
-        throw new Error('Cannot create user: no company context available')
+        throw new UserError('Benutzer kann nicht angelegt werden: kein Unternehmen ausgewählt.', 400)
       }
 
       // Resolve role_id before creating the auth user so we can include it in
@@ -206,9 +201,13 @@ Deno.serve(async (req: Request) => {
       })
 
       if (createError) {
-        throw new Error(`Failed to create user: ${createError.message}`)
+        const alreadyRegistered = /already (been )?registered|already exists/i.test(createError.message)
+        if (alreadyRegistered) {
+          throw new UserError('Diese E-Mail-Adresse ist bereits registriert.', 409)
+        }
+        throw createError
       }
-      if (!newUser.user) throw new Error('User creation failed: no user data returned')
+      if (!newUser.user) throw new Error('createUser returned no user')
 
       // Upsert the profile — if the trigger already inserted a row we update it,
       // otherwise we create it. This is robust regardless of trigger timing.
@@ -229,8 +228,15 @@ Deno.serve(async (req: Request) => {
         }, { onConflict: 'user_id' })
 
       if (profileError) {
-        // Auth user was created but profile failed — surface the real reason
-        throw new Error(`User created in auth but profile save failed: ${profileError.message}`)
+        // Half-created: the login exists, the profile does not. The admin needs
+        // to know not to retry blindly, so this one is a UserError — but the
+        // failing constraint stays in the log, reachable by request id.
+        console.error(JSON.stringify({ level: 'error', fn: 'manage-users',
+          step: 'profile-upsert-after-createUser', userId: newUser.user.id,
+          detail: profileError.message }))
+        throw new UserError(
+          'Das Benutzerkonto wurde angelegt, das Profil konnte jedoch nicht gespeichert werden. Bitte wenden Sie sich an den Support.',
+          500)
       }
 
       // Only send invite email for the email-invite flow (not temp password).
@@ -258,7 +264,7 @@ Deno.serve(async (req: Request) => {
             must_change_password: useTempPassword,
           }
         }),
-        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 }
+        { headers: { ...corsFor(req), 'Content-Type': 'application/json' }, status: 200 }
       )
     }
 
@@ -303,7 +309,7 @@ Deno.serve(async (req: Request) => {
 
       return new Response(
         JSON.stringify({ success: true }),
-        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 }
+        { headers: { ...corsFor(req), 'Content-Type': 'application/json' }, status: 200 }
       )
     }
 
@@ -327,7 +333,7 @@ Deno.serve(async (req: Request) => {
 
       return new Response(
         JSON.stringify({ success: true }),
-        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 }
+        { headers: { ...corsFor(req), 'Content-Type': 'application/json' }, status: 200 }
       )
     }
 
@@ -340,7 +346,7 @@ Deno.serve(async (req: Request) => {
       await assertSameCompany(body.user_id)
 
       const { data: userData } = await supabaseAdmin.auth.admin.getUserById(body.user_id)
-      if (!userData.user) throw new Error('User not found')
+      if (!userData.user) throw new UserError('Benutzer nicht gefunden.', 404)
 
       const appOrigin = req.headers.get('origin') || req.headers.get('referer')?.replace(/\/$/, '') || ''
       const { error: resetError } = await supabaseAdmin.auth.admin.generateLink({
@@ -357,7 +363,7 @@ Deno.serve(async (req: Request) => {
 
       return new Response(
         JSON.stringify({ success: true }),
-        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 }
+        { headers: { ...corsFor(req), 'Content-Type': 'application/json' }, status: 200 }
       )
     }
 
@@ -368,7 +374,7 @@ Deno.serve(async (req: Request) => {
       const body: ResetPasswordRequest = await req.json()
 
       if (!body.password || body.password.length < 8) {
-        throw new Error('Passwort muss mindestens 8 Zeichen lang sein')
+        throw new UserError('Passwort muss mindestens 8 Zeichen lang sein.', 400)
       }
 
       await assertSameCompany(body.user_id)
@@ -387,7 +393,7 @@ Deno.serve(async (req: Request) => {
 
       return new Response(
         JSON.stringify({ success: true }),
-        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 }
+        { headers: { ...corsFor(req), 'Content-Type': 'application/json' }, status: 200 }
       )
     }
 
@@ -405,19 +411,18 @@ Deno.serve(async (req: Request) => {
 
       return new Response(
         JSON.stringify({ success: true }),
-        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 }
+        { headers: { ...corsFor(req), 'Content-Type': 'application/json' }, status: 200 }
       )
     }
 
     return new Response(
       JSON.stringify({ error: 'Endpoint not found' }),
-      { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 404 }
+      { headers: { ...corsFor(req), 'Content-Type': 'application/json' }, status: 404 }
     )
 
-  } catch (error: any) {
-    return new Response(
-      JSON.stringify({ error: error.message || 'An unexpected error occurred' }),
-      { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400 }
-    )
+  } catch (error: unknown) {
+    // A UserError keeps its text; a GoTrue or Postgres error does not — it names
+    // columns and constraints, and this function holds the service-role key.
+    return errorResponse(req, error, 'manage-users')
   }
 })

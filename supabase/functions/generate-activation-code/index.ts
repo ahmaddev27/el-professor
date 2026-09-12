@@ -1,11 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Client-Info, Apikey",
-};
+import { corsFor } from "../_shared/http.ts";
 
 interface GenerateRequest {
   company_id?: string | null;
@@ -26,13 +21,13 @@ async function sha256hex(text: string): Promise<string> {
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
-    return new Response(null, { status: 200, headers: corsHeaders });
+    return new Response(null, { status: 200, headers: corsFor(req) });
   }
 
   const respond = (body: unknown, status = 200) =>
     new Response(JSON.stringify(body), {
       status,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+      headers: { ...corsFor(req), "Content-Type": "application/json" },
     });
 
   try {
@@ -118,7 +113,16 @@ Deno.serve(async (req: Request) => {
       expires_at: expiresAt.toISOString(),
     });
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : "Unbekannter Fehler";
-    return respond({ success: false, error: msg }, 500);
+    // Every message meant for the caller is returned explicitly above. Anything
+    // that reaches here is a database or runtime error, and this function holds
+    // the service-role key — so it is logged, not returned.
+    const requestId = crypto.randomUUID().slice(0, 8);
+    const detail = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+    console.error(JSON.stringify({ level: "error", fn: "generate-activation-code", requestId, detail }));
+    return respond({
+      success: false,
+      error: "Es ist ein interner Fehler aufgetreten. Bitte versuchen Sie es erneut.",
+      request_id: requestId,
+    }, 500);
   }
 });

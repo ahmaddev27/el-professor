@@ -13,11 +13,13 @@
  * belongs somewhere in version control, and this is the only place every
  * request passes through.
  *
- * `PUBLIC_FUNCTIONS` is the allow-list, and it is deliberately empty. Every
- * function this project ships either administers users, spends money, or reads
- * tenant data; none of them should answer an unauthenticated caller. A function
- * added later that genuinely must be public has to be named here, in a commit,
- * with a reason.
+ * `PUBLIC_FUNCTIONS` names the exceptions, and the reason for each is written
+ * beside it. Everything else needs a session. A function added later that must
+ * be public has to be listed there, in a commit, with its reason.
+ *
+ * CORS is decided here too: the browser's preflight never reaches the target
+ * function, so the allow-list in _shared/http.ts has to be applied by the
+ * dispatcher or OPTIONS would always answer `*`.
  *
  * Verification here is authentication, not authorization: it proves the caller
  * holds a token this stack signed. Each function still loads the caller's
@@ -25,6 +27,7 @@
  * pattern in manage-users.
  */
 import * as jose from 'https://deno.land/x/jose@v4.14.4/index.ts'
+import { corsFor } from './../_shared/http.ts'
 
 const JWT_SECRET = Deno.env.get('JWT_SECRET')
 const FUNCTIONS_ROOT = '/home/deno/functions'
@@ -49,16 +52,13 @@ const PUBLIC_FUNCTIONS = new Set<string>(['company-signup'])
 
 const ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY')
 
-const CORS = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Client-Info, Apikey',
-}
-
-const json = (status: number, body: unknown) =>
+// The preflight never reaches the target function — this router answers it —
+// so the allow-list has to be applied here too, or every OPTIONS would come
+// back `*` no matter what the functions themselves do.
+const json = (req: Request, status: number, body: unknown) =>
   new Response(JSON.stringify(body), {
     status,
-    headers: { ...CORS, 'Content-Type': 'application/json' },
+    headers: { ...corsFor(req), 'Content-Type': 'application/json' },
   })
 
 function bearer(req: Request): string | null {
@@ -80,14 +80,14 @@ async function tokenIsValid(token: string): Promise<boolean> {
 }
 
 Deno.serve(async (req: Request) => {
-  if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS })
+  if (req.method === 'OPTIONS') return new Response('ok', { headers: corsFor(req) })
 
   const { pathname } = new URL(req.url)
   // Kong strips /functions/v1, so pathname starts at the function name.
   const name = pathname.split('/').filter(Boolean)[0]
 
   if (!name || name === 'main') {
-    return json(404, { error: 'No function named in the request path' })
+    return json(req, 404, { error: 'No function named in the request path' })
   }
 
   if (PUBLIC_FUNCTIONS.has(name)) {
@@ -95,13 +95,23 @@ Deno.serve(async (req: Request) => {
     // route, so the check lives here.
     const apikey = req.headers.get('apikey') ?? bearer(req)
     if (!ANON_KEY || apikey !== ANON_KEY) {
-      return json(401, { error: 'Missing or invalid API key' })
+      return json(req, 401, { error: 'Missing or invalid API key' })
     }
   } else {
     const token = bearer(req)
     if (!token || !(await tokenIsValid(token))) {
-      return json(401, { error: 'Missing or invalid authorization token' })
+      return json(req, 401, { error: 'Missing or invalid authorization token' })
     }
+  }
+
+  // Asked for before the worker is built, because the runtime's own failure for
+  // a directory that is not there is a generic "worker boot error" 500 that
+  // reads like a crash. A function that was deleted should answer 404.
+  try {
+    const entry = await Deno.stat(`${FUNCTIONS_ROOT}/${name}/index.ts`)
+    if (!entry.isFile) throw new Error('not a file')
+  } catch {
+    return json(req, 404, { error: `Unknown function: ${name}` })
   }
 
   try {
@@ -117,13 +127,12 @@ Deno.serve(async (req: Request) => {
     })
     return await worker.fetch(req)
   } catch (err) {
-    // A missing directory and a function that threw at import time both land
-    // here; say which so the 500 is diagnosable from the response alone.
+    // The function exists (checked above), so anything here is a real failure to
+    // start: a syntax error, a bad import, a missing env var at module scope.
+    // `detail` names a path or an import error in our own code — no database
+    // text and no credentials reach here — so it stays, because a 500 with no
+    // detail from a dispatcher is undiagnosable.
     const message = err instanceof Error ? err.message : String(err)
-    const missing = message.includes('No such file') || message.includes('not found')
-    return json(missing ? 404 : 500, {
-      error: missing ? `Unknown function: ${name}` : 'Function failed to start',
-      detail: message,
-    })
+    return json(req, 500, { error: 'Function failed to start', detail: message })
   }
 })

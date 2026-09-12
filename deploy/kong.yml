@@ -1,10 +1,22 @@
+# NOTE: no backticks and no dollar-parens anywhere in this file, comments
+# included. The kong service renders it through an eval of an echo of the file
+# in order to substitute $APP_URL and the API keys, and eval runs whatever sits
+# inside either construct. A comment was enough to execute two words of prose
+# as shell commands at start-up. Only the bare $VARIABLE form is safe here.
+#
 # Kong routes the four Supabase services under one origin, matching the paths
 # @supabase/supabase-js expects. The client is configured with a single URL and
 # derives /auth/v1, /rest/v1, /storage/v1 and /realtime/v1 from it — so these
 # paths are not a convention, they are the contract.
 
+# Kong's "cors" plugin answers the browser preflight itself. Left unconfigured
+# it replies "*" to every origin and the upstream never sees the request, so
+# nothing the services do can tighten it — the origin list has to live here.
+# Repeated per service rather than shared through a YAML anchor: Kong validates
+# every top-level key and rejects the whole file on one it does not recognise.
 _format_version: '2.1'
 _transform: true
+
 
 consumers:
   - username: anon
@@ -32,6 +44,28 @@ services:
         paths: [/auth/v1/]
     plugins:
       - name: cors
+        config:
+          origins:
+            - $APP_URL
+          methods:
+            - GET
+            - POST
+            - PUT
+            - PATCH
+            - DELETE
+            - OPTIONS
+          headers:
+            - Content-Type
+            - Authorization
+            - X-Client-Info
+            - Apikey
+            - Prefer
+            - Range
+          exposed_headers:
+            - Content-Range
+            - Content-Profile
+          credentials: true
+          max_age: 3600
 
   # ── REST — every .from() call ─────────────────────────────────────────────
   # key-auth only proves the request carries a publishable key. Row-level
@@ -44,6 +78,28 @@ services:
         paths: [/rest/v1/]
     plugins:
       - name: cors
+        config:
+          origins:
+            - $APP_URL
+          methods:
+            - GET
+            - POST
+            - PUT
+            - PATCH
+            - DELETE
+            - OPTIONS
+          headers:
+            - Content-Type
+            - Authorization
+            - X-Client-Info
+            - Apikey
+            - Prefer
+            - Range
+          exposed_headers:
+            - Content-Range
+            - Content-Profile
+          credentials: true
+          max_age: 3600
       - name: key-auth
         config:
           hide_credentials: true
@@ -57,6 +113,28 @@ services:
         paths: [/storage/v1/]
     plugins:
       - name: cors
+        config:
+          origins:
+            - $APP_URL
+          methods:
+            - GET
+            - POST
+            - PUT
+            - PATCH
+            - DELETE
+            - OPTIONS
+          headers:
+            - Content-Type
+            - Authorization
+            - X-Client-Info
+            - Apikey
+            - Prefer
+            - Range
+          exposed_headers:
+            - Content-Range
+            - Content-Profile
+          credentials: true
+          max_age: 3600
 
   # ── Edge functions ────────────────────────────────────────────────────────
   # No key-auth here, deliberately. The functions are called with a *user's*
@@ -72,6 +150,28 @@ services:
         paths: [/functions/v1/]
     plugins:
       - name: cors
+        config:
+          origins:
+            - $APP_URL
+          methods:
+            - GET
+            - POST
+            - PUT
+            - PATCH
+            - DELETE
+            - OPTIONS
+          headers:
+            - Content-Type
+            - Authorization
+            - X-Client-Info
+            - Apikey
+            - Prefer
+            - Range
+          exposed_headers:
+            - Content-Range
+            - Content-Profile
+          credentials: true
+          max_age: 3600
 
   # ── Realtime — websocket for postgres_changes ─────────────────────────────
   - name: realtime-v1
@@ -83,6 +183,28 @@ services:
         paths: [/realtime/v1/]
     plugins:
       - name: cors
+        config:
+          origins:
+            - $APP_URL
+          methods:
+            - GET
+            - POST
+            - PUT
+            - PATCH
+            - DELETE
+            - OPTIONS
+          headers:
+            - Content-Type
+            - Authorization
+            - X-Client-Info
+            - Apikey
+            - Prefer
+            - Range
+          exposed_headers:
+            - Content-Range
+            - Content-Profile
+          credentials: true
+          max_age: 3600
       - name: key-auth
         config:
           hide_credentials: false

@@ -1,11 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Client-Info, Apikey",
-};
+import { corsFor } from "../_shared/http.ts";
 
 interface ValidateRequest {
   code: string;
@@ -30,8 +25,16 @@ interface ValidateResponse {
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
-    return new Response(null, { status: 200, headers: corsHeaders });
+    return new Response(null, { status: 200, headers: corsFor(req) });
   }
+
+  // Defined here rather than at module scope so it can carry this request's
+  // CORS headers — the allow-list depends on the caller's Origin.
+  const respond = (data: ValidateResponse): Response =>
+    new Response(JSON.stringify(data), {
+      status: 200,
+      headers: { ...corsFor(req), "Content-Type": "application/json" },
+    });
 
   try {
     const supabase = createClient(
@@ -172,17 +175,16 @@ Deno.serve(async (req: Request) => {
     });
 
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : "Unbekannter Fehler";
+    // `_error` used to carry err.message to the browser. This runs with the
+    // service-role key, so that message could be a Postgres error naming a
+    // column or a constraint. The detail goes to the log instead; request_id is
+    // what lets a support report be matched to the log line.
+    const requestId = crypto.randomUUID().slice(0, 8);
+    const detail = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+    console.error(JSON.stringify({ level: "error", fn: "validate-discount-code", requestId, detail }));
     return new Response(
-      JSON.stringify({ valid: false, reason_code: "ERROR", german_message: "Ein Fehler ist aufgetreten.", discount_amount: 0, final_price: 0, discount_code_id: null, usage_mode: null, discount_type: null, discount_value: null, _error: message }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      JSON.stringify({ valid: false, reason_code: "ERROR", german_message: "Ein Fehler ist aufgetreten.", discount_amount: 0, final_price: 0, discount_code_id: null, usage_mode: null, discount_type: null, discount_value: null, request_id: requestId }),
+      { status: 500, headers: { ...corsFor(req), "Content-Type": "application/json" } }
     );
   }
 });
-
-function respond(data: ValidateResponse): Response {
-  return new Response(JSON.stringify(data), {
-    status: 200,
-    headers: { ...corsHeaders, "Content-Type": "application/json" },
-  });
-}

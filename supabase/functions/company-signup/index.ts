@@ -1,11 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Client-Info, Apikey",
-};
+import { UserError, corsFor, json, errorResponse } from "../_shared/http.ts";
 
 type Plan = 'basic' | 'advanced' | 'premium';
 
@@ -31,7 +26,7 @@ interface SignupRequest {
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
-    return new Response(null, { status: 200, headers: corsHeaders });
+    return new Response(null, { status: 200, headers: corsFor(req) });
   }
 
   try {
@@ -43,10 +38,10 @@ Deno.serve(async (req: Request) => {
 
     const body: SignupRequest = await req.json();
 
-    if (!body.company_name?.trim()) throw new Error("Unternehmensname ist erforderlich");
-    if (!body.full_name?.trim()) throw new Error("Name ist erforderlich");
-    if (!body.email?.trim()) throw new Error("E-Mail ist erforderlich");
-    if (!body.password || body.password.length < 8) throw new Error("Passwort muss mindestens 8 Zeichen haben");
+    if (!body.company_name?.trim()) throw new UserError("Unternehmensname ist erforderlich");
+    if (!body.full_name?.trim()) throw new UserError("Name ist erforderlich");
+    if (!body.email?.trim()) throw new UserError("E-Mail ist erforderlich");
+    if (!body.password || body.password.length < 8) throw new UserError("Passwort muss mindestens 8 Zeichen haben");
 
     const plan: Plan = (['basic', 'advanced', 'premium'] as Plan[]).includes(body.plan as Plan)
       ? (body.plan as Plan)
@@ -90,7 +85,7 @@ Deno.serve(async (req: Request) => {
       if (authError.message?.toLowerCase().includes("already registered") ||
           authError.message?.toLowerCase().includes("already been registered") ||
           authError.message?.toLowerCase().includes("duplicate")) {
-        throw new Error("Diese E-Mail-Adresse ist bereits registriert");
+        throw new UserError("Diese E-Mail-Adresse ist bereits registriert");
       }
       throw new Error(authError.message);
     }
@@ -219,13 +214,9 @@ Deno.serve(async (req: Request) => {
         // account exists and the code did not apply — the signup itself stands.
         discount: discountResult,
       }),
-      { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 }
+      { headers: { ...corsFor(req), "Content-Type": "application/json" }, status: 200 }
     );
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : "Unbekannter Fehler";
-    return new Response(
-      JSON.stringify({ success: false, error: message }),
-      { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 }
-    );
+    return errorResponse(req, err, "company-signup");
   }
 });
