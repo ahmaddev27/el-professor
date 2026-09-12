@@ -2,8 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { useDatabase } from '../hooks/useDatabase';
 import { Driver } from '../types/receipt';
 import IncomeManagement from '../components/IncomeManagement';
+import { useTranslation } from '../contexts/LanguageContext';
 
 const UmsaetzePage: React.FC = () => {
+  const { t } = useTranslation();
   const { drivers: driverActions, isLoading: dbLoading } = useDatabase();
   const [drivers, setDrivers] = useState<Driver[]>([]);
   const [loading, setLoading] = useState(false);
@@ -36,7 +38,7 @@ const UmsaetzePage: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      <h2 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>Umsätze</h2>
+      <h2 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>{t('umsaetze.title')}</h2>
       <IncomeManagement drivers={drivers} />
     </div>
   );

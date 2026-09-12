@@ -163,7 +163,7 @@ const ActivationPage: React.FC = () => {
             {expiryDisplay && (
               <div className="flex items-center justify-center gap-2 text-sm" style={{ color: 'var(--text-secondary)' }}>
                 <CalendarCheck size={14} style={{ color: 'var(--success)' }} />
-                <span>Abo aktiv bis:</span>
+                <span>{t('activation.aboActiveUntil')}</span>
                 <span className="font-semibold" style={{ color: 'var(--success)' }}>
                   {format(new Date(expiryDisplay), 'dd.MM.yyyy', { locale: de })}
                 </span>
@@ -196,7 +196,7 @@ const ActivationPage: React.FC = () => {
 
       {/* Page title */}
       <div>
-        <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>Abo aktivieren</h1>
+        <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>{t('activation.activateAbo')}</h1>
         <p className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>
           Geben Sie Ihren Aktivierungscode ein, um Ihr Abonnement freizuschalten.
         </p>
@@ -277,7 +277,7 @@ const ActivationPage: React.FC = () => {
               value={code}
               onChange={handleCodeChange}
               disabled={submitState === 'loading' || isBlocked}
-              placeholder="6-stelliger Code"
+              placeholder={t('activation.codePlaceholder')}
               autoFocus
               className="w-full px-4 py-4 rounded-xl focus:outline-none focus:ring-2 transition-all text-2xl font-mono tracking-[0.5em] text-center disabled:opacity-40"
               style={{

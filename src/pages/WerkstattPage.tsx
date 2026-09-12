@@ -70,7 +70,7 @@ export default function WerkstattPage() {
       if (error) throw error;
       setChecks(data || []);
     } catch (error: any) {
-      showToast('error', 'Fehler beim Laden der Checks: ' + error.message);
+      showToast('error', t('werkstatt.errorLoadChecks', { error: error.message }));
     } finally {
       setLoading(false);
     }

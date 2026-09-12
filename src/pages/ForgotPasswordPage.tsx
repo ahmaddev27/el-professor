@@ -84,7 +84,7 @@ const ForgotPasswordPage: React.FC = () => {
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
                       className="w-full pl-10 pr-4 py-3 bg-white/5 border border-white/10 text-white placeholder-white/20 rounded-xl focus:outline-none focus:ring-2 focus:ring-cyan-500/50 focus:border-cyan-500/40 transition-all text-sm"
-                      placeholder="ihre@email.de"
+                      placeholder={t('forgot.emailPlaceholder')}
                       required
                     />
                   </div>

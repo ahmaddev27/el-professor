@@ -3863,4 +3863,19 @@ export const en: PartialDictionary = {
   'blocked.msg.userDeactivated':  'Your user account has been deactivated. Please contact your administrator.',
   'blocked.msg.userInactive':     'Your user account is deactivated. Please contact your administrator.',
   'blocked.msg.userSuspended':    'Your user account is suspended. Please contact your administrator.',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'activation.aboActiveUntil':  'Subscription active until:',
+  'activation.activateAbo':     'Activate subscription',
+  'activation.codePlaceholder': '6-digit code',
+  'forgot.emailPlaceholder':    'you@example.com',
+  'setpw.redirecting':          'Redirecting you…',
+  'umsaetze.title':             'Revenue',
+  'users.export.createdAt':     'Created on',
+  'users.export.customRole':    'Custom role',
+  'users.export.name':          'Name',
+  'users.export.sheetTitle':    'User list',
+  'users.export.systemRole':    'System role',
+  'users.export.totalRow':      '{count} users in total',
+  'werkstatt.errorLoadChecks':  'Could not load the Werkstatt checks: {error}',
 };

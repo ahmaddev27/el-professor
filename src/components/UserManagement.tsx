@@ -797,22 +797,28 @@ const UserManagement: React.FC = () => {
   }
 
   const handleExport = () => {
-    // Filename, sheet title, column headers and cell values below land inside the
-    // generated workbook, not on screen, so they stay German in both languages.
+    // A user list is not one of the four statutory artefacts, so its headers
+    // follow the UI language — see the closed list in i18n/index.ts. The German
+    // filename slug matches what WerkstattPage and BargeldbestandPage already
+    // write, and the date format stays de-DE like every other figure.
     exportTableToExcel({
       filename: `benutzer_${new Date().toISOString().split('T')[0]}`,
-      sheetTitle: 'Benutzerliste',
-      moduleName: 'Benutzer',
+      sheetTitle: t('users.export.sheetTitle'),
+      moduleName: t('nav.users'),
       columns: [
-        { key: 'full_name',   label: 'Name',          width: 28 },
-        { key: 'email',       label: 'E-Mail',        width: 34 },
-        { key: 'role',        label: 'Systemrolle',   width: 16 },
-        { key: 'role_name',   label: 'Benutzerdefinierte Rolle', width: 24 },
-        { key: 'status',      label: 'Status',        width: 16, format: v => ({ active: 'Aktiv', inactive: 'Inaktiv', pending_invite: 'Einladung ausstehend' }[v as string] ?? String(v ?? '')) },
-        { key: 'created_at',  label: 'Erstellt am',   width: 16, format: v => v ? new Date(v as string).toLocaleDateString('de-DE') : '' },
+        { key: 'full_name',   label: t('users.export.name'),       width: 28 },
+        { key: 'email',       label: t('auth.email'),              width: 34 },
+        { key: 'role',        label: t('users.export.systemRole'), width: 16 },
+        { key: 'role_name',   label: t('users.export.customRole'), width: 24 },
+        { key: 'status',      label: t('common.status'),           width: 16, format: v => ({
+          active:         t('overview.status.active'),
+          inactive:       t('overview.status.inactive'),
+          pending_invite: t('users.badge.pendingInvite'),
+        }[v as string] ?? String(v ?? '')) },
+        { key: 'created_at',  label: t('users.export.createdAt'),  width: 16, format: v => v ? new Date(v as string).toLocaleDateString('de-DE') : '' },
       ],
       rows: users as unknown as Record<string, unknown>[],
-      totals: { full_name: `${users.length} Benutzer gesamt` },
+      totals: { full_name: t('users.export.totalRow', { count: users.length }) },
     });
   };
 

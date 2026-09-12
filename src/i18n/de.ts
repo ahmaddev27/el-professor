@@ -3861,4 +3861,19 @@ export const de = {
   'blocked.msg.userDeactivated':  'Ihr Benutzerkonto wurde deaktiviert. Bitte kontaktieren Sie Ihren Administrator.',
   'blocked.msg.userInactive':     'Ihr Benutzerkonto ist deaktiviert. Bitte kontaktieren Sie Ihren Administrator.',
   'blocked.msg.userSuspended':    'Ihr Benutzerkonto ist gesperrt. Bitte kontaktieren Sie Ihren Administrator.',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'activation.aboActiveUntil':  'Abo aktiv bis:',
+  'activation.activateAbo':     'Abo aktivieren',
+  'activation.codePlaceholder': '6-stelliger Code',
+  'forgot.emailPlaceholder':    'ihre@email.de',
+  'setpw.redirecting':          'Sie werden weitergeleitet...',
+  'umsaetze.title':             'Umsätze',
+  'users.export.createdAt':     'Erstellt am',
+  'users.export.customRole':    'Benutzerdefinierte Rolle',
+  'users.export.name':          'Name',
+  'users.export.sheetTitle':    'Benutzerliste',
+  'users.export.systemRole':    'Systemrolle',
+  'users.export.totalRow':      '{count} Benutzer gesamt',
+  'werkstatt.errorLoadChecks':  'Fehler beim Laden der Checks: {error}',
 } as const;

@@ -157,7 +157,7 @@ const SetPasswordPage: React.FC = () => {
                 <CheckCircle2 className="text-emerald-400" size={22} />
               </div>
               <h2 className="text-white font-semibold mb-2">{t('setpw.saved')}</h2>
-              <p className="text-white/60 text-sm">Sie werden weitergeleitet...</p>
+              <p className="text-white/60 text-sm">{t('setpw.redirecting')}</p>
             </div>
           ) : (
             <>
