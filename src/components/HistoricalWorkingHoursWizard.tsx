@@ -47,6 +47,7 @@ import {
   type InhaberAssignmentResult,
   type OwnerShiftResult,
   type FinalBlockAssignmentSnapshotResult,
+  type FinalBlockAssignmentRow,
   type HistoricalWorkingHoursExportValidationResult,
   type RegularAssignmentStrategy,
   type DriverPlanningExclusion,
@@ -9740,6 +9741,16 @@ function VehicleMonthBoundarySummary({ rows }: VehicleMonthBoundarySummaryProps)
 }
 
 
+
+/**
+ * The only caller is CompanyPlannerPage, which renders the wizard for
+ * `planningMode === 'hist_working_hours'` and passes a single way out.
+ * `Props` was annotated but never declared, so the parameter was silently
+ * `any` — the one prop this component takes went unchecked.
+ */
+interface Props {
+  onBack: () => void;
+}
 
 export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
   const { user } = useAuth();
