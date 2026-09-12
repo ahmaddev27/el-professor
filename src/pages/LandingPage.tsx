@@ -6,6 +6,8 @@ import {
   DollarSign, Target, AlertTriangle, Clock, Star, Menu, X,
   TrendingDown, Calendar, ChevronDown, Receipt, Settings, CreditCard,
 } from 'lucide-react';
+import { useTranslation } from '../contexts/LanguageContext';
+import type { TranslationKey } from '../i18n';
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 
@@ -118,7 +120,9 @@ const RingChart: React.FC<{ pct: number; size?: number }> = ({ pct, size = 44 })
 
 // ─── Hero dashboard mockup ────────────────────────────────────────────────────
 
-const HeroDashboard: React.FC = () => (
+const HeroDashboard: React.FC = () => {
+  const { t } = useTranslation();
+  return (
   <div style={{ position: 'relative', width: '100%', maxWidth: 600, margin: '0 auto' }}>
     {/* Glow halo */}
     <div style={{
@@ -149,9 +153,9 @@ const HeroDashboard: React.FC = () => (
         {/* KPIs */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 10 }}>
           {[
-            { l: 'Umsatz', v: '28.450 €', d: '+12.4%', pos: true },
-            { l: 'Gewinn', v: '8.720 €', d: '+8.1%', pos: true },
-            { l: 'Fahrer', v: '12 aktiv', d: null, pos: true },
+            { l: t('landing.mock.kpiRevenue'), v: '28.450 €', d: '+12.4%', pos: true },
+            { l: t('landing.mock.kpiProfit'), v: '8.720 €', d: '+8.1%', pos: true },
+            { l: t('nav.fahrer'), v: t('landing.mock.kpiDriversValue'), d: null, pos: true },
           ].map((k, i) => (
             <div key={i} style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 12, padding: '10px 12px' }}>
               <div style={{ fontSize: 9, fontWeight: 700, color: 'rgba(255,255,255,0.35)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 5 }}>{k.l}</div>
@@ -165,8 +169,8 @@ const HeroDashboard: React.FC = () => (
         <div style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 12, padding: '12px 14px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
             <div>
-              <div style={{ fontSize: 10, fontWeight: 600, color: 'rgba(255,255,255,0.6)' }}>6-Monats-Trend</div>
-              <div style={{ fontSize: 9, color: 'rgba(255,255,255,0.25)' }}>Umsatz & Gewinn</div>
+              <div style={{ fontSize: 10, fontWeight: 600, color: 'rgba(255,255,255,0.6)' }}>{t('landing.mock.trendTitle')}</div>
+              <div style={{ fontSize: 9, color: 'rgba(255,255,255,0.25)' }}>{t('landing.mock.trendSub')}</div>
             </div>
             <span style={{ fontSize: 9, fontWeight: 700, color: '#34d399', background: 'rgba(52,211,153,0.1)', padding: '2px 8px', borderRadius: 100 }}>+12.4%</span>
           </div>
@@ -176,11 +180,11 @@ const HeroDashboard: React.FC = () => (
         {/* Bottom panels */}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
           <div style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 12, padding: '10px 12px' }}>
-            <div style={{ fontSize: 9, fontWeight: 700, color: 'rgba(255,255,255,0.3)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8 }}>Einnahmen-Mix</div>
+            <div style={{ fontSize: 9, fontWeight: 700, color: 'rgba(255,255,255,0.3)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8 }}>{t('landing.mock.incomeMix')}</div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
               <RingChart pct={68} />
               <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                {[['#06b6d4','Fahrpreis 68%'],['#818cf8','Bargeld 22%'],['#f472b6','Trinkgeld 10%']].map(([c,l],i) => (
+                {[['#06b6d4',t('landing.mock.legendFare')],['#818cf8',t('landing.mock.legendCash')],['#f472b6',t('landing.mock.legendTip')]].map(([c,l],i) => (
                   <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 9, color: 'rgba(255,255,255,0.55)' }}>
                     <span style={{ width: 6, height: 6, borderRadius: '50%', background: c as string, flexShrink: 0 }} />
                     {l}
@@ -191,7 +195,7 @@ const HeroDashboard: React.FC = () => (
           </div>
 
           <div style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 12, padding: '10px 12px' }}>
-            <div style={{ fontSize: 9, fontWeight: 700, color: 'rgba(255,255,255,0.3)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8 }}>Top-Fahrer</div>
+            <div style={{ fontSize: 9, fontWeight: 700, color: 'rgba(255,255,255,0.3)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8 }}>{t('landing.mock.topDrivers')}</div>
             {['Ahmad K.','Klaus M.','Mehmet A.'].map((n,i) => (
               <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
                 <span style={{ fontSize: 9, fontWeight: 800, color: 'rgba(255,255,255,0.2)', width: 10 }}>{i+1}</span>
@@ -207,8 +211,8 @@ const HeroDashboard: React.FC = () => (
         {/* Alert bar */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.18)', borderRadius: 10 }}>
           <AlertTriangle size={11} style={{ color: '#fbbf24', flexShrink: 0 }} />
-          <span style={{ fontSize: 9, color: 'rgba(251,191,36,0.8)' }}>2 offene Gehaltsabrechnungen · 1.840 € offen</span>
-          <span style={{ marginLeft: 'auto', fontSize: 9, color: '#fbbf24', fontWeight: 700 }}>Verwalten →</span>
+          <span style={{ fontSize: 9, color: 'rgba(251,191,36,0.8)' }}>{t('landing.mock.alert')}</span>
+          <span style={{ marginLeft: 'auto', fontSize: 9, color: '#fbbf24', fontWeight: 700 }}>{t('landing.mock.alertAction')}</span>
         </div>
       </div>
     </div>
@@ -238,10 +242,10 @@ const HeroDashboard: React.FC = () => (
         el.style.transform = '';
       }}
     >
-      <div style={{ fontSize: 9, fontWeight: 700, color: 'rgba(255,255,255,0.35)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 4 }}>Bargeld</div>
+      <div style={{ fontSize: 9, fontWeight: 700, color: 'rgba(255,255,255,0.35)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 4 }}>{t('landing.mock.cashLabel')}</div>
       <div style={{ fontSize: 18, fontWeight: 800, color: '#fff' }}>3.920 €</div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 9, fontWeight: 700, color: '#34d399', marginTop: 3 }}>
-        <TrendingUp size={8} /> +6.2% vs. Vormonat
+        <TrendingUp size={8} /> {t('landing.mock.cashDelta')}
       </div>
       <span style={{
         position: 'absolute', top: 8, right: 8, width: 6, height: 6, borderRadius: '50%',
@@ -276,10 +280,10 @@ const HeroDashboard: React.FC = () => (
         el.style.transform = '';
       }}
     >
-      <div style={{ fontSize: 9, fontWeight: 700, color: 'rgba(255,255,255,0.35)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 4 }}>Flotte</div>
+      <div style={{ fontSize: 9, fontWeight: 700, color: 'rgba(255,255,255,0.35)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 4 }}>{t('landing.mock.fleetLabel')}</div>
       <div style={{ fontSize: 18, fontWeight: 800, color: '#fff' }}>8 / 9 OK</div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 9, fontWeight: 700, color: '#34d399', marginTop: 3 }}>
-        <Car size={8} /> Alle aktiv
+        <Car size={8} /> {t('landing.mock.fleetAllActive')}
       </div>
       <span style={{
         position: 'absolute', top: 8, right: 8, width: 6, height: 6, borderRadius: '50%',
@@ -314,7 +318,7 @@ const HeroDashboard: React.FC = () => (
         el.style.transform = '';
       }}
     >
-      <div style={{ fontSize: 9, fontWeight: 700, color: 'rgba(255,255,255,0.35)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 4 }}>Gewinnmarge</div>
+      <div style={{ fontSize: 9, fontWeight: 700, color: 'rgba(255,255,255,0.35)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 4 }}>{t('landing.mock.marginLabel')}</div>
       <div style={{ fontSize: 18, fontWeight: 800, color: '#fff' }}>30.6%</div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 9, fontWeight: 700, color: '#34d399', marginTop: 3 }}>
         <TrendingUp size={8} /> +2.1pp
@@ -327,7 +331,8 @@ const HeroDashboard: React.FC = () => (
       }} />
     </div>
   </div>
-);
+  );
+};
 
 // ─── Pain stat card ───────────────────────────────────────────────────────────
 
@@ -407,13 +412,19 @@ const ScreenPanel: React.FC<{ title: string; subtitle: string; children: React.R
 
 // ─── Abrechnung mockup ────────────────────────────────────────────────────────
 
-const AbrechnungPanel: React.FC = () => (
-  <ScreenPanel title="Fahrerabrechnung" subtitle="KW 14 · April 2026" tag="PDF bereit">
+const AbrechnungPanel: React.FC = () => {
+  const { t } = useTranslation();
+  return (
+  <ScreenPanel
+    title={t('landing.mock.abrechnungTitle')}
+    subtitle={t('landing.mock.abrechnungSub')}
+    tag={t('landing.mock.abrechnungTag')}
+  >
     {[
-      { name: 'Ahmad K.', umsatz: '2.840 €', lohn: '1.136 €', status: 'bezahlt', color: '#34d399' },
-      { name: 'Klaus M.', umsatz: '2.290 €', lohn: '916 €', status: 'offen', color: '#fbbf24' },
-      { name: 'Mehmet A.', umsatz: '3.110 €', lohn: '1.244 €', status: 'bezahlt', color: '#34d399' },
-      { name: 'Stefan B.', umsatz: '1.960 €', lohn: '784 €', status: 'offen', color: '#fbbf24' },
+      { name: 'Ahmad K.', umsatz: '2.840 €', lohn: '1.136 €', status: t('landing.mock.statusPaid'), color: '#34d399' },
+      { name: 'Klaus M.', umsatz: '2.290 €', lohn: '916 €', status: t('landing.mock.statusOpen'), color: '#fbbf24' },
+      { name: 'Mehmet A.', umsatz: '3.110 €', lohn: '1.244 €', status: t('landing.mock.statusPaid'), color: '#34d399' },
+      { name: 'Stefan B.', umsatz: '1.960 €', lohn: '784 €', status: t('landing.mock.statusOpen'), color: '#fbbf24' },
     ].map((r, i) => (
       <div key={i} style={{ display: 'flex', alignItems: 'center', padding: '8px 0', borderBottom: i < 3 ? '1px solid rgba(255,255,255,0.04)' : 'none' }}>
         <div style={{ width: 26, height: 26, borderRadius: '50%', background: 'linear-gradient(135deg,#06b6d4,#818cf8)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 9, fontWeight: 800, color: '#fff', marginRight: 10, flexShrink: 0 }}>
@@ -421,7 +432,7 @@ const AbrechnungPanel: React.FC = () => (
         </div>
         <div style={{ flex: 1 }}>
           <div style={{ fontSize: 11, fontWeight: 600, color: 'rgba(255,255,255,0.8)' }}>{r.name}</div>
-          <div style={{ fontSize: 9, color: 'rgba(255,255,255,0.3)' }}>Umsatz {r.umsatz}</div>
+          <div style={{ fontSize: 9, color: 'rgba(255,255,255,0.3)' }}>{t('landing.mock.kpiRevenue')} {r.umsatz}</div>
         </div>
         <div style={{ textAlign: 'right' }}>
           <div style={{ fontSize: 12, fontWeight: 800, color: '#fff' }}>{r.lohn}</div>
@@ -430,31 +441,34 @@ const AbrechnungPanel: React.FC = () => (
       </div>
     ))}
     <div style={{ marginTop: 12, padding: '10px 12px', background: 'rgba(6,182,212,0.06)', border: '1px solid rgba(6,182,212,0.15)', borderRadius: 10, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-      <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.5)' }}>Gesamt offen</span>
+      <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.5)' }}>{t('landing.mock.totalOpen')}</span>
       <span style={{ fontSize: 14, fontWeight: 900, color: '#06b6d4' }}>1.700 €</span>
     </div>
   </ScreenPanel>
-);
+  );
+};
 
 // ─── Kasse mockup ─────────────────────────────────────────────────────────────
 
-const KassePanel: React.FC = () => (
-  <ScreenPanel title="Kassenbestand" subtitle="Stand heute · 09:41 Uhr">
+const KassePanel: React.FC = () => {
+  const { t } = useTranslation();
+  return (
+  <ScreenPanel title={t('landing.mock.kasseTitle')} subtitle={t('landing.mock.kasseSub')}>
     <div style={{ marginBottom: 14 }}>
-      <div style={{ fontSize: 9, fontWeight: 700, color: 'rgba(255,255,255,0.3)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 4 }}>Aktueller Bestand</div>
+      <div style={{ fontSize: 9, fontWeight: 700, color: 'rgba(255,255,255,0.3)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 4 }}>{t('landing.mock.currentBalance')}</div>
       <div style={{ fontSize: 32, fontWeight: 900, letterSpacing: '-0.03em', background: 'linear-gradient(90deg,#06b6d4,#818cf8)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text' }}>
         4.380 €
       </div>
-      <div style={{ fontSize: 10, color: '#34d399', fontWeight: 700, marginTop: 2 }}>↑ 320 € gegenüber gestern</div>
+      <div style={{ fontSize: 10, color: '#34d399', fontWeight: 700, marginTop: 2 }}>{t('landing.mock.vsYesterday')}</div>
     </div>
     <div style={{ marginBottom: 10 }}>
       <LineChart />
     </div>
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
       {[
-        { l: 'Einnahmen heute', v: '+840 €', c: '#34d399' },
-        { l: 'Ausgaben heute', v: '-520 €', c: '#f87171' },
-        { l: 'Differenz', v: '+320 €', c: '#06b6d4' },
+        { l: t('landing.mock.incomeToday'), v: '+840 €', c: '#34d399' },
+        { l: t('landing.mock.expensesToday'), v: '-520 €', c: '#f87171' },
+        { l: t('landing.mock.difference'), v: '+320 €', c: '#06b6d4' },
       ].map((row,i) => (
         <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 10px', background: 'rgba(255,255,255,0.03)', borderRadius: 8 }}>
           <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.4)' }}>{row.l}</span>
@@ -463,15 +477,20 @@ const KassePanel: React.FC = () => (
       ))}
     </div>
   </ScreenPanel>
-);
+  );
+};
 
 // ─── Fuhrpark mockup ─────────────────────────────────────────────────────────
 
-const FuhrparkPanel: React.FC = () => (
-  <ScreenPanel title="Fuhrpark & Werkstatt" subtitle="9 Fahrzeuge · 1 Prüfung fällig">
+const FuhrparkPanel: React.FC = () => {
+  const { t } = useTranslation();
+  return (
+  <ScreenPanel title={t('landing.mock.fleetTitle')} subtitle={t('landing.mock.fleetSub')}>
     {[
+      // 'OK' reads the same in both languages, so only the due-for-inspection
+      // status needs the dictionary.
       { kz: 'SG-AB 1234', mod: 'Mercedes Vito', km: '98.400', status: 'OK', c: '#34d399' },
-      { kz: 'SG-CD 5678', mod: 'VW Crafter', km: '112.800', status: 'Prüfung', c: '#fbbf24' },
+      { kz: 'SG-CD 5678', mod: 'VW Crafter', km: '112.800', status: t('landing.mock.statusInspection'), c: '#fbbf24' },
       { kz: 'SG-EF 9012', mod: 'Ford Transit', km: '76.200', status: 'OK', c: '#34d399' },
       { kz: 'SG-GH 3456', mod: 'Mercedes Vito', km: '154.300', status: 'OK', c: '#34d399' },
     ].map((v, i) => (
@@ -487,39 +506,44 @@ const FuhrparkPanel: React.FC = () => (
       </div>
     ))}
   </ScreenPanel>
-);
+  );
+};
 
 // ─── Pricing ──────────────────────────────────────────────────────────────────
 
 import { calcPricing, fleetDiscountPercent, PRICE_PER_CAR, YEARLY_DISCOUNT_PERCENT, fmt as fmtPrice } from '../utils/pricing';
 import type { Plan as PricingPlan } from '../contexts/PlanContext';
 
+// `label` is the product tier name and stays untranslated. `sub`, `badge` and
+// `features` hold TranslationKeys: this list is module-level and t() is a hook
+// value, so every consumer resolves it at the render site.
 const PRICING_PLANS: {
   id: PricingPlan;
   label: string;
-  sub: string;
+  sub: TranslationKey;
   highlight: boolean;
-  badge: string;
-  features: string[];
+  badge: TranslationKey | '';
+  features: TranslationKey[];
 }[] = [
   {
-    id: 'basic', label: 'Basic', sub: 'Für kleine Flotten.',
+    id: 'basic', label: 'Basic', sub: 'landing.plan.basicSub',
     highlight: false, badge: '',
-    features: ['Übersicht','Belege','Fahrer','Fahrzeuge','Umsätze','Fixkosten','Bargeldbestand','Backup','Excel-Export'],
+    features: ['nav.overview','nav.belege','nav.fahrer','nav.cars','nav.umsaetze','nav.fixkosten','nav.bargeldbestand','landing.plan.feature.backup','landing.plan.feature.excelExport'],
   },
   {
-    id: 'advanced', label: 'Advanced', sub: 'Für wachsende Unternehmen.',
-    highlight: true, badge: 'Am beliebtesten',
-    features: ['Übersicht','Belege','Fahrer','Fahrzeuge','Umsätze','Fixkosten','Bargeldbestand','Backup','Excel-Export','Werkstatt','Abrechnung','Notiz','Rollen & Nutzer'],
+    id: 'advanced', label: 'Advanced', sub: 'landing.plan.advancedSub',
+    highlight: true, badge: 'landing.plan.badgeMostPopular',
+    features: ['nav.overview','nav.belege','nav.fahrer','nav.cars','nav.umsaetze','nav.fixkosten','nav.bargeldbestand','landing.plan.feature.backup','landing.plan.feature.excelExport','nav.werkstatt','nav.abrechnung','landing.plan.feature.note','locked.feature.rollenNutzer'],
   },
   {
-    id: 'premium', label: 'Premium', sub: 'Für professionelle Fuhrparks.',
+    id: 'premium', label: 'Premium', sub: 'landing.plan.premiumSub',
     highlight: false, badge: '',
-    features: ['Übersicht','Belege','Fahrer','Fahrzeuge','Umsätze','Fixkosten','Bargeldbestand','Backup','Excel-Export','Werkstatt','Abrechnung','Notiz','Rollen & Nutzer','Gehälter','Dokumente'],
+    features: ['nav.overview','nav.belege','nav.fahrer','nav.cars','nav.umsaetze','nav.fixkosten','nav.bargeldbestand','landing.plan.feature.backup','landing.plan.feature.excelExport','nav.werkstatt','nav.abrechnung','landing.plan.feature.note','locked.feature.rollenNutzer','nav.salaries','nav.documents'],
   },
 ];
 
 const PricingSection: React.FC = () => {
+  const { t } = useTranslation();
   const [billing, setBilling] = useState<'monthly'|'yearly'>('monthly');
   const [carCount, setCarCount] = useState(5);
 
@@ -529,12 +553,12 @@ const PricingSection: React.FC = () => {
     <section id="pricing" style={{ position: 'relative', zIndex: 10, padding: '120px 20px' }}>
       <div style={{ maxWidth: 1140, margin: '0 auto' }}>
         <div style={{ textAlign: 'center', maxWidth: 560, margin: '0 auto 16px' }}>
-          <Tag>Preise</Tag>
+          <Tag>{t('landing.nav.pricing')}</Tag>
           <h2 style={{ fontSize: 'clamp(32px,4vw,48px)', fontWeight: 900, lineHeight: 1.1, letterSpacing: '-0.02em', marginBottom: 16 }}>
-            Transparente Preise. <GradientText violet>Pro Fahrzeug.</GradientText>
+            {t('landing.pricing.titleLead')} <GradientText violet>{t('landing.pricing.titleHighlight')}</GradientText>
           </h2>
           <p style={{ fontSize: 15, color: 'rgba(255,255,255,0.42)', lineHeight: 1.65 }}>
-            Sie zahlen nur für Ihre aktiven Fahrzeuge. Kein Festpreis, kein Kleingedrucktes.
+            {t('landing.pricing.body')}
           </p>
         </div>
 
@@ -550,8 +574,8 @@ const PricingSection: React.FC = () => {
                 color: billing === b ? '#fff' : 'rgba(255,255,255,0.4)',
                 boxShadow: billing === b ? '0 2px 16px rgba(6,182,212,0.3)' : 'none',
               }}>
-                {b === 'monthly' ? 'Monatlich' : (
-                  <><span>Jährlich</span>
+                {b === 'monthly' ? t('landing.pricing.monthly') : (
+                  <><span>{t('landing.pricing.yearly')}</span>
                   <span style={{ fontSize: 10, fontWeight: 800, background: billing === 'yearly' ? 'rgba(255,255,255,0.2)' : 'rgba(6,182,212,0.15)', color: billing === 'yearly' ? '#fff' : '#06b6d4', padding: '1px 6px', borderRadius: 100 }}>-{YEARLY_DISCOUNT_PERCENT}%</span>
                   </>
                 )}
@@ -561,7 +585,7 @@ const PricingSection: React.FC = () => {
 
           {/* Car count slider */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-            <span style={{ fontSize: 12, fontWeight: 600, color: 'rgba(255,255,255,0.35)', whiteSpace: 'nowrap' }}>Fahrzeuge:</span>
+            <span style={{ fontSize: 12, fontWeight: 600, color: 'rgba(255,255,255,0.35)', whiteSpace: 'nowrap' }}>{t('landing.pricing.vehiclesLabel')}</span>
             <input
               type="range" min={1} max={20} value={carCount}
               onChange={e => setCarCount(Number(e.target.value))}
@@ -574,7 +598,7 @@ const PricingSection: React.FC = () => {
             }}>{carCount}</span>
             {fleetPct > 0 && (
               <span style={{ fontSize: 11, fontWeight: 700, color: '#34d399', background: 'rgba(52,211,153,0.1)', padding: '2px 8px', borderRadius: 100, whiteSpace: 'nowrap' }}>
-                -{fleetPct}% Flottenrabatt
+                -{fleetPct}% {t('landing.pricing.fleetDiscount')}
               </span>
             )}
           </div>
@@ -603,20 +627,20 @@ const PricingSection: React.FC = () => {
                 {p.badge && (
                   <div style={{ position: 'absolute', top: -14, left: '50%', transform: 'translateX(-50%)', zIndex: 2 }}>
                     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, fontWeight: 800, color: '#fff', padding: '5px 16px', borderRadius: 100, background: 'linear-gradient(90deg,#06b6d4,#818cf8)', boxShadow: '0 0 24px rgba(6,182,212,0.4)', whiteSpace: 'nowrap' }}>
-                      <Star size={9} style={{ fill: '#fff' }} /> {p.badge}
+                      <Star size={9} style={{ fill: '#fff' }} /> {t(p.badge as TranslationKey)}
                     </span>
                   </div>
                 )}
 
                 <div style={{ marginBottom: 12 }}>
                   <div style={{ fontSize: 17, fontWeight: 800, color: '#fff', marginBottom: 2 }}>{p.label}</div>
-                  <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.36)' }}>{p.sub}</div>
+                  <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.36)' }}>{t(p.sub)}</div>
                 </div>
 
                 {/* Price per car badge */}
                 <div style={{ marginBottom: 10 }}>
                   <span style={{ fontSize: 11, color: '#06b6d4', background: 'rgba(6,182,212,0.08)', border: '1px solid rgba(6,182,212,0.15)', padding: '2px 10px', borderRadius: 100, fontWeight: 700 }}>
-                    {PRICE_PER_CAR[p.id]} € / Fahrzeug / Monat
+                    {PRICE_PER_CAR[p.id]} € {t('landing.pricing.perVehiclePerMonth')}
                   </span>
                 </div>
 
@@ -626,11 +650,11 @@ const PricingSection: React.FC = () => {
                     <span style={{ fontSize: 44, fontWeight: 900, lineHeight: 1, letterSpacing: '-0.03em', color: '#fff' }}>
                       {fmtPrice(displayMonthly)}€
                     </span>
-                    <span style={{ fontSize: 13, color: 'rgba(255,255,255,0.3)' }}>/Monat</span>
+                    <span style={{ fontSize: 13, color: 'rgba(255,255,255,0.3)' }}>{t('landing.pricing.perMonth')}</span>
                   </div>
                   {billing === 'yearly' && (
                     <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.35)', marginTop: 2 }}>
-                      = {fmtPrice(displayYearly)} € / Jahr (inkl. {YEARLY_DISCOUNT_PERCENT}% Jahresrabatt)
+                      = {fmtPrice(displayYearly)} € {t('landing.pricing.perYearInclDiscount', { pct: YEARLY_DISCOUNT_PERCENT })}
                     </div>
                   )}
                 </div>
@@ -639,12 +663,12 @@ const PricingSection: React.FC = () => {
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 20 }}>
                   {bp.fleetDiscountPct > 0 && (
                     <span style={{ fontSize: 10, fontWeight: 700, color: '#34d399', background: 'rgba(52,211,153,0.1)', border: '1px solid rgba(52,211,153,0.2)', padding: '2px 8px', borderRadius: 100 }}>
-                      -{bp.fleetDiscountPct}% Flottenrabatt
+                      -{bp.fleetDiscountPct}% {t('landing.pricing.fleetDiscount')}
                     </span>
                   )}
                   {billing === 'yearly' && (
                     <span style={{ fontSize: 10, fontWeight: 700, color: '#fbbf24', background: 'rgba(251,191,36,0.1)', border: '1px solid rgba(251,191,36,0.2)', padding: '2px 8px', borderRadius: 100 }}>
-                      -{YEARLY_DISCOUNT_PERCENT}% Jahresrabatt
+                      -{YEARLY_DISCOUNT_PERCENT}% {t('landing.pricing.yearlyDiscount')}
                     </span>
                   )}
                 </div>
@@ -657,18 +681,18 @@ const PricingSection: React.FC = () => {
                   color: '#fff',
                   boxShadow: p.highlight ? '0 4px 28px rgba(6,182,212,0.3)' : '0 0 0 1px rgba(255,255,255,0.07)',
                 }}>
-                  14 Tage kostenlos starten
+                  {t('landing.pricing.cta')}
                 </a>
 
                 <div style={{ height: 1, background: p.highlight ? 'rgba(6,182,212,0.15)' : 'rgba(255,255,255,0.05)', marginBottom: 20 }} />
 
                 <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 9 }}>
-                  {p.features.map((f, j) => (
+                  {p.features.map((featureKey, j) => (
                     <li key={j} style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, color: 'rgba(255,255,255,0.65)' }}>
                       <span style={{ width: 16, height: 16, borderRadius: '50%', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: p.highlight ? 'rgba(6,182,212,0.18)' : 'rgba(255,255,255,0.06)' }}>
                         <CheckCircle size={9} style={{ color: p.highlight ? '#22d3ee' : 'rgba(255,255,255,0.4)' }} />
                       </span>
-                      {f}
+                      {t(featureKey)}
                     </li>
                   ))}
                 </ul>
@@ -680,9 +704,9 @@ const PricingSection: React.FC = () => {
         {/* Pricing explanation */}
         <div style={{ marginTop: 40, padding: '20px 24px', background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.05)', borderRadius: 16, maxWidth: 700, margin: '40px auto 0' }}>
           <p style={{ fontSize: 12, color: 'rgba(255,255,255,0.35)', lineHeight: 1.7, textAlign: 'center', margin: 0 }}>
-            <strong style={{ color: 'rgba(255,255,255,0.55)' }}>Flottenrabatt:</strong> 1–5 Fahrzeuge: 0% · 6–10 Fahrzeuge: 5% · 11+ Fahrzeuge: 10%
+            <strong style={{ color: 'rgba(255,255,255,0.55)' }}>{t('landing.pricing.fleetDiscount')}:</strong> {t('landing.pricing.fleetTiers')}
             &nbsp;&nbsp;|&nbsp;&nbsp;
-            <strong style={{ color: 'rgba(255,255,255,0.55)' }}>Jahresrabatt:</strong> weitere 10% bei jährlicher Abrechnung
+            <strong style={{ color: 'rgba(255,255,255,0.55)' }}>{t('landing.pricing.yearlyDiscount')}:</strong> {t('landing.pricing.yearlyNote')}
           </p>
         </div>
       </div>
@@ -719,6 +743,7 @@ const FAQItem: React.FC<{ q: string; a: string }> = ({ q, a }) => {
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 const LandingPage: React.FC = () => {
+  const { t } = useTranslation();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
 
@@ -729,10 +754,10 @@ const LandingPage: React.FC = () => {
   }, []);
 
   const navLinks = [
-    { href: '#features', label: 'Features' },
-    { href: '#screenshots', label: 'Einblicke' },
-    { href: '#pricing', label: 'Preise' },
-    { href: '#faq', label: 'FAQ' },
+    { href: '#features', label: t('landing.nav.features') },
+    { href: '#screenshots', label: t('landing.nav.insights') },
+    { href: '#pricing', label: t('landing.nav.pricing') },
+    { href: '#faq', label: t('landing.nav.faq') },
   ];
 
   const sectionStyle = (py = 120): React.CSSProperties => ({
@@ -782,7 +807,7 @@ const LandingPage: React.FC = () => {
             <Link to="/login" style={{ fontSize: 13, color: 'rgba(255,255,255,0.55)', textDecoration: 'none', padding: '8px 12px', transition: 'color 0.2s' }}
               onMouseEnter={e => (e.currentTarget.style.color = '#fff')}
               onMouseLeave={e => (e.currentTarget.style.color = 'rgba(255,255,255,0.55)')}
-            >Anmelden</Link>
+            >{t('auth.signIn')}</Link>
             <Link to="/signup" style={{
               fontSize: 13, fontWeight: 700, color: '#fff', textDecoration: 'none',
               padding: '9px 20px', borderRadius: 10,
@@ -792,7 +817,7 @@ const LandingPage: React.FC = () => {
             }}
               onMouseEnter={e => { (e.currentTarget as HTMLElement).style.boxShadow = '0 4px 28px rgba(6,182,212,0.5)'; (e.currentTarget as HTMLElement).style.transform = 'translateY(-1px)'; }}
               onMouseLeave={e => { (e.currentTarget as HTMLElement).style.boxShadow = '0 2px 20px rgba(6,182,212,0.3)'; (e.currentTarget as HTMLElement).style.transform = 'none'; }}
-            >Kostenlos testen</Link>
+            >{t('landing.nav.tryFree')}</Link>
           </div>
 
           <button className="md:hidden" onClick={() => setMobileOpen(!mobileOpen)} style={{ background: 'none', border: 'none', color: 'rgba(255,255,255,0.6)', cursor: 'pointer', padding: 4 }}>
@@ -806,7 +831,7 @@ const LandingPage: React.FC = () => {
               <a key={l.href} href={l.href} onClick={() => setMobileOpen(false)} style={{ display: 'block', fontSize: 14, color: 'rgba(255,255,255,0.6)', textDecoration: 'none', padding: '10px 0', borderBottom: `1px solid ${BORDER}` }}>{l.label}</a>
             ))}
             <Link to="/signup" onClick={() => setMobileOpen(false)} style={{ display: 'block', textAlign: 'center', marginTop: 14, fontSize: 14, fontWeight: 700, color: '#fff', textDecoration: 'none', padding: '12px', borderRadius: 12, background: 'linear-gradient(90deg,#06b6d4,#818cf8)' }}>
-              Kostenlos testen
+              {t('landing.nav.tryFree')}
             </Link>
           </div>
         )}
@@ -826,17 +851,17 @@ const LandingPage: React.FC = () => {
                 fontSize: 11, fontWeight: 700, color: '#06b6d4', letterSpacing: '0.06em',
               }}>
                 <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#34d399', boxShadow: '0 0 6px rgba(52,211,153,0.8)', animation: 'pulse 2s infinite' }} />
-                El-Professor · Flottenmanagement All-in-One
+                {t('landing.hero.badge')}
               </div>
 
               <h1 style={{ fontSize: 'clamp(40px,5vw,68px)', fontWeight: 900, lineHeight: 1.0, letterSpacing: '-0.03em', marginBottom: 24 }}>
-                Die gesamte<br />
-                <GradientText>Fahrerabrechnung</GradientText><br />
-                in Minuten. Nicht<br />Stunden.
+                {t('landing.hero.titleLead')}<br />
+                <GradientText>{t('landing.hero.titleHighlight')}</GradientText><br />
+                {t('landing.hero.titleTail')}
               </h1>
 
               <p style={{ fontSize: 16, color: 'rgba(255,255,255,0.48)', lineHeight: 1.65, marginBottom: 36, maxWidth: 440 }}>
-                Die einzige Plattform, die Fahrerverwaltung, Buchhaltung, Abrechnungen, Flottenüberwachung und Gehaltsmanagement vereint.
+                {t('landing.hero.subtitle')}
               </p>
 
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, marginBottom: 40 }}>
@@ -851,7 +876,7 @@ const LandingPage: React.FC = () => {
                   onMouseEnter={e => { (e.currentTarget as HTMLElement).style.boxShadow = '0 0 52px rgba(6,182,212,0.55)'; (e.currentTarget as HTMLElement).style.transform = 'translateY(-2px)'; }}
                   onMouseLeave={e => { (e.currentTarget as HTMLElement).style.boxShadow = '0 0 32px rgba(6,182,212,0.35)'; (e.currentTarget as HTMLElement).style.transform = 'none'; }}
                 >
-                  Jetzt kostenlos starten <ArrowRight size={15} />
+                  {t('landing.hero.ctaPrimary')} <ArrowRight size={15} />
                 </Link>
                 <a href="#features" style={{
                   display: 'inline-flex', alignItems: 'center', gap: 8,
@@ -862,14 +887,14 @@ const LandingPage: React.FC = () => {
                   onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.09)'; (e.currentTarget as HTMLElement).style.borderColor = 'rgba(255,255,255,0.18)'; }}
                   onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.05)'; (e.currentTarget as HTMLElement).style.borderColor = 'rgba(255,255,255,0.1)'; }}
                 >
-                  Features entdecken
+                  {t('landing.hero.ctaSecondary')}
                 </a>
               </div>
 
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 20 }}>
-                {['Keine Kreditkarte', 'DSGVO-konform', 'Made in Germany'].map((t, i) => (
+                {[t('landing.hero.noCreditCard'), t('landing.trust.gdpr'), t('landing.trust.madeInGermany')].map((badge, i) => (
                   <span key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'rgba(255,255,255,0.32)' }}>
-                    <CheckCircle size={12} style={{ color: '#34d399' }} /> {t}
+                    <CheckCircle size={12} style={{ color: '#34d399' }} /> {badge}
                   </span>
                 ))}
               </div>
@@ -888,10 +913,10 @@ const LandingPage: React.FC = () => {
         <div style={{ maxWidth: 1000, margin: '0 auto', background: CARD, border: `1px solid ${BORDER}`, borderRadius: 16, padding: '32px 40px' }}>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 20 }}>
             {[
-              { v: '500+', l: 'Buchungen täglich' },
-              { v: '98%', l: 'Kundenzufriedenheit' },
-              { v: '12 Std.', l: 'Ø Zeit gespart / Monat' },
-              { v: '99.9%', l: 'System-Verfügbarkeit' },
+              { v: '500+', l: t('landing.stats.bookings') },
+              { v: '98%', l: t('landing.stats.satisfaction') },
+              { v: t('landing.stats.timeSavedValue'), l: t('landing.stats.timeSaved') },
+              { v: '99.9%', l: t('landing.stats.uptime') },
             ].map((s, i) => (
               <div key={i} style={{ textAlign: 'center' }}>
                 <div style={{ fontSize: 28, fontWeight: 900, letterSpacing: '-0.03em', background: 'linear-gradient(90deg,#06b6d4,#818cf8)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text', marginBottom: 6 }}>{s.v}</div>
@@ -906,20 +931,20 @@ const LandingPage: React.FC = () => {
       <section style={sectionStyle()}>
         <div style={{ maxWidth: 1100, margin: '0 auto' }}>
           <div style={sectionHead()}>
-            <Tag>Das Problem</Tag>
+            <Tag>{t('landing.pain.tag')}</Tag>
             <h2 style={h2Style}>
-              Jeder Montag kostet Sie <GradientText>Stunden<br />und Nerven.</GradientText>
+              {t('landing.pain.titleLead')} <GradientText>{t('landing.pain.titleHighlight')}</GradientText>
             </h2>
-            <p style={bodyStyle}>Die meisten Fahrunternehmen kämpfen täglich mit denselben Problemen — wir haben sie gelöst.</p>
+            <p style={bodyStyle}>{t('landing.pain.body')}</p>
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: 16, marginBottom: 16 }}>
-            <PainCard value="90%" label="Weniger Zeit für Abrechnungen" desc="Fahrerverwaltung, Umsätze und Gehälter in einer Oberfläche — kein manuelles Excel mehr." accent="linear-gradient(90deg,#06b6d4,#22d3ee)" />
-            <PainCard value="0" label="Nachfehler bei Löhnen" desc="Automatische Gehaltsberechnung auf Basis von Umsatz und Provisionsmodell — auf den Cent genau." accent="linear-gradient(90deg,#818cf8,#a78bfa)" />
+            <PainCard value="90%" label={t('landing.pain.time.label')} desc={t('landing.pain.time.desc')} accent="linear-gradient(90deg,#06b6d4,#22d3ee)" />
+            <PainCard value="0" label={t('landing.pain.payrollErrors.label')} desc={t('landing.pain.payrollErrors.desc')} accent="linear-gradient(90deg,#818cf8,#a78bfa)" />
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: 16 }}>
-            <PainCard value="100%" label="Überblick über Ihre Flotte" desc="Fahrzeugstatus, Werkstatt-Checks und KM-Stände immer aktuell. Kein Chaos mehr." accent="linear-gradient(90deg,#34d399,#06b6d4)" />
-            <PainCard value="1" label="Platform statt 6 Tools" desc="Belege, Abrechnung, Kasse, Fahrer, Gehälter und Dokumente. Alles an einem Ort." accent="linear-gradient(90deg,#f472b6,#818cf8)" />
+            <PainCard value="100%" label={t('landing.pain.fleet.label')} desc={t('landing.pain.fleet.desc')} accent="linear-gradient(90deg,#34d399,#06b6d4)" />
+            <PainCard value="1" label={t('landing.pain.onePlatform.label')} desc={t('landing.pain.onePlatform.desc')} accent="linear-gradient(90deg,#f472b6,#818cf8)" />
           </div>
         </div>
       </section>
@@ -928,27 +953,27 @@ const LandingPage: React.FC = () => {
       <section id="features" style={sectionStyle()}>
         <div style={{ maxWidth: 1100, margin: '0 auto' }}>
           <div style={sectionHead()}>
-            <Tag>Module & Features</Tag>
+            <Tag>{t('landing.features.tag')}</Tag>
             <h2 style={h2Style}>
-              Alles, was ein Fuhrparkbetrieb<br />braucht. <GradientText>In einem System.</GradientText>
+              {t('landing.features.titleLead')} <GradientText>{t('landing.features.titleHighlight')}</GradientText>
             </h2>
-            <p style={bodyStyle}>Von der Fahrererfassung bis zur Jahresauswertung — jeder Prozess Ihres Unternehmens abgedeckt.</p>
+            <p style={bodyStyle}>{t('landing.features.body')}</p>
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 12 }}>
             {[
-              { icon: <TrendingUp size={18}/>, title: 'Umsatzverwaltung', desc: 'Fahrpreise, Aktionen, Trinkgeld und Bargeld erfassen und auswerten — pro Fahrer und Periode.', accent: '#06b6d4' },
-              { icon: <FileText size={18}/>, title: 'Belegmanagement', desc: 'Ausgaben, Quittungen und Kostenstellen digital erfassen mit automatischer Zuordnung.', accent: '#818cf8' },
-              { icon: <Users size={18}/>, title: 'Fahrerverwaltung', desc: 'Fahrerstammdaten, Status, Notizen und Provisionsmodelle zentral verwalten.', accent: '#22d3ee' },
-              { icon: <DollarSign size={18}/>, title: 'Gehaltsabrechnung', desc: 'Automatische Berechnung auf Basis von Umsatz und Provisionsmodell — mit Zahlungsstatus.', accent: '#f59e0b' },
-              { icon: <Wallet size={18}/>, title: 'Bargeldbestand', desc: 'Kassenstand in Echtzeit: Einnahmen vs. Ausgaben, Differenzen und Risikoampel.', accent: '#34d399' },
-              { icon: <BarChart3 size={18}/>, title: 'Abrechnung & Reports', desc: 'Wochen- und Monatsabrechnungen als PDF oder Export — auf Knopfdruck.', accent: '#38bdf8' },
-              { icon: <Car size={18}/>, title: 'Fahrzeugflotte', desc: 'Alle Fahrzeuge mit Kennzeichen, KM-Stand und Status auf einen Blick.', accent: '#a78bfa' },
-              { icon: <Wrench size={18}/>, title: 'Werkstatt-Checks', desc: 'Wöchentliche Fahrzeug-Checks mit Status, Notizen und Reparaturprotokoll.', accent: '#fb923c' },
-              { icon: <Target size={18}/>, title: 'Executive Dashboard', desc: 'KPIs, Trends, Fahrerranking und Smart Insights — sofort auf der Übersichtsseite.', accent: '#f472b6' },
-              { icon: <Receipt size={18}/>, title: 'Dokumente', desc: 'Trinkgeld-Quittungen, Stundennachweis und weitere Dokumente als PDF generieren.', accent: '#4ade80' },
-              { icon: <Settings size={18}/>, title: 'Rollen & Nutzer', desc: 'Verschiedene Zugriffsrechte für Fahrer, Manager und Administratoren.', accent: '#60a5fa' },
-              { icon: <CreditCard size={18}/>, title: 'Fixkosten', desc: 'Wiederkehrende Betriebskosten erfassen und in die Gewinnberechnung einbeziehen.', accent: '#c084fc' },
+              { icon: <TrendingUp size={18}/>, title: t('landing.feature.revenue.title'), desc: t('landing.feature.revenue.desc'), accent: '#06b6d4' },
+              { icon: <FileText size={18}/>, title: t('landing.feature.belege.title'), desc: t('landing.feature.belege.desc'), accent: '#818cf8' },
+              { icon: <Users size={18}/>, title: t('landing.feature.drivers.title'), desc: t('landing.feature.drivers.desc'), accent: '#22d3ee' },
+              { icon: <DollarSign size={18}/>, title: t('landing.feature.payroll.title'), desc: t('landing.feature.payroll.desc'), accent: '#f59e0b' },
+              { icon: <Wallet size={18}/>, title: t('nav.bargeldbestand'), desc: t('landing.feature.cash.desc'), accent: '#34d399' },
+              { icon: <BarChart3 size={18}/>, title: t('landing.feature.abrechnung.title'), desc: t('landing.feature.abrechnung.desc'), accent: '#38bdf8' },
+              { icon: <Car size={18}/>, title: t('landing.feature.fleet.title'), desc: t('landing.feature.fleet.desc'), accent: '#a78bfa' },
+              { icon: <Wrench size={18}/>, title: t('landing.feature.werkstatt.title'), desc: t('landing.feature.werkstatt.desc'), accent: '#fb923c' },
+              { icon: <Target size={18}/>, title: t('landing.feature.dashboard.title'), desc: t('landing.feature.dashboard.desc'), accent: '#f472b6' },
+              { icon: <Receipt size={18}/>, title: t('nav.documents'), desc: t('landing.feature.documents.desc'), accent: '#4ade80' },
+              { icon: <Settings size={18}/>, title: t('locked.feature.rollenNutzer'), desc: t('landing.feature.roles.desc'), accent: '#60a5fa' },
+              { icon: <CreditCard size={18}/>, title: t('nav.fixkosten'), desc: t('landing.feature.fixedCosts.desc'), accent: '#c084fc' },
             ].map((f, i) => (
               <FeatureCard key={i} {...f} />
             ))}
@@ -960,16 +985,16 @@ const LandingPage: React.FC = () => {
       <section id="workflow" style={sectionStyle()}>
         <div style={{ maxWidth: 1100, margin: '0 auto' }}>
           <div style={{ textAlign: 'center', marginBottom: 64 }}>
-            <Tag>So einfach</Tag>
-            <h2 style={h2Style}>Drei Schritte. <GradientText>Keine Einlernphase.</GradientText></h2>
-            <p style={bodyStyle}>Keine IT-Abteilung. Keine lange Einrichtung. Innerhalb eines Tages produktiv.</p>
+            <Tag>{t('landing.how.tag')}</Tag>
+            <h2 style={h2Style}>{t('landing.how.titleLead')} <GradientText>{t('landing.how.titleHighlight')}</GradientText></h2>
+            <p style={bodyStyle}>{t('landing.how.body')}</p>
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 16 }}>
             {[
-              { n: '01', title: 'Starten in 5 Minuten', desc: 'Fahrer und Fahrzeuge anlegen, Provisionsmodelle zuweisen, Einstellungen konfigurieren — fertig.' },
-              { n: '02', title: 'Tägliche Daten erfassen', desc: 'Umsätze buchen, Belege hochladen, Bargeld protokollieren. Alles mit wenigen Klicks.' },
-              { n: '03', title: 'Abrechnen und abschließen', desc: 'Automatisch berechnete Wochenabrechnungen, Gehaltsübersichten und PDF-Export auf Knopfdruck.' },
+              { n: '01', title: t('landing.how.step1.title'), desc: t('landing.how.step1.desc') },
+              { n: '02', title: t('landing.how.step2.title'), desc: t('landing.how.step2.desc') },
+              { n: '03', title: t('landing.how.step3.title'), desc: t('landing.how.step3.desc') },
             ].map((s, i) => {
               const [hovered, setHovered] = React.useState(false);
               return (
@@ -1007,20 +1032,20 @@ const LandingPage: React.FC = () => {
       <section id="screenshots" style={sectionStyle()}>
         <div style={{ maxWidth: 1100, margin: '0 auto' }}>
           <div style={sectionHead()}>
-            <Tag>Einblicke</Tag>
+            <Tag>{t('landing.nav.insights')}</Tag>
             <h2 style={h2Style}>
-              Bildschirme, die wirklich<br /><GradientText>benutzt werden.</GradientText>
+              {t('landing.screens.titleLead')}<br /><GradientText>{t('landing.screens.titleHighlight')}</GradientText>
             </h2>
-            <p style={bodyStyle}>Kein aufgeräumtes Demo-Interface. Das ist die echte Oberfläche Ihrer täglichen Arbeit.</p>
+            <p style={bodyStyle}>{t('landing.screens.body')}</p>
           </div>
 
           {/* Row 1 */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, marginBottom: 20 }}>
             <div>
               <div style={{ marginBottom: 20 }}>
-                <div style={{ fontSize: 16, fontWeight: 800, color: '#fff', marginBottom: 6 }}>Fahrerabrechnung, die sich selbst schreibt.</div>
-                <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.42)', lineHeight: 1.65, marginBottom: 16 }}>Wählen Sie die Woche, klicken Sie auf Export — fertig. Das System berechnet Lohn, Trinkgeld und Provision automatisch.</div>
-                {['Automatisch berechneter Lohnanteil','Trinkgeld separat ausgewiesen','Status: bezahlt / offen verfolgt','PDF-Export per Knopfdruck'].map((f,i) => (
+                <div style={{ fontSize: 16, fontWeight: 800, color: '#fff', marginBottom: 6 }}>{t('landing.screens.payout.title')}</div>
+                <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.42)', lineHeight: 1.65, marginBottom: 16 }}>{t('landing.screens.payout.body')}</div>
+                {[t('landing.screens.payout.point1'),t('landing.screens.payout.point2'),t('landing.screens.payout.point3'),t('landing.screens.payout.point4')].map((f,i) => (
                   <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'rgba(255,255,255,0.6)', marginBottom: 7 }}>
                     <CheckCircle size={12} style={{ color: '#06b6d4', flexShrink: 0 }} /> {f}
                   </div>
@@ -1034,9 +1059,9 @@ const LandingPage: React.FC = () => {
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, marginBottom: 20 }}>
             <KassePanel />
             <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-              <div style={{ fontSize: 16, fontWeight: 800, color: '#fff', marginBottom: 6 }}>Kassenbestand auf den Cent genau.</div>
-              <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.42)', lineHeight: 1.65, marginBottom: 16 }}>Bargeldeinnahmen, Ausgaben und Differenzen auf einen Blick. Keine Überraschungen mehr beim Tagesabschluss.</div>
-              {['Echtzeit-Kassenstand','Tagesverläufe als Chart','Einnahmen-Ausgaben-Differenz','Risikoampel bei Abweichungen'].map((f,i) => (
+              <div style={{ fontSize: 16, fontWeight: 800, color: '#fff', marginBottom: 6 }}>{t('landing.screens.cash.title')}</div>
+              <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.42)', lineHeight: 1.65, marginBottom: 16 }}>{t('landing.screens.cash.body')}</div>
+              {[t('landing.screens.cash.point1'),t('landing.screens.cash.point2'),t('landing.screens.cash.point3'),t('landing.screens.cash.point4')].map((f,i) => (
                 <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'rgba(255,255,255,0.6)', marginBottom: 7 }}>
                   <CheckCircle size={12} style={{ color: '#818cf8', flexShrink: 0 }} /> {f}
                 </div>
@@ -1047,9 +1072,9 @@ const LandingPage: React.FC = () => {
           {/* Row 3 */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
             <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-              <div style={{ fontSize: 16, fontWeight: 800, color: '#fff', marginBottom: 6 }}>Fuhrpark und Werkstatt immer im Blick.</div>
-              <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.42)', lineHeight: 1.65, marginBottom: 16 }}>Welches Fahrzeug braucht Werkstatt? Welches hat wann TÜV? Alle Status in einer Übersicht.</div>
-              {['KM-Stand & Status je Fahrzeug','Werkstatt-Checks mit Protokoll','Fälligkeitsampel','Servicehistorie je Fahrzeug'].map((f,i) => (
+              <div style={{ fontSize: 16, fontWeight: 800, color: '#fff', marginBottom: 6 }}>{t('landing.screens.fleet.title')}</div>
+              <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.42)', lineHeight: 1.65, marginBottom: 16 }}>{t('landing.screens.fleet.body')}</div>
+              {[t('landing.screens.fleet.point1'),t('landing.screens.fleet.point2'),t('landing.screens.fleet.point3'),t('landing.screens.fleet.point4')].map((f,i) => (
                 <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'rgba(255,255,255,0.6)', marginBottom: 7 }}>
                   <CheckCircle size={12} style={{ color: '#f59e0b', flexShrink: 0 }} /> {f}
                 </div>
@@ -1065,18 +1090,18 @@ const LandingPage: React.FC = () => {
         <div style={{ maxWidth: 1000, margin: '0 auto' }}>
           <div style={{ background: CARD, border: `1px solid ${BORDER}`, borderRadius: 16, padding: '24px 40px', display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 20 }}>
             {[
-              { icon: <Shield size={16} style={{ color: '#34d399' }} />, label: 'DSGVO-konform', sub: 'Daten in der EU' },
-              { icon: <Zap size={16} style={{ color: '#06b6d4' }} />, label: 'Echtzeit-Updates', sub: 'Sofort sichtbar' },
-              { icon: <Globe size={16} style={{ color: '#818cf8' }} />, label: 'Überall erreichbar', sub: 'Browser-basiert' },
-              { icon: <Clock size={16} style={{ color: '#f59e0b' }} />, label: 'Persönlicher Support', sub: 'Einrichtungsservice' },
-            ].map((t, i) => (
+              { icon: <Shield size={16} style={{ color: '#34d399' }} />, label: t('landing.trust.gdpr'), sub: t('landing.trust.gdprSub') },
+              { icon: <Zap size={16} style={{ color: '#06b6d4' }} />, label: t('landing.trust.realtime.label'), sub: t('landing.trust.realtime.sub') },
+              { icon: <Globe size={16} style={{ color: '#818cf8' }} />, label: t('landing.trust.anywhere.label'), sub: t('landing.trust.anywhere.sub') },
+              { icon: <Clock size={16} style={{ color: '#f59e0b' }} />, label: t('landing.trust.support.label'), sub: t('landing.trust.support.sub') },
+            ].map((item, i) => (
               <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                 <div style={{ width: 36, height: 36, borderRadius: 10, background: 'rgba(255,255,255,0.04)', border: `1px solid ${BORDER}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                  {t.icon}
+                  {item.icon}
                 </div>
                 <div>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: 'rgba(255,255,255,0.8)' }}>{t.label}</div>
-                  <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.3)' }}>{t.sub}</div>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: 'rgba(255,255,255,0.8)' }}>{item.label}</div>
+                  <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.3)' }}>{item.sub}</div>
                 </div>
               </div>
             ))}
@@ -1091,15 +1116,15 @@ const LandingPage: React.FC = () => {
       <section style={sectionStyle(80)}>
         <div style={{ maxWidth: 1100, margin: '0 auto' }}>
           <div style={{ textAlign: 'center', marginBottom: 48 }}>
-            <Tag>Kundenstimmen</Tag>
-            <h2 style={{ ...h2Style, fontSize: 'clamp(28px,3vw,42px)' }}>Was unsere Kunden sagen</h2>
+            <Tag>{t('landing.testimonials.tag')}</Tag>
+            <h2 style={{ ...h2Style, fontSize: 'clamp(28px,3vw,42px)' }}>{t('landing.testimonials.title')}</h2>
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 16 }}>
             {[
-              { name: 'Mehmet A.', role: 'Inhaber · 8 Fahrzeuge', quote: 'Seit wir die Software nutzen, spare ich pro Woche mindestens 4 Stunden. Die Gehaltsabrechnung läuft automatisch.' },
-              { name: 'Klaus T.', role: 'Geschäftsführer · 14 Fahrer', quote: 'Das Dashboard gibt mir auf einen Blick was ich brauche. Ich sehe sofort ob wir im Plan sind.' },
-              { name: 'Ahmad S.', role: 'Flottenmanager · 6 Fahrzeuge', quote: 'Die Werkstatt-Checks und die Flottenübersicht sind Gold wert. Früher hatte ich alles in WhatsApp.' },
-            ].map((t, i) => (
+              { name: 'Mehmet A.', role: t('landing.testimonials.role1'), quote: t('landing.testimonials.quote1') },
+              { name: 'Klaus T.', role: t('landing.testimonials.role2'), quote: t('landing.testimonials.quote2') },
+              { name: 'Ahmad S.', role: t('landing.testimonials.role3'), quote: t('landing.testimonials.quote3') },
+            ].map((testimonial, i) => (
               <div key={i} style={{ background: CARD, border: `1px solid ${BORDER}`, borderRadius: 16, padding: '24px 22px', transition: 'border-color 0.25s' }}
                 onMouseEnter={e => (e.currentTarget.style.borderColor = 'rgba(255,255,255,0.14)')}
                 onMouseLeave={e => (e.currentTarget.style.borderColor = BORDER)}
@@ -1107,14 +1132,14 @@ const LandingPage: React.FC = () => {
                 <div style={{ display: 'flex', gap: 2, marginBottom: 14 }}>
                   {Array(5).fill(0).map((_,j) => <Star key={j} size={13} style={{ color: '#fbbf24', fill: '#fbbf24' }} />)}
                 </div>
-                <p style={{ fontSize: 13, color: 'rgba(255,255,255,0.6)', lineHeight: 1.7, marginBottom: 18, fontStyle: 'italic' }}>"{t.quote}"</p>
+                <p style={{ fontSize: 13, color: 'rgba(255,255,255,0.6)', lineHeight: 1.7, marginBottom: 18, fontStyle: 'italic' }}>"{testimonial.quote}"</p>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                   <div style={{ width: 32, height: 32, borderRadius: '50%', background: 'linear-gradient(135deg,#06b6d4,#818cf8)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 800, color: '#fff' }}>
-                    {t.name.charAt(0)}
+                    {testimonial.name.charAt(0)}
                   </div>
                   <div>
-                    <div style={{ fontSize: 13, fontWeight: 700, color: '#fff' }}>{t.name}</div>
-                    <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.32)' }}>{t.role}</div>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: '#fff' }}>{testimonial.name}</div>
+                    <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.32)' }}>{testimonial.role}</div>
                   </div>
                 </div>
               </div>
@@ -1127,17 +1152,17 @@ const LandingPage: React.FC = () => {
       <section id="faq" style={sectionStyle()}>
         <div style={{ maxWidth: 720, margin: '0 auto' }}>
           <div style={{ textAlign: 'center', marginBottom: 56 }}>
-            <Tag>FAQ</Tag>
-            <h2 style={h2Style}>Alles, was Sie <GradientText violet>wissen müssen.</GradientText></h2>
+            <Tag>{t('landing.nav.faq')}</Tag>
+            <h2 style={h2Style}>{t('landing.faq.titleLead')} <GradientText violet>{t('landing.faq.titleHighlight')}</GradientText></h2>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             {[
-              { q: 'Wie schnell kann ich starten?', a: 'Nach der Registrierung können Sie sofort loslegen. Die Einrichtung dauert in der Regel unter einer Stunde. Unser Team unterstützt Sie beim Onboarding.' },
-              { q: 'Kann ich bestehende Daten importieren?', a: 'Ja, wir bieten einen strukturierten Daten-Import-Service. Sprechen Sie uns an und wir helfen beim Transfer Ihrer bestehenden Excel-Daten.' },
-              { q: 'Wie funktioniert die Gehaltsabrechnung?', a: 'Das System berechnet Gehälter automatisch basierend auf dem Umsatz, dem hinterlegten Provisionsmodell und den Trinkgeldeinnahmen. Jede Periode wird separat abgerechnet.' },
-              { q: 'Ist die Software DSGVO-konform?', a: 'Ja, alle Daten werden in der EU gespeichert und verarbeitet. Wir setzen auf Verschlüsselung und ein strenges Zugriffsrollensystem.' },
-              { q: 'Können mehrere Benutzer gleichzeitig arbeiten?', a: 'Ja. Das Rollensystem erlaubt es, verschiedenen Mitarbeitern unterschiedliche Zugriffsrechte zuzuweisen — von Fahrern bis zu Administratoren.' },
-              { q: 'Gibt es eine Mindestvertragslaufzeit?', a: 'Nein. Alle Pläne sind monatlich kündbar. Kein Risiko, keine Bindung.' },
+              { q: t('landing.faq.q.startSpeed'), a: t('landing.faq.a.startSpeed') },
+              { q: t('landing.faq.q.dataImport'), a: t('landing.faq.a.dataImport') },
+              { q: t('landing.faq.q.payroll'), a: t('landing.faq.a.payroll') },
+              { q: t('landing.faq.q.gdpr'), a: t('landing.faq.a.gdpr') },
+              { q: t('landing.faq.q.multipleUsers'), a: t('landing.faq.a.multipleUsers') },
+              { q: t('landing.faq.q.minimumTerm'), a: t('landing.faq.a.minimumTerm') },
             ].map((item, i) => (
               <FAQItem key={i} q={item.q} a={item.a} />
             ))}
@@ -1164,12 +1189,12 @@ const LandingPage: React.FC = () => {
             {/* Top glow line */}
             <div style={{ position: 'absolute', top: 0, left: '20%', right: '20%', height: 1, background: 'linear-gradient(90deg, transparent, rgba(6,182,212,0.6), transparent)' }} />
 
-            <Tag>Bereit loszulegen?</Tag>
+            <Tag>{t('landing.cta.tag')}</Tag>
             <h2 style={{ ...h2Style, marginBottom: 16 }}>
-              Geben Sie Ihrem Büro<br /><GradientText>den Freitag zurück.</GradientText>
+              {t('landing.cta.titleLead')}<br /><GradientText>{t('landing.cta.titleHighlight')}</GradientText>
             </h2>
             <p style={{ ...bodyStyle, maxWidth: 440, margin: '0 auto 36px' }}>
-              Starten Sie kostenlos. Keine Kreditkarte. Keine Bindung. Innerhalb von Minuten eingerichtet.
+              {t('landing.cta.body')}
             </p>
             <div style={{ display: 'flex', gap: 14, justifyContent: 'center', flexWrap: 'wrap' }}>
               <Link to="/signup" style={{
@@ -1183,7 +1208,7 @@ const LandingPage: React.FC = () => {
                 onMouseEnter={e => { (e.currentTarget as HTMLElement).style.boxShadow = '0 0 60px rgba(6,182,212,0.6)'; (e.currentTarget as HTMLElement).style.transform = 'translateY(-2px)'; }}
                 onMouseLeave={e => { (e.currentTarget as HTMLElement).style.boxShadow = '0 0 40px rgba(6,182,212,0.4)'; (e.currentTarget as HTMLElement).style.transform = 'none'; }}
               >
-                Kostenlos starten <ArrowRight size={15} />
+                {t('landing.cta.primary')} <ArrowRight size={15} />
               </Link>
               <a href="#features" style={{
                 display: 'inline-flex', alignItems: 'center', gap: 8,
@@ -1194,7 +1219,7 @@ const LandingPage: React.FC = () => {
                 onMouseEnter={e => (e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.09)'}
                 onMouseLeave={e => (e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.05)'}
               >
-                Demo ansehen
+                {t('landing.cta.secondary')}
               </a>
             </div>
           </div>
@@ -1208,13 +1233,13 @@ const LandingPage: React.FC = () => {
             <div>
               <img src="/professor_logo_white.svg" alt="El-Professor" style={{ height: 28, objectFit: 'contain', marginBottom: 14, opacity: 0.8 }} />
               <p style={{ fontSize: 13, color: 'rgba(255,255,255,0.35)', lineHeight: 1.65, maxWidth: 260 }}>
-                Die All-in-One Flottenverwaltungssoftware von El-Professor für Taxiunternehmen.
+                {t('landing.footer.tagline')}
               </p>
             </div>
             {[
-              { head: 'Produkt', links: [{ l: 'Features', h: '#features' }, { l: 'Einblicke', h: '#screenshots' }, { l: 'Preise', h: '#pricing' }] },
-              { head: 'Unternehmen', links: [{ l: 'FAQ', h: '#faq' }, { l: 'Support', h: '#faq' }] },
-              { head: 'Zugang', links: [{ l: 'Anmelden', h: '/login' }, { l: 'Kostenlos testen', h: '/login' }] },
+              { head: t('landing.footer.product'), links: [{ l: t('landing.nav.features'), h: '#features' }, { l: t('landing.nav.insights'), h: '#screenshots' }, { l: t('landing.nav.pricing'), h: '#pricing' }] },
+              { head: t('landing.footer.company'), links: [{ l: t('landing.nav.faq'), h: '#faq' }, { l: t('landing.footer.support'), h: '#faq' }] },
+              { head: t('landing.footer.access'), links: [{ l: t('auth.signIn'), h: '/login' }, { l: t('landing.nav.tryFree'), h: '/login' }] },
             ].map((col, i) => (
               <div key={i}>
                 <div style={{ fontSize: 11, fontWeight: 800, color: 'rgba(255,255,255,0.35)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 16 }}>{col.head}</div>
@@ -1230,8 +1255,8 @@ const LandingPage: React.FC = () => {
             ))}
           </div>
           <div style={{ borderTop: `1px solid ${BORDER}`, paddingTop: 24, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
-            <p style={{ fontSize: 12, color: 'rgba(255,255,255,0.22)' }}>© 2025 YA Software. Alle Rechte vorbehalten.</p>
-            <p style={{ fontSize: 12, color: 'rgba(255,255,255,0.22)' }}>DSGVO-konform · Made in Germany</p>
+            <p style={{ fontSize: 12, color: 'rgba(255,255,255,0.22)' }}>© 2025 YA Software. {t('landing.footer.rights')}</p>
+            <p style={{ fontSize: 12, color: 'rgba(255,255,255,0.22)' }}>{t('landing.trust.gdpr')} · {t('landing.trust.madeInGermany')}</p>
           </div>
         </div>
       </footer>

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { X, Plus, Loader2 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useToast } from '../contexts/ToastContext';
+import { useTranslation } from '../contexts/LanguageContext';
 
 interface Plan {
   id: string;
@@ -20,6 +21,7 @@ interface Props {
 
 export default function AssignSubscriptionModal({ plans, onClose, onAssigned }: Props) {
   const { showToast } = useToast();
+  const { t } = useTranslation();
   const [companies, setCompanies] = useState<{ id: string; name: string }[]>([]);
   const [companyId, setCompanyId] = useState('');
   const [planId, setPlanId] = useState('');
@@ -41,7 +43,7 @@ export default function AssignSubscriptionModal({ plans, onClose, onAssigned }: 
 
   const handleSubmit = async () => {
     if (!companyId || !planId) {
-      showToast('error', 'Bitte Firma und Plan ausw\u00E4hlen');
+      showToast('error', t('bill.assign.selectBoth'));
       return;
     }
     const plan = activePlans.find(p => p.id === planId);
@@ -71,11 +73,11 @@ export default function AssignSubscriptionModal({ plans, onClose, onAssigned }: 
         drivers_per_car_limit: plan.drivers_per_car_limit,
       }).eq('company_id', companyId);
 
-      showToast('success', 'Abonnement zugewiesen');
+      showToast('success', t('bill.assign.success'));
       onAssigned();
       onClose();
     } catch (err: any) {
-      showToast('error', 'Fehler: ' + (err.message || 'Unbekannt'));
+      showToast('error', t('bill.errorWithMessage', { message: err.message || t('common.unknown') }));
     } finally {
       setSaving(false);
     }
@@ -99,7 +101,7 @@ export default function AssignSubscriptionModal({ plans, onClose, onAssigned }: 
             <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: 'rgba(6,182,212,0.12)' }}>
               <Plus size={20} style={{ color: 'var(--accent)' }} />
             </div>
-            <h2 className="font-bold" style={{ color: 'var(--text-primary)' }}>Abo zuweisen</h2>
+            <h2 className="font-bold" style={{ color: 'var(--text-primary)' }}>{t('bill.assign.title')}</h2>
           </div>
           <button onClick={onClose} style={{ color: 'var(--text-tertiary)' }}><X size={20} /></button>
         </div>
@@ -110,19 +112,19 @@ export default function AssignSubscriptionModal({ plans, onClose, onAssigned }: 
           ) : (
             <>
               <div>
-                <label className="block text-xs font-semibold mb-1.5" style={{ color: 'var(--text-secondary)' }}>Firma *</label>
+                <label className="block text-xs font-semibold mb-1.5" style={{ color: 'var(--text-secondary)' }}>{t('bill.field.companyRequired')}</label>
                 <select value={companyId} onChange={e => setCompanyId(e.target.value)} style={inputStyle}>
-                  <option value="">Firma ausw\u00E4hlen...</option>
+                  <option value="">{t('bill.assign.pickCompany')}</option>
                   {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>
               </div>
               <div>
-                <label className="block text-xs font-semibold mb-1.5" style={{ color: 'var(--text-secondary)' }}>Plan *</label>
+                <label className="block text-xs font-semibold mb-1.5" style={{ color: 'var(--text-secondary)' }}>{t('bill.field.planRequired')}</label>
                 <select value={planId} onChange={e => setPlanId(e.target.value)} style={inputStyle}>
-                  <option value="">Plan ausw\u00E4hlen...</option>
+                  <option value="">{t('bill.assign.pickPlan')}</option>
                   {activePlans.map(p => (
                     <option key={p.id} value={p.id}>
-                      {p.name} \u2013 {p.monthly_price.toLocaleString('de-DE', { minimumFractionDigits: 2 })} \u20AC/Monat
+                      {p.name} – {t('bill.pricePerMonth', { price: p.monthly_price.toLocaleString('de-DE', { minimumFractionDigits: 2 }) })}
                     </option>
                   ))}
                 </select>
@@ -130,31 +132,31 @@ export default function AssignSubscriptionModal({ plans, onClose, onAssigned }: 
               {selectedPlan && (
                 <div className="p-3 rounded-xl text-sm" style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)' }}>
                   <p style={{ color: 'var(--text-primary)' }}><strong>{selectedPlan.name}</strong></p>
-                  <p style={{ color: 'var(--text-secondary)' }}>{selectedPlan.included_cars} Fahrzeuge, {selectedPlan.drivers_per_car_limit} Fahrer/Auto</p>
-                  <p style={{ color: 'var(--accent)' }} className="font-semibold">{selectedPlan.monthly_price.toLocaleString('de-DE', { minimumFractionDigits: 2 })} \u20AC/Monat</p>
+                  <p style={{ color: 'var(--text-secondary)' }}>{t('bill.planSummary', { cars: selectedPlan.included_cars, drivers: selectedPlan.drivers_per_car_limit })}</p>
+                  <p style={{ color: 'var(--accent)' }} className="font-semibold">{t('bill.pricePerMonth', { price: selectedPlan.monthly_price.toLocaleString('de-DE', { minimumFractionDigits: 2 }) })}</p>
                 </div>
               )}
               <div>
-                <label className="block text-xs font-semibold mb-1.5" style={{ color: 'var(--text-secondary)' }}>Abrechnungstag</label>
+                <label className="block text-xs font-semibold mb-1.5" style={{ color: 'var(--text-secondary)' }}>{t('bill.field.billingDay')}</label>
                 <input type="number" min="1" max="28" value={billingDay} onChange={e => setBillingDay(e.target.value)} style={inputStyle} />
               </div>
               <div>
-                <label className="block text-xs font-semibold mb-1.5" style={{ color: 'var(--text-secondary)' }}>Notiz (optional)</label>
-                <textarea value={notes} onChange={e => setNotes(e.target.value)} style={{ ...inputStyle, minHeight: '3rem', resize: 'vertical' }} placeholder="Optionale Notiz..." />
+                <label className="block text-xs font-semibold mb-1.5" style={{ color: 'var(--text-secondary)' }}>{t('bill.field.noteOptional')}</label>
+                <textarea value={notes} onChange={e => setNotes(e.target.value)} style={{ ...inputStyle, minHeight: '3rem', resize: 'vertical' }} placeholder={t('bill.notePlaceholder')} />
               </div>
             </>
           )}
         </div>
 
         <div className="flex justify-end gap-2 p-5 border-t" style={{ borderColor: 'var(--border)' }}>
-          <button onClick={onClose} className="px-4 py-2.5 rounded-xl text-sm font-medium" style={{ color: 'var(--text-primary)', border: '1px solid var(--border)' }}>Abbrechen</button>
+          <button onClick={onClose} className="px-4 py-2.5 rounded-xl text-sm font-medium" style={{ color: 'var(--text-primary)', border: '1px solid var(--border)' }}>{t('common.cancel')}</button>
           <button
             onClick={handleSubmit}
             disabled={saving || !companyId || !planId}
             className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold text-white"
             style={{ background: 'var(--accent)', opacity: saving || !companyId || !planId ? 0.6 : 1 }}
           >
-            <Plus size={16} /> {saving ? 'Wird gespeichert...' : 'Zuweisen'}
+            <Plus size={16} /> {saving ? t('common.saving') : t('bill.assign.submit')}
           </button>
         </div>
       </div>

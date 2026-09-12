@@ -1,6 +1,8 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import { useToast } from '../contexts/ToastContext';
+import { useTranslation } from '../contexts/LanguageContext';
+import type { TranslationKey } from '../i18n';
 import {
   KeyRound, Plus, Copy, Check, X, RefreshCw, ChevronDown,
   CalendarCheck, Clock, Ban, CheckCircle, AlertTriangle,
@@ -56,6 +58,7 @@ interface ConfirmDialogProps {
 }
 
 function ConfirmDialog({ title, body, confirmLabel, confirmColor = '#ef4444', onConfirm, onCancel, extra }: ConfirmDialogProps) {
+  const { t } = useTranslation();
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.65)' }}>
       <div className="w-full max-w-sm rounded-2xl p-6 space-y-4" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
@@ -68,7 +71,7 @@ function ConfirmDialog({ title, body, confirmLabel, confirmColor = '#ef4444', on
             className="px-4 py-2 rounded-xl text-sm font-semibold"
             style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
           >
-            Abbrechen
+            {t('common.cancel')}
           </button>
           <button
             onClick={onConfirm}
@@ -85,32 +88,50 @@ function ConfirmDialog({ title, body, confirmLabel, confirmColor = '#ef4444', on
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-const DURATION_LABELS: Record<DurationType, string> = {
-  '1_monat':         '1 Monat',
-  '3_monate':        '3 Monate',
-  '1_jahr':          '1 Jahr',
-  'benutzerdefiniert': 'Benutzerdefiniert',
+// `label` holds a TranslationKey throughout this section: these maps are
+// module-level and t() is a hook value. Every consumer resolves it. The record
+// keys and tab ids are the stored duration / status values and are never
+// translated — only the label a user reads.
+const DURATION_LABELS: Record<DurationType, TranslationKey> = {
+  '1_monat':           'activation.duration.1month',
+  '3_monate':          'activation.duration.3months',
+  '1_jahr':            'activation.duration.1year',
+  'benutzerdefiniert': 'activation.custom',
 };
 
-const STATUS_CFG: Record<CodeStatus, { label: string; color: string; bg: string; Icon: React.ElementType }> = {
-  active:  { label: 'Aktiv',      color: '#10b981', bg: 'rgba(16,185,129,0.1)',  Icon: CheckCircle },
-  used:    { label: 'Verwendet',  color: '#06b6d4', bg: 'rgba(6,182,212,0.1)',   Icon: Check },
-  expired: { label: 'Abgelaufen', color: '#f59e0b', bg: 'rgba(245,158,11,0.1)',  Icon: Clock },
-  revoked: { label: 'Widerrufen', color: '#ef4444', bg: 'rgba(239,68,68,0.1)',   Icon: Ban },
+const STATUS_CFG: Record<CodeStatus, { label: TranslationKey; color: string; bg: string; Icon: React.ElementType }> = {
+  active:  { label: 'codes.status.active',    color: '#10b981', bg: 'rgba(16,185,129,0.1)',  Icon: CheckCircle },
+  used:    { label: 'codes.status.used',      color: '#06b6d4', bg: 'rgba(6,182,212,0.1)',   Icon: Check },
+  expired: { label: 'activation.expiredShort', color: '#f59e0b', bg: 'rgba(245,158,11,0.1)',  Icon: Clock },
+  revoked: { label: 'codes.status.revoked',   color: '#ef4444', bg: 'rgba(239,68,68,0.1)',   Icon: Ban },
 };
 
-const FILTER_TABS: { id: FilterTab; label: string }[] = [
-  { id: 'all',     label: 'Alle' },
-  { id: 'active',  label: 'Aktiv' },
-  { id: 'used',    label: 'Verwendet' },
-  { id: 'expired', label: 'Abgelaufen' },
-  { id: 'revoked', label: 'Widerrufen' },
-  { id: 'hidden',  label: 'Ausgeblendet' },
+const FILTER_TABS: { id: FilterTab; label: TranslationKey }[] = [
+  { id: 'all',     label: 'common.all' },
+  { id: 'active',  label: 'codes.status.active' },
+  { id: 'used',    label: 'codes.status.used' },
+  { id: 'expired', label: 'activation.expiredShort' },
+  { id: 'revoked', label: 'codes.status.revoked' },
+  { id: 'hidden',  label: 'codes.filter.hidden' },
+];
+
+// Column headers of the code table, in render order.
+const TABLE_HEADER_KEYS: TranslationKey[] = [
+  'codes.col.code',
+  'codes.col.company',
+  'codes.col.email',
+  'codes.field.duration',
+  'common.status',
+  'codes.col.validUntil',
+  'codes.details.usedAt',
+  'codes.details.created',
+  'codes.col.actions',
 ];
 
 // ─── Countdown for active codes ───────────────────────────────────────────────
 
 function CodeCountdown({ expiresAt }: { expiresAt: string }) {
+  const { t } = useTranslation();
   const [display, setDisplay] = useState('');
   const rafRef = useRef<number>();
 
@@ -118,7 +139,7 @@ function CodeCountdown({ expiresAt }: { expiresAt: string }) {
     const end = new Date(expiresAt).getTime();
     const tick = () => {
       const diff = end - Date.now();
-      if (diff <= 0) { setDisplay('Abgelaufen'); return; }
+      if (diff <= 0) { setDisplay(t('activation.expiredShort')); return; }
       const s = Math.floor(diff / 1000);
       const m = Math.floor(s / 60);
       const sec = s % 60;
@@ -127,7 +148,7 @@ function CodeCountdown({ expiresAt }: { expiresAt: string }) {
     };
     rafRef.current = requestAnimationFrame(tick);
     return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); };
-  }, [expiresAt]);
+  }, [expiresAt, t]);
 
   const end = new Date(expiresAt).getTime();
   const isUrgent = end - Date.now() < 30_000;
@@ -149,6 +170,7 @@ function GeneratedCodeModal({
   expiresAt: string;
   onClose: () => void;
 }) {
+  const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
 
   const handleCopy = async () => {
@@ -166,7 +188,7 @@ function GeneratedCodeModal({
 
         <div>
           <p className="text-xs font-semibold uppercase tracking-widest mb-3" style={{ color: 'var(--text-tertiary)' }}>
-            Aktivierungscode
+            {t('codes.generated.label')}
           </p>
           <div
             className="text-5xl font-mono font-bold tracking-[0.25em] py-4 px-6 rounded-2xl select-all"
@@ -178,7 +200,9 @@ function GeneratedCodeModal({
 
         <div className="p-3 rounded-xl" style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.2)' }}>
           <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>
-            Dieser Code ist <strong style={{ color: '#f59e0b' }}>2 Minuten gültig</strong> und kann nur einmal verwendet werden.
+            {t('codes.generated.validityBefore')}{' '}
+            <strong style={{ color: '#f59e0b' }}>{t('codes.generated.validityStrong')}</strong>{' '}
+            {t('codes.generated.validityAfter')}
           </p>
           <div className="mt-1.5 flex items-center justify-center gap-1.5">
             <Clock size={11} style={{ color: '#f59e0b' }} />
@@ -193,19 +217,19 @@ function GeneratedCodeModal({
             style={{ background: copied ? 'rgba(16,185,129,0.15)' : 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.3)', color: '#10b981' }}
           >
             {copied ? <Check size={14} /> : <Copy size={14} />}
-            {copied ? 'Kopiert!' : 'Kopieren'}
+            {copied ? t('codes.copied') : t('common.copy')}
           </button>
           <button
             onClick={onClose}
             className="flex-1 py-2.5 rounded-xl text-sm font-semibold"
             style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
           >
-            Schließen
+            {t('common.close')}
           </button>
         </div>
 
         <p className="text-[11px]" style={{ color: 'var(--text-tertiary)' }}>
-          Nach dem Schließen wird der vollständige Code nicht mehr angezeigt.
+          {t('codes.generated.hiddenAfterClose')}
         </p>
       </div>
     </div>
@@ -215,28 +239,30 @@ function GeneratedCodeModal({
 // ─── Details Modal ────────────────────────────────────────────────────────────
 
 function DetailsModal({ code, onClose }: { code: ActivationCode; onClose: () => void }) {
+  const { t } = useTranslation();
   const st = STATUS_CFG[code.status] ?? STATUS_CFG.expired;
+  // Timestamps keep the German DD.MM.YYYY format in both languages — see src/i18n/index.ts.
   const rows: [string, React.ReactNode][] = [
-    ['Code (maskiert)', <span className="font-mono">••{code.code_last4 ?? '????'}</span>],
-    ['Status', <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold" style={{ background: st.bg, color: st.color }}><st.Icon size={10} />{st.label}</span>],
-    ['Dauer', DURATION_LABELS[code.duration_type] ?? code.duration_type],
-    ['Erstellt', format(new Date(code.created_at), 'dd.MM.yyyy HH:mm', { locale: de })],
-    ['Gültig bis (Code)', format(new Date(code.expires_at), 'dd.MM.yyyy HH:mm', { locale: de })],
-    ['Ziel-Unternehmen', code.company_name ?? '—'],
-    ['Ziel-E-Mail', code.target_email ?? '—'],
-    ['Verwendet am', code.used_at ? format(new Date(code.used_at), 'dd.MM.yyyy HH:mm', { locale: de }) : '—'],
-    ['Verwendet von', code.used_company_name ?? '—'],
-    ['Widerrufen am', code.revoked_at ? format(new Date(code.revoked_at), 'dd.MM.yyyy HH:mm', { locale: de }) : '—'],
-    ['Ausgeblendet am', code.hidden_at ? format(new Date(code.hidden_at), 'dd.MM.yyyy HH:mm', { locale: de }) : '—'],
-    ['Ausblende-Grund', code.hidden_reason ?? '—'],
-    ['Gelöscht am', code.deleted_at ? format(new Date(code.deleted_at), 'dd.MM.yyyy HH:mm', { locale: de }) : '—'],
+    [t('codes.details.codeMasked'), <span className="font-mono">••{code.code_last4 ?? '????'}</span>],
+    [t('common.status'), <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold" style={{ background: st.bg, color: st.color }}><st.Icon size={10} />{t(st.label)}</span>],
+    [t('codes.details.duration'), DURATION_LABELS[code.duration_type] ? t(DURATION_LABELS[code.duration_type]) : code.duration_type],
+    [t('codes.details.created'), format(new Date(code.created_at), 'dd.MM.yyyy HH:mm', { locale: de })],
+    [t('codes.details.validUntilCode'), format(new Date(code.expires_at), 'dd.MM.yyyy HH:mm', { locale: de })],
+    [t('codes.details.targetCompany'), code.company_name ?? '—'],
+    [t('codes.details.targetEmail'), code.target_email ?? '—'],
+    [t('codes.details.usedAt'), code.used_at ? format(new Date(code.used_at), 'dd.MM.yyyy HH:mm', { locale: de }) : '—'],
+    [t('codes.details.usedBy'), code.used_company_name ?? '—'],
+    [t('codes.details.revokedAt'), code.revoked_at ? format(new Date(code.revoked_at), 'dd.MM.yyyy HH:mm', { locale: de }) : '—'],
+    [t('codes.details.hiddenAt'), code.hidden_at ? format(new Date(code.hidden_at), 'dd.MM.yyyy HH:mm', { locale: de }) : '—'],
+    [t('codes.details.hideReason'), code.hidden_reason ?? '—'],
+    [t('codes.details.deletedAt'), code.deleted_at ? format(new Date(code.deleted_at), 'dd.MM.yyyy HH:mm', { locale: de }) : '—'],
   ];
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.65)' }}>
       <div className="w-full max-w-md rounded-2xl p-6 space-y-4" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
         <div className="flex items-center justify-between">
-          <h3 className="font-bold" style={{ color: 'var(--text-primary)' }}>Code-Details</h3>
+          <h3 className="font-bold" style={{ color: 'var(--text-primary)' }}>{t('codes.details.title')}</h3>
           <button onClick={onClose} className="p-1.5 rounded-lg" style={{ color: 'var(--text-tertiary)' }}>
             <X size={16} />
           </button>
@@ -255,7 +281,7 @@ function DetailsModal({ code, onClose }: { code: ActivationCode; onClose: () => 
             className="px-4 py-2 rounded-xl text-sm font-semibold"
             style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
           >
-            Schließen
+            {t('common.close')}
           </button>
         </div>
       </div>
@@ -271,6 +297,7 @@ interface Props {
 
 export default function ActivationCodesManagement({ companies: propCompanies }: Props) {
   const { showToast } = useToast();
+  const { t } = useTranslation();
 
   const [codes, setCodes]       = useState<ActivationCode[]>([]);
   const [companies, setCompanies] = useState<CompanyOption[]>(propCompanies ?? []);
@@ -348,7 +375,7 @@ export default function ActivationCodesManagement({ companies: propCompanies }: 
         setCompanies(comps ?? []);
       }
     } catch (err: any) {
-      showToast('error', err.message || 'Fehler beim Laden');
+      showToast('error', err.message || t('common.errorLoad'));
     } finally {
       setLoading(false);
     }
@@ -411,7 +438,7 @@ export default function ActivationCodesManagement({ companies: propCompanies }: 
         }
       );
       const data = await res.json();
-      if (!data.success) throw new Error(data.error || 'Fehler bei der Code-Generierung');
+      if (!data.success) throw new Error(data.error || t('codes.generateFailed'));
 
       setGeneratedCode({ code: data.code, expiresAt: data.expires_at });
       setShowForm(false);
@@ -419,7 +446,7 @@ export default function ActivationCodesManagement({ companies: propCompanies }: 
       setFCustomDays(''); setFCustomDate('');
       load();
     } catch (err: any) {
-      showToast('error', err.message || 'Fehler');
+      showToast('error', err.message || t('common.error'));
     } finally {
       setGenerating(false);
     }
@@ -434,15 +461,15 @@ export default function ActivationCodesManagement({ companies: propCompanies }: 
       if (type === 'revoke') {
         const { data } = await supabase.rpc('revoke_activation_code', { p_code_id: code.id });
         const result = data as { success: boolean; error?: string };
-        if (!result?.success) throw new Error(result?.error ?? 'Fehler beim Widerrufen');
-        showToast('success', 'Code widerrufen');
+        if (!result?.success) throw new Error(result?.error ?? t('codes.revokeFailed'));
+        showToast('success', t('codes.revoked'));
       }
 
       if (type === 'delete') {
         const { data } = await supabase.rpc('delete_activation_code', { p_code_id: code.id });
         const result = data as { success: boolean; error?: string };
-        if (!result?.success) throw new Error(result?.error ?? 'Fehler beim Löschen');
-        showToast('success', 'Code gelöscht');
+        if (!result?.success) throw new Error(result?.error ?? t('common.errorDelete'));
+        showToast('success', t('codes.deleted'));
       }
 
       if (type === 'hide') {
@@ -451,15 +478,15 @@ export default function ActivationCodesManagement({ companies: propCompanies }: 
           p_reason: hideReason.trim() || null,
         });
         const result = data as { success: boolean; error?: string };
-        if (!result?.success) throw new Error(result?.error ?? 'Fehler beim Ausblenden');
-        showToast('success', 'Eintrag ausgeblendet');
+        if (!result?.success) throw new Error(result?.error ?? t('codes.hideFailed'));
+        showToast('success', t('codes.hidden'));
       }
 
       setConfirmAction(null);
       setHideReason('');
       load();
     } catch (err: any) {
-      showToast('error', err.message || 'Fehler');
+      showToast('error', err.message || t('common.error'));
     } finally {
       setActionInFlight(false);
     }
@@ -469,12 +496,14 @@ export default function ActivationCodesManagement({ companies: propCompanies }: 
 
   const durationPreview = () => {
     const base = new Date();
-    if (fDuration === '1_monat')  return `Gültig bis ${format(addMonths(base, 1), 'dd.MM.yyyy', { locale: de })}`;
-    if (fDuration === '3_monate') return `Gültig bis ${format(addMonths(base, 3), 'dd.MM.yyyy', { locale: de })}`;
-    if (fDuration === '1_jahr')   return `Gültig bis ${format(addYears(base, 1), 'dd.MM.yyyy', { locale: de })}`;
+    // Dates keep the German DD.MM.YYYY format in both languages — see src/i18n/index.ts.
+    const validUntil = (d: Date) => t('codes.validUntilDate', { date: format(d, 'dd.MM.yyyy', { locale: de }) });
+    if (fDuration === '1_monat')  return validUntil(addMonths(base, 1));
+    if (fDuration === '3_monate') return validUntil(addMonths(base, 3));
+    if (fDuration === '1_jahr')   return validUntil(addYears(base, 1));
     if (fDuration === 'benutzerdefiniert') {
-      if (fCustomMode === 'days' && fCustomDays) return `Gültig bis ${format(addDays(base, parseInt(fCustomDays)), 'dd.MM.yyyy', { locale: de })}`;
-      if (fCustomMode === 'date' && fCustomDate) return `Gültig bis ${format(new Date(fCustomDate), 'dd.MM.yyyy', { locale: de })}`;
+      if (fCustomMode === 'days' && fCustomDays) return validUntil(addDays(base, parseInt(fCustomDays)));
+      if (fCustomMode === 'date' && fCustomDate) return validUntil(new Date(fCustomDate));
     }
     return null;
   };
@@ -491,9 +520,9 @@ export default function ActivationCodesManagement({ companies: propCompanies }: 
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div className="flex items-center gap-2">
           <KeyRound size={18} style={{ color: 'var(--accent)' }} />
-          <h2 className="text-base font-semibold" style={{ color: 'var(--text-primary)' }}>Aktivierungscodes</h2>
+          <h2 className="text-base font-semibold" style={{ color: 'var(--text-primary)' }}>{t('codes.title')}</h2>
           <span className="text-xs px-2 py-0.5 rounded-full font-semibold" style={{ background: 'var(--accent-subtle)', color: 'var(--accent)' }}>
-            {tabCounts.active} aktiv
+            {t('codes.activeCount', { count: tabCounts.active })}
           </span>
         </div>
         <button
@@ -502,19 +531,19 @@ export default function ActivationCodesManagement({ companies: propCompanies }: 
           style={{ background: 'var(--accent)', color: '#fff' }}
         >
           {showForm ? <X size={14} /> : <Plus size={14} />}
-          {showForm ? 'Abbrechen' : 'Aktivierungscode erstellen'}
+          {showForm ? t('common.cancel') : t('codes.create')}
         </button>
       </div>
 
       {/* Generate form */}
       {showForm && (
         <div className="p-6 space-y-5" style={cardStyle}>
-          <h3 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>Neuen Code generieren</h3>
+          <h3 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>{t('codes.generateNew')}</h3>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-tertiary)' }}>
-                <Building2 size={10} className="inline mr-1" />Unternehmen (optional)
+                <Building2 size={10} className="inline mr-1" />{t('codes.field.companyOptional')}
               </label>
               <select
                 value={fCompanyId}
@@ -522,7 +551,7 @@ export default function ActivationCodesManagement({ companies: propCompanies }: 
                 className="w-full px-3 py-2.5 rounded-xl text-sm focus:outline-none"
                 style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
               >
-                <option value="">Generischer Code (kein Unternehmen)</option>
+                <option value="">{t('codes.genericCode')}</option>
                 {companies.map(c => (
                   <option key={c.id} value={c.id}>{c.name}</option>
                 ))}
@@ -531,13 +560,13 @@ export default function ActivationCodesManagement({ companies: propCompanies }: 
 
             <div>
               <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-tertiary)' }}>
-                <Mail size={10} className="inline mr-1" />E-Mail (optional)
+                <Mail size={10} className="inline mr-1" />{t('codes.field.emailOptional')}
               </label>
               <input
                 type="email"
                 value={fEmail}
                 onChange={e => setFEmail(e.target.value)}
-                placeholder="nutzerbindung@beispiel.de"
+                placeholder={t('codes.emailPlaceholder')}
                 className="w-full px-3 py-2.5 rounded-xl text-sm focus:outline-none"
                 style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
               />
@@ -545,7 +574,7 @@ export default function ActivationCodesManagement({ companies: propCompanies }: 
           </div>
 
           <div>
-            <label className="block text-xs font-semibold uppercase tracking-wider mb-2" style={{ color: 'var(--text-tertiary)' }}>Dauer</label>
+            <label className="block text-xs font-semibold uppercase tracking-wider mb-2" style={{ color: 'var(--text-tertiary)' }}>{t('codes.field.duration')}</label>
             <div className="flex gap-2 flex-wrap">
               {(['1_monat', '3_monate', '1_jahr', 'benutzerdefiniert'] as DurationType[]).map(d => (
                 <button
@@ -558,7 +587,7 @@ export default function ActivationCodesManagement({ companies: propCompanies }: 
                     : { background: 'var(--bg-subtle)', border: '1px solid var(--border)', color: 'var(--text-secondary)' }
                   }
                 >
-                  {DURATION_LABELS[d]}
+                  {t(DURATION_LABELS[d])}
                 </button>
               ))}
             </div>
@@ -578,25 +607,25 @@ export default function ActivationCodesManagement({ companies: propCompanies }: 
                       : { border: '1px solid var(--border)', color: 'var(--text-secondary)' }
                     }
                   >
-                    {m === 'days' ? 'Tage' : 'Ablaufdatum'}
+                    {m === 'days' ? t('codes.mode.days') : t('codes.mode.expiryDate')}
                   </button>
                 ))}
               </div>
               {fCustomMode === 'days' ? (
                 <div>
-                  <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-tertiary)' }}>Anzahl Tage</label>
+                  <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-tertiary)' }}>{t('codes.field.numberOfDays')}</label>
                   <input
                     type="number" min={1} max={3650}
                     value={fCustomDays}
                     onChange={e => setFCustomDays(e.target.value)}
-                    placeholder="z.B. 90"
+                    placeholder={t('codes.daysPlaceholder')}
                     className="w-32 px-3 py-2.5 rounded-xl text-sm focus:outline-none"
                     style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
                   />
                 </div>
               ) : (
                 <div>
-                  <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-tertiary)' }}>Ablaufdatum</label>
+                  <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-tertiary)' }}>{t('codes.mode.expiryDate')}</label>
                   <input
                     type="date"
                     value={fCustomDate}
@@ -623,7 +652,7 @@ export default function ActivationCodesManagement({ companies: propCompanies }: 
               className="px-4 py-2.5 rounded-xl text-sm font-semibold"
               style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
             >
-              Abbrechen
+              {t('common.cancel')}
             </button>
             <button
               onClick={handleGenerate}
@@ -632,7 +661,7 @@ export default function ActivationCodesManagement({ companies: propCompanies }: 
               style={{ background: 'var(--accent)', color: '#fff' }}
             >
               {generating ? <RefreshCw size={13} className="animate-spin" /> : <KeyRound size={13} />}
-              {generating ? 'Wird erstellt…' : 'Aktivierungscode erstellen'}
+              {generating ? t('codes.creating') : t('codes.create')}
             </button>
           </div>
         </div>
@@ -645,7 +674,7 @@ export default function ActivationCodesManagement({ companies: propCompanies }: 
             <div className="flex items-center gap-2">
               <KeyRound size={15} style={{ color: 'var(--text-tertiary)' }} />
               <h3 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
-                Code-Verlauf ({filteredCodes.length})
+                {t('codes.history', { count: filteredCodes.length })}
               </h3>
             </div>
             <button
@@ -671,7 +700,7 @@ export default function ActivationCodesManagement({ companies: propCompanies }: 
                   : { background: 'var(--bg-subtle)', border: '1px solid var(--border)', color: 'var(--text-secondary)' }
                 }
               >
-                {tab.label}
+                {t(tab.label)}
                 {tabCounts[tab.id] > 0 && (
                   <span
                     className="px-1.5 py-0.5 rounded-full text-[10px] font-bold leading-none"
@@ -695,15 +724,15 @@ export default function ActivationCodesManagement({ companies: propCompanies }: 
         ) : filteredCodes.length === 0 ? (
           <div className="py-10 text-center" style={{ color: 'var(--text-tertiary)' }}>
             <KeyRound size={32} className="mx-auto mb-3 opacity-30" />
-            <p className="text-sm">Keine Einträge für diesen Filter</p>
+            <p className="text-sm">{t('codes.noneForFilter')}</p>
           </div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr style={{ background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)' }}>
-                  {['Code', 'Unternehmen', 'E-Mail', 'Dauer', 'Status', 'Gültig bis', 'Verwendet am', 'Erstellt', 'Aktionen'].map(h => (
-                    <th key={h} className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wide whitespace-nowrap" style={{ color: 'var(--text-tertiary)' }}>{h}</th>
+                  {TABLE_HEADER_KEYS.map(key => (
+                    <th key={key} className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wide whitespace-nowrap" style={{ color: 'var(--text-tertiary)' }}>{t(key)}</th>
                   ))}
                 </tr>
               </thead>
@@ -730,12 +759,12 @@ export default function ActivationCodesManagement({ companies: propCompanies }: 
                         </span>
                         {isHidden && (
                           <span className="ml-1 text-[10px] px-1 py-0.5 rounded" style={{ background: 'rgba(148,163,184,0.15)', color: 'var(--text-tertiary)' }}>
-                            ausgeblendet
+                            {t('codes.badge.hidden')}
                           </span>
                         )}
                         {isDeleted && (
                           <span className="ml-1 text-[10px] px-1 py-0.5 rounded" style={{ background: 'rgba(239,68,68,0.1)', color: 'var(--danger)' }}>
-                            gelöscht
+                            {t('codes.badge.deleted')}
                           </span>
                         )}
                       </td>
@@ -759,8 +788,8 @@ export default function ActivationCodesManagement({ companies: propCompanies }: 
                       {/* Duration */}
                       <td className="px-4 py-3">
                         <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>
-                          {DURATION_LABELS[c.duration_type]}
-                          {c.custom_days && <span style={{ color: 'var(--text-tertiary)' }}> ({c.custom_days}T)</span>}
+                          {t(DURATION_LABELS[c.duration_type])}
+                          {c.custom_days && <span style={{ color: 'var(--text-tertiary)' }}> {t('codes.customDaysSuffix', { count: c.custom_days })}</span>}
                         </span>
                       </td>
 
@@ -769,7 +798,7 @@ export default function ActivationCodesManagement({ companies: propCompanies }: 
                         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold whitespace-nowrap"
                           style={{ background: st.bg, color: st.color }}>
                           <st.Icon size={10} />
-                          {st.label}
+                          {t(st.label)}
                         </span>
                       </td>
 
@@ -804,13 +833,13 @@ export default function ActivationCodesManagement({ companies: propCompanies }: 
                           {effectiveStatus === 'active' && isUnused && !isDeleted && !isHidden && (
                             <button
                               onClick={() => setConfirmAction({ type: 'revoke', code: c })}
-                              title="Widerrufen"
+                              title={t('codes.action.revoke')}
                               className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium transition-colors"
                               style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
                               onMouseEnter={e => { e.currentTarget.style.borderColor = '#ef4444'; e.currentTarget.style.color = '#ef4444'; }}
                               onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--text-secondary)'; }}
                             >
-                              <Ban size={11} />Widerrufen
+                              <Ban size={11} />{t('codes.action.revoke')}
                             </button>
                           )}
 
@@ -818,13 +847,13 @@ export default function ActivationCodesManagement({ companies: propCompanies }: 
                           {isUnused && !isDeleted && (
                             <button
                               onClick={() => setConfirmAction({ type: 'delete', code: c })}
-                              title="Löschen"
+                              title={t('common.delete')}
                               className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium transition-colors"
                               style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
                               onMouseEnter={e => { e.currentTarget.style.borderColor = '#ef4444'; e.currentTarget.style.color = '#ef4444'; }}
                               onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--text-secondary)'; }}
                             >
-                              <Trash2 size={11} />Löschen
+                              <Trash2 size={11} />{t('common.delete')}
                             </button>
                           )}
 
@@ -832,26 +861,26 @@ export default function ActivationCodesManagement({ companies: propCompanies }: 
                           {!isHidden && (
                             <button
                               onClick={() => { setHideReason(''); setConfirmAction({ type: 'hide', code: c }); }}
-                              title="Ausblenden"
+                              title={t('codes.action.hide')}
                               className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium transition-colors"
                               style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
                               onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--warning)'; e.currentTarget.style.color = 'var(--warning)'; }}
                               onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--text-secondary)'; }}
                             >
-                              <EyeOff size={11} />Ausblenden
+                              <EyeOff size={11} />{t('codes.action.hide')}
                             </button>
                           )}
 
                           {/* Details — always shown */}
                           <button
                             onClick={() => setDetailsCode(c)}
-                            title="Details"
+                            title={t('codes.action.details')}
                             className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium transition-colors"
                             style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
                             onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--accent)'; e.currentTarget.style.color = 'var(--accent)'; }}
                             onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--text-secondary)'; }}
                           >
-                            <Info size={11} />Details
+                            <Info size={11} />{t('codes.action.details')}
                           </button>
                         </div>
                       </td>
@@ -881,9 +910,9 @@ export default function ActivationCodesManagement({ companies: propCompanies }: 
       {/* Confirmation dialogs */}
       {confirmAction?.type === 'revoke' && (
         <ConfirmDialog
-          title="Aktivierungscode widerrufen?"
-          body="Dieser Code kann danach nicht mehr verwendet werden."
-          confirmLabel={actionInFlight ? 'Wird widerrufen…' : 'Widerrufen'}
+          title={t('codes.confirm.revokeTitle')}
+          body={t('codes.confirm.revokeBody')}
+          confirmLabel={actionInFlight ? t('codes.revoking') : t('codes.action.revoke')}
           confirmColor="#ef4444"
           onConfirm={executeAction}
           onCancel={() => setConfirmAction(null)}
@@ -892,9 +921,9 @@ export default function ActivationCodesManagement({ companies: propCompanies }: 
 
       {confirmAction?.type === 'delete' && (
         <ConfirmDialog
-          title="Aktivierungscode löschen?"
-          body="Unbenutzte Codes können gelöscht werden. Verwendete Codes werden aus Gründen der Nachvollziehbarkeit nicht endgültig gelöscht."
-          confirmLabel={actionInFlight ? 'Wird gelöscht…' : 'Löschen'}
+          title={t('codes.confirm.deleteTitle')}
+          body={t('codes.confirm.deleteBody')}
+          confirmLabel={actionInFlight ? t('codes.deleting') : t('common.delete')}
           confirmColor="#ef4444"
           onConfirm={executeAction}
           onCancel={() => setConfirmAction(null)}
@@ -903,22 +932,22 @@ export default function ActivationCodesManagement({ companies: propCompanies }: 
 
       {confirmAction?.type === 'hide' && (
         <ConfirmDialog
-          title="Eintrag ausblenden?"
-          body="Der Eintrag wird aus der Standardansicht entfernt, bleibt aber für Audit-Zwecke gespeichert."
-          confirmLabel={actionInFlight ? 'Wird ausgeblendet…' : 'Ausblenden'}
+          title={t('codes.confirm.hideTitle')}
+          body={t('codes.confirm.hideBody')}
+          confirmLabel={actionInFlight ? t('codes.hiding') : t('codes.action.hide')}
           confirmColor="#f59e0b"
           onConfirm={executeAction}
           onCancel={() => setConfirmAction(null)}
           extra={
             <div>
               <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-tertiary)' }}>
-                Grund (optional)
+                {t('codes.field.reasonOptional')}
               </label>
               <input
                 type="text"
                 value={hideReason}
                 onChange={e => setHideReason(e.target.value)}
-                placeholder="z.B. Stornierung auf Kundenwunsch"
+                placeholder={t('codes.reasonPlaceholder')}
                 className="w-full px-3 py-2 rounded-lg text-sm focus:outline-none"
                 style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
               />

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { X, Save, AlertCircle, DollarSign, Calendar, FileText } from 'lucide-react';
 import { SalaryPayment } from '../types/receipt';
 import { format } from 'date-fns';
+import { useTranslation } from '../contexts/LanguageContext';
 
 interface SalaryPaymentModalProps {
   isOpen: boolean;
@@ -31,6 +32,7 @@ const SalaryPaymentModal: React.FC<SalaryPaymentModalProps> = ({
   remainingBalance,
   payment,
 }) => {
+  const { t } = useTranslation();
   const [formData, setFormData] = useState({
     payment_type: 'cash' as 'cash' | 'bank',
     amount: '',
@@ -68,7 +70,7 @@ const SalaryPaymentModal: React.FC<SalaryPaymentModalProps> = ({
     const amount = parseFloat(formData.amount);
 
     if (isNaN(amount) || amount <= 0) {
-      setError('Bitte geben Sie einen gültigen Betrag ein');
+      setError(t('sal.payment.invalidAmount'));
       return;
     }
 
@@ -84,7 +86,7 @@ const SalaryPaymentModal: React.FC<SalaryPaymentModalProps> = ({
       });
       onClose();
     } catch (err: any) {
-      setError(err.message || 'Fehler beim Speichern der Zahlung');
+      setError(err.message || t('sal.payment.errorSave'));
     } finally {
       setLoading(false);
     }
@@ -98,7 +100,7 @@ const SalaryPaymentModal: React.FC<SalaryPaymentModalProps> = ({
         <div style={{ borderBottom: '1px solid var(--border)' }} className="p-6 flex items-center justify-between">
           <h2 style={{ color: 'var(--text-primary)' }} className="text-2xl font-bold flex items-center space-x-2">
             <DollarSign size={24} />
-            <span>{payment ? 'Zahlung bearbeiten' : 'Neue Zahlung'}</span>
+            <span>{payment ? t('sal.payment.editTitle') : t('sal.payment.newTitle')}</span>
           </h2>
           <button
             onClick={onClose}
@@ -121,14 +123,14 @@ const SalaryPaymentModal: React.FC<SalaryPaymentModalProps> = ({
           {!payment && (
             <div style={{ background: 'var(--accent-subtle)', border: '1px solid var(--accent)', borderRadius: '0.5rem', padding: '1rem' }}>
               <p style={{ color: 'var(--accent)', fontSize: '0.875rem' }}>
-                <span className="font-semibold">Restbetrag:</span> {remainingBalance.toFixed(2)} €
+                <span className="font-semibold">{t('sal.payment.remainingLabel')}</span> {remainingBalance.toFixed(2)} €
               </p>
             </div>
           )}
 
           <div>
             <label style={{ color: 'var(--text-secondary)' }} className="block text-sm font-medium mb-2">
-              Zahlungsart *
+              {t('sal.payment.type')} *
             </label>
             <select
               value={formData.payment_type}
@@ -137,14 +139,15 @@ const SalaryPaymentModal: React.FC<SalaryPaymentModalProps> = ({
               disabled={loading}
               required
             >
-              <option value="cash">Bargeld</option>
-              <option value="bank">Banküberweisung</option>
+              {/* The `value`s are the stored `salary_payments.payment_type`. */}
+              <option value="cash">{t('sal.payment.cash')}</option>
+              <option value="bank">{t('sal.payment.bankTransfer')}</option>
             </select>
           </div>
 
           <div>
             <label style={{ color: 'var(--text-secondary)' }} className="block text-sm font-medium mb-2">
-              Betrag (€) *
+              {t('sal.payment.amount')} *
             </label>
             <div className="space-y-2">
               <div className="relative">
@@ -170,7 +173,7 @@ const SalaryPaymentModal: React.FC<SalaryPaymentModalProps> = ({
                   onMouseLeave={e => (e.currentTarget.style.opacity = '1')}
                   disabled={loading}
                 >
-                  Restbetrag zahlen ({remainingBalance.toFixed(2)} €)
+                  {t('sal.payment.payRemaining', { amount: remainingBalance.toFixed(2) })}
                 </button>
               )}
             </div>
@@ -178,7 +181,7 @@ const SalaryPaymentModal: React.FC<SalaryPaymentModalProps> = ({
 
           <div>
             <label style={{ color: 'var(--text-secondary)' }} className="block text-sm font-medium mb-2">
-              Zahlungsdatum *
+              {t('sal.payment.date')} *
             </label>
             <div className="relative">
               <Calendar style={{ color: 'var(--text-tertiary)', position: 'absolute', left: '0.75rem', top: '50%', transform: 'translateY(-50%)' }} size={18} />
@@ -195,7 +198,7 @@ const SalaryPaymentModal: React.FC<SalaryPaymentModalProps> = ({
 
           <div>
             <label style={{ color: 'var(--text-secondary)' }} className="block text-sm font-medium mb-2">
-              Beschreibung
+              {t('common.description')}
             </label>
             <div className="relative">
               <FileText style={{ color: 'var(--text-tertiary)', position: 'absolute', left: '0.75rem', top: '0.75rem' }} size={18} />
@@ -203,7 +206,7 @@ const SalaryPaymentModal: React.FC<SalaryPaymentModalProps> = ({
                 value={formData.description}
                 onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                 style={{ ...inputStyle, paddingLeft: '2.25rem', resize: 'vertical' }}
-                placeholder="Optionale Notiz zur Zahlung"
+                placeholder={t('sal.payment.descriptionPlaceholder')}
                 rows={3}
                 disabled={loading}
               />
@@ -219,7 +222,7 @@ const SalaryPaymentModal: React.FC<SalaryPaymentModalProps> = ({
               onMouseLeave={e => (e.currentTarget.style.background = 'var(--bg-subtle)')}
               disabled={loading}
             >
-              Abbrechen
+              {t('common.cancel')}
             </button>
             <button
               type="submit"
@@ -230,7 +233,7 @@ const SalaryPaymentModal: React.FC<SalaryPaymentModalProps> = ({
               className="flex items-center space-x-2 disabled:opacity-50"
             >
               <Save size={20} />
-              <span>{loading ? 'Speichern...' : 'Speichern'}</span>
+              <span>{loading ? t('common.saving') : t('common.save')}</span>
             </button>
           </div>
         </form>

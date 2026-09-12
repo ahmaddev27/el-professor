@@ -3,6 +3,8 @@ import { Plus, CreditCard as Edit2, Trash2, ToggleLeft, ToggleRight, Tag, Chevro
 import ConfirmationModal from './ConfirmationModal';
 import { supabase } from '../lib/supabase';
 import { useToast } from '../contexts/ToastContext';
+import { useTranslation } from '../contexts/LanguageContext';
+import type { TranslationKey } from '../i18n';
 import { fmt as fmtPrice } from '../utils/pricing';
 import { format } from 'date-fns';
 import { de } from 'date-fns/locale';
@@ -76,6 +78,7 @@ interface ModalProps {
 
 const DiscountCodeModal: React.FC<ModalProps> = ({ dc, companies, onClose, onSaved }) => {
   const { showToast } = useToast();
+  const { t } = useTranslation();
   const [form, setForm] = useState(dc ? {
     code: dc.code,
     description: dc.description ?? '',
@@ -114,10 +117,10 @@ const DiscountCodeModal: React.FC<ModalProps> = ({ dc, companies, onClose, onSav
   const set = (k: string, v: unknown) => setForm(f => ({ ...f, [k]: v }));
 
   const handleSave = async () => {
-    if (!form.code.trim()) { showToast('error', 'Bitte Code eingeben.'); return; }
-    if (form.discount_value <= 0) { showToast('error', 'Rabattwert muss > 0 sein.'); return; }
+    if (!form.code.trim()) { showToast('error', t('codes.discount.enterCode')); return; }
+    if (form.discount_value <= 0) { showToast('error', t('codes.discount.valuePositive')); return; }
     if (form.discount_type === 'percentage' && form.discount_value > 100) {
-      showToast('error', 'Prozentwert darf max. 100 sein.'); return;
+      showToast('error', t('codes.discount.percentMax')); return;
     }
     setSaving(true);
     const payload = {
@@ -142,7 +145,7 @@ const DiscountCodeModal: React.FC<ModalProps> = ({ dc, companies, onClose, onSav
       : await supabase.from('discount_codes').insert(payload);
     setSaving(false);
     if (error) { showToast('error', error.message); return; }
-    showToast('success', dc ? 'Rabattcode aktualisiert.' : 'Rabattcode erstellt.');
+    showToast('success', dc ? t('codes.discount.updated') : t('codes.discount.created'));
     onSaved();
     onClose();
   };
@@ -155,7 +158,7 @@ const DiscountCodeModal: React.FC<ModalProps> = ({ dc, companies, onClose, onSav
       <div className="w-full max-w-xl max-h-[90vh] overflow-y-auto rounded-2xl shadow-2xl" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
         <div className="flex items-center justify-between px-6 py-4 border-b" style={{ borderColor: 'var(--border)' }}>
           <h2 className="font-bold text-lg" style={{ color: 'var(--text-primary)' }}>
-            {dc ? 'Rabattcode bearbeiten' : 'Neuer Rabattcode'}
+            {dc ? t('codes.discount.edit') : t('codes.discount.new')}
           </h2>
           <button onClick={onClose} className="p-1.5 rounded-lg hover:opacity-70 transition-opacity" style={{ color: 'var(--text-secondary)' }}>
             <X size={18} />
@@ -165,27 +168,27 @@ const DiscountCodeModal: React.FC<ModalProps> = ({ dc, companies, onClose, onSav
           {/* Code + Description */}
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-secondary)' }}>Code *</label>
+              <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-secondary)' }}>{t('codes.discount.codeRequired')}</label>
               <input className={inputCls} style={fieldStyle} value={form.code} onChange={e => set('code', e.target.value.toUpperCase())} placeholder="WELCOME10" />
             </div>
             <div>
-              <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-secondary)' }}>Beschreibung</label>
-              <input className={inputCls} style={fieldStyle} value={form.description ?? ''} onChange={e => set('description', e.target.value)} placeholder="Optionale Beschreibung" />
+              <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-secondary)' }}>{t('common.description')}</label>
+              <input className={inputCls} style={fieldStyle} value={form.description ?? ''} onChange={e => set('description', e.target.value)} placeholder={t('codes.discount.descPlaceholder')} />
             </div>
           </div>
 
           {/* Discount type + value */}
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-secondary)' }}>Rabattart</label>
+              <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-secondary)' }}>{t('codes.discount.type')}</label>
               <select className={inputCls} style={fieldStyle} value={form.discount_type} onChange={e => set('discount_type', e.target.value)}>
-                <option value="percentage">Prozent (%)</option>
-                <option value="fixed">Festbetrag (€)</option>
+                <option value="percentage">{t('codes.discount.percentOption')}</option>
+                <option value="fixed">{t('codes.discount.fixedOption')}</option>
               </select>
             </div>
             <div>
               <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-secondary)' }}>
-                Rabattwert {form.discount_type === 'percentage' ? '(%)' : '(€)'}
+                {t('codes.discount.value')} {form.discount_type === 'percentage' ? '(%)' : '(€)'}
               </label>
               <input type="number" min={0} max={form.discount_type === 'percentage' ? 100 : undefined} step="0.01"
                 className={inputCls} style={fieldStyle}
@@ -197,17 +200,17 @@ const DiscountCodeModal: React.FC<ModalProps> = ({ dc, companies, onClose, onSav
           {/* Usage mode + Audience type */}
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-secondary)' }}>Nutzung</label>
+              <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-secondary)' }}>{t('codes.discount.usage')}</label>
               <select className={inputCls} style={fieldStyle} value={form.usage_mode} onChange={e => set('usage_mode', e.target.value)}>
-                <option value="once">Einmalig</option>
-                <option value="monthly">Monatlich wiederkehrend</option>
+                <option value="once">{t('codes.discount.once')}</option>
+                <option value="monthly">{t('codes.discount.monthlyRecurring')}</option>
               </select>
             </div>
             <div>
-              <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-secondary)' }}>Zielgruppe</label>
+              <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-secondary)' }}>{t('codes.discount.audience')}</label>
               <select className={inputCls} style={fieldStyle} value={form.audience_type} onChange={e => set('audience_type', e.target.value)}>
-                <option value="multiple">Mehrere Firmen</option>
-                <option value="single">Eine Firma</option>
+                <option value="multiple">{t('codes.discount.multipleCompanies')}</option>
+                <option value="single">{t('codes.discount.singleCompany')}</option>
               </select>
             </div>
           </div>
@@ -215,29 +218,29 @@ const DiscountCodeModal: React.FC<ModalProps> = ({ dc, companies, onClose, onSav
           {/* Assigned company (single) + max redemptions (multiple) */}
           {form.audience_type === 'single' && (
             <div>
-              <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-secondary)' }}>Zugewiesene Firma (optional)</label>
+              <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-secondary)' }}>{t('codes.discount.assignedCompany')}</label>
               <select className={inputCls} style={fieldStyle} value={form.assigned_company_id ?? ''} onChange={e => set('assigned_company_id', e.target.value)}>
-                <option value="">— Erste einlösende Firma —</option>
+                <option value="">{t('codes.discount.firstRedeemer')}</option>
                 {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
             </div>
           )}
           {form.audience_type === 'multiple' && (
             <div>
-              <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-secondary)' }}>Maximale Nutzungen (leer = unbegrenzt)</label>
+              <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-secondary)' }}>{t('codes.discount.maxRedemptions')}</label>
               <input type="number" min={1} className={inputCls} style={fieldStyle}
-                value={form.max_redemptions} onChange={e => set('max_redemptions', e.target.value)} placeholder="z.B. 100" />
+                value={form.max_redemptions} onChange={e => set('max_redemptions', e.target.value)} placeholder={t('codes.discount.maxPlaceholder')} />
             </div>
           )}
 
           {/* Validity dates */}
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-secondary)' }}>Gültig von</label>
+              <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-secondary)' }}>{t('codes.discount.validFrom')}</label>
               <input type="date" className={inputCls} style={fieldStyle} value={form.valid_from ?? ''} onChange={e => set('valid_from', e.target.value)} />
             </div>
             <div>
-              <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-secondary)' }}>Gültig bis</label>
+              <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-secondary)' }}>{t('codes.col.validUntil')}</label>
               <input type="date" className={inputCls} style={fieldStyle} value={form.valid_until ?? ''} onChange={e => set('valid_until', e.target.value)} />
             </div>
           </div>
@@ -245,20 +248,21 @@ const DiscountCodeModal: React.FC<ModalProps> = ({ dc, companies, onClose, onSav
           {/* Plan + billing cycle filters */}
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-secondary)' }}>Gültig für Tarif</label>
+              <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-secondary)' }}>{t('codes.discount.validForPlan')}</label>
               <select className={inputCls} style={fieldStyle} value={form.applies_to_plan} onChange={e => set('applies_to_plan', e.target.value)}>
-                <option value="all">Alle Tarife</option>
+                <option value="all">{t('codes.discount.allPlans')}</option>
+                {/* Plan tier names are product names, identical in both languages. */}
                 <option value="basic">Basic</option>
                 <option value="advanced">Advanced</option>
                 <option value="premium">Premium</option>
               </select>
             </div>
             <div>
-              <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-secondary)' }}>Gültig für Abrechnung</label>
+              <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-secondary)' }}>{t('codes.discount.validForCycle')}</label>
               <select className={inputCls} style={fieldStyle} value={form.applies_to_billing_cycle} onChange={e => set('applies_to_billing_cycle', e.target.value)}>
-                <option value="all">Monatlich & Jährlich</option>
-                <option value="monthly">Nur monatlich</option>
-                <option value="yearly">Nur jährlich</option>
+                <option value="all">{t('codes.discount.monthlyAndYearly')}</option>
+                <option value="monthly">{t('codes.discount.monthlyOnly')}</option>
+                <option value="yearly">{t('codes.discount.yearlyOnly')}</option>
               </select>
             </div>
           </div>
@@ -266,12 +270,12 @@ const DiscountCodeModal: React.FC<ModalProps> = ({ dc, companies, onClose, onSav
           {/* Car limits */}
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-secondary)' }}>Mindestanzahl Fahrzeuge</label>
+              <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-secondary)' }}>{t('codes.discount.minCars')}</label>
               <input type="number" min={1} className={inputCls} style={fieldStyle}
                 value={form.min_cars} onChange={e => set('min_cars', e.target.value)} placeholder="—" />
             </div>
             <div>
-              <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-secondary)' }}>Maximale Anzahl Fahrzeuge</label>
+              <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-secondary)' }}>{t('codes.discount.maxCars')}</label>
               <input type="number" min={1} className={inputCls} style={fieldStyle}
                 value={form.max_cars} onChange={e => set('max_cars', e.target.value)} placeholder="—" />
             </div>
@@ -286,15 +290,15 @@ const DiscountCodeModal: React.FC<ModalProps> = ({ dc, companies, onClose, onSav
             >
               <div className="absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform" style={{ transform: form.active ? 'translateX(20px)' : 'translateX(0)' }} />
             </div>
-            <span className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>Aktiv</span>
+            <span className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>{t('codes.status.active')}</span>
           </label>
         </div>
         <div className="flex justify-end gap-3 px-6 py-4 border-t" style={{ borderColor: 'var(--border)' }}>
           <button onClick={onClose} className="px-4 py-2 rounded-lg text-sm font-medium transition-opacity hover:opacity-70" style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)' }}>
-            Abbrechen
+            {t('common.cancel')}
           </button>
           <button onClick={handleSave} disabled={saving} className="px-5 py-2 rounded-lg text-sm font-semibold text-white transition-all disabled:opacity-50" style={{ background: 'var(--accent)' }}>
-            {saving ? 'Speichern…' : 'Speichern'}
+            {saving ? t('common.saving') : t('common.save')}
           </button>
         </div>
       </div>
@@ -305,6 +309,7 @@ const DiscountCodeModal: React.FC<ModalProps> = ({ dc, companies, onClose, onSav
 // ─── Redemptions popover ──────────────────────────────────────────────────────
 
 const RedemptionsPanel: React.FC<{ codeId: string }> = ({ codeId }) => {
+  const { t } = useTranslation();
   const [rows, setRows] = useState<Redemption[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -321,19 +326,19 @@ const RedemptionsPanel: React.FC<{ codeId: string }> = ({ codeId }) => {
     })();
   }, [codeId]);
 
-  if (loading) return <p className="text-xs text-center py-3" style={{ color: 'var(--text-tertiary)' }}>Laden…</p>;
-  if (!rows.length) return <p className="text-xs text-center py-3" style={{ color: 'var(--text-tertiary)' }}>Noch keine Einlösungen.</p>;
+  if (loading) return <p className="text-xs text-center py-3" style={{ color: 'var(--text-tertiary)' }}>{t('common.loading')}</p>;
+  if (!rows.length) return <p className="text-xs text-center py-3" style={{ color: 'var(--text-tertiary)' }}>{t('codes.discount.noRedemptions')}</p>;
 
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-xs">
         <thead>
           <tr style={{ color: 'var(--text-tertiary)' }}>
-            <th className="text-left py-1.5 pr-3 font-semibold">Firma</th>
-            <th className="text-left py-1.5 pr-3 font-semibold">Tarif</th>
-            <th className="text-right py-1.5 pr-3 font-semibold">Original</th>
-            <th className="text-right py-1.5 pr-3 font-semibold">Rabatt</th>
-            <th className="text-right py-1.5 font-semibold">Endpreis</th>
+            <th className="text-left py-1.5 pr-3 font-semibold">{t('codes.col.firm')}</th>
+            <th className="text-left py-1.5 pr-3 font-semibold">{t('codes.col.plan')}</th>
+            <th className="text-right py-1.5 pr-3 font-semibold">{t('codes.col.original')}</th>
+            <th className="text-right py-1.5 pr-3 font-semibold">{t('codes.col.discount')}</th>
+            <th className="text-right py-1.5 font-semibold">{t('codes.col.finalPrice')}</th>
           </tr>
         </thead>
         <tbody>
@@ -354,8 +359,22 @@ const RedemptionsPanel: React.FC<{ codeId: string }> = ({ codeId }) => {
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
+// Holds TranslationKeys: this list is module-level and t() is a hook value.
+const TABLE_HEADER_KEYS: TranslationKey[] = [
+  'codes.col.code',
+  'codes.discount.type',
+  'common.value',
+  'codes.discount.usage',
+  'codes.discount.audience',
+  'codes.col.validity',
+  'codes.col.usages',
+  'codes.status.active',
+  'codes.col.actions',
+];
+
 const DiscountCodesManagement: React.FC = () => {
   const { showToast } = useToast();
+  const { t, tPlural } = useTranslation();
   const [codes, setCodes] = useState<DiscountCode[]>([]);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [loading, setLoading] = useState(true);
@@ -393,7 +412,7 @@ const DiscountCodesManagement: React.FC = () => {
     const { error } = await supabase.from('discount_codes').delete().eq('id', dc.id);
     if (error) { showToast('error', error.message); return; }
     setCodes(prev => prev.filter(c => c.id !== dc.id));
-    showToast('success', 'Rabattcode gelöscht.');
+    showToast('success', t('codes.discount.deleted'));
   };
 
   const formatDate = (iso: string | null) => iso ? format(new Date(iso), 'dd.MM.yy', { locale: de }) : '—';
@@ -403,11 +422,21 @@ const DiscountCodesManagement: React.FC = () => {
       ? `${dc.discount_value}%`
       : `${fmtPrice(dc.discount_value)} €`;
 
-  const usageModeLabel = (mode: string) => mode === 'once' ? 'Einmalig' : 'Monatlich';
-  const audienceLabel = (type: string) => type === 'single' ? 'Eine Firma' : 'Mehrere Firmen';
+  const usageModeLabel = (mode: string) =>
+    mode === 'once' ? t('codes.discount.once') : t('codes.discount.monthly');
+  const audienceLabel = (type: string) =>
+    type === 'single' ? t('codes.discount.singleCompany') : t('codes.discount.multipleCompanies');
 
-  const planLabel = (v: string) => ({ all: 'Alle', basic: 'Basic', advanced: 'Advanced', premium: 'Premium' }[v] ?? v);
-  const cycleLabel = (v: string) => ({ all: 'Alle', monthly: 'Monatlich', yearly: 'Jährlich' }[v] ?? v);
+  // The keys of these maps are the stored plan / billing-cycle values — only the
+  // label is translated, never the value compared against the database.
+  const planLabel = (v: string) => {
+    const labels: Record<string, string> = { all: t('common.all'), basic: 'Basic', advanced: 'Advanced', premium: 'Premium' };
+    return labels[v] ?? v;
+  };
+  const cycleLabel = (v: string) => {
+    const labels: Record<string, string> = { all: t('common.all'), monthly: t('codes.discount.monthly'), yearly: t('codes.discount.yearly') };
+    return labels[v] ?? v;
+  };
 
   return (
     <div className="space-y-6">
@@ -419,9 +448,11 @@ const DiscountCodesManagement: React.FC = () => {
             <Tag className="text-cyan-400" size={28} />
           </div>
           <div>
-            <h1 className="text-2xl font-bold text-white">Rabattcodes</h1>
+            <h1 className="text-2xl font-bold text-white">{t('codes.discount.title')}</h1>
             <p className="text-sm" style={{ color: 'rgba(255,255,255,0.45)' }}>
-              {codes.length} Code{codes.length !== 1 ? 's' : ''} · {codes.filter(c => c.active).length} aktiv
+              {tPlural({ one: 'codes.countCode.one', other: 'codes.countCode.other' }, codes.length)}
+              {' · '}
+              {t('codes.activeCount', { count: codes.filter(c => c.active).length })}
             </p>
           </div>
         </div>
@@ -431,26 +462,26 @@ const DiscountCodesManagement: React.FC = () => {
           style={{ background: 'var(--accent)' }}
         >
           <Plus size={16} />
-          Neuer Rabattcode
+          {t('codes.discount.new')}
         </button>
       </div>
 
       {/* Table */}
       <div className="rounded-xl overflow-hidden" style={{ background: 'var(--bg-surface)', boxShadow: 'var(--shadow-md)', border: '1px solid var(--border)' }}>
         {loading ? (
-          <div className="py-16 text-center" style={{ color: 'var(--text-tertiary)' }}>Laden…</div>
+          <div className="py-16 text-center" style={{ color: 'var(--text-tertiary)' }}>{t('common.loading')}</div>
         ) : codes.length === 0 ? (
           <div className="py-16 text-center">
             <Tag size={40} className="mx-auto mb-3 opacity-20" style={{ color: 'var(--text-tertiary)' }} />
-            <p style={{ color: 'var(--text-tertiary)' }}>Noch keine Rabattcodes erstellt.</p>
+            <p style={{ color: 'var(--text-tertiary)' }}>{t('codes.discount.none')}</p>
           </div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead style={{ background: 'var(--bg-subtle)' }}>
                 <tr>
-                  {['Code', 'Rabattart', 'Wert', 'Nutzung', 'Zielgruppe', 'Gültigkeit', 'Nutzungen', 'Aktiv', 'Aktionen'].map(h => (
-                    <th key={h} className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-secondary)' }}>{h}</th>
+                  {TABLE_HEADER_KEYS.map(key => (
+                    <th key={key} className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-secondary)' }}>{t(key)}</th>
                   ))}
                 </tr>
               </thead>
@@ -470,7 +501,7 @@ const DiscountCodesManagement: React.FC = () => {
                           )}
                           {(dc.min_cars || dc.max_cars) && (
                             <span className="text-[10px] px-1.5 py-0.5 rounded font-semibold" style={{ background: 'var(--bg-muted)', color: 'var(--text-tertiary)' }}>
-                              {dc.min_cars ?? '1'}–{dc.max_cars ?? '∞'} Fz.
+                              {t('codes.discount.carsRange', { min: dc.min_cars ?? '1', max: dc.max_cars ?? '∞' })}
                             </span>
                           )}
                         </div>
@@ -481,14 +512,14 @@ const DiscountCodesManagement: React.FC = () => {
                             ? { background: 'rgba(6,182,212,0.1)', color: '#22d3ee' }
                             : { background: 'rgba(251,191,36,0.1)', color: '#fbbf24' }}>
                           {dc.discount_type === 'percentage' ? <Percent size={10} /> : <Euro size={10} />}
-                          {dc.discount_type === 'percentage' ? 'Prozent' : 'Festbetrag'}
+                          {dc.discount_type === 'percentage' ? t('codes.discount.percent') : t('codes.discount.fixed')}
                         </span>
                       </td>
                       <td className="px-4 py-3 font-bold text-sm" style={{ color: 'var(--text-primary)' }}>{discountLabel(dc)}</td>
                       <td className="px-4 py-3 text-xs" style={{ color: 'var(--text-secondary)' }}>{usageModeLabel(dc.usage_mode)}</td>
                       <td className="px-4 py-3 text-xs" style={{ color: 'var(--text-secondary)' }}>
                         <div>{audienceLabel(dc.audience_type)}</div>
-                        {dc.max_redemptions && <div className="text-[11px]" style={{ color: 'var(--text-tertiary)' }}>max. {dc.max_redemptions}</div>}
+                        {dc.max_redemptions && <div className="text-[11px]" style={{ color: 'var(--text-tertiary)' }}>{t('codes.discount.maxShort', { count: dc.max_redemptions })}</div>}
                       </td>
                       <td className="px-4 py-3 text-xs" style={{ color: 'var(--text-secondary)' }}>
                         <div>{formatDate(dc.valid_from)} – {formatDate(dc.valid_until)}</div>
@@ -517,7 +548,7 @@ const DiscountCodesManagement: React.FC = () => {
                             onClick={() => setModalDc(dc)}
                             className="p-1.5 rounded-lg transition-opacity hover:opacity-70"
                             style={{ color: 'var(--accent)' }}
-                            title="Bearbeiten"
+                            title={t('common.edit')}
                           >
                             <Edit2 size={15} />
                           </button>
@@ -525,7 +556,7 @@ const DiscountCodesManagement: React.FC = () => {
                             onClick={() => handleDelete(dc)}
                             className="p-1.5 rounded-lg transition-opacity hover:opacity-70"
                             style={{ color: 'var(--danger)' }}
-                            title="Löschen"
+                            title={t('common.delete')}
                           >
                             <Trash2 size={15} />
                           </button>
@@ -535,7 +566,7 @@ const DiscountCodesManagement: React.FC = () => {
                     {expanded === dc.id && (
                       <tr>
                         <td colSpan={9} className="px-6 py-4" style={{ background: 'var(--bg-subtle)' }}>
-                          <p className="text-xs font-semibold uppercase tracking-wider mb-3" style={{ color: 'var(--text-secondary)' }}>Einlösungen</p>
+                          <p className="text-xs font-semibold uppercase tracking-wider mb-3" style={{ color: 'var(--text-secondary)' }}>{t('codes.discount.redemptions')}</p>
                           <RedemptionsPanel codeId={dc.id} />
                         </td>
                       </tr>
@@ -561,11 +592,11 @@ const DiscountCodesManagement: React.FC = () => {
         isOpen={deleteConfirm.open}
         onClose={() => setDeleteConfirm({ open: false, dc: null })}
         onConfirm={confirmDelete}
-        title="Rabattcode löschen"
-        message={`Rabattcode "${deleteConfirm.dc?.code ?? ''}" wirklich löschen?`}
+        title={t('codes.discount.deleteTitle')}
+        message={t('codes.discount.deleteConfirm', { code: deleteConfirm.dc?.code ?? '' })}
         type="confirm"
-        confirmText="Löschen"
-        cancelText="Abbrechen"
+        confirmText={t('common.delete')}
+        cancelText={t('common.cancel')}
       />
     </div>
   );

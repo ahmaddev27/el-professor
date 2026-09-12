@@ -109,7 +109,7 @@ export default function BargeldbestandPage() {
       setTransactions(allTransactions);
 
       const uniqueDrivers = Array.from(
-        new Set(allTransactions.map(t => t.driver_name).filter(Boolean))
+        new Set(allTransactions.map(tx => tx.driver_name).filter(Boolean))
       ) as string[];
       setDrivers(uniqueDrivers.sort());
 
@@ -123,10 +123,10 @@ export default function BargeldbestandPage() {
 
   function applyFilters() {
     let filtered = [...transactions];
-    if (selectedDriver !== 'all') filtered = filtered.filter(t => t.driver_name === selectedDriver);
-    if (selectedType !== 'all') filtered = filtered.filter(t => t.type === selectedType);
-    if (startDate) filtered = filtered.filter(t => t.date >= startDate);
-    if (endDate) filtered = filtered.filter(t => t.date <= endDate);
+    if (selectedDriver !== 'all') filtered = filtered.filter(tx => tx.driver_name === selectedDriver);
+    if (selectedType !== 'all') filtered = filtered.filter(tx => tx.type === selectedType);
+    if (startDate) filtered = filtered.filter(tx => tx.date >= startDate);
+    if (endDate) filtered = filtered.filter(tx => tx.date <= endDate);
     setFilteredTransactions(filtered);
   }
 
@@ -144,8 +144,8 @@ export default function BargeldbestandPage() {
     if (startDate) filters.push(`Von: ${new Date(startDate).toLocaleDateString('de-DE')}`);
     if (endDate) filters.push(`Bis: ${new Date(endDate).toLocaleDateString('de-DE')}`);
 
-    const totalIncome = filteredTransactions.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0);
-    const totalExpense = filteredTransactions.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0);
+    const totalIncome = filteredTransactions.filter(tx => tx.type === 'income').reduce((sum, tx) => sum + tx.amount, 0);
+    const totalExpense = filteredTransactions.filter(tx => tx.type === 'expense').reduce((sum, tx) => sum + tx.amount, 0);
 
     exportTableToExcel({
       filename: `bargeldbestand_${selectedMonth}`,
@@ -154,7 +154,7 @@ export default function BargeldbestandPage() {
       filterSummary: filters,
       columns: [
         { key: 'date',        label: t('common.date'),        width: 14, format: v => new Date(v as string).toLocaleDateString('de-DE') },
-        { key: 'type',        label: 'Typ',          width: 14, format: v => v === 'income' ? t('bargeld.incomeCol') : t('bargeld.expenseCol') },
+        { key: 'type',        label: t('fleet.typeColumn'),    width: 14, format: v => v === 'income' ? t('bargeld.incomeCol') : t('bargeld.expenseCol') },
         { key: 'driver_name', label: t('common.driver'),        width: 22 },
         { key: 'description', label: t('common.description'),  width: 36 },
         { key: 'amount',      label: t('bargeld.amountEuro'),    width: 16, align: 'right', format: v => (v as number).toFixed(2) },

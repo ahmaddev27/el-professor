@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { useToast } from '../contexts/ToastContext';
+import { useTranslation } from '../contexts/LanguageContext';
+import type { TranslationKey } from '../i18n';
 import { X, RefreshCw, PencilLine } from 'lucide-react';
 import { format } from 'date-fns';
-import { de } from 'date-fns/locale';
 
 type SubStatus = 'inactive' | 'active' | 'expired' | 'suspended';
 
@@ -22,19 +23,21 @@ interface Props {
   onSaved: () => void;
 }
 
-const STATUS_OPTIONS: { value: SubStatus; label: string }[] = [
-  { value: 'inactive',  label: 'Inaktiv' },
-  { value: 'active',    label: 'Aktiv' },
-  { value: 'expired',   label: 'Abgelaufen' },
-  { value: 'suspended', label: 'Gesperrt' },
+// `label` holds a TranslationKey: these lists are module-level and t() is a hook
+// value. `value` is the status/duration as stored in the database — never translated.
+const STATUS_OPTIONS: { value: SubStatus; label: TranslationKey }[] = [
+  { value: 'inactive',  label: 'bill.subStatus.inactive' },
+  { value: 'active',    label: 'bill.subStatus.active' },
+  { value: 'expired',   label: 'bill.subStatus.expired' },
+  { value: 'suspended', label: 'bill.subStatus.suspended' },
 ];
 
-const DURATION_OPTIONS = [
-  { value: '',              label: 'Keine Angabe' },
-  { value: '1_monat',       label: '1 Monat' },
-  { value: '3_monate',      label: '3 Monate' },
-  { value: '1_jahr',        label: '1 Jahr' },
-  { value: 'benutzerdefiniert', label: 'Benutzerdefiniert' },
+const DURATION_OPTIONS: { value: string; label: TranslationKey }[] = [
+  { value: '',                  label: 'bill.duration.none' },
+  { value: '1_monat',           label: 'activation.duration.1month' },
+  { value: '3_monate',          label: 'activation.duration.3months' },
+  { value: '1_jahr',            label: 'activation.duration.1year' },
+  { value: 'benutzerdefiniert', label: 'activation.custom' },
 ];
 
 function toDateInputValue(iso: string | null | undefined): string {
@@ -44,6 +47,7 @@ function toDateInputValue(iso: string | null | undefined): string {
 
 export default function ManualSubscriptionModal({ company, onClose, onSaved }: Props) {
   const { showToast } = useToast();
+  const { t } = useTranslation();
 
   const [status, setStatus]         = useState<SubStatus>((company.subscription_status as SubStatus) || 'inactive');
   const [startedAt, setStartedAt]   = useState(toDateInputValue(company.subscription_started_at));
@@ -64,12 +68,12 @@ export default function ManualSubscriptionModal({ company, onClose, onSaved }: P
         p_reason:                    reason.trim() || null,
       });
       const result = data as { success: boolean; error?: string };
-      if (!result?.success) throw new Error(result?.error ?? 'Fehler beim Speichern');
-      showToast('success', 'Abonnement aktualisiert');
+      if (!result?.success) throw new Error(result?.error ?? t('bill.saveFailed'));
+      showToast('success', t('bill.subUpdated'));
       onSaved();
       onClose();
     } catch (err: any) {
-      showToast('error', err.message || 'Fehler');
+      showToast('error', err.message || t('common.error'));
     } finally {
       setSaving(false);
     }
@@ -85,7 +89,7 @@ export default function ManualSubscriptionModal({ company, onClose, onSaved }: P
               <PencilLine size={15} style={{ color: 'var(--accent)' }} />
             </div>
             <div>
-              <h3 className="font-bold text-sm" style={{ color: 'var(--text-primary)' }}>Abo manuell bearbeiten</h3>
+              <h3 className="font-bold text-sm" style={{ color: 'var(--text-primary)' }}>{t('bill.manual.title')}</h3>
               <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>{company.name}</p>
             </div>
           </div>
@@ -100,7 +104,7 @@ export default function ManualSubscriptionModal({ company, onClose, onSaved }: P
           {/* Abo-Status */}
           <div>
             <label className="block text-xs font-semibold uppercase tracking-wider mb-2" style={{ color: 'var(--text-tertiary)' }}>
-              Abo-Status
+              {t('bill.field.subStatus')}
             </label>
             <div className="flex gap-2 flex-wrap">
               {STATUS_OPTIONS.map(opt => (
@@ -114,7 +118,7 @@ export default function ManualSubscriptionModal({ company, onClose, onSaved }: P
                     : { background: 'var(--bg-subtle)', border: '1px solid var(--border)', color: 'var(--text-secondary)' }
                   }
                 >
-                  {opt.label}
+                  {t(opt.label)}
                 </button>
               ))}
             </div>
@@ -123,7 +127,7 @@ export default function ManualSubscriptionModal({ company, onClose, onSaved }: P
           {/* Aktiv seit */}
           <div>
             <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-tertiary)' }}>
-              Aktiv seit
+              {t('bill.field.activeSince')}
             </label>
             <input
               type="date"
@@ -137,7 +141,7 @@ export default function ManualSubscriptionModal({ company, onClose, onSaved }: P
           {/* Aktiv bis */}
           <div>
             <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-tertiary)' }}>
-              Aktiv bis
+              {t('bill.field.activeUntil')}
             </label>
             <input
               type="date"
@@ -151,7 +155,7 @@ export default function ManualSubscriptionModal({ company, onClose, onSaved }: P
           {/* Laufzeit */}
           <div>
             <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-tertiary)' }}>
-              Laufzeit (optional)
+              {t('bill.field.termOptional')}
             </label>
             <select
               value={durationType}
@@ -160,7 +164,7 @@ export default function ManualSubscriptionModal({ company, onClose, onSaved }: P
               style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
             >
               {DURATION_OPTIONS.map(opt => (
-                <option key={opt.value} value={opt.value}>{opt.label}</option>
+                <option key={opt.value} value={opt.value}>{t(opt.label)}</option>
               ))}
             </select>
           </div>
@@ -168,20 +172,20 @@ export default function ManualSubscriptionModal({ company, onClose, onSaved }: P
           {/* Änderungsgrund */}
           <div>
             <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-tertiary)' }}>
-              Änderungsgrund (optional)
+              {t('bill.field.changeReason')}
             </label>
             <input
               type="text"
               value={reason}
               onChange={e => setReason(e.target.value)}
-              placeholder="z.B. Manuelle Verlängerung nach Absprache"
+              placeholder={t('bill.manual.reasonPlaceholder')}
               className="w-full px-3 py-2.5 rounded-xl text-sm focus:outline-none"
               style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
             />
           </div>
 
           <p className="text-[11px] p-3 rounded-xl" style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.2)', color: 'var(--text-secondary)' }}>
-            Diese Änderung überschreibt die aktuellen Abo-Felder direkt. Aktivierungscode-Hashes werden nicht verändert. Alle Änderungen werden protokolliert.
+            {t('bill.manual.warning')}
           </p>
         </div>
 
@@ -192,7 +196,7 @@ export default function ManualSubscriptionModal({ company, onClose, onSaved }: P
             className="px-4 py-2.5 rounded-xl text-sm font-semibold"
             style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
           >
-            Abbrechen
+            {t('common.cancel')}
           </button>
           <button
             onClick={handleSave}
@@ -201,7 +205,7 @@ export default function ManualSubscriptionModal({ company, onClose, onSaved }: P
             style={{ background: 'linear-gradient(135deg, #06b6d4, #3b82f6)', color: '#fff' }}
           >
             {saving ? <RefreshCw size={13} className="animate-spin" /> : <PencilLine size={13} />}
-            {saving ? 'Wird gespeichert…' : 'Speichern'}
+            {saving ? t('common.saving') : t('common.save')}
           </button>
         </div>
       </div>

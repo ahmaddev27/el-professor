@@ -5,6 +5,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
 import type { CarWithDrivers } from '../types/car';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
+import { useTranslation } from '../contexts/LanguageContext';
 
 interface Driver {
   id: string;
@@ -38,6 +39,7 @@ export default function CarModal({ car, onClose, onSuccess }: CarModalProps) {
   const { user } = useAuth();
   const { effectiveCompanyId: companyId } = useSuperAdmin();
   const { showToast } = useToast();
+  const { t } = useTranslation();
 
   useEffect(() => { loadDrivers(); }, []);
 
@@ -53,7 +55,7 @@ export default function CarModal({ car, onClose, onSuccess }: CarModalProps) {
       if (error) throw error;
       setAvailableDrivers(data || []);
     } catch (error: any) {
-      showToast('error', 'Fehler beim Laden der Fahrer: ' + error.message);
+      showToast('error', t('fleet.driversLoadFailed', { error: error.message }));
     } finally {
       setLoadingDrivers(false);
     }
@@ -63,7 +65,7 @@ export default function CarModal({ car, onClose, onSuccess }: CarModalProps) {
     setSelectedDriverIds(prev => {
       if (prev.includes(driverId)) return prev.filter(id => id !== driverId);
       if (prev.length >= 2) {
-        showToast('error', 'Maximal 2 Fahrer können einem Fahrzeug zugewiesen werden');
+        showToast('error', t('fleet.maxTwoDrivers'));
         return prev;
       }
       return [...prev, driverId];
@@ -72,8 +74,8 @@ export default function CarModal({ car, onClose, onSuccess }: CarModalProps) {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!kennzeichen.trim()) { showToast('error', 'Bitte geben Sie ein Kennzeichen ein'); return; }
-    if (!user) { showToast('error', 'Sie müssen angemeldet sein'); return; }
+    if (!kennzeichen.trim()) { showToast('error', t('fleet.kennzeichenRequired')); return; }
+    if (!user) { showToast('error', t('fleet.mustBeSignedIn')); return; }
 
     try {
       setLoading(true);
@@ -96,7 +98,7 @@ export default function CarModal({ car, onClose, onSuccess }: CarModalProps) {
           );
           if (insertError) throw insertError;
         }
-        showToast('success', 'Fahrzeug erfolgreich aktualisiert');
+        showToast('success', t('fleet.carUpdated'));
       } else {
         const { data: newCar, error: carError } = await supabase
           .from('cars').insert({ ...carData, created_by: user.id, company_id: companyId }).select().single();
@@ -108,16 +110,16 @@ export default function CarModal({ car, onClose, onSuccess }: CarModalProps) {
           );
           if (assignmentError) throw assignmentError;
         }
-        showToast('success', 'Fahrzeug erfolgreich erstellt');
+        showToast('success', t('fleet.carCreated'));
       }
       onSuccess();
     } catch (error: any) {
       if (error.message.includes('duplicate key')) {
-        showToast('error', 'Ein Fahrzeug mit diesem Kennzeichen existiert bereits');
+        showToast('error', t('fleet.kennzeichenExists'));
       } else if (error.message.includes('maximum 2 drivers')) {
-        showToast('error', 'Maximal 2 Fahrer können einem Fahrzeug zugewiesen werden');
+        showToast('error', t('fleet.maxTwoDrivers'));
       } else {
-        showToast('error', 'Fehler beim Speichern: ' + error.message);
+        showToast('error', t('fleet.saveFailed', { error: error.message }));
       }
     } finally {
       setLoading(false);
@@ -149,7 +151,7 @@ export default function CarModal({ car, onClose, onSuccess }: CarModalProps) {
               <CarIcon className="w-5 h-5" style={{ color: 'var(--accent-text)' }} />
             </div>
             <h2 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>
-              {car ? 'Fahrzeug bearbeiten' : 'Neues Fahrzeug'}
+              {car ? t('fleet.editCar') : t('fleet.newCar')}
             </h2>
           </div>
           <button
@@ -167,14 +169,14 @@ export default function CarModal({ car, onClose, onSuccess }: CarModalProps) {
           {/* Kennzeichen */}
           <div>
             <label className="block text-sm font-medium mb-1.5" style={{ color: 'var(--text-secondary)' }}>
-              Kennzeichen *
+              {t('werkstatt.plate')} *
             </label>
             <input
               type="text"
               value={kennzeichen}
               onChange={(e) => setKennzeichen(e.target.value.toUpperCase())}
               className="input-base"
-              placeholder="z.B. B-YA-1234"
+              placeholder={t('fleet.kennzeichenPlaceholder')}
               required
               disabled={loading}
             />
@@ -188,14 +190,14 @@ export default function CarModal({ car, onClose, onSuccess }: CarModalProps) {
             <div className="flex items-center gap-2">
               <ShieldCheck className="w-4 h-4" style={{ color: 'var(--accent-text)' }} />
               <span className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
-                TÜV / Hauptuntersuchung
+                {t('fleet.tuevSection')}
               </span>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium mb-1.5" style={{ color: 'var(--text-secondary)' }}>
-                  TÜV gültig bis
+                  {t('fleet.tuevValidUntil')}
                 </label>
                 <div className="flex gap-2">
                   <input
@@ -209,7 +211,7 @@ export default function CarModal({ car, onClose, onSuccess }: CarModalProps) {
                     type="button"
                     onClick={handleRenewTuev}
                     disabled={loading}
-                    title="+1 Jahr ab aktuellem Datum"
+                    title={t('fleet.renewTuevTooltip')}
                     className="flex items-center gap-1 px-3 py-2 rounded-lg text-xs font-medium transition-colors disabled:opacity-50 whitespace-nowrap flex-shrink-0"
                     style={{
                       background: 'var(--accent-subtle)',
@@ -220,16 +222,16 @@ export default function CarModal({ car, onClose, onSuccess }: CarModalProps) {
                     onMouseLeave={e => (e.currentTarget.style.opacity = '1')}
                   >
                     <RefreshCw className="w-3.5 h-3.5" />
-                    +1 Jahr
+                    {t('fleet.plusOneYear')}
                   </button>
                 </div>
                 <p className="mt-1 text-xs" style={{ color: 'var(--text-tertiary)' }}>
-                  Ablaufdatum der Hauptuntersuchung
+                  {t('fleet.tuevValidUntilHint')}
                 </p>
               </div>
               <div>
                 <label className="block text-sm font-medium mb-1.5" style={{ color: 'var(--text-secondary)' }}>
-                  Letzte HU
+                  {t('fleet.lastHu')}
                 </label>
                 <input
                   type="date"
@@ -239,7 +241,7 @@ export default function CarModal({ car, onClose, onSuccess }: CarModalProps) {
                   disabled={loading}
                 />
                 <p className="mt-1 text-xs" style={{ color: 'var(--text-tertiary)' }}>
-                  Datum der letzten Hauptuntersuchung
+                  {t('fleet.lastHuHint')}
                 </p>
               </div>
             </div>
@@ -248,13 +250,13 @@ export default function CarModal({ car, onClose, onSuccess }: CarModalProps) {
           {/* Drivers */}
           <div>
             <label className="block text-sm font-medium mb-1.5" style={{ color: 'var(--text-secondary)' }}>
-              Fahrer zuweisen (max. 2)
+              {t('fleet.assignDrivers')}
             </label>
             {loadingDrivers ? (
-              <div className="text-sm" style={{ color: 'var(--text-tertiary)' }}>Laden...</div>
+              <div className="text-sm" style={{ color: 'var(--text-tertiary)' }}>{t('common.loading')}</div>
             ) : availableDrivers.length === 0 ? (
               <div className="text-sm italic" style={{ color: 'var(--text-tertiary)' }}>
-                Keine Fahrer verfügbar. Bitte erstellen Sie zuerst Fahrer.
+                {t('fleet.noDriversAvailable')}
               </div>
             ) : (
               <div
@@ -304,7 +306,7 @@ export default function CarModal({ car, onClose, onSuccess }: CarModalProps) {
               </div>
             )}
             <p className="mt-2 text-xs" style={{ color: 'var(--text-tertiary)' }}>
-              {selectedDriverIds.length}/2 Fahrer ausgewählt
+              {t('fleet.driversSelected', { count: selectedDriverIds.length })}
             </p>
           </div>
 
@@ -319,7 +321,7 @@ export default function CarModal({ car, onClose, onSuccess }: CarModalProps) {
               onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-muted)')}
               onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
             >
-              Abbrechen
+              {t('common.cancel')}
             </button>
             <button
               type="submit"
@@ -330,7 +332,7 @@ export default function CarModal({ car, onClose, onSuccess }: CarModalProps) {
               onMouseLeave={e => (e.currentTarget.style.background = 'var(--accent)')}
             >
               <Save className="w-4 h-4" />
-              {loading ? 'Speichern...' : 'Speichern'}
+              {loading ? t('common.saving') : t('common.save')}
             </button>
           </div>
         </form>

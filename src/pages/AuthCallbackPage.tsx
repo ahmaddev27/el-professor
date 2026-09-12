@@ -2,11 +2,13 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AlertCircle } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { useTranslation } from '../contexts/LanguageContext';
 
 type CallbackType = 'recovery' | 'invite' | 'signup' | 'magiclink' | 'email_change' | string;
 
 const AuthCallbackPage: React.FC = () => {
   const navigate = useNavigate();
+  const { t } = useTranslation();
   const [error, setError] = useState('');
 
   useEffect(() => {
@@ -32,9 +34,9 @@ const AuthCallbackPage: React.FC = () => {
     if (hashError) {
       const decodedError = decodeURIComponent(hashError);
       if (decodedError.toLowerCase().includes('expired')) {
-        setError('Der Link ist abgelaufen. Bitte fordern Sie einen neuen Link an.');
+        setError(t('signup.callback.linkExpired'));
       } else {
-        setError('Der Link ist ungültig oder abgelaufen. Bitte fordern Sie einen neuen Link an.');
+        setError(t('signup.callback.linkInvalid'));
       }
       return;
     }
@@ -62,21 +64,21 @@ const AuthCallbackPage: React.FC = () => {
         if (!cancelled) {
           // Session never appeared
           if (type === 'recovery' || type === 'invite') {
-            setError('Der Link ist ungültig oder abgelaufen. Bitte fordern Sie einen neuen Link an.');
+            setError(t('signup.callback.linkInvalid'));
           } else {
-            setError('Die Sitzung konnte nicht hergestellt werden. Bitte versuchen Sie es erneut.');
+            setError(t('signup.callback.sessionFailed'));
           }
         }
       } catch {
         if (!cancelled) {
-          setError('Ein unerwarteter Fehler ist aufgetreten. Bitte versuchen Sie es erneut.');
+          setError(t('forgot.unexpected'));
         }
       }
     };
 
     go();
     return () => { cancelled = true; };
-  }, [navigate]);
+  }, [navigate, t]);
 
   return (
     <div className="min-h-screen bg-[#060a0f] flex items-center justify-center p-4">
@@ -86,27 +88,27 @@ const AuthCallbackPage: React.FC = () => {
             <div className="w-12 h-12 rounded-full bg-red-500/15 border border-red-500/30 flex items-center justify-center mx-auto mb-4">
               <AlertCircle className="text-red-400" size={22} />
             </div>
-            <h2 className="text-white font-semibold mb-2">Link ungültig</h2>
+            <h2 className="text-white font-semibold mb-2">{t('signup.callback.title')}</h2>
             <p className="text-white/60 text-sm leading-relaxed mb-6">{error}</p>
             <div className="flex flex-col gap-2">
               <button
                 onClick={() => navigate('/auth/forgot-password', { replace: true })}
                 className="w-full bg-gradient-to-r from-cyan-500 to-blue-600 text-white py-3 px-4 rounded-xl font-semibold text-sm"
               >
-                Neuen Link anfordern
+                {t('signup.callback.requestNewLink')}
               </button>
               <button
                 onClick={() => navigate('/login', { replace: true })}
                 className="w-full text-white/50 hover:text-white/80 text-sm py-2 transition-colors"
               >
-                Zurück zur Anmeldung
+                {t('signup.callback.backToLogin')}
               </button>
             </div>
           </div>
         ) : (
           <div>
             <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-cyan-400 mx-auto mb-4" />
-            <p className="text-white/50 text-sm">Link wird überprüft...</p>
+            <p className="text-white/50 text-sm">{t('signup.callback.checking')}</p>
           </div>
         )}
       </div>

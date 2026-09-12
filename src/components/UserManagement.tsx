@@ -4,6 +4,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import ConfirmationModal from './ConfirmationModal';
 import { exportTableToExcel } from '../utils/excelExport';
+import { useTranslation } from '../contexts/LanguageContext';
 
 interface UserData {
   id: string;
@@ -30,6 +31,7 @@ interface UserModalProps {
 }
 
 const UserModal: React.FC<UserModalProps> = ({ isOpen, onClose, onSave, user, title }) => {
+  const { t } = useTranslation();
   const [formData, setFormData] = useState({
     email: '',
     password: '',
@@ -140,14 +142,14 @@ const UserModal: React.FC<UserModalProps> = ({ isOpen, onClose, onSave, user, ti
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
           <div>
             <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>
-              Vollständiger Name
+              {t('users.form.fullName')}
             </label>
             <input
               type="text"
               value={formData.full_name}
               onChange={(e) => setFormData({ ...formData, full_name: e.target.value })}
               style={inputStyle}
-              placeholder="Max Mustermann"
+              placeholder={t('users.form.fullNamePlaceholder')}
               required
               disabled={loading}
             />
@@ -155,7 +157,7 @@ const UserModal: React.FC<UserModalProps> = ({ isOpen, onClose, onSave, user, ti
 
           <div>
             <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>
-              E-Mail-Adresse
+              {t('users.form.email')}
             </label>
             <div className="relative">
               <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2" style={{ color: 'var(--text-tertiary)' }} size={16} />
@@ -164,7 +166,7 @@ const UserModal: React.FC<UserModalProps> = ({ isOpen, onClose, onSave, user, ti
                 value={formData.email}
                 onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                 style={{ ...inputStyle, paddingLeft: '2.25rem' }}
-                placeholder="benutzer@yamobility.de"
+                placeholder={t('users.form.emailPlaceholder')}
                 required
                 disabled={loading}
               />
@@ -186,7 +188,7 @@ const UserModal: React.FC<UserModalProps> = ({ isOpen, onClose, onSave, user, ti
                 />
                 <label htmlFor="mode-email" className="text-sm font-medium flex items-center space-x-1" style={{ color: 'var(--text-primary)' }}>
                   <MailCheck size={16} style={{ color: 'var(--accent-text)' }} />
-                  <span>Einladung per E-Mail</span>
+                  <span>{t('users.invite.byEmail')}</span>
                 </label>
               </div>
               <div className="flex items-center space-x-2">
@@ -202,7 +204,7 @@ const UserModal: React.FC<UserModalProps> = ({ isOpen, onClose, onSave, user, ti
                 />
                 <label htmlFor="mode-temp" className="text-sm font-medium flex items-center space-x-1" style={{ color: 'var(--text-primary)' }}>
                   <Lock size={16} style={{ color: 'var(--warning)' }} />
-                  <span>Temporäres Passwort</span>
+                  <span>{t('users.invite.tempPassword')}</span>
                 </label>
               </div>
 
@@ -211,9 +213,9 @@ const UserModal: React.FC<UserModalProps> = ({ isOpen, onClose, onSave, user, ti
                   <div className="flex items-start space-x-2">
                     <MailCheck style={{ color: 'var(--accent-text)' }} className="mt-0.5 flex-shrink-0" size={18} />
                     <div>
-                      <p className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>Einladung per E-Mail</p>
+                      <p className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>{t('users.invite.byEmail')}</p>
                       <p className="text-xs mt-1" style={{ color: 'var(--text-secondary)' }}>
-                        Der Benutzer erhält eine E-Mail-Einladung, um sein Passwort selbst festzulegen.
+                        {t('users.invite.byEmailHint')}
                       </p>
                     </div>
                   </div>
@@ -222,7 +224,7 @@ const UserModal: React.FC<UserModalProps> = ({ isOpen, onClose, onSave, user, ti
                 <div className="space-y-2">
                   <div>
                     <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>
-                      Temporäres Passwort
+                      {t('users.invite.tempPassword')}
                     </label>
                     <div className="relative">
                       <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2" style={{ color: 'var(--text-tertiary)' }} size={16} />
@@ -231,7 +233,7 @@ const UserModal: React.FC<UserModalProps> = ({ isOpen, onClose, onSave, user, ti
                         value={formData.password}
                         onChange={(e) => setFormData({ ...formData, password: e.target.value })}
                         style={{ ...inputStyle, paddingLeft: '2.25rem', paddingRight: '2.25rem' }}
-                        placeholder="z.B. Start123!"
+                        placeholder={t('users.invite.tempPasswordPlaceholder')}
                         required={formData.use_temp_password}
                         minLength={8}
                         disabled={loading}
@@ -249,7 +251,7 @@ const UserModal: React.FC<UserModalProps> = ({ isOpen, onClose, onSave, user, ti
                   <div className="flex items-start space-x-2" style={{ background: 'var(--warning-subtle)', border: '1px solid var(--warning)', borderRadius: '0.375rem', padding: '0.75rem' }}>
                     <AlertTriangle style={{ color: 'var(--warning)' }} className="mt-0.5 flex-shrink-0" size={16} />
                     <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>
-                      Der Benutzer muss dieses Passwort beim ersten Login ändern.
+                      {t('users.invite.firstLoginChangeHint')}
                     </p>
                   </div>
                 </div>
@@ -259,7 +261,7 @@ const UserModal: React.FC<UserModalProps> = ({ isOpen, onClose, onSave, user, ti
 
           <div>
             <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>
-              Rolle
+              {t('users.form.role')}
             </label>
             <select
               value={formData.role}
@@ -283,7 +285,7 @@ const UserModal: React.FC<UserModalProps> = ({ isOpen, onClose, onSave, user, ti
               className="transition-colors hover:opacity-80 disabled:opacity-50"
               disabled={loading}
             >
-              Abbrechen
+              {t('common.cancel')}
             </button>
             <button
               type="submit"
@@ -296,7 +298,7 @@ const UserModal: React.FC<UserModalProps> = ({ isOpen, onClose, onSave, user, ti
               ) : (
                 <Save size={16} />
               )}
-              <span>{loading ? 'Wird gespeichert...' : 'Speichern'}</span>
+              <span>{loading ? t('common.saving') : t('common.save')}</span>
             </button>
           </div>
         </form>
@@ -306,6 +308,7 @@ const UserModal: React.FC<UserModalProps> = ({ isOpen, onClose, onSave, user, ti
 };
 
 const UserManagement: React.FC = () => {
+  const { t } = useTranslation();
   const { user: currentUser, isAdmin, profile, loading: authLoading } = useAuth();
   const [users, setUsers] = useState<UserData[]>([]);
   const [loading, setLoading] = useState(true);
@@ -316,6 +319,10 @@ const UserManagement: React.FC = () => {
   const [resetPasswordLoading, setResetPasswordLoading] = useState(false);
   const [resetPasswordError, setResetPasswordError] = useState('');
   const [resetPasswordSuccess, setResetPasswordSuccess] = useState(false);
+  // The reset-password dialog's eye toggle read `showPassword` from UserModal,
+  // a different component, so opening the dialog threw a ReferenceError during
+  // render and took the whole user list down with it. Same name, own state.
+  const [showResetPassword, setShowResetPassword] = useState(false);
   const [confirmModal, setConfirmModal] = useState({
     isOpen: false,
     title: '',
@@ -403,8 +410,8 @@ const UserManagement: React.FC = () => {
       console.error('Error loading users:', error);
       setConfirmModal({
         isOpen: true,
-        title: 'Fehler',
-        message: 'Ein unerwarteter Fehler beim Laden der Benutzer ist aufgetreten.',
+        title: t('common.error'),
+        message: t('users.error.loadUsers'),
         onConfirm: () => {},
         type: 'error' as const
       });
@@ -451,10 +458,10 @@ const UserManagement: React.FC = () => {
       
       setConfirmModal({
         isOpen: true,
-        title: 'Erfolg',
+        title: t('users.successTitle'),
         message: userData.use_temp_password
-          ? `Benutzer "${userData.full_name}" wurde erfolgreich erstellt! Der Benutzer muss sich mit dem temporären Passwort anmelden und dieses beim ersten Login ändern.`
-          : `Benutzer "${userData.full_name}" wurde erfolgreich erstellt! Eine Einladung wurde an die E-Mail-Adresse gesendet.`,
+          ? t('users.created.tempPassword', { name: userData.full_name })
+          : t('users.created.invited', { name: userData.full_name }),
         onConfirm: () => {},
         type: 'success' as const
       });
@@ -470,8 +477,10 @@ const UserManagement: React.FC = () => {
       });
       setConfirmModal({
         isOpen: true,
-        title: 'Fehler',
-        message: `Benutzer konnte nicht erstellt werden: ${error instanceof Error ? error.message : 'Unbekannter Fehler'}\n\nBitte überprüfen Sie die Browser-Konsole für weitere Details.`,
+        title: t('common.error'),
+        // The interpolated detail can be a manage-users response message, which the
+        // server already returns in German.
+        message: t('users.error.create', { error: error instanceof Error ? error.message : t('users.error.unknown') }),
         onConfirm: () => {},
         type: 'error' as const
       });
@@ -512,8 +521,8 @@ const UserManagement: React.FC = () => {
 
       setConfirmModal({
         isOpen: true,
-        title: 'Erfolg',
-        message: `Benutzer "${userData.full_name}" wurde erfolgreich aktualisiert!`,
+        title: t('users.successTitle'),
+        message: t('users.updated', { name: userData.full_name }),
         onConfirm: () => {},
         type: 'success' as const
       });
@@ -525,8 +534,8 @@ const UserManagement: React.FC = () => {
       console.error('Error editing user:', error);
       setConfirmModal({
         isOpen: true,
-        title: 'Fehler',
-        message: 'Ein unerwarteter Fehler ist aufgetreten.',
+        title: t('common.error'),
+        message: t('users.error.unexpected'),
         onConfirm: () => {},
         type: 'error' as const
       });
@@ -551,7 +560,7 @@ const UserManagement: React.FC = () => {
   const submitResetPassword = async () => {
     if (!resetPasswordUser) return;
     if (resetPasswordValue.length < 8) {
-      setResetPasswordError('Das Passwort muss mindestens 8 Zeichen lang sein.');
+      setResetPasswordError(t('users.password.minLength'));
       return;
     }
     setResetPasswordLoading(true);
@@ -569,13 +578,14 @@ const UserManagement: React.FC = () => {
       });
       if (!response.ok) {
         const errorData = await response.json();
-        throw new Error(errorData.error || 'Fehler beim Zurücksetzen des Passworts');
+        throw new Error(errorData.error || t('users.error.resetPassword'));
       }
       setResetPasswordSuccess(true);
       await loadUsers();
       setTimeout(() => closeResetPasswordModal(), 1500);
     } catch (err) {
-      setResetPasswordError(err instanceof Error ? err.message : 'Ein Fehler ist aufgetreten.');
+      // `err.message` here is the manage-users response text, which is German already.
+      setResetPasswordError(err instanceof Error ? err.message : t('users.error.generic'));
     } finally {
       setResetPasswordLoading(false);
     }
@@ -584,8 +594,8 @@ const UserManagement: React.FC = () => {
   const handleDeleteUser = (user: UserData) => {
     setConfirmModal({
       isOpen: true,
-      title: 'Benutzer löschen',
-      message: `Sind Sie sicher, dass Sie den Benutzer "${user.full_name}" (${user.email}) löschen möchten? Diese Aktion kann nicht rückgängig gemacht werden.`,
+      title: t('users.delete.title'),
+      message: t('users.delete.confirm', { name: user.full_name ?? '', email: user.email }),
       onConfirm: async () => {
         try {
           const { data: { session } } = await supabase.auth.getSession();
@@ -609,8 +619,8 @@ const UserManagement: React.FC = () => {
 
           setConfirmModal({
             isOpen: true,
-            title: 'Erfolg',
-            message: `Benutzer "${user.full_name}" wurde erfolgreich gelöscht.`,
+            title: t('users.successTitle'),
+            message: t('users.deleted', { name: user.full_name ?? '' }),
             onConfirm: () => {},
             type: 'success' as const
           });
@@ -620,8 +630,8 @@ const UserManagement: React.FC = () => {
           console.error('Error deleting user:', error);
           setConfirmModal({
             isOpen: true,
-            title: 'Fehler',
-            message: `Benutzer konnte nicht gelöscht werden: ${error instanceof Error ? error.message : 'Unbekannter Fehler'}`,
+            title: t('common.error'),
+            message: t('users.error.delete', { error: error instanceof Error ? error.message : t('users.error.unknown') }),
             onConfirm: () => {},
             type: 'error' as const
           });
@@ -652,8 +662,8 @@ const UserManagement: React.FC = () => {
 
       setConfirmModal({
         isOpen: true,
-        title: 'Erfolg',
-        message: `Benutzerstatus wurde erfolgreich ${newStatus === 'active' ? 'aktiviert' : 'deaktiviert'}.`,
+        title: t('users.successTitle'),
+        message: newStatus === 'active' ? t('users.status.activated') : t('users.status.deactivated'),
         onConfirm: () => {},
         type: 'success' as const
       });
@@ -662,8 +672,8 @@ const UserManagement: React.FC = () => {
     } catch (error) {
       setConfirmModal({
         isOpen: true,
-        title: 'Fehler',
-        message: `Status konnte nicht geändert werden: ${error instanceof Error ? error.message : 'Unbekannter Fehler'}`,
+        title: t('common.error'),
+        message: t('users.error.statusChange', { error: error instanceof Error ? error.message : t('users.error.unknown') }),
         onConfirm: () => {},
         type: 'error' as const
       });
@@ -691,8 +701,8 @@ const UserManagement: React.FC = () => {
 
       setConfirmModal({
         isOpen: true,
-        title: 'Erfolg',
-        message: 'Einladung wurde erneut gesendet.',
+        title: t('users.successTitle'),
+        message: t('users.invite.resent'),
         onConfirm: () => {},
         type: 'success' as const
       });
@@ -701,8 +711,8 @@ const UserManagement: React.FC = () => {
     } catch (error) {
       setConfirmModal({
         isOpen: true,
-        title: 'Fehler',
-        message: `Einladung konnte nicht gesendet werden: ${error instanceof Error ? error.message : 'Unbekannter Fehler'}`,
+        title: t('common.error'),
+        message: t('users.error.resendInvite', { error: error instanceof Error ? error.message : t('users.error.unknown') }),
         onConfirm: () => {},
         type: 'error' as const
       });
@@ -714,7 +724,7 @@ const UserManagement: React.FC = () => {
       return (
         <span className="px-2 py-1 text-xs font-medium rounded-full flex items-center space-x-1" style={{ background: 'var(--warning-subtle)', color: 'var(--warning)' }}>
           <KeyRound size={12} />
-          <span>Passwortänderung erforderlich</span>
+          <span>{t('users.badge.passwordChangeRequired')}</span>
         </span>
       );
     }
@@ -722,7 +732,7 @@ const UserManagement: React.FC = () => {
       return (
         <span className="px-2 py-1 text-xs font-medium rounded-full flex items-center space-x-1" style={{ background: 'var(--bg-muted)', color: 'var(--text-secondary)' }}>
           <XCircle size={12} />
-          <span>Deaktiviert</span>
+          <span>{t('users.badge.inactive')}</span>
         </span>
       );
     }
@@ -730,19 +740,22 @@ const UserManagement: React.FC = () => {
       return (
         <span className="px-2 py-1 text-xs font-medium rounded-full flex items-center space-x-1" style={{ background: 'var(--warning-subtle)', color: 'var(--warning)' }}>
           <Clock size={12} />
-          <span>Einladung ausstehend</span>
+          <span>{t('users.badge.pendingInvite')}</span>
         </span>
       );
     }
     return (
       <span className="px-2 py-1 text-xs font-medium rounded-full flex items-center space-x-1" style={{ background: 'var(--success-subtle)', color: 'var(--success)' }}>
         <CheckCircle size={12} />
-        <span>Aktiv</span>
+        <span>{t('users.badge.active')}</span>
       </span>
     );
   };
 
   const getRoleBadge = (user: UserData) => {
+    // The keys below are the stored `user_profiles.role` values that RLS policies
+    // match on, not labels — and the badge shows the role verbatim because a custom
+    // role's name is free text from the `roles` table. Nothing here is translatable.
     const roleStyles: Record<string, React.CSSProperties> = {
       admin: { background: 'var(--danger-subtle)', color: 'var(--danger)' },
       supervisor: { background: 'var(--warning-subtle)', color: 'var(--warning)' },
@@ -765,7 +778,7 @@ const UserManagement: React.FC = () => {
     return (
       <div className="text-center py-12">
         <div className="animate-spin rounded-full h-12 w-12 mx-auto mb-4" style={{ borderBottom: '2px solid var(--accent)', border: '2px solid var(--border)', borderBottomColor: 'var(--accent)' }}></div>
-        <p style={{ color: 'var(--text-secondary)' }}>Berechtigungen werden überprüft...</p>
+        <p style={{ color: 'var(--text-secondary)' }}>{t('users.checkingPermissions')}</p>
       </div>
     );
   }
@@ -776,14 +789,16 @@ const UserManagement: React.FC = () => {
         <div className="rounded-full p-6 w-24 h-24 mx-auto mb-4 flex items-center justify-center" style={{ background: 'var(--danger-subtle)' }}>
           <User className="h-12 w-12" style={{ color: 'var(--danger)' }} />
         </div>
-        <h3 className="text-xl font-semibold mb-2" style={{ color: 'var(--text-primary)' }}>Zugriff verweigert</h3>
-        <p style={{ color: 'var(--text-secondary)' }}>Nur Administratoren können Benutzer verwalten.</p>
-        <p className="text-xs mt-2" style={{ color: 'var(--text-tertiary)' }}>Ihre Rolle: {profile?.role || 'Keine'}</p>
+        <h3 className="text-xl font-semibold mb-2" style={{ color: 'var(--text-primary)' }}>{t('users.accessDenied')}</h3>
+        <p style={{ color: 'var(--text-secondary)' }}>{t('users.adminOnly')}</p>
+        <p className="text-xs mt-2" style={{ color: 'var(--text-tertiary)' }}>{t('users.yourRole', { role: profile?.role || t('users.roleNone') })}</p>
       </div>
     );
   }
 
   const handleExport = () => {
+    // Filename, sheet title, column headers and cell values below land inside the
+    // generated workbook, not on screen, so they stay German in both languages.
     exportTableToExcel({
       filename: `benutzer_${new Date().toISOString().split('T')[0]}`,
       sheetTitle: 'Benutzerliste',
@@ -805,7 +820,7 @@ const UserManagement: React.FC = () => {
     return (
       <div className="text-center py-12">
         <div className="animate-spin rounded-full h-12 w-12 mx-auto mb-4" style={{ border: '2px solid var(--border)', borderBottomColor: 'var(--accent)' }}></div>
-        <p style={{ color: 'var(--text-secondary)' }}>Benutzer werden geladen...</p>
+        <p style={{ color: 'var(--text-secondary)' }}>{t('users.loadingUsers')}</p>
       </div>
     );
   }
@@ -821,8 +836,8 @@ const UserManagement: React.FC = () => {
                 <Users className="text-white" size={32} />
               </div>
               <div>
-                <h1 className="text-3xl font-bold">Benutzerverwaltung</h1>
-                <p className="text-blue-100 mt-1">Verwalten Sie alle Systembenutzer</p>
+                <h1 className="text-3xl font-bold">{t('users.title')}</h1>
+                <p className="text-blue-100 mt-1">{t('users.subtitle')}</p>
               </div>
             </div>
           </div>
@@ -831,7 +846,7 @@ const UserManagement: React.FC = () => {
             <button
               onClick={handleExport}
               className="flex items-center gap-2 px-4 py-3 rounded-lg text-sm font-medium bg-white bg-opacity-20 hover:bg-opacity-30 text-white transition-all"
-              title="Als Excel exportieren"
+              title={t('common.exportExcelShort')}
             >
               <Download size={16} />
               <span>Excel</span>
@@ -841,7 +856,7 @@ const UserManagement: React.FC = () => {
               className="px-6 py-3 bg-white text-blue-600 rounded-lg hover:bg-blue-50 transition-all duration-200 flex items-center space-x-2 shadow-md font-semibold hover:shadow-lg transform hover:-translate-y-0.5"
             >
               <Plus size={18} />
-              <span>Neuer Benutzer</span>
+              <span>{t('users.newUser')}</span>
             </button>
           </div>
         </div>
@@ -855,28 +870,28 @@ const UserManagement: React.FC = () => {
               <Users style={{ color: 'var(--accent-text)' }} size={24} />
             </div>
             <p className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>{users.length}</p>
-            <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>Gesamt Benutzer</p>
+            <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>{t('users.stats.total')}</p>
           </div>
           <div className="text-center">
             <div className="rounded-full p-4 w-16 h-16 mx-auto mb-3 flex items-center justify-center" style={{ background: 'var(--success-subtle)' }}>
               <User style={{ color: 'var(--success)' }} size={24} />
             </div>
             <p className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>{users.filter(u => u.email_confirmed_at).length}</p>
-            <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>Bestätigt</p>
+            <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>{t('users.stats.confirmed')}</p>
           </div>
           <div className="text-center">
             <div className="rounded-full p-4 w-16 h-16 mx-auto mb-3 flex items-center justify-center" style={{ background: 'var(--danger-subtle)' }}>
               <User style={{ color: 'var(--danger)' }} size={24} />
             </div>
             <p className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>{users.filter(u => u.role === 'admin').length}</p>
-            <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>Administratoren</p>
+            <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>{t('users.stats.admins')}</p>
           </div>
           <div className="text-center">
             <div className="rounded-full p-4 w-16 h-16 mx-auto mb-3 flex items-center justify-center" style={{ background: 'var(--warning-subtle)' }}>
               <User style={{ color: 'var(--warning)' }} size={24} />
             </div>
             <p className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>{users.filter(u => u.role === 'viewer').length}</p>
-            <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>Betrachter</p>
+            <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>{t('users.stats.viewers')}</p>
           </div>
         </div>
       </div>
@@ -888,9 +903,9 @@ const UserManagement: React.FC = () => {
             <div className="rounded-full p-6 w-24 h-24 mx-auto mb-4 flex items-center justify-center" style={{ background: 'var(--bg-muted)' }}>
               <Users className="h-12 w-12" style={{ color: 'var(--text-tertiary)' }} />
             </div>
-            <h3 className="text-xl font-semibold mb-2" style={{ color: 'var(--text-primary)' }}>Keine Benutzer vorhanden</h3>
+            <h3 className="text-xl font-semibold mb-2" style={{ color: 'var(--text-primary)' }}>{t('users.empty.title')}</h3>
             <p className="mb-6 max-w-md mx-auto" style={{ color: 'var(--text-secondary)' }}>
-              Fügen Sie den ersten Benutzer hinzu, um zu beginnen.
+              {t('users.empty.hint')}
             </p>
           </div>
         ) : (
@@ -901,19 +916,19 @@ const UserManagement: React.FC = () => {
                 <thead style={{ background: 'var(--bg-subtle)' }}>
                   <tr>
                     <th className="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>
-                      Benutzer
+                      {t('users.table.user')}
                     </th>
                     <th className="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>
-                      E-Mail
+                      {t('users.table.email')}
                     </th>
                     <th className="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>
-                      Rolle
+                      {t('users.form.role')}
                     </th>
                     <th className="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>
-                      Status
+                      {t('common.status')}
                     </th>
                     <th className="px-6 py-4 text-right text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>
-                      Aktionen
+                      {t('users.table.actions')}
                     </th>
                   </tr>
                 </thead>
@@ -929,7 +944,7 @@ const UserManagement: React.FC = () => {
                           </div>
                           <div className="ml-4">
                             <div className="text-base font-semibold" style={{ color: 'var(--text-primary)' }}>
-                              {user.full_name || 'Unbekannt'}
+                              {user.full_name || t('common.unknown')}
                             </div>
                             <div className="text-sm" style={{ color: 'var(--text-tertiary)' }}>
                               ID: {user.id.slice(0, 8)}...
@@ -953,7 +968,7 @@ const UserManagement: React.FC = () => {
                               onClick={() => handleResendInvite(user.id)}
                               className="p-2 rounded-lg transition-all duration-200 hover:opacity-80"
                               style={{ color: 'var(--accent-text)', background: 'transparent' }}
-                              title="Einladung erneut senden"
+                              title={t('users.action.resendInvite')}
                             >
                               <MailCheck size={18} />
                             </button>
@@ -963,7 +978,7 @@ const UserManagement: React.FC = () => {
                               onClick={() => handleActivateDeactivate(user.id, 'inactive')}
                               className="p-2 rounded-lg transition-all duration-200 hover:opacity-80"
                               style={{ color: 'var(--warning)', background: 'transparent' }}
-                              title="Benutzer deaktivieren"
+                              title={t('users.action.deactivate')}
                             >
                               <XCircle size={18} />
                             </button>
@@ -973,7 +988,7 @@ const UserManagement: React.FC = () => {
                               onClick={() => handleActivateDeactivate(user.id, 'active')}
                               className="p-2 rounded-lg transition-all duration-200 hover:opacity-80"
                               style={{ color: 'var(--success)', background: 'transparent' }}
-                              title="Benutzer aktivieren"
+                              title={t('users.action.activate')}
                             >
                               <CheckCircle size={18} />
                             </button>
@@ -985,7 +1000,7 @@ const UserManagement: React.FC = () => {
                             }}
                             className="p-2 rounded-lg transition-all duration-200 hover:opacity-80"
                             style={{ color: 'var(--accent-text)', background: 'transparent' }}
-                            title="Bearbeiten"
+                            title={t('common.edit')}
                           >
                             <Edit size={18} />
                           </button>
@@ -994,7 +1009,7 @@ const UserManagement: React.FC = () => {
                               onClick={() => handleDeleteUser(user)}
                               className="p-2 rounded-lg transition-all duration-200 hover:opacity-80"
                               style={{ color: 'var(--danger)', background: 'transparent' }}
-                              title="Löschen"
+                              title={t('common.delete')}
                             >
                               <Trash2 size={18} />
                             </button>
@@ -1020,7 +1035,7 @@ const UserManagement: React.FC = () => {
                       </div>
                       <div>
                         <div className="text-base font-semibold" style={{ color: 'var(--text-primary)' }}>
-                          {user.full_name || 'Unbekannt'}
+                          {user.full_name || t('common.unknown')}
                         </div>
                         <div className="text-sm" style={{ color: 'var(--text-secondary)' }}>{user.email}</div>
                       </div>
@@ -1031,7 +1046,7 @@ const UserManagement: React.FC = () => {
                           onClick={() => handleResendInvite(user.id)}
                           className="p-2 rounded-lg transition-all duration-200 hover:opacity-80"
                           style={{ color: 'var(--accent-text)', background: 'transparent' }}
-                          title="Einladung erneut senden"
+                          title={t('users.action.resendInvite')}
                         >
                           <MailCheck size={18} />
                         </button>
@@ -1041,7 +1056,7 @@ const UserManagement: React.FC = () => {
                           onClick={() => handleActivateDeactivate(user.id, 'inactive')}
                           className="p-2 rounded-lg transition-all duration-200 hover:opacity-80"
                           style={{ color: 'var(--warning)', background: 'transparent' }}
-                          title="Benutzer deaktivieren"
+                          title={t('users.action.deactivate')}
                         >
                           <XCircle size={18} />
                         </button>
@@ -1051,7 +1066,7 @@ const UserManagement: React.FC = () => {
                           onClick={() => handleActivateDeactivate(user.id, 'active')}
                           className="p-2 rounded-lg transition-all duration-200 hover:opacity-80"
                           style={{ color: 'var(--success)', background: 'transparent' }}
-                          title="Benutzer aktivieren"
+                          title={t('users.action.activate')}
                         >
                           <CheckCircle size={18} />
                         </button>
@@ -1071,7 +1086,7 @@ const UserManagement: React.FC = () => {
                           onClick={() => handleResetPassword(user)}
                           className="p-2 rounded-lg transition-all duration-200 hover:opacity-80"
                           style={{ color: 'var(--warning)', background: 'transparent' }}
-                          title="Passwort zurücksetzen"
+                          title={t('users.action.resetPassword')}
                         >
                           <KeyRound size={18} />
                         </button>
@@ -1109,7 +1124,7 @@ const UserManagement: React.FC = () => {
         }}
         onSave={editingUser ? handleEditUser : handleAddUser}
         user={editingUser}
-        title={editingUser ? 'Benutzer bearbeiten' : 'Neuer Benutzer'}
+        title={editingUser ? t('users.editUser') : t('users.newUser')}
       />
 
       {/* Confirmation Modal */}
@@ -1127,51 +1142,52 @@ const UserManagement: React.FC = () => {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.5)' }} onClick={closeResetPasswordModal}>
           <div className="w-full max-w-md rounded-2xl p-6" style={{ background: 'var(--surface)' }} onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>Passwort zurücksetzen</h3>
+              <h3 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>{t('users.action.resetPassword')}</h3>
               <button onClick={closeResetPasswordModal} className="p-1 rounded-lg" style={{ color: 'var(--text-tertiary)' }}>
                 <X size={20} />
               </button>
             </div>
             <p className="text-sm mb-4" style={{ color: 'var(--text-secondary)' }}>
-              Neues temporäres Passwort für <span className="font-medium" style={{ color: 'var(--text-primary)' }}>{resetPasswordUser.email}</span>
+              {t('users.resetPassword.forUser')}{' '}
+              <span className="font-medium" style={{ color: 'var(--text-primary)' }}>{resetPasswordUser.email}</span>
             </p>
             {resetPasswordSuccess ? (
               <div className="flex items-center space-x-2 p-3 rounded-lg" style={{ background: 'var(--success-subtle)', color: 'var(--success)' }}>
                 <CheckCircle size={18} />
-                <span className="text-sm">Passwort zurückgesetzt. Der Benutzer muss es beim nächsten Login ändern.</span>
+                <span className="text-sm">{t('users.resetPassword.success')}</span>
               </div>
             ) : (
               <div className="space-y-3">
                 <div>
                   <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>
-                    Neues temporäres Passwort
+                    {t('users.resetPassword.label')}
                   </label>
                   <div className="relative">
                     <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2" style={{ color: 'var(--text-tertiary)' }} size={16} />
                     <input
-                      type={showPassword ? 'text' : 'password'}
+                      type={showResetPassword ? 'text' : 'password'}
                       value={resetPasswordValue}
                       onChange={(e) => setResetPasswordValue(e.target.value)}
                       className="w-full pl-10 pr-10 py-2 rounded-lg"
                       style={{ background: 'var(--surface-hover)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
-                      placeholder="Mindestens 8 Zeichen"
+                      placeholder={t('users.password.minLengthPlaceholder')}
                       minLength={8}
                       disabled={resetPasswordLoading}
                     />
                     <button
                       type="button"
-                      onClick={() => setShowPassword(!showPassword)}
+                      onClick={() => setShowResetPassword(!showResetPassword)}
                       className="absolute right-3 top-1/2 transform -translate-y-1/2"
                       style={{ color: 'var(--text-tertiary)' }}
                     >
-                      {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                      {showResetPassword ? <EyeOff size={16} /> : <Eye size={16} />}
                     </button>
                   </div>
                 </div>
                 <div className="flex items-start space-x-2" style={{ background: 'var(--warning-subtle)', border: '1px solid var(--warning)', borderRadius: '0.375rem', padding: '0.75rem' }}>
                   <AlertTriangle style={{ color: 'var(--warning)' }} className="mt-0.5 flex-shrink-0" size={16} />
                   <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>
-                    Der Benutzer muss dieses Passwort beim nächsten Login ändern.
+                    {t('users.resetPassword.nextLoginHint')}
                   </p>
                 </div>
                 {resetPasswordError && (
@@ -1187,7 +1203,7 @@ const UserManagement: React.FC = () => {
                     style={{ background: 'var(--surface-hover)', color: 'var(--text-secondary)' }}
                     disabled={resetPasswordLoading}
                   >
-                    Abbrechen
+                    {t('common.cancel')}
                   </button>
                   <button
                     onClick={submitResetPassword}
@@ -1200,7 +1216,7 @@ const UserManagement: React.FC = () => {
                     ) : (
                       <>
                         <KeyRound size={16} />
-                        <span>Passwort zurücksetzen</span>
+                        <span>{t('users.action.resetPassword')}</span>
                       </>
                     )}
                   </button>

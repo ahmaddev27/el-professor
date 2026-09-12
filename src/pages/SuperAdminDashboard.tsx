@@ -16,6 +16,8 @@ import { format, differenceInDays, isAfter, isBefore, addDays, startOfMonth } fr
 import { de } from 'date-fns/locale';
 import { calcPricing, fmt as fmtPrice } from '../utils/pricing';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
+import { useTranslation } from '../contexts/LanguageContext';
+import type { TranslationKey } from '../i18n';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -73,6 +75,7 @@ interface PlatformKPIs {
 function useCountdown(endIso: string | null): string {
   const [display, setDisplay] = useState('');
   const rafRef = useRef<number>();
+  const { t } = useTranslation();
 
   useEffect(() => {
     if (!endIso) { setDisplay(''); return; }
@@ -80,21 +83,26 @@ function useCountdown(endIso: string | null): string {
 
     const tick = () => {
       const diff = end - Date.now();
-      if (diff <= 0) { setDisplay('Abgelaufen'); return; }
+      if (diff <= 0) { setDisplay(t('sa.dash.expired')); return; }
       const d = Math.floor(diff / 86_400_000);
       const h = Math.floor((diff % 86_400_000) / 3_600_000);
       const m = Math.floor((diff % 3_600_000) / 60_000);
       const s = Math.floor((diff % 60_000) / 1_000);
       setDisplay(
         d > 0
-          ? `${d}T ${String(h).padStart(2,'0')}Std ${String(m).padStart(2,'0')}Min ${String(s).padStart(2,'0')}Sek`
+          ? t('sa.dash.countdownDays', {
+              d,
+              h: String(h).padStart(2, '0'),
+              m: String(m).padStart(2, '0'),
+              s: String(s).padStart(2, '0'),
+            })
           : `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`
       );
       rafRef.current = requestAnimationFrame(tick);
     };
     rafRef.current = requestAnimationFrame(tick);
     return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); };
-  }, [endIso]);
+  }, [endIso, t]);
 
   return display;
 }
@@ -111,23 +119,29 @@ const PLAN_BG: Record<Plan, string> = {
   advanced: 'rgba(245,158,11,0.12)',
   premium:  'rgba(16,185,129,0.12)',
 };
+// Product tier names, not words — untranslated in both dictionaries.
 const PLAN_LABEL: Record<Plan, string> = { basic: 'Basic', advanced: 'Advanced', premium: 'Premium' };
 
-const STATUS_CFG: Record<CompanyStatus, { label: string; color: string; bg: string; Icon: React.ElementType }> = {
-  active:    { label: 'Aktiv',      color: 'var(--success)',        bg: 'var(--success-subtle)',  Icon: CheckCircle },
-  trial:     { label: 'Testphase',  color: 'var(--warning)',        bg: 'var(--warning-subtle)',  Icon: Clock },
-  suspended: { label: 'Gesperrt',   color: 'var(--danger)',         bg: 'var(--danger-subtle)',   Icon: PauseCircle },
-  inactive:  { label: 'Inaktiv',    color: 'var(--text-tertiary)',  bg: 'var(--bg-muted)',        Icon: XCircle },
-  archived:  { label: 'Archiviert', color: '#64748b',               bg: 'rgba(100,116,139,0.12)', Icon: XCircle },
-  deleted:   { label: 'Gelöscht',   color: 'var(--danger)',         bg: 'var(--danger-subtle)',   Icon: XCircle },
+// Object keys are the values stored in `companies.status`, which drive RLS and
+// the approval gates in App.tsx — never translate the key or a comparison, only
+// the label. `label` holds a TranslationKey because this map is module-level
+// and t() is a hook value; CompaniesPage.tsx resolves the same key set.
+const STATUS_CFG: Record<CompanyStatus, { label: TranslationKey; color: string; bg: string; Icon: React.ElementType }> = {
+  active:    { label: 'sa.status.active',    color: 'var(--success)',        bg: 'var(--success-subtle)',  Icon: CheckCircle },
+  trial:     { label: 'sa.status.trial',     color: 'var(--warning)',        bg: 'var(--warning-subtle)',  Icon: Clock },
+  suspended: { label: 'sa.status.suspended', color: 'var(--danger)',         bg: 'var(--danger-subtle)',   Icon: PauseCircle },
+  inactive:  { label: 'sa.status.inactive',  color: 'var(--text-tertiary)',  bg: 'var(--bg-muted)',        Icon: XCircle },
+  archived:  { label: 'sa.status.archived',  color: '#64748b',               bg: 'rgba(100,116,139,0.12)', Icon: XCircle },
+  deleted:   { label: 'sa.status.deleted',   color: 'var(--danger)',         bg: 'var(--danger-subtle)',   Icon: XCircle },
 };
 
 function StatusBadge({ status }: { status: CompanyStatus }) {
+  const { t } = useTranslation();
   const cfg = STATUS_CFG[status] || STATUS_CFG.inactive;
   const Icon = cfg.Icon;
   return (
     <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold" style={{ background: cfg.bg, color: cfg.color }}>
-      <Icon size={10} />{cfg.label}
+      <Icon size={10} />{t(cfg.label)}
     </span>
   );
 }
@@ -205,6 +219,8 @@ interface AttentionItem {
 
 function PlanDistributionBar({ kpis, total }: { kpis: PlatformKPIs; total: number }) {
   if (total === 0) return null;
+  // Product tier names, plus 'Trial' which this chart has always shown in
+  // English — none of these are German, so none are translated.
   const segments = [
     { label: 'Basic',    count: kpis.basicCount,    color: PLAN_COLOR.basic },
     { label: 'Advanced', count: kpis.advancedCount,  color: PLAN_COLOR.advanced },
@@ -244,6 +260,7 @@ export default function SuperAdminDashboard() {
   const { enterCompany } = useSuperAdmin();
   const { showToast } = useToast();
   const navigate = useNavigate();
+  const { t, tPlural } = useTranslation();
 
   const [companies, setCompanies] = useState<CompanyRow[]>([]);
   const [kpis, setKpis] = useState<PlatformKPIs | null>(null);
@@ -355,12 +372,12 @@ export default function SuperAdminDashboard() {
       };
       setKpis(kpiData);
     } catch (err: any) {
-      showToast('error', 'Fehler beim Laden der Plattform-Daten');
+      showToast('error', t('sa.dash.errorLoad'));
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -381,10 +398,10 @@ export default function SuperAdminDashboard() {
         .update({ trial_end: newEnd.toISOString(), updated_at: new Date().toISOString() })
         .eq('id', company.id);
       if (error) throw error;
-      showToast('success', `Testphase von ${company.name} um 7 Tage verlängert`);
+      showToast('success', t('sa.dash.toast.trialExtended', { name: company.name }));
       load(true);
     } catch (err: any) {
-      showToast('error', err.message || 'Fehler beim Verlängern');
+      showToast('error', err.message || t('sa.dash.errorExtend'));
     } finally {
       setExtendingId(null);
     }
@@ -397,10 +414,11 @@ export default function SuperAdminDashboard() {
         .update({ status, updated_at: new Date().toISOString() })
         .eq('id', company.id);
       if (error) throw error;
-      showToast('success', `${company.name} → ${STATUS_CFG[status]?.label ?? status}`);
+      const statusKey = STATUS_CFG[status]?.label;
+      showToast('success', `${company.name} → ${statusKey ? t(statusKey) : status}`);
       load(true);
     } catch (err: any) {
-      showToast('error', err.message || 'Fehler');
+      showToast('error', err.message || t('common.error'));
     }
   };
 
@@ -411,10 +429,10 @@ export default function SuperAdminDashboard() {
         .update({ plan, updated_at: new Date().toISOString() })
         .eq('id', company.id);
       if (error) throw error;
-      showToast('success', `${company.name} → ${PLAN_LABEL[plan]}-Plan`);
+      showToast('success', t('sa.dash.toast.planChanged', { name: company.name, plan: PLAN_LABEL[plan] }));
       load(true);
     } catch (err: any) {
-      showToast('error', err.message || 'Fehler');
+      showToast('error', err.message || t('common.error'));
     }
   };
 
@@ -425,10 +443,10 @@ export default function SuperAdminDashboard() {
         .update({ billing_cycle, updated_at: new Date().toISOString() })
         .eq('id', company.id);
       if (error) throw error;
-      showToast('success', `${company.name} → ${billing_cycle === 'yearly' ? 'Jährlich' : 'Monatlich'}`);
+      showToast('success', `${company.name} → ${t(billing_cycle === 'yearly' ? 'sa.dash.cycle.yearly' : 'sa.dash.cycle.monthly')}`);
       load(true);
     } catch (err: any) {
-      showToast('error', err.message || 'Fehler');
+      showToast('error', err.message || t('common.error'));
     }
   };
 
@@ -440,10 +458,10 @@ export default function SuperAdminDashboard() {
         .update({ subscription_car_limit: limit, updated_at: new Date().toISOString() })
         .eq('id', company.id);
       if (error) throw error;
-      showToast('success', `${company.name} → ${limit} Fahrzeuge`);
+      showToast('success', t('sa.dash.toast.carLimitChanged', { name: company.name, limit }));
       load(true);
     } catch (err: any) {
-      showToast('error', err.message || 'Fehler');
+      showToast('error', err.message || t('common.error'));
     }
   };
 
@@ -462,10 +480,10 @@ export default function SuperAdminDashboard() {
         })
         .eq('id', company.id);
       if (error) throw error;
-      showToast('success', `${company.name} freigeschaltet`);
+      showToast('success', t('sa.dash.toast.approved', { name: company.name }));
       load(true);
     } catch (err: any) {
-      showToast('error', err.message || 'Fehler');
+      showToast('error', err.message || t('common.error'));
     } finally {
       setApprovingId(null);
     }
@@ -488,12 +506,12 @@ export default function SuperAdminDashboard() {
         })
         .eq('id', company.id);
       if (error) throw error;
-      showToast('success', `${company.name} abgelehnt`);
+      showToast('success', t('sa.dash.toast.rejected', { name: company.name }));
       setRejectModal(null);
       setRejectReason('');
       load(true);
     } catch (err: any) {
-      showToast('error', err.message || 'Fehler');
+      showToast('error', err.message || t('common.error'));
     } finally {
       setApprovingId(null);
     }
@@ -506,10 +524,10 @@ export default function SuperAdminDashboard() {
         .update({ approval_status: 'suspended', updated_at: new Date().toISOString() })
         .eq('id', company.id);
       if (error) throw error;
-      showToast('success', `${company.name} gesperrt`);
+      showToast('success', t('sa.dash.toast.approvalSuspended', { name: company.name }));
       load(true);
     } catch (err: any) {
-      showToast('error', err.message || 'Fehler');
+      showToast('error', err.message || t('common.error'));
     }
   };
 
@@ -519,7 +537,7 @@ export default function SuperAdminDashboard() {
   if (companies.length > 0) {
     // Pending approvals are first in attention
     for (const c of pendingCompanies) {
-      attentionItems.push({ id: `${c.id}-pending`, companyName: c.name, reason: 'Wartet auf Freischaltung', severity: 'warning', company: c });
+      attentionItems.push({ id: `${c.id}-pending`, companyName: c.name, reason: t('sa.dash.attention.pending'), severity: 'warning', company: c });
     }
     const now = new Date();
     for (const c of companies) {
@@ -529,20 +547,24 @@ export default function SuperAdminDashboard() {
       const daysLeft = trialEnd ? differenceInDays(trialEnd, now) : null;
 
       if (c.status === 'trial' && trialEnd && isBefore(trialEnd, now)) {
-        attentionItems.push({ id: `${c.id}-expired`, companyName: c.name, reason: 'Testphase abgelaufen — kein aktiver Plan', severity: 'critical', company: c });
+        attentionItems.push({ id: `${c.id}-expired`, companyName: c.name, reason: t('sa.dash.attention.trialExpired'), severity: 'critical', company: c });
       } else if (c.status === 'trial' && daysLeft !== null && daysLeft <= 2) {
-        attentionItems.push({ id: `${c.id}-critical`, companyName: c.name, reason: `Testphase endet in ${daysLeft <= 0 ? 'weniger als 1 Tag' : `${daysLeft} Tag${daysLeft === 1 ? '' : 'en'}`}`, severity: 'critical', company: c });
+        const remaining = daysLeft <= 0
+          ? t('sa.dash.attention.lessThanOneDay')
+          : tPlural({ one: 'sa.dash.dayCount.one', other: 'sa.dash.dayCount.other' }, daysLeft);
+        attentionItems.push({ id: `${c.id}-critical`, companyName: c.name, reason: t('sa.dash.attention.trialEndsIn', { remaining }), severity: 'critical', company: c });
       } else if (c.status === 'trial' && daysLeft !== null && daysLeft <= 5) {
-        attentionItems.push({ id: `${c.id}-warning`, companyName: c.name, reason: `Testphase endet in ${daysLeft} Tagen`, severity: 'warning', company: c });
+        const remaining = tPlural({ one: 'sa.dash.dayCount.one', other: 'sa.dash.dayCount.other' }, daysLeft);
+        attentionItems.push({ id: `${c.id}-warning`, companyName: c.name, reason: t('sa.dash.attention.trialEndsIn', { remaining }), severity: 'warning', company: c });
       }
       if (c.user_count === 0) {
-        attentionItems.push({ id: `${c.id}-nousers`, companyName: c.name, reason: 'Keine Benutzer angelegt', severity: 'info', company: c });
+        attentionItems.push({ id: `${c.id}-nousers`, companyName: c.name, reason: t('sa.dash.attention.noUsers'), severity: 'info', company: c });
       }
       if (c.driver_count === 0 && c.status !== 'inactive') {
-        attentionItems.push({ id: `${c.id}-nodrivers`, companyName: c.name, reason: 'Keine Fahrer angelegt', severity: 'info', company: c });
+        attentionItems.push({ id: `${c.id}-nodrivers`, companyName: c.name, reason: t('sa.dash.attention.noDrivers'), severity: 'info', company: c });
       }
       if (c.status === 'suspended') {
-        attentionItems.push({ id: `${c.id}-suspended`, companyName: c.name, reason: 'Unternehmen ist gesperrt', severity: 'warning', company: c });
+        attentionItems.push({ id: `${c.id}-suspended`, companyName: c.name, reason: t('sa.dash.attention.suspended'), severity: 'warning', company: c });
       }
     }
     // Sort: critical first
@@ -589,9 +611,9 @@ export default function SuperAdminDashboard() {
             </div>
             <span className="text-xs font-semibold uppercase tracking-widest" style={{ color: 'var(--warning)' }}>Super Admin</span>
           </div>
-          <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>Plattform-Übersicht</h1>
+          <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>{t('sa.dash.title')}</h1>
           <p className="text-sm mt-0.5" style={{ color: 'var(--text-secondary)' }}>
-            Echtzeit-Überblick über alle Unternehmen, Pläne und Trials
+            {t('sa.dash.subtitle')}
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
@@ -604,7 +626,7 @@ export default function SuperAdminDashboard() {
             onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
           >
             <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''} />
-            Aktualisieren
+            {t('common.update')}
           </button>
           <Link
             to="/super-admin/companies"
@@ -612,7 +634,7 @@ export default function SuperAdminDashboard() {
             style={{ background: 'var(--warning)', color: 'white' }}
           >
             <Building2 size={14} />
-            Alle Unternehmen
+            {t('sa.dash.allCompanies')}
           </Link>
         </div>
       </div>
@@ -620,11 +642,11 @@ export default function SuperAdminDashboard() {
       {/* ── Section tabs ───────────────────────────────────────────────────────── */}
       <div className="flex gap-1 p-1 rounded-xl flex-wrap" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', width: 'fit-content' }}>
         {([
-          { id: 'overview',    label: 'Übersicht',   icon: BarChart3 },
-          { id: 'approvals',   label: 'Freischaltung', icon: ClipboardCheck, badge: pendingCompanies.length },
-          { id: 'discounts',   label: 'Rabattcodes',  icon: Tag },
-          { id: 'referrals',   label: 'Empfehlungen', icon: Gift },
-          { id: 'activation',  label: 'Aktivierung',  icon: KeyRound },
+          { id: 'overview',    label: t('sa.dash.tab.overview'),   icon: BarChart3 },
+          { id: 'approvals',   label: t('sa.dash.tab.approvals'),  icon: ClipboardCheck, badge: pendingCompanies.length },
+          { id: 'discounts',   label: t('sa.dash.tab.discounts'),  icon: Tag },
+          { id: 'referrals',   label: t('sa.dash.tab.referrals'),  icon: Gift },
+          { id: 'activation',  label: t('sa.dash.tab.activation'), icon: KeyRound },
         ] as const).map(tab => (
           <button
             key={tab.id}
@@ -663,7 +685,7 @@ export default function SuperAdminDashboard() {
               <div className="flex items-center gap-2">
                 <ClipboardCheck size={16} style={{ color: 'var(--warning)' }} />
                 <h3 className="font-semibold text-sm" style={{ color: 'var(--text-primary)' }}>
-                  Ausstehende Freischaltungen
+                  {t('sa.dash.pendingApprovals')}
                 </h3>
                 {pendingCompanies.length > 0 && (
                   <span className="px-2 py-0.5 rounded-full text-xs font-bold" style={{ background: 'var(--warning-subtle)', color: 'var(--warning)' }}>
@@ -675,7 +697,7 @@ export default function SuperAdminDashboard() {
             {pendingCompanies.length === 0 ? (
               <div className="px-5 py-10 text-center" style={{ color: 'var(--text-tertiary)' }}>
                 <CheckCircle size={32} className="mx-auto mb-3 opacity-30" />
-                <p className="text-sm">Keine ausstehenden Anfragen</p>
+                <p className="text-sm">{t('sa.dash.noPendingRequests')}</p>
               </div>
             ) : (
               <div className="divide-y" style={{ borderColor: 'var(--border)' }}>
@@ -691,7 +713,7 @@ export default function SuperAdminDashboard() {
                       <div className="flex items-center gap-2 mt-0.5 flex-wrap">
                         <PlanBadge plan={c.plan ?? 'basic'} />
                         <span className="text-[11px]" style={{ color: 'var(--text-tertiary)' }}>
-                          {c.subscription_car_limit} Fahrzeuge · {c.billing_cycle === 'yearly' ? 'Jährlich' : 'Monatlich'}
+                          {t('sa.dash.carsCount', { count: c.subscription_car_limit })} · {t(c.billing_cycle === 'yearly' ? 'sa.dash.cycle.yearly' : 'sa.dash.cycle.monthly')}
                         </span>
                         {c.referral_code_used && (
                           <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-mono font-semibold" style={{ background: 'rgba(16,185,129,0.1)', color: '#10b981' }}>
@@ -699,7 +721,7 @@ export default function SuperAdminDashboard() {
                           </span>
                         )}
                         <span className="text-[11px]" style={{ color: 'var(--text-tertiary)' }}>
-                          Registriert: {format(new Date(c.created_at), 'dd. MMM yyyy HH:mm', { locale: de })}
+                          {t('sa.dash.registeredAt', { date: format(new Date(c.created_at), 'dd. MMM yyyy HH:mm', { locale: de }) })}
                         </span>
                       </div>
                     </div>
@@ -711,7 +733,7 @@ export default function SuperAdminDashboard() {
                         style={{ background: 'var(--success)', color: 'white' }}
                       >
                         {approvingId === c.id ? <RefreshCw size={11} className="animate-spin" /> : <CheckCircle size={11} />}
-                        Freischalten
+                        {t('sa.dash.approve')}
                       </button>
                       <button
                         onClick={() => { setRejectModal({ company: c }); setRejectReason(''); }}
@@ -720,7 +742,7 @@ export default function SuperAdminDashboard() {
                         style={{ background: 'var(--danger-subtle)', color: 'var(--danger)', border: '1px solid var(--danger)30' }}
                       >
                         <XCircle size={11} />
-                        Ablehnen
+                        {t('sa.dash.reject')}
                       </button>
                     </div>
                   </div>
@@ -733,14 +755,17 @@ export default function SuperAdminDashboard() {
           <div style={cardStyle} className="overflow-hidden">
             <div className="flex items-center gap-2 px-5 py-4 border-b" style={{ borderColor: 'var(--border)' }}>
               <Activity size={16} style={{ color: 'var(--text-tertiary)' }} />
-              <h3 className="font-semibold text-sm" style={{ color: 'var(--text-primary)' }}>Alle Freischaltungs-Status</h3>
+              <h3 className="font-semibold text-sm" style={{ color: 'var(--text-primary)' }}>{t('sa.dash.allApprovalStatuses')}</h3>
             </div>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
                   <tr style={{ background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)' }}>
-                    {['Unternehmen', 'Freischaltung', 'Registriert', 'Empfehlungscode', ''].map(h => (
-                      <th key={h} className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-tertiary)' }}>{h}</th>
+                    {([
+                      'sa.dash.col.company', 'sa.dash.col.approval',
+                      'sa.dash.col.registered', 'sa.dash.col.referralCode', null,
+                    ] as const).map((h, i) => (
+                      <th key={i} className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-tertiary)' }}>{h ? t(h) : ''}</th>
                     ))}
                   </tr>
                 </thead>
@@ -749,7 +774,12 @@ export default function SuperAdminDashboard() {
                     const ap = c.approval_status;
                     const apColor = ap === 'approved' ? 'var(--success)' : ap === 'pending' ? 'var(--warning)' : 'var(--danger)';
                     const apBg = ap === 'approved' ? 'var(--success-subtle)' : ap === 'pending' ? 'var(--warning-subtle)' : 'var(--danger-subtle)';
-                    const apLabel = ap === 'approved' ? 'Freigeschaltet' : ap === 'pending' ? 'Ausstehend' : ap === 'rejected' ? 'Abgelehnt' : 'Gesperrt';
+                    const apLabel = t(
+                      ap === 'approved' ? 'sa.dash.approval.approved'
+                        : ap === 'pending' ? 'sa.dash.approval.pending'
+                          : ap === 'rejected' ? 'sa.dash.approval.rejected'
+                            : 'sa.dash.approval.suspended',
+                    );
                     return (
                       <tr key={c.id} style={{ borderBottom: '1px solid var(--border)' }}>
                         <td className="px-4 py-3">
@@ -773,7 +803,7 @@ export default function SuperAdminDashboard() {
                                 onMouseEnter={e => { (e.currentTarget.style.borderColor = 'var(--danger)'); (e.currentTarget.style.color = 'var(--danger)'); }}
                                 onMouseLeave={e => { (e.currentTarget.style.borderColor = 'var(--border)'); (e.currentTarget.style.color = 'var(--text-tertiary)'); }}
                               >
-                                Sperren
+                                {t('sa.dash.suspend')}
                               </button>
                             )}
                             {(ap === 'rejected' || ap === 'suspended') && (
@@ -783,7 +813,7 @@ export default function SuperAdminDashboard() {
                                 className="text-[11px] px-2 py-0.5 rounded border transition-colors"
                                 style={{ borderColor: 'var(--success)', color: 'var(--success)' }}
                               >
-                                Freischalten
+                                {t('sa.dash.approve')}
                               </button>
                             )}
                             {ap === 'pending' && (
@@ -793,13 +823,13 @@ export default function SuperAdminDashboard() {
                                 className="text-[11px] px-2 py-0.5 rounded border transition-colors"
                                 style={{ borderColor: 'var(--success)', color: 'var(--success)' }}
                               >
-                                {approvingId === c.id ? '…' : 'Freischalten'}
+                                {approvingId === c.id ? '…' : t('sa.dash.approve')}
                               </button>
                             )}
                           </div>
                           {c.rejection_reason && (
                             <p className="text-[11px] mt-1 max-w-xs truncate" style={{ color: 'var(--text-tertiary)' }} title={c.rejection_reason}>
-                              Grund: {c.rejection_reason}
+                              {t('sa.dash.reasonPrefix', { reason: c.rejection_reason })}
                             </p>
                           )}
                         </td>
@@ -842,11 +872,11 @@ export default function SuperAdminDashboard() {
       {/* ── KPI Grid ──────────────────────────────────────────────────────────── */}
       {kpis && (
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-          <KpiCard label="Unternehmen gesamt" value={kpis.totalCompanies} icon={Building2} color="var(--accent)" trend={kpis.newThisMonth} sub={`+${kpis.newThisMonth} diesen Monat`} />
-          <KpiCard label="Benutzer gesamt" value={kpis.totalUsers} icon={Users} color="#8b5cf6" />
-          <KpiCard label="Fahrer gesamt" value={kpis.totalDrivers} icon={Car} color="#06b6d4" />
-          <KpiCard label="Belege gesamt" value={kpis.totalReceipts} icon={FileText} color="#64748b" />
-          <KpiCard label="In Testphase" value={kpis.trialCompanies} icon={Clock} color="var(--warning)" sub={kpis.expiringIn7Days > 0 ? `${kpis.expiringIn7Days} enden bald` : undefined} />
+          <KpiCard label={t('sa.dash.kpi.companies')} value={kpis.totalCompanies} icon={Building2} color="var(--accent)" trend={kpis.newThisMonth} sub={t('sa.dash.kpi.newThisMonth', { count: kpis.newThisMonth })} />
+          <KpiCard label={t('sa.dash.kpi.users')} value={kpis.totalUsers} icon={Users} color="#8b5cf6" />
+          <KpiCard label={t('sa.dash.kpi.drivers')} value={kpis.totalDrivers} icon={Car} color="#06b6d4" />
+          <KpiCard label={t('sa.dash.kpi.receipts')} value={kpis.totalReceipts} icon={FileText} color="#64748b" />
+          <KpiCard label={t('sa.dash.kpi.inTrial')} value={kpis.trialCompanies} icon={Clock} color="var(--warning)" sub={kpis.expiringIn7Days > 0 ? t('sa.dash.kpi.endingSoon', { count: kpis.expiringIn7Days }) : undefined} />
         </div>
       )}
 
@@ -856,21 +886,23 @@ export default function SuperAdminDashboard() {
         {/* Subscription breakdown */}
         {kpis && (
           <div className="lg:col-span-1 p-5 space-y-4" style={cardStyle}>
-            <h3 className="text-sm font-semibold uppercase tracking-wide" style={{ color: 'var(--text-tertiary)' }}>Status-Verteilung</h3>
+            <h3 className="text-sm font-semibold uppercase tracking-wide" style={{ color: 'var(--text-tertiary)' }}>{t('sa.dash.statusDistribution')}</h3>
             <div className="space-y-2.5">
-              {[
-                { label: 'Aktiv',              value: kpis.activeCompanies,    color: 'var(--success)',        Icon: CheckCircle },
-                { label: 'Testphase',          value: kpis.trialCompanies,     color: 'var(--warning)',        Icon: Clock },
-                { label: 'Trial abgelaufen',   value: kpis.expiredTrials,      color: 'var(--danger)',         Icon: AlertTriangle },
-                { label: 'Gesperrt',           value: kpis.suspendedCompanies, color: 'var(--danger)',         Icon: PauseCircle },
-                { label: 'Inaktiv',            value: kpis.inactiveCompanies,  color: 'var(--text-tertiary)',  Icon: XCircle },
-                { label: 'Archiviert',         value: kpis.archivedCompanies,  color: '#64748b',               Icon: XCircle },
-                { label: 'Gelöscht',           value: kpis.deletedCompanies,   color: 'var(--danger)',         Icon: XCircle },
-              ].filter(row => row.value > 0 || ['Aktiv', 'Testphase'].includes(row.label)).map(row => (
-                <div key={row.label} className="flex items-center justify-between">
+              {([
+                // `alwaysShow` replaces a filter that matched on the German label.
+                // Active and trial stay visible at zero; the rest appear only when non-zero.
+                { id: 'active',       labelKey: 'sa.status.active',            value: kpis.activeCompanies,    color: 'var(--success)',        Icon: CheckCircle, alwaysShow: true },
+                { id: 'trial',        labelKey: 'sa.status.trial',             value: kpis.trialCompanies,     color: 'var(--warning)',        Icon: Clock,       alwaysShow: true },
+                { id: 'trialExpired', labelKey: 'sa.dash.dist.trialExpired',   value: kpis.expiredTrials,      color: 'var(--danger)',         Icon: AlertTriangle },
+                { id: 'suspended',    labelKey: 'sa.status.suspended',         value: kpis.suspendedCompanies, color: 'var(--danger)',         Icon: PauseCircle },
+                { id: 'inactive',     labelKey: 'sa.status.inactive',          value: kpis.inactiveCompanies,  color: 'var(--text-tertiary)',  Icon: XCircle },
+                { id: 'archived',     labelKey: 'sa.status.archived',          value: kpis.archivedCompanies,  color: '#64748b',               Icon: XCircle },
+                { id: 'deleted',      labelKey: 'sa.status.deleted',           value: kpis.deletedCompanies,   color: 'var(--danger)',         Icon: XCircle },
+              ] as const).filter(row => row.value > 0 || 'alwaysShow' in row).map(row => (
+                <div key={row.id} className="flex items-center justify-between">
                   <div className="flex items-center gap-2 text-sm" style={{ color: 'var(--text-secondary)' }}>
                     <row.Icon size={13} style={{ color: row.color }} />
-                    {row.label}
+                    {t(row.labelKey)}
                   </div>
                   <span className="font-bold text-sm" style={{ color: row.value > 0 ? row.color : 'var(--text-tertiary)' }}>
                     {row.value}
@@ -885,8 +917,8 @@ export default function SuperAdminDashboard() {
         {kpis && (
           <div className="lg:col-span-2 p-5 space-y-4" style={cardStyle}>
             <div className="flex items-center justify-between">
-              <h3 className="text-sm font-semibold uppercase tracking-wide" style={{ color: 'var(--text-tertiary)' }}>Plan-Verteilung</h3>
-              <span className="text-xs" style={{ color: 'var(--text-tertiary)' }}>{kpis.totalCompanies} Unternehmen</span>
+              <h3 className="text-sm font-semibold uppercase tracking-wide" style={{ color: 'var(--text-tertiary)' }}>{t('sa.dash.planDistribution')}</h3>
+              <span className="text-xs" style={{ color: 'var(--text-tertiary)' }}>{t('sa.dash.companiesCount', { count: kpis.totalCompanies })}</span>
             </div>
             <PlanDistributionBar kpis={kpis} total={kpis.totalCompanies} />
             <div className="grid grid-cols-3 gap-3 pt-1">
@@ -911,7 +943,7 @@ export default function SuperAdminDashboard() {
           <div className="flex items-center gap-2">
             <AlertTriangle size={16} style={{ color: 'var(--warning)' }} />
             <h3 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
-              Handlungsbedarf ({attentionItems.length})
+              {t('sa.dash.attentionTitle', { count: attentionItems.length })}
             </h3>
           </div>
           <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
@@ -939,14 +971,14 @@ export default function SuperAdminDashboard() {
                         className="px-2.5 py-1 rounded-lg text-xs font-semibold transition-opacity hover:opacity-80"
                         style={{ background: 'var(--warning)', color: 'white' }}
                       >
-                        +7 Tage
+                        {t('sa.dash.extendSevenDays')}
                       </button>
                     )}
                     <button
                       onClick={() => { enterCompany(item.company as any); navigate('/overview'); }}
                       className="p-1.5 rounded-lg transition-colors"
                       style={{ color: severityColor }}
-                      title="Unternehmen öffnen"
+                      title={t('sa.dash.openCompany')}
                       onMouseEnter={e => (e.currentTarget.style.background = severityBg)}
                       onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
                     >
@@ -967,19 +999,22 @@ export default function SuperAdminDashboard() {
             <div className="flex items-center gap-2">
               <Clock size={16} style={{ color: 'var(--warning)' }} />
               <h3 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
-                Testphase endet bald
+                {t('sa.dash.trialEndingSoon')}
               </h3>
             </div>
             <span className="text-xs px-2 py-0.5 rounded-full font-semibold" style={{ background: 'var(--warning-subtle)', color: 'var(--warning)' }}>
-              {expiringSoon.length} Unternehmen
+              {t('sa.dash.companiesCount', { count: expiringSoon.length })}
             </span>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                  {['Unternehmen', 'Plan', 'Verbleibende Zeit', 'Trial-Ende', ''].map(h => (
-                    <th key={h} className="px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-tertiary)' }}>{h}</th>
+                  {([
+                    'sa.dash.col.company', 'sa.dash.col.plan',
+                    'sa.dash.col.remainingTime', 'sa.dash.col.trialEnd', null,
+                  ] as const).map((h, i) => (
+                    <th key={i} className="px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-tertiary)' }}>{h ? t(h) : ''}</th>
                   ))}
                 </tr>
               </thead>
@@ -1009,14 +1044,14 @@ export default function SuperAdminDashboard() {
                           style={{ background: 'var(--warning)', color: 'white' }}
                         >
                           {extendingId === c.id ? <RefreshCw size={11} className="animate-spin" /> : <Zap size={11} />}
-                          +7 Tage
+                          {t('sa.dash.extendSevenDays')}
                         </button>
                         <button
                           onClick={() => handleStatusChange(c, 'active')}
                           className="px-2.5 py-1 rounded-lg text-xs font-semibold transition-opacity hover:opacity-80"
                           style={{ background: 'var(--success)', color: 'white' }}
                         >
-                          Aktivieren
+                          {t('sa.dash.activate')}
                         </button>
                         <button
                           onClick={() => { enterCompany(c as any); navigate('/overview'); }}
@@ -1043,7 +1078,7 @@ export default function SuperAdminDashboard() {
           <div className="flex items-center gap-2">
             <Activity size={16} style={{ color: 'var(--accent)' }} />
             <h3 className="font-semibold text-sm" style={{ color: 'var(--text-primary)' }}>
-              Alle Unternehmen ({companies.length})
+              {t('sa.dash.allCompaniesCount', { count: companies.length })}
             </h3>
           </div>
           <Link
@@ -1053,15 +1088,19 @@ export default function SuperAdminDashboard() {
             onMouseEnter={e => (e.currentTarget.style.opacity = '0.7')}
             onMouseLeave={e => (e.currentTarget.style.opacity = '1')}
           >
-            Alle verwalten <ChevronRight size={13} />
+            {t('sa.dash.manageAll')} <ChevronRight size={13} />
           </Link>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr style={{ borderBottom: '1px solid var(--border)', background: 'var(--bg-subtle)' }}>
-                {['Unternehmen', 'Tarif', 'Abrechnung', 'Fahrzeuge', 'Fahrer', 'Preis', 'Status', 'Trial', 'Erstellt', ''].map(h => (
-                  <th key={h} className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wide whitespace-nowrap" style={{ color: 'var(--text-tertiary)' }}>{h}</th>
+                {([
+                  'sa.dash.col.company', 'sa.dash.col.tariff', 'sa.dash.col.billing',
+                  'sa.dash.col.cars', 'sa.dash.col.drivers', 'sa.dash.col.price',
+                  'common.status', 'sa.dash.col.trial', 'sa.dash.col.created', null,
+                ] as const).map((h, i) => (
+                  <th key={i} className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wide whitespace-nowrap" style={{ color: 'var(--text-tertiary)' }}>{h ? t(h) : ''}</th>
                 ))}
               </tr>
             </thead>
@@ -1092,8 +1131,9 @@ export default function SuperAdminDashboard() {
                       onChange={e => handlePlanChange(c, e.target.value as Plan)}
                       className="text-xs rounded-lg px-2 py-1 font-semibold border-0 outline-none cursor-pointer"
                       style={{ background: PLAN_BG[c.plan ?? 'basic'], color: PLAN_COLOR[c.plan ?? 'basic'] }}
-                      title="Tarif ändern"
+                      title={t('sa.dash.changeTariff')}
                     >
+                      {/* Product tier names — untranslated in both languages. */}
                       <option value="basic">Basic</option>
                       <option value="advanced">Advanced</option>
                       <option value="premium">Premium</option>
@@ -1107,10 +1147,10 @@ export default function SuperAdminDashboard() {
                       onChange={e => handleBillingCycleChange(c, e.target.value as 'monthly' | 'yearly')}
                       className="text-xs rounded-lg px-2 py-1 border-0 outline-none cursor-pointer"
                       style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)' }}
-                      title="Abrechnung ändern"
+                      title={t('sa.dash.changeBilling')}
                     >
-                      <option value="monthly">Monatlich</option>
-                      <option value="yearly">Jährlich</option>
+                      <option value="monthly">{t('sa.dash.cycle.monthly')}</option>
+                      <option value="yearly">{t('sa.dash.cycle.yearly')}</option>
                     </select>
                   </td>
 
@@ -1128,7 +1168,7 @@ export default function SuperAdminDashboard() {
                         }}
                         className="w-14 text-xs rounded-lg px-2 py-1 border-0 outline-none text-center font-semibold"
                         style={{ background: 'var(--bg-subtle)', color: 'var(--text-primary)' }}
-                        title="Fahrzeuglimit"
+                        title={t('sa.dash.carLimit')}
                       />
                       <span className="text-[10px] whitespace-nowrap" style={{ color: c.active_car_count >= c.subscription_car_limit ? 'var(--danger)' : 'var(--text-tertiary)' }}>
                         {c.active_car_count}/{c.subscription_car_limit}
@@ -1150,11 +1190,11 @@ export default function SuperAdminDashboard() {
                       return (
                         <div>
                           <p className="text-xs font-semibold" style={{ color: 'var(--text-primary)' }}>
-                            {fmtPrice(bp.monthlyEquivalent)} €<span style={{ color: 'var(--text-tertiary)', fontWeight: 400 }}>/Mo</span>
+                            {fmtPrice(bp.monthlyEquivalent)} €<span style={{ color: 'var(--text-tertiary)', fontWeight: 400 }}>{t('sa.dash.perMonthShort')}</span>
                           </p>
                           {c.billing_cycle === 'yearly' && (
                             <p className="text-[10px]" style={{ color: 'var(--text-tertiary)' }}>
-                              {fmtPrice(bp.finalTotal)} €/Jahr
+                              {fmtPrice(bp.finalTotal)} €{t('sa.dash.perYearShort')}
                             </p>
                           )}
                         </div>
@@ -1175,12 +1215,13 @@ export default function SuperAdminDashboard() {
                           background: STATUS_CFG[c.status]?.bg ?? 'var(--bg-muted)',
                           color: STATUS_CFG[c.status]?.color ?? 'var(--text-secondary)',
                         }}
-                        title="Status ändern"
+                        title={t('sa.dash.changeStatus')}
                       >
-                        <option value="active">Aktiv</option>
-                        <option value="trial">Testphase</option>
-                        <option value="suspended">Gesperrt</option>
-                        <option value="inactive">Inaktiv</option>
+                        {/* `value` is the stored companies.status — only the label is translated. */}
+                        <option value="active">{t('sa.status.active')}</option>
+                        <option value="trial">{t('sa.status.trial')}</option>
+                        <option value="suspended">{t('sa.status.suspended')}</option>
+                        <option value="inactive">{t('sa.status.inactive')}</option>
                       </select>
                     )}
                   </td>
@@ -1210,7 +1251,7 @@ export default function SuperAdminDashboard() {
                           disabled={extendingId === c.id}
                           className="p-1.5 rounded-lg transition-colors"
                           style={{ color: 'var(--warning)' }}
-                          title="Trial verlängern (+7 Tage)"
+                          title={t('sa.dash.extendTrialTitle')}
                           onMouseEnter={e => (e.currentTarget.style.background = 'var(--warning-subtle)')}
                           onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
                         >
@@ -1221,7 +1262,7 @@ export default function SuperAdminDashboard() {
                         onClick={() => setManualSubModal(c)}
                         className="p-1.5 rounded-lg transition-colors"
                         style={{ color: 'var(--text-tertiary)' }}
-                        title="Abo manuell bearbeiten"
+                        title={t('sa.dash.editSubscriptionManually')}
                         onMouseEnter={e => { e.currentTarget.style.background = 'var(--accent-subtle)'; e.currentTarget.style.color = 'var(--accent)'; }}
                         onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-tertiary)'; }}
                       >
@@ -1231,7 +1272,7 @@ export default function SuperAdminDashboard() {
                         onClick={() => { enterCompany(c as any); navigate('/overview'); }}
                         className="p-1.5 rounded-lg transition-colors"
                         style={{ color: 'var(--accent)' }}
-                        title="Als Unternehmen öffnen"
+                        title={t('sa.dash.openAsCompany')}
                         onMouseEnter={e => (e.currentTarget.style.background = 'var(--accent-subtle)')}
                         onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
                       >
@@ -1247,7 +1288,7 @@ export default function SuperAdminDashboard() {
         {companies.length > 8 && (
           <div className="px-5 py-3 border-t text-center" style={{ borderColor: 'var(--border)' }}>
             <Link to="/super-admin/companies" className="text-xs font-semibold" style={{ color: 'var(--accent)' }}>
-              Alle {companies.length} Unternehmen anzeigen →
+              {t('sa.dash.showAllCompanies', { count: companies.length })}
             </Link>
           </div>
         )}
@@ -1257,7 +1298,7 @@ export default function SuperAdminDashboard() {
       <div className="p-5 space-y-3" style={cardStyle}>
         <div className="flex items-center gap-2">
           <TrendingUp size={16} style={{ color: 'var(--success)' }} />
-          <h3 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>Neueste Registrierungen</h3>
+          <h3 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>{t('sa.dash.recentSignups')}</h3>
         </div>
         {companies.slice(0, 5).map(c => (
           <div key={c.id} className="flex items-center justify-between gap-3 py-1.5">
@@ -1296,17 +1337,17 @@ export default function SuperAdminDashboard() {
       <div className="p-5 space-y-3" style={cardStyle}>
         <div className="flex items-center gap-2">
           <BarChart3 size={16} style={{ color: 'var(--accent)' }} />
-          <h3 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>Schnellzugriff</h3>
+          <h3 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>{t('sa.dash.quickAccess')}</h3>
         </div>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           {[
-            { label: 'Unternehmen verwalten', icon: Building2, color: 'var(--warning)', to: '/super-admin/companies' },
-            { label: 'Neues Unternehmen', icon: Plus, color: 'var(--success)', to: '/super-admin/companies' },
-            { label: 'Benutzer verwalten', icon: Users, color: 'var(--accent)', to: '/users' },
-            { label: 'Einstellungen', icon: Shield, color: 'var(--text-secondary)', to: '/settings' },
+            { id: 'manageCompanies', label: t('sa.dash.quick.manageCompanies'), icon: Building2, color: 'var(--warning)', to: '/super-admin/companies' },
+            { id: 'newCompany', label: t('sa.dash.quick.newCompany'), icon: Plus, color: 'var(--success)', to: '/super-admin/companies' },
+            { id: 'manageUsers', label: t('sa.dash.quick.manageUsers'), icon: Users, color: 'var(--accent)', to: '/users' },
+            { id: 'settings', label: t('common.settings'), icon: Shield, color: 'var(--text-secondary)', to: '/settings' },
           ].map(action => (
             <Link
-              key={action.label}
+              key={action.id}
               to={action.to}
               className="flex flex-col items-center gap-2 p-4 rounded-xl text-center text-xs font-medium transition-all hover:-translate-y-0.5 hover:shadow-md"
               style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
@@ -1325,7 +1366,7 @@ export default function SuperAdminDashboard() {
             onMouseLeave={e => { (e.currentTarget.style.borderColor = 'var(--border)'); (e.currentTarget.style.color = 'var(--text-secondary)'); }}
           >
             <Tag size={20} />
-            Rabattcodes
+            {t('sa.dash.tab.discounts')}
           </button>
           <button
             onClick={() => setActiveSection('approvals')}
@@ -1340,7 +1381,7 @@ export default function SuperAdminDashboard() {
               </span>
             )}
             <ClipboardCheck size={20} />
-            Freischaltung
+            {t('sa.dash.tab.approvals')}
           </button>
           <button
             onClick={() => setActiveSection('referrals')}
@@ -1350,7 +1391,7 @@ export default function SuperAdminDashboard() {
             onMouseLeave={e => { (e.currentTarget.style.borderColor = 'var(--border)'); (e.currentTarget.style.color = 'var(--text-secondary)'); }}
           >
             <Gift size={20} />
-            Empfehlungen
+            {t('sa.dash.tab.referrals')}
           </button>
           <button
             onClick={() => setActiveSection('activation')}
@@ -1360,7 +1401,7 @@ export default function SuperAdminDashboard() {
             onMouseLeave={e => { (e.currentTarget.style.borderColor = 'var(--border)'); (e.currentTarget.style.color = 'var(--text-secondary)'); }}
           >
             <KeyRound size={20} />
-            Aktivierung
+            {t('sa.dash.tab.activation')}
           </button>
         </div>
       </div>
@@ -1374,20 +1415,24 @@ export default function SuperAdminDashboard() {
       <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.6)' }}>
         <div className="w-full max-w-md rounded-2xl p-6 space-y-4" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
           <h3 className="font-semibold text-base" style={{ color: 'var(--text-primary)' }}>
-            Registrierung ablehnen
+            {t('sa.dash.rejectModal.title')}
           </h3>
           <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-            Möchten Sie die Registrierung von <strong style={{ color: 'var(--text-primary)' }}>{rejectModal.company.name}</strong> ablehnen?
+            {/* Split so the company name keeps its bold emphasis; the two halves
+                sit either side of the name in both languages. */}
+            {t('sa.dash.rejectModal.questionPrefix')}
+            <strong style={{ color: 'var(--text-primary)' }}>{rejectModal.company.name}</strong>
+            {t('sa.dash.rejectModal.questionSuffix')}
           </p>
           <div>
             <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-tertiary)' }}>
-              Ablehnungsgrund (optional, wird dem Unternehmen angezeigt)
+              {t('sa.dash.rejectModal.reasonLabel')}
             </label>
             <textarea
               value={rejectReason}
               onChange={e => setRejectReason(e.target.value)}
               rows={3}
-              placeholder="z.B. Unvollständige Angaben, kein Taxiunternehmen..."
+              placeholder={t('sa.dash.rejectModal.reasonPlaceholder')}
               className="w-full px-3 py-2.5 rounded-xl text-sm resize-none focus:outline-none"
               style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
             />
@@ -1398,7 +1443,7 @@ export default function SuperAdminDashboard() {
               className="flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold"
               style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
             >
-              Abbrechen
+              {t('common.cancel')}
             </button>
             <button
               onClick={handleReject}
@@ -1406,7 +1451,7 @@ export default function SuperAdminDashboard() {
               className="flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold transition-opacity hover:opacity-85 disabled:opacity-50"
               style={{ background: 'var(--danger)', color: 'white' }}
             >
-              {approvingId === rejectModal.company.id ? 'Wird abgelehnt…' : 'Ablehnen'}
+              {approvingId === rejectModal.company.id ? t('sa.dash.rejecting') : t('sa.dash.reject')}
             </button>
           </div>
         </div>

@@ -21,21 +21,26 @@ export interface RoleWithPermissions extends Role {
   permissions: RolePermission[];
 }
 
+/**
+ * `key` is the stored `role_permissions.page_key` — it is matched, never displayed.
+ * `label` and `description` hold TranslationKeys because this list is module-level
+ * and `t()` is a hook value; RoleModal resolves them where it renders each row.
+ */
 export const PAGE_DEFINITIONS = [
-  { key: 'overview', label: 'Übersicht', description: 'Dashboard overview' },
-  { key: 'drivers', label: 'Fahrer', description: 'Driver management' },
-  { key: 'income', label: 'Umsätze', description: 'Income tracking' },
-  { key: 'receipts', label: 'Belege', description: 'Receipt management' },
-  { key: 'fixed-costs', label: 'Fixkosten', description: 'Fixed costs' },
-  { key: 'salaries', label: 'Gehälter', description: 'Salary management' },
-  { key: 'cash-balance', label: 'Bargeldbestand', description: 'Cash balance' },
-  { key: 'statistics', label: 'Statistiken', description: 'Statistics and reports' },
-  { key: 'documents', label: 'Dokumente', description: 'Document management and generation' },
-  { key: 'accounting', label: 'Abrechnung', description: 'Accounting' },
-  { key: 'users', label: 'Benutzerverwaltung', description: 'User management' },
-  { key: 'cars', label: 'Autos', description: 'Car management' },
-  { key: 'werkstatt', label: 'Werkstatt', description: 'Workshop checks' },
-  { key: 'notes', label: 'Notizen', description: 'Driver notes' },
-  { key: 'roles', label: 'Rollen', description: 'Role management' },
-  { key: 'settings', label: 'Einstellungen', description: 'System settings' },
+  { key: 'overview', label: 'users.page.overview', description: 'users.page.overview.desc' },
+  { key: 'drivers', label: 'users.page.drivers', description: 'users.page.drivers.desc' },
+  { key: 'income', label: 'users.page.income', description: 'users.page.income.desc' },
+  { key: 'receipts', label: 'users.page.receipts', description: 'users.page.receipts.desc' },
+  { key: 'fixed-costs', label: 'users.page.fixedCosts', description: 'users.page.fixedCosts.desc' },
+  { key: 'salaries', label: 'users.page.salaries', description: 'users.page.salaries.desc' },
+  { key: 'cash-balance', label: 'users.page.cashBalance', description: 'users.page.cashBalance.desc' },
+  { key: 'statistics', label: 'users.page.statistics', description: 'users.page.statistics.desc' },
+  { key: 'documents', label: 'users.page.documents', description: 'users.page.documents.desc' },
+  { key: 'accounting', label: 'users.page.accounting', description: 'users.page.accounting.desc' },
+  { key: 'users', label: 'users.page.users', description: 'users.page.users.desc' },
+  { key: 'cars', label: 'users.page.cars', description: 'users.page.cars.desc' },
+  { key: 'werkstatt', label: 'users.page.werkstatt', description: 'users.page.werkstatt.desc' },
+  { key: 'notes', label: 'users.page.notes', description: 'users.page.notes.desc' },
+  { key: 'roles', label: 'users.page.roles', description: 'users.page.roles.desc' },
+  { key: 'settings', label: 'users.page.settings', description: 'users.page.settings.desc' },
 ] as const;

@@ -3,6 +3,8 @@ import { X, FileText, Loader2 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
+import { useTranslation } from '../contexts/LanguageContext';
+import type { TranslationKey } from '../i18n';
 
 interface CompanySub {
   id: string;
@@ -21,14 +23,19 @@ interface Props {
   onGenerated: () => void;
 }
 
-const MONTHS_DE = [
-  'Januar', 'Februar', 'M\u00E4rz', 'April', 'Mai', 'Juni',
-  'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember',
+// Holds TranslationKeys: this list is module-level and t() is a hook value. These
+// month names only label the on-screen picker and hint \u2014 no filename, no exported
+// cell \u2014 so unlike document text they are translated.
+const MONTH_KEYS: TranslationKey[] = [
+  'bill.month.january', 'bill.month.february', 'bill.month.march', 'bill.month.april',
+  'bill.month.may', 'bill.month.june', 'bill.month.july', 'bill.month.august',
+  'bill.month.september', 'bill.month.october', 'bill.month.november', 'bill.month.december',
 ];
 
 export default function GenerateInvoicesModal({ subscriptions, onClose, onGenerated }: Props) {
   const { user } = useAuth();
   const { showToast } = useToast();
+  const { t, tPlural } = useTranslation();
   const now = new Date();
   const [month, setMonth] = useState(now.getMonth() + 1);
   const [year, setYear] = useState(now.getFullYear());
@@ -63,7 +70,7 @@ export default function GenerateInvoicesModal({ subscriptions, onClose, onGenera
         // Generate invoice number via RPC
         const { data: invNum } = await supabase.rpc('generate_invoice_number', { p_year: year });
         if (!invNum) {
-          errors.push(`Rechnungsnummer f\u00FCr ${(sub.companies as any)?.name} konnte nicht generiert werden`);
+          errors.push(t('bill.invoice.numberFailed', { company: (sub.companies as any)?.name ?? '' }));
           continue;
         }
 
@@ -96,11 +103,11 @@ export default function GenerateInvoicesModal({ subscriptions, onClose, onGenera
 
       setResults({ created: created.length, skipped: skipped.length, errors });
       if (created.length > 0) {
-        showToast('success', `${created.length} Rechnung(en) erstellt`);
+        showToast('success', tPlural({ one: 'bill.invoice.createdCount.one', other: 'bill.invoice.createdCount.other' }, created.length));
         onGenerated();
       }
     } catch (err: any) {
-      showToast('error', 'Fehler: ' + (err.message || 'Unbekannt'));
+      showToast('error', t('bill.errorWithMessage', { message: err.message || t('common.unknown') }));
     } finally {
       setGenerating(false);
     }
@@ -125,8 +132,10 @@ export default function GenerateInvoicesModal({ subscriptions, onClose, onGenera
               <FileText size={20} style={{ color: 'var(--accent)' }} />
             </div>
             <div>
-              <h2 className="font-bold" style={{ color: 'var(--text-primary)' }}>Monatsrechnungen generieren</h2>
-              <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>{activeSubs.length} aktive Abonnements</p>
+              <h2 className="font-bold" style={{ color: 'var(--text-primary)' }}>{t('bill.invoice.generateTitle')}</h2>
+              <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
+                {tPlural({ one: 'bill.invoice.activeSubs.one', other: 'bill.invoice.activeSubs.other' }, activeSubs.length)}
+              </p>
             </div>
           </div>
           <button onClick={onClose} style={{ color: 'var(--text-tertiary)' }}><X size={20} /></button>
@@ -135,19 +144,21 @@ export default function GenerateInvoicesModal({ subscriptions, onClose, onGenera
         <div className="p-5 space-y-4">
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs font-semibold mb-1.5" style={{ color: 'var(--text-secondary)' }}>Monat</label>
+              <label className="block text-xs font-semibold mb-1.5" style={{ color: 'var(--text-secondary)' }}>{t('common.month')}</label>
               <select value={month} onChange={e => setMonth(+e.target.value)} style={inputStyle}>
-                {MONTHS_DE.map((m, i) => <option key={i} value={i + 1}>{m}</option>)}
+                {MONTH_KEYS.map((key, i) => <option key={key} value={i + 1}>{t(key)}</option>)}
               </select>
             </div>
             <div>
-              <label className="block text-xs font-semibold mb-1.5" style={{ color: 'var(--text-secondary)' }}>Jahr</label>
+              <label className="block text-xs font-semibold mb-1.5" style={{ color: 'var(--text-secondary)' }}>{t('bill.field.year')}</label>
               <input type="number" value={year} onChange={e => setYear(+e.target.value)} style={inputStyle} min={2024} max={2099} />
             </div>
           </div>
 
           <div className="p-3 rounded-xl text-sm" style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)' }}>
-            F\u00FCr {activeSubs.length} aktive Abonnements werden Rechnungen f\u00FCr <strong>{MONTHS_DE[month - 1]} {year}</strong> erstellt. Bereits vorhandene werden \u00FCbersprungen.
+            {t('bill.invoice.hintPeriodLead', { count: activeSubs.length })}{' '}
+            <strong>{t(MONTH_KEYS[month - 1])} {year}</strong>
+            {t('bill.invoice.hintPeriodTail')}
           </div>
 
           {results && (
@@ -155,8 +166,10 @@ export default function GenerateInvoicesModal({ subscriptions, onClose, onGenera
               background: results.errors.length > 0 ? 'rgba(239,68,68,0.08)' : 'rgba(34,197,94,0.08)',
               border: `1px solid ${results.errors.length > 0 ? 'var(--danger)' : 'var(--success)'}`,
             }}>
-              <p style={{ color: 'var(--success)' }}>{results.created} Rechnung(en) erstellt</p>
-              {results.skipped > 0 && <p style={{ color: 'var(--text-tertiary)' }}>{results.skipped} \u00FCbersprungen (existiert bereits)</p>}
+              <p style={{ color: 'var(--success)' }}>
+                {tPlural({ one: 'bill.invoice.createdCount.one', other: 'bill.invoice.createdCount.other' }, results.created)}
+              </p>
+              {results.skipped > 0 && <p style={{ color: 'var(--text-tertiary)' }}>{t('bill.invoice.skippedCount', { count: results.skipped })}</p>}
               {results.errors.map((e, i) => <p key={i} style={{ color: 'var(--danger)' }}>{e}</p>)}
             </div>
           )}
@@ -164,7 +177,7 @@ export default function GenerateInvoicesModal({ subscriptions, onClose, onGenera
 
         <div className="flex justify-end gap-2 p-5 border-t" style={{ borderColor: 'var(--border)' }}>
           <button onClick={onClose} className="px-4 py-2.5 rounded-xl text-sm font-medium" style={{ color: 'var(--text-primary)', border: '1px solid var(--border)' }}>
-            Schlie\u00DFen
+            {t('common.close')}
           </button>
           <button
             onClick={handleGenerate}
@@ -172,7 +185,9 @@ export default function GenerateInvoicesModal({ subscriptions, onClose, onGenera
             className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold text-white"
             style={{ background: 'var(--accent)', opacity: generating || activeSubs.length === 0 ? 0.6 : 1 }}
           >
-            {generating ? <><Loader2 size={16} className="animate-spin" /> Generiere...</> : <><FileText size={16} /> Generieren</>}
+            {generating
+              ? <><Loader2 size={16} className="animate-spin" /> {t('bill.invoice.generating')}</>
+              : <><FileText size={16} /> {t('bill.invoice.generate')}</>}
           </button>
         </div>
       </div>

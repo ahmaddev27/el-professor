@@ -8,6 +8,8 @@ import { supabase } from '../lib/supabase';
 import { Plan } from '../contexts/PlanContext';
 import { calcPricing, fleetDiscountPercent, PRICE_PER_CAR, YEARLY_DISCOUNT_PERCENT, fmt as fmtPrice } from '../utils/pricing';
 import type { BillingCycle, DiscountResult } from '../utils/pricing';
+import { useTranslation } from '../contexts/LanguageContext';
+import type { TranslationKey } from '../i18n';
 
 type Step = 'plan' | 'company' | 'account' | 'done';
 
@@ -21,37 +23,40 @@ const labelClass = 'block text-xs font-semibold text-white/40 uppercase tracking
 
 interface PlanDef {
   id: Plan;
+  /** Product name — a tier is called Basic/Advanced/Premium in every language. */
   name: string;
-  sub: string;
+  sub: TranslationKey;
   highlight: boolean;
   color: string;
-  features: string[];
+  features: TranslationKey[];
 }
 
+// `sub` and `features` hold TranslationKeys: this list is module-level and t()
+// is a hook value. Every consumer resolves it at the render site.
 const PLANS: PlanDef[] = [
   {
     id: 'basic',
     name: 'Basic',
-    sub: 'Grundfunktionen für Ihre Flotte.',
+    sub: 'signup.plan.basicSub',
     highlight: false,
     color: '#06b6d4',
-    features: ['Übersicht', 'Belege', 'Fahrer', 'Fahrzeuge', 'Umsätze', 'Fixkosten', 'Bargeldbestand'],
+    features: ['nav.overview', 'nav.belege', 'nav.fahrer', 'nav.cars', 'nav.umsaetze', 'nav.fixkosten', 'nav.bargeldbestand'],
   },
   {
     id: 'advanced',
     name: 'Advanced',
-    sub: 'Für wachsende Unternehmen.',
+    sub: 'landing.plan.advancedSub',
     highlight: true,
     color: '#f59e0b',
-    features: ['Alles aus Basic', 'Werkstatt', 'Abrechnung', 'Notizen', 'Rollen & Nutzer'],
+    features: ['signup.plan.everythingInBasic', 'nav.werkstatt', 'nav.abrechnung', 'nav.notes', 'locked.feature.rollenNutzer'],
   },
   {
     id: 'premium',
     name: 'Premium',
-    sub: 'Für professionelle Fuhrparks.',
+    sub: 'landing.plan.premiumSub',
     highlight: false,
     color: '#10b981',
-    features: ['Alles aus Advanced', 'Gehälter', 'Dokumente', 'Stundennachweis'],
+    features: ['signup.plan.everythingInAdvanced', 'nav.salaries', 'nav.documents', 'locked.feature.stundennachweis'],
   },
 ];
 
@@ -65,6 +70,7 @@ const PricePreview: React.FC<{
   billingCycle: BillingCycle;
   discount?: DiscountResult | null;
 }> = ({ plan, carLimit, billingCycle, discount }) => {
+  const { t } = useTranslation();
   const bp = calcPricing(plan, carLimit, billingCycle);
   const fleetPct = fleetDiscountPercent(carLimit);
   const planColor = PLANS.find(p => p.id === plan)?.color ?? '#06b6d4';
@@ -78,22 +84,22 @@ const PricePreview: React.FC<{
       borderColor: `${planColor}30`,
     }}>
       <p className="text-xs font-semibold uppercase tracking-wider mb-3" style={{ color: planColor }}>
-        Ihre Preisübersicht
+        {t('signup.price.heading')}
       </p>
       <div className="space-y-1.5 text-xs">
         <div className="flex justify-between text-white/50">
-          <span>Grundpreis ({carLimit} × {PRICE_PER_CAR[plan]} €)</span>
+          <span>{t('signup.price.base')} ({carLimit} × {PRICE_PER_CAR[plan]} €)</span>
           <span>{fmtPrice(bp.baseMonthly)} €</span>
         </div>
         {fleetPct > 0 && (
           <div className="flex justify-between" style={{ color: '#34d399' }}>
-            <span>Flottenrabatt -{fleetPct}%</span>
+            <span>{t('landing.pricing.fleetDiscount')} -{fleetPct}%</span>
             <span>-{fmtPrice(bp.baseMonthly - bp.monthlyAfterFleet)} €</span>
           </div>
         )}
         {billingCycle === 'yearly' && (
           <div className="flex justify-between" style={{ color: '#fbbf24' }}>
-            <span>Jahresrabatt -{YEARLY_DISCOUNT_PERCENT}%</span>
+            <span>{t('landing.pricing.yearlyDiscount')} -{YEARLY_DISCOUNT_PERCENT}%</span>
             <span>
               -{fmtPrice(billingCycle === 'yearly' ? bp.monthlyAfterFleet * 12 - bp.yearlyTotal : 0)} €
             </span>
@@ -101,32 +107,32 @@ const PricePreview: React.FC<{
         )}
         {discount && (
           <div className="flex justify-between" style={{ color: '#34d399' }}>
-            <span>Rabattcode ({discount.code})</span>
+            <span>{t('signup.discount.label')} ({discount.code})</span>
             <span>-{fmtPrice(discount.discount_amount)} €</span>
           </div>
         )}
         <div className="pt-2 border-t border-white/10 flex justify-between font-bold" style={{ color: planColor }}>
           {billingCycle === 'yearly' ? (
             <>
-              <span>Endpreis (jährlich)</span>
+              <span>{t('signup.price.finalYearly')}</span>
               <span>{fmtPrice(finalPrice)} €</span>
             </>
           ) : (
             <>
-              <span>Endpreis (monatlich)</span>
+              <span>{t('signup.price.finalMonthly')}</span>
               <span>{fmtPrice(finalPrice)} €</span>
             </>
           )}
         </div>
         {billingCycle === 'yearly' && (
           <div className="flex justify-between text-white/35 text-[11px]">
-            <span>Monatliches Äquivalent</span>
-            <span>{fmtPrice(finalPrice / 12)} € / Monat</span>
+            <span>{t('signup.price.monthlyEquivalent')}</span>
+            <span>{fmtPrice(finalPrice / 12)} € {t('signup.price.perMonth')}</span>
           </div>
         )}
       </div>
       <p className="text-[10px] text-white/25 mt-3">
-        Fahrerlimit: {carLimit * 4} aktive Fahrer (4× Fahrzeuge)
+        {t('signup.price.driverLimitNote', { count: carLimit * 4 })}
       </p>
     </div>
   );
@@ -144,6 +150,7 @@ const DiscountCodeInput: React.FC<{
   onRemoved: () => void;
   applied: DiscountResult | null;
 }> = ({ plan, carLimit, billingCycle, currentPrice, companyId, onApplied, onRemoved, applied }) => {
+  const { t } = useTranslation();
   const [code, setCode] = useState('');
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<{ text: string; ok: boolean } | null>(null);
@@ -174,6 +181,8 @@ const DiscountCodeInput: React.FC<{
         }
       );
       const data = await res.json();
+      // `german_message` is authored by the edge function, not the dictionary —
+      // it is displayed exactly as the server phrased it.
       if (data.valid) {
         onApplied({ ...data, code: code.trim().toUpperCase() });
         setMessage({ text: data.german_message, ok: true });
@@ -182,7 +191,7 @@ const DiscountCodeInput: React.FC<{
         setMessage({ text: data.german_message, ok: false });
       }
     } catch {
-      setMessage({ text: 'Fehler bei der Validierung.', ok: false });
+      setMessage({ text: t('signup.discount.validationError'), ok: false });
     } finally {
       setLoading(false);
     }
@@ -194,7 +203,7 @@ const DiscountCodeInput: React.FC<{
         <div className="flex items-center gap-2">
           <Tag size={14} style={{ color: '#34d399' }} />
           <span className="text-xs font-bold" style={{ color: '#34d399' }}>{applied.code}</span>
-          <span className="text-xs text-white/40">angewendet</span>
+          <span className="text-xs text-white/40">{t('signup.discount.applied')}</span>
         </div>
         <button onClick={() => { onRemoved(); setMessage(null); }} className="p-1 rounded hover:opacity-70 transition-opacity" style={{ color: '#34d399' }}>
           <X size={14} />
@@ -213,7 +222,7 @@ const DiscountCodeInput: React.FC<{
             value={code}
             onChange={e => setCode(e.target.value.toUpperCase())}
             onKeyDown={e => e.key === 'Enter' && handleApply()}
-            placeholder="Rabattcode"
+            placeholder={t('signup.discount.label')}
             className="w-full pl-9 pr-3 py-2.5 bg-white/5 border border-white/10 text-white placeholder-white/20 rounded-xl focus:outline-none focus:ring-2 focus:ring-cyan-500/30 text-sm font-mono"
           />
         </div>
@@ -223,7 +232,7 @@ const DiscountCodeInput: React.FC<{
           className="px-4 py-2.5 rounded-xl text-sm font-semibold text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed"
           style={{ background: 'rgba(6,182,212,0.2)', border: '1px solid rgba(6,182,212,0.3)' }}
         >
-          {loading ? '…' : 'Anwenden'}
+          {loading ? '…' : t('signup.discount.apply')}
         </button>
       </div>
       {message && (
@@ -239,6 +248,7 @@ const DiscountCodeInput: React.FC<{
 // ─── Component ────────────────────────────────────────────────────────────────
 
 const SignupPage: React.FC = () => {
+  const { t } = useTranslation();
   const [step, setStep] = useState<Step>('plan');
   const [selectedPlan, setSelectedPlan] = useState<Plan>('advanced');
   const [billingCycle, setBillingCycle] = useState<BillingCycle>('monthly');
@@ -267,7 +277,7 @@ const SignupPage: React.FC = () => {
     setError('');
     setReferralError('');
     if (password.length < 8) {
-      setError('Das Passwort muss mindestens 8 Zeichen lang sein.');
+      setError(t('account.error.pwShort', { n: 8 }));
       return;
     }
     setLoading(true);
@@ -303,13 +313,15 @@ const SignupPage: React.FC = () => {
       );
       const data = await res.json();
       if (!res.ok || !data.success) {
+        // The needles are matched against the edge function's own wording, so
+        // they are server vocabulary rather than UI copy.
         const errMsg: string = data.error || '';
         if (errMsg.toLowerCase().includes('bereits registriert') || errMsg.toLowerCase().includes('already')) {
-          setError('Diese E-Mail-Adresse ist bereits registriert. Bitte melden Sie sich an oder setzen Sie Ihr Passwort zurück.');
+          setError(t('signup.error.emailTaken'));
         } else if (errMsg.toLowerCase().includes('empfehlungscode') || errMsg.toLowerCase().includes('referral')) {
           setReferralError(errMsg);
         } else {
-          setError(errMsg || 'Registrierung fehlgeschlagen. Bitte versuchen Sie es erneut.');
+          setError(errMsg || t('signup.error.failed'));
         }
         return;
       }
@@ -325,7 +337,7 @@ const SignupPage: React.FC = () => {
       // AuthContext will detect approval_status=pending and render PendingApprovalPage
       window.location.href = '/overview';
     } catch {
-      setError('Ein unerwarteter Fehler ist aufgetreten. Bitte versuchen Sie es erneut.');
+      setError(t('forgot.unexpected'));
     } finally {
       setLoading(false);
     }
@@ -344,8 +356,8 @@ const SignupPage: React.FC = () => {
           <div className="w-14 h-14 mx-auto mb-3 flex items-center justify-center">
             <img src="/professor_logo_white.svg" alt="El-Professor" className="w-14 h-14 object-contain drop-shadow-[0_0_16px_rgba(6,182,212,0.5)]" />
           </div>
-          <h1 className="text-2xl font-bold text-white mb-1">Kostenlos starten</h1>
-          <p className="text-white/40 text-sm">{TRIAL_DAYS} Tage kostenlos testen — keine Kreditkarte erforderlich</p>
+          <h1 className="text-2xl font-bold text-white mb-1">{t('signup.cta')}</h1>
+          <p className="text-white/40 text-sm">{t('signup.subtitle', { days: TRIAL_DAYS })}</p>
         </div>
 
         {/* Step indicators */}
@@ -364,7 +376,7 @@ const SignupPage: React.FC = () => {
                     {i < stepIndex ? <Check size={12} /> : i + 1}
                   </div>
                   <span className={`text-xs font-medium hidden sm:inline ${step === s ? 'text-white' : 'text-white/30'}`}>
-                    {s === 'plan' ? 'Plan' : s === 'company' ? 'Unternehmen' : 'Zugangsdaten'}
+                    {s === 'plan' ? t('signup.step.plan') : s === 'company' ? t('signup.step.company') : t('signup.step.account')}
                   </span>
                 </div>
                 {i < 2 && <div className={`w-6 h-px ${i < stepIndex ? 'bg-emerald-500/50' : 'bg-white/10'}`} />}
@@ -381,12 +393,12 @@ const SignupPage: React.FC = () => {
               <div className="w-14 h-14 rounded-full bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center mx-auto mb-4">
                 <CheckCircle2 className="text-emerald-400" size={26} />
               </div>
-              <h2 className="text-white font-semibold mb-2">Konto erfolgreich erstellt</h2>
+              <h2 className="text-white font-semibold mb-2">{t('signup.done.title')}</h2>
               <p className="text-white/60 text-sm leading-relaxed mb-6">
-                Ihr Konto wurde erstellt. Sie k&ouml;nnen sich jetzt anmelden.
+                {t('signup.done.body')}
               </p>
               <Link to="/login" className="inline-flex items-center justify-center gap-2 w-full bg-gradient-to-r from-cyan-500 to-blue-600 text-white py-3 px-4 rounded-xl font-semibold text-sm">
-                Zur Anmeldung
+                {t('signup.done.cta')}
               </Link>
             </div>
           )}
@@ -395,8 +407,8 @@ const SignupPage: React.FC = () => {
           {step === 'plan' && (
             <div className="space-y-5">
               <div>
-                <h2 className="text-base font-semibold text-white mb-1">Tarif auswählen</h2>
-                <p className="text-xs text-white/40">Alle Tarife starten mit {TRIAL_DAYS} Tagen kostenlos — Sie können jederzeit wechseln.</p>
+                <h2 className="text-base font-semibold text-white mb-1">{t('signup.plan.heading')}</h2>
+                <p className="text-xs text-white/40">{t('signup.plan.subheading', { days: TRIAL_DAYS })}</p>
               </div>
 
               {/* Plan cards */}
@@ -418,7 +430,7 @@ const SignupPage: React.FC = () => {
                         className="absolute -top-2.5 left-1/2 -translate-x-1/2 px-2 py-0.5 rounded-full text-[10px] font-bold"
                         style={{ background: plan.color, color: '#000' }}
                       >
-                        Beliebt
+                        {t('signup.plan.badgePopular')}
                       </div>
                     )}
                     {selectedPlan === plan.id && (
@@ -428,13 +440,13 @@ const SignupPage: React.FC = () => {
                     )}
                     <p className="font-bold text-white text-sm mb-0.5">{plan.name}</p>
                     <p className="text-xs mb-1" style={{ color: plan.color }}>
-                      {PRICE_PER_CAR[plan.id]} €<span className="text-white/30"> / Fahrzeug / Monat</span>
+                      {PRICE_PER_CAR[plan.id]} €<span className="text-white/30"> {t('landing.pricing.perVehiclePerMonth')}</span>
                     </p>
                     <ul className="space-y-1">
-                      {plan.features.map(f => (
-                        <li key={f} className="flex items-center gap-1.5 text-xs text-white/50">
+                      {plan.features.map(featureKey => (
+                        <li key={featureKey} className="flex items-center gap-1.5 text-xs text-white/50">
                           <span className="w-1 h-1 rounded-full flex-shrink-0" style={{ background: plan.color }} />
-                          {f}
+                          {t(featureKey)}
                         </li>
                       ))}
                     </ul>
@@ -446,7 +458,7 @@ const SignupPage: React.FC = () => {
               <div>
                 <label className={labelClass}>
                   <Car size={11} className="inline mr-1" />
-                  Anzahl Fahrzeuge
+                  {t('signup.cars.label')}
                 </label>
                 <div className="flex items-center gap-4">
                   <input
@@ -458,10 +470,10 @@ const SignupPage: React.FC = () => {
                   <span className="text-white font-bold text-lg w-8 text-center">{carLimit}</span>
                 </div>
                 <p className="text-[11px] text-white/30 mt-1">
-                  Fahrerlimit: {carLimit * 4} aktive Fahrer
+                  {t('signup.cars.driverLimit', { count: carLimit * 4 })}
                   {fleetDiscountPercent(carLimit) > 0 && (
                     <span className="ml-2 text-emerald-400 font-semibold">
-                      -{fleetDiscountPercent(carLimit)}% Flottenrabatt
+                      -{fleetDiscountPercent(carLimit)}% {t('landing.pricing.fleetDiscount')}
                     </span>
                   )}
                 </p>
@@ -469,7 +481,7 @@ const SignupPage: React.FC = () => {
 
               {/* Billing cycle */}
               <div>
-                <label className={labelClass}>Abrechnung</label>
+                <label className={labelClass}>{t('signup.billing.label')}</label>
                 <div className="flex gap-2">
                   {(['monthly', 'yearly'] as BillingCycle[]).map(bc => (
                     <button
@@ -483,8 +495,8 @@ const SignupPage: React.FC = () => {
                         color: billingCycle === bc ? '#fff' : 'rgba(255,255,255,0.4)',
                       }}
                     >
-                      {bc === 'monthly' ? 'Monatlich' : (
-                        <><span>Jährlich</span>
+                      {bc === 'monthly' ? t('landing.pricing.monthly') : (
+                        <><span>{t('landing.pricing.yearly')}</span>
                           <span className="px-1.5 py-0.5 rounded-full text-[10px]" style={{ background: 'rgba(251,191,36,0.15)', color: '#fbbf24' }}>
                             -{YEARLY_DISCOUNT_PERCENT}%
                           </span>
@@ -519,9 +531,9 @@ const SignupPage: React.FC = () => {
               <div className="p-3.5 rounded-xl border border-cyan-500/20 bg-cyan-500/5 flex items-start gap-2.5">
                 <Zap size={14} className="text-cyan-400 flex-shrink-0 mt-0.5" />
                 <p className="text-xs text-white/50">
-                  <span className="text-cyan-300 font-semibold">{TRIAL_DAYS} Tage kostenlos:</span>{' '}
-                  Während Ihrer Testphase (bis {trialEndFormatted}) haben Sie Zugriff auf alle{' '}
-                  <span className="text-white/70">Premium</span>-Features — unabhängig vom gewählten Tarif.
+                  <span className="text-cyan-300 font-semibold">{t('signup.trial.badge', { days: TRIAL_DAYS })}</span>{' '}
+                  {t('signup.trial.bodyLead', { date: trialEndFormatted })}{' '}
+                  <span className="text-white/70">Premium</span>{t('signup.trial.bodyTail')}
                 </p>
               </div>
 
@@ -529,7 +541,7 @@ const SignupPage: React.FC = () => {
                 onClick={() => setStep('company')}
                 className="w-full bg-gradient-to-r from-cyan-500 to-blue-600 text-white py-3 px-4 rounded-xl font-semibold text-sm hover:shadow-[0_4px_24px_rgba(6,182,212,0.4)] hover:-translate-y-0.5 transition-all duration-200 flex items-center justify-center gap-2"
               >
-                Weiter mit {selectedPlanDef.name}
+                {t('signup.continueWith', { plan: selectedPlanDef.name })}
                 <ArrowRight size={15} />
               </button>
             </div>
@@ -541,13 +553,13 @@ const SignupPage: React.FC = () => {
               <div>
                 <button type="button" onClick={() => setStep('plan')} className="flex items-center gap-1.5 text-white/40 hover:text-white/70 text-xs mb-4 transition-colors">
                   <ArrowLeft size={13} />
-                  {selectedPlanDef.name} · {carLimit} Fahrzeuge
+                  {selectedPlanDef.name} · {carLimit} {t('signup.vehiclesUnit')}
                 </button>
-                <h2 className="text-base font-semibold text-white mb-1">Ihr Unternehmen</h2>
-                <p className="text-xs text-white/40 mb-4">Wie heißt Ihr Unternehmen?</p>
+                <h2 className="text-base font-semibold text-white mb-1">{t('signup.company.heading')}</h2>
+                <p className="text-xs text-white/40 mb-4">{t('signup.company.subheading')}</p>
               </div>
               <div>
-                <label className={labelClass}>Unternehmensname</label>
+                <label className={labelClass}>{t('signup.company.nameLabel')}</label>
                 <div className="relative">
                   <Building2 className="absolute left-3.5 top-1/2 -translate-y-1/2 text-white/25" size={16} />
                   <input
@@ -555,7 +567,7 @@ const SignupPage: React.FC = () => {
                     value={companyName}
                     onChange={e => setCompanyName(e.target.value)}
                     className={`${inputClass} pl-10`}
-                    placeholder="Muster GmbH"
+                    placeholder={t('signup.company.namePlaceholder')}
                     required
                     autoFocus
                   />
@@ -566,7 +578,7 @@ const SignupPage: React.FC = () => {
                 disabled={!companyName.trim()}
                 className="w-full bg-gradient-to-r from-cyan-500 to-blue-600 text-white py-3 px-4 rounded-xl font-semibold text-sm hover:shadow-[0_4px_24px_rgba(6,182,212,0.4)] hover:-translate-y-0.5 transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:translate-y-0 flex items-center justify-center gap-2"
               >
-                Weiter
+                {t('signup.next')}
                 <ArrowRight size={15} />
               </button>
             </form>
@@ -580,8 +592,8 @@ const SignupPage: React.FC = () => {
                   <ArrowLeft size={13} />
                   {companyName}
                 </button>
-                <h2 className="text-base font-semibold text-white mb-1">Ihr Zugang</h2>
-                <p className="text-xs text-white/40 mb-4">Sie werden der erste Administrator des Unternehmens.</p>
+                <h2 className="text-base font-semibold text-white mb-1">{t('signup.account.heading')}</h2>
+                <p className="text-xs text-white/40 mb-4">{t('signup.account.subheading')}</p>
               </div>
 
               {error && (
@@ -592,23 +604,23 @@ const SignupPage: React.FC = () => {
               )}
 
               <div>
-                <label className={labelClass}>Vollständiger Name</label>
+                <label className={labelClass}>{t('signup.account.fullName')}</label>
                 <div className="relative">
                   <User className="absolute left-3.5 top-1/2 -translate-y-1/2 text-white/25" size={16} />
-                  <input type="text" value={fullName} onChange={e => setFullName(e.target.value)} className={`${inputClass} pl-10`} placeholder="Max Mustermann" required />
+                  <input type="text" value={fullName} onChange={e => setFullName(e.target.value)} className={`${inputClass} pl-10`} placeholder={t('signup.account.fullNamePlaceholder')} required />
                 </div>
               </div>
 
               <div>
-                <label className={labelClass}>E-Mail-Adresse</label>
+                <label className={labelClass}>{t('auth.email')}</label>
                 <div className="relative">
                   <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 text-white/25" size={16} />
-                  <input type="email" value={email} onChange={e => setEmail(e.target.value)} className={`${inputClass} pl-10`} placeholder="max@muster-gmbh.de" required />
+                  <input type="email" value={email} onChange={e => setEmail(e.target.value)} className={`${inputClass} pl-10`} placeholder={t('signup.account.emailPlaceholder')} required />
                 </div>
               </div>
 
               <div>
-                <label className={labelClass}>Passwort</label>
+                <label className={labelClass}>{t('auth.password')}</label>
                 <div className="relative">
                   <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 text-white/25" size={16} />
                   <input
@@ -616,7 +628,7 @@ const SignupPage: React.FC = () => {
                     value={password}
                     onChange={e => setPassword(e.target.value)}
                     className={`${inputClass} pl-10 pr-12`}
-                    placeholder="Mindestens 8 Zeichen"
+                    placeholder={t('signup.account.passwordPlaceholder')}
                     required
                     minLength={8}
                   />
@@ -629,7 +641,7 @@ const SignupPage: React.FC = () => {
               <div>
                 <label className={labelClass}>
                   <Gift size={11} className="inline mr-1" />
-                  Empfehlungscode <span className="text-white/20 normal-case tracking-normal font-normal">(optional)</span>
+                  {t('signup.account.referralCode')} <span className="text-white/20 normal-case tracking-normal font-normal">{t('signup.optional')}</span>
                 </label>
                 <div className="relative">
                   <Gift className="absolute left-3.5 top-1/2 -translate-y-1/2 text-white/25" size={16} />
@@ -638,7 +650,7 @@ const SignupPage: React.FC = () => {
                     value={referralCode}
                     onChange={e => { setReferralCode(e.target.value.toUpperCase()); setReferralError(''); }}
                     className={`${inputClass} pl-10 font-mono`}
-                    placeholder="z.B. PARTNER2024"
+                    placeholder={t('signup.account.referralPlaceholder')}
                   />
                 </div>
                 {referralError && (
@@ -656,21 +668,25 @@ const SignupPage: React.FC = () => {
               >
                 {loading
                   ? <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
-                  : <><CheckCircle2 size={15} />Kostenlos starten</>
+                  : <><CheckCircle2 size={15} />{t('signup.cta')}</>
                 }
               </button>
 
               <p className="text-center text-white/25 text-xs pt-1">
-                {TRIAL_DAYS} Tage kostenlos, danach <strong className="text-white/40">{selectedPlanDef.name}</strong> ·{' '}
-                {carLimit} Fahrzeuge · {billingCycle === 'yearly' ? 'jährliche' : 'monatliche'} Abrechnung.
+                {t('signup.summaryLead', { days: TRIAL_DAYS })}
+                <strong className="text-white/40">{selectedPlanDef.name}</strong>
+                {t('signup.summaryTail', {
+                  cars: carLimit,
+                  cycle: billingCycle === 'yearly' ? t('signup.billing.yearlyAdj') : t('signup.billing.monthlyAdj'),
+                })}
               </p>
             </form>
           )}
         </div>
 
         <p className="text-center mt-5 text-white/30 text-sm">
-          Bereits registriert?{' '}
-          <Link to="/login" className="text-cyan-300/80 hover:text-cyan-200 transition-colors">Anmelden</Link>
+          {t('signup.alreadyRegistered')}{' '}
+          <Link to="/login" className="text-cyan-300/80 hover:text-cyan-200 transition-colors">{t('auth.signIn')}</Link>
         </p>
       </div>
     </div>

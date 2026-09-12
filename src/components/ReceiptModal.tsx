@@ -1,9 +1,11 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { X, Save, DollarSign, Receipt as ReceiptIcon, User, MapPin, CreditCard, Upload, Camera, Loader2, CheckCircle, AlertCircle } from 'lucide-react';
-import { Receipt, ReceiptFormData, Driver, PAYMENT_METHODS } from '../types/receipt';
+import { Receipt, ReceiptFormData, Driver } from '../types/receipt';
 import { getCityFromPostalCode, isValidGermanPostalCode } from '../utils/germanPostalCodes';
 import { useToast } from '../contexts/ToastContext';
 import { extractReceiptData, OcrResult, formatAmountDE } from '../utils/receiptOcr';
+import { useTranslation } from '../contexts/LanguageContext';
+import type { TranslationKey } from '../i18n';
 
 interface ReceiptModalProps {
   isOpen: boolean;
@@ -15,6 +17,9 @@ interface ReceiptModalProps {
   existingReceipts: Receipt[];
 }
 
+// These values are written to `receipts.description` and compared on read.
+// `Tanken` in particular selects the receipts that feed the Tankenquote, so the
+// stored string must stay byte-identical. Only the label below is translated.
 const RECEIPT_CATEGORIES = [
   'Tanken',
   'Autowäsche',
@@ -24,6 +29,16 @@ const RECEIPT_CATEGORIES = [
 ] as const;
 
 type ReceiptCategory = typeof RECEIPT_CATEGORIES[number];
+
+// `label` holds a TranslationKey: this map is module-level and t() is a hook
+// value, so every consumer resolves it at the call site.
+const RECEIPT_CATEGORY_LABELS: Record<ReceiptCategory, TranslationKey> = {
+  'Tanken':       'rec.category.tanken',
+  'Autowäsche':   'rec.category.carWash',
+  'Autozubehör':  'rec.category.carAccessories',
+  'Öl wechseln':  'rec.category.oilChange',
+  'Other':        'rec.category.other',
+};
 
 type ScanState = 'idle' | 'scanning' | 'success' | 'error';
 
@@ -49,6 +64,7 @@ const ReceiptModal: React.FC<ReceiptModalProps> = ({
   existingReceipts,
 }) => {
   const { success: showSuccess, error: showError } = useToast();
+  const { t } = useTranslation();
   const dateInputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dropZoneRef = useRef<HTMLDivElement>(null);
@@ -201,7 +217,7 @@ const ReceiptModal: React.FC<ReceiptModalProps> = ({
   const handlePostalCodeChange = async (value: string) => {
     const cleanValue = value.replace(/\D/g, '').slice(0, 5);
     if (cleanValue.length === 5 && isValidGermanPostalCode(cleanValue)) {
-      setFormData(prev => ({ ...prev, postalCode: cleanValue, city: 'Lädt...' }));
+      setFormData(prev => ({ ...prev, postalCode: cleanValue, city: t('rec.cityLoading') }));
       const city = await getCityFromPostalCode(cleanValue);
       setFormData(prev => ({ ...prev, postalCode: cleanValue, city: city || '' }));
     } else {
@@ -230,7 +246,7 @@ const ReceiptModal: React.FC<ReceiptModalProps> = ({
 
   const processImageFile = useCallback(async (file: File | Blob) => {
     if (!file.type.startsWith('image/')) {
-      showError('Bitte ein Bild-Format wählen (JPEG, PNG, WebP)');
+      showError(t('rec.ocr.invalidImage'));
       return;
     }
 
@@ -238,11 +254,11 @@ const ReceiptModal: React.FC<ReceiptModalProps> = ({
     const url = URL.createObjectURL(file);
     setPreviewUrl(prev => { if (prev) URL.revokeObjectURL(prev); return url; });
     setScanState('scanning');
-    setScanMessage('Belegdaten werden erkannt …');
+    setScanMessage(t('rec.ocr.detecting'));
 
     try {
       const data = await extractReceiptData(file, (pct) => {
-        setScanMessage(`Texterkennung … ${pct}%`);
+        setScanMessage(t('rec.ocr.progress', { percent: pct }));
       });
 
       setOcrResult(data);
@@ -250,22 +266,24 @@ const ReceiptModal: React.FC<ReceiptModalProps> = ({
       const hasAnyField = data.date || data.receiptNumber || data.amount || data.postalCode;
       if (!hasAnyField) {
         setScanState('error');
-        setScanMessage('Belegdaten konnten nicht vollständig erkannt werden. Bitte manuell ausfüllen.');
+        setScanMessage(t('rec.ocr.failed'));
         return;
       }
 
       applyExtracted(data);
       setScanState('success');
+      // 'Unsicher' is the marker receiptOcr.ts writes into its reason strings, not
+      // display text — matching it must not follow the UI language.
       const uncertain = (data.dateReason?.startsWith('Unsicher') || data.amountReason?.startsWith('Unsicher'));
       setScanMessage(uncertain
-        ? 'Felder erkannt — unsichere Felder bitte prüfen.'
-        : 'Felder automatisch ausgefüllt — bitte prüfen und ggf. korrigieren.');
+        ? t('rec.ocr.successUncertain')
+        : t('rec.ocr.success'));
     } catch (err) {
       console.error('Receipt OCR error:', err);
       setScanState('error');
-      setScanMessage('Belegdaten konnten nicht vollständig erkannt werden. Bitte manuell ausfüllen.');
+      setScanMessage(t('rec.ocr.failed'));
     }
-  }, []);
+  }, [t]);
 
   // Map extracted data onto form fields
   const applyExtracted = useCallback(async (data: OcrResult) => {
@@ -346,13 +364,13 @@ const ReceiptModal: React.FC<ReceiptModalProps> = ({
     if (!finalDescription.trim()) return;
     if (!formData.receiptNumber.trim() || !formData.driverName) return;
     if (!formData.date.match(/^\d{4}-\d{2}-\d{2}$/)) {
-      showError('Bitte ein gültiges Datum eingeben (TT/MM/JJJJ)');
+      showError(t('rec.invalidDate'));
       dateInputRef.current?.focus();
       return;
     }
 
     await onSave({ ...formData, description: finalDescription });
-    showSuccess('Beleg erfolgreich gespeichert');
+    showSuccess(t('rec.saved'));
 
     if (!receipt) {
       resetForm(true);
@@ -411,7 +429,7 @@ const ReceiptModal: React.FC<ReceiptModalProps> = ({
             <div>
               <label style={{ color: 'var(--text-secondary)' }} className="block text-sm font-medium mb-2 flex items-center gap-1.5">
                 <Camera size={14} />
-                Belegbild einfügen oder hochladen
+                {t('rec.scanLabel')}
               </label>
 
               {/* Drop zone */}
@@ -437,7 +455,7 @@ const ReceiptModal: React.FC<ReceiptModalProps> = ({
                   <div style={{ position: 'relative' }}>
                     <img
                       src={previewUrl}
-                      alt="Belegvorschau"
+                      alt={t('rec.previewAlt')}
                       style={{
                         width: '100%',
                         maxHeight: '180px',
@@ -457,7 +475,7 @@ const ReceiptModal: React.FC<ReceiptModalProps> = ({
                         border: 'none', cursor: 'pointer',
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
                       }}
-                      title="Bild entfernen"
+                      title={t('rec.removeImage')}
                     >
                       <X size={13} />
                     </button>
@@ -471,11 +489,11 @@ const ReceiptModal: React.FC<ReceiptModalProps> = ({
                       <Upload size={22} />
                     </div>
                     <p style={{ color: 'var(--text-tertiary)', fontSize: '0.8125rem', textAlign: 'center', margin: 0 }}>
-                      Bild hier ablegen, einfügen{' '}
-                      <span style={{ color: 'var(--accent)', fontWeight: 600 }}>(Strg+V)</span>
-                      {' '}oder{' '}
+                      {t('rec.dropHint')}{' '}
+                      <span style={{ color: 'var(--accent)', fontWeight: 600 }}>{t('rec.dropShortcut')}</span>
+                      {' '}{t('rec.dropOr')}{' '}
                       <span style={{ color: 'var(--accent)', fontWeight: 600, textDecoration: 'underline' }}>
-                        Datei wählen
+                        {t('rec.chooseFile')}
                       </span>
                     </p>
                     <p style={{ color: 'var(--text-tertiary)', fontSize: '0.6875rem', margin: 0 }}>
@@ -550,7 +568,7 @@ const ReceiptModal: React.FC<ReceiptModalProps> = ({
                 onMouseLeave={e => (e.currentTarget.style.background = 'var(--bg-subtle)')}
               >
                 <Upload size={13} />
-                Belegfoto hochladen
+                {t('rec.uploadPhoto')}
               </button>
 
               {/* OCR debug panel */}
@@ -561,20 +579,21 @@ const ReceiptModal: React.FC<ReceiptModalProps> = ({
                     onClick={() => setShowOcrDebug(v => !v)}
                     style={{ fontSize: '0.7rem', color: 'var(--text-tertiary)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
                   >
-                    {showOcrDebug ? '▾' : '▸'} OCR-Kandidaten anzeigen
+                    {showOcrDebug ? '▾' : '▸'} {t('rec.ocr.showCandidates')}
                   </button>
                   {showOcrDebug && (
                     <div style={{ fontSize: '0.68rem', marginTop: 4, padding: '8px', borderRadius: '0.375rem', background: 'var(--bg-subtle)', color: 'var(--text-tertiary)', lineHeight: 1.5 }}>
                       {ocrResult.amountCandidates && ocrResult.amountCandidates.length > 0 && (
                         <div style={{ marginBottom: 6 }}>
-                          <strong style={{ color: 'var(--text-secondary)' }}>Betrag-Kandidaten:</strong>
+                          <strong style={{ color: 'var(--text-secondary)' }}>{t('rec.ocr.amountCandidates')}</strong>
                           {ocrResult.amountCandidates.map((c, i) => (
                             <div key={i} style={{ paddingLeft: 8, color: c.rejected ? '#f87171' : i === 0 ? '#86efac' : 'var(--text-tertiary)' }}>
                               {c.rejected ? '✗ ' : i === 0 ? '✓ ' : '  '}
                               {c.value}
+                              {/* c.rejectedReason / c.reason come from receiptOcr.ts and stay German. */}
                               {c.rejected
-                                ? ` — Abgelehnt: ${c.rejectedReason}`
-                                : ` (Score ${c.score}) — ${c.reason}`}
+                                ? t('rec.ocr.rejectedReason', { reason: c.rejectedReason ?? '' })
+                                : t('rec.ocr.scoredReason', { score: c.score, reason: c.reason })}
                               <span style={{ opacity: 0.6 }}> [{c.sourceLine.slice(0, 40)}]</span>
                             </div>
                           ))}
@@ -582,28 +601,28 @@ const ReceiptModal: React.FC<ReceiptModalProps> = ({
                       )}
                       {ocrResult.dateCandidates && ocrResult.dateCandidates.length > 0 && (
                         <div style={{ marginBottom: 6 }}>
-                          <strong style={{ color: 'var(--text-secondary)' }}>Datum-Kandidaten:</strong>
+                          <strong style={{ color: 'var(--text-secondary)' }}>{t('rec.ocr.dateCandidates')}</strong>
                           {ocrResult.dateCandidates.map((c, i) => (
                             <div key={i} style={{ paddingLeft: 8, color: c.rejected ? '#f87171' : i === 0 ? '#86efac' : 'var(--text-tertiary)' }}>
                               {c.rejected ? '✗ ' : i === 0 ? '✓ ' : '  '}
-                              {c.value} (Score {c.score}) — {c.reason}
+                              {c.value}{t('rec.ocr.scoredReason', { score: c.score, reason: c.reason })}
                               <span style={{ opacity: 0.6 }}> [{c.sourceLine.slice(0, 40)}]</span>
                             </div>
                           ))}
                         </div>
                       )}
                       <div>
-                        <strong style={{ color: 'var(--text-secondary)' }}>PLZ/Stadt-Kandidaten:</strong>
+                        <strong style={{ color: 'var(--text-secondary)' }}>{t('rec.ocr.plzCandidates')}</strong>
                         {(!ocrResult.plzCandidates || ocrResult.plzCandidates.length === 0) ? (
-                          <div style={{ paddingLeft: 8, color: '#f87171' }}>Keine PLZ/Stadt-Kandidaten gefunden</div>
+                          <div style={{ paddingLeft: 8, color: '#f87171' }}>{t('rec.ocr.noPlzCandidates')}</div>
                         ) : (
                           ocrResult.plzCandidates.map((c, i) => (
                             <div key={i} style={{ paddingLeft: 8, color: c.rejected ? '#f87171' : i === 0 ? '#86efac' : 'var(--text-tertiary)' }}>
                               {c.rejected ? '✗ ' : i === 0 ? '✓ ' : '  '}
                               {c.postalCode} {c.city}
                               {c.rejected
-                                ? ` — Abgelehnt: ${c.rejectedReason}`
-                                : ` (Score ${c.score}) — ${c.reason}`}
+                                ? t('rec.ocr.rejectedReason', { reason: c.rejectedReason ?? '' })
+                                : t('rec.ocr.scoredReason', { score: c.score, reason: c.reason })}
                             </div>
                           ))
                         )}
@@ -621,7 +640,7 @@ const ReceiptModal: React.FC<ReceiptModalProps> = ({
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
               <label style={{ color: 'var(--text-secondary)' }} className="block text-sm font-medium mb-1">
-                Belegnummer
+                {t('rec.receiptNumber')}
               </label>
               <div className="relative">
                 <ReceiptIcon style={{ color: 'var(--text-tertiary)' }} className="absolute left-3 top-1/2 transform -translate-y-1/2" size={16} />
@@ -630,7 +649,7 @@ const ReceiptModal: React.FC<ReceiptModalProps> = ({
                   value={formData.receiptNumber}
                   onChange={e => setFormData(prev => ({ ...prev, receiptNumber: e.target.value }))}
                   style={{ ...inputStyle, paddingLeft: '2.25rem' }}
-                  placeholder="Automatisch generiert"
+                  placeholder={t('rec.autoGenerated')}
                   required
                 />
               </div>
@@ -638,11 +657,13 @@ const ReceiptModal: React.FC<ReceiptModalProps> = ({
 
             <div>
               <label style={{ color: 'var(--text-secondary)' }} className="block text-sm font-medium mb-1 flex items-center gap-2">
-                Datum
+                {t('common.date')}
                 {ocrResult?.dateReason?.startsWith('Unsicher') && (
-                  <span style={{ fontSize: '0.7rem', color: '#f59e0b', fontWeight: 600 }}>Bitte prüfen</span>
+                  <span style={{ fontSize: '0.7rem', color: '#f59e0b', fontWeight: 600 }}>{t('rec.pleaseCheck')}</span>
                 )}
               </label>
+              {/* The date mask stays German (TT/MM/JJJJ): displayToIso parses
+                  DD.MM.YYYY / DD/MM/YYYY only, and the figure matches the Beleg. */}
               <input
                 ref={dateInputRef}
                 type="text"
@@ -675,6 +696,7 @@ const ReceiptModal: React.FC<ReceiptModalProps> = ({
               />
               {ocrResult?.dateReason && (
                 <p style={{ fontSize: '0.7rem', color: 'var(--text-tertiary)', marginTop: 3 }}>
+                  {/* dateReason is OCR diagnostics produced in German by receiptOcr.ts. */}
                   OCR: {ocrResult.dateReason}
                 </p>
               )}
@@ -682,7 +704,7 @@ const ReceiptModal: React.FC<ReceiptModalProps> = ({
 
             <div>
               <label style={{ color: 'var(--text-secondary)' }} className="block text-sm font-medium mb-1">
-                Fahrer
+                {t('common.driver')}
               </label>
               <div className="relative">
                 <User style={{ color: 'var(--text-tertiary)' }} className="absolute left-3 top-1/2 transform -translate-y-1/2" size={16} />
@@ -692,7 +714,7 @@ const ReceiptModal: React.FC<ReceiptModalProps> = ({
                   style={{ ...inputStyle, paddingLeft: '2.25rem', appearance: 'none' }}
                   required
                 >
-                  <option value="">Fahrer auswählen</option>
+                  <option value="">{t('rec.selectDriver')}</option>
                   {drivers.filter(d => d.status !== 'inactive').map(d => (
                     <option key={d.id} value={d.name}>{d.name}</option>
                   ))}
@@ -702,7 +724,7 @@ const ReceiptModal: React.FC<ReceiptModalProps> = ({
 
             <div>
               <label style={{ color: 'var(--text-secondary)' }} className="block text-sm font-medium mb-1">
-                Kategorie
+                {t('rec.category')}
               </label>
               <select
                 value={selectedCategory}
@@ -710,8 +732,9 @@ const ReceiptModal: React.FC<ReceiptModalProps> = ({
                 style={{ ...inputStyle, appearance: 'none' }}
                 required
               >
+                {/* The option value is the persisted category; only the label translates. */}
                 {RECEIPT_CATEGORIES.map(cat => (
-                  <option key={cat} value={cat}>{cat}</option>
+                  <option key={cat} value={cat}>{t(RECEIPT_CATEGORY_LABELS[cat])}</option>
                 ))}
               </select>
             </div>
@@ -719,14 +742,14 @@ const ReceiptModal: React.FC<ReceiptModalProps> = ({
             {selectedCategory === 'Other' && (
               <div>
                 <label style={{ color: 'var(--text-secondary)' }} className="block text-sm font-medium mb-1">
-                  Beschreibung
+                  {t('common.description')}
                 </label>
                 <input
                   type="text"
                   value={customDescription}
                   onChange={e => handleCustomDescriptionChange(e.target.value)}
                   style={inputStyle}
-                  placeholder="Bitte Beschreibung eingeben"
+                  placeholder={t('rec.descriptionPlaceholder')}
                   required
                 />
               </div>
@@ -735,7 +758,7 @@ const ReceiptModal: React.FC<ReceiptModalProps> = ({
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label style={{ color: 'var(--text-secondary)' }} className="block text-sm font-medium mb-1">
-                  Postleitzahl
+                  {t('rec.postalCode')}
                 </label>
                 <div className="relative">
                   <MapPin style={{ color: 'var(--text-tertiary)' }} className="absolute left-3 top-1/2 transform -translate-y-1/2" size={16} />
@@ -744,30 +767,30 @@ const ReceiptModal: React.FC<ReceiptModalProps> = ({
                     value={formData.postalCode || ''}
                     onChange={e => handlePostalCodeChange(e.target.value)}
                     style={{ ...inputStyle, paddingLeft: '2.25rem' }}
-                    placeholder="z.B. 10115"
+                    placeholder={t('rec.postalCodePlaceholder')}
                     maxLength={5}
                   />
                 </div>
               </div>
               <div>
                 <label style={{ color: 'var(--text-secondary)' }} className="block text-sm font-medium mb-1">
-                  Stadt
+                  {t('rec.city')}
                 </label>
                 <input
                   type="text"
                   value={formData.city || ''}
                   readOnly
                   style={{ ...inputStyle, opacity: 0.7 }}
-                  placeholder="Automatisch erkannt"
+                  placeholder={t('rec.autoDetected')}
                 />
               </div>
             </div>
 
             <div>
               <label style={{ color: 'var(--danger)' }} className="block text-sm font-medium mb-1 flex items-center gap-2">
-                Ausgaben €
+                {t('rec.expensesEuro')}
                 {ocrResult?.amountReason?.startsWith('Unsicher') && (
-                  <span style={{ fontSize: '0.7rem', color: '#f59e0b', fontWeight: 600 }}>Bitte prüfen</span>
+                  <span style={{ fontSize: '0.7rem', color: '#f59e0b', fontWeight: 600 }}>{t('rec.pleaseCheck')}</span>
                 )}
               </label>
               <div className="relative">
@@ -800,6 +823,7 @@ const ReceiptModal: React.FC<ReceiptModalProps> = ({
               </div>
               {ocrResult?.amountReason && (
                 <p style={{ fontSize: '0.7rem', color: 'var(--text-tertiary)', marginTop: 3 }}>
+                  {/* amountReason is OCR diagnostics produced in German by receiptOcr.ts. */}
                   OCR: {ocrResult.amountReason}
                 </p>
               )}
@@ -807,7 +831,7 @@ const ReceiptModal: React.FC<ReceiptModalProps> = ({
 
             <div>
               <label style={{ color: 'var(--text-secondary)' }} className="block text-sm font-medium mb-1">
-                Zahlungsmethode
+                {t('rec.paymentMethod')}
               </label>
               <div className="relative">
                 <CreditCard style={{ color: 'var(--text-tertiary)' }} className="absolute left-3 top-1/2 transform -translate-y-1/2" size={16} />
@@ -817,8 +841,11 @@ const ReceiptModal: React.FC<ReceiptModalProps> = ({
                   style={{ ...inputStyle, paddingLeft: '2.25rem', appearance: 'none' }}
                   required
                 >
-                  <option value="bar">{PAYMENT_METHODS.bar}</option>
-                  <option value="uberweisung">{PAYMENT_METHODS.uberweisung}</option>
+                  {/* PAYMENT_METHODS is a shared constant in types/receipt.ts that
+                      utils/receiptPdf.ts also reads, so it is not translated in
+                      place; the on-screen option label is resolved here instead. */}
+                  <option value="bar">{t('rec.payment.bar')}</option>
+                  <option value="uberweisung">{t('rec.payment.uberweisung')}</option>
                 </select>
               </div>
             </div>
@@ -831,7 +858,7 @@ const ReceiptModal: React.FC<ReceiptModalProps> = ({
                 onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-muted)')}
                 onMouseLeave={e => (e.currentTarget.style.background = 'var(--bg-subtle)')}
               >
-                Abbrechen
+                {t('common.cancel')}
               </button>
               <button
                 type="submit"
@@ -849,7 +876,7 @@ const ReceiptModal: React.FC<ReceiptModalProps> = ({
                 onMouseLeave={e => { if (scanState !== 'scanning') e.currentTarget.style.background = 'var(--accent)'; }}
               >
                 {scanState === 'scanning' ? <Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} /> : <Save size={16} />}
-                <span>{scanState === 'scanning' ? 'Erkenne …' : 'Speichern'}</span>
+                <span>{scanState === 'scanning' ? t('rec.scanning') : t('common.save')}</span>
               </button>
             </div>
           </form>

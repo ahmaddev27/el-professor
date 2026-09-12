@@ -12,6 +12,8 @@ import { useSuperAdmin, CompanyListItem } from '../contexts/SuperAdminContext';
 import { useToast } from '../contexts/ToastContext';
 import { format, differenceInDays } from 'date-fns';
 import { de } from 'date-fns/locale';
+import { useTranslation } from '../contexts/LanguageContext';
+import type { TranslationKey } from '../i18n';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -49,13 +51,17 @@ interface AdminFormData {
 
 // ─── Status config ────────────────────────────────────────────────────────────
 
-const STATUS_CONFIG: Record<CompanyStatus, { label: string; icon: React.ElementType; color: string; bg: string }> = {
-  active:    { label: 'Aktiv',       icon: CheckCircle,    color: 'var(--success)',        bg: 'var(--success-subtle)' },
-  trial:     { label: 'Testphase',   icon: AlertCircle,    color: 'var(--warning)',        bg: 'var(--warning-subtle)' },
-  suspended: { label: 'Gesperrt',    icon: PauseCircle,    color: 'var(--danger)',         bg: 'var(--danger-subtle)' },
-  inactive:  { label: 'Inaktiv',     icon: XCircle,        color: 'var(--text-tertiary)',  bg: 'var(--bg-muted)' },
-  archived:  { label: 'Archiviert',  icon: Archive,        color: '#64748b',               bg: 'rgba(100,116,139,0.12)' },
-  deleted:   { label: 'Gelöscht',    icon: Trash2,         color: 'var(--danger)',         bg: 'var(--danger-subtle)' },
+// Object keys are the values stored in `companies.status`, which drive RLS and
+// the approval gates in App.tsx — never translate the key or a comparison, only
+// the label. `label` holds a TranslationKey because this map is module-level
+// and t() is a hook value; SuperAdminDashboard.tsx resolves the same key set.
+const STATUS_CONFIG: Record<CompanyStatus, { label: TranslationKey; icon: React.ElementType; color: string; bg: string }> = {
+  active:    { label: 'sa.status.active',    icon: CheckCircle,    color: 'var(--success)',        bg: 'var(--success-subtle)' },
+  trial:     { label: 'sa.status.trial',     icon: AlertCircle,    color: 'var(--warning)',        bg: 'var(--warning-subtle)' },
+  suspended: { label: 'sa.status.suspended', icon: PauseCircle,    color: 'var(--danger)',         bg: 'var(--danger-subtle)' },
+  inactive:  { label: 'sa.status.inactive',  icon: XCircle,        color: 'var(--text-tertiary)',  bg: 'var(--bg-muted)' },
+  archived:  { label: 'sa.status.archived',  icon: Archive,        color: '#64748b',               bg: 'rgba(100,116,139,0.12)' },
+  deleted:   { label: 'sa.status.deleted',   icon: Trash2,         color: 'var(--danger)',         bg: 'var(--danger-subtle)' },
 };
 
 // ─── Shared primitives ────────────────────────────────────────────────────────
@@ -82,11 +88,12 @@ const labelStyle: React.CSSProperties = {
 };
 
 function StatusBadge({ status }: { status: CompanyStatus }) {
+  const { t } = useTranslation();
   const cfg = STATUS_CONFIG[status] ?? STATUS_CONFIG.inactive;
   const Icon = cfg.icon;
   return (
     <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold" style={{ background: cfg.bg, color: cfg.color }}>
-      <Icon size={11} />{cfg.label}
+      <Icon size={11} />{t(cfg.label)}
     </span>
   );
 }
@@ -102,54 +109,57 @@ interface LifecycleConfirmProps {
   onClose: () => void;
 }
 
+// `title` / `description` / `confirmLabel` hold TranslationKeys: this map is
+// module-level and t() is a hook value. LifecycleConfirmModal resolves them.
 const LIFECYCLE_META: Record<LifecycleAction, {
-  title: string;
-  description: string;
-  confirmLabel: string;
-  confirmPlaceholder?: string;
+  title: TranslationKey;
+  description: TranslationKey;
+  confirmLabel: TranslationKey;
+  confirmPlaceholder?: TranslationKey;
   confirmMatch?: string;
   dangerLevel: 'medium' | 'high' | 'critical';
 }> = {
   suspend: {
-    title: 'Unternehmen sperren',
-    description: 'Das Unternehmen wird gesperrt. Alle Benutzer dieses Unternehmens verlieren den Zugang zur App. Die Daten bleiben vollständig erhalten und das Unternehmen kann jederzeit reaktiviert werden.',
-    confirmLabel: 'Unternehmen sperren',
+    title: 'sa.lifecycle.suspend.title',
+    description: 'sa.lifecycle.suspend.description',
+    confirmLabel: 'sa.lifecycle.suspend.confirm',
     dangerLevel: 'medium',
   },
   reactivate: {
-    title: 'Unternehmen reaktivieren',
-    description: 'Das Unternehmen wird auf "Aktiv" gesetzt. Alle Benutzer erhalten sofort wieder Zugang zur App.',
-    confirmLabel: 'Reaktivieren',
+    title: 'sa.lifecycle.reactivate.title',
+    description: 'sa.lifecycle.reactivate.description',
+    confirmLabel: 'sa.lifecycle.reactivate.confirm',
     dangerLevel: 'medium',
   },
   archive: {
-    title: 'Unternehmen archivieren',
-    description: 'Das Unternehmen wird archiviert und aus der aktiven Liste ausgeblendet. Alle Daten bleiben vollständig erhalten. Das Unternehmen kann jederzeit wiederhergestellt werden. Archivierte Unternehmen haben keinen Zugang zur App.',
-    confirmLabel: 'Archivieren',
+    title: 'sa.lifecycle.archive.title',
+    description: 'sa.lifecycle.archive.description',
+    confirmLabel: 'sa.lifecycle.archive.confirm',
     dangerLevel: 'high',
   },
   restore: {
-    title: 'Archivierung aufheben',
-    description: 'Das Unternehmen wird aus dem Archiv wiederhergestellt und auf "Inaktiv" gesetzt. Die Daten sind unverändert. Das Unternehmen muss anschließend manuell reaktiviert werden.',
-    confirmLabel: 'Wiederherstellen',
+    title: 'sa.lifecycle.restore.title',
+    description: 'sa.lifecycle.restore.description',
+    confirmLabel: 'sa.lifecycle.restore.confirm',
     dangerLevel: 'medium',
   },
   softDelete: {
-    title: 'Unternehmen zur Löschung vormerken',
-    description: 'Das Unternehmen wird als "gelöscht" markiert und vollständig deaktiviert. Die Daten bleiben für 30 Tage erhalten und können in diesem Zeitraum noch wiederhergestellt werden. Danach ist eine endgültige Löschung möglich.',
-    confirmLabel: 'Zur Löschung vormerken',
+    title: 'sa.lifecycle.softDelete.title',
+    description: 'sa.lifecycle.softDelete.description',
+    confirmLabel: 'sa.lifecycle.softDelete.confirm',
     dangerLevel: 'high',
   },
   hardDelete: {
-    title: 'Endgültig löschen',
-    description: 'ACHTUNG: Diese Aktion ist nicht umkehrbar. Das Unternehmen und ALLE zugehörigen Daten werden dauerhaft und unwiderruflich gelöscht: Belege, Fahrer, Fahrzeuge, Umsätze, Gehälter, Fixkosten, Einstellungen und alle Benutzerzuordnungen. Zur Bestätigung geben Sie den Unternehmensnamen ein.',
-    confirmLabel: 'Endgültig löschen',
-    confirmPlaceholder: 'Unternehmensname eingeben',
+    title: 'sa.lifecycle.hardDelete.title',
+    description: 'sa.lifecycle.hardDelete.description',
+    confirmLabel: 'sa.lifecycle.hardDelete.confirm',
+    confirmPlaceholder: 'sa.lifecycle.hardDelete.placeholder',
     dangerLevel: 'critical',
   },
 };
 
 function LifecycleConfirmModal({ action, company, onConfirm, onClose }: LifecycleConfirmProps) {
+  const { t } = useTranslation();
   const meta = LIFECYCLE_META[action];
   const [confirmText, setConfirmText] = useState('');
   const [busy, setBusy] = useState(false);
@@ -188,7 +198,7 @@ function LifecycleConfirmModal({ action, company, onConfirm, onClose }: Lifecycl
                 : <AlertTriangle size={16} style={{ color: 'var(--warning)' }} />
               }
             </div>
-            <h2 className="font-bold text-base" style={{ color: 'var(--text-primary)' }}>{meta.title}</h2>
+            <h2 className="font-bold text-base" style={{ color: 'var(--text-primary)' }}>{t(meta.title)}</h2>
           </div>
           <button onClick={onClose} className="p-1 rounded-lg" style={{ color: 'var(--text-tertiary)' }}
             onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-muted)')}
@@ -209,11 +219,11 @@ function LifecycleConfirmModal({ action, company, onConfirm, onClose }: Lifecycl
             <StatusBadge status={company.status as CompanyStatus} />
           </div>
 
-          <p className="text-sm leading-relaxed" style={{ color: 'var(--text-secondary)' }}>{meta.description}</p>
+          <p className="text-sm leading-relaxed" style={{ color: 'var(--text-secondary)' }}>{t(meta.description)}</p>
 
           {needsTyping && (
             <div>
-              <label style={labelStyle}>Unternehmensname zur Bestätigung eingeben</label>
+              <label style={labelStyle}>{t('sa.lifecycle.typeNameLabel')}</label>
               <input
                 style={inputStyle}
                 value={confirmText}
@@ -222,7 +232,7 @@ function LifecycleConfirmModal({ action, company, onConfirm, onClose }: Lifecycl
                 autoFocus
               />
               {confirmText.length > 0 && confirmText.trim() !== company.name.trim() && (
-                <p className="text-xs mt-1" style={{ color: 'var(--danger)' }}>Name stimmt nicht überein</p>
+                <p className="text-xs mt-1" style={{ color: 'var(--danger)' }}>{t('sa.lifecycle.nameMismatch')}</p>
               )}
             </div>
           )}
@@ -231,7 +241,7 @@ function LifecycleConfirmModal({ action, company, onConfirm, onClose }: Lifecycl
             <div className="flex items-start gap-2 p-3 rounded-xl" style={{ background: 'var(--danger-subtle)', border: '1px solid var(--danger)' }}>
               <AlertTriangle size={14} style={{ color: 'var(--danger)', flexShrink: 0, marginTop: 1 }} />
               <p className="text-xs font-semibold" style={{ color: 'var(--danger)' }}>
-                Diese Aktion löscht alle Unternehmensdaten unwiderruflich. Sie kann nicht rückgängig gemacht werden.
+                {t('sa.lifecycle.criticalWarning')}
               </p>
             </div>
           )}
@@ -243,7 +253,7 @@ function LifecycleConfirmModal({ action, company, onConfirm, onClose }: Lifecycl
             style={{ color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
             onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-muted)')}
             onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
-            Abbrechen
+            {t('common.cancel')}
           </button>
           <button
             onClick={handleConfirm}
@@ -252,7 +262,7 @@ function LifecycleConfirmModal({ action, company, onConfirm, onClose }: Lifecycl
             style={{ background: btnColor, color: 'white', opacity: (!canConfirm || busy) ? 0.5 : 1 }}
           >
             {busy && <RefreshCw size={13} className="animate-spin" />}
-            {meta.confirmLabel}
+            {t(meta.confirmLabel)}
           </button>
         </div>
       </div>
@@ -269,12 +279,14 @@ interface CreateCompanyModalProps {
 
 function CreateCompanyModal({ onClose, onCreated }: CreateCompanyModalProps) {
   const { showToast } = useToast();
+  const { t } = useTranslation();
   const [step, setStep] = useState<1 | 2>(1);
   const [saving, setSaving] = useState(false);
   const [createdCompany, setCreatedCompany] = useState<CompanyListItem | null>(null);
 
   const [form, setForm] = useState<CompanyFormData>({
     name: '', slug: '', legal_name: '', email: '', phone: '',
+    // `country` is a value written to companies.country, not a label.
     address: '', city: '', postal_code: '', country: 'Deutschland', status: 'active',
   });
   const [adminForm, setAdminForm] = useState<AdminFormData>({ full_name: '', email: '', password: '' });
@@ -291,7 +303,7 @@ function CreateCompanyModal({ onClose, onCreated }: CreateCompanyModalProps) {
 
   const handleCreateCompany = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!form.name.trim() || !form.slug.trim()) { showToast('error', 'Name und Slug sind Pflichtfelder'); return; }
+    if (!form.name.trim() || !form.slug.trim()) { showToast('error', t('sa.companies.errorNameSlugRequired')); return; }
     try {
       setSaving(true);
       const { data, error } = await supabase.from('companies').insert({
@@ -304,9 +316,9 @@ function CreateCompanyModal({ onClose, onCreated }: CreateCompanyModalProps) {
       if (error) throw error;
       setCreatedCompany(data as CompanyListItem);
       setStep(2);
-      showToast('success', 'Unternehmen erfolgreich erstellt');
+      showToast('success', t('sa.companies.toast.created'));
     } catch (err: any) {
-      showToast('error', err.message?.includes('unique') ? 'Slug bereits vergeben' : err.message || 'Fehler');
+      showToast('error', err.message?.includes('unique') ? t('sa.companies.errorSlugTaken') : err.message || t('common.error'));
     } finally {
       setSaving(false);
     }
@@ -315,9 +327,9 @@ function CreateCompanyModal({ onClose, onCreated }: CreateCompanyModalProps) {
   const handleCreateAdmin = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!adminForm.full_name.trim() || !adminForm.email.trim() || !adminForm.password.trim()) {
-      showToast('error', 'Alle Felder sind Pflichtfelder'); return;
+      showToast('error', t('sa.companies.errorAllFieldsRequired')); return;
     }
-    if (adminForm.password.length < 8) { showToast('error', 'Passwort min. 8 Zeichen'); return; }
+    if (adminForm.password.length < 8) { showToast('error', t('sa.companies.errorPasswordShort')); return; }
     if (!createdCompany) return;
     try {
       setAdminSaving(true);
@@ -328,11 +340,13 @@ function CreateCompanyModal({ onClose, onCreated }: CreateCompanyModalProps) {
         body: JSON.stringify({ email: adminForm.email.trim(), full_name: adminForm.full_name.trim(), role: 'admin', company_id: createdCompany.id, password: adminForm.password }),
       });
       const result = await response.json();
-      if (!response.ok) throw new Error(result.error || 'Fehler');
-      showToast('success', 'Admin-Benutzer erstellt');
+      // The manage-users edge function already answers in German and its text
+      // is shown verbatim; only our own fallback is translated.
+      if (!response.ok) throw new Error(result.error || t('common.error'));
+      showToast('success', t('sa.companies.toast.adminCreated'));
       onCreated(createdCompany);
     } catch (err: any) {
-      showToast('error', err.message || 'Fehler beim Erstellen des Admins');
+      showToast('error', err.message || t('sa.companies.errorCreateAdmin'));
     } finally {
       setAdminSaving(false);
     }
@@ -347,8 +361,8 @@ function CreateCompanyModal({ onClose, onCreated }: CreateCompanyModalProps) {
               <Building2 size={20} style={{ color: 'var(--accent)' }} />
             </div>
             <div>
-              <h2 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>{step === 1 ? 'Neues Unternehmen' : 'Ersten Admin einrichten'}</h2>
-              <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>Schritt {step} von 2</p>
+              <h2 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>{t(step === 1 ? 'sa.companies.createTitle' : 'sa.companies.firstAdminTitle')}</h2>
+              <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>{t('sa.companies.stepOfTwo', { step })}</p>
             </div>
           </div>
           <button onClick={onClose} className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ color: 'var(--text-tertiary)' }}
@@ -360,35 +374,36 @@ function CreateCompanyModal({ onClose, onCreated }: CreateCompanyModalProps) {
           <form onSubmit={handleCreateCompany} className="p-6 space-y-4">
             <div className="grid grid-cols-2 gap-4">
               <div className="col-span-2">
-                <label style={labelStyle}>Unternehmensname *</label>
+                <label style={labelStyle}>{t('sa.companies.field.name')}</label>
                 <input style={inputStyle} value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="El-Professor GmbH" required />
               </div>
               <div>
-                <label style={labelStyle}>Slug *</label>
+                <label style={labelStyle}>{t('sa.companies.field.slug')}</label>
                 <input style={inputStyle} value={form.slug} onChange={e => setForm(f => ({ ...f, slug: e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '') }))} placeholder="el-professor" required />
               </div>
               <div>
-                <label style={labelStyle}>Status</label>
+                <label style={labelStyle}>{t('common.status')}</label>
+                {/* `value` is the stored companies.status — only the label is translated. */}
                 <select style={inputStyle} value={form.status} onChange={e => setForm(f => ({ ...f, status: e.target.value as any }))}>
-                  <option value="active">Aktiv</option>
-                  <option value="trial">Testphase</option>
-                  <option value="suspended">Gesperrt</option>
-                  <option value="inactive">Inaktiv</option>
+                  <option value="active">{t('sa.status.active')}</option>
+                  <option value="trial">{t('sa.status.trial')}</option>
+                  <option value="suspended">{t('sa.status.suspended')}</option>
+                  <option value="inactive">{t('sa.status.inactive')}</option>
                 </select>
               </div>
-              <div className="col-span-2"><label style={labelStyle}>Rechtlicher Name</label><input style={inputStyle} value={form.legal_name} onChange={e => setForm(f => ({ ...f, legal_name: e.target.value }))} /></div>
-              <div><label style={labelStyle}>E-Mail</label><input type="email" style={inputStyle} value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} /></div>
-              <div><label style={labelStyle}>Telefon</label><input style={inputStyle} value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} /></div>
-              <div className="col-span-2"><label style={labelStyle}>Adresse</label><input style={inputStyle} value={form.address} onChange={e => setForm(f => ({ ...f, address: e.target.value }))} /></div>
-              <div><label style={labelStyle}>PLZ</label><input style={inputStyle} value={form.postal_code} onChange={e => setForm(f => ({ ...f, postal_code: e.target.value }))} /></div>
-              <div><label style={labelStyle}>Stadt</label><input style={inputStyle} value={form.city} onChange={e => setForm(f => ({ ...f, city: e.target.value }))} /></div>
+              <div className="col-span-2"><label style={labelStyle}>{t('sa.companies.field.legalName')}</label><input style={inputStyle} value={form.legal_name} onChange={e => setForm(f => ({ ...f, legal_name: e.target.value }))} /></div>
+              <div><label style={labelStyle}>{t('sa.companies.field.email')}</label><input type="email" style={inputStyle} value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} /></div>
+              <div><label style={labelStyle}>{t('sa.companies.field.phone')}</label><input style={inputStyle} value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} /></div>
+              <div className="col-span-2"><label style={labelStyle}>{t('common.address')}</label><input style={inputStyle} value={form.address} onChange={e => setForm(f => ({ ...f, address: e.target.value }))} /></div>
+              <div><label style={labelStyle}>{t('sa.companies.field.postalCode')}</label><input style={inputStyle} value={form.postal_code} onChange={e => setForm(f => ({ ...f, postal_code: e.target.value }))} /></div>
+              <div><label style={labelStyle}>{t('sa.companies.field.city')}</label><input style={inputStyle} value={form.city} onChange={e => setForm(f => ({ ...f, city: e.target.value }))} /></div>
             </div>
             <div className="flex justify-end gap-3 pt-2">
               <button type="button" onClick={onClose} className="px-4 py-2 rounded-lg text-sm font-medium" style={{ color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
                 onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-muted)')}
-                onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>Abbrechen</button>
+                onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>{t('common.cancel')}</button>
               <button type="submit" disabled={saving} className="px-5 py-2 rounded-lg text-sm font-semibold flex items-center gap-2" style={{ background: 'var(--accent)', color: 'white', opacity: saving ? 0.7 : 1 }}>
-                {saving ? <RefreshCw size={14} className="animate-spin" /> : <Building2 size={14} />}Unternehmen erstellen</button>
+                {saving ? <RefreshCw size={14} className="animate-spin" /> : <Building2 size={14} />}{t('sa.companies.createButton')}</button>
             </div>
           </form>
         )}
@@ -397,18 +412,18 @@ function CreateCompanyModal({ onClose, onCreated }: CreateCompanyModalProps) {
           <div className="p-6 space-y-5">
             <div className="flex items-center gap-3 p-3 rounded-xl" style={{ background: 'var(--success-subtle)' }}>
               <CheckCircle size={16} style={{ color: 'var(--success)' }} />
-              <p className="text-sm font-medium" style={{ color: 'var(--success)' }}>"{createdCompany.name}" wurde erstellt</p>
+              <p className="text-sm font-medium" style={{ color: 'var(--success)' }}>{t('sa.companies.createdNotice', { name: createdCompany.name })}</p>
             </div>
             <form onSubmit={handleCreateAdmin} className="space-y-4">
-              <div><label style={labelStyle}>Vollständiger Name *</label><input style={inputStyle} value={adminForm.full_name} onChange={e => setAdminForm(f => ({ ...f, full_name: e.target.value }))} required /></div>
-              <div><label style={labelStyle}>E-Mail *</label><input type="email" style={inputStyle} value={adminForm.email} onChange={e => setAdminForm(f => ({ ...f, email: e.target.value }))} required /></div>
-              <div><label style={labelStyle}>Temporäres Passwort *</label><input type="text" style={inputStyle} value={adminForm.password} onChange={e => setAdminForm(f => ({ ...f, password: e.target.value }))} minLength={8} required /></div>
+              <div><label style={labelStyle}>{t('sa.companies.field.fullName')}</label><input style={inputStyle} value={adminForm.full_name} onChange={e => setAdminForm(f => ({ ...f, full_name: e.target.value }))} required /></div>
+              <div><label style={labelStyle}>{t('sa.companies.field.emailRequired')}</label><input type="email" style={inputStyle} value={adminForm.email} onChange={e => setAdminForm(f => ({ ...f, email: e.target.value }))} required /></div>
+              <div><label style={labelStyle}>{t('sa.companies.field.tempPassword')}</label><input type="text" style={inputStyle} value={adminForm.password} onChange={e => setAdminForm(f => ({ ...f, password: e.target.value }))} minLength={8} required /></div>
               <div className="flex justify-between gap-3 pt-2">
                 <button type="button" onClick={() => onCreated(createdCompany)} className="px-4 py-2 rounded-lg text-sm font-medium" style={{ color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
                   onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-muted)')}
-                  onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>Überspringen</button>
+                  onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>{t('sa.companies.skip')}</button>
                 <button type="submit" disabled={adminSaving} className="px-5 py-2 rounded-lg text-sm font-semibold flex items-center gap-2" style={{ background: 'var(--accent)', color: 'white', opacity: adminSaving ? 0.7 : 1 }}>
-                  {adminSaving ? <RefreshCw size={14} className="animate-spin" /> : <User size={14} />}Admin erstellen</button>
+                  {adminSaving ? <RefreshCw size={14} className="animate-spin" /> : <User size={14} />}{t('sa.companies.createAdmin')}</button>
               </div>
             </form>
           </div>
@@ -428,6 +443,7 @@ interface EditCompanyModalProps {
 
 function EditCompanyModal({ company, onClose, onUpdated }: EditCompanyModalProps) {
   const { showToast } = useToast();
+  const { t } = useTranslation();
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState<CompanyFormData>({
     name: company.name, slug: company.slug,
@@ -440,7 +456,7 @@ function EditCompanyModal({ company, onClose, onUpdated }: EditCompanyModalProps
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!form.name.trim() || !form.slug.trim()) { showToast('error', 'Name und Slug sind Pflichtfelder'); return; }
+    if (!form.name.trim() || !form.slug.trim()) { showToast('error', t('sa.companies.errorNameSlugRequired')); return; }
     try {
       setSaving(true);
       const { data, error } = await supabase.from('companies').update({
@@ -452,10 +468,10 @@ function EditCompanyModal({ company, onClose, onUpdated }: EditCompanyModalProps
         updated_at: new Date().toISOString(),
       }).eq('id', company.id).select().single();
       if (error) throw error;
-      showToast('success', 'Unternehmen aktualisiert');
+      showToast('success', t('sa.companies.toast.updated'));
       onUpdated(data as CompanyListItem);
     } catch (err: any) {
-      showToast('error', err.message || 'Fehler');
+      showToast('error', err.message || t('common.error'));
     } finally {
       setSaving(false);
     }
@@ -465,34 +481,35 @@ function EditCompanyModal({ company, onClose, onUpdated }: EditCompanyModalProps
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.7)' }}>
       <div className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-lg)' }}>
         <div className="flex items-center justify-between p-6 border-b" style={{ borderColor: 'var(--border)' }}>
-          <h2 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>{company.name} bearbeiten</h2>
+          <h2 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>{t('sa.companies.editTitle', { name: company.name })}</h2>
           <button onClick={onClose} className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ color: 'var(--text-tertiary)' }}
             onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-muted)')}
             onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}><X size={16} /></button>
         </div>
         <form onSubmit={handleSave} className="p-6 space-y-4">
           <div className="grid grid-cols-2 gap-4">
-            <div className="col-span-2"><label style={labelStyle}>Unternehmensname *</label><input style={inputStyle} value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} required /></div>
-            <div><label style={labelStyle}>Slug *</label><input style={inputStyle} value={form.slug} onChange={e => setForm(f => ({ ...f, slug: e.target.value }))} required /></div>
-            <div><label style={labelStyle}>Status</label>
+            <div className="col-span-2"><label style={labelStyle}>{t('sa.companies.field.name')}</label><input style={inputStyle} value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} required /></div>
+            <div><label style={labelStyle}>{t('sa.companies.field.slug')}</label><input style={inputStyle} value={form.slug} onChange={e => setForm(f => ({ ...f, slug: e.target.value }))} required /></div>
+            <div><label style={labelStyle}>{t('common.status')}</label>
+              {/* `value` is the stored companies.status — only the label is translated. */}
               <select style={inputStyle} value={form.status} onChange={e => setForm(f => ({ ...f, status: e.target.value as any }))}>
-                <option value="active">Aktiv</option><option value="trial">Testphase</option>
-                <option value="suspended">Gesperrt</option><option value="inactive">Inaktiv</option>
+                <option value="active">{t('sa.status.active')}</option><option value="trial">{t('sa.status.trial')}</option>
+                <option value="suspended">{t('sa.status.suspended')}</option><option value="inactive">{t('sa.status.inactive')}</option>
               </select>
             </div>
-            <div className="col-span-2"><label style={labelStyle}>Rechtlicher Name</label><input style={inputStyle} value={form.legal_name} onChange={e => setForm(f => ({ ...f, legal_name: e.target.value }))} /></div>
-            <div><label style={labelStyle}>E-Mail</label><input type="email" style={inputStyle} value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} /></div>
-            <div><label style={labelStyle}>Telefon</label><input style={inputStyle} value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} /></div>
-            <div className="col-span-2"><label style={labelStyle}>Adresse</label><input style={inputStyle} value={form.address} onChange={e => setForm(f => ({ ...f, address: e.target.value }))} /></div>
-            <div><label style={labelStyle}>PLZ</label><input style={inputStyle} value={form.postal_code} onChange={e => setForm(f => ({ ...f, postal_code: e.target.value }))} /></div>
-            <div><label style={labelStyle}>Stadt</label><input style={inputStyle} value={form.city} onChange={e => setForm(f => ({ ...f, city: e.target.value }))} /></div>
+            <div className="col-span-2"><label style={labelStyle}>{t('sa.companies.field.legalName')}</label><input style={inputStyle} value={form.legal_name} onChange={e => setForm(f => ({ ...f, legal_name: e.target.value }))} /></div>
+            <div><label style={labelStyle}>{t('sa.companies.field.email')}</label><input type="email" style={inputStyle} value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} /></div>
+            <div><label style={labelStyle}>{t('sa.companies.field.phone')}</label><input style={inputStyle} value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} /></div>
+            <div className="col-span-2"><label style={labelStyle}>{t('common.address')}</label><input style={inputStyle} value={form.address} onChange={e => setForm(f => ({ ...f, address: e.target.value }))} /></div>
+            <div><label style={labelStyle}>{t('sa.companies.field.postalCode')}</label><input style={inputStyle} value={form.postal_code} onChange={e => setForm(f => ({ ...f, postal_code: e.target.value }))} /></div>
+            <div><label style={labelStyle}>{t('sa.companies.field.city')}</label><input style={inputStyle} value={form.city} onChange={e => setForm(f => ({ ...f, city: e.target.value }))} /></div>
           </div>
           <div className="flex justify-end gap-3 pt-2">
             <button type="button" onClick={onClose} className="px-4 py-2 rounded-lg text-sm font-medium" style={{ color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
               onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-muted)')}
-              onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>Abbrechen</button>
+              onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>{t('common.cancel')}</button>
             <button type="submit" disabled={saving} className="px-5 py-2 rounded-lg text-sm font-semibold flex items-center gap-2" style={{ background: 'var(--accent)', color: 'white', opacity: saving ? 0.7 : 1 }}>
-              {saving ? <RefreshCw size={14} className="animate-spin" /> : <Save size={14} />}Speichern</button>
+              {saving ? <RefreshCw size={14} className="animate-spin" /> : <Save size={14} />}{t('common.save')}</button>
           </div>
         </form>
       </div>
@@ -510,13 +527,14 @@ interface InviteAdminModalProps {
 
 function InviteAdminModal({ company, onClose, onInvited }: InviteAdminModalProps) {
   const { showToast } = useToast();
+  const { t } = useTranslation();
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({ full_name: '', email: '', password: '', role: 'admin' });
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!form.full_name.trim() || !form.email.trim() || !form.password.trim()) { showToast('error', 'Alle Felder sind Pflichtfelder'); return; }
-    if (form.password.length < 8) { showToast('error', 'Passwort min. 8 Zeichen'); return; }
+    if (!form.full_name.trim() || !form.email.trim() || !form.password.trim()) { showToast('error', t('sa.companies.errorAllFieldsRequired')); return; }
+    if (form.password.length < 8) { showToast('error', t('sa.companies.errorPasswordShort')); return; }
     try {
       setSaving(true);
       const { data: { session } } = await supabase.auth.getSession();
@@ -526,11 +544,13 @@ function InviteAdminModal({ company, onClose, onInvited }: InviteAdminModalProps
         body: JSON.stringify({ email: form.email.trim(), full_name: form.full_name.trim(), role: form.role, company_id: company.id, password: form.password }),
       });
       const result = await response.json();
-      if (!response.ok) throw new Error(result.error || 'Fehler');
-      showToast('success', 'Benutzer erstellt');
+      // The manage-users edge function already answers in German and its text
+      // is shown verbatim; only our own fallback is translated.
+      if (!response.ok) throw new Error(result.error || t('common.error'));
+      showToast('success', t('sa.companies.toast.userCreated'));
       onInvited();
     } catch (err: any) {
-      showToast('error', err.message || 'Fehler');
+      showToast('error', err.message || t('common.error'));
     } finally {
       setSaving(false);
     }
@@ -540,26 +560,27 @@ function InviteAdminModal({ company, onClose, onInvited }: InviteAdminModalProps
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.7)' }}>
       <div className="w-full max-w-md rounded-2xl" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-lg)' }}>
         <div className="flex items-center justify-between p-6 border-b" style={{ borderColor: 'var(--border)' }}>
-          <h2 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>Benutzer hinzufügen</h2>
+          <h2 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>{t('sa.companies.addUser')}</h2>
           <button onClick={onClose} className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ color: 'var(--text-tertiary)' }}
             onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-muted)')}
             onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}><X size={16} /></button>
         </div>
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
-          <div><label style={labelStyle}>Name *</label><input style={inputStyle} value={form.full_name} onChange={e => setForm(f => ({ ...f, full_name: e.target.value }))} required /></div>
-          <div><label style={labelStyle}>E-Mail *</label><input type="email" style={inputStyle} value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} required /></div>
-          <div><label style={labelStyle}>Rolle</label>
+          <div><label style={labelStyle}>{t('sa.companies.field.nameRequired')}</label><input style={inputStyle} value={form.full_name} onChange={e => setForm(f => ({ ...f, full_name: e.target.value }))} required /></div>
+          <div><label style={labelStyle}>{t('sa.companies.field.emailRequired')}</label><input type="email" style={inputStyle} value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} required /></div>
+          <div><label style={labelStyle}>{t('sa.companies.field.role')}</label>
+            {/* `value` is the stored user_profiles.role — only the label is translated. */}
             <select style={inputStyle} value={form.role} onChange={e => setForm(f => ({ ...f, role: e.target.value }))}>
-              <option value="admin">Administrator</option><option value="creator">Ersteller</option><option value="viewer">Betrachter</option>
+              <option value="admin">{t('sa.companies.role.admin')}</option><option value="creator">{t('sa.companies.role.creator')}</option><option value="viewer">{t('sa.companies.role.viewer')}</option>
             </select>
           </div>
-          <div><label style={labelStyle}>Temporäres Passwort *</label><input type="text" style={inputStyle} value={form.password} onChange={e => setForm(f => ({ ...f, password: e.target.value }))} minLength={8} required /></div>
+          <div><label style={labelStyle}>{t('sa.companies.field.tempPassword')}</label><input type="text" style={inputStyle} value={form.password} onChange={e => setForm(f => ({ ...f, password: e.target.value }))} minLength={8} required /></div>
           <div className="flex justify-end gap-3 pt-2">
             <button type="button" onClick={onClose} className="px-4 py-2 rounded-lg text-sm font-medium" style={{ color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
               onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-muted)')}
-              onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>Abbrechen</button>
+              onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>{t('common.cancel')}</button>
             <button type="submit" disabled={saving} className="px-5 py-2 rounded-lg text-sm font-semibold flex items-center gap-2" style={{ background: 'var(--accent)', color: 'white', opacity: saving ? 0.7 : 1 }}>
-              {saving ? <RefreshCw size={14} className="animate-spin" /> : <User size={14} />}Erstellen</button>
+              {saving ? <RefreshCw size={14} className="animate-spin" /> : <User size={14} />}{t('sa.companies.create')}</button>
           </div>
         </form>
       </div>
@@ -585,6 +606,7 @@ function CompanyDetail({ company, onBack, onEdit, onLifecycleAction, onEnterComp
   const [actionMenuOpen, setActionMenuOpen] = useState(false);
   const [dangerOpen, setDangerOpen] = useState(false);
   const { showToast } = useToast();
+  const { t } = useTranslation();
 
   const isArchived = company.status === 'archived';
   const isDeleted = company.status === 'deleted';
@@ -599,11 +621,11 @@ function CompanyDetail({ company, onBack, onEdit, onLifecycleAction, onEnterComp
       if (error) throw error;
       setUsers(data || []);
     } catch {
-      showToast('error', 'Fehler beim Laden der Benutzer');
+      showToast('error', t('sa.companies.errorLoadUsers'));
     } finally {
       setLoadingUsers(false);
     }
-  }, [company.id]);
+  }, [company.id, t]);
 
   useEffect(() => { loadUsers(); }, [loadUsers]);
 
@@ -615,7 +637,7 @@ function CompanyDetail({ company, onBack, onEdit, onLifecycleAction, onEnterComp
           <button onClick={onBack} className="flex items-center gap-1.5 text-sm mb-3 transition-colors" style={{ color: 'var(--text-secondary)' }}
             onMouseEnter={e => (e.currentTarget.style.color = 'var(--text-primary)')}
             onMouseLeave={e => (e.currentTarget.style.color = 'var(--text-secondary)')}>
-            <ArrowLeft size={14} />Alle Unternehmen
+            <ArrowLeft size={14} />{t('sa.companies.backToAll')}
           </button>
           <div className="flex items-center gap-3">
             <div className="w-12 h-12 rounded-2xl flex items-center justify-center text-xl font-bold"
@@ -638,7 +660,7 @@ function CompanyDetail({ company, onBack, onEdit, onLifecycleAction, onEnterComp
               style={{ background: 'var(--accent)', color: 'white' }}
               onMouseEnter={e => (e.currentTarget.style.opacity = '0.85')}
               onMouseLeave={e => (e.currentTarget.style.opacity = '1')}>
-              <ExternalLink size={14} />Als Unternehmen öffnen
+              <ExternalLink size={14} />{t('sa.companies.openAsCompany')}
             </button>
           )}
           {isOperational && (
@@ -646,7 +668,7 @@ function CompanyDetail({ company, onBack, onEdit, onLifecycleAction, onEnterComp
               style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
               onMouseEnter={e => { (e.currentTarget.style.background = 'var(--bg-muted)'); (e.currentTarget.style.color = 'var(--text-primary)'); }}
               onMouseLeave={e => { (e.currentTarget.style.background = 'transparent'); (e.currentTarget.style.color = 'var(--text-secondary)'); }}>
-              <Edit2 size={14} />Bearbeiten
+              <Edit2 size={14} />{t('common.edit')}
             </button>
           )}
 
@@ -657,7 +679,7 @@ function CompanyDetail({ company, onBack, onEdit, onLifecycleAction, onEnterComp
               style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
               onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-muted)')}
               onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
-              <MoreVertical size={14} />Aktionen<ChevronDown size={12} />
+              <MoreVertical size={14} />{t('sa.companies.actions')}<ChevronDown size={12} />
             </button>
             {actionMenuOpen && (
               <>
@@ -672,7 +694,7 @@ function CompanyDetail({ company, onBack, onEdit, onLifecycleAction, onEnterComp
                       style={{ color: 'var(--success)' }}
                       onMouseEnter={e => (e.currentTarget.style.background = 'var(--success-subtle)')}
                       onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
-                      <CheckCircle size={14} />Reaktivieren
+                      <CheckCircle size={14} />{t('sa.lifecycle.reactivate.confirm')}
                     </button>
                   )}
                   {isOperational && company.status !== 'suspended' && (
@@ -681,7 +703,7 @@ function CompanyDetail({ company, onBack, onEdit, onLifecycleAction, onEnterComp
                       style={{ color: 'var(--warning)' }}
                       onMouseEnter={e => (e.currentTarget.style.background = 'var(--warning-subtle)')}
                       onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
-                      <PauseCircle size={14} />Sperren
+                      <PauseCircle size={14} />{t('sa.companies.menu.suspend')}
                     </button>
                   )}
 
@@ -692,7 +714,7 @@ function CompanyDetail({ company, onBack, onEdit, onLifecycleAction, onEnterComp
                       style={{ color: '#64748b' }}
                       onMouseEnter={e => (e.currentTarget.style.background = 'rgba(100,116,139,0.1)')}
                       onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
-                      <Archive size={14} />Archivieren
+                      <Archive size={14} />{t('sa.lifecycle.archive.confirm')}
                     </button>
                   )}
 
@@ -703,7 +725,7 @@ function CompanyDetail({ company, onBack, onEdit, onLifecycleAction, onEnterComp
                       style={{ color: 'var(--accent)' }}
                       onMouseEnter={e => (e.currentTarget.style.background = 'var(--accent-subtle)')}
                       onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
-                      <RotateCcw size={14} />Aus Archiv wiederherstellen
+                      <RotateCcw size={14} />{t('sa.companies.menu.restoreFromArchive')}
                     </button>
                   )}
 
@@ -714,7 +736,7 @@ function CompanyDetail({ company, onBack, onEdit, onLifecycleAction, onEnterComp
                       style={{ color: 'var(--accent)' }}
                       onMouseEnter={e => (e.currentTarget.style.background = 'var(--accent-subtle)')}
                       onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
-                      <RotateCcw size={14} />Löschung aufheben
+                      <RotateCcw size={14} />{t('sa.companies.menu.undoDeletion')}
                     </button>
                   )}
                 </div>
@@ -734,12 +756,10 @@ function CompanyDetail({ company, onBack, onEdit, onLifecycleAction, onEnterComp
           {isDeleted ? <Trash2 size={16} style={{ color: 'var(--danger)' }} /> : <Archive size={16} style={{ color: '#64748b' }} />}
           <div>
             <p className="font-semibold text-sm" style={{ color: isDeleted ? 'var(--danger)' : '#64748b' }}>
-              {isDeleted ? 'Zur Löschung vorgemerkt' : 'Archiviert'}
+              {t(isDeleted ? 'sa.companies.banner.deletedTitle' : 'sa.status.archived')}
             </p>
             <p className="text-xs mt-0.5" style={{ color: 'var(--text-secondary)' }}>
-              {isDeleted
-                ? 'Dieses Unternehmen ist zur endgültigen Löschung vorgemerkt. Alle Daten sind noch vorhanden und können noch wiederhergestellt werden.'
-                : 'Dieses Unternehmen ist archiviert. Daten sind vollständig erhalten. Es kann jederzeit wiederhergestellt werden.'}
+              {t(isDeleted ? 'sa.companies.banner.deletedBody' : 'sa.companies.banner.archivedBody')}
             </p>
           </div>
         </div>
@@ -748,55 +768,55 @@ function CompanyDetail({ company, onBack, onEdit, onLifecycleAction, onEnterComp
       {/* Info cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="md:col-span-2 rounded-2xl p-5 space-y-3" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
-          <h3 className="text-sm font-semibold uppercase tracking-wide" style={{ color: 'var(--text-tertiary)' }}>Unternehmensdaten</h3>
+          <h3 className="text-sm font-semibold uppercase tracking-wide" style={{ color: 'var(--text-tertiary)' }}>{t('sa.companies.companyData')}</h3>
           <div className="grid grid-cols-2 gap-3 text-sm">
             {company.legal_name && (
-              <div><p style={{ color: 'var(--text-tertiary)', fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Rechtlicher Name</p>
+              <div><p style={{ color: 'var(--text-tertiary)', fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t('sa.companies.legalName')}</p>
                 <p style={{ color: 'var(--text-primary)' }}>{company.legal_name}</p></div>
             )}
             {company.email && (
               <div className="flex items-start gap-2">
                 <Mail size={13} style={{ color: 'var(--text-tertiary)', marginTop: 2 }} />
-                <div><p style={{ color: 'var(--text-tertiary)', fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>E-Mail</p>
+                <div><p style={{ color: 'var(--text-tertiary)', fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t('sa.companies.email')}</p>
                   <p style={{ color: 'var(--text-primary)' }}>{company.email}</p></div>
               </div>
             )}
             {company.phone && (
               <div className="flex items-start gap-2">
                 <Phone size={13} style={{ color: 'var(--text-tertiary)', marginTop: 2 }} />
-                <div><p style={{ color: 'var(--text-tertiary)', fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Telefon</p>
+                <div><p style={{ color: 'var(--text-tertiary)', fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t('sa.companies.phone')}</p>
                   <p style={{ color: 'var(--text-primary)' }}>{company.phone}</p></div>
               </div>
             )}
             {(company.city || company.address) && (
               <div className="flex items-start gap-2">
                 <MapPin size={13} style={{ color: 'var(--text-tertiary)', marginTop: 2 }} />
-                <div><p style={{ color: 'var(--text-tertiary)', fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Adresse</p>
+                <div><p style={{ color: 'var(--text-tertiary)', fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t('common.address')}</p>
                   <p style={{ color: 'var(--text-primary)' }}>{[company.address, company.postal_code, company.city, company.country].filter(Boolean).join(', ')}</p></div>
               </div>
             )}
             <div className="flex items-start gap-2">
               <Globe size={13} style={{ color: 'var(--text-tertiary)', marginTop: 2 }} />
-              <div><p style={{ color: 'var(--text-tertiary)', fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Slug</p>
+              <div><p style={{ color: 'var(--text-tertiary)', fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t('sa.companies.slug')}</p>
                 <p style={{ color: 'var(--text-primary)' }}>{company.slug}</p></div>
             </div>
             <div className="flex items-start gap-2">
               <Calendar size={13} style={{ color: 'var(--text-tertiary)', marginTop: 2 }} />
-              <div><p style={{ color: 'var(--text-tertiary)', fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Erstellt</p>
+              <div><p style={{ color: 'var(--text-tertiary)', fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t('sa.companies.created')}</p>
                 <p style={{ color: 'var(--text-primary)' }}>{format(new Date(company.created_at), 'dd.MM.yyyy', { locale: de })}</p></div>
             </div>
           </div>
         </div>
 
         <div className="rounded-2xl p-5 space-y-4" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
-          <h3 className="text-sm font-semibold uppercase tracking-wide" style={{ color: 'var(--text-tertiary)' }}>Statistiken</h3>
+          <h3 className="text-sm font-semibold uppercase tracking-wide" style={{ color: 'var(--text-tertiary)' }}>{t('sa.companies.statistics')}</h3>
           <div className="space-y-3">
             <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2 text-sm" style={{ color: 'var(--text-secondary)' }}><Users size={14} />Benutzer</div>
+              <div className="flex items-center gap-2 text-sm" style={{ color: 'var(--text-secondary)' }}><Users size={14} />{t('sa.companies.users')}</div>
               <span className="font-bold text-lg" style={{ color: 'var(--text-primary)' }}>{users.length}</span>
             </div>
             <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2 text-sm" style={{ color: 'var(--text-secondary)' }}><Shield size={14} />Admins</div>
+              <div className="flex items-center gap-2 text-sm" style={{ color: 'var(--text-secondary)' }}><Shield size={14} />{t('sa.companies.admins')}</div>
               <span className="font-bold text-lg" style={{ color: 'var(--text-primary)' }}>{users.filter(u => u.role === 'admin').length}</span>
             </div>
           </div>
@@ -806,25 +826,28 @@ function CompanyDetail({ company, onBack, onEdit, onLifecycleAction, onEnterComp
       {/* Users table */}
       <div className="rounded-2xl overflow-hidden" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
         <div className="flex items-center justify-between px-5 py-4 border-b" style={{ borderColor: 'var(--border)' }}>
-          <h3 className="font-semibold" style={{ color: 'var(--text-primary)' }}>Benutzer ({users.length})</h3>
+          <h3 className="font-semibold" style={{ color: 'var(--text-primary)' }}>{t('sa.companies.usersCount', { count: users.length })}</h3>
           {isOperational && (
             <button onClick={() => setShowInviteModal(true)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold" style={{ background: 'var(--accent-subtle)', color: 'var(--accent)' }}
               onMouseEnter={e => (e.currentTarget.style.opacity = '0.8')}
               onMouseLeave={e => (e.currentTarget.style.opacity = '1')}>
-              <Plus size={12} />Benutzer hinzufügen
+              <Plus size={12} />{t('sa.companies.addUser')}
             </button>
           )}
         </div>
         {loadingUsers ? (
           <div className="flex items-center justify-center py-10"><RefreshCw size={18} className="animate-spin" style={{ color: 'var(--text-tertiary)' }} /></div>
         ) : users.length === 0 ? (
-          <div className="py-10 text-center"><Users size={28} className="mx-auto mb-2" style={{ color: 'var(--text-tertiary)' }} /><p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>Keine Benutzer</p></div>
+          <div className="py-10 text-center"><Users size={28} className="mx-auto mb-2" style={{ color: 'var(--text-tertiary)' }} /><p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>{t('sa.companies.noUsers')}</p></div>
         ) : (
           <table className="w-full text-sm">
             <thead>
               <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                {['Name', 'E-Mail', 'Rolle', 'Status', 'Erstellt'].map(h => (
-                  <th key={h} className="px-5 py-3 text-left" style={{ color: 'var(--text-tertiary)', fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 600 }}>{h}</th>
+                {([
+                  'sa.companies.col.name', 'sa.companies.email',
+                  'sa.companies.col.role', 'common.status', 'sa.companies.created',
+                ] as const).map((h, i) => (
+                  <th key={i} className="px-5 py-3 text-left" style={{ color: 'var(--text-tertiary)', fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 600 }}>{t(h)}</th>
                 ))}
               </tr>
             </thead>
@@ -857,7 +880,7 @@ function CompanyDetail({ company, onBack, onEdit, onLifecycleAction, onEnterComp
         >
           <div className="flex items-center gap-2">
             <Lock size={14} style={{ color: 'var(--danger)' }} />
-            <span className="font-semibold text-sm" style={{ color: 'var(--danger)' }}>Gefahrenzone</span>
+            <span className="font-semibold text-sm" style={{ color: 'var(--danger)' }}>{t('sa.companies.dangerZone')}</span>
           </div>
           <ChevronDown size={14} style={{ color: 'var(--danger)', transform: dangerOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }} />
         </button>
@@ -865,7 +888,7 @@ function CompanyDetail({ company, onBack, onEdit, onLifecycleAction, onEnterComp
         {dangerOpen && (
           <div className="px-5 pb-5 space-y-3 border-t" style={{ borderColor: 'var(--danger)' }}>
             <p className="text-xs pt-3" style={{ color: 'var(--text-secondary)' }}>
-              Die folgenden Aktionen können die Verfügbarkeit oder Daten dieses Unternehmens dauerhaft beeinflussen. Gehen Sie mit Bedacht vor.
+              {t('sa.companies.dangerZoneNote')}
             </p>
 
             <div className="space-y-2">
@@ -873,13 +896,13 @@ function CompanyDetail({ company, onBack, onEdit, onLifecycleAction, onEnterComp
               {company.status !== 'deleted' && (
                 <div className="flex items-center justify-between p-3 rounded-xl" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
                   <div>
-                    <p className="font-semibold text-sm" style={{ color: 'var(--text-primary)' }}>Zur Löschung vormerken</p>
-                    <p className="text-xs mt-0.5" style={{ color: 'var(--text-secondary)' }}>Deaktiviert das Unternehmen vollständig. Daten bleiben 30 Tage erhalten.</p>
+                    <p className="font-semibold text-sm" style={{ color: 'var(--text-primary)' }}>{t('sa.lifecycle.softDelete.confirm')}</p>
+                    <p className="text-xs mt-0.5" style={{ color: 'var(--text-secondary)' }}>{t('sa.companies.softDeleteNote')}</p>
                   </div>
                   <button onClick={() => onLifecycleAction(company, 'softDelete')}
                     className="ml-4 flex-shrink-0 px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5"
                     style={{ background: 'var(--danger)', color: 'white' }}>
-                    <Trash2 size={12} />Vormerken
+                    <Trash2 size={12} />{t('sa.companies.markForDeletion')}
                   </button>
                 </div>
               )}
@@ -888,15 +911,15 @@ function CompanyDetail({ company, onBack, onEdit, onLifecycleAction, onEnterComp
               {company.status === 'deleted' && (
                 <div className="flex items-center justify-between p-3 rounded-xl" style={{ background: 'rgba(239,68,68,0.12)', border: '2px solid var(--danger)' }}>
                   <div>
-                    <p className="font-semibold text-sm" style={{ color: 'var(--danger)' }}>Endgültig löschen</p>
+                    <p className="font-semibold text-sm" style={{ color: 'var(--danger)' }}>{t('sa.lifecycle.hardDelete.confirm')}</p>
                     <p className="text-xs mt-0.5" style={{ color: 'var(--text-secondary)' }}>
-                      Löscht dieses Unternehmen und ALLE Daten dauerhaft. Nicht umkehrbar.
+                      {t('sa.companies.hardDeleteNote')}
                     </p>
                   </div>
                   <button onClick={() => onLifecycleAction(company, 'hardDelete')}
                     className="ml-4 flex-shrink-0 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5"
                     style={{ background: 'var(--danger)', color: 'white' }}>
-                    <Trash2 size={12} />Endgültig löschen
+                    <Trash2 size={12} />{t('sa.lifecycle.hardDelete.confirm')}
                   </button>
                 </div>
               )}
@@ -918,6 +941,7 @@ export default function CompaniesPage() {
   const { isSuperAdmin } = useAuth();
   const { enterCompany } = useSuperAdmin();
   const { showToast } = useToast();
+  const { t } = useTranslation();
 
   const [companies, setCompanies] = useState<CompanyListItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -944,11 +968,11 @@ export default function CompaniesPage() {
         setCompanies(data || []);
       }
     } catch {
-      showToast('error', 'Fehler beim Laden der Unternehmen');
+      showToast('error', t('sa.companies.errorLoad'));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => { loadCompanies(); }, [loadCompanies]);
 
@@ -961,7 +985,7 @@ export default function CompaniesPage() {
       if (error) throw error;
       // Deactivate all company users
       await supabase.from('user_profiles').update({ status: 'suspended' }).eq('company_id', company.id).neq('is_super_admin', true);
-      showToast('success', `${company.name} wurde gesperrt`);
+      showToast('success', t('sa.companies.toast.suspended', { name: company.name }));
     }
 
     if (action === 'reactivate') {
@@ -969,7 +993,7 @@ export default function CompaniesPage() {
       if (error) throw error;
       // Restore users to active
       await supabase.from('user_profiles').update({ status: 'active' }).eq('company_id', company.id).eq('status', 'suspended');
-      showToast('success', `${company.name} wurde reaktiviert`);
+      showToast('success', t('sa.companies.toast.reactivated', { name: company.name }));
     }
 
     if (action === 'archive') {
@@ -977,7 +1001,7 @@ export default function CompaniesPage() {
       if (error) throw error;
       // Deactivate all company users
       await supabase.from('user_profiles').update({ status: 'deactivated' }).eq('company_id', company.id).neq('is_super_admin', true);
-      showToast('success', `${company.name} wurde archiviert`);
+      showToast('success', t('sa.companies.toast.archived', { name: company.name }));
     }
 
     if (action === 'restore') {
@@ -985,7 +1009,7 @@ export default function CompaniesPage() {
         status: 'inactive', archived_at: null, deleted_at: null, updated_at: now,
       }).eq('id', company.id);
       if (error) throw error;
-      showToast('success', `${company.name} wurde wiederhergestellt (Status: Inaktiv)`);
+      showToast('success', t('sa.companies.toast.restored', { name: company.name, status: t('sa.status.inactive') }));
     }
 
     if (action === 'softDelete') {
@@ -993,14 +1017,14 @@ export default function CompaniesPage() {
       if (error) throw error;
       // Deactivate all company users
       await supabase.from('user_profiles').update({ status: 'deactivated' }).eq('company_id', company.id).neq('is_super_admin', true);
-      showToast('success', `${company.name} zur Löschung vorgemerkt`);
+      showToast('success', t('sa.companies.toast.softDeleted', { name: company.name }));
     }
 
     if (action === 'hardDelete') {
       // CASCADE delete handles all related rows
       const { error } = await supabase.from('companies').delete().eq('id', company.id);
       if (error) throw error;
-      showToast('success', `${company.name} wurde endgültig gelöscht`);
+      showToast('success', t('sa.companies.toast.hardDeleted', { name: company.name }));
       setViewingCompany(null);
     }
 
@@ -1017,7 +1041,7 @@ export default function CompaniesPage() {
 
   const handleEnterCompany = (company: CompanyListItem) => {
     enterCompany(company);
-    showToast('success', `Jetzt als "${company.name}" aktiv`);
+    showToast('success', t('sa.companies.toast.nowActiveAs', { name: company.name }));
   };
 
   const filtered = companies.filter(c => {
@@ -1034,8 +1058,8 @@ export default function CompaniesPage() {
       <div className="flex items-center justify-center h-64">
         <div className="text-center">
           <Shield size={40} className="mx-auto mb-3" style={{ color: 'var(--text-tertiary)' }} />
-          <p className="font-medium" style={{ color: 'var(--text-primary)' }}>Kein Zugriff</p>
-          <p className="text-sm mt-1" style={{ color: 'var(--text-tertiary)' }}>Nur Super-Admins</p>
+          <p className="font-medium" style={{ color: 'var(--text-primary)' }}>{t('sa.companies.noAccess')}</p>
+          <p className="text-sm mt-1" style={{ color: 'var(--text-tertiary)' }}>{t('sa.companies.superAdminsOnly')}</p>
         </div>
       </div>
     );
@@ -1070,21 +1094,30 @@ export default function CompaniesPage() {
 
   // ── List view ──
   const filterOptions: Array<'all' | CompanyStatus> = ['all', 'active', 'trial', 'suspended', 'inactive', 'archived', 'deleted'];
-  const filterLabels: Record<string, string> = { all: 'Alle', active: 'Aktiv', trial: 'Testphase', suspended: 'Gesperrt', inactive: 'Inaktiv', archived: 'Archiviert', deleted: 'Gelöscht' };
+  // Keys are the stored companies.status values the filter compares against.
+  const filterLabels: Record<string, TranslationKey> = {
+    all: 'common.all',
+    active: 'sa.status.active',
+    trial: 'sa.status.trial',
+    suspended: 'sa.status.suspended',
+    inactive: 'sa.status.inactive',
+    archived: 'sa.status.archived',
+    deleted: 'sa.status.deleted',
+  };
 
   return (
     <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-4">
         <div>
-          <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>Unternehmen</h1>
-          <p className="text-sm mt-0.5" style={{ color: 'var(--text-secondary)' }}>Super Admin — {companies.length} Unternehmen</p>
+          <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>{t('sa.companies.title')}</h1>
+          <p className="text-sm mt-0.5" style={{ color: 'var(--text-secondary)' }}>{t('sa.companies.subtitle', { count: companies.length })}</p>
         </div>
         <button onClick={() => setShowCreateModal(true)} className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold"
           style={{ background: 'var(--accent)', color: 'white' }}
           onMouseEnter={e => (e.currentTarget.style.opacity = '0.85')}
           onMouseLeave={e => (e.currentTarget.style.opacity = '1')}>
-          <Plus size={16} />Unternehmen erstellen
+          <Plus size={16} />{t('sa.companies.createButton')}
         </button>
       </div>
 
@@ -1092,14 +1125,14 @@ export default function CompaniesPage() {
       <div className="flex items-center gap-3 flex-wrap">
         <div className="relative flex-1 min-w-[200px]">
           <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--text-tertiary)' }} />
-          <input style={{ ...inputStyle, paddingLeft: '2rem' }} placeholder="Suchen..." value={search} onChange={e => setSearch(e.target.value)} />
+          <input style={{ ...inputStyle, paddingLeft: '2rem' }} placeholder={t('sa.companies.searchPlaceholder')} value={search} onChange={e => setSearch(e.target.value)} />
         </div>
         <div className="flex items-center gap-1.5 flex-wrap">
           {filterOptions.map(s => (
             <button key={s} onClick={() => setStatusFilter(s)}
               className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors"
               style={{ background: statusFilter === s ? 'var(--accent)' : 'var(--bg-subtle)', color: statusFilter === s ? 'white' : 'var(--text-secondary)', border: '1px solid var(--border)' }}>
-              {filterLabels[s]}
+              {t(filterLabels[s])}
             </button>
           ))}
         </div>
@@ -1114,15 +1147,18 @@ export default function CompaniesPage() {
       ) : filtered.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-20 rounded-2xl" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
           <Building2 size={40} className="mb-3" style={{ color: 'var(--text-tertiary)' }} />
-          <p className="font-medium" style={{ color: 'var(--text-primary)' }}>{search || statusFilter !== 'all' ? 'Keine Treffer' : 'Noch keine Unternehmen'}</p>
+          <p className="font-medium" style={{ color: 'var(--text-primary)' }}>{t(search || statusFilter !== 'all' ? 'sa.companies.noMatches' : 'sa.companies.noneYet')}</p>
         </div>
       ) : (
         <div className="rounded-2xl overflow-hidden" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
           <table className="w-full text-sm">
             <thead>
               <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                {['Unternehmen', 'Status', 'E-Mail / Stadt', 'Benutzer', 'Erstellt', ''].map(h => (
-                  <th key={h} className="px-5 py-3.5 text-left" style={{ color: 'var(--text-tertiary)', fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 600 }}>{h}</th>
+                {([
+                  'sa.companies.col.company', 'common.status', 'sa.companies.col.emailCity',
+                  'sa.companies.users', 'sa.companies.created', null,
+                ] as const).map((h, i) => (
+                  <th key={i} className="px-5 py-3.5 text-left" style={{ color: 'var(--text-tertiary)', fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 600 }}>{h ? t(h) : ''}</th>
                 ))}
               </tr>
             </thead>
@@ -1165,19 +1201,19 @@ export default function CompaniesPage() {
                     </td>
                     <td className="px-5 py-4" onClick={e => e.stopPropagation()}>
                       <div className="flex items-center gap-1.5 justify-end">
-                        <button onClick={() => setViewingCompany(company)} className="p-1.5 rounded-lg transition-colors" style={{ color: 'var(--text-tertiary)' }} title="Details"
+                        <button onClick={() => setViewingCompany(company)} className="p-1.5 rounded-lg transition-colors" style={{ color: 'var(--text-tertiary)' }} title={t('sa.companies.details')}
                           onMouseEnter={e => { (e.currentTarget.style.background = 'var(--bg-muted)'); (e.currentTarget.style.color = 'var(--text-primary)'); }}
                           onMouseLeave={e => { (e.currentTarget.style.background = 'transparent'); (e.currentTarget.style.color = 'var(--text-tertiary)'); }}>
                           <Eye size={14} />
                         </button>
                         {!isArchived && !isDeleted && (
                           <>
-                            <button onClick={() => setEditingCompany(company)} className="p-1.5 rounded-lg transition-colors" style={{ color: 'var(--text-tertiary)' }} title="Bearbeiten"
+                            <button onClick={() => setEditingCompany(company)} className="p-1.5 rounded-lg transition-colors" style={{ color: 'var(--text-tertiary)' }} title={t('common.edit')}
                               onMouseEnter={e => { (e.currentTarget.style.background = 'var(--bg-muted)'); (e.currentTarget.style.color = 'var(--text-primary)'); }}
                               onMouseLeave={e => { (e.currentTarget.style.background = 'transparent'); (e.currentTarget.style.color = 'var(--text-tertiary)'); }}>
                               <Edit2 size={14} />
                             </button>
-                            <button onClick={() => handleEnterCompany(company)} className="p-1.5 rounded-lg transition-colors" style={{ color: 'var(--accent)' }} title="Als Unternehmen öffnen"
+                            <button onClick={() => handleEnterCompany(company)} className="p-1.5 rounded-lg transition-colors" style={{ color: 'var(--accent)' }} title={t('sa.companies.openAsCompany')}
                               onMouseEnter={e => (e.currentTarget.style.background = 'var(--accent-subtle)')}
                               onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
                               <ExternalLink size={14} />
@@ -1185,7 +1221,7 @@ export default function CompaniesPage() {
                           </>
                         )}
                         {(isArchived || isDeleted) && (
-                          <button onClick={() => handleLifecycleAction(company, 'restore')} className="p-1.5 rounded-lg transition-colors" style={{ color: 'var(--accent)' }} title="Wiederherstellen"
+                          <button onClick={() => handleLifecycleAction(company, 'restore')} className="p-1.5 rounded-lg transition-colors" style={{ color: 'var(--accent)' }} title={t('sa.lifecycle.restore.confirm')}
                             onMouseEnter={e => (e.currentTarget.style.background = 'var(--accent-subtle)')}
                             onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
                             <RotateCcw size={14} />

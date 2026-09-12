@@ -8,6 +8,8 @@ import { supabase } from '../lib/supabase';
 import type { DriverOption, CarOption } from '../components/FahrtenbuchImportModal';
 import { exportStundennachweisAsPdf, toPdfDayRow } from '../utils/stundennachweisPdfExport';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
+import { useTranslation } from '../contexts/LanguageContext';
+import type { TranslationKey } from '../i18n';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -49,9 +51,23 @@ interface MonthGroup {
   totalGross: number | null;
 }
 
+// There are deliberately two month-name tables.
+//
+// MONTH_NAMES_DE is document text: it names the Stundennachweis PDF handed to
+// the Steuerberater, so it must stay German in both UI languages and must never
+// be routed through the dictionary.
 const MONTH_NAMES_DE = [
   'Januar', 'Februar', 'März', 'April', 'Mai', 'Juni',
   'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember',
+];
+
+// MONTH_NAME_KEYS is the screen-text counterpart, used only for the archive
+// group headings. It holds TranslationKeys because this list is module-level
+// and t() is a hook value; every consumer resolves it at the call site.
+const MONTH_NAME_KEYS: TranslationKey[] = [
+  'doc.month.january', 'doc.month.february', 'doc.month.march',     'doc.month.april',
+  'doc.month.may',     'doc.month.june',     'doc.month.july',      'doc.month.august',
+  'doc.month.september', 'doc.month.october', 'doc.month.november', 'doc.month.december',
 ];
 
 function minsToDecimal(mins: number): number {
@@ -101,6 +117,7 @@ function totalMins(rec: SavedRecord): number {
 const DocumentsPage: React.FC = () => {
   const navigate = useNavigate();
   const { effectiveCompanyId: companyId } = useSuperAdmin();
+  const { t, tPlural } = useTranslation();
   const [isTrinkgeldModalOpen, setIsTrinkgeldModalOpen] = useState(false);
   const [isMietwagenModalOpen, setIsMietwagenModalOpen] = useState(false);
   const [subView, setSubView] = useState<SubView>('main');
@@ -190,7 +207,7 @@ const DocumentsPage: React.FC = () => {
         key,
         year,
         month,
-        label: `${MONTH_NAMES_DE[month - 1]} ${year}`,
+        label: `${t(MONTH_NAME_KEYS[month - 1])} ${year}`,
         records: sorted,
         totalMins: groupTotalMins,
         totalGross,
@@ -199,7 +216,7 @@ const DocumentsPage: React.FC = () => {
     // newest first
     groups.sort((a, b) => b.year !== a.year ? b.year - a.year : b.month - a.month);
     return groups;
-  }, [savedRecords]);
+  }, [savedRecords, t]);
 
   // Auto-expand the newest group on first load
   useEffect(() => {
@@ -254,7 +271,7 @@ const DocumentsPage: React.FC = () => {
       .eq('company_id', companyId);
     setDeleting(false);
     if (error) {
-      setDeleteError(`Löschen fehlgeschlagen: ${error.message}`);
+      setDeleteError(t('doc.deleteFailed', { message: error.message }));
       return;
     }
     setDeleteConfirmId(null);
@@ -308,12 +325,12 @@ const DocumentsPage: React.FC = () => {
             onMouseEnter={e => (e.currentTarget.style.borderColor = 'var(--accent)')}
             onMouseLeave={e => (e.currentTarget.style.borderColor = 'var(--border)')}
           >
-            <ArrowLeft size={16} /> Dokumente
+            <ArrowLeft size={16} /> {t('nav.documents')}
           </button>
           <div>
-            <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>Fahrtenbuch</h1>
+            <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>{t('doc.fahrtenbuch')}</h1>
             <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>
-              Fahrtenbuch importieren und Fahrten verwalten
+              {t('doc.fahrtenbuchSubtitle')}
             </p>
           </div>
         </div>
@@ -335,9 +352,9 @@ const DocumentsPage: React.FC = () => {
             <FileText size={32} />
           </div>
           <div>
-            <h1 className="text-3xl font-bold">Dokumente</h1>
+            <h1 className="text-3xl font-bold">{t('nav.documents')}</h1>
             <p className="mt-1" style={{ color: 'rgba(255,255,255,0.8)' }}>
-              Stundennachweis, Trinkgeld-Quittung, Mietwagenauftrag und Fahrtenbuch
+              {t('doc.headerSubtitle')}
             </p>
           </div>
         </div>
@@ -346,7 +363,7 @@ const DocumentsPage: React.FC = () => {
       {/* Document tools */}
       <div>
         <h2 className="text-sm font-semibold uppercase tracking-wider mb-3" style={{ color: 'var(--text-tertiary)' }}>
-          Dokument-Tools
+          {t('doc.toolsHeading')}
         </h2>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
 
@@ -364,13 +381,13 @@ const DocumentsPage: React.FC = () => {
               </div>
               <ChevronRight size={16} style={{ color: 'var(--text-tertiary)' }} className="mt-1 group-hover:translate-x-0.5 transition-transform" />
             </div>
-            <h3 className="font-semibold text-base mb-1" style={{ color: 'var(--text-primary)' }}>Stundennachweis</h3>
+            <h3 className="font-semibold text-base mb-1" style={{ color: 'var(--text-primary)' }}>{t('doc.stundennachweis')}</h3>
             <p className="text-xs leading-relaxed" style={{ color: 'var(--text-tertiary)' }}>
-              Monatliche Arbeitszeitnachweise für Fahrer generieren, bearbeiten und als PDF exportieren.
+              {t('doc.stundennachweisDesc')}
             </p>
             <div className="mt-3 flex items-center gap-1.5">
-              <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ background: 'var(--accent-subtle)', color: 'var(--accent-text)' }}>Vorlage</span>
-              <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ background: 'var(--success-subtle)', color: 'var(--success)' }}>PDF Export</span>
+              <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ background: 'var(--accent-subtle)', color: 'var(--accent-text)' }}>{t('doc.badgeTemplate')}</span>
+              <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ background: 'var(--success-subtle)', color: 'var(--success)' }}>{t('doc.badgePdfExport')}</span>
             </div>
           </button>
 
@@ -388,13 +405,13 @@ const DocumentsPage: React.FC = () => {
               </div>
               <ChevronRight size={16} style={{ color: 'var(--text-tertiary)' }} className="mt-1 group-hover:translate-x-0.5 transition-transform" />
             </div>
-            <h3 className="font-semibold text-base mb-1" style={{ color: 'var(--text-primary)' }}>Trinkgeld Quittung</h3>
+            <h3 className="font-semibold text-base mb-1" style={{ color: 'var(--text-primary)' }}>{t('doc.trinkgeldQuittung')}</h3>
             <p className="text-xs leading-relaxed" style={{ color: 'var(--text-tertiary)' }}>
-              Formelle Quittung über Trinkgeld-Barzahlung an einen Fahrer für einen gewählten Monat.
+              {t('doc.trinkgeldQuittungDesc')}
             </p>
             <div className="mt-3 flex items-center gap-1.5">
-              <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ background: 'var(--accent-subtle)', color: 'var(--accent-text)' }}>Vorlage</span>
-              <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ background: 'var(--success-subtle)', color: 'var(--success)' }}>PDF Export</span>
+              <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ background: 'var(--accent-subtle)', color: 'var(--accent-text)' }}>{t('doc.badgeTemplate')}</span>
+              <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ background: 'var(--success-subtle)', color: 'var(--success)' }}>{t('doc.badgePdfExport')}</span>
             </div>
           </button>
 
@@ -412,13 +429,13 @@ const DocumentsPage: React.FC = () => {
               </div>
               <ChevronRight size={16} style={{ color: 'var(--text-tertiary)' }} className="mt-1 group-hover:translate-x-0.5 transition-transform" />
             </div>
-            <h3 className="font-semibold text-base mb-1" style={{ color: 'var(--text-primary)' }}>Mietwagenauftrag / Fahrtennachweis</h3>
+            <h3 className="font-semibold text-base mb-1" style={{ color: 'var(--text-primary)' }}>{t('doc.mietwagenauftrag')}</h3>
             <p className="text-xs leading-relaxed" style={{ color: 'var(--text-tertiary)' }}>
-              Fahrtennachweis für Personenbeförderung im Mietwagenverkehr.
+              {t('doc.mietwagenauftragDesc')}
             </p>
             <div className="mt-3 flex items-center gap-1.5">
-              <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ background: 'var(--accent-subtle)', color: 'var(--accent-text)' }}>Vorlage</span>
-              <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ background: 'var(--success-subtle)', color: 'var(--success)' }}>PDF Export</span>
+              <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ background: 'var(--accent-subtle)', color: 'var(--accent-text)' }}>{t('doc.badgeTemplate')}</span>
+              <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ background: 'var(--success-subtle)', color: 'var(--success)' }}>{t('doc.badgePdfExport')}</span>
             </div>
           </button>
 
@@ -436,12 +453,12 @@ const DocumentsPage: React.FC = () => {
               </div>
               <ChevronRight size={16} style={{ color: 'var(--text-tertiary)' }} className="mt-1 group-hover:translate-x-0.5 transition-transform" />
             </div>
-            <h3 className="font-semibold text-base mb-1" style={{ color: 'var(--text-primary)' }}>Fahrtenbuch</h3>
+            <h3 className="font-semibold text-base mb-1" style={{ color: 'var(--text-primary)' }}>{t('doc.fahrtenbuch')}</h3>
             <p className="text-xs leading-relaxed" style={{ color: 'var(--text-tertiary)' }}>
-              Fahrtenbuch importieren und Fahrten später mit dem Stundennachweis abgleichen.
+              {t('doc.fahrtenbuchDesc')}
             </p>
             <div className="mt-3 flex items-center gap-1.5">
-              <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ background: 'rgba(16,185,129,0.12)', color: '#059669' }}>Import</span>
+              <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ background: 'rgba(16,185,129,0.12)', color: '#059669' }}>{t('doc.badgeImport')}</span>
               <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ background: 'var(--accent-subtle)', color: 'var(--accent-text)' }}>Excel / CSV</span>
             </div>
           </button>
@@ -453,25 +470,25 @@ const DocumentsPage: React.FC = () => {
       <div>
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-sm font-semibold uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>
-            Gespeicherte Stundennachweise
+            {t('doc.archiveHeading')}
           </h2>
           {!loadingArchive && savedRecords.length > 0 && (
             <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ background: 'var(--accent-subtle)', color: 'var(--accent-text)' }}>
-              {savedRecords.length} {savedRecords.length === 1 ? 'Eintrag' : 'Einträge'}
+              {tPlural({ one: 'doc.entryCount.one', other: 'doc.entryCount.other' }, savedRecords.length)}
             </span>
           )}
         </div>
 
         {loadingArchive ? (
           <div className="rounded-xl p-8 text-center text-sm" style={{ border: '1px solid var(--border)', background: 'var(--bg-surface)', color: 'var(--text-tertiary)' }}>
-            Lade gespeicherte Stundennachweise…
+            {t('doc.archiveLoading')}
           </div>
         ) : monthGroups.length === 0 ? (
           <div className="rounded-xl p-8 text-center" style={{ border: '1px solid var(--border)', background: 'var(--bg-surface)' }}>
             <Clock size={32} className="mx-auto mb-3" style={{ color: 'var(--text-tertiary)' }} />
-            <p className="text-sm font-medium mb-1" style={{ color: 'var(--text-primary)' }}>Keine gespeicherten Stundennachweise vorhanden.</p>
+            <p className="text-sm font-medium mb-1" style={{ color: 'var(--text-primary)' }}>{t('doc.archiveEmpty')}</p>
             <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
-              Im Stundennachweis-Tool auf „Speichern" klicken, um einen Nachweis zu archivieren.
+              {t('doc.archiveEmptyHint')}
             </p>
           </div>
         ) : (
@@ -496,12 +513,12 @@ const DocumentsPage: React.FC = () => {
                         {group.label}
                       </span>
                       <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ background: 'var(--accent-subtle)', color: 'var(--accent-text)' }}>
-                        {group.records.length} {group.records.length === 1 ? 'Eintrag' : 'Einträge'}
+                        {tPlural({ one: 'doc.entryCount.one', other: 'doc.entryCount.other' }, group.records.length)}
                       </span>
                       <span className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
-                        {fmtDec(minsToDecimal(group.totalMins))} Std. gesamt
+                        {t('doc.hoursTotal', { hours: fmtDec(minsToDecimal(group.totalMins)) })}
                         {group.totalGross != null && (
-                          <span className="ml-2">· {fmtEuro(group.totalGross)} Brutto</span>
+                          <span className="ml-2">· {fmtEuro(group.totalGross)} {t('doc.gross')}</span>
                         )}
                       </span>
                     </div>
@@ -513,9 +530,9 @@ const DocumentsPage: React.FC = () => {
                         style={{ background: 'var(--success-subtle)', color: 'var(--success)', border: '1px solid transparent' }}
                         onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--success)'; }}
                         onMouseLeave={e => { e.currentTarget.style.borderColor = 'transparent'; }}
-                        title={`Alle PDFs für ${group.label} herunterladen`}
+                        title={t('doc.downloadAllTitle', { label: group.label })}
                       >
-                        <Download size={12} /> Alle herunterladen
+                        <Download size={12} /> {t('doc.downloadAll')}
                       </button>
                       <button
                         onClick={() => { setGroupDeleteError(''); setDeleteGroupKey(group.key); }}
@@ -523,9 +540,9 @@ const DocumentsPage: React.FC = () => {
                         style={{ background: 'var(--error-subtle)', color: 'var(--error)', border: '1px solid transparent' }}
                         onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--error)'; }}
                         onMouseLeave={e => { e.currentTarget.style.borderColor = 'transparent'; }}
-                        title={`Alle Einträge für ${group.label} löschen`}
+                        title={t('doc.deleteAllTitle', { label: group.label })}
                       >
-                        <Trash2 size={12} /> Alle löschen
+                        <Trash2 size={12} /> {t('doc.deleteAll')}
                       </button>
                     </div>
                   </div>
@@ -536,9 +553,12 @@ const DocumentsPage: React.FC = () => {
                       <table className="w-full text-sm">
                         <thead>
                           <tr style={{ background: 'var(--bg-muted)', borderBottom: '1px solid var(--border)' }}>
-                            {['Fahrer', 'Personalnr.', 'Gesamtstunden', 'Brutto erwartet', 'Arbeitstage', 'Gespeichert am', 'Aktualisiert am', 'Aktionen'].map(h => (
+                            {([
+                              'common.driver', 'doc.personalnummer', 'doc.totalHours', 'doc.grossExpected',
+                              'doc.workingDays', 'doc.savedAt', 'doc.updatedAt', 'doc.tableActions',
+                            ] as TranslationKey[]).map(h => (
                               <th key={h} className="px-4 py-2.5 text-left font-semibold text-xs uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>
-                                {h}
+                                {t(h)}
                               </th>
                             ))}
                           </tr>
@@ -555,17 +575,17 @@ const DocumentsPage: React.FC = () => {
                               <td className="px-4 py-3 font-medium" style={{ color: 'var(--text-primary)' }}>
                                 {rec.driver_name}
                                 {rec.generation_source === 'fahrtenbuch' && (
-                                  <span className="ml-1.5 text-[10px] px-1.5 py-0.5 rounded font-medium" style={{ background: 'var(--accent-subtle)', color: 'var(--accent-text)' }}>Fahrtenbuch</span>
+                                  <span className="ml-1.5 text-[10px] px-1.5 py-0.5 rounded font-medium" style={{ background: 'var(--accent-subtle)', color: 'var(--accent-text)' }}>{t('doc.fahrtenbuch')}</span>
                                 )}
                                 {rec.generation_source === 'monatsplanung' && (
-                                  <span className="ml-1.5 text-[10px] px-1.5 py-0.5 rounded font-medium" style={{ background: 'rgba(16,185,129,0.12)', color: '#059669' }}>Planung</span>
+                                  <span className="ml-1.5 text-[10px] px-1.5 py-0.5 rounded font-medium" style={{ background: 'rgba(16,185,129,0.12)', color: '#059669' }}>{t('doc.badgePlanning')}</span>
                                 )}
                               </td>
                               <td className="px-4 py-3 font-mono text-xs" style={{ color: 'var(--text-secondary)' }}>
                                 {rec.personalnummer ?? '—'}
                               </td>
                               <td className="px-4 py-3 font-mono" style={{ color: 'var(--text-primary)' }}>
-                                {fmtDec(minsToDecimal(totalMins(rec)))} Std.
+                                {fmtDec(minsToDecimal(totalMins(rec)))} {t('doc.hoursShort')}
                               </td>
                               <td className="px-4 py-3 font-mono" style={{ color: rec.calculated_salary != null ? 'var(--text-primary)' : 'var(--text-tertiary)' }}>
                                 {fmtEuro(rec.calculated_salary)}
@@ -583,17 +603,17 @@ const DocumentsPage: React.FC = () => {
                                 <div className="flex items-center gap-1.5">
                                   <button
                                     onClick={() => handleOpen(rec)}
-                                    title="Öffnen"
+                                    title={t('doc.open')}
                                     className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all"
                                     style={{ background: 'var(--accent-subtle)', color: 'var(--accent-text)', border: '1px solid transparent' }}
                                     onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--accent)'; }}
                                     onMouseLeave={e => { e.currentTarget.style.borderColor = 'transparent'; }}
                                   >
-                                    <ExternalLink size={12} /> Öffnen
+                                    <ExternalLink size={12} /> {t('doc.open')}
                                   </button>
                                   <button
                                     onClick={() => handlePdf(rec)}
-                                    title="Als PDF exportieren"
+                                    title={t('doc.exportPdf')}
                                     className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all"
                                     style={{ background: 'var(--success-subtle)', color: 'var(--success)', border: '1px solid transparent' }}
                                     onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--success)'; }}
@@ -603,7 +623,7 @@ const DocumentsPage: React.FC = () => {
                                   </button>
                                   <button
                                     onClick={() => { setDeleteError(''); setDeleteConfirmId(rec.id); }}
-                                    title="Löschen"
+                                    title={t('common.delete')}
                                     className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all"
                                     style={{ background: 'var(--error-subtle)', color: 'var(--error)', border: '1px solid transparent' }}
                                     onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--error)'; }}
@@ -634,10 +654,10 @@ const DocumentsPage: React.FC = () => {
               <div className="rounded-lg p-2" style={{ background: 'var(--error-subtle)' }}>
                 <AlertTriangle size={20} style={{ color: 'var(--error)' }} />
               </div>
-              <h3 className="font-semibold text-base" style={{ color: 'var(--text-primary)' }}>Löschen bestätigen</h3>
+              <h3 className="font-semibold text-base" style={{ color: 'var(--text-primary)' }}>{t('doc.confirmDeleteTitle')}</h3>
             </div>
             <p className="text-sm mb-6" style={{ color: 'var(--text-secondary)' }}>
-              Diesen gespeicherten Stundennachweis wirklich löschen? Diese Aktion kann nicht rückgängig gemacht werden.
+              {t('doc.confirmDeleteBody')}
             </p>
             {deleteError && (
               <div
@@ -654,7 +674,7 @@ const DocumentsPage: React.FC = () => {
                 className="px-4 py-2 rounded-lg text-sm font-medium transition-colors"
                 style={{ background: 'var(--bg-muted)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
               >
-                Abbrechen
+                {t('common.cancel')}
               </button>
               <button
                 onClick={handleDeleteConfirm}
@@ -662,7 +682,7 @@ const DocumentsPage: React.FC = () => {
                 className="px-4 py-2 rounded-lg text-sm font-medium transition-colors"
                 style={{ background: 'var(--error)', color: 'white' }}
               >
-                {deleting ? 'Löschen…' : 'Löschen'}
+                {deleting ? t('common.deleting') : t('common.delete')}
               </button>
             </div>
           </div>
@@ -677,13 +697,17 @@ const DocumentsPage: React.FC = () => {
               <div className="rounded-lg p-2" style={{ background: 'var(--error-subtle)' }}>
                 <AlertTriangle size={20} style={{ color: 'var(--error)' }} />
               </div>
-              <h3 className="font-semibold text-base" style={{ color: 'var(--text-primary)' }}>Gruppe löschen bestätigen</h3>
+              <h3 className="font-semibold text-base" style={{ color: 'var(--text-primary)' }}>{t('doc.confirmDeleteGroupTitle')}</h3>
             </div>
             <p className="text-sm mb-2" style={{ color: 'var(--text-secondary)' }}>
-              Alle Stundennachweise für <strong>{groupForDelete.label}</strong> wirklich löschen?
+              {/* Split around the bolded label so both languages keep their word order. */}
+              {t('doc.confirmDeleteGroupBefore')}<strong>{groupForDelete.label}</strong>{t('doc.confirmDeleteGroupAfter')}
             </p>
             <p className="text-sm mb-6" style={{ color: 'var(--text-tertiary)' }}>
-              {groupForDelete.records.length} {groupForDelete.records.length === 1 ? 'Eintrag wird' : 'Einträge werden'} gelöscht. Diese Aktion kann nicht rückgängig gemacht werden.
+              {tPlural(
+                { one: 'doc.confirmDeleteGroupCount.one', other: 'doc.confirmDeleteGroupCount.other' },
+                groupForDelete.records.length,
+              )}
             </p>
             {groupDeleteError && (
               <p className="text-xs mb-4 px-3 py-2 rounded-lg" style={{ background: 'var(--error-subtle)', color: 'var(--error)' }}>
@@ -697,7 +721,7 @@ const DocumentsPage: React.FC = () => {
                 className="px-4 py-2 rounded-lg text-sm font-medium transition-colors"
                 style={{ background: 'var(--bg-muted)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
               >
-                Abbrechen
+                {t('common.cancel')}
               </button>
               <button
                 onClick={() => void handleDeleteGroupConfirm()}
@@ -705,7 +729,7 @@ const DocumentsPage: React.FC = () => {
                 className="px-4 py-2 rounded-lg text-sm font-medium transition-colors"
                 style={{ background: 'var(--error)', color: 'white' }}
               >
-                {deletingGroup ? 'Löschen…' : 'Alle löschen'}
+                {deletingGroup ? t('common.deleting') : t('doc.deleteAll')}
               </button>
             </div>
           </div>

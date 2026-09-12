@@ -10,12 +10,41 @@ import { handleDatabaseError } from '../utils/errorHandler';
 import { exportIncomeToExcel } from '../utils/excelExport';
 import { getWeeksOfMonth, getWeekNumberForDate, WeekOfMonth, getBusinessMonthRange, getBusinessWeekRange } from '../utils/weekCalculations';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
+import { useTranslation } from '../contexts/LanguageContext';
+import type { TranslationKey } from '../i18n';
 
 interface IncomeManagementProps {
   drivers: Driver[];
 }
 
 type DatePreset = 'thisWeek' | 'lastWeek' | 'thisMonth' | 'lastMonth' | 'thisYear' | 'custom';
+
+type IncomeType = 'bargeld' | 'umsatz' | 'trinkgeld' | 'aktionen';
+
+// Values hold TranslationKeys: these maps are module-level and t() is a hook
+// value, so every consumer resolves them at the call site.
+const DATE_PRESET_LABELS: Record<DatePreset, TranslationKey> = {
+  thisWeek:  'inc.preset.thisWeek',
+  lastWeek:  'inc.preset.lastWeek',
+  thisMonth: 'inc.preset.thisMonth',
+  lastMonth: 'inc.preset.lastMonth',
+  thisYear:  'inc.preset.thisYear',
+  custom:    'inc.preset.custom',
+};
+
+// The keys of this map are the values persisted in `income.type` and compared on
+// read — they are data, not labels, and never translate. The labels do: Bargeld,
+// Umsatz and Aktionen render as Cash, Revenue and Promotions, matching
+// overview.kpi.* in the English dictionary. Only Trinkgeld stays German, because
+// it is the subject of the Trinkgeld-Quittung.
+const INCOME_TYPE_LABELS: Record<IncomeType, TranslationKey> = {
+  bargeld:   'inc.typeBargeld',
+  umsatz:    'inc.typeUmsatz',
+  aktionen:  'inc.typeAktionen',
+  trinkgeld: 'inc.typeTrinkgeld',
+};
+
+const INCOME_TYPE_ORDER: IncomeType[] = ['bargeld', 'umsatz', 'aktionen', 'trinkgeld'];
 
 const IncomeManagement: React.FC<IncomeManagementProps> = ({ drivers }) => {
   const [incomes, setIncomes] = useState<Income[]>([]);
@@ -65,6 +94,7 @@ const IncomeManagement: React.FC<IncomeManagementProps> = ({ drivers }) => {
   const { user, profile, canEdit, canDelete, canCreate } = useAuth();
   const { effectiveCompanyId: companyId } = useSuperAdmin();
   const { success, error: showError, warning } = useToast();
+  const { t, tPlural } = useTranslation();
   const [deleteConfirm, setDeleteConfirm] = useState<{ isOpen: boolean; id: string | null }>({ isOpen: false, id: null });
 
   useEffect(() => {
@@ -103,7 +133,7 @@ const IncomeManagement: React.FC<IncomeManagementProps> = ({ drivers }) => {
       setIncomes(data || []);
     } catch (err: any) {
       console.error('Error loading incomes:', err);
-      showError('Fehler beim Laden', handleDatabaseError(err));
+      showError(t('common.errorLoad'), handleDatabaseError(err));
     } finally {
       setLoading(false);
     }
@@ -193,11 +223,14 @@ const IncomeManagement: React.FC<IncomeManagementProps> = ({ drivers }) => {
 
   const handleExport = () => {
     if (filteredIncomes.length === 0) {
-      warning('Keine Daten', 'Es gibt keine Daten zum Exportieren');
+      warning(t('inc.noData'), t('inc.noDataToExport'));
       return;
     }
+    // exportIncomeToExcel hard-codes its headers inside excelExport.ts rather
+    // than taking them from here, so this workbook does not follow the UI
+    // language. Nothing to pass; nothing to translate at this call site.
     exportIncomeToExcel(filteredIncomes, fromDate, toDate);
-    success('Export erfolgreich', 'Die Daten wurden als Excel-Datei exportiert');
+    success(t('inc.exportSuccess'), t('inc.exportSuccessBody'));
   };
 
   const parseBatchAmount = (val: string) => {
@@ -209,15 +242,15 @@ const IncomeManagement: React.FC<IncomeManagementProps> = ({ drivers }) => {
 
   const handleBatchAdd = async () => {
     if (!canCreate) {
-      showError('Keine Berechtigung', 'Nur Administratoren und Ersteller können Einnahmen hinzufügen');
+      showError(t('common.noPermission'), t('inc.noPermissionAdd'));
       return;
     }
     if (!batchForm.driver_name) {
-      warning('Fehlende Angaben', 'Bitte wählen Sie einen Fahrer aus');
+      warning(t('inc.missingFields'), t('inc.selectDriverFirst'));
       return;
     }
 
-    const amounts: { type: 'umsatz' | 'aktionen' | 'trinkgeld' | 'bargeld'; amount: number }[] = [];
+    const amounts: { type: IncomeType; amount: number }[] = [];
     const netto = parseBatchAmount(batchForm.nettoFahrpreis);
     const akt   = parseBatchAmount(batchForm.aktionen);
     const tkg   = parseBatchAmount(batchForm.trinkgeld);
@@ -229,7 +262,7 @@ const IncomeManagement: React.FC<IncomeManagementProps> = ({ drivers }) => {
     if (bar)   amounts.push({ type: 'bargeld',   amount: bar });
 
     if (amounts.length === 0) {
-      warning('Fehlende Angaben', 'Mindestens ein Betrag muss größer als 0 sein');
+      warning(t('inc.missingFields'), t('inc.amountRequired'));
       return;
     }
 
@@ -238,17 +271,20 @@ const IncomeManagement: React.FC<IncomeManagementProps> = ({ drivers }) => {
     if (rawTripCount !== '') {
       const tc = parseInt(rawTripCount, 10);
       if (isNaN(tc) || tc < 0) {
-        warning('Ungültige Eingabe', 'Anzahl Fahrten muss eine nicht-negative ganze Zahl sein');
+        warning(t('inc.invalidInput'), t('inc.tripCountInvalid'));
         return;
       }
       tripCount = tc;
     }
 
     if (!profile?.id) {
-      showError('Fehler', 'Benutzerprofil nicht geladen');
+      showError(t('common.error'), t('inc.profileNotLoaded'));
       return;
     }
 
+    // The `Woche N` prefix is written into `income.description` and matched again
+    // on edit (`includes` below, and a regex in handleUpdate). It is stored data,
+    // not a label, so it stays German in both UI languages.
     let description = batchForm.description.trim();
     if (batchForm.week && description && !description.includes(`Woche ${batchForm.week}`)) {
       description = `Woche ${batchForm.week} - ${description}`;
@@ -300,25 +336,33 @@ const IncomeManagement: React.FC<IncomeManagementProps> = ({ drivers }) => {
 
       if (hiddenByFilter) {
         warning(
-          'Einnahmen gespeichert',
-          `${rows.length} Einträge wurden gespeichert, sind aber durch die aktuellen Filter nicht sichtbar.`
+          t('inc.savedTitle'),
+          tPlural(
+            { one: 'inc.savedHiddenBody.one', other: 'inc.savedHiddenBody.other' },
+            rows.length,
+          ),
         );
       } else {
-        success('Einnahmen erstellt', `${rows.length} Einträge erfolgreich gespeichert`);
+        success(
+          t('inc.createdTitle'),
+          tPlural({ one: 'inc.createdBody.one', other: 'inc.createdBody.other' }, rows.length),
+        );
       }
     } catch (err: any) {
       console.error('Error adding incomes:', err);
-      showError('Fehler beim Erstellen', handleDatabaseError(err));
+      showError(t('common.errorCreate'), handleDatabaseError(err));
     }
   };
 
   const handleUpdate = async (id: string) => {
     if (!formData.amount || !formData.driver_name) {
-      warning('Fehlende Angaben', 'Bitte füllen Sie Betrag und Fahrer aus');
+      warning(t('inc.missingFields'), t('inc.amountAndDriverRequired'));
       return;
     }
 
     try {
+      // `Woche N` is stored in `income.description` and matched here — data, not
+      // a label. See handleBatchAdd.
       let description = formData.description.trim();
       if (formData.week && description && !description.includes(`Woche ${formData.week}`)) {
         description = description.replace(/Woche \d+/i, `Woche ${formData.week}`);
@@ -353,10 +397,10 @@ const IncomeManagement: React.FC<IncomeManagementProps> = ({ drivers }) => {
         week: undefined
       });
       await loadIncomes();
-      success('Einnahme aktualisiert', 'Die Einnahme wurde erfolgreich geändert');
+      success(t('inc.updated'), t('inc.updatedBody'));
     } catch (err: any) {
       console.error('Error updating income:', err);
-      showError('Fehler beim Aktualisieren', handleDatabaseError(err));
+      showError(t('common.errorUpdate'), handleDatabaseError(err));
     }
   };
 
@@ -369,11 +413,11 @@ const IncomeManagement: React.FC<IncomeManagementProps> = ({ drivers }) => {
 
       if (error) throw error;
       await loadIncomes();
-      success('Einnahme gelöscht', 'Die Einnahme wurde erfolgreich entfernt');
+      success(t('inc.deleted'), t('inc.deletedBody'));
       setDeleteConfirm({ isOpen: false, id: null });
     } catch (err: any) {
       console.error('Error deleting income:', err);
-      showError('Fehler beim Löschen', handleDatabaseError(err));
+      showError(t('common.errorDelete'), handleDatabaseError(err));
     }
   };
 
@@ -511,14 +555,14 @@ const IncomeManagement: React.FC<IncomeManagementProps> = ({ drivers }) => {
               <TrendingUp className="text-white" size={32} />
             </div>
             <div>
-              <h1 className="text-3xl font-bold">Umsätze hinzufügen</h1>
-              <p className="text-green-100 mt-1">Wöchentliche Einnahmen pro Fahrer verwalten</p>
+              <h1 className="text-3xl font-bold">{t('inc.title')}</h1>
+              <p className="text-green-100 mt-1">{t('inc.subtitle')}</p>
             </div>
           </div>
           <div className="text-right">
-            <p className="text-sm text-green-100">Gesamteinnahmen (gefiltert)</p>
-            <p className="text-3xl font-bold">{totalIncome.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €</p>
-            <p className="text-xs text-green-200 mt-1">{filteredIncomes.length} von {incomes.length} Einträgen</p>
+            <p className="text-sm text-green-100">{t('inc.totalFiltered')}</p>
+            <p className="text-3xl font-bold">{totalIncome.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €</p>
+            <p className="text-xs text-green-200 mt-1">{t('inc.entriesOf', { shown: filteredIncomes.length, total: incomes.length })}</p>
           </div>
         </div>
       </div>
@@ -531,15 +575,7 @@ const IncomeManagement: React.FC<IncomeManagementProps> = ({ drivers }) => {
         <div className="space-y-4">
           {/* Preset Buttons */}
           <div className="flex flex-wrap gap-2">
-            {(['thisWeek', 'lastWeek', 'thisMonth', 'lastMonth', 'thisYear', 'custom'] as DatePreset[]).map((preset) => {
-              const labels: Record<DatePreset, string> = {
-                thisWeek: 'Diese Woche',
-                lastWeek: 'Letzte Woche',
-                thisMonth: 'Dieser Monat',
-                lastMonth: 'Letzter Monat',
-                thisYear: 'Dieses Jahr',
-                custom: 'Benutzerdefiniert'
-              };
+            {(Object.keys(DATE_PRESET_LABELS) as DatePreset[]).map((preset) => {
               return (
                 <button
                   key={preset}
@@ -551,7 +587,7 @@ const IncomeManagement: React.FC<IncomeManagementProps> = ({ drivers }) => {
                       : { background: 'var(--bg-subtle)', color: 'var(--text-secondary)' }
                   }
                 >
-                  {labels[preset]}
+                  {t(DATE_PRESET_LABELS[preset])}
                 </button>
               );
             })}
@@ -561,7 +597,7 @@ const IncomeManagement: React.FC<IncomeManagementProps> = ({ drivers }) => {
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
             <div>
               <label htmlFor="from-date" className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>
-                Von Datum
+                {t('common.dateFrom')}
               </label>
               <div className="relative">
                 <Calendar className="absolute left-3 top-1/2 transform -translate-y-1/2" style={{ color: 'var(--text-tertiary)' }} size={16} />
@@ -575,14 +611,14 @@ const IncomeManagement: React.FC<IncomeManagementProps> = ({ drivers }) => {
                   }}
                   className="w-full pl-10 pr-3"
                   style={{ ...inputStyle, padding: '0.5rem 0.75rem 0.5rem 2.25rem' }}
-                  aria-label="Von Datum"
+                  aria-label={t('common.dateFrom')}
                 />
               </div>
             </div>
 
             <div>
               <label htmlFor="to-date" className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>
-                Bis Datum
+                {t('common.dateTo')}
               </label>
               <div className="relative">
                 <Calendar className="absolute left-3 top-1/2 transform -translate-y-1/2" style={{ color: 'var(--text-tertiary)' }} size={16} />
@@ -596,14 +632,14 @@ const IncomeManagement: React.FC<IncomeManagementProps> = ({ drivers }) => {
                   }}
                   className="w-full pl-10 pr-3"
                   style={{ ...inputStyle, padding: '0.5rem 0.75rem 0.5rem 2.25rem' }}
-                  aria-label="Bis Datum"
+                  aria-label={t('common.dateTo')}
                 />
               </div>
             </div>
 
             <div>
               <label htmlFor="driver-filter" className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>
-                Fahrer
+                {t('common.driver')}
               </label>
               <select
                 id="driver-filter"
@@ -612,7 +648,7 @@ const IncomeManagement: React.FC<IncomeManagementProps> = ({ drivers }) => {
                 className="w-full"
                 style={inputStyle}
               >
-                <option value="">Alle Fahrer</option>
+                <option value="">{t('common.allDrivers')}</option>
                 {drivers.filter(driver => driver.status !== 'inactive').map(driver => (
                   <option key={driver.id} value={driver.name}>{driver.name}</option>
                 ))}
@@ -621,7 +657,7 @@ const IncomeManagement: React.FC<IncomeManagementProps> = ({ drivers }) => {
 
             <div>
               <label htmlFor="type-filter" className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>
-                Typ
+                {t('inc.type')}
               </label>
               <select
                 id="type-filter"
@@ -630,11 +666,11 @@ const IncomeManagement: React.FC<IncomeManagementProps> = ({ drivers }) => {
                 className="w-full"
                 style={inputStyle}
               >
-                <option value="">Alle Typen</option>
-                <option value="bargeld">Bargeld</option>
-                <option value="umsatz">Umsatz</option>
-                <option value="aktionen">Aktionen</option>
-                <option value="trinkgeld">Trinkgeld</option>
+                {/* The option value is the persisted `income.type`; only the label translates. */}
+                <option value="">{t('inc.allTypes')}</option>
+                {INCOME_TYPE_ORDER.map(type => (
+                  <option key={type} value={type}>{t(INCOME_TYPE_LABELS[type])}</option>
+                ))}
               </select>
             </div>
 
@@ -643,10 +679,10 @@ const IncomeManagement: React.FC<IncomeManagementProps> = ({ drivers }) => {
                 onClick={resetFilters}
                 className="flex-1 px-4 py-2 rounded-lg transition-colors flex items-center justify-center gap-2"
                 style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)' }}
-                title="Filter zurücksetzen"
+                title={t('inc.resetFilters')}
               >
                 <RefreshCw size={16} />
-                <span className="hidden sm:inline">Zurücksetzen</span>
+                <span className="hidden sm:inline">{t('inc.reset')}</span>
               </button>
               <button
                 onClick={handleExport}
@@ -657,7 +693,7 @@ const IncomeManagement: React.FC<IncomeManagementProps> = ({ drivers }) => {
                     ? { background: 'var(--bg-subtle)', color: 'var(--text-tertiary)', cursor: 'not-allowed' }
                     : { background: 'var(--success)', color: 'white' }
                 }
-                title={filteredIncomes.length === 0 ? 'Keine Daten zum Exportieren' : 'Als Excel exportieren'}
+                title={filteredIncomes.length === 0 ? t('inc.nothingToExport') : t('common.exportExcelShort')}
                 aria-disabled={filteredIncomes.length === 0}
               >
                 <Download size={16} />
@@ -677,7 +713,7 @@ const IncomeManagement: React.FC<IncomeManagementProps> = ({ drivers }) => {
                 onClick={() => scrollCarousel('left')}
                 className="absolute left-0 top-1/2 -translate-y-1/2 -translate-x-3 z-10 rounded-full p-1.5 transition-all"
                 style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-md)' }}
-                aria-label="Nach links scrollen"
+                aria-label={t('inc.scrollLeft')}
               >
                 <ChevronLeft size={18} style={{ color: 'var(--text-secondary)' }} />
               </button>
@@ -685,7 +721,7 @@ const IncomeManagement: React.FC<IncomeManagementProps> = ({ drivers }) => {
                 onClick={() => scrollCarousel('right')}
                 className="absolute right-0 top-1/2 -translate-y-1/2 translate-x-3 z-10 rounded-full p-1.5 transition-all"
                 style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-md)' }}
-                aria-label="Nach rechts scrollen"
+                aria-label={t('inc.scrollRight')}
               >
                 <ChevronRight size={18} style={{ color: 'var(--text-secondary)' }} />
               </button>
@@ -710,29 +746,29 @@ const IncomeManagement: React.FC<IncomeManagementProps> = ({ drivers }) => {
                   style={{ background: 'var(--bg-surface)', boxShadow: 'var(--shadow-md)' }}
                 >
                   <div className="mb-3">
-                    <p className="text-sm font-medium" style={{ color: 'var(--text-secondary)' }}>Gefilterte Periode</p>
+                    <p className="text-sm font-medium" style={{ color: 'var(--text-secondary)' }}>{t('inc.filteredPeriod')}</p>
                     <p className="text-lg font-bold truncate" style={{ color: 'var(--text-primary)' }}>{driver.name}</p>
                   </div>
                   <div className="space-y-2">
                     <div className="flex justify-between items-center">
-                      <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>Netto-Fahrpreis:</span>
-                      <span className="font-semibold" style={{ color: 'var(--accent-text)' }}>{nettoFahrpreis.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €</span>
+                      <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>{t('inc.nettoFahrpreis')}:</span>
+                      <span className="font-semibold" style={{ color: 'var(--accent-text)' }}>{nettoFahrpreis.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €</span>
                     </div>
                     <div className="flex justify-between items-center">
-                      <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>Aktionen:</span>
-                      <span className="font-semibold" style={{ color: 'var(--warning)' }}>{aktionen.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €</span>
+                      <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>{t('inc.typeAktionen')}:</span>
+                      <span className="font-semibold" style={{ color: 'var(--warning)' }}>{aktionen.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €</span>
                     </div>
                     <div className="flex justify-between items-center">
-                      <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>Trinkgeld:</span>
-                      <span className="font-semibold" style={{ color: 'var(--text-primary)' }}>{trinkgeld.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €</span>
+                      <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>{t('inc.typeTrinkgeld')}:</span>
+                      <span className="font-semibold" style={{ color: 'var(--text-primary)' }}>{trinkgeld.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €</span>
                     </div>
                     <div className="flex justify-between items-center">
-                      <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>Bargeld:</span>
-                      <span className="font-semibold" style={{ color: 'var(--success)' }}>{bargeld.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €</span>
+                      <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>{t('inc.typeBargeld')}:</span>
+                      <span className="font-semibold" style={{ color: 'var(--success)' }}>{bargeld.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €</span>
                     </div>
                     <div className="flex justify-between items-center pt-2" style={{ borderTop: '1px solid var(--border)' }}>
-                      <span className="text-sm font-medium" style={{ color: 'var(--text-secondary)' }}>Summe:</span>
-                      <span className="font-bold" style={{ color: 'var(--text-primary)' }}>{summe.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €</span>
+                      <span className="text-sm font-medium" style={{ color: 'var(--text-secondary)' }}>{t('inc.sum')}:</span>
+                      <span className="font-bold" style={{ color: 'var(--text-primary)' }}>{summe.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €</span>
                     </div>
                   </div>
                 </div>
@@ -754,14 +790,14 @@ const IncomeManagement: React.FC<IncomeManagementProps> = ({ drivers }) => {
               style={{ background: 'var(--success)' }}
             >
               <Plus size={20} />
-              Neue Einnahme hinzufügen
+              {t('inc.addNew')}
             </button>
           ) : (
             <div className="space-y-5">
               {/* Form header */}
               <div className="flex items-center justify-between">
-                <h3 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>Neue Einnahme</h3>
-                <button onClick={cancelAdd} style={{ color: 'var(--text-tertiary)' }} title="Schließen">
+                <h3 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>{t('inc.newEntry')}</h3>
+                <button onClick={cancelAdd} style={{ color: 'var(--text-tertiary)' }} title={t('common.close')}>
                   <X size={20} />
                 </button>
               </div>
@@ -769,14 +805,14 @@ const IncomeManagement: React.FC<IncomeManagementProps> = ({ drivers }) => {
               {/* Shared fields: Fahrer, Datum, Woche, Beschreibung */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Fahrer *</label>
+                  <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>{t('common.driver')} *</label>
                   <select
                     value={batchForm.driver_name}
                     onChange={(e) => setBatchForm(prev => ({ ...prev, driver_name: e.target.value }))}
                     className="w-full"
                     style={inputStyle}
                   >
-                    <option value="">Fahrer auswählen</option>
+                    <option value="">{t('inc.selectDriver')}</option>
                     {drivers.filter(d => d.status !== 'inactive').map(d => (
                       <option key={d.id} value={d.name}>{d.name}</option>
                     ))}
@@ -784,7 +820,7 @@ const IncomeManagement: React.FC<IncomeManagementProps> = ({ drivers }) => {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Datum *</label>
+                  <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>{t('common.date')} *</label>
                   <input
                     type="date"
                     value={batchForm.date}
@@ -795,14 +831,14 @@ const IncomeManagement: React.FC<IncomeManagementProps> = ({ drivers }) => {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Woche</label>
+                  <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>{t('common.week')}</label>
                   <select
                     value={batchForm.week ?? ''}
                     onChange={(e) => setBatchForm(prev => ({ ...prev, week: e.target.value ? parseInt(e.target.value) : undefined }))}
                     className="w-full"
                     style={inputStyle}
                   >
-                    <option value="">Woche auswählen</option>
+                    <option value="">{t('inc.selectWeek')}</option>
                     {availableWeeks.map(w => (
                       <option key={w.weekNumber} value={w.weekNumber}>{w.label}</option>
                     ))}
@@ -811,7 +847,7 @@ const IncomeManagement: React.FC<IncomeManagementProps> = ({ drivers }) => {
 
                 <div>
                   <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>
-                    Beschreibung <span className="text-xs" style={{ color: 'var(--text-tertiary)' }}>(optional)</span>
+                    {t('common.description')} <span className="text-xs" style={{ color: 'var(--text-tertiary)' }}>{t('inc.optional')}</span>
                   </label>
                   <input
                     type="text"
@@ -819,7 +855,7 @@ const IncomeManagement: React.FC<IncomeManagementProps> = ({ drivers }) => {
                     onChange={(e) => setBatchForm(prev => ({ ...prev, description: e.target.value }))}
                     className="w-full"
                     style={inputStyle}
-                    placeholder="z.B. Wocheneinnahmen"
+                    placeholder={t('inc.descriptionPlaceholder')}
                   />
                 </div>
               </div>
@@ -830,13 +866,13 @@ const IncomeManagement: React.FC<IncomeManagementProps> = ({ drivers }) => {
               {/* Amount fields */}
               <div>
                 <p className="text-xs font-semibold uppercase tracking-widest mb-3" style={{ color: 'var(--text-tertiary)' }}>
-                  Beträge — nur ausgefüllte Felder werden gespeichert
+                  {t('inc.amountsHint')}
                 </p>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                   {/* Netto-Fahrpreis → type umsatz */}
                   <div>
                     <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>
-                      Netto-Fahrpreis (€)
+                      {t('inc.nettoFahrpreisEuro')}
                     </label>
                     <input
                       type="text"
@@ -852,7 +888,7 @@ const IncomeManagement: React.FC<IncomeManagementProps> = ({ drivers }) => {
                   {/* Aktionen → type aktionen */}
                   <div>
                     <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>
-                      Aktionen (€)
+                      {t('inc.aktionenEuro')}
                     </label>
                     <input
                       type="text"
@@ -868,7 +904,7 @@ const IncomeManagement: React.FC<IncomeManagementProps> = ({ drivers }) => {
                   {/* Trinkgeld → type trinkgeld */}
                   <div>
                     <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>
-                      Trinkgeld (€)
+                      {t('inc.trinkgeldEuro')}
                     </label>
                     <input
                       type="text"
@@ -884,7 +920,7 @@ const IncomeManagement: React.FC<IncomeManagementProps> = ({ drivers }) => {
                   {/* Bargeld → type bargeld */}
                   <div>
                     <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>
-                      Bargeld (€)
+                      {t('inc.bargeldEuro')}
                     </label>
                     <input
                       type="text"
@@ -902,7 +938,7 @@ const IncomeManagement: React.FC<IncomeManagementProps> = ({ drivers }) => {
               {/* Anzahl Fahrten */}
               <div className="max-w-xs">
                 <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>
-                  Anzahl Fahrten <span className="text-xs" style={{ color: 'var(--text-tertiary)' }}>(optional)</span>
+                  {t('inc.tripCount')} <span className="text-xs" style={{ color: 'var(--text-tertiary)' }}>{t('inc.optional')}</span>
                 </label>
                 <input
                   type="number"
@@ -912,7 +948,7 @@ const IncomeManagement: React.FC<IncomeManagementProps> = ({ drivers }) => {
                   onChange={(e) => setBatchForm(prev => ({ ...prev, tripCount: e.target.value }))}
                   className="w-full"
                   style={inputStyle}
-                  placeholder="z.B. 12"
+                  placeholder={t('inc.tripCountPlaceholder')}
                 />
               </div>
 
@@ -936,8 +972,8 @@ const IncomeManagement: React.FC<IncomeManagementProps> = ({ drivers }) => {
                     >
                       <DollarSign size={14} />
                       {willCreate > 0
-                        ? `Es werden ${willCreate} ${willCreate === 1 ? 'Eintrag' : 'Einträge'} erstellt.`
-                        : 'Keine Beträge eingegeben.'}
+                        ? tPlural({ one: 'inc.willCreate.one', other: 'inc.willCreate.other' }, willCreate)
+                        : t('inc.noAmounts')}
                     </div>
                     <div className="flex gap-2">
                       <button
@@ -945,7 +981,7 @@ const IncomeManagement: React.FC<IncomeManagementProps> = ({ drivers }) => {
                         className="px-4 py-2 rounded-lg text-sm transition-colors"
                         style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)' }}
                       >
-                        Abbrechen
+                        {t('common.cancel')}
                       </button>
                       <button
                         onClick={handleBatchAdd}
@@ -954,7 +990,7 @@ const IncomeManagement: React.FC<IncomeManagementProps> = ({ drivers }) => {
                         style={{ background: 'var(--success)', opacity: willCreate === 0 ? 0.5 : 1, cursor: willCreate === 0 ? 'not-allowed' : 'pointer' }}
                       >
                         <Save size={15} />
-                        Speichern
+                        {t('common.save')}
                       </button>
                     </div>
                   </div>
@@ -974,20 +1010,22 @@ const IncomeManagement: React.FC<IncomeManagementProps> = ({ drivers }) => {
           <table className="w-full">
             <thead style={{ background: 'var(--bg-subtle)' }}>
               <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>Datum</th>
-                <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>Woche</th>
-                <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>Fahrer</th>
-                <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>Typ</th>
-                <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>Beschreibung</th>
-                <th className="px-6 py-3 text-right text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>Betrag</th>
-                <th className="px-6 py-3 text-right text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>Aktionen</th>
+                <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>{t('common.date')}</th>
+                <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>{t('common.week')}</th>
+                <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>{t('common.driver')}</th>
+                <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>{t('inc.type')}</th>
+                <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>{t('common.description')}</th>
+                <th className="px-6 py-3 text-right text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>{t('common.amount')}</th>
+                {/* Column header = "Actions". Not the `aktionen` income type, which
+                    keeps its German name — see INCOME_TYPE_LABELS. */}
+                <th className="px-6 py-3 text-right text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>{t('inc.tableActions')}</th>
               </tr>
             </thead>
             <tbody>
               {filteredIncomes.length === 0 ? (
                 <tr>
                   <td colSpan={7} className="px-6 py-8 text-center" style={{ color: 'var(--text-secondary)' }}>
-                    Keine Einträge für den ausgewählten Zeitraum
+                    {t('inc.noEntries')}
                   </td>
                 </tr>
               ) : (
@@ -1043,14 +1081,14 @@ const IncomeManagement: React.FC<IncomeManagementProps> = ({ drivers }) => {
                         <td className="px-6 py-4">
                           <select
                             value={formData.type}
-                            onChange={(e) => setFormData({ ...formData, type: e.target.value as 'bargeld' | 'umsatz' | 'trinkgeld' | 'aktionen' })}
+                            onChange={(e) => setFormData({ ...formData, type: e.target.value as IncomeType })}
                             className="w-full px-2 py-1"
                             style={{ ...inputStyle, padding: '0.25rem 0.5rem' }}
                           >
-                            <option value="bargeld">Bargeld</option>
-                            <option value="umsatz">Umsatz</option>
-                            <option value="aktionen">Aktionen</option>
-                            <option value="trinkgeld">Trinkgeld</option>
+                            {/* The option value is the persisted `income.type`. */}
+                            {INCOME_TYPE_ORDER.map(type => (
+                              <option key={type} value={type}>{t(INCOME_TYPE_LABELS[type])}</option>
+                            ))}
                           </select>
                         </td>
                         <td className="px-6 py-4">
@@ -1077,14 +1115,14 @@ const IncomeManagement: React.FC<IncomeManagementProps> = ({ drivers }) => {
                             <button
                               onClick={() => handleUpdate(income.id)}
                               style={{ color: 'var(--success)' }}
-                              title="Speichern"
+                              title={t('common.save')}
                             >
                               <Check size={18} />
                             </button>
                             <button
                               onClick={cancelEdit}
                               style={{ color: 'var(--text-secondary)' }}
-                              title="Abbrechen"
+                              title={t('common.cancel')}
                             >
                               <X size={18} />
                             </button>
@@ -1097,7 +1135,7 @@ const IncomeManagement: React.FC<IncomeManagementProps> = ({ drivers }) => {
                           {format(new Date(income.date), 'dd.MM.yyyy')}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm" style={{ color: 'var(--text-primary)' }}>
-                          {income.week ? `Woche ${income.week}` : '-'}
+                          {income.week ? t('inc.weekLabel', { week: income.week }) : '-'}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm" style={{ color: 'var(--text-primary)' }}>
                           {income.driver_name}
@@ -1112,20 +1150,25 @@ const IncomeManagement: React.FC<IncomeManagementProps> = ({ drivers }) => {
                               { background: 'var(--bg-muted)', color: 'var(--text-secondary)' }
                             }
                           >
-                            {income.type === 'bargeld' ? 'Bargeld' :
-                             income.type === 'umsatz' ? 'Umsatz' :
-                             income.type === 'aktionen' ? 'Aktionen' :
-                             'Trinkgeld'}
+                            {t(INCOME_TYPE_LABELS[income.type] ?? INCOME_TYPE_LABELS.trinkgeld)}
                           </span>
                         </td>
                         <td className="px-6 py-4 text-sm" style={{ color: 'var(--text-primary)' }}>
                           {income.description}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-right font-semibold" style={{ color: 'var(--success)' }}>
-                          {Number(income.amount).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
+                          {Number(income.amount).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
+                          {/* Unreachable: 'nettofahrt' is not in IncomeType
+                              ('bargeld' | 'umsatz' | 'trinkgeld' | 'aktionen'),
+                              so this suffix has never rendered. Left disabled
+                              rather than repointed — trip_count is populated on
+                              all four types in production, so the data does not
+                              say which one was meant, and guessing would switch
+                              on a suffix across 266 rows of a money screen.
+                              TS2367 marks it until someone decides. */}
                           {income.type === 'nettofahrt' && income.trip_count != null && (
                             <span className="ml-2 text-xs font-normal" style={{ color: 'var(--text-tertiary)' }}>
-                              ({income.trip_count} Fahrten)
+                              {t('inc.tripsSuffix', { count: income.trip_count })}
                             </span>
                           )}
                         </td>
@@ -1135,7 +1178,7 @@ const IncomeManagement: React.FC<IncomeManagementProps> = ({ drivers }) => {
                               <button
                                 onClick={() => startEdit(income)}
                                 style={{ color: 'var(--accent)' }}
-                                title="Bearbeiten"
+                                title={t('common.edit')}
                               >
                                 <Edit2 size={18} />
                               </button>
@@ -1144,7 +1187,7 @@ const IncomeManagement: React.FC<IncomeManagementProps> = ({ drivers }) => {
                               <button
                                 onClick={() => confirmDelete(income.id)}
                                 style={{ color: 'var(--danger)' }}
-                                title="Löschen"
+                                title={t('common.delete')}
                               >
                                 <Trash2 size={18} />
                               </button>
@@ -1166,7 +1209,7 @@ const IncomeManagement: React.FC<IncomeManagementProps> = ({ drivers }) => {
         style={{ background: 'var(--accent-subtle)', border: '1px solid var(--accent)' }}
       >
         <p className="text-sm" style={{ color: 'var(--accent-text)' }}>
-          <strong>Hinweis:</strong> Einnahmen werden wöchentlich pro Fahrer erfasst. Die Typen sind: Bargeld (Cash), Umsatz (Revenue) und Trinkgeld (Tips).
+          <strong>{t('inc.noteLabel')}</strong> {t('inc.noteBody')}
         </p>
       </div>
 
@@ -1174,9 +1217,9 @@ const IncomeManagement: React.FC<IncomeManagementProps> = ({ drivers }) => {
         isOpen={deleteConfirm.isOpen}
         onClose={() => setDeleteConfirm({ isOpen: false, id: null })}
         onConfirm={() => deleteConfirm.id && handleDelete(deleteConfirm.id)}
-        title="Einnahme löschen"
-        message="Möchten Sie diese Einnahme wirklich löschen?"
-        type="warning"
+        title={t('inc.deleteTitle')}
+        message={t('inc.deleteMessage')}
+        type="confirm"
       />
     </div>
   );

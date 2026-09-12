@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { X, Save, AlertCircle, ShieldCheck } from 'lucide-react';
 import { Role, RolePermission, PAGE_DEFINITIONS } from '../types/role';
+import { useTranslation } from '../contexts/LanguageContext';
 
 interface RoleModalProps {
   isOpen: boolean;
@@ -23,6 +24,7 @@ const RoleModal: React.FC<RoleModalProps> = ({
   role,
   existingPermissions = [],
 }) => {
+  const { t, tPlural } = useTranslation();
   const [roleName, setRoleName] = useState('');
   const [roleDescription, setRoleDescription] = useState('');
   const [permissionMap, setPermissionMap] = useState<Record<string, PermissionState>>({});
@@ -99,7 +101,7 @@ const RoleModal: React.FC<RoleModalProps> = ({
 
     const trimmedName = roleName.trim();
     if (!trimmedName) {
-      setValidationError('Rollenname ist erforderlich');
+      setValidationError(t('users.roles.nameRequired'));
       return;
     }
 
@@ -115,7 +117,7 @@ const RoleModal: React.FC<RoleModalProps> = ({
       await onSave(roleData, permissionsData);
       onClose();
     } catch (err: any) {
-      setValidationError(err.message || 'Fehler beim Speichern der Rolle');
+      setValidationError(err.message || t('users.roles.error.save'));
     } finally {
       setIsSubmitting(false);
     }
@@ -174,10 +176,12 @@ const RoleModal: React.FC<RoleModalProps> = ({
             </div>
             <div>
               <h2 id="role-modal-title" style={{ fontSize: '1rem', fontWeight: 700, color: '#f1f5f9', margin: 0, lineHeight: 1.3 }}>
-                {role ? 'Rolle bearbeiten' : 'Neue Rolle erstellen'}
+                {role ? t('users.roles.edit') : t('users.roles.createNew')}
               </h2>
               <p style={{ fontSize: '0.75rem', color: '#64748b', margin: 0, marginTop: 2 }}>
-                {enabledCount > 0 ? `${enabledCount} Bereich${enabledCount !== 1 ? 'e' : ''} ausgewählt` : 'Keine Berechtigungen gesetzt'}
+                {enabledCount > 0
+                  ? tPlural({ one: 'users.roles.areasSelected.one', other: 'users.roles.areasSelected.other' }, enabledCount)
+                  : t('users.roles.noPermissionsSet')}
               </p>
             </div>
           </div>
@@ -197,7 +201,7 @@ const RoleModal: React.FC<RoleModalProps> = ({
             }}
             onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.color = '#f1f5f9'; (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.07)'; }}
             onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.color = '#64748b'; (e.currentTarget as HTMLButtonElement).style.background = 'transparent'; }}
-            aria-label="Schließen"
+            aria-label={t('common.close')}
           >
             <X size={20} />
           </button>
@@ -230,7 +234,7 @@ const RoleModal: React.FC<RoleModalProps> = ({
                 borderRadius: '0.5rem',
               }}>
                 <p style={{ fontSize: '0.875rem', color: '#67e8f9', margin: 0 }}>
-                  Dies ist eine Systemrolle. Der Name kann nicht geändert werden.
+                  {t('users.roles.systemRoleNote')}
                 </p>
               </div>
             )}
@@ -242,7 +246,7 @@ const RoleModal: React.FC<RoleModalProps> = ({
                   htmlFor="role-name"
                   style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 600, color: '#94a3b8', marginBottom: '0.5rem', letterSpacing: '0.02em' }}
                 >
-                  Rollenname <span style={{ color: '#ef4444' }}>*</span>
+                  {t('users.roles.nameLabel')} <span style={{ color: '#ef4444' }}>*</span>
                 </label>
                 <input
                   id="role-name"
@@ -250,7 +254,7 @@ const RoleModal: React.FC<RoleModalProps> = ({
                   value={roleName}
                   onChange={(e) => setRoleName(e.target.value)}
                   disabled={role?.is_system || isSubmitting}
-                  placeholder="z.B. Manager, Buchhalter"
+                  placeholder={t('users.roles.namePlaceholder')}
                   autoComplete="off"
                   style={{
                     width: '100%', boxSizing: 'border-box',
@@ -275,14 +279,14 @@ const RoleModal: React.FC<RoleModalProps> = ({
                   htmlFor="role-description"
                   style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 600, color: '#94a3b8', marginBottom: '0.5rem', letterSpacing: '0.02em' }}
                 >
-                  Beschreibung
+                  {t('common.description')}
                 </label>
                 <textarea
                   id="role-description"
                   value={roleDescription}
                   onChange={(e) => setRoleDescription(e.target.value)}
                   disabled={isSubmitting}
-                  placeholder="Beschreiben Sie die Rolle und ihre Verantwortlichkeiten"
+                  placeholder={t('users.roles.descriptionPlaceholder')}
                   rows={2}
                   autoComplete="off"
                   style={{
@@ -308,9 +312,9 @@ const RoleModal: React.FC<RoleModalProps> = ({
             {/* PERMISSIONS */}
             <div>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.875rem' }}>
-                <h3 style={{ fontSize: '0.9375rem', fontWeight: 700, color: '#f1f5f9', margin: 0 }}>Berechtigungen</h3>
+                <h3 style={{ fontSize: '0.9375rem', fontWeight: 700, color: '#f1f5f9', margin: 0 }}>{t('users.roles.permissions')}</h3>
                 <span style={{ fontSize: '0.75rem', color: '#64748b' }}>
-                  Bearbeiten setzt Ansehen voraus
+                  {t('users.roles.editRequiresView')}
                 </span>
               </div>
 
@@ -327,9 +331,9 @@ const RoleModal: React.FC<RoleModalProps> = ({
                   padding: '0.625rem 1rem',
                   borderBottom: '1px solid rgba(255,255,255,0.07)',
                 }}>
-                  <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#64748b', letterSpacing: '0.05em', textTransform: 'uppercase' }}>Bereich</span>
-                  <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#64748b', letterSpacing: '0.05em', textTransform: 'uppercase', textAlign: 'center' }}>Ansehen</span>
-                  <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#64748b', letterSpacing: '0.05em', textTransform: 'uppercase', textAlign: 'center' }}>Bearbeiten</span>
+                  <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#64748b', letterSpacing: '0.05em', textTransform: 'uppercase' }}>{t('users.roles.col.area')}</span>
+                  <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#64748b', letterSpacing: '0.05em', textTransform: 'uppercase', textAlign: 'center' }}>{t('users.roles.col.view')}</span>
+                  <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#64748b', letterSpacing: '0.05em', textTransform: 'uppercase', textAlign: 'center' }}>{t('users.roles.col.edit')}</span>
                 </div>
 
                 {/* Rows */}
@@ -342,8 +346,8 @@ const RoleModal: React.FC<RoleModalProps> = ({
                     <PermissionRow
                       key={page.key}
                       pageKey={page.key}
-                      label={page.label}
-                      description={page.description}
+                      label={t(page.label)}
+                      description={t(page.description)}
                       canView={canView}
                       canEdit={canEdit}
                       isLast={isLast}
@@ -385,7 +389,7 @@ const RoleModal: React.FC<RoleModalProps> = ({
               onMouseEnter={e => { if (!isSubmitting) { (e.currentTarget as HTMLButtonElement).style.borderColor = 'rgba(255,255,255,0.22)'; (e.currentTarget as HTMLButtonElement).style.color = '#f1f5f9'; } }}
               onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.borderColor = 'rgba(255,255,255,0.12)'; (e.currentTarget as HTMLButtonElement).style.color = '#94a3b8'; }}
             >
-              Abbrechen
+              {t('common.cancel')}
             </button>
             <button
               type="submit"
@@ -407,7 +411,7 @@ const RoleModal: React.FC<RoleModalProps> = ({
               onMouseLeave={e => { if (!isSubmitting) (e.currentTarget as HTMLButtonElement).style.background = '#06b6d4'; }}
             >
               <Save size={15} />
-              {isSubmitting ? 'Speichern...' : 'Speichern'}
+              {isSubmitting ? t('common.saving') : t('common.save')}
             </button>
           </div>
         </form>

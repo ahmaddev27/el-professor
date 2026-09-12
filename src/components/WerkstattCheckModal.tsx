@@ -5,6 +5,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
 import { getWeekNumber, getWeeksOfMonth, getWeekNumberForDate } from '../utils/weekCalculations';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
+import { useTranslation } from '../contexts/LanguageContext';
 
 interface Car {
   id: string;
@@ -73,6 +74,7 @@ export default function WerkstattCheckModal({
   const { user } = useAuth();
   const { effectiveCompanyId: companyId } = useSuperAdmin();
   const { showToast } = useToast();
+  const { t } = useTranslation();
 
   useEffect(() => {
     const weeksOfMonth = getWeeksOfMonth(selectedMonth);
@@ -105,7 +107,7 @@ export default function WerkstattCheckModal({
       setCars(data || []);
     } catch (error: any) {
       console.error('Error loading cars:', error);
-      showToast('error', 'Fehler beim Laden der Fahrzeuge: ' + error.message);
+      showToast('error', t('fleet.carsLoadFailed', { error: error.message }));
     } finally {
       setLoadingCars(false);
     }
@@ -121,17 +123,17 @@ export default function WerkstattCheckModal({
     e.preventDefault();
 
     if (!carId) {
-      showToast('error', 'Bitte wählen Sie ein Fahrzeug aus');
+      showToast('error', t('fleet.selectCarRequired'));
       return;
     }
 
     if (!kmStand || kmStand.trim() === '' || parseInt(kmStand) < 0) {
-      showToast('error', 'Bitte geben Sie einen gültigen KM-Stand ein');
+      showToast('error', t('fleet.kmStandInvalid'));
       return;
     }
 
     if (!user) {
-      showToast('error', 'Sie müssen angemeldet sein');
+      showToast('error', t('fleet.mustBeSignedIn'));
       return;
     }
 
@@ -140,7 +142,7 @@ export default function WerkstattCheckModal({
 
       const weekData = weeks.find(w => w.weekNumber === selectedWeek);
       if (!weekData) {
-        showToast('error', 'Ungültige Woche ausgewählt');
+        showToast('error', t('fleet.invalidWeek'));
         return;
       }
 
@@ -167,23 +169,23 @@ export default function WerkstattCheckModal({
           .eq('id', check.id);
 
         if (error) throw error;
-        showToast('success', 'Werkstatt-Check erfolgreich aktualisiert');
+        showToast('success', t('fleet.werkstattCheckUpdated'));
       } else {
         const { error } = await supabase
           .from('werkstatt_checks')
           .insert(checkData);
 
         if (error) throw error;
-        showToast('success', 'Werkstatt-Check erfolgreich erstellt');
+        showToast('success', t('fleet.werkstattCheckCreated'));
       }
 
       onSuccess();
     } catch (error: any) {
       console.error('Error saving werkstatt check:', error);
       if (error.message.includes('duplicate key')) {
-        showToast('error', 'Für dieses Fahrzeug wurde bereits ein Check in dieser Woche erstellt');
+        showToast('error', t('fleet.werkstattCheckDuplicate'));
       } else {
-        showToast('error', 'Fehler beim Speichern: ' + error.message);
+        showToast('error', t('fleet.saveFailed', { error: error.message }));
       }
     } finally {
       setLoading(false);
@@ -199,7 +201,7 @@ export default function WerkstattCheckModal({
               <Wrench style={{ color: 'var(--warning)' }} className="w-6 h-6" />
             </div>
             <h2 style={{ color: 'var(--text-primary)' }} className="text-xl font-semibold">
-              {check ? 'Check bearbeiten' : 'Neuer Werkstatt-Check'}
+              {check ? t('fleet.editCheck') : t('fleet.newWerkstattCheck')}
             </h2>
           </div>
           <button
@@ -215,7 +217,7 @@ export default function WerkstattCheckModal({
         <form onSubmit={handleSubmit} className="p-6 space-y-6">
           <div>
             <label style={{ color: 'var(--text-secondary)' }} className="block text-sm font-medium mb-2">
-              Fahrzeug *
+              {t('fleet.vehicle')} *
             </label>
             <select
               value={carId}
@@ -224,7 +226,7 @@ export default function WerkstattCheckModal({
               required
               disabled={loading || loadingCars || !!check}
             >
-              <option value="">Fahrzeug auswählen</option>
+              <option value="">{t('fleet.selectVehicle')}</option>
               {cars.map((car) => (
                 <option key={car.id} value={car.id}>
                   {car.kennzeichen}
@@ -235,7 +237,7 @@ export default function WerkstattCheckModal({
 
           <div>
             <label style={{ color: 'var(--text-secondary)' }} className="block text-sm font-medium mb-2">
-              Monat und Woche *
+              {t('fleet.monthAndWeek')} *
             </label>
             <div style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)', borderRadius: '0.5rem', padding: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
               <Calendar style={{ color: 'var(--text-secondary)' }} className="w-5 h-5" />
@@ -272,7 +274,7 @@ export default function WerkstattCheckModal({
                 onMouseLeave={e => (e.currentTarget.style.background = 'var(--bg-muted)')}
                 disabled={loading}
               >
-                Heute
+                {t('common.today')}
               </button>
               <div className="flex-1" />
               <select
@@ -292,7 +294,7 @@ export default function WerkstattCheckModal({
 
           <div>
             <label style={{ color: 'var(--text-secondary)' }} className="block text-sm font-medium mb-2">
-              Check-Datum (optional)
+              {t('fleet.checkDateOptional')}
             </label>
             <input
               type="date"
@@ -302,13 +304,13 @@ export default function WerkstattCheckModal({
               disabled={loading}
             />
             <p style={{ color: 'var(--text-tertiary)' }} className="text-xs mt-1">
-              Falls leer, wird der erste Tag der ausgewählten Woche verwendet
+              {t('fleet.checkDateHint')}
             </p>
           </div>
 
           <div>
             <label style={{ color: 'var(--text-secondary)' }} className="block text-sm font-medium mb-2">
-              Status *
+              {t('common.status')} *
             </label>
             <div className="grid grid-cols-3 gap-3">
               <button
@@ -325,7 +327,7 @@ export default function WerkstattCheckModal({
                 }}
                 disabled={loading}
               >
-                Positiv
+                {t('werkstatt.positive')}
               </button>
               <button
                 type="button"
@@ -341,7 +343,7 @@ export default function WerkstattCheckModal({
                 }}
                 disabled={loading}
               >
-                Negativ
+                {t('werkstatt.negative')}
               </button>
               <button
                 type="button"
@@ -357,35 +359,37 @@ export default function WerkstattCheckModal({
                 }}
                 disabled={loading}
               >
-                Repariert
+                {t('werkstatt.repaired')}
               </button>
             </div>
           </div>
 
           <div>
             <label style={{ color: 'var(--text-secondary)' }} className="block text-sm font-medium mb-2">
-              Öl-Status
+              {t('werkstatt.oilStatus')}
             </label>
+            {/* The example values stay German: whatever is typed here is stored
+                verbatim and printed into the German Werkstatt Excel export. */}
             <input
               type="text"
               value={oilStatus}
               onChange={(e) => setOilStatus(e.target.value)}
               style={inputStyle}
-              placeholder="z.B. OK, Niedrig, Gewechselt"
+              placeholder={t('fleet.oilStatusPlaceholder')}
               disabled={loading}
             />
           </div>
 
           <div>
             <label style={{ color: 'var(--text-secondary)' }} className="block text-sm font-medium mb-2">
-              KM-Stand *
+              {t('werkstatt.odometer')} *
             </label>
             <input
               type="number"
               value={kmStand}
               onChange={(e) => setKmStand(e.target.value)}
               style={inputStyle}
-              placeholder="Aktueller Kilometerstand"
+              placeholder={t('fleet.odometerPlaceholder')}
               min="0"
               required
               disabled={loading}
@@ -394,14 +398,14 @@ export default function WerkstattCheckModal({
 
           <div>
             <label style={{ color: 'var(--text-secondary)' }} className="block text-sm font-medium mb-2">
-              Check-Notizen *
+              {t('fleet.checkNotes')} *
             </label>
             <textarea
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
               rows={4}
               style={{ ...inputStyle, resize: 'vertical' }}
-              placeholder="Allgemeine Notizen zum Check..."
+              placeholder={t('fleet.checkNotesPlaceholder')}
               required
               disabled={loading}
             />
@@ -410,14 +414,14 @@ export default function WerkstattCheckModal({
           {status === 'repaired' && (
             <div>
               <label style={{ color: 'var(--text-secondary)' }} className="block text-sm font-medium mb-2">
-                Reparatur-Notizen
+                {t('fleet.repairNotes')}
               </label>
               <textarea
                 value={repairNotes}
                 onChange={(e) => setRepairNotes(e.target.value)}
                 rows={3}
                 style={{ ...inputStyle, resize: 'vertical' }}
-                placeholder="Details zur durchgeführten Reparatur..."
+                placeholder={t('fleet.repairNotesPlaceholder')}
                 disabled={loading}
               />
             </div>
@@ -432,7 +436,7 @@ export default function WerkstattCheckModal({
               onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
               disabled={loading}
             >
-              Abbrechen
+              {t('common.cancel')}
             </button>
             <button
               type="submit"
@@ -442,7 +446,7 @@ export default function WerkstattCheckModal({
               disabled={loading}
             >
               <Save className="w-5 h-5" />
-              {loading ? 'Speichern...' : 'Speichern'}
+              {loading ? t('common.saving') : t('common.save')}
             </button>
           </div>
         </form>

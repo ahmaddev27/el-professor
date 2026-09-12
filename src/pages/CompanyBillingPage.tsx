@@ -8,12 +8,17 @@ import {
 } from 'lucide-react';
 import { format, differenceInDays } from 'date-fns';
 import { de } from 'date-fns/locale';
+import { useTranslation } from '../contexts/LanguageContext';
+import type { TranslationKey } from '../i18n';
 
-const DURATION_LABELS: Record<string, string> = {
-  '1_monat':           '1 Monat',
-  '3_monate':          '3 Monate',
-  '1_jahr':            '1 Jahr',
-  'benutzerdefiniert': 'Benutzerdefiniert',
+// Map keys are the stored `subscription_duration_type` values and must not be
+// translated; the values hold a TranslationKey because t() is a hook value and
+// this map is module-level. Every consumer resolves it.
+const DURATION_LABELS: Record<string, TranslationKey> = {
+  '1_monat':           'sa.billing.duration.oneMonth',
+  '3_monate':          'sa.billing.duration.threeMonths',
+  '1_jahr':            'sa.billing.duration.oneYear',
+  'benutzerdefiniert': 'sa.billing.duration.custom',
 };
 
 interface CompanySubDetail {
@@ -45,6 +50,7 @@ export default function CompanyBillingPage() {
     effectiveSubscriptionStatus,
   } = useAuth();
   const navigate = useNavigate();
+  const { t, tPlural } = useTranslation();
 
   const [companyDetail, setCompanyDetail] = useState<CompanySubDetail | null>(null);
   const [lastCodeLast4, setLastCodeLast4] = useState<string | null>(null);
@@ -114,9 +120,9 @@ export default function CompanyBillingPage() {
     subExpired ? 'rgba(245,158,11,0.10)' :
     'rgba(239,68,68,0.10)';
   const aboStatusLabel =
-    subActive ? 'Aktiv' :
-    subExpired ? 'Abgelaufen' :
-    'Inaktiv';
+    subActive ? t('sa.status.active') :
+    subExpired ? t('sa.billing.statusExpired') :
+    t('sa.status.inactive');
 
   const daysRemaining = subActive && subscriptionExpiresAt
     ? differenceInDays(new Date(subscriptionExpiresAt), new Date())
@@ -125,9 +131,12 @@ export default function CompanyBillingPage() {
   const subStarted = companyDetail?.subscription_started_at
     ? (() => { try { return format(new Date(companyDetail.subscription_started_at), 'dd. MMMM yyyy', { locale: de }); } catch { return null; } })()
     : null;
-  const durLabel = companyDetail?.subscription_duration_type
-    ? (DURATION_LABELS[companyDetail.subscription_duration_type] ?? companyDetail.subscription_duration_type)
-    : null;
+  const durationKey = companyDetail?.subscription_duration_type
+    ? DURATION_LABELS[companyDetail.subscription_duration_type]
+    : undefined;
+  const durLabel = durationKey
+    ? t(durationKey)
+    : companyDetail?.subscription_duration_type ?? null;
 
   const hasHistory = history.length > 0;
 
@@ -141,7 +150,7 @@ export default function CompanyBillingPage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>Abonnement & Rechnungen</h1>
+      <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>{t('sa.billing.title')}</h1>
 
       {/* Abo Status Header Card */}
       <div className="rounded-xl p-5" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
@@ -151,7 +160,7 @@ export default function CompanyBillingPage() {
               <ShieldCheck size={20} style={{ color: aboStatusColor }} />
             </div>
             <div>
-              <p className="text-xs font-semibold uppercase tracking-wider mb-1" style={{ color: 'var(--text-tertiary)' }}>Abo-Status</p>
+              <p className="text-xs font-semibold uppercase tracking-wider mb-1" style={{ color: 'var(--text-tertiary)' }}>{t('sa.billing.statusLabel')}</p>
               <div className="flex items-center gap-2 flex-wrap">
                 <span
                   className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold"
@@ -163,7 +172,7 @@ export default function CompanyBillingPage() {
                 {subActive && subExpiry && (
                   <span className="flex items-center gap-1.5 text-sm" style={{ color: 'var(--text-secondary)' }}>
                     <CalendarDays size={13} style={{ color: 'var(--success)' }} />
-                    Aktiv bis:
+                    {t('sa.billing.activeUntilColon')}
                     <span className="font-semibold" style={{ color: 'var(--text-primary)' }}>{subExpiry}</span>
                     {daysRemaining !== null && (
                       <span
@@ -173,7 +182,7 @@ export default function CompanyBillingPage() {
                           color: daysRemaining <= 7 ? 'var(--warning)' : 'var(--success)',
                         }}
                       >
-                        {daysRemaining} {daysRemaining === 1 ? 'Tag' : 'Tage'}
+                        {tPlural({ one: 'sa.billing.dayCount.one', other: 'sa.billing.dayCount.other' }, daysRemaining)}
                       </span>
                     )}
                   </span>
@@ -181,7 +190,7 @@ export default function CompanyBillingPage() {
                 {subExpired && subExpiry && (
                   <span className="flex items-center gap-1.5 text-sm" style={{ color: 'var(--text-secondary)' }}>
                     <CalendarDays size={13} style={{ color: 'var(--warning)' }} />
-                    Abgelaufen am:
+                    {t('sa.billing.expiredOnColon')}
                     <span className="font-semibold" style={{ color: 'var(--warning)' }}>{subExpiry}</span>
                   </span>
                 )}
@@ -195,7 +204,7 @@ export default function CompanyBillingPage() {
               style={{ background: 'linear-gradient(135deg, #06b6d4, #3b82f6)', color: '#fff' }}
             >
               <KeyRound size={14} />
-              Abo aktivieren
+              {t('sa.billing.activateCta')}
             </button>
           )}
         </div>
@@ -210,32 +219,32 @@ export default function CompanyBillingPage() {
               <CheckCircle size={18} style={{ color: 'var(--success)' }} />
             </div>
             <div>
-              <h2 className="font-semibold" style={{ color: 'var(--text-primary)' }}>Aktives Abonnement</h2>
-              <p className="text-xs mt-0.5" style={{ color: 'var(--text-secondary)' }}>Ihr Abonnement ist aktiv und läuft.</p>
+              <h2 className="font-semibold" style={{ color: 'var(--text-primary)' }}>{t('sa.billing.activeSubTitle')}</h2>
+              <p className="text-xs mt-0.5" style={{ color: 'var(--text-secondary)' }}>{t('sa.billing.activeSubSub')}</p>
             </div>
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 pt-1">
             {subStarted && (
               <div>
-                <p className="text-xs font-semibold uppercase tracking-wider mb-1" style={{ color: 'var(--text-tertiary)' }}>Gestartet am</p>
+                <p className="text-xs font-semibold uppercase tracking-wider mb-1" style={{ color: 'var(--text-tertiary)' }}>{t('sa.billing.startedOn')}</p>
                 <p className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>{subStarted}</p>
               </div>
             )}
             {subExpiry && (
               <div>
-                <p className="text-xs font-semibold uppercase tracking-wider mb-1" style={{ color: 'var(--text-tertiary)' }}>Aktiv bis</p>
+                <p className="text-xs font-semibold uppercase tracking-wider mb-1" style={{ color: 'var(--text-tertiary)' }}>{t('sa.billing.activeUntil')}</p>
                 <p className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>{subExpiry}</p>
               </div>
             )}
             {durLabel && (
               <div>
-                <p className="text-xs font-semibold uppercase tracking-wider mb-1" style={{ color: 'var(--text-tertiary)' }}>Laufzeit</p>
+                <p className="text-xs font-semibold uppercase tracking-wider mb-1" style={{ color: 'var(--text-tertiary)' }}>{t('sa.billing.term')}</p>
                 <p className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>{durLabel}</p>
               </div>
             )}
             {lastCodeLast4 && (
               <div>
-                <p className="text-xs font-semibold uppercase tracking-wider mb-1" style={{ color: 'var(--text-tertiary)' }}>Aktivierungscode</p>
+                <p className="text-xs font-semibold uppercase tracking-wider mb-1" style={{ color: 'var(--text-tertiary)' }}>{t('sa.billing.activationCode')}</p>
                 <p className="text-sm font-mono font-medium tracking-widest" style={{ color: 'var(--text-primary)' }}>
                   ••{lastCodeLast4}
                 </p>
@@ -243,12 +252,12 @@ export default function CompanyBillingPage() {
             )}
             {daysRemaining !== null && (
               <div>
-                <p className="text-xs font-semibold uppercase tracking-wider mb-1" style={{ color: 'var(--text-tertiary)' }}>Restlaufzeit</p>
+                <p className="text-xs font-semibold uppercase tracking-wider mb-1" style={{ color: 'var(--text-tertiary)' }}>{t('sa.billing.remainingTerm')}</p>
                 <p
                   className="text-sm font-semibold"
                   style={{ color: daysRemaining <= 7 ? 'var(--warning)' : 'var(--success)' }}
                 >
-                  {daysRemaining} {daysRemaining === 1 ? 'Tag' : 'Tage'}
+                  {tPlural({ one: 'sa.billing.dayCount.one', other: 'sa.billing.dayCount.other' }, daysRemaining)}
                 </p>
               </div>
             )}
@@ -263,9 +272,9 @@ export default function CompanyBillingPage() {
             style={{ background: 'rgba(245,158,11,0.10)', border: '1px solid rgba(245,158,11,0.25)' }}>
             <AlertCircle size={26} style={{ color: 'var(--warning)' }} />
           </div>
-          <p className="font-semibold" style={{ color: 'var(--text-primary)' }}>Abonnement abgelaufen</p>
+          <p className="font-semibold" style={{ color: 'var(--text-primary)' }}>{t('sa.billing.expiredTitle')}</p>
           <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>
-            Ihr Abonnement ist abgelaufen. Bitte geben Sie einen neuen Aktivierungscode ein.
+            {t('sa.billing.expiredSub')}
           </p>
           <button
             onClick={() => navigate('/abo-aktivieren')}
@@ -273,7 +282,7 @@ export default function CompanyBillingPage() {
             style={{ background: 'linear-gradient(135deg, #06b6d4, #3b82f6)', color: '#fff' }}
           >
             <KeyRound size={14} />
-            Abo aktivieren
+            {t('sa.billing.activateCta')}
           </button>
         </div>
       )}
@@ -285,9 +294,9 @@ export default function CompanyBillingPage() {
             style={{ background: 'rgba(239,68,68,0.10)', border: '1px solid rgba(239,68,68,0.2)' }}>
             <XCircle size={26} style={{ color: 'var(--danger)' }} />
           </div>
-          <p className="font-semibold" style={{ color: 'var(--text-primary)' }}>Kein aktives Abonnement</p>
+          <p className="font-semibold" style={{ color: 'var(--text-primary)' }}>{t('sa.billing.noneTitle')}</p>
           <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>
-            Bitte geben Sie einen Aktivierungscode ein, um Ihr Abonnement freizuschalten.
+            {t('sa.billing.noneSub')}
           </p>
           <button
             onClick={() => navigate('/abo-aktivieren')}
@@ -295,7 +304,7 @@ export default function CompanyBillingPage() {
             style={{ background: 'linear-gradient(135deg, #06b6d4, #3b82f6)', color: '#fff' }}
           >
             <KeyRound size={14} />
-            Abo aktivieren
+            {t('sa.billing.activateCta')}
           </button>
         </div>
       )}
@@ -305,9 +314,9 @@ export default function CompanyBillingPage() {
         <div className="rounded-xl p-4 flex items-start gap-3" style={{ background: 'rgba(239,68,68,0.06)', border: '1px solid rgba(239,68,68,0.2)' }}>
           <XCircle size={16} style={{ color: 'var(--danger)', flexShrink: 0, marginTop: 1 }} />
           <div>
-            <p className="text-sm font-semibold" style={{ color: 'var(--danger)' }}>Kein aktives Abonnement</p>
+            <p className="text-sm font-semibold" style={{ color: 'var(--danger)' }}>{t('sa.billing.noneTitle')}</p>
             <p className="text-xs mt-0.5" style={{ color: 'var(--text-secondary)' }}>
-              Das Abonnement ist aktuell nicht aktiv. Frühere Aktivierungen sind unten sichtbar.
+              {t('sa.billing.inactiveWithHistory')}
             </p>
           </div>
         </div>
@@ -317,12 +326,12 @@ export default function CompanyBillingPage() {
       <div>
         <div className="flex items-center gap-2 mb-3">
           <History size={16} style={{ color: 'var(--text-tertiary)' }} />
-          <h2 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>Zahlungs- & Aktivierungshistorie</h2>
+          <h2 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>{t('sa.billing.historyTitle')}</h2>
         </div>
         {history.length === 0 ? (
           <div className="rounded-xl p-8 text-center" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
             <Clock size={32} className="mx-auto mb-2 opacity-30" style={{ color: 'var(--text-tertiary)' }} />
-            <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>Noch keine Aktivierungen vorhanden</p>
+            <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>{t('sa.billing.historyEmpty')}</p>
           </div>
         ) : (
           <div className="rounded-xl overflow-hidden" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
@@ -330,13 +339,17 @@ export default function CompanyBillingPage() {
               <table className="w-full text-sm">
                 <thead>
                   <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                    {['Datum', 'Typ', 'Dauer', 'Aktiv von', 'Aktiv bis', 'Code', 'Status'].map((h, i) => (
+                    {([
+                      'common.date', 'sa.billing.col.type', 'sa.billing.col.duration',
+                      'sa.billing.col.activeFrom', 'sa.billing.col.activeTo',
+                      'sa.billing.col.code', 'common.status',
+                    ] as const).map((h, i) => (
                       <th
                         key={i}
                         className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider"
                         style={{ color: 'var(--text-tertiary)' }}
                       >
-                        {h}
+                        {t(h)}
                       </th>
                     ))}
                   </tr>
@@ -352,21 +365,21 @@ export default function CompanyBillingPage() {
                       rowStatus = (
                         <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold"
                           style={{ background: 'rgba(34,197,94,0.12)', color: 'var(--success)' }}>
-                          <CheckCircle size={11} />Aktuell aktiv
+                          <CheckCircle size={11} />{t('sa.billing.rowCurrentlyActive')}
                         </span>
                       );
                     } else if (isPastPeriod) {
                       rowStatus = (
                         <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold"
                           style={{ background: 'rgba(245,158,11,0.10)', color: 'var(--warning)' }}>
-                          <Clock size={11} />Abgelaufen
+                          <Clock size={11} />{t('sa.billing.statusExpired')}
                         </span>
                       );
                     } else {
                       rowStatus = (
                         <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold"
                           style={{ background: 'rgba(6,182,212,0.10)', color: 'var(--accent)' }}>
-                          <CheckCircle size={11} />Verwendet
+                          <CheckCircle size={11} />{t('sa.billing.rowUsed')}
                         </span>
                       );
                     }
@@ -385,10 +398,12 @@ export default function CompanyBillingPage() {
                             : '-'}
                         </td>
                         <td className="px-4 py-3 whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>
-                          Barzahlung / Aktivierungscode
+                          {t('sa.billing.rowTypeCash')}
                         </td>
                         <td className="px-4 py-3 whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>
-                          {row.duration_type ? (DURATION_LABELS[row.duration_type] ?? row.duration_type) : '-'}
+                          {row.duration_type
+                            ? (DURATION_LABELS[row.duration_type] ? t(DURATION_LABELS[row.duration_type]) : row.duration_type)
+                            : '-'}
                         </td>
                         <td className="px-4 py-3 whitespace-nowrap text-xs" style={{ color: 'var(--text-secondary)' }}>
                           {fmtDate(row.applied_subscription_started_at)}

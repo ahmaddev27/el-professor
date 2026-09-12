@@ -102,7 +102,16 @@ if (errors.length) {
 
 const keys = [...merged.keys()].sort();
 const pad = Math.min(Math.max(...keys.map((k) => k.length + 3), 0), 40);
-const quote = (s) => `'${s.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`;
+// A real newline inside a value ends the single-quoted literal and takes the
+// rest of the file with it — a two-line confirmation message produced 141 parse
+// errors. Backslash first, or the escapes this adds get escaped again.
+const quote = (s) =>
+  `'${s
+    .replace(/\\/g, '\\\\')
+    .replace(/'/g, "\\'")
+    .replace(/\r/g, '\\r')
+    .replace(/\n/g, '\\n')
+    .replace(/\t/g, '\\t')}'`;
 const block = (lang) =>
   keys.map((k) => `  ${(quote(k) + ':').padEnd(pad)} ${quote(merged.get(k)[lang])},`).join('\n');
 
@@ -112,10 +121,18 @@ console.log(`${sameInBoth.length} identical in both languages (domain vocabulary
 
 if (DRY) { console.log('\n--dry: nothing written'); process.exit(0); }
 
+// de.ts closes with `} as const;` because it defines the key type; en.ts is a
+// PartialDictionary and closes with a plain `};`. Locating the closing brace
+// rather than one spelling of it keeps the merge working on both.
+const closingBrace = (src) => {
+  const at = Math.max(src.lastIndexOf('\n} as const;'), src.lastIndexOf('\n};'));
+  return at < 0 ? -1 : at + 1;
+};
+
 for (const [file, lang] of [[DE, 'de'], [EN, 'en']]) {
   const src = readFileSync(file, 'utf8');
-  const anchor = src.lastIndexOf('} as const;');
-  if (anchor < 0) { console.error(`${file}: no closing "} as const;"`); process.exit(1); }
+  const anchor = closingBrace(src);
+  if (anchor < 0) { console.error(`${file}: no closing brace for the dictionary`); process.exit(1); }
   const insert = `\n  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────\n${block(lang)}\n`;
   writeFileSync(file, src.slice(0, anchor) + insert + src.slice(anchor), 'utf8');
   console.log(`  ${path.relative(ROOT, file)} += ${keys.length}`);

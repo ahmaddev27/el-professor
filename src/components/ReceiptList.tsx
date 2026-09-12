@@ -1,8 +1,10 @@
 import React, { useState, useMemo } from 'react';
 import { CreditCard as Edit, Trash2, Search, Import as SortAsc, Dessert as SortDesc, Receipt as ReceiptIcon, User, Filter, X, Calendar, FileDown } from 'lucide-react';
-import { Receipt, Driver, PAYMENT_METHODS } from '../types/receipt';
+import { Receipt, Driver } from '../types/receipt';
 import { format, getMonth, getYear } from 'date-fns';
 import { getBusinessMonthRange, getBusinessWeeksForMonth, WeekOfMonth } from '../utils/weekCalculations';
+import { useTranslation } from '../contexts/LanguageContext';
+import type { TranslationKey } from '../i18n';
 
 interface ReceiptListProps {
   receipts: Receipt[];
@@ -27,6 +29,15 @@ export interface PdfFilterInfo {
 type SortField = 'receiptNumber' | 'date' | 'description' | 'driverName' | 'income' | 'expense' | 'balance';
 type SortDirection = 'asc' | 'desc';
 
+// Values hold TranslationKeys: this map is module-level and t() is a hook value,
+// so the table header resolves it at the call site.
+const SORTABLE_COLUMN_LABELS: Record<'receiptNumber' | 'date' | 'driverName' | 'description', TranslationKey> = {
+  receiptNumber: 'rec.receiptNumber',
+  date:          'common.date',
+  driverName:    'common.driver',
+  description:   'rec.bookingText',
+};
+
 interface Filters {
   selectedMonth: string;    // 'yyyy-MM'
   selectedWeek: number | 0; // 0 = all weeks
@@ -46,9 +57,11 @@ const ReceiptList: React.FC<ReceiptListProps> = ({
   canDelete,
   userDisplayNames = new Map(),
 }) => {
+  const { t, tPlural } = useTranslation();
+
   const resolveCreator = (createdBy: string | undefined): string => {
-    if (!createdBy) return 'Unbekannter Benutzer';
-    return userDisplayNames.get(createdBy) ?? 'Unbekannter Benutzer';
+    if (!createdBy) return t('rec.unknownUser');
+    return userDisplayNames.get(createdBy) ?? t('rec.unknownUser');
   };
   const now = new Date();
   const currentMonthStr = format(now, 'yyyy-MM');
@@ -214,7 +227,7 @@ const ReceiptList: React.FC<ReceiptListProps> = ({
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2" style={{ color: 'var(--text-tertiary)' }} size={20} />
             <input
               type="text"
-              placeholder="Suchen nach Belegnummer, Beschreibung, Fahrer oder Datum..."
+              placeholder={t('rec.searchPlaceholder')}
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="w-full pl-10 pr-4"
@@ -243,10 +256,14 @@ const ReceiptList: React.FC<ReceiptListProps> = ({
               onChange={(e) => handleWeekChange(Number(e.target.value))}
               style={{ ...inputStyle, width: '100%', cursor: 'pointer' }}
             >
-              <option value={0}>Alle Wochen</option>
+              <option value={0}>{t('rec.allWeeks')}</option>
               {weeksForMonth.map(w => (
                 <option key={w.weekNumber} value={w.weekNumber}>
-                  Woche {w.weekNumber} — {format(w.firstDay, 'dd.MM.yyyy')} – {format(w.lastDay, 'dd.MM.yyyy')}
+                  {t('rec.weekOption', {
+                    week: w.weekNumber,
+                    from: format(w.firstDay, 'dd.MM.yyyy'),
+                    to: format(w.lastDay, 'dd.MM.yyyy'),
+                  })}
                 </option>
               ))}
             </select>
@@ -263,7 +280,7 @@ const ReceiptList: React.FC<ReceiptListProps> = ({
             }
           >
             <Filter size={16} />
-            <span>Filter</span>
+            <span>{t('rec.filter')}</span>
             {hasActiveFilters && (
               <span className="text-xs rounded-full px-2 py-0.5" style={{ background: 'var(--accent)', color: 'white' }}>
                 {activeFilterCount}
@@ -285,10 +302,10 @@ const ReceiptList: React.FC<ReceiptListProps> = ({
               fontSize: '0.875rem',
               fontWeight: '500'
             }}
-            title={sortedReceipts.length === 0 ? 'Keine Belege für die aktuellen Filter gefunden.' : 'Zusammenfassung als PDF herunterladen'}
+            title={sortedReceipts.length === 0 ? t('rec.noneForFilters') : t('rec.downloadSummaryPdf')}
           >
             <FileDown size={16} />
-            <span className="hidden sm:inline">Zusammenfassung PDF</span>
+            <span className="hidden sm:inline">{t('rec.summaryPdf')}</span>
           </button>
         </div>
 
@@ -297,7 +314,11 @@ const ReceiptList: React.FC<ReceiptListProps> = ({
           <div className="flex items-center gap-2 text-sm" style={{ color: 'var(--text-secondary)' }}>
             <Calendar size={14} />
             <span>
-              Woche {activeWeek.weekNumber}: {format(activeWeek.firstDay, 'dd.MM.yyyy')} – {format(activeWeek.lastDay, 'dd.MM.yyyy')}
+              {t('rec.activeWeek', {
+                week: activeWeek.weekNumber,
+                from: format(activeWeek.firstDay, 'dd.MM.yyyy'),
+                to: format(activeWeek.lastDay, 'dd.MM.yyyy'),
+              })}
             </span>
           </div>
         )}
@@ -307,21 +328,21 @@ const ReceiptList: React.FC<ReceiptListProps> = ({
           <div className="p-4 rounded-lg" style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)' }}>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div>
-                <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Fahrer</label>
+                <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>{t('common.driver')}</label>
                 <select
                   value={filters.driver}
                   onChange={(e) => setFilters({ ...filters, driver: e.target.value })}
                   className="w-full"
                   style={inputStyle}
                 >
-                  <option value="">Alle Fahrer</option>
+                  <option value="">{t('common.allDrivers')}</option>
                   {drivers.map((d) => (
                     <option key={d.id} value={d.name}>{d.name}</option>
                   ))}
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Zeitraum von (manuell)</label>
+                <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>{t('rec.customFrom')}</label>
                 <input
                   type="date"
                   value={filters.customDateFrom}
@@ -331,7 +352,7 @@ const ReceiptList: React.FC<ReceiptListProps> = ({
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Zeitraum bis (manuell)</label>
+                <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>{t('rec.customTo')}</label>
                 <input
                   type="date"
                   value={filters.customDateTo}
@@ -348,7 +369,7 @@ const ReceiptList: React.FC<ReceiptListProps> = ({
                 style={{ color: 'var(--text-secondary)' }}
               >
                 <X size={14} />
-                <span>Alle Filter zurücksetzen</span>
+                <span>{t('rec.resetAllFilters')}</span>
               </button>
             </div>
           </div>
@@ -359,20 +380,20 @@ const ReceiptList: React.FC<ReceiptListProps> = ({
       <div className="rounded-lg p-4" style={{ background: 'var(--danger-subtle)', border: '1px solid var(--danger)' }}>
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div>
-            <p className="text-sm font-medium" style={{ color: 'var(--danger)' }}>Gesamtausgaben</p>
+            <p className="text-sm font-medium" style={{ color: 'var(--danger)' }}>{t('rec.totalExpenses')}</p>
             <p className="text-xs mt-0.5" style={{ color: 'var(--danger)' }}>
-              {sortedReceipts.length} {sortedReceipts.length === 1 ? 'Beleg' : 'Belege'}
+              {tPlural({ one: 'rec.belegCount.one', other: 'rec.belegCount.other' }, sortedReceipts.length)}
             </p>
           </div>
           <div className="flex flex-col sm:flex-row gap-4 sm:items-end text-right">
             <div>
-              <p className="text-xs font-medium mb-0.5" style={{ color: 'var(--danger)', opacity: 0.75 }}>Summe Ausgaben €</p>
+              <p className="text-xs font-medium mb-0.5" style={{ color: 'var(--danger)', opacity: 0.75 }}>{t('rec.sumExpensesEuro')}</p>
               <p className="text-2xl font-bold" style={{ color: 'var(--danger)' }}>
                 {formatDE(totalExpenses)} €
               </p>
             </div>
             <div>
-              <p className="text-xs font-medium mb-0.5" style={{ color: 'var(--danger)', opacity: 0.75 }}>Summe MwSt 19%</p>
+              <p className="text-xs font-medium mb-0.5" style={{ color: 'var(--danger)', opacity: 0.75 }}>{t('rec.sumVat19')}</p>
               <p className="text-xl font-semibold" style={{ color: 'var(--danger)' }}>
                 {formatDE(totalVat19)} €
               </p>
@@ -386,8 +407,7 @@ const ReceiptList: React.FC<ReceiptListProps> = ({
         <table className="w-full">
           <thead style={{ background: 'var(--bg-subtle)' }}>
             <tr>
-              {(['receiptNumber', 'date', 'driverName', 'description'] as SortField[]).map((field, i) => {
-                const labels: Record<string, string> = { receiptNumber: 'Belegnummer', date: 'Datum', driverName: 'Fahrer', description: 'Buchungstext' };
+              {(Object.keys(SORTABLE_COLUMN_LABELS) as (keyof typeof SORTABLE_COLUMN_LABELS)[]).map((field) => {
                 return (
                   <th
                     key={field}
@@ -398,14 +418,14 @@ const ReceiptList: React.FC<ReceiptListProps> = ({
                     onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
                   >
                     <div className="flex items-center space-x-1">
-                      <span>{labels[field]}</span>
+                      <span>{t(SORTABLE_COLUMN_LABELS[field])}</span>
                       <SortIcon field={field} />
                     </div>
                   </th>
                 );
               })}
-              <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>Stadt</th>
-              <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>Zahlungsart</th>
+              <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>{t('rec.city')}</th>
+              <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>{t('rec.paymentType')}</th>
               <th
                 className="px-6 py-3 text-right text-xs font-medium uppercase tracking-wider cursor-pointer"
                 style={{ color: 'var(--text-tertiary)' }}
@@ -414,13 +434,13 @@ const ReceiptList: React.FC<ReceiptListProps> = ({
                 onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
               >
                 <div className="flex items-center justify-end space-x-1">
-                  <span>Ausgaben €</span>
+                  <span>{t('rec.expensesEuro')}</span>
                   <SortIcon field="expense" />
                 </div>
               </th>
-              <th className="px-6 py-3 text-right text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>MwSt 19%</th>
-              <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>Erstellt von</th>
-              <th className="px-6 py-3 text-right text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>Aktionen</th>
+              <th className="px-6 py-3 text-right text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>{t('rec.vat19')}</th>
+              <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>{t('rec.createdBy')}</th>
+              <th className="px-6 py-3 text-right text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>{t('rec.tableActions')}</th>
             </tr>
           </thead>
           <tbody style={{ background: 'var(--bg-surface)' }}>
@@ -459,7 +479,10 @@ const ReceiptList: React.FC<ReceiptListProps> = ({
                       ? { background: 'var(--accent-subtle)', color: 'var(--accent-text)' }
                       : { background: 'var(--success-subtle)', color: 'var(--success)' }}
                   >
-                    {receipt.paymentMethod ? PAYMENT_METHODS[receipt.paymentMethod] : PAYMENT_METHODS.bar}
+                    {/* PAYMENT_METHODS is a shared constant in types/receipt.ts that
+                        utils/receiptPdf.ts also reads, so it is not translated in
+                        place; the on-screen badge is resolved here instead. */}
+                    {t(receipt.paymentMethod === 'uberweisung' ? 'rec.payment.uberweisung' : 'rec.payment.bar')}
                   </span>
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-right">
@@ -486,7 +509,7 @@ const ReceiptList: React.FC<ReceiptListProps> = ({
                       onClick={() => canEdit(receipt) && onEdit(receipt)}
                       disabled={!canEdit(receipt)}
                       style={{ color: canEdit(receipt) ? 'var(--accent)' : 'var(--text-tertiary)', cursor: canEdit(receipt) ? 'pointer' : 'not-allowed', opacity: canEdit(receipt) ? 1 : 0.5 }}
-                      title={canEdit(receipt) ? 'Bearbeiten' : 'Nur für Admin oder Ersteller'}
+                      title={canEdit(receipt) ? t('common.edit') : t('rec.onlyAdminOrCreator')}
                     >
                       <Edit size={16} />
                     </button>
@@ -494,7 +517,7 @@ const ReceiptList: React.FC<ReceiptListProps> = ({
                       onClick={() => canDelete(receipt) && onDelete(receipt.id)}
                       disabled={!canDelete(receipt)}
                       style={{ color: canDelete(receipt) ? 'var(--danger)' : 'var(--text-tertiary)', cursor: canDelete(receipt) ? 'pointer' : 'not-allowed', opacity: canDelete(receipt) ? 1 : 0.5 }}
-                      title={canDelete(receipt) ? 'Löschen' : 'Nur für Admin oder Ersteller'}
+                      title={canDelete(receipt) ? t('common.delete') : t('rec.onlyAdminOrCreator')}
                     >
                       <Trash2 size={16} />
                     </button>
@@ -521,7 +544,7 @@ const ReceiptList: React.FC<ReceiptListProps> = ({
                   <User size={14} />
                   <span>{receipt.driverName}</span>
                 </div>
-                {receipt.city && <div className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>Stadt: {receipt.city}</div>}
+                {receipt.city && <div className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>{t('rec.city')}: {receipt.city}</div>}
               </div>
               <div className="flex space-x-2">
                 <button
@@ -544,23 +567,23 @@ const ReceiptList: React.FC<ReceiptListProps> = ({
             </div>
             <div className="grid grid-cols-2 gap-4 text-sm">
               <div>
-                <span style={{ color: 'var(--text-tertiary)' }}>Datum:</span>
+                <span style={{ color: 'var(--text-tertiary)' }}>{t('common.date')}:</span>
                 <div className="font-medium" style={{ color: 'var(--text-primary)' }}>{format(new Date(receipt.date), 'dd.MM.yyyy')}</div>
               </div>
               {receipt.expense > 0 && (
                 <div>
-                  <span style={{ color: 'var(--text-tertiary)' }}>Ausgaben:</span>
+                  <span style={{ color: 'var(--text-tertiary)' }}>{t('common.expenses')}:</span>
                   <div className="font-medium" style={{ color: 'var(--danger)' }}>{formatDE(receipt.expense)} €</div>
                 </div>
               )}
               {receipt.expense > 0 && (
                 <div>
-                  <span style={{ color: 'var(--text-tertiary)' }}>MwSt 19%:</span>
+                  <span style={{ color: 'var(--text-tertiary)' }}>{t('rec.vat19')}:</span>
                   <div className="font-medium" style={{ color: 'var(--text-secondary)' }}>{formatDE(calculateVat19FromGross(receipt.expense))} €</div>
                 </div>
               )}
               <div>
-                <span style={{ color: 'var(--text-tertiary)' }}>Zahlungsart:</span>
+                <span style={{ color: 'var(--text-tertiary)' }}>{t('rec.paymentType')}:</span>
                 <div className="font-medium">
                   <span
                     className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium"
@@ -568,12 +591,12 @@ const ReceiptList: React.FC<ReceiptListProps> = ({
                       ? { background: 'var(--accent-subtle)', color: 'var(--accent-text)' }
                       : { background: 'var(--success-subtle)', color: 'var(--success)' }}
                   >
-                    {receipt.paymentMethod ? PAYMENT_METHODS[receipt.paymentMethod] : PAYMENT_METHODS.bar}
+                    {t(receipt.paymentMethod === 'uberweisung' ? 'rec.payment.uberweisung' : 'rec.payment.bar')}
                   </span>
                 </div>
               </div>
               <div>
-                <span style={{ color: 'var(--text-tertiary)' }}>Erstellt von:</span>
+                <span style={{ color: 'var(--text-tertiary)' }}>{t('rec.createdBy')}:</span>
                 <div className="font-medium" style={{ color: 'var(--text-secondary)' }} title={receipt.createdBy || ''}>
                   {resolveCreator(receipt.createdBy)}
                 </div>
@@ -586,11 +609,11 @@ const ReceiptList: React.FC<ReceiptListProps> = ({
       {sortedReceipts.length === 0 && (
         <div className="text-center py-12 rounded-lg" style={{ background: 'var(--bg-surface)', boxShadow: 'var(--shadow-sm)' }}>
           <p className="text-lg" style={{ color: 'var(--text-secondary)' }}>
-            {receipts.length === 0 ? 'Keine Belege vorhanden' : 'Keine Belege für die aktuellen Filter gefunden.'}
+            {receipts.length === 0 ? t('rec.noneYet') : t('rec.noneForFilters')}
           </p>
           {receipts.length > 0 && (
             <button onClick={clearFilters} className="mt-2 text-sm" style={{ color: 'var(--accent)' }}>
-              Filter zurücksetzen
+              {t('rec.resetFilters')}
             </button>
           )}
         </div>

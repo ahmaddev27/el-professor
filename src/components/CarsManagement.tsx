@@ -9,44 +9,48 @@ import type { CarWithDrivers, TuevStatus } from '../types/car';
 import { getTuevStatus } from '../types/car';
 import { exportTableToExcel } from '../utils/excelExport';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
+import { useTranslation } from '../contexts/LanguageContext';
+import type { TranslationKey } from '../i18n';
 
 type TuevFilter = 'all' | TuevStatus;
 
+// `label` and `shortLabel` hold TranslationKeys: this map is module-level and
+// t() is a hook value. Every consumer resolves them.
 const TUEV_CONFIG: Record<TuevStatus, {
-  label: string;
-  shortLabel: string;
+  label: TranslationKey;
+  shortLabel: TranslationKey;
   bg: string;
   border: string;
   color: string;
   icon: React.ReactNode;
 }> = {
   gueltig: {
-    label: 'Gültig',
-    shortLabel: 'Gültig',
+    label: 'fleet.tuevStatus.valid',
+    shortLabel: 'fleet.tuevStatus.valid',
     bg: 'var(--success-subtle)',
     border: 'rgba(5,150,105,0.3)',
     color: 'var(--success)',
     icon: <ShieldCheck className="w-3.5 h-3.5" />,
   },
   bald_ablaufend: {
-    label: 'Läuft bald ab',
-    shortLabel: 'Bald ablaufend',
+    label: 'fleet.tuevStatus.expiringSoon',
+    shortLabel: 'fleet.tuevStatus.expiringSoonShort',
     bg: 'var(--warning-subtle)',
     border: 'rgba(217,119,6,0.3)',
     color: 'var(--warning)',
     icon: <ShieldAlert className="w-3.5 h-3.5" />,
   },
   abgelaufen: {
-    label: 'Abgelaufen',
-    shortLabel: 'Abgelaufen',
+    label: 'fleet.tuevStatus.expired',
+    shortLabel: 'fleet.tuevStatus.expired',
     bg: 'var(--danger-subtle)',
     border: 'rgba(220,38,38,0.3)',
     color: 'var(--danger)',
     icon: <ShieldX className="w-3.5 h-3.5" />,
   },
   unbekannt: {
-    label: 'Nicht hinterlegt',
-    shortLabel: 'Unbekannt',
+    label: 'fleet.tuevStatus.unknown',
+    shortLabel: 'common.unknown',
     bg: 'var(--bg-subtle)',
     border: 'var(--border)',
     color: 'var(--text-tertiary)',
@@ -69,6 +73,7 @@ export default function CarsManagement() {
   const { effectiveCompanyId: companyId } = useSuperAdmin();
   const { showToast } = useToast();
   const { planState } = usePlan();
+  const { t, tPlural } = useTranslation();
 
   useEffect(() => {
     loadCars();
@@ -117,7 +122,7 @@ export default function CarsManagement() {
       setCars(carsWithDrivers);
     } catch (error: any) {
       console.error('Error loading cars:', error);
-      showToast('error', 'Fehler beim Laden der Fahrzeuge: ' + error.message);
+      showToast('error', t('fleet.carsLoadFailed', { error: error.message }));
     } finally {
       setLoading(false);
     }
@@ -129,7 +134,7 @@ export default function CarsManagement() {
 
   const handleAddCar = () => {
     if (carLimitReached) {
-      showToast('error', `Fahrzeuglimit erreicht. Ihr Abonnement erlaubt maximal ${carLimit} aktive Fahrzeuge.`);
+      showToast('error', t('fleet.carLimitReachedToast', { limit: carLimit }));
       return;
     }
     setEditingCar(null);
@@ -148,11 +153,11 @@ export default function CarsManagement() {
     try {
       const { error } = await supabase.from('cars').delete().eq('id', deleteConfirmation.carId);
       if (error) throw error;
-      showToast('success', 'Fahrzeug erfolgreich gelöscht');
+      showToast('success', t('fleet.carDeleted'));
       loadCars();
     } catch (error: any) {
       console.error('Error deleting car:', error);
-      showToast('error', 'Fehler beim Löschen des Fahrzeugs: ' + error.message);
+      showToast('error', t('fleet.carDeleteFailed', { error: error.message }));
     } finally {
       setDeleteConfirmation({ isOpen: false, carId: null, kennzeichen: '' });
     }
@@ -174,45 +179,47 @@ export default function CarsManagement() {
   const handleExport = () => {
     exportTableToExcel({
       filename: `fahrzeuge_${new Date().toISOString().split('T')[0]}`,
-      sheetTitle: 'Fahrzeugliste',
-      moduleName: 'Fahrzeuge',
-      filterSummary: tuevFilter !== 'all' ? [`TÜV-Status: ${TUEV_CONFIG[tuevFilter as TuevStatus].label}`] : [],
+      sheetTitle: t('fleet.carsSheetTitle'),
+      moduleName: t('nav.cars'),
+      filterSummary: tuevFilter !== 'all'
+        ? [t('fleet.tuevStatusFilter', { status: t(TUEV_CONFIG[tuevFilter as TuevStatus].label) })]
+        : [],
       columns: [
-        { key: 'kennzeichen',      label: 'Kennzeichen',        width: 18 },
-        { key: 'drivers',          label: 'Zugeordnete Fahrer', width: 36, format: v => (v as { name: string }[] ?? []).map(d => d.name).join(', ') || '—' },
-        { key: 'tuev_gueltig_bis', label: 'TÜV gültig bis',    width: 16, format: v => v ? new Date(v as string).toLocaleDateString('de-DE') : '—' },
-        { key: 'tuev_status',      label: 'TÜV-Status',        width: 18 },
-        { key: 'letzte_hu',        label: 'Letzte HU',         width: 16, format: v => v ? new Date(v as string).toLocaleDateString('de-DE') : '—' },
-        { key: 'created_at',       label: 'Erstellt am',       width: 16, format: v => v ? new Date(v as string).toLocaleDateString('de-DE') : '' },
+        { key: 'kennzeichen',      label: t('werkstatt.plate'),         width: 18 },
+        { key: 'drivers',          label: t('fleet.assignedDrivers'),   width: 36, format: v => (v as { name: string }[] ?? []).map(d => d.name).join(', ') || '—' },
+        { key: 'tuev_gueltig_bis', label: t('fleet.tuevValidUntil'),    width: 16, format: v => v ? new Date(v as string).toLocaleDateString('de-DE') : '—' },
+        { key: 'tuev_status',      label: t('fleet.tuevStatusColumn'),  width: 18 },
+        { key: 'letzte_hu',        label: t('fleet.lastHu'),            width: 16, format: v => v ? new Date(v as string).toLocaleDateString('de-DE') : '—' },
+        { key: 'created_at',       label: t('fleet.createdAt'),         width: 16, format: v => v ? new Date(v as string).toLocaleDateString('de-DE') : '' },
       ],
       rows: filteredCars.map(c => {
         const { status, daysLeft } = getTuevStatus(c.tuev_gueltig_bis);
-        const cfg = TUEV_CONFIG[status];
+        const label = t(TUEV_CONFIG[status].label);
         const statusLabel = daysLeft !== null && daysLeft >= 0
-          ? `${cfg.label} (noch ${daysLeft} Tage)`
+          ? t('fleet.tuevDaysRemaining', { label, days: daysLeft })
           : daysLeft !== null
-          ? `${cfg.label} (vor ${Math.abs(daysLeft)} Tagen)`
-          : cfg.label;
+          ? t('fleet.tuevDaysOverdue', { label, days: Math.abs(daysLeft) })
+          : label;
         return { ...(c as unknown as Record<string, unknown>), tuev_status: statusLabel };
       }),
-      totals: { kennzeichen: `${filteredCars.length} Fahrzeuge` },
+      totals: { kennzeichen: t('fleet.carsTotal', { count: filteredCars.length }) },
     });
   };
 
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <div style={{ color: 'var(--text-tertiary)' }}>Laden...</div>
+        <div style={{ color: 'var(--text-tertiary)' }}>{t('common.loading')}</div>
       </div>
     );
   }
 
   const filterButtons: { key: TuevFilter; label: string; count?: number }[] = [
-    { key: 'all', label: `Alle (${cars.length})` },
-    { key: 'abgelaufen',    label: `Abgelaufen`,     count: counts.abgelaufen },
-    { key: 'bald_ablaufend', label: `Bald ablaufend`, count: counts.bald_ablaufend },
-    { key: 'gueltig',       label: `Gültig`,         count: counts.gueltig },
-    { key: 'unbekannt',     label: `Unbekannt`,      count: counts.unbekannt },
+    { key: 'all', label: `${t('common.all')} (${cars.length})` },
+    { key: 'abgelaufen',     label: t(TUEV_CONFIG.abgelaufen.shortLabel),     count: counts.abgelaufen },
+    { key: 'bald_ablaufend', label: t(TUEV_CONFIG.bald_ablaufend.shortLabel), count: counts.bald_ablaufend },
+    { key: 'gueltig',        label: t(TUEV_CONFIG.gueltig.shortLabel),        count: counts.gueltig },
+    { key: 'unbekannt',      label: t(TUEV_CONFIG.unbekannt.shortLabel),      count: counts.unbekannt },
   ];
 
   return (
@@ -220,11 +227,11 @@ export default function CarsManagement() {
       {/* Header */}
       <div className="flex justify-between items-start flex-wrap gap-3">
         <div>
-          <h2 style={{ color: 'var(--text-primary)' }} className="text-2xl font-bold">Fahrzeuge</h2>
+          <h2 style={{ color: 'var(--text-primary)' }} className="text-2xl font-bold">{t('nav.cars')}</h2>
           <p style={{ color: 'var(--text-secondary)' }} className="mt-1">
-            Fahrzeuge, Fahrerzuordnungen und TÜV-Status
+            {t('fleet.carsSubtitle')}
             <span className="ml-2 text-xs font-medium" style={{ color: carLimitReached ? 'var(--danger)' : 'var(--text-tertiary)' }}>
-              ({activeCars.length}/{carLimit} Aktive Fahrzeuge)
+              {t('fleet.activeCarsCount', { active: activeCars.length, limit: carLimit })}
             </span>
           </p>
         </div>
@@ -233,7 +240,7 @@ export default function CarsManagement() {
             onClick={handleExport}
             className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-opacity hover:opacity-80"
             style={{ background: 'var(--success)', color: 'white' }}
-            title="Als Excel exportieren"
+            title={t('common.exportExcelShort')}
           >
             <Download className="w-4 h-4" />
             Excel
@@ -248,10 +255,10 @@ export default function CarsManagement() {
               cursor: carLimitReached ? 'not-allowed' : 'pointer',
             }}
             className="flex items-center gap-2"
-            title={carLimitReached ? `Fahrzeuglimit erreicht (${carLimit} Fahrzeuge)` : 'Neues Fahrzeug hinzufügen'}
+            title={carLimitReached ? t('fleet.carLimitReachedTitle', { limit: carLimit }) : t('fleet.addCarTooltip')}
           >
             <Plus className="w-5 h-5" />
-            Neues Fahrzeug
+            {t('fleet.newCar')}
           </button>
         </div>
       </div>
@@ -261,7 +268,7 @@ export default function CarsManagement() {
         <div className="flex items-center gap-3 px-4 py-3 rounded-xl" style={{ background: 'var(--danger-subtle)', border: '1px solid rgba(220,38,38,0.25)' }}>
           <CarIcon className="w-4 h-4 flex-shrink-0" style={{ color: 'var(--danger)' }} />
           <p className="text-sm" style={{ color: 'var(--danger)' }}>
-            <strong>Fahrzeuglimit erreicht.</strong> Ihr Abonnement erlaubt maximal <strong>{carLimit}</strong> aktive Fahrzeuge. Kontaktieren Sie uns um Ihr Limit zu erhöhen.
+            <strong>{t('fleet.carLimitReachedHeading')}</strong> {t('fleet.carLimitReachedBody', { limit: carLimit })}
           </p>
         </div>
       )}
@@ -277,9 +284,9 @@ export default function CarsManagement() {
               <ShieldX className="w-5 h-5 flex-shrink-0" style={{ color: 'var(--danger)' }} />
               <div>
                 <p className="text-sm font-semibold" style={{ color: 'var(--danger)' }}>
-                  {counts.abgelaufen} Fahrzeug{counts.abgelaufen > 1 ? 'e' : ''} — TÜV abgelaufen
+                  {tPlural({ one: 'fleet.tuevExpiredBanner.one', other: 'fleet.tuevExpiredBanner.other' }, counts.abgelaufen)}
                 </p>
-                <p className="text-xs mt-0.5" style={{ color: 'var(--text-secondary)' }}>TÜV-Termin überfällig, sofort erneuern</p>
+                <p className="text-xs mt-0.5" style={{ color: 'var(--text-secondary)' }}>{t('fleet.tuevExpiredHint')}</p>
               </div>
             </div>
           )}
@@ -291,9 +298,9 @@ export default function CarsManagement() {
               <ShieldAlert className="w-5 h-5 flex-shrink-0" style={{ color: 'var(--warning)' }} />
               <div>
                 <p className="text-sm font-semibold" style={{ color: 'var(--warning)' }}>
-                  {counts.bald_ablaufend} Fahrzeug{counts.bald_ablaufend > 1 ? 'e' : ''} — TÜV läuft bald ab
+                  {tPlural({ one: 'fleet.tuevExpiringBanner.one', other: 'fleet.tuevExpiringBanner.other' }, counts.bald_ablaufend)}
                 </p>
-                <p className="text-xs mt-0.5" style={{ color: 'var(--text-secondary)' }}>Innerhalb von 60 Tagen fällig</p>
+                <p className="text-xs mt-0.5" style={{ color: 'var(--text-secondary)' }}>{t('fleet.tuevExpiringHint')}</p>
               </div>
             </div>
           )}
@@ -340,10 +347,10 @@ export default function CarsManagement() {
         >
           <CarIcon style={{ color: 'var(--text-tertiary)' }} className="w-16 h-16 mx-auto mb-4" />
           <h3 style={{ color: 'var(--text-primary)' }} className="text-lg font-medium mb-2">
-            {cars.length === 0 ? 'Keine Fahrzeuge vorhanden' : 'Keine Fahrzeuge für diesen Filter'}
+            {cars.length === 0 ? t('fleet.noCars') : t('fleet.noCarsForFilter')}
           </h3>
           <p style={{ color: 'var(--text-secondary)' }} className="mb-4">
-            {cars.length === 0 ? 'Erstellen Sie Ihr erstes Fahrzeug, um zu beginnen.' : 'Probieren Sie einen anderen TÜV-Status-Filter.'}
+            {cars.length === 0 ? t('fleet.noCarsHint') : t('fleet.noCarsFilterHint')}
           </p>
           {cars.length === 0 && (
             <button
@@ -354,7 +361,7 @@ export default function CarsManagement() {
               className="inline-flex items-center gap-2"
             >
               <Plus className="w-5 h-5" />
-              Fahrzeug hinzufügen
+              {t('fleet.addCar')}
             </button>
           )}
         </div>
@@ -385,7 +392,7 @@ export default function CarsManagement() {
                     </div>
                     <div>
                       <h3 style={{ color: 'var(--text-primary)' }} className="text-lg font-bold tracking-wide">{car.kennzeichen}</h3>
-                      <p style={{ color: 'var(--text-tertiary)' }} className="text-xs">Kennzeichen</p>
+                      <p style={{ color: 'var(--text-tertiary)' }} className="text-xs">{t('werkstatt.plate')}</p>
                     </div>
                   </div>
                   <div className="flex gap-1">
@@ -394,7 +401,7 @@ export default function CarsManagement() {
                       style={{ color: 'var(--accent)', borderRadius: '0.5rem', padding: '0.4rem' }}
                       onMouseEnter={e => (e.currentTarget.style.background = 'var(--accent-subtle)')}
                       onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
-                      title="Bearbeiten"
+                      title={t('common.edit')}
                     >
                       <Edit2 className="w-4 h-4" />
                     </button>
@@ -403,7 +410,7 @@ export default function CarsManagement() {
                       style={{ color: 'var(--danger)', borderRadius: '0.5rem', padding: '0.4rem' }}
                       onMouseEnter={e => (e.currentTarget.style.background = 'var(--danger-subtle)')}
                       onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
-                      title="Löschen"
+                      title={t('common.delete')}
                     >
                       <Trash2 className="w-4 h-4" />
                     </button>
@@ -418,7 +425,7 @@ export default function CarsManagement() {
                   <div className="flex items-center gap-2">
                     <span style={{ color: tuevCfg.color }}>{tuevCfg.icon}</span>
                     <div>
-                      <p className="text-xs font-semibold leading-tight" style={{ color: tuevCfg.color }}>TÜV {tuevCfg.label}</p>
+                      <p className="text-xs font-semibold leading-tight" style={{ color: tuevCfg.color }}>{t('fleet.tuevBadge', { status: t(tuevCfg.label) })}</p>
                       {car.tuev_gueltig_bis && (
                         <p className="text-xs mt-0.5" style={{ color: 'var(--text-secondary)' }}>
                           {new Date(car.tuev_gueltig_bis).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' })}
@@ -431,7 +438,7 @@ export default function CarsManagement() {
                       className="text-xs font-bold px-2 py-0.5 rounded-full whitespace-nowrap"
                       style={{ background: tuevCfg.color + '18', color: tuevCfg.color }}
                     >
-                      {daysLeft >= 0 ? `${daysLeft}T` : `−${Math.abs(daysLeft)}T`}
+                      {t('fleet.daysShort', { days: daysLeft >= 0 ? daysLeft : `−${Math.abs(daysLeft)}` })}
                     </span>
                   )}
                 </div>
@@ -440,7 +447,7 @@ export default function CarsManagement() {
                 {car.letzte_hu && (
                   <div className="flex items-center gap-2 text-xs" style={{ color: 'var(--text-tertiary)' }}>
                     <ShieldCheck className="w-3.5 h-3.5 flex-shrink-0" />
-                    <span>Letzte HU: {new Date(car.letzte_hu).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' })}</span>
+                    <span>{t('fleet.lastHuLabel', { date: new Date(car.letzte_hu).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' }) })}</span>
                   </div>
                 )}
 
@@ -449,7 +456,7 @@ export default function CarsManagement() {
                   <div className="flex items-center gap-2 mb-2">
                     <Users style={{ color: 'var(--text-tertiary)' }} className="w-3.5 h-3.5" />
                     <span style={{ color: 'var(--text-secondary)' }} className="text-xs font-medium">
-                      Fahrer ({car.drivers.length}/2)
+                      {t('fleet.driversCount', { count: car.drivers.length })}
                     </span>
                   </div>
                   {car.drivers.length > 0 ? (
@@ -464,7 +471,7 @@ export default function CarsManagement() {
                       ))}
                     </div>
                   ) : (
-                    <p style={{ color: 'var(--text-tertiary)' }} className="text-xs italic">Keine Fahrer zugewiesen</p>
+                    <p style={{ color: 'var(--text-tertiary)' }} className="text-xs italic">{t('fleet.noDriversAssigned')}</p>
                   )}
                 </div>
               </div>
@@ -481,10 +488,10 @@ export default function CarsManagement() {
         <ConfirmationModal
           isOpen={deleteConfirmation.isOpen}
           type="confirm"
-          title="Fahrzeug löschen"
-          message={`Möchten Sie das Fahrzeug "${deleteConfirmation.kennzeichen}" wirklich löschen? Diese Aktion kann nicht rückgängig gemacht werden.`}
-          confirmText="Löschen"
-          cancelText="Abbrechen"
+          title={t('fleet.deleteCarTitle')}
+          message={t('fleet.deleteCarMessage', { kennzeichen: deleteConfirmation.kennzeichen })}
+          confirmText={t('common.delete')}
+          cancelText={t('common.cancel')}
           onConfirm={confirmDelete}
           onClose={() => setDeleteConfirmation({ isOpen: false, carId: null, kennzeichen: '' })}
         />

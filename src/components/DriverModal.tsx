@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { X, Save, User, ChevronDown, ChevronUp } from 'lucide-react';
 import { Driver } from '../types/receipt';
+import { useTranslation } from '../contexts/LanguageContext';
+import type { TranslationKey } from '../i18n';
 
 type Gender = 'male' | 'female' | '';
 
@@ -24,14 +26,17 @@ export interface DriverPlanningFields {
 }
 
 // Weekday encoding: 1=Mon, 2=Tue, ..., 7=Sun (ISO).
-export const WEEKDAY_OPTIONS: Array<{ value: number; label: string }> = [
-  { value: 1, label: 'Mo' },
-  { value: 2, label: 'Di' },
-  { value: 3, label: 'Mi' },
-  { value: 4, label: 'Do' },
-  { value: 5, label: 'Fr' },
-  { value: 6, label: 'Sa' },
-  { value: 7, label: 'So' },
+// `label` holds a TranslationKey: this list is module-level and t() is a hook
+// value. Every consumer resolves it. These are chip labels on screen, not
+// document text.
+export const WEEKDAY_OPTIONS: Array<{ value: number; label: TranslationKey }> = [
+  { value: 1, label: 'fleet.weekday.mon' },
+  { value: 2, label: 'fleet.weekday.tue' },
+  { value: 3, label: 'fleet.weekday.wed' },
+  { value: 4, label: 'fleet.weekday.thu' },
+  { value: 5, label: 'fleet.weekday.fri' },
+  { value: 6, label: 'fleet.weekday.sat' },
+  { value: 7, label: 'fleet.weekday.sun' },
 ];
 
 interface DriverModalProps {
@@ -92,6 +97,7 @@ const DriverModal: React.FC<DriverModalProps> = ({
   const [planning, setPlanning] = useState<DriverPlanningFields>(DEFAULT_PLANNING);
   const [showPlanning, setShowPlanning] = useState(false);
   const [salaryRangeError, setSalaryRangeError] = useState('');
+  const { t } = useTranslation();
 
   useEffect(() => {
     if (driver) {
@@ -137,7 +143,7 @@ const DriverModal: React.FC<DriverModalProps> = ({
       const minSal = planning.planning_min_salary !== '' ? parseFloat(planning.planning_min_salary) : null;
       const maxSal = planning.planning_max_salary !== '' ? parseFloat(planning.planning_max_salary) : null;
       if (minSal != null && maxSal != null && maxSal < minSal) {
-        setSalaryRangeError('Maximalgehalt darf nicht kleiner als Mindestgehalt sein.');
+        setSalaryRangeError(t('fleet.salaryRangeInvalid'));
         return;
       }
       setSalaryRangeError('');
@@ -178,56 +184,56 @@ const DriverModal: React.FC<DriverModalProps> = ({
           {/* Core fields */}
           <div>
             <label style={{ color: 'var(--text-secondary)' }} className="block text-sm font-medium mb-1">
-              Fahrername *
+              {t('fleet.driverName')} *
             </label>
             <input
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
               style={inputStyle}
-              placeholder="Name des Fahrers eingeben"
+              placeholder={t('fleet.driverNamePlaceholder')}
               required
             />
           </div>
 
           <div>
             <label style={{ color: 'var(--text-secondary)' }} className="block text-sm font-medium mb-1">
-              Personalnummer *
+              {t('fleet.personalnummer')} *
             </label>
             <input
               type="text"
               value={personalnummer}
               onChange={(e) => setPersonalnummer(e.target.value)}
               style={inputStyle}
-              placeholder="z.B. 11, P-042, ..."
+              placeholder={t('fleet.personalnummerPlaceholder')}
               required
             />
             <p style={{ color: 'var(--text-tertiary)' }} className="text-xs mt-1">
-              Eindeutige Personalnummer des Fahrers (wird im Stundennachweis verwendet)
+              {t('fleet.personalnummerHint')}
             </p>
           </div>
 
           <div>
             <label style={{ color: 'var(--text-secondary)' }} className="block text-sm font-medium mb-1">
-              Anrede / Geschlecht
+              {t('fleet.salutationGender')}
             </label>
             <select
               value={gender}
               onChange={(e) => setGender(e.target.value as Gender)}
               style={inputStyle}
             >
-              <option value="">— nicht angegeben —</option>
-              <option value="male">männlich (Herr)</option>
-              <option value="female">weiblich (Frau)</option>
+              <option value="">{t('fleet.notSpecified')}</option>
+              <option value="male">{t('fleet.male')}</option>
+              <option value="female">{t('fleet.female')}</option>
             </select>
             <p style={{ color: 'var(--text-tertiary)' }} className="text-xs mt-1">
-              Wird für die Anrede in der Trinkgeld Quittung verwendet (Herr / Frau).
+              {t('fleet.genderHint')}
             </p>
           </div>
 
           <div>
             <label style={{ color: 'var(--text-secondary)' }} className="block text-sm font-medium mb-1">
-              Umsatzanteil (%)
+              {t('fleet.revenueShare')}
             </label>
             <div className="relative">
               <input
@@ -244,7 +250,7 @@ const DriverModal: React.FC<DriverModalProps> = ({
               <span style={{ color: 'var(--text-tertiary)' }} className="absolute right-3 top-1/2 transform -translate-y-1/2">%</span>
             </div>
             <p style={{ color: 'var(--text-tertiary)' }} className="text-xs mt-1">
-              Anteil des Umsatzes, den der Fahrer erhält (0-100%). Standard: 50%
+              {t('fleet.revenueShareHint')}
             </p>
           </div>
 
@@ -256,7 +262,7 @@ const DriverModal: React.FC<DriverModalProps> = ({
               className="w-full flex items-center justify-between px-4 py-3 text-sm font-medium text-left"
               style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)' }}
             >
-              <span>Planungseinstellungen</span>
+              <span>{t('fleet.planningSettings')}</span>
               {showPlanning ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
             </button>
 
@@ -264,63 +270,63 @@ const DriverModal: React.FC<DriverModalProps> = ({
               <div className="p-4 space-y-4">
                 <div>
                   <label style={{ color: 'var(--text-secondary)' }} className="block text-sm font-medium mb-1">
-                    Fahrerrolle
+                    {t('fleet.driverRole')}
                   </label>
                   <select
                     value={planning.employment_type}
                     onChange={e => setPlanning(p => ({ ...p, employment_type: e.target.value as 'employee' | 'company_owner' }))}
                     style={inputStyle}
                   >
-                    <option value="employee">Angestellter Fahrer</option>
-                    <option value="company_owner">Inhaber / Selbstständig</option>
+                    <option value="employee">{t('fleet.employee')}</option>
+                    <option value="company_owner">{t('fleet.companyOwner')}</option>
                   </select>
                   <p style={{ color: 'var(--text-tertiary)' }} className="text-xs mt-1">
-                    Inhaber / Selbstständige sind von täglichen und monatlichen Stundenlimits ausgenommen und werden als Fallback nach regulären Fahrern eingesetzt.
+                    {t('fleet.driverRoleHint')}
                   </p>
                 </div>
 
                 <div>
                   <label style={{ color: 'var(--text-secondary)' }} className="block text-sm font-medium mb-1">
-                    Nutzung im Plan
+                    {t('fleet.planUsage')}
                   </label>
                   <select
                     value={planning.driver_usage_type}
                     onChange={e => setPlanning(p => ({ ...p, driver_usage_type: e.target.value as 'regular' | 'coverage_only' }))}
                     style={inputStyle}
                   >
-                    <option value="regular">Regulärer Fahrer</option>
-                    <option value="coverage_only">Planungs-/Deckungsfahrer</option>
+                    <option value="regular">{t('fleet.regularDriver')}</option>
+                    <option value="coverage_only">{t('fleet.coverageDriver')}</option>
                   </select>
                   <p style={{ color: 'var(--text-tertiary)' }} className="text-xs mt-1">
-                    Deckungsfahrer erhalten Fahrten nur im Planungsvorschlag, wenn reguläre Fahrer überlastet sind.
+                    {t('fleet.planUsageHint')}
                   </p>
                 </div>
 
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label style={{ color: 'var(--text-secondary)' }} className="block text-sm font-medium mb-1">
-                      Zielstunden / Monat
+                      {t('fleet.targetHoursMonth')}
                     </label>
                     <input
                       type="number"
                       value={planning.target_monthly_hours}
                       onChange={e => setPlanning(p => ({ ...p, target_monthly_hours: e.target.value }))}
                       style={inputStyle}
-                      placeholder="z.B. 160"
+                      placeholder={t('fleet.targetHoursPlaceholder')}
                       min="0"
                       step="0.5"
                     />
                   </div>
                   <div>
                     <label style={{ color: 'var(--text-secondary)' }} className="block text-sm font-medium mb-1">
-                      Maximale Stunden / Monat
+                      {t('fleet.maxHoursMonth')}
                     </label>
                     <input
                       type="number"
                       value={planning.max_monthly_hours}
                       onChange={e => setPlanning(p => ({ ...p, max_monthly_hours: e.target.value }))}
                       style={inputStyle}
-                      placeholder="z.B. 180"
+                      placeholder={t('fleet.maxHoursPlaceholder')}
                       min="0"
                       step="0.5"
                     />
@@ -330,28 +336,28 @@ const DriverModal: React.FC<DriverModalProps> = ({
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label style={{ color: 'var(--text-secondary)' }} className="block text-sm font-medium mb-1">
-                      Mindestgehalt (€)
+                      {t('fleet.minSalary')}
                     </label>
                     <input
                       type="number"
                       value={planning.planning_min_salary}
                       onChange={e => { setPlanning(p => ({ ...p, planning_min_salary: e.target.value })); setSalaryRangeError(''); }}
                       style={inputStyle}
-                      placeholder="z.B. 1800"
+                      placeholder={t('fleet.minSalaryPlaceholder')}
                       min="0"
                       step="0.01"
                     />
                   </div>
                   <div>
                     <label style={{ color: 'var(--text-secondary)' }} className="block text-sm font-medium mb-1">
-                      Maximalgehalt (€)
+                      {t('fleet.maxSalary')}
                     </label>
                     <input
                       type="number"
                       value={planning.planning_max_salary}
                       onChange={e => { setPlanning(p => ({ ...p, planning_max_salary: e.target.value })); setSalaryRangeError(''); }}
                       style={inputStyle}
-                      placeholder="z.B. 2200"
+                      placeholder={t('fleet.maxSalaryPlaceholder')}
                       min="0"
                       step="0.01"
                     />
@@ -364,14 +370,14 @@ const DriverModal: React.FC<DriverModalProps> = ({
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label style={{ color: 'var(--text-secondary)' }} className="block text-sm font-medium mb-1">
-                      Stundensatz (€)
+                      {t('fleet.hourlyRate')}
                     </label>
                     <input
                       type="number"
                       value={planning.planning_hourly_rate}
                       onChange={e => setPlanning(p => ({ ...p, planning_hourly_rate: e.target.value }))}
                       style={inputStyle}
-                      placeholder="z.B. 13.50"
+                      placeholder={t('fleet.hourlyRatePlaceholder')}
                       min="0"
                       step="0.01"
                     />
@@ -381,7 +387,7 @@ const DriverModal: React.FC<DriverModalProps> = ({
                 <div className="grid grid-cols-2 gap-3 items-center">
                   <div>
                     <label style={{ color: 'var(--text-secondary)' }} className="block text-sm font-medium mb-1">
-                      Planungspriorität
+                      {t('fleet.planningPriority')}
                     </label>
                     <input
                       type="number"
@@ -393,12 +399,12 @@ const DriverModal: React.FC<DriverModalProps> = ({
                       max="999"
                     />
                     <p style={{ color: 'var(--text-tertiary)' }} className="text-xs mt-1">
-                      Niedrigere Zahl = höhere Priorität
+                      {t('fleet.planningPriorityHint')}
                     </p>
                   </div>
                   <div>
                     <label style={{ color: 'var(--text-secondary)' }} className="block text-sm font-medium mb-2">
-                      Für Planung aktiv
+                      {t('fleet.planningEnabled')}
                     </label>
                     <label className="flex items-center gap-2 cursor-pointer">
                       <input
@@ -408,7 +414,7 @@ const DriverModal: React.FC<DriverModalProps> = ({
                         className="w-4 h-4"
                       />
                       <span style={{ color: 'var(--text-secondary)' }} className="text-sm">
-                        {planning.planning_enabled ? 'Aktiv' : 'Inaktiv'}
+                        {planning.planning_enabled ? t('overview.status.active') : t('overview.status.inactive')}
                       </span>
                     </label>
                   </div>
@@ -423,21 +429,20 @@ const DriverModal: React.FC<DriverModalProps> = ({
                       className="w-4 h-4"
                     />
                     <span style={{ color: 'var(--text-secondary)' }} className="text-sm font-medium">
-                      Kann andere Fahrer decken
+                      {t('fleet.canCoverOthers')}
                     </span>
                   </label>
                   <p style={{ color: 'var(--text-tertiary)' }} className="text-xs mt-1 ml-6">
-                    Wenn aktiv, kann dieser Fahrer Schichten anderer Fahrer übernehmen, die ihr Limit überschreiten.
+                    {t('fleet.canCoverOthersHint')}
                   </p>
                 </div>
 
                 <div className="pt-3 mt-3" style={{ borderTop: '1px solid var(--border)' }}>
                   <p className="text-sm font-semibold mb-2" style={{ color: 'var(--text-primary)' }}>
-                    Arbeitszeitfenster / Dienstzeit
+                    {t('fleet.workWindowTitle')}
                   </p>
                   <p className="text-xs mb-3" style={{ color: 'var(--text-tertiary)' }}>
-                    Festes Zeitfenster, in dem der Fahrer normalerweise Fahrten erhält. Außerhalb gilt es als Ausnahme.
-                    Wenn Ende vor Anfang liegt, gilt das Fenster über Mitternacht (z. B. 22:00 bis 06:00).
+                    {t('fleet.workWindowHint')}
                   </p>
                   <div className="mb-3">
                     <label className="flex items-center gap-2 cursor-pointer">
@@ -448,11 +453,11 @@ const DriverModal: React.FC<DriverModalProps> = ({
                         className="w-4 h-4"
                       />
                       <span style={{ color: 'var(--text-secondary)' }} className="text-sm font-medium">
-                        Ganztägig verfügbar (24 Stunden)
+                        {t('fleet.fullDayAvailable')}
                       </span>
                     </label>
                     <p style={{ color: 'var(--text-tertiary)' }} className="text-xs mt-1 ml-6">
-                      Fahrer ist an erlaubten Wochentagen jederzeit einsetzbar. Tägliche/monatliche Limits gelten weiterhin.
+                      {t('fleet.fullDayAvailableHint')}
                     </p>
                   </div>
                   {planning.is_full_day_available ? (
@@ -460,13 +465,13 @@ const DriverModal: React.FC<DriverModalProps> = ({
                       className="px-3 py-2 rounded-lg text-sm font-medium"
                       style={{ background: 'var(--bg-subtle)', color: 'var(--text-primary)', border: '1px solid var(--border)' }}
                     >
-                      Arbeitszeit: Ganztägig
+                      {t('fleet.workTimeAllDay')}
                     </div>
                   ) : (
                     <div className="grid grid-cols-2 gap-3">
                       <div>
                         <label style={{ color: 'var(--text-secondary)' }} className="block text-sm font-medium mb-1">
-                          Arbeitsbeginn
+                          {t('fleet.workStart')}
                         </label>
                         <input
                           type="time"
@@ -477,7 +482,7 @@ const DriverModal: React.FC<DriverModalProps> = ({
                       </div>
                       <div>
                         <label style={{ color: 'var(--text-secondary)' }} className="block text-sm font-medium mb-1">
-                          Arbeitsende
+                          {t('fleet.workEnd')}
                         </label>
                         <input
                           type="time"
@@ -490,7 +495,7 @@ const DriverModal: React.FC<DriverModalProps> = ({
                   )}
                   <div className="mt-3">
                     <label style={{ color: 'var(--text-secondary)' }} className="block text-sm font-medium mb-2">
-                      Gültig an Wochentagen
+                      {t('fleet.allowedWeekdays')}
                     </label>
                     <div className="flex flex-wrap gap-2">
                       {WEEKDAY_OPTIONS.map(wd => {
@@ -512,7 +517,7 @@ const DriverModal: React.FC<DriverModalProps> = ({
                               border: `1px solid ${active ? 'var(--accent)' : 'var(--border)'}`,
                             }}
                           >
-                            {wd.label}
+                            {t(wd.label)}
                           </button>
                         );
                       })}
@@ -527,11 +532,11 @@ const DriverModal: React.FC<DriverModalProps> = ({
                         className="w-4 h-4"
                       />
                       <span style={{ color: 'var(--text-secondary)' }} className="text-sm font-medium">
-                        Ausnahmen außerhalb der Dienstzeit erlauben
+                        {t('fleet.allowOutsideExceptions')}
                       </span>
                     </label>
                     <p style={{ color: 'var(--text-tertiary)' }} className="text-xs mt-1 ml-6">
-                      Wenn aktiv, kann der Planer Ausnahmen vorschlagen, die explizit akzeptiert werden müssen.
+                      {t('fleet.allowOutsideExceptionsHint')}
                     </p>
                   </div>
                 </div>
@@ -547,7 +552,7 @@ const DriverModal: React.FC<DriverModalProps> = ({
               onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-muted)')}
               onMouseLeave={e => (e.currentTarget.style.background = 'var(--bg-subtle)')}
             >
-              Abbrechen
+              {t('common.cancel')}
             </button>
             <button
               type="submit"
@@ -557,7 +562,7 @@ const DriverModal: React.FC<DriverModalProps> = ({
               className="flex items-center space-x-2"
             >
               <Save size={16} />
-              <span>Speichern</span>
+              <span>{t('common.save')}</span>
             </button>
           </div>
         </form>

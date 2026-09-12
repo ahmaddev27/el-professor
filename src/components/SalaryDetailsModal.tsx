@@ -11,6 +11,7 @@ import ConfirmationModal from './ConfirmationModal';
 import { generateDriverSalaryPdf } from '../utils/driverSalaryPdf';
 import DriverSalarySummaryCard from './DriverSalarySummaryCard';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
+import { useTranslation } from '../contexts/LanguageContext';
 
 interface SalaryDetailsModalProps {
   isOpen: boolean;
@@ -31,6 +32,7 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
   salary,
   onUpdate,
 }) => {
+  const { t } = useTranslation();
   const [activeTab, setActiveTab] = useState<'details' | 'summary'>('details');
   const [payments, setPayments] = useState<SalaryPayment[]>([]);
   const [loading, setLoading] = useState(false);
@@ -82,8 +84,8 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
     if (salary.salary_id) return;
     try {
       const { data: { user: authUser } } = await supabase.auth.getUser();
-      if (!authUser) throw new Error('Nicht angemeldet');
-      if (!salary.period_start || !salary.period_end) throw new Error('Zeitraum fehlt');
+      if (!authUser) throw new Error(t('sal.notSignedIn'));
+      if (!salary.period_start || !salary.period_end) throw new Error(t('sal.periodMissing'));
 
       const { data: existing } = await supabase
         .from('salaries')
@@ -116,7 +118,7 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
       await onUpdate();
     } catch (error: any) {
       console.error('Error creating salary record:', error);
-      showToast('error', 'Fehler beim Erstellen des Gehalts');
+      showToast('error', t('sal.error.createSalary'));
     }
   };
 
@@ -132,7 +134,7 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
       if (error) throw error;
       setPayments(data || []);
     } catch {
-      showToast('error', 'Fehler beim Laden der Zahlungen');
+      showToast('error', t('sal.error.loadPayments'));
     } finally {
       setLoading(false);
     }
@@ -186,9 +188,9 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
         .eq('id', salary.salary_id);
 
       if (error) throw error;
-      showToast('success', 'Lohnabrechnung gespeichert');
+      showToast('success', t('sal.payroll.saved'));
     } catch {
-      showToast('error', 'Fehler beim Speichern');
+      showToast('error', t('sal.error.save'));
     } finally {
       setSavingPayroll(false);
     }
@@ -196,7 +198,7 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
 
   const handleWeeklyCashPayment = async () => {
     if (!salary.period_start || !salary.period_end) {
-      showToast('warning', 'Bitte zuerst Fahrer und Monat auswählen.');
+      showToast('warning', t('sal.weekly.selectFirst'));
       return;
     }
 
@@ -221,7 +223,7 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
       );
 
       if (driverRows.length === 0) {
-        showToast('warning', 'Keine Wochenabrechnung für diesen Fahrer im ausgewählten Monat gefunden.');
+        showToast('warning', t('sal.weekly.notFound'));
         return;
       }
 
@@ -236,9 +238,9 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
 
       if (difference < 0.01) {
         if (difference < -0.01) {
-          showToast('warning', 'Die letzte Wochenabrechnung hat keine Barzahlung für den Fahrer. Es besteht eine offene Differenz.');
+          showToast('warning', t('sal.weekly.noCashOpenDiff'));
         } else {
-          showToast('info', 'Für die letzte Wochenabrechnung gibt es keine positive Bargeld-Differenz.');
+          showToast('info', t('sal.weekly.noPositiveDiff'));
         }
         return;
       }
@@ -255,7 +257,7 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
 
       const salaryId = salary.salary_id;
       if (!salaryId) {
-        showToast('error', 'Gehaltsabrechnung konnte nicht erstellt werden.');
+        showToast('error', t('sal.error.createPayroll'));
         return;
       }
 
@@ -269,7 +271,7 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
         .maybeSingle();
 
       if (existing) {
-        showToast('warning', 'Diese Wochenabrechnung wurde bereits als Barzahlung übernommen.');
+        showToast('warning', t('sal.weekly.alreadyImported'));
         return;
       }
 
@@ -280,13 +282,15 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
 
       const { data: authData } = await supabase.auth.getUser();
       const userId = authData.user?.id;
-      if (!userId) throw new Error('Nicht angemeldet');
+      if (!userId) throw new Error(t('sal.notSignedIn'));
 
       const { error: insertErr } = await supabase.from('salary_payments').insert({
         salary_id: salaryId,
         payment_type: 'cash',
         amount: Math.round(difference * 100) / 100,
         payment_date: paymentDate,
+        // `description` and `payment_category` are persisted to salary_payments and
+        // read back as stored data, so they stay German in both languages.
         description: 'Automatisch aus letzter Wochenabrechnung übernommen',
         payment_category: 'Bargehalt',
         source_type: 'weekly_cash_difference',
@@ -300,7 +304,7 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
       if (insertErr) {
         // Postgres unique constraint violation
         if (insertErr.code === '23505') {
-          showToast('warning', 'Diese Wochenabrechnung wurde bereits als Barzahlung übernommen.');
+          showToast('warning', t('sal.weekly.alreadyImported'));
           return;
         }
         throw new Error(insertErr.message);
@@ -308,9 +312,9 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
 
       await fetchPayments();
       await onUpdate();
-      showToast('success', `Barzahlung von ${difference.toLocaleString('de-DE', { minimumFractionDigits: 2 })} € aus Wochenabrechnung erstellt.`);
+      showToast('success', t('sal.weekly.created', { amount: difference.toLocaleString('de-DE', { minimumFractionDigits: 2 }) }));
     } catch (err: any) {
-      showToast('error', err.message || 'Fehler beim Erstellen der Barzahlung.');
+      showToast('error', err.message || t('sal.weekly.errorCreate'));
     } finally {
       setLoadingWeekly(false);
     }
@@ -319,7 +323,7 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
   const handleSavePayment = async (paymentData: Omit<SalaryPayment, 'id' | 'created_by' | 'created_at' | 'updated_at'>) => {
     try {
       const { data: { user: authUser } } = await supabase.auth.getUser();
-      if (!authUser) throw new Error('Nicht angemeldet');
+      if (!authUser) throw new Error(t('sal.notSignedIn'));
 
       if (selectedPayment) {
         const { error } = await supabase
@@ -332,13 +336,13 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
           })
           .eq('id', selectedPayment.id);
         if (error) throw error;
-        showToast('success', 'Zahlung erfolgreich aktualisiert');
+        showToast('success', t('sal.payment.updated'));
       } else {
         const { error } = await supabase
           .from('salary_payments')
           .insert({ ...paymentData, created_by: authUser.id, company_id: companyId });
         if (error) throw error;
-        showToast('success', 'Zahlung erfolgreich hinzugefügt');
+        showToast('success', t('sal.payment.added'));
       }
 
       await fetchPayments();
@@ -355,17 +359,19 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
     try {
       const { error } = await supabase.from('salary_payments').delete().eq('id', paymentToDelete.id);
       if (error) throw error;
-      showToast('success', 'Zahlung erfolgreich gelöscht');
+      showToast('success', t('sal.payment.deleted'));
       await fetchPayments();
       await onUpdate();
     } catch (error: any) {
-      showToast('error', error.message || 'Fehler beim Löschen');
+      showToast('error', error.message || t('common.errorDelete'));
     } finally {
       setPaymentToDelete(null);
     }
   };
 
   const handleExportPdf = () => {
+    // Only figures cross into the PDF here; its own labels live in driverSalaryPdf.ts
+    // and stay German because the document goes to the Steuerberater.
     generateDriverSalaryPdf({
       salary,
       settings,
@@ -377,14 +383,15 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
     });
   };
 
+  // `status` is the derived payment status; only the badge text is translated.
   const getStatusBadge = (status?: string) => {
     switch (status) {
       case 'paid':
-        return <span style={{ background: 'var(--success-subtle)', color: 'var(--success)', borderRadius: '9999px', padding: '0.25rem 0.75rem', fontSize: '0.875rem', fontWeight: 500 }}>Vollständig bezahlt</span>;
+        return <span style={{ background: 'var(--success-subtle)', color: 'var(--success)', borderRadius: '9999px', padding: '0.25rem 0.75rem', fontSize: '0.875rem', fontWeight: 500 }}>{t('sal.status.fullyPaid')}</span>;
       case 'partially_paid':
-        return <span style={{ background: 'var(--warning-subtle)', color: 'var(--warning)', borderRadius: '9999px', padding: '0.25rem 0.75rem', fontSize: '0.875rem', fontWeight: 500 }}>Teilweise bezahlt</span>;
+        return <span style={{ background: 'var(--warning-subtle)', color: 'var(--warning)', borderRadius: '9999px', padding: '0.25rem 0.75rem', fontSize: '0.875rem', fontWeight: 500 }}>{t('sal.status.partiallyPaid')}</span>;
       default:
-        return <span style={{ background: 'var(--danger-subtle)', color: 'var(--danger)', borderRadius: '9999px', padding: '0.25rem 0.75rem', fontSize: '0.875rem', fontWeight: 500 }}>Unbezahlt</span>;
+        return <span style={{ background: 'var(--danger-subtle)', color: 'var(--danger)', borderRadius: '9999px', padding: '0.25rem 0.75rem', fontSize: '0.875rem', fontWeight: 500 }}>{t('sal.status.unpaid')}</span>;
     }
   };
 
@@ -427,7 +434,7 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
             <div className="flex items-start justify-between mb-4">
               <div>
                 <h2 style={{ color: 'var(--text-primary)' }} className="text-2xl font-bold">
-                  Gehaltsdetails — {salary.driver_name}
+                  {t('sal.details.title', { name: salary.driver_name })}
                 </h2>
                 <p style={{ color: 'var(--text-secondary)' }} className="text-sm mt-1">
                   {salary.period_start && salary.period_end
@@ -448,8 +455,8 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
             {/* Tab bar */}
             <div className="flex gap-1" style={{ marginBottom: '-1px' }}>
               {([
-                { key: 'details', label: 'Details & Zahlungen', icon: <DollarSign size={15} /> },
-                { key: 'summary', label: 'Zusammenfassung', icon: <LayoutDashboard size={15} /> },
+                { key: 'details', label: t('sal.tab.details'), icon: <DollarSign size={15} /> },
+                { key: 'summary', label: t('common.summary'), icon: <LayoutDashboard size={15} /> },
               ] as const).map(tab => (
                 <button
                   key={tab.key}
@@ -498,9 +505,9 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div style={{ background: 'var(--accent-subtle)', borderRadius: '0.5rem', padding: '1rem' }}>
                 <div style={{ color: 'var(--accent)', fontSize: '0.875rem', fontWeight: 500, marginBottom: '0.25rem' }}>
-                  Berechnetes Fahrer-Gehalt
+                  {t('sal.calculatedDriverSalary')}
                   {salary.netto_salary && salary.netto_salary !== salary.amount_due && (
-                    <span style={{ fontSize: '0.75rem', opacity: 0.8 }}> (angepasst)</span>
+                    <span style={{ fontSize: '0.75rem', opacity: 0.8 }}> {t('sal.adjustedSuffix')}</span>
                   )}
                 </div>
                 <div style={{ color: 'var(--text-primary)', fontSize: '1.5rem', fontWeight: 700 }}>
@@ -509,7 +516,7 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
               </div>
 
               <div style={{ background: 'var(--success-subtle)', borderRadius: '0.5rem', padding: '1rem' }}>
-                <div style={{ color: 'var(--success)', fontSize: '0.875rem', fontWeight: 500, marginBottom: '0.25rem' }}>Bereits bezahlt</div>
+                <div style={{ color: 'var(--success)', fontSize: '0.875rem', fontWeight: 500, marginBottom: '0.25rem' }}>{t('sal.alreadyPaid')}</div>
                 <div style={{ color: 'var(--text-primary)', fontSize: '1.5rem', fontWeight: 700 }}>
                   {fmtEur(totalPaid)}
                 </div>
@@ -517,7 +524,7 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
 
               <div style={{ background: remainingBalance > 0 ? 'var(--danger-subtle)' : 'var(--bg-subtle)', borderRadius: '0.5rem', padding: '1rem' }}>
                 <div style={{ color: remainingBalance > 0 ? 'var(--danger)' : 'var(--text-secondary)', fontSize: '0.875rem', fontWeight: 500, marginBottom: '0.25rem' }}>
-                  Restbetrag
+                  {t('sal.remaining')}
                 </div>
                 <div style={{ color: 'var(--text-primary)', fontSize: '1.5rem', fontWeight: 700 }}>
                   {fmtEur(remainingBalance)}
@@ -528,15 +535,15 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
             {/* ——— Lohnabrechnung & Auszahlung ——— */}
             <div style={{ border: '1px solid var(--border)', borderRadius: '0.5rem', overflow: 'hidden' }}>
               <div style={{ background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)', padding: '0.875rem 1.25rem' }} className="flex items-center justify-between">
-                <h3 style={{ color: 'var(--text-primary)', fontWeight: 600 }}>Lohnabrechnung & Auszahlung</h3>
-                <span style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)' }}>Optional — für interne Planung</span>
+                <h3 style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{t('sal.payroll.sectionTitle')}</h3>
+                <span style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)' }}>{t('sal.payroll.internalOnly')}</span>
               </div>
 
               <div className="p-5 space-y-5">
 
                 {/* Read-only: system total */}
                 <div style={readonlyRowStyle}>
-                  <span style={{ color: 'var(--text-secondary)', fontSize: '0.875rem' }}>Berechnetes Fahrer-Gehalt</span>
+                  <span style={{ color: 'var(--text-secondary)', fontSize: '0.875rem' }}>{t('sal.calculatedDriverSalary')}</span>
                   <span style={{ color: 'var(--text-primary)', fontWeight: 700 }}>{fmtEur(calculatedSalaryTotal)}</span>
                 </div>
 
@@ -544,7 +551,7 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>
-                      Brutto in Lohnabrechnung (€)
+                      {t('sal.payroll.grossLabel')}
                     </label>
                     <input
                       type="number"
@@ -559,13 +566,13 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
                       style={inputStyle}
                     />
                     <p style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)', marginTop: '0.25rem' }}>
-                      Bruttobetrag über Lohnabrechnung
+                      {t('sal.payroll.grossHint')}
                     </p>
                   </div>
 
                   <div>
                     <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>
-                      Netto laut Lohnabrechnung / Bankgehalt (€)
+                      {t('sal.payroll.netLabel')}
                     </label>
                     <input
                       type="number"
@@ -580,7 +587,7 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
                       style={inputStyle}
                     />
                     <p style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)', marginTop: '0.25rem' }}>
-                      Nettobetrag aus Lohnabrechnung (Bankzahlung)
+                      {t('sal.payroll.netHint')}
                     </p>
                   </div>
                 </div>
@@ -590,7 +597,7 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
                   <div style={{ background: 'var(--danger-subtle)', border: '1px solid var(--danger)', borderRadius: '0.375rem', padding: '0.625rem 0.875rem' }} className="flex items-center gap-2">
                     <AlertCircle size={16} style={{ color: 'var(--danger)', flexShrink: 0 }} />
                     <span style={{ fontSize: '0.875rem', color: 'var(--danger)' }}>
-                      Das Brutto in der Lohnabrechnung ist höher als das berechnete Fahrer-Gehalt.
+                      {t('sal.payroll.grossExceedsWarning')}
                     </span>
                   </div>
                 )}
@@ -599,14 +606,14 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
                 {hasPayrollData && (
                   <div style={{ background: 'var(--bg-subtle)', borderRadius: '0.5rem', padding: '1rem', border: '1px solid var(--border)' }} className="space-y-0">
                     <p style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-tertiary)', marginBottom: '0.625rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                      Berechnete Auszahlung
+                      {t('sal.payroll.computedPayout')}
                     </p>
 
                     {/* Bargehalt */}
                     <div className="flex items-center justify-between py-2" style={{ borderBottom: '1px solid var(--border)' }}>
                       <div className="flex items-center gap-2">
                         <Banknote size={15} style={{ color: 'var(--success)' }} />
-                        <span style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>Bargehalt</span>
+                        <span style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>{t('sal.payroll.cashSalary')}</span>
                         <span style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)' }}>
                           ({fmtEur(calculatedSalaryTotal)} − {fmtEur(payrollGross)})
                         </span>
@@ -624,7 +631,7 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
                     <div className="flex items-center justify-between py-2" style={{ borderBottom: '1px solid var(--border)' }}>
                       <div className="flex items-center gap-2">
                         <Building2 size={15} style={{ color: 'var(--accent)' }} />
-                        <span style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>Bankgehalt</span>
+                        <span style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>{t('sal.payroll.bankSalary')}</span>
                       </div>
                       <span style={{ fontWeight: 700, color: 'var(--text-primary)' }}>{fmtEur(bankSalary)}</span>
                     </div>
@@ -632,7 +639,7 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
                     {/* Total net payout */}
                     <div className="flex items-center justify-between pt-2">
                       <span style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--text-primary)' }}>
-                        Gesamt Netto Auszahlung
+                        {t('sal.payroll.totalNetPayout')}
                       </span>
                       <span style={{
                         fontSize: '1.125rem',
@@ -642,7 +649,7 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
                         {fmtEur(totalNetPayout)}
                         {cashIsNegative && (
                           <span style={{ fontSize: '0.75rem', color: 'var(--warning)', marginLeft: '0.5rem', fontWeight: 400 }}>
-                            (Bargehalt negativ)
+                            {t('sal.payroll.cashNegative')}
                           </span>
                         )}
                       </span>
@@ -661,12 +668,12 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
                     {payrollData.tax_review_confirmed
                       ? <CheckSquare size={16} style={{ color: 'var(--success)' }} />
                       : <Square size={16} style={{ color: 'var(--text-tertiary)' }} />}
-                    Steuerliche Behandlung mit Steuerberater geprüft
+                    {t('sal.payroll.taxReviewed')}
                   </button>
                 </div>
 
                 <p style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)', fontStyle: 'italic' }}>
-                  Bitte steuerliche Behandlung mit dem Steuerberater prüfen. Diese Angaben ersetzen keine offizielle Lohnabrechnung.
+                  {t('sal.payroll.taxDisclaimer')}
                 </p>
 
                 <div className="flex justify-end">
@@ -684,7 +691,7 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
                     onMouseEnter={e => { if (!savingPayroll) e.currentTarget.style.background = 'var(--accent-hover)'; }}
                     onMouseLeave={e => (e.currentTarget.style.background = 'var(--accent)')}
                   >
-                    {savingPayroll ? 'Speichert...' : 'Lohnabrechnung speichern'}
+                    {savingPayroll ? t('common.saving') : t('sal.payroll.save')}
                   </button>
                 </div>
               </div>
@@ -693,7 +700,7 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
             {/* Payment status + add buttons */}
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
-                <h3 style={{ color: 'var(--text-primary)' }} className="text-lg font-semibold">Zahlungsstatus</h3>
+                <h3 style={{ color: 'var(--text-primary)' }} className="text-lg font-semibold">{t('sal.paymentStatus')}</h3>
                 <div className="mt-2">{getStatusBadge(paymentStatus)}</div>
               </div>
               <div className="flex flex-wrap items-center gap-2">
@@ -710,10 +717,10 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
                   }}
                   onMouseEnter={e => { if (!loadingWeekly) { e.currentTarget.style.background = 'var(--success)'; e.currentTarget.style.color = '#fff'; } }}
                   onMouseLeave={e => { e.currentTarget.style.background = 'var(--success-subtle)'; e.currentTarget.style.color = 'var(--success)'; }}
-                  title="Letzte Wochenabrechnung als Barzahlung übernehmen"
+                  title={t('sal.weekly.buttonTitle')}
                 >
                   <Zap size={16} />
-                  <span>Letzte Woche als Barzahlung</span>
+                  <span>{t('sal.weekly.button')}</span>
                 </button>
                 <button
                   onClick={() => { setSelectedPayment(undefined); setIsPaymentModalOpen(true); }}
@@ -724,30 +731,30 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
                   className="flex items-center space-x-2 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <Plus size={20} />
-                  <span>Zahlung hinzufügen</span>
+                  <span>{t('sal.payment.add')}</span>
                 </button>
               </div>
             </div>
 
             {/* Payment history */}
             <div>
-              <h3 style={{ color: 'var(--text-primary)' }} className="text-lg font-semibold mb-4">Zahlungshistorie</h3>
+              <h3 style={{ color: 'var(--text-primary)' }} className="text-lg font-semibold mb-4">{t('sal.paymentHistory')}</h3>
               {loading ? (
                 <div className="flex items-center justify-center py-8">
                   <div style={{ borderColor: 'var(--accent)' }} className="animate-spin rounded-full h-8 w-8 border-b-2"></div>
                 </div>
               ) : payments.length === 0 ? (
-                <div style={{ color: 'var(--text-tertiary)' }} className="text-center py-8">Noch keine Zahlungen erfasst</div>
+                <div style={{ color: 'var(--text-tertiary)' }} className="text-center py-8">{t('sal.noPayments')}</div>
               ) : (
                 <div style={{ border: '1px solid var(--border)', borderRadius: '0.5rem', overflow: 'hidden' }}>
                   <table className="w-full">
                     <thead style={{ background: 'var(--bg-subtle)' }}>
                       <tr>
-                        <th style={{ color: 'var(--text-secondary)', padding: '0.75rem 1rem', textAlign: 'left', fontSize: '0.875rem', fontWeight: 600 }}>Datum</th>
-                        <th style={{ color: 'var(--text-secondary)', padding: '0.75rem 1rem', textAlign: 'left', fontSize: '0.875rem', fontWeight: 600 }}>Zahlungsart</th>
-                        <th style={{ color: 'var(--text-secondary)', padding: '0.75rem 1rem', textAlign: 'right', fontSize: '0.875rem', fontWeight: 600 }}>Betrag</th>
-                        <th style={{ color: 'var(--text-secondary)', padding: '0.75rem 1rem', textAlign: 'left', fontSize: '0.875rem', fontWeight: 600 }}>Beschreibung</th>
-                        <th style={{ color: 'var(--text-secondary)', padding: '0.75rem 1rem', textAlign: 'right', fontSize: '0.875rem', fontWeight: 600 }}>Aktionen</th>
+                        <th style={{ color: 'var(--text-secondary)', padding: '0.75rem 1rem', textAlign: 'left', fontSize: '0.875rem', fontWeight: 600 }}>{t('common.date')}</th>
+                        <th style={{ color: 'var(--text-secondary)', padding: '0.75rem 1rem', textAlign: 'left', fontSize: '0.875rem', fontWeight: 600 }}>{t('sal.payment.type')}</th>
+                        <th style={{ color: 'var(--text-secondary)', padding: '0.75rem 1rem', textAlign: 'right', fontSize: '0.875rem', fontWeight: 600 }}>{t('common.amount')}</th>
+                        <th style={{ color: 'var(--text-secondary)', padding: '0.75rem 1rem', textAlign: 'left', fontSize: '0.875rem', fontWeight: 600 }}>{t('common.description')}</th>
+                        <th style={{ color: 'var(--text-secondary)', padding: '0.75rem 1rem', textAlign: 'right', fontSize: '0.875rem', fontWeight: 600 }}>{t('sal.col.actions')}</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -776,8 +783,8 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
                                 width: 'fit-content',
                               }}>
                                 {payment.payment_type === 'cash'
-                                  ? <><Banknote size={12} />Barzahlung</>
-                                  : <><Building2 size={12} />Bankzahlung</>}
+                                  ? <><Banknote size={12} />{t('sal.payment.cashBadge')}</>
+                                  : <><Building2 size={12} />{t('sal.payment.bankBadge')}</>}
                               </span>
                               {payment.source_type === 'weekly_cash_difference' && (
                                 <span style={{
@@ -792,7 +799,7 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
                                   gap: '0.25rem',
                                   width: 'fit-content',
                                 }}>
-                                  <Zap size={10} />Aus Wochenabrechnung
+                                  <Zap size={10} />{t('sal.weekly.badge')}
                                 </span>
                               )}
                             </div>
@@ -810,7 +817,7 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
                                 style={{ color: 'var(--accent)', borderRadius: '0.25rem', padding: '0.25rem' }}
                                 onMouseEnter={e => (e.currentTarget.style.background = 'var(--accent-subtle)')}
                                 onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
-                                title="Bearbeiten"
+                                title={t('common.edit')}
                               >
                                 <Edit2 size={16} />
                               </button>
@@ -819,7 +826,7 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
                                 style={{ color: 'var(--danger)', borderRadius: '0.25rem', padding: '0.25rem' }}
                                 onMouseEnter={e => (e.currentTarget.style.background = 'var(--danger-subtle)')}
                                 onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
-                                title="Löschen"
+                                title={t('common.delete')}
                               >
                                 <Trash2 size={16} />
                               </button>
@@ -843,7 +850,7 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
               onMouseEnter={e => (e.currentTarget.style.background = 'var(--border)')}
               onMouseLeave={e => (e.currentTarget.style.background = 'var(--bg-muted)')}
             >
-              Schließen
+              {t('common.close')}
             </button>
           </div>
         </div>
@@ -863,9 +870,9 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
         onClose={() => setPaymentToDelete(null)}
         onConfirm={handleDeletePayment}
         type="confirm"
-        title="Zahlung löschen"
-        message="Möchten Sie diese Zahlung wirklich löschen? Diese Aktion kann nicht rückgängig gemacht werden."
-        confirmText="Löschen"
+        title={t('sal.payment.deleteTitle')}
+        message={t('sal.payment.deleteConfirm')}
+        confirmText={t('common.delete')}
       />
     </>
   );

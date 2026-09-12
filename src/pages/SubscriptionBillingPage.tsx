@@ -10,6 +10,8 @@ import {
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { de } from 'date-fns/locale';
+import { useTranslation } from '../contexts/LanguageContext';
+import type { TranslationKey } from '../i18n';
 import MarkPaidModal from '../components/MarkPaidModal';
 import PlanManagementModal from '../components/PlanManagementModal';
 import GenerateInvoicesModal from '../components/GenerateInvoicesModal';
@@ -79,10 +81,21 @@ interface CompanySettings {
   account_holder: string | null;
 }
 
-const MONTHS_DE = [
-  'Januar', 'Februar', 'M\u00E4rz', 'April', 'Mai', 'Juni',
-  'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember',
+// Screen-only month names, for the filter dropdown and the period column. The
+// Rechnung/Quittung PDF keeps its own German copy in utils/subscriptionPdf.ts,
+// so nothing here reaches a generated document. Values are TranslationKeys
+// because this array is module-level and t() is a hook value.
+const MONTH_KEYS: readonly TranslationKey[] = [
+  'sa.month.january', 'sa.month.february', 'sa.month.march', 'sa.month.april',
+  'sa.month.may', 'sa.month.june', 'sa.month.july', 'sa.month.august',
+  'sa.month.september', 'sa.month.october', 'sa.month.november', 'sa.month.december',
 ];
+
+/** Resolve a 1-based month number, tolerating a value outside 1\u201312. */
+function monthLabel(t: (key: TranslationKey) => string, month: number): string {
+  const key = MONTH_KEYS[month - 1];
+  return key ? t(key) : '';
+}
 
 function fmtEur(v: number) {
   return v.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' \u20AC';
@@ -93,6 +106,7 @@ function fmtEur(v: number) {
 export default function SubscriptionBillingPage() {
   const { isSuperAdmin, user, profile } = useAuth();
   const { showToast } = useToast();
+  const { t } = useTranslation();
 
   const [plans, setPlans] = useState<SubscriptionPlan[]>([]);
   const [subscriptions, setSubscriptions] = useState<CompanySub[]>([]);
@@ -143,11 +157,11 @@ export default function SubscriptionBillingPage() {
       }
     } catch (err) {
       console.error(err);
-      showToast('error', 'Fehler beim Laden der Daten');
+      showToast('error', t('sa.subs.errorLoad'));
     } finally {
       setLoading(false);
     }
-  }, [isSuperAdmin, profile?.company_id, showToast]);
+  }, [isSuperAdmin, profile?.company_id, showToast, t]);
 
   useEffect(() => { loadData(); }, [loadData]);
 
@@ -192,7 +206,7 @@ export default function SubscriptionBillingPage() {
       .update({ status: 'open', paid_at: null, paid_by: null, collected_by: null, cash_received_amount: null })
       .eq('id', inv.id);
     if (error) {
-      showToast('error', 'Fehler: ' + error.message);
+      showToast('error', t('sa.subs.errorWithMessage', { message: error.message }));
       return;
     }
     await supabase.from('subscription_payment_audit').insert({
@@ -203,9 +217,11 @@ export default function SubscriptionBillingPage() {
       new_status: 'open',
       amount: inv.amount,
       changed_by: user!.id,
+      // Persisted audit-trail text, not a label: the row keeps the wording it
+      // was written with, whatever language the operator's UI was in.
       note: 'Als unbezahlt markiert',
     });
-    showToast('success', 'Rechnung als offen markiert');
+    showToast('success', t('sa.subs.markedOpen'));
     loadData();
   };
 
@@ -216,7 +232,7 @@ export default function SubscriptionBillingPage() {
       .update({ status: 'canceled' })
       .eq('id', inv.id);
     if (error) {
-      showToast('error', 'Fehler: ' + error.message);
+      showToast('error', t('sa.subs.errorWithMessage', { message: error.message }));
       return;
     }
     await supabase.from('subscription_payment_audit').insert({
@@ -228,11 +244,13 @@ export default function SubscriptionBillingPage() {
       amount: inv.amount,
       changed_by: user!.id,
     });
-    showToast('success', 'Rechnung storniert');
+    showToast('success', t('sa.subs.invoiceCanceled'));
     loadData();
   };
 
   // ── PDF download ──
+  // Every literal below feeds generateSubscriptionPdf and is therefore German
+  // in both languages: the PDF is a German payment record.
   const handleDownloadPdf = (inv: Invoice) => {
     const planName = inv.company_subscriptions?.subscription_plans?.name || 'Abonnement';
     const co = inv.companies;
@@ -262,9 +280,11 @@ export default function SubscriptionBillingPage() {
     };
 
     const doc = generateSubscriptionPdf(pdfData);
+    // German in both languages: this word is the export filename and also
+    // appears inside the generated PDF, which is a German payment record.
     const label = inv.status === 'paid' ? 'Quittung' : 'Rechnung';
     doc.save(`${label}_${inv.invoice_number}.pdf`);
-    showToast('success', `${label} heruntergeladen`);
+    showToast('success', t('sa.subs.pdfDownloaded', { label }));
   };
 
   // ── Status badge ──
@@ -273,10 +293,10 @@ export default function SubscriptionBillingPage() {
     const displayStatus = isOverdue ? 'overdue' : status;
 
     const config: Record<string, { bg: string; text: string; label: string; icon: React.ElementType }> = {
-      open:     { bg: 'rgba(59,130,246,0.12)', text: 'var(--accent)',  label: 'Offen',        icon: Clock },
-      paid:     { bg: 'rgba(34,197,94,0.12)',   text: 'var(--success)', label: 'Bezahlt',      icon: CheckCircle },
-      overdue:  { bg: 'rgba(239,68,68,0.12)',   text: 'var(--danger)',  label: '\u00DCberf\u00E4llig', icon: AlertTriangle },
-      canceled: { bg: 'rgba(148,163,184,0.15)', text: 'var(--text-tertiary)', label: 'Storniert', icon: XCircle },
+      open:     { bg: 'rgba(59,130,246,0.12)', text: 'var(--accent)',  label: t('sa.subs.invoiceStatus.open'),     icon: Clock },
+      paid:     { bg: 'rgba(34,197,94,0.12)',   text: 'var(--success)', label: t('sa.subs.invoiceStatus.paid'),     icon: CheckCircle },
+      overdue:  { bg: 'rgba(239,68,68,0.12)',   text: 'var(--danger)',  label: t('sa.subs.invoiceStatus.overdue'),  icon: AlertTriangle },
+      canceled: { bg: 'rgba(148,163,184,0.15)', text: 'var(--text-tertiary)', label: t('sa.subs.invoiceStatus.canceled'), icon: XCircle },
     };
     const c = config[displayStatus] || config.open;
     const Icon = c.icon;
@@ -317,7 +337,7 @@ export default function SubscriptionBillingPage() {
                 onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
                 onClick={() => { setOpen(false); setDetailInvoice(inv); }}
               >
-                <Eye size={14} /> Anzeigen
+                <Eye size={14} /> {t('sa.subs.actionView')}
               </button>
               {inv.status !== 'paid' && inv.status !== 'canceled' && (
                 <button className="w-full text-left px-3 py-2 text-sm flex items-center gap-2 transition-colors"
@@ -326,7 +346,7 @@ export default function SubscriptionBillingPage() {
                   onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
                   onClick={() => { setOpen(false); setMarkPaidInvoice(inv); }}
                 >
-                  <Banknote size={14} /> Als bar bezahlt
+                  <Banknote size={14} /> {t('sa.subs.actionMarkPaidCash')}
                 </button>
               )}
               {inv.status === 'paid' && (
@@ -336,7 +356,7 @@ export default function SubscriptionBillingPage() {
                   onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
                   onClick={() => { setOpen(false); handleMarkUnpaid(inv); }}
                 >
-                  <XCircle size={14} /> Als unbezahlt
+                  <XCircle size={14} /> {t('sa.subs.actionMarkUnpaid')}
                 </button>
               )}
               {inv.status !== 'canceled' && (
@@ -346,7 +366,7 @@ export default function SubscriptionBillingPage() {
                   onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
                   onClick={() => { setOpen(false); handleCancel(inv); }}
                 >
-                  <XCircle size={14} /> Stornieren
+                  <XCircle size={14} /> {t('sa.subs.actionCancel')}
                 </button>
               )}
               <button className="w-full text-left px-3 py-2 text-sm flex items-center gap-2 transition-colors"
@@ -355,7 +375,7 @@ export default function SubscriptionBillingPage() {
                 onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
                 onClick={() => { setOpen(false); handleDownloadPdf(inv); }}
               >
-                <Download size={14} /> {inv.status === 'paid' ? 'Quittung' : 'Rechnung'} PDF
+                <Download size={14} /> {t(inv.status === 'paid' ? 'sa.subs.actionReceiptPdf' : 'sa.subs.actionInvoicePdf')}
               </button>
             </div>
           </>
@@ -365,7 +385,7 @@ export default function SubscriptionBillingPage() {
   };
 
   if (!isSuperAdmin) {
-    return <div className="p-8" style={{ color: 'var(--text-secondary)' }}>Zugriff verweigert.</div>;
+    return <div className="p-8" style={{ color: 'var(--text-secondary)' }}>{t('sa.subs.accessDenied')}</div>;
   }
 
   if (loading) {
@@ -385,9 +405,9 @@ export default function SubscriptionBillingPage() {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>Abos & Zahlungen</h1>
+          <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>{t('sa.subs.title')}</h1>
           <p className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>
-            Barzahlungen verwalten und Rechnungen erstellen
+            {t('sa.subs.subtitle')}
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -398,7 +418,7 @@ export default function SubscriptionBillingPage() {
             onMouseEnter={e => (e.currentTarget.style.opacity = '0.9')}
             onMouseLeave={e => (e.currentTarget.style.opacity = '1')}
           >
-            <FileText size={16} /> Rechnungen generieren
+            <FileText size={16} /> {t('sa.subs.generateInvoices')}
           </button>
           <button
             onClick={() => setShowAssignModal(true)}
@@ -407,7 +427,7 @@ export default function SubscriptionBillingPage() {
             onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-muted)')}
             onMouseLeave={e => (e.currentTarget.style.background = 'var(--bg-surface)')}
           >
-            <Plus size={16} /> Abo zuweisen
+            <Plus size={16} /> {t('sa.subs.assignSubscription')}
           </button>
           <button
             onClick={() => setShowPlanModal(true)}
@@ -416,7 +436,7 @@ export default function SubscriptionBillingPage() {
             onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-muted)')}
             onMouseLeave={e => (e.currentTarget.style.background = 'var(--bg-surface)')}
           >
-            <CreditCard size={16} /> Pl\u00E4ne verwalten
+            <CreditCard size={16} /> {t('sa.subs.managePlans')}
           </button>
         </div>
       </div>
@@ -424,12 +444,12 @@ export default function SubscriptionBillingPage() {
       {/* KPI Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
         {[
-          { label: 'Aktive Abos', value: activeSubCount, icon: CreditCard, color: 'var(--accent)' },
-          { label: 'Offene Rechnungen', value: openInvoices.length, icon: Clock, color: 'var(--warning)' },
-          { label: 'Bezahlt (Monat)', value: paidThisMonth.length, icon: CheckCircle, color: 'var(--success)' },
-          { label: '\u00DCberf\u00E4llig', value: overdueInvoices.length, icon: AlertTriangle, color: 'var(--danger)' },
-          { label: 'Erwartet', value: fmtEur(totalExpected), icon: TrendingUp, color: 'var(--accent)' },
-          { label: 'Eingesammelt', value: fmtEur(totalCollected), icon: Banknote, color: 'var(--success)' },
+          { label: t('sa.subs.kpi.activeSubs'), value: activeSubCount, icon: CreditCard, color: 'var(--accent)' },
+          { label: t('sa.subs.kpi.openInvoices'), value: openInvoices.length, icon: Clock, color: 'var(--warning)' },
+          { label: t('sa.subs.kpi.paidThisMonth'), value: paidThisMonth.length, icon: CheckCircle, color: 'var(--success)' },
+          { label: t('sa.subs.invoiceStatus.overdue'), value: overdueInvoices.length, icon: AlertTriangle, color: 'var(--danger)' },
+          { label: t('sa.subs.kpi.expected'), value: fmtEur(totalExpected), icon: TrendingUp, color: 'var(--accent)' },
+          { label: t('sa.subs.kpi.collected'), value: fmtEur(totalCollected), icon: Banknote, color: 'var(--success)' },
         ].map((kpi, i) => {
           const Icon = kpi.icon;
           return (
@@ -449,7 +469,11 @@ export default function SubscriptionBillingPage() {
       {/* Tabs */}
       <div className="flex gap-1 p-1 rounded-xl" style={{ background: 'var(--bg-subtle)' }}>
         {(['invoices', 'subscriptions', 'plans'] as const).map(tab => {
-          const labels = { invoices: 'Rechnungen', subscriptions: 'Abonnements', plans: 'Pl\u00E4ne' };
+          const labels = {
+            invoices: t('sa.subs.tab.invoices'),
+            subscriptions: t('sa.subs.tab.subscriptions'),
+            plans: t('sa.subs.tab.plans'),
+          };
           const icons = { invoices: Receipt, subscriptions: CalendarDays, plans: CreditCard };
           const Icon = icons[tab];
           return (
@@ -479,7 +503,7 @@ export default function SubscriptionBillingPage() {
               <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--text-tertiary)' }} />
               <input
                 type="text"
-                placeholder="Suche nach Firma oder Nummer..."
+                placeholder={t('sa.subs.searchPlaceholder')}
                 value={searchTerm}
                 onChange={e => setSearchTerm(e.target.value)}
                 className="w-full pl-9 pr-3 py-2.5 rounded-xl text-sm"
@@ -492,8 +516,8 @@ export default function SubscriptionBillingPage() {
               className="px-3 py-2.5 rounded-xl text-sm"
               style={{ background: 'var(--bg-surface)', color: 'var(--text-primary)', border: '1px solid var(--border)' }}
             >
-              <option value={0}>Alle Monate</option>
-              {MONTHS_DE.map((m, i) => <option key={i} value={i + 1}>{m}</option>)}
+              <option value={0}>{t('sa.subs.filterAllMonths')}</option>
+              {MONTH_KEYS.map((monthKey, i) => <option key={i} value={i + 1}>{t(monthKey)}</option>)}
             </select>
             <select
               value={filterYear}
@@ -509,10 +533,10 @@ export default function SubscriptionBillingPage() {
               className="px-3 py-2.5 rounded-xl text-sm"
               style={{ background: 'var(--bg-surface)', color: 'var(--text-primary)', border: '1px solid var(--border)' }}
             >
-              <option value="all">Alle Status</option>
-              <option value="open">Offen</option>
-              <option value="paid">Bezahlt</option>
-              <option value="canceled">Storniert</option>
+              <option value="all">{t('sa.subs.filterAllStatuses')}</option>
+              <option value="open">{t('sa.subs.invoiceStatus.open')}</option>
+              <option value="paid">{t('sa.subs.invoiceStatus.paid')}</option>
+              <option value="canceled">{t('sa.subs.invoiceStatus.canceled')}</option>
             </select>
             <select
               value={filterCompany}
@@ -520,7 +544,7 @@ export default function SubscriptionBillingPage() {
               className="px-3 py-2.5 rounded-xl text-sm"
               style={{ background: 'var(--bg-surface)', color: 'var(--text-primary)', border: '1px solid var(--border)' }}
             >
-              <option value="all">Alle Firmen</option>
+              <option value="all">{t('sa.subs.filterAllCompanies')}</option>
               {[...companyMap.entries()].sort((a, b) => a[1].localeCompare(b[1])).map(([id, name]) => (
                 <option key={id} value={id}>{name}</option>
               ))}
@@ -533,8 +557,12 @@ export default function SubscriptionBillingPage() {
               <table className="w-full text-sm">
                 <thead>
                   <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                    {['Firma', 'Plan', 'Monat/Jahr', 'Nr.', 'Betrag', 'Status', 'F\u00E4llig', 'Bezahlt am', ''].map((h, i) => (
-                      <th key={i} className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>{h}</th>
+                    {([
+                      'sa.subs.col.company', 'sa.subs.col.plan', 'sa.subs.col.monthYear',
+                      'sa.subs.col.number', 'common.amount', 'common.status',
+                      'sa.subs.col.due', 'sa.subs.col.paidOn', null,
+                    ] as const).map((h, i) => (
+                      <th key={i} className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>{h ? t(h) : ''}</th>
                     ))}
                   </tr>
                 </thead>
@@ -543,7 +571,7 @@ export default function SubscriptionBillingPage() {
                     <tr>
                       <td colSpan={9} className="text-center py-12" style={{ color: 'var(--text-tertiary)' }}>
                         <Receipt size={32} className="mx-auto mb-2 opacity-40" />
-                        <p>Keine Rechnungen gefunden</p>
+                        <p>{t('sa.subs.noInvoices')}</p>
                       </td>
                     </tr>
                   ) : filteredInvoices.map(inv => (
@@ -561,7 +589,7 @@ export default function SubscriptionBillingPage() {
                         {inv.company_subscriptions?.subscription_plans?.name || '-'}
                       </td>
                       <td className="px-4 py-3" style={{ color: 'var(--text-secondary)' }}>
-                        {MONTHS_DE[inv.invoice_month - 1]} {inv.invoice_year}
+                        {monthLabel(t, inv.invoice_month)} {inv.invoice_year}
                       </td>
                       <td className="px-4 py-3 font-mono text-xs" style={{ color: 'var(--text-tertiary)' }}>
                         {inv.invoice_number}
@@ -597,8 +625,12 @@ export default function SubscriptionBillingPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                  {['Firma', 'Plan', 'Preis/Monat', 'Status', 'Start', 'Zahlung', 'Abrechnungstag'].map((h, i) => (
-                    <th key={i} className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>{h}</th>
+                  {([
+                    'sa.subs.col.company', 'sa.subs.col.plan', 'sa.subs.col.pricePerMonth',
+                    'common.status', 'sa.subs.col.start', 'sa.subs.col.payment',
+                    'sa.subs.col.billingDay',
+                  ] as const).map((h, i) => (
+                    <th key={i} className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>{t(h)}</th>
                   ))}
                 </tr>
               </thead>
@@ -607,7 +639,7 @@ export default function SubscriptionBillingPage() {
                   <tr>
                     <td colSpan={7} className="text-center py-12" style={{ color: 'var(--text-tertiary)' }}>
                       <CalendarDays size={32} className="mx-auto mb-2 opacity-40" />
-                      <p>Keine Abonnements vorhanden</p>
+                      <p>{t('sa.subs.noSubscriptions')}</p>
                     </td>
                   </tr>
                 ) : subscriptions.map(sub => (
@@ -633,10 +665,10 @@ export default function SubscriptionBillingPage() {
                       {(() => { try { return format(new Date(sub.starts_at), 'dd.MM.yyyy'); } catch { return sub.starts_at; } })()}
                     </td>
                     <td className="px-4 py-3" style={{ color: 'var(--text-secondary)' }}>
-                      Barzahlung
+                      {t('sa.subs.paymentCash')}
                     </td>
                     <td className="px-4 py-3" style={{ color: 'var(--text-secondary)' }}>
-                      {sub.billing_day}. des Monats
+                      {t('sa.subs.dayOfMonth', { day: sub.billing_day })}
                     </td>
                   </tr>
                 ))}
@@ -652,13 +684,13 @@ export default function SubscriptionBillingPage() {
           {plans.length === 0 ? (
             <div className="col-span-full text-center py-16" style={{ color: 'var(--text-tertiary)' }}>
               <CreditCard size={40} className="mx-auto mb-3 opacity-40" />
-              <p className="text-sm">Noch keine Pl\u00E4ne erstellt</p>
+              <p className="text-sm">{t('sa.subs.noPlans')}</p>
               <button
                 onClick={() => setShowPlanModal(true)}
                 className="mt-4 px-4 py-2 rounded-xl text-sm font-medium"
                 style={{ background: 'var(--accent)', color: 'white' }}
               >
-                Plan erstellen
+                {t('sa.subs.createPlan')}
               </button>
             </div>
           ) : plans.map(plan => {
@@ -672,14 +704,14 @@ export default function SubscriptionBillingPage() {
                 <div className="flex items-center justify-between">
                   <h3 className="font-bold text-lg" style={{ color: 'var(--text-primary)' }}>{plan.name}</h3>
                   {!plan.is_active && (
-                    <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: 'rgba(239,68,68,0.12)', color: 'var(--danger)' }}>Inaktiv</span>
+                    <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: 'rgba(239,68,68,0.12)', color: 'var(--danger)' }}>{t('sa.status.inactive')}</span>
                   )}
                 </div>
-                <p className="text-2xl font-bold" style={{ color: 'var(--accent)' }}>{fmtEur(plan.monthly_price)}<span className="text-sm font-normal" style={{ color: 'var(--text-tertiary)' }}>/Monat</span></p>
+                <p className="text-2xl font-bold" style={{ color: 'var(--accent)' }}>{fmtEur(plan.monthly_price)}<span className="text-sm font-normal" style={{ color: 'var(--text-tertiary)' }}>{t('sa.subs.perMonthSuffix')}</span></p>
                 <div className="space-y-1.5 text-sm" style={{ color: 'var(--text-secondary)' }}>
-                  <p>{plan.included_cars} Fahrzeuge inklusive</p>
-                  <p>{plan.drivers_per_car_limit} Fahrer pro Fahrzeug</p>
-                  <p>{subCount} aktive Abonnements</p>
+                  <p>{t('sa.subs.plan.carsIncluded', { count: plan.included_cars })}</p>
+                  <p>{t('sa.subs.plan.driversPerCar', { count: plan.drivers_per_car_limit })}</p>
+                  <p>{t('sa.subs.plan.activeSubscriptions', { count: subCount })}</p>
                 </div>
               </div>
             );

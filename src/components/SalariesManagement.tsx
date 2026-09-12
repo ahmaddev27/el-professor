@@ -14,12 +14,14 @@ import { exportSalariesToExcel } from '../utils/excelExport';
 import { getBusinessMonthRange } from '../utils/weekCalculations';
 import { generateDriverSalaryPdf } from '../utils/driverSalaryPdf';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
+import { useTranslation } from '../contexts/LanguageContext';
 
 interface SalariesManagementProps {
   drivers: Driver[];
 }
 
 const SalariesManagement: React.FC<SalariesManagementProps> = ({ drivers }) => {
+  const { t } = useTranslation();
   const [salaries, setSalaries] = useState<Salary[]>([]);
   const [incomes, setIncomes] = useState<Income[]>([]);
   const [calculations, setCalculations] = useState<SalaryCalculation[]>([]);
@@ -78,6 +80,8 @@ const SalariesManagement: React.FC<SalariesManagementProps> = ({ drivers }) => {
       // Both tables are paginated: PostgREST caps a response at 1000 rows without
       // reporting it, and a truncated income set understates a driver's revenue —
       // a figure this screen then writes into the salaries table.
+      // The `label` values below are interpolated into fetchAllPaginated's own German
+      // error template, so they stay German.
       const dataPromises = Promise.all([
         fetchAllPaginated<any>(
           (from, to) => supabase
@@ -109,7 +113,7 @@ const SalariesManagement: React.FC<SalariesManagementProps> = ({ drivers }) => {
       return { salaries: salariesRows, incomes: incomeRows };
     } catch (err: any) {
       console.error('Error loading data:', err);
-      showError('Fehler beim Laden', handleDatabaseError(err));
+      showError(t('common.errorLoad'), handleDatabaseError(err));
       setSalaries([]);
       setIncomes([]);
       return { salaries: [], incomes: [] };
@@ -217,11 +221,11 @@ const SalariesManagement: React.FC<SalariesManagementProps> = ({ drivers }) => {
 
   const handleExport = () => {
     if (calculations.length === 0) {
-      warning('Keine Daten', 'Es gibt keine Daten zum Exportieren');
+      warning(t('sal.export.noDataTitle'), t('sal.export.noDataMessage'));
       return;
     }
     exportSalariesToExcel(calculations, periodStart, periodEnd);
-    success('Export erfolgreich', 'Die Gehaltsdaten wurden als Excel-Datei exportiert');
+    success(t('sal.export.successTitle'), t('sal.export.successMessage'));
   };
 
   const openStatusModal = (salary: SalaryCalculation, newStatus: 'paid' | 'unpaid') => {
@@ -233,7 +237,7 @@ const SalariesManagement: React.FC<SalariesManagementProps> = ({ drivers }) => {
     if (!statusModal.salary) return;
 
     if (!isAdmin) {
-      showError('Keine Berechtigung', 'Nur Administratoren können den Status ändern');
+      showError(t('common.noPermission'), t('sal.adminOnlyStatus'));
       return;
     }
 
@@ -270,12 +274,12 @@ const SalariesManagement: React.FC<SalariesManagementProps> = ({ drivers }) => {
       await loadData();
       setStatusModal({ isOpen: false, salary: null, newStatus: 'unpaid' });
       success(
-        newStatus === 'paid' ? 'Als bezahlt markiert' : 'Als unbezahlt markiert',
-        `Gehalt für ${salary.driver_name} wurde aktualisiert`
+        newStatus === 'paid' ? t('sal.markedPaid') : t('sal.markedUnpaid'),
+        t('sal.salaryUpdated', { name: salary.driver_name })
       );
     } catch (err: any) {
       console.error('Error updating status:', err);
-      showError('Fehler beim Aktualisieren', handleDatabaseError(err));
+      showError(t('common.errorUpdate'), handleDatabaseError(err));
     }
   };
 
@@ -328,17 +332,17 @@ const SalariesManagement: React.FC<SalariesManagementProps> = ({ drivers }) => {
               <DollarSign className="text-white" size={32} />
             </div>
             <div>
-              <h1 className="text-3xl font-bold">Gehaltsabrechnung</h1>
-              <p className="text-blue-100 mt-1">Monatliche Gehälter pro Fahrer verwalten</p>
+              <h1 className="text-3xl font-bold">{t('sal.title')}</h1>
+              <p className="text-blue-100 mt-1">{t('sal.subtitle')}</p>
             </div>
           </div>
           <div className="text-right">
-            <p className="text-sm text-blue-100">Gesamt Fällig</p>
+            <p className="text-sm text-blue-100">{t('sal.totalDue')}</p>
             <p className="text-3xl font-bold">
-              {totalDue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
+              {totalDue.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
             </p>
             <p className="text-xs text-blue-200 mt-1">
-              {paidCount} bezahlt / {unpaidCount} unbezahlt
+              {t('sal.paidUnpaidCount', { paid: paidCount, unpaid: unpaidCount })}
             </p>
           </div>
         </div>
@@ -347,25 +351,25 @@ const SalariesManagement: React.FC<SalariesManagementProps> = ({ drivers }) => {
       {/* KPI Cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <div className="rounded-lg p-4" style={{ background: 'var(--bg-surface)', boxShadow: 'var(--shadow-sm)' }}>
-          <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>Gesamt Fällig</p>
+          <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>{t('sal.totalDue')}</p>
           <p className="text-2xl font-bold" style={{ color: 'var(--accent-text)' }}>
-            {totalDue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
+            {totalDue.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
           </p>
         </div>
         <div className="rounded-lg p-4" style={{ background: 'var(--bg-surface)', boxShadow: 'var(--shadow-sm)' }}>
-          <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>Trinkgeld</p>
+          <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>{t('sal.tips')}</p>
           <p className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>
-            {totalTips.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
+            {totalTips.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
           </p>
         </div>
         <div className="rounded-lg p-4" style={{ background: 'var(--bg-surface)', boxShadow: 'var(--shadow-sm)' }}>
-          <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>Umsatzanteil</p>
+          <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>{t('sal.revenueShare')}</p>
           <p className="text-2xl font-bold" style={{ color: 'var(--success)' }}>
-            {totalRevenueShare.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
+            {totalRevenueShare.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
           </p>
         </div>
         <div className="rounded-lg p-4" style={{ background: 'var(--bg-surface)', boxShadow: 'var(--shadow-sm)' }}>
-          <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>Status</p>
+          <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>{t('common.status')}</p>
           <div className="flex items-center gap-4 mt-1">
             <div className="flex items-center gap-1">
               <CheckCircle size={16} style={{ color: 'var(--success)' }} />
@@ -384,7 +388,7 @@ const SalariesManagement: React.FC<SalariesManagementProps> = ({ drivers }) => {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
           <div>
             <label htmlFor="month-selector" className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>
-              Monat
+              {t('common.month')}
             </label>
             <div className="relative">
               <Calendar className="absolute left-3 top-1/2 transform -translate-y-1/2" style={{ color: 'var(--text-tertiary)' }} size={16} />
@@ -401,7 +405,7 @@ const SalariesManagement: React.FC<SalariesManagementProps> = ({ drivers }) => {
 
           <div>
             <label htmlFor="from-date" className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>
-              Von
+              {t('sal.from')}
             </label>
             <input
               id="from-date"
@@ -415,7 +419,7 @@ const SalariesManagement: React.FC<SalariesManagementProps> = ({ drivers }) => {
 
           <div>
             <label htmlFor="to-date" className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>
-              Bis
+              {t('sal.to')}
             </label>
             <input
               id="to-date"
@@ -429,7 +433,7 @@ const SalariesManagement: React.FC<SalariesManagementProps> = ({ drivers }) => {
 
           <div>
             <label htmlFor="driver-filter" className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>
-              Fahrer
+              {t('common.driver')}
             </label>
             <select
               id="driver-filter"
@@ -438,7 +442,7 @@ const SalariesManagement: React.FC<SalariesManagementProps> = ({ drivers }) => {
               className="w-full"
               style={inputStyle}
             >
-              <option value="">Alle Fahrer</option>
+              <option value="">{t('common.allDrivers')}</option>
               {drivers.filter(driver => driver.status !== 'inactive').map(driver => (
                 <option key={driver.id} value={driver.id}>
                   {driver.name}
@@ -449,7 +453,7 @@ const SalariesManagement: React.FC<SalariesManagementProps> = ({ drivers }) => {
 
           <div>
             <label htmlFor="status-filter" className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>
-              Status
+              {t('common.status')}
             </label>
             <select
               id="status-filter"
@@ -458,9 +462,10 @@ const SalariesManagement: React.FC<SalariesManagementProps> = ({ drivers }) => {
               className="w-full"
               style={inputStyle}
             >
-              <option value="all">Alle</option>
-              <option value="paid">Bezahlt</option>
-              <option value="unpaid">Unbezahlt</option>
+              {/* The `value`s are the stored salary status, only the labels translate. */}
+              <option value="all">{t('common.all')}</option>
+              <option value="paid">{t('sal.status.paid')}</option>
+              <option value="unpaid">{t('sal.status.unpaid')}</option>
             </select>
           </div>
         </div>
@@ -472,7 +477,7 @@ const SalariesManagement: React.FC<SalariesManagementProps> = ({ drivers }) => {
             style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)' }}
           >
             <RefreshCw size={16} />
-            Zurücksetzen
+            {t('sal.resetFilters')}
           </button>
           <button
             onClick={handleExport}
@@ -483,11 +488,11 @@ const SalariesManagement: React.FC<SalariesManagementProps> = ({ drivers }) => {
                 ? { background: 'var(--bg-subtle)', color: 'var(--text-tertiary)', cursor: 'not-allowed' }
                 : { background: 'var(--accent)', color: 'white' }
             }
-            title={calculations.length === 0 ? 'Keine Daten zum Exportieren' : 'Als Excel exportieren'}
+            title={calculations.length === 0 ? t('sal.export.noDataTooltip') : t('common.exportExcelShort')}
             aria-disabled={calculations.length === 0}
           >
             <Download size={16} />
-            Excel exportieren
+            {t('sal.exportExcel')}
           </button>
         </div>
       </div>
@@ -499,34 +504,34 @@ const SalariesManagement: React.FC<SalariesManagementProps> = ({ drivers }) => {
             <thead style={{ background: 'var(--bg-subtle)' }}>
               <tr>
                 <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>
-                  Fahrer
+                  {t('common.driver')}
                 </th>
                 <th className="px-6 py-3 text-right text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>
-                  Umsatz (€)
+                  {t('sal.col.revenue')}
                 </th>
                 <th className="px-6 py-3 text-right text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>
-                  Anteil (%)
+                  {t('sal.col.ratio')}
                 </th>
                 <th className="px-6 py-3 text-right text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>
-                  Umsatzanteil (€)
+                  {t('sal.col.revenueShare')}
                 </th>
                 <th className="px-6 py-3 text-right text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>
-                  Trinkgeld (€)
+                  {t('sal.col.tips')}
                 </th>
                 <th className="px-6 py-3 text-right text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>
-                  Gesamtgehalt (€)
+                  {t('sal.col.totalSalary')}
                 </th>
                 <th className="px-6 py-3 text-right text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>
-                  Bezahlt (€)
+                  {t('sal.col.paid')}
                 </th>
                 <th className="px-6 py-3 text-right text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>
-                  Restbetrag (€)
+                  {t('sal.col.remaining')}
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>
-                  Status
+                  {t('common.status')}
                 </th>
                 <th className="px-6 py-3 text-right text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>
-                  Aktionen
+                  {t('sal.col.actions')}
                 </th>
               </tr>
             </thead>
@@ -534,7 +539,7 @@ const SalariesManagement: React.FC<SalariesManagementProps> = ({ drivers }) => {
               {calculations.length === 0 ? (
                 <tr>
                   <td colSpan={11} className="px-6 py-8 text-center" style={{ color: 'var(--text-secondary)' }}>
-                    Keine Gehaltsdaten für den ausgewählten Zeitraum
+                    {t('sal.noData')}
                   </td>
                 </tr>
               ) : (
@@ -549,29 +554,29 @@ const SalariesManagement: React.FC<SalariesManagementProps> = ({ drivers }) => {
                       {calc.driver_name}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-right" style={{ color: 'var(--text-primary)' }}>
-                      {calc.revenue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      {calc.revenue.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-right" style={{ color: 'var(--text-secondary)' }}>
                       {(calc.salary_ratio * 100).toFixed(1)}%
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-right font-semibold" style={{ color: 'var(--success)' }}>
-                      {calc.revenue_share.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      {calc.revenue_share.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-right font-semibold" style={{ color: 'var(--text-primary)' }}>
-                      {calc.tips.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      {calc.tips.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-right font-bold" style={{ color: 'var(--accent-text)' }}>
                       <div className="flex items-center justify-end gap-1">
-                        {(calc.netto_salary || calc.amount_due).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        {(calc.netto_salary || calc.amount_due).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         {calc.netto_salary && calc.netto_salary !== calc.amount_due && (
-                          <span className="text-xs" style={{ color: 'var(--accent)' }} title="Manuell angepasst">*</span>
+                          <span className="text-xs" style={{ color: 'var(--accent)' }} title={t('sal.manuallyAdjusted')}>*</span>
                         )}
                       </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-right">
                       {calc.total_paid ? (
                         <span className="font-semibold" style={{ color: 'var(--success)' }}>
-                          {calc.total_paid.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          {calc.total_paid.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </span>
                       ) : (
                         <span style={{ color: 'var(--text-tertiary)' }}>0.00</span>
@@ -579,24 +584,24 @@ const SalariesManagement: React.FC<SalariesManagementProps> = ({ drivers }) => {
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-right">
                       <span className="font-semibold" style={{ color: calc.remaining_balance > 0 ? 'var(--danger)' : 'var(--text-tertiary)' }}>
-                        {calc.remaining_balance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        {calc.remaining_balance.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </span>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm">
                       {calc.payment_status === 'paid' ? (
                         <span className="px-2 py-1 rounded-full text-xs font-medium flex items-center gap-1 w-fit" style={{ background: 'var(--success-subtle)', color: 'var(--success)' }}>
                           <CheckCircle size={12} />
-                          Bezahlt
+                          {t('sal.status.paid')}
                         </span>
                       ) : calc.payment_status === 'partially_paid' ? (
                         <span className="px-2 py-1 rounded-full text-xs font-medium flex items-center gap-1 w-fit" style={{ background: 'var(--warning-subtle)', color: 'var(--warning)' }}>
                           <DollarSign size={12} />
-                          Teilweise
+                          {t('sal.status.partiallyShort')}
                         </span>
                       ) : (
                         <span className="px-2 py-1 rounded-full text-xs font-medium flex items-center gap-1 w-fit" style={{ background: 'var(--danger-subtle)', color: 'var(--danger)' }}>
                           <XCircle size={12} />
-                          Unbezahlt
+                          {t('sal.status.unpaid')}
                         </span>
                       )}
                     </td>
@@ -605,14 +610,14 @@ const SalariesManagement: React.FC<SalariesManagementProps> = ({ drivers }) => {
                         <button
                           onClick={() => showDriverDetails(calc.driver_name)}
                           style={{ color: 'var(--accent)' }}
-                          title="Umsatzdetails anzeigen"
+                          title={t('sal.action.viewRevenueDetails')}
                         >
                           <Eye size={18} />
                         </button>
                         <button
                           onClick={() => generateDriverSalaryPdf({ salary: calc, settings, showNote: false })}
                           style={{ color: 'var(--text-secondary)', cursor: 'pointer' }}
-                          title="Zusammenfassung für Fahrer (PDF)"
+                          title={t('sal.action.driverSummaryPdf')}
                         >
                           <FileText size={18} />
                         </button>
@@ -620,7 +625,7 @@ const SalariesManagement: React.FC<SalariesManagementProps> = ({ drivers }) => {
                           onClick={() => setSalaryDetailsModal({ isOpen: true, salary: calc })}
                           disabled={!isAdmin}
                           style={isAdmin ? { color: 'var(--success)', cursor: 'pointer' } : { color: 'var(--text-tertiary)', cursor: 'not-allowed' }}
-                          title={isAdmin ? 'Zahlungen verwalten' : 'Nur Admin'}
+                          title={isAdmin ? t('sal.action.managePayments') : t('sal.adminOnlyShort')}
                         >
                           <DollarSign size={18} />
                         </button>
@@ -639,12 +644,13 @@ const SalariesManagement: React.FC<SalariesManagementProps> = ({ drivers }) => {
         isOpen={statusModal.isOpen}
         onClose={() => setStatusModal({ isOpen: false, salary: null, newStatus: 'unpaid' })}
         onConfirm={handleStatusChange}
-        title={statusModal.newStatus === 'paid' ? 'Als bezahlt markieren' : 'Als unbezahlt markieren'}
+        title={statusModal.newStatus === 'paid' ? t('sal.confirm.markPaidTitle') : t('sal.confirm.markUnpaidTitle')}
         message={
           statusModal.salary
-            ? `Möchten Sie das Gehalt von ${statusModal.salary.driver_name} wirklich als ${
-                statusModal.newStatus === 'paid' ? 'bezahlt' : 'unbezahlt'
-              } markieren?\n\nBetrag: ${statusModal.salary.amount_due.toFixed(2)} €`
+            ? t(
+                statusModal.newStatus === 'paid' ? 'sal.confirm.markPaidMessage' : 'sal.confirm.markUnpaidMessage',
+                { name: statusModal.salary.driver_name, amount: statusModal.salary.amount_due.toFixed(2) },
+              )
             : ''
         }
         type={statusModal.newStatus === 'paid' ? 'success' : 'warning'}
@@ -653,10 +659,10 @@ const SalariesManagement: React.FC<SalariesManagementProps> = ({ drivers }) => {
       {/* Driver Details Modal */}
       {detailsModal.isOpen && (() => {
         const transactions = detailsModal.transactions;
-        const umsatzTotal = transactions.filter(t => t.type === 'umsatz').reduce((sum, t) => sum + Number(t.amount), 0);
-        const aktionenTotal = transactions.filter(t => t.type === 'aktionen').reduce((sum, t) => sum + Number(t.amount), 0);
-        const trinkgeldTotal = transactions.filter(t => t.type === 'trinkgeld').reduce((sum, t) => sum + Number(t.amount), 0);
-        const bargeldTotal = transactions.filter(t => t.type === 'bargeld').reduce((sum, t) => sum + Number(t.amount), 0);
+        const umsatzTotal = transactions.filter(tx => tx.type === 'umsatz').reduce((sum, tx) => sum + Number(tx.amount), 0);
+        const aktionenTotal = transactions.filter(tx => tx.type === 'aktionen').reduce((sum, tx) => sum + Number(tx.amount), 0);
+        const trinkgeldTotal = transactions.filter(tx => tx.type === 'trinkgeld').reduce((sum, tx) => sum + Number(tx.amount), 0);
+        const bargeldTotal = transactions.filter(tx => tx.type === 'bargeld').reduce((sum, tx) => sum + Number(tx.amount), 0);
         const totalIncome = umsatzTotal + aktionenTotal + trinkgeldTotal + bargeldTotal;
 
         const getTypeStyle = (type: string): React.CSSProperties => {
@@ -669,12 +675,13 @@ const SalariesManagement: React.FC<SalariesManagementProps> = ({ drivers }) => {
           }
         };
 
+        // `type` is the stored income type; only the returned label is translated.
         const getTypeLabel = (type: string) => {
           switch (type) {
-            case 'umsatz': return 'Umsatz';
-            case 'aktionen': return 'Aktionen';
-            case 'trinkgeld': return 'Trinkgeld';
-            case 'bargeld': return 'Bargeld';
+            case 'umsatz': return t('sal.type.umsatz');
+            case 'aktionen': return t('sal.type.aktionen');
+            case 'trinkgeld': return t('sal.type.trinkgeld');
+            case 'bargeld': return t('sal.type.bargeld');
             default: return type;
           }
         };
@@ -686,7 +693,7 @@ const SalariesManagement: React.FC<SalariesManagementProps> = ({ drivers }) => {
               <div className="p-6" style={{ borderBottom: '1px solid var(--border)' }}>
                 <div className="flex items-center justify-between">
                   <h3 className="text-xl font-bold" style={{ color: 'var(--text-primary)' }}>
-                    Transaktionen: {detailsModal.driverName}
+                    {t('sal.transactions.title', { name: detailsModal.driverName })}
                   </h3>
                   <button
                     onClick={() => setDetailsModal({ isOpen: false, driverName: '', transactions: [] })}
@@ -699,30 +706,30 @@ const SalariesManagement: React.FC<SalariesManagementProps> = ({ drivers }) => {
 
               {/* Summary Section */}
               <div className="p-6" style={{ background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)' }}>
-                <h4 className="text-sm font-semibold mb-4" style={{ color: 'var(--text-secondary)' }}>Zusammenfassung</h4>
+                <h4 className="text-sm font-semibold mb-4" style={{ color: 'var(--text-secondary)' }}>{t('common.summary')}</h4>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                   <div className="rounded-lg p-4" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
-                    <div className="text-xs mb-1" style={{ color: 'var(--text-tertiary)' }}>Umsatz</div>
+                    <div className="text-xs mb-1" style={{ color: 'var(--text-tertiary)' }}>{t('sal.type.umsatz')}</div>
                     <div className="text-lg font-bold" style={{ color: 'var(--success)' }}>
                       {umsatzTotal.toFixed(2)} €
                     </div>
                   </div>
                   {aktionenTotal > 0 && (
                     <div className="rounded-lg p-4" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
-                      <div className="text-xs mb-1" style={{ color: 'var(--text-tertiary)' }}>Aktionen</div>
+                      <div className="text-xs mb-1" style={{ color: 'var(--text-tertiary)' }}>{t('sal.type.aktionen')}</div>
                       <div className="text-lg font-bold" style={{ color: 'var(--warning)' }}>
                         {aktionenTotal.toFixed(2)} €
                       </div>
                     </div>
                   )}
                   <div className="rounded-lg p-4" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
-                    <div className="text-xs mb-1" style={{ color: 'var(--text-tertiary)' }}>Trinkgeld</div>
+                    <div className="text-xs mb-1" style={{ color: 'var(--text-tertiary)' }}>{t('sal.type.trinkgeld')}</div>
                     <div className="text-lg font-bold" style={{ color: 'var(--success)' }}>
                       {trinkgeldTotal.toFixed(2)} €
                     </div>
                   </div>
                   <div className="rounded-lg p-4" style={{ background: 'var(--accent-subtle)', border: '1px solid var(--accent)' }}>
-                    <div className="text-xs mb-1 font-medium" style={{ color: 'var(--accent-text)' }}>Gesamt</div>
+                    <div className="text-xs mb-1 font-medium" style={{ color: 'var(--accent-text)' }}>{t('sal.total')}</div>
                     <div className="text-lg font-bold" style={{ color: 'var(--accent-text)' }}>
                       {totalIncome.toFixed(2)} €
                     </div>
@@ -736,19 +743,19 @@ const SalariesManagement: React.FC<SalariesManagementProps> = ({ drivers }) => {
                   <table className="w-full">
                     <thead className="sticky top-0" style={{ background: 'var(--bg-subtle)' }}>
                       <tr>
-                        <th className="px-4 py-2 text-left text-xs font-medium uppercase" style={{ color: 'var(--text-tertiary)' }}>Datum</th>
-                        <th className="px-4 py-2 text-left text-xs font-medium uppercase" style={{ color: 'var(--text-tertiary)' }}>Typ</th>
+                        <th className="px-4 py-2 text-left text-xs font-medium uppercase" style={{ color: 'var(--text-tertiary)' }}>{t('common.date')}</th>
+                        <th className="px-4 py-2 text-left text-xs font-medium uppercase" style={{ color: 'var(--text-tertiary)' }}>{t('sal.col.type')}</th>
                         <th className="px-4 py-2 text-left text-xs font-medium uppercase" style={{ color: 'var(--text-tertiary)' }}>
-                          Beschreibung
+                          {t('common.description')}
                         </th>
-                        <th className="px-4 py-2 text-right text-xs font-medium uppercase" style={{ color: 'var(--text-tertiary)' }}>Betrag</th>
+                        <th className="px-4 py-2 text-right text-xs font-medium uppercase" style={{ color: 'var(--text-tertiary)' }}>{t('common.amount')}</th>
                       </tr>
                     </thead>
                     <tbody>
                       {transactions.length === 0 ? (
                         <tr>
                           <td colSpan={4} className="px-4 py-8 text-center" style={{ color: 'var(--text-secondary)' }}>
-                            Keine Transaktionen
+                            {t('sal.noTransactions')}
                           </td>
                         </tr>
                       ) : (
@@ -769,7 +776,7 @@ const SalariesManagement: React.FC<SalariesManagementProps> = ({ drivers }) => {
                             </td>
                             <td className="px-4 py-2 text-sm" style={{ color: 'var(--text-primary)' }}>{transaction.description}</td>
                             <td className="px-4 py-2 text-sm text-right font-semibold" style={{ color: transaction.type === 'bargeld' ? 'var(--danger)' : 'var(--success)' }}>
-                              {Number(transaction.amount).toLocaleString('en-US', {
+                              {Number(transaction.amount).toLocaleString('de-DE', {
                                 minimumFractionDigits: 2,
                                 maximumFractionDigits: 2
                               })}{' '}

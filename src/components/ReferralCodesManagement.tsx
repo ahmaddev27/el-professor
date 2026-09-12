@@ -1,6 +1,8 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 import { useToast } from '../contexts/ToastContext';
+import { useTranslation } from '../contexts/LanguageContext';
+import type { TranslationKey } from '../i18n';
 import { Plus, CreditCard as Edit2, Trash2, RefreshCw, Gift, Check, X, ToggleLeft, ToggleRight } from 'lucide-react';
 import { format } from 'date-fns';
 import { de } from 'date-fns/locale';
@@ -28,8 +30,20 @@ interface Props {
 
 const emptyForm = { ref_code: '', name: '', description: '' };
 
+// Holds TranslationKeys: this list is module-level and t() is a hook value. The
+// trailing empty key labels the action column, which has no header.
+const TABLE_HEADER_KEYS: (TranslationKey | null)[] = [
+  'codes.col.code',
+  'codes.col.name',
+  'codes.col.usages',
+  'common.status',
+  'codes.details.created',
+  null,
+];
+
 export default function ReferralCodesManagement({ companies }: Props) {
   const { showToast } = useToast();
+  const { t, tPlural } = useTranslation();
   const [referrals, setReferrals] = useState<ReferralCode[]>([]);
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState(emptyForm);
@@ -57,7 +71,7 @@ export default function ReferralCodesManagement({ companies }: Props) {
 
       setReferrals((data ?? []).map(r => ({ ...r, usage_count: usageMap[r.ref_code] ?? 0 })));
     } catch (err: any) {
-      showToast('error', err.message || 'Fehler beim Laden');
+      showToast('error', err.message || t('common.errorLoad'));
     } finally {
       setLoading(false);
     }
@@ -77,21 +91,21 @@ export default function ReferralCodesManagement({ companies }: Props) {
           .update({ ref_code: code, name, description: form.description.trim() || null, updated_at: new Date().toISOString() })
           .eq('id', editingId);
         if (error) throw error;
-        showToast('success', 'Empfehlungscode aktualisiert');
+        showToast('success', t('codes.referral.updated'));
       } else {
         const { data: { user } } = await supabase.auth.getUser();
         const { error } = await supabase
           .from('referrals')
           .insert({ ref_code: code, name, description: form.description.trim() || null, created_by: user?.id ?? null });
         if (error) throw error;
-        showToast('success', 'Empfehlungscode erstellt');
+        showToast('success', t('codes.referral.created'));
       }
       setForm(emptyForm);
       setEditingId(null);
       setShowForm(false);
       load();
     } catch (err: any) {
-      showToast('error', err.message || 'Fehler beim Speichern');
+      showToast('error', err.message || t('codes.saveFailed'));
     } finally {
       setSaving(false);
     }
@@ -104,22 +118,25 @@ export default function ReferralCodesManagement({ companies }: Props) {
         .update({ is_active: !r.is_active, updated_at: new Date().toISOString() })
         .eq('id', r.id);
       if (error) throw error;
-      showToast('success', `${r.ref_code} ${!r.is_active ? 'aktiviert' : 'deaktiviert'}`);
+      showToast('success', t(
+        !r.is_active ? 'codes.referral.activated' : 'codes.referral.deactivated',
+        { code: r.ref_code },
+      ));
       load();
     } catch (err: any) {
-      showToast('error', err.message || 'Fehler');
+      showToast('error', err.message || t('common.error'));
     }
   };
 
   const handleDelete = async (r: ReferralCode) => {
-    if (!window.confirm(`Empfehlungscode "${r.ref_code}" wirklich löschen?`)) return;
+    if (!window.confirm(t('codes.referral.deleteConfirm', { code: r.ref_code }))) return;
     try {
       const { error } = await supabase.from('referrals').delete().eq('id', r.id);
       if (error) throw error;
-      showToast('success', `${r.ref_code} gelöscht`);
+      showToast('success', t('codes.referral.deleted', { code: r.ref_code }));
       load();
     } catch (err: any) {
-      showToast('error', err.message || 'Fehler');
+      showToast('error', err.message || t('common.error'));
     }
   };
 
@@ -139,9 +156,9 @@ export default function ReferralCodesManagement({ companies }: Props) {
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Gift size={18} style={{ color: '#10b981' }} />
-          <h2 className="text-base font-semibold" style={{ color: 'var(--text-primary)' }}>Empfehlungscodes</h2>
+          <h2 className="text-base font-semibold" style={{ color: 'var(--text-primary)' }}>{t('codes.referral.title')}</h2>
           <span className="text-xs px-2 py-0.5 rounded-full font-semibold" style={{ background: 'rgba(16,185,129,0.1)', color: '#10b981' }}>
-            {referrals.length} Codes
+            {tPlural({ one: 'codes.countCode.one', other: 'codes.countCode.other' }, referrals.length)}
           </span>
         </div>
         <button
@@ -150,7 +167,7 @@ export default function ReferralCodesManagement({ companies }: Props) {
           style={{ background: '#10b981', color: 'white' }}
         >
           {showForm ? <X size={14} /> : <Plus size={14} />}
-          {showForm ? 'Abbrechen' : 'Neuer Code'}
+          {showForm ? t('common.cancel') : t('codes.referral.newShort')}
         </button>
       </div>
 
@@ -158,11 +175,11 @@ export default function ReferralCodesManagement({ companies }: Props) {
       {showForm && (
         <div className="p-5 space-y-4" style={cardStyle}>
           <h3 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
-            {editingId ? 'Code bearbeiten' : 'Neuer Empfehlungscode'}
+            {editingId ? t('codes.referral.edit') : t('codes.referral.new')}
           </h3>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-tertiary)' }}>Code *</label>
+              <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-tertiary)' }}>{t('codes.discount.codeRequired')}</label>
               <input
                 type="text"
                 value={form.ref_code}
@@ -173,24 +190,24 @@ export default function ReferralCodesManagement({ companies }: Props) {
               />
             </div>
             <div>
-              <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-tertiary)' }}>Name / Bezeichnung *</label>
+              <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-tertiary)' }}>{t('codes.referral.nameRequired')}</label>
               <input
                 type="text"
                 value={form.name}
                 onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
-                placeholder="z.B. Partner ABC"
+                placeholder={t('codes.referral.namePlaceholder')}
                 className={inputClass}
                 style={inputStyle}
               />
             </div>
           </div>
           <div>
-            <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-tertiary)' }}>Beschreibung (optional)</label>
+            <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-tertiary)' }}>{t('codes.field.descriptionOptional')}</label>
             <input
               type="text"
               value={form.description}
               onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
-              placeholder="z.B. Partnerschaft mit XYZ GmbH"
+              placeholder={t('codes.referral.descPlaceholder')}
               className={inputClass}
               style={inputStyle}
             />
@@ -201,7 +218,7 @@ export default function ReferralCodesManagement({ companies }: Props) {
               className="px-4 py-2 rounded-xl text-sm font-semibold"
               style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
             >
-              Abbrechen
+              {t('common.cancel')}
             </button>
             <button
               onClick={handleSave}
@@ -210,7 +227,7 @@ export default function ReferralCodesManagement({ companies }: Props) {
               style={{ background: '#10b981', color: 'white' }}
             >
               {saving ? <RefreshCw size={13} className="animate-spin" /> : <Check size={13} />}
-              {editingId ? 'Speichern' : 'Erstellen'}
+              {editingId ? t('common.save') : t('codes.actionCreate')}
             </button>
           </div>
         </div>
@@ -225,15 +242,15 @@ export default function ReferralCodesManagement({ companies }: Props) {
         ) : referrals.length === 0 ? (
           <div className="py-10 text-center" style={{ color: 'var(--text-tertiary)' }}>
             <Gift size={32} className="mx-auto mb-3 opacity-30" />
-            <p className="text-sm">Noch keine Empfehlungscodes</p>
+            <p className="text-sm">{t('codes.referral.none')}</p>
           </div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr style={{ background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)' }}>
-                  {['Code', 'Name', 'Nutzungen', 'Status', 'Erstellt', ''].map(h => (
-                    <th key={h} className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-tertiary)' }}>{h}</th>
+                  {TABLE_HEADER_KEYS.map((key, i) => (
+                    <th key={i} className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-tertiary)' }}>{key ? t(key) : ''}</th>
                   ))}
                 </tr>
               </thead>
@@ -261,7 +278,7 @@ export default function ReferralCodesManagement({ companies }: Props) {
                           style={{ color: (r.usage_count ?? 0) > 0 ? '#10b981' : 'var(--text-tertiary)' }}
                         >
                           {r.usage_count ?? 0}
-                          {(r.usage_count ?? 0) > 0 && <span className="text-[10px] font-normal">Unternehmen</span>}
+                          {(r.usage_count ?? 0) > 0 && <span className="text-[10px] font-normal">{t('codes.col.company')}</span>}
                         </button>
                       </td>
                       <td className="px-4 py-3">
@@ -271,7 +288,7 @@ export default function ReferralCodesManagement({ companies }: Props) {
                           style={{ color: r.is_active ? '#10b981' : 'var(--text-tertiary)' }}
                         >
                           {r.is_active ? <ToggleRight size={18} /> : <ToggleLeft size={18} />}
-                          {r.is_active ? 'Aktiv' : 'Inaktiv'}
+                          {r.is_active ? t('codes.status.active') : t('codes.status.inactive')}
                         </button>
                       </td>
                       <td className="px-4 py-3 text-xs" style={{ color: 'var(--text-tertiary)' }}>
@@ -308,7 +325,7 @@ export default function ReferralCodesManagement({ companies }: Props) {
                     {expandedCode === r.ref_code && (r.usage_count ?? 0) > 0 && (
                       <tr style={{ borderBottom: '1px solid var(--border)', background: 'var(--bg-subtle)' }}>
                         <td colSpan={6} className="px-6 py-3">
-                          <p className="text-[11px] font-semibold uppercase tracking-wider mb-2" style={{ color: 'var(--text-tertiary)' }}>Unternehmen mit diesem Code</p>
+                          <p className="text-[11px] font-semibold uppercase tracking-wider mb-2" style={{ color: 'var(--text-tertiary)' }}>{t('codes.referral.companiesUsing')}</p>
                           <div className="flex flex-wrap gap-2">
                             {companies
                               .filter(c => c.referral_code_used === r.ref_code)

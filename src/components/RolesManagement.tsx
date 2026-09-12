@@ -6,8 +6,10 @@ import RoleModal from './RoleModal';
 import ConfirmationModal from './ConfirmationModal';
 import { useToast } from '../contexts/ToastContext';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
+import { useTranslation } from '../contexts/LanguageContext';
 
 const RolesManagement: React.FC = () => {
+  const { t } = useTranslation();
   const [roles, setRoles] = useState<RoleWithPermissions[]>([]);
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -46,7 +48,7 @@ const RolesManagement: React.FC = () => {
       setRoles(rolesWithPermissions);
     } catch (error: any) {
       console.error('Error fetching roles:', error);
-      showToast('error', 'Fehler beim Laden der Rollen');
+      showToast('error', t('users.roles.error.load'));
     } finally {
       setLoading(false);
     }
@@ -55,7 +57,7 @@ const RolesManagement: React.FC = () => {
   const handleSaveRole = async (roleData: Partial<Role>, permissionsData: Partial<RolePermission>[]) => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error('Nicht angemeldet');
+      if (!user) throw new Error(t('users.notSignedIn'));
 
       if (roleData.id) {
         const { error: updateError } = await supabase
@@ -88,7 +90,7 @@ const RolesManagement: React.FC = () => {
 
         if (insertPermsError) throw insertPermsError;
 
-        showToast('success', 'Rolle erfolgreich aktualisiert');
+        showToast('success', t('users.roles.updated'));
       } else {
         const { data: newRole, error: insertError } = await supabase
           .from('roles')
@@ -117,7 +119,7 @@ const RolesManagement: React.FC = () => {
 
         if (insertPermsError) throw insertPermsError;
 
-        showToast('success', 'Rolle erfolgreich erstellt');
+        showToast('success', t('users.roles.created'));
       }
 
       await fetchRoles();
@@ -125,7 +127,7 @@ const RolesManagement: React.FC = () => {
       setSelectedRole(undefined);
     } catch (error: any) {
       console.error('Error saving role:', error);
-      throw new Error(error.message || 'Fehler beim Speichern der Rolle');
+      throw new Error(error.message || t('users.roles.error.save'));
     }
   };
 
@@ -136,7 +138,7 @@ const RolesManagement: React.FC = () => {
 
   const handleDeleteClick = (role: Role) => {
     if (role.is_system) {
-      showToast('error', 'Systemrollen können nicht gelöscht werden');
+      showToast('error', t('users.roles.systemCannotDelete'));
       return;
     }
     setRoleToDelete(role);
@@ -154,11 +156,11 @@ const RolesManagement: React.FC = () => {
 
       if (error) throw error;
 
-      showToast('success', 'Rolle erfolgreich gelöscht');
+      showToast('success', t('users.roles.deleted'));
       await fetchRoles();
     } catch (error: any) {
       console.error('Error deleting role:', error);
-      showToast('error', error.message || 'Fehler beim Löschen der Rolle');
+      showToast('error', error.message || t('users.roles.error.delete'));
     } finally {
       setIsDeleteModalOpen(false);
       setRoleToDelete(null);
@@ -168,13 +170,13 @@ const RolesManagement: React.FC = () => {
   const getPermissionsSummary = (permissions: RolePermission[]) => {
     const viewCount = permissions.filter(p => p.can_view).length;
     const editCount = permissions.filter(p => p.can_edit).length;
-    return `${viewCount} Ansehen / ${editCount} Bearbeiten`;
+    return t('users.roles.permissionsSummary', { view: viewCount, edit: editCount });
   };
 
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <div style={{ color: 'var(--text-secondary)' }}>Lade Rollen...</div>
+        <div style={{ color: 'var(--text-secondary)' }}>{t('users.roles.loading')}</div>
       </div>
     );
   }
@@ -183,9 +185,9 @@ const RolesManagement: React.FC = () => {
     <div className="space-y-6">
       <div className="flex justify-between items-center">
         <div>
-          <h2 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>Rollenverwaltung</h2>
+          <h2 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>{t('users.roles.title')}</h2>
           <p className="mt-1" style={{ color: 'var(--text-secondary)' }}>
-            Verwalten Sie Rollen und deren Berechtigungen
+            {t('users.roles.subtitle')}
           </p>
         </div>
         <button
@@ -197,7 +199,7 @@ const RolesManagement: React.FC = () => {
           style={{ background: 'var(--accent)', color: 'white' }}
         >
           <Plus size={20} />
-          <span>Neue Rolle</span>
+          <span>{t('users.roles.new')}</span>
         </button>
       </div>
 
@@ -207,19 +209,19 @@ const RolesManagement: React.FC = () => {
             <thead style={{ background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)' }}>
               <tr>
                 <th className="px-6 py-3 text-left text-sm font-semibold" style={{ color: 'var(--text-tertiary)' }}>
-                  Rolle
+                  {t('users.form.role')}
                 </th>
                 <th className="px-6 py-3 text-left text-sm font-semibold" style={{ color: 'var(--text-tertiary)' }}>
-                  Beschreibung
+                  {t('common.description')}
                 </th>
                 <th className="px-6 py-3 text-left text-sm font-semibold" style={{ color: 'var(--text-tertiary)' }}>
-                  Berechtigungen
+                  {t('users.roles.permissions')}
                 </th>
                 <th className="px-6 py-3 text-left text-sm font-semibold" style={{ color: 'var(--text-tertiary)' }}>
-                  Typ
+                  {t('users.roles.type')}
                 </th>
                 <th className="px-6 py-3 text-right text-sm font-semibold" style={{ color: 'var(--text-tertiary)' }}>
-                  Aktionen
+                  {t('users.table.actions')}
                 </th>
               </tr>
             </thead>
@@ -227,7 +229,7 @@ const RolesManagement: React.FC = () => {
               {roles.length === 0 ? (
                 <tr>
                   <td colSpan={5} className="px-6 py-8 text-center" style={{ color: 'var(--text-secondary)' }}>
-                    Keine Rollen vorhanden
+                    {t('users.roles.empty')}
                   </td>
                 </tr>
               ) : (
@@ -248,11 +250,11 @@ const RolesManagement: React.FC = () => {
                     <td className="px-6 py-4">
                       {role.is_system ? (
                         <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium" style={{ background: 'var(--bg-muted)', color: 'var(--text-secondary)' }}>
-                          System
+                          {t('users.roles.typeSystem')}
                         </span>
                       ) : (
                         <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium" style={{ background: 'var(--success-subtle)', color: 'var(--success)' }}>
-                          Benutzerdefiniert
+                          {t('users.roles.typeCustom')}
                         </span>
                       )}
                     </td>
@@ -262,7 +264,7 @@ const RolesManagement: React.FC = () => {
                           onClick={() => handleEditRole(role)}
                           className="p-2 rounded-lg transition-colors hover:opacity-80"
                           style={{ color: 'var(--accent-text)', background: 'transparent' }}
-                          title="Bearbeiten"
+                          title={t('common.edit')}
                         >
                           <Edit2 size={18} />
                         </button>
@@ -271,7 +273,7 @@ const RolesManagement: React.FC = () => {
                           disabled={role.is_system}
                           className="p-2 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed hover:opacity-80"
                           style={{ color: 'var(--danger)', background: 'transparent' }}
-                          title={role.is_system ? 'Systemrollen können nicht gelöscht werden' : 'Löschen'}
+                          title={role.is_system ? t('users.roles.systemCannotDelete') : t('common.delete')}
                         >
                           <Trash2 size={18} />
                         </button>
@@ -290,11 +292,13 @@ const RolesManagement: React.FC = () => {
           <div className="flex items-start space-x-2">
             <AlertCircle style={{ color: 'var(--accent-text)' }} className="flex-shrink-0 mt-0.5" size={20} />
             <div className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-              <p className="font-medium mb-1" style={{ color: 'var(--text-primary)' }}>Hinweis:</p>
+              <p className="font-medium mb-1" style={{ color: 'var(--text-primary)' }}>{t('users.roles.noteTitle')}</p>
               <ul className="list-disc list-inside space-y-1">
-                <li>Systemrollen (admin, supervisor, editor) können nicht gelöscht werden</li>
-                <li>Bearbeiten-Berechtigung erfordert automatisch Ansehen-Berechtigung</li>
-                <li>Änderungen an Rollen wirken sich sofort auf alle Benutzer mit dieser Rolle aus</li>
+                {/* `admin`, `supervisor` and `editor` inside this sentence are the stored
+                    role values, so both dictionaries name them verbatim. */}
+                <li>{t('users.roles.note.systemUndeletable')}</li>
+                <li>{t('users.roles.note.editImpliesView')}</li>
+                <li>{t('users.roles.note.immediateEffect')}</li>
               </ul>
             </div>
           </div>
@@ -320,9 +324,9 @@ const RolesManagement: React.FC = () => {
         }}
         onConfirm={handleDeleteConfirm}
         type="confirm"
-        title="Rolle löschen"
-        message={`Sind Sie sicher, dass Sie die Rolle "${roleToDelete?.name}" löschen möchten? Diese Aktion kann nicht rückgängig gemacht werden.`}
-        confirmText="Löschen"
+        title={t('users.roles.deleteTitle')}
+        message={t('users.roles.deleteConfirm', { name: roleToDelete?.name ?? '' })}
+        confirmText={t('common.delete')}
       />
     </div>
   );
