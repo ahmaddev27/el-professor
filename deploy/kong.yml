@@ -55,12 +55,22 @@ services:
             - DELETE
             - OPTIONS
           headers:
+            # Whatever supabase-js actually sends, or the browser fails the
+            # preflight and the request never leaves the tab — no server log,
+            # no error the user can act on, just a login that does nothing.
+            # X-Supabase-Api-Version is the one that bit: the client sends it on
+            # every auth call and it was missing from this list.
             - Content-Type
             - Authorization
             - X-Client-Info
+            - X-Supabase-Api-Version
             - Apikey
+            - apikey
             - Prefer
             - Range
+            - X-Requested-With
+            - Accept-Profile
+            - Content-Profile
           exposed_headers:
             - Content-Range
             - Content-Profile
@@ -89,12 +99,22 @@ services:
             - DELETE
             - OPTIONS
           headers:
+            # Whatever supabase-js actually sends, or the browser fails the
+            # preflight and the request never leaves the tab — no server log,
+            # no error the user can act on, just a login that does nothing.
+            # X-Supabase-Api-Version is the one that bit: the client sends it on
+            # every auth call and it was missing from this list.
             - Content-Type
             - Authorization
             - X-Client-Info
+            - X-Supabase-Api-Version
             - Apikey
+            - apikey
             - Prefer
             - Range
+            - X-Requested-With
+            - Accept-Profile
+            - Content-Profile
           exposed_headers:
             - Content-Range
             - Content-Profile
@@ -124,12 +144,22 @@ services:
             - DELETE
             - OPTIONS
           headers:
+            # Whatever supabase-js actually sends, or the browser fails the
+            # preflight and the request never leaves the tab — no server log,
+            # no error the user can act on, just a login that does nothing.
+            # X-Supabase-Api-Version is the one that bit: the client sends it on
+            # every auth call and it was missing from this list.
             - Content-Type
             - Authorization
             - X-Client-Info
+            - X-Supabase-Api-Version
             - Apikey
+            - apikey
             - Prefer
             - Range
+            - X-Requested-With
+            - Accept-Profile
+            - Content-Profile
           exposed_headers:
             - Content-Range
             - Content-Profile
@@ -161,12 +191,22 @@ services:
             - DELETE
             - OPTIONS
           headers:
+            # Whatever supabase-js actually sends, or the browser fails the
+            # preflight and the request never leaves the tab — no server log,
+            # no error the user can act on, just a login that does nothing.
+            # X-Supabase-Api-Version is the one that bit: the client sends it on
+            # every auth call and it was missing from this list.
             - Content-Type
             - Authorization
             - X-Client-Info
+            - X-Supabase-Api-Version
             - Apikey
+            - apikey
             - Prefer
             - Range
+            - X-Requested-With
+            - Accept-Profile
+            - Content-Profile
           exposed_headers:
             - Content-Range
             - Content-Profile
@@ -194,12 +234,22 @@ services:
             - DELETE
             - OPTIONS
           headers:
+            # Whatever supabase-js actually sends, or the browser fails the
+            # preflight and the request never leaves the tab — no server log,
+            # no error the user can act on, just a login that does nothing.
+            # X-Supabase-Api-Version is the one that bit: the client sends it on
+            # every auth call and it was missing from this list.
             - Content-Type
             - Authorization
             - X-Client-Info
+            - X-Supabase-Api-Version
             - Apikey
+            - apikey
             - Prefer
             - Range
+            - X-Requested-With
+            - Accept-Profile
+            - Content-Profile
           exposed_headers:
             - Content-Range
             - Content-Profile
