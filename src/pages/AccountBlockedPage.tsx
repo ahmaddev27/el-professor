@@ -1,6 +1,6 @@
 import React from 'react';
 import { UserX, LogOut, Mail } from 'lucide-react';
-import { useAuth, BLOCK_MESSAGES, BlockReason } from '../contexts/AuthContext';
+import { useAuth, BLOCK_MESSAGE_KEYS, BlockReason } from '../contexts/AuthContext';
 import { useTranslation } from '../contexts/LanguageContext';
 
 /**
@@ -35,7 +35,7 @@ const AccountBlockedPage: React.FC<{ reason: BlockReason }> = ({ reason }) => {
           <h1 className="text-xl font-bold text-white mb-3">{t('blocked.title')}</h1>
 
           <p className="text-white/55 text-sm leading-relaxed mb-6">
-            {BLOCK_MESSAGES[reason]}
+            {t(BLOCK_MESSAGE_KEYS[reason])}
           </p>
 
           <div className="p-4 rounded-xl border border-orange-500/20 bg-orange-500/5 mb-6">

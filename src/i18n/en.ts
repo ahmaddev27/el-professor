@@ -716,7 +716,7 @@ export const en: PartialDictionary = {
   'codes.discount.valuePositive':          'The discount value must be greater than 0.',
   'codes.discount.yearly':                 'Yearly',
   'codes.discount.yearlyOnly':             'Yearly only',
-  'codes.emailPlaceholder':                'nutzerbindung@beispiel.de',
+  'codes.emailPlaceholder':                'user@example.com',
   'codes.field.companyOptional':           'Company (optional)',
   'codes.field.descriptionOptional':       'Description (optional)',
   'codes.field.duration':                  'Duration',
@@ -3853,4 +3853,14 @@ export const en: PartialDictionary = {
   'stn.weekdayRule.weekdaysOnly':          'Mon, Tue, Wed, Thu, Fri (business rule)',
   'stn.weekdayRule.weekendOnly':           'Sat, Sun (business rule)',
   'werkstatt.deleteFailedReason':          'Could not delete: {error}',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'blocked.msg.companyDeleted':   'Your company account has been deleted. Please contact support.',
+  'blocked.msg.companyInactive':  'Your company account is no longer active. Please contact support.',
+  'blocked.msg.companyPending':   'Your registration is under review. Please wait for our team to approve it.',
+  'blocked.msg.companyRejected':  'Your registration was rejected. Please contact support.',
+  'blocked.msg.companySuspended': 'Your company account is suspended. Please contact support.',
+  'blocked.msg.userDeactivated':  'Your user account has been deactivated. Please contact your administrator.',
+  'blocked.msg.userInactive':     'Your user account is deactivated. Please contact your administrator.',
+  'blocked.msg.userSuspended':    'Your user account is suspended. Please contact your administrator.',
 };

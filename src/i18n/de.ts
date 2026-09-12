@@ -3851,4 +3851,14 @@ export const de = {
   'stn.weekdayRule.weekdaysOnly':          'Mo, Di, Mi, Do, Fr (Business Rule)',
   'stn.weekdayRule.weekendOnly':           'Sa, So (Business Rule)',
   'werkstatt.deleteFailedReason':          'Fehler beim Löschen: {error}',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'blocked.msg.companyDeleted':   'Ihr Unternehmenskonto wurde gelöscht. Bitte kontaktieren Sie den Support.',
+  'blocked.msg.companyInactive':  'Ihr Unternehmenskonto ist nicht mehr aktiv. Bitte kontaktieren Sie den Support.',
+  'blocked.msg.companyPending':   'Ihre Registrierung wird geprüft. Bitte warten Sie auf die Freischaltung durch unser Team.',
+  'blocked.msg.companyRejected':  'Ihre Registrierung wurde abgelehnt. Bitte kontaktieren Sie den Support.',
+  'blocked.msg.companySuspended': 'Ihr Unternehmenskonto ist gesperrt. Bitte kontaktieren Sie den Support.',
+  'blocked.msg.userDeactivated':  'Ihr Benutzerkonto wurde deaktiviert. Bitte kontaktieren Sie Ihren Administrator.',
+  'blocked.msg.userInactive':     'Ihr Benutzerkonto ist deaktiviert. Bitte kontaktieren Sie Ihren Administrator.',
+  'blocked.msg.userSuspended':    'Ihr Benutzerkonto ist gesperrt. Bitte kontaktieren Sie Ihren Administrator.',
 } as const;

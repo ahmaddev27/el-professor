@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { LogIn, Mail, Lock, Eye, EyeOff, AlertCircle } from 'lucide-react';
-import { useAuth } from '../contexts/AuthContext';
+import { useAuth, BLOCK_MESSAGE_KEYS } from '../contexts/AuthContext';
 import { useTranslation } from '../contexts/LanguageContext';
 import LanguageSwitcher from './LanguageSwitcher';
 import type { TranslationKey } from '../i18n';
@@ -19,10 +19,10 @@ const GoogleIcon: React.FC<{ size?: number }> = ({ size = 18 }) => (
 /**
  * Classify a raw auth error into a translation key.
  *
- * Returns null when the message is one of our own BLOCK_MESSAGES, which is
- * already written for the user and passes through unchanged.
+ * Our own block reasons never reach here — signIn() reports those through
+ * `blockReason`, which handleSubmit resolves before falling back to this.
  */
-const toErrorKey = (msg: string): TranslationKey | null => {
+const toErrorKey = (msg: string): TranslationKey => {
   const m = msg.toLowerCase();
   if (m.includes('invalid login credentials') || m.includes('invalid credentials')) {
     return 'auth.error.invalidCredentials';
@@ -36,10 +36,6 @@ const toErrorKey = (msg: string): TranslationKey | null => {
   if (m.includes('network') || m.includes('fetch')) {
     return 'auth.error.network';
   }
-  // Already-localized messages from BLOCK_MESSAGES pass through untouched.
-  if (msg.includes('Ihren Administrator') || msg.includes('Support') || msg.includes('Postfach')) {
-    return null;
-  }
   return 'auth.error.generic';
 };
 
@@ -49,12 +45,7 @@ const LoginForm: React.FC = () => {
   const [showPassword, setShowPassword] = useState(false);
   const { t } = useTranslation();
 
-  // Resolve a raw auth error to display text. A null key means the message is
-  // already user-facing (one of our BLOCK_MESSAGES) and is shown as-is.
-  const translateAuthError = (message: string): string => {
-    const key = toErrorKey(message);
-    return key ? t(key) : message;
-  };
+  const translateAuthError = (message: string): string => t(toErrorKey(message));
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
@@ -65,9 +56,13 @@ const LoginForm: React.FC = () => {
     setError('');
     setLoading(true);
 
-    const { error } = await signIn(email, password);
+    const { error, blockReason } = await signIn(email, password);
 
-    if (error) {
+    if (blockReason) {
+      // Our own reason, and it carries a key — never run it through the
+      // classifier, which only knows Supabase's own English error strings.
+      setError(t(BLOCK_MESSAGE_KEYS[blockReason]));
+    } else if (error) {
       setError(translateAuthError(error.message || ''));
     }
 

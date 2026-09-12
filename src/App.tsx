@@ -43,27 +43,36 @@ import CompanySuspendedPage from './pages/CompanySuspendedPage';
 import ActivationPage from './pages/ActivationPage';
 import AccountBlockedPage from './pages/AccountBlockedPage';
 import AdminLayout from './components/AdminLayout';
+import { useTranslation } from './contexts/LanguageContext';
+import type { TranslationKey } from './i18n';
 
 // ─── Plan-gated route wrapper ─────────────────────────────────────────────────
 
-const FEATURE_LABELS: Partial<Record<FeatureKey, string>> = {
-  werkstatt:            'Werkstatt',
-  abrechnung:           'Abrechnung',
-  notizen:              'Notizen',
-  rollen_nutzer:        'Rollen & Nutzer',
-  benachrichtigungen:   'Benachrichtigungen',
-  gehaelter:            'Gehälter',
-  dokumente:            'Dokumente',
-  trinkgeld_quittung:   'Trinkgeld Quittung',
-  stundennachweis:      'Stundennachweis',
+// The name LockedFeaturePage puts in "X is not included in your plan", as
+// translation keys — the map is module-level and cannot call t() itself.
+// Werkstatt, Abrechnung, Stundennachweis and Trinkgeld Quittung resolve to
+// themselves in English: they are the domain vocabulary listed in i18n/index.ts,
+// and the locked screen has to name the feature the way the nav does.
+const FEATURE_LABEL_KEYS: Partial<Record<FeatureKey, TranslationKey>> = {
+  werkstatt:            'nav.werkstatt',
+  abrechnung:           'nav.abrechnung',
+  notizen:              'nav.notes',
+  rollen_nutzer:        'locked.feature.rollenNutzer',
+  benachrichtigungen:   'nav.notifications',
+  gehaelter:            'nav.salaries',
+  dokumente:            'nav.documents',
+  trinkgeld_quittung:   'locked.feature.trinkgeld',
+  stundennachweis:      'locked.feature.stundennachweis',
 };
 
 const PlanGate: React.FC<{ feature: FeatureKey; children: React.ReactNode }> = ({ feature, children }) => {
   const { can } = usePlan();
+  const { t } = useTranslation();
   if (can(feature)) return <>{children}</>;
+  const labelKey = FEATURE_LABEL_KEYS[feature];
   return (
     <LockedFeaturePage
-      featureName={FEATURE_LABELS[feature] ?? feature}
+      featureName={labelKey ? t(labelKey) : feature}
       requiredPlan={FEATURE_MIN_PLAN[feature]}
     />
   );

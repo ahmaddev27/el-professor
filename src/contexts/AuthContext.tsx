@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useState, useRef, useCallback } from 'react';
 import { User, Session } from '@supabase/supabase-js';
 import { supabase, isSupabaseConfigured, appOrigin } from '../lib/supabase';
+import type { TranslationKey } from '../i18n';
 
 const SESSION_TIMEOUT = 20 * 60 * 1000;
 const LAST_ACTIVITY_KEY = 'lastActivity';
@@ -48,15 +49,28 @@ export type BlockReason =
   | 'company_pending'
   | 'company_rejected';
 
-export const BLOCK_MESSAGES: Record<BlockReason, string> = {
-  user_inactive:        'Ihr Benutzerkonto ist deaktiviert. Bitte kontaktieren Sie Ihren Administrator.',
-  user_suspended:       'Ihr Benutzerkonto ist gesperrt. Bitte kontaktieren Sie Ihren Administrator.',
-  user_deactivated:     'Ihr Benutzerkonto wurde deaktiviert. Bitte kontaktieren Sie Ihren Administrator.',
-  company_suspended:    'Ihr Unternehmenskonto ist gesperrt. Bitte kontaktieren Sie den Support.',
-  company_inactive:     'Ihr Unternehmenskonto ist nicht mehr aktiv. Bitte kontaktieren Sie den Support.',
-  company_deleted:      'Ihr Unternehmenskonto wurde gelöscht. Bitte kontaktieren Sie den Support.',
-  company_pending:      'Ihre Registrierung wird geprüft. Bitte warten Sie auf die Freischaltung durch unser Team.',
-  company_rejected:     'Ihre Registrierung wurde abgelehnt. Bitte kontaktieren Sie den Support.',
+/**
+ * The message each block reason shows, as a translation key.
+ *
+ * Keys rather than text because this module sits outside any component and
+ * cannot call `t()`. Both consumers — AccountBlockedPage and LoginForm — are
+ * inside the provider and resolve it themselves.
+ *
+ * It used to hold German sentences, and LoginForm told them apart from
+ * Supabase's own errors by looking for the words "Ihren Administrator",
+ * "Support" and "Postfach" in the string. That worked only while the UI was
+ * German: in English it matched nothing, so a blocked user was shown the
+ * generic error instead of the reason they were blocked.
+ */
+export const BLOCK_MESSAGE_KEYS: Record<BlockReason, TranslationKey> = {
+  user_inactive:        'blocked.msg.userInactive',
+  user_suspended:       'blocked.msg.userSuspended',
+  user_deactivated:     'blocked.msg.userDeactivated',
+  company_suspended:    'blocked.msg.companySuspended',
+  company_inactive:     'blocked.msg.companyInactive',
+  company_deleted:      'blocked.msg.companyDeleted',
+  company_pending:      'blocked.msg.companyPending',
+  company_rejected:     'blocked.msg.companyRejected',
 };
 
 /**
@@ -396,7 +410,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           // Force sign out — user should not access the app
           await supabase.auth.signOut();
           clearSessionData();
-          return { error: { message: BLOCK_MESSAGES[blockReason] }, blockReason };
+          // `blockReason` is the channel a caller should read — it survives
+          // translation. `message` carries the key rather than a sentence so
+          // that anything reading only `message` still has something it can
+          // resolve, instead of German text in an English UI.
+          return { error: { message: BLOCK_MESSAGE_KEYS[blockReason] }, blockReason };
         }
       }
 
