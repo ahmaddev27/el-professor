@@ -20,7 +20,7 @@ Roughly ten screens are converted; the other ~90 files still hold German literal
 
 Three things stay German in both languages, and the reasoning is in the header of `src/i18n/index.ts`:
 
-- **Generated documents.** Stundennachweis PDFs and the Fahrtenbuch XLSX carry statutory German text, and the `'original'` export mode has to reproduce the imported sheet's headers byte for byte. Translating any of it breaks the export and produces invalid records. Those strings live in the export modules, never in the dictionaries.
+- **Generated documents.** Stundennachweis PDFs and the Fahrtenbuch XLSX carry statutory German text, and the `'original'` export mode has to reproduce the imported sheet's headers byte for byte. Translating any of it breaks the export and produces invalid records. Those strings live in the export modules, never in the dictionaries. The list is closed — the Stundennachweis PDF, the Fahrtenbuch XLSX, the Trinkgeld-Quittung and the Mietwagenauftrag. An `exportTableToExcel(...)` dump of vehicles, drivers, users, Fixkosten, the Bargeldbestand or Werkstatt checks is **not** on it: no statutory form, so its headers follow the UI language like any other label.
 - **Domain vocabulary** — `Stundennachweis`, `Fahrtenbuch`, `Abrechnung`, `Beleg`, `Werkstatt`, `Monatsplanung`, `Lohnart`, `Bundesland` — so the screen and the paperwork agree.
 - **Money and date formatting**, because on-screen figures map one-to-one onto German documents.
 

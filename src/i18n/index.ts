@@ -15,9 +15,25 @@
  * headers byte for byte. None of that text belongs in these dictionaries; it
  * stays hard-coded in the export modules.
  *
+ * The list is closed, and it is shorter than it looks: the Stundennachweis PDF,
+ * the Fahrtenbuch XLSX, the Trinkgeld-Quittung and the Mietwagenauftrag. A
+ * `exportTableToExcel(...)` dump of vehicles, drivers, users, Fixkosten, the
+ * Bargeldbestand or Werkstatt checks is **not** one of them — it is a
+ * convenience export of an operational list, it satisfies no statutory form,
+ * and its headers follow the UI language like any other label. Two independent
+ * readings of this file disagreed on that point, so it is settled here rather
+ * than per screen: if the artefact has a statutory shape, hard-code German in
+ * the export module; otherwise translate it.
+ *
  * **Domain vocabulary.** Stundennachweis, Fahrtenbuch, Abrechnung, Beleg,
  * Werkstatt, Lohnart and Bundesland stay German in the English UI. Operators use
  * these words daily and they must match what the documents say.
+ *
+ * That list is closed too. Trinkgeld joins it only because it is the subject of
+ * the Quittung. **Kennzeichen, Fixkosten, Personalnummer and Inhaber are not on
+ * it** — they are ordinary German words with exact English equivalents that
+ * appear on no statutory form, and leaving them untranslated makes the English
+ * UI read like a half-finished job rather than a considered choice.
  *
  * **Money and date formatting.** German conventions (decimal comma, DD.MM.YYYY)
  * are kept in both languages. The figures on screen correspond one-to-one with
