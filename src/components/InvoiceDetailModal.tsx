@@ -4,12 +4,12 @@ import { format } from 'date-fns';
 import { de } from 'date-fns/locale';
 
 const MONTHS_DE = [
-  'Januar', 'Februar', 'M\u00E4rz', 'April', 'Mai', 'Juni',
+  'Januar', 'Februar', 'März', 'April', 'Mai', 'Juni',
   'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember',
 ];
 
 function fmtEur(v: number) {
-  return v.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' \u20AC';
+  return v.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €';
 }
 
 interface Invoice {
@@ -70,7 +70,7 @@ export default function InvoiceDetailModal({ invoice, onClose, onDownloadPdf, se
           }}>
             {isPaid ? <CheckCircle size={20} style={{ color: 'var(--success)' }} /> : isOverdue ? <AlertTriangle size={20} style={{ color: 'var(--danger)' }} /> : <Clock size={20} style={{ color: 'var(--accent)' }} />}
             <span className="font-semibold text-sm" style={{ color: isPaid ? 'var(--success)' : isOverdue ? 'var(--danger)' : 'var(--accent)' }}>
-              {isPaid ? 'Bezahlt' : isOverdue ? '\u00DCberf\u00E4llig' : invoice.status === 'canceled' ? 'Storniert' : 'Offen'}
+              {isPaid ? 'Bezahlt' : isOverdue ? 'Überfällig' : invoice.status === 'canceled' ? 'Storniert' : 'Offen'}
             </span>
           </div>
 
@@ -83,7 +83,7 @@ export default function InvoiceDetailModal({ invoice, onClose, onDownloadPdf, se
             {row('Rechnungsnummer', invoice.invoice_number)}
             {row('Betrag', <span className="text-base font-bold" style={{ color: 'var(--accent)' }}>{fmtEur(invoice.amount)}</span>)}
             {row('Zahlungsart', 'Barzahlung')}
-            {row('F\u00E4llig am', (() => { try { return format(new Date(invoice.due_date), 'dd.MM.yyyy'); } catch { return invoice.due_date; } })())}
+            {row('Fällig am', (() => { try { return format(new Date(invoice.due_date), 'dd.MM.yyyy'); } catch { return invoice.due_date; } })())}
             {isPaid && invoice.paid_at && row('Bezahlt am', (() => { try { return format(new Date(invoice.paid_at), 'dd.MM.yyyy, HH:mm', { locale: de }); } catch { return invoice.paid_at; } })())}
             {isPaid && invoice.cash_received_amount != null && row('Erhalten', fmtEur(invoice.cash_received_amount))}
             {invoice.receipt_note && row('Anmerkung', invoice.receipt_note)}
@@ -92,7 +92,7 @@ export default function InvoiceDetailModal({ invoice, onClose, onDownloadPdf, se
 
         <div className="flex justify-end gap-2 p-5 border-t" style={{ borderColor: 'var(--border)' }}>
           <button onClick={onClose} className="px-4 py-2.5 rounded-xl text-sm font-medium" style={{ color: 'var(--text-primary)', border: '1px solid var(--border)' }}>
-            Schlie\u00DFen
+            Schließen
           </button>
           <button
             onClick={onDownloadPdf}
