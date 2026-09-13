@@ -148,8 +148,36 @@ services:
       GOTRUE_SMTP_PASS: ${SMTP_PASS}
       GOTRUE_SMTP_ADMIN_EMAIL: ${SMTP_SENDER}
       GOTRUE_SMTP_SENDER_NAME: ${SMTP_SENDER_NAME:-El-Professor}
-      GOTRUE_MAILER_URLPATHS_RECOVERY: /auth/callback
-      GOTRUE_MAILER_URLPATHS_INVITE: /auth/callback
+
+      # The path GoTrue puts in front of every emailed link, appended to
+      # API_EXTERNAL_URL — so it names an *API* route, not a screen. These were
+      # set to /auth/callback, the SPA page a user lands on afterwards, which
+      # produced https://api.elprofessor.eu/auth/callback?token=… and Kong
+      # answered "no Route matched": every invite and reset link was dead. It
+      # went unnoticed only because SMTP had never delivered one. GoTrue's own
+      # /verify consumes the token and 303s to redirect_to, which is where
+      # /auth/callback belongs. All four types need it: GoTrue's default,
+      # /verify, has no /auth/v1 prefix and would 404 at Kong the same way.
+      GOTRUE_MAILER_URLPATHS_INVITE: /auth/v1/verify
+      GOTRUE_MAILER_URLPATHS_RECOVERY: /auth/v1/verify
+      GOTRUE_MAILER_URLPATHS_CONFIRMATION: /auth/v1/verify
+      GOTRUE_MAILER_URLPATHS_EMAIL_CHANGE: /auth/v1/verify
+
+      # German, El-Professor-branded templates. GoTrue fetches them over HTTP
+      # from the web container, so they ship with the frontend from
+      # public/email-templates and are versioned alongside it. nginx answers a
+      # missing one with 404 rather than the SPA shell, so a typo here makes
+      # GoTrue fall back to its default template instead of mailing index.html.
+      GOTRUE_MAILER_TEMPLATES_INVITE: http://web/email-templates/invite.html
+      GOTRUE_MAILER_TEMPLATES_RECOVERY: http://web/email-templates/recovery.html
+      GOTRUE_MAILER_TEMPLATES_CONFIRMATION: http://web/email-templates/confirmation.html
+      GOTRUE_MAILER_TEMPLATES_EMAIL_CHANGE: http://web/email-templates/email-change.html
+      GOTRUE_MAILER_TEMPLATES_MAGIC_LINK: http://web/email-templates/magic-link.html
+      GOTRUE_MAILER_SUBJECTS_INVITE: "Ihre Einladung zu El-Professor"
+      GOTRUE_MAILER_SUBJECTS_RECOVERY: "Passwort festlegen – El-Professor"
+      GOTRUE_MAILER_SUBJECTS_CONFIRMATION: "E-Mail-Adresse bestätigen – El-Professor"
+      GOTRUE_MAILER_SUBJECTS_EMAIL_CHANGE: "Neue E-Mail-Adresse bestätigen – El-Professor"
+      GOTRUE_MAILER_SUBJECTS_MAGIC_LINK: "Ihr Anmeldelink – El-Professor"
 
       # Google sign-in — the app calls signInWithOAuth({ provider: 'google' }).
       # Add ${PUBLIC_URL}/auth/v1/callback to the authorised redirect URIs in
