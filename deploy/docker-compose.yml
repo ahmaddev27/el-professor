@@ -41,6 +41,14 @@ name: ${PROJECT_NAME:?set PROJECT_NAME in .env - ya-mobility for production, ya-
 
 services:
   # ── Database ───────────────────────────────────────────────────────────────
+  # cpu_shares on every service: a relative weight, applied only when CPU is
+  # contended. Production and staging share this host with ridy, and no
+  # container has a hard CPU cap. Production leaves CPU_SHARES unset, which
+  # is 1024 — Docker's own default, so nothing about production changes.
+  # Staging sets it lower: a load test there gets every core while the host is
+  # idle, so its numbers stay honest, but yields the moment production or ridy
+  # needs the CPU. A hard `cpus:` limit would have protected production too, at
+  # the price of making every staging performance measurement a lie.
   db:
     # Must track the hosted project's major version. Production reports
     # PostgreSQL 17.6, and pg_dump refuses to dump from a server newer than
@@ -49,6 +57,7 @@ services:
     # that exact release.
     image: supabase/postgres:17.6.1.170
     restart: unless-stopped
+    cpu_shares: ${CPU_SHARES:-1024}
     environment:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
       POSTGRES_DB: postgres
@@ -99,6 +108,7 @@ services:
   rest:
     image: postgrest/postgrest:v12.2.3
     restart: unless-stopped
+    cpu_shares: ${CPU_SHARES:-1024}
     depends_on:
       db: { condition: service_healthy }
     environment:
@@ -119,6 +129,7 @@ services:
   auth:
     image: supabase/gotrue:v2.170.0
     restart: unless-stopped
+    cpu_shares: ${CPU_SHARES:-1024}
     depends_on:
       db: { condition: service_healthy }
     environment:
@@ -202,6 +213,7 @@ services:
   storage:
     image: supabase/storage-api:v1.19.3
     restart: unless-stopped
+    cpu_shares: ${CPU_SHARES:-1024}
     depends_on:
       db: { condition: service_healthy }
       rest: { condition: service_started }
@@ -229,6 +241,7 @@ services:
   realtime:
     image: supabase/realtime:v2.34.7
     restart: unless-stopped
+    cpu_shares: ${CPU_SHARES:-1024}
     depends_on:
       db: { condition: service_healthy }
     environment:
@@ -264,6 +277,7 @@ services:
   functions:
     image: supabase/edge-runtime:v1.76.2
     restart: unless-stopped
+    cpu_shares: ${CPU_SHARES:-1024}
     depends_on:
       db: { condition: service_healthy }
     environment:
@@ -295,6 +309,7 @@ services:
   kong:
     image: kong:2.8.1
     restart: unless-stopped
+    cpu_shares: ${CPU_SHARES:-1024}
     depends_on: [rest, auth, storage, realtime, functions]
     environment:
       KONG_DATABASE: 'off'
@@ -351,6 +366,7 @@ services:
   web:
     image: nginx:1.27-alpine
     restart: unless-stopped
+    cpu_shares: ${CPU_SHARES:-1024}
     volumes:
       - ./dist:/usr/share/nginx/html:ro
       - ./nginx-spa.conf:/etc/nginx/conf.d/default.conf:ro
@@ -377,6 +393,7 @@ services:
     image: axllent/mailpit:v1.20.4
     profiles: [staging]
     restart: unless-stopped
+    cpu_shares: ${CPU_SHARES:-1024}
     environment:
       MP_MAX_MESSAGES: 2000
       MP_SMTP_AUTH_ACCEPT_ANY: 'true'

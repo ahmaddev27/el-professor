@@ -60,6 +60,18 @@ else
   [ -z "$PROFILES" ] || fail "production must not enable compose profiles (found COMPOSE_PROFILES=$PROFILES)"
 fi
 
+# Both stacks share the CPU with each other and with ridy, and nothing is capped.
+# Staging is where load tests run, so it must yield under contention; production
+# must never be the one yielding. See cpu_shares in docker-compose.yml.
+CPU_SHARES="$(grep -E '^CPU_SHARES=' .env | cut -d= -f2- | tr -d '\r')" || true
+if [ "$ENVIRONMENT" = staging ]; then
+  [[ "$CPU_SHARES" =~ ^[0-9]+$ ]] && [ "$CPU_SHARES" -lt 1024 ] \
+    || fail "staging needs CPU_SHARES below 1024 (found '${CPU_SHARES:-unset}'), or a load test there can starve production"
+else
+  [ -z "$CPU_SHARES" ] || { [[ "$CPU_SHARES" =~ ^[0-9]+$ ]] && [ "$CPU_SHARES" -ge 1024 ]; } \
+    || fail "production CPU_SHARES is '$CPU_SHARES'; it must be unset or at least 1024"
+fi
+
 docker compose config -q || fail "docker compose config is invalid"
 echo "  project $PROJECT_NAME in $ROOT"
 
