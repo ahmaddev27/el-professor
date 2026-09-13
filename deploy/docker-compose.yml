@@ -400,7 +400,17 @@ services:
       MP_SMTP_AUTH_ALLOW_INSECURE: 'true'
     expose:
       - '1025'
-      - '8025'
+    # The one host port anywhere in this file, and it is loopback only. The
+    # caught mail contains live password-reset and invite links for real
+    # accounts, so the UI must not be public — but it has to be reachable by
+    # whoever tests staging. Bound to 127.0.0.1 it is reachable only from this
+    # host, i.e. through an SSH tunnel:
+    #   ssh -L 8025:127.0.0.1:8025 root@159.195.205.30   then open http://localhost:8025
+    # Safe to bind here because Docker >= 28 stopped exposing 127.0.0.1 ports to
+    # LAN neighbours (this host runs 29.x) and route_localnet is 0 on every
+    # interface. Profile `staging` only; production never starts this service.
+    ports:
+      - '127.0.0.1:8025:8025'
     deploy:
       resources:
         limits: { memory: 128M }
