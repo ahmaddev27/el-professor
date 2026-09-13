@@ -66,4 +66,11 @@ rm -rf "$DIR/deploy/dist.new";       cp -r "$work/dist"                  "$DIR/d
 # Files built on Windows arrive with CRLF; bash cannot run those.
 sed -i 's/\r$//' "$DIR/deploy/deploy.sh"
 
-exec bash "$DIR/deploy/deploy.sh" "$ENV"
+# Everything has been copied into place, so the extracted archive is spent.
+# Remove it here rather than trusting the EXIT trap: this script used to finish
+# with `exec bash deploy.sh`, and exec replaces the process, so the trap never
+# ran and every release left a full copy of the bundle in /tmp.
+rm -rf "$work"
+trap - EXIT
+
+bash "$DIR/deploy/deploy.sh" "$ENV"
