@@ -55,6 +55,13 @@ PROFILES="$(grep -E '^COMPOSE_PROFILES=' .env | cut -d= -f2- | tr -d '\r')" || t
 if [ "$ENVIRONMENT" = staging ]; then
   [ "$SMTP_HOST" = mailpit ] || fail "staging SMTP_HOST is '$SMTP_HOST'; it must be mailpit so no real person is emailed"
   [ "$PROFILES" = staging ] || fail "staging needs COMPOSE_PROFILES=staging, or the mailpit service it sends to never starts"
+  # Fail closed on the mailbox login. If this file is missing, Docker creates an
+  # empty *directory* at the bind-mount path and Mailpit may start with no UI
+  # authentication — publishing live reset links for real accounts. Every line
+  # must be user:bcrypt.
+  [ -f mailpit-ui-auth ] && [ -s mailpit-ui-auth ] \
+    && ! grep -qvE '^[A-Za-z0-9._-]+:\$2[aby]\$[0-9]{2}\$[./A-Za-z0-9]{53}$' mailpit-ui-auth \
+    || fail "deploy/mailpit-ui-auth is missing or malformed; set a login with deploy/set-mailpit-password.sh"
 else
   [ "$SMTP_HOST" != mailpit ] || fail "production SMTP_HOST is mailpit; production mail would be silently swallowed"
   [ -z "$PROFILES" ] || fail "production must not enable compose profiles (found COMPOSE_PROFILES=$PROFILES)"

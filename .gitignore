@@ -37,3 +37,7 @@ deploy/.env
 
 # Generated per environment into dist/ by scripts/build-email-templates.mjs.
 public/email-templates/*.html
+
+# Mailpit UI login for staging (bcrypt), provisioned on the host by
+# deploy/set-mailpit-password.sh. Never committed.
+deploy/mailpit-ui-auth

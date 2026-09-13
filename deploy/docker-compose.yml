@@ -398,6 +398,20 @@ services:
       MP_MAX_MESSAGES: 2000
       MP_SMTP_AUTH_ACCEPT_ANY: 'true'
       MP_SMTP_AUTH_ALLOW_INSECURE: 'true'
+      # The web UI and API require a login. This is not optional even though
+      # staging itself is open: the caught mail holds live reset and invite links
+      # for real accounts, so reading it is taking over any staging login. Auth
+      # sits in Mailpit rather than only in Caddy because the service is on
+      # ridy's network, where Caddy is not the only thing that can reach it.
+      # The file is provisioned on the host by deploy/set-mailpit-password.sh and
+      # never committed; deploy.sh refuses a staging release without it.
+      MP_UI_AUTH_FILE: /run/mailpit/ui-auth
+    volumes:
+      - ./mailpit-ui-auth:/run/mailpit/ui-auth:ro
+    # On ridy's network so Caddy can publish it at mail-staging.elprofessor.eu.
+    networks:
+      - default
+      - ridy
     expose:
       - '1025'
     # The one host port anywhere in this file, and it is loopback only. The
