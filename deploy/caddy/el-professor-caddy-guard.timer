@@ -1,0 +1,10 @@
+[Unit]
+Description=Fallback check that El-Professor's routes are in ridy's Caddy
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=1min
+AccuracySec=5s
+
+[Install]
+WantedBy=timers.target
