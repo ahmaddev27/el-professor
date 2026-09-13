@@ -31,7 +31,13 @@
 # Nothing here is exposed directly. Kong is the only public port, and TLS
 # terminates in Caddy in front of it (see Caddyfile).
 
-name: ya-mobility
+# The project name prefixes every container AND every named volume. Production's
+# data lives in ya-mobility_db-data and ya-mobility_storage-data, so production
+# must always run as `ya-mobility` — any other name gives it new, empty volumes
+# and the site looks wiped. There is deliberately no default: a staging checkout
+# that forgot to set it would otherwise fall back to `ya-mobility` and mount
+# production's database. Missing, it fails loudly instead.
+name: ${PROJECT_NAME:?set PROJECT_NAME in .env - ya-mobility for production, ya-mobility-staging for staging}
 
 services:
   # ── Database ───────────────────────────────────────────────────────────────
