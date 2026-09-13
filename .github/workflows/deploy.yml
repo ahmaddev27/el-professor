@@ -1,0 +1,159 @@
+# Two environments, two ways in.
+#
+#   push to `staging`  -> build, test, deploy to https://app.elprofessor.eu
+#   push to `main`     -> build and test only. Nothing is deployed.
+#   "Run workflow" on `main`, confirm "production"
+#                      -> build, test, deploy to https://elprofessor.eu
+#
+# Production is a button rather than a merge side effect because this account's
+# GitHub plan offers neither required reviewers on environments nor branch
+# protection for a private repository. The button is the approval, and the
+# production job refuses main unless every commit on it went through staging
+# first — the one rule branch protection would have enforced, done in code.
+#
+# The host side is deploy/ci-release.sh, bound to the deploy key with
+# command=/restrict: the key can run "release staging" or "release production"
+# and nothing else. deploy/deploy.sh then applies migrations and health-checks.
+
+name: Deploy
+
+on:
+  push:
+    branches: [staging, main]
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type "production" to deploy main to https://elprofessor.eu'
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  # ── main: prove it builds, deploy nothing ─────────────────────────────────
+  verify-main:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      # Builds against the committed .env.production — the production values.
+      # Typecheck ratchet, then tests, then vite build, then mail templates.
+      - run: npm run build
+      - name: Next step
+        run: |
+          echo "::notice title=Ready for production::main builds and passes. Deploy with Actions -> Deploy -> Run workflow on main, confirm 'production'."
+
+  # ── staging ───────────────────────────────────────────────────────────────
+  deploy-staging:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/staging'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    environment:
+      name: staging
+      url: https://app.elprofessor.eu
+    concurrency:
+      group: deploy-staging
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - name: Build for staging
+        env:
+          VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ vars.VITE_SUPABASE_ANON_KEY }}
+          VITE_APP_URL: ${{ vars.VITE_APP_URL }}
+          VITE_DEPLOY_ENV: ${{ vars.VITE_DEPLOY_ENV }}
+        run: npm run build
+      - name: Check the bundle points at staging
+        shell: bash
+        run: |
+          js=$(ls dist/assets/index-*.js)
+          grep -q 'api-staging\.elprofessor\.eu' $js || { echo "::error::bundle does not reference the staging API"; exit 1; }
+          if grep -q '//api\.elprofessor\.eu' $js; then echo "::error::staging bundle references the production API"; exit 1; fi
+          grep -q 'app\.elprofessor\.eu/email-templates/logo\.png' dist/email-templates/recovery.html \
+            || { echo "::error::mail templates carry the wrong logo URL"; exit 1; }
+          # Staging holds real accounts; a staging build without the banner would
+          # let someone work there believing it is production.
+          [ "${{ vars.VITE_DEPLOY_ENV }}" = staging ] && grep -q 'env.banner.notProduction' $js \
+            || { echo "::error::staging build is missing VITE_DEPLOY_ENV=staging, so the banner would not show"; exit 1; }
+      - uses: ./.github/actions/release
+        with:
+          environment: staging
+          ssh-key: ${{ secrets.DEPLOY_SSH_KEY }}
+          known-hosts: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          host: ${{ secrets.DEPLOY_HOST }}
+
+  # ── production ────────────────────────────────────────────────────────────
+  deploy-production:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    environment:
+      name: production
+      url: https://elprofessor.eu
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+    steps:
+      - name: Refuse anything but main, confirmed
+        shell: bash
+        run: |
+          [ "${{ github.ref }}" = "refs/heads/main" ] \
+            || { echo "::error::production deploys only from main (this run is on ${{ github.ref_name }})"; exit 1; }
+          [ "${{ inputs.confirm }}" = "production" ] \
+            || { echo "::error::confirmation was not 'production' — nothing deployed"; exit 1; }
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Refuse commits that never reached staging
+        shell: bash
+        run: |
+          git fetch --no-tags origin staging
+          # Merge commits are made on main by definition, so they are excused;
+          # every commit that carries a change must already be on staging.
+          unseen=$(git log --no-merges --format='%h %s' origin/staging..HEAD)
+          if [ -n "$unseen" ]; then
+            echo "::error::these commits are on main but were never on staging:"
+            echo "$unseen"
+            exit 1
+          fi
+          echo "every change on main has been on staging"
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - name: Build for production
+        env:
+          VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ vars.VITE_SUPABASE_ANON_KEY }}
+          VITE_APP_URL: ${{ vars.VITE_APP_URL }}
+        run: npm run build
+      - name: Check the bundle points at production
+        shell: bash
+        run: |
+          js=$(ls dist/assets/index-*.js)
+          grep -q '//api\.elprofessor\.eu' $js || { echo "::error::bundle does not reference the production API"; exit 1; }
+          if grep -q 'api-staging\.elprofessor\.eu' $js; then echo "::error::production bundle references the staging API"; exit 1; fi
+          if grep -q 'service_role' $js; then echo "::error::bundle contains service_role"; exit 1; fi
+          case "${{ vars.VITE_DEPLOY_ENV }}" in ""|production) ;; *)
+            echo "::error::production environment sets VITE_DEPLOY_ENV=${{ vars.VITE_DEPLOY_ENV }}, which would show a test banner"; exit 1 ;;
+          esac
+          grep -q 'https://elprofessor\.eu/email-templates/logo\.png' dist/email-templates/recovery.html \
+            || { echo "::error::mail templates carry the wrong logo URL"; exit 1; }
+      - uses: ./.github/actions/release
+        with:
+          environment: production
+          ssh-key: ${{ secrets.DEPLOY_SSH_KEY }}
+          known-hosts: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          host: ${{ secrets.DEPLOY_HOST }}

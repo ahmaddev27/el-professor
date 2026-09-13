@@ -3876,4 +3876,7 @@ export const de = {
   'users.export.systemRole':    'Systemrolle',
   'users.export.totalRow':      '{count} Benutzer gesamt',
   'werkstatt.errorLoadChecks':  'Fehler beim Laden der Checks: {error}',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'env.banner.notProduction': 'Testumgebung mit einer Kopie der Produktionsdaten – Änderungen hier erreichen die Produktion nicht',
 } as const;
