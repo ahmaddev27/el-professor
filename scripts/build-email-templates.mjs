@@ -2,12 +2,19 @@
 /**
  * Build the German, El-Professor-branded GoTrue mail templates.
  *
- *   node scripts/build-email-templates.mjs
+ *   VITE_APP_URL=https://elprofessor.eu node scripts/build-email-templates.mjs
  *
- * Writes public/email-templates/*.html. They ship with the frontend and GoTrue
- * fetches them from the web container (see GOTRUE_MAILER_TEMPLATES_* in
- * deploy/docker-compose.yml). Edit the copy here, not the generated files —
- * one layout keeps the five messages from drifting apart.
+ * Runs after `vite build` (see package.json) and writes dist/email-templates/*.html.
+ * They ship with the frontend and GoTrue fetches them from the web container
+ * (see GOTRUE_MAILER_TEMPLATES_* in deploy/docker-compose.yml). The generated
+ * HTML is not committed: edit the copy here — one layout keeps the five
+ * messages from drifting apart.
+ *
+ * The logo URL is absolute because a mail client fetches it from the reader's
+ * machine, and it differs per environment. Production and staging build from
+ * the same commit, so a URL written into a committed file would put one
+ * environment's address into the other's mail. VITE_APP_URL is required and
+ * there is no default, for the same reason.
  *
  * Email is not the web. What shapes every choice below:
  *
@@ -31,11 +38,31 @@
  * GoTrue renders these with Go's html/template. Keep `{{` out of anything that
  * is not a template action — including CSS and HTML comments.
  */
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
-const OUT = path.resolve(import.meta.dirname, '..', 'public', 'email-templates');
-const LOGO = 'https://app.elprofessor.eu/email-templates/logo.png';
+const ROOT = path.resolve(import.meta.dirname, '..');
+const OUT = path.join(ROOT, 'dist', 'email-templates');
+
+// CI sets VITE_APP_URL explicitly per environment. A local `npm run build` has
+// no such variable, so it reads the same .env.production Vite itself used.
+function appUrl() {
+  if (process.env.VITE_APP_URL) return { url: process.env.VITE_APP_URL, from: 'environment' };
+  const file = path.join(ROOT, '.env.production');
+  if (existsSync(file)) {
+    const m = readFileSync(file, 'utf8').match(/^VITE_APP_URL=(.+)$/m);
+    if (m) return { url: m[1].trim(), from: '.env.production' };
+  }
+  throw new Error('VITE_APP_URL is not set — refusing to build mail templates with a guessed logo URL');
+}
+const { url: APP_URL, from: APP_URL_FROM } = appUrl();
+if (!/^https:\/\/[^/]+$/.test(APP_URL.replace(/\/$/, ''))) {
+  throw new Error(`VITE_APP_URL must be an https origin with no path, got: ${APP_URL}`);
+}
+const LOGO = `${APP_URL.replace(/\/$/, '')}/email-templates/logo.png`;
+if (!existsSync(path.join(ROOT, 'dist'))) {
+  throw new Error('dist/ does not exist — run this after vite build, not before');
+}
 
 const FONT = "-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif";
 const C = {
@@ -171,6 +198,7 @@ const TEMPLATES = {
 };
 
 mkdirSync(OUT, { recursive: true });
+console.log(`  mail templates for ${APP_URL} (from ${APP_URL_FROM})`);
 for (const [file, t] of Object.entries(TEMPLATES)) {
   const html = render(t);
   // A stray `{{` outside a template action breaks GoTrue's parse and silently

@@ -48,6 +48,18 @@ if [ "$ENVIRONMENT" = staging ] && [ -f /srv/PRO/deploy/.env ]; then
   [ "$own" != "$prod" ] || fail "staging and production share a JWT_SECRET"
 fi
 
+# Staging holds a copy of production data, real addresses included. It may only
+# ever hand mail to the local catcher; production must never do so.
+SMTP_HOST="$(grep -E '^SMTP_HOST=' .env | cut -d= -f2- | tr -d '\r')"
+PROFILES="$(grep -E '^COMPOSE_PROFILES=' .env | cut -d= -f2- | tr -d '\r')"
+if [ "$ENVIRONMENT" = staging ]; then
+  [ "$SMTP_HOST" = mailpit ] || fail "staging SMTP_HOST is '$SMTP_HOST'; it must be mailpit so no real person is emailed"
+  [ "$PROFILES" = staging ] || fail "staging needs COMPOSE_PROFILES=staging, or the mailpit service it sends to never starts"
+else
+  [ "$SMTP_HOST" != mailpit ] || fail "production SMTP_HOST is mailpit; production mail would be silently swallowed"
+  [ -z "$PROFILES" ] || fail "production must not enable compose profiles (found COMPOSE_PROFILES=$PROFILES)"
+fi
+
 docker compose config -q || fail "docker compose config is invalid"
 echo "  project $PROJECT_NAME in $ROOT"
 
