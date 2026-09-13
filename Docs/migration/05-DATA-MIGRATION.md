@@ -5,6 +5,15 @@ Done on 2026-09-10. The VPS now serves the production schema and data at
 required, because six of these were not in the plan and each one failed in a way
 that pointed somewhere else.
 
+> **Domain changed 2026-09-13** to `app.elprofessor.eu` / `api.elprofessor.eu`,
+> same server, same database — nothing below moved. `app.elprofessor.de` now
+> 301-redirects to `.eu` with the path preserved; `api.elprofessor.de` still
+> proxies to Kong but the API answers only the `.eu` origin. What the switch
+> touched: `PUBLIC_URL` and `APP_URL` in the server `.env`, two lines in
+> `.env.production`, the ridy Caddyfile, and three `company_settings.logo_url`
+> rows that still pointed at the hosted project from before this migration. The
+> apex `elprofessor.eu` has no A record and is not served.
+
 ---
 
 ## The order that works
