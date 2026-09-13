@@ -69,6 +69,28 @@ The remaining errors are not uniform. Roughly 182 are unused locals (`TS6133`, n
 
 Env (`.env`, see `.env.example`): `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` are required; `VITE_APP_URL` is the origin baked into auth email redirect links (`/auth/callback`) and must be the real domain in production, or reset emails point at localhost.
 
+## Environments and deployment
+
+Two full, separate stacks run on one VPS (159.195.205.30), behind ridy's Caddy.
+
+| | production | staging |
+|---|---|---|
+| web | `https://elprofessor.eu` | `https://app.elprofessor.eu` |
+| API | `https://api.elprofessor.eu` | `https://api-staging.elprofessor.eu` |
+| branch | `main` | `staging` |
+| host dir | `/srv/PRO` | `/srv/PRO-staging` |
+| compose project | `ya-mobility` | `ya-mobility-staging` |
+| mail | Resend | Mailpit — delivers nothing |
+| deploys | **Actions → Deploy → Run workflow** on `main`, confirm `production` | every push to `staging` |
+
+- **Never change production's `PROJECT_NAME`.** It prefixes the named volumes that hold production's data (`ya-mobility_db-data`, `ya-mobility_storage-data`); any other name makes Docker create empty ones and the site looks wiped. The compose file has no default for it on purpose, so a staging checkout that forgot to set it fails instead of mounting production's database.
+- **Staging runs on a copy of production data**, real accounts and password hashes included. Hence three safeguards: its mail goes to Mailpit, it shows a "STAGING" banner on every screen (`VITE_DEPLOY_ENV`), and its JWT secret, anon and service keys all differ from production's — a key from one environment is rejected by the other in both directions.
+- **Merging to `main` deploys nothing.** The account's GitHub plan has no required reviewers or branch protection for a private repo, so the production deploy is a manual button, and that job refuses `main` if any non-merge commit on it never reached `staging`.
+- **CI can only release.** The deploy key is bound in `authorized_keys` to `/usr/local/sbin/el-professor-release` (`deploy/ci-release.sh`) with `restrict`: no shell, no pty, no port forwarding, and only `release staging|production`. The wrapper lives outside `/srv/PRO*` so a release cannot overwrite it, and it refuses any archive containing an `.env`.
+- **`deploy/deploy.sh` is the release.** Guards first (directory, project name, shared JWT secret, SMTP host, compose profiles), then migrations, then the bundle swap, then health checks. Migrations are tracked in `app_meta.schema_migrations` — a schema PostgREST does not expose — and each file runs in one transaction with its ledger row. An empty ledger on a populated database is refused; seeding it is `deploy.sh <env> --baseline`, typed once by a person. Production is snapshotted with `pg_dump` before any migration runs.
+- Each environment's `.env` is provisioned by hand on the host and never leaves it. Build-time values (`VITE_*`) live as GitHub environment variables; the deploy key, host and pinned host key are repository secrets.
+- `deploy.sh` reads every `.env` key with `|| true`. Under `set -euo pipefail` a bare `grep` that matches nothing ends the script with no message — that exact bug broke production login for a few minutes the first time it ran.
+
 ## Architecture
 
 ### Provider stack

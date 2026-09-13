@@ -31,7 +31,13 @@
 # Nothing here is exposed directly. Kong is the only public port, and TLS
 # terminates in Caddy in front of it (see Caddyfile).
 
-name: ya-mobility
+# The project name prefixes every container AND every named volume. Production's
+# data lives in ya-mobility_db-data and ya-mobility_storage-data, so production
+# must always run as `ya-mobility` — any other name gives it new, empty volumes
+# and the site looks wiped. There is deliberately no default: a staging checkout
+# that forgot to set it would otherwise fall back to `ya-mobility` and mount
+# production's database. Missing, it fails loudly instead.
+name: ${PROJECT_NAME:?set PROJECT_NAME in .env - ya-mobility for production, ya-mobility-staging for staging}
 
 services:
   # ── Database ───────────────────────────────────────────────────────────────
@@ -353,6 +359,31 @@ services:
     networks:
       - default
       - ridy
+    deploy:
+      resources:
+        limits: { memory: 128M }
+
+  # ── Staging only: a mail catcher in place of Resend ─────────────────────────
+  # Staging runs on a copy of production data, so it holds real employees'
+  # addresses. Pointed at Resend, a test click on "Einladung erneut senden"
+  # would email a real person. Mailpit accepts every message and delivers none.
+  # deploy.sh refuses a staging release whose SMTP_HOST is not this service, and
+  # a production release whose SMTP_HOST is.
+  #
+  # Only on the project network — no host port, not on ridy's network. Read the
+  # caught mail with:
+  #   docker compose exec mailpit wget -qO- http://localhost:8025/api/v1/messages
+  mailpit:
+    image: axllent/mailpit:v1.20.4
+    profiles: [staging]
+    restart: unless-stopped
+    environment:
+      MP_MAX_MESSAGES: 2000
+      MP_SMTP_AUTH_ACCEPT_ANY: 'true'
+      MP_SMTP_AUTH_ALLOW_INSECURE: 'true'
+    expose:
+      - '1025'
+      - '8025'
     deploy:
       resources:
         limits: { memory: 128M }

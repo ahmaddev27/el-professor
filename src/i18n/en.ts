@@ -3878,4 +3878,7 @@ export const en: PartialDictionary = {
   'users.export.systemRole':    'System role',
   'users.export.totalRow':      '{count} users in total',
   'werkstatt.errorLoadChecks':  'Could not load the Werkstatt checks: {error}',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'env.banner.notProduction': 'Test environment with a copy of production data – changes here never reach production',
 };

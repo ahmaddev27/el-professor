@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "node scripts/typecheck-ratchet.mjs && vitest run && vite build",
+    "build": "node scripts/typecheck-ratchet.mjs && vitest run && vite build && node scripts/build-email-templates.mjs",
     "build:novalidate": "vite build",
     "typecheck": "node node_modules/typescript/bin/tsc --noEmit -p tsconfig.app.json",
     "typecheck:update": "node scripts/typecheck-ratchet.mjs --update",

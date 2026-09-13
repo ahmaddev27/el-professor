@@ -34,3 +34,6 @@ schema-chain.sql
 
 # Local deployment secrets
 deploy/.env
+
+# Generated per environment into dist/ by scripts/build-email-templates.mjs.
+public/email-templates/*.html
