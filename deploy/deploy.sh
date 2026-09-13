@@ -36,22 +36,22 @@ step "guard: $ENVIRONMENT"
 [ "$ROOT" = "$EXPECT_DIR" ] || fail "this checkout is $ROOT, but $ENVIRONMENT lives in $EXPECT_DIR"
 [ -f .env ] || fail ".env is missing in $HERE — it is provisioned once by hand, never by CI"
 
-PROJECT_NAME="$(grep -E '^PROJECT_NAME=' .env | cut -d= -f2- | tr -d '\r')"
+PROJECT_NAME="$(grep -E '^PROJECT_NAME=' .env | cut -d= -f2- | tr -d '\r')" || true
 [ "$PROJECT_NAME" = "$EXPECT_PROJECT" ] \
   || fail ".env says PROJECT_NAME=$PROJECT_NAME, $ENVIRONMENT requires $EXPECT_PROJECT"
 
 # The two stacks must never share signing keys: a staging token accepted by
 # production would let anyone with a staging login act on real data.
 if [ "$ENVIRONMENT" = staging ] && [ -f /srv/PRO/deploy/.env ]; then
-  own="$(grep -E '^JWT_SECRET=' .env | cut -d= -f2- | sha256sum | cut -c1-16)"
-  prod="$(grep -E '^JWT_SECRET=' /srv/PRO/deploy/.env | cut -d= -f2- | sha256sum | cut -c1-16)"
+  own="$(grep -E '^JWT_SECRET=' .env | cut -d= -f2- | sha256sum | cut -c1-16)" || true
+  prod="$(grep -E '^JWT_SECRET=' /srv/PRO/deploy/.env | cut -d= -f2- | sha256sum | cut -c1-16)" || true
   [ "$own" != "$prod" ] || fail "staging and production share a JWT_SECRET"
 fi
 
 # Staging holds a copy of production data, real addresses included. It may only
 # ever hand mail to the local catcher; production must never do so.
-SMTP_HOST="$(grep -E '^SMTP_HOST=' .env | cut -d= -f2- | tr -d '\r')"
-PROFILES="$(grep -E '^COMPOSE_PROFILES=' .env | cut -d= -f2- | tr -d '\r')"
+SMTP_HOST="$(grep -E '^SMTP_HOST=' .env | cut -d= -f2- | tr -d '\r')" || true
+PROFILES="$(grep -E '^COMPOSE_PROFILES=' .env | cut -d= -f2- | tr -d '\r')" || true
 if [ "$ENVIRONMENT" = staging ]; then
   [ "$SMTP_HOST" = mailpit ] || fail "staging SMTP_HOST is '$SMTP_HOST'; it must be mailpit so no real person is emailed"
   [ "$PROFILES" = staging ] || fail "staging needs COMPOSE_PROFILES=staging, or the mailpit service it sends to never starts"
@@ -150,8 +150,8 @@ dc up -d --force-recreate --no-deps web functions < /dev/null
 # ── Health ───────────────────────────────────────────────────────────────────
 
 step "health"
-APP_URL="$(grep -E '^APP_URL=' .env | cut -d= -f2- | tr -d '\r')"
-PUBLIC_URL="$(grep -E '^PUBLIC_URL=' .env | cut -d= -f2- | tr -d '\r')"
+APP_URL="$(grep -E '^APP_URL=' .env | cut -d= -f2- | tr -d '\r')" || true
+PUBLIC_URL="$(grep -E '^PUBLIC_URL=' .env | cut -d= -f2- | tr -d '\r')" || true
 
 for i in $(seq 1 30); do
   down="$(dc ps --format '{{.Service}} {{.State}}' < /dev/null | awk '$2 != "running"' | wc -l)"
