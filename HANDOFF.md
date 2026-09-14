@@ -12,7 +12,13 @@ Start here when you pick up this project. Read it together with [CLAUDE.md](CLAU
   - 0.2 kept releases and rollback, PR #3. Rollback was exercised on the host.
   - 0.3 production gate, PR #3. It takes effect once the code reaches `main`.
   - 0.4 staging web login, PR #5.
-- **Next:** 0.5, end-to-end test tooling. Then 0.6, the first production release from CI. Only the owner presses that button.
+- **0.5, end-to-end test tooling:** `e2e/` (Playwright with the installed Chrome, Mailpit helper, `setup-staging.sh`). Its first run found a live bug, fixed in the same PR: a password-reset or invite link signed the user straight back out when they had not used the app for 20 minutes. `AuthContext` now treats a session whose `last_sign_in_at` is under 5 minutes old as fresh, and `authRedirect` in `src/lib/supabase.ts` keeps the link type that supabase-js strips from the hash.
+- **Next:** 0.6, the first production release from CI. Only the owner presses that button.
+- **In progress since 14.09.2026, as a background workflow:** Phases 1–4 are being built in parallel worktrees.
+  - Branches: `phase1/otp-db`, `phase1/otp-functions`, `phase1/otp-frontend`, `phase2/design-system`, `phase3/rls-baseline`, then `phase3/platform-authority`, and `phase4/receipt-foundations`.
+  - Each branch ends in a reviewed PR into `staging`. Nothing from the agents is merged or deployed automatically.
+  - Merge them one at a time, and run `cd e2e && npm test` after each staging deploy.
+- **Owner decision, 14.09.2026:** staging mail is delivered for real, to everyone, through production's Resend. Mailpit relays it and keeps a copy. The implementation is pending; see PROGRESS.md.
 - **`main` is behind `staging`** by the Phase 0 work. Production still runs a bundle deployed before CI releases existed.
 
 ## What is live where
@@ -50,6 +56,7 @@ Secrets never enter git:
 | Change routes | Edit `deploy/caddy/elprofessor.caddy`, then `EL_PROFESSOR_SSH=elprofessor bash deploy/caddy/publish.sh` |
 | Change the staging login | `ssh -t root@159.195.205.30 /srv/PRO-staging/deploy/set-staging-password.sh` (without `-t` the prompts cannot read the password) |
 | Reach the host from the dev machine | `ssh elprofessor` (dedicated key; see memory) |
+| Run the end-to-end tests | `cd e2e && npm install && npm run setup && npm test` (details in `e2e/README.md`) |
 
 ## Waiting on the owner
 
@@ -66,6 +73,8 @@ Secrets never enter git:
 - **Caddy accepts any `@name` as a named matcher,** so a template placeholder must be an invalid directive to fail closed.
 - **The `Enter passphrase for key … id_ed25519` prompt is local to your machine.** Pressing Enter falls back to the server password.
 - **GoTrue v2.170.0 only rate-limits when `GOTRUE_RATE_LIMIT_HEADER` is set;** otherwise it silently does nothing.
+- **Playwright applies the config's `httpCredentials` to every request context, including `request.newContext()`.** A "visitor without a login" built that way silently sends the test login. Use Node's `fetch` for anonymous checks.
+- **supabase-js strips the URL hash while it creates a session from a link.** Anything that needs `type=` or `error=` must read it before the client is created; see `authRedirect` in `src/lib/supabase.ts`.
 
 ## Keeping this file honest
 
