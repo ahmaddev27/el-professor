@@ -163,7 +163,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const userRef = useRef<User | null>(null);
   userRef.current = user;
 
-  const isSessionExpired = () => {
+  const isSessionExpired = (session: { user: { last_sign_in_at?: string | null } }) => {
+    // A session created moments ago — by a password-reset or invite link, or a
+    // sign-in in another tab — is not a stale one. Without this, anyone who had
+    // not used the app for 20 minutes (everyone who forgot a password, every
+    // newly invited employee) was signed out the instant their link signed them
+    // in, and saw "Link ungültig".
+    const FRESH_SIGN_IN_MS = 5 * 60 * 1000;
+    const signedInAt = session.user.last_sign_in_at ? Date.parse(session.user.last_sign_in_at) : NaN;
+    if (Number.isFinite(signedInAt) && Date.now() - signedInAt < FRESH_SIGN_IN_MS) return false;
+
     const lastActivity = localStorage.getItem(LAST_ACTIVITY_KEY);
     if (!lastActivity) return true;
     return Date.now() - parseInt(lastActivity) > SESSION_TIMEOUT;
@@ -336,7 +345,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
 
         if (existingSession) {
-          if (isSessionExpired()) {
+          if (isSessionExpired(existingSession)) {
             await supabase.auth.signOut();
             clearSessionData();
             setLoading(false);
