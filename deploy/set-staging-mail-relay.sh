@@ -85,17 +85,28 @@ echo "Staging mail is now relayed to its real recipients through Resend (example
 
 if [ "$MODE" = --test ]; then
   # Resend's own sink address: accepted and marked delivered, reaches no one.
-  net="$(docker inspect -f '{{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}' "$(docker compose ps -q mailpit)" | tr ' ' '\n' | grep -m1 staging)"
-  docker run --rm --pull never --network "$net" alpine:latest sh -c '
+  # No pipelines in this block: under pipefail a grep that matches nothing ends
+  # the script silently, which once hid the outcome of the test.
+  net=""
+  for n in $(docker inspect -f '{{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}' "$(docker compose ps -q mailpit)"); do
+    case "$n" in *staging*) net="$n"; break ;; esac
+  done
+  [ -n "$net" ] || { echo "Could not find the staging network of the mailpit container."; exit 1; }
+  reply="$(docker run --rm --pull never --network "$net" alpine:latest sh -c '
     { printf "EHLO relay-test\r\n"; sleep 1; printf "MAIL FROM:<noreply-staging@elprofessor.eu>\r\n"; sleep 1;
       printf "RCPT TO:<delivered@resend.dev>\r\n"; sleep 1; printf "DATA\r\n"; sleep 1;
       printf "From: El-Professor Staging <noreply-staging@elprofessor.eu>\r\nTo: delivered@resend.dev\r\nSubject: Staging relay test\r\n\r\nRelay test from staging.\r\n.\r\n"; sleep 1;
-      printf "QUIT\r\n"; } | nc mailpit 1025' > /dev/null
+      printf "QUIT\r\n"; } | nc mailpit 1025')" || true
+  case "$reply" in
+    *"Ok: queued"*) ;;
+    *) echo "Mailpit did not accept the test mail. Its SMTP replies:"; echo "$reply"; exit 1 ;;
+  esac
+  # Mailpit logs a relay only when it fails (success is a debug line), so a quiet
+  # log is the good case.
   sleep 10
   if docker compose logs --since 20s mailpit 2>&1 | grep -q 'error relaying'; then
     echo "The test mail was NOT relayed:"; docker compose logs --since 20s mailpit 2>&1 | grep 'error relaying' | tail -2
     exit 1
   fi
-  docker compose logs --since 20s mailpit 2>&1 | grep -i relay | tail -3
   echo "Test mail to delivered@resend.dev relayed without error. Resend's dashboard shows it as delivered."
 fi
