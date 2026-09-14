@@ -18,6 +18,7 @@
 **Now:** Phase 0 of the requirements plan — releases, rollback and staging protection.
 
 - **Live on staging:** per-client login rate limits, kept releases with one-step rollback, the production gate, a login in front of staging, and the end-to-end suite in `e2e/`. That suite found and fixed a live bug: reset and invite links signed users straight back out.
+- **Staging mail reaches real recipients** through production's Resend, by the owner's decision; test addresses at `example.com` never leave the host, and Mailpit keeps a copy of every message.
 - **Next:** 0.6, the first production release from CI.
 - **Being built in parallel, as PRs into `staging`:** Phases 1–4 (OTP, design system, platform authority, cash receipt foundations).
 
@@ -26,6 +27,7 @@
 | web | https://elprofessor.eu | https://app.elprofessor.eu (login required) |
 | API | https://api.elprofessor.eu | https://api-staging.elprofessor.eu |
 | branch | `main` — deployed by a manual button | `staging` — deployed on every push |
+| mail | Resend | Mailpit keeps a copy and relays to Resend, except `@example.com` |
 
 Sections 1–25 below describe the application. Where they disagree with the code, the code wins.
 

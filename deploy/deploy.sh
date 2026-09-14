@@ -93,12 +93,26 @@ if [ "$ENVIRONMENT" = staging ] && [ -f /srv/PRO/deploy/.env ]; then
   [ "$own" != "$prod" ] || fail "staging and production share a JWT_SECRET"
 fi
 
-# Staging holds a copy of production data, real addresses included. It may only
-# ever hand mail to the local catcher; production must never do so.
+# Staging holds a copy of production data, real addresses included. Its mail
+# always goes through Mailpit, which keeps a copy of every message and decides
+# what leaves the host: since 14.09.2026 it relays everything but @example.com
+# to Resend, so staging mail reaches real inboxes the way production's does
+# (the owner's decision; deploy/set-staging-mail-relay.sh). Production must
+# never send to the catcher.
 SMTP_HOST="$(grep -E '^SMTP_HOST=' .env | cut -d= -f2- | tr -d '\r')" || true
 PROFILES="$(grep -E '^COMPOSE_PROFILES=' .env | cut -d= -f2- | tr -d '\r')" || true
 if [ "$ENVIRONMENT" = staging ]; then
-  [ "$SMTP_HOST" = mailpit ] || fail "staging SMTP_HOST is '$SMTP_HOST'; it must be mailpit so no real person is emailed"
+  [ "$SMTP_HOST" = mailpit ] || fail "staging SMTP_HOST is '$SMTP_HOST'; it must be mailpit, which keeps a copy of every message and blocks the test addresses"
+  # Mailpit reads its relay settings at start. A missing file turns into an empty
+  # directory at the bind-mount path and Mailpit does not start at all. With
+  # relaying on, the example.com block must be there: test accounts would
+  # otherwise bounce and spend the Resend quota staging shares with production.
+  [ -f mailpit-relay.yml ] || fail "deploy/mailpit-relay.yml is missing; write it with deploy/set-staging-mail-relay.sh (add --off to keep mail on the host)"
+  RELAY_ALL="$(grep -E '^MAILPIT_RELAY_ALL=' .env | cut -d= -f2- | tr -d '\r')" || true
+  if [ "$RELAY_ALL" = true ]; then
+    grep -qE "^blocked-recipients: '@example" mailpit-relay.yml \
+      || fail "staging relays all mail but deploy/mailpit-relay.yml does not block example.com; rerun deploy/set-staging-mail-relay.sh"
+  fi
   [ "$PROFILES" = staging ] || fail "staging needs COMPOSE_PROFILES=staging, or the mailpit service it sends to never starts"
   # Fail closed on the mailbox login. If this file is missing, Docker creates an
   # empty *directory* at the bind-mount path and Mailpit may start with no UI
