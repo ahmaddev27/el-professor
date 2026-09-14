@@ -431,8 +431,17 @@ services:
       # The file is provisioned on the host by deploy/set-mailpit-password.sh and
       # never committed; deploy.sh refuses a staging release without it.
       MP_UI_AUTH_FILE: /run/mailpit/ui-auth
+      # Staging mail reaches real inboxes, as production's does (owner's
+      # decision, 14.09.2026). With MAILPIT_RELAY_ALL=true Mailpit keeps its copy
+      # and hands every message on to Resend with production's key; the relay
+      # file blocks @example.com, so test accounts never spend the quota staging
+      # shares with production. Both are written on the host by
+      # deploy/set-staging-mail-relay.sh; --off keeps every message here.
+      MP_SMTP_RELAY_CONFIG: /run/mailpit/relay.yml
+      MP_SMTP_RELAY_ALL: ${MAILPIT_RELAY_ALL:-false}
     volumes:
       - ./mailpit-ui-auth:/run/mailpit/ui-auth:ro
+      - ./mailpit-relay.yml:/run/mailpit/relay.yml:ro
     # On ridy's network so Caddy can publish it at mail-staging.elprofessor.eu.
     networks:
       - default
