@@ -13,6 +13,12 @@
 #
 # The stacks publish no host ports. Their containers join ridy_default and are
 # reached here by container name.
+#
+# Every API host sets X-Client-IP from the connecting address. GoTrue keys its
+# per-client limits on login, /verify and password recovery on that header
+# (GOTRUE_RATE_LIMIT_HEADER in deploy/docker-compose.yml) and applies none of
+# them without it. It has to be set here, at the edge: header_up replaces
+# whatever a client sent, and past Kong every request comes from one container.
 
 # Retired: the .de domain is kept only so existing links and mails still land.
 api.elprofessor.de {
@@ -21,6 +27,7 @@ api.elprofessor.de {
 	# Fahrtenbuch XLSX uploads and PDF batches outlast Caddy's default read
 	# timeout long before they hit any body limit.
 	reverse_proxy ya-mobility-kong-1:8000 {
+		header_up X-Client-IP {remote_host}
 		transport http {
 			read_timeout 300s
 			write_timeout 300s
@@ -45,6 +52,7 @@ api.elprofessor.eu {
 	encode zstd gzip
 
 	reverse_proxy ya-mobility-kong-1:8000 {
+		header_up X-Client-IP {remote_host}
 		transport http {
 			read_timeout 300s
 			write_timeout 300s
@@ -101,6 +109,7 @@ api-staging.elprofessor.eu {
 	encode zstd gzip
 
 	reverse_proxy ya-mobility-staging-kong-1:8000 {
+		header_up X-Client-IP {remote_host}
 		transport http {
 			read_timeout 300s
 			write_timeout 300s

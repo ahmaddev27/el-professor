@@ -151,6 +151,23 @@ services:
       # open registration. Keep this false unless that changes.
       GOTRUE_DISABLE_SIGNUP: ${DISABLE_SIGNUP:-false}
 
+      # Per-client limits on login and token refresh (/token), /verify, and
+      # /recover plus user updates. GoTrue enforces none of them unless it is
+      # told which header identifies the client, so until this was set password
+      # guessing against /token was unlimited. Caddy writes X-Client-IP from the
+      # connecting address on every API host (deploy/caddy/elprofessor.caddy),
+      # replacing anything a client sends. Our own edge functions reach GoTrue
+      # through Kong without that header and are deliberately not limited.
+      #
+      # TOKEN, VERIFY and OTP count requests per client per 5 minutes;
+      # EMAIL_SENT counts mails per hour across the whole instance. Staging can
+      # raise RATE_LIMIT_TOKEN in its .env for a load test.
+      GOTRUE_RATE_LIMIT_HEADER: X-Client-IP
+      GOTRUE_RATE_LIMIT_TOKEN_REFRESH: ${RATE_LIMIT_TOKEN:-60}
+      GOTRUE_RATE_LIMIT_VERIFY: ${RATE_LIMIT_VERIFY:-30}
+      GOTRUE_RATE_LIMIT_OTP: ${RATE_LIMIT_OTP:-30}
+      GOTRUE_RATE_LIMIT_EMAIL_SENT: ${RATE_LIMIT_EMAIL_SENT:-60}
+
       # Email confirmation is expected OFF: company-signup creates users with
       # email_confirm: true and LoginForm has a dedicated error for this being
       # left on.
