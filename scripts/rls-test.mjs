@@ -14,12 +14,18 @@
  * Migrations newer than the dump are applied on top, which also proves they
  * apply cleanly to a real schema.
  *
+ * After the permission matrix (assertions.sql), every other tests/rls/*.sql
+ * file runs in name order, against the same database. The seed files are
+ * loaded before, not asserted. A test file that writes should run inside
+ * BEGIN … ROLLBACK (otp.sql does), so the files after it see only the seeds.
+ *
  *   node scripts/rls-test.mjs            # build, assert, tear down
  *   node scripts/rls-test.mjs --keep     # leave the container up to poke at
  *
  * Needs Docker. Exits non-zero on the first failed assertion.
  */
-import { execFileSync, execFile } from 'node:child_process';
+import { execFileSync, execFile, spawnSync } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
 import { readdirSync, existsSync, readFileSync } from 'node:fs';
 import { promisify } from 'node:util';
 import path from 'node:path';
@@ -27,28 +33,48 @@ import path from 'node:path';
 const execFileP = promisify(execFile);
 
 const IMAGE = 'supabase/postgres:17.6.1.170';
-const NAME = 'ya-rls-test';
+// Unique per run. The kit runs on a host shared by parallel work, and with a
+// fixed name one run's teardown removed another run's database mid-assertion.
+const NAME = process.env.RLS_TEST_CONTAINER || `ya-rls-test-${randomBytes(4).toString('hex')}`;
 const PW = 'rls-test-only';
 const ROOT = path.resolve(import.meta.dirname, '..');
 const FIXTURE = path.join(ROOT, 'tests/fixtures/schema.sql');
+const TESTS = path.join(ROOT, 'tests/rls');
 const KEEP = process.argv.includes('--keep');
 
 /** Migrations that postdate the fixture dump, in filename order. */
 const MIGRATIONS_AFTER = '20260908';
 
+/** Loaded before the assertions; never run as a test file. */
+const SEEDS = new Set(['seed.sql', 'roles-seed.sql']);
+
+const PSQL = ['exec', '-i', NAME, 'psql', '-v', 'ON_ERROR_STOP=1', '-q',
+              '-U', 'supabase_admin', '-d', 'postgres'];
+const MAX_BUFFER = 64 * 1024 * 1024;
+
 const sh = (args, opts = {}) =>
   execFileSync('docker', args, { encoding: 'utf8', stdio: 'pipe', ...opts });
 
 const psqlText = (sql) =>
-  execFileSync('docker', ['exec', '-i', NAME, 'psql', '-v', 'ON_ERROR_STOP=1', '-q',
-                          '-U', 'supabase_admin', '-d', 'postgres'],
-               { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], input: sql });
+  execFileSync('docker', PSQL,
+               { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], input: sql, maxBuffer: MAX_BUFFER });
 
-const psqlFile = (file) =>
-  execFileSync('docker', ['exec', '-i', NAME, 'psql', '-v', 'ON_ERROR_STOP=1', '-q',
-                          '-U', 'supabase_admin', '-d', 'postgres'],
-               { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'],
-                 input: execFileSync('cat', [file], { encoding: 'utf8' }) });
+const psqlFile = (file) => psqlText(readFileSync(file, 'utf8'));
+
+/**
+ * Runs one assertion file and returns what it reported. psql writes NOTICE to
+ * stderr, so stdout alone shows nothing on a passing run.
+ */
+function assertFile(file) {
+  const r = spawnSync('docker', PSQL,
+                      { encoding: 'utf8', input: readFileSync(file, 'utf8'), maxBuffer: MAX_BUFFER });
+  if (r.error) throw r.error;
+  if (r.status !== 0) {
+    throw Object.assign(new Error(`${path.basename(file)} failed`),
+                        { stderr: `${path.basename(file)}:\n${r.stderr}` });
+  }
+  return `${r.stdout}${r.stderr}`.replace(/^psql:[^:]+:\d+: NOTICE:\s*/gm, '    ');
+}
 
 function teardown() {
   try { sh(['rm', '-f', NAME]); } catch { /* already gone */ }
@@ -77,6 +103,14 @@ function migrationsAfterFixture() {
     .map(f => path.join(dir, f));
 }
 
+/** The permission matrix first, then every other test file in name order. */
+function assertionFiles() {
+  const rest = readdirSync(TESTS)
+    .filter(f => f.endsWith('.sql') && f !== 'assertions.sql' && !SEEDS.has(f))
+    .sort();
+  return ['assertions.sql', ...rest].map(f => path.join(TESTS, f));
+}
+
 const step = (msg) => process.stdout.write(`  ${msg}\n`);
 
 try {
@@ -85,8 +119,9 @@ try {
   }
 
   teardown();
-  step('starting a throwaway postgres…');
-  sh(['run', '-d', '--name', NAME, '-e', `POSTGRES_PASSWORD=${PW}`, IMAGE]);
+  step(`starting a throwaway postgres (${NAME})…`);
+  sh(['run', '-d', '--name', NAME, '--cpus', '1', '--memory', '1g',
+      '-e', `POSTGRES_PASSWORD=${PW}`, IMAGE]);
   await waitReady();
 
   step('loading the production schema fixture…');
@@ -113,14 +148,15 @@ try {
   // came across as empty tables. Without them current_role_permits() denies
   // everything and every assertion would pass for the wrong reason.
   step('seeding the system roles and permission matrix…');
-  psqlFile(path.join(ROOT, 'tests/rls/roles-seed.sql'));
+  psqlFile(path.join(TESTS, 'roles-seed.sql'));
 
   step('seeding two tenants and five principals…');
-  psqlFile(path.join(ROOT, 'tests/rls/seed.sql'));
+  psqlFile(path.join(TESTS, 'seed.sql'));
 
-  step('asserting the permission matrix…\n');
-  const out = psqlFile(path.join(ROOT, 'tests/rls/assertions.sql'));
-  process.stdout.write(out.replace(/^psql:[^:]+:\d+: NOTICE:\s*/gm, '    '));
+  for (const file of assertionFiles()) {
+    step(`asserting ${path.basename(file)}…\n`);
+    process.stdout.write(assertFile(file));
+  }
 
   process.stdout.write('\nRLS assertions passed.\n');
 } catch (err) {
