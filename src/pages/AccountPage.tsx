@@ -3,8 +3,22 @@ import { User, Mail, Lock, Eye, EyeOff, AlertCircle, CheckCircle2, Building2, Sh
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { useTranslation } from '../contexts/LanguageContext';
+import {
+  formatOtpMessage,
+  isPlausibleEmail,
+  normalizeEmail,
+  otpMessage,
+  requestOtp,
+  type OtpRequestFailure,
+  type OtpVerifyFailure,
+} from '../lib/otpClient';
+import EmphasizedText from '../components/auth/EmphasizedText';
+import OtpChallenge from '../components/auth/OtpChallenge';
 
 const MIN_LEN = 8;
+
+/** A code went to the new address; the change happens once it is entered. */
+type EmailChallenge = { newEmail: string; accessToken: string; cooldownSeconds: number };
 
 /**
  * The signed-in user's own account: display name, email address, password.
@@ -13,13 +27,19 @@ const MIN_LEN = 8;
  * included — PlatformAccountGuard lets this one path through precisely because
  * it shows no tenant data, only the caller's own record.
  *
- * Changing a password re-authenticates first. `supabase.auth.updateUser()`
- * accepts a new password on the strength of the session alone, so without this
- * an unattended logged-in browser is enough to take an account over. The
- * current password is verified with a sign-in call before the update is sent.
+ * Both sensitive changes re-authenticate first, because an unattended
+ * signed-in browser must not be enough to take the account over:
+ *
+ * - Password: `supabase.auth.updateUser()` accepts a new password on the
+ *   strength of the session alone, so the current password is verified with a
+ *   sign-in call before the update is sent.
+ * - Email address: the same sign-in is the password proof otp-request demands
+ *   (at most ten minutes old), and the address changes only once the code sent
+ *   to the new address is entered. The trigger sync_user_profile_email keeps
+ *   user_profiles.email in step with auth.users.
  */
 const AccountPage: React.FC = () => {
-  const { t } = useTranslation();
+  const { t, tPlural } = useTranslation();
   const { user, profile, isSuperAdmin } = useAuth();
 
   const [companyName, setCompanyName] = useState<string | null>(null);
@@ -29,8 +49,10 @@ const AccountPage: React.FC = () => {
   const [nameMsg, setNameMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
   const [email, setEmail] = useState('');
+  const [emailPw, setEmailPw] = useState('');
   const [emailBusy, setEmailBusy] = useState(false);
   const [emailMsg, setEmailMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [emailChallenge, setEmailChallenge] = useState<EmailChallenge | null>(null);
 
   const [currentPw, setCurrentPw] = useState('');
   const [newPw, setNewPw] = useState('');
@@ -39,10 +61,16 @@ const AccountPage: React.FC = () => {
   const [pwBusy, setPwBusy] = useState(false);
   const [pwMsg, setPwMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
+  // Keyed on the values rather than the objects: each re-authenticating sign-in
+  // below reloads the profile, and resetting the fields on every reload wiped
+  // whatever was being typed.
   useEffect(() => {
     setFullName(profile?.full_name ?? '');
+  }, [profile?.full_name]);
+
+  useEffect(() => {
     setEmail(profile?.email ?? user?.email ?? '');
-  }, [profile, user]);
+  }, [profile?.email, user?.email]);
 
   useEffect(() => {
     if (!profile?.company_id) { setCompanyName(null); return; }
@@ -54,6 +82,10 @@ const AccountPage: React.FC = () => {
     })();
     return () => { alive = false; };
   }, [profile?.company_id]);
+
+  // The address the account signs in with. auth.users is the authority; the
+  // profile copy is only for display.
+  const signInEmail = user?.email ?? profile?.email ?? '';
 
   const saveName = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -69,36 +101,54 @@ const AccountPage: React.FC = () => {
       : { ok: true, text: t('account.saved.name') });
   };
 
-  const saveEmail = async (e: React.FormEvent) => {
+  const requestEmailChange = async (e: React.FormEvent) => {
     e.preventDefault();
     setEmailMsg(null);
-    const next = email.trim().toLowerCase();
-    if (!next || !next.includes('@')) { setEmailMsg({ ok: false, text: t('account.error.emailInvalid') }); return; }
-    if (next === (profile?.email ?? '').toLowerCase()) { setEmailMsg({ ok: false, text: t('account.error.emailUnchanged') }); return; }
+    const next = normalizeEmail(email);
+    if (!isPlausibleEmail(next)) { setEmailMsg({ ok: false, text: t('account.error.emailInvalid') }); return; }
+    if (next === normalizeEmail(signInEmail)) { setEmailMsg({ ok: false, text: t('account.error.emailUnchanged') }); return; }
 
     setEmailBusy(true);
-    const { error } = await supabase.auth.updateUser({ email: next });
-    if (error) {
+    const { data, error: authErr } = await supabase.auth.signInWithPassword({
+      email: signInEmail,
+      password: emailPw,
+    });
+    if (authErr || !data.session) {
       setEmailBusy(false);
-      // Changing your own address is the one flow here that cannot complete
-      // without mail delivery: the server sends a confirmation link and fails
-      // the request when it cannot. Say that, rather than showing the 500 —
-      // an administrator can still change the address from the Users screen,
-      // which goes through the admin API and needs no confirmation.
-      const mailFailure = /5\d\d|mail|smtp|send/i.test(`${error.status ?? ''} ${error.message}`);
-      setEmailMsg({ ok: false, text: mailFailure ? t('account.error.emailNoMailer') : error.message });
+      setEmailMsg({ ok: false, text: t('account.error.pwCurrentWrong') });
       return;
     }
 
-    // Keep the profile row in step. It is what every screen reads; auth.users is
-    // only consulted at sign-in, so leaving the two apart shows the old address
-    // everywhere while the new one is what actually logs in.
-    const { error: profErr } = await supabase
-      .from('user_profiles').update({ email: next }).eq('user_id', user!.id);
+    const accessToken = data.session.access_token;
+    const result = await requestOtp({ purpose: 'email_change', newEmail: next, accessToken });
     setEmailBusy(false);
-    setEmailMsg(profErr
-      ? { ok: false, text: profErr.message }
-      : { ok: true, text: t('account.saved.email') });
+    if (!result.ok) {
+      const message = otpMessage(result);
+      setEmailMsg({ ok: false, text: message ? formatOtpMessage(message, t, tPlural) : t('otp.error.internal') });
+      return;
+    }
+    setEmailPw('');
+    setEmailChallenge({ newEmail: next, accessToken, cooldownSeconds: result.cooldownSeconds });
+  };
+
+  const handleEmailVerified = async () => {
+    // A refreshed token carries the new address, and AuthContext's listener
+    // reloads the profile the trigger has already updated.
+    await supabase.auth.refreshSession();
+    setEmailChallenge(null);
+    setEmailMsg({ ok: true, text: t('account.saved.email') });
+  };
+
+  // otp-request accepts the password proof behind the token for ten minutes
+  // only, and the token is void once its session ends. Only the form can produce
+  // a new one, so the code screen gives way to it and says why, instead of
+  // telling the user to confirm a password on a screen that has no password field.
+  const returnToEmailForm = (result: OtpRequestFailure | OtpVerifyFailure): boolean => {
+    if (result.reason !== 'reauth_required' && result.reason !== 'unauthorized') return false;
+    const message = otpMessage(result);
+    setEmailChallenge(null);
+    setEmailMsg({ ok: false, text: message ? formatOtpMessage(message, t, tPlural) : t('otp.error.internal') });
+    return true;
   };
 
   const savePassword = async (e: React.FormEvent) => {
@@ -151,6 +201,7 @@ const AccountPage: React.FC = () => {
   const Notice: React.FC<{ msg: { ok: boolean; text: string } | null }> = ({ msg }) =>
     !msg ? null : (
       <div
+        role={msg.ok ? 'status' : 'alert'}
         className="mt-3 flex items-start gap-2 rounded-lg p-3 text-sm"
         style={{
           background: msg.ok ? 'var(--success-subtle)' : 'var(--danger-subtle)',
@@ -162,6 +213,13 @@ const AccountPage: React.FC = () => {
         <span>{msg.text}</span>
       </div>
     );
+
+  const emailHeading = (
+    <h3 className="text-base font-semibold flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
+      <Mail size={16} style={{ color: 'var(--accent)' }} />
+      {t('account.email.heading')}
+    </h3>
+  );
 
   return (
     <div className="space-y-6 max-w-3xl">
@@ -220,30 +278,72 @@ const AccountPage: React.FC = () => {
         </button>
       </form>
 
-      {/* Email */}
-      <form onSubmit={saveEmail} className="rounded-xl p-5" style={card}>
-        <h3 className="text-base font-semibold flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
-          <Mail size={16} style={{ color: 'var(--accent)' }} />
-          {t('account.email.heading')}
-        </h3>
-        <p className="text-xs mt-1" style={{ color: 'var(--text-secondary)' }}>
-          {t('account.email.hint')}
-        </p>
-        <input
-          type="email"
-          value={email}
-          onChange={e => setEmail(e.target.value)}
-          className="mt-3 w-full rounded-lg px-3 py-2 text-sm outline-none"
-          style={inputStyle}
-          autoComplete="email"
-        />
-        <Notice msg={emailMsg} />
-        <button type="submit" disabled={emailBusy}
-          className="mt-4 rounded-lg px-4 py-2 text-sm font-medium transition-colors"
-          style={btn(emailBusy)}>
-          {emailBusy ? t('common.saving') : t('account.email.submit')}
-        </button>
-      </form>
+      {/* Email: the form sends a code to the new address; the challenge completes the change */}
+      {emailChallenge ? (
+        <section className="rounded-xl p-5" style={card}>
+          {emailHeading}
+          <div className="mt-3">
+            <OtpChallenge
+              surface="app"
+              purpose="email_change"
+              email={signInEmail}
+              newEmail={emailChallenge.newEmail}
+              accessToken={emailChallenge.accessToken}
+              initialCooldownSeconds={emailChallenge.cooldownSeconds}
+              hint={
+                <EmphasizedText
+                  template={t('account.email.codeSentTo')}
+                  placeholder="email"
+                  value={emailChallenge.newEmail}
+                  className="font-medium"
+                  style={{ color: 'var(--text-primary)' }}
+                />
+              }
+              verifyLabel={t('account.email.submit')}
+              onVerified={handleEmailVerified}
+              onFailure={returnToEmailForm}
+              onResendFailure={returnToEmailForm}
+              onBack={() => setEmailChallenge(null)}
+              backLabel={t('common.cancel')}
+            />
+          </div>
+        </section>
+      ) : (
+        <form onSubmit={requestEmailChange} className="rounded-xl p-5" style={card}>
+          {emailHeading}
+          <p className="text-xs mt-1" style={{ color: 'var(--text-secondary)' }}>
+            {t('account.email.hint')}
+          </p>
+          <div className="mt-3 space-y-3">
+            <input
+              type="email"
+              value={email}
+              onChange={e => setEmail(e.target.value)}
+              className="w-full rounded-lg px-3 py-2 text-sm outline-none"
+              style={inputStyle}
+              aria-label={t('account.email.heading')}
+              autoComplete="email"
+            />
+            <input
+              type="password"
+              value={emailPw}
+              onChange={e => setEmailPw(e.target.value)}
+              className="w-full rounded-lg px-3 py-2 text-sm outline-none"
+              style={inputStyle}
+              placeholder={t('account.email.currentPassword')}
+              aria-label={t('account.email.currentPassword')}
+              autoComplete="current-password"
+              required
+            />
+          </div>
+          <Notice msg={emailMsg} />
+          <button type="submit" disabled={emailBusy || !emailPw}
+            className="mt-4 rounded-lg px-4 py-2 text-sm font-medium transition-colors"
+            style={btn(emailBusy || !emailPw)}>
+            {emailBusy ? t('otp.verifying') : t('account.email.sendCode')}
+          </button>
+        </form>
+      )}
 
       {/* Password */}
       <form onSubmit={savePassword} className="rounded-xl p-5" style={card}>

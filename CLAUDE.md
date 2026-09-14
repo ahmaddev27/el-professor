@@ -121,6 +121,11 @@ Two full, separate stacks run on one VPS (159.195.205.30), behind ridy's Caddy.
 
 `AuthContext` also enforces a 20-minute inactivity logout (`SESSION_TIMEOUT`, tracked in `localStorage.lastActivity`).
 
+Two rules about how a session comes to exist:
+
+- **Owners of a pending or rejected company stay signed in.** `signIn` signs the session back out only for user blocks and for suspended, inactive or deleted companies; gate 3 then shows the waiting or rejected page. A new owner lands on the waiting page straight after entering the signup code.
+- **One-time codes go through `src/lib/otpClient.ts` and nothing else.** Forgot password, the signup verification step, `/auth/verify-email`, `/einladung` and the email change on `/mein-konto` all render `OtpChallenge` from `src/components/auth/`. A session returned by `otp-verify` is installed with `useOtpSessionHandoff`, never with a bare `setSession()` followed by `navigate()`: installing it swaps App's public router for the authenticated one, and a `navigate()` issued around that swap can land in the router being unmounted, leaving the new one on the code screen.
+
 ### Multi-tenancy and the two company IDs
 
 Every business table carries `company_id`, isolated by RLS. `AuthContext.companyId` is the logged-in user's own company. `SuperAdminContext.effectiveCompanyId` is the company whose data should actually be queried — it differs when a super admin has "entered" another company to view its data. Most components still use `companyId` directly; only `MonatsplanungStundennachweisPreview.tsx` uses `effectiveCompanyId`. When adding a query a super admin should be able to run *as* a customer, use `effectiveCompanyId`.

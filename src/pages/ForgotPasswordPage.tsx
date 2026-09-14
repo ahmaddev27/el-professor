@@ -1,122 +1,136 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Mail, ArrowLeft, AlertCircle, CheckCircle2, Send } from 'lucide-react';
-import { supabase, appOrigin } from '../lib/supabase';
+import { Mail, ArrowLeft, Send } from 'lucide-react';
 import { useTranslation } from '../contexts/LanguageContext';
+import { useOtpSessionHandoff } from '../hooks/useOtpSessionHandoff';
+import {
+  formatOtpMessage,
+  isPlausibleEmail,
+  normalizeEmail,
+  otpMessage,
+  requestOtp,
+  type OtpMessage,
+  type OtpVerifyFailure,
+  type OtpVerifySuccess,
+} from '../lib/otpClient';
+import type { OtpNotice } from '../lib/otpUi';
+import AuthShell from '../components/auth/AuthShell';
+import NoticeBox from '../components/auth/NoticeBox';
+import OtpChallenge from '../components/auth/OtpChallenge';
+import {
+  authInputClass,
+  authLabelClass,
+  authPrimaryButtonClass,
+  authQuietLinkClass,
+  authSpinnerClass,
+} from '../components/auth/authStyles';
 
+type Challenge = { email: string; cooldownSeconds: number; notice: OtpNotice };
+
+/**
+ * Password reset by one-time code: the address, then the code, then
+ * SetPasswordPage.
+ *
+ * The server answers every request the same way whether or not the account
+ * exists (contract 3.2), so this screen never says a code was sent — only that
+ * one was if the account exists — and does not repeat the address as the
+ * recipient of a mail that may never have gone out.
+ */
 const ForgotPasswordPage: React.FC = () => {
-  const { t } = useTranslation();
+  const { t, tPlural } = useTranslation();
+  const completeSignIn = useOtpSessionHandoff();
   const [email, setEmail] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-  const [sent, setSent] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState<OtpMessage | null>(null);
+  const [challenge, setChallenge] = useState<Challenge | null>(null);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError('');
-    setLoading(true);
-    try {
-      const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
-        redirectTo: `${appOrigin}/auth/callback`,
-      });
-      if (error) {
-        setError(t('forgot.sendFailed'));
-      } else {
-        setSent(true);
-      }
-    } catch {
-      setError(t('forgot.unexpected'));
-    } finally {
-      setLoading(false);
+  const sendCode = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!isPlausibleEmail(email)) {
+      setError({ key: 'account.error.emailInvalid' });
+      return;
     }
+    const address = normalizeEmail(email);
+    setSending(true);
+    setError(null);
+    const result = await requestOtp({ purpose: 'password_reset', email: address });
+    setSending(false);
+    if (!result.ok) {
+      setError(otpMessage(result));
+      return;
+    }
+    setChallenge({
+      email: address,
+      cooldownSeconds: result.cooldownSeconds,
+      notice: { tone: 'success', message: { key: result.uniform ? 'forgot.codeSentIfExists' : 'otp.sent' } },
+    });
+  };
+
+  const handleVerified = async (result: OtpVerifySuccess): Promise<OtpVerifyFailure | void> => {
+    if (!('session' in result)) return { ok: false, reason: 'internal' };
+    const signedIn = await completeSignIn(result.session, '/auth/set-password');
+    if (!signedIn) return { ok: false, reason: 'session_failed' };
   };
 
   return (
-    <div className="min-h-screen bg-[#060a0f] flex items-center justify-center p-4 relative overflow-hidden">
-      <div className="absolute inset-0 bg-[linear-gradient(rgba(6,182,212,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(6,182,212,0.03)_1px,transparent_1px)] bg-[size:48px_48px]" />
-      <div className="absolute top-1/4 left-1/2 -translate-x-1/2 w-[600px] h-[400px] bg-cyan-600/5 rounded-full blur-[120px] pointer-events-none" />
+    <AuthShell
+      title={t('forgot.title')}
+      subtitle={challenge ? challenge.email : t('forgot.subtitle')}
+      footer={
+        <Link to="/login" className={authQuietLinkClass}>
+          <ArrowLeft size={14} aria-hidden="true" />
+          {t('forgot.backToLogin')}
+        </Link>
+      }
+    >
+      {challenge ? (
+        <OtpChallenge
+          purpose="password_reset"
+          email={challenge.email}
+          initialCooldownSeconds={challenge.cooldownSeconds}
+          initialNotice={challenge.notice}
+          hint={null}
+          onVerified={handleVerified}
+          onBack={() => setChallenge(null)}
+          backLabel={t('forgot.changeEmail')}
+        />
+      ) : (
+        <form onSubmit={sendCode} className="space-y-4" noValidate>
+          {error && <NoticeBox tone="error" announce>{formatOtpMessage(error, t, tPlural)}</NoticeBox>}
 
-      <div className="relative w-full max-w-sm">
-        <div className="text-center mb-8">
-          <div className="w-16 h-16 mx-auto mb-4 flex items-center justify-center">
-            <img src="/professor_logo_white.svg" alt="El-Professor" className="w-16 h-16 object-contain drop-shadow-[0_0_16px_rgba(6,182,212,0.5)]" />
-          </div>
-          <h1 className="text-2xl font-bold text-white mb-1">{t('forgot.title')}</h1>
-          <p className="text-white/40 text-sm">{t('forgot.subtitle')}</p>
-        </div>
-
-        <div className="bg-white/4 backdrop-blur-xl border border-white/10 rounded-2xl p-7 shadow-[0_24px_64px_rgba(0,0,0,0.5)]">
-          {sent ? (
-            <div className="text-center">
-              <div className="w-12 h-12 rounded-full bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center mx-auto mb-4">
-                <CheckCircle2 className="text-emerald-400" size={22} />
-              </div>
-              <h2 className="text-white font-semibold mb-2">{t('forgot.sent')}</h2>
-              <p className="text-white/60 text-sm leading-relaxed mb-6">
-                Wenn ein Konto mit dieser Adresse existiert, haben wir einen Link zum Zurücksetzen Ihres Passworts gesendet. Bitte prüfen Sie auch Ihren Spam-Ordner.
-              </p>
-              <Link
-                to="/login"
-                className="inline-flex items-center gap-2 text-cyan-300 hover:text-cyan-200 text-sm font-medium"
-              >
-                <ArrowLeft size={14} />
-                Zurück zur Anmeldung
-              </Link>
+          <div>
+            <label htmlFor="forgot-email" className={authLabelClass}>
+              {t('forgot.emailLabel')}
+            </label>
+            <div className="relative">
+              <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 text-white/25" size={16} aria-hidden="true" />
+              <input
+                id="forgot-email"
+                type="email"
+                autoComplete="email"
+                value={email}
+                onChange={event => setEmail(event.target.value)}
+                className={authInputClass}
+                placeholder={t('forgot.emailPlaceholder')}
+                required
+                autoFocus
+              />
             </div>
-          ) : (
-            <>
-              {error && (
-                <div className="mb-5 p-3.5 bg-red-500/10 border border-red-500/20 rounded-xl flex items-center gap-2.5">
-                  <AlertCircle className="text-red-400 flex-shrink-0" size={16} />
-                  <span className="text-red-300 text-sm">{error}</span>
-                </div>
-              )}
+          </div>
 
-              <form onSubmit={handleSubmit} className="space-y-4">
-                <div>
-                  <label className="block text-xs font-semibold text-white/40 uppercase tracking-wider mb-2">
-                    E-Mail-Adresse
-                  </label>
-                  <div className="relative">
-                    <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 text-white/25" size={16} />
-                    <input
-                      type="email"
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                      className="w-full pl-10 pr-4 py-3 bg-white/5 border border-white/10 text-white placeholder-white/20 rounded-xl focus:outline-none focus:ring-2 focus:ring-cyan-500/50 focus:border-cyan-500/40 transition-all text-sm"
-                      placeholder={t('forgot.emailPlaceholder')}
-                      required
-                    />
-                  </div>
-                </div>
-
-                <button
-                  type="submit"
-                  disabled={loading || !email}
-                  className="w-full bg-gradient-to-r from-cyan-500 to-blue-600 text-white py-3 px-4 rounded-xl font-semibold text-sm hover:shadow-[0_4px_24px_rgba(6,182,212,0.4)] hover:-translate-y-0.5 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:translate-y-0 flex items-center justify-center gap-2 mt-2"
-                >
-                  {loading ? (
-                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
-                  ) : (
-                    <>
-                      <Send size={15} />
-                      <span>{t('forgot.sendLink')}</span>
-                    </>
-                  )}
-                </button>
-              </form>
-
-              <div className="mt-6 text-center">
-                <Link to="/login" className="inline-flex items-center gap-1.5 text-white/50 hover:text-white/80 text-sm">
-                  <ArrowLeft size={14} />
-                  Zurück zur Anmeldung
-                </Link>
-              </div>
-            </>
-          )}
-        </div>
-      </div>
-    </div>
+          <button type="submit" disabled={sending || !email.trim()} className={`${authPrimaryButtonClass} mt-2`}>
+            {sending ? (
+              <span className={authSpinnerClass} aria-hidden="true" />
+            ) : (
+              <>
+                <Send size={15} aria-hidden="true" />
+                <span>{t('forgot.sendCode')}</span>
+              </>
+            )}
+          </button>
+        </form>
+      )}
+    </AuthShell>
   );
 };
 

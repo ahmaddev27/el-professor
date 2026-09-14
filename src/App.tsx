@@ -12,6 +12,8 @@ import LandingPage from './pages/LandingPage';
 import ForgotPasswordPage from './pages/ForgotPasswordPage';
 import AuthCallbackPage from './pages/AuthCallbackPage';
 import SetPasswordPage from './pages/SetPasswordPage';
+import VerifyEmailPage from './pages/VerifyEmailPage';
+import InviteAcceptPage from './pages/InviteAcceptPage';
 import SignupPage from './pages/SignupPage';
 import OverviewPage from './pages/OverviewPage';
 import AccountPage from './pages/AccountPage';
@@ -183,6 +185,8 @@ function App() {
           <Route path="/auth/callback" element={<AuthCallbackPage />} />
           <Route path="/auth/set-password" element={<SetPasswordPage />} />
           <Route path="/set-new-password" element={<SetPasswordPage />} />
+          <Route path="/auth/verify-email" element={<VerifyEmailPage />} />
+          <Route path="/einladung" element={<InviteAcceptPage />} />
           <Route path="/signup" element={<SignupPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
@@ -193,7 +197,8 @@ function App() {
   // Account revocation gate. Runs before the company gates because it is the
   // narrower block: a deactivated user must be stopped even while their company
   // is perfectly healthy. signIn() already refuses these accounts; this catches
-  // restored sessions, where signIn() never runs.
+  // restored sessions and sessions installed from a one-time code, where
+  // signIn() never runs.
   if (userBlockReason) {
     return <AccountBlockedPage reason={userBlockReason} />;
   }
@@ -219,6 +224,7 @@ function App() {
               <Route path="/auth/set-password" element={<SetPasswordPage />} />
               <Route path="/set-new-password" element={<SetPasswordPage />} />
               <Route path="/auth/forgot-password" element={<ForgotPasswordPage />} />
+              <Route path="/einladung" element={<InviteAcceptPage />} />
               <Route path="/" element={
                 <PlatformAccountGuard>
                 <MustChangePasswordGuard>

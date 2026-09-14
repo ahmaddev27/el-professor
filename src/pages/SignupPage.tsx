@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   Building2, User, Mail, Lock, Eye, EyeOff,
-  AlertCircle, CheckCircle2, ArrowLeft, ArrowRight, Zap, Check, Car, Tag, X, Gift,
+  AlertCircle, CheckCircle2, ArrowLeft, ArrowRight, Zap, Check, Car, Tag, X, Gift, LogIn,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { Plan } from '../contexts/PlanContext';
@@ -10,8 +10,17 @@ import { calcPricing, fleetDiscountPercent, PRICE_PER_CAR, YEARLY_DISCOUNT_PERCE
 import type { BillingCycle, DiscountResult } from '../utils/pricing';
 import { useTranslation } from '../contexts/LanguageContext';
 import type { TranslationKey } from '../i18n';
+import { useOtpSessionHandoff } from '../hooks/useOtpSessionHandoff';
+import { formatOtpMessage, normalizeEmail, type OtpVerifyFailure, type OtpVerifySuccess } from '../lib/otpClient';
+import { signupFailure, signupVerificationStart, type VerificationStart } from '../lib/accountFunctionResponses';
+import EmphasizedText from '../components/auth/EmphasizedText';
+import NoticeBox from '../components/auth/NoticeBox';
+import OtpChallenge from '../components/auth/OtpChallenge';
+import { authPrimaryButtonClass } from '../components/auth/authStyles';
 
-type Step = 'plan' | 'company' | 'account' | 'done';
+// 'verify' follows a successful company-signup: the account exists and waits
+// for the code, so there is no way back to the earlier steps from there.
+type Step = 'plan' | 'company' | 'account' | 'verify';
 
 const TRIAL_DAYS = 14;
 
@@ -60,7 +69,14 @@ const PLANS: PlanDef[] = [
   },
 ];
 
-const STEPS: Step[] = ['plan', 'company', 'account'];
+const STEPS: Step[] = ['plan', 'company', 'account', 'verify'];
+
+const STEP_LABEL_KEYS: Record<Step, TranslationKey> = {
+  plan:    'signup.step.plan',
+  company: 'signup.step.company',
+  account: 'signup.step.account',
+  verify:  'signup.step.verify',
+};
 
 // ─── PricePreview ─────────────────────────────────────────────────────────────
 
@@ -248,7 +264,8 @@ const DiscountCodeInput: React.FC<{
 // ─── Component ────────────────────────────────────────────────────────────────
 
 const SignupPage: React.FC = () => {
-  const { t } = useTranslation();
+  const { t, tPlural } = useTranslation();
+  const completeSignIn = useOtpSessionHandoff();
   const [step, setStep] = useState<Step>('plan');
   const [selectedPlan, setSelectedPlan] = useState<Plan>('advanced');
   const [billingCycle, setBillingCycle] = useState<BillingCycle>('monthly');
@@ -263,8 +280,10 @@ const SignupPage: React.FC = () => {
   const [appliedDiscount, setAppliedDiscount] = useState<DiscountResult | null>(null);
   const [referralCode, setReferralCode] = useState('');
   const [referralError, setReferralError] = useState('');
+  const [verification, setVerification] = useState<VerificationStart | null>(null);
+  const [verifiedWithoutSession, setVerifiedWithoutSession] = useState(false);
 
-  const stepIndex = STEPS.indexOf(step as any);
+  const stepIndex = STEPS.indexOf(step);
 
   const trialEndDate = new Date();
   trialEndDate.setDate(trialEndDate.getDate() + TRIAL_DAYS);
@@ -303,44 +322,50 @@ const SignupPage: React.FC = () => {
             billing_cycle: billingCycle,
             subscription_car_limit: carLimit,
             // The code the user typed, not the id the validation returned.
-            // The server redeems it against a locked row and computes the
-            // price itself; anything we sent about the amount was advisory and
-            // is now ignored.
+            // The server keeps it with the pending signup and redeems it only
+            // once the address is confirmed, so an unverified signup cannot
+            // use up a limited code. It computes the price itself.
             discount_code: appliedDiscount?.code ?? null,
             referral_code: referralCode.trim() || null,
           }),
         }
       );
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        // The needles are matched against the edge function's own wording, so
-        // they are server vocabulary rather than UI copy.
-        const errMsg: string = data.error || '';
-        if (errMsg.toLowerCase().includes('bereits registriert') || errMsg.toLowerCase().includes('already')) {
-          setError(t('signup.error.emailTaken'));
-        } else if (errMsg.toLowerCase().includes('empfehlungscode') || errMsg.toLowerCase().includes('referral')) {
-          setReferralError(errMsg);
-        } else {
-          setError(errMsg || t('signup.error.failed'));
-        }
+      const data: unknown = await res.json().catch(() => null);
+      const succeeded = res.ok && typeof data === 'object' && data !== null
+        && (data as { success?: unknown }).success === true;
+      if (!succeeded) {
+        // Branch on the reason company-signup reports, never on its German text.
+        const failure = signupFailure(data, referralCode);
+        const text = formatOtpMessage(failure.message, t, tPlural);
+        if (failure.field === 'referral') setReferralError(text);
+        else setError(text);
         return;
       }
-      // Account created — sign in and let the app show the pending approval page
-      const { error: signInError } = await supabase.auth.signInWithPassword({
-        email: email.trim(),
-        password,
-      });
-      if (signInError) {
-        setStep('done');
-        return;
-      }
-      // AuthContext will detect approval_status=pending and render PendingApprovalPage
-      window.location.href = '/overview';
+      // The account exists but cannot sign in until its address is confirmed.
+      // company-signup has already sent the code, or reports why it could not.
+      setVerification(signupVerificationStart(data));
+      setPassword('');
+      setStep('verify');
     } catch {
       setError(t('forgot.unexpected'));
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleVerified = async (result: OtpVerifySuccess): Promise<OtpVerifyFailure | void> => {
+    if (!('session' in result)) return { ok: false, reason: 'internal' };
+    // App shows PendingApprovalPage for the new company once the profile loads.
+    const signedIn = await completeSignIn(result.session, '/');
+    if (!signedIn) return { ok: false, reason: 'session_failed' };
+  };
+
+  // After session_failed the address is already confirmed, so a new code would
+  // be refused; the password chosen a moment ago signs in instead.
+  const handleVerifyFailure = (result: OtpVerifyFailure): boolean => {
+    if (result.reason !== 'session_failed') return false;
+    setVerifiedWithoutSession(true);
+    return true;
   };
 
   const selectedPlanDef = PLANS.find(p => p.id === selectedPlan)!;
@@ -361,45 +386,69 @@ const SignupPage: React.FC = () => {
         </div>
 
         {/* Step indicators */}
-        {step !== 'done' && (
-          <div className="flex items-center justify-center gap-2 mb-6">
-            {(['plan', 'company', 'account'] as Step[]).map((s, i) => (
-              <React.Fragment key={s}>
-                <div className="flex items-center gap-1.5">
-                  <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold transition-all ${
-                    step === s
-                      ? 'bg-cyan-500 text-white'
-                      : i < stepIndex
-                        ? 'bg-emerald-500 text-white'
-                        : 'bg-white/10 text-white/30'
-                  }`}>
-                    {i < stepIndex ? <Check size={12} /> : i + 1}
-                  </div>
-                  <span className={`text-xs font-medium hidden sm:inline ${step === s ? 'text-white' : 'text-white/30'}`}>
-                    {s === 'plan' ? t('signup.step.plan') : s === 'company' ? t('signup.step.company') : t('signup.step.account')}
-                  </span>
+        <div className="flex items-center justify-center gap-2 mb-6">
+          {STEPS.map((s, i) => (
+            <React.Fragment key={s}>
+              <div className="flex items-center gap-1.5" aria-current={step === s ? 'step' : undefined}>
+                <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold transition-all ${
+                  step === s
+                    ? 'bg-cyan-500 text-white'
+                    : i < stepIndex
+                      ? 'bg-emerald-500 text-white'
+                      : 'bg-white/10 text-white/30'
+                }`}>
+                  {i < stepIndex ? <Check size={12} aria-hidden="true" /> : i + 1}
                 </div>
-                {i < 2 && <div className={`w-6 h-px ${i < stepIndex ? 'bg-emerald-500/50' : 'bg-white/10'}`} />}
-              </React.Fragment>
-            ))}
-          </div>
-        )}
+                <span className={`text-xs font-medium hidden sm:inline ${step === s ? 'text-white' : 'text-white/30'}`}>
+                  {t(STEP_LABEL_KEYS[s])}
+                </span>
+              </div>
+              {i < STEPS.length - 1 && <div className={`w-6 h-px ${i < stepIndex ? 'bg-emerald-500/50' : 'bg-white/10'}`} />}
+            </React.Fragment>
+          ))}
+        </div>
 
         <div className="bg-white/4 backdrop-blur-xl border border-white/10 rounded-2xl p-6 shadow-[0_24px_64px_rgba(0,0,0,0.5)]">
 
-          {/* ── Done ── */}
-          {step === 'done' && (
-            <div className="text-center py-4">
-              <div className="w-14 h-14 rounded-full bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center mx-auto mb-4">
-                <CheckCircle2 className="text-emerald-400" size={26} />
+          {/* ── Step 4: Confirm the email address ── */}
+          {step === 'verify' && (
+            <div className="space-y-5">
+              <div>
+                <h2 className="text-base font-semibold text-white mb-1">{t('signup.verify.heading')}</h2>
+                <p className="text-xs text-white/40 break-words">
+                  <EmphasizedText
+                    template={t('signup.verify.subheading')}
+                    placeholder="email"
+                    value={normalizeEmail(email)}
+                    className="text-cyan-300"
+                  />
+                </p>
               </div>
-              <h2 className="text-white font-semibold mb-2">{t('signup.done.title')}</h2>
-              <p className="text-white/60 text-sm leading-relaxed mb-6">
-                {t('signup.done.body')}
-              </p>
-              <Link to="/login" className="inline-flex items-center justify-center gap-2 w-full bg-gradient-to-r from-cyan-500 to-blue-600 text-white py-3 px-4 rounded-xl font-semibold text-sm">
-                {t('signup.done.cta')}
-              </Link>
+
+              <div className="w-full max-w-sm mx-auto">
+                {verifiedWithoutSession ? (
+                  <div className="space-y-4">
+                    <NoticeBox tone="success" announce>{t('signup.verify.verifiedLogin')}</NoticeBox>
+                    <Link to="/login" replace className={authPrimaryButtonClass}>
+                      <LogIn size={15} aria-hidden="true" />
+                      <span>{t('auth.signIn')}</span>
+                    </Link>
+                  </div>
+                ) : (
+                  // No "code sent to" hint: when the send failed, that sentence
+                  // would be false. The subheading and the first notice say
+                  // what actually happened.
+                  <OtpChallenge
+                    purpose="signup_verify"
+                    email={normalizeEmail(email)}
+                    initialCooldownSeconds={verification?.cooldownSeconds ?? 0}
+                    initialNotice={verification?.notice ?? null}
+                    hint={null}
+                    onVerified={handleVerified}
+                    onFailure={handleVerifyFailure}
+                  />
+                )}
+              </div>
             </div>
           )}
 

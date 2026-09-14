@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { Link } from 'react-router-dom';
-import { LogIn, Mail, Lock, Eye, EyeOff, AlertCircle } from 'lucide-react';
+import { Link, useNavigate } from 'react-router-dom';
+import { LogIn, Mail, Lock, Eye, EyeOff, AlertCircle, MailCheck } from 'lucide-react';
 import { useAuth, BLOCK_MESSAGE_KEYS } from '../contexts/AuthContext';
 import { useTranslation } from '../contexts/LanguageContext';
 import LanguageSwitcher from './LanguageSwitcher';
@@ -29,20 +29,30 @@ const toErrorKey = (msg: string): TranslationKey => {
   return 'auth.error.generic';
 };
 
+/**
+ * GoTrue refuses a password sign-in for an address nobody confirmed — an owner
+ * who signed up and never entered the code. supabase-js names that by code;
+ * the message match is the fallback for errors built without one.
+ */
+const isUnconfirmedEmail = (error: { code?: unknown; message?: unknown } | null | undefined): boolean =>
+  error?.code === 'email_not_confirmed' ||
+  (typeof error?.message === 'string' && toErrorKey(error.message) === 'auth.error.emailNotConfirmed');
+
 const LoginForm: React.FC = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const { t } = useTranslation();
-
-  const translateAuthError = (message: string): string => t(toErrorKey(message));
+  const navigate = useNavigate();
   const [error, setError] = useState('');
+  const [needsVerification, setNeedsVerification] = useState(false);
   const [loading, setLoading] = useState(false);
   const { signIn } = useAuth();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    setNeedsVerification(false);
     setLoading(true);
 
     const { error, blockReason } = await signIn(email, password);
@@ -51,8 +61,11 @@ const LoginForm: React.FC = () => {
       // Our own reason, and it carries a key — never run it through the
       // classifier, which only knows Supabase's own English error strings.
       setError(t(BLOCK_MESSAGE_KEYS[blockReason]));
+    } else if (isUnconfirmedEmail(error)) {
+      setNeedsVerification(true);
+      setError(t('auth.error.emailNotConfirmed'));
     } else if (error) {
-      setError(translateAuthError(error.message || ''));
+      setError(t(toErrorKey(error.message || '')));
     }
 
     setLoading(false);
@@ -82,9 +95,21 @@ const LoginForm: React.FC = () => {
           <h2 className="text-lg font-semibold text-white mb-5 text-center">{t('auth.signIn')}</h2>
 
           {error && (
-            <div className="mb-5 p-3.5 bg-red-500/10 border border-red-500/20 rounded-xl flex items-start gap-2.5">
-              <AlertCircle className="text-red-400 flex-shrink-0 mt-0.5" size={16} />
-              <span className="text-red-300 text-sm leading-relaxed">{error}</span>
+            <div role="alert" className="mb-5 p-3.5 bg-red-500/10 border border-red-500/20 rounded-xl">
+              <div className="flex items-start gap-2.5">
+                <AlertCircle className="text-red-400 flex-shrink-0 mt-0.5" size={16} aria-hidden="true" />
+                <span className="text-red-300 text-sm leading-relaxed">{error}</span>
+              </div>
+              {needsVerification && (
+                <button
+                  type="button"
+                  onClick={() => navigate('/auth/verify-email', { state: { email: email.trim() } })}
+                  className="mt-3 w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl border border-cyan-500/30 bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-200 text-sm font-medium transition-colors"
+                >
+                  <MailCheck size={15} aria-hidden="true" />
+                  {t('auth.verifyEmailCta')}
+                </button>
+              )}
             </div>
           )}
 

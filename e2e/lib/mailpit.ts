@@ -79,6 +79,16 @@ export class Mailpit {
   }
 }
 
+/**
+ * The six-digit code in a one-time-code mail. The plain-text part carries it on
+ * a line of its own; the HTML part only letter-spaces it for reading.
+ */
+export function codeFrom(mail: Mail): string {
+  const match = mail.text.match(/^\s*(\d{6})\s*$/m);
+  if (!match) throw new Error('The mail contains no line holding a six-digit code');
+  return match[1];
+}
+
 /** The GoTrue verification link in a mail, with HTML entities decoded. */
 export function verifyLinkFrom(html: string): string {
   const match = html.match(/href="([^"]*\/auth\/v1\/verify[^"]*)"/);
