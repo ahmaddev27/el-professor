@@ -42,7 +42,7 @@ End-to-end tests against staging live in `e2e/`, a separate npm package (Playwri
 
 ### Golden-master tests
 
-Coverage is narrow and deliberate: `src/utils/*.golden.test.ts` characterizes the money and calendar paths — `computeLohnartSeconds`, both German holiday tables, and the business-week rule. They run in the build gate.
+Coverage is narrow and deliberate: `src/utils/*.golden.test.ts` characterizes the money and calendar paths — `computeLohnartSeconds`, both German holiday tables, the business-week rule, and the amount in words printed on a Quittung (`germanAmountInWords`). They run in the build gate.
 
 These are **characterization tests, not specifications.** They assert what the code does today so that Phase 3 changes become visible: correct a premium against §3b EStG and the affected snapshots fail, to be reviewed on purpose rather than discovered on a payslip. Do not "fix" a failing snapshot by regenerating it without reading the diff.
 
@@ -220,6 +220,8 @@ The Brutto-Gehälter mode (`HistoricalReconciliationWizard.tsx`) is a different 
 - **Schicht compression** (max 3 shifts/day) is display- and export-only. It must not alter stored minutes, premium buckets, or Brutto figures.
 - **Ausgleichsstunden** exist only in the Stundennachweis, always as Lohnart `1000` with no premium. They must never create trips or touch `fahrtenbuch_trips`, and must never appear in the Fahrtenbuch.
 - **Belegnummer is always system-generated** (`BEL-{timestamp}-{random}`, collision-checked). OCR output must never overwrite it.
+- **Gehaltsquittung (cash salary receipt) is a ledger entry** (`supabase/migrations/20260914140000_salary_cash_receipts.sql`). `confirm_salary_cash_payment` writes the receipt (`GQ-YYYY-NNNN`, gapless per company and payment year), its `salary_payments` row (`source_type = 'gehaltsquittung'`) and an outgoing `cash_movements` row in one transaction; it is idempotent on `request_id` and refuses more than the balance it reads under lock. `void_salary_cash_receipt` deletes the payment and books the cash back on the day of the void; the receipt stays, marked `voided`. A trigger refuses any direct edit, delete or forged insert of a receipt's payment. Due is `COALESCE(netto_salary, amount_due)`; the weekly "Bar zurück" counts as paid and never moves cash. Every writer locks the salary row `FOR NO KEY UPDATE`, never `FOR UPDATE`: a payment's foreign-key check holds a key share on the salary, `FOR UPDATE` conflicts with it, and two concurrent payments deadlock. The browser mirror computes in integer cents (`utils/money.ts`, `utils/salaryCashReceipt.ts`) and walks the same scenario as `tests/rls/salary-cash.sql`.
+- **A driver can hold salary rows with overlapping periods.** `unique_driver_period` is only `UNIQUE (driver_id, period_start)`, so a calendar month beside a business month passes it; staging's copy of production has 25 such rows in one company. The receipt RPC refuses such a salary (`overlapping_salary`) until the owner decides how to merge them, and the unique index on driver and period waits for the same decision.
 
 ## Known defects and sharp edges
 
