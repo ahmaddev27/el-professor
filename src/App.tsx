@@ -193,7 +193,7 @@ function App() {
   // Account revocation gate. Runs before the company gates because it is the
   // narrower block: a deactivated user must be stopped even while their company
   // is perfectly healthy. signIn() already refuses these accounts; this catches
-  // the restored-session and OAuth paths, where signIn() never runs.
+  // restored sessions, where signIn() never runs.
   if (userBlockReason) {
     return <AccountBlockedPage reason={userBlockReason} />;
   }

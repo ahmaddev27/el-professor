@@ -77,10 +77,8 @@ export const de = {
   'auth.password':          'Passwort',
   'auth.passwordPlaceholder': 'Ihr Passwort',
   'auth.forgotPassword':    'Passwort vergessen?',
-  'auth.signInWithGoogle':  'Mit Google anmelden',
   'auth.noAccountYet':      'Noch kein Konto?',
   'auth.register':          'Registrieren',
-  'auth.or':                'oder',
   'auth.tryFree':           '14 Tage kostenlos testen',
   'auth.showPassword':      'Passwort anzeigen',
   'auth.hidePassword':      'Passwort verbergen',
@@ -90,7 +88,6 @@ export const de = {
   'auth.error.emailNotConfirmed': 'E-Mail-Bestätigung ist noch in den Supabase-Einstellungen aktiviert. Bitte deaktivieren Sie "Confirm email" unter Authentication > Providers > Email.',
   'auth.error.generic':            'Anmeldung nicht möglich. Bitte versuchen Sie es erneut.',
   'auth.error.network':            'Netzwerkfehler. Bitte prüfen Sie Ihre Internetverbindung.',
-  'auth.error.google':             'Google-Anmeldung fehlgeschlagen. Bitte versuchen Sie es erneut.',
 
   // ── Plan gating ────────────────────────────────────────────────────────────
   'locked.title':           '{feature} ist nicht in Ihrem Plan',
