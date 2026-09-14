@@ -58,10 +58,14 @@ sleep 3
 
 failed=0
 for url in https://elprofessor.eu/ https://api.elprofessor.eu/auth/v1/health \
-           https://app.elprofessor.eu/ https://api-staging.elprofessor.eu/auth/v1/health; do
+           https://app.elprofessor.eu/version.txt https://api-staging.elprofessor.eu/auth/v1/health; do
   c="$(code "$url")"; echo "  $c  $url"
   [ "$c" = 200 ] || failed=1
 done
+# Staging holds a copy of production data: behind its login (401), or locked
+# because no login is set (503) — never open.
+c="$(code https://app.elprofessor.eu/)"; echo "  $c  https://app.elprofessor.eu/ (must be 401 or 503)"
+case "$c" in 401|503) ;; *) failed=1 ;; esac
 # ridy is judged against itself: broken by this publish only if it answered
 # before and does not now.
 ridy_after="$(code https://reidey.de/)"; echo "  $ridy_after  https://reidey.de/ (was $ridy_before)"

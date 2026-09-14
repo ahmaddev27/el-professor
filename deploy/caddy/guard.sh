@@ -53,6 +53,41 @@ flock -w 60 9 || { err "another run still holds the lock"; exit 1; }
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
+# Staging's login. The routes file carries a marker line where the basic_auth
+# block belongs; the hash comes from a root-only file on this host, so it never
+# enters git. A missing or malformed file renders a 503 in its place: staging
+# is locked rather than open, and production's routes are still written.
+STAGING_AUTH_FILE="${STAGING_AUTH_FILE:-/root/el-professor-secrets/staging-web-auth}"
+# Not an @-name on purpose: Caddy reads "@anything" as a named matcher and
+# accepts it, which would leave staging open if the marker ever went unrendered.
+# An unknown directive name fails validation instead.
+MARKER='__STAGING_WEB_AUTH__'
+auth_re='^([A-Za-z0-9._-]+):(\$2[aby]\$[0-9]{2}\$[./A-Za-z0-9]{53})$'
+auth_line="$(head -n 1 "$STAGING_AUTH_FILE" 2>/dev/null | tr -d '\r' || true)"
+if [[ "$auth_line" =~ $auth_re ]]; then
+  auth_block="$(printf 'basic_auth {\n\t%s %s\n}' "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}")"
+  staging_state="behind its login"
+else
+  auth_block='respond "Staging ist gesperrt: kein Zugang eingerichtet." 503'
+  staging_state="locked, no valid $STAGING_AUTH_FILE"
+fi
+unset auth_line
+AUTH_BLOCK="$auth_block" MARKER="$MARKER" awk '
+  index($0, ENVIRON["MARKER"]) {
+    match($0, /^[ \t]*/)
+    indent = substr($0, 1, RLENGTH)
+    n = split(ENVIRON["AUTH_BLOCK"], lines, "\n")
+    for (i = 1; i <= n; i++) print indent lines[i]
+    next
+  }
+  { print }
+' "$SITES_FILE" > "$work/sites"
+unset auth_block
+if grep -qF "$MARKER" "$work/sites"; then
+  err "the staging login marker survived rendering; nothing was written"
+  exit 1
+fi
+
 # ridy's lines alone: our section removed, trailing blank lines trimmed so
 # repeated runs converge on one byte-identical file.
 awk -v b="$BEGIN" -v e="$END" '
@@ -65,7 +100,7 @@ awk -v b="$BEGIN" -v e="$END" '
 ' "$RIDY_CADDYFILE" > "$work/desired"
 {
   printf '\n%s\n' "$BEGIN"
-  sed -e '$a\' "$SITES_FILE"
+  sed -e '$a\' "$work/sites"
   printf '%s\n' "$END"
 } >> "$work/desired"
 
@@ -93,10 +128,10 @@ if ! cmp -s "$work/desired" "$RIDY_CADDYFILE"; then
   size="$(stat -c %s "$RIDY_CADDYFILE")"
   if cmp -s -n "$size" "$work/desired" "$RIDY_CADDYFILE"; then
     tail -c +"$((size + 1))" "$work/desired" >> "$RIDY_CADDYFILE"
-    note "appended El-Professor routes to $RIDY_CADDYFILE"
+    note "appended El-Professor routes to $RIDY_CADDYFILE (staging: $staging_state)"
   else
     cat "$work/desired" > "$RIDY_CADDYFILE"
-    note "rewrote the El-Professor section of $RIDY_CADDYFILE"
+    note "rewrote the El-Professor section of $RIDY_CADDYFILE (staging: $staging_state)"
   fi
 fi
 
