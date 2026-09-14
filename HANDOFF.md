@@ -18,7 +18,7 @@ Start here when you pick up this project. Read it together with [CLAUDE.md](CLAU
   - Branches: `phase1/otp-db`, `phase1/otp-functions`, `phase1/otp-frontend`, `phase2/design-system`, `phase3/rls-baseline`, then `phase3/platform-authority`, and `phase4/receipt-foundations`.
   - Each branch ends in a reviewed PR into `staging`. Nothing from the agents is merged or deployed automatically.
   - Merge them one at a time, and run `cd e2e && npm test` after each staging deploy. Merge the OTP branches in order: `otp-db`, `otp-functions`, `otp-frontend`.
-  - The first run (`wf_ce583f7b-774`) was cut off by a session restart. Its uncommitted work was saved as one `wip:` commit per branch, and a second run continues from those commits. All three OTP streams follow the contract kept at `C:\Users\ahmad\.claude\plans\otp-contract-wf_ce583f7b-774.md`, outside the repo.
+  - The first run (`wf_ce583f7b-774`) was cut off by a session restart. Its uncommitted work was saved as one `wip:` commit per branch. The second run (`wf_864f8ee2-06d`) died after five hours when this machine lost its network, and its work was saved the same way. The third run commits a checkpoint after every step and retries a build agent that dies. All three OTP streams follow the contract kept at `C:\Users\ahmad\.claude\plans\otp-contract-wf_ce583f7b-774.md`, outside the repo.
 - **Staging mail reaches real recipients** (owner's decision, 14.09.2026). Mailpit keeps a copy of every message and relays it through production's Resend account, except mail to `@example.com`. Live on staging since PR #8 (`45ff313`). Resend lists the relayed test mails to `delivered@resend.dev` as `delivered`.
 - **`main` is behind `staging`** by the Phase 0 work. Production still runs a bundle deployed before CI releases existed.
 
@@ -66,6 +66,7 @@ Secrets never enter git:
 - DNS A record `mail-staging` → `159.195.205.30`, then `set-mailpit-password.sh`.
 - Step 0.6: merge `staging` into `main` and press the production button.
 - Rotate the secrets that were exposed: root SSH password, production database password, and the Resend key pasted in chat.
+- Stop the MyPublicWiFi service on the dev machine if it is not needed (admin rights); it is what cuts the agents off.
 
 ## Gotchas learned the hard way
 
@@ -79,7 +80,7 @@ Secrets never enter git:
 - **Playwright applies the config's `httpCredentials` to every request context, including `request.newContext()`.** A "visitor without a login" built that way silently sends the test login. Use Node's `fetch` for anonymous checks.
 - **supabase-js strips the URL hash while it creates a session from a link.** Anything that needs `type=` or `error=` must read it before the client is created; see `authRedirect` in `src/lib/supabase.ts`.
 - **A single-file bind mount whose file is missing becomes an empty directory.** Mailpit then cannot read `mailpit-relay.yml` and does not start, or starts without its UI login. `deploy.sh` checks both files before a staging release.
-- **"No buffer space available" / `ERR_NO_BUFFER_SPACE` on the dev machine means it ran out of sockets,** not that the host is down. On 14.09.2026 the MyPublicWiFi service held 16,000 bound sockets, and e2e, git and ssh all failed until it let them go.
+- **"No buffer space available" / `ERR_NO_BUFFER_SPACE` on the dev machine means it ran out of sockets,** not that the host is down. On 14.09.2026 the MyPublicWiFi service held 16,000 bound sockets, and e2e, git and ssh all failed until it let them go. It came back the same day, and six agents died after five hours with `ENOTFOUND`. Stopping the service is the only real fix.
 - **Mailpit logs a relay only when it fails;** success is a debug line, so a quiet log is the good case. To see what Resend did with a mail, list `GET https://api.resend.com/emails` with production's key (pass the header on stdin with `curl -H @-`) and read `last_event`. Print only the fields you need: the list holds customers' addresses.
 - **A `grep` that matches nothing ends a `set -euo pipefail` script silently** — the same trap as the `.env` reads in `deploy.sh`. It hid the result of the first relay test, which had in fact been delivered.
 - **The Workflow tool does not save an agent's worktree.** When a run is cut off, commit what is on disk (as `wip:`) before relaunching; a resumed run only replays agents that had finished.
