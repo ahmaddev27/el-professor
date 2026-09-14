@@ -323,12 +323,14 @@ const UserManagement: React.FC = () => {
   // a different component, so opening the dialog threw a ReferenceError during
   // render and took the whole user list down with it. Same name, own state.
   const [showResetPassword, setShowResetPassword] = useState(false);
+  // `type` was inferred as the literal 'confirm', so every success and error
+  // dialog below was a type error the build never checked.
   const [confirmModal, setConfirmModal] = useState({
     isOpen: false,
     title: '',
     message: '',
     onConfirm: () => {},
-    type: 'confirm' as const
+    type: 'confirm' as 'confirm' | 'success' | 'error' | 'info'
   });
 
   // The debug logging and the "connectivity test" that used to run here printed
