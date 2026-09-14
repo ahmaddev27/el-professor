@@ -15,7 +15,11 @@
 | [el-professor-plan.html](el-professor-plan.html) | The plan for the five requirements, open in a browser (Arabic) |
 | [CLAUDE.md](CLAUDE.md) | Rules, mechanisms and sharp edges — read before changing code |
 
-**Now:** Phase 0 of the requirements plan — releases, rollback and staging protection. Live on staging: per-client login rate limits, kept releases with one-step rollback, the production gate, and a login in front of staging. Next: 0.5, end-to-end test tooling; then 0.6, the first production release from CI.
+**Now:** Phase 0 of the requirements plan — releases, rollback and staging protection.
+
+- **Live on staging:** per-client login rate limits, kept releases with one-step rollback, the production gate, a login in front of staging, and the end-to-end suite in `e2e/`. That suite found and fixed a live bug: reset and invite links signed users straight back out.
+- **Next:** 0.6, the first production release from CI.
+- **Being built in parallel, as PRs into `staging`:** Phases 1–4 (OTP, design system, platform authority, cash receipt foundations).
 
 | | production | staging |
 |---|---|---|
