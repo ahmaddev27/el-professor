@@ -69,11 +69,27 @@ api.elprofessor.eu {
 }
 
 # Staging web. It runs on a copy of production data and shows a STAGING banner
-# on every screen, so nobody works here by mistake.
+# on every screen, so nobody works here by mistake — and it sits behind a login.
+#
+# The marker line below is not Caddy syntax. The guard replaces it with a
+# basic_auth block built from /root/el-professor-secrets/staging-web-auth (set
+# with deploy/set-staging-password.sh), so the password hash never enters git.
+# Without a valid file the guard renders a 503 there instead: staging is locked,
+# never open, and production's routes are written either way.
+#
+# /version.txt and the mail logo stay public. deploy.sh reads the first to prove
+# a release is live; mail clients load the second without a login.
 app.elprofessor.eu {
 	encode zstd gzip
 
-	reverse_proxy ya-mobility-staging-web-1:80
+	@public path /version.txt /email-templates/logo.png
+	handle @public {
+		reverse_proxy ya-mobility-staging-web-1:80
+	}
+	handle {
+		__STAGING_WEB_AUTH__
+		reverse_proxy ya-mobility-staging-web-1:80
+	}
 
 	header {
 		Strict-Transport-Security "max-age=31536000; includeSubDomains"

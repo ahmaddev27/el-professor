@@ -27,8 +27,11 @@ IFS= read -rs -p "Repeat password: " PASS2; echo
 [ "$PASS" = "$PASS2" ] || { echo "The two entries differ. Nothing changed."; exit 1; }
 unset PASS2
 
-# bcrypt from Caddy's own implementation, fed on stdin.
-HASH="$(printf '%s\n' "$PASS" | docker exec -i ridy-caddy-1 caddy hash-password 2>/dev/null | tail -1)"
+# bcrypt from Caddy's own implementation, fed on stdin, in a throwaway container
+# of the image the Caddy guard validates with. Nothing runs inside ridy's
+# containers.
+IMG="$(docker inspect ridy-caddy-1 --format '{{.Image}}' 2>/dev/null || echo caddy:2-alpine)"
+HASH="$(printf '%s\n' "$PASS" | docker run --rm -i --pull never --network none "$IMG" caddy hash-password 2>/dev/null | tail -1)"
 [[ "$HASH" =~ ^\$2[aby]\$[0-9]{2}\$[./A-Za-z0-9]{53}$ ]] || { echo "Hashing failed. Nothing changed."; exit 1; }
 
 umask 077
