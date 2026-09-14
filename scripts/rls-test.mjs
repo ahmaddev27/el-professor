@@ -95,6 +95,16 @@ async function waitReady() {
   throw new Error('database never became ready');
 }
 
+const RLS_DIR = path.join(ROOT, 'tests/rls');
+/** Files the kit loads itself, in its own order, before any suite runs. */
+const RLS_SETUP = new Set(['roles-seed.sql', 'seed.sql', 'assertions.sql']);
+
+function rlsSuites() {
+  return readdirSync(RLS_DIR)
+    .filter(f => f.endsWith('.sql') && !RLS_SETUP.has(f))
+    .sort();
+}
+
 function migrationsAfterFixture() {
   const dir = path.join(ROOT, 'supabase/migrations');
   return readdirSync(dir)
@@ -134,6 +144,11 @@ try {
       .replace(/^CREATE SCHEMA public;/m, 'CREATE SCHEMA IF NOT EXISTS public;'),
   );
 
+  // The image has no storage schema (storage-api creates it at runtime), so a
+  // migration that adds a bucket or a storage policy needs this to apply.
+  step('providing the storage tables the fixture does not carry…');
+  psqlFile(path.join(ROOT, 'tests/fixtures/storage-shim.sql'));
+
   const migrations = migrationsAfterFixture();
   step(`applying ${migrations.length} migrations newer than the fixture…`);
   for (const m of migrations) {
@@ -156,6 +171,14 @@ try {
   for (const file of assertionFiles()) {
     step(`asserting ${path.basename(file)}…\n`);
     process.stdout.write(assertFile(file));
+  }
+
+  // Every other .sql file in tests/rls is a suite of its own, run after the
+  // matrix in filename order, so adding a suite needs no change here.
+  for (const suite of rlsSuites()) {
+    step(`\n  asserting ${suite}…\n`);
+    const suiteOut = psqlFile(path.join(RLS_DIR, suite));
+    process.stdout.write(suiteOut.replace(/^psql:[^:]+:\d+: NOTICE:\s*/gm, '    '));
   }
 
   process.stdout.write('\nRLS assertions passed.\n');
