@@ -9,6 +9,9 @@ import type { CompanySettings } from '../types/settings';
 import { getBusinessMonthRange } from '../utils/weekCalculations';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { useTranslation } from '../contexts/LanguageContext';
+import { amountInWordsFromCents } from '../utils/germanAmountInWords';
+import { formatCentsDe, formatCentsForInput, toCents } from '../utils/money';
+import { parseQuittungAmountCents } from '../utils/quittungAmount';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -24,7 +27,8 @@ interface QuittungData {
   companyName: string;
   month:       number;
   year:        number;
-  amount:      number;
+  /** Integer cents. */
+  amountCents: number;
   city:        string;
   docDate:     string;
   signatory:   string;
@@ -42,57 +46,6 @@ const MONTH_NAMES_DE = [
   'Januar', 'Februar', 'März', 'April', 'Mai', 'Juni',
   'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember',
 ];
-
-function fmtAmount(v: number): string {
-  return v.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-}
-
-// ─── German number-to-words (0 – 999 999) ────────────────────────────────────
-// Used to render the Trinkgeld amount in words inside the receipt.
-
-const DE_ONES = [
-  'null', 'ein', 'zwei', 'drei', 'vier', 'fünf', 'sechs', 'sieben', 'acht', 'neun',
-  'zehn', 'elf', 'zwölf', 'dreizehn', 'vierzehn', 'fünfzehn',
-  'sechzehn', 'siebzehn', 'achtzehn', 'neunzehn',
-];
-const DE_TENS = ['', '', 'zwanzig', 'dreißig', 'vierzig', 'fünfzig', 'sechzig', 'siebzig', 'achtzig', 'neunzig'];
-
-function deUnder100(n: number): string {
-  if (n < 20) return DE_ONES[n];
-  const t = Math.floor(n / 10);
-  const o = n % 10;
-  if (o === 0) return DE_TENS[t];
-  return `${DE_ONES[o]}und${DE_TENS[t]}`;
-}
-
-function deUnder1000(n: number): string {
-  if (n < 100) return deUnder100(n);
-  const h = Math.floor(n / 100);
-  const r = n % 100;
-  const hp = `${DE_ONES[h]}hundert`;
-  return r === 0 ? hp : `${hp}${deUnder100(r)}`;
-}
-
-function deInt(n: number): string {
-  if (n === 0) return 'null';
-  if (n < 1000) return deUnder1000(n);
-  const k = Math.floor(n / 1000);
-  const r = n % 1000;
-  const kp = k === 1 ? 'eintausend' : `${deUnder1000(k)}tausend`;
-  return r === 0 ? kp : `${kp}${deUnder1000(r)}`;
-}
-
-/** Converts e.g. 198.34 → "Einhundertachtundneunzig Euro und vierunddreißig Cent". */
-function amountInWords(amount: number): string {
-  const safe = Number.isFinite(amount) ? amount : 0;
-  const totalCents = Math.round(Math.abs(safe) * 100);
-  const euros = Math.floor(totalCents / 100);
-  const cents = totalCents % 100;
-  const euroWords = deInt(euros);
-  const centWords = deInt(cents);
-  const capitalised = euroWords.charAt(0).toUpperCase() + euroWords.slice(1);
-  return `${capitalised} Euro und ${centWords} Cent`;
-}
 
 function monthLabel(m: number, y: number): string {
   return `${String(m).padStart(2, '0')}.${y}`;
@@ -220,9 +173,9 @@ const A4Document: React.FC<A4DocProps> = ({ data, settings, forExport = false })
       <div style={{ fontSize: '11.5px', lineHeight: 1.75, color: '#333', marginBottom: '20px' }}>
         Der Arbeitnehmer bestätigt hiermit, das Trinkgeld für den Monat{' '}
         <strong style={{ color: '#111' }}>{monthLabel(data.month, data.year)}</strong> in Höhe von{' '}
-        <strong style={{ color: '#111' }}>{fmtAmount(data.amount)} EUR</strong>{' '}
+        <strong style={{ color: '#111' }}>{formatCentsDe(data.amountCents)} EUR</strong>{' '}
         <span style={{ color: '#555', fontStyle: 'italic' }}>
-          (in Worten: {amountInWords(data.amount)})
+          (in Worten: {amountInWordsFromCents(data.amountCents)})
         </span>{' '}
         in bar vom Arbeitgeber erhalten zu haben. Mit seiner Unterschrift bestätigt der
         Arbeitnehmer den vollständigen Erhalt des oben genannten Betrages.
@@ -240,7 +193,7 @@ const A4Document: React.FC<A4DocProps> = ({ data, settings, forExport = false })
         <div style={{ flex: 1, padding: '14px 20px', borderRight: '1px solid #e0e0e0' }}>
           <div style={labelStyle}>Betrag (EUR)</div>
           <div style={{ fontSize: '20px', fontWeight: 800, color: '#111', letterSpacing: '-0.01em' }}>
-            {fmtAmount(data.amount)} EUR
+            {formatCentsDe(data.amountCents)} EUR
           </div>
         </div>
         <div style={{ flex: 1, padding: '14px 20px' }}>
@@ -394,7 +347,7 @@ const TrinkgeldQuittungModal: React.FC<Props> = ({ isOpen, onClose }) => {
     setSignatory(settings?.company_name || '');
   }, [settings, month, year]);
 
-  const fetchTrinkgeldTotal = useCallback(async (driverName: string, m: number, y: number): Promise<number> => {
+  const fetchTrinkgeldTotalCents = useCallback(async (driverName: string, m: number, y: number): Promise<number> => {
     const { start, end } = getBusinessMonthRange(m - 1, y);
     const from = format(start, 'yyyy-MM-dd');
     const to   = format(end,   'yyyy-MM-dd');
@@ -409,7 +362,7 @@ const TrinkgeldQuittungModal: React.FC<Props> = ({ isOpen, onClose }) => {
       .lte('date', to);
 
     if (error) throw error;
-    return (data ?? []).reduce((s, r) => s + Number(r.amount), 0);
+    return (data ?? []).reduce((sum, row) => sum + toCents(row.amount), 0);
   }, [companyId]);
 
   const handleGenerate = async () => {
@@ -418,8 +371,8 @@ const TrinkgeldQuittungModal: React.FC<Props> = ({ isOpen, onClose }) => {
     try {
       const driver = drivers.find(d => d.id === driverId);
       if (!driver) return;
-      const total = await fetchTrinkgeldTotal(driver.name, month, year);
-      setAmount(fmtAmount(total).replace('.', ','));
+      const totalCents = await fetchTrinkgeldTotalCents(driver.name, month, year);
+      setAmount(formatCentsForInput(totalCents));
       prefillFromSettings();
       setStep('preview');
     } finally {
@@ -433,8 +386,8 @@ const TrinkgeldQuittungModal: React.FC<Props> = ({ isOpen, onClose }) => {
     const driver = drivers.find(d => d.id === newDriverId);
     if (!driver) return;
     try {
-      const total = await fetchTrinkgeldTotal(driver.name, month, year);
-      setAmount(fmtAmount(total).replace('.', ','));
+      const totalCents = await fetchTrinkgeldTotalCents(driver.name, month, year);
+      setAmount(formatCentsForInput(totalCents));
     } catch (err) {
       console.error('Failed to load Trinkgeld for driver:', err);
     }
@@ -447,8 +400,8 @@ const TrinkgeldQuittungModal: React.FC<Props> = ({ isOpen, onClose }) => {
     const driver = drivers.find(d => d.id === driverId);
     if (!driver) return;
     try {
-      const total = await fetchTrinkgeldTotal(driver.name, newMonth, newYear);
-      setAmount(fmtAmount(total).replace('.', ','));
+      const totalCents = await fetchTrinkgeldTotalCents(driver.name, newMonth, newYear);
+      setAmount(formatCentsForInput(totalCents));
     } catch (err) {
       console.error('Failed to load Trinkgeld for month:', err);
     }
@@ -457,8 +410,8 @@ const TrinkgeldQuittungModal: React.FC<Props> = ({ isOpen, onClose }) => {
   const handleExport = async () => {
     const driver = drivers.find(d => d.id === driverId);
     if (!driver) return;
-    const parsedAmount = parseFloat(amount.replace(',', '.'));
-    if (isNaN(parsedAmount)) return;
+    const amountCents = parseQuittungAmountCents(amount);
+    if (amountCents === null) return;
 
     setExporting(true);
     try {
@@ -470,7 +423,7 @@ const TrinkgeldQuittungModal: React.FC<Props> = ({ isOpen, onClose }) => {
           companyName:  settings?.company_name || signatory,
           month,
           year,
-          amount:       parsedAmount,
+          amountCents,
           city:         city || settings?.city || 'Ort',
           docDate:      docDate || firstDayNextMonth(month, year),
           signatory:    signatory || settings?.company_name || '',
@@ -485,6 +438,7 @@ const TrinkgeldQuittungModal: React.FC<Props> = ({ isOpen, onClose }) => {
   if (!isOpen) return null;
 
   const selectedDriver = drivers.find(d => d.id === driverId);
+  const amountIsPrintable = parseQuittungAmountCents(amount) !== null;
 
   // Printed on the Quittung — German fallbacks, same as the export payload above.
   const previewData: QuittungData | null = selectedDriver
@@ -494,7 +448,7 @@ const TrinkgeldQuittungModal: React.FC<Props> = ({ isOpen, onClose }) => {
         companyName:  settings?.company_name || signatory,
         month,
         year,
-        amount:       parseFloat(amount.replace(',', '.')) || 0,
+        amountCents:  parseQuittungAmountCents(amount) ?? 0,
         city:         city || settings?.city || 'Ort',
         docDate:      docDate || firstDayNextMonth(month, year),
         signatory:    signatory || settings?.company_name || '',
@@ -671,8 +625,14 @@ const TrinkgeldQuittungModal: React.FC<Props> = ({ isOpen, onClose }) => {
                       inputMode="decimal"
                       value={amount}
                       onChange={e => setAmount(e.target.value)}
-                      style={IS}
+                      aria-invalid={!amountIsPrintable}
+                      style={amountIsPrintable ? IS : { ...IS, borderColor: 'var(--danger)' }}
                     />
+                    {!amountIsPrintable && (
+                      <p className="text-xs mt-1" style={{ color: 'var(--danger)' }}>
+                        {t('a4.tqAmountInvalid')}
+                      </p>
+                    )}
                   </div>
                   <div>
                     <label className="block text-sm font-medium mb-1.5" style={{ color: 'var(--text-secondary)' }}>
@@ -758,9 +718,11 @@ const TrinkgeldQuittungModal: React.FC<Props> = ({ isOpen, onClose }) => {
               </button>
               <button
                 onClick={handleExport}
-                disabled={exporting}
+                disabled={exporting || !amountIsPrintable}
                 className="flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-semibold transition-all"
-                style={{ background: 'var(--accent)', color: 'white' }}
+                style={amountIsPrintable
+                  ? { background: 'var(--accent)', color: 'white' }
+                  : { background: 'var(--bg-muted)', color: 'var(--text-tertiary)', cursor: 'not-allowed' }}
               >
                 <Download size={14} />
                 {exporting ? t('a4.tqExporting') : t('a4.tqExportPdf')}

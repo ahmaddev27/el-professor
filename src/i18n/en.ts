@@ -1998,6 +1998,7 @@ export const en: PartialDictionary = {
   'a4.mwSubtitle':                         'Passenger transport — record of order receipt',
   'a4.mwTitle':                            'Mietwagenauftrag / trip record',
   'a4.tqAdjustFields':                     'Adjust fields',
+  'a4.tqAmountInvalid':                    'Enter a valid amount, e.g. 1.234,56.',
   'a4.tqDriverPlaceholder':                'Select driver …',
   'a4.tqExportPdf':                        'Export as PDF',
   'a4.tqExporting':                        'Exporting …',
