@@ -309,7 +309,7 @@ const UserModal: React.FC<UserModalProps> = ({ isOpen, onClose, onSave, user, ti
 
 const UserManagement: React.FC = () => {
   const { t } = useTranslation();
-  const { user: currentUser, isAdmin, profile, loading: authLoading } = useAuth();
+  const { isAdmin, profile, loading: authLoading } = useAuth();
   const [users, setUsers] = useState<UserData[]>([]);
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -331,55 +331,12 @@ const UserManagement: React.FC = () => {
     type: 'confirm' as const
   });
 
+  // The debug logging and the "connectivity test" that used to run here printed
+  // session details, and handleAddUser printed the new user's password, to the
+  // browser console of every administrator. Nothing read either.
   useEffect(() => {
-    console.log('UserManagement - Auth State:', {
-      user: currentUser?.email,
-      isAdmin,
-      profile: profile?.role,
-      authLoading
-    });
-    if (isAdmin) {
-      loadUsers();
-      testEdgeFunctionConnectivity();
-    }
+    if (isAdmin) loadUsers();
   }, [isAdmin, authLoading]);
-
-  const testEdgeFunctionConnectivity = async () => {
-    try {
-      console.log('🧪 Testing Edge Function connectivity...');
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
-        console.log('❌ No session for connectivity test');
-        return;
-      }
-
-      const testUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/manage-users/list`;
-      console.log('🔗 Testing URL:', testUrl);
-      
-      const response = await fetch(testUrl, {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${session.access_token}`,
-          'Content-Type': 'application/json',
-        },
-      });
-
-      console.log('🧪 Connectivity test response:', {
-        status: response.status,
-        ok: response.ok,
-        statusText: response.statusText
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('🧪 Connectivity test failed:', errorText);
-      } else {
-        console.log('✅ Edge Function is accessible');
-      }
-    } catch (error) {
-      console.error('🧪 Connectivity test error:', error);
-    }
-  };
 
   const loadUsers = async () => {
     setLoading(true);
@@ -422,19 +379,12 @@ const UserManagement: React.FC = () => {
 
   const handleAddUser = async (userData: { email: string; password?: string; full_name: string; role: string; use_temp_password?: boolean }) => {
     try {
-      console.log('🔄 Starting user creation process...', userData);
-      
       // Use edge function to create user
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) {
-        console.error('❌ No active session found');
         throw new Error('No active session');
       }
 
-      console.log('✅ Session found, making API call...');
-      const apiUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/manage-users/create`;
-      console.log('📡 API URL:', apiUrl);
-      
       const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/manage-users/create`, {
         method: 'POST',
         headers: {
@@ -444,18 +394,11 @@ const UserManagement: React.FC = () => {
         body: JSON.stringify(userData),
       });
 
-      console.log('📥 Response status:', response.status);
-      console.log('📥 Response ok:', response.ok);
-      
       if (!response.ok) {
         const errorData = await response.json();
-        console.error('❌ API Error Response:', errorData);
         throw new Error(errorData.error || 'Failed to create user');
       }
 
-      const result = await response.json();
-      console.log('✅ User creation successful:', result);
-      
       setConfirmModal({
         isOpen: true,
         title: t('users.successTitle'),
@@ -470,11 +413,6 @@ const UserManagement: React.FC = () => {
       loadUsers(); // Reload the user list
     } catch (error) {
       console.error('Error adding user:', error);
-      console.error('Full error details:', {
-        message: error instanceof Error ? error.message : 'Unknown error',
-        stack: error instanceof Error ? error.stack : 'No stack trace',
-        error: error
-      });
       setConfirmModal({
         isOpen: true,
         title: t('common.error'),
