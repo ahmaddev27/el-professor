@@ -1,19 +1,23 @@
-# Two environments, two ways in.
+# Two environments, three ways in.
 #
 #   push to `staging`  -> build, test, deploy to https://app.elprofessor.eu
 #   push to `main`     -> build and test only. Nothing is deployed.
 #   "Run workflow" on `main`, confirm "production"
 #                      -> build, test, deploy to https://elprofessor.eu
 #
+# A bad release of either environment is undone with the Rollback workflow.
+#
 # Production is a button rather than a merge side effect because this account's
 # GitHub plan offers neither required reviewers on environments nor branch
-# protection for a private repository. The button is the approval, and the
-# production job refuses main unless every commit on it went through staging
-# first — the one rule branch protection would have enforced, done in code.
+# protection for a private repository. The button is the approval. The job then
+# refuses main unless its tree is exactly the tree staging is running — asked of
+# the host itself, so an untested merge, a failed staging release or a staging
+# rollback can never be promoted by mistake.
 #
 # The host side is deploy/ci-release.sh, bound to the deploy key with
-# command=/restrict: the key can run "release staging" or "release production"
-# and nothing else. deploy/deploy.sh then applies migrations and health-checks.
+# command=/restrict: the key can run "release <env> <sha>", "rollback <env>" and
+# "status <env>", and nothing else. deploy/deploy.sh then applies migrations and
+# health-checks.
 
 name: Deploy
 
@@ -76,6 +80,8 @@ jobs:
         run: npm run build
       - name: Check the bundle points at staging
         shell: bash
+        env:
+          DEPLOY_ENV: ${{ vars.VITE_DEPLOY_ENV }}
         run: |
           js=$(ls dist/assets/index-*.js)
           grep -q 'api-staging\.elprofessor\.eu' $js || { echo "::error::bundle does not reference the staging API"; exit 1; }
@@ -84,10 +90,11 @@ jobs:
             || { echo "::error::mail templates carry the wrong logo URL"; exit 1; }
           # Staging holds real accounts; a staging build without the banner would
           # let someone work there believing it is production.
-          [ "${{ vars.VITE_DEPLOY_ENV }}" = staging ] && grep -q 'env.banner.notProduction' $js \
+          [ "$DEPLOY_ENV" = staging ] && grep -q 'env.banner.notProduction' $js \
             || { echo "::error::staging build is missing VITE_DEPLOY_ENV=staging, so the banner would not show"; exit 1; }
-      - uses: ./.github/actions/release
+      - uses: ./.github/actions/host
         with:
+          command: release
           environment: staging
           ssh-key: ${{ secrets.DEPLOY_SSH_KEY }}
           known-hosts: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
@@ -107,27 +114,46 @@ jobs:
     steps:
       - name: Refuse anything but main, confirmed
         shell: bash
+        env:
+          REF: ${{ github.ref }}
+          REF_NAME: ${{ github.ref_name }}
+          CONFIRM: ${{ inputs.confirm }}
         run: |
-          [ "${{ github.ref }}" = "refs/heads/main" ] \
-            || { echo "::error::production deploys only from main (this run is on ${{ github.ref_name }})"; exit 1; }
-          [ "${{ inputs.confirm }}" = "production" ] \
+          [ "$REF" = "refs/heads/main" ] \
+            || { echo "::error::production deploys only from main (this run is on $REF_NAME)"; exit 1; }
+          [ "$CONFIRM" = "production" ] \
             || { echo "::error::confirmation was not 'production' — nothing deployed"; exit 1; }
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Refuse commits that never reached staging
+      - name: Ask the host what staging runs
+        id: staging
+        uses: ./.github/actions/host
+        with:
+          command: status
+          environment: staging
+          ssh-key: ${{ secrets.DEPLOY_SSH_KEY }}
+          known-hosts: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          host: ${{ secrets.DEPLOY_HOST }}
+      - name: Refuse unless main is exactly what staging runs
         shell: bash
+        env:
+          LIVE: ${{ steps.staging.outputs.stdout }}
         run: |
-          git fetch --no-tags origin staging
-          # Merge commits are made on main by definition, so they are excused;
-          # every commit that carries a change must already be on staging.
-          unseen=$(git log --no-merges --format='%h %s' origin/staging..HEAD)
-          if [ -n "$unseen" ]; then
-            echo "::error::these commits are on main but were never on staging:"
-            echo "$unseen"
+          sha=$(printf '%s\n' "$LIVE" | sed -n 's/^sha=\([0-9a-f]\{40\}\) .*/\1/p')
+          status=$(printf '%s\n' "$LIVE" | sed -n 's/.* status=\([a-z_]*\) .*/\1/p')
+          [ -n "$sha" ] \
+            || { echo "::error::staging has no recorded release yet. Push main's changes to staging, let it deploy, then press this button again."; exit 1; }
+          [ "$status" = ok ] \
+            || { echo "::error::staging's live release is '$status', not a clean deploy"; exit 1; }
+          git cat-file -e "$sha^{commit}" 2>/dev/null \
+            || { echo "::error::staging runs $sha, which this repository does not contain"; exit 1; }
+          if [ "$(git rev-parse 'HEAD^{tree}')" != "$(git rev-parse "$sha^{tree}")" ]; then
+            echo "::error::main is not what staging runs (${sha:0:7}). Bring main and staging to the same tree, let staging deploy it, then press this button again."
+            git diff --stat "$sha" HEAD | tail -25
             exit 1
           fi
-          echo "every change on main has been on staging"
+          echo "main is exactly staging's live release ${sha:0:7}"
       - uses: actions/setup-node@v4
         with:
           node-version-file: .nvmrc
@@ -141,18 +167,21 @@ jobs:
         run: npm run build
       - name: Check the bundle points at production
         shell: bash
+        env:
+          DEPLOY_ENV: ${{ vars.VITE_DEPLOY_ENV }}
         run: |
           js=$(ls dist/assets/index-*.js)
           grep -q '//api\.elprofessor\.eu' $js || { echo "::error::bundle does not reference the production API"; exit 1; }
           if grep -q 'api-staging\.elprofessor\.eu' $js; then echo "::error::production bundle references the staging API"; exit 1; fi
           if grep -q 'service_role' $js; then echo "::error::bundle contains service_role"; exit 1; fi
-          case "${{ vars.VITE_DEPLOY_ENV }}" in ""|production) ;; *)
-            echo "::error::production environment sets VITE_DEPLOY_ENV=${{ vars.VITE_DEPLOY_ENV }}, which would show a test banner"; exit 1 ;;
+          case "$DEPLOY_ENV" in ""|production) ;; *)
+            echo "::error::production environment sets VITE_DEPLOY_ENV=$DEPLOY_ENV, which would show a test banner"; exit 1 ;;
           esac
           grep -q 'https://elprofessor\.eu/email-templates/logo\.png' dist/email-templates/recovery.html \
             || { echo "::error::mail templates carry the wrong logo URL"; exit 1; }
-      - uses: ./.github/actions/release
+      - uses: ./.github/actions/host
         with:
+          command: release
           environment: production
           ssh-key: ${{ secrets.DEPLOY_SSH_KEY }}
           known-hosts: ${{ secrets.DEPLOY_KNOWN_HOSTS }}

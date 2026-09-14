@@ -1,0 +1,93 @@
+name: Run on host
+description: >
+  Release to, roll back, or read the status of an environment on the VPS. The
+  deploy key is bound on the host to deploy/ci-release.sh, so "release <env>
+  <sha>", "rollback <env>" and "status <env>" are the only commands it can run.
+
+inputs:
+  command:
+    description: release, rollback or status
+    required: true
+  environment:
+    description: staging or production
+    required: true
+  ssh-key:
+    description: private key of the restricted deploy key
+    required: true
+  known-hosts:
+    description: pinned host key line for the VPS
+    required: true
+  host:
+    description: VPS address
+    required: true
+
+outputs:
+  stdout:
+    description: the line the host printed for status
+    value: ${{ steps.run.outputs.stdout }}
+
+runs:
+  using: composite
+  steps:
+    - name: Prepare SSH
+      shell: bash
+      env:
+        SSH_KEY: ${{ inputs.ssh-key }}
+        KNOWN_HOSTS: ${{ inputs.known-hosts }}
+      run: |
+        install -m 700 -d ~/.ssh
+        printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
+        chmod 600 ~/.ssh/deploy_key
+        # The host key is pinned rather than accepted on first use: this
+        # connection carries a production release, and trusting whatever
+        # answers would let an impostor receive it.
+        printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+        chmod 644 ~/.ssh/known_hosts
+
+    - name: Run on host
+      id: run
+      shell: bash
+      env:
+        HOST: ${{ inputs.host }}
+        ENVIRONMENT: ${{ inputs.environment }}
+        COMMAND: ${{ inputs.command }}
+      run: |
+        set -o pipefail
+        case "$ENVIRONMENT" in staging|production) ;; *) echo "::error::unknown environment"; exit 1 ;; esac
+        on_host() {
+          ssh -i "$HOME/.ssh/deploy_key" \
+              -o IdentitiesOnly=yes -o BatchMode=yes \
+              -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+              -o ServerAliveInterval=30 \
+              "root@${HOST}" "$1"
+        }
+        case "$COMMAND" in
+          release)
+            # deploy.sh reads this back through the public URL after the swap.
+            printf '%s\n' "$GITHUB_SHA" > dist/version.txt
+            # Only what the host needs. deploy/.env* never leaves the host and is
+            # refused by ci-release.sh if it ever arrives.
+            tar -cz \
+              dist \
+              deploy/docker-compose.yml deploy/deploy.sh deploy/kong.yml deploy/nginx-spa.conf \
+              deploy/init-db deploy/SCHEMA_EPOCH \
+              supabase/functions supabase/migrations \
+            | on_host "release ${ENVIRONMENT} ${GITHUB_SHA}"
+            ;;
+          rollback)
+            on_host "rollback ${ENVIRONMENT}" < /dev/null
+            ;;
+          status)
+            out="$(on_host "status ${ENVIRONMENT}" < /dev/null)"
+            printf '%s\n' "$out"
+            printf 'stdout=%s\n' "$(printf '%s' "$out" | head -1)" >> "$GITHUB_OUTPUT"
+            ;;
+          *)
+            echo "::error::unknown host command"; exit 1
+            ;;
+        esac
+
+    - name: Remove the key from the runner
+      if: always()
+      shell: bash
+      run: rm -f ~/.ssh/deploy_key
