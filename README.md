@@ -1,5 +1,24 @@
 # Y&A Mobility — Technical Developer Reference
 
+[![Deploy](https://github.com/ahmaddev27/el-professor/actions/workflows/deploy.yml/badge.svg?branch=staging&event=push)](https://github.com/ahmaddev27/el-professor/actions/workflows/deploy.yml)
+[![PR checks](https://github.com/ahmaddev27/el-professor/actions/workflows/pr-checks.yml/badge.svg?event=pull_request)](https://github.com/ahmaddev27/el-professor/actions/workflows/pr-checks.yml)
+[![Production](https://img.shields.io/website?url=https%3A%2F%2Felprofessor.eu&label=production&up_message=online&down_message=offline)](https://elprofessor.eu)
+[![Staging](https://img.shields.io/website?url=https%3A%2F%2Fapp.elprofessor.eu%2Fversion.txt&label=staging&up_message=online&down_message=offline)](https://app.elprofessor.eu)
+[![E2E on staging](https://img.shields.io/badge/e2e%20on%20staging-5%2F5%20passing-2ea44f)](e2e/README.md)
+
+![React](https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=black)
+![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&logoColor=white)
+![Vite](https://img.shields.io/badge/Vite-646CFF?logo=vite&logoColor=white)
+![Supabase](https://img.shields.io/badge/Supabase-self--hosted-3FCF8E?logo=supabase&logoColor=white)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-17-4169E1?logo=postgresql&logoColor=white)
+![Playwright](https://img.shields.io/badge/Playwright-e2e-2EAD33?logo=playwright&logoColor=white)
+![Languages](https://img.shields.io/badge/UI-Deutsch%20%7C%20English-555555)
+
+![Requirements plan](https://img.shields.io/badge/requirements%20plan-5%20of%2031%20steps-yellow)
+![Phase 0](https://img.shields.io/badge/phase%200-5%2F6-yellowgreen)
+![Phases 1–4](https://img.shields.io/badge/phases%201%E2%80%934-building-orange)
+![Phase 5](https://img.shields.io/badge/phase%205-not%20started-lightgrey)
+
 > **For new developers:** This document contains all business rules, workflow logic, database schema details, UI flows, validation rules, and architectural decisions needed to continue development without any prior chat history. Read this before touching any planning, salary, OCR, historical reconciliation, or document-generation code.
 
 ---
@@ -15,19 +34,59 @@
 | [el-professor-plan.html](el-professor-plan.html) | The plan for the five requirements, open in a browser (Arabic) |
 | [CLAUDE.md](CLAUDE.md) | Rules, mechanisms and sharp edges — read before changing code |
 
-**Now:** Phase 0 of the requirements plan — releases, rollback and staging protection.
+### Progress
 
-- **Live on staging:** per-client login rate limits, kept releases with one-step rollback, the production gate, a login in front of staging, and the end-to-end suite in `e2e/`. That suite found and fixed a live bug: reset and invite links signed users straight back out.
-- **Staging mail reaches real recipients** through production's Resend, by the owner's decision; test addresses at `example.com` never leave the host, and Mailpit keeps a copy of every message.
-- **Next:** 0.6, the first production release from CI.
-- **Being built in parallel, as PRs into `staging`:** Phases 1–4 (OTP, design system, platform authority, cash receipt foundations).
+A step counts once it is merged into `staging` and verified there. Production receives everything at step 0.6.
+
+| Phase | Requirement | Progress | State |
+|---|---|---|---|
+| **0** | Releases, rollback, staging protection | `▰▰▰▰▰▱` **5/6** · 83% | ![live on staging](https://img.shields.io/badge/-live%20on%20staging-2ea44f) 0.6 waits for the production button |
+| **1** | OTP and account security | `▱▱▱▱▱▱` **0/6** | ![building](https://img.shields.io/badge/-building-orange) database, edge functions, screens |
+| **2** | Design system and prototype | `▱▱▱` **0/3** | ![building](https://img.shields.io/badge/-building-orange) ends at the owner's approval |
+| **3** | Platform admin and permissions | `▱▱▱▱▱▱▱▱` **0/8** | ![building](https://img.shields.io/badge/-building-orange) 3.0 baseline, then 3.1 and 3.5 |
+| **4** | Cash salary receipt | `▱▱▱` **0/3** | ![building](https://img.shields.io/badge/-building-orange) logic and database first |
+| **5** | Design rollout | `▱▱▱▱▱` **0/5** | ![not started](https://img.shields.io/badge/-not%20started-lightgrey) |
+
+**Overall:** `▰▰▰▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱` 5 of 31 steps · 16%
+
+### Live on staging
+
+- [x] **0.1** Login attempts limited per client — PR #2
+- [x] **0.2** Every release kept, rollback with one button — PR #3
+- [x] **0.3** Production deploys only what staging runs — PR #3
+- [x] **0.4** Staging web behind a login — PR #5
+- [x] **0.5** End-to-end suite, 5/5 passing; its first run found reset and invite links that signed users straight back out, fixed in the same PR — PR #7
+- [x] Staging mail reaches real recipients through Resend, `example.com` excluded, by the owner's decision — PR #8, #9
+- [ ] **0.6** First production release from CI — the owner presses the button
+
+### Building now
+
+Agents build Phases 1–4 in parallel git worktrees. Each branch ends in a reviewed PR into `staging`, and nothing merges on its own. Two runs were cut off before they pushed, by a session restart and then by a network outage on the dev machine; their work is saved on the branches, and the current run continues from it.
+
+| Stream | Branch |
+|---|---|
+| OTP database | `phase1/otp-db` |
+| OTP edge functions | `phase1/otp-functions` |
+| OTP screens | `phase1/otp-frontend` |
+| Design system and prototype | `phase2/design-system` |
+| Permission baseline, then platform authority | `phase3/rls-baseline` → `phase3/platform-authority` |
+| Cash receipt foundations | `phase4/receipt-foundations` |
+
+### Environments
 
 | | production | staging |
 |---|---|---|
+| status | ![production](https://img.shields.io/website?url=https%3A%2F%2Felprofessor.eu&label=status&up_message=online&down_message=offline) | ![staging](https://img.shields.io/website?url=https%3A%2F%2Fapp.elprofessor.eu%2Fversion.txt&label=status&up_message=online&down_message=offline) |
 | web | https://elprofessor.eu | https://app.elprofessor.eu (login required) |
 | API | https://api.elprofessor.eu | https://api-staging.elprofessor.eu |
 | branch | `main` — deployed by a manual button | `staging` — deployed on every push |
 | mail | Resend | Mailpit keeps a copy and relays to Resend, except `@example.com` |
+
+### Waiting on the owner
+
+- DNS record `mail-staging` → `159.195.205.30`, then a Mailpit login.
+- Step 0.6: merge `staging` into `main` and press the production button.
+- Rotate the secrets that were exposed in chat.
 
 Sections 1–25 below describe the application. Where they disagree with the code, the code wins.
 
