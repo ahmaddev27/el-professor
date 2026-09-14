@@ -34,9 +34,12 @@ set_env() {
 # release that adds it is deployed, the settings here wait for that release.
 compose_knows_relay() { grep -q 'MP_SMTP_RELAY_CONFIG' docker-compose.yml; }
 
+# Mailpit reads the relay file only when it starts, and compose does not notice
+# a changed file behind a bind mount, so the container is always recreated.
+# That drops the mail caught so far, which staging can afford.
 recreate_mailpit() {
   if compose_knows_relay; then
-    docker compose up -d --no-deps mailpit < /dev/null > /dev/null 2>&1
+    docker compose up -d --no-deps --force-recreate mailpit < /dev/null > /dev/null 2>&1
     sleep 4
   else
     echo "The deployed compose file has no relay settings yet; this takes effect with the next staging release."
@@ -74,7 +77,8 @@ mv mailpit-relay.yml.new mailpit-relay.yml
 set_env MAILPIT_RELAY_ALL true
 recreate_mailpit
 
-logs="$(docker compose logs --since 30s mailpit 2>&1)"
+# The container was just recreated, so its whole log is this start-up.
+logs="$(docker compose logs mailpit 2>&1)"
 grep -q 'auto-relaying all new messages' <<<"$logs" || { echo "Mailpit did not report auto-relay; check: docker compose logs mailpit"; exit 1; }
 grep -q 'blocklist is active' <<<"$logs" || { echo "Mailpit did not report the example.com blocklist; check: docker compose logs mailpit"; exit 1; }
 echo "Staging mail is now relayed to its real recipients through Resend (example.com excluded). Copies stay in Mailpit."
@@ -92,5 +96,6 @@ if [ "$MODE" = --test ]; then
     echo "The test mail was NOT relayed:"; docker compose logs --since 20s mailpit 2>&1 | grep 'error relaying' | tail -2
     exit 1
   fi
+  docker compose logs --since 20s mailpit 2>&1 | grep -i relay | tail -3
   echo "Test mail to delivered@resend.dev relayed without error. Resend's dashboard shows it as delivered."
 fi
