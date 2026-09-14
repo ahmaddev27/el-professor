@@ -141,6 +141,29 @@ A DB trigger (`protect_fahrtenbuch_immutable_fields`) raises an exception on any
 
 This constraint shapes the whole planning system: it is why planning is computed entirely in memory and committed in one apply step, and why time corrections in the historical wizard are stored as separate `historical_time_adjustments` rows rather than edits.
 
+### `app_private`: state the browser must never reach
+
+PostgREST serves only `public` and `storage`. Tables that hold security state live in `app_private` (since `20260915100000`): `otp_challenges`, `otp_send_events`, `pending_signups`, `platform_login_verifications`. Nobody but the owner has USAGE on the schema — not `anon`, not `authenticated`, not `service_role` — so the only way in is a `SECURITY DEFINER` function in `public` whose EXECUTE is granted to `service_role` alone. Four rules for anything added there:
+
+- **Revoke from `PUBLIC, anon, authenticated`**, not just `authenticated`. Supabase's default privileges grant EXECUTE on every new `public` function to `anon` too; `20260911120000_redeem_discount_code_rpc.sql` missed that, so do not copy its grant block.
+- **A new `app_private` object needs its own REVOKE.** EXECUTE-to-PUBLIC on new functions is a built-in global default and cannot be revoked per schema. Missing USAGE is what keeps callers out; the REVOKE is the second wall.
+- **`LANGUAGE plpgsql`, `SET search_path = pg_catalog, public`, `app_private.*` and `auth.*` schema-qualified.** plpgsql resolves `auth.sessions` at call time; the RLS test database only gets GoTrue's tables when a test stubs them.
+- **Outcomes are return values, never exceptions.** `otp_verify` counts the attempt before comparing the hash; raising on a wrong code would roll that count back and make the five-attempt lock worthless. A broken argument contract raises `22023` with a fixed message, and no function returns `SQLERRM`.
+
+Each OTP migration ends with a `DO` block that fails the release: the schema file if `anon`, `authenticated` or `service_role` can reach `app_private` or any table in it, the RPC files if any function they created is executable by `anon`/`authenticated` or lacks a pinned `search_path`. `app_private.platform_login_verified(user_id, session_id)` has no grant for anyone: whatever calls it (PLATFORM's `is_user_super_admin()`) must be a `SECURITY DEFINER` function owned by a role that already holds USAGE on `app_private` and EXECUTE on it — in practice `supabase_admin`, which runs the migrations. The limits (10 min validity, 5 attempts, 60 s cooldown, 5 codes per address and 20 requests per IP per hour, 12 h platform verification) are `CONSTANT`s in the one function that enforces each.
+
+Signup is code-confirmed: `signup_create_company` writes the company, an owner profile in status `pending_invite` and a `pending_signups` row in one transaction; `signup_complete` activates the owner and redeems the discount code only after the code is entered. `purge_unverified_signups` and `signup_discard_unverified` delete **only** accounts in `pending_signups` — legacy unconfirmed production accounts were never written there and no job can reach them. `auth.users.email` is copied to `user_profiles.email` by the `sync_user_profile_email` trigger, whatever changed it.
+
+`npm run test:rls` runs `tests/rls/assertions.sql` and then every other `tests/rls/*.sql` in name order (the seeds excepted), in a throwaway `supabase/postgres` container with a random name, so parallel runs on the shared VPS cannot tear each other down. A test file that writes runs inside `BEGIN; … ROLLBACK;`, as `otp.sql` does, so the files after it see only the migrations and the seeds. There is no Docker locally: run it on the VPS in a `mktemp -d` copy, never against a stack's database. The `node` image has no Docker CLI, so mount the host's (it links only against glibc, which `bookworm` provides):
+
+```bash
+git archive HEAD scripts/rls-test.mjs tests supabase/migrations | ssh elprofessor 'd=$(mktemp -d /root/rls.XXXXXX) && tar -x -C "$d" &&
+  docker run --rm --cpus 1 --memory 1g -v /var/run/docker.sock:/var/run/docker.sock -v /usr/bin/docker:/usr/bin/docker:ro \
+    -v "$d":"$d" -w "$d" node:22-bookworm-slim node scripts/rls-test.mjs; rc=$?; rm -rf "$d"; exit $rc'
+```
+
+A new RPC needs no `NOTIFY pgrst` and no restart of `rest` (which `deploy.sh` never recreates): the `supabase/postgres` image installs the `pgrst_ddl_watch` event trigger, which tells PostgREST to reload its schema cache after every DDL statement.
+
 ## The planning pipeline (the core of the product)
 
 Entry point `src/pages/CompanyPlannerPage.tsx` branches on `planningMode` into three workflows: `new_month` (the standard pipeline), `historical_reconciliation` (Brutto-Gehälter mode), and `hist_working_hours` (Arbeitsstunden block-engine mode).
