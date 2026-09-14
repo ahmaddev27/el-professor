@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AlertCircle } from 'lucide-react';
-import { supabase } from '../lib/supabase';
+import { supabase, authRedirect } from '../lib/supabase';
 import { useTranslation } from '../contexts/LanguageContext';
 
 type CallbackType = 'recovery' | 'invite' | 'signup' | 'magiclink' | 'email_change' | string;
@@ -14,26 +14,13 @@ const AuthCallbackPage: React.FC = () => {
   useEffect(() => {
     let cancelled = false;
 
-    // Parse type from hash or query string
-    const hash = window.location.hash || '';
-    const search = window.location.search || '';
-
-    const hashParams = new URLSearchParams(
-      hash.startsWith('#') ? hash.slice(1) : ''
-    );
-    const queryParams = new URLSearchParams(
-      search.startsWith('?') ? search.slice(1) : ''
-    );
-
-    const getParam = (key: string) =>
-      hashParams.get(key) || queryParams.get(key);
-
-    const hashError = getParam('error') || getParam('error_description');
-    const type: CallbackType = getParam('type') ?? '';
+    // Captured in lib/supabase before supabase-js consumed the URL: by now the
+    // hash that carried these is already gone.
+    const hashError = authRedirect.error;
+    const type: CallbackType = authRedirect.type;
 
     if (hashError) {
-      const decodedError = decodeURIComponent(hashError);
-      if (decodedError.toLowerCase().includes('expired')) {
+      if (hashError.toLowerCase().includes('expired')) {
         setError(t('signup.callback.linkExpired'));
       } else {
         setError(t('signup.callback.linkInvalid'));

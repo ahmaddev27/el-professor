@@ -4,6 +4,21 @@ const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
 /**
+ * What brought the browser to this page, read before the client below parses
+ * the URL. With detectSessionInUrl, supabase-js creates the session from a
+ * reset or invite link and then strips the hash — so by the time
+ * AuthCallbackPage mounts, "type=recovery" is gone, and a password reset
+ * landed on the dashboard instead of the password form.
+ */
+export const authRedirect: { type: string; error: string } = (() => {
+  if (typeof window === 'undefined') return { type: '', error: '' };
+  const hash = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+  const query = new URLSearchParams(window.location.search);
+  const read = (key: string) => hash.get(key) ?? query.get(key) ?? '';
+  return { type: read('type'), error: read('error_description') || read('error') };
+})();
+
+/**
  * Returns the canonical app origin used for auth email redirect URLs.
  *
  * Priority:
