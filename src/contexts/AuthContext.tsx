@@ -110,6 +110,11 @@ interface AuthContextType {
   refreshSubscription: () => Promise<void>;
   isSuperAdmin: boolean;
   mustChangePassword: boolean;
+  /**
+   * Password sign-in. The owner of a company still pending approval, or
+   * rejected, stays signed in and App shows PendingApprovalPage or RejectedPage.
+   * Every other block signs the session straight out again and is returned.
+   */
   signIn: (email: string, password: string) => Promise<{ error: any; blockReason?: BlockReason }>;
   signOut: () => Promise<void>;
   isAdmin: boolean;
@@ -413,7 +418,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       // After successful Supabase auth, check profile/company status
       if (data.user) {
         const blockReason = await checkProfileAccess(data.user.id);
-        if (blockReason) {
+        // A company waiting for approval, or rejected, is not a reason to end
+        // the session: App renders PendingApprovalPage or RejectedPage for it.
+        // Signing those owners out left a newly registered owner on the login
+        // form, unable to see the page that explains the wait.
+        const approvalGateShowsIt = blockReason === 'company_pending' || blockReason === 'company_rejected';
+        if (blockReason && !approvalGateShowsIt) {
           // Force sign out — user should not access the app
           await supabase.auth.signOut();
           clearSessionData();
