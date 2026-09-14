@@ -1996,6 +1996,7 @@ export const de = {
   'a4.mwSubtitle':                         'Personenbeförderung — Nachweis des Auftragseingangs',
   'a4.mwTitle':                            'Mietwagenauftrag / Fahrtennachweis',
   'a4.tqAdjustFields':                     'Felder anpassen',
+  'a4.tqAmountInvalid':                    'Bitte einen gültigen Betrag eingeben, z. B. 1.234,56.',
   'a4.tqDriverPlaceholder':                'Fahrer auswählen …',
   'a4.tqExportPdf':                        'Als PDF exportieren',
   'a4.tqExporting':                        'Exportiert …',
