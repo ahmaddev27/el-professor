@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useEffect, useState, useRef, useCallback } from 'react';
 import { User, Session } from '@supabase/supabase-js';
-import { supabase, isSupabaseConfigured, appOrigin } from '../lib/supabase';
+import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import type { TranslationKey } from '../i18n';
 
 const SESSION_TIMEOUT = 20 * 60 * 1000;
@@ -94,8 +94,8 @@ interface AuthContextType {
   profile: UserProfile | null;
   /**
    * Set when the *restored* session belongs to an account that has since been
-   * revoked. Sign-in blocks are returned by signIn(); this covers the reload and
-   * OAuth paths, where signIn() is never called.
+   * revoked. Sign-in blocks are returned by signIn(); this covers reloads,
+   * where signIn() is never called.
    */
   userBlockReason: BlockReason | null;
   session: Session | null;
@@ -111,8 +111,6 @@ interface AuthContextType {
   isSuperAdmin: boolean;
   mustChangePassword: boolean;
   signIn: (email: string, password: string) => Promise<{ error: any; blockReason?: BlockReason }>;
-  signUp: (email: string, password: string, fullName?: string) => Promise<{ error: any }>;
-  signInWithGoogle: () => Promise<{ error: any }>;
   signOut: () => Promise<void>;
   isAdmin: boolean;
   isCreator: boolean;
@@ -233,9 +231,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setProfile(data ?? null);
 
       // Account revocation must bite on every session, not only at sign-in.
-      // signIn() calls checkProfileAccess, but a restored session and the Google
-      // OAuth path never reach it, so a suspended or deactivated user kept working
-      // across reloads indefinitely.
+      // signIn() calls checkProfileAccess, but a restored session never reaches
+      // it, so without this a suspended or deactivated user kept working across
+      // reloads indefinitely.
       setUserBlockReason(
         userStatusBlockReason(data?.status, data?.is_super_admin ?? false),
       );
@@ -433,46 +431,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const signUp = async (email: string, password: string, fullName?: string) => {
-    if (!isSupabaseConfigured) {
-      return { error: { message: 'Supabase is not configured' } };
-    }
-    try {
-      const { error } = await supabase.auth.signUp({
-        email,
-        password,
-        options: {
-          data: { full_name: fullName || '' },
-          emailRedirectTo: `${appOrigin}/auth/callback`,
-        },
-      });
-      return { error };
-    } catch (error) {
-      return { error: { message: error instanceof Error ? error.message : 'Sign up failed' } };
-    }
-  };
-
-  const signInWithGoogle = async (): Promise<{ error: any }> => {
-    if (!isSupabaseConfigured) {
-      return { error: { message: 'Supabase is not configured' } };
-    }
-    try {
-      const { error } = await supabase.auth.signInWithOAuth({
-        provider: 'google',
-        options: {
-          redirectTo: `${appOrigin}/auth/callback`,
-          queryParams: {
-            access_type: 'offline',
-            prompt: 'consent',
-          },
-        },
-      });
-      return { error };
-    } catch (error) {
-      return { error: { message: error instanceof Error ? error.message : 'Google sign in failed' } };
-    }
-  };
-
   const signOut = async () => {
     if (sessionTimerRef.current) {
       clearTimeout(sessionTimerRef.current);
@@ -587,8 +545,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     isSuperAdmin,
     mustChangePassword,
     signIn,
-    signUp,
-    signInWithGoogle,
     signOut,
     isAdmin,
     isCreator,

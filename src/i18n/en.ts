@@ -79,10 +79,8 @@ export const en: PartialDictionary = {
   'auth.password':          'Password',
   'auth.passwordPlaceholder': 'Your password',
   'auth.forgotPassword':    'Forgot your password?',
-  'auth.signInWithGoogle':  'Sign in with Google',
   'auth.noAccountYet':      'No account yet?',
   'auth.register':          'Register',
-  'auth.or':                'or',
   'auth.tryFree':           'Try free for 14 days',
   'auth.showPassword':      'Show password',
   'auth.hidePassword':      'Hide password',
@@ -92,7 +90,6 @@ export const en: PartialDictionary = {
   'auth.error.emailNotConfirmed': 'Email confirmation is still enabled in the Supabase settings. Please disable "Confirm email" under Authentication > Providers > Email.',
   'auth.error.generic':            'Sign-in failed. Please try again.',
   'auth.error.network':            'Network error. Please check your internet connection.',
-  'auth.error.google':             'Google sign-in failed. Please try again.',
 
   // ── Plan gating ────────────────────────────────────────────────────────────
   'locked.title':           '{feature} is not included in your plan',
