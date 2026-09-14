@@ -35,12 +35,10 @@ Until `mail-staging.elprofessor.eu` resolves, the suite reaches Mailpit through 
 |---|---|
 | `staging-protection` | Staging answers 401 without the login, `/version.txt` stays public, and with the login the sign-in page and the STAGING banner show. |
 | `sign-in` | The E2E admin signs in and reaches the company overview. |
-| `forgot-password` | The reset mail arrives in Mailpit, its link opens the password form, and the new password signs in. Afterwards the password is put back. |
-
-`forgot-password` covers today's link-based reset. Phase 1 replaces the link with a one-time code, and the test is rewritten in that change.
+| `forgot-password` | The reset code arrives in Mailpit with no secret in a link or the subject, a wrong code is refused with the attempts left, the right one opens the password form, and the new password signs in. Afterwards the password is put back. |
 
 ## Things to know
 
-- **One reset mail per account per minute.** GoTrue enforces this, so two runs less than a minute apart fail at "E-Mail versendet".
+- **One code per address per minute.** otp-request enforces this and answers exactly as if it had sent one, so a second `forgot-password` run less than a minute after the first times out waiting for the mail.
 - **Login attempts are rate-limited per client** (60 per 5 minutes on `/token`). A test that loops over logins will hit 429.
 - **Tests change the E2E admin's password.** A failed run may leave it changed; `bash setup-staging.sh --reset-admin-password` puts it back.

@@ -5,6 +5,8 @@ import { supabase } from '../lib/supabase';
 import ConfirmationModal from './ConfirmationModal';
 import { exportTableToExcel } from '../utils/excelExport';
 import { useTranslation } from '../contexts/LanguageContext';
+import { formatOtpMessage } from '../lib/otpClient';
+import { inviteCreateFailure, resendInviteOutcome } from '../lib/accountFunctionResponses';
 
 interface UserData {
   id: string;
@@ -308,7 +310,7 @@ const UserModal: React.FC<UserModalProps> = ({ isOpen, onClose, onSave, user, ti
 };
 
 const UserManagement: React.FC = () => {
-  const { t } = useTranslation();
+  const { t, tPlural } = useTranslation();
   const { isAdmin, profile, loading: authLoading } = useAuth();
   const [users, setUsers] = useState<UserData[]>([]);
   const [loading, setLoading] = useState(true);
@@ -397,7 +399,23 @@ const UserManagement: React.FC = () => {
       });
 
       if (!response.ok) {
-        const errorData = await response.json();
+        const errorData = await response.json().catch(() => ({}));
+        // The account and its profile exist; only the invitation mail failed.
+        // Say exactly that and reload the list, where "resend invitation" is,
+        // rather than inviting a second attempt that ends in "already registered".
+        const inviteFailure = inviteCreateFailure(response.status, errorData);
+        if (inviteFailure) {
+          setIsModalOpen(false);
+          loadUsers();
+          setConfirmModal({
+            isOpen: true,
+            title: t('common.error'),
+            message: formatOtpMessage(inviteFailure, t, tPlural),
+            onConfirm: () => {},
+            type: 'error' as const
+          });
+          return;
+        }
         throw new Error(errorData.error || 'Failed to create user');
       }
 
@@ -634,17 +652,22 @@ const UserManagement: React.FC = () => {
         body: JSON.stringify({ user_id: userId }),
       });
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Resend invite failed');
+      const body: unknown = await response.json().catch(() => null);
+      // The cooldown, the hourly limit, a failed send and an invitation that was
+      // already accepted each have their own message; anything else keeps the
+      // generic one with the server's text.
+      const outcome = resendInviteOutcome(response.status, body);
+      if (!outcome.message) {
+        const serverText = (body as { error?: unknown } | null)?.error;
+        throw new Error(typeof serverText === 'string' && serverText ? serverText : 'Resend invite failed');
       }
 
       setConfirmModal({
         isOpen: true,
-        title: t('users.successTitle'),
-        message: t('users.invite.resent'),
+        title: outcome.ok ? t('users.successTitle') : t('common.error'),
+        message: formatOtpMessage(outcome.message, t, tPlural),
         onConfirm: () => {},
-        type: 'success' as const
+        type: outcome.ok ? 'success' : 'error'
       });
 
       await loadUsers();

@@ -94,8 +94,8 @@ interface AuthContextType {
   profile: UserProfile | null;
   /**
    * Set when the *restored* session belongs to an account that has since been
-   * revoked. Sign-in blocks are returned by signIn(); this covers reloads,
-   * where signIn() is never called.
+   * revoked. Sign-in blocks are returned by signIn(); this covers reloads and
+   * sessions installed from a one-time code, where signIn() is never called.
    */
   userBlockReason: BlockReason | null;
   session: Session | null;
@@ -236,9 +236,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setProfile(data ?? null);
 
       // Account revocation must bite on every session, not only at sign-in.
-      // signIn() calls checkProfileAccess, but a restored session never reaches
-      // it, so without this a suspended or deactivated user kept working across
-      // reloads indefinitely.
+      // signIn() calls checkProfileAccess, but a restored session and a session
+      // installed from a one-time code never reach it, so without this a
+      // suspended or deactivated user kept working across reloads indefinitely.
       setUserBlockReason(
         userStatusBlockReason(data?.status, data?.is_super_admin ?? false),
       );

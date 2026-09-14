@@ -1,33 +1,43 @@
 import { test, expect } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
-import { Mailpit, verifyLinkFrom } from '../lib/mailpit';
+import { Mailpit, codeFrom } from '../lib/mailpit';
 import { resetAdminPassword } from '../lib/staging';
 
-// The current, link-based password reset, end to end. Phase 1 replaces the
-// link with a one-time code; this test is rewritten in that same change.
+// Password reset by one-time code, end to end: the code arrives without a link
+// that carries a secret, a wrong code is refused with the attempts left, the
+// right one opens the password form, and the new password signs in.
 //
-// GoTrue sends at most one reset mail per account per minute, so two runs
-// less than a minute apart fail at the "E-Mail versendet" step.
+// otp-request issues at most one code per address per minute, so a second run
+// less than a minute after the first waits for a mail that never comes.
 
 test.afterAll(() => resetAdminPassword());
 
-test('forgot password: the mail arrives, its link opens the form, the new password signs in', async ({ page, browser }) => {
+test('forgot password: the code arrives, a wrong one is refused, the right one opens the form, the new password signs in', async ({ page, browser }) => {
   const email = process.env.E2E_ADMIN_EMAIL!;
   const mailpit = Mailpit.fromEnv();
   await mailpit.clear(email);
 
   await page.goto('/auth/forgot-password');
   await page.locator('input[type="email"]').fill(email);
-  await page.getByRole('button', { name: 'Link senden' }).click();
-  await expect(page.getByText('E-Mail versendet')).toBeVisible();
+  await page.getByRole('button', { name: 'Code senden' }).click();
+  await expect(page.getByText('Falls ein Konto zu dieser Adresse existiert')).toBeVisible();
 
   const mail = await mailpit.waitForMessage(email);
-  expect(mail.subject).toContain('Passwort festlegen');
-  const link = verifyLinkFrom(mail.html);
-  expect(new URL(link).origin).toBe(new URL(process.env.E2E_API_URL!).origin);
+  expect(mail.subject).toContain('Passwort');
+  expect(mail.subject).not.toMatch(/\d{6}/);
+  expect(mail.html).not.toMatch(/token/i);
+  const code = codeFrom(mail);
 
-  await page.goto(link);
+  const firstBox = page.getByLabel('Ziffer 1 von 6');
+  await firstBox.click();
+  await page.keyboard.type(code === '000000' ? '111111' : '000000');
+  await expect(page.getByText('Noch 4 Versuche.')).toBeVisible();
+
+  // The wrong code cleared the boxes; the sixth digit submits by itself.
+  await firstBox.click();
+  await page.keyboard.type(code);
   await expect(page).toHaveURL(/\/auth\/set-password/, { timeout: 30_000 });
+
   const newPassword = `E2e-${randomUUID()}`;
   const fields = page.locator('input[type="password"]');
   await fields.nth(0).fill(newPassword);
@@ -36,7 +46,7 @@ test('forgot password: the mail arrives, its link opens the form, the new passwo
   await expect(page.getByText('Passwort gespeichert')).toBeVisible();
 
   // A separate browser context proves the new password itself, not the
-  // session the link opened.
+  // session the code opened.
   const fresh = await browser.newContext({
     baseURL: process.env.E2E_BASE_URL,
     locale: 'de-DE',
