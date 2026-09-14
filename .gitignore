@@ -41,3 +41,7 @@ public/email-templates/*.html
 # Mailpit UI login for staging (bcrypt), provisioned on the host by
 # deploy/set-mailpit-password.sh. Never committed.
 deploy/mailpit-ui-auth
+
+# End-to-end test output (e2e/). Credentials live in e2e/.env.local, covered by *.local.
+e2e/test-results
+e2e/playwright-report

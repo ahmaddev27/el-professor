@@ -63,15 +63,31 @@ STAGING_AUTH_FILE="${STAGING_AUTH_FILE:-/root/el-professor-secrets/staging-web-a
 # An unknown directive name fails validation instead.
 MARKER='__STAGING_WEB_AUTH__'
 auth_re='^([A-Za-z0-9._-]+):(\$2[aby]\$[0-9]{2}\$[./A-Za-z0-9]{53})$'
-auth_line="$(head -n 1 "$STAGING_AUTH_FILE" 2>/dev/null | tr -d '\r' || true)"
-if [[ "$auth_line" =~ $auth_re ]]; then
-  auth_block="$(printf 'basic_auth {\n\t%s %s\n}' "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}")"
-  staging_state="behind its login"
+# One login per line — the owner's, the end-to-end tests'. Every line must be
+# valid: a malformed line locks staging instead of being silently skipped.
+auth_users=""
+auth_count=0
+auth_bad=0
+if [ -s "$STAGING_AUTH_FILE" ]; then
+  while IFS= read -r auth_line || [ -n "$auth_line" ]; do
+    auth_line="${auth_line%$'\r'}"
+    [ -n "$auth_line" ] || continue
+    if [[ "$auth_line" =~ $auth_re ]]; then
+      auth_users+="$(printf '\t%s %s' "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}")"$'\n'
+      auth_count=$((auth_count + 1))
+    else
+      auth_bad=1
+    fi
+  done < "$STAGING_AUTH_FILE"
+fi
+if [ "$auth_count" -gt 0 ] && [ "$auth_bad" = 0 ]; then
+  auth_block="$(printf 'basic_auth {\n%s}' "$auth_users")"
+  staging_state="behind its login, $auth_count user(s)"
 else
   auth_block='respond "Staging ist gesperrt: kein Zugang eingerichtet." 503'
   staging_state="locked, no valid $STAGING_AUTH_FILE"
 fi
-unset auth_line
+unset auth_line auth_users
 AUTH_BLOCK="$auth_block" MARKER="$MARKER" awk '
   index($0, ENVIRON["MARKER"]) {
     match($0, /^[ \t]*/)

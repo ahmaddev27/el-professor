@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
 # Set the login for staging's Mailpit inbox at https://mail-staging.elprofessor.eu
 #
-#   ssh root@159.195.205.30 /srv/PRO-staging/deploy/set-mailpit-password.sh
+#   ssh -t root@159.195.205.30 /srv/PRO-staging/deploy/set-mailpit-password.sh
 #
-# Mailpit needs a login even though staging itself is open: the mail it catches
+# (-t matters: without a terminal the hidden password prompts cannot read input.)
+#
+# Mailpit has a login of its own, separate from staging's: the mail it catches
 # carries live password-reset and invite links for real accounts, so anyone who
-# can read it can take over any staging login.
+# can read it can take over any staging login. Other logins in the file — the
+# end-to-end tests have one — are kept.
 #
 # The password is read twice without echo, hashed with bcrypt, and only the
 # hash is written. It reaches the hashing tool on stdin, so it never appears in
@@ -35,10 +38,13 @@ HASH="$(printf '%s\n' "$PASS" | docker run --rm -i --pull never --network none "
 [[ "$HASH" =~ ^\$2[aby]\$[0-9]{2}\$[./A-Za-z0-9]{53}$ ]] || { echo "Hashing failed. Nothing changed."; exit 1; }
 
 umask 077
-printf '%s:%s\n' "$USERNAME" "$HASH" > mailpit-ui-auth.new
+# Replace this user's line and keep the other logins (the end-to-end tests
+# have their own). The "locked" seed line exists only until a real login is set.
+{ awk -F: -v u="$USERNAME" '$1 != u && $1 != "locked"' mailpit-ui-auth 2>/dev/null || true; printf '%s:%s\n' "$USERNAME" "$HASH"; } > mailpit-ui-auth.new
 chmod 600 mailpit-ui-auth.new
 mv mailpit-ui-auth.new mailpit-ui-auth
 unset HASH
+echo "Mailpit logins now: $(cut -d: -f1 mailpit-ui-auth | paste -sd' ' -)"
 
 docker compose up -d --force-recreate --no-deps mailpit < /dev/null >/dev/null 2>&1
 for i in $(seq 1 20); do

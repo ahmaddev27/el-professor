@@ -1,0 +1,14 @@
+{
+  "name": "el-professor-e2e",
+  "version": "1.0.0",
+  "description": "End-to-end tests against staging (see e2e/README.md)",
+  "scripts": {
+    "test": "playwright test",
+    "setup": "bash setup-staging.sh"
+  },
+  "type": "commonjs",
+  "devDependencies": {
+    "@playwright/test": "^1.63.0"
+  },
+  "private": true
+}

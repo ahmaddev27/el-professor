@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Set the login for the staging web app at https://app.elprofessor.eu
 #
-#   ssh root@159.195.205.30 /srv/PRO-staging/deploy/set-staging-password.sh
+#   ssh -t root@159.195.205.30 /srv/PRO-staging/deploy/set-staging-password.sh
+#
+# (-t matters: without a terminal the hidden password prompts cannot read input.)
 #
 # Staging runs on a copy of production data — real accounts, real payroll — so
 # it is not open to anyone who finds the address. The password is read twice
@@ -37,9 +39,12 @@ HASH="$(printf '%s\n' "$PASS" | docker run --rm -i --pull never --network none "
 
 install -d -m 700 "$(dirname "$SECRET")"
 umask 077
-printf '%s:%s\n' "$USERNAME" "$HASH" > "$SECRET.new"
+# Replace this user's line and keep every other login (the end-to-end tests
+# have their own).
+{ awk -F: -v u="$USERNAME" '$1 != u' "$SECRET" 2>/dev/null || true; printf '%s:%s\n' "$USERNAME" "$HASH"; } > "$SECRET.new"
 mv "$SECRET.new" "$SECRET"
 unset HASH
+echo "Logins in front of staging now: $(cut -d: -f1 "$SECRET" | paste -sd' ' -)"
 
 "$GUARD" --reload > /dev/null \
   || { echo "The Caddy guard refused the change; see: journalctl -u el-professor-caddy-guard"; exit 1; }
