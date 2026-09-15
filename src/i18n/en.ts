@@ -46,6 +46,16 @@ export const en: PartialDictionary = {
   'admin.nav.companies':    'Companies',
   'admin.nav.billing':      'Subscriptions & payments',
   'admin.nav.diagnostics':  'Acceptance diagnostics',
+  'admin.access.checking':  'Checking platform access…',
+  'admin.access.errorTitle': 'Platform access could not be checked',
+  'admin.access.errorBody': 'The connection to the server failed. Please try again.',
+  'admin.access.retry':     'Try again',
+  'admin.access.noneTitle': 'No platform access',
+  'admin.access.noneBody':  'Your account has no active role in the platform team. Ask a platform owner.',
+  'admin.role.owner':       'Owner',
+  'admin.role.support':     'Support',
+  'admin.role.billing':     'Billing',
+  'admin.role.read_only':   'Read only',
 
   // ── Shell chrome ───────────────────────────────────────────────────────────
   'shell.systemName':       'Management system',

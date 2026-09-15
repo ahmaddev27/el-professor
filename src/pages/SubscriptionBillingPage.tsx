@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
+import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { useToast } from '../contexts/ToastContext';
 import {
   CreditCard, Receipt, CheckCircle, AlertTriangle, Clock,
@@ -105,6 +106,10 @@ function fmtEur(v: number) {
 
 export default function SubscriptionBillingPage() {
   const { isSuperAdmin, user, profile } = useAuth();
+  // Hidden for a role without the capability; the database refuses regardless.
+  const { platformCan } = useSuperAdmin();
+  const canBilling = platformCan('billing.manage');
+  const canPricing = platformCan('pricing.manage');
   const { showToast } = useToast();
   const { t } = useTranslation();
 
@@ -339,7 +344,7 @@ export default function SubscriptionBillingPage() {
               >
                 <Eye size={14} /> {t('sa.subs.actionView')}
               </button>
-              {inv.status !== 'paid' && inv.status !== 'canceled' && (
+              {canBilling && inv.status !== 'paid' && inv.status !== 'canceled' && (
                 <button className="w-full text-left px-3 py-2 text-sm flex items-center gap-2 transition-colors"
                   style={{ color: 'var(--success)' }}
                   onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-muted)')}
@@ -349,7 +354,7 @@ export default function SubscriptionBillingPage() {
                   <Banknote size={14} /> {t('sa.subs.actionMarkPaidCash')}
                 </button>
               )}
-              {inv.status === 'paid' && (
+              {canBilling && inv.status === 'paid' && (
                 <button className="w-full text-left px-3 py-2 text-sm flex items-center gap-2 transition-colors"
                   style={{ color: 'var(--warning)' }}
                   onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-muted)')}
@@ -359,7 +364,7 @@ export default function SubscriptionBillingPage() {
                   <XCircle size={14} /> {t('sa.subs.actionMarkUnpaid')}
                 </button>
               )}
-              {inv.status !== 'canceled' && (
+              {canBilling && inv.status !== 'canceled' && (
                 <button className="w-full text-left px-3 py-2 text-sm flex items-center gap-2 transition-colors"
                   style={{ color: 'var(--danger)' }}
                   onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-muted)')}
@@ -413,7 +418,7 @@ export default function SubscriptionBillingPage() {
         <div className="flex flex-wrap gap-2">
           <button
             onClick={() => setShowGenerateModal(true)}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all"
+            className={`${canBilling ? 'flex' : 'hidden'} items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all`}
             style={{ background: 'var(--accent)', color: 'white' }}
             onMouseEnter={e => (e.currentTarget.style.opacity = '0.9')}
             onMouseLeave={e => (e.currentTarget.style.opacity = '1')}
@@ -422,7 +427,7 @@ export default function SubscriptionBillingPage() {
           </button>
           <button
             onClick={() => setShowAssignModal(true)}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all"
+            className={`${canBilling ? 'flex' : 'hidden'} items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all`}
             style={{ background: 'var(--bg-surface)', color: 'var(--text-primary)', border: '1px solid var(--border)' }}
             onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-muted)')}
             onMouseLeave={e => (e.currentTarget.style.background = 'var(--bg-surface)')}
@@ -431,7 +436,7 @@ export default function SubscriptionBillingPage() {
           </button>
           <button
             onClick={() => setShowPlanModal(true)}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all"
+            className={`${canPricing ? 'flex' : 'hidden'} items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all`}
             style={{ background: 'var(--bg-surface)', color: 'var(--text-primary)', border: '1px solid var(--border)' }}
             onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-muted)')}
             onMouseLeave={e => (e.currentTarget.style.background = 'var(--bg-surface)')}
@@ -686,6 +691,7 @@ export default function SubscriptionBillingPage() {
               <CreditCard size={40} className="mx-auto mb-3 opacity-40" />
               <p className="text-sm">{t('sa.subs.noPlans')}</p>
               <button
+                hidden={!canPricing}
                 onClick={() => setShowPlanModal(true)}
                 className="mt-4 px-4 py-2 rounded-xl text-sm font-medium"
                 style={{ background: 'var(--accent)', color: 'white' }}

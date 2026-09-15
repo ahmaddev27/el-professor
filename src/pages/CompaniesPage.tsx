@@ -607,6 +607,12 @@ function CompanyDetail({ company, onBack, onEdit, onLifecycleAction, onEnterComp
   const [dangerOpen, setDangerOpen] = useState(false);
   const { showToast } = useToast();
   const { t } = useTranslation();
+  // Hidden for a role without the capability; the database refuses regardless.
+  const { platformCan } = useSuperAdmin();
+  const canLifecycle = platformCan('companies.lifecycle');
+  const canHardDelete = platformCan('companies.hard_delete');
+  const canManageUsers = platformCan('company_users.manage');
+  const canOpenCompany = platformCan('business.read');
 
   const isArchived = company.status === 'archived';
   const isDeleted = company.status === 'deleted';
@@ -655,7 +661,7 @@ function CompanyDetail({ company, onBack, onEdit, onLifecycleAction, onEnterComp
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
-          {isOperational && (
+          {isOperational && canOpenCompany && (
             <button onClick={() => onEnterCompany(company)} className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold"
               style={{ background: 'var(--accent)', color: 'white' }}
               onMouseEnter={e => (e.currentTarget.style.opacity = '0.85')}
@@ -663,7 +669,7 @@ function CompanyDetail({ company, onBack, onEdit, onLifecycleAction, onEnterComp
               <ExternalLink size={14} />{t('sa.companies.openAsCompany')}
             </button>
           )}
-          {isOperational && (
+          {isOperational && canLifecycle && (
             <button onClick={() => onEdit(company)} className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-colors"
               style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
               onMouseEnter={e => { (e.currentTarget.style.background = 'var(--bg-muted)'); (e.currentTarget.style.color = 'var(--text-primary)'); }}
@@ -673,7 +679,7 @@ function CompanyDetail({ company, onBack, onEdit, onLifecycleAction, onEnterComp
           )}
 
           {/* Lifecycle actions dropdown */}
-          <div className="relative">
+          <div className="relative" hidden={!canLifecycle}>
             <button onClick={() => setActionMenuOpen(v => !v)}
               className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium transition-colors"
               style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
@@ -827,7 +833,7 @@ function CompanyDetail({ company, onBack, onEdit, onLifecycleAction, onEnterComp
       <div className="rounded-2xl overflow-hidden" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
         <div className="flex items-center justify-between px-5 py-4 border-b" style={{ borderColor: 'var(--border)' }}>
           <h3 className="font-semibold" style={{ color: 'var(--text-primary)' }}>{t('sa.companies.usersCount', { count: users.length })}</h3>
-          {isOperational && (
+          {isOperational && canManageUsers && (
             <button onClick={() => setShowInviteModal(true)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold" style={{ background: 'var(--accent-subtle)', color: 'var(--accent)' }}
               onMouseEnter={e => (e.currentTarget.style.opacity = '0.8')}
               onMouseLeave={e => (e.currentTarget.style.opacity = '1')}>
@@ -873,7 +879,7 @@ function CompanyDetail({ company, onBack, onEdit, onLifecycleAction, onEnterComp
       </div>
 
       {/* Danger Zone */}
-      <div className="rounded-2xl overflow-hidden" style={{ border: '1px solid var(--danger)', background: 'var(--danger-subtle)' }}>
+      <div className="rounded-2xl overflow-hidden" hidden={!canLifecycle && !canHardDelete} style={{ border: '1px solid var(--danger)', background: 'var(--danger-subtle)' }}>
         <button
           onClick={() => setDangerOpen(v => !v)}
           className="w-full flex items-center justify-between px-5 py-4 text-left"
@@ -893,7 +899,7 @@ function CompanyDetail({ company, onBack, onEdit, onLifecycleAction, onEnterComp
 
             <div className="space-y-2">
               {/* Soft delete */}
-              {company.status !== 'deleted' && (
+              {company.status !== 'deleted' && canLifecycle && (
                 <div className="flex items-center justify-between p-3 rounded-xl" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
                   <div>
                     <p className="font-semibold text-sm" style={{ color: 'var(--text-primary)' }}>{t('sa.lifecycle.softDelete.confirm')}</p>
@@ -908,7 +914,7 @@ function CompanyDetail({ company, onBack, onEdit, onLifecycleAction, onEnterComp
               )}
 
               {/* Hard delete — only available when already soft-deleted */}
-              {company.status === 'deleted' && (
+              {company.status === 'deleted' && canHardDelete && (
                 <div className="flex items-center justify-between p-3 rounded-xl" style={{ background: 'rgba(239,68,68,0.12)', border: '2px solid var(--danger)' }}>
                   <div>
                     <p className="font-semibold text-sm" style={{ color: 'var(--danger)' }}>{t('sa.lifecycle.hardDelete.confirm')}</p>
@@ -939,7 +945,10 @@ function CompanyDetail({ company, onBack, onEdit, onLifecycleAction, onEnterComp
 
 export default function CompaniesPage() {
   const { isSuperAdmin } = useAuth();
-  const { enterCompany } = useSuperAdmin();
+  const { enterCompany, platformCan } = useSuperAdmin();
+  // Hidden for a role without the capability; the database refuses regardless.
+  const canLifecycle = platformCan('companies.lifecycle');
+  const canOpenCompany = platformCan('business.read');
   const { showToast } = useToast();
   const { t } = useTranslation();
 
@@ -1113,7 +1122,7 @@ export default function CompaniesPage() {
           <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>{t('sa.companies.title')}</h1>
           <p className="text-sm mt-0.5" style={{ color: 'var(--text-secondary)' }}>{t('sa.companies.subtitle', { count: companies.length })}</p>
         </div>
-        <button onClick={() => setShowCreateModal(true)} className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold"
+        <button onClick={() => setShowCreateModal(true)} className={`${canLifecycle ? 'flex' : 'hidden'} items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold`}
           style={{ background: 'var(--accent)', color: 'white' }}
           onMouseEnter={e => (e.currentTarget.style.opacity = '0.85')}
           onMouseLeave={e => (e.currentTarget.style.opacity = '1')}>
@@ -1208,12 +1217,12 @@ export default function CompaniesPage() {
                         </button>
                         {!isArchived && !isDeleted && (
                           <>
-                            <button onClick={() => setEditingCompany(company)} className="p-1.5 rounded-lg transition-colors" style={{ color: 'var(--text-tertiary)' }} title={t('common.edit')}
+                            <button hidden={!canLifecycle} onClick={() => setEditingCompany(company)} className="p-1.5 rounded-lg transition-colors" style={{ color: 'var(--text-tertiary)' }} title={t('common.edit')}
                               onMouseEnter={e => { (e.currentTarget.style.background = 'var(--bg-muted)'); (e.currentTarget.style.color = 'var(--text-primary)'); }}
                               onMouseLeave={e => { (e.currentTarget.style.background = 'transparent'); (e.currentTarget.style.color = 'var(--text-tertiary)'); }}>
                               <Edit2 size={14} />
                             </button>
-                            <button onClick={() => handleEnterCompany(company)} className="p-1.5 rounded-lg transition-colors" style={{ color: 'var(--accent)' }} title={t('sa.companies.openAsCompany')}
+                            <button hidden={!canOpenCompany} onClick={() => handleEnterCompany(company)} className="p-1.5 rounded-lg transition-colors" style={{ color: 'var(--accent)' }} title={t('sa.companies.openAsCompany')}
                               onMouseEnter={e => (e.currentTarget.style.background = 'var(--accent-subtle)')}
                               onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
                               <ExternalLink size={14} />
@@ -1221,7 +1230,7 @@ export default function CompaniesPage() {
                           </>
                         )}
                         {(isArchived || isDeleted) && (
-                          <button onClick={() => handleLifecycleAction(company, 'restore')} className="p-1.5 rounded-lg transition-colors" style={{ color: 'var(--accent)' }} title={t('sa.lifecycle.restore.confirm')}
+                          <button hidden={!canLifecycle} onClick={() => handleLifecycleAction(company, 'restore')} className="p-1.5 rounded-lg transition-colors" style={{ color: 'var(--accent)' }} title={t('sa.lifecycle.restore.confirm')}
                             onMouseEnter={e => (e.currentTarget.style.background = 'var(--accent-subtle)')}
                             onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
                             <RotateCcw size={14} />
