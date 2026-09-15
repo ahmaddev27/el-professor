@@ -135,6 +135,15 @@ Supabase caps a query at 1000 rows, so trip loading is paginated with `while (tr
 
 Writes that RLS forbids go through `SECURITY DEFINER` RPCs: `apply_monthly_planning_run`, `replace_monthly_planning_run`, `reassign_fahrtenbuch_trip`, `get_weekly_abrechnung` / `get_monthly_abrechnung`, `redeem_activation_code`, `update_company_subscription_manual`, and others in `supabase/migrations/`.
 
+### Design system and the design preview
+
+`src/components/ui` holds the new primitives (Radix plus `class-variance-authority`, classes merged with `cn()`) and `AppShell`, the new frame. **No existing screen uses them yet.** `AppLayout`, `AdminLayout` and every page still run on the legacy variables (`--bg-*`, `--text-*`, `--accent*`) and inline styles; Phase 5 moves screens over in batches once the owner has approved the prototype.
+
+- Tokens are RGB-channel CSS variables in two marked blocks of `src/index.css` (`/* @tokens light */` on `:root`, `/* @tokens dark */` on `.dark`), mapped to Tailwind colours in `tailwind.config.js` (`bg-canvas`, `text-fg-muted`, `bg-brand`, `text-critical` and so on). No token name is shared with the legacy set, so a new token changes no current screen. `tokens.contrast.test.ts` parses both blocks and fails the build when a text pair drops below 4.5:1 or a border, focus or chart pair below 3:1. When a component starts rendering a new combination, add the pair there.
+- The font is Barlow, self-hosted from `@fontsource/barlow`; nothing loads from a font CDN. It applies only where `font-ui` is set, which today means only the new components. Barlow's default figures are proportional, so money and counts need `tabular-nums`.
+- Controls grow on touch screens. Buttons, fields, select items, tabs and navigation links carry `[@media(pointer:coarse)]:` sizes of 40 to 44 px, and fields switch to 16 px text there, because iOS zooms the page into any field with smaller text. A new control keeps that; a mouse keeps the denser sizes.
+- `src/components/ui/format.ts` formats German money, numbers and dates for display only and does no arithmetic. Euro amounts go through `utils/money.ts` (`formatEuroCents` for cents, `formatEuro` for a stored euro amount), so a screen and a Gehaltsquittung round and write a figure the same way.
+
 ### `fahrtenbuch_trips` is append-only by design
 
 A DB trigger (`protect_fahrtenbuch_immutable_fields`) raises an exception on any UPDATE to `trip_date`, `start_time`, `end_time`, `duration_minutes`, `car_id`, `car_identifier`, route/description, all amount columns, `raw_data_json`, `original_driver_*`, `import_id`, `company_id`. Only the `assigned_driver_*` / `assignment_*` columns are mutable, and **there is no UPDATE RLS policy at all** — every write must go through an RPC. Trips with `is_canceled = true` must never be reassigned or counted.

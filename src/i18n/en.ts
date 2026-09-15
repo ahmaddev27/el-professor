@@ -31,7 +31,10 @@ export const en: PartialDictionary = {
   'nav.roles':              'Roles',
   'nav.billing':            'Subscription',
   'nav.settings':           'Settings',
+  'nav.section.finance':    'Finance',
   'nav.section.management': 'Management',
+  'nav.section.operations': 'Operations',
+  'nav.section.planning':   'Planning & documents',
   'nav.section.superAdmin': 'Super Admin',
   'nav.backToAdmin':        'Back to administration',
 
@@ -51,6 +54,22 @@ export const en: PartialDictionary = {
   'shell.themeToDark':      'Switch to dark mode',
   'shell.exitCompanyView':  'Exit company view',
   'shell.language':         'Language',
+
+  // ── Design system primitives (src/components/ui) ──────────────────────────
+  'ui.kpi.trendDown':         'Decrease',
+  'ui.kpi.trendFlat':         'Unchanged',
+  'ui.kpi.trendUp':           'Increase',
+  'ui.select.placeholder':    'Please select',
+  'ui.shell.collapseSidebar': 'Collapse sidebar',
+  'ui.shell.expandSidebar':   'Expand sidebar',
+  'ui.shell.mainNavigation':  'Main navigation',
+  'ui.shell.openNavigation':  'Open navigation',
+  'ui.shell.skipToContent':   'Skip to content',
+  'ui.table.emptyTitle':      'No entries',
+  'ui.table.errorTitle':      'The data could not be loaded',
+  'ui.table.noValue':         'Not set',
+  'ui.table.retry':           'Try again',
+  'ui.table.total':           'Total',
 
   // ── Common actions and states ──────────────────────────────────────────────
   'common.save':            'Save',
