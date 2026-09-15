@@ -123,6 +123,10 @@
       member reads the account status of a user in another company
     - get_current_cash_balance() fails for every caller (42703): it reads
       receipts."user", a column receipts no longer has
+    - create_user_profile_manual() completes for nobody: it inserts
+      user_profiles without email, which is NOT NULL, and PostgreSQL checks
+      that before ON CONFLICT, so everyone its guard lets through, the super
+      admin included, gets 23502
 
   ## Uncovered objects
 
@@ -144,10 +148,14 @@
       privileges, so only grants from the migrations applied on top are real
       here. An RPC cell is `-` exactly where 20260427075001, 20260428102656 or
       20260607124839 revoked that caller's EXECUTE and no later migration
-      restated it; create_user_profile_manual lost authenticated's too, so it
-      is not probed at all. 20260915110000 restates the grants of
-      create_user_account, list_users_for_admin, get_user_status and
-      is_user_active, so their cells are probed. Every other anon cell relies
+      restated it. 20260915110000 restates the grants of create_user_account,
+      list_users_for_admin, get_user_status and is_user_active, and
+      20260915130000 those of is_user_super_admin and
+      create_user_profile_manual, so their cells are probed. A `-` follows the
+      migration history, not the live grant: on staging on 15.09.2026 anon
+      still held EXECUTE on get_user_company_id, get_current_user_role,
+      is_role, is_support_user, uid and reassign_fahrtenbuch_trip, all of them
+      `-` here. Every other anon cell relies
       on Supabase's default privileges granting anon EXECUTE explicitly when a
       function is created; confirm with has_function_privilege() on a copy of
       staging. No migration older than the fixture revoked a table privilege,
@@ -1590,10 +1598,12 @@ ON CONFLICT (id) DO NOTHING;
 CREATE TEMP TABLE _mx_rpc (ord serial, label text, stmt text, want text, hole text);
 
 INSERT INTO _mx_rpc (label, stmt, want, hole) VALUES
-    -- the platform screens
+    -- the platform screens. is_user_super_admin() answers false, not NULL, to
+    -- anon since 20260915130000, which restates anon's grant (staging held it
+    -- too), so that cell is probed
     ('is_user_super_admin()',
      $q$SELECT is_user_super_admin()::text$q$,
-     '-NNNNNY', '3.2 platform right from the column alone, no verified session'),
+     'NNNNNNY', '3.2 platform right from the column alone, no verified session'),
     ('revoke_activation_code(code of A)',
      $q$SELECT revoke_activation_code({ref:activation_codes})::text$q$,
      'NNNNNNY', '3.1 super check reads the is_super_admin column directly'),
@@ -1689,10 +1699,11 @@ INSERT INTO _mx_rpc (label, stmt, want, hole) VALUES
     ('is_company_admin()',
      $q$SELECT is_company_admin()::text$q$,
      'NNNNYYN', NULL),
-    -- NULL, not false, for a caller without a profile row
+    -- false for a caller without a profile row. It answered NULL there until
+    -- 20260915130000 made is_user_super_admin() answer false to that caller
     ('current_role_permits(drivers, edit)',
      $q$SELECT current_role_permits('drivers', true)::text$q$,
-     '0NYYYYY', NULL),
+     'NNYYYYY', NULL),
     ('get_current_user_role()',
      $q$SELECT get_current_user_role()$q$,
      '-YYYYYY', NULL),
@@ -1723,11 +1734,14 @@ INSERT INTO _mx_rpc (label, stmt, want, hole) VALUES
     ('list_users_for_admin()',
      $q$SELECT count(*)::text FROM list_users_for_admin()$q$,
      'PPPPPPP', NULL),
-    -- EXECUTE revoked from anon and authenticated before the fixture, and by no
-    -- later migration
+    -- 20260915130000 revokes PUBLIC and anon and grants authenticated and
+    -- service_role, as production and staging were left by hand on 15.09.2026,
+    -- so the cells are probed. Every signed-in caller but the super admin
+    -- meets the guard. The super admin passes it and reaches the upsert, which
+    -- fails on user_profiles.email (see "Recorded without a plan step")
     ('create_user_profile_manual(user, name)',
      $q$SELECT create_user_profile_manual({ref:user_profiles}, 'x')::text$q$,
-     '-------', NULL),
+     'PTTTTTE', NULL),
 
     -- the Gehaltsquittung RPCs (20260914140000), on company A's owed salary and
     -- on its receipt. Each wants the caller's own company and edit rights on
