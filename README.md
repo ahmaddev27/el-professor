@@ -14,7 +14,7 @@
 ![Playwright](https://img.shields.io/badge/Playwright-e2e-2EAD33?logo=playwright&logoColor=white)
 ![Languages](https://img.shields.io/badge/UI-Deutsch%20%7C%20English-555555)
 
-![Requirements plan](https://img.shields.io/badge/requirements%20plan-17%20of%2038%20steps-yellow)
+![Requirements plan](https://img.shields.io/badge/requirements%20plan-17%20of%2037%20steps-yellow)
 ![Phase 0](https://img.shields.io/badge/phase%200-5%2F6-yellowgreen)
 ![Phases 1–4](https://img.shields.io/badge/phases%201%E2%80%934-building-orange)
 ![Phase 5](https://img.shields.io/badge/phase%205-not%20started-lightgrey)
@@ -41,11 +41,11 @@ A step counts once it is merged into `staging` and verified there. Production re
 | **0** | Releases, rollback, staging protection | `▰▰▰▰▰▱` **5/6** · 83% | ![live on staging](https://img.shields.io/badge/-live%20on%20staging-2ea44f) 0.6 waits for the production button |
 | **1** | OTP and account security | `▰▰▰▰▰▰▱` **6/7** · 86% | ![on staging](https://img.shields.io/badge/-on%20staging-2ea44f) PRs #11, #16, #14; done once the code flows pass on staging and a real code arrives from production. 1.6 Google sign-in, added 15.09.2026, is building and ships switched off |
 | **2** | Design system and prototype | `▰▰▰` **3/3** · 100% | ![on staging](https://img.shields.io/badge/-on%20staging-2ea44f) PR #17; approved when the owner asked to merge every open PR |
-| **3** | Platform admin and permissions | `▰▱▱▱▱▱▱▱▱▱▱▱▱▱` **1/14** · 7% | ![building](https://img.shields.io/badge/-building-orange) restructured into slices 3.0–3.13 on 15.09.2026; 3.0 merged (PR #12); 3.1 building, then 3.2 release N, 3.5, 3.6b and 3.9; the 3.8 conflict report is PR #21 |
+| **3** | Platform admin and permissions | `▰▱▱▱▱▱▱▱▱▱▱▱▱` **1/13** · 8% | ![building](https://img.shields.io/badge/-building-orange) restructured into slices on 15.09.2026; 3.0 merged (PR #12); 3.1 in review (PR #24), then 3.5, 3.6b and 3.9; 3.2 cancelled on 16.09.2026 (platform admin sign-in stays password-only); the 3.8 conflict report merged (PR #21) |
 | **4** | Cash salary receipt | `▰▰▱` **2/3** · 67% | ![building](https://img.shields.io/badge/-building-orange) logic and database merged (PR #13); screens wait for the design approval |
 | **5** | Design rollout | `▱▱▱▱▱` **0/5** | ![not started](https://img.shields.io/badge/-not%20started-lightgrey) |
 
-**Overall:** `▰▰▰▰▰▰▰▰▰▱▱▱▱▱▱▱▱▱▱▱` 17 of 38 steps · 45%
+**Overall:** `▰▰▰▰▰▰▰▰▰▱▱▱▱▱▱▱▱▱▱▱` 17 of 37 steps · 46%
 
 ### Live on staging
 
@@ -78,7 +78,8 @@ Agents build in parallel git worktrees. Each branch ends in a reviewed PR into `
 |---|---|---|
 | Google sign-in: deploy, Kong and the oauth-account function (1.6 PR B, switched off) | `feat/google-signin-deploy` | PR #29, in review; the database part merged in PR #22 |
 | Platform authority (3.1): staff roles, capabilities, audit log | `phase3/platform-authority` | PR #24, fixing review findings |
-| On the 3.1 branch: admin sign-in code (3.2 release N), platform write RPCs (3.5), directory read models (3.6b), prices and features in the database (3.9) | `phase3/admin-otp`, `phase3/platform-writes`, `phase3/read-models`, `phase3/pricing-settings` | after 3.1 |
+| After 3.1 merges: platform write RPCs (3.5), directory read models (3.6b), prices and features in the database (3.9) | `phase3/platform-writes`, `phase3/read-models`, `phase3/pricing-settings` | after 3.1 |
+| Gehaltsquittung screens, PDF and receipt list (4.3a) | `feat/receipts-ui` or similar | building |
 
 ### Environments
 
