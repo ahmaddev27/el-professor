@@ -45,4 +45,7 @@ jobs:
         run: |
           js=$(ls dist/assets/index-*.js)
           if grep -q 'service_role' $js; then echo "::error::bundle contains service_role"; exit 1; fi
+          # This build sets no VITE_DEPLOY_ENV, exactly like production's, so
+          # the design preview (staging and dev server only) must be absent.
+          if grep -rq 'data-design-preview' dist/assets; then echo "::error::the design preview is in a production-shaped build"; exit 1; fi
           echo "bundle clean"

@@ -174,6 +174,7 @@ jobs:
           grep -q '//api\.elprofessor\.eu' $js || { echo "::error::bundle does not reference the production API"; exit 1; }
           if grep -q 'api-staging\.elprofessor\.eu' $js; then echo "::error::production bundle references the staging API"; exit 1; fi
           if grep -q 'service_role' $js; then echo "::error::bundle contains service_role"; exit 1; fi
+          if grep -rq 'data-design-preview' dist/assets; then echo "::error::production bundle contains the design preview"; exit 1; fi
           case "$DEPLOY_ENV" in ""|production) ;; *)
             echo "::error::production environment sets VITE_DEPLOY_ENV=$DEPLOY_ENV, which would show a test banner"; exit 1 ;;
           esac
