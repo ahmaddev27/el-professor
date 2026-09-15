@@ -18,15 +18,24 @@
  *     200 {ok:true, action:"none", reason: one of RECONCILE_NONE_REASONS}
  *   {"action":"register", "full_name", "company_name", "plan"?, "billing_cycle"?,
  *    "subscription_car_limit"?, "referral_code"?, "discount_code"?}
- *     200 {ok:true, company:{id, name, slug, trial_end, approval_status}, discount}
+ *     200 {ok:true, company:{id, name, slug, trial_end, approval_status},
+ *          discount: null | {success, reason_code, original_price, discount_amount, final_price}}
  *     4xx {ok:false, reason: one of RegisterRefusalReason}
  *   {"action":"discard"}
  *     200 {ok:true, discarded:true}
  *     409 {ok:false, reason:"not_discardable"}
  *
- * Every refusal carries a reason and no sentence. The screens translate the
- * reason into German and English, and no text from the database reaches the
- * browser.
+ * Every refusal carries a reason and no sentence, and so does a discount code
+ * that did not apply: redeem_discount_code's german_message is dropped. The
+ * screens translate the reason into German and English, and no text from the
+ * database reaches the browser.
+ *
+ * Platform staff never sign in with Google (owner decision, 16.09.2026). The
+ * database refuses or ignores them in all three actions, asking one function
+ * (app_private.oauth_account_is_platform_staff): register is refused with
+ * platform_staff, reconcile answers none/platform_staff before it changes
+ * anything, and discard answers not_discardable. This file adds no second
+ * check, so plan 3.1 still changes one function body.
  */
 import { describeError, invalidRequest, parseJsonObject, type HttpReply } from './otp-core.ts';
 
@@ -46,11 +55,21 @@ export const MIN_CAR_LIMIT = 1;
 export const MAX_CAR_LIMIT = 100;
 /** company-signup refuses a longer referral code as referral_invalid without asking the database. */
 export const MAX_REFERRAL_CODE_LENGTH = 64;
+/** The same bound for a discount code. A longer one is no code anybody typed: invalid_request. */
+export const MAX_DISCOUNT_CODE_LENGTH = 64;
 /**
  * The database stores both names as unbounded text. This bound only keeps a
  * pathological value out of the company list; the 4 KB body limit applies first.
  */
 export const MAX_NAME_LENGTH = 200;
+
+/**
+ * Control and format characters inside a name: line breaks, NUL, zero-width
+ * characters and bidirectional overrides. None belongs in a name a person
+ * typed, and an override would reorder the text wherever the name is shown,
+ * the platform's company list and generated documents included.
+ */
+const CONTROL_OR_FORMAT_CHARACTER = /[\p{Cc}\p{Cf}]/u;
 
 export interface RegisterInput {
   action: 'register';
@@ -72,11 +91,12 @@ function isOneOf<T extends string>(values: readonly T[], value: unknown): value 
   return typeof value === 'string' && (values as readonly string[]).includes(value);
 }
 
-/** Trimmed text of 1 to MAX_NAME_LENGTH characters, or null. */
+/** Trimmed text of 1 to MAX_NAME_LENGTH characters with no control or format character, or null. */
 function parseName(raw: unknown): string | null {
   if (typeof raw !== 'string') return null;
   const value = raw.trim();
-  return value.length > 0 && value.length <= MAX_NAME_LENGTH ? value : null;
+  if (value.length === 0 || value.length > MAX_NAME_LENGTH) return null;
+  return CONTROL_OR_FORMAT_CHARACTER.test(value) ? null : value;
 }
 
 export function normalizePlan(raw: unknown): Plan {
@@ -106,6 +126,7 @@ export function parseOauthAccountRequest(text: string): ParsedOauthAccountReques
   const referralCode = typeof body.referral_code === 'string' ? body.referral_code.trim().toUpperCase() : '';
   if (referralCode.length > MAX_REFERRAL_CODE_LENGTH) return { reply: registerRefusal('referral_invalid') };
   const discountCode = typeof body.discount_code === 'string' ? body.discount_code.trim() : '';
+  if (discountCode.length > MAX_DISCOUNT_CODE_LENGTH) return { reply: invalidRequest() };
 
   return {
     input: {
@@ -146,6 +167,61 @@ export function asReconcileDbResult(raw: unknown): ReconcileResult {
   throw new Error('oauth_session_reconcile returned a result outside the contract');
 }
 
+/** redeem_discount_code's reason codes (20260911120000). Any other value is passed on as null. */
+export const DISCOUNT_REASON_CODES = [
+  'INVALID',
+  'INACTIVE',
+  'NOT_YET_VALID',
+  'EXPIRED',
+  'WRONG_PLAN',
+  'WRONG_BILLING_CYCLE',
+  'TOO_FEW_CARS',
+  'TOO_MANY_CARS',
+  'ALREADY_USED',
+  'LIMIT_REACHED',
+] as const;
+export type DiscountReasonCode = (typeof DISCOUNT_REASON_CODES)[number];
+
+/**
+ * What the registration screen needs of the discount code: whether it applied,
+ * why not, and the prices. redeem_discount_code also returns a German sentence,
+ * the code's id, type and usage mode; none of that is passed on.
+ */
+export interface DiscountSummary {
+  success: boolean;
+  /** Set only when the code did not apply. */
+  reason_code: DiscountReasonCode | null;
+  /** Set only when the code applied. */
+  original_price: number | null;
+  discount_amount: number | null;
+  final_price: number | null;
+}
+
+const finiteNumberOrNull = (value: unknown): number | null =>
+  typeof value === 'number' && Number.isFinite(value) ? value : null;
+
+/** null when no discount code was given. The company is committed by the time this runs, so it never throws. */
+export function asDiscountSummary(raw: unknown): DiscountSummary | null {
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const result = raw as Record<string, unknown>;
+  if (result.success === true) {
+    return {
+      success: true,
+      reason_code: null,
+      original_price: finiteNumberOrNull(result.original_price),
+      discount_amount: finiteNumberOrNull(result.discount_amount),
+      final_price: finiteNumberOrNull(result.final_price),
+    };
+  }
+  return {
+    success: false,
+    reason_code: isOneOf(DISCOUNT_REASON_CODES, result.reason_code) ? result.reason_code : null,
+    original_price: null,
+    discount_amount: null,
+    final_price: null,
+  };
+}
+
 export interface RegisteredCompany {
   id: string;
   name: string | null;
@@ -156,7 +232,7 @@ export interface RegisteredCompany {
 
 export interface RegisterResult {
   company: RegisteredCompany;
-  discount: unknown;
+  discount: DiscountSummary | null;
 }
 
 const textOrNull = (value: unknown): string | null => (typeof value === 'string' ? value : null);
@@ -181,7 +257,7 @@ export function asRegisterDbResult(raw: unknown): RegisterResult {
       trial_end: textOrNull(company.trial_end),
       approval_status: textOrNull(company.approval_status),
     },
-    discount: result.discount ?? null,
+    discount: asDiscountSummary(result.discount),
   };
 }
 

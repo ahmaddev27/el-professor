@@ -45,6 +45,17 @@ chmod 600 "$ENV_FILE" 2>/dev/null || true
 [ "$(getv E2E_BASE_URL)" = https://app.elprofessor.eu ] || { echo "refusing: E2E_BASE_URL must be staging" >&2; exit 1; }
 SSH_HOST="$(getv E2E_SSH_HOST)"
 
+# Staging's anon key, for the tests that call the API the way supabase-js does.
+# It ships in the web bundle and is therefore public; it is read from the host
+# on every full setup, so a rotated key follows.
+if [ "$MODE" = all ]; then
+  anon_key="$(ssh "$SSH_HOST" "grep -E '^ANON_KEY=' /srv/PRO-staging/deploy/.env | tail -n 1 | cut -d= -f2- | tr -d '\r'")"
+  [ -n "$anon_key" ] || { echo "could not read staging's ANON_KEY from the host" >&2; exit 1; }
+  setv E2E_ANON_KEY "$anon_key"
+  unset anon_key
+  chmod 600 "$ENV_FILE" 2>/dev/null || true
+fi
+
 # Hand the values to the host in a root-only file; the remote script deletes it.
 secrets="$(grep -E '^E2E_' "$ENV_FILE" | tr -d '\r' | ssh "$SSH_HOST" 'umask 077; f="$(mktemp /root/e2e-setup.XXXXXX)"; cat > "$f"; echo "$f"')"
 

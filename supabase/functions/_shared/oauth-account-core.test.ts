@@ -1,10 +1,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  asDiscountSummary,
   asReconcileDbResult,
   asRegisterDbResult,
   describeOauthError,
+  DISCOUNT_REASON_CODES,
   logOauthFailure,
   mapRegisterError,
+  MAX_DISCOUNT_CODE_LENGTH,
   MAX_NAME_LENGTH,
   MAX_REFERRAL_CODE_LENGTH,
   normalizeBillingCycle,
@@ -22,6 +25,22 @@ const USER = '0b5c3f0e-7a1d-4e2b-9c8f-1d2e3f4a5b6c';
 const OTHER_USER = '9f8e7d6c-5b4a-4c3d-8e2f-1a0b9c8d7e6f';
 const INVALID = { status: 400, body: { ok: false, reason: 'invalid_request' } };
 
+// redeem_discount_code's two kinds of answer (20260911120000), German sentence included.
+const REDEEMED_DISCOUNT = {
+  success: true,
+  discount_code_id: OTHER_USER,
+  usage_mode: 'once',
+  discount_type: 'percentage',
+  discount_value: 10,
+  original_price: 60,
+  discount_amount: 6,
+  final_price: 54,
+  german_message: 'Rabattcode erfolgreich eingelöst.',
+};
+const REFUSED_DISCOUNT = { success: false, reason_code: 'EXPIRED', german_message: 'Dieser Rabattcode ist abgelaufen.' };
+const REDEEMED_SUMMARY = { success: true, reason_code: null, original_price: 60, discount_amount: 6, final_price: 54 };
+const REFUSED_SUMMARY = { success: false, reason_code: 'EXPIRED', original_price: null, discount_amount: null, final_price: null };
+
 function accepted(text: string): OauthAccountInput {
   const parsed = parseOauthAccountRequest(text);
   if (!('input' in parsed)) throw new Error(`refused: ${JSON.stringify(parsed.reply)}`);
@@ -36,6 +55,15 @@ function refused(text: string) {
 
 const register = (fields: Record<string, unknown>) =>
   JSON.stringify({ action: 'register', full_name: 'Anna Beispiel', company_name: 'Taxi Beispiel GmbH', ...fields });
+
+function fakeRpc(answer: { data?: unknown; error?: unknown }) {
+  const calls: Array<{ fn: string; args: Record<string, unknown> }> = [];
+  const rpc: RpcCall = async (fn, args) => {
+    calls.push({ fn, args });
+    return { data: answer.data ?? null, error: answer.error ?? null };
+  };
+  return { rpc, calls };
+}
 
 describe('parseOauthAccountRequest', () => {
   it('accepts reconcile and discard with nothing else', () => {
@@ -85,11 +113,36 @@ describe('parseOauthAccountRequest', () => {
       expect(accepted(register({ company_name: 'x'.repeat(MAX_NAME_LENGTH) }))).toMatchObject({ companyName: 'x'.repeat(MAX_NAME_LENGTH) });
     });
 
+    it('refuses a name with a control or format character inside it', () => {
+      // Built from code points, so this file holds no invisible character itself:
+      // line feed, tab, NUL, DEL, NEL, zero-width space, right-to-left override,
+      // left-to-right isolate, soft hyphen and byte order mark.
+      const codePoints = [0x0a, 0x09, 0x00, 0x7f, 0x85, 0x200b, 0x202e, 0x2066, 0xad, 0xfeff];
+      for (const code of codePoints) {
+        const name = `Taxi${String.fromCodePoint(code)}Beispiel`;
+        expect(refused(register({ full_name: name }))).toEqual(INVALID);
+        expect(refused(register({ company_name: name }))).toEqual(INVALID);
+      }
+    });
+
+    it('keeps names in any script and with ordinary punctuation', () => {
+      for (const name of ['Müller & Söhne GmbH', "O'Brien Taxi", 'Ærø Mietwagen', 'Łukasz Żółć', 'تاكسي برلين', 'Taxi-Zentrale (Nord) e.K.']) {
+        expect(accepted(register({ full_name: name, company_name: name }))).toMatchObject({ fullName: name, companyName: name });
+      }
+    });
+
     it('answers a referral code longer than company-signup allows as referral_invalid', () => {
       expect(refused(register({ referral_code: 'A'.repeat(MAX_REFERRAL_CODE_LENGTH + 1) })))
         .toEqual({ status: 400, body: { ok: false, reason: 'referral_invalid' } });
       expect(accepted(register({ referral_code: 'a'.repeat(MAX_REFERRAL_CODE_LENGTH) })))
         .toMatchObject({ referralCode: 'A'.repeat(MAX_REFERRAL_CODE_LENGTH) });
+    });
+
+    it('refuses a discount code longer than a referral code may be', () => {
+      expect(MAX_DISCOUNT_CODE_LENGTH).toBe(MAX_REFERRAL_CODE_LENGTH);
+      expect(refused(register({ discount_code: 'D'.repeat(MAX_DISCOUNT_CODE_LENGTH + 1) }))).toEqual(INVALID);
+      expect(accepted(register({ discount_code: ` ${'d'.repeat(MAX_DISCOUNT_CODE_LENGTH)} ` })))
+        .toMatchObject({ discountCode: 'd'.repeat(MAX_DISCOUNT_CODE_LENGTH) });
     });
 
     it('treats blank and non-text codes as no code, as company-signup does', () => {
@@ -132,12 +185,39 @@ describe('asReconcileDbResult', () => {
   });
 });
 
+describe('asDiscountSummary', () => {
+  it('passes on success and the prices of a redeemed code, and nothing else', () => {
+    expect(asDiscountSummary(REDEEMED_DISCOUNT)).toEqual(REDEEMED_SUMMARY);
+  });
+
+  it('passes on the reason code of a code that did not apply, and no sentence', () => {
+    expect(asDiscountSummary(REFUSED_DISCOUNT)).toEqual(REFUSED_SUMMARY);
+  });
+
+  it.each(DISCOUNT_REASON_CODES)('keeps the reason code %s', (reasonCode) => {
+    expect(asDiscountSummary({ success: false, reason_code: reasonCode, german_message: 'Text' })).toEqual({ ...REFUSED_SUMMARY, reason_code: reasonCode });
+  });
+
+  it('turns anything outside the contract into nulls, never into text', () => {
+    expect(asDiscountSummary({ success: false, reason_code: 'Dieser Rabattcode ist ungültig.' })).toEqual({ ...REFUSED_SUMMARY, reason_code: null });
+    expect(asDiscountSummary({ success: 'true', original_price: 60, german_message: 'Text' })).toEqual({ ...REFUSED_SUMMARY, reason_code: null });
+    expect(asDiscountSummary({ success: true, original_price: '60', discount_amount: Number.NaN, final_price: null, reason_code: 'EXPIRED' }))
+      .toEqual({ success: true, reason_code: null, original_price: null, discount_amount: null, final_price: null });
+  });
+
+  it('is null when no discount code was given', () => {
+    for (const raw of [null, undefined, 'Rabattcode erfolgreich eingelöst.', 42, [REDEEMED_DISCOUNT]]) {
+      expect(asDiscountSummary(raw)).toBeNull();
+    }
+  });
+});
+
 describe('asRegisterDbResult', () => {
   const company = { id: OTHER_USER, name: 'Taxi Beispiel GmbH', slug: 'taxi-beispiel-gmbh', trial_end: '2026-10-15T10:00:00+00:00', approval_status: 'pending' };
 
-  it('returns the company summary and the discount result', () => {
-    expect(asRegisterDbResult({ ok: true, company, discount: { ok: true, percent: 10 } }))
-      .toEqual({ company, discount: { ok: true, percent: 10 } });
+  it('returns the company summary and the discount summary', () => {
+    expect(asRegisterDbResult({ ok: true, company, discount: REDEEMED_DISCOUNT })).toEqual({ company, discount: REDEEMED_SUMMARY });
+    expect(asRegisterDbResult({ ok: true, company, discount: REFUSED_DISCOUNT })).toEqual({ company, discount: REFUSED_SUMMARY });
   });
 
   it('needs only ok and the company id, because the company is already committed', () => {
@@ -186,15 +266,6 @@ describe('mapRegisterError', () => {
 });
 
 describe('runOauthAccountAction', () => {
-  function fakeRpc(answer: { data?: unknown; error?: unknown }) {
-    const calls: Array<{ fn: string; args: Record<string, unknown> }> = [];
-    const rpc: RpcCall = async (fn, args) => {
-      calls.push({ fn, args });
-      return { data: answer.data ?? null, error: answer.error ?? null };
-    };
-    return { rpc, calls };
-  }
-
   it('reconciles the caller and nobody else', async () => {
     const { rpc, calls } = fakeRpc({ data: { action: 'invite_accepted', company_id: OTHER_USER } });
     expect(await runOauthAccountAction({ action: 'reconcile' }, USER, rpc))
@@ -203,9 +274,9 @@ describe('runOauthAccountAction', () => {
   });
 
   it('reports a reconcile that changed nothing, with its reason', async () => {
-    const { rpc } = fakeRpc({ data: { action: 'none', reason: 'platform_staff' } });
+    const { rpc } = fakeRpc({ data: { action: 'none', reason: 'nothing_pending' } });
     expect(await runOauthAccountAction({ action: 'reconcile' }, USER, rpc))
-      .toEqual({ status: 200, body: { ok: true, action: 'none', reason: 'platform_staff' } });
+      .toEqual({ status: 200, body: { ok: true, action: 'none', reason: 'nothing_pending' } });
   });
 
   it('registers with every field, and the caller as the user', async () => {
@@ -226,6 +297,15 @@ describe('runOauthAccountAction', () => {
         p_discount_code: null,
       },
     }]);
+  });
+
+  it('answers a registration with its discount summary and without the database text', async () => {
+    const company = { id: OTHER_USER, name: 'Taxi Beispiel GmbH', slug: 'taxi-beispiel-gmbh', trial_end: '2026-10-15', approval_status: 'pending' };
+    for (const [discount, summary] of [[REDEEMED_DISCOUNT, REDEEMED_SUMMARY], [REFUSED_DISCOUNT, REFUSED_SUMMARY]] as const) {
+      const reply = await runOauthAccountAction(accepted(register({ discount_code: 'Sommer26' })), USER, fakeRpc({ data: { ok: true, company, discount } }).rpc);
+      expect(reply).toEqual({ status: 200, body: { ok: true, company, discount: summary } });
+      expect(JSON.stringify(reply)).not.toMatch(/german_message|Rabattcode|discount_code_id|usage_mode/);
+    }
   });
 
   it('answers a refusal the database raised with its reason', async () => {
@@ -257,6 +337,34 @@ describe('runOauthAccountAction', () => {
       await expect(runOauthAccountAction({ action: 'discard' }, id, rpc)).rejects.toThrow(/user id/);
     }
     expect(calls).toEqual([]);
+  });
+});
+
+// Owner decision, 16.09.2026: platform staff sign in with email and password
+// only, never with Google. The database decides who is staff, in
+// app_private.oauth_account_is_platform_staff, and tests/rls/oauth-signup.sql
+// proves it writes nothing for them. These pin that the function passes each
+// of those answers on unchanged, with one RPC call and no second opinion.
+describe('platform staff', () => {
+  it('register: the database raises OA005 and the reply is 403 platform_staff', async () => {
+    const { rpc, calls } = fakeRpc({ error: { code: 'OA005', message: 'oauth_signup_create_company: platform_staff' } });
+    expect(await runOauthAccountAction(accepted(register({})), USER, rpc))
+      .toEqual({ status: 403, body: { ok: false, reason: 'platform_staff' } });
+    expect(calls.map((call) => call.fn)).toEqual(['oauth_signup_create_company']);
+  });
+
+  it('reconcile: the database answers none/platform_staff and nothing is accepted or cancelled', async () => {
+    const { rpc, calls } = fakeRpc({ data: { action: 'none', reason: 'platform_staff' } });
+    expect(await runOauthAccountAction({ action: 'reconcile' }, USER, rpc))
+      .toEqual({ status: 200, body: { ok: true, action: 'none', reason: 'platform_staff' } });
+    expect(calls.map((call) => call.fn)).toEqual(['oauth_session_reconcile']);
+  });
+
+  it('discard: the database answers false and the reply is 409 not_discardable', async () => {
+    const { rpc, calls } = fakeRpc({ data: false });
+    expect(await runOauthAccountAction({ action: 'discard' }, USER, rpc))
+      .toEqual({ status: 409, body: { ok: false, reason: 'not_discardable' } });
+    expect(calls.map((call) => call.fn)).toEqual(['oauth_signup_discard']);
   });
 });
 

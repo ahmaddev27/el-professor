@@ -88,9 +88,11 @@ env_value() {
 }
 
 # GOOGLE_SIGNIN_ENABLED is empty, true or false and nothing else. Compose hands
-# it to GoTrue, which would read "TRUE" or "1" as on, while the auth entrypoint
-# opens signup only for the exact string true: every new Google account would
-# then fail. Switched on, it needs a Google web client id and a secret.
+# it to GoTrue, which would read "TRUE" or "1" as on with signup still closed
+# and autoconfirm still on; the auth entrypoint therefore stops the container
+# for anything but an empty value, true or false, and this refuses the release
+# before it gets that far. Switched on, it needs a Google web client id and a
+# secret.
 #
 # Each environment has its own Google client (owner decision G3 is still open;
 # the plan recommends separate clients and this takes that): a client shared
@@ -120,12 +122,13 @@ google_signin_guard() {
 
 # kong.yml must carry the auth-v1-closed service with the three paths and the
 # request-termination plugin answering 403. Its entries are read as trimmed
-# lines of that one service, comments left out, as ci-release.sh reads them.
+# lines of that one service, comments left out, as ci-release.sh reads them:
+# only a line starting with something other than blank space or # ends it.
 kong_closed_block_guard() {
   local kong_file="$1" block want
   block="$(awk '
     { sub(/\r$/, "") }
-    /^[^ #]/ { inside = 0 }
+    /^[^ \t#]/ { inside = 0 }
     /^  - name:/ { inside = ($3 == "auth-v1-closed") }
     inside { entry = $0; sub(/^[ \t]+/, "", entry); sub(/[ \t]+$/, "", entry); if (entry != "" && entry !~ /^#/) print entry }
   ' "$kong_file" 2>/dev/null)" || true
@@ -157,6 +160,53 @@ expected.update({"google": on, "disable_signup": not on, "mailer_autoconfirm": n
 wrong = ["%s=%s" % (name, str(actual.get(name)).lower()) for name in sorted(expected) if actual.get(name) is not expected[name]]
 print(" ".join(wrong))
 sys.exit(1 if wrong else 0)
+' "$1"
+}
+
+# The kong service as compose renders it (JSON on stdin), for the throwaway Kong
+# that parses kong.yml before the live one is touched: its environment goes to
+# the env file $1, created with mode 600, and only its image is printed. Fails
+# for an answer without a kong image or environment, or with a value docker's
+# env-file format cannot carry.
+kong_parse_inputs() {
+  python3 -c '
+import json, os, sys
+try:
+    kong = json.load(sys.stdin)["services"]["kong"]
+    image, env = kong["image"], kong["environment"]
+except (ValueError, KeyError, TypeError):
+    sys.exit(1)
+if not isinstance(image, str) or not image or not isinstance(env, dict) or not env:
+    sys.exit(1)
+lines = []
+for name in sorted(env):
+    value = "" if env[name] is None else str(env[name])
+    if "\n" in value or "\r" in value or "=" in name:
+        sys.exit(1)
+    lines.append("%s=%s\n" % (name, value))
+with os.fdopen(os.open(sys.argv[1], os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as out:
+    out.writelines(lines)
+print(image)
+' "$1"
+}
+
+# stdin to stdout with the value of every key, secret, password or token in the
+# env file $1 replaced by its name, so Kong's own error can be shown in a
+# release log without the API keys it was rendered with.
+redact_env_values() {
+  python3 -c '
+import re, sys
+secret_name = re.compile(r"KEY|SECRET|PASS|TOKEN")
+pairs = []
+with open(sys.argv[1], encoding="utf-8") as env_file:
+    for line in env_file:
+        name, _, value = line.rstrip("\n").partition("=")
+        if secret_name.search(name) and len(value) >= 4:
+            pairs.append((value, "[%s]" % name))
+text = sys.stdin.read()
+for value, label in sorted(pairs, key=lambda pair: len(pair[0]), reverse=True):
+    text = text.replace(value, label)
+sys.stdout.write(text)
 ' "$1"
 }
 
@@ -279,6 +329,30 @@ if "request-termination" not in plugins.split(","):
 print(" ".join(problems))
 ' "$GOOGLE_SIGNIN")" || fail "could not render docker-compose.yml to check the sign-in settings"
 [ -z "$render_problems" ] || fail "docker-compose.yml does not render the sign-in settings this release relies on: $render_problems"
+
+# kong.yml as the new Kong will load it, parsed first by a throwaway copy of the
+# compose kong service: its image, its environment (KONG_PLUGINS included) and
+# its rendering of the file, with no network and nothing mounted but kong.yml.
+# A file Kong rejects would otherwise show only after the live gateway had been
+# recreated with it, with Kong crash-looping and the whole API down, the way
+# deploy/caddy/guard.sh validates a Caddyfile before it writes one. Kong's own
+# message is printed with the API keys replaced by their names.
+kong_check="$(mktemp -d)"
+kong_image="$(docker compose config --format json < /dev/null | kong_parse_inputs "$kong_check/kong.env")" \
+  || { rm -rf "$kong_check"; fail "could not read the kong service from docker-compose.yml to parse kong.yml; nothing has been changed"; }
+kong_parse_status=0
+docker run --rm --network none --cpus 1 --memory 512m --env-file "$kong_check/kong.env" \
+    -v "$HERE/kong.yml":/home/kong/kong.template.yml:ro --entrypoint bash "$kong_image" \
+    -c 'eval "echo \"$(cat /home/kong/kong.template.yml)\"" > /home/kong/kong.yml && kong config parse /home/kong/kong.yml' \
+    < /dev/null > "$kong_check/parse.log" 2>&1 || kong_parse_status=$?
+if [ "$kong_parse_status" -ne 0 ]; then
+  kong_parse_error="$(redact_env_values "$kong_check/kong.env" < "$kong_check/parse.log" | grep -vE '^[[:space:]]*$|Run with --v' | tail -n 8)" || true
+  rm -rf "$kong_check"
+  fail "$kong_image refuses deploy/kong.yml with this release's KONG_PLUGINS (exit $kong_parse_status). Nothing has been changed; the running Kong keeps its current config.
+$kong_parse_error"
+fi
+rm -rf "$kong_check"
+echo "  deploy/kong.yml parses in $kong_image with this release's KONG_PLUGINS"
 
 echo "  project $PROJECT_NAME in $ROOT${MANIFEST:+, release $(basename "$RELEASE_DIR")}"
 
@@ -404,10 +478,14 @@ probe_closed_routes() {
 }
 
 # Kong first, and seen answering 403 on all three routes before GoTrue can be
-# recreated with its signup open. A failure stops the release here: the bundle,
-# GoTrue and every other service are left as they were.
-dc up -d --no-deps kong < /dev/null
-probe_closed_routes || fail "Kong does not answer 403 on GoTrue's signup routes; nothing after Kong was changed"
+# recreated with its signup open. The guards have already parsed kong.yml in a
+# throwaway Kong, so what can still fail here is the gateway itself. A failure
+# stops the release with Kong recreated on this release's kong.yml, and with the
+# bundle, GoTrue and every other service as they were.
+dc up -d --no-deps kong < /dev/null \
+  || fail "docker compose could not recreate Kong with this release's kong.yml. The bundle, GoTrue and every other service are unchanged; Kong may be stopped or still on its previous container (see the compose output above). Restore it by deploying a working release: a fix forward, or a revert of this change"
+probe_closed_routes \
+  || fail "Kong now runs this release's kong.yml but does not answer 403 on GoTrue's signup routes, and may not answer at all, so the API may be down. The bundle, GoTrue and every other service are unchanged. Restore Kong by deploying a working release: a fix forward, or a revert of this change"
 
 if [ -d dist.new ]; then
   [ -f dist.new/index.html ] || fail "dist.new has no index.html — refusing to publish an empty bundle"

@@ -136,15 +136,19 @@ services:
     # because compose interpolation cannot negate a variable. GoTrue v2.170.0
     # refuses to create a new Google account while GOTRUE_DISABLE_SIGNUP is true,
     # so signup opens exactly when GOTRUE_EXTERNAL_GOOGLE_ENABLED is the string
-    # `true` in the environment GoTrue is about to read, and stays closed for
-    # anything else. Autoconfirm goes off in the same step (see
-    # GOTRUE_MAILER_AUTOCONFIRM below). Deriving either in deploy.sh would drift:
-    # any `docker compose up` deploy.sh did not run, deploy/set-resend.sh's among
-    # them, would recreate GoTrue without the derived values. Opening signup is
-    # safe only because kong.yml answers 403 on /signup, /otp and /magiclink;
-    # deploy.sh probes that before it starts GoTrue and reads /auth/v1/settings
-    # back afterwards.
-    entrypoint: ['/bin/sh', '-c', 'if [ "$$GOTRUE_EXTERNAL_GOOGLE_ENABLED" = true ]; then export GOTRUE_DISABLE_SIGNUP=false GOTRUE_MAILER_AUTOCONFIRM=false; fi; exec auth']
+    # `true` in the environment GoTrue is about to read, and stays closed for an
+    # empty value or `false`. Any other value stops the container with exit code
+    # 64 before GoTrue starts. GoTrue parses the variable as a Go bool, so TRUE,
+    # True, 1 or t would turn Google on while signup stayed closed and
+    # autoconfirm stayed on, and GoTrue would then link a Google account whose
+    # address Google never verified to the account that owns that address.
+    # Autoconfirm goes off together with signup (see GOTRUE_MAILER_AUTOCONFIRM
+    # below). Deriving either in deploy.sh would drift: any `docker compose up`
+    # deploy.sh did not run, deploy/set-resend.sh's among them, would recreate
+    # GoTrue without the derived values. Opening signup is safe only because
+    # kong.yml answers 403 on /signup, /otp and /magiclink; deploy.sh probes that
+    # before it starts GoTrue and reads /auth/v1/settings back afterwards.
+    entrypoint: ['/bin/sh', '-c', 'case "$$GOTRUE_EXTERNAL_GOOGLE_ENABLED" in true) export GOTRUE_DISABLE_SIGNUP=false GOTRUE_MAILER_AUTOCONFIRM=false ;; ""|false) ;; *) echo "GOTRUE_EXTERNAL_GOOGLE_ENABLED must be true or false" >&2; exit 64 ;; esac; exec auth']
     environment:
       GOTRUE_API_HOST: 0.0.0.0
       GOTRUE_API_PORT: '9999'
