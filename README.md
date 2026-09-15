@@ -14,7 +14,7 @@
 ![Playwright](https://img.shields.io/badge/Playwright-e2e-2EAD33?logo=playwright&logoColor=white)
 ![Languages](https://img.shields.io/badge/UI-Deutsch%20%7C%20English-555555)
 
-![Requirements plan](https://img.shields.io/badge/requirements%20plan-8%20of%2031%20steps-yellow)
+![Requirements plan](https://img.shields.io/badge/requirements%20plan-13%20of%2031%20steps-yellow)
 ![Phase 0](https://img.shields.io/badge/phase%200-5%2F6-yellowgreen)
 ![Phases 1–4](https://img.shields.io/badge/phases%201%E2%80%934-building-orange)
 ![Phase 5](https://img.shields.io/badge/phase%205-not%20started-lightgrey)
@@ -41,13 +41,13 @@ A step counts once it is merged into `staging` and verified there. Production re
 | Phase | Requirement | Progress | State |
 |---|---|---|---|
 | **0** | Releases, rollback, staging protection | `▰▰▰▰▰▱` **5/6** · 83% | ![live on staging](https://img.shields.io/badge/-live%20on%20staging-2ea44f) 0.6 waits for the production button |
-| **1** | OTP and account security | `▰▱▱▱▱▱` **1/6** · 17% | ![building](https://img.shields.io/badge/-building-orange) database merged (PR #11); screens in PR #14; edge functions building |
+| **1** | OTP and account security | `▰▰▰▰▰▰` **6/6** · 100% | ![on staging](https://img.shields.io/badge/-on%20staging-2ea44f) PRs #11, #16, #14; done once the code flows pass on staging and a real code arrives from production |
 | **2** | Design system and prototype | `▱▱▱` **0/3** | ![building](https://img.shields.io/badge/-building-orange) ends at the owner's approval |
 | **3** | Platform admin and permissions | `▱▱▱▱▱▱▱▱` **0/8** | ![building](https://img.shields.io/badge/-building-orange) 3.0 baseline in PR #12, then 3.1 and 3.5 |
 | **4** | Cash salary receipt | `▰▰▱` **2/3** · 67% | ![building](https://img.shields.io/badge/-building-orange) logic and database merged (PR #13); screens wait for the design approval |
 | **5** | Design rollout | `▱▱▱▱▱` **0/5** | ![not started](https://img.shields.io/badge/-not%20started-lightgrey) |
 
-**Overall:** `▰▰▰▰▰▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱` 8 of 31 steps · 26%
+**Overall:** `▰▰▰▰▰▰▰▰▱▱▱▱▱▱▱▱▱▱▱▱` 13 of 31 steps · 42%
 
 ### Live on staging
 
@@ -57,7 +57,8 @@ A step counts once it is merged into `staging` and verified there. Production re
 - [x] **0.4** Staging web behind a login — PR #5
 - [x] **0.5** End-to-end suite, 5/5 passing; its first run found reset and invite links that signed users straight back out, fixed in the same PR — PR #7
 - [x] Staging mail reaches real recipients through Resend, `example.com` excluded, by the owner's decision — PR #8, #9
-- [x] **1.1** OTP database: code tables, rate-limited RPCs and one-transaction signup; nothing uses it yet — PR #11
+- [x] **1.1** OTP database: code tables, rate-limited RPCs and one-transaction signup — PR #11
+- [x] **1.0, 1.2–1.5** One-time codes for signup, "Passwort vergessen", invitations and email change; public signup closed, Google sign-in removed, and each function gets only the variables it needs — PR #16, #14
 - [x] **Security fix:** anonymous callers can no longer list users, redeem discount or activation codes, or read a user's status. Closed by hand on production and staging on 15.09.2026, and made permanent by migration `20260915110000` — PR #15
 - [x] **4.1–4.2** Cash receipt foundations: receipts, a cash ledger, gapless GQ numbering and integer-cent helpers; the Trinkgeld-Quittung prints amounts of 1000 € and more correctly again — PR #13
 - [ ] **0.6** First production release from CI — the owner presses the button
@@ -69,9 +70,9 @@ Agents build Phases 1–4 in parallel git worktrees. Each branch ends in a revie
 | Stream | Branch | State |
 |---|---|---|
 | OTP database | `phase1/otp-db` | merged — PR #11 |
-| OTP edge functions | `phase1/otp-functions` | building |
-| OTP screens | `phase1/otp-frontend` | PR #14 open, waits for the edge functions |
-| Design system and prototype | `phase2/design-system` | building |
+| OTP edge functions | `phase1/otp-functions` | merged — PR #16 |
+| OTP screens | `phase1/otp-frontend` | merged — PR #14 |
+| Design system and prototype | `phase2/design-system` | PR #17, in review |
 | Permission baseline, then platform authority | `phase3/rls-baseline` → `phase3/platform-authority` | PR #12, fixing review findings |
 | Cash receipt foundations | `phase4/receipt-foundations` | merged — PR #13; screens come later |
 
@@ -89,6 +90,7 @@ Agents build Phases 1–4 in parallel git worktrees. Each branch ends in a revie
 
 - DNS record `mail-staging` → `159.195.205.30`, then a Mailpit login.
 - Step 0.6: merge `staging` into `main` and press the production button.
+- Approve a production `OTP_PEPPER` before 0.6, and after it, receive a real code mail at an address you own.
 - Rotate the secrets that were exposed in chat.
 - Answer the agents' open questions listed in HANDOFF.md.
 - Decide how overlapping salary rows are merged, and confirm the receipt numbering (details in HANDOFF.md).
