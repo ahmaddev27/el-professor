@@ -6,7 +6,7 @@ Start here when you pick up this project. Read it together with [CLAUDE.md](CLAU
 
 ## Where things stand
 
-- **Current work:** Phase 0 is done on staging except 0.6. Phases 1–4 are arriving as PRs; PR #11 (OTP database, step 1.1) is merged.
+- **Current work:** Phase 0 is done on staging except 0.6. Phases 1–4 are arriving as PRs. Merged so far: PR #11 (OTP database, step 1.1), PR #15 (security fix) and PR #13 (receipt foundations, steps 4.1 and 4.2).
 - **Done on staging:**
   - 0.1 login rate limits, PR #2.
   - 0.2 kept releases and rollback, PR #3. Rollback was exercised on the host.
@@ -21,7 +21,7 @@ Start here when you pick up this project. Read it together with [CLAUDE.md](CLAU
   - The first run (`wf_ce583f7b-774`) was cut off by a session restart. Its uncommitted work was saved as one `wip:` commit per branch. The second run (`wf_864f8ee2-06d`) died after five hours when this machine lost its network, and its work was saved the same way. The third run (`wf_c24553f4-594`) commits a checkpoint after every step and retries a build agent that dies. The dev machine slept overnight; the runtime restarted the agents that were cut off. By 15.09.2026 it had opened:
     - PR #11, OTP database. Review approved with six minor findings; merged.
     - PR #12, permission baseline. Review asked for two major changes: UPDATE probes never move a row to another tenant, and a live hole. A fix agent is on it.
-    - PR #13, receipt foundations. In review.
+    - PR #13, receipt foundations. Review approved with seven minor findings. Merged after a dry run of its migration on staging.
     - PR #14, OTP screens. It waits for OTP-FUNCTIONS, which is still building.
   - `OTP_PEPPER` must be provisioned in both `.env` files before OTP-FUNCTIONS deploys; its `deploy.sh` guard refuses a release without it. All three OTP streams follow the contract kept at `C:\Users\ahmad\.claude\plans\otp-contract-wf_ce583f7b-774.md`, outside the repo.
 - **Staging mail reaches real recipients** (owner's decision, 14.09.2026). Mailpit keeps a copy of every message and relays it through production's Resend account, except mail to `@example.com`. Live on staging since PR #8 (`45ff313`). Resend lists the relayed test mails to `delivered@resend.dev` as `delivered`.
@@ -29,7 +29,13 @@ Start here when you pick up this project. Read it together with [CLAUDE.md](CLAU
   - **Why the guard failed:** it reads `IF auth.email() != 'support@…' THEN RAISE`. For an anonymous caller `auth.email()` is NULL, so the comparison is NULL and the RAISE never runs. Confirmed on staging: 15 rows came back.
   - **Closed by hand, with the owner's approval.** On production and staging, EXECUTE was revoked from anon and PUBLIC on `list_users_for_admin`, `create_user_account`, `redeem_discount_code`, `preview_activation_code` and `redeem_activation_code`. Signed-in users keep the activation functions and service_role keeps discount redemption. anon now gets 401.
   - **No sign of use:** Kong's production log starts 13.09.2026 and shows no call to these functions.
-  - **Made permanent:** migration `20260915110000_revoke_anon_from_unguarded_functions.sql`, which also closes `get_user_status` and `is_user_active` and fails the release if anon can still run any of them.
+  - **Made permanent (PR #15):** migration `20260915110000_revoke_anon_from_unguarded_functions.sql`, which also closes `get_user_status` and `is_user_active` and fails the release if anon can still run any of them.
+- **Receipt foundations (PR #13), for whoever builds step 4.3.** The screens wait for the owner's design approval. Carry these review findings into 4.3:
+  - `payment_date` has no lower bound and no relation to the salary period.
+  - A signed copy can be replaced without keeping the previous path.
+  - The receipt month comes from `get_business_month(period_start)`, which mislabels a salary row that does not start on a Monday.
+  - The RPCs and storage policies must adopt PLATFORM's server-side block once it exists.
+  - When 4.3 ships, add the Gehaltsquittung to the closed list of German-only documents in `src/i18n/index.ts`.
 - **`main` is behind `staging`** by the Phase 0 work. Production still runs a bundle deployed before CI releases existed.
 
 ## What is live where
@@ -81,6 +87,13 @@ Secrets never enter git:
   - **OTP-DB.** A new signup with an unverified address replaces the pending one immediately, which stops address squatting but lets anyone knock out a real owner. Keep that, or only replace one older than about 10 minutes?
   - **Baseline.** `get_current_cash_balance()` reads a receipts column that no longer exists and nothing calls it. Drop it or fix it?
   - **Baseline.** `storage.objects` policies are not in the matrix because the fixture is a public-schema dump. Take a schema-only storage dump before step 3.3 rewrites those policies?
+  - **Receipt.** One staging company has overlapping salary rows: 5 drivers, 25 rows, 16 overlapping pairs, no exact duplicates. The owner needs to decide:
+    - which row is the salary of record (the business month, say);
+    - what happens to payments recorded on the others;
+    - how overlaps are prevented afterwards. An exclusion constraint on driver and period needs `btree_gist`.
+
+    Until then, `confirm_salary_cash_payment` refuses those rows with `overlapping_salary`.
+  - **Receipt.** Receipt numbers are `GQ-YYYY-NNNN`, using the year of the payment date, gapless per company. Keep that, or use the salary's business year?
 - The user list was readable anonymously until 15.09.2026. The logs since 13.09.2026 show no use, and older logs are gone. Whether that needs a data-protection assessment is the owner's call.
 
 ## Gotchas learned the hard way
