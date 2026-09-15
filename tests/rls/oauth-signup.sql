@@ -728,7 +728,10 @@ BEGIN
   DELETE FROM user_profiles WHERE user_id = e_noprof;
   UPDATE auth.users SET email_confirmed_at = now() WHERE id = e_conf;
   UPDATE user_profiles SET company_id = 'c0000000-0000-4000-8000-00000000000a' WHERE user_id = e_attached;
-  UPDATE user_profiles SET is_super_admin = true WHERE user_id = e_super;
+  -- Since 20260916110010 a staff row, not the flag, makes an account platform
+  -- staff. The sync trigger sets the flag too, which is what the 20260915100200
+  -- copy reads, so both functions see the same account.
+  INSERT INTO app_private.platform_staff (user_id, role, note) VALUES (e_super, 'support', 'oauth test');
   PERFORM public.signup_create_company(e_pending, 'oauth-e-pending@test.invalid', 'Pia', 'Pia GmbH',
                                        NULL, NULL, NULL, NULL, NULL);
 
@@ -837,7 +840,7 @@ BEGIN
   INSERT INTO auth.identities (provider_id, user_id, identity_data, provider, created_at, updated_at)
   VALUES (c_noid::text, c_noid, jsonb_build_object('sub', c_noid::text, 'email', 'oauth-c-noid@test.invalid'), 'email', now(), now());
 
-  UPDATE user_profiles SET is_super_admin = true WHERE user_id = c_staff;
+  INSERT INTO app_private.platform_staff (user_id, role, note) VALUES (c_staff, 'read_only', 'oauth test');
   UPDATE user_profiles SET company_id = company_a, status = 'active' WHERE user_id = c_company;
   DELETE FROM app_private.pending_oauth_signups WHERE user_id = c_nopend;
   UPDATE auth.users SET banned_until = now() + interval '1 day' WHERE id = c_banned;
@@ -1091,7 +1094,7 @@ BEGIN
     AND (SELECT to_jsonb(up) FROM user_profiles up WHERE up.user_id = r_active) = before);
 
   PERFORM _oauth_google_signup(r_staff, 'oauth-r-staff@test.invalid');
-  UPDATE user_profiles SET is_super_admin = true WHERE user_id = r_staff;
+  INSERT INTO app_private.platform_staff (user_id, role, note) VALUES (r_staff, 'billing', 'oauth test');
   SELECT to_jsonb(up) INTO before FROM user_profiles up WHERE up.user_id = r_staff;
   r := public.oauth_session_reconcile(r_staff);
   PERFORM _oauth_ok('platform staff: nothing, whatever else holds',
@@ -1101,7 +1104,8 @@ BEGIN
   -- Platform staff never sign in with Google (owner decision, 16.09.2026), so a
   -- Google sign-in settles nothing that is pending on a staff account either.
   PERFORM _oauth_invited_employee(r_staff_inv, 'oauth-r-staff-inv@test.invalid', company_a);
-  UPDATE user_profiles SET is_super_admin = true WHERE user_id = r_staff_inv;
+  -- Since 20260916110010 a staff row, not the flag, makes an account platform staff.
+  INSERT INTO app_private.platform_staff (user_id, role, note) VALUES (r_staff_inv, 'support', 'oauth test');
   PERFORM _oauth_link_google(r_staff_inv);
   SELECT to_jsonb(up) INTO before FROM user_profiles up WHERE up.user_id = r_staff_inv;
   r := public.oauth_session_reconcile(r_staff_inv);
@@ -1113,7 +1117,8 @@ BEGIN
   PERFORM _oauth_password_signup_account(r_staff_pend, 'oauth-r-staff-pend@test.invalid');
   co_staff := (public.signup_create_company(r_staff_pend, 'oauth-r-staff-pend@test.invalid', 'Paula Plattform', 'Plattform GmbH',
                                             NULL, NULL, NULL, NULL, NULL)->'company'->>'id')::uuid;
-  UPDATE user_profiles SET is_super_admin = true WHERE user_id = r_staff_pend;
+  -- The staff row comes after the signup, so the signup itself still succeeds.
+  INSERT INTO app_private.platform_staff (user_id, role, note) VALUES (r_staff_pend, 'read_only', 'oauth test');
   PERFORM _oauth_link_google(r_staff_pend);
   SELECT to_jsonb(up) INTO before FROM user_profiles up WHERE up.user_id = r_staff_pend;
   r := public.oauth_session_reconcile(r_staff_pend);
@@ -1186,7 +1191,8 @@ BEGIN
     AND (SELECT company_id FROM user_profiles WHERE user_id = d_company) = co);
 
   PERFORM _oauth_google_signup(d_staff, 'oauth-d-staff@test.invalid');
-  UPDATE user_profiles SET is_super_admin = true WHERE user_id = d_staff;
+  -- disabled on purpose: a former staff member's account is not discarded either
+  INSERT INTO app_private.platform_staff (user_id, role, disabled_at, note) VALUES (d_staff, 'support', now(), 'oauth test');
   v_ok := public.oauth_signup_discard(d_staff);
   PERFORM _oauth_ok('platform staff are refused, marked or not',
     NOT v_ok AND EXISTS (SELECT 1 FROM auth.users WHERE id = d_staff) AND EXISTS (SELECT 1 FROM user_profiles WHERE user_id = d_staff));
@@ -1246,7 +1252,7 @@ BEGIN
   VALUES (p_inv, 'oauth-p-inv@test.invalid', now() - interval '30 days');
 
   PERFORM _oauth_google_signup(p_staff, 'oauth-p-staff@test.invalid');
-  UPDATE user_profiles SET is_super_admin = true WHERE user_id = p_staff;
+  INSERT INTO app_private.platform_staff (user_id, role, note) VALUES (p_staff, 'owner', 'oauth test');
   UPDATE app_private.pending_oauth_signups SET created_at = now() - interval '30 days' WHERE user_id = p_staff;
 
   -- A stale password signup belongs to purge_unverified_signups, not here.

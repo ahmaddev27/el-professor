@@ -20,7 +20,7 @@
                 editor_a    role editor
                 viewer_a    role viewer
     company B   admin_b     role admin
-    platform    super       is_super_admin, company_id NULL
+    platform    super       owner in app_private.platform_staff, company_id NULL
 
   and, for the answers a caller without a profile row gets, anon (no JWT) and
   a signed-in account with no user_profiles row.
@@ -301,7 +301,7 @@ BEGIN
     PERFORM _as(super_u);
     answer := is_user_super_admin();
     RESET ROLE;
-    PERFORM _check('is_user_super_admin() is true for the column super admin', answer IS TRUE, true);
+    PERFORM _check('is_user_super_admin() is true for the platform owner', answer IS TRUE, true);
 
     PERFORM _check('anon cannot EXECUTE create_user_profile_manual',
       has_function_privilege('anon', manual_profile, 'EXECUTE'), false);
@@ -323,7 +323,7 @@ BEGIN
     PERFORM _check(format('a signed-in caller without a profile calling create_user_profile_manual gets the exception [%s]', outcome),
       outcome LIKE 'P0001 Access denied: only super admins%', true);
 
-    -- …and the column super admin still gets through both. What happens after
+    -- …and the platform owner still gets through both. What happens after
     -- the guard is not this check's business: the upsert never supplies
     -- user_profiles.email, which is NOT NULL, so today it fails with 23502 for
     -- the super admin as for anyone (recorded in matrix.sql).
