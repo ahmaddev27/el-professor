@@ -34,9 +34,13 @@ export default function EnvironmentBanner() {
     const titleEl = document.querySelector('title');
     if (titleEl) observer.observe(titleEl, { childList: true });
     document.body.style.paddingTop = '28px';
+    // Fixed and sticky chrome (the new AppShell, sheets) offsets itself by this
+    // so the banner never covers a sidebar top or a top bar.
+    document.documentElement.style.setProperty('--env-banner-height', '28px');
     return () => {
       observer.disconnect();
       document.body.style.paddingTop = '';
+      document.documentElement.style.removeProperty('--env-banner-height');
     };
   }, [show]);
 

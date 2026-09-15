@@ -1,8 +1,99 @@
+/* Barlow, self-hosted through @fontsource so no request leaves for a font CDN.
+   The @font-face rules cost nothing until an element uses `font-ui`: a browser
+   only downloads a face it has to render. */
+@import '@fontsource/barlow/400.css';
+@import '@fontsource/barlow/500.css';
+@import '@fontsource/barlow/600.css';
+@import '@fontsource/barlow/700.css';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-/* ── Theme tokens ─────────────────────────────────────────────────────────── */
+/* ── Design system tokens (Phase 2) ───────────────────────────────────────────
+ * The palette of src/components/ui and the AppShell, derived from the brand
+ * board: night #0A0F1C, surface #0C1730, blue #146BFF, cyan #00E7FF.
+ *
+ * Deliberately separate from the legacy variables further down. Those still
+ * drive every existing screen, and Phase 5 moves screens across in batches, so
+ * nothing in this block may change how a current page looks. No name here is
+ * shared with the legacy set.
+ *
+ * Colours are space-separated RGB channels so Tailwind's opacity modifier works
+ * (`bg-brand/10`); the hex in each comment is the same colour. Every text and
+ * surface pairing is held to WCAG AA by src/components/ui/tokens.contrast.test.ts,
+ * which parses the two blocks below by their marker comments, so a changed value
+ * fails the build if it no longer passes.
+ *
+ * Shape rule: controls (buttons, inputs, selects) use --radius-control, surfaces
+ * (cards, tables, dialogs, sheets) use --radius-surface, badges and avatars are
+ * fully round.
+ */
+/* @tokens light */
+:root {
+  --canvas:         244 246 250;  /* #F4F6FA page background */
+  --raised:         255 255 255;  /* #FFFFFF cards, tables, sidebar */
+  --overlay:        255 255 255;  /* #FFFFFF dialogs, sheets, popovers */
+  --sunken:         237 241 247;  /* #EDF1F7 table header, hover, skeleton */
+  --field:          255 255 255;  /* #FFFFFF input fill */
+  --fg:             10 15 28;     /* #0A0F1C primary text */
+  --fg-muted:       70 83 107;    /* #46536B secondary text */
+  --fg-subtle:      95 107 130;   /* #5F6B82 captions, placeholders */
+  --line:           220 226 236;  /* #DCE2EC dividers */
+  --line-strong:    124 136 158;  /* #7C889E input borders (3:1 non-text) */
+  --brand:          20 107 255;   /* #146BFF primary actions, chart marks */
+  --brand-hover:    15 90 224;    /* #0F5AE0 */
+  --brand-fg:       255 255 255;  /* #FFFFFF text on brand */
+  --brand-soft:     231 240 255;  /* #E7F0FF selected and info fills */
+  --brand-text:     15 90 224;    /* #0F5AE0 links, active navigation */
+  --signal:         0 124 145;    /* #007C91 brand cyan, darkened to read on light */
+  --focus:          20 107 255;   /* #146BFF focus outline */
+  --positive:       10 122 69;    /* #0A7A45 */
+  --positive-soft:  227 246 236;  /* #E3F6EC */
+  --caution:        143 82 0;     /* #8F5200 */
+  --caution-soft:   253 241 220;  /* #FDF1DC */
+  --critical:       192 38 45;    /* #C0262D */
+  --critical-soft:  253 232 232;  /* #FDE8E8 */
+  --critical-solid: 192 38 45;    /* #C0262D destructive button fill */
+
+  --radius-control: 0.5rem;
+  --radius-surface: 0.75rem;
+  --shadow-raised:  0 1px 2px rgb(10 15 28 / 0.05), 0 1px 3px rgb(10 15 28 / 0.04);
+  --shadow-overlay: 0 16px 40px rgb(10 15 28 / 0.16), 0 2px 6px rgb(10 15 28 / 0.08);
+}
+
+/* @tokens dark */
+.dark {
+  --canvas:         10 15 28;     /* #0A0F1C brand night */
+  --raised:         12 23 48;     /* #0C1730 brand surface */
+  --overlay:        17 30 59;     /* #111E3B */
+  --sunken:         20 34 65;     /* #142241 */
+  --field:          10 15 28;     /* #0A0F1C */
+  --fg:             238 242 250;  /* #EEF2FA */
+  --fg-muted:       169 181 204;  /* #A9B5CC */
+  --fg-subtle:      130 144 171;  /* #8290AB */
+  --line:           30 44 75;     /* #1E2C4B */
+  --line-strong:    94 110 143;   /* #5E6E8F */
+  --brand:          20 107 255;   /* #146BFF */
+  --brand-hover:    15 90 224;    /* #0F5AE0 */
+  --brand-fg:       255 255 255;  /* #FFFFFF */
+  --brand-soft:     18 41 90;     /* #12295A */
+  --brand-text:     111 164 255;  /* #6FA4FF */
+  --signal:         0 231 255;    /* #00E7FF brand cyan */
+  --focus:          0 231 255;    /* #00E7FF */
+  --positive:       74 222 152;   /* #4ADE98 */
+  --positive-soft:  15 46 42;     /* #0F2E2A */
+  --caution:        255 194 102;  /* #FFC266 */
+  --caution-soft:   51 38 15;     /* #33260F */
+  --critical:       255 138 138;  /* #FF8A8A */
+  --critical-soft:  58 21 32;     /* #3A1520 */
+  --critical-solid: 214 58 64;    /* #D63A40 */
+
+  --shadow-raised:  0 0 #0000;
+  --shadow-overlay: 0 20px 48px rgb(0 0 0 / 0.5), 0 0 0 1px rgb(255 255 255 / 0.04);
+}
+
+/* ── Legacy theme tokens (every screen built before Phase 2) ─────────────── */
 :root {
   /* Light */
   --bg-base:        #f4f6fa;

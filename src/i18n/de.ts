@@ -29,7 +29,10 @@ export const de = {
   'nav.roles':              'Rollen',
   'nav.billing':            'Abonnement',
   'nav.settings':           'Einstellungen',
+  'nav.section.finance':    'Finanzen',
   'nav.section.management': 'Verwaltung',
+  'nav.section.operations': 'Betrieb',
+  'nav.section.planning':   'Planung & Dokumente',
   'nav.section.superAdmin': 'Super Admin',
   'nav.backToAdmin':        'Zurück zur Verwaltung',
 
@@ -49,6 +52,22 @@ export const de = {
   'shell.themeToDark':      'Zum dunklen Modus wechseln',
   'shell.exitCompanyView':  'Unternehmensansicht beenden',
   'shell.language':         'Sprache',
+
+  // ── Design system primitives (src/components/ui) ──────────────────────────
+  'ui.kpi.trendDown':         'Rückgang',
+  'ui.kpi.trendFlat':         'Unverändert',
+  'ui.kpi.trendUp':           'Anstieg',
+  'ui.select.placeholder':    'Bitte auswählen',
+  'ui.shell.collapseSidebar': 'Seitenleiste einklappen',
+  'ui.shell.expandSidebar':   'Seitenleiste ausklappen',
+  'ui.shell.mainNavigation':  'Hauptnavigation',
+  'ui.shell.openNavigation':  'Navigation öffnen',
+  'ui.shell.skipToContent':   'Zum Inhalt springen',
+  'ui.table.emptyTitle':      'Keine Einträge',
+  'ui.table.errorTitle':      'Die Daten konnten nicht geladen werden',
+  'ui.table.noValue':         'Keine Angabe',
+  'ui.table.retry':           'Erneut versuchen',
+  'ui.table.total':           'Summe',
 
   // ── Common actions and states ──────────────────────────────────────────────
   'common.save':            'Speichern',
