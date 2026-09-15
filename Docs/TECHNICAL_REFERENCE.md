@@ -1,4 +1,4 @@
-# Y&A Mobility — Technical Developer Reference
+# El-Professor — Technical Developer Reference
 
 > **Read this first.** Moved here unchanged from `README.md` on 15.09.2026. This reference predates the self-hosted Supabase stack in places, and some files it names have since been deleted. [CLAUDE.md](../CLAUDE.md) is authoritative, and wherever this reference, CLAUDE.md and the code disagree, the code wins. The current project status lives in the "Project status" section of [README.md](../README.md).
 
@@ -55,7 +55,7 @@ Sections 1–25 below describe the application. Where they disagree with the cod
 
 ## 1. Project Overview
 
-Y&A Mobility is a multi-tenant German-language SaaS platform for taxi and fleet companies. It handles:
+El-Professor is a multi-tenant German-language SaaS platform for taxi and fleet companies. It handles:
 
 - **Fahrtenbuch import/export** — importing XLSX ride logs, tracking per-trip assignments
 - **Monatsplanung** — monthly driver-vehicle-block assignment planning (4-phase in-memory engine)

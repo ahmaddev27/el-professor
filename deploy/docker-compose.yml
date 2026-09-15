@@ -1,4 +1,4 @@
-# Self-hosted stack for Y&A Mobility.
+# Self-hosted stack for El-Professor.
 #
 # Replaces the hosted Supabase project with the same open-source components on
 # your own VPS: PostgreSQL, PostgREST (the `.from()` API), GoTrue (auth),
