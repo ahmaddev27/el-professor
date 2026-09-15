@@ -20,7 +20,9 @@ test('forgot password: the code arrives, a wrong one is refused, the right one o
   await page.goto('/auth/forgot-password');
   await page.locator('input[type="email"]').fill(email);
   await page.getByRole('button', { name: 'Code senden' }).click();
-  await expect(page.getByText('Falls ein Konto zu dieser Adresse existiert')).toBeVisible();
+  // The first call after a staging release boots a fresh otp-request isolate,
+  // which took longer than the default 5 s right after PRs #29 and #30.
+  await expect(page.getByText('Falls ein Konto zu dieser Adresse existiert')).toBeVisible({ timeout: 20_000 });
 
   const mail = await mailpit.waitForMessage(email);
   expect(mail.subject).toContain('Passwort');
@@ -31,7 +33,7 @@ test('forgot password: the code arrives, a wrong one is refused, the right one o
   const firstBox = page.getByLabel('Ziffer 1 von 6');
   await firstBox.click();
   await page.keyboard.type(code === '000000' ? '111111' : '000000');
-  await expect(page.getByText('Noch 4 Versuche.')).toBeVisible();
+  await expect(page.getByText('Noch 4 Versuche.')).toBeVisible({ timeout: 20_000 });
 
   // The wrong code cleared the boxes; the sixth digit submits by itself.
   await firstBox.click();
