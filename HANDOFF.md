@@ -1,12 +1,12 @@
 # Handoff
 
-Last updated: **14.09.2026**
+Last updated: **15.09.2026**
 
 Start here when you pick up this project. Read it together with [CLAUDE.md](CLAUDE.md), which holds the rules and how every mechanism works, and [PROGRESS.md](PROGRESS.md), which records what is done and what was verified. The owner-facing plan is [el-professor-plan.html](el-professor-plan.html).
 
 ## Where things stand
 
-- **Current work:** Phase 0 of the requirements plan (releases, rollback, staging protection).
+- **Current work:** Phase 0 is done on staging except 0.6. Phases 1–4 are arriving as PRs; PR #11 (OTP database, step 1.1) is merged.
 - **Done on staging:**
   - 0.1 login rate limits, PR #2.
   - 0.2 kept releases and rollback, PR #3. Rollback was exercised on the host.
@@ -18,7 +18,12 @@ Start here when you pick up this project. Read it together with [CLAUDE.md](CLAU
   - Branches: `phase1/otp-db`, `phase1/otp-functions`, `phase1/otp-frontend`, `phase2/design-system`, `phase3/rls-baseline`, then `phase3/platform-authority`, and `phase4/receipt-foundations`.
   - Each branch ends in a reviewed PR into `staging`. Nothing from the agents is merged or deployed automatically.
   - Merge them one at a time, and run `cd e2e && npm test` after each staging deploy. Merge the OTP branches in order: `otp-db`, `otp-functions`, `otp-frontend`.
-  - The first run (`wf_ce583f7b-774`) was cut off by a session restart. Its uncommitted work was saved as one `wip:` commit per branch. The second run (`wf_864f8ee2-06d`) died after five hours when this machine lost its network, and its work was saved the same way. The third run commits a checkpoint after every step and retries a build agent that dies. All three OTP streams follow the contract kept at `C:\Users\ahmad\.claude\plans\otp-contract-wf_ce583f7b-774.md`, outside the repo.
+  - The first run (`wf_ce583f7b-774`) was cut off by a session restart. Its uncommitted work was saved as one `wip:` commit per branch. The second run (`wf_864f8ee2-06d`) died after five hours when this machine lost its network, and its work was saved the same way. The third run (`wf_c24553f4-594`) commits a checkpoint after every step and retries a build agent that dies. The dev machine slept overnight; the runtime restarted the agents that were cut off. By 15.09.2026 it had opened:
+    - PR #11, OTP database. Review approved with six minor findings; merged.
+    - PR #12, permission baseline. Review asked for two major changes: UPDATE probes never move a row to another tenant, and a live hole. A fix agent is on it.
+    - PR #13, receipt foundations. In review.
+    - PR #14, OTP screens. It waits for OTP-FUNCTIONS, which is still building.
+  - `OTP_PEPPER` must be provisioned in both `.env` files before OTP-FUNCTIONS deploys; its `deploy.sh` guard refuses a release without it. All three OTP streams follow the contract kept at `C:\Users\ahmad\.claude\plans\otp-contract-wf_ce583f7b-774.md`, outside the repo.
 - **Staging mail reaches real recipients** (owner's decision, 14.09.2026). Mailpit keeps a copy of every message and relays it through production's Resend account, except mail to `@example.com`. Live on staging since PR #8 (`45ff313`). Resend lists the relayed test mails to `delivered@resend.dev` as `delivered`.
 - **`main` is behind `staging`** by the Phase 0 work. Production still runs a bundle deployed before CI releases existed.
 
@@ -66,7 +71,11 @@ Secrets never enter git:
 - DNS A record `mail-staging` → `159.195.205.30`, then `set-mailpit-password.sh`.
 - Step 0.6: merge `staging` into `main` and press the production button.
 - Rotate the secrets that were exposed: root SSH password, production database password, and the Resend key pasted in chat.
-- Stop the MyPublicWiFi service on the dev machine if it is not needed (admin rights); it is what cuts the agents off.
+- Questions the agents raised:
+  - **OTP-DB.** If GoTrue confirmed a new owner's address but `signup_complete` then failed, may the owner finish with a new signup code? That needs a contract change; the alternative is that `otp-verify` retries completion.
+  - **OTP-DB.** A new signup with an unverified address replaces the pending one immediately, which stops address squatting but lets anyone knock out a real owner. Keep that, or only replace one older than about 10 minutes?
+  - **Baseline.** `get_current_cash_balance()` reads a receipts column that no longer exists and nothing calls it. Drop it or fix it?
+  - **Baseline.** `storage.objects` policies are not in the matrix because the fixture is a public-schema dump. Take a schema-only storage dump before step 3.3 rewrites those policies?
 
 ## Gotchas learned the hard way
 
@@ -83,6 +92,7 @@ Secrets never enter git:
 - **"No buffer space available" / `ERR_NO_BUFFER_SPACE` on the dev machine means it ran out of sockets,** not that the host is down. On 14.09.2026 the MyPublicWiFi service held 16,000 bound sockets, and e2e, git and ssh all failed until it let them go. It came back the same day, and six agents died after five hours with `ENOTFOUND`. Stopping the service is the only real fix.
 - **Mailpit logs a relay only when it fails;** success is a debug line, so a quiet log is the good case. To see what Resend did with a mail, list `GET https://api.resend.com/emails` with production's key (pass the header on stdin with `curl -H @-`) and read `last_event`. Print only the fields you need: the list holds customers' addresses.
 - **A `grep` that matches nothing ends a `set -euo pipefail` script silently** — the same trap as the `.env` reads in `deploy.sh`. It hid the result of the first relay test, which had in fact been delivered.
+- **On Windows, vitest rewrites the golden `.snap` files with LF line endings.** The content is byte-identical and `git diff` is empty, but with `core.autocrlf=true` git lists them as modified. Restore them with `git checkout -- src/utils/__snapshots__/` and never commit them. A `.gitattributes` line `src/utils/__snapshots__/*.snap text eol=lf` would end the churn.
 - **The Workflow tool does not save an agent's worktree.** When a run is cut off, commit what is on disk (as `wip:`) before relaunching; a resumed run only replays agents that had finished.
 
 ## Keeping this file honest
