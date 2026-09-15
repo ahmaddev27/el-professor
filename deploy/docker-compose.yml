@@ -147,9 +147,12 @@ services:
       GOTRUE_JWT_AUD: authenticated
       GOTRUE_JWT_DEFAULT_GROUP_NAME: authenticated
 
-      # The app creates companies through the company-signup function, not by
-      # open registration. Keep this false unless that changes.
-      GOTRUE_DISABLE_SIGNUP: ${DISABLE_SIGNUP:-false}
+      # Closed, and a literal on purpose. GoTrue's public /signup would create an
+      # account outside company-signup: no company, no code, no limit. Companies
+      # are created only by company-signup through the admin API, which this
+      # setting does not affect. ci-release.sh refuses a rollback to a release
+      # that would open it again.
+      GOTRUE_DISABLE_SIGNUP: 'true'
 
       # Per-client limits on login and token refresh (/token), /verify, and
       # /recover plus user updates. GoTrue enforces none of them unless it is
@@ -168,14 +171,21 @@ services:
       GOTRUE_RATE_LIMIT_OTP: ${RATE_LIMIT_OTP:-30}
       GOTRUE_RATE_LIMIT_EMAIL_SENT: ${RATE_LIMIT_EMAIL_SENT:-60}
 
-      # Email confirmation is expected OFF: company-signup creates users with
-      # email_confirm: true and LoginForm has a dedicated error for this being
-      # left on.
+      # Left at 'true', and nothing depends on it any more. It governs GoTrue's
+      # own /signup, closed above; the admin createUser that makes every account
+      # ignores it. company-signup creates the owner with email_confirm: false,
+      # and GoTrue refuses a password login for an unconfirmed address whatever
+      # this says (both probed against v2.170.0 on 15.09.2026), so an owner signs
+      # in only after otp-verify has confirmed the address with a code.
+      # ci-release.sh compares this value too: changing it blocks a rollback
+      # across the change.
       GOTRUE_MAILER_AUTOCONFIRM: 'true'
 
-      # Password reset and invite links depend on this. Without working SMTP,
-      # resetPasswordForEmail and generateLink fail and users cannot recover
-      # their accounts.
+      # GoTrue's own link mail. Nothing in the app asks for one any more: the
+      # codes for signup, "Passwort vergessen", invitations and email changes are
+      # sent by the functions (_shared/mail.ts) through this same server. These
+      # settings and the templates below stay for one release, together with
+      # AuthCallbackPage, so a link mailed just before the release still works.
       GOTRUE_SMTP_HOST: ${SMTP_HOST:?set SMTP_HOST}
       GOTRUE_SMTP_PORT: ${SMTP_PORT:-587}
       GOTRUE_SMTP_USER: ${SMTP_USER}
@@ -213,13 +223,9 @@ services:
       GOTRUE_MAILER_SUBJECTS_EMAIL_CHANGE: "Neue E-Mail-Adresse bestätigen – El-Professor"
       GOTRUE_MAILER_SUBJECTS_MAGIC_LINK: "Ihr Anmeldelink – El-Professor"
 
-      # Google sign-in — the app calls signInWithOAuth({ provider: 'google' }).
-      # Add ${PUBLIC_URL}/auth/v1/callback to the authorised redirect URIs in
-      # the Google Cloud console, or the button silently fails.
-      GOTRUE_EXTERNAL_GOOGLE_ENABLED: ${GOOGLE_ENABLED:-false}
-      GOTRUE_EXTERNAL_GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
-      GOTRUE_EXTERNAL_GOOGLE_SECRET: ${GOOGLE_SECRET}
-      GOTRUE_EXTERNAL_GOOGLE_REDIRECT_URI: ${PUBLIC_URL}/auth/v1/callback
+      # Google sign-in is gone from the app. Off as a literal, so no .env value
+      # can open a login path that nothing in the UI offers and no test covers.
+      GOTRUE_EXTERNAL_GOOGLE_ENABLED: 'false'
     expose:
       - '9999'
     deploy:
@@ -282,15 +288,20 @@ services:
         limits: { memory: 512M }
 
   # ── Edge functions ────────────────────────────────────────────────────────
-  # Four of the seven are load-bearing: manage-users (the entire Users screen —
-  # 11 call sites), company-signup, validate-discount-code and
-  # generate-activation-code. Without this service those screens fail with a
-  # network error and no explanation.
+  # Six are load-bearing: manage-users (the entire Users screen — 11 call
+  # sites), company-signup, otp-request and otp-verify (every one-time code:
+  # signup, "Passwort vergessen", invitations, email changes),
+  # validate-discount-code and generate-activation-code. Without this service
+  # those screens fail with a network error and no explanation.
   #
   # extract-receipt and update-income-weeks are deployed but unreachable in
   # practice: nothing in src/ calls either, and extract-receipt performs no auth
   # check while spending ANTHROPIC_API_KEY, so it is left without an API key
   # rather than merely unrouted. The live OCR is client-side Tesseract.
+  #
+  # Only the main router sees the variables below. main/index.ts hands each
+  # function exactly the ones FUNCTION_ENV names for it, so a variable added here
+  # reaches no function until it is added there as well.
   functions:
     image: supabase/edge-runtime:v1.76.2
     restart: unless-stopped
@@ -303,16 +314,33 @@ services:
       SUPABASE_URL: http://kong:8000
       SUPABASE_ANON_KEY: ${ANON_KEY:?set ANON_KEY}
       SUPABASE_SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY:?set SERVICE_ROLE_KEY}
-      SUPABASE_DB_URL: postgres://supabase_admin:${POSTGRES_PASSWORD}@db:5432/postgres
+      # No SUPABASE_DB_URL: it was a superuser connection string that no function
+      # read and every worker received.
+      #
       # Read by functions/main/index.ts, which verifies every request itself.
       # Hosted Supabase keeps this as a per-function dashboard toggle; here the
-      # decision lives in git.
+      # decision lives in git. No worker receives it.
       JWT_SECRET: ${JWT_SECRET}
       # The CORS allow-list in _shared/http.ts. Without it the functions fall
       # back to `*`, which was the old behaviour and is worth avoiding now that
       # company-signup answers unauthenticated callers.
       APP_URL: ${APP_URL:?set APP_URL}
       EXTRA_CORS_ORIGINS: ${EXTRA_CORS_ORIGINS:-}
+      # One-time codes: the HMAC key their hashes are made with (_shared/otp.ts).
+      # The database stores only the hash and never sees this. At least 32
+      # characters and different in each environment; deploy.sh refuses a
+      # release otherwise.
+      OTP_PEPPER: ${OTP_PEPPER:?set OTP_PEPPER}
+      # The functions mail the codes themselves (_shared/mail.ts), through the
+      # server GoTrue uses: Mailpit on staging, Resend on 2587 in production.
+      # Port 465 is TLS from the first byte, any other port must offer STARTTLS,
+      # and only the host `mailpit` may be plain.
+      SMTP_HOST: ${SMTP_HOST:?set SMTP_HOST}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER}
+      SMTP_PASS: ${SMTP_PASS}
+      SMTP_SENDER: ${SMTP_SENDER:?set SMTP_SENDER}
+      SMTP_SENDER_NAME: ${SMTP_SENDER_NAME:-El-Professor}
     volumes:
       - ../supabase/functions:/home/deno/functions:ro
     command: ['start', '--main-service', '/home/deno/functions/main']

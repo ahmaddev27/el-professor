@@ -126,6 +126,21 @@ else
   [ -z "$PROFILES" ] || fail "production must not enable compose profiles (found COMPOSE_PROFILES=$PROFILES)"
 fi
 
+# One-time codes are stored as HMAC-SHA256(OTP_PEPPER, "<challenge>:<code>").
+# Without the pepper the functions cannot issue a code, and nobody could sign
+# up, reset a password or accept an invitation. Staging runs on a copy of
+# production data, so a shared pepper would make a code hash taken from one
+# database checkable against the other. Neither value is ever printed.
+OTP_PEPPER="$(grep -E '^OTP_PEPPER=' .env | cut -d= -f2- | tr -d '\r')" || true
+[ "${#OTP_PEPPER}" -ge 32 ] || fail "OTP_PEPPER is missing or shorter than 32 characters; generate one with: openssl rand -base64 48"
+if [ "$ENVIRONMENT" = staging ] && [ -f /srv/PRO/deploy/.env ]; then
+  prod_pepper="$(grep -E '^OTP_PEPPER=' /srv/PRO/deploy/.env | cut -d= -f2- | tr -d '\r')" || true
+  [ "$(printf '%s' "$OTP_PEPPER" | sha256sum | cut -c1-16)" != "$(printf '%s' "$prod_pepper" | sha256sum | cut -c1-16)" ] \
+    || fail "staging and production share an OTP_PEPPER"
+  unset prod_pepper
+fi
+unset OTP_PEPPER
+
 # Both stacks share the CPU with each other and with ridy, and nothing is capped.
 # Staging is where load tests run, so it must yield under contention; production
 # must never be the one yielding. See cpu_shares in docker-compose.yml.

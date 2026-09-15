@@ -143,9 +143,10 @@ docker exec ridy-caddy-1 wget -qO- http://ya-mobility-web-1/ | head -1
 
 ## 6. Google sign-in
 
-Add `https://api.your-domain.de/auth/v1/callback` to the authorised redirect
-URIs in the Google Cloud console, then set `GOOGLE_ENABLED=true` and restart
-`auth`. Until then the "Mit Google anmelden" button fails with an opaque error.
+Removed. The app no longer offers it, and `deploy/docker-compose.yml` sets
+`GOTRUE_EXTERNAL_GOOGLE_ENABLED: 'false'` as a literal, so no `.env` value can
+turn it back on. `GOOGLE_ENABLED`, `GOOGLE_CLIENT_ID` and `GOOGLE_SECRET` are
+read by nothing and can be deleted from an existing `.env`.
 
 ---
 
@@ -156,7 +157,6 @@ Work through these against the new stack while the old project is still live:
 - [ ] Sign in with email and password
 - [ ] Password reset — **the email actually arrives**, and the link lands on
       `app.your-domain.de/auth/callback`
-- [ ] Google sign-in, if enabled
 - [ ] A company user sees only their own drivers, receipts and trips
 - [ ] A super admin reaches `/super-admin`; a company user redirected away
 - [ ] Company logo loads (Storage read)
