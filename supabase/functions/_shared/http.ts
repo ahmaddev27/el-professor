@@ -25,13 +25,23 @@
  * request id to match them up.
  */
 
-/** An error whose message is written for the end user and may be returned as-is. */
+/**
+ * An error whose message is written for the end user and may be returned as-is.
+ *
+ * `reason` is a stable code for the client to branch on, so no screen has to
+ * match German text. `extra` carries further fields such as
+ * retry_after_seconds. Both go into the response body next to the message.
+ */
 export class UserError extends Error {
   readonly status: number;
-  constructor(message: string, status = 400) {
+  readonly reason?: string;
+  readonly extra?: Record<string, unknown>;
+  constructor(message: string, status = 400, reason?: string, extra?: Record<string, unknown>) {
     super(message);
     this.name = 'UserError';
     this.status = status;
+    this.reason = reason;
+    this.extra = extra;
   }
 }
 
@@ -80,7 +90,12 @@ export function json(req: Request, status: number, body: unknown): Response {
  */
 export function errorResponse(req: Request, err: unknown, fn: string): Response {
   if (err instanceof UserError) {
-    return json(req, err.status, { success: false, error: err.message });
+    return json(req, err.status, {
+      ...err.extra,
+      success: false,
+      error: err.message,
+      ...(err.reason ? { reason: err.reason } : {}),
+    });
   }
   const requestId = crypto.randomUUID().slice(0, 8);
   const detail = err instanceof Error ? `${err.name}: ${err.message}` : String(err);

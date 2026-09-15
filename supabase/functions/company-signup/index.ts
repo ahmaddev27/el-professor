@@ -1,6 +1,38 @@
+/**
+ * POST /functions/v1/company-signup: create a company and its owner's account.
+ *
+ * Public (see PUBLIC_FUNCTIONS in main/index.ts): nobody has a session yet.
+ *
+ * The order is what keeps a half-made signup from surviving:
+ *
+ *   1. validate the input, and check a referral code before anything is created
+ *   2. signup_discard_unverified: a signup nobody verified may not squat the
+ *      address, so a newer attempt replaces it (codes sent to it die with it)
+ *   3. createUser with email_confirm: false. GoTrue refuses a password login for
+ *      an unconfirmed address whatever GOTRUE_MAILER_AUTOCONFIRM says (probed
+ *      against v2.170.0 on 15.09.2026), so the owner cannot sign in before
+ *      entering the code
+ *   4. signup_create_company: company, owner profile (pending_invite), settings
+ *      and the pending-signup row in one transaction. If it fails or refuses,
+ *      the login from step 3 is discarded. A success is never returned without
+ *      both a company and a profile
+ *   5. send the signup_verify code
+ *
+ * The signup stands even when the code cannot be sent; the page offers "Neuen
+ * Code senden". A discount code is stored with the pending signup and redeemed
+ * only when the code is verified (otp-verify), so a limited code is not used up
+ * by signups nobody finishes.
+ */
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
-import { createClient } from "npm:@supabase/supabase-js@2";
 import { UserError, corsFor, json, errorResponse } from "../_shared/http.ts";
+import { issueAndSendOtp, serviceClient } from "../_shared/otp.ts";
+import {
+  isEmailExistsError,
+  logFailure,
+  OTP_COOLDOWN_SECONDS,
+  parseClientIp,
+  parseEmail,
+} from "../_shared/otp-core.ts";
 
 type Plan = 'basic' | 'advanced' | 'premium';
 
@@ -24,199 +56,190 @@ interface SignupRequest {
   referral_code?: string | null;
 }
 
+interface CompanySummary {
+  id: string;
+  name: string;
+  slug: string;
+  trial_end: string;
+  approval_status: string;
+}
+
+interface VerificationSummary {
+  status: 'sent' | 'send_failed' | 'rate_limited';
+  cooldown_seconds: number;
+  retry_after_seconds: number | null;
+}
+
+const FN = "company-signup";
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 200, headers: corsFor(req) });
   }
 
   try {
-    const supabaseAdmin = createClient(
-      Deno.env.get("SUPABASE_URL") ?? "",
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
-      { auth: { autoRefreshToken: false, persistSession: false } }
-    );
+    let body: SignupRequest;
+    try {
+      body = await req.json();
+    } catch {
+      throw new UserError("Ungültige Anfrage.");
+    }
+    if (!body || typeof body !== "object") throw new UserError("Ungültige Anfrage.");
 
-    const body: SignupRequest = await req.json();
-
-    if (!body.company_name?.trim()) throw new UserError("Unternehmensname ist erforderlich");
-    if (!body.full_name?.trim()) throw new UserError("Name ist erforderlich");
-    if (!body.email?.trim()) throw new UserError("E-Mail ist erforderlich");
-    if (!body.password || body.password.length < 8) throw new UserError("Passwort muss mindestens 8 Zeichen haben");
+    const companyName = typeof body.company_name === "string" ? body.company_name.trim() : "";
+    const fullName = typeof body.full_name === "string" ? body.full_name.trim() : "";
+    if (!companyName) throw new UserError("Unternehmensname ist erforderlich");
+    if (!fullName) throw new UserError("Name ist erforderlich");
+    if (typeof body.email !== "string" || !body.email.trim()) throw new UserError("E-Mail ist erforderlich");
+    const email = parseEmail(body.email);
+    if (!email) throw new UserError("Bitte geben Sie eine gültige E-Mail-Adresse ein.");
+    if (typeof body.password !== "string" || body.password.length < 8) {
+      throw new UserError("Passwort muss mindestens 8 Zeichen haben");
+    }
 
     const plan: Plan = (['basic', 'advanced', 'premium'] as Plan[]).includes(body.plan as Plan)
       ? (body.plan as Plan)
       : 'basic';
-
-    const billingCycle: BillingCycle =
-      body.billing_cycle === 'yearly' ? 'yearly' : 'monthly';
-
+    const billingCycle: BillingCycle = body.billing_cycle === 'yearly' ? 'yearly' : 'monthly';
     const carLimit = Math.max(1, Math.min(100, Math.floor(Number(body.subscription_car_limit) || 3)));
+    const referralCode = typeof body.referral_code === "string" ? body.referral_code.trim().toUpperCase() : "";
+    const discountCode = typeof body.discount_code === "string" ? body.discount_code.trim() : "";
 
-    // Validate referral code if provided
-    let referralId: string | null = null;
-    const rawReferralCode = body.referral_code?.trim().toUpperCase() ?? null;
+    if (referralCode) await assertReferralUsable(referralCode);
 
-    if (rawReferralCode) {
-      const { data: referral } = await supabaseAdmin
-        .from("referrals")
-        .select("id, is_active")
-        .eq("ref_code", rawReferralCode)
-        .maybeSingle();
+    const admin = serviceClient();
+    const { error: discardError } = await admin.rpc("signup_discard_unverified", { p_email: email });
+    if (discardError) throw discardError;
 
-      if (!referral) {
-        throw new Error(`Empfehlungscode "${rawReferralCode}" ist ungültig.`);
-      }
-      if (!referral.is_active) {
-        throw new Error(`Empfehlungscode "${rawReferralCode}" ist nicht mehr aktiv.`);
-      }
-      referralId = referral.id;
-    }
-
-    // 1. Create auth user — email_confirm: true marks email as already verified
-    //    so the user can sign in immediately without a confirmation link.
-    const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
-      email: body.email.trim(),
+    const { data: created, error: createError } = await admin.auth.admin.createUser({
+      email,
       password: body.password,
-      email_confirm: true,
-      user_metadata: { full_name: body.full_name.trim() },
-    } as any);
-
-    if (authError) {
-      if (authError.message?.toLowerCase().includes("already registered") ||
-          authError.message?.toLowerCase().includes("already been registered") ||
-          authError.message?.toLowerCase().includes("duplicate")) {
-        throw new UserError("Diese E-Mail-Adresse ist bereits registriert");
+      email_confirm: false,
+      user_metadata: { full_name: fullName },
+    });
+    if (createError) {
+      if (isEmailExistsError(createError) || /duplicate/i.test(createError.message ?? "")) {
+        throw new UserError("Diese E-Mail-Adresse ist bereits registriert", 409, "email_taken");
       }
-      throw new Error(authError.message);
+      throw createError;
     }
+    if (!created.user) throw new Error("createUser returned no user");
+    const userId = created.user.id;
 
-    if (!authData.user) throw new Error("Benutzer konnte nicht erstellt werden");
-    const userId = authData.user.id;
+    const company = await createCompany(userId, {
+      email, fullName, companyName, plan, billingCycle, carLimit, referralCode, discountCode,
+    });
 
-    // 2. Generate a URL-safe slug from the company name
-    const slug = body.company_name.trim()
-      .toLowerCase()
-      .replace(/[äöüß]/g, (c) => ({ ä: "ae", ö: "oe", ü: "ue", ß: "ss" }[c] ?? c))
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-|-$/g, "")
-      .slice(0, 60);
+    const verification = await sendVerificationCode(email, userId, parseClientIp(req.headers.get("x-client-ip")));
 
-    // Ensure slug is unique by appending a short random suffix if taken
-    const { data: existing } = await supabaseAdmin
-      .from("companies")
-      .select("id")
-      .eq("slug", slug)
-      .maybeSingle();
-
-    const finalSlug = existing
-      ? `${slug}-${Math.random().toString(36).slice(2, 7)}`
-      : slug;
-
-    const now = new Date();
-    const trialEnd = new Date(now);
-    trialEnd.setDate(trialEnd.getDate() + 14);
-
-    // 3. Create the company — pending approval, trial status
-    const companyInsert: Record<string, unknown> = {
-      name: body.company_name.trim(),
-      slug: finalSlug,
-      status: "trial",
-      approval_status: "pending",
-      plan,
-      billing_cycle: billingCycle,
-      subscription_car_limit: carLimit,
-      trial_start: now.toISOString(),
-      trial_end: trialEnd.toISOString(),
-      country: "Deutschland",
-      subscription_status: "inactive",
-    };
-
-    if (referralId) {
-      companyInsert.referral_id = referralId;
-      companyInsert.referral_code_used = rawReferralCode;
-      companyInsert.referred_at = now.toISOString();
-    }
-
-    const { data: company, error: companyError } = await supabaseAdmin
-      .from("companies")
-      .insert(companyInsert)
-      .select()
-      .single();
-
-    if (companyError) throw new Error(`Unternehmen konnte nicht erstellt werden: ${companyError.message}`);
-
-    // 3b. Redeem the discount code, if one was entered.
-    //
-    // redeem_discount_code re-runs every check against a locked row, records
-    // the redemption, increments used_count and returns the price IT computed —
-    // so neither the code's identity nor the amount comes from the browser.
-    // Runs after the insert because it needs the new company's id.
-    //
-    // A code that fails here does not fail the signup: the account is already
-    // created, and refusing it over a discount would be worse than charging
-    // full price. The reason is returned so the client can say so.
-    let discountResult: Record<string, unknown> | null = null;
-    if (body.discount_code?.trim()) {
-      const { data: redeemed, error: redeemError } = await supabaseAdmin.rpc(
-        "redeem_discount_code",
-        {
-          p_code:          body.discount_code.trim(),
-          p_company_id:    company.id,
-          p_plan:          plan,
-          p_billing_cycle: billingCycle,
-          p_car_limit:     carLimit,
-        },
-      );
-      discountResult = redeemError
-        ? { success: false, german_message: "Der Rabattcode konnte nicht eingelöst werden." }
-        : (redeemed as Record<string, unknown>);
-    }
-
-    // 4. Upsert the user profile with admin role + company link
-    //    The handle_new_user trigger may have already inserted a minimal row.
-    const { error: profileError } = await supabaseAdmin
-      .from("user_profiles")
-      .upsert({
-        user_id: userId,
-        email: body.email.trim(),
-        full_name: body.full_name.trim(),
-        role: "admin",
-        company_id: company.id,
-        status: "active",
-        is_super_admin: false,
-      }, { onConflict: "user_id" });
-
-    if (profileError) {
-      console.error("Profile upsert error:", profileError.message);
-    }
-
-    // 5. Create a default company_settings row so the app has something to read
-    await supabaseAdmin
-      .from("company_settings")
-      .insert({
-        company_id: company.id,
-        company_name: body.company_name.trim(),
-      })
-      .select()
-      .maybeSingle();
-
-    return new Response(
-      JSON.stringify({
-        success: true,
-        company: {
-          id: company.id,
-          name: company.name,
-          slug: company.slug,
-          trial_end: company.trial_end,
-          approval_status: company.approval_status,
-        },
-        // Present only when a code was entered. `success: false` here means the
-        // account exists and the code did not apply — the signup itself stands.
-        discount: discountResult,
-      }),
-      { headers: { ...corsFor(req), "Content-Type": "application/json" }, status: 200 }
-    );
+    return json(req, 200, { success: true, company, verification });
   } catch (err: unknown) {
-    return errorResponse(req, err, "company-signup");
+    return errorResponse(req, err, FN);
   }
 });
+
+function referralRefusal(reason: unknown, code: string): UserError | null {
+  if (reason === "referral_invalid") {
+    return new UserError(`Empfehlungscode "${code}" ist ungültig.`, 400, "referral_invalid");
+  }
+  if (reason === "referral_inactive") {
+    return new UserError(`Empfehlungscode "${code}" ist nicht mehr aktiv.`, 400, "referral_inactive");
+  }
+  return null;
+}
+
+/** Refuses an unknown or inactive referral code before any account exists. */
+async function assertReferralUsable(code: string): Promise<void> {
+  if (code.length > 64) throw referralRefusal("referral_invalid", code.slice(0, 64))!;
+  const { data, error } = await serviceClient()
+    .from("referrals")
+    .select("id, is_active")
+    .eq("ref_code", code)
+    .maybeSingle();
+  if (error) throw error;
+  const refusal = referralRefusal(!data ? "referral_invalid" : data.is_active ? null : "referral_inactive", code);
+  if (refusal) throw refusal;
+}
+
+async function createCompany(
+  userId: string,
+  input: {
+    email: string; fullName: string; companyName: string; plan: Plan; billingCycle: BillingCycle;
+    carLimit: number; referralCode: string; discountCode: string;
+  },
+): Promise<CompanySummary> {
+  let result: { ok?: unknown; reason?: unknown; company?: CompanySummary } | null;
+  try {
+    const { data, error } = await serviceClient().rpc("signup_create_company", {
+      p_user_id: userId,
+      p_email: input.email,
+      p_full_name: input.fullName,
+      p_company_name: input.companyName,
+      p_plan: input.plan,
+      p_billing_cycle: input.billingCycle,
+      p_car_limit: input.carLimit,
+      p_referral_code: input.referralCode || null,
+      p_discount_code: input.discountCode || null,
+    });
+    if (error) throw error;
+    result = data;
+  } catch (err) {
+    await discardSignup(userId);
+    throw err;
+  }
+
+  const company = result?.company;
+  if (result?.ok === true && company) {
+    return {
+      id: company.id,
+      name: company.name,
+      slug: company.slug,
+      trial_end: company.trial_end,
+      approval_status: company.approval_status,
+    };
+  }
+  await discardSignup(userId);
+  // The referral can have been deactivated between the pre-check and the
+  // transaction; the database's answer is the one that counts.
+  throw referralRefusal(result?.reason, input.referralCode) ??
+    new Error("signup_create_company returned a result outside the contract");
+}
+
+/**
+ * Undoes a signup that could not be completed, so no login survives without a
+ * company and a profile. signup_discard removes all three in one transaction;
+ * if it cannot, the login is deleted directly.
+ */
+async function discardSignup(userId: string): Promise<void> {
+  const admin = serviceClient();
+  try {
+    const { data, error } = await admin.rpc("signup_discard", { p_user_id: userId });
+    if (error) throw error;
+    if (data === true) return;
+    logFailure(FN, "compensate_signup_discard", { user_id: userId }, new Error("signup_discard refused"));
+  } catch (err) {
+    logFailure(FN, "compensate_signup_discard", { user_id: userId }, err);
+  }
+  const { error } = await admin.auth.admin.deleteUser(userId);
+  if (error) logFailure(FN, "compensate_delete_user", { user_id: userId }, error);
+}
+
+/** Sends the first code. Never throws: the signup already stands. */
+async function sendVerificationCode(email: string, userId: string, clientIp: string | null): Promise<VerificationSummary> {
+  try {
+    const outcome = await issueAndSendOtp({ purpose: "signup_verify", email, clientIp });
+    if (outcome.status === "sent") {
+      return { status: "sent", cooldown_seconds: OTP_COOLDOWN_SECONDS, retry_after_seconds: null };
+    }
+    if (outcome.status === "rate_limited") {
+      return {
+        status: "rate_limited",
+        cooldown_seconds: OTP_COOLDOWN_SECONDS,
+        retry_after_seconds: outcome.retryAfterSeconds ?? OTP_COOLDOWN_SECONDS,
+      };
+    }
+  } catch (err) {
+    logFailure(FN, "issue_signup_code", { purpose: "signup_verify", user_id: userId }, err);
+  }
+  return { status: "send_failed", cooldown_seconds: OTP_COOLDOWN_SECONDS, retry_after_seconds: null };
+}
