@@ -6,7 +6,7 @@ Start here when you pick up this project. Read it together with [CLAUDE.md](CLAU
 
 ## Where things stand
 
-- **Current work:** Phase 0 is done on staging except 0.6. Merged so far: PR #11, #16 and #14 (all of Phase 1's code), PR #15 (security fix), PR #13 (receipt foundations, steps 4.1 and 4.2), PR #17 (design system and prototype, 2.1–2.3), PR #20 (the product is named El-Professor) and PR #12 (permission matrix, 3.0). On 15.09.2026 the owner approved a restructured Phase 3 (slices 3.0–3.13: staff roles, audited reads, support sessions, a settings area, one subscription model), Google sign-in as step 1.6, and an approval email that carries a trial activation code. The plan file is the reference.
+- **Current work:** Phase 0 is done on staging except 0.6. Merged so far: PR #11, #16 and #14 (all of Phase 1's code), PR #15 (security fix), PR #13 (receipt foundations, steps 4.1 and 4.2), PR #17 (design system and prototype, 2.1–2.3), PR #20 (the product is named El-Professor), PR #12 (permission matrix, 3.0), PR #21 (3.8 U0 subscription conflict report), PR #22 (Google sign-in database, inert) and PR #26 (NULL-safe super-admin check). On 15.09.2026 the owner approved a restructured Phase 3 (slices 3.0–3.13: staff roles, audited reads, support sessions, a settings area, one subscription model), Google sign-in as step 1.6, and emailing each activation code when the platform admin generates it, with the validity unchanged at 2 minutes. An earlier idea from the same day, a trial code sent at approval (PR #25), was dropped by the owner and the PR closed. The plan file is the reference.
 - **Done on staging:**
   - 0.1 login rate limits, PR #2.
   - 0.2 kept releases and rollback, PR #3. Rollback was exercised on the host.
@@ -24,8 +24,31 @@ Start here when you pick up this project. Read it together with [CLAUDE.md](CLAU
     - PR #13, receipt foundations. Review approved with seven minor findings. Merged after a dry run of its migration on staging.
     - PR #16, OTP edge functions, and PR #14, OTP screens. Both reviews approved, with 6 and 4 minor findings. Merged back to back.
     - PR #17, design system and prototype. Review approved; merged after the owner asked to merge every open PR.
-  - The fourth run (`wf_29c78f4c-a9b`, 15.09.2026) builds the product name (PR #20, merged), Google sign-in PR A then PR B (shipped switched off), the 3.8 U0 subscription conflict report (PR #21), and 3.1 platform authority. After 3.1, 3.2 release N, 3.5, 3.6b and 3.9 start on its branch. A separate agent builds the approval email with the trial code (`feat/approval-trial-code`).
+  - The fourth run (`wf_29c78f4c-a9b`, 15.09.2026) builds the product name (PR #20, merged), Google sign-in PR A then PR B (shipped switched off), the 3.8 U0 subscription conflict report (PR #21), and 3.1 platform authority. After 3.1, 3.2 release N, 3.5, 3.6b and 3.9 start on its branch. A separate agent builds the activation code email (`feat/activation-code-email`).
   - The laptop has 8 GB RAM. Agents run every `npm ci` and build through `buildlock.sh` in the session scratchpad (two machine-wide slots) and wrap RLS kit runs on the VPS in `flock /root/.el-professor-rls-kit.lock`.
+- **Second security finding, 15.09.2026.** `create_user_profile_manual` was executable by anon.
+  - **Why the guard failed:** it read `IF NOT is_user_super_admin()`, and the helper returned NULL for a caller without a profile. On top of that, `enforce_user_profile_privilege_guard` returns NEW when `auth.uid()` is NULL.
+  - **No role changed:** the upsert still failed with 23502, because `user_profiles.email` is NOT NULL and the function never supplies it.
+  - **Closed by hand, with the owner's approval:** EXECUTE revoked on production and staging (anon gets 401).
+  - **Made permanent (PR #26, `20260915130000`):** it also makes `is_user_super_admin()` answer false, never NULL.
+  - **Follow-ups from its scan:**
+    - anon still holds EXECUTE on `reassign_fahrtenbuch_trip`, `delete_activation_code`, `hide_activation_code`, `revoke_activation_code` and `update_company_subscription_manual`. Their guards are NULL-safe; a small PR revoking anon is being built.
+    - `create_user_profile_manual` can never complete, and nothing calls `list_users_for_admin` or `create_user_account`. Drop them with a `SCHEMA_EPOCH` bump.
+    - `preview_activation_code` compares its binding with a NULL-blind `<>` (3.5).
+    - `enforce_user_profile_privilege_guard` passes any caller whose `auth.uid()` is NULL (3.1).
+- **Function ownership, found in the PR #25 review.**
+  - On the real databases, older SECURITY DEFINER functions such as `redeem_activation_code` are owned by `postgres`, which is not a superuser there.
+  - `CREATE OR REPLACE` keeps that owner. A redefined function that calls an `app_private` helper then fails with "permission denied", while the RLS kit passes, because its fixture has no owners.
+  - Add `ALTER FUNCTION … OWNER TO CURRENT_USER` and an owner self-check (see `phase3/platform-authority`, migration `20260916110010`).
+- **Subscription conflict report (PR #21), counts on staging:**
+  - 9 companies say `active` with no expiry, 8 of them suspended.
+  - 2 still say `active` after their expiry.
+  - 1 paying company is locked because its status is still `trial`.
+  - 11 have suspension flags that disagree.
+  - 1 subscription row is invoiced at a price that differs from the price book.
+  - 2 open invoices are past due while access is active.
+  - 1 old activation code has no recorded period.
+  - U1 needs an owner rule (D8 to D10) for each class.
   - `OTP_PEPPER`: provisioned in staging's `.env` on 15.09.2026 (64 hex characters, never printed). Production needs its own, different one before 0.6, or its deploy is refused. That waits for the owner's go. All three OTP streams follow the contract kept at `C:\Users\ahmad\.claude\plans\otp-contract-wf_ce583f7b-774.md`, outside the repo.
 - **Staging mail reaches real recipients** (owner's decision, 14.09.2026). Mailpit keeps a copy of every message and relays it through production's Resend account, except mail to `@example.com`. Live on staging since PR #8 (`45ff313`). Resend lists the relayed test mails to `delivered@resend.dev` as `delivered`.
 - **Security fix, 15.09.2026.** Anyone holding the public anon key could call `list_users_for_admin()` and read every account's email, name and role.
@@ -94,7 +117,7 @@ Secrets never enter git:
 - Rotate the secrets that were exposed: root SSH password, production database password, and the Resend key pasted in chat.
 - Phase 3 decisions D1–D13, seller data for invoices, and the admin email for the Y&A Mobility company account (all listed in the plan file).
 - Google sign-in (1.6): two Google Cloud OAuth clients, one per environment, a privacy policy and an Impressum, and decisions G1–G3.
-- Approval email with the trial code: an emailed code cannot use the two-minute window of hand-read activation codes. Confirm the replacement rule its PR proposes.
+- Rules for each subscription conflict class before step U1 (D8 to D10), counts above.
 - Questions the agents raised:
   - **OTP-DB.** If GoTrue confirmed a new owner's address but `signup_complete` then failed, may the owner finish with a new signup code? That needs a contract change; the alternative is that `otp-verify` retries completion.
   - **OTP-DB.** A new signup with an unverified address replaces the pending one immediately, which stops address squatting but lets anyone knock out a real owner. Keep that, or only replace one older than about 10 minutes?
