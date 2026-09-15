@@ -106,13 +106,15 @@ const MustChangePasswordGuard: React.FC<{ children: React.ReactNode }> = ({ chil
 };
 
 // ─── Subscription guard (must live inside BrowserRouter) ─────────────────────
-// Redirects to /abo-aktivieren when an approved company's subscription is inactive.
+// Redirects to /abo-aktivieren when an approved company has neither an active
+// subscription nor a trial started with its trial code. A trial that began at
+// signup, before the code existed, never opened this gate and still does not.
 // Allows through: activation page, billing page, and auth routes.
 
 const SUBSCRIPTION_ALLOWED_PATHS = ['/abo-aktivieren', '/aktivierung', '/billing'];
 
 const SubscriptionGuard: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { isSuperAdmin, companyApprovalStatus, isSubscriptionActive, profile } = useAuth();
+  const { isSuperAdmin, companyApprovalStatus, isSubscriptionActive, hasTrialAccess, profile } = useAuth();
   const location = useLocation();
 
   if (
@@ -120,6 +122,7 @@ const SubscriptionGuard: React.FC<{ children: React.ReactNode }> = ({ children }
     companyApprovalStatus === 'approved' &&
     !!profile?.company_id &&
     !isSubscriptionActive &&
+    !hasTrialAccess &&
     !SUBSCRIPTION_ALLOWED_PATHS.includes(location.pathname)
   ) {
     return <Navigate to="/abo-aktivieren" replace />;

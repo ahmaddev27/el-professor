@@ -1417,9 +1417,13 @@ BEGIN
      AND p.proname !~ '^_'
      AND p.prosrc ~ '(^|[^a-z_])is_super_admin([^a-z_]|$)';
   -- otp_issue, signup_create_company and signup_discard came with the
-  -- one-time-code migrations (20260915100100, 20260915100200)
+  -- one-time-code migrations (20260915100100, 20260915100200); company_approve
+  -- and company_resend_trial_code with 20260916160000. Those two check the
+  -- actor a service-role call names, for whom is_user_super_admin() (auth.uid())
+  -- has nothing to read.
   PERFORM _mx_expect('catalogue', 'functions that read the is_super_admin column directly', v,
-    '8: delete_activation_code, enforce_user_profile_privilege_guard, hide_activation_code, '
+    '10: company_approve, company_resend_trial_code, delete_activation_code, '
+    'enforce_user_profile_privilege_guard, hide_activation_code, '
     'otp_issue, revoke_activation_code, signup_create_company, signup_discard, '
     'update_company_subscription_manual',
     '3.1 route every check through is_user_super_admin()');
@@ -1611,10 +1615,12 @@ INSERT INTO _mx_rpc (label, stmt, want, hole) VALUES
     ('generate_invoice_number(2026)',
      $q$SELECT generate_invoice_number(2026)$q$,
      'PYYYYYY', NULL),
-    -- anon's EXECUTE on both activation-code RPCs revoked by 20260915110000
+    -- anon's EXECUTE on both activation-code RPCs revoked by 20260915110000.
+    -- The super admin, who has no company, is refused since 20260916160000: the
+    -- company binding compared with <>, which a caller without a company passed.
     ('preview_activation_code(valid code of A)',
      $q$SELECT preview_activation_code('482915')::text$q$,
-     'PYYYYNY', '3.5 preview_activation_code has no limit'),
+     'PYYYYNN', '3.5 preview_activation_code has no limit'),
     ('redeem_activation_code(valid code of A)',
      $q$SELECT redeem_activation_code('482915')::text$q$,
      'PYYYYNN', '3.5 redeem_activation_code open to every member, not only the admin'),
@@ -1777,6 +1783,13 @@ INSERT INTO _mx_rpc (label, stmt, want, hole) VALUES
      'PPPPPPP', NULL),
     ('purge_unverified_signups(…)',
      $q$SELECT purge_unverified_signups(interval '24 hours')::text$q$,
+     'PPPPPPP', NULL),
+    -- service_role only, called by the company-approval function (20260916160000)
+    ('company_approve(…)',
+     $q$SELECT company_approve(NULL::uuid, NULL::uuid, NULL::text, NULL::text)::text$q$,
+     'PPPPPPP', NULL),
+    ('company_resend_trial_code(…)',
+     $q$SELECT company_resend_trial_code(NULL::uuid, NULL::uuid, NULL::text, NULL::text)::text$q$,
      'PPPPPPP', NULL);
 
 DO $$

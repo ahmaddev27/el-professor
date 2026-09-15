@@ -60,7 +60,8 @@ interface CompanySummary {
   id: string;
   name: string;
   slug: string;
-  trial_end: string;
+  /** Always null since 20260916160000: the trial starts when its code is redeemed. */
+  trial_end: string | null;
   approval_status: string;
 }
 

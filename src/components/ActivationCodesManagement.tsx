@@ -13,7 +13,7 @@ import { de } from 'date-fns/locale';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type DurationType = '1_monat' | '3_monate' | '1_jahr' | 'benutzerdefiniert';
+type DurationType = '1_monat' | '3_monate' | '1_jahr' | 'benutzerdefiniert' | 'testphase';
 type CodeStatus   = 'active' | 'used' | 'expired' | 'revoked';
 type FilterTab    = 'active' | 'used' | 'expired' | 'revoked' | 'hidden' | 'all';
 
@@ -97,7 +97,18 @@ const DURATION_LABELS: Record<DurationType, TranslationKey> = {
   '3_monate':          'activation.duration.3months',
   '1_jahr':            'activation.duration.1year',
   'benutzerdefiniert': 'activation.custom',
+  'testphase':         'activation.duration.trial',
 };
+
+/**
+ * A trial code is mailed with the approval and has no redemption window: its
+ * expires_at is 'infinity', which `new Date()` cannot parse. It is never shown
+ * as a date or a countdown, and never counts as expired.
+ */
+const isTrialCode = (code: Pick<ActivationCode, 'duration_type'>) => code.duration_type === 'testphase';
+
+const isCodeExpiredNow = (code: Pick<ActivationCode, 'status' | 'duration_type' | 'expires_at'>) =>
+  code.status === 'active' && !isTrialCode(code) && new Date(code.expires_at) < new Date();
 
 const STATUS_CFG: Record<CodeStatus, { label: TranslationKey; color: string; bg: string; Icon: React.ElementType }> = {
   active:  { label: 'codes.status.active',    color: '#10b981', bg: 'rgba(16,185,129,0.1)',  Icon: CheckCircle },
@@ -247,7 +258,7 @@ function DetailsModal({ code, onClose }: { code: ActivationCode; onClose: () => 
     [t('common.status'), <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold" style={{ background: st.bg, color: st.color }}><st.Icon size={10} />{t(st.label)}</span>],
     [t('codes.details.duration'), DURATION_LABELS[code.duration_type] ? t(DURATION_LABELS[code.duration_type]) : code.duration_type],
     [t('codes.details.created'), format(new Date(code.created_at), 'dd.MM.yyyy HH:mm', { locale: de })],
-    [t('codes.details.validUntilCode'), format(new Date(code.expires_at), 'dd.MM.yyyy HH:mm', { locale: de })],
+    [t('codes.details.validUntilCode'), isTrialCode(code) ? t('codes.details.validUntilRedeemed') : format(new Date(code.expires_at), 'dd.MM.yyyy HH:mm', { locale: de })],
     [t('codes.details.targetCompany'), code.company_name ?? '—'],
     [t('codes.details.targetEmail'), code.target_email ?? '—'],
     [t('codes.details.usedAt'), code.used_at ? format(new Date(code.used_at), 'dd.MM.yyyy HH:mm', { locale: de }) : '—'],
@@ -388,7 +399,7 @@ export default function ActivationCodesManagement({ companies: propCompanies }: 
   const filteredCodes = codes.filter(c => {
     const isHidden  = !!c.hidden_at;
     const isDeleted = !!c.deleted_at;
-    const isExpiredNow = c.status === 'active' && new Date(c.expires_at) < new Date();
+    const isExpiredNow = isCodeExpiredNow(c);
     const effectiveStatus = isExpiredNow ? 'expired' : c.status;
 
     if (activeFilter === 'hidden')  return isHidden;
@@ -404,9 +415,9 @@ export default function ActivationCodesManagement({ companies: propCompanies }: 
 
   const tabCounts = {
     all:     codes.filter(c => !c.deleted_at).length,
-    active:  codes.filter(c => !c.hidden_at && !c.deleted_at && c.status === 'active' && new Date(c.expires_at) >= new Date()).length,
+    active:  codes.filter(c => !c.hidden_at && !c.deleted_at && c.status === 'active' && !isCodeExpiredNow(c)).length,
     used:    codes.filter(c => !c.hidden_at && !c.deleted_at && c.status === 'used').length,
-    expired: codes.filter(c => !c.hidden_at && !c.deleted_at && (c.status === 'expired' || (c.status === 'active' && new Date(c.expires_at) < new Date()))).length,
+    expired: codes.filter(c => !c.hidden_at && !c.deleted_at && (c.status === 'expired' || isCodeExpiredNow(c))).length,
     revoked: codes.filter(c => !c.hidden_at && !c.deleted_at && c.status === 'revoked').length,
     hidden:  codes.filter(c => !!c.hidden_at).length,
   };
@@ -738,7 +749,7 @@ export default function ActivationCodesManagement({ companies: propCompanies }: 
               </thead>
               <tbody>
                 {filteredCodes.map(c => {
-                  const isExpiredNow = c.status === 'active' && new Date(c.expires_at) < new Date();
+                  const isExpiredNow = isCodeExpiredNow(c);
                   const effectiveStatus: CodeStatus = isExpiredNow ? 'expired' : c.status;
                   const st = STATUS_CFG[effectiveStatus] ?? STATUS_CFG.expired;
                   const isUnused = !c.used_at && !c.used_company_id;
@@ -804,7 +815,11 @@ export default function ActivationCodesManagement({ companies: propCompanies }: 
 
                       {/* Gültig bis */}
                       <td className="px-4 py-3">
-                        {c.status === 'active' && !isExpiredNow ? (
+                        {isTrialCode(c) ? (
+                          <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>
+                            {t('codes.details.validUntilRedeemed')}
+                          </span>
+                        ) : c.status === 'active' && !isExpiredNow ? (
                           <CodeCountdown expiresAt={c.expires_at} />
                         ) : (
                           <span className="text-xs" style={{ color: 'var(--text-tertiary)' }}>

@@ -130,7 +130,7 @@ Two full, separate stacks run on one VPS (159.195.205.30), behind ridy's Caddy.
 2. no `user` → public routes only (`/`, `/login`, `/signup`, `/auth/*`)
 3. `companyApprovalStatus` `pending` / `rejected` / `suspended` → full-page takeover, no router at all
 4. `MustChangePasswordGuard` → forces `/set-new-password`
-5. `SubscriptionGuard` → forces `/abo-aktivieren` when an approved company's subscription is inactive
+5. `SubscriptionGuard` → forces `/abo-aktivieren` when an approved company has neither an active subscription nor a trial started with its trial code (`AuthContext.hasTrialAccess`; see Plan gating)
 6. `PlanGate` per route → `LockedFeaturePage` when the plan tier is too low
 7. `isAdmin` / `isSuperAdmin` conditionally *register* the route at all
 
@@ -148,6 +148,14 @@ Every business table carries `company_id`, isolated by RLS. `AuthContext.company
 ### Plan gating
 
 `PlanContext` maps `FeatureKey → minimum Plan` in `FEATURE_MIN_PLAN` (`basic` < `advanced` < `premium`). Two behaviors are easy to miss: a company **in trial** gets `effectivePlan = 'premium'` regardless of its stored plan, and a super admin's `can()` always returns `true`. Add a new gated feature by extending `FeatureKey` + `FEATURE_MIN_PLAN` in `PlanContext.tsx` and `FEATURE_LABELS` in `App.tsx`, then wrapping the route in `<PlanGate>`.
+
+**A trial starts when its code is redeemed, not at signup** (`20260916160000_approval_trial_code.sql`). "In trial" still means exactly `trial_end` in the future; what changed is who sets it.
+
+- `signup_create_company` leaves `trial_start` and `trial_end` NULL; everything else about a signup is as before.
+- A platform admin approves through the `company-approval` edge function, never by writing `companies` directly. `company_approve` sets the approval fields and, for a trial signup (`status = 'trial'`, trial not started, no active subscription, no redeemed trial code), creates an activation code with `duration_type = 'testphase'` in the same transaction. The function draws the code with `crypto.getRandomValues` (`_shared/activation-code.ts`), mails it to the company's active admins with a confirmed address (`_shared/approval-mail.ts`), and answers `approved`, `code_created`, `mail_sent` — never the code. `resend_trial_code` revokes an unused trial code and mails a new one.
+- A trial code is bound to its company, redeemable once and only by an active admin of that company, and has **no redemption window**: its `expires_at` is `infinity` (the 2-minute window is for codes read out live). `new Date('infinity')` is invalid, so any screen showing `expires_at` must special-case it, as `ActivationCodesManagement` does.
+- `redeem_activation_code` with a trial code sets `trial_start = now`, `trial_end = now + app_private.trial_length()` (the one constant, 14 days) and `companies.trial_activation_code_id`, and writes no subscription field. `SubscriptionGuard` admits a company whose trial came from a code until `trial_end`. A trial that started at signup, before this, never opened that gate and still does not; those companies were not touched.
+- After `trial_end`, `companies.status` stays `'trial'`, so `PlanContext` reports `trial_expired` and `can()` refuses every plan-gated route, **even with a paid subscription**, until a platform admin changes the status. That predates the trial code and is unchanged.
 
 ### Data access
 

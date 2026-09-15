@@ -49,7 +49,8 @@ interface Copy {
   link?: EmailLink;
 }
 
-function appOrigin(appUrl: string): string {
+/** APP_URL as an origin without a trailing slash. Shared with approval-mail.ts. */
+export function appOrigin(appUrl: string): string {
   const origin = appUrl.trim().replace(/\/+$/, '');
   if (!/^https?:\/\/[^/\s]+$/.test(origin)) {
     throw new Error('otp mail: APP_URL must be an origin such as https://elprofessor.eu');

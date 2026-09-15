@@ -285,12 +285,6 @@ const SignupPage: React.FC = () => {
 
   const stepIndex = STEPS.indexOf(step);
 
-  const trialEndDate = new Date();
-  trialEndDate.setDate(trialEndDate.getDate() + TRIAL_DAYS);
-  const trialEndFormatted = trialEndDate.toLocaleDateString('de-DE', {
-    day: '2-digit', month: 'long', year: 'numeric',
-  });
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
@@ -581,7 +575,7 @@ const SignupPage: React.FC = () => {
                 <Zap size={14} className="text-cyan-400 flex-shrink-0 mt-0.5" />
                 <p className="text-xs text-white/50">
                   <span className="text-cyan-300 font-semibold">{t('signup.trial.badge', { days: TRIAL_DAYS })}</span>{' '}
-                  {t('signup.trial.bodyLead', { date: trialEndFormatted })}{' '}
+                  {t('signup.trial.bodyLead', { days: TRIAL_DAYS })}{' '}
                   <span className="text-white/70">Premium</span>{t('signup.trial.bodyTail')}
                 </p>
               </div>

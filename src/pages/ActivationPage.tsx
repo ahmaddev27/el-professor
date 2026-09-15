@@ -5,6 +5,7 @@ import {
   CalendarCheck, ArrowLeft, Clock, ShieldCheck,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
+import { usePlan } from '../contexts/PlanContext';
 import { supabase } from '../lib/supabase';
 import { format, differenceInDays } from 'date-fns';
 import { de } from 'date-fns/locale';
@@ -13,11 +14,28 @@ import type { TranslationKey } from '../i18n';
 
 type SubmitState = 'idle' | 'loading' | 'success' | 'error';
 
-interface CodePreview {
-  status: string;
-  expires_at: string;
-  duration_type: string;
-  seconds_remaining: number;
+// A subscription code is read out live and lives 2 minutes; a trial code comes
+// with the approval mail and starts the trial when it is redeemed.
+type CodePreview =
+  | { kind: 'subscription'; duration_type: string; seconds_remaining: number }
+  | { kind: 'trial'; trial_days: number };
+
+interface PreviewResult {
+  success: boolean;
+  kind?: string;
+  status?: string;
+  duration_type?: string;
+  seconds_remaining?: number | null;
+  trial_days?: number | null;
+}
+
+function toPreview(result: PreviewResult | null): CodePreview | null {
+  if (!result?.success || result.status !== 'active') return null;
+  if (result.kind === 'trial') {
+    return typeof result.trial_days === 'number' ? { kind: 'trial', trial_days: result.trial_days } : null;
+  }
+  if (!result.duration_type || (result.seconds_remaining ?? 0) <= 0) return null;
+  return { kind: 'subscription', duration_type: result.duration_type, seconds_remaining: result.seconds_remaining ?? 0 };
 }
 
 // Keys, not text: this map is module-level and t() is a hook value.
@@ -59,12 +77,14 @@ const ActivationPage: React.FC = () => {
     profile, refreshSubscription, subscriptionExpiresAt,
     isSubscriptionActive, effectiveSubscriptionStatus,
   } = useAuth();
+  const { refresh: refreshPlan } = usePlan();
   const navigate = useNavigate();
 
   const [code, setCode] = useState('');
   const [submitState, setSubmitState] = useState<SubmitState>('idle');
   const [errorMsg, setErrorMsg] = useState('');
   const [newExpiry, setNewExpiry] = useState<string | null>(null);
+  const [trialEnd, setTrialEnd] = useState<string | null>(null);
   const [attempts, setAttempts] = useState(0);
   const [preview, setPreview] = useState<CodePreview | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
@@ -75,17 +95,7 @@ const ActivationPage: React.FC = () => {
     setPreviewLoading(true);
     try {
       const { data } = await supabase.rpc('preview_activation_code', { input_code: inputCode });
-      const result = data as { success: boolean; status?: string; expires_at?: string; duration_type?: string; seconds_remaining?: number; error?: string } | null;
-      if (result?.success && result.status === 'active' && (result.seconds_remaining ?? 0) > 0) {
-        setPreview({
-          status:            result.status!,
-          expires_at:        result.expires_at!,
-          duration_type:     result.duration_type!,
-          seconds_remaining: result.seconds_remaining!,
-        });
-      } else {
-        setPreview(null);
-      }
+      setPreview(toPreview(data as PreviewResult | null));
     } catch {
       setPreview(null);
     } finally {
@@ -104,13 +114,13 @@ const ActivationPage: React.FC = () => {
     }
   };
 
-  // Redirect to billing after successful activation
+  // After a subscription code, to billing; after a trial code, into the app.
   useEffect(() => {
     if (submitState === 'success') {
-      const timer = setTimeout(() => navigate('/billing', { replace: true }), 2200);
+      const timer = setTimeout(() => navigate(trialEnd ? '/overview' : '/billing', { replace: true }), 2200);
       return () => clearTimeout(timer);
     }
-  }, [submitState, navigate]);
+  }, [submitState, navigate, trialEnd]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -125,15 +135,20 @@ const ActivationPage: React.FC = () => {
     try {
       const { data, error } = await supabase.rpc('redeem_activation_code', { input_code: clean });
       if (error) throw new Error(error.message);
-      const result = data as { success: boolean; error?: string; subscription_expires_at?: string };
+      const result = data as { success: boolean; error?: string; subscription_expires_at?: string; kind?: string; trial_end?: string };
       if (!result.success) {
         setAttempts(a => a + 1);
         setErrorMsg(result.error ?? t('activation.invalid'));
         setSubmitState('error');
         return;
       }
-      setNewExpiry(result.subscription_expires_at ?? null);
-      await refreshSubscription();
+      if (result.kind === 'trial') {
+        setTrialEnd(result.trial_end ?? null);
+      } else {
+        setNewExpiry(result.subscription_expires_at ?? null);
+      }
+      // AuthContext decides SubscriptionGuard, PlanContext the trial's features.
+      await Promise.all([refreshSubscription(), refreshPlan()]);
       setSubmitState('success');
     } catch (err: any) {
       setAttempts(a => a + 1);
@@ -148,6 +163,31 @@ const ActivationPage: React.FC = () => {
   const subStatusLabel = isSubscriptionActive ? 'Aktiv' : (effectiveSubscriptionStatus === 'expired' ? t('activation.expiredShort') : 'Inaktiv');
 
   // ── Success view ────────────────────────────────────────────────────────────
+  if (submitState === 'success' && trialEnd) {
+    return (
+      <div className="max-w-lg mx-auto py-6">
+        <div className="rounded-2xl p-8 text-center space-y-5" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
+          <div className="w-16 h-16 rounded-full flex items-center justify-center mx-auto"
+            style={{ background: 'rgba(34,197,94,0.12)', border: '1px solid rgba(34,197,94,0.25)' }}>
+            <CheckCircle2 size={30} style={{ color: 'var(--success)' }} />
+          </div>
+          <div>
+            <h2 className="text-xl font-bold mb-2" style={{ color: 'var(--text-primary)' }}>
+              {t('activation.trial.successTitle')}
+            </h2>
+            <div className="flex items-center justify-center gap-2 text-sm" style={{ color: 'var(--text-secondary)' }}>
+              <CalendarCheck size={14} style={{ color: 'var(--success)' }} />
+              <span>{t('activation.trial.endsOn')}</span>
+              <span className="font-semibold" style={{ color: 'var(--success)' }}>
+                {format(new Date(trialEnd), 'dd.MM.yyyy', { locale: de })}
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if (submitState === 'success') {
     return (
       <div className="max-w-lg mx-auto py-6">
@@ -226,7 +266,7 @@ const ActivationPage: React.FC = () => {
           )}
         </div>
         <p className="text-xs mt-3" style={{ color: 'var(--text-tertiary)' }}>
-          Der Aktivierungscode ist nach Erstellung 2 Minuten gültig. Geben Sie ihn direkt nach Erhalt ein.
+          {t('activation.validityNote')}
         </p>
       </div>
 
@@ -297,6 +337,13 @@ const ActivationPage: React.FC = () => {
               {previewLoading ? (
                 <><RefreshCw size={13} className="animate-spin" style={{ color: 'var(--text-tertiary)' }} />
                 <span className="text-sm" style={{ color: 'var(--text-tertiary)' }}>{t('activation.checking')}</span></>
+              ) : preview?.kind === 'trial' ? (
+                <>
+                  <CalendarCheck size={13} style={{ color: 'var(--success)' }} />
+                  <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+                    {t('activation.trial.preview', { days: preview.trial_days })}
+                  </span>
+                </>
               ) : preview ? (
                 <>
                   <Clock size={13} style={{ color: 'var(--text-tertiary)' }} />

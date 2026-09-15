@@ -82,9 +82,8 @@ const PUBLIC_FUNCTIONS = new Set<string>(['company-signup', 'otp-request', 'otp-
 
 const BASE_ENV = ['SUPABASE_URL', 'SUPABASE_ANON_KEY', 'APP_URL', 'EXTRA_CORS_ORIGINS'] as const
 const SERVICE_ENV = ['SUPABASE_SERVICE_ROLE_KEY'] as const
-const OTP_MAIL_ENV = [
-  'OTP_PEPPER', 'SMTP_HOST', 'SMTP_PORT', 'SMTP_USER', 'SMTP_PASS', 'SMTP_SENDER', 'SMTP_SENDER_NAME',
-] as const
+const SMTP_ENV = ['SMTP_HOST', 'SMTP_PORT', 'SMTP_USER', 'SMTP_PASS', 'SMTP_SENDER', 'SMTP_SENDER_NAME'] as const
+const OTP_MAIL_ENV = ['OTP_PEPPER', ...SMTP_ENV] as const
 
 /** Exactly the variables each worker may see. JWT_SECRET and SUPABASE_DB_URL are never passed. */
 const FUNCTION_ENV: ReadonlyMap<string, readonly string[]> = new Map<string, readonly string[]>([
@@ -95,6 +94,8 @@ const FUNCTION_ENV: ReadonlyMap<string, readonly string[]> = new Map<string, rea
   // Invites send an OTP.
   ['manage-users', [...BASE_ENV, ...SERVICE_ENV, ...OTP_MAIL_ENV]],
   ['generate-activation-code', [...BASE_ENV, ...SERVICE_ENV]],
+  // Mails the approval and the trial code; no code hash needs the pepper.
+  ['company-approval', [...BASE_ENV, ...SERVICE_ENV, ...SMTP_ENV]],
   ['validate-discount-code', [...BASE_ENV, ...SERVICE_ENV]],
   ['update-income-weeks', [...BASE_ENV]],
   ['extract-receipt', [...BASE_ENV, 'ANTHROPIC_API_KEY']],

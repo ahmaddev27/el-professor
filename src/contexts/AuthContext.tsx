@@ -107,6 +107,12 @@ interface AuthContextType {
   subscriptionExpiresAt: string | null;
   effectiveSubscriptionStatus: 'inactive' | 'active' | 'expired' | 'suspended' | null;
   isSubscriptionActive: boolean;
+  /**
+   * The company's trial was started by redeeming its trial code and has not
+   * ended. SubscriptionGuard lets such a company in without a subscription. A
+   * trial that began at signup, before trial codes existed, does not count.
+   */
+  hasTrialAccess: boolean;
   refreshSubscription: () => Promise<void>;
   isSuperAdmin: boolean;
   mustChangePassword: boolean;
@@ -142,6 +148,10 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+/** Where a company's trial access ends: its trial_end, but only for a trial its trial code started. */
+const trialAccessEndOf = (company: { trial_end?: string | null; trial_activation_code_id?: string | null }) =>
+  company.trial_activation_code_id ? company.trial_end ?? null : null;
+
 export const useAuth = () => {
   const context = useContext(AuthContext);
   if (context === undefined) {
@@ -159,6 +169,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [rejectionReason, setRejectionReason] = useState<string | null>(null);
   const [subscriptionStatus, setSubscriptionStatus] = useState<'inactive' | 'active' | 'expired' | 'suspended' | null>(null);
   const [subscriptionExpiresAt, setSubscriptionExpiresAt] = useState<string | null>(null);
+  const [trialAccessEndsAt, setTrialAccessEndsAt] = useState<string | null>(null);
   const [userBlockReason, setUserBlockReason] = useState<BlockReason | null>(null);
   const [permissions, setPermissions] = useState<Record<string, { canView: boolean; canEdit: boolean }>>({});
 
@@ -194,6 +205,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setRejectionReason(null);
     setSubscriptionStatus(null);
     setSubscriptionExpiresAt(null);
+    setTrialAccessEndsAt(null);
     setUserBlockReason(null);
     setPermissions({});
   };
@@ -268,7 +280,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (data?.company_id && !data.is_super_admin) {
         const { data: company } = await supabase
           .from('companies')
-          .select('approval_status, rejection_reason, subscription_status, subscription_expires_at')
+          .select('approval_status, rejection_reason, subscription_status, subscription_expires_at, trial_end, trial_activation_code_id')
           .eq('id', data.company_id)
           .maybeSingle();
         if (company) {
@@ -276,12 +288,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           setRejectionReason(company.rejection_reason ?? null);
           setSubscriptionStatus(company.subscription_status as 'inactive' | 'active' | 'expired' | 'suspended');
           setSubscriptionExpiresAt(company.subscription_expires_at ?? null);
+          setTrialAccessEndsAt(trialAccessEndOf(company));
         }
       } else {
         setCompanyApprovalStatus(null);
         setRejectionReason(null);
         setSubscriptionStatus(null);
         setSubscriptionExpiresAt(null);
+        setTrialAccessEndsAt(null);
       }
     } catch (error) {
       console.error('Profile loading exception:', error);
@@ -497,6 +511,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     subscriptionStatus === 'active' &&
     (subscriptionExpiresAt === null || new Date(subscriptionExpiresAt) > new Date());
 
+  const hasTrialAccess = trialAccessEndsAt !== null && new Date(trialAccessEndsAt) > new Date();
+
   // Effective status: if DB says 'active' but expiry is in the past, treat as 'expired'
   const effectiveSubscriptionStatus: 'inactive' | 'active' | 'expired' | 'suspended' | null =
     subscriptionStatus === null ? null :
@@ -509,12 +525,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       const { data: company } = await supabase
         .from('companies')
-        .select('subscription_status, subscription_expires_at, approval_status, rejection_reason')
+        .select('subscription_status, subscription_expires_at, approval_status, rejection_reason, trial_end, trial_activation_code_id')
         .eq('id', profile.company_id)
         .maybeSingle();
       if (company) {
         setSubscriptionStatus(company.subscription_status as 'inactive' | 'active' | 'expired' | 'suspended');
         setSubscriptionExpiresAt(company.subscription_expires_at ?? null);
+        setTrialAccessEndsAt(trialAccessEndOf(company));
         setCompanyApprovalStatus(company.approval_status as 'pending' | 'approved' | 'rejected' | 'suspended');
         setRejectionReason(company.rejection_reason ?? null);
       }
@@ -551,6 +568,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     subscriptionExpiresAt,
     effectiveSubscriptionStatus,
     isSubscriptionActive,
+    hasTrialAccess,
     refreshSubscription,
     isSuperAdmin,
     mustChangePassword,

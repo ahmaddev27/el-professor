@@ -843,9 +843,11 @@ BEGIN
     comp.name = 'Müller & Söhne GmbH' AND comp.status = 'trial' AND comp.approval_status = 'pending'
     AND comp.subscription_status = 'inactive' AND comp.country = 'Deutschland'
     AND r->'company'->>'approval_status' = 'pending' AND r->'company'->>'name' = comp.name);
-  PERFORM _otp_ok('the trial runs 14 days from now',
-    comp.trial_start = now() AND comp.trial_end = now() + interval '14 days'
-    AND (r->'company'->>'trial_end')::timestamptz = comp.trial_end);
+  -- Since 20260916160000 the trial starts when the code sent with the approval
+  -- is redeemed; tests/rls/approval-trial-code.sql covers that.
+  PERFORM _otp_ok('the trial clock does not start at signup',
+    comp.trial_start IS NULL AND comp.trial_end IS NULL
+    AND r->'company'->'trial_end' = 'null'::jsonb);
   PERFORM _otp_ok('an unknown plan becomes basic, an unknown cycle monthly, and car limit 0 becomes 3',
     comp.plan = 'basic' AND comp.billing_cycle = 'monthly' AND comp.subscription_car_limit = 3);
   PERFORM _otp_ok('the referral is recorded under its upper-cased code',

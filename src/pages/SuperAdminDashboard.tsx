@@ -18,6 +18,7 @@ import { calcPricing, fmt as fmtPrice } from '../utils/pricing';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { useTranslation } from '../contexts/LanguageContext';
 import type { TranslationKey } from '../i18n';
+import { approveCompany, resendTrialCode, type ApprovalMailError, type ApproveCompanyResult } from '../lib/companyApproval';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -269,6 +270,9 @@ export default function SuperAdminDashboard() {
   const [extendingId, setExtendingId] = useState<string | null>(null);
   const [activeSection, setActiveSection] = useState<'overview' | 'approvals' | 'discounts' | 'referrals' | 'activation'>('overview');
   const [approvingId, setApprovingId] = useState<string | null>(null);
+  const [resendingId, setResendingId] = useState<string | null>(null);
+  // Companies whose trial code is still unused; they are offered a resend.
+  const [openTrialCodeCompanyIds, setOpenTrialCodeCompanyIds] = useState<Set<string>>(new Set());
   const [rejectModal, setRejectModal] = useState<{ company: CompanyRow } | null>(null);
   const [rejectReason, setRejectReason] = useState('');
   const [manualSubModal, setManualSubModal] = useState<CompanyRow | null>(null);
@@ -343,6 +347,16 @@ export default function SuperAdminDashboard() {
       }));
 
       setCompanies(enriched);
+
+      // 6. Unused trial codes: only which companies hold one, for the resend action.
+      const { data: openTrialCodes } = await supabase
+        .from('activation_codes')
+        .select('company_id')
+        .eq('duration_type', 'testphase')
+        .eq('status', 'active');
+      setOpenTrialCodeCompanyIds(new Set(
+        (openTrialCodes ?? []).flatMap((row: { company_id: string | null }) => (row.company_id ? [row.company_id] : [])),
+      ));
 
       // Compute KPIs
       const now = new Date();
@@ -465,25 +479,50 @@ export default function SuperAdminDashboard() {
     }
   };
 
+  const mailFailureHint = (mailError: ApprovalMailError | null) =>
+    t(mailError === 'no_recipient' ? 'sa.dash.toast.mailNoRecipient' : 'sa.dash.toast.mailSendFailed');
+
+  const handleResendTrialCode = async (company: CompanyRow) => {
+    setResendingId(company.id);
+    try {
+      const result = await resendTrialCode(company.id);
+      if (result.mailSent) {
+        showToast('success', t('sa.dash.toast.trialCodeResent', { name: company.name }));
+      } else {
+        showToast('warning', t('sa.dash.toast.trialCodeMailFailed', { name: company.name }),
+          mailFailureHint(result.mailError), 12000,
+          { label: t('sa.dash.resendTrialCode'), onClick: () => handleResendTrialCode(company) });
+      }
+      load(true);
+    } catch (err) {
+      showToast('error', (err instanceof Error && err.message) || t('common.error'));
+    } finally {
+      setResendingId(null);
+    }
+  };
+
+  // The approval stands whether or not its mail went out. The toast says which,
+  // and offers a fresh trial code when the mail that carried one failed.
+  const showApprovalToast = (company: CompanyRow, result: ApproveCompanyResult) => {
+    const name = company.name;
+    if (result.alreadyApproved) {
+      showToast('info', t('sa.dash.toast.alreadyApproved', { name }));
+    } else if (result.mailSent) {
+      showToast('success', t(result.codeCreated ? 'sa.dash.toast.approvedTrialCodeSent' : 'sa.dash.toast.approvedMailSent', { name }));
+    } else {
+      showToast('warning', t('sa.dash.toast.approvedMailFailed', { name }), mailFailureHint(result.mailError),
+        result.codeCreated ? 12000 : 7000,
+        result.codeCreated ? { label: t('sa.dash.resendTrialCode'), onClick: () => handleResendTrialCode(company) } : undefined);
+    }
+  };
+
   const handleApprove = async (company: CompanyRow) => {
     setApprovingId(company.id);
     try {
-      const { data: { user: me } } = await supabase.auth.getUser();
-      const { error } = await supabase
-        .from('companies')
-        .update({
-          approval_status: 'approved',
-          approved_at: new Date().toISOString(),
-          approved_by: me?.id ?? null,
-          rejection_reason: null,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', company.id);
-      if (error) throw error;
-      showToast('success', t('sa.dash.toast.approved', { name: company.name }));
+      showApprovalToast(company, await approveCompany(company.id));
       load(true);
-    } catch (err: any) {
-      showToast('error', err.message || t('common.error'));
+    } catch (err) {
+      showToast('error', (err instanceof Error && err.message) || t('common.error'));
     } finally {
       setApprovingId(null);
     }
@@ -804,6 +843,16 @@ export default function SuperAdminDashboard() {
                                 onMouseLeave={e => { (e.currentTarget.style.borderColor = 'var(--border)'); (e.currentTarget.style.color = 'var(--text-tertiary)'); }}
                               >
                                 {t('sa.dash.suspend')}
+                              </button>
+                            )}
+                            {ap === 'approved' && openTrialCodeCompanyIds.has(c.id) && (
+                              <button
+                                onClick={() => handleResendTrialCode(c)}
+                                disabled={resendingId === c.id}
+                                className="text-[11px] px-2 py-0.5 rounded border transition-colors disabled:opacity-50"
+                                style={{ borderColor: 'var(--accent)', color: 'var(--accent)' }}
+                              >
+                                {resendingId === c.id ? '…' : t('sa.dash.resendTrialCode')}
                               </button>
                             )}
                             {(ap === 'rejected' || ap === 'suspended') && (
