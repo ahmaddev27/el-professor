@@ -44,6 +44,16 @@ export const de = {
   'admin.nav.companies':    'Unternehmen',
   'admin.nav.billing':      'Abos & Zahlungen',
   'admin.nav.diagnostics':  'Abnahme-Diagnose',
+  'admin.access.checking':  'Plattformzugriff wird geprüft …',
+  'admin.access.errorTitle': 'Plattformzugriff konnte nicht geprüft werden',
+  'admin.access.errorBody': 'Die Verbindung zum Server ist fehlgeschlagen. Bitte versuchen Sie es erneut.',
+  'admin.access.retry':     'Erneut versuchen',
+  'admin.access.noneTitle': 'Kein Plattformzugriff',
+  'admin.access.noneBody':  'Ihr Konto hat keine aktive Rolle im Plattform-Team. Wenden Sie sich an einen Plattform-Inhaber.',
+  'admin.role.owner':       'Inhaber',
+  'admin.role.support':     'Support',
+  'admin.role.billing':     'Buchhaltung',
+  'admin.role.read_only':   'Nur Lesen',
 
   // ── Shell chrome ───────────────────────────────────────────────────────────
   'shell.systemName':       'Verwaltungssystem',

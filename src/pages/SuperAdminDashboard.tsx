@@ -257,7 +257,13 @@ function PlanDistributionBar({ kpis, total }: { kpis: PlatformKPIs; total: numbe
 // ─── Main Dashboard ───────────────────────────────────────────────────────────
 
 export default function SuperAdminDashboard() {
-  const { enterCompany } = useSuperAdmin();
+  const { enterCompany, platformCan } = useSuperAdmin();
+  // What the platform role may do, from platform_whoami(). Actions a role lacks
+  // are hidden; the database refuses them regardless.
+  const canLifecycle = platformCan('companies.lifecycle');
+  const canBilling = platformCan('billing.manage');
+  const canCodes = platformCan('codes.manage');
+  const canOpenCompany = platformCan('business.read');
   const { showToast } = useToast();
   const navigate = useNavigate();
   const { t, tPlural } = useTranslation();
@@ -642,12 +648,12 @@ export default function SuperAdminDashboard() {
       {/* ── Section tabs ───────────────────────────────────────────────────────── */}
       <div className="flex gap-1 p-1 rounded-xl flex-wrap" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', width: 'fit-content' }}>
         {([
-          { id: 'overview',    label: t('sa.dash.tab.overview'),   icon: BarChart3 },
-          { id: 'approvals',   label: t('sa.dash.tab.approvals'),  icon: ClipboardCheck, badge: pendingCompanies.length },
-          { id: 'discounts',   label: t('sa.dash.tab.discounts'),  icon: Tag },
-          { id: 'referrals',   label: t('sa.dash.tab.referrals'),  icon: Gift },
-          { id: 'activation',  label: t('sa.dash.tab.activation'), icon: KeyRound },
-        ] as const).map(tab => (
+          { id: 'overview',    label: t('sa.dash.tab.overview'),   icon: BarChart3,      visible: true },
+          { id: 'approvals',   label: t('sa.dash.tab.approvals'),  icon: ClipboardCheck, visible: true, badge: pendingCompanies.length },
+          { id: 'discounts',   label: t('sa.dash.tab.discounts'),  icon: Tag,            visible: canCodes },
+          { id: 'referrals',   label: t('sa.dash.tab.referrals'),  icon: Gift,           visible: canCodes },
+          { id: 'activation',  label: t('sa.dash.tab.activation'), icon: KeyRound,       visible: canCodes },
+        ] as const).filter(tab => tab.visible).map(tab => (
           <button
             key={tab.id}
             onClick={() => setActiveSection(tab.id)}
@@ -669,13 +675,13 @@ export default function SuperAdminDashboard() {
       </div>
 
       {/* ── Discount Codes section ─────────────────────────────────────────────── */}
-      {activeSection === 'discounts' && <DiscountCodesManagement />}
+      {canCodes && activeSection === 'discounts' && <DiscountCodesManagement />}
 
       {/* ── Referral Codes section ─────────────────────────────────────────────── */}
-      {activeSection === 'referrals' && <ReferralCodesManagement companies={companies} />}
+      {canCodes && activeSection === 'referrals' && <ReferralCodesManagement companies={companies} />}
 
       {/* ── Activation Codes section ───────────────────────────────────────────── */}
-      {activeSection === 'activation' && <ActivationCodesManagement companies={companies} />}
+      {canCodes && activeSection === 'activation' && <ActivationCodesManagement companies={companies} />}
 
       {/* ── Approvals section ────────────────────────────────────────────────── */}
       {activeSection === 'approvals' && (
@@ -725,7 +731,7 @@ export default function SuperAdminDashboard() {
                         </span>
                       </div>
                     </div>
-                    <div className="flex items-center gap-2 flex-shrink-0">
+                    <div className={`${canLifecycle ? 'flex' : 'hidden'} items-center gap-2 flex-shrink-0`}>
                       <button
                         onClick={() => handleApprove(c)}
                         disabled={approvingId === c.id}
@@ -795,7 +801,7 @@ export default function SuperAdminDashboard() {
                             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold" style={{ background: apBg, color: apColor }}>
                               {apLabel}
                             </span>
-                            {ap === 'approved' && (
+                            {canLifecycle && ap === 'approved' && (
                               <button
                                 onClick={() => handleSuspendApproval(c)}
                                 className="text-[11px] px-2 py-0.5 rounded border transition-colors"
@@ -806,7 +812,7 @@ export default function SuperAdminDashboard() {
                                 {t('sa.dash.suspend')}
                               </button>
                             )}
-                            {(ap === 'rejected' || ap === 'suspended') && (
+                            {canLifecycle && (ap === 'rejected' || ap === 'suspended') && (
                               <button
                                 onClick={() => handleApprove(c)}
                                 disabled={approvingId === c.id}
@@ -816,7 +822,7 @@ export default function SuperAdminDashboard() {
                                 {t('sa.dash.approve')}
                               </button>
                             )}
-                            {ap === 'pending' && (
+                            {canLifecycle && ap === 'pending' && (
                               <button
                                 onClick={() => handleApprove(c)}
                                 disabled={approvingId === c.id}
@@ -847,7 +853,7 @@ export default function SuperAdminDashboard() {
                         </td>
                         <td className="px-4 py-3">
                           <button
-                            onClick={() => { enterCompany(c as any); navigate('/overview'); }}
+                            hidden={!canOpenCompany} onClick={() => { enterCompany(c as any); navigate('/overview'); }}
                             className="p-1.5 rounded-lg transition-colors"
                             style={{ color: 'var(--text-tertiary)' }}
                             onMouseEnter={e => { (e.currentTarget.style.background = 'var(--bg-muted)'); (e.currentTarget.style.color = 'var(--accent)'); }}
@@ -964,7 +970,7 @@ export default function SuperAdminDashboard() {
                     </div>
                   </div>
                   <div className="flex items-center gap-1.5 flex-shrink-0">
-                    {(item.company.status === 'trial') && item.company.trial_end && (
+                    {canBilling && (item.company.status === 'trial') && item.company.trial_end && (
                       <button
                         onClick={() => handleExtendTrial(item.company)}
                         disabled={extendingId === item.company.id}
@@ -975,7 +981,7 @@ export default function SuperAdminDashboard() {
                       </button>
                     )}
                     <button
-                      onClick={() => { enterCompany(item.company as any); navigate('/overview'); }}
+                      hidden={!canOpenCompany} onClick={() => { enterCompany(item.company as any); navigate('/overview'); }}
                       className="p-1.5 rounded-lg transition-colors"
                       style={{ color: severityColor }}
                       title={t('sa.dash.openCompany')}
@@ -1040,13 +1046,14 @@ export default function SuperAdminDashboard() {
                         <button
                           onClick={() => handleExtendTrial(c)}
                           disabled={extendingId === c.id}
-                          className="px-2.5 py-1 rounded-lg text-xs font-semibold transition-opacity hover:opacity-80 flex items-center gap-1"
+                          className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-opacity hover:opacity-80 ${canBilling ? 'flex' : 'hidden'} items-center gap-1`}
                           style={{ background: 'var(--warning)', color: 'white' }}
                         >
                           {extendingId === c.id ? <RefreshCw size={11} className="animate-spin" /> : <Zap size={11} />}
                           {t('sa.dash.extendSevenDays')}
                         </button>
                         <button
+                          hidden={!canLifecycle}
                           onClick={() => handleStatusChange(c, 'active')}
                           className="px-2.5 py-1 rounded-lg text-xs font-semibold transition-opacity hover:opacity-80"
                           style={{ background: 'var(--success)', color: 'white' }}
@@ -1054,7 +1061,7 @@ export default function SuperAdminDashboard() {
                           {t('sa.dash.activate')}
                         </button>
                         <button
-                          onClick={() => { enterCompany(c as any); navigate('/overview'); }}
+                          hidden={!canOpenCompany} onClick={() => { enterCompany(c as any); navigate('/overview'); }}
                           className="p-1.5 rounded-lg transition-colors"
                           style={{ color: 'var(--text-tertiary)' }}
                           onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-muted)')}
@@ -1128,6 +1135,7 @@ export default function SuperAdminDashboard() {
                   <td className="px-4 py-3">
                     <select
                       value={c.plan ?? 'basic'}
+                      disabled={!canBilling}
                       onChange={e => handlePlanChange(c, e.target.value as Plan)}
                       className="text-xs rounded-lg px-2 py-1 font-semibold border-0 outline-none cursor-pointer"
                       style={{ background: PLAN_BG[c.plan ?? 'basic'], color: PLAN_COLOR[c.plan ?? 'basic'] }}
@@ -1144,6 +1152,7 @@ export default function SuperAdminDashboard() {
                   <td className="px-4 py-3">
                     <select
                       value={c.billing_cycle}
+                      disabled={!canBilling}
                       onChange={e => handleBillingCycleChange(c, e.target.value as 'monthly' | 'yearly')}
                       className="text-xs rounded-lg px-2 py-1 border-0 outline-none cursor-pointer"
                       style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)' }}
@@ -1162,6 +1171,7 @@ export default function SuperAdminDashboard() {
                         min={1}
                         max={200}
                         defaultValue={c.subscription_car_limit}
+                        disabled={!canBilling}
                         onBlur={e => {
                           const v = parseInt(e.target.value);
                           if (!isNaN(v) && v !== c.subscription_car_limit) handleCarLimitChange(c, v);
@@ -1209,6 +1219,7 @@ export default function SuperAdminDashboard() {
                     ) : (
                       <select
                         value={c.status}
+                        disabled={!canLifecycle}
                         onChange={e => handleStatusChange(c, e.target.value as CompanyStatus)}
                         className="text-xs rounded-lg px-2 py-1 font-semibold border-0 outline-none cursor-pointer"
                         style={{
@@ -1247,6 +1258,7 @@ export default function SuperAdminDashboard() {
                     <div className="flex items-center gap-1 justify-end">
                       {c.status === 'trial' && c.trial_end && (
                         <button
+                          hidden={!canBilling}
                           onClick={() => handleExtendTrial(c)}
                           disabled={extendingId === c.id}
                           className="p-1.5 rounded-lg transition-colors"
@@ -1259,6 +1271,7 @@ export default function SuperAdminDashboard() {
                         </button>
                       )}
                       <button
+                        hidden={!canBilling}
                         onClick={() => setManualSubModal(c)}
                         className="p-1.5 rounded-lg transition-colors"
                         style={{ color: 'var(--text-tertiary)' }}
@@ -1269,7 +1282,7 @@ export default function SuperAdminDashboard() {
                         <PencilLine size={13} />
                       </button>
                       <button
-                        onClick={() => { enterCompany(c as any); navigate('/overview'); }}
+                        hidden={!canOpenCompany} onClick={() => { enterCompany(c as any); navigate('/overview'); }}
                         className="p-1.5 rounded-lg transition-colors"
                         style={{ color: 'var(--accent)' }}
                         title={t('sa.dash.openAsCompany')}
@@ -1320,7 +1333,7 @@ export default function SuperAdminDashboard() {
                 {format(new Date(c.created_at), 'dd. MMM', { locale: de })}
               </span>
               <button
-                onClick={() => { enterCompany(c as any); navigate('/overview'); }}
+                hidden={!canOpenCompany} onClick={() => { enterCompany(c as any); navigate('/overview'); }}
                 className="p-1.5 rounded-lg transition-colors"
                 style={{ color: 'var(--text-tertiary)' }}
                 onMouseEnter={e => { (e.currentTarget.style.background = 'var(--bg-muted)'); (e.currentTarget.style.color = 'var(--accent)'); }}
@@ -1360,7 +1373,7 @@ export default function SuperAdminDashboard() {
           ))}
           <button
             onClick={() => setActiveSection('discounts')}
-            className="flex flex-col items-center gap-2 p-4 rounded-xl text-center text-xs font-medium transition-all hover:-translate-y-0.5 hover:shadow-md"
+            className={`${canCodes ? 'flex' : 'hidden'} flex-col items-center gap-2 p-4 rounded-xl text-center text-xs font-medium transition-all hover:-translate-y-0.5 hover:shadow-md`}
             style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
             onMouseEnter={e => { (e.currentTarget.style.borderColor = '#06b6d4'); (e.currentTarget.style.color = '#06b6d4'); }}
             onMouseLeave={e => { (e.currentTarget.style.borderColor = 'var(--border)'); (e.currentTarget.style.color = 'var(--text-secondary)'); }}
@@ -1385,7 +1398,7 @@ export default function SuperAdminDashboard() {
           </button>
           <button
             onClick={() => setActiveSection('referrals')}
-            className="flex flex-col items-center gap-2 p-4 rounded-xl text-center text-xs font-medium transition-all hover:-translate-y-0.5 hover:shadow-md"
+            className={`${canCodes ? 'flex' : 'hidden'} flex-col items-center gap-2 p-4 rounded-xl text-center text-xs font-medium transition-all hover:-translate-y-0.5 hover:shadow-md`}
             style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
             onMouseEnter={e => { (e.currentTarget.style.borderColor = '#10b981'); (e.currentTarget.style.color = '#10b981'); }}
             onMouseLeave={e => { (e.currentTarget.style.borderColor = 'var(--border)'); (e.currentTarget.style.color = 'var(--text-secondary)'); }}
@@ -1395,7 +1408,7 @@ export default function SuperAdminDashboard() {
           </button>
           <button
             onClick={() => setActiveSection('activation')}
-            className="flex flex-col items-center gap-2 p-4 rounded-xl text-center text-xs font-medium transition-all hover:-translate-y-0.5 hover:shadow-md"
+            className={`${canCodes ? 'flex' : 'hidden'} flex-col items-center gap-2 p-4 rounded-xl text-center text-xs font-medium transition-all hover:-translate-y-0.5 hover:shadow-md`}
             style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
             onMouseEnter={e => { (e.currentTarget.style.borderColor = 'var(--accent)'); (e.currentTarget.style.color = 'var(--accent)'); }}
             onMouseLeave={e => { (e.currentTarget.style.borderColor = 'var(--border)'); (e.currentTarget.style.color = 'var(--text-secondary)'); }}
