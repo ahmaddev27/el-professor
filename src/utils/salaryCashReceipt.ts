@@ -51,12 +51,16 @@ export interface PaidCashCents {
   gehaltsquittung: number;
 }
 
-export interface ReceiptFigures {
+/** Where a salary stands before a new payment. */
+export interface BalanceFigures {
   dueCents: number;
   paidCashCents: PaidCashCents;
   paidBankCents: number;
   paidTotalCents: number;
   remainingBeforeCents: number;
+}
+
+export interface ReceiptFigures extends BalanceFigures {
   thisPaymentCents: number;
   remainingAfterCents: number;
   isPartial: boolean;
@@ -98,6 +102,25 @@ export function sumPaidCents(payments: readonly SalaryPaymentInput[]): {
 }
 
 /**
+ * Due, paid by source, and remaining for `salary`, before any new payment.
+ *
+ * This is the first half of computeReceiptFigures, which calls it, so a screen
+ * can show the balance before an amount is typed, or beside a refusal, from the
+ * same arithmetic the preview uses.
+ */
+export function computeBalanceFigures(
+  salary: SalaryDueInput,
+  existingPayments: readonly SalaryPaymentInput[],
+): BalanceFigures {
+  const dueCents = salaryDueCents(salary);
+  const { paidCashCents, paidBankCents } = sumPaidCents(existingPayments);
+  const paidTotalCents =
+    paidBankCents + paidCashCents.manual + paidCashCents.weeklyCashDifference + paidCashCents.gehaltsquittung;
+  const remainingBeforeCents = Math.max(dueCents - paidTotalCents, 0);
+  return { dueCents, paidCashCents, paidBankCents, paidTotalCents, remainingBeforeCents };
+}
+
+/**
  * The figures for paying `thisPaymentCents` in cash against `salary`, given the
  * payments already recorded for it (not including this one).
  */
@@ -106,11 +129,8 @@ export function computeReceiptFigures(
   existingPayments: readonly SalaryPaymentInput[],
   thisPaymentCents: number,
 ): ReceiptFiguresResult {
-  const dueCents = salaryDueCents(salary);
-  const { paidCashCents, paidBankCents } = sumPaidCents(existingPayments);
-  const paidTotalCents =
-    paidBankCents + paidCashCents.manual + paidCashCents.weeklyCashDifference + paidCashCents.gehaltsquittung;
-  const remainingBeforeCents = Math.max(dueCents - paidTotalCents, 0);
+  const balance = computeBalanceFigures(salary, existingPayments);
+  const { remainingBeforeCents } = balance;
 
   if (!Number.isSafeInteger(thisPaymentCents) || thisPaymentCents <= 0) {
     return { ok: false, refusal: 'invalid_amount', remainingBeforeCents };
@@ -126,11 +146,7 @@ export function computeReceiptFigures(
   return {
     ok: true,
     figures: {
-      dueCents,
-      paidCashCents,
-      paidBankCents,
-      paidTotalCents,
-      remainingBeforeCents,
+      ...balance,
       thisPaymentCents,
       remainingAfterCents,
       isPartial: remainingAfterCents > 0,

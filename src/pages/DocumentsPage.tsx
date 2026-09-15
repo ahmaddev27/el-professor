@@ -1,9 +1,11 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { FileText, Clock, ChevronRight, ChevronDown, Receipt, Car, MapPin, ArrowLeft, Trash2, ExternalLink, FileDown, AlertTriangle, Download } from 'lucide-react';
+import { FileText, Clock, ChevronRight, ChevronDown, Receipt, Car, MapPin, ArrowLeft, Trash2, ExternalLink, FileDown, AlertTriangle, Download, Banknote } from 'lucide-react';
 import TrinkgeldQuittungModal from '../components/TrinkgeldQuittungModal';
 import MietwagenauftragModal from '../components/MietwagenauftragModal';
+import GehaltsquittungModal from '../components/GehaltsquittungModal';
+import GehaltsquittungList from '../components/GehaltsquittungList';
 import FahrtenbuchTripsView from '../components/FahrtenbuchTripsView';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import type { DriverOption, CarOption } from '../components/FahrtenbuchImportModal';
 import { exportStundennachweisAsPdf, toPdfDayRow } from '../utils/stundennachweisPdfExport';
@@ -120,7 +122,15 @@ const DocumentsPage: React.FC = () => {
   const { t, tPlural } = useTranslation();
   const [isTrinkgeldModalOpen, setIsTrinkgeldModalOpen] = useState(false);
   const [isMietwagenModalOpen, setIsMietwagenModalOpen] = useState(false);
+  const [isGehaltsquittungModalOpen, setIsGehaltsquittungModalOpen] = useState(false);
+  // Bumped when the dialog issues a receipt or attaches a signed copy, so the list reloads.
+  const [receiptsVersion, setReceiptsVersion] = useState(0);
   const [subView, setSubView] = useState<SubView>('main');
+
+  // SalaryDetailsModal links a locked payment to its receipt through router state.
+  const location = useLocation();
+  const focusReceiptState = (location.state as { focusReceiptId?: unknown } | null)?.focusReceiptId;
+  const focusReceiptId = typeof focusReceiptState === 'string' ? focusReceiptState : null;
 
   // Drivers and cars for Fahrtenbuch matching
   const [drivers, setDrivers] = useState<DriverOption[]>([]);
@@ -415,6 +425,30 @@ const DocumentsPage: React.FC = () => {
             </div>
           </button>
 
+          {/* Gehaltsquittung */}
+          <button
+            onClick={() => setIsGehaltsquittungModalOpen(true)}
+            className="text-left rounded-xl p-5 transition-all group"
+            style={cardBase}
+            onMouseEnter={e => { e.currentTarget.style.boxShadow = 'var(--shadow-md)'; e.currentTarget.style.borderColor = 'var(--accent)'; }}
+            onMouseLeave={e => { e.currentTarget.style.boxShadow = 'var(--shadow-sm)'; e.currentTarget.style.borderColor = 'var(--border)'; }}
+          >
+            <div className="flex items-start justify-between mb-3">
+              <div className="rounded-lg p-2.5" style={{ background: 'var(--success-subtle)' }}>
+                <Banknote size={22} style={{ color: 'var(--success)' }} />
+              </div>
+              <ChevronRight size={16} style={{ color: 'var(--text-tertiary)' }} className="mt-1 group-hover:translate-x-0.5 transition-transform" />
+            </div>
+            <h3 className="font-semibold text-base mb-1" style={{ color: 'var(--text-primary)' }}>{t('doc.gehaltsquittung')}</h3>
+            <p className="text-xs leading-relaxed" style={{ color: 'var(--text-tertiary)' }}>
+              {t('doc.gehaltsquittungDesc')}
+            </p>
+            <div className="mt-3 flex items-center gap-1.5">
+              <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ background: 'var(--accent-subtle)', color: 'var(--accent-text)' }}>{t('doc.badgeTemplate')}</span>
+              <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ background: 'var(--success-subtle)', color: 'var(--success)' }}>{t('doc.badgePdfExport')}</span>
+            </div>
+          </button>
+
           {/* Mietwagenauftrag */}
           <button
             onClick={() => setIsMietwagenModalOpen(true)}
@@ -465,6 +499,13 @@ const DocumentsPage: React.FC = () => {
 
         </div>
       </div>
+
+      {/* ── Gehaltsquittungen ─────────────────────────────────────────────────── */}
+      <GehaltsquittungList
+        refreshKey={receiptsVersion}
+        focusReceiptId={focusReceiptId}
+        onCreate={() => setIsGehaltsquittungModalOpen(true)}
+      />
 
       {/* ── Saved Stundennachweise archive ─────────────────────────────────────── */}
       <div>
@@ -738,6 +779,11 @@ const DocumentsPage: React.FC = () => {
 
       <TrinkgeldQuittungModal isOpen={isTrinkgeldModalOpen} onClose={() => setIsTrinkgeldModalOpen(false)} />
       <MietwagenauftragModal  isOpen={isMietwagenModalOpen} onClose={() => setIsMietwagenModalOpen(false)} />
+      <GehaltsquittungModal
+        open={isGehaltsquittungModalOpen}
+        onOpenChange={setIsGehaltsquittungModalOpen}
+        onChanged={() => setReceiptsVersion(version => version + 1)}
+      />
     </div>
   );
 };

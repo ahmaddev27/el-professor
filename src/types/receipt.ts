@@ -104,7 +104,8 @@ export interface SalaryPayment {
   created_at: string;
   updated_at: string;
   payment_category?: string;
-  source_type?: 'manual' | 'weekly_cash_difference';
+  /** `gehaltsquittung` rows are written by confirm_salary_cash_payment and change only through their receipt. */
+  source_type?: 'manual' | 'weekly_cash_difference' | 'gehaltsquittung';
   source_reference?: string;
   week_start?: string;
   week_end?: string;

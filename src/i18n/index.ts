@@ -16,7 +16,8 @@
  * stays hard-coded in the export modules.
  *
  * The list is closed, and it is shorter than it looks: the Stundennachweis PDF,
- * the Fahrtenbuch XLSX, the Trinkgeld-Quittung and the Mietwagenauftrag. A
+ * the Fahrtenbuch XLSX, the Trinkgeld-Quittung, the Gehaltsquittung (its text
+ * is built in utils/salaryCashReceiptDocument.ts) and the Mietwagenauftrag. A
  * `exportTableToExcel(...)` dump of vehicles, drivers, users, Fixkosten, the
  * Bargeldbestand or Werkstatt checks is **not** one of them — it is a
  * convenience export of an operational list, it satisfies no statutory form,
