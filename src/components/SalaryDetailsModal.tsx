@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { X, Plus, CreditCard as Edit2, Trash2, DollarSign, AlertCircle, FileText, CheckSquare, Square, Building2, Banknote, LayoutDashboard, Zap } from 'lucide-react';
+import { X, Plus, CreditCard as Edit2, Trash2, DollarSign, AlertCircle, FileText, CheckSquare, Square, Building2, Banknote, LayoutDashboard, Zap, Lock } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { SalaryPayment, SalaryCalculation } from '../types/receipt';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
+import { usePlan } from '../contexts/PlanContext';
 import { useToast } from '../contexts/ToastContext';
 import { useCompanySettings } from '../contexts/CompanySettingsContext';
 import { format } from 'date-fns';
@@ -49,6 +51,8 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
 
   const { showToast } = useToast();
   const { user } = useAuth();
+  const navigate = useNavigate();
+  const { can: planIncludes } = usePlan();
   const { effectiveCompanyId: companyId } = useSuperAdmin();
   const { settings } = useCompanySettings();
 
@@ -802,6 +806,22 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
                                   <Zap size={10} />{t('sal.weekly.badge')}
                                 </span>
                               )}
+                              {payment.source_type === 'gehaltsquittung' && (
+                                <span style={{
+                                  background: 'var(--bg-muted)',
+                                  color: 'var(--text-secondary)',
+                                  borderRadius: '0.25rem',
+                                  padding: '0.125rem 0.375rem',
+                                  fontSize: '0.6875rem',
+                                  fontWeight: 500,
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '0.25rem',
+                                  width: 'fit-content',
+                                }}>
+                                  <Lock size={10} />{t('sal.payment.receiptBadge')}
+                                </span>
+                              )}
                             </div>
                           </td>
                           <td style={{ color: 'var(--text-primary)', padding: '0.75rem 1rem', fontSize: '0.875rem', textAlign: 'right', fontWeight: 600 }}>
@@ -811,6 +831,31 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
                             {payment.description || '-'}
                           </td>
                           <td style={{ padding: '0.75rem 1rem', textAlign: 'right' }}>
+                            {payment.source_type === 'gehaltsquittung' ? (
+                              // Written by confirm_salary_cash_payment; a trigger refuses any edit or
+                              // delete, so the row changes only by voiding its receipt.
+                              <div className="flex items-center justify-end gap-2">
+                                <span
+                                  role="img"
+                                  aria-label={t('sal.payment.receiptLocked')}
+                                  title={t('sal.payment.receiptLocked')}
+                                  style={{ color: 'var(--text-tertiary)', display: 'inline-flex' }}
+                                >
+                                  <Lock size={16} />
+                                </span>
+                                {planIncludes('dokumente') && payment.source_reference && (
+                                  <button
+                                    type="button"
+                                    onClick={() => navigate('/dokumente', { state: { focusReceiptId: payment.source_reference } })}
+                                    style={{ color: 'var(--accent)', borderRadius: '0.25rem', padding: '0.25rem 0.375rem', fontSize: '0.8125rem', fontWeight: 500 }}
+                                    onMouseEnter={e => (e.currentTarget.style.background = 'var(--accent-subtle)')}
+                                    onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+                                  >
+                                    {t('sal.payment.openReceipt')}
+                                  </button>
+                                )}
+                              </div>
+                            ) : (
                             <div className="flex items-center justify-end space-x-2">
                               <button
                                 onClick={() => { setSelectedPayment(payment); setIsPaymentModalOpen(true); }}
@@ -831,6 +876,7 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
                                 <Trash2 size={16} />
                               </button>
                             </div>
+                            )}
                           </td>
                         </tr>
                       ))}

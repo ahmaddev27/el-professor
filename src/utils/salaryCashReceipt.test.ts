@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  computeBalanceFigures,
   computeReceiptFigures,
   salaryDueCents,
   sumPaidCents,
@@ -84,6 +85,38 @@ describe('computeReceiptFigures — the database scenario', () => {
     const f = figures(computeReceiptFigures(s2, [], 80000));
     expect(f.dueCents).toBe(80000);
     expect(f.isPartial).toBe(false);
+  });
+});
+
+describe('computeBalanceFigures — the balance before a payment', () => {
+  const beforeR3: SalaryPaymentInput[] = [
+    receipt(400),
+    receipt(250),
+    { payment_type: 'bank', amount: 100, source_type: 'manual' },
+    { payment_type: 'cash', amount: 50, source_type: 'weekly_cash_difference' },
+    { payment_type: 'cash', amount: 20, source_type: 'manual' },
+  ];
+
+  it('is the first half of computeReceiptFigures', () => {
+    const f = figures(computeReceiptFigures(S1, beforeR3, 18000));
+    expect(computeBalanceFigures(S1, beforeR3)).toEqual({
+      dueCents: f.dueCents,
+      paidCashCents: f.paidCashCents,
+      paidBankCents: f.paidBankCents,
+      paidTotalCents: f.paidTotalCents,
+      remainingBeforeCents: f.remainingBeforeCents,
+    });
+  });
+
+  it('still shows due and paid where every payment would be refused', () => {
+    const overpaid: SalaryPaymentInput[] = [{ payment_type: 'bank', amount: 1200, source_type: 'manual' }];
+    expect(computeBalanceFigures(S1, overpaid)).toEqual({
+      dueCents: 100000,
+      paidCashCents: { manual: 0, weeklyCashDifference: 0, gehaltsquittung: 0 },
+      paidBankCents: 120000,
+      paidTotalCents: 120000,
+      remainingBeforeCents: 0,
+    });
   });
 });
 

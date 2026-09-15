@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatCentsDe, formatCentsForInput, parseGermanAmountToCents, toCents } from './money';
+import { formatCentsDe, formatCentsForInput, formatCentsForNumeric, parseGermanAmountToCents, toCents } from './money';
 
 describe('toCents', () => {
   it('converts database numbers without float drift', () => {
@@ -97,5 +97,26 @@ describe('formatCentsForInput', () => {
     for (const cents of [0, 1, 99999, 100000, 100001, 123456, 1000000, 99999999]) {
       expect(parseGermanAmountToCents(formatCentsForInput(cents))).toBe(cents);
     }
+  });
+});
+
+describe('formatCentsForNumeric', () => {
+  it('writes a decimal point, two decimals and no grouping', () => {
+    expect(formatCentsForNumeric(0)).toBe('0.00');
+    expect(formatCentsForNumeric(5)).toBe('0.05');
+    expect(formatCentsForNumeric(18000)).toBe('180.00');
+    expect(formatCentsForNumeric(123456)).toBe('1234.56');
+    expect(formatCentsForNumeric(99999999)).toBe('999999.99');
+    expect(formatCentsForNumeric(-1250)).toBe('-12.50');
+  });
+
+  it('round-trips through toCents', () => {
+    for (const cents of [0, 1, 10, 99, 100, 29999, 123456, 99999999, 9999999999]) {
+      expect(toCents(formatCentsForNumeric(cents))).toBe(cents);
+    }
+  });
+
+  it('refuses fractional cents', () => {
+    expect(() => formatCentsForNumeric(12.5)).toThrow(RangeError);
   });
 });

@@ -61,6 +61,18 @@ export function formatCentsForInput(cents: number): string {
 }
 
 /**
+ * Cents as the decimal text a numeric database parameter reads exactly:
+ * 123456 → "1234.56". The inverse of toCents for strings. An RPC receives this
+ * rather than cents / 100, so no float stands between a typed amount and the
+ * ledger row it becomes.
+ */
+export function formatCentsForNumeric(cents: number): string {
+  assertWholeCents(cents);
+  const abs = Math.abs(cents);
+  return `${cents < 0 ? '-' : ''}${Math.floor(abs / 100)}.${String(abs % 100).padStart(2, '0')}`;
+}
+
+/**
  * A non-negative amount typed the German way, to cents; null when it is not
  * one. Accepted:
  *

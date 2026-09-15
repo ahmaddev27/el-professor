@@ -2,8 +2,9 @@
  * The El-Professor design system (Phase 2).
  *
  * Tokens live in src/index.css and are mapped in tailwind.config.js; the
- * preview at /design-preview shows every component in use. Existing screens do
- * not use any of this yet. Phase 5 moves them across in batches.
+ * preview at /design-preview shows every component in use. Of the existing
+ * screens only the Gehaltsquittung dialog and receipt list (plan 4.3a) use it.
+ * Phase 5 moves the others across in batches.
  */
 export { AppShell, type AppShellNavGroup, type AppShellNavItem, type AppShellProps } from './AppShell';
 export { Badge, badgeVariants, type BadgeProps } from './Badge';

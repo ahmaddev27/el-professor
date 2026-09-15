@@ -17,6 +17,7 @@ The redesign of El-Professor, request 4 of the requirements plan. Phase 2 define
 - **Prototype screenshots:** [`prototype/`](prototype/), in German, light and dark, at 375, 768 and 1280 px: `{width}-{theme}-uebersicht.png`, `-fahrzeuge.png`, `-fahrzeug-formular.png` (the add form showing a validation error), `-navigation.png` (the folded sidebar or the phone drawer), and `1280-{theme}-komponenten.png` with every component in its states.
 - **On staging, once merged:** `https://app.elprofessor.eu/design-preview`, behind the staging login, without signing in to the app. Invented sample data; nothing is saved. Production builds do not contain it.
 - **The audit of today's screens:** [`audit/`](audit/README.md), 22 findings in priority order with 80 screenshots.
+- **Gehaltsquittung (plan 4.3a):** [`gehaltsquittung/`](gehaltsquittung/), the first real screens on the design system: the receipt list on Dokumente and each step of the dialog, rendered with invented data in a German Chrome, light, dark, English and at 390 px (`390-*` shows the whole scrolled dialog).
 - **Code:** tokens in `src/index.css` and `tailwind.config.js`, components and `AppShell` in `src/components/ui`, the prototype in `src/design-preview`. CLAUDE.md, "Design system and the design preview", has the rules.
 
 ## Open questions for the owner
