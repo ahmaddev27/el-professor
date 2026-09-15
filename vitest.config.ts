@@ -12,7 +12,10 @@ process.env.TZ = 'Europe/Berlin';
 
 export default defineConfig({
   test: {
-    include: ['src/**/*.test.ts'],
+    // The edge functions' pure modules (_shared/otp-core.ts, smtp-core.ts, the
+    // mail layout and its copy) use only web-standard APIs, so Node runs them
+    // unchanged. Anything that touches Deno is kept out of those files.
+    include: ['src/**/*.test.ts', 'supabase/functions/_shared/**/*.test.ts'],
     environment: 'node',
   },
 });
