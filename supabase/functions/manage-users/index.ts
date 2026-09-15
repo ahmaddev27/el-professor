@@ -1,6 +1,8 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from 'npm:@supabase/supabase-js@2'
 import { corsFor, errorResponse, UserError } from '../_shared/http.ts'
+import { issueAndSendOtp } from '../_shared/otp.ts'
+import { logFailure } from '../_shared/otp-core.ts'
 
 interface CreateUserRequest {
   email: string
@@ -96,28 +98,6 @@ Deno.serve(async (req: Request) => {
       if (!targetCompany || targetCompany !== callerCompanyId) {
         throw new UserError('Keine Berechtigung: Dieser Benutzer gehört zu einem anderen Unternehmen.', 403)
       }
-    }
-
-    /**
-     * Email the user a link to set their password.
-     *
-     * This used to call `auth.admin.generateLink`, which *builds* a link and
-     * returns it — it never sends anything — and the result was discarded. So
-     * an admin who invited an employee by email was told an invitation had gone
-     * out when none had, and "resend invite" did nothing but bump invited_at.
-     * resetPasswordForEmail is the sending counterpart of the same recovery
-     * link, which is what the original code evidently meant.
-     *
-     * The landing page comes from APP_URL, not from the request's Origin header:
-     * GoTrue would reject a foreign redirect anyway, but a link that depends on
-     * whichever header the browser happened to send is not one to put in mail.
-     */
-    const sendPasswordSetupEmail = async (email: string): Promise<void> => {
-      const appUrl = (Deno.env.get('APP_URL') ?? '').replace(/\/$/, '')
-      const { error } = await supabaseAdmin.auth.resetPasswordForEmail(email, {
-        redirectTo: appUrl ? `${appUrl}/auth/callback` : undefined,
-      })
-      if (error) throw error
     }
 
     const url = new URL(req.url)
@@ -261,21 +241,40 @@ Deno.serve(async (req: Request) => {
           500)
       }
 
-      // Only send invite email for the email-invite flow (not temp password).
+      // Only invite by code for the email-invite flow (not temp password).
       // Temp-password users log in directly with the password the admin set.
+      //
+      // The invitation is a six-digit code the employee enters at /einladung;
+      // no link in the mail carries a token. clientIp is null on purpose: the
+      // per-IP limit guards the public endpoints, and an admin inviting a whole
+      // office from one address would trip it. The per-address cooldown and
+      // hourly limit still apply.
       if (!useTempPassword) {
+        let sent = false
         try {
-          await sendPasswordSetupEmail(body.email)
-        } catch (mailError) {
-          // The account and profile exist; only the email failed. Say so, and
+          const outcome = await issueAndSendOtp({
+            purpose: 'invite_activate',
+            email: newUser.user.email ?? body.email,
+            clientIp: null,
+            actorUserId: user.id,
+          })
+          sent = outcome.status === 'sent'
+          if (!sent) {
+            logFailure('manage-users', 'invite-code-after-createUser',
+              { purpose: 'invite_activate', user_id: newUser.user.id },
+              new Error(`invite not sent: ${outcome.status}${outcome.reason ? ` (${outcome.reason})` : ''}`))
+          }
+        } catch (inviteError) {
+          logFailure('manage-users', 'invite-code-after-createUser',
+            { purpose: 'invite_activate', user_id: newUser.user.id }, inviteError)
+        }
+        if (!sent) {
+          // The account and profile exist; only the invitation failed. Say so, and
           // point at the button that retries it, rather than letting the admin
           // create the user again and hit "address already registered".
-          console.error(JSON.stringify({ level: 'error', fn: 'manage-users',
-            step: 'invite-email-after-createUser', userId: newUser.user.id,
-            detail: mailError instanceof Error ? mailError.message : String(mailError) }))
           throw new UserError(
             'Das Benutzerkonto wurde angelegt, die Einladungs-E-Mail konnte jedoch nicht gesendet werden. Bitte nutzen Sie „Einladung erneut senden".',
-            502)
+            502, 'send_failed')
         }
       }
 
@@ -291,7 +290,8 @@ Deno.serve(async (req: Request) => {
             company_id: targetCompanyId,
             status: profileStatus,
             must_change_password: useTempPassword,
-          }
+          },
+          ...(useTempPassword ? {} : { invite: { status: 'sent' } }),
         }),
         { headers: { ...corsFor(req), 'Content-Type': 'application/json' }, status: 200 }
       )
@@ -375,9 +375,32 @@ Deno.serve(async (req: Request) => {
       await assertSameCompany(body.user_id)
 
       const { data: userData } = await supabaseAdmin.auth.admin.getUserById(body.user_id)
-      if (!userData.user) throw new UserError('Benutzer nicht gefunden.', 404)
+      if (!userData.user?.email) throw new UserError('Benutzer nicht gefunden.', 404)
 
-      await sendPasswordSetupEmail(userData.user.email!)
+      // A new code replaces the previous one. The database decides whether the
+      // user can still be invited (pending_invite, in a company) and whether the
+      // address is cooling down; each refusal carries a reason for the screen.
+      const outcome = await issueAndSendOtp({
+        purpose: 'invite_activate',
+        email: userData.user.email,
+        clientIp: null,
+        actorUserId: user.id,
+      })
+      if (outcome.status === 'rate_limited') {
+        const seconds = outcome.retryAfterSeconds ?? 60
+        throw outcome.reason === 'email_hourly'
+          ? new UserError('Für diese Adresse wurden zu viele Einladungen angefordert. Bitte versuchen Sie es in einer Stunde erneut.',
+            429, 'email_hourly', { retry_after_seconds: seconds })
+          : new UserError(`Bitte warten Sie ${seconds} Sekunden, bevor Sie die Einladung erneut senden.`,
+            429, 'cooldown', { retry_after_seconds: seconds })
+      }
+      if (outcome.status === 'send_failed') {
+        throw new UserError('Die Einladungs-E-Mail konnte nicht gesendet werden. Bitte versuchen Sie es in einigen Minuten erneut.',
+          502, 'send_failed')
+      }
+      if (outcome.status !== 'sent') {
+        throw new UserError('Für diesen Benutzer ist keine Einladung mehr offen.', 409, 'not_pending')
+      }
 
       await supabaseAdmin
         .from('user_profiles')
