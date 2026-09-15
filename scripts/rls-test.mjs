@@ -14,10 +14,11 @@
  * Migrations newer than the dump are applied on top, which also proves they
  * apply cleanly to a real schema.
  *
- * After the permission matrix (assertions.sql), every other tests/rls/*.sql
- * file runs in name order, against the same database. The seed files are
- * loaded before, not asserted. A test file that writes should run inside
- * BEGIN … ROLLBACK (otp.sql does), so the files after it see only the seeds.
+ * After assertions.sql, every other tests/rls/*.sql file (the permission matrix
+ * among them) runs once, in name order, against the same database. The seed
+ * files are loaded before, not asserted. A test file that writes should run
+ * inside BEGIN … ROLLBACK (matrix.sql and otp.sql do), so the files after it
+ * see only the seeds.
  *
  *   node scripts/rls-test.mjs            # build, assert, tear down
  *   node scripts/rls-test.mjs --keep     # leave the container up to poke at
@@ -62,8 +63,9 @@ const psqlText = (sql) =>
 const psqlFile = (file) => psqlText(readFileSync(file, 'utf8'));
 
 /**
- * Runs one assertion file and returns what it reported. psql writes NOTICE to
- * stderr, so stdout alone shows nothing on a passing run.
+ * Runs one test file and returns what it reported. psql writes NOTICE and
+ * WARNING to stderr, and execFileSync discards stderr on success, so a passing
+ * run would show neither the checks nor the matrix's UNCOVERED warnings.
  */
 function assertFile(file) {
   const r = spawnSync('docker', PSQL,
@@ -71,9 +73,11 @@ function assertFile(file) {
   if (r.error) throw r.error;
   if (r.status !== 0) {
     throw Object.assign(new Error(`${path.basename(file)} failed`),
-                        { stderr: `${path.basename(file)}:\n${r.stderr}` });
+                        { stderr: `${path.basename(file)}:\n${r.stdout}${r.stderr}` });
   }
-  return `${r.stdout}${r.stderr}`.replace(/^psql:[^:]+:\d+: NOTICE:\s*/gm, '    ');
+  return `${r.stdout}${r.stderr}`
+    .replace(/^psql:[^:]+:\d+: NOTICE:\s*/gm, '    ')
+    .replace(/^psql:[^:]+:\d+: WARNING:\s*/gm, '    WARNING ');
 }
 
 function teardown() {
@@ -95,16 +99,6 @@ async function waitReady() {
   throw new Error('database never became ready');
 }
 
-const RLS_DIR = path.join(ROOT, 'tests/rls');
-/** Files the kit loads itself, in its own order, before any suite runs. */
-const RLS_SETUP = new Set(['roles-seed.sql', 'seed.sql', 'assertions.sql']);
-
-function rlsSuites() {
-  return readdirSync(RLS_DIR)
-    .filter(f => f.endsWith('.sql') && !RLS_SETUP.has(f))
-    .sort();
-}
-
 function migrationsAfterFixture() {
   const dir = path.join(ROOT, 'supabase/migrations');
   return readdirSync(dir)
@@ -113,7 +107,11 @@ function migrationsAfterFixture() {
     .map(f => path.join(dir, f));
 }
 
-/** The permission matrix first, then every other test file in name order. */
+/**
+ * assertions.sql first, so a broken rule is reported as a broken rule before
+ * it shows up as a moved matrix cell, then every other test file in name
+ * order. Adding a suite needs no change here.
+ */
 function assertionFiles() {
   const rest = readdirSync(TESTS)
     .filter(f => f.endsWith('.sql') && f !== 'assertions.sql' && !SEEDS.has(f))
@@ -169,16 +167,8 @@ try {
   psqlFile(path.join(TESTS, 'seed.sql'));
 
   for (const file of assertionFiles()) {
-    step(`asserting ${path.basename(file)}…\n`);
+    step(`\n  asserting ${path.basename(file)}…\n`);
     process.stdout.write(assertFile(file));
-  }
-
-  // Every other .sql file in tests/rls is a suite of its own, run after the
-  // matrix in filename order, so adding a suite needs no change here.
-  for (const suite of rlsSuites()) {
-    step(`\n  asserting ${suite}…\n`);
-    const suiteOut = psqlFile(path.join(RLS_DIR, suite));
-    process.stdout.write(suiteOut.replace(/^psql:[^:]+:\d+: NOTICE:\s*/gm, '    '));
   }
 
   process.stdout.write('\nRLS assertions passed.\n');
