@@ -14,7 +14,7 @@
 ![Playwright](https://img.shields.io/badge/Playwright-e2e-2EAD33?logo=playwright&logoColor=white)
 ![Languages](https://img.shields.io/badge/UI-Deutsch%20%7C%20English-555555)
 
-![Requirements plan](https://img.shields.io/badge/requirements%20plan-17%20of%2037%20steps-yellow)
+![Requirements plan](https://img.shields.io/badge/requirements%20plan-18%20of%2037%20steps-yellow)
 ![Phase 0](https://img.shields.io/badge/phase%200-5%2F6-yellowgreen)
 ![Phases 1–4](https://img.shields.io/badge/phases%201%E2%80%934-building-orange)
 ![Phase 5](https://img.shields.io/badge/phase%205-not%20started-lightgrey)
@@ -41,11 +41,11 @@ A step counts once it is merged into `staging` and verified there. Production re
 | **0** | Releases, rollback, staging protection | `▰▰▰▰▰▱` **5/6** · 83% | ![live on staging](https://img.shields.io/badge/-live%20on%20staging-2ea44f) 0.6 waits for the production button |
 | **1** | OTP and account security | `▰▰▰▰▰▰▱` **6/7** · 86% | ![on staging](https://img.shields.io/badge/-on%20staging-2ea44f) PRs #11, #16, #14; done once the code flows pass on staging and a real code arrives from production. 1.6 Google sign-in: database (PR #22) and deploy settings (PR #29) are on staging, switched off; the sign-in screens wait for the Google Cloud clients, a privacy policy and an Impressum |
 | **2** | Design system and prototype | `▰▰▰` **3/3** · 100% | ![on staging](https://img.shields.io/badge/-on%20staging-2ea44f) PR #17; approved when the owner asked to merge every open PR |
-| **3** | Platform admin and permissions | `▰▱▱▱▱▱▱▱▱▱▱▱▱` **1/13** · 8% | ![building](https://img.shields.io/badge/-building-orange) restructured into slices on 15.09.2026; 3.0 merged (PR #12); 3.1 in review (PR #24), then 3.5, 3.6b and 3.9; 3.2 cancelled on 16.09.2026 (platform admin sign-in stays password-only); the 3.8 conflict report merged (PR #21) |
+| **3** | Platform admin and permissions | `▰▰▱▱▱▱▱▱▱▱▱▱▱` **2/13** · 15% | ![building](https://img.shields.io/badge/-building-orange) restructured into slices on 15.09.2026; 3.0 (PR #12) and 3.1 (PR #24) merged; 3.5, 3.6b and 3.9 building; 3.2 cancelled on 16.09.2026 (platform admin sign-in stays password-only); the 3.8 conflict report merged (PR #21) |
 | **4** | Cash salary receipt | `▰▰▱` **2/3** · 67% | ![building](https://img.shields.io/badge/-building-orange) logic and database merged (PR #13); screens wait for the design approval |
 | **5** | Design rollout | `▱▱▱▱▱` **0/5** | ![not started](https://img.shields.io/badge/-not%20started-lightgrey) |
 
-**Overall:** `▰▰▰▰▰▰▰▰▰▱▱▱▱▱▱▱▱▱▱▱` 17 of 37 steps · 46%
+**Overall:** `▰▰▰▰▰▰▰▰▰▰▱▱▱▱▱▱▱▱▱▱` 18 of 37 steps · 49%
 
 ### Live on staging
 
@@ -69,6 +69,7 @@ A step counts once it is merged into `staging` and verified there. Production re
 - [x] **Security:** five guarded RPCs are no longer executable by anonymous callers (none was exploitable) — PR #28
 - [x] A generated activation code is emailed to the address on the code, or to the company admins; its validity stays 2 minutes — PR #30
 - [x] **1.6, deploy part** Google sign-in deploy settings, switched off: Kong closes GoTrue signup, otp and magiclink (403, checked on every release), the auth entrypoint refuses any switch value but true or false, and oauth-account refuses platform staff — PR #29
+- [x] **3.1** Platform authority: four staff roles (owner, support, billing, read_only) with a capability matrix, an append-only audit log, audited platform reads and writes in manage-users and generate-activation-code, and a profile guard that refuses JWT changes of company, staff flag and user id — PR #24
 - [ ] **0.6** First production release from CI — the owner presses the button
 
 ### Building now
@@ -77,8 +78,7 @@ Agents build in parallel git worktrees. Each branch ends in a reviewed PR into `
 
 | Stream | Branch | State |
 |---|---|---|
-| Platform authority (3.1): staff roles, capabilities, audit log | `phase3/platform-authority` | PR #24, fixing review findings |
-| After 3.1 merges: platform write RPCs (3.5), directory read models (3.6b), prices and features in the database (3.9) | `phase3/platform-writes`, `phase3/read-models`, `phase3/pricing-settings` | after 3.1 |
+| Platform write RPCs (3.5), directory read models (3.6b), prices and features in the database (3.9) | `phase3/platform-writes`, `phase3/read-models`, `phase3/pricing-settings` | building |
 | Gehaltsquittung screens, PDF and receipt list (4.3a) | `feat/receipts-ui` or similar | building |
 
 ### Environments
