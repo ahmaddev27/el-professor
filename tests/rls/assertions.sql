@@ -134,6 +134,14 @@ DECLARE
     'public.replace_monthly_planning_run(jsonb, uuid)',
     'public.delete_or_archive_monthly_planning_run(uuid)',
     'public.purge_old_monthly_planning_runs(integer, integer)'];
+  -- SECURITY DEFINER functions that check their caller themselves and that
+  -- only signed-in screens call, whose anon grant 20260915140000 revoked
+  guarded_signed_in constant text[] := ARRAY[
+    'public.reassign_fahrtenbuch_trip(uuid, uuid, text, text, text, text)',
+    'public.revoke_activation_code(uuid)',
+    'public.delete_activation_code(uuid)',
+    'public.hide_activation_code(uuid, text)',
+    'public.update_company_subscription_manual(uuid, text, timestamp with time zone, timestamp with time zone, text, text)'];
   redeem_discount constant text := 'public.redeem_discount_code(text, uuid, text, text, integer)';
 BEGIN
   SELECT id INTO co_a FROM companies WHERE slug = 'test-a';
@@ -246,14 +254,14 @@ BEGIN
   -- unless it revokes it again. redeem_discount_code lost authenticated in
   -- 20260911120000 and anon in 20260915110000.
   PERFORM _check(format('anon cannot EXECUTE %s', f), has_function_privilege('anon', f, 'EXECUTE'), false)
-     FROM unnest(signed_in_only || redeem_discount) AS f;
+     FROM unnest(signed_in_only || guarded_signed_in || redeem_discount) AS f;
   PERFORM _check('a signed-in user cannot EXECUTE redeem_discount_code',
     has_function_privilege('authenticated', redeem_discount, 'EXECUTE'), false);
   -- …and each function stays callable by the role it exists for.
   PERFORM _check('the service role CAN EXECUTE redeem_discount_code',
     has_function_privilege('service_role', redeem_discount, 'EXECUTE'), true);
   PERFORM _check(format('a signed-in user CAN EXECUTE %s', f), has_function_privilege('authenticated', f, 'EXECUTE'), true)
-     FROM unnest(signed_in_only) AS f;
+     FROM unnest(signed_in_only || guarded_signed_in) AS f;
 
   -- ── the super-admin check, for a caller without a profile ─────────────────
   -- is_user_super_admin() answered NULL, not false, to anyone without a

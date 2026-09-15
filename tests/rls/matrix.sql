@@ -149,13 +149,14 @@
       here. An RPC cell is `-` exactly where 20260427075001, 20260428102656 or
       20260607124839 revoked that caller's EXECUTE and no later migration
       restated it. 20260915110000 restates the grants of create_user_account,
-      list_users_for_admin, get_user_status and is_user_active, and
+      list_users_for_admin, get_user_status and is_user_active,
       20260915130000 those of is_user_super_admin and
-      create_user_profile_manual, so their cells are probed. A `-` follows the
+      create_user_profile_manual, and 20260915140000 that of
+      reassign_fahrtenbuch_trip, so their cells are probed. A `-` follows the
       migration history, not the live grant: on staging on 15.09.2026 anon
       still held EXECUTE on get_user_company_id, get_current_user_role,
-      is_role, is_support_user, uid and reassign_fahrtenbuch_trip, all of them
-      `-` here. Every other anon cell relies
+      is_role, is_support_user and uid, all of them `-` here, and on
+      reassign_fahrtenbuch_trip until 20260915140000. Every other anon cell relies
       on Supabase's default privileges granting anon EXECUTE explicitly when a
       function is created; confirm with has_function_privilege() on a copy of
       staging. No migration older than the fixture revoked a table privilege,
@@ -1604,18 +1605,21 @@ INSERT INTO _mx_rpc (label, stmt, want, hole) VALUES
     ('is_user_super_admin()',
      $q$SELECT is_user_super_admin()::text$q$,
      'NNNNNNY', '3.2 platform right from the column alone, no verified session'),
+    -- anon's EXECUTE on the next four revoked by 20260915140000. Only the super
+    -- admin's dashboard calls them, signed in. Their anon cell moved from N
+    -- (the guard answered success=false) to P: NNNNNNY became PNNNNNY
     ('revoke_activation_code(code of A)',
      $q$SELECT revoke_activation_code({ref:activation_codes})::text$q$,
-     'NNNNNNY', '3.1 super check reads the is_super_admin column directly'),
+     'PNNNNNY', '3.1 super check reads the is_super_admin column directly'),
     ('delete_activation_code(code of A)',
      $q$SELECT delete_activation_code({ref:activation_codes})::text$q$,
-     'NNNNNNY', '3.1 super check reads the is_super_admin column directly'),
+     'PNNNNNY', '3.1 super check reads the is_super_admin column directly'),
     ('hide_activation_code(code of A)',
      $q$SELECT hide_activation_code({ref:activation_codes}, 'mx')::text$q$,
-     'NNNNNNY', '3.1 super check reads the is_super_admin column directly'),
+     'PNNNNNY', '3.1 super check reads the is_super_admin column directly'),
     ('update_company_subscription_manual(company B)',
      $q$SELECT update_company_subscription_manual('c0000000-0000-4000-8000-00000000000b', 'active', now(), now() + interval '30 days', '1_monat', 'mx')::text$q$,
-     'NNNNNNY', '3.1 super check reads the is_super_admin column directly'),
+     'PNNNNNY', '3.1 super check reads the is_super_admin column directly'),
     -- anon's EXECUTE revoked by 20260915120000; the platform's invoice screen
     -- calls it signed in
     ('generate_invoice_number(2026)',
@@ -1664,10 +1668,13 @@ INSERT INTO _mx_rpc (label, stmt, want, hole) VALUES
     ('purge_old_monthly_planning_runs(month of A''s archived run)',
      $q$SELECT ((purge_old_monthly_planning_runs(5, 2026) ->> 'deleted_count') IS NOT NULL)::text$q$,
      'PYYYYNT', NULL),
-    -- anon's EXECUTE revoked by 20260607124839
+    -- anon's EXECUTE revoked by 20260607124839, before the fixture, yet still
+    -- held on staging on 15.09.2026, and revoked again by 20260915140000,
+    -- which the kit applies, so the anon cell is probed. It moved from - (not
+    -- probed) to P: -YYYYTT became PYYYYTT
     ('reassign_fahrtenbuch_trip(trip of A)',
      $q$SELECT reassign_fahrtenbuch_trip({ref:fahrtenbuch_trips}, {ref:drivers}, 'MX', 'pending', 'mx', 'mx')::text$q$,
-     '-YYYYTT', NULL),
+     'PYYYYTT', NULL),
 
     -- the Abrechnung and cash RPCs: security invoker, so they return what the
     -- income, receipts and cash_transactions policies let the caller read.
