@@ -14,7 +14,7 @@
 ![Playwright](https://img.shields.io/badge/Playwright-e2e-2EAD33?logo=playwright&logoColor=white)
 ![Languages](https://img.shields.io/badge/UI-Deutsch%20%7C%20English-555555)
 
-![Requirements plan](https://img.shields.io/badge/requirements%20plan-6%20of%2031%20steps-yellow)
+![Requirements plan](https://img.shields.io/badge/requirements%20plan-8%20of%2031%20steps-yellow)
 ![Phase 0](https://img.shields.io/badge/phase%200-5%2F6-yellowgreen)
 ![Phases 1–4](https://img.shields.io/badge/phases%201%E2%80%934-building-orange)
 ![Phase 5](https://img.shields.io/badge/phase%205-not%20started-lightgrey)
@@ -44,10 +44,10 @@ A step counts once it is merged into `staging` and verified there. Production re
 | **1** | OTP and account security | `▰▱▱▱▱▱` **1/6** · 17% | ![building](https://img.shields.io/badge/-building-orange) database merged (PR #11); screens in PR #14; edge functions building |
 | **2** | Design system and prototype | `▱▱▱` **0/3** | ![building](https://img.shields.io/badge/-building-orange) ends at the owner's approval |
 | **3** | Platform admin and permissions | `▱▱▱▱▱▱▱▱` **0/8** | ![building](https://img.shields.io/badge/-building-orange) 3.0 baseline in PR #12, then 3.1 and 3.5 |
-| **4** | Cash salary receipt | `▱▱▱` **0/3** | ![building](https://img.shields.io/badge/-building-orange) logic and database in PR #13 |
+| **4** | Cash salary receipt | `▰▰▱` **2/3** · 67% | ![building](https://img.shields.io/badge/-building-orange) logic and database merged (PR #13); screens wait for the design approval |
 | **5** | Design rollout | `▱▱▱▱▱` **0/5** | ![not started](https://img.shields.io/badge/-not%20started-lightgrey) |
 
-**Overall:** `▰▰▰▰▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱` 6 of 31 steps · 19%
+**Overall:** `▰▰▰▰▰▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱` 8 of 31 steps · 26%
 
 ### Live on staging
 
@@ -58,7 +58,8 @@ A step counts once it is merged into `staging` and verified there. Production re
 - [x] **0.5** End-to-end suite, 5/5 passing; its first run found reset and invite links that signed users straight back out, fixed in the same PR — PR #7
 - [x] Staging mail reaches real recipients through Resend, `example.com` excluded, by the owner's decision — PR #8, #9
 - [x] **1.1** OTP database: code tables, rate-limited RPCs and one-transaction signup; nothing uses it yet — PR #11
-- [x] **Security fix:** anonymous callers can no longer list users, redeem discount or activation codes, or read a user's status. Closed by hand on production and staging on 15.09.2026, and made permanent by migration `20260915110000`.
+- [x] **Security fix:** anonymous callers can no longer list users, redeem discount or activation codes, or read a user's status. Closed by hand on production and staging on 15.09.2026, and made permanent by migration `20260915110000` — PR #15
+- [x] **4.1–4.2** Cash receipt foundations: receipts, a cash ledger, gapless GQ numbering and integer-cent helpers; the Trinkgeld-Quittung prints amounts of 1000 € and more correctly again — PR #13
 - [ ] **0.6** First production release from CI — the owner presses the button
 
 ### Building now
@@ -72,7 +73,7 @@ Agents build Phases 1–4 in parallel git worktrees. Each branch ends in a revie
 | OTP screens | `phase1/otp-frontend` | PR #14 open, waits for the edge functions |
 | Design system and prototype | `phase2/design-system` | building |
 | Permission baseline, then platform authority | `phase3/rls-baseline` → `phase3/platform-authority` | PR #12, fixing review findings |
-| Cash receipt foundations | `phase4/receipt-foundations` | PR #13, in review |
+| Cash receipt foundations | `phase4/receipt-foundations` | merged — PR #13; screens come later |
 
 ### Environments
 
@@ -90,6 +91,7 @@ Agents build Phases 1–4 in parallel git worktrees. Each branch ends in a revie
 - Step 0.6: merge `staging` into `main` and press the production button.
 - Rotate the secrets that were exposed in chat.
 - Answer the agents' open questions listed in HANDOFF.md.
+- Decide how overlapping salary rows are merged, and confirm the receipt numbering (details in HANDOFF.md).
 
 Sections 1–25 below describe the application. Where they disagree with the code, the code wins.
 
