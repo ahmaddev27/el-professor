@@ -163,6 +163,11 @@ INSERT INTO user_profiles (user_id, email, full_name, role, company_id, is_super
 INSERT INTO app_private.pending_signups (user_id, company_id) VALUES
   ('0e000000-0000-4000-8000-000000000010', 'c0000000-0000-4000-8000-0000000000e1');
 
+-- Since 20260916110010 platform_login eligibility is an active staff row, not
+-- the profile flag.
+INSERT INTO app_private.platform_staff (user_id, role, note) VALUES
+  ('0e000000-0000-4000-8000-000000000007', 'owner', 'otp test');
+
 INSERT INTO auth.sessions (id, user_id, not_after) VALUES
   ('5e000000-0000-4000-8000-000000000001', '0e000000-0000-4000-8000-000000000007', NULL),
   ('5e000000-0000-4000-8000-000000000002', '0e000000-0000-4000-8000-000000000007', now() - interval '1 minute'),
