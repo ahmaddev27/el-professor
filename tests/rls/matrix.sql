@@ -18,8 +18,8 @@
     supervisor  supervisor-a  role supervisor  company A
     admin       admin-a       role admin       company A
     other       admin-b       role admin       company B — a member of another company
-    super       super         is_super_admin = true, company NULL — the column alone,
-                              no second factor, no support session
+    super       super         an owner in app_private.platform_staff (seed.sql),
+                              company NULL, no support session
 
   ## Rows
 
@@ -81,15 +81,18 @@
 
   Each is tagged `HOLE[3.x]` with the plan step that is meant to change it.
 
-    3.1  platform rights come from the `is_super_admin` column alone; 15 policies
-         and 8 functions read the column directly instead of is_user_super_admin(),
-         three of them (otp_issue, signup_create_company, signup_discard) added
-         by the one-time-code migrations
-    3.1  enforce_user_profile_privilege_guard lets a column super admin move a
-         profile — its own included — into any company, and grant the column
-    3.2  is_user_super_admin() is true for the column alone: no verified second
-         factor, no live session, so the policies built on it (companies,
-         subscriptions, invoices, plans, document categories) open to a password
+  3.1 (20260916110010) closed two: platform rights came from the is_super_admin
+  column alone, and the profile guard let a column super admin move any profile
+  into any company and grant the column. Platform sign-in stays an address and a
+  password, with no second step (the owner's decision of 16.09.2026), so no step
+  of the plan adds one and nothing here is tagged for it.
+
+    3.3  is_user_super_admin() is true for any active platform_staff row, whatever
+         its role, so the policies built on it (companies, subscriptions,
+         invoices, plans, document categories) give support, billing and
+         read_only the writes of an owner. The platform principal here is an
+         owner, so its cells stay when 3.3 asks the capability instead;
+         tests/rls/platform-authority.sql records the read_only case
     3.3  company status, approval and subscription, and a user's own status, are
          not enforced by the database: a pending, rejected, suspended or inactive
          company, one whose subscription is inactive, expired or suspended or
@@ -847,16 +850,16 @@ CREATE TEMP TABLE _mx_expected (
 
 INSERT INTO _mx_expected VALUES
 --                                          anon  viewer editor superv admin other super
-('activation_code_attempts',           'S', '..', '..', '..', '..', '..', '..', 'YY', '3.1 super check reads the is_super_admin column directly'),
+('activation_code_attempts',           'S', '..', '..', '..', '..', '..', '..', 'YY', NULL),
 ('activation_code_attempts',           'I', 'RR', 'YY', 'YY', 'YY', 'YY', 'YY', 'YY', '3.5 WITH CHECK (true): any member writes attempts for any company'),
 ('activation_code_attempts',           'U', '..', '..', '..', '..', '..', '..', '..', NULL),
 ('activation_code_attempts',           'D', '..', '..', '..', '..', '..', '..', '..', NULL),
 ('activation_code_attempts',           'M', '..', '..', '..', '..', '..', '..', '..', NULL),
-('activation_codes',                   'S', '..', '..', '..', '..', '..', '..', 'YY', '3.1 super check reads the is_super_admin column directly'),
-('activation_codes',                   'I', 'RR', 'RR', 'RR', 'RR', 'RR', 'RR', 'YY', '3.1 super check reads the is_super_admin column directly'),
-('activation_codes',                   'U', '..', '..', '..', '..', '..', '..', 'YY', '3.1 super check reads the is_super_admin column directly'),
-('activation_codes',                   'D', '..', '..', '..', '..', '..', '..', 'YY', '3.1 super check reads the is_super_admin column directly'),
-('activation_codes',                   'M', '..', '..', '..', '..', '..', '..', 'YY', '3.1 super check reads the is_super_admin column directly'),
+('activation_codes',                   'S', '..', '..', '..', '..', '..', '..', 'YY', NULL),
+('activation_codes',                   'I', 'RR', 'RR', 'RR', 'RR', 'RR', 'RR', 'YY', NULL),
+('activation_codes',                   'U', '..', '..', '..', '..', '..', '..', 'YY', NULL),
+('activation_codes',                   'D', '..', '..', '..', '..', '..', '..', 'YY', NULL),
+('activation_codes',                   'M', '..', '..', '..', '..', '..', '..', 'YY', NULL),
 ('car_driver_assignments',             'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'YY', '3.4 super reaches tenant data with no support session'),
 ('car_driver_assignments',             'I', 'RR', 'YR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
 ('car_driver_assignments',             'U', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'RR', NULL),
@@ -878,9 +881,9 @@ INSERT INTO _mx_expected VALUES
 ('cash_transactions',                  'D', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'YY', '3.4 super reaches tenant data with no support session'),
 ('cash_transactions',                  'M', '..', 'R.', 'R.', 'R.', 'R.', '.R', 'RR', NULL),
 ('companies',                          'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'YY', '3.5 approval_note and rejection_reason readable by members'),
-('companies',                          'I', 'RR', 'RR', 'RR', 'RR', 'RR', 'RR', 'YY', '3.2 platform right from the column alone, no verified session'),
-('companies',                          'U', '..', '..', '..', '..', '..', '..', 'YY', '3.2 platform right from the column alone, no verified session'),
-('companies',                          'D', '..', '..', '..', '..', '..', '..', 'YY', '3.2 platform right from the column alone, no verified session'),
+('companies',                          'I', 'RR', 'RR', 'RR', 'RR', 'RR', 'RR', 'YY', '3.3 platform right from any active staff role, not the capability'),
+('companies',                          'U', '..', '..', '..', '..', '..', '..', 'YY', '3.3 platform right from any active staff role, not the capability'),
+('companies',                          'D', '..', '..', '..', '..', '..', '..', 'YY', '3.3 platform right from any active staff role, not the capability'),
 ('companies',                          'M', '--', '--', '--', '--', '--', '--', '--', NULL),
 ('company_planning_run_blocks',        'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
 ('company_planning_run_blocks',        'I', 'RR', 'YR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
@@ -895,32 +898,32 @@ INSERT INTO _mx_expected VALUES
 ('company_settings',                   'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'YY', '3.4 super reaches tenant data with no support session'),
 ('company_settings',                   'I', 'RR', 'RR', 'RR', 'RR', 'YR', 'RY', 'RR', NULL),
 ('company_settings',                   'U', '..', '..', '..', '..', 'Y.', '.Y', 'YY', '3.4 super reaches tenant data with no support session'),
-('company_settings',                   'D', '..', '..', '..', '..', '..', '..', 'YY', '3.2 platform right from the column alone, no verified session'),
+('company_settings',                   'D', '..', '..', '..', '..', '..', '..', 'YY', '3.3 platform right from any active staff role, not the capability'),
 ('company_settings',                   'M', '..', '..', '..', '..', 'R.', '.R', 'YY', '3.4 super moves tenant rows into another company with no support session'),
-('company_subscriptions',              'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'YY', '3.2 platform right from the column alone, no verified session'),
-('company_subscriptions',              'I', 'RR', 'RR', 'RR', 'RR', 'RR', 'RR', 'YY', '3.2 platform right from the column alone, no verified session'),
-('company_subscriptions',              'U', '..', '..', '..', '..', '..', '..', 'YY', '3.2 platform right from the column alone, no verified session'),
-('company_subscriptions',              'D', '..', '..', '..', '..', '..', '..', 'YY', '3.2 platform right from the column alone, no verified session'),
-('company_subscriptions',              'M', '..', '..', '..', '..', '..', '..', 'YY', '3.2 platform right from the column alone, no verified session'),
-('discount_code_redemptions',          'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'YY', '3.1 super check reads the is_super_admin column directly'),
+('company_subscriptions',              'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'YY', '3.3 platform right from any active staff role, not the capability'),
+('company_subscriptions',              'I', 'RR', 'RR', 'RR', 'RR', 'RR', 'RR', 'YY', '3.3 platform right from any active staff role, not the capability'),
+('company_subscriptions',              'U', '..', '..', '..', '..', '..', '..', 'YY', '3.3 platform right from any active staff role, not the capability'),
+('company_subscriptions',              'D', '..', '..', '..', '..', '..', '..', 'YY', '3.3 platform right from any active staff role, not the capability'),
+('company_subscriptions',              'M', '..', '..', '..', '..', '..', '..', 'YY', '3.3 platform right from any active staff role, not the capability'),
+('discount_code_redemptions',          'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'YY', NULL),
 ('discount_code_redemptions',          'I', 'RR', 'RR', 'RR', 'RR', 'RR', 'RR', 'RR', NULL),
 ('discount_code_redemptions',          'U', '..', '..', '..', '..', '..', '..', '..', NULL),
 ('discount_code_redemptions',          'D', '..', '..', '..', '..', '..', '..', '..', NULL),
 ('discount_code_redemptions',          'M', '..', '..', '..', '..', '..', '..', '..', NULL),
 ('discount_codes',                     'S', '..', 'YY', 'YY', 'YY', 'YY', 'YY', 'YY', '3.5 every signed-in user reads all active discount codes'),
-('discount_codes',                     'I', 'RR', 'RR', 'RR', 'RR', 'RR', 'RR', 'YY', '3.1 super check reads the is_super_admin column directly'),
-('discount_codes',                     'U', '..', '..', '..', '..', '..', '..', 'YY', '3.1 super check reads the is_super_admin column directly'),
-('discount_codes',                     'D', '..', '..', '..', '..', '..', '..', 'YY', '3.1 super check reads the is_super_admin column directly'),
-('discount_codes',                     'M', '..', '..', '..', '..', '..', '..', 'YY', '3.1 super check reads the is_super_admin column directly'),
+('discount_codes',                     'I', 'RR', 'RR', 'RR', 'RR', 'RR', 'RR', 'YY', NULL),
+('discount_codes',                     'U', '..', '..', '..', '..', '..', '..', 'YY', NULL),
+('discount_codes',                     'D', '..', '..', '..', '..', '..', '..', 'YY', NULL),
+('discount_codes',                     'M', '..', '..', '..', '..', '..', '..', 'YY', NULL),
 ('document_blocks',                    'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'YY', '3.4 super reaches tenant data with no support session'),
 ('document_blocks',                    'I', 'RR', 'YR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
 ('document_blocks',                    'U', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'RR', NULL),
 ('document_blocks',                    'D', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'YY', '3.4 super reaches tenant data with no support session'),
 ('document_blocks',                    'M', '..', 'R.', 'R.', 'R.', 'R.', '.R', 'RR', NULL),
 ('document_categories',                'S', '..', 'YY', 'YY', 'YY', 'YY', 'YY', 'YY', NULL),
-('document_categories',                'I', 'RR', 'RR', 'RR', 'RR', 'RR', 'RR', 'YY', '3.2 platform right from the column alone, no verified session'),
-('document_categories',                'U', '..', '..', '..', '..', '..', '..', 'YY', '3.2 platform right from the column alone, no verified session'),
-('document_categories',                'D', '..', '..', '..', '..', '..', '..', 'YY', '3.2 platform right from the column alone, no verified session'),
+('document_categories',                'I', 'RR', 'RR', 'RR', 'RR', 'RR', 'RR', 'YY', '3.3 platform right from any active staff role, not the capability'),
+('document_categories',                'U', '..', '..', '..', '..', '..', '..', 'YY', '3.3 platform right from any active staff role, not the capability'),
+('document_categories',                'D', '..', '..', '..', '..', '..', '..', 'YY', '3.3 platform right from any active staff role, not the capability'),
 ('document_categories',                'M', '--', '--', '--', '--', '--', '--', '--', NULL),
 ('document_counters',                  'S', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', NULL),
 ('document_counters',                  'I', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', NULL),
@@ -1047,10 +1050,10 @@ INSERT INTO _mx_expected VALUES
 ('receipts',                           'U', '..', '..', 'Y.', 'Y.', 'Y.', '.Y', 'YY', '3.4 super reaches tenant data with no support session'),
 ('receipts',                           'D', '..', '..', 'Y.', 'Y.', 'Y.', '.Y', 'YY', '3.4 super reaches tenant data with no support session'),
 ('receipts',                           'M', '..', '..', 'R.', 'R.', 'R.', '.R', 'YY', '3.4 super moves tenant rows into another company with no support session'),
-('referrals',                          'S', '..', '..', '..', '..', '..', '..', 'YY', '3.1 super check reads the is_super_admin column directly'),
-('referrals',                          'I', 'RR', 'RR', 'RR', 'RR', 'RR', 'RR', 'YY', '3.1 super check reads the is_super_admin column directly'),
-('referrals',                          'U', '..', '..', '..', '..', '..', '..', 'YY', '3.1 super check reads the is_super_admin column directly'),
-('referrals',                          'D', '..', '..', '..', '..', '..', '..', 'YY', '3.1 super check reads the is_super_admin column directly'),
+('referrals',                          'S', '..', '..', '..', '..', '..', '..', 'YY', NULL),
+('referrals',                          'I', 'RR', 'RR', 'RR', 'RR', 'RR', 'RR', 'YY', NULL),
+('referrals',                          'U', '..', '..', '..', '..', '..', '..', 'YY', NULL),
+('referrals',                          'D', '..', '..', '..', '..', '..', '..', 'YY', NULL),
 ('referrals',                          'M', '--', '--', '--', '--', '--', '--', '--', NULL),
 ('role_permissions',                   'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'YY', '3.4 super reaches tenant data with no support session'),
 ('role_permissions',                   'I', 'RR', 'RR', 'RR', 'RR', 'YR', 'RY', 'RR', NULL),
@@ -1082,31 +1085,34 @@ INSERT INTO _mx_expected VALUES
 ('saved_stundennachweise',             'U', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'YY', '3.4 super reaches tenant data with no support session'),
 ('saved_stundennachweise',             'D', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'YY', '3.4 super reaches tenant data with no support session'),
 ('saved_stundennachweise',             'M', '..', 'R.', 'R.', 'R.', 'R.', '.R', 'YY', '3.4 super moves tenant rows into another company with no support session'),
-('subscription_admin_actions',         'S', '..', '..', '..', '..', '..', '..', 'YY', '3.1 super check reads the is_super_admin column directly'),
-('subscription_admin_actions',         'I', 'RR', 'RR', 'RR', 'RR', 'RR', 'RR', 'YY', '3.1 super check reads the is_super_admin column directly'),
-('subscription_admin_actions',         'U', '..', '..', '..', '..', '..', '..', 'YY', '3.1 super check reads the is_super_admin column directly'),
-('subscription_admin_actions',         'D', '..', '..', '..', '..', '..', '..', 'YY', '3.1 super check reads the is_super_admin column directly'),
-('subscription_admin_actions',         'M', '..', '..', '..', '..', '..', '..', 'YY', '3.1 super check reads the is_super_admin column directly'),
-('subscription_invoices',              'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'YY', '3.2 platform right from the column alone, no verified session'),
-('subscription_invoices',              'I', 'RR', 'RR', 'RR', 'RR', 'RR', 'RR', 'YY', '3.2 platform right from the column alone, no verified session'),
-('subscription_invoices',              'U', '..', '..', '..', '..', '..', '..', 'YY', '3.2 platform right from the column alone, no verified session'),
-('subscription_invoices',              'D', '..', '..', '..', '..', '..', '..', 'YY', '3.2 platform right from the column alone, no verified session'),
-('subscription_invoices',              'M', '..', '..', '..', '..', '..', '..', 'YY', '3.2 platform right from the column alone, no verified session'),
-('subscription_payment_audit',         'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'YY', '3.2 platform right from the column alone, no verified session'),
-('subscription_payment_audit',         'I', 'RR', 'RR', 'RR', 'RR', 'RR', 'RR', 'YY', '3.2 platform right from the column alone, no verified session'),
+('subscription_admin_actions',         'S', '..', '..', '..', '..', '..', '..', 'YY', NULL),
+('subscription_admin_actions',         'I', 'RR', 'RR', 'RR', 'RR', 'RR', 'RR', 'YY', NULL),
+('subscription_admin_actions',         'U', '..', '..', '..', '..', '..', '..', 'YY', NULL),
+('subscription_admin_actions',         'D', '..', '..', '..', '..', '..', '..', 'YY', NULL),
+('subscription_admin_actions',         'M', '..', '..', '..', '..', '..', '..', 'YY', NULL),
+('subscription_invoices',              'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'YY', '3.3 platform right from any active staff role, not the capability'),
+('subscription_invoices',              'I', 'RR', 'RR', 'RR', 'RR', 'RR', 'RR', 'YY', '3.3 platform right from any active staff role, not the capability'),
+('subscription_invoices',              'U', '..', '..', '..', '..', '..', '..', 'YY', '3.3 platform right from any active staff role, not the capability'),
+('subscription_invoices',              'D', '..', '..', '..', '..', '..', '..', 'YY', '3.3 platform right from any active staff role, not the capability'),
+('subscription_invoices',              'M', '..', '..', '..', '..', '..', '..', 'YY', '3.3 platform right from any active staff role, not the capability'),
+('subscription_payment_audit',         'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'YY', '3.3 platform right from any active staff role, not the capability'),
+('subscription_payment_audit',         'I', 'RR', 'RR', 'RR', 'RR', 'RR', 'RR', 'YY', '3.3 platform right from any active staff role, not the capability'),
 ('subscription_payment_audit',         'U', '..', '..', '..', '..', '..', '..', '..', NULL),
 ('subscription_payment_audit',         'D', '..', '..', '..', '..', '..', '..', '..', NULL),
 ('subscription_payment_audit',         'M', '..', '..', '..', '..', '..', '..', '..', NULL),
 ('subscription_plans',                 'S', '..', 'YY', 'YY', 'YY', 'YY', 'YY', 'YY', NULL),
-('subscription_plans',                 'I', 'RR', 'RR', 'RR', 'RR', 'RR', 'RR', 'YY', '3.2 platform right from the column alone, no verified session'),
-('subscription_plans',                 'U', '..', '..', '..', '..', '..', '..', 'YY', '3.2 platform right from the column alone, no verified session'),
-('subscription_plans',                 'D', '..', '..', '..', '..', '..', '..', 'YY', '3.2 platform right from the column alone, no verified session'),
+('subscription_plans',                 'I', 'RR', 'RR', 'RR', 'RR', 'RR', 'RR', 'YY', '3.3 platform right from any active staff role, not the capability'),
+('subscription_plans',                 'U', '..', '..', '..', '..', '..', '..', 'YY', '3.3 platform right from any active staff role, not the capability'),
+('subscription_plans',                 'D', '..', '..', '..', '..', '..', '..', 'YY', '3.3 platform right from any active staff role, not the capability'),
 ('subscription_plans',                 'M', '--', '--', '--', '--', '--', '--', '--', NULL),
 ('user_profiles',                      'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'YY', '3.4 super reaches tenant data with no support session'),
-('user_profiles',                      'I', 'RR', 'TT', 'TT', 'TT', 'TT', 'TT', 'RR', NULL),
+-- anon and super: since 20260916110010 the profile guard refuses a JWT putting a
+-- profile into a company before RLS is asked; both were RR
+('user_profiles',                      'I', 'TT', 'TT', 'TT', 'TT', 'TT', 'TT', 'TT', NULL),
 ('user_profiles',                      'U', '..', '..', '..', '..', 'Y.', '.Y', 'YY', '3.4 super reaches tenant data with no support session'),
 ('user_profiles',                      'D', '..', '..', '..', '..', 'Y.', '.Y', 'YY', '3.4 super reaches tenant data with no support session'),
-('user_profiles',                      'M', '..', '..', '..', '..', 'T.', '.T', 'YY', '3.1 guard lets a column super admin change company_id'),
+-- super: since 20260916110010 no JWT moves a profile between companies; was YY
+('user_profiles',                      'M', '..', '..', '..', '..', 'T.', '.T', 'TT', NULL),
 ('user_sessions',                      'S', '..', '..', '..', '..', 'Y.', '.Y', '..', NULL),
 ('user_sessions',                      'I', 'RR', 'RR', 'RR', 'RR', 'YR', 'RY', 'RR', NULL),
 ('user_sessions',                      'U', '..', '..', '..', '..', 'Y.', '.Y', '..', NULL),
@@ -1365,15 +1371,25 @@ DECLARE
   r_admin  uuid := (SELECT id FROM roles WHERE name = 'admin'  AND company_id IS NULL);
   r_editor uuid := (SELECT id FROM roles WHERE name = 'editor' AND company_id IS NULL);
 BEGIN
-  PERFORM _mx_expect('guard', 'column super admin moves its own profile into company A',
+  -- Since 20260916110010 no JWT moves a profile between companies or grants the
+  -- column, a platform owner's included. The three lines below were Y.
+  PERFORM _mx_expect('guard', 'platform owner cannot move its own profile into company A',
     _mx_try('super', NULL, format('UPDATE user_profiles SET company_id = %L WHERE user_id = %L', co_a, super_u)),
-    'Y', '3.1 guard lets a column super admin change company_id');
-  PERFORM _mx_expect('guard', 'column super admin moves a company B member into company A',
+    'T');
+  PERFORM _mx_expect('guard', 'platform owner cannot move a company B member into company A',
     _mx_try('super', NULL, format('UPDATE user_profiles SET company_id = %L WHERE user_id = %L', co_a, member_b)),
-    'Y', '3.1 guard lets a column super admin change company_id');
-  PERFORM _mx_expect('guard', 'column super admin grants is_super_admin to a company member',
+    'T');
+  PERFORM _mx_expect('guard', 'platform owner cannot grant is_super_admin to a company member',
     _mx_try('super', NULL, format('UPDATE user_profiles SET is_super_admin = true WHERE user_id = %L', member_a)),
-    'Y', '3.1 platform rights granted through the column');
+    'T');
+  -- New with 20260916110010: no JWT hands a profile to another account. Both
+  -- were Y before it, with no line here.
+  PERFORM _mx_expect('guard', 'platform owner cannot change a member''s user_id',
+    _mx_try('super', NULL, format('UPDATE user_profiles SET user_id = %L WHERE user_id = %L', gen_random_uuid(), member_a)),
+    'T');
+  PERFORM _mx_expect('guard', 'company admin cannot change a member''s user_id',
+    _mx_try('admin-a', NULL, format('UPDATE user_profiles SET user_id = %L WHERE user_id = %L', gen_random_uuid(), member_a)),
+    'T');
   PERFORM _mx_expect('guard', 'company admin cannot move its own profile to company B',
     _mx_try('admin-a', NULL, format('UPDATE user_profiles SET company_id = %L WHERE user_id = %L', co_b, admin_a)), 'T');
   PERFORM _mx_expect('guard', 'company admin cannot grant itself is_super_admin',
@@ -1393,12 +1409,12 @@ BEGIN
     'Y', '3.3 a deactivated admin still passes the guard''s admin branch');
 END $$;
 
--- ── 3.1 / 3.2: where platform rights come from ──────────────────────────────
+-- ── 3.1: where platform rights come from ───────────────────────────────────
 DO $$
 DECLARE v text;
 BEGIN
-  PERFORM _mx_expect('platform', 'is_user_super_admin() is true for the column alone',
-    _mx_call('super', 'SELECT is_user_super_admin()::text'), 'Y', '3.2 no second factor, no session');
+  PERFORM _mx_expect('platform', 'is_user_super_admin() is true for an active staff row alone',
+    _mx_call('super', 'SELECT is_user_super_admin()::text'), 'Y');
   PERFORM _mx_expect('platform', 'is_user_super_admin() is false for a company admin',
     _mx_call('admin-a', 'SELECT is_user_super_admin()::text'), 'N');
 
@@ -1407,16 +1423,9 @@ BEGIN
     FROM pg_policies
    WHERE schemaname = 'public'
      AND (coalesce(qual, '') || ' ' || coalesce(with_check, '')) ~ '(^|[^a-z_])is_super_admin([^a-z_]|$)';
+  -- 20260916110010 moved all fifteen onto platform_can(); was 15
   PERFORM _mx_expect('catalogue', 'policies that read the is_super_admin column directly', v,
-    '15: activation_code_attempts.sa_select_attempts, activation_codes.sa_delete_activation_codes, '
-    'activation_codes.sa_insert_activation_codes, activation_codes.sa_select_activation_codes, '
-    'activation_codes.sa_update_activation_codes, discount_code_redemptions.SuperAdmins can view all redemptions, '
-    'discount_codes.SuperAdmins can delete discount codes, discount_codes.SuperAdmins can insert discount codes, '
-    'discount_codes.SuperAdmins can manage discount codes, discount_codes.SuperAdmins can update discount codes, '
-    'referrals.super_admin_delete_referrals, referrals.super_admin_insert_referrals, '
-    'referrals.super_admin_select_referrals, referrals.super_admin_update_referrals, '
-    'subscription_admin_actions.super_admin_all_subscription_admin_actions',
-    '3.1 route every check through is_user_super_admin()');
+    '0: ');
 
   SELECT count(*) || ': ' || coalesce(string_agg(p.proname::text, ', ' ORDER BY p.proname), '')
     INTO v
@@ -1425,13 +1434,10 @@ BEGIN
      AND p.proname <> 'is_user_super_admin'
      AND p.proname !~ '^_'
      AND p.prosrc ~ '(^|[^a-z_])is_super_admin([^a-z_]|$)';
-  -- otp_issue, signup_create_company and signup_discard came with the
-  -- one-time-code migrations (20260915100100, 20260915100200)
+  -- 20260916110010 moved the other seven onto platform_staff; was 8. The guard
+  -- still names the column because it compares the old and the new value.
   PERFORM _mx_expect('catalogue', 'functions that read the is_super_admin column directly', v,
-    '8: delete_activation_code, enforce_user_profile_privilege_guard, hide_activation_code, '
-    'otp_issue, revoke_activation_code, signup_create_company, signup_discard, '
-    'update_company_subscription_manual',
-    '3.1 route every check through is_user_super_admin()');
+    '1: enforce_user_profile_privilege_guard');
 
   SELECT count(*) || ': ' || coalesce(string_agg(p.proname::text, ', ' ORDER BY p.proname), '')
     INTO v
@@ -1440,8 +1446,8 @@ BEGIN
      AND p.prosecdef
      AND NOT EXISTS (SELECT 1 FROM unnest(coalesce(p.proconfig, '{}'::text[])) c WHERE c LIKE 'search_path=%');
   PERFORM _mx_expect('catalogue', 'SECURITY DEFINER functions without a pinned search_path', v,
-    '5: delete_activation_code, enforce_car_limit, hide_activation_code, revoke_activation_code, '
-    'update_company_subscription_manual',
+    -- was 5: the four platform RPCs gained one when 20260916110010 rewrote them
+    '1: enforce_car_limit',
     '3.5 pin search_path');
 END $$;
 
@@ -1601,25 +1607,50 @@ CREATE TEMP TABLE _mx_rpc (ord serial, label text, stmt text, want text, hole te
 INSERT INTO _mx_rpc (label, stmt, want, hole) VALUES
     -- the platform screens. is_user_super_admin() answers false, not NULL, to
     -- anon since 20260915130000, which restates anon's grant (staging held it
-    -- too), so that cell is probed
+    -- too), so that cell is probed. Since 20260916110010 it asks platform_staff
+    -- and still answers false there
     ('is_user_super_admin()',
      $q$SELECT is_user_super_admin()::text$q$,
-     'NNNNNNY', '3.2 platform right from the column alone, no verified session'),
+     'NNNNNNY', NULL),
     -- anon's EXECUTE on the next four revoked by 20260915140000. Only the super
     -- admin's dashboard calls them, signed in. Their anon cell moved from N
-    -- (the guard answered success=false) to P: NNNNNNY became PNNNNNY
+    -- (the guard answered success=false) to P: NNNNNNY became PNNNNNY.
+    -- 20260916110010 rewrote them onto platform_can() with CREATE OR REPLACE
+    -- and restates those grants, so no cell moves with it
     ('revoke_activation_code(code of A)',
      $q$SELECT revoke_activation_code({ref:activation_codes})::text$q$,
-     'PNNNNNY', '3.1 super check reads the is_super_admin column directly'),
+     'PNNNNNY', NULL),
     ('delete_activation_code(code of A)',
      $q$SELECT delete_activation_code({ref:activation_codes})::text$q$,
-     'PNNNNNY', '3.1 super check reads the is_super_admin column directly'),
+     'PNNNNNY', NULL),
     ('hide_activation_code(code of A)',
      $q$SELECT hide_activation_code({ref:activation_codes}, 'mx')::text$q$,
-     'PNNNNNY', '3.1 super check reads the is_super_admin column directly'),
+     'PNNNNNY', NULL),
     ('update_company_subscription_manual(company B)',
      $q$SELECT update_company_subscription_manual('c0000000-0000-4000-8000-00000000000b', 'active', now(), now() + interval '30 days', '1_monat', 'mx')::text$q$,
-     'PNNNNNY', '3.1 super check reads the is_super_admin column directly'),
+     'PNNNNNY', NULL),
+    -- the platform helpers of 20260916110000, for signed-in callers only: anon
+    -- holds EXECUTE on none of them, and each answers nothing without a staff row
+    ('platform_staff_role() is set',
+     $q$SELECT (platform_staff_role() IS NOT NULL)::text$q$,
+     'PNNNNNY', NULL),
+    ('platform_can(codes.manage)',
+     $q$SELECT platform_can('codes.manage')::text$q$,
+     'PNNNNNY', NULL),
+    ('platform_whoami() names a role',
+     $q$SELECT (platform_whoami() ->> 'role' IS NOT NULL)::text$q$,
+     'PNNNNNY', NULL),
+    -- writes a row for staff only; NULL, so N, for everyone else
+    ('platform_audit_record(read)',
+     $q$SELECT (platform_audit_record('read', 'matrix.probe', 'ok') IS NOT NULL)::text$q$,
+     'PNNNNNY', NULL),
+    ('platform_can_manage_account(member of A)',
+     $q$SELECT platform_can_manage_account({ref:user_profiles})::text$q$,
+     'PNNNNNY', NULL),
+    -- service role only (20260916110010): manage-users asks it for a company admin
+    ('account_is_platform_staff(member of A)',
+     $q$SELECT account_is_platform_staff({ref:user_profiles})::text$q$,
+     'PPPPPPP', NULL),
     -- anon's EXECUTE revoked by 20260915120000; the platform's invoice screen
     -- calls it signed in
     ('generate_invoice_number(2026)',
@@ -1707,7 +1738,8 @@ INSERT INTO _mx_rpc (label, stmt, want, hole) VALUES
      $q$SELECT is_company_admin()::text$q$,
      'NNNNYYN', NULL),
     -- false for a caller without a profile row. It answered NULL there until
-    -- 20260915130000 made is_user_super_admin() answer false to that caller
+    -- 20260915130000 made is_user_super_admin() answer false to that caller;
+    -- the platform_staff body of 20260916110010 keeps answering false
     ('current_role_permits(drivers, edit)',
      $q$SELECT current_role_permits('drivers', true)::text$q$,
      'NNYYYYY', NULL),
