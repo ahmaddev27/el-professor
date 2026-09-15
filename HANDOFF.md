@@ -6,7 +6,7 @@ Start here when you pick up this project. Read it together with [CLAUDE.md](CLAU
 
 ## Where things stand
 
-- **Current work:** Phase 0 is done on staging except 0.6. Phases 1–4 are arriving as PRs. Merged so far: PR #11 (OTP database, step 1.1), PR #15 (security fix) and PR #13 (receipt foundations, steps 4.1 and 4.2).
+- **Current work:** Phase 0 is done on staging except 0.6. Phases 1–4 are arriving as PRs. Merged so far: PR #11, #16 and #14 (all of Phase 1's code), PR #15 (security fix) and PR #13 (receipt foundations, steps 4.1 and 4.2).
 - **Done on staging:**
   - 0.1 login rate limits, PR #2.
   - 0.2 kept releases and rollback, PR #3. Rollback was exercised on the host.
@@ -22,8 +22,9 @@ Start here when you pick up this project. Read it together with [CLAUDE.md](CLAU
     - PR #11, OTP database. Review approved with six minor findings; merged.
     - PR #12, permission baseline. Review asked for two major changes: UPDATE probes never move a row to another tenant, and a live hole. A fix agent is on it.
     - PR #13, receipt foundations. Review approved with seven minor findings. Merged after a dry run of its migration on staging.
-    - PR #14, OTP screens. It waits for OTP-FUNCTIONS, which is still building.
-  - `OTP_PEPPER` must be provisioned in both `.env` files before OTP-FUNCTIONS deploys; its `deploy.sh` guard refuses a release without it. All three OTP streams follow the contract kept at `C:\Users\ahmad\.claude\plans\otp-contract-wf_ce583f7b-774.md`, outside the repo.
+    - PR #16, OTP edge functions, and PR #14, OTP screens. Both reviews approved, with 6 and 4 minor findings. Merged back to back.
+    - PR #17, design system and prototype. In review.
+  - `OTP_PEPPER`: provisioned in staging's `.env` on 15.09.2026 (64 hex characters, never printed). Production needs its own, different one before 0.6, or its deploy is refused. That waits for the owner's go. All three OTP streams follow the contract kept at `C:\Users\ahmad\.claude\plans\otp-contract-wf_ce583f7b-774.md`, outside the repo.
 - **Staging mail reaches real recipients** (owner's decision, 14.09.2026). Mailpit keeps a copy of every message and relays it through production's Resend account, except mail to `@example.com`. Live on staging since PR #8 (`45ff313`). Resend lists the relayed test mails to `delivered@resend.dev` as `delivered`.
 - **Security fix, 15.09.2026.** Anyone holding the public anon key could call `list_users_for_admin()` and read every account's email, name and role.
   - **Why the guard failed:** it reads `IF auth.email() != 'support@…' THEN RAISE`. For an anonymous caller `auth.email()` is NULL, so the comparison is NULL and the RAISE never runs. Confirmed on staging: 15 rows came back.
@@ -36,6 +37,12 @@ Start here when you pick up this project. Read it together with [CLAUDE.md](CLAU
   - The receipt month comes from `get_business_month(period_start)`, which mislabels a salary row that does not start on a Monday.
   - The RPCs and storage policies must adopt PLATFORM's server-side block once it exists.
   - When 4.3 ships, add the Gehaltsquittung to the closed list of German-only documents in `src/i18n/index.ts`.
+- **Phase 1 on staging (PR #11, #16, #14).** Codes replace the links for signup, "Passwort vergessen", invitations and email changes.
+  - GoTrue's public `/signup` is closed and answers 422 `signup_disabled`.
+  - Each function receives only its allowlisted variables, and none gets `SUPABASE_DB_URL`.
+  - `AuthCallbackPage` and GoTrue's link templates stay for one release, so a link mailed just before still works.
+  - A staging rollback across #16 is refused on purpose, because it would reopen signup.
+  - Phase 1 is not done until two things happen: the code flows pass on staging (with `@example.com` addresses only), and a real code reaches an owner's mailbox from production.
 - **`main` is behind `staging`** by the Phase 0 work. Production still runs a bundle deployed before CI releases existed.
 
 ## What is live where
@@ -54,6 +61,7 @@ Start here when you pick up this project. Read it together with [CLAUDE.md](CLAU
 - `/usr/local/sbin/el-professor-caddy-guard` plus its systemd `.path`/`.timer`/`.service` units: `deploy/caddy/guard.sh`.
 - `/srv/caddy-sites/elprofessor.caddy`: the published routes. Change them only through `deploy/caddy/publish.sh`.
 - `/srv/PRO-staging/deploy/set-staging-password.sh`, `set-mailpit-password.sh` and `set-staging-mail-relay.sh`.
+- `/srv/PRO-staging/deploy/otp-housekeeping.sh`, scheduled by `/etc/cron.d/el-professor-otp` to run hourly and daily on staging. The production lines are added at 0.6.
 - Previous versions are kept in `/root/el-professor-caddy-backups/` and `/root/el-professor-release.before-rollback-*`.
 
 Secrets never enter git:
@@ -94,6 +102,8 @@ Secrets never enter git:
 
     Until then, `confirm_salary_cash_payment` refuses those rows with `overlapping_salary`.
   - **Receipt.** Receipt numbers are `GQ-YYYY-NNNN`, using the year of the payment date, gapless per company. Keep that, or use the salary's business year?
+  - **OTP-FUNCTIONS.** Mail goes through a small SMTP client of our own, probed and unit-tested, instead of a pinned library. Accept it?
+  - **OTP-FRONTEND.** An owner of a pending company cannot finish a password reset until approval, because `App.tsx` shows the waiting page before any route. Move `/auth/set-password` ahead of that gate?
 - The user list was readable anonymously until 15.09.2026. The logs since 13.09.2026 show no use, and older logs are gone. Whether that needs a data-protection assessment is the owner's call.
 
 ## Gotchas learned the hard way
@@ -112,6 +122,7 @@ Secrets never enter git:
 - **Mailpit logs a relay only when it fails;** success is a debug line, so a quiet log is the good case. To see what Resend did with a mail, list `GET https://api.resend.com/emails` with production's key (pass the header on stdin with `curl -H @-`) and read `last_event`. Print only the fields you need: the list holds customers' addresses.
 - **A `grep` that matches nothing ends a `set -euo pipefail` script silently** — the same trap as the `.env` reads in `deploy.sh`. It hid the result of the first relay test, which had in fact been delivered.
 - **On Windows, vitest rewrites the golden `.snap` files with LF line endings.** The content is byte-identical and `git diff` is empty, but with `core.autocrlf=true` git lists them as modified. Restore them with `git checkout -- src/utils/__snapshots__/` and never commit them. A `.gitattributes` line `src/utils/__snapshots__/*.snap text eol=lf` would end the churn.
+- **A release copies only part of `deploy/`.** `install_release` copies the compose file, `kong.yml`, `nginx-spa.conf`, `deploy.sh`, `init-db`, the functions, the migrations and `dist`. Any other script the host runs (`set-*.sh`, `otp-housekeeping.sh`) stays at the copy installed by hand, so reinstall it when it changes.
 - **Supabase grants EXECUTE on every new function to PUBLIC, anon and authenticated.** A function meant for service_role only needs all three revoked; `20260911120000` missed anon. A guard written as `auth.email() != '…'` or `auth.uid() <> …` lets an anonymous caller through, because the comparison is NULL. For every SECURITY DEFINER function a PR adds, check `has_function_privilege('anon', …)`.
 - **Never delete a PR's branch before `gh pr view N --json state` says MERGED.** On 15.09.2026 a merge failed on a GitHub TLS timeout, the script deleted the branch anyway, and GitHub closed PR #11 unmerged. Pushing the head commit back and `gh pr reopen` recovered it.
 - **The Workflow tool does not save an agent's worktree.** When a run is cut off, commit what is on disk (as `wip:`) before relaunching; a resumed run only replays agents that had finished.
