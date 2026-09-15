@@ -25,9 +25,32 @@
  * holds a token this stack signed. Each function still loads the caller's
  * profile and checks role, tenancy and target — see the assertSameCompany()
  * pattern in manage-users.
+ *
+ * ## Why each worker gets a written list of environment variables
+ *
+ * This process holds the whole container environment, JWT_SECRET included. It
+ * used to hand all of it to every worker, and with it SUPABASE_DB_URL, a
+ * superuser connection string no function ever read. A bug in any function,
+ * or a dependency it pulls from npm, could read either. `FUNCTION_ENV` now
+ * names exactly what each function receives, and a function with no entry is
+ * not started at all, so adding one forces a decision in a commit.
  */
 import * as jose from 'https://deno.land/x/jose@v4.14.4/index.ts'
 import { corsFor } from './../_shared/http.ts'
+
+// The slice of the edge-runtime API only the main service may use. User
+// functions get their own typings from jsr:@supabase/functions-js.
+declare const EdgeRuntime: {
+  userWorkers: {
+    create(options: {
+      servicePath: string
+      memoryLimitMb: number
+      workerTimeoutMs: number
+      noModuleCache: boolean
+      envVars: [string, string][]
+    }): Promise<{ fetch(request: Request): Promise<Response> }>
+  }
+}
 
 const JWT_SECRET = Deno.env.get('JWT_SECRET')
 const FUNCTIONS_ROOT = '/home/deno/functions'
@@ -40,15 +63,42 @@ const FUNCTIONS_ROOT = '/home/deno/functions'
  * before the request ever reached the function — the page rendered, the button
  * worked, and every submission failed.
  *
+ * `otp-request` and `otp-verify` send and check one-time codes for signup,
+ * "Passwort vergessen" and invite activation, all of which happen before the
+ * person has a session. Their two signed-in purposes, email_change and
+ * platform_login, verify the bearer token inside the function, and their limits
+ * (per code, per address, per IP) are enforced by the database, not here.
+ *
  * These are not unauthenticated: the publishable anon key must still be
  * presented, exactly as hosted Supabase requires, so arbitrary traffic without
  * the key is refused at the door. What that does NOT give you is rate limiting
  * — the anon key ships in the browser bundle and is therefore public. Anyone
- * holding it can call this endpoint repeatedly, so signup abuse has to be
- * bounded somewhere else (a captcha, or a limit in front of Kong) before this
- * is exposed to the open internet for long.
+ * holding it can call these endpoints repeatedly, so abuse has to be bounded
+ * elsewhere: the OTP functions by otp_issue's limits, company-signup by the same
+ * per-IP limit on the code it sends, and by a captcha or a limit in front of
+ * Kong before it is exposed to the open internet for long.
  */
-const PUBLIC_FUNCTIONS = new Set<string>(['company-signup'])
+const PUBLIC_FUNCTIONS = new Set<string>(['company-signup', 'otp-request', 'otp-verify'])
+
+const BASE_ENV = ['SUPABASE_URL', 'SUPABASE_ANON_KEY', 'APP_URL', 'EXTRA_CORS_ORIGINS'] as const
+const SERVICE_ENV = ['SUPABASE_SERVICE_ROLE_KEY'] as const
+const OTP_MAIL_ENV = [
+  'OTP_PEPPER', 'SMTP_HOST', 'SMTP_PORT', 'SMTP_USER', 'SMTP_PASS', 'SMTP_SENDER', 'SMTP_SENDER_NAME',
+] as const
+
+/** Exactly the variables each worker may see. JWT_SECRET and SUPABASE_DB_URL are never passed. */
+const FUNCTION_ENV: ReadonlyMap<string, readonly string[]> = new Map<string, readonly string[]>([
+  ['company-signup', [...BASE_ENV, ...SERVICE_ENV, ...OTP_MAIL_ENV]],
+  ['otp-request', [...BASE_ENV, ...SERVICE_ENV, ...OTP_MAIL_ENV]],
+  // Sends the "address changed" notice to the old address.
+  ['otp-verify', [...BASE_ENV, ...SERVICE_ENV, ...OTP_MAIL_ENV]],
+  // Invites send an OTP.
+  ['manage-users', [...BASE_ENV, ...SERVICE_ENV, ...OTP_MAIL_ENV]],
+  ['generate-activation-code', [...BASE_ENV, ...SERVICE_ENV]],
+  ['validate-discount-code', [...BASE_ENV, ...SERVICE_ENV]],
+  ['update-income-weeks', [...BASE_ENV]],
+  ['extract-receipt', [...BASE_ENV, 'ANTHROPIC_API_KEY']],
+])
 
 const ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY')
 
@@ -79,6 +129,14 @@ async function tokenIsValid(token: string): Promise<boolean> {
   }
 }
 
+/** The allowlisted variables that are actually set, as the runtime expects them. */
+function workerEnv(names: readonly string[]): [string, string][] {
+  return names.flatMap((name): [string, string][] => {
+    const value = Deno.env.get(name)
+    return value === undefined ? [] : [[name, value]]
+  })
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsFor(req) })
 
@@ -104,6 +162,15 @@ Deno.serve(async (req: Request) => {
     }
   }
 
+  // Fails closed: a function nobody gave an environment is not started. The
+  // log names the missing entry so the 404 is not a mystery to whoever added it.
+  const allowedEnv = FUNCTION_ENV.get(name)
+  if (!allowedEnv) {
+    console.error(JSON.stringify({ level: 'error', fn: 'main', step: 'env-allowlist',
+      detail: `no FUNCTION_ENV entry for "${name}" in supabase/functions/main/index.ts` }))
+    return json(req, 404, { error: `Unknown function: ${name}` })
+  }
+
   // Asked for before the worker is built, because the runtime's own failure for
   // a directory that is not there is a generic "worker boot error" 500 that
   // reads like a crash. A function that was deleted should answer 404.
@@ -123,16 +190,18 @@ Deno.serve(async (req: Request) => {
       memoryLimitMb: 256,
       workerTimeoutMs: 60_000,
       noModuleCache: false,
-      envVars: Object.entries(Deno.env.toObject()),
+      envVars: workerEnv(allowedEnv),
     })
     return await worker.fetch(req)
   } catch (err) {
     // The function exists (checked above), so anything here is a real failure to
     // start: a syntax error, a bad import, a missing env var at module scope.
-    // `detail` names a path or an import error in our own code — no database
-    // text and no credentials reach here — so it stays, because a 500 with no
-    // detail from a dispatcher is undiagnosable.
-    const message = err instanceof Error ? err.message : String(err)
-    return json(req, 500, { error: 'Function failed to start', detail: message })
+    // The detail names paths and imports, which is our business and not the
+    // caller's: it goes to the log, and the request id ties the two together.
+    const requestId = crypto.randomUUID().slice(0, 8)
+    const detail = err instanceof Error ? err.message : String(err)
+    console.error(JSON.stringify({ level: 'error', fn: 'main', step: 'worker-start', function: name,
+      request_id: requestId, detail }))
+    return json(req, 500, { error: 'Function failed to start', request_id: requestId })
   }
 })
