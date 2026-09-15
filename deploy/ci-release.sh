@@ -114,17 +114,59 @@ prune_releases() {
 }
 
 # The parts of the stack a code rollback must never change: the database
-# service, and the auth settings that close signup and limit login attempts.
+# service; the auth settings that close signup, limit login attempts and decide
+# which identity providers may create or attach an account, together with the
+# auth entrypoint that derives signup from the Google switch; and Kong's plugin
+# list with the block that answers 403 on GoTrue's account-creating routes
+# (deploy/kong.yml, auth-v1-closed). Of the GOTRUE_EXTERNAL_* settings only the
+# names and the *_ENABLED values are compared: client ids and redirect URIs
+# differ per environment, and the client secret must never reach this output.
 compose_fingerprint() {
   docker compose --project-directory "$DIR/deploy" --env-file "$DIR/deploy/.env" -f "$1" \
       config --format json 2>/dev/null \
     | python3 -c '
-import json, sys
+import json, re, sys
 services = json.load(sys.stdin).get("services", {})
-env = services.get("auth", {}).get("environment", {}) or {}
-guarded = {k: env[k] for k in sorted(env)
-           if k in ("GOTRUE_DISABLE_SIGNUP", "GOTRUE_MAILER_AUTOCONFIRM") or k.startswith("GOTRUE_RATE_LIMIT")}
-print(json.dumps({"db": services.get("db"), "auth": guarded}, sort_keys=True))'
+auth = services.get("auth", {}) or {}
+env = auth.get("environment", {}) or {}
+kong_env = (services.get("kong", {}) or {}).get("environment", {}) or {}
+
+def guarded(name):
+    return (name in ("GOTRUE_DISABLE_SIGNUP", "GOTRUE_MAILER_AUTOCONFIRM", "GOTRUE_SAML_ENABLED",
+                     "GOTRUE_SECURITY_MANUAL_LINKING_ENABLED")
+            or name.startswith("GOTRUE_RATE_LIMIT") or name.startswith("GOTRUE_EXTERNAL_"))
+
+def shown(name):
+    if name.startswith("GOTRUE_EXTERNAL_") and not name.endswith("_ENABLED"):
+        return "(name only)"
+    return env[name]
+
+# The auth-v1-closed service of kong.yml, one stripped line per entry, comments
+# left out: a release without the block yields an empty list.
+def closed_routes(path):
+    try:
+        lines = open(path, encoding="utf-8", errors="replace").read().splitlines()
+    except OSError:
+        return None
+    block, inside = [], False
+    for line in lines:
+        if re.match(r"^\S", line):
+            inside = False
+        service = re.match(r"^  - name:\s*(\S+)\s*$", line)
+        if service:
+            inside = service.group(1) == "auth-v1-closed"
+        entry = line.strip()
+        if inside and entry and not entry.startswith("#"):
+            block.append(entry)
+    return block
+
+print(json.dumps({
+    "db": services.get("db"),
+    "auth": {name: shown(name) for name in sorted(env) if guarded(name)},
+    "auth_entrypoint": auth.get("entrypoint"),
+    "kong_plugins": kong_env.get("KONG_PLUGINS"),
+    "kong_closed_routes": closed_routes(sys.argv[1]),
+}, sort_keys=True))' "$(dirname "$1")/kong.yml"
 }
 
 # ── release ──────────────────────────────────────────────────────────────────
