@@ -1,6 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { corsFor } from "../_shared/http.ts";
+import { mailActivationCode } from "../_shared/activation-code-delivery.ts";
 
 interface GenerateRequest {
   company_id?: string | null;
@@ -106,11 +107,25 @@ Deno.serve(async (req: Request) => {
 
     if (insertErr) throw new Error(insertErr.message);
 
+    // The code exists now. The mail never throws, and a failed one leaves the
+    // code as it is: the screen still shows it.
+    const delivery = await mailActivationCode(supabaseAdmin, {
+      code:            rawCode,
+      companyId:       typeof insertRow.company_id === "string" ? insertRow.company_id : null,
+      targetEmail:     typeof insertRow.target_email === "string" ? insertRow.target_email : null,
+      durationType:    body.duration_type,
+      customDays:      typeof insertRow.custom_days === "number" ? insertRow.custom_days : null,
+      customExpiresAt: typeof insertRow.custom_expires_at === "string" ? insertRow.custom_expires_at : null,
+      expiresAt,
+    });
+
     return respond({
-      success:    true,
-      code:       rawCode,           // plain text — shown once only
-      code_id:    inserted.id,
-      expires_at: expiresAt.toISOString(),
+      success:         true,
+      code:            rawCode,           // plain text — shown once only
+      code_id:         inserted.id,
+      expires_at:      expiresAt.toISOString(),
+      mail_sent:       delivery.mailSent,
+      recipient_count: delivery.recipientCount,
     });
   } catch (err: unknown) {
     // Every message meant for the caller is returned explicitly above. Anything
