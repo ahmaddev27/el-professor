@@ -184,7 +184,7 @@ export async function readBodyText(req: Request, maxBytes = MAX_BODY_BYTES): Pro
   }
 }
 
-function parseJsonObject(text: string): Record<string, unknown> | null {
+export function parseJsonObject(text: string): Record<string, unknown> | null {
   try {
     const value: unknown = JSON.parse(text);
     return value !== null && typeof value === 'object' && !Array.isArray(value)

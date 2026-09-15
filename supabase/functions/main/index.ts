@@ -95,6 +95,9 @@ const FUNCTION_ENV: ReadonlyMap<string, readonly string[]> = new Map<string, rea
   ['manage-users', [...BASE_ENV, ...SERVICE_ENV, ...OTP_MAIL_ENV]],
   // Mails the generated code to its target address or its company's admins.
   ['generate-activation-code', [...BASE_ENV, ...SERVICE_ENV, ...SMTP_ENV]],
+  // Google sign-in: calls the oauth_* RPCs as service_role for the signed-in
+  // caller. Needs a session, so it is deliberately not in PUBLIC_FUNCTIONS.
+  ['oauth-account', [...BASE_ENV, ...SERVICE_ENV]],
   ['validate-discount-code', [...BASE_ENV, ...SERVICE_ENV]],
   ['update-income-weeks', [...BASE_ENV]],
   ['extract-receipt', [...BASE_ENV, 'ANTHROPIC_API_KEY']],
