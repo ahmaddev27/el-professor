@@ -59,6 +59,7 @@ A step counts once it is merged into `staging` and verified there. Production re
 - [x] **1.0, 1.2–1.5** One-time codes for signup, "Passwort vergessen", invitations and email change; public signup closed, Google sign-in removed, and each function gets only the variables it needs — PR #16, #14
 - [x] **Security fix:** anonymous callers can no longer list users, redeem discount or activation codes, or read a user's status. Closed by hand on production and staging on 15.09.2026, and made permanent by migration `20260915110000` — PR #15
 - [x] **4.1–4.2** Cash receipt foundations: receipts, a cash ledger, gapless GQ numbering and integer-cent helpers; the Trinkgeld-Quittung prints amounts of 1000 € and more correctly again — PR #13
+- [x] Landing page works on phones and tablets: sections stack to one column, and the mobile menu has Anmelden
 - [ ] **0.6** First production release from CI — the owner presses the button
 
 ### Building now

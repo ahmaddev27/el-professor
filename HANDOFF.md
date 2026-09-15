@@ -2,7 +2,7 @@
 
 Last updated: **15.09.2026**
 
-Start here when you pick up this project. Read it together with [CLAUDE.md](CLAUDE.md), which holds the rules and how every mechanism works, and [PROGRESS.md](PROGRESS.md), which records what is done and what was verified. The owner-facing plan is [el-professor-plan.html](el-professor-plan.html).
+Start here when you pick up this project. Read it together with [CLAUDE.md](CLAUDE.md), which holds the rules and how every mechanism works, and [PROGRESS.md](PROGRESS.md), which records what is done and what was verified. The owner-facing plan is [el-professor-plan.html](el-professor-plan.html). The older developer reference, moved out of the README in PR #18, is [Docs/TECHNICAL_REFERENCE.md](Docs/TECHNICAL_REFERENCE.md); where it disagrees with CLAUDE.md or the code, they win.
 
 ## Where things stand
 
@@ -125,6 +125,7 @@ Secrets never enter git:
 - **A release copies only part of `deploy/`.** `install_release` copies the compose file, `kong.yml`, `nginx-spa.conf`, `deploy.sh`, `init-db`, the functions, the migrations and `dist`. Any other script the host runs (`set-*.sh`, `otp-housekeeping.sh`) stays at the copy installed by hand, so reinstall it when it changes.
 - **Supabase grants EXECUTE on every new function to PUBLIC, anon and authenticated.** A function meant for service_role only needs all three revoked; `20260911120000` missed anon. A guard written as `auth.email() != '…'` or `auth.uid() <> …` lets an anonymous caller through, because the comparison is NULL. For every SECURITY DEFINER function a PR adds, check `has_function_privilege('anon', …)`.
 - **Never delete a PR's branch before `gh pr view N --json state` says MERGED.** On 15.09.2026 a merge failed on a GitHub TLS timeout, the script deleted the branch anyway, and GitHub closed PR #11 unmerged. Pushing the head commit back and `gh pr reopen` recovered it.
+- **An inline `style` beats a Tailwind class.** Most screens set their layout in `style={{…}}`, which cannot change with the screen width. A class such as `hidden md:flex` next to an inline `display` hides nothing. On 15.09.2026 that kept the landing page two to four columns wide on phones. Anything that has to follow the viewport (grid columns, padding, display) belongs in classes, not in the style object.
 - **The Workflow tool does not save an agent's worktree.** When a run is cut off, commit what is on disk (as `wip:`) before relaunching; a resumed run only replays agents that had finished.
 
 ## Keeping this file honest
