@@ -25,6 +25,11 @@ Start here when you pick up this project. Read it together with [CLAUDE.md](CLAU
     - PR #14, OTP screens. It waits for OTP-FUNCTIONS, which is still building.
   - `OTP_PEPPER` must be provisioned in both `.env` files before OTP-FUNCTIONS deploys; its `deploy.sh` guard refuses a release without it. All three OTP streams follow the contract kept at `C:\Users\ahmad\.claude\plans\otp-contract-wf_ce583f7b-774.md`, outside the repo.
 - **Staging mail reaches real recipients** (owner's decision, 14.09.2026). Mailpit keeps a copy of every message and relays it through production's Resend account, except mail to `@example.com`. Live on staging since PR #8 (`45ff313`). Resend lists the relayed test mails to `delivered@resend.dev` as `delivered`.
+- **Security fix, 15.09.2026.** Anyone holding the public anon key could call `list_users_for_admin()` and read every account's email, name and role.
+  - **Why the guard failed:** it reads `IF auth.email() != 'support@…' THEN RAISE`. For an anonymous caller `auth.email()` is NULL, so the comparison is NULL and the RAISE never runs. Confirmed on staging: 15 rows came back.
+  - **Closed by hand, with the owner's approval.** On production and staging, EXECUTE was revoked from anon and PUBLIC on `list_users_for_admin`, `create_user_account`, `redeem_discount_code`, `preview_activation_code` and `redeem_activation_code`. Signed-in users keep the activation functions and service_role keeps discount redemption. anon now gets 401.
+  - **No sign of use:** Kong's production log starts 13.09.2026 and shows no call to these functions.
+  - **Made permanent:** migration `20260915110000_revoke_anon_from_unguarded_functions.sql`, which also closes `get_user_status` and `is_user_active` and fails the release if anon can still run any of them.
 - **`main` is behind `staging`** by the Phase 0 work. Production still runs a bundle deployed before CI releases existed.
 
 ## What is live where
@@ -76,6 +81,7 @@ Secrets never enter git:
   - **OTP-DB.** A new signup with an unverified address replaces the pending one immediately, which stops address squatting but lets anyone knock out a real owner. Keep that, or only replace one older than about 10 minutes?
   - **Baseline.** `get_current_cash_balance()` reads a receipts column that no longer exists and nothing calls it. Drop it or fix it?
   - **Baseline.** `storage.objects` policies are not in the matrix because the fixture is a public-schema dump. Take a schema-only storage dump before step 3.3 rewrites those policies?
+- The user list was readable anonymously until 15.09.2026. The logs since 13.09.2026 show no use, and older logs are gone. Whether that needs a data-protection assessment is the owner's call.
 
 ## Gotchas learned the hard way
 
@@ -93,6 +99,8 @@ Secrets never enter git:
 - **Mailpit logs a relay only when it fails;** success is a debug line, so a quiet log is the good case. To see what Resend did with a mail, list `GET https://api.resend.com/emails` with production's key (pass the header on stdin with `curl -H @-`) and read `last_event`. Print only the fields you need: the list holds customers' addresses.
 - **A `grep` that matches nothing ends a `set -euo pipefail` script silently** — the same trap as the `.env` reads in `deploy.sh`. It hid the result of the first relay test, which had in fact been delivered.
 - **On Windows, vitest rewrites the golden `.snap` files with LF line endings.** The content is byte-identical and `git diff` is empty, but with `core.autocrlf=true` git lists them as modified. Restore them with `git checkout -- src/utils/__snapshots__/` and never commit them. A `.gitattributes` line `src/utils/__snapshots__/*.snap text eol=lf` would end the churn.
+- **Supabase grants EXECUTE on every new function to PUBLIC, anon and authenticated.** A function meant for service_role only needs all three revoked; `20260911120000` missed anon. A guard written as `auth.email() != '…'` or `auth.uid() <> …` lets an anonymous caller through, because the comparison is NULL. For every SECURITY DEFINER function a PR adds, check `has_function_privilege('anon', …)`.
+- **Never delete a PR's branch before `gh pr view N --json state` says MERGED.** On 15.09.2026 a merge failed on a GitHub TLS timeout, the script deleted the branch anyway, and GitHub closed PR #11 unmerged. Pushing the head commit back and `gh pr reopen` recovered it.
 - **The Workflow tool does not save an agent's worktree.** When a run is cut off, commit what is on disk (as `wip:`) before relaunching; a resumed run only replays agents that had finished.
 
 ## Keeping this file honest

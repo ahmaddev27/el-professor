@@ -58,6 +58,7 @@ A step counts once it is merged into `staging` and verified there. Production re
 - [x] **0.5** End-to-end suite, 5/5 passing; its first run found reset and invite links that signed users straight back out, fixed in the same PR — PR #7
 - [x] Staging mail reaches real recipients through Resend, `example.com` excluded, by the owner's decision — PR #8, #9
 - [x] **1.1** OTP database: code tables, rate-limited RPCs and one-transaction signup; nothing uses it yet — PR #11
+- [x] **Security fix:** anonymous callers can no longer list users, redeem discount or activation codes, or read a user's status. Closed by hand on production and staging on 15.09.2026, and made permanent by migration `20260915110000`.
 - [ ] **0.6** First production release from CI — the owner presses the button
 
 ### Building now
