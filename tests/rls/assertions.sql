@@ -84,6 +84,16 @@ DECLARE
   admin_a uuid; editor_a uuid; viewer_a uuid; admin_b uuid; super_u uuid;
   drv_a uuid; drv_b uuid;
   n integer;
+  -- functions only signed-in screens and the service role call, whose anon
+  -- grant 20260915120000 revoked
+  signed_in_only constant text[] := ARRAY[
+    'public.compute_plan_price(text, integer, text)',
+    'public.generate_invoice_number(integer)',
+    'public.apply_monthly_planning_run(jsonb)',
+    'public.replace_monthly_planning_run(jsonb, uuid)',
+    'public.delete_or_archive_monthly_planning_run(uuid)',
+    'public.purge_old_monthly_planning_runs(integer, integer)'];
+  redeem_discount constant text := 'public.redeem_discount_code(text, uuid, text, text, integer)';
 BEGIN
   SELECT id INTO co_a FROM companies WHERE slug = 'test-a';
   SELECT id INTO co_b FROM companies WHERE slug = 'test-b';
@@ -187,6 +197,22 @@ BEGIN
     _allowed(super_u, format('UPDATE companies SET plan = %L WHERE id = %L', 'premium', co_a)), true);
   PERFORM _check('super admin CAN UPDATE an operational row in any company',
     _allowed(super_u, format('UPDATE drivers SET name = %L WHERE id = %L', 'support-fix', drv_b)), true);
+
+  -- ── functions anon may not execute ────────────────────────────────────────
+  -- Supabase's default privileges grant anon EXECUTE on every function created
+  -- in public, and REVOKE … FROM PUBLIC leaves that grant alone. A migration
+  -- that drops and recreates one of these functions gives anon its grant back
+  -- unless it revokes it again. redeem_discount_code lost authenticated in
+  -- 20260911120000 and anon in 20260915110000.
+  PERFORM _check(format('anon cannot EXECUTE %s', f), has_function_privilege('anon', f, 'EXECUTE'), false)
+     FROM unnest(signed_in_only || redeem_discount) AS f;
+  PERFORM _check('a signed-in user cannot EXECUTE redeem_discount_code',
+    has_function_privilege('authenticated', redeem_discount, 'EXECUTE'), false);
+  -- …and each function stays callable by the role it exists for.
+  PERFORM _check('the service role CAN EXECUTE redeem_discount_code',
+    has_function_privilege('service_role', redeem_discount, 'EXECUTE'), true);
+  PERFORM _check(format('a signed-in user CAN EXECUTE %s', f), has_function_privilege('authenticated', f, 'EXECUTE'), true)
+     FROM unnest(signed_in_only) AS f;
 
   RAISE NOTICE '── all assertions passed ──';
 END $$;
