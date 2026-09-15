@@ -51,6 +51,16 @@ const OtpCodeInput: React.FC<OtpCodeInputProps> = ({
   const boxes = useRef<Array<HTMLInputElement | null>>([]);
   const pendingSelect = useRef<number | null>(null);
 
+  // The code as of the latest edit, which the handlers read instead of `value`.
+  // Moving focus to the next box fires its focus handler synchronously, before
+  // React has rendered the digit that unlocked it; judged by the rendered
+  // `value`, that box was still out of reach and focus went back one box.
+  // Chrome and Firefox recovered because their select() refocuses the box after
+  // the render. WebKit's select() does not, so on Safari and every iOS browser
+  // each typed digit overwrote the one before it and the code never completed.
+  const latest = useRef(value);
+  latest.current = value;
+
   // Selecting before React writes the new digit selects the old one, so the
   // selection is repeated after the render. A selected digit is replaced by
   // the next keystroke instead of sitting next to it.
@@ -70,13 +80,15 @@ const OtpCodeInput: React.FC<OtpCodeInputProps> = ({
   };
 
   useEffect(() => {
-    if (autoFocus && !disabled) focusBox(focusableIndex(value, LAST_BOX));
+    if (autoFocus && !disabled) focusBox(focusableIndex(latest.current, LAST_BOX));
     // On mount only: refocusing on later changes would pull focus away from the buttons.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const apply = (edit: CodeEdit) => {
-    const changed = edit.value !== value;
+    const changed = edit.value !== latest.current;
+    // Before focus moves, so the focus handler already sees this edit.
+    latest.current = edit.value;
     if (changed) onChange(edit.value);
     focusBox(edit.focusIndex);
     if (changed && edit.value.length === OTP_CODE_LENGTH) onComplete(edit.value);
@@ -85,29 +97,31 @@ const OtpCodeInput: React.FC<OtpCodeInputProps> = ({
   // Reached by mobile keyboards, autofill and IME input; desktop digits are
   // handled in onKeyDown before a change event exists.
   const handleChange = (index: number, raw: string) => {
+    const code = latest.current;
     if (raw === '') {
-      apply(deleteBackward(value, index));
+      apply(deleteBackward(code, index));
       return;
     }
-    const previous = value[index] ?? '';
+    const previous = code[index] ?? '';
     let typed = raw;
     // The selection was lost, so the old digit is still in the box beside the new one.
     if (previous && raw.length === 2 && raw.includes(previous)) {
       typed = raw[0] === previous ? raw[1] : raw[0];
     }
-    apply(enterDigits(value, index, typed));
+    apply(enterDigits(code, index, typed));
   };
 
   const handleKeyDown = (index: number, event: React.KeyboardEvent<HTMLInputElement>) => {
     if (event.metaKey || event.ctrlKey || event.altKey) return;
+    const code = latest.current;
     switch (event.key) {
       case 'Backspace':
         event.preventDefault();
-        apply(deleteBackward(value, index));
+        apply(deleteBackward(code, index));
         return;
       case 'Delete':
         event.preventDefault();
-        apply(deleteForward(value, index));
+        apply(deleteForward(code, index));
         return;
       case 'ArrowLeft':
         event.preventDefault();
@@ -115,7 +129,7 @@ const OtpCodeInput: React.FC<OtpCodeInputProps> = ({
         return;
       case 'ArrowRight':
         event.preventDefault();
-        focusBox(focusableIndex(value, index + 1));
+        focusBox(focusableIndex(code, index + 1));
         return;
       case 'Home':
         event.preventDefault();
@@ -123,12 +137,12 @@ const OtpCodeInput: React.FC<OtpCodeInputProps> = ({
         return;
       case 'End':
         event.preventDefault();
-        focusBox(focusableIndex(value, LAST_BOX));
+        focusBox(focusableIndex(code, LAST_BOX));
         return;
       default:
         if (/^\d$/.test(event.key)) {
           event.preventDefault();
-          apply(enterDigits(value, index, event.key));
+          apply(enterDigits(code, index, event.key));
         }
     }
   };
@@ -140,7 +154,7 @@ const OtpCodeInput: React.FC<OtpCodeInputProps> = ({
   };
 
   const handleFocus = (index: number, event: React.FocusEvent<HTMLInputElement>) => {
-    const allowed = focusableIndex(value, index);
+    const allowed = focusableIndex(latest.current, index);
     if (allowed !== index) {
       focusBox(allowed);
       return;
