@@ -3,15 +3,15 @@
  *
  * The functions between "# >>> google-signin checks" and "# <<< google-signin
  * checks" in deploy/deploy.sh are copied out verbatim, sourced by bash with a
- * stub `fail`, and run against fake .env, kong.yml and /auth/v1/settings
- * answers in a temporary directory. No docker, no host paths.
+ * stub `fail`, and run against fake .env, kong.yml, compose and
+ * /auth/v1/settings answers in a temporary directory. No docker, no host paths.
  *
- * Needs bash with grep, awk and sha256sum; the settings check also needs
- * python3, as deploy.sh does on the host. Where they are missing the tests are
- * skipped, never passed.
+ * Needs bash with grep, awk and sha256sum; the settings check, the Kong parse
+ * inputs and the redaction also need python3, as deploy.sh does on the host.
+ * Where they are missing the tests are skipped, never passed.
  */
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
@@ -60,6 +60,7 @@ function file(content: string): string {
   writeFileSync(path, content);
   return path.replace(/\\/g, '/');
 }
+const freshPath = () => join(dir, `fresh-${++fixture}`).replace(/\\/g, '/');
 
 function run(args: string[], stdin = ''): { output: string; status: number | null } {
   const result = spawnSync('bash', [join(dir, 'run.sh').replace(/\\/g, '/'), ...args], {
@@ -146,6 +147,12 @@ describe.skipIf(!hasBash)('kong_closed_block_guard', () => {
     expect(guardKong(kong.replace(/\n/g, '\r\n')).output).toBe('PASSED');
   });
 
+  it('reads past a comment in column 0 inside the block, as ci-release.sh does', () => {
+    const commented = kong.replace('    routes:\n      - name: auth-v1-closed\n', '# a note in column 0\n    routes:\n      - name: auth-v1-closed\n');
+    expect(commented).not.toBe(kong);
+    expect(guardKong(commented).output).toBe('PASSED');
+  });
+
   it('refuses a kong.yml without the block, or with any part of it missing', () => {
     const service = /\n {2}- name: auth-v1-closed\n[\s\S]*?(?=\n\n {2}# ── Auth ──)/;
     expect(kong).toMatch(service);
@@ -158,6 +165,8 @@ describe.skipIf(!hasBash)('kong_closed_block_guard', () => {
       kong.replace('- name: request-termination', '- name: request-transformer'),
       kong.replace('  - name: auth-v1-closed\n', '  - name: auth-v1-shut\n'),
       kong.replace(service, (block) => block.replace(/\n/g, '\n#')),
+      // A top-level key ends the block, so what follows it is not part of it.
+      kong.replace('    plugins:\n      - name: request-termination\n', 'x_other: 1\n    plugins:\n      - name: request-termination\n'),
     ];
     for (const text of cases) {
       expect(text).not.toBe(kong);
@@ -198,8 +207,8 @@ describe.skipIf(!hasPython)('auth_settings_problems', () => {
   it('accepts Google on only with signup open and autoconfirm off', () => {
     expect(check(ON, 'true')).toBe('[] 0\nPASSED');
     expect(check(OFF, 'true')).toBe('[disable_signup=true google=false mailer_autoconfirm=true] 1\nPASSED');
-    // Google on with signup still closed: what a switch GoTrue reads as on but
-    // the entrypoint does not (TRUE, 1) would produce.
+    // Google on with signup still closed: what GoTrue would show if the auth
+    // entrypoint were edited or bypassed, since GoTrue reads TRUE or 1 as on.
     expect(check({ ...ON, disable_signup: true, mailer_autoconfirm: true }, 'true'))
       .toBe('[disable_signup=true mailer_autoconfirm=true] 1\nPASSED');
     expect(check(ON, 'false')).toBe('[disable_signup=false google=true mailer_autoconfirm=false] 1\nPASSED');
@@ -214,5 +223,65 @@ describe.skipIf(!hasPython)('auth_settings_problems', () => {
     for (const body of ['', '<html>502 Bad Gateway</html>', '{}', '{"external":{}}', JSON.stringify({ ...OFF, disable_signup: undefined })]) {
       expect(check(body, 'false')).toBe('[no settings answer] 1\nPASSED');
     }
+  });
+});
+
+describe.skipIf(!hasPython)('kong_parse_inputs', () => {
+  const KONG = {
+    image: 'kong:2.8.1',
+    environment: {
+      KONG_PLUGINS: 'request-transformer,cors,key-auth,acl,request-termination',
+      SERVICE_ROLE_KEY: 'service.role.key.value',
+      ANON_KEY: 'anon.key.value',
+      APP_URL: 'https://app.example.test',
+      KONG_DATABASE: 'off',
+    },
+  };
+  const composeAnswer = (kong: unknown) =>
+    JSON.stringify({ services: { auth: { environment: { GOTRUE_JWT_SECRET: 'not-for-kong' } }, kong } });
+
+  it('writes the kong environment, sorted and nothing else, to a mode 600 env file, and prints only the image', () => {
+    const envFile = freshPath();
+    expect(run(['kong_parse_inputs', envFile], composeAnswer(KONG))).toEqual({ output: 'kong:2.8.1\nPASSED', status: 0 });
+    expect(readFileSync(envFile, 'utf8')).toBe(
+      [
+        'ANON_KEY=anon.key.value',
+        'APP_URL=https://app.example.test',
+        'KONG_DATABASE=off',
+        'KONG_PLUGINS=request-transformer,cors,key-auth,acl,request-termination',
+        'SERVICE_ROLE_KEY=service.role.key.value',
+        '',
+      ].join('\n'),
+    );
+    if (process.platform !== 'win32') expect(statSync(envFile).mode & 0o777).toBe(0o600);
+  });
+
+  it('fails, printing nothing, without a kong image or environment, or with a line break in a value', () => {
+    for (const answer of [
+      'not json',
+      composeAnswer(undefined),
+      composeAnswer({ environment: KONG.environment }),
+      composeAnswer({ image: 'kong:2.8.1' }),
+      composeAnswer({ image: 'kong:2.8.1', environment: {} }),
+      composeAnswer({ ...KONG, environment: { ...KONG.environment, APP_URL: 'https://app.example.test\nKONG_PLUGINS=off' } }),
+    ]) {
+      expect(run(['kong_parse_inputs', freshPath()], answer)).toEqual({ output: '', status: 1 });
+    }
+  });
+});
+
+describe.skipIf(!hasPython)('redact_env_values', () => {
+  it('replaces the values of keys, secrets, passwords and tokens with their names, and leaves the rest of the message', () => {
+    const envFile = env([
+      'ANON_KEY=anon.key.value',
+      'SERVICE_ROLE_KEY=service.role.key.value',
+      'SMTP_PASS=smtp-pass-value',
+      'KONG_DECLARATIVE_CONFIG=/home/kong/kong.yml',
+      'KONG_PLUGINS=request-transformer,cors',
+    ]);
+    const message = "Error: in 'key': service.role.key.value, anon.key.value, smtp-pass-value in /home/kong/kong.yml (request-transformer,cors)\n";
+    expect(run(['redact_env_values', envFile], message).output).toBe(
+      "Error: in 'key': [SERVICE_ROLE_KEY], [ANON_KEY], [SMTP_PASS] in /home/kong/kong.yml (request-transformer,cors)\nPASSED",
+    );
   });
 });

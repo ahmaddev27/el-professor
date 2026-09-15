@@ -3,8 +3,11 @@
 # Code only: the bundle, edge functions, Kong and nginx config return to that
 # release, and the database stays as it is. The host (deploy/ci-release.sh)
 # refuses when the earlier release predates a schema change marked incompatible
-# in deploy/SCHEMA_EPOCH, or when it would change the database service or
-# loosen the auth settings. To undo a rollback, run the Deploy workflow again.
+# in deploy/SCHEMA_EPOCH, or when it would change the database service, the auth
+# settings (signup, autoconfirm, login limits, the identity-provider switches),
+# the auth entrypoint that derives signup from the Google switch, or Kong's
+# plugin list or auth-v1-closed block. To undo a rollback, run the Deploy
+# workflow again.
 
 name: Rollback
 

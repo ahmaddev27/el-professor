@@ -142,7 +142,8 @@ def shown(name):
     return env[name]
 
 # The auth-v1-closed service of kong.yml, one stripped line per entry, comments
-# left out: a release without the block yields an empty list.
+# left out: a release without the block yields an empty list. A comment in
+# column 0 does not end the block, exactly as in deploy.sh kong_closed_block_guard.
 def closed_routes(path):
     try:
         lines = open(path, encoding="utf-8", errors="replace").read().splitlines()
@@ -150,7 +151,7 @@ def closed_routes(path):
         return None
     block, inside = [], False
     for line in lines:
-        if re.match(r"^\S", line):
+        if re.match(r"^[^\s#]", line):
             inside = False
         service = re.match(r"^  - name:\s*(\S+)\s*$", line)
         if service:
@@ -216,6 +217,9 @@ if [ "$VERB" = release ]; then
   install_release "$name"
   rc=0
   bash "$DIR/deploy/deploy.sh" "$ENV" --release-dir "$rel" || rc=$?
+  if [ "$rc" != 0 ]; then
+    echo "   release $name did not complete. $DIR holds its files and releases/current still names $(current_name); whatever deploy.sh changed before it stopped stays changed, and its last message says what. Deploy a fix forward to restore $ENV" >&2
+  fi
   prune_releases
   exit "$rc"
 fi
@@ -243,7 +247,7 @@ now_fp="$(compose_fingerprint "$DIR/deploy/docker-compose.yml")"
 old_fp="$(compose_fingerprint "$RELEASES/$target/deploy/docker-compose.yml")"
 [ -n "$now_fp" ] && [ -n "$old_fp" ] || refuse "could not read the compose configuration of $cur or $target"
 [ "$now_fp" = "$old_fp" ] \
-  || refuse "$target would change the database service or loosen the auth settings (signup, login limits); deploy a fix forward instead"
+  || refuse "$target would change the database service, the auth settings (signup, autoconfirm, login limits, identity-provider switches), the auth entrypoint, or Kong's plugin list or auth-v1-closed block; deploy a fix forward instead"
 
 echo "== rolling $ENV back: $cur -> $target"
 echo "   migrations $cur applied stay applied: $(mget "$cur" MIGRATIONS_APPLIED)"
@@ -257,6 +261,6 @@ bash "$DIR/deploy/deploy.sh" "$ENV" --activate --release-dir "$RELEASES/$target"
 if [ "$rc" = 0 ]; then
   mset "$cur" STATUS rolled_back
 else
-  echo "   the rollback did not come up healthy; run the Deploy workflow for $ENV to put the newest release back" >&2
+  echo "   the rollback did not come up healthy. $DIR holds the files of $target, and whatever deploy.sh recreated before it stopped runs them (Kong first; its last message says how far it got). Run the Deploy workflow for $ENV to put the newest release back" >&2
 fi
 exit "$rc"

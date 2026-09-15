@@ -36,6 +36,7 @@ Until `mail-staging.elprofessor.eu` resolves, the suite reaches Mailpit through 
 | `staging-protection` | Staging answers 401 without the login, `/version.txt` stays public, and with the login the sign-in page and the STAGING banner show. |
 | `sign-in` | The E2E admin signs in and reaches the company overview. |
 | `forgot-password` | The reset code arrives in Mailpit with no secret in a link or the subject, a wrong code is refused with the attempts left, the right one opens the password form, and the new password signs in. Afterwards the password is put back. |
+| `kong-closed-routes` | The API answers 403 from Kong on `/auth/v1/signup`, `/auth/v1/signup/`, `//auth/v1/signup`, `/auth/v1/%73ignup`, `/auth/v1/otp` and `/auth/v1/magiclink`, and `/auth/v1/settings` still answers 200 with Google, signup and autoconfirm agreeing. Needs the release with Kong's `auth-v1-closed` block on staging, and `E2E_ANON_KEY` from `npm run setup`. |
 
 ## Things to know
 

@@ -49,7 +49,10 @@ const authEnv = auth.environment ?? {};
 const CLOSED_PATHS = ['/auth/v1/signup', '/auth/v1/otp', '/auth/v1/magiclink'];
 const CLOSED_MESSAGE = 'This route is closed by the gateway';
 const ENTRYPOINT_SCRIPT =
-  'if [ "$$GOTRUE_EXTERNAL_GOOGLE_ENABLED" = true ]; then export GOTRUE_DISABLE_SIGNUP=false GOTRUE_MAILER_AUTOCONFIRM=false; fi; exec auth';
+  'case "$$GOTRUE_EXTERNAL_GOOGLE_ENABLED" in true) export GOTRUE_DISABLE_SIGNUP=false GOTRUE_MAILER_AUTOCONFIRM=false ;; ""|false) ;; *) echo "GOTRUE_EXTERNAL_GOOGLE_ENABLED must be true or false" >&2; exit 64 ;; esac; exec auth';
+const ENTRYPOINT_REFUSAL = 'GOTRUE_EXTERNAL_GOOGLE_ENABLED must be true or false\n';
+/** How the kong service renders kong.yml at start, and how deploy.sh renders it for its parse check. */
+const KONG_RENDER = 'eval "echo \\"$(cat /home/kong/kong.template.yml)\\"" > /home/kong/kong.yml';
 
 describe('docker-compose.yml: auth', () => {
   it('runs the GoTrue version whose behaviour the comments and the entrypoint were checked against', () => {
@@ -94,8 +97,8 @@ describe('docker-compose.yml: auth', () => {
   });
 });
 
-// The entrypoint's condition, run by a real sh with `exec auth` replaced by a
-// print of the two variables GoTrue would read.
+// The entrypoint's case statement, run by a real sh with `exec auth` replaced
+// by a print of the two variables GoTrue would read.
 const shell = spawnSync('sh', ['-c', 'echo ok'], { encoding: 'utf8', timeout: 20_000 });
 const hasSh = shell.status === 0 && shell.stdout.trim() === 'ok';
 
@@ -105,7 +108,7 @@ describe.skipIf(!hasSh)('the auth entrypoint under sh', () => {
     'printf "%s %s" "$GOTRUE_DISABLE_SIGNUP" "$GOTRUE_MAILER_AUTOCONFIRM"',
   );
 
-  const effective = (google: string | undefined) => {
+  const start = (google: string | undefined) => {
     const environment: Record<string, string> = {
       ...process.env,
       GOTRUE_DISABLE_SIGNUP: 'true',
@@ -113,25 +116,49 @@ describe.skipIf(!hasSh)('the auth entrypoint under sh', () => {
     } as Record<string, string>;
     delete environment.GOTRUE_EXTERNAL_GOOGLE_ENABLED;
     if (google !== undefined) environment.GOTRUE_EXTERNAL_GOOGLE_ENABLED = google;
-    return spawnSync('sh', ['-c', script], { encoding: 'utf8', env: environment, timeout: 20_000 }).stdout;
+    const result = spawnSync('sh', ['-c', script], { encoding: 'utf8', env: environment, timeout: 20_000 });
+    return { status: result.status, stdout: result.stdout, stderr: result.stderr.replace(/\r\n/g, '\n') };
   };
 
   it('opens signup and turns autoconfirm off for exactly the string true', () => {
-    expect(effective('true')).toBe('false false');
+    expect(start('true')).toEqual({ status: 0, stdout: 'false false', stderr: '' });
   });
 
-  it.each([[undefined], [''], ['false'], ['TRUE'], ['True'], ['1'], [' true'], ['true '], ['yes']])(
-    'keeps signup closed and autoconfirm on for %p',
+  it.each([[undefined], [''], ['false']])('keeps signup closed and autoconfirm on for %p', (google) => {
+    expect(start(google)).toEqual({ status: 0, stdout: 'true true', stderr: '' });
+  });
+
+  // GoTrue reads the variable as a Go bool, so 1, t, T, True and TRUE mean on.
+  // Any of them would turn Google on while signup stayed closed and autoconfirm
+  // stayed on, so the container stops before GoTrue starts. So does every
+  // other value, false-looking ones included: only three are known.
+  it.each([['TRUE'], ['True'], ['t'], ['T'], ['1'], [' true'], ['true '], ['yes'], ['on'], ['"true"'], ['FALSE'], ['0'], ['f']])(
+    'stops with exit code 64 before GoTrue starts for %p',
     (google) => {
-      expect(effective(google)).toBe('true true');
+      expect(start(google)).toEqual({ status: 64, stdout: '', stderr: ENTRYPOINT_REFUSAL });
     },
   );
 });
 
 describe('docker-compose.yml: kong', () => {
+  it('runs the Kong version the closed-route variants were proven against', () => {
+    // kong.yml relies on how Kong 2.8.1 routes: prefix paths tried longest
+    // first, and the path normalised (//, ./, ../, percent-encoded letters)
+    // before it is matched. Before this pin moves, prove the whole variant
+    // matrix again against a throwaway container of the new version, and run
+    // e2e/tests/kong-closed-routes.spec.ts against staging after its release.
+    expect(compose.services.kong.image).toBe('kong:2.8.1');
+  });
+
   it('loads request-termination next to the plugins kong.yml already uses', () => {
     const plugins = String(compose.services.kong.environment?.KONG_PLUGINS).split(',');
     expect(plugins).toEqual(expect.arrayContaining(['request-transformer', 'cors', 'key-auth', 'acl', 'request-termination']));
+  });
+
+  it('renders kong.yml at start the way deploy.sh renders it for kong config parse', () => {
+    const composeRender = KONG_RENDER.replace('$(', '$$$$(');
+    expect(compose.services.kong.entrypoint).toBe(`bash -c '${composeRender} && exec /docker-entrypoint.sh kong docker-start'`);
+    expect(deploySh).toContain(`'${KONG_RENDER} && kong config parse /home/kong/kong.yml'`);
   });
 });
 

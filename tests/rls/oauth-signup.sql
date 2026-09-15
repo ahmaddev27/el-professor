@@ -970,6 +970,8 @@ DECLARE
   r_fresh   uuid := '9a000005-0000-4000-8000-000000000008';
   r_unconf  uuid := '9a000005-0000-4000-8000-000000000009';
   r_banned  uuid := '9a000005-0000-4000-8000-00000000000a';
+  r_staff_inv  uuid := '9a000005-0000-4000-8000-00000000000b';
+  r_staff_pend uuid := '9a000005-0000-4000-8000-00000000000c';
   company_a uuid := 'c0000000-0000-4000-8000-00000000000a';
   admin_a   uuid := 'a0000000-0000-4000-8000-000000000001';
   c_signup  uuid := gen_random_uuid();
@@ -977,6 +979,7 @@ DECLARE
   co        uuid;
   co_appr   uuid;
   co_member uuid;
+  co_staff  uuid;
   r         jsonb;
   prof      record;
   before    jsonb;
@@ -1094,6 +1097,32 @@ BEGIN
   PERFORM _oauth_ok('platform staff: nothing, whatever else holds',
     r->>'action' = 'none' AND r->>'reason' = 'platform_staff'
     AND (SELECT to_jsonb(up) FROM user_profiles up WHERE up.user_id = r_staff) = before);
+
+  -- Platform staff never sign in with Google (owner decision, 16.09.2026), so a
+  -- Google sign-in settles nothing that is pending on a staff account either.
+  PERFORM _oauth_invited_employee(r_staff_inv, 'oauth-r-staff-inv@test.invalid', company_a);
+  UPDATE user_profiles SET is_super_admin = true WHERE user_id = r_staff_inv;
+  PERFORM _oauth_link_google(r_staff_inv);
+  SELECT to_jsonb(up) INTO before FROM user_profiles up WHERE up.user_id = r_staff_inv;
+  r := public.oauth_session_reconcile(r_staff_inv);
+  PERFORM _oauth_ok('platform staff with a pending invitation: platform_staff, and the invitation is not accepted',
+    r->>'action' = 'none' AND r->>'reason' = 'platform_staff'
+    AND before->>'status' = 'pending_invite'
+    AND (SELECT to_jsonb(up) FROM user_profiles up WHERE up.user_id = r_staff_inv) = before);
+
+  PERFORM _oauth_password_signup_account(r_staff_pend, 'oauth-r-staff-pend@test.invalid');
+  co_staff := (public.signup_create_company(r_staff_pend, 'oauth-r-staff-pend@test.invalid', 'Paula Plattform', 'Plattform GmbH',
+                                            NULL, NULL, NULL, NULL, NULL)->'company'->>'id')::uuid;
+  UPDATE user_profiles SET is_super_admin = true WHERE user_id = r_staff_pend;
+  PERFORM _oauth_link_google(r_staff_pend);
+  SELECT to_jsonb(up) INTO before FROM user_profiles up WHERE up.user_id = r_staff_pend;
+  r := public.oauth_session_reconcile(r_staff_pend);
+  PERFORM _oauth_ok('platform staff with a pending password signup: platform_staff, and the signup is not cancelled',
+    r->>'action' = 'none' AND r->>'reason' = 'platform_staff'
+    AND EXISTS (SELECT 1 FROM companies WHERE id = co_staff)
+    AND EXISTS (SELECT 1 FROM app_private.pending_signups WHERE user_id = r_staff_pend AND company_id = co_staff)
+    AND (SELECT to_jsonb(up) FROM user_profiles up WHERE up.user_id = r_staff_pend) = before
+    AND NOT EXISTS (SELECT 1 FROM app_private.pending_oauth_signups WHERE user_id = r_staff_pend));
 
   PERFORM _oauth_google_signup(r_fresh, 'oauth-r-fresh@test.invalid');
   r := public.oauth_session_reconcile(r_fresh);
