@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { Suspense, lazy } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from './contexts/AuthContext';
 import { CompanySettingsProvider } from './contexts/CompanySettingsContext';
@@ -47,6 +47,14 @@ import AccountBlockedPage from './pages/AccountBlockedPage';
 import AdminLayout from './components/AdminLayout';
 import { useTranslation } from './contexts/LanguageContext';
 import type { TranslationKey } from './i18n';
+import { isDesignPreviewPath } from './design-preview/gate';
+
+// ─── Design preview (Phase 2 prototype) ──────────────────────────────────────
+// The new design on invented data, for the owner to approve before any screen
+// moves over. __DESIGN_PREVIEW__ is false in production builds (vite.config.ts),
+// which folds this to null and leaves the preview's code out of the bundle.
+// Nothing links to it; it is reached by typing /design-preview.
+const DesignPreviewApp = __DESIGN_PREVIEW__ ? lazy(() => import('./design-preview/DesignPreviewApp')) : null;
 
 // ─── Plan-gated route wrapper ─────────────────────────────────────────────────
 
@@ -163,6 +171,16 @@ const PlatformAccountGuard: React.FC<{ children: React.ReactNode }> = ({ childre
 
 function App() {
   const { user, loading: authLoading, isAdmin, isSuperAdmin, companyApprovalStatus, userBlockReason } = useAuth();
+
+  // Ahead of every gate: the preview reads no account or tenant data, and it
+  // has to render for a reviewer whatever their session state is.
+  if (DesignPreviewApp && isDesignPreviewPath(window.location.pathname)) {
+    return (
+      <Suspense fallback={null}>
+        <DesignPreviewApp />
+      </Suspense>
+    );
+  }
 
   if (authLoading) {
     return (
