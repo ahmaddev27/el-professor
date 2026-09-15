@@ -146,7 +146,7 @@ const HeroDashboard: React.FC = () => {
         <span style={{ width: 10, height: 10, borderRadius: '50%', background: 'rgba(245,158,11,0.5)' }} />
         <span style={{ width: 10, height: 10, borderRadius: '50%', background: 'rgba(16,185,129,0.5)' }} />
         <span style={{ flex: 1 }} />
-        <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.2)', fontFamily: 'monospace' }}>YA · Dashboard</span>
+        <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.2)', fontFamily: 'monospace' }}>El-Professor · Dashboard</span>
       </div>
 
       <div style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -1260,7 +1260,7 @@ const LandingPage: React.FC = () => {
             ))}
           </div>
           <div style={{ borderTop: `1px solid ${BORDER}`, paddingTop: 24, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
-            <p style={{ fontSize: 12, color: 'rgba(255,255,255,0.22)' }}>© 2025 YA Software. {t('landing.footer.rights')}</p>
+            <p style={{ fontSize: 12, color: 'rgba(255,255,255,0.22)' }}>© {new Date().getFullYear()} El-Professor. {t('landing.footer.rights')}</p>
             <p style={{ fontSize: 12, color: 'rgba(255,255,255,0.22)' }}>{t('landing.trust.gdpr')} · {t('landing.trust.madeInGermany')}</p>
           </div>
         </div>

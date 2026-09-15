@@ -1974,7 +1974,7 @@ export const en: PartialDictionary = {
   'users.error.unexpected':                'An unexpected error occurred.',
   'users.error.unknown':                   'Unknown error',
   'users.form.email':                      'Email address',
-  'users.form.emailPlaceholder':           'user@yamobility.de',
+  'users.form.emailPlaceholder':           'name@company.com',
   'users.form.fullName':                   'Full name',
   'users.form.fullNamePlaceholder':        'John Doe',
   'users.form.role':                       'Role',

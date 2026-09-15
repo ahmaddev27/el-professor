@@ -1972,7 +1972,7 @@ export const de = {
   'users.error.unexpected':                'Ein unerwarteter Fehler ist aufgetreten.',
   'users.error.unknown':                   'Unbekannter Fehler',
   'users.form.email':                      'E-Mail-Adresse',
-  'users.form.emailPlaceholder':           'benutzer@yamobility.de',
+  'users.form.emailPlaceholder':           'name@firma.de',
   'users.form.fullName':                   'Vollständiger Name',
   'users.form.fullNamePlaceholder':        'Max Mustermann',
   'users.form.role':                       'Rolle',

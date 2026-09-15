@@ -1,4 +1,4 @@
-# Y&A Mobility — Technical Developer Reference
+# El-Professor
 
 [![Deploy](https://github.com/ahmaddev27/el-professor/actions/workflows/deploy.yml/badge.svg?branch=staging&event=push)](https://github.com/ahmaddev27/el-professor/actions/workflows/deploy.yml)
 [![PR checks](https://github.com/ahmaddev27/el-professor/actions/workflows/pr-checks.yml/badge.svg?event=pull_request)](https://github.com/ahmaddev27/el-professor/actions/workflows/pr-checks.yml)
@@ -98,7 +98,7 @@ Agents build Phases 1–4 in parallel git worktrees. Each branch ends in a revie
 
 ## What it is
 
-El-Professor (Y&A Mobility) is a multi-tenant SaaS for German taxi and Mietwagen fleet operators. It handles their monthly payroll and compliance paperwork: import the Fahrtenbuch (the XLSX ride log), assign drivers to vehicle blocks, and produce the Stundennachweise (statutory time records) and a corrected Fahrtenbuch that reconcile with the Steuerberater's payroll figures. Around that it keeps drivers, vehicles, Belege, salaries and the weekly Abrechnung.
+El-Professor is a multi-tenant SaaS for German taxi and Mietwagen fleet operators. It handles their monthly payroll and compliance paperwork: import the Fahrtenbuch (the XLSX ride log), assign drivers to vehicle blocks, and produce the Stundennachweise (statutory time records) and a corrected Fahrtenbuch that reconcile with the Steuerberater's payroll figures. Around that it keeps drivers, vehicles, Belege, salaries and the weekly Abrechnung.
 
 It is a React SPA that talks directly to a self-hosted Supabase stack (PostgreSQL, Auth, Storage, Edge Functions); there is no application server of our own. The UI is German and English with German as the fallback, while generated documents, domain terms, money and dates stay German (`41,47`, `DD.MM.YYYY`).
 

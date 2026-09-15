@@ -1,5 +1,7 @@
 #!/bin/bash
-# Nightly logical backup of the Y&A Mobility database.
+# Nightly logical backup of the El-Professor production database.
+#
+# The file keeps its ya-mobility name because the host schedules it by that name.
 #
 # Runs from cron.daily rather than from inside a container: our Postgres has no
 # scheduler of its own, and the dump has to survive the container being
