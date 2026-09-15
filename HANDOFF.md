@@ -6,7 +6,7 @@ Start here when you pick up this project. Read it together with [CLAUDE.md](CLAU
 
 ## Where things stand
 
-- **Current work:** Phase 0 is done on staging except 0.6. Phases 1–4 are arriving as PRs. Merged so far: PR #11, #16 and #14 (all of Phase 1's code), PR #15 (security fix) and PR #13 (receipt foundations, steps 4.1 and 4.2).
+- **Current work:** Phase 0 is done on staging except 0.6. Merged so far: PR #11, #16 and #14 (all of Phase 1's code), PR #15 (security fix), PR #13 (receipt foundations, steps 4.1 and 4.2), PR #17 (design system and prototype, 2.1–2.3), PR #20 (the product is named El-Professor) and PR #12 (permission matrix, 3.0). On 15.09.2026 the owner approved a restructured Phase 3 (slices 3.0–3.13: staff roles, audited reads, support sessions, a settings area, one subscription model), Google sign-in as step 1.6, and an approval email that carries a trial activation code. The plan file is the reference.
 - **Done on staging:**
   - 0.1 login rate limits, PR #2.
   - 0.2 kept releases and rollback, PR #3. Rollback was exercised on the host.
@@ -20,10 +20,12 @@ Start here when you pick up this project. Read it together with [CLAUDE.md](CLAU
   - Merge them one at a time, and run `cd e2e && npm test` after each staging deploy. Merge the OTP branches in order: `otp-db`, `otp-functions`, `otp-frontend`.
   - The first run (`wf_ce583f7b-774`) was cut off by a session restart. Its uncommitted work was saved as one `wip:` commit per branch. The second run (`wf_864f8ee2-06d`) died after five hours when this machine lost its network, and its work was saved the same way. The third run (`wf_c24553f4-594`) commits a checkpoint after every step and retries a build agent that dies. The dev machine slept overnight; the runtime restarted the agents that were cut off. By 15.09.2026 it had opened:
     - PR #11, OTP database. Review approved with six minor findings; merged.
-    - PR #12, permission baseline. Review asked for two major changes: UPDATE probes never move a row to another tenant, and a live hole. A fix agent is on it.
+    - PR #12, permission baseline. Review asked for two major changes: UPDATE probes never moved a row to another tenant, and a live hole. PR #15 closed the hole. The fix added a move probe that reaches only WITH CHECK (`SELECT … FOR UPDATE`, then `UPDATE … WHERE CURRENT OF`), proven by loosening one policy on purpose, and migration `20260915120000` for six more functions. Merged.
     - PR #13, receipt foundations. Review approved with seven minor findings. Merged after a dry run of its migration on staging.
     - PR #16, OTP edge functions, and PR #14, OTP screens. Both reviews approved, with 6 and 4 minor findings. Merged back to back.
-    - PR #17, design system and prototype. In review.
+    - PR #17, design system and prototype. Review approved; merged after the owner asked to merge every open PR.
+  - The fourth run (`wf_29c78f4c-a9b`, 15.09.2026) builds the product name (PR #20, merged), Google sign-in PR A then PR B (shipped switched off), the 3.8 U0 subscription conflict report (PR #21), and 3.1 platform authority. After 3.1, 3.2 release N, 3.5, 3.6b and 3.9 start on its branch. A separate agent builds the approval email with the trial code (`feat/approval-trial-code`).
+  - The laptop has 8 GB RAM. Agents run every `npm ci` and build through `buildlock.sh` in the session scratchpad (two machine-wide slots) and wrap RLS kit runs on the VPS in `flock /root/.el-professor-rls-kit.lock`.
   - `OTP_PEPPER`: provisioned in staging's `.env` on 15.09.2026 (64 hex characters, never printed). Production needs its own, different one before 0.6, or its deploy is refused. That waits for the owner's go. All three OTP streams follow the contract kept at `C:\Users\ahmad\.claude\plans\otp-contract-wf_ce583f7b-774.md`, outside the repo.
 - **Staging mail reaches real recipients** (owner's decision, 14.09.2026). Mailpit keeps a copy of every message and relays it through production's Resend account, except mail to `@example.com`. Live on staging since PR #8 (`45ff313`). Resend lists the relayed test mails to `delivered@resend.dev` as `delivered`.
 - **Security fix, 15.09.2026.** Anyone holding the public anon key could call `list_users_for_admin()` and read every account's email, name and role.
@@ -90,6 +92,9 @@ Secrets never enter git:
 - DNS A record `mail-staging` → `159.195.205.30`, then `set-mailpit-password.sh`.
 - Step 0.6: merge `staging` into `main` and press the production button.
 - Rotate the secrets that were exposed: root SSH password, production database password, and the Resend key pasted in chat.
+- Phase 3 decisions D1–D13, seller data for invoices, and the admin email for the Y&A Mobility company account (all listed in the plan file).
+- Google sign-in (1.6): two Google Cloud OAuth clients, one per environment, a privacy policy and an Impressum, and decisions G1–G3.
+- Approval email with the trial code: an emailed code cannot use the two-minute window of hand-read activation codes. Confirm the replacement rule its PR proposes.
 - Questions the agents raised:
   - **OTP-DB.** If GoTrue confirmed a new owner's address but `signup_complete` then failed, may the owner finish with a new signup code? That needs a contract change; the alternative is that `otp-verify` retries completion.
   - **OTP-DB.** A new signup with an unverified address replaces the pending one immediately, which stops address squatting but lets anyone knock out a real owner. Keep that, or only replace one older than about 10 minutes?
