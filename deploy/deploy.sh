@@ -75,6 +75,93 @@ fail() {
   exit 1
 }
 
+# ── Sign-in checks ───────────────────────────────────────────────────────────
+# Everything between the two marker lines is also sourced on its own by
+# tests/deploy/google-signin-guards.test.ts and run against fake .env files, so
+# it may use only its arguments, fail, grep, awk, sha256sum and python3.
+# >>> google-signin checks
+
+# One value from an env file: the last line for the key, CR removed. Empty when
+# the key, the line's value or the whole file is missing.
+env_value() {
+  { grep -E "^$2=" "$1" 2>/dev/null || true; } | tail -n 1 | cut -d= -f2- | tr -d '\r'
+}
+
+# GOOGLE_SIGNIN_ENABLED is empty, true or false and nothing else. Compose hands
+# it to GoTrue, which would read "TRUE" or "1" as on, while the auth entrypoint
+# opens signup only for the exact string true: every new Google account would
+# then fail. Switched on, it needs a Google web client id and a secret.
+#
+# Each environment has its own Google client (owner decision G3 is still open;
+# the plan recommends separate clients and this takes that): a client shared
+# with production would accept production's consent and tokens on a host that
+# runs a copy of production's accounts. The ids are compared by hash, like
+# OTP_PEPPER, from whichever side deploys. No value read here is ever printed.
+google_signin_guard() {
+  local env_file="$1" peer_env_file="$2" flag client_id peer_client_id
+  flag="$(env_value "$env_file" GOOGLE_SIGNIN_ENABLED)"
+  case "$flag" in
+    ''|true|false) ;;
+    *) fail "GOOGLE_SIGNIN_ENABLED must be empty, true or false; .env holds something else" ;;
+  esac
+  client_id="$(env_value "$env_file" GOOGLE_CLIENT_ID)"
+  if [ "$flag" = true ]; then
+    [[ "$client_id" =~ ^[0-9]+-[0-9a-z]+\.apps\.googleusercontent\.com$ ]] \
+      || fail "GOOGLE_SIGNIN_ENABLED=true needs GOOGLE_CLIENT_ID, one Google web client id (<number>-<id>.apps.googleusercontent.com)"
+    [ -n "$(env_value "$env_file" GOOGLE_CLIENT_SECRET)" ] \
+      || fail "GOOGLE_SIGNIN_ENABLED=true needs GOOGLE_CLIENT_SECRET"
+  fi
+  if [ -n "$client_id" ] && [ -f "$peer_env_file" ]; then
+    peer_client_id="$(env_value "$peer_env_file" GOOGLE_CLIENT_ID)"
+    [ "$(printf '%s' "$client_id" | sha256sum | cut -c1-16)" != "$(printf '%s' "$peer_client_id" | sha256sum | cut -c1-16)" ] \
+      || fail "staging and production share a GOOGLE_CLIENT_ID; each environment needs its own Google OAuth client"
+  fi
+}
+
+# kong.yml must carry the auth-v1-closed service with the three paths and the
+# request-termination plugin answering 403. Its entries are read as trimmed
+# lines of that one service, comments left out, as ci-release.sh reads them.
+kong_closed_block_guard() {
+  local kong_file="$1" block want
+  block="$(awk '
+    { sub(/\r$/, "") }
+    /^[^ #]/ { inside = 0 }
+    /^  - name:/ { inside = ($3 == "auth-v1-closed") }
+    inside { entry = $0; sub(/^[ \t]+/, "", entry); sub(/[ \t]+$/, "", entry); if (entry != "" && entry !~ /^#/) print entry }
+  ' "$kong_file" 2>/dev/null)" || true
+  for want in 'paths:' '- /auth/v1/signup' '- /auth/v1/otp' '- /auth/v1/magiclink' '- name: request-termination' 'status_code: 403'; do
+    grep -qxF -- "$want" <<<"$block" \
+      || fail "deploy/kong.yml has no complete auth-v1-closed block (missing '$want'); GoTrue's signup routes would stay reachable"
+  done
+}
+
+# What is wrong with GoTrue's /settings answer on stdin for this switch, as one
+# line; empty, and status 0, when nothing is. Google on means signup open and
+# autoconfirm off, which only the auth entrypoint sets. Every other provider,
+# phone, anonymous users and SAML must be off.
+auth_settings_problems() {
+  python3 -c '
+import json, sys
+on = sys.argv[1] == "true"
+try:
+    settings = json.load(sys.stdin)
+    external = settings["external"]
+    actual = {name: external[name] for name in external}
+    for name in ("disable_signup", "mailer_autoconfirm", "saml_enabled"):
+        actual[name] = settings[name]
+except (ValueError, KeyError, TypeError):
+    print("no settings answer")
+    sys.exit(1)
+expected = {name: False for name in external if name not in ("email", "google")}
+expected.update({"google": on, "disable_signup": not on, "mailer_autoconfirm": not on, "saml_enabled": False})
+wrong = ["%s=%s" % (name, str(actual.get(name)).lower()) for name in sorted(expected) if actual.get(name) is not expected[name]]
+print(" ".join(wrong))
+sys.exit(1 if wrong else 0)
+' "$1"
+}
+
+# <<< google-signin checks
+
 # ── Guards ───────────────────────────────────────────────────────────────────
 
 step "guard: $ENVIRONMENT"
@@ -141,6 +228,15 @@ if [ "$ENVIRONMENT" = staging ] && [ -f /srv/PRO/deploy/.env ]; then
 fi
 unset OTP_PEPPER
 
+# Google sign-in (plan step 1.6). With GOOGLE_SIGNIN_ENABLED=true GoTrue opens
+# its own signup, and Kong's auth-v1-closed block is then all that keeps
+# /signup, /otp and /magiclink from creating accounts, so a release without the
+# block is refused whatever the switch says.
+if [ "$ENVIRONMENT" = staging ]; then PEER_ENV=/srv/PRO/deploy/.env; else PEER_ENV=/srv/PRO-staging/deploy/.env; fi
+google_signin_guard .env "$PEER_ENV"
+kong_closed_block_guard kong.yml
+GOOGLE_SIGNIN="$(env_value .env GOOGLE_SIGNIN_ENABLED)"
+
 # Both stacks share the CPU with each other and with ridy, and nothing is capped.
 # Staging is where load tests run, so it must yield under contention; production
 # must never be the one yielding. See cpu_shares in docker-compose.yml.
@@ -154,6 +250,36 @@ else
 fi
 
 docker compose config -q || fail "docker compose config is invalid"
+
+# The sign-in settings as compose renders them, before anything starts: Google
+# follows the switch, signup and autoconfirm are the literals the auth
+# entrypoint starts from, every other way to create or attach an account is
+# off, and Kong loads request-termination (without it Kong rejects kong.yml and
+# crash-loops). Only names are printed.
+render_problems="$(docker compose config --format json < /dev/null | python3 -c '
+import json, sys
+on = sys.argv[1] == "true"
+services = json.load(sys.stdin).get("services", {})
+env = (services.get("auth", {}) or {}).get("environment", {}) or {}
+expected = {
+    "GOTRUE_EXTERNAL_GOOGLE_ENABLED": "true" if on else "false",
+    "GOTRUE_DISABLE_SIGNUP": "true",
+    "GOTRUE_MAILER_AUTOCONFIRM": "true",
+    "GOTRUE_EXTERNAL_PHONE_ENABLED": "false",
+    "GOTRUE_EXTERNAL_ANONYMOUS_USERS_ENABLED": "false",
+    "GOTRUE_SAML_ENABLED": "false",
+    "GOTRUE_SECURITY_MANUAL_LINKING_ENABLED": "false",
+}
+problems = [name for name in sorted(expected) if str(env.get(name)).lower() != expected[name]]
+problems += [name for name in sorted(env) if name.startswith("GOTRUE_EXTERNAL_") and name.endswith("_ENABLED")
+             and name not in expected and str(env[name]).lower() != "false"]
+plugins = str(((services.get("kong", {}) or {}).get("environment", {}) or {}).get("KONG_PLUGINS", ""))
+if "request-termination" not in plugins.split(","):
+    problems.append("KONG_PLUGINS")
+print(" ".join(problems))
+' "$GOOGLE_SIGNIN")" || fail "could not render docker-compose.yml to check the sign-in settings"
+[ -z "$render_problems" ] || fail "docker-compose.yml does not render the sign-in settings this release relies on: $render_problems"
+
 echo "  project $PROJECT_NAME in $ROOT${MANIFEST:+, release $(basename "$RELEASE_DIR")}"
 
 dc() { docker compose "$@"; }
@@ -236,13 +362,6 @@ fi
 # ── Release ──────────────────────────────────────────────────────────────────
 
 step "release"
-if [ -d dist.new ]; then
-  [ -f dist.new/index.html ] || fail "dist.new has no index.html — refusing to publish an empty bundle"
-  rm -rf dist.old
-  [ -d dist ] && mv dist dist.old
-  mv dist.new dist
-  echo "  bundle swapped"
-fi
 
 # kong.yml and nginx-spa.conf are single-file bind mounts that each service reads
 # once at start, so an edited file never reached a running container. Their
@@ -252,8 +371,55 @@ KONG_CONFIG_SHA="$(sha256sum kong.yml | cut -c1-16)"
 NGINX_CONFIG_SHA="$(sha256sum nginx-spa.conf | cut -c1-16)"
 export KONG_CONFIG_SHA NGINX_CONFIG_SHA
 
-# web and functions bind-mount directories that were just replaced; a running
-# container keeps the old inode, so both are recreated rather than restarted.
+# The routes GoTrue would create an account on once its signup is open. Only
+# Kong's request-termination plugin answers them with this message: the
+# auth-v1-closed service points at a dead port, so a lost plugin answers 502
+# and a lost route reaches GoTrue, and neither says this.
+CLOSED_ROUTES="/auth/v1/signup /auth/v1/otp /auth/v1/magiclink"
+CLOSED_MESSAGE="This route is closed by the gateway"
+
+# Asked inside the kong container, of its own port: proves the gateway alone,
+# without GoTrue and without Caddy in front of it. kong:2.8.1 ships no curl, so
+# the request goes over bash's /dev/tcp, as HTTP/1.0 so that Kong closes the
+# connection after answering. Kong needs a few seconds after a recreate before
+# it answers at all.
+probe_closed_routes() {
+  local path answer status i
+  for path in $CLOSED_ROUTES; do
+    answer=""
+    status=""
+    for i in $(seq 1 30); do
+      answer="$(dc exec -T kong bash -c '
+        exec 3<>/dev/tcp/127.0.0.1/8000 || exit 1
+        printf "POST %s HTTP/1.0\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: 2\r\n\r\n{}" "$1" >&3
+        while IFS= read -r -t 5 line || [ -n "$line" ]; do printf "%s\n" "$line"; line=""; done <&3
+      ' probe "$path" < /dev/null 2>/dev/null)" || true
+      status="$(printf '%s\n' "$answer" | head -n 1 | cut -d' ' -f2)"
+      [ "$status" = 403 ] && grep -qF "$CLOSED_MESSAGE" <<<"$answer" && break
+      sleep 2
+    done
+    echo "  kong $path -> ${status:-no answer}"
+    { [ "$status" = 403 ] && grep -qF "$CLOSED_MESSAGE" <<<"$answer"; } || return 1
+  done
+}
+
+# Kong first, and seen answering 403 on all three routes before GoTrue can be
+# recreated with its signup open. A failure stops the release here: the bundle,
+# GoTrue and every other service are left as they were.
+dc up -d --no-deps kong < /dev/null
+probe_closed_routes || fail "Kong does not answer 403 on GoTrue's signup routes; nothing after Kong was changed"
+
+if [ -d dist.new ]; then
+  [ -f dist.new/index.html ] || fail "dist.new has no index.html — refusing to publish an empty bundle"
+  rm -rf dist.old
+  [ -d dist ] && mv dist dist.old
+  mv dist.new dist
+  echo "  bundle swapped"
+fi
+
+# Then GoTrue and everything else. web and functions bind-mount directories that
+# were just replaced; a running container keeps the old inode, so both are
+# recreated rather than restarted.
 dc up -d --remove-orphans < /dev/null
 dc up -d --force-recreate --no-deps web functions < /dev/null
 
@@ -293,10 +459,25 @@ else
   [ "$app" = 200 ] || fail "the app did not answer 200"
 fi
 
-auth="$(code "$PUBLIC_URL/auth/v1/health")"
-echo "  $PUBLIC_URL/auth/v1/health -> $auth"
-# GoTrue's health endpoint sits behind key-auth-free /auth/v1 and answers 200.
-[ "$auth" = 200 ] || fail "auth did not answer 200"
+# GoTrue's own account of its sign-in settings, through Caddy and Kong as the app
+# reads it. It is the only place the entrypoint's signup and autoconfirm show,
+# so it is what proves GoTrue took the switch; a GoTrue that does not answer
+# fails here too.
+auth_problems="no settings answer"
+for i in $(seq 1 15); do
+  auth_problems="$(curl -s --max-time 10 "$PUBLIC_URL/auth/v1/settings" | auth_settings_problems "$GOOGLE_SIGNIN")" && break
+  sleep 2
+done
+echo "  $PUBLIC_URL/auth/v1/settings -> ${auth_problems:-as .env says (Google sign-in ${GOOGLE_SIGNIN:-false})}"
+[ -z "$auth_problems" ] || fail "GoTrue's settings do not match GOOGLE_SIGNIN_ENABLED: $auth_problems"
+
+# And the closed routes from outside: nothing in front of Kong may route
+# around the block.
+for path in $CLOSED_ROUTES; do
+  closed="$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 -X POST "$PUBLIC_URL$path")" || true
+  echo "  $PUBLIC_URL$path -> $closed"
+  [ "$closed" = 403 ] || fail "$PUBLIC_URL$path answered '$closed' instead of 403"
+done
 
 if [ -n "$MANIFEST" ]; then
   if [ "$MODE" != --activate ]; then

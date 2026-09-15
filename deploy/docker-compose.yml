@@ -132,6 +132,19 @@ services:
     cpu_shares: ${CPU_SHARES:-1024}
     depends_on:
       db: { condition: service_healthy }
+    # GoTrue's own signup follows the Google switch, and it is decided here
+    # because compose interpolation cannot negate a variable. GoTrue v2.170.0
+    # refuses to create a new Google account while GOTRUE_DISABLE_SIGNUP is true,
+    # so signup opens exactly when GOTRUE_EXTERNAL_GOOGLE_ENABLED is the string
+    # `true` in the environment GoTrue is about to read, and stays closed for
+    # anything else. Autoconfirm goes off in the same step (see
+    # GOTRUE_MAILER_AUTOCONFIRM below). Deriving either in deploy.sh would drift:
+    # any `docker compose up` deploy.sh did not run, deploy/set-resend.sh's among
+    # them, would recreate GoTrue without the derived values. Opening signup is
+    # safe only because kong.yml answers 403 on /signup, /otp and /magiclink;
+    # deploy.sh probes that before it starts GoTrue and reads /auth/v1/settings
+    # back afterwards.
+    entrypoint: ['/bin/sh', '-c', 'if [ "$$GOTRUE_EXTERNAL_GOOGLE_ENABLED" = true ]; then export GOTRUE_DISABLE_SIGNUP=false GOTRUE_MAILER_AUTOCONFIRM=false; fi; exec auth']
     environment:
       GOTRUE_API_HOST: 0.0.0.0
       GOTRUE_API_PORT: '9999'
@@ -147,11 +160,12 @@ services:
       GOTRUE_JWT_AUD: authenticated
       GOTRUE_JWT_DEFAULT_GROUP_NAME: authenticated
 
-      # Closed, and a literal on purpose. GoTrue's public /signup would create an
+      # Closed, and a literal on purpose: only the entrypoint above opens it, and
+      # only while Google sign-in is on. GoTrue's public /signup would create an
       # account outside company-signup: no company, no code, no limit. Companies
-      # are created only by company-signup through the admin API, which this
-      # setting does not affect. ci-release.sh refuses a rollback to a release
-      # that would open it again.
+      # are created only by company-signup and oauth-account through the admin
+      # API, which this setting does not affect. ci-release.sh refuses a rollback
+      # to a release that would open it again.
       GOTRUE_DISABLE_SIGNUP: 'true'
 
       # Per-client limits on login and token refresh (/token), /verify, and
@@ -171,14 +185,29 @@ services:
       GOTRUE_RATE_LIMIT_OTP: ${RATE_LIMIT_OTP:-30}
       GOTRUE_RATE_LIMIT_EMAIL_SENT: ${RATE_LIMIT_EMAIL_SENT:-60}
 
-      # Left at 'true', and nothing depends on it any more. It governs GoTrue's
-      # own /signup, closed above; the admin createUser that makes every account
-      # ignores it. company-signup creates the owner with email_confirm: false,
-      # and GoTrue refuses a password login for an unconfirmed address whatever
-      # this says (both probed against v2.170.0 on 15.09.2026), so an owner signs
-      # in only after otp-verify has confirmed the address with a code.
-      # ci-release.sh compares this value too: changing it blocks a rollback
-      # across the change.
+      # No identity provider may ever be enabled that does not verify the email
+      # addresses it reports. With autoconfirm on, GoTrue v2.170.0 treats every
+      # provider address as verified: it confirms a new account with it
+      # (internal/api/external.go) and links the identity to the existing account
+      # with that address (internal/models/linking.go), so an unverified address
+      # would sign in as whoever owns it here. Google says per account whether it
+      # verified the address, and an unverified one is rare but possible. So the
+      # entrypoint above also turns autoconfirm off whenever Google is on: GoTrue
+      # then links and confirms only what Google verified, and mails its own
+      # confirmation link for anything else. That is the conservative answer to
+      # a question still open for the owner. Nothing in use reads this setting
+      # otherwise: its other readers are /signup, /otp and /magiclink (closed at
+      # Kong), anonymous users (off), and GoTrue's own email-change flow and send
+      # limit, neither of which the app uses.
+      #
+      # While Google is off it stays 'true', and nothing depends on it any more.
+      # It governs GoTrue's own /signup, closed above; the admin createUser that
+      # makes every account ignores it. company-signup creates the owner with
+      # email_confirm: false, and GoTrue refuses a password login for an
+      # unconfirmed address whatever this says (both probed against v2.170.0 on
+      # 15.09.2026), so an owner signs in only after otp-verify has confirmed the
+      # address with a code. ci-release.sh compares this value and the entrypoint
+      # too: changing either blocks a rollback across the change.
       GOTRUE_MAILER_AUTOCONFIRM: 'true'
 
       # GoTrue's own link mail. Nothing in the app asks for one any more: the
@@ -223,9 +252,26 @@ services:
       GOTRUE_MAILER_SUBJECTS_EMAIL_CHANGE: "Neue E-Mail-Adresse bestätigen – El-Professor"
       GOTRUE_MAILER_SUBJECTS_MAGIC_LINK: "Ihr Anmeldelink – El-Professor"
 
-      # Google sign-in is gone from the app. Off as a literal, so no .env value
-      # can open a login path that nothing in the UI offers and no test covers.
-      GOTRUE_EXTERNAL_GOOGLE_ENABLED: 'false'
+      # Google sign-in (plan step 1.6). Off unless GOOGLE_SIGNIN_ENABLED=true in
+      # .env; the entrypoint above opens signup and turns autoconfirm off with it.
+      # deploy.sh refuses any value but empty, true or false, a client id that is
+      # not one Google web client id, a missing secret, and a client id the other
+      # environment also uses. The redirect URI is GoTrue's own callback behind
+      # Kong, and the Google client must list exactly this URL. The kill switch
+      # is GOOGLE_SIGNIN_ENABLED=false and a redeploy.
+      GOTRUE_EXTERNAL_GOOGLE_ENABLED: ${GOOGLE_SIGNIN_ENABLED:-false}
+      GOTRUE_EXTERNAL_GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOTRUE_EXTERNAL_GOOGLE_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      GOTRUE_EXTERNAL_GOOGLE_REDIRECT_URI: ${PUBLIC_URL}/auth/v1/callback
+
+      # Every other way GoTrue can create or attach an account, off as literals
+      # so that no .env value and no change of a GoTrue default can open one:
+      # phone signups, anonymous users, SAML single sign-on, and linking a
+      # further identity to a signed-in account. The app offers none of them.
+      GOTRUE_EXTERNAL_PHONE_ENABLED: 'false'
+      GOTRUE_EXTERNAL_ANONYMOUS_USERS_ENABLED: 'false'
+      GOTRUE_SAML_ENABLED: 'false'
+      GOTRUE_SECURITY_MANUAL_LINKING_ENABLED: 'false'
     expose:
       - '9999'
     deploy:
@@ -293,6 +339,10 @@ services:
   # signup, "Passwort vergessen", invitations, email changes),
   # validate-discount-code and generate-activation-code. Without this service
   # those screens fail with a network error and no explanation.
+  #
+  # oauth-account settles an account after a Google sign-in (register, reconcile,
+  # discard). It is deployed with the switch and called by nothing while Google
+  # sign-in is off.
   #
   # extract-receipt and update-income-weeks are deployed but unreachable in
   # practice: nothing in src/ calls either, and extract-receipt performs no auth
@@ -368,8 +418,10 @@ services:
       # `acl` is not optional. kong.yml declares a top-level `acls` block, and
       # that entity belongs to the acl plugin — leave it out of this list and
       # Kong rejects the entire config with `in 'acls': unknown field`, then
-      # crash-loops.
-      KONG_PLUGINS: request-transformer,cors,key-auth,acl
+      # crash-loops. `request-termination` is the same kind of dependency: it
+      # answers 403 on GoTrue's account-creating routes (auth-v1-closed in
+      # kong.yml), and deploy.sh refuses a release whose list lacks it.
+      KONG_PLUGINS: request-transformer,cors,key-auth,acl,request-termination
       # Kong defaults this to the CPU count. On a 12-core box that is 12 nginx
       # workers, each loading its own Lua VM at roughly 80 MB — about 960 MB
       # against the 512 MB limit below. The workers are OOM-killed as they
