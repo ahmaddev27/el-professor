@@ -66,6 +66,8 @@ A step counts once it is merged into `staging` and verified there. Production re
 - [x] **3.8 U0** Subscription conflict report: a read-only SQL report of where the subscription models disagree, run once on staging — PR #21
 - [x] **1.6, database part** Google sign-in groundwork: pending Google signups, one shared company insert, and register, reconcile and purge RPCs for the service role only; nothing calls them yet — PR #22
 - [x] **Security fix:** `is_user_super_admin()` never answers NULL, and `create_user_profile_manual` is closed to anonymous callers (closed by hand on production and staging first) — PR #26
+- [x] **Security:** five guarded RPCs are no longer executable by anonymous callers (none was exploitable) — PR #28
+- [x] A generated activation code is emailed to the address on the code, or to the company admins; its validity stays 2 minutes — PR #30
 - [ ] **0.6** First production release from CI — the owner presses the button
 
 ### Building now
@@ -74,10 +76,8 @@ Agents build in parallel git worktrees. Each branch ends in a reviewed PR into `
 
 | Stream | Branch | State |
 |---|---|---|
-| Activation code emailed when the platform admin generates it (validity stays 2 minutes) | `feat/activation-code-email` | building; replaces PR #25, closed after the owner dropped the code-at-approval idea |
-| No anonymous EXECUTE on five guarded RPCs | `fix/revoke-anon-guarded-functions` | building |
-| Google sign-in: deploy, Kong and the oauth-account function (1.6 PR B, switched off) | `feat/google-signin-deploy` | building; the database part merged in PR #22 |
-| Platform authority (3.1): staff roles, capabilities, audit log | `phase3/platform-authority` | in review |
+| Google sign-in: deploy, Kong and the oauth-account function (1.6 PR B, switched off) | `feat/google-signin-deploy` | PR #29, in review; the database part merged in PR #22 |
+| Platform authority (3.1): staff roles, capabilities, audit log | `phase3/platform-authority` | PR #24, fixing review findings |
 | On the 3.1 branch: admin sign-in code (3.2 release N), platform write RPCs (3.5), directory read models (3.6b), prices and features in the database (3.9) | `phase3/admin-otp`, `phase3/platform-writes`, `phase3/read-models`, `phase3/pricing-settings` | after 3.1 |
 
 ### Environments
