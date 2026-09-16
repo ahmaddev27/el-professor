@@ -3,13 +3,27 @@
 # whenever staging's data is refreshed from production.
 #
 #   cd e2e && npm run setup                          # everything
-#   bash e2e/setup-staging.sh --reset-admin-password # used by tests that change it
+#   bash e2e/setup-staging.sh --pool-only            # only the reset accounts
+#   bash e2e/setup-staging.sh --reset-admin-password # an admin password changed by hand
 #
 # On staging only, never production, it makes sure there is:
 #   - a login "e2e" in front of the staging web app, next to the owner's;
 #   - a Mailpit login "e2e", so tests can read the mail staging sends;
 #   - the company "E2E Test GmbH" with its admin e2e-admin@example.com,
-#     approved and with an active subscription.
+#     approved and with an active subscription;
+#   - six password-reset accounts e2e-reset-1..6@example.com, each approved,
+#     subscribed and confirmed.
+#
+# --pool-only does the last of those and nothing else, so the pool can be seeded
+# while a merge run is using staging. A full setup is not safe to run then, and
+# the password is not the reason — `ensure` only generates one when the key is
+# empty, so a re-run normally re-applies the same value. The disruptive parts
+# are elsewhere: it may recreate the Mailpit container, which destroys the
+# mailbox an in-flight run is reading; it may reload Caddy, blipping the staging
+# web host; and it rewrites E2E_ANON_KEY in .env.local underneath a running
+# suite. The password does become a hazard when the .env.local doing the setup
+# is not the one the running suite loaded, which is the ordinary case across two
+# machines. Seeding has to be safe by construction rather than safe by timing.
 #
 # Passwords are generated here and kept only in e2e/.env.local (gitignored)
 # and, as bcrypt hashes or GoTrue's own hash, on the host. None is printed.
@@ -19,7 +33,7 @@ set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ENV_FILE="$HERE/.env.local"
 MODE="${1:-all}"
-case "$MODE" in all|--reset-admin-password) ;; *) echo "usage: setup-staging.sh [--reset-admin-password]" >&2; exit 2 ;; esac
+case "$MODE" in all|--reset-admin-password|--pool-only) ;; *) echo "usage: setup-staging.sh [--reset-admin-password|--pool-only]" >&2; exit 2 ;; esac
 
 rand() { head -c 48 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 28; }
 getv() { grep -E "^$1=" "$ENV_FILE" 2>/dev/null | tail -1 | cut -d= -f2- || true; }
@@ -50,8 +64,9 @@ SSH_HOST="$(getv E2E_SSH_HOST)"
 
 # Staging's anon key, for the tests that call the API the way supabase-js does.
 # It ships in the web bundle and is therefore public; it is read from the host
-# on every full setup, so a rotated key follows.
-if [ "$MODE" = all ]; then
+# on every full setup, so a rotated key follows. --pool-only reads it too:
+# company-signup is how a missing reset account is created.
+if [ "$MODE" = all ] || [ "$MODE" = --pool-only ]; then
   anon_key="$(ssh "$SSH_HOST" "grep -E '^ANON_KEY=' /srv/PRO-staging/deploy/.env | tail -n 1 | cut -d= -f2- | tr -d '\r'")"
   [ -n "$anon_key" ] || { echo "could not read staging's ANON_KEY from the host" >&2; exit 1; }
   setv E2E_ANON_KEY "$anon_key"
@@ -119,6 +134,15 @@ if [ "$MODE" = --reset-admin-password ]; then
   exit 0
 fi
 
+# Everything from here to the admin sign-in is a full setup, and each part can
+# disturb a run that is already going: recreating Mailpit throws away the
+# mailbox that run is reading, reloading Caddy blips the web host, and the admin
+# password is re-applied from whichever .env.local is doing the setup.
+# --pool-only skips the lot. What it must still reach is above this line — the
+# staging URL assertion, the PROJECT_NAME check — and below it, the address
+# guard and the confirm that keeps the purge away.
+if [ "$MODE" = all ]; then
+
 # ── Staging web login ────────────────────────────────────────────────────────
 U="$(val E2E_STAGING_USER)"; P="$(val E2E_STAGING_PASS)"
 web_code() { basic "$U" "$P" | curl -s -o /dev/null -w '%{http_code}' --max-time 10 -H @- --resolve app.elprofessor.eu:443:127.0.0.1 https://app.elprofessor.eu/; }
@@ -179,6 +203,8 @@ psqlq "UPDATE public.user_profiles SET status = 'active', must_change_password =
 
 [ "$(sign_in_code)" = 200 ] && echo "E2E admin sign-in: works" || { echo "E2E admin cannot sign in"; exit 1; }
 
+fi  # end of the full-setup section
+
 # ── Password-reset pool ──────────────────────────────────────────────────────
 # forgot-password spends one of five hourly codes per address, so it rotates
 # over these instead of the admin's. Each one is confirmed below, which is also
@@ -192,13 +218,15 @@ for addr in "${POOL[@]}"; do
   [[ "$addr" =~ ^e2e[a-z0-9.-]*@example\.com$ ]] || { echo "refusing: '$addr' is not an e2e…@example.com address"; exit 1; }
   ruid="$(psqlq "SELECT id FROM auth.users WHERE email = '$addr'")"
   if [ -z "$ruid" ]; then
-    python3 - "$addr" "$(rand_pw)" "$n" > "$work/pool.json" <<'PY'
-import json, sys
+    # The password goes through the environment, never argv: a command line is
+    # readable by every user in the process table, and this host is shared.
+    POOL_PW="$(rand_pw)" python3 - "$addr" "$n" > "$work/pool.json" <<'PY'
+import json, os, sys
 print(json.dumps({
-  "company_name": "E2E Reset Pool %s" % sys.argv[3],
-  "full_name": "E2E Reset %s" % sys.argv[3],
+  "company_name": "E2E Reset Pool %s" % sys.argv[2],
+  "full_name": "E2E Reset %s" % sys.argv[2],
   "email": sys.argv[1],
-  "password": sys.argv[2],
+  "password": os.environ["POOL_PW"],
   "plan": "premium",
   "billing_cycle": "monthly",
   "subscription_car_limit": 5,
