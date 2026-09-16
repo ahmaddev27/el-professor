@@ -4,7 +4,7 @@
 [![PR checks](https://github.com/ahmaddev27/el-professor/actions/workflows/pr-checks.yml/badge.svg?event=pull_request)](https://github.com/ahmaddev27/el-professor/actions/workflows/pr-checks.yml)
 [![Production](https://img.shields.io/website?url=https%3A%2F%2Felprofessor.eu&label=production&up_message=online&down_message=offline)](https://elprofessor.eu)
 [![Staging](https://img.shields.io/website?url=https%3A%2F%2Fapp.elprofessor.eu%2Fversion.txt&label=staging&up_message=online&down_message=offline)](https://app.elprofessor.eu)
-[![E2E on staging](https://img.shields.io/badge/e2e%20on%20staging-5%2F5%20passing-2ea44f)](e2e/README.md)
+[![E2E on staging](https://img.shields.io/badge/e2e%20on%20staging-13%20passed%2C%201%20skipped-2ea44f)](e2e/README.md)
 
 ![React](https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=black)
 ![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&logoColor=white)
@@ -23,7 +23,7 @@
 
 ## Project status
 
-> Kept current with every fix and feature. Last update: **15.09.2026**.
+> Kept current with every fix and feature. Last update: **16.09.2026**.
 
 | Document | What it is |
 |---|---|
@@ -39,10 +39,10 @@ A step counts once it is merged into `staging` and verified there. Production re
 | Phase | Requirement | Progress | State |
 |---|---|---|---|
 | **0** | Releases, rollback, staging protection | `▰▰▰▰▰▱` **5/6** · 83% | ![live on staging](https://img.shields.io/badge/-live%20on%20staging-2ea44f) 0.6 waits for the production button |
-| **1** | OTP and account security | `▰▰▰▰▰▰▱` **6/7** · 86% | ![on staging](https://img.shields.io/badge/-on%20staging-2ea44f) PRs #11, #16, #14; done once the code flows pass on staging and a real code arrives from production. 1.6 Google sign-in: database (PR #22) and deploy settings (PR #29) are on staging, switched off; the sign-in screens wait for the Google Cloud clients, a privacy policy and an Impressum |
+| **1** | OTP and account security | `▰▰▰▰▰▰▱` **6/7** · 86% | ![on staging](https://img.shields.io/badge/-on%20staging-2ea44f) PRs #11, #16, #14; done once the code flows pass on staging and a real code arrives from production. 1.6 Google sign-in: database (PR #22), deploy settings (PR #29) and the sign-in screens (PR #45) are all on staging with the provider switched off; switching it on waits for the Google Cloud clients, a privacy policy and an Impressum, and for the server-side rule that a platform capability requires a password session |
 | **2** | Design system and prototype | `▰▰▰` **3/3** · 100% | ![on staging](https://img.shields.io/badge/-on%20staging-2ea44f) PR #17; approved when the owner asked to merge every open PR |
-| **3** | Platform admin and permissions | `▰▰▰▰▰▱▱▱▱▱▱▱▱` **5/13** · 38% | ![building](https://img.shields.io/badge/-building-orange) restructured into slices on 15.09.2026; 3.0 (PR #12), 3.1 (PR #24), the first part of 3.6b (PR #36), 3.5 (PR #39) and 3.9 (PR #38) merged; 3.3, 3.4 and the /admin screens are next; 3.2 cancelled on 16.09.2026 (platform admin sign-in stays password-only); the 3.8 conflict report merged (PR #21) |
-| **4** | Cash salary receipt | `▰▰▰` **3/3** · 100% | ![on staging](https://img.shields.io/badge/-on%20staging-2ea44f) logic and database (PR #13), screens, PDF and receipt list (PR #34); the Bargeldbestand page still reads the old source (4.3b) |
+| **3** | Platform admin and permissions | `▰▰▰▰▰▱▱▱▱▱▱▱▱` **5/13** · 38% | ![building](https://img.shields.io/badge/-building-orange) restructured into slices on 15.09.2026; 3.0 (PR #12), 3.1 (PR #24), the first part of 3.6b (PR #36), 3.5 (PR #39) and 3.9 (PR #38, hardened by PR #44) merged; 3.3 is in review (PR #46), then 3.4 and the /admin screens; 3.2 cancelled on 16.09.2026 (platform admin sign-in stays password-only); the 3.8 conflict report merged (PR #21) |
+| **4** | Cash salary receipt | `▰▰▰` **3/3** · 100% | ![on staging](https://img.shields.io/badge/-on%20staging-2ea44f) logic and database (PR #13), screens, PDF and receipt list (PR #34), and Bargeldbestand on the cash ledger (PR #43); the overlapping-salary and receipt-numbering decisions are still open |
 | **5** | Design rollout | `▱▱▱▱▱` **0/5** | ![not started](https://img.shields.io/badge/-not%20started-lightgrey) |
 
 **Overall:** `▰▰▰▰▰▰▰▰▰▰▰▰▱▱▱▱▱▱▱▱` 22 of 37 steps · 59%
@@ -74,6 +74,9 @@ A step counts once it is merged into `staging` and verified there. Production re
 - [x] **3.6b, part 1** Audited platform read models: paginated company, vehicle, driver, user and audit-log lists for platform staff, each checking its capability and refusing to answer when its audit row cannot be written — PR #36
 - [x] **3.5** Audited platform write RPCs: company approval, lifecycle, trial, plan, subscriptions, invoices and codes all go through one audited path, staff can be invited (owner role only until 3.3), and the discount-code, activation-attempt and approval-note holes are closed — PR #39
 - [x] **3.9** Prices and the feature map move into the database: one price book and one plan-feature map, read by `compute_plan_price` and the app, written only by the roles the capability matrix allows (the feature map by the owner alone), with parity tests that pin today's numbers — PR #38
+- [x] **3.9, hardening** Settings audit rows capped at 120 per actor per minute, an incomplete plan-feature map refused, and the rate-limit helper failing closed on a NULL actor; all three rules of the 3.5 audit guard re-checked on staging afterwards — PR #44
+- [x] **1.6, screens part** Google sign-in screens, shipped with the provider switched off (`/auth/v1/settings` reports `google:false` in both environments): a Google button behind the settings check, a complete-registration page, error mapping that no longer swallows dead mail links, and a bounded recovery screen when the profile cannot be read. The platform-staff refusal is enforced in the browser only; the server-side rule waits for 3.3 — PR #45
+- [x] **4.3b** Bargeldbestand and the Overview cash panel read one cash ledger: paginated queries, scope established before any figure is claimed, and German formatting on the new cards. The seeded staging check confirms a receipt paid in one month and voided in the next lowers the first month and raises the second — PR #43
 - [ ] **0.6** First production release from CI — the owner presses the button
 
 ### Building now
@@ -82,7 +85,7 @@ Agents build in parallel git worktrees. Each branch ends in a reviewed PR into `
 
 | Stream | Branch | State |
 |---|---|---|
-| _nothing building right now_ | — | next: 3.3 (one policy shape, server-side status), 3.4 (support sessions), the /admin screens, and 4.3b |
+| One policy shape and server-side state (3.3) | `phase3/policy-unify` | PR #46, in review — next after it: 3.4 (support sessions) and the /admin screens |
 
 ### Environments
 
@@ -96,6 +99,8 @@ Agents build in parallel git worktrees. Each branch ends in a reviewed PR into `
 
 ### Waiting on the owner
 
+- **Decide on GoTrue signup, which is open on the production stack.** Measured read-only, never exploited: production reports `disable_signup:false`, the Kong block that closes those routes on staging is absent there, so `POST /auth/v1/signup` appears open to anyone holding the public anon key. Cause: production has never run a pipeline release, so PR #29's guard never reached it. Proposed fix: `GOTRUE_DISABLE_SIGNUP=true` in production's `.env` and recreate only the auth container. Details in HANDOFF.md.
+- **Approve a production `OTP_PEPPER`** — it is missing from production's `.env`, and `deploy.sh` refuses a release without one, which blocks step 0.6.
 - DNS record `mail-staging` → `159.195.205.30`, then a Mailpit login.
 - Step 0.6: merge `staging` into `main` and press the production button.
 - Approve a production `OTP_PEPPER` before 0.6, and after it, receive a real code mail at an address you own.
