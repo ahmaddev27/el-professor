@@ -14,7 +14,7 @@
 ![Playwright](https://img.shields.io/badge/Playwright-e2e-2EAD33?logo=playwright&logoColor=white)
 ![Languages](https://img.shields.io/badge/UI-Deutsch%20%7C%20English-555555)
 
-![Requirements plan](https://img.shields.io/badge/requirements%20plan-22%20of%2037%20steps-yellow)
+![Requirements plan](https://img.shields.io/badge/requirements%20plan-23%20of%2037%20steps-yellow)
 ![Phase 0](https://img.shields.io/badge/phase%200-5%2F6-yellowgreen)
 ![Phases 1–4](https://img.shields.io/badge/phases%201%E2%80%934-building-orange)
 ![Phase 5](https://img.shields.io/badge/phase%205-not%20started-lightgrey)
@@ -39,13 +39,13 @@ A step counts once it is merged into `staging` and verified there. Production re
 | Phase | Requirement | Progress | State |
 |---|---|---|---|
 | **0** | Releases, rollback, staging protection | `▰▰▰▰▰▱` **5/6** · 83% | ![live on staging](https://img.shields.io/badge/-live%20on%20staging-2ea44f) 0.6 waits for the production button |
-| **1** | OTP and account security | `▰▰▰▰▰▰▱` **6/7** · 86% | ![on staging](https://img.shields.io/badge/-on%20staging-2ea44f) PRs #11, #16, #14; done once the code flows pass on staging and a real code arrives from production. 1.6 Google sign-in: database (PR #22), deploy settings (PR #29) and the sign-in screens (PR #45) are all on staging with the provider switched off; switching it on waits for the Google Cloud clients, a privacy policy and an Impressum, and for the server-side rule that a platform capability requires a password session |
+| **1** | OTP and account security | `▰▰▰▰▰▰▱` **6/7** · 86% | ![on staging](https://img.shields.io/badge/-on%20staging-2ea44f) PRs #11, #16, #14; done once the code flows pass on staging and a real code arrives from production. 1.6 Google sign-in: database (PR #22), deploy settings (PR #29) and the sign-in screens (PR #45, with the registration gate fixed in PR #51) are on staging, and the provider was **switched on for staging** on 16.09.2026. Production stays off, and must, until the server-side rule exists that a platform capability requires a password session — today the refusal of a platform-staff Google sign-in is enforced in the browser only. Production also waits for its own Google Cloud client, a privacy policy and an Impressum |
 | **2** | Design system and prototype | `▰▰▰` **3/3** · 100% | ![on staging](https://img.shields.io/badge/-on%20staging-2ea44f) PR #17; approved when the owner asked to merge every open PR |
-| **3** | Platform admin and permissions | `▰▰▰▰▰▱▱▱▱▱▱▱▱` **5/13** · 38% | ![building](https://img.shields.io/badge/-building-orange) restructured into slices on 15.09.2026; 3.0 (PR #12), 3.1 (PR #24), the first part of 3.6b (PR #36), 3.5 (PR #39) and 3.9 (PR #38, hardened by PR #44) merged; 3.3 is in review (PR #46), then 3.4 and the /admin screens; 3.2 cancelled on 16.09.2026 (platform admin sign-in stays password-only); the 3.8 conflict report merged (PR #21) |
-| **4** | Cash salary receipt | `▰▰▰` **3/3** · 100% | ![on staging](https://img.shields.io/badge/-on%20staging-2ea44f) logic and database (PR #13), screens, PDF and receipt list (PR #34), and Bargeldbestand on the cash ledger (PR #43); the overlapping-salary and receipt-numbering decisions are still open |
+| **3** | Platform admin and permissions | `▰▰▰▰▰▰▱▱▱▱▱▱▱` **6/13** · 46% | ![building](https://img.shields.io/badge/-building-orange) restructured into slices on 15.09.2026; 3.0 (PR #12), 3.1 (PR #24), the first part of 3.6b (PR #36), 3.5 (PR #39), 3.9 (PR #38, hardened by PR #44) and 3.3 (PR #46, which raises `SCHEMA_EPOCH` to 2) merged; the 3.6c panel pages followed (PR #50, plus the Konto link in PR #48) inside the 3.6 slice already counted at PR #36; next are 3.4 (support sessions, which 3.6c's workspace tab waits for) and the rest of 3.6b; 3.2 cancelled on 16.09.2026 (platform admin sign-in stays password-only); the 3.8 conflict report merged (PR #21) |
+| **4** | Cash salary receipt | `▰▰▰` **3/3** · 100% | ![on staging](https://img.shields.io/badge/-on%20staging-2ea44f) logic and database (PR #13), screens, PDF and receipt list (PR #34), Bargeldbestand on the cash ledger (PR #43) and the receipt preview on the salary payment row (PR #49); the overlapping-salary and receipt-numbering decisions are still open |
 | **5** | Design rollout | `▱▱▱▱▱` **0/5** | ![not started](https://img.shields.io/badge/-not%20started-lightgrey) |
 
-**Overall:** `▰▰▰▰▰▰▰▰▰▰▰▰▱▱▱▱▱▱▱▱` 22 of 37 steps · 59%
+**Overall:** `▰▰▰▰▰▰▰▰▰▰▰▰▱▱▱▱▱▱▱▱` 23 of 37 steps · 62%
 
 ### Live on staging
 
@@ -77,6 +77,10 @@ A step counts once it is merged into `staging` and verified there. Production re
 - [x] **3.9, hardening** Settings audit rows capped at 120 per actor per minute, an incomplete plan-feature map refused, and the rate-limit helper failing closed on a NULL actor; all three rules of the 3.5 audit guard re-checked on staging afterwards — PR #44
 - [x] **1.6, screens part** Google sign-in screens, shipped with the provider switched off (`/auth/v1/settings` reports `google:false` in both environments): a Google button behind the settings check, a complete-registration page, error mapping that no longer swallows dead mail links, and a bounded recovery screen when the profile cannot be read. The platform-staff refusal is enforced in the browser only; the server-side rule waits for 3.3 — PR #45
 - [x] **4.3b** Bargeldbestand and the Overview cash panel read one cash ledger: paginated queries, scope established before any figure is claimed, and German formatting on the new cards. The seeded staging check confirms a receipt paid in one month and voided in the next lowers the first month and raises the second — PR #43
+- [x] **3.3** One policy shape for every tenant table: the RLS policies were rewritten onto capabilities in migration `20260917130000`, which raises `SCHEMA_EPOCH` to 2, so a rollback across this release is refused by design and the way back is the `pg_dump` snapshot taken before migrating. Platform staff cannot write tenant data outside a support session, and two billing tables gained a trigger pinning `company_id`. The per-company parity gate on staging reported 30 profiles and zero mismatches — PR #46
+- [x] **3.6c** The four missing panel pages: Verzeichnisse (vehicles, drivers and users across all companies), Protokoll (the audit log), Einstellungen (the price book and the plan feature map) and Team, each reading the read models and write RPCs phase 3 already serves; the Konto link in the platform sidebar came with it — PR #50, #48
+- [x] **4.3** The Gehaltsquittung preview on the salary payment row: the row already showed a lock badge and a link that navigated away to Dokumente, and now previews the stored receipt in place, with a PDF download — PR #49
+- [x] **1.6, registration gate** A Google signup with no profile row is no longer read as "nothing to do": such an account reached `/overview` inside the tenant shell with `invalid input syntax for type uuid: "null"` errors instead of the complete-your-registration screen — PR #51
 - [ ] **0.6** First production release from CI — the owner presses the button
 
 ### Building now
@@ -85,7 +89,10 @@ Agents build in parallel git worktrees. Each branch ends in a reviewed PR into `
 
 | Stream | Branch | State |
 |---|---|---|
-| One policy shape and server-side state (3.3) | `phase3/policy-unify` | PR #46, in review — next after it: 3.4 (support sessions) and the /admin screens |
+| Support sessions and the company workspace (3.4) | — | next; 3.6c's workspace tab waits for it |
+| The staff roster read model, `platform_staff_list` (3.12) | — | next; the Team page reconstructs its roster from the audit log until it lands, and audit retention (D4) must not be implemented before it |
+
+No pull request was open into `staging` at the time this status was written.
 
 ### Environments
 
@@ -96,19 +103,18 @@ Agents build in parallel git worktrees. Each branch ends in a reviewed PR into `
 | API | https://api.elprofessor.eu | https://api-staging.elprofessor.eu |
 | branch | `main` — deployed by a manual button | `staging` — deployed on every push |
 | mail | Resend | Mailpit keeps a copy and relays to Resend, except `@example.com` |
+| GoTrue signup | closed since 16.09.2026 (`disable_signup:true`) | closed; Kong answers 403 on signup, otp and magiclink |
+| Google sign-in | off, and stays off until the password-session rule exists | on since 16.09.2026 |
 
 ### Waiting on the owner
 
-- **Decide on GoTrue signup, which is open on the production stack.** Measured read-only, never exploited: production reports `disable_signup:false`, the Kong block that closes those routes on staging is absent there, so `POST /auth/v1/signup` appears open to anyone holding the public anon key. Cause: production has never run a pipeline release, so PR #29's guard never reached it. Proposed fix: `GOTRUE_DISABLE_SIGNUP=true` in production's `.env` and recreate only the auth container. Details in HANDOFF.md.
-- **Approve a production `OTP_PEPPER`** — it is missing from production's `.env`, and `deploy.sh` refuses a release without one, which blocks step 0.6.
+- Step 0.6: merge `staging` into `main` and press the production button. Its last technical blocker is gone — a production `OTP_PEPPER` was written on 16.09.2026 with the owner's approval. After the release: receive a real code mail at an address you own.
 - DNS record `mail-staging` → `159.195.205.30`, then a Mailpit login.
-- Step 0.6: merge `staging` into `main` and press the production button.
-- Approve a production `OTP_PEPPER` before 0.6, and after it, receive a real code mail at an address you own.
 - Rotate the secrets that were exposed in chat.
 - Answer the agents' open questions listed in HANDOFF.md.
 - Decide how overlapping salary rows are merged, and confirm the receipt numbering (details in HANDOFF.md).
 - Phase 3 decisions D1–D13, seller data for invoices, and the admin email for the Y&A Mobility company account (listed in the plan).
-- Google sign-in: two Google Cloud OAuth clients (production and staging), a privacy policy and an Impressum, and decisions G1–G3.
+- Google sign-in on production: its own Google Cloud OAuth client, a privacy policy and an Impressum, and decisions G1–G3. Staging's client is in place and the provider is on there.
 
 ---
 

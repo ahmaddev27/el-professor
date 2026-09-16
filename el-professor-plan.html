@@ -429,7 +429,7 @@
     <p class="lede">الطلبات الخمسة من ملف المتطلبات، مقسومة على 6 مراحل. كل مرحلة بتنبني وبتنفحص على الستيج، وبعدين بتنشر على البرودكشن بزر منك، ومعها زر رجوع إذا صار إشي.</p>
     <div class="meta">
       <span class="pill info">قيد التنفيذ · المراحل 0–4</span>
-      <span>آخر تحديث: <span class="num">15.09.2026</span></span>
+      <span>آخر تحديث: <span class="num">16.09.2026</span></span>
       <span>المصدر: <code>elprofessor_requirements_ar.pdf</code></span>
     </div>
   </header>
@@ -472,7 +472,7 @@
         </li>
         <li><a href="#p1"><span class="no">1</span><h3>OTP وأمان الحسابات</h3></a><ul class="chips"><li class="chip">كبير</li><li class="chip">عالستيج</li></ul></li>
         <li><a href="#p2"><span class="no">2</span><h3>نظام التصميم والنموذج</h3></a><ul class="chips"><li class="chip">متوسط</li><li class="chip">اندمج عالستيج</li></ul><p class="gate">البوابة انفتحت: وافقت على النموذج بـ 15.09</p></li>
-        <li><a href="#p3"><span class="no">3</span><h3>فصل المنصة والصلاحيات</h3></a><ul class="chips"><li class="chip">كبير جداً</li><li class="chip">3.0 و3.1 اندمجوا</li><li class="chip">قيد البناء</li></ul></li>
+        <li><a href="#p3"><span class="no">3</span><h3>فصل المنصة والصلاحيات</h3></a><ul class="chips"><li class="chip">كبير جداً</li><li class="chip">3.0 و3.1 و3.3 و3.5 و3.9 اندمجوا</li><li class="chip">قيد البناء</li></ul></li>
         <li><a href="#p4"><span class="no">4</span><h3>إيصال الراتب النقدي</h3></a><ul class="chips"><li class="chip">متوسط</li><li class="chip">الأساس اندمج</li></ul></li>
         <li><a href="#p5"><span class="no">5</span><h3>تعميم التصميم</h3></a><ul class="chips"><li class="chip">كبير</li><li class="chip">ما بلّشت</li></ul></li>
       </ol>
@@ -492,7 +492,7 @@
             <tr><td class="num">0.4</td><td>كلمة مرور الستيج</td><td><span class="pill ok">مفعّل</span></td><td><code>app.elprofessor.eu</code> بيرد 401 وبيطلب دخول (المستخدم <code>admon</code>). <code>/version.txt</code> ولوغو الإيميلات مفتوحين. البرودكشن ورايدي 200.</td><td class="num">#5</td></tr>
             <tr><td class="num">0.5</td><td>أدوات الاختبار الآلي</td><td><span class="pill ok">خلص عالستيج</span></td><td>مجلد <code>e2e/</code> بـ Playwright: حماية الستيج، تسجيل الدخول، ونسيت كلمة المرور. أول تشغيل كشف إنه رابط الاستعادة والدعوة كانوا يطلّعوا المستخدم فوراً، وانحلّت. بعد النشر نجحوا الخمسة.</td><td class="num">#7</td></tr>
             <tr><td class="num">+</td><td>إيميلات الستيج بتوصل فعلياً</td><td><span class="pill ok">شغّال عالستيج</span></td><td>قرارك: Mailpit بيحتفظ بنسخة من كل إيميل وبيبعته لصاحبه عبر Resend تبع البرودكشن، إلا عناوين <code>example.com</code> تبع الاختبارات. إيميلين تجربة وصلوا، وResend سجّلهم <code>delivered</code>.</td><td class="num">#8</td></tr>
-            <tr><td class="num">0.6</td><td>أول نشر للبرودكشن من CI</td><td><span class="pill">بزر منك</span></td><td>—</td><td class="num">—</td></tr>
+            <tr><td class="num">0.6</td><td>أول نشر للبرودكشن من CI</td><td><span class="pill">بزر منك</span></td><td>المانع التقني الأخير راح: مفتاح <code>OTP_PEPPER</code> للبرودكشن انكتب بـ 16.09.2026 بموافقتك (48 حرف، مختلف عن الستيج). وتسجيل GoTrue على البرودكشن انسكّر بنفس اليوم. ضل زرّك.</td><td class="num">—</td></tr>
           </tbody>
         </table>
       </div>
@@ -862,7 +862,7 @@
       </div>
 
       <div class="step">
-        <h3><span class="step-no">3.3</span>توحيد قواعد الحماية وفرض الحالة</h3>
+        <h3><span class="step-no">3.3</span>توحيد قواعد الحماية وفرض الحالة <span class="pill ok">اندمج عالستيج (PR #46)</span></h3>
         <ul class="list">
           <li>حوالي 69 قاعدة حماية مكتوبة بطريقة مختلفة، ومعها قواعد الملفات المخزّنة، بتتوحّد على دالة وحدة.</li>
           <li>دالة جديدة بتعطي بيانات الشركة بس إذا تحققت الشروط:</li>
@@ -897,7 +897,7 @@ AND (c.subscription_expires_at IS NULL OR c.subscription_expires_at &gt; now())<
       </div>
 
       <div class="step">
-        <h3><span class="step-no">3.6</span>بوابة <code>/admin</code> (بالتصميم الجديد) <span class="pill ok">قوائم المنصة اندمجت (3.6ب جزء 1)</span></h3>
+        <h3><span class="step-no">3.6</span>بوابة <code>/admin</code> (بالتصميم الجديد) <span class="pill ok">قوائم المنصة (3.6ب جزء 1) وصفحات اللوحة (3.6ج) اندمجوا</span></h3>
         <ul class="list">
           <li><code>/admin/login</code>: كلمة السر، ثم كود OTP، ثم اللوحة. فيها صفحة حسابي وتسجيل خروج.</li>
           <li>جلسة المنصة محفوظة منفصلة عن جلسة الشركة. التنقل بين البوابتين بتحميل صفحة كامل.</li>
@@ -1065,7 +1065,8 @@ AND (c.subscription_expires_at IS NULL OR c.subscription_expires_at &gt; now())<
         <li><span class="when">المرحلة 2</span><span>الموافقة على النموذج الأولي للتصميم.</span><span class="pill ok">خلص</span></li>
         <li><span class="when">المرحلة 3</span><span>إيميل أدمن شركة Y&amp;A Mobility.</span><span class="pill">لاحقاً</span></li>
         <li><span class="when">المرحلة 3</span><span>قرارات D1–D13 وبيانات البائع للفواتير (التفاصيل بالخطة).</span><span class="pill warn">لسا</span></li>
-        <li><span class="when">جوجل 1.6</span><span>مشروعين Google Cloud، وسياسة خصوصية وImpressum، وقرارات G1–G3.</span><span class="pill warn">لسا</span></li>
+        <li><span class="when">المرحلة 0</span><span>مفتاح <code>OTP_PEPPER</code> للبرودكشن.</span><span class="pill ok">خلص</span></li>
+        <li><span class="when">جوجل 1.6</span><span>عميل Google Cloud للبرودكشن، وسياسة خصوصية وImpressum، وقرارات G1–G3. (عميل الستيج جاهز وجوجل شغّال عليه من 16.09.2026؛ البرودكشن بيضل مطفي لحد ما تنبني قاعدة "الجلسة بكلمة مرور" من الخادم.)</span><span class="pill warn">لسا</span></li>
         <li><span class="when">المرحلة 4</span><span>قرار دمج صفوف الرواتب المكررة.</span><span class="pill">لاحقاً</span></li>
       </ul>
     </section>
