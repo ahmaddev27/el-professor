@@ -11,6 +11,10 @@ const required = [
   'E2E_BASE_URL', 'E2E_API_URL', 'E2E_STAGING_USER', 'E2E_STAGING_PASS',
   'E2E_MAILPIT_URL', 'E2E_MAILPIT_USER', 'E2E_MAILPIT_PASS',
   'E2E_ADMIN_EMAIL', 'E2E_ADMIN_PASSWORD',
+  // The seeded password-reset accounts. forgot-password spends one of five
+  // hourly codes per address, so it rotates over these instead of the admin;
+  // lib/resetAddress.ts explains the sizing.
+  'E2E_RESET_EMAILS',
   // The warm-up in global setup sends it to the functions, which refuse a
   // request without it before they start a worker — so it is needed by every
   // run now, not only by the two specs that call the API directly.

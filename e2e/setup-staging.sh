@@ -40,6 +40,9 @@ ensure E2E_MAILPIT_USER e2e
 ensure E2E_MAILPIT_PASS "$(rand)"
 ensure E2E_ADMIN_EMAIL e2e-admin@example.com
 ensure E2E_ADMIN_PASSWORD "$(rand)"
+# One address per run for forgot-password: five codes per address per hour is a
+# security constant, so the suite rotates rather than sharing one account.
+ensure E2E_RESET_EMAILS "e2e-reset-1@example.com,e2e-reset-2@example.com,e2e-reset-3@example.com,e2e-reset-4@example.com,e2e-reset-5@example.com,e2e-reset-6@example.com"
 chmod 600 "$ENV_FILE" 2>/dev/null || true
 
 [ "$(getv E2E_BASE_URL)" = https://app.elprofessor.eu ] || { echo "refusing: E2E_BASE_URL must be staging" >&2; exit 1; }
@@ -175,6 +178,57 @@ psqlq "UPDATE public.companies c
 psqlq "UPDATE public.user_profiles SET status = 'active', must_change_password = false WHERE user_id = '$uid'" > /dev/null
 
 [ "$(sign_in_code)" = 200 ] && echo "E2E admin sign-in: works" || { echo "E2E admin cannot sign in"; exit 1; }
+
+# ── Password-reset pool ──────────────────────────────────────────────────────
+# forgot-password spends one of five hourly codes per address, so it rotates
+# over these instead of the admin's. Each one is confirmed below, which is also
+# what keeps the nightly purge away: purge_unverified_signups only deletes
+# accounts whose address was never confirmed.
+rand_pw() { head -c 48 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 28; }
+n=0
+IFS=',' read -r -a POOL <<< "$(val E2E_RESET_EMAILS)"
+for addr in "${POOL[@]}"; do
+  n=$((n + 1))
+  [[ "$addr" =~ ^e2e[a-z0-9.-]*@example\.com$ ]] || { echo "refusing: '$addr' is not an e2e…@example.com address"; exit 1; }
+  ruid="$(psqlq "SELECT id FROM auth.users WHERE email = '$addr'")"
+  if [ -z "$ruid" ]; then
+    python3 - "$addr" "$(rand_pw)" "$n" > "$work/pool.json" <<'PY'
+import json, sys
+print(json.dumps({
+  "company_name": "E2E Reset Pool %s" % sys.argv[3],
+  "full_name": "E2E Reset %s" % sys.argv[3],
+  "email": sys.argv[1],
+  "password": sys.argv[2],
+  "plan": "premium",
+  "billing_cycle": "monthly",
+  "subscription_car_limit": 5,
+}))
+PY
+    code="$(printf 'apikey: %s\n' "$ANON" | curl -s -o "$work/pool.out" -w '%{http_code}' --max-time 30 -X POST "$API/functions/v1/company-signup" -H @- -H 'Content-Type: application/json' --data-binary @"$work/pool.json")"
+    [ "$code" = 200 ] || { echo "company-signup for $addr answered $code: $(head -c 200 "$work/pool.out")"; exit 1; }
+    ruid="$(psqlq "SELECT id FROM auth.users WHERE email = '$addr'")"
+    [ -n "$ruid" ] || { echo "company-signup for $addr created no account"; exit 1; }
+    echo "reset pool $addr: created"
+  else
+    echo "reset pool $addr: in place"
+  fi
+  # The password is deliberately not kept anywhere: the test sets its own and
+  # signs in with that. This call is here to confirm the address.
+  printf '{"password":%s,"email_confirm":true}' "$(printf '%s' "$(rand_pw)" | json_string)" > "$work/pool.pw"
+  rc="$(printf 'apikey: %s\nAuthorization: Bearer %s\n' "$SERVICE" "$SERVICE" \
+    | curl -s -o /dev/null -w '%{http_code}' --max-time 20 -X PUT "$API/auth/v1/admin/users/$ruid" \
+        -H @- -H 'Content-Type: application/json' --data-binary @"$work/pool.pw")"
+  [ "$rc" = 200 ] || { echo "confirming $addr answered $rc"; exit 1; }
+  # Approved, subscribed and active, so the sign-in at the end of the test lands
+  # in the app rather than on a gate.
+  psqlq "UPDATE public.companies c
+            SET approval_status = 'approved', subscription_status = 'active',
+                subscription_expires_at = now() + interval '10 years'
+           FROM public.user_profiles p
+          WHERE p.user_id = '$ruid' AND c.id = p.company_id" > /dev/null
+  psqlq "UPDATE public.user_profiles SET status = 'active', must_change_password = false WHERE user_id = '$ruid'" > /dev/null
+done
+echo "reset pool: $n addresses ready"
 REMOTE
 
 echo "Done. Values are in $ENV_FILE (not in git). Run the suite with: cd e2e && npm test"
