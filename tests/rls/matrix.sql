@@ -980,8 +980,15 @@ INSERT INTO _mx_expected (tbl, op, anon, viewer, editor, supervisor, admin, othe
 -- rejection reason stays — a rejected company's owner is shown it.
 ('companies',                          'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'YY', NULL),
 ('companies',                          'I', 'RR', 'RR', 'RR', 'RR', 'RR', 'RR', 'YY', NULL),
-('companies',                          'U', '..', '..', '..', '..', '..', '..', 'YY', NULL),
-('companies',                          'D', '..', '..', '..', '..', '..', '..', 'YY', NULL),
+-- Both stay YY, and both are tagged: `companies.lifecycle` and
+-- `companies.hard_delete` name no company at all, so a staff account edits or
+-- deletes either tenant with no context, no reason and no audit row. That is
+-- 20260917130000's design and 20260917140000 does not touch it — the concession
+-- it closes is the *operational* data. Narrowing the shell is 3.4c's and
+-- 3.13's. The same shape, untagged only to keep this file readable, holds for
+-- company_subscriptions, subscription_invoices and subscription_payment_audit.
+('companies',                          'U', '..', '..', '..', '..', '..', '..', 'YY', 'the shell still takes a capability-only cross-tenant write: no context, no reason, no audit row (3.4c/3.13)'),
+('companies',                          'D', '..', '..', '..', '..', '..', '..', 'YY', 'the shell still takes a capability-only cross-tenant write: no context, no reason, no audit row (3.4c/3.13)'),
 ('companies',                          'M', '--', '--', '--', '--', '--', '--', '--', NULL),
 ('company_planning_run_blocks',       'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
 ('company_planning_run_blocks',        'I', 'RR', 'YR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
@@ -999,8 +1006,8 @@ INSERT INTO _mx_expected (tbl, op, anon, viewer, editor, supervisor, admin, othe
 -- they are — a support session is not what carries them.
 ('company_settings',                   'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'YY', NULL),
 ('company_settings',                   'I', 'RR', 'RR', 'RR', 'RR', 'YR', 'RY', 'RR', NULL),
-('company_settings',                   'U', '..', '..', '..', '..', 'Y.', '.Y', 'YY', NULL),
-('company_settings',                   'D', '..', '..', '..', '..', '..', '..', 'YY', NULL),
+('company_settings',                   'U', '..', '..', '..', '..', 'Y.', '.Y', 'YY', 'the shell still takes a capability-only cross-tenant write: no context, no reason, no audit row (3.4c/3.13)'),
+('company_settings',                   'D', '..', '..', '..', '..', '..', '..', 'YY', 'the shell still takes a capability-only cross-tenant write: no context, no reason, no audit row (3.4c/3.13)'),
 ('company_settings',                   'M', '..', '..', '..', '..', 'R.', '.R', 'YY', 'companies.lifecycle can re-point a company_settings row, with or without a session'),
 -- Not a hole and not a support-session matter: the money a platform account
 -- reads to run the business is companies.read's, which every staff role holds
@@ -1169,17 +1176,28 @@ INSERT INTO _mx_expected (tbl, op, anon, viewer, editor, supervisor, admin, othe
 ('referrals',                          'M', '--', '--', '--', '--', '--', '--', '--', NULL),
 ('role_permissions',                   'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
 ('role_permissions',                   'I', 'RR', 'RR', 'RR', 'RR', 'YR', 'RY', 'RR', NULL),
-('role_permissions',                   'U', '..', '..', '..', '..', 'Y.', '.Y', 'RR', NULL),
-('role_permissions',                   'D', '..', '..', '..', '..', 'Y.', '.Y', 'YY', NULL),
-('role_permissions',                   'M', '..', '..', '..', '..', 'T.', '.T', 'TT', NULL),
+-- The platform column on these three was RR / YY / TT until 20260917140000,
+-- and every one of them moved to '..' for the same reason: `company_users.manage`
+-- still says yes, but the row is no longer *visible*. role_permissions reaches
+-- its company through an EXISTS on roles, whose SELECT policy is
+-- `company_id IS NULL OR company_id = get_user_company_id() OR <the read seam>`
+-- — and with the seam false and no context open, a platform account sees the
+-- system roles and nothing else. A U, D or M probe whose WHERE reads a column
+-- needs SELECT rights too, so PostgreSQL applies that policy before the write
+-- policy is ever consulted. With a context open the same three answer for the
+-- context's company alone; see the staff columns below.
+('role_permissions',                   'U', '..', '..', '..', '..', 'Y.', '.Y', '..', NULL),
+('role_permissions',                   'D', '..', '..', '..', '..', 'Y.', '.Y', '..', NULL),
+('role_permissions',                   'M', '..', '..', '..', '..', 'T.', '.T', '..', NULL),
 ('roles',                              'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
 ('roles',                              'I', 'RR', 'RR', 'RR', 'RR', 'YR', 'RY', 'RR', NULL),
-('roles',                              'U', '..', '..', '..', '..', 'Y.', '.Y', 'RR', NULL),
-('roles',                              'D', '..', '..', '..', '..', 'Y.', '.Y', 'YY', NULL),
+-- …and the same for the roles themselves: visible only through a context.
+('roles',                              'U', '..', '..', '..', '..', 'Y.', '.Y', '..', NULL),
+('roles',                              'D', '..', '..', '..', '..', 'Y.', '.Y', '..', NULL),
 -- Was R. / .R / RR: the WITH CHECK refused the move. 20260917140000 pins the
 -- column instead, because the shell term now answers the open context and the
 -- WITH CHECK alone would have admitted a pull-in from the other company.
-('roles',                              'M', '..', '..', '..', '..', 'T.', '.T', 'TT', NULL),
+('roles',                              'M', '..', '..', '..', '..', 'T.', '.T', '..', NULL),
 ('salaries',                           'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
 ('salaries',                           'I', 'RR', 'RR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
 ('salaries',                          'U', '..', '..', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
@@ -1226,10 +1244,14 @@ INSERT INTO _mx_expected (tbl, op, anon, viewer, editor, supervisor, admin, othe
 -- anon and super: since 20260916110010 the profile guard refuses a JWT putting a
 -- profile into a company before RLS is asked; both were RR
 ('user_profiles',                      'I', 'TT', 'TT', 'TT', 'TT', 'TT', 'TT', 'TT', NULL),
-('user_profiles',                      'U', '..', '..', '..', '..', 'Y.', '.Y', 'YY', NULL),
-('user_profiles',                      'D', '..', '..', '..', '..', 'Y.', '.Y', 'YY', NULL),
+-- Same again: company_users.manage carries no company term, so the write
+-- policy says yes for either company — and the SELECT policy, which a probe
+-- with a WHERE clause also has to satisfy, now shows a platform account only
+-- the profiles of the company it has opened.
+('user_profiles',                      'U', '..', '..', '..', '..', 'Y.', '.Y', '..', NULL),
+('user_profiles',                      'D', '..', '..', '..', '..', 'Y.', '.Y', '..', NULL),
 -- super: since 20260916110010 no JWT moves a profile between companies; was YY
-('user_profiles',                      'M', '..', '..', '..', '..', 'T.', '.T', 'TT', NULL),
+('user_profiles',                      'M', '..', '..', '..', '..', 'T.', '.T', '..', NULL),
 ('user_sessions',                      'S', '..', '..', '..', '..', 'Y.', '.Y', '..', NULL),
 ('user_sessions',                      'I', 'RR', 'RR', 'RR', 'RR', 'YR', 'RY', 'RR', NULL),
 ('user_sessions',                      'U', '..', '..', '..', '..', 'Y.', '.Y', '..', NULL),
@@ -1258,11 +1280,22 @@ INSERT INTO _mx_expected (tbl, op, anon, viewer, editor, supervisor, admin, othe
 --                  every INSERT, UPDATE and DELETE statement is refused by
 --                  app_private.refuse_read_only_context_write (T), on both
 --                  sides, because the trigger asks about the caller and not
---                  about the row. A move is T only where a move is attempted
---                  at all: where `admin` answers '..' the row could not be
---                  taken FOR UPDATE, no UPDATE is ever issued, and no trigger
---                  fires (fahrtenbuch_trips and fahrtenbuch_assignment_audit,
---                  which have no UPDATE policy)
+--                  about the row — a statement that would have matched nothing
+--                  is refused just the same.
+--
+--                  A move is the exception, and the reason is mechanical: the
+--                  probe has to take the row with SELECT … FOR UPDATE before it
+--                  issues any UPDATE, and that applies the UPDATE policy's
+--                  USING. In a view context the role gate inside that USING is
+--                  false, so on a role-gated table there is nothing to lock, no
+--                  UPDATE is ever issued, and the trigger never speaks: the
+--                  answer is the silent one, not T. The caller whose gates
+--                  answer the same way inside its own company is the viewer, so
+--                  the viewer's own move cell is what says which it is —
+--                  '..' where the row cannot be held (the ten role-gated
+--                  tables, notification_settings, and fahrtenbuch_trips and
+--                  fahrtenbuch_assignment_audit, which have no UPDATE policy at
+--                  all), 'T.' where it can.
 --
 -- Tables whose cell is PP are skipped: no GRANT means the statement never
 -- reaches a policy or a trigger.
@@ -1273,7 +1306,7 @@ UPDATE _mx_expected x
    SET staff_support = x.admin,
        staff_view    = CASE x.op
                          WHEN 'S' THEN x.admin
-                         WHEN 'M' THEN CASE WHEN x.admin = '..' THEN '..' ELSE 'T.' END
+                         WHEN 'M' THEN CASE WHEN x.viewer = '..' THEN '..' ELSE 'T.' END
                          ELSE 'TT'
                        END
  WHERE x.admin <> 'PP'
@@ -1296,22 +1329,58 @@ UPDATE _mx_expected x
 -- Both modes answer the same here — none of these is gated by
 -- current_role_permits() or is_company_admin(), so the support session makes no
 -- difference; company_users.manage and companies.lifecycle already did.
+-- Four of them carry the refusal trigger too, and for a reason this slice
+-- created: their write predicate is
+--   company_id = get_user_company_id() AND (is_company_admin() OR platform_can(…))
+-- which was refused for a company-less platform account only because the first
+-- conjunct was NULL. Answering the open context there completes it and the
+-- capability supplies the rest, so a *view* context could otherwise have
+-- created a role, given it can_edit on every page, and pointed a company's
+-- profile at it — three writes with no reason recorded. So on roles,
+-- role_permissions, company_settings and activation_code_attempts the view
+-- column reads like the tenant tables: T for every statement it issues, and
+-- for a move only where the row could be locked first.
 UPDATE _mx_expected x SET staff_view = o.sv, staff_support = o.ss
   FROM (VALUES
-    -- the caller's own company is now company A, so an attempt is recorded
-    ('activation_code_attempts', 'I', 'YR', 'YR'),
-    -- …and a settings row may be created for it (companies.lifecycle)
-    ('company_settings',         'I', 'YR', 'YR'),
-    -- the company's own roles and their permissions come into view, and
-    -- company_users.manage writes them where the company matches
+    -- roles and their permissions: visible for the context's company, written
+    -- only inside the support session. A move is refused by the pin trigger
+    -- once the support session lets the statement through at all.
     ('roles',                    'S', 'Y.', 'Y.'),
-    ('roles',                    'I', 'YR', 'YR'),
-    ('roles',                    'U', 'YR', 'YR'),
+    ('roles',                    'I', 'TT', 'YR'),
+    ('roles',                    'U', 'TT', 'Y.'),
+    ('roles',                    'D', 'TT', 'Y.'),
+    ('roles',                    'M', 'T.', 'T.'),
     ('role_permissions',         'S', 'Y.', 'Y.'),
-    ('role_permissions',         'I', 'YR', 'YR'),
-    ('role_permissions',         'U', 'YR', 'YR'),
-    -- and its people
-    ('user_profiles',            'S', 'Y.', 'Y.')
+    ('role_permissions',         'I', 'TT', 'YR'),
+    ('role_permissions',         'U', 'TT', 'Y.'),
+    ('role_permissions',         'D', 'TT', 'Y.'),
+    ('role_permissions',         'M', 'T.', 'T.'),
+    -- the company's legal details: both rows are visible through
+    -- companies.read, and companies.lifecycle writes either — until a view
+    -- context makes the trigger the first thing the statement meets
+    ('company_settings',         'I', 'TT', 'YR'),
+    ('company_settings',         'U', 'TT', 'YY'),
+    ('company_settings',         'D', 'TT', 'YY'),
+    ('company_settings',         'M', 'TT', 'YY'),
+    -- an attempt is recorded against the caller's own company, which is now
+    -- the opened one; there is no UPDATE or DELETE policy, so a support
+    -- session finds nothing to change and a view context is refused before
+    -- that can matter
+    ('activation_code_attempts', 'I', 'TT', 'YR'),
+    ('activation_code_attempts', 'U', 'TT', '..'),
+    ('activation_code_attempts', 'D', 'TT', '..'),
+    ('activation_code_attempts', 'M', '..', '..'),
+    -- user_profiles and companies carry no trigger: their platform branch is a
+    -- capability with no company term, so a context neither grants nor takes
+    -- away a write there — it only decides which rows are visible. The two T
+    -- cells are the trigger firing through a cascade: deleting a profile or a
+    -- company reaches tenant tables that do carry it, and a read-only context
+    -- destroys nothing.
+    ('user_profiles',            'S', 'Y.', 'Y.'),
+    ('user_profiles',            'U', 'Y.', 'Y.'),
+    ('user_profiles',            'D', 'T.', 'Y.'),
+    ('user_profiles',            'M', 'T.', 'T.'),
+    ('companies',                'D', 'TT', 'YY')
   ) AS o(tbl, op, sv, ss)
  WHERE x.tbl = o.tbl AND x.op = o.op;
 
@@ -2199,15 +2268,17 @@ INSERT INTO _mx_rpc (label, stmt, want, hole) VALUES
     -- 20260915130000 made is_user_super_admin() answer false to that caller;
     -- the platform_staff body of 20260916110010 keeps answering false.
     -- 20260917130000 removed the `is_user_super_admin() OR …` term from the
-    -- body altogether. 20260917140000 then took the seeded platform account's
-    -- last claim to it: the profile role is asked first, as it is for every
-    -- caller, and a company-less staff account falls through to "am I inside a
-    -- support session" — which `super`, holding no context, is not. seed.sql's
-    -- `admin` text role no longer decides anything there, because that profile
-    -- names no company for the role matrix to be about
+    -- body altogether, so the platform column reads Y for the reason every
+    -- other column does: seed.sql gives that account the text role `admin` and
+    -- the system admin role_id, and roles-seed.sql gives that role can_edit on
+    -- all sixteen pages. 20260917140000 asks the profile first and returns
+    -- there, exactly as 3.3 did, so this cell does not move — the support
+    -- session is the *fallback* for an account whose profile grants nothing,
+    -- which is what the two context principals are (role `viewer`, can_edit
+    -- false everywhere) and what a platform account looks like after 3.7b
     ('current_role_permits(drivers, edit)',
      $q$SELECT current_role_permits('drivers', true)::text$q$,
-     'NNYYYYN', NULL),
+     'NNYYYYY', NULL),
     ('get_current_user_role()',
      $q$SELECT get_current_user_role()$q$,
      '-YYYYYY', NULL),

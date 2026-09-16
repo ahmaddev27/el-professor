@@ -414,6 +414,47 @@ BEGIN
       LIKE 'ERR P0001%');
 END $$;
 
+-- ─── 5b. …and neither does it write the shell tables a context unlocks ──────
+--
+-- Four tables of the account shell have the write predicate
+--   company_id = get_user_company_id() AND (is_company_admin() OR platform_can(…))
+-- which refused a company-less platform account only because the first conjunct
+-- was NULL. Answering the open context there completes it, and the capability
+-- supplies the rest — so without the trigger on these four, a view context
+-- could create a role, give it can_edit on every page through role_permissions,
+-- and point a company's profile at it: three writes, no reason recorded, in the
+-- mode that is supposed to write nothing.
+
+DO $$
+DECLARE
+  co_x constant uuid := _pc_id('company:x');
+  u_o  constant uuid := _pc_id('user:owner');
+  s_o  constant uuid := _pc_id('session:owner');
+BEGIN
+  PERFORM _pc_ok('view: cannot create a role in the company it is reading',
+    _pc_try(u_o, s_o, format('INSERT INTO roles (name, description, company_id, is_system) VALUES (''PC view role'', ''pc'', %L, false)', co_x))
+      LIKE 'ERR P0001%');
+  PERFORM _pc_ok('view: cannot grant a permission to a role that exists',
+    _pc_try(u_o, s_o, format('INSERT INTO role_permissions (role_id, page_key, can_view, can_edit) VALUES (%L, ''salaries'', true, true)', _pc_id('role:x')))
+      LIKE 'ERR P0001%');
+  PERFORM _pc_ok('view: cannot change the company''s settings',
+    _pc_try(u_o, s_o, format('UPDATE company_settings SET company_name = ''PC view'' WHERE company_id = %L', co_x))
+      LIKE 'ERR P0001%');
+  PERFORM _pc_ok('view: cannot record an activation-code attempt in the company''s name',
+    _pc_try(u_o, s_o, format('INSERT INTO activation_code_attempts (company_id, user_id, input_last4, success, reason, kind) VALUES (%L, %L, NULL, false, ''pc'', ''preview'')', co_x, u_o))
+      LIKE 'ERR P0001%');
+
+  -- Recorded, not asserted away: company_users.manage carries no company term
+  -- at all (20260917130000's deliberate design), so a staff account may still
+  -- point a profile at a role that already exists — with a context and, for a
+  -- row it can see, without one. What this section closes is the escalation:
+  -- the role and the permissions behind it can no longer be made. Confining the
+  -- capability itself is 3.4c's and 3.13's, and matrix.sql tags it.
+  PERFORM _pc_ok('view: …but company_users.manage still re-points a profile — residual, tagged for 3.4c/3.13',
+    _pc_try(u_o, s_o, format('UPDATE user_profiles SET role_id = %L WHERE user_id = %L',
+                             _pc_id('role:x'), _pc_id('user:admin-x'))) = 'rows 1');
+END $$;
+
 -- ─── 6. a support session writes, inside its own company ────────────────────
 
 DO $$
@@ -457,6 +498,19 @@ BEGIN
   PERFORM _pc_ok('support: nor can one be pulled in from the other company',
     _pc_try(u_o, s_o, format('UPDATE drivers SET company_id = %L WHERE id = %L', co_x, _pc_id('driver:y')))
       = 'rows 0');
+
+  -- The four shell tables of section 5b, from the other side: what a view
+  -- context is refused, a support session carries out — in its own company.
+  PERFORM _pc_ok('support: a role and its permissions can be written for the company being supported',
+    _pc_try(u_o, s_o, format('INSERT INTO roles (name, description, company_id, is_system) VALUES (''PC support role'', ''pc'', %L, false)', co_x))
+      = 'rows 1'
+    AND _pc_try(u_o, s_o, format('INSERT INTO role_permissions (role_id, page_key, can_view, can_edit) VALUES (%L, ''salaries'', true, true)', _pc_id('role:x')))
+      = 'rows 1');
+  PERFORM _pc_ok('support: …and the company''s settings, but not another company''s role',
+    _pc_try(u_o, s_o, format('UPDATE company_settings SET company_name = ''PC support'' WHERE company_id = %L', co_x))
+      = 'rows 1'
+    AND _pc_try(u_o, s_o, format('INSERT INTO roles (name, description, company_id, is_system) VALUES (''PC no'', ''pc'', %L, false)', co_y))
+      LIKE 'ERR 42501%row-level security%');
 
   -- Everything it wrote is still the company's own data, and the company's
   -- people still see it: the session is a way in, not a second tenant.
