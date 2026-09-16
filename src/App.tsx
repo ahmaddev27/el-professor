@@ -40,6 +40,10 @@ import CompanyPlannerPage from './pages/CompanyPlannerPage';
 import SubscriptionBillingPage from './pages/SubscriptionBillingPage';
 import CompanyBillingPage from './pages/CompanyBillingPage';
 import AbnahmeDiagnosticPage from './pages/AbnahmeDiagnosticPage';
+import PlatformDirectoriesPage from './pages/PlatformDirectoriesPage';
+import PlatformAuditPage from './pages/PlatformAuditPage';
+import PlatformSettingsPage from './pages/PlatformSettingsPage';
+import PlatformTeamPage from './pages/PlatformTeamPage';
 import PendingApprovalPage from './pages/PendingApprovalPage';
 import RejectedPage from './pages/RejectedPage';
 import CompanySuspendedPage from './pages/CompanySuspendedPage';
@@ -363,6 +367,12 @@ function App() {
                   <Route path="companies"        element={<CompaniesPage />} />
                   <Route path="billing"          element={<SubscriptionBillingPage />} />
                   <Route path="abnahme-diagnose" element={<AbnahmeDiagnosticPage />} />
+                  {/* Each of these checks its own capability again, and every
+                      RPC behind them checks it a third time in the database. */}
+                  <Route path="verzeichnisse"    element={<PlatformDirectoriesPage />} />
+                  <Route path="protokoll"        element={<PlatformAuditPage />} />
+                  <Route path="einstellungen"    element={<PlatformSettingsPage />} />
+                  <Route path="team"             element={<PlatformTeamPage />} />
                   <Route path="*" element={<Navigate to="/super-admin" replace />} />
                 </Route>
               )}
