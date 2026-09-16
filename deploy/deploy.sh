@@ -517,6 +517,41 @@ dc ps --format '  {{.Service}} {{.State}}' < /dev/null
 
 code() { curl -s -o /dev/null -w '%{http_code}' --max-time 15 "$1"; }
 
+# ── The edge-function probe's verdict ────────────────────────────────────────
+# Everything between the two marker lines is also sourced on its own by
+# tests/deploy/functions-health.test.ts, so it may use only its arguments.
+# >>> functions health checks
+
+# What one answer to POST /functions/v1/otp-request with the body `{}` proves.
+# Prints nothing when the edge runtime served it, otherwise one line naming what
+# answered instead.
+#
+# The body decides, not the status. Only `"reason":"invalid_request"` is the
+# *function's* own answer: parseOtpRequest produces it inside the user worker,
+# which means Kong reached the runtime, main/index.ts accepted the key, found the
+# directory and booted the worker. A status alone cannot say that — 400 is also
+# what a gateway says to a request it dislikes.
+#
+# 502 is read as the gateway's here because otp-request never returns one. Do not
+# point this at otp-verify without revisiting that: sessionFailed() answers 502
+# from inside the function.
+functions_probe_problem() {
+  local status="$1" body="$2"
+  case "$status" in
+    400)
+      case "$body" in
+        *'"reason":"invalid_request"'*) ;;
+        *) echo "HTTP 400, but not the function's own invalid_request answer" ;;
+      esac ;;
+    502|503|504) echo "HTTP $status from the gateway — Kong did not reach the edge runtime" ;;
+    401) echo "HTTP 401 — the router refused the key, so ANON_KEY in .env is not this stack's" ;;
+    404) echo "HTTP 404 — the router knows no such function, or it has no FUNCTION_ENV entry" ;;
+    000|'') echo "no answer at all" ;;
+    *) echo "HTTP $status, not the function's own answer" ;;
+  esac
+}
+# <<< functions health checks
+
 # CI writes the commit into dist/version.txt. Reading it back through the public
 # URL proves this exact bundle is what visitors get — a 200 on / only proved
 # that something answered. The path stays reachable when the site itself sits
@@ -556,6 +591,52 @@ for path in $CLOSED_ROUTES; do
   echo "  $PUBLIC_URL$path -> $closed"
   [ "$closed" = 403 ] || fail "$PUBLIC_URL$path answered '$closed' instead of 403"
 done
+
+# And the edge functions, end to end: Caddy, Kong, the runtime, a user worker.
+# Nothing checked them until now, so a broken router, a missing FUNCTION_ENV
+# entry or an unreachable runtime shipped silently and a customer found it.
+#
+# It is also the one check this release needs most, because this release is what
+# breaks the route. `web` and `functions` are force-recreated together above, so
+# Docker frees both addresses and hands them back in either order — the two
+# regularly swap. Kong is not recreated unless kong.yml changed, so it keeps the
+# address it resolved for `functions` until that record expires (Docker's
+# embedded DNS serves a 600 s TTL). While the cache is stale Kong dials the
+# address `web` now holds, nginx refuses port 9000, and every POST to
+# /functions/v1/* is answered 502 in ~130 ms. Measured on staging 16.09.2026:
+# three such episodes in 21 h, each 19-78 s after a release finished, and none at
+# any other time — idle stretches of 6 min to 10.5 h all answered normally. For a
+# customer that window is "Passwort vergessen" showing "Ein unerwarteter Fehler
+# ist aufgetreten"; for the e2e suite it was four red merges in a row.
+#
+# So the release does not finish while that route is dead. `{}` is refused by
+# parseOtpRequest before any database, mail or rate-limit work, so the probe
+# costs one worker boot and nothing else — no code is sent and no budget spent.
+# 30 tries, 5 s apart: every window seen was under 80 s, and a stall past 150 s
+# is worth a red deploy rather than a release nobody checked.
+fn_anon_key="$(env_value .env ANON_KEY)"
+[ -n "$fn_anon_key" ] || fail "ANON_KEY is missing from .env, so the edge functions cannot be probed"
+
+# curl writes the body, then a newline, then the status, so the last line is the
+# status and everything before it is the body. The separator is held in a
+# variable because $'\n' inside a "${...}" expansion opens a quote bash never
+# closes, and the whole script stops parsing.
+fn_nl=$'\n'
+fn_problem="no answer at all"
+for i in $(seq 1 30); do
+  fn_answer="$(curl -s --max-time 15 -X POST "$PUBLIC_URL/functions/v1/otp-request" \
+    -H "apikey: $fn_anon_key" -H 'Content-Type: application/json' \
+    -d '{}' -w '\n%{http_code}')" || true
+  fn_problem="$(functions_probe_problem "${fn_answer##*"$fn_nl"}" "${fn_answer%"$fn_nl"*}")"
+  [ -z "$fn_problem" ] && break
+  sleep 5
+done
+unset fn_anon_key
+# Not spelled inline: an apostrophe inside ${x:-...} opens a quote bash never
+# closes, and the whole script stops parsing.
+fn_served="served by the function itself"
+echo "  $PUBLIC_URL/functions/v1/otp-request -> ${fn_problem:-$fn_served}"
+[ -z "$fn_problem" ] || fail "the edge functions do not answer through $PUBLIC_URL: $fn_problem. The bundle is live and every other service answered, so this is the functions service alone. If it is a 502, Kong is still dialling the address 'functions' held before this release; 'docker compose exec kong kong reload' from this directory drops its DNS cache without dropping a connection or recreating a container"
 
 if [ -n "$MANIFEST" ]; then
   if [ "$MODE" != --activate ]; then
