@@ -316,10 +316,16 @@ BEGIN
   SELECT count(*) INTO n FROM salary_cash_receipts;
   RESET ROLE;
   PERFORM _sc_eq('a viewer reads its company''s receipts', n, 5::bigint);
+  -- Since 20260917100000 (plan 3.3) the Gehaltsquittung tables carry the same
+  -- SELECT shape as every other business table, so an active staff role holding
+  -- business.read reads them too. matrix.sql records that as HOLE[3.4]: 3.4
+  -- confines it to an open read or support context. Writing them stays
+  -- nobody's — authenticated holds SELECT and nothing else, which is what the
+  -- checks below prove.
   PERFORM _sc_as(super_u);
-  SELECT count(*) INTO n FROM salary_cash_receipts;
+  SELECT count(DISTINCT company_id) INTO n FROM salary_cash_receipts;
   RESET ROLE;
-  PERFORM _sc_eq('the platform account has no direct read path to receipts', n, 0::bigint);
+  PERFORM _sc_eq('the platform account reads both companies receipts through business.read', n, 2::bigint);
 
   -- ── nothing is written around the RPCs ──────────────────────────────────
   PERFORM _sc_eq('no one inserts a receipt directly',

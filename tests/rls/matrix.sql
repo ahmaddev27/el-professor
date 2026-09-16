@@ -95,22 +95,23 @@
   member could read, and the last SECURITY DEFINER function without a pinned
   search_path. The cells and scenarios they moved are marked below.
 
-    3.3  is_user_super_admin() is true for any active platform_staff row, whatever
-         its role, so the policies built on it (companies, subscriptions,
-         invoices, plans, document categories) give support, billing and
-         read_only the writes of an owner. The platform principal here is an
-         owner, so its cells stay when 3.3 asks the capability instead;
-         tests/rls/platform-authority.sql records the read_only case
-    3.3  company status, approval and subscription, and a user's own status, are
-         not enforced by the database: a pending, rejected, suspended or inactive
-         company, one whose subscription is inactive, expired or suspended or
-         whose expiry date has passed, and a deactivated, suspended, inactive or
-         still-invited user all keep reading and writing, through the tables and
-         through the planning RPCs; a deactivated company admin can even set its
-         own status back to active. A trial company with an active subscription
-         is recorded untagged: it is the control that must stay allowed
-    3.4  the super admin reads and writes every tenant's operational data with no
-         support session, and moves a tenant's rows into another company (M)
+  3.3 (20260917100000) closed the write side and the state rules. Every tenant
+  table now carries one shape; the tenant predicate is get_active_company_id(),
+  which answers NULL for a company or an account App.tsx refuses, so a pending,
+  rejected or suspended company, one whose subscription is inactive, expired or
+  past its expiry, and a deactivated, suspended or inactive user read and write
+  nothing — through the tables or through the planning RPCs, which ask the same
+  helper. The platform branch of every write policy is gone, and the platform
+  tables ask the capability that names the act instead of "is this account
+  staff". A trial company and an invited employee are the two controls that
+  stay allowed, because App.tsx admits both.
+
+    3.4  the super admin reads every tenant's operational data with no support
+         session. 3.3 gave the Fahrtenbuch, planning, historical, notification
+         and Gehaltsquittung tables the same read shape as the rest, so the
+         reads it records are wider than before and the writes are gone: a
+         staff role writes a tenant's rows only inside the support session 3.4
+         brings
 
   ## Recorded without a plan step
 
@@ -868,24 +869,24 @@ INSERT INTO _mx_expected VALUES
 ('activation_codes',                   'M', '..', '..', '..', '..', '..', '..', 'YY', NULL),
 ('car_driver_assignments',             'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'YY', '3.4 super reaches tenant data with no support session'),
 ('car_driver_assignments',             'I', 'RR', 'YR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
-('car_driver_assignments',             'U', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'RR', NULL),
-('car_driver_assignments',             'D', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'YY', '3.4 super reaches tenant data with no support session'),
-('car_driver_assignments',             'M', '..', 'R.', 'R.', 'R.', 'R.', '.R', 'RR', NULL),
+('car_driver_assignments',            'U', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('car_driver_assignments',            'D', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('car_driver_assignments',            'M', '..', 'R.', 'R.', 'R.', 'R.', '.R', '..', NULL),
 ('cars',                               'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'YY', '3.4 super reaches tenant data with no support session'),
 ('cars',                               'I', 'RR', 'RR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
-('cars',                               'U', '..', '..', 'Y.', 'Y.', 'Y.', '.Y', 'YY', '3.4 super reaches tenant data with no support session'),
-('cars',                               'D', '..', '..', 'Y.', 'Y.', 'Y.', '.Y', 'YY', '3.4 super reaches tenant data with no support session'),
-('cars',                               'M', '..', '..', 'R.', 'R.', 'R.', '.R', 'YY', '3.4 super moves tenant rows into another company with no support session'),
-('cash_movements',                     'S', 'PP', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('cars',                              'U', '..', '..', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('cars',                              'D', '..', '..', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('cars',                              'M', '..', '..', 'R.', 'R.', 'R.', '.R', '..', NULL),
+('cash_movements',                    'S', 'PP', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'YY', '3.4 super reaches tenant data with no support session'),
 ('cash_movements',                     'I', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', NULL),
 ('cash_movements',                     'U', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', NULL),
 ('cash_movements',                     'D', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', NULL),
 ('cash_movements',                     'M', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', NULL),
 ('cash_transactions',                  'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'YY', '3.4 super reaches tenant data with no support session'),
 ('cash_transactions',                  'I', 'RR', 'YR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
-('cash_transactions',                  'U', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'RR', NULL),
-('cash_transactions',                  'D', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'YY', '3.4 super reaches tenant data with no support session'),
-('cash_transactions',                  'M', '..', 'R.', 'R.', 'R.', 'R.', '.R', 'RR', NULL),
+('cash_transactions',                 'U', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('cash_transactions',                 'D', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('cash_transactions',                 'M', '..', 'R.', 'R.', 'R.', 'R.', '.R', '..', NULL),
 -- A member still reads its own company row. What it can no longer read there is
 -- an approval note: 20260916130020 retired the column, and the platform's record
 -- of a decision is the audit row platform_company_set_approval writes. The
@@ -895,12 +896,12 @@ INSERT INTO _mx_expected VALUES
 ('companies',                          'U', '..', '..', '..', '..', '..', '..', 'YY', '3.3 platform right from any active staff role, not the capability'),
 ('companies',                          'D', '..', '..', '..', '..', '..', '..', 'YY', '3.3 platform right from any active staff role, not the capability'),
 ('companies',                          'M', '--', '--', '--', '--', '--', '--', '--', NULL),
-('company_planning_run_blocks',        'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('company_planning_run_blocks',       'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'YY', '3.4 super reaches tenant data with no support session'),
 ('company_planning_run_blocks',        'I', 'RR', 'YR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
 ('company_planning_run_blocks',        'U', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
 ('company_planning_run_blocks',        'D', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
 ('company_planning_run_blocks',        'M', '..', 'R.', 'R.', 'R.', 'R.', '.R', '..', NULL),
-('company_planning_runs',              'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('company_planning_runs',             'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'YY', '3.4 super reaches tenant data with no support session'),
 ('company_planning_runs',              'I', 'RR', 'YR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
 ('company_planning_runs',              'U', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
 ('company_planning_runs',              'D', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
@@ -930,9 +931,9 @@ INSERT INTO _mx_expected VALUES
 ('discount_codes',                     'M', '..', '..', '..', '..', '..', '..', 'YY', NULL),
 ('document_blocks',                    'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'YY', '3.4 super reaches tenant data with no support session'),
 ('document_blocks',                    'I', 'RR', 'YR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
-('document_blocks',                    'U', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'RR', NULL),
-('document_blocks',                    'D', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'YY', '3.4 super reaches tenant data with no support session'),
-('document_blocks',                    'M', '..', 'R.', 'R.', 'R.', 'R.', '.R', 'RR', NULL),
+('document_blocks',                   'U', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('document_blocks',                   'D', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('document_blocks',                   'M', '..', 'R.', 'R.', 'R.', 'R.', '.R', '..', NULL),
 ('document_categories',                'S', '..', 'YY', 'YY', 'YY', 'YY', 'YY', 'YY', NULL),
 ('document_categories',                'I', 'RR', 'RR', 'RR', 'RR', 'RR', 'RR', 'YY', '3.3 platform right from any active staff role, not the capability'),
 ('document_categories',                'U', '..', '..', '..', '..', '..', '..', 'YY', '3.3 platform right from any active staff role, not the capability'),
@@ -945,124 +946,124 @@ INSERT INTO _mx_expected VALUES
 ('document_counters',                  'M', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', NULL),
 ('document_templates',                 'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'YY', '3.4 super reaches tenant data with no support session'),
 ('document_templates',                 'I', 'RR', 'YR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
-('document_templates',                 'U', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'RR', NULL),
-('document_templates',                 'D', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'YY', '3.4 super reaches tenant data with no support session'),
-('document_templates',                 'M', '..', 'R.', 'R.', 'R.', 'R.', '.R', 'RR', NULL),
+('document_templates',                'U', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('document_templates',                'D', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('document_templates',                'M', '..', 'R.', 'R.', 'R.', 'R.', '.R', '..', NULL),
 ('document_variables',                 'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'YY', '3.4 super reaches tenant data with no support session'),
 ('document_variables',                 'I', 'RR', 'YR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
-('document_variables',                 'U', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'RR', NULL),
-('document_variables',                 'D', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'YY', '3.4 super reaches tenant data with no support session'),
-('document_variables',                 'M', '..', 'R.', 'R.', 'R.', 'R.', '.R', 'RR', NULL),
+('document_variables',                'U', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('document_variables',                'D', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('document_variables',                'M', '..', 'R.', 'R.', 'R.', 'R.', '.R', '..', NULL),
 ('documents',                          'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'YY', '3.4 super reaches tenant data with no support session'),
 ('documents',                          'I', 'RR', 'RR', 'RR', 'YR', 'YR', 'RY', 'RR', NULL),
-('documents',                          'U', '..', '..', '..', 'Y.', 'Y.', '.Y', 'YY', '3.4 super reaches tenant data with no support session'),
-('documents',                          'D', '..', '..', '..', 'Y.', 'Y.', '.Y', 'YY', '3.4 super reaches tenant data with no support session'),
-('documents',                          'M', '..', '..', '..', 'R.', 'R.', '.R', 'YY', '3.4 super moves tenant rows into another company with no support session'),
+('documents',                         'U', '..', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('documents',                         'D', '..', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('documents',                         'M', '..', '..', '..', 'R.', 'R.', '.R', '..', NULL),
 ('driver_notes',                       'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'YY', '3.4 super reaches tenant data with no support session'),
 ('driver_notes',                       'I', 'RR', 'RR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
-('driver_notes',                       'U', '..', '..', 'Y.', 'Y.', 'Y.', '.Y', 'YY', '3.4 super reaches tenant data with no support session'),
-('driver_notes',                       'D', '..', '..', 'Y.', 'Y.', 'Y.', '.Y', 'YY', '3.4 super reaches tenant data with no support session'),
-('driver_notes',                       'M', '..', '..', 'R.', 'R.', 'R.', '.R', 'YY', '3.4 super moves tenant rows into another company with no support session'),
+('driver_notes',                      'U', '..', '..', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('driver_notes',                      'D', '..', '..', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('driver_notes',                      'M', '..', '..', 'R.', 'R.', 'R.', '.R', '..', NULL),
 ('drivers',                            'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'YY', '3.4 super reaches tenant data with no support session'),
 ('drivers',                            'I', 'RR', 'RR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
-('drivers',                            'U', '..', '..', 'Y.', 'Y.', 'Y.', '.Y', 'YY', '3.4 super reaches tenant data with no support session'),
-('drivers',                            'D', '..', '..', 'Y.', 'Y.', 'Y.', '.Y', 'YY', '3.4 super reaches tenant data with no support session'),
-('drivers',                            'M', '..', '..', 'R.', 'R.', 'R.', '.R', 'YY', '3.4 super moves tenant rows into another company with no support session'),
-('fahrtenbuch_assignment_audit',       'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('drivers',                           'U', '..', '..', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('drivers',                           'D', '..', '..', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('drivers',                           'M', '..', '..', 'R.', 'R.', 'R.', '.R', '..', NULL),
+('fahrtenbuch_assignment_audit',      'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'YY', '3.4 super reaches tenant data with no support session'),
 ('fahrtenbuch_assignment_audit',       'I', 'RR', 'YR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
 ('fahrtenbuch_assignment_audit',       'U', '..', '..', '..', '..', '..', '..', '..', NULL),
 ('fahrtenbuch_assignment_audit',       'D', '..', '..', '..', '..', '..', '..', '..', NULL),
 ('fahrtenbuch_assignment_audit',       'M', '..', '..', '..', '..', '..', '..', '..', NULL),
-('fahrtenbuch_imports',                'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('fahrtenbuch_imports',               'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'YY', '3.4 super reaches tenant data with no support session'),
 ('fahrtenbuch_imports',                'I', 'RR', 'YR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
 ('fahrtenbuch_imports',                'U', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
 ('fahrtenbuch_imports',                'D', '..', '..', '..', '..', 'Y.', '.Y', '..', NULL),
 ('fahrtenbuch_imports',                'M', '..', 'R.', 'R.', 'R.', 'R.', '.R', '..', NULL),
-('fahrtenbuch_trips',                  'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('fahrtenbuch_trips',                 'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'YY', '3.4 super reaches tenant data with no support session'),
 ('fahrtenbuch_trips',                  'I', 'RR', 'YR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
 ('fahrtenbuch_trips',                  'U', '..', '..', '..', '..', '..', '..', '..', NULL),
 ('fahrtenbuch_trips',                  'D', '..', '..', '..', '..', 'Y.', '.Y', '..', NULL),
 ('fahrtenbuch_trips',                  'M', '..', '..', '..', '..', '..', '..', '..', NULL),
 ('fixed_costs',                        'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'YY', '3.4 super reaches tenant data with no support session'),
 ('fixed_costs',                        'I', 'RR', 'RR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
-('fixed_costs',                        'U', '..', '..', 'Y.', 'Y.', 'Y.', '.Y', 'YY', '3.4 super reaches tenant data with no support session'),
-('fixed_costs',                        'D', '..', '..', 'Y.', 'Y.', 'Y.', '.Y', 'YY', '3.4 super reaches tenant data with no support session'),
-('fixed_costs',                        'M', '..', '..', 'R.', 'R.', 'R.', '.R', 'YY', '3.4 super moves tenant rows into another company with no support session'),
-('historical_block_adjustments',       'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('fixed_costs',                       'U', '..', '..', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('fixed_costs',                       'D', '..', '..', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('fixed_costs',                       'M', '..', '..', 'R.', 'R.', 'R.', '.R', '..', NULL),
+('historical_block_adjustments',      'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'YY', '3.4 super reaches tenant data with no support session'),
 ('historical_block_adjustments',       'I', 'RR', 'YR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
 ('historical_block_adjustments',       'U', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
 ('historical_block_adjustments',       'D', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
 ('historical_block_adjustments',       'M', '..', 'R.', 'R.', 'R.', 'R.', '.R', '..', NULL),
-('historical_driver_hour_targets',     'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('historical_driver_hour_targets',    'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'YY', '3.4 super reaches tenant data with no support session'),
 ('historical_driver_hour_targets',     'I', 'RR', 'YR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
 ('historical_driver_hour_targets',     'U', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
 ('historical_driver_hour_targets',     'D', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
 ('historical_driver_hour_targets',     'M', '..', 'R.', 'R.', 'R.', 'R.', '.R', '..', NULL),
-('historical_payroll_targets',         'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('historical_payroll_targets',        'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'YY', '3.4 super reaches tenant data with no support session'),
 ('historical_payroll_targets',         'I', 'RR', 'YR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
 ('historical_payroll_targets',         'U', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
 ('historical_payroll_targets',         'D', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
 ('historical_payroll_targets',         'M', '..', 'R.', 'R.', 'R.', 'R.', '.R', '..', NULL),
-('historical_reconciliation_drivers',  'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('historical_reconciliation_drivers', 'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'YY', '3.4 super reaches tenant data with no support session'),
 ('historical_reconciliation_drivers',  'I', 'RR', 'YR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
 ('historical_reconciliation_drivers',  'U', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
 ('historical_reconciliation_drivers',  'D', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
 ('historical_reconciliation_drivers',  'M', '..', 'R.', 'R.', 'R.', 'R.', '.R', '..', NULL),
-('historical_reconciliation_results',  'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('historical_reconciliation_results', 'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'YY', '3.4 super reaches tenant data with no support session'),
 ('historical_reconciliation_results',  'I', 'RR', 'YR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
 ('historical_reconciliation_results',  'U', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
 ('historical_reconciliation_results',  'D', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
 ('historical_reconciliation_results',  'M', '..', 'R.', 'R.', 'R.', 'R.', '.R', '..', NULL),
-('historical_reconciliation_wh_drivers','S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('historical_reconciliation_wh_drivers','S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'YY', '3.4 super reaches tenant data with no support session'),
 ('historical_reconciliation_wh_drivers','I', 'RR', 'YR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
 ('historical_reconciliation_wh_drivers','U', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
 ('historical_reconciliation_wh_drivers','D', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
 ('historical_reconciliation_wh_drivers','M', '..', 'R.', 'R.', 'R.', 'R.', '.R', '..', NULL),
-('historical_reconciliations',         'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('historical_reconciliations',        'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'YY', '3.4 super reaches tenant data with no support session'),
 ('historical_reconciliations',         'I', 'RR', 'YR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
 ('historical_reconciliations',         'U', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
 ('historical_reconciliations',         'D', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
 ('historical_reconciliations',         'M', '..', 'R.', 'R.', 'R.', 'R.', '.R', '..', NULL),
-('historical_time_adjustments',        'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('historical_time_adjustments',       'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'YY', '3.4 super reaches tenant data with no support session'),
 ('historical_time_adjustments',        'I', 'RR', 'YR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
 ('historical_time_adjustments',        'U', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
 ('historical_time_adjustments',        'D', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
 ('historical_time_adjustments',        'M', '..', 'R.', 'R.', 'R.', 'R.', '.R', '..', NULL),
-('historical_wh_saved_plans',          'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('historical_wh_saved_plans',         'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'YY', '3.4 super reaches tenant data with no support session'),
 ('historical_wh_saved_plans',          'I', 'RR', 'YR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
 ('historical_wh_saved_plans',          'U', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
 ('historical_wh_saved_plans',          'D', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
 ('historical_wh_saved_plans',          'M', '..', 'R.', 'R.', 'R.', 'R.', '.R', '..', NULL),
 ('income',                             'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'YY', '3.4 super reaches tenant data with no support session'),
 ('income',                             'I', 'RR', 'RR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
-('income',                             'U', '..', '..', 'Y.', 'Y.', 'Y.', '.Y', 'YY', '3.4 super reaches tenant data with no support session'),
-('income',                             'D', '..', '..', 'Y.', 'Y.', 'Y.', '.Y', 'YY', '3.4 super reaches tenant data with no support session'),
-('income',                             'M', '..', '..', 'R.', 'R.', 'R.', '.R', 'YY', '3.4 super moves tenant rows into another company with no support session'),
-('monthly_planning_manual_exceptions', 'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('income',                            'U', '..', '..', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('income',                            'D', '..', '..', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('income',                            'M', '..', '..', 'R.', 'R.', 'R.', '.R', '..', NULL),
+('monthly_planning_manual_exceptions','S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'YY', '3.4 super reaches tenant data with no support session'),
 ('monthly_planning_manual_exceptions', 'I', 'RR', 'YR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
 ('monthly_planning_manual_exceptions', 'U', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
 ('monthly_planning_manual_exceptions', 'D', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
 ('monthly_planning_manual_exceptions', 'M', '..', 'R.', 'R.', 'R.', 'R.', '.R', '..', NULL),
-('notification_settings',              'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('notification_settings',             'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'YY', '3.4 super reaches tenant data with no support session'),
 ('notification_settings',              'I', 'RR', 'RR', 'RR', 'RR', 'YR', 'RY', 'RR', NULL),
 ('notification_settings',              'U', '..', '..', '..', '..', 'Y.', '.Y', '..', NULL),
 ('notification_settings',              'D', '..', '..', '..', '..', '..', '..', '..', NULL),
 ('notification_settings',              'M', '..', '..', '..', '..', 'R.', '.R', '..', NULL),
 ('planning_finalizations',             'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'YY', '3.4 super reaches tenant data with no support session'),
 ('planning_finalizations',             'I', 'RR', 'YR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
-('planning_finalizations',             'U', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'RR', NULL),
-('planning_finalizations',             'D', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'YY', '3.4 super reaches tenant data with no support session'),
-('planning_finalizations',             'M', '..', 'R.', 'R.', 'R.', 'R.', '.R', 'RR', NULL),
+('planning_finalizations',            'U', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('planning_finalizations',            'D', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('planning_finalizations',            'M', '..', 'R.', 'R.', 'R.', 'R.', '.R', '..', NULL),
 ('planning_run_adjustments',           'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'YY', '3.4 super reaches tenant data with no support session'),
-('planning_run_adjustments',           'I', 'RR', 'YR', 'YR', 'YR', 'YR', 'RY', 'YY', '3.4 super reaches tenant data with no support session'),
-('planning_run_adjustments',           'U', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'YY', '3.4 super reaches tenant data with no support session'),
-('planning_run_adjustments',           'D', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'YY', '3.4 super reaches tenant data with no support session'),
-('planning_run_adjustments',           'M', '..', 'R.', 'R.', 'R.', 'R.', '.R', 'YY', '3.4 super moves tenant rows into another company with no support session'),
+('planning_run_adjustments',          'I', 'RR', 'YR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
+('planning_run_adjustments',          'U', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('planning_run_adjustments',          'D', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('planning_run_adjustments',          'M', '..', 'R.', 'R.', 'R.', 'R.', '.R', '..', NULL),
 ('receipts',                           'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'YY', '3.4 super reaches tenant data with no support session'),
 ('receipts',                           'I', 'RR', 'RR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
-('receipts',                           'U', '..', '..', 'Y.', 'Y.', 'Y.', '.Y', 'YY', '3.4 super reaches tenant data with no support session'),
-('receipts',                           'D', '..', '..', 'Y.', 'Y.', 'Y.', '.Y', 'YY', '3.4 super reaches tenant data with no support session'),
-('receipts',                           'M', '..', '..', 'R.', 'R.', 'R.', '.R', 'YY', '3.4 super moves tenant rows into another company with no support session'),
+('receipts',                          'U', '..', '..', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('receipts',                          'D', '..', '..', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('receipts',                          'M', '..', '..', 'R.', 'R.', 'R.', '.R', '..', NULL),
 ('referrals',                          'S', '..', '..', '..', '..', '..', '..', 'YY', NULL),
 ('referrals',                          'I', 'RR', 'RR', 'RR', 'RR', 'RR', 'RR', 'YY', NULL),
 ('referrals',                          'U', '..', '..', '..', '..', '..', '..', 'YY', NULL),
@@ -1080,24 +1081,24 @@ INSERT INTO _mx_expected VALUES
 ('roles',                              'M', '..', '..', '..', '..', 'R.', '.R', 'RR', NULL),
 ('salaries',                           'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'YY', '3.4 super reaches tenant data with no support session'),
 ('salaries',                           'I', 'RR', 'RR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
-('salaries',                           'U', '..', '..', 'Y.', 'Y.', 'Y.', '.Y', 'YY', '3.4 super reaches tenant data with no support session'),
-('salaries',                           'D', '..', '..', 'Y.', 'Y.', 'Y.', '.Y', 'YY', '3.4 super reaches tenant data with no support session'),
-('salaries',                           'M', '..', '..', 'R.', 'R.', 'R.', '.R', 'YY', '3.4 super moves tenant rows into another company with no support session'),
-('salary_cash_receipts',               'S', 'PP', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('salaries',                          'U', '..', '..', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('salaries',                          'D', '..', '..', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('salaries',                          'M', '..', '..', 'R.', 'R.', 'R.', '.R', '..', NULL),
+('salary_cash_receipts',              'S', 'PP', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'YY', '3.4 super reaches tenant data with no support session'),
 ('salary_cash_receipts',               'I', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', NULL),
 ('salary_cash_receipts',               'U', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', NULL),
 ('salary_cash_receipts',               'D', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', NULL),
 ('salary_cash_receipts',               'M', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', NULL),
 ('salary_payments',                    'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'YY', '3.4 super reaches tenant data with no support session'),
 ('salary_payments',                    'I', 'RR', 'RR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
-('salary_payments',                    'U', '..', '..', 'Y.', 'Y.', 'Y.', '.Y', 'YY', '3.4 super reaches tenant data with no support session'),
-('salary_payments',                    'D', '..', '..', 'Y.', 'Y.', 'Y.', '.Y', 'YY', '3.4 super reaches tenant data with no support session'),
-('salary_payments',                    'M', '..', '..', 'R.', 'R.', 'R.', '.R', 'YY', '3.4 super moves tenant rows into another company with no support session'),
+('salary_payments',                   'U', '..', '..', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('salary_payments',                   'D', '..', '..', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('salary_payments',                   'M', '..', '..', 'R.', 'R.', 'R.', '.R', '..', NULL),
 ('saved_stundennachweise',             'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'YY', '3.4 super reaches tenant data with no support session'),
-('saved_stundennachweise',             'I', 'RR', 'YR', 'YR', 'YR', 'YR', 'RY', 'YY', '3.4 super reaches tenant data with no support session'),
-('saved_stundennachweise',             'U', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'YY', '3.4 super reaches tenant data with no support session'),
-('saved_stundennachweise',             'D', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'YY', '3.4 super reaches tenant data with no support session'),
-('saved_stundennachweise',             'M', '..', 'R.', 'R.', 'R.', 'R.', '.R', 'YY', '3.4 super moves tenant rows into another company with no support session'),
+('saved_stundennachweise',            'I', 'RR', 'YR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
+('saved_stundennachweise',            'U', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('saved_stundennachweise',            'D', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('saved_stundennachweise',            'M', '..', 'R.', 'R.', 'R.', 'R.', '.R', '..', NULL),
 ('subscription_admin_actions',         'S', '..', '..', '..', '..', '..', '..', 'YY', NULL),
 ('subscription_admin_actions',         'I', 'RR', 'RR', 'RR', 'RR', 'RR', 'RR', 'YY', NULL),
 ('subscription_admin_actions',         'U', '..', '..', '..', '..', '..', '..', 'YY', NULL),
@@ -1133,9 +1134,9 @@ INSERT INTO _mx_expected VALUES
 ('user_sessions',                      'M', '..', '..', '..', '..', 'R.', '.R', '..', NULL),
 ('werkstatt_checks',                   'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'YY', '3.4 super reaches tenant data with no support session'),
 ('werkstatt_checks',                   'I', 'RR', 'RR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
-('werkstatt_checks',                   'U', '..', '..', 'Y.', 'Y.', 'Y.', '.Y', 'YY', '3.4 super reaches tenant data with no support session'),
-('werkstatt_checks',                   'D', '..', '..', 'Y.', 'Y.', 'Y.', '.Y', 'YY', '3.4 super reaches tenant data with no support session'),
-('werkstatt_checks',                   'M', '..', '..', 'R.', 'R.', 'R.', '.R', 'YY', '3.4 super moves tenant rows into another company with no support session');
+('werkstatt_checks',                  'U', '..', '..', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('werkstatt_checks',                  'D', '..', '..', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('werkstatt_checks',                  'M', '..', '..', 'R.', 'R.', 'R.', '.R', '..', NULL);
 
 -- ─── the expected view lines ────────────────────────────────────────────────
 -- PostgREST serves a view like a table, so each public view gets a SELECT line
@@ -1417,9 +1418,12 @@ BEGIN
     _mx_try('admin-a', NULL, format('UPDATE user_profiles SET status = %L WHERE user_id = %L', 'deactivated', member_a)), 'Y');
   PERFORM _mx_expect('guard', 'suspended editor cannot reactivate itself',
     _mx_try('suspended-a', NULL, format('UPDATE user_profiles SET status = %L WHERE user_id = %L', 'active', _mx_id('user', 'suspended-a'))), 'T');
-  PERFORM _mx_expect('guard', 'deactivated company admin reactivates itself',
+  -- 20260917100000: the guard's company-admin exceptions now require the
+  -- caller's own account to be usable, so a deactivated administrator changes
+  -- nobody's status, its own included. This line was Y, tagged HOLE[3.3].
+  PERFORM _mx_expect('guard', 'deactivated company admin cannot reactivate itself',
     _mx_try('deactivated-a', NULL, format('UPDATE user_profiles SET status = %L WHERE user_id = %L', 'active', _mx_id('user', 'deactivated-a'))),
-    'Y', '3.3 a deactivated admin still passes the guard''s admin branch');
+    'T');
 END $$;
 
 -- ── 3.1: where platform rights come from ───────────────────────────────────
@@ -1465,12 +1469,18 @@ BEGIN
     '0: ');
 END $$;
 
--- ── 3.3: company and user state are not enforced by the database ────────────
+-- ── 3.3: company and user state, decided by the database ───────────────────
 -- Each principal reads, inserts, updates and deletes a driver of its own
--- company, and reassigns one of its own trips through the planning RPC. Every
--- line is allowed today. The trial company is untagged on purpose: it is the
--- control that must still read YYYY and Y after phase 3.3, while every tagged
--- line is meant to move.
+-- company, and reassigns one of its own trips through the planning RPC. Since
+-- 20260917100000 a company that may not be used, and an account that may not
+-- use it, get nothing: the tenant helper answers NULL, so SELECT, UPDATE and
+-- DELETE match no row (.) and INSERT fails its WITH CHECK (R), and the planning
+-- RPCs, which read the same helper, refuse with their own "caller has no
+-- company" (T).
+--
+-- Two lines are controls that must stay allowed, because App.tsx admits both:
+-- the trial company with an active subscription, and the invited employee —
+-- an invitation that could not be completed would lock out every new employee.
 DO $$
 DECLARE
   r   record;
@@ -1479,31 +1489,30 @@ BEGIN
   FOR r IN
     SELECT 'admin-' || s.slug AS who, _mx_id('company', s.slug) AS co,
            _mx_id('state-driver', s.slug) AS drv, _mx_id('state-trip', s.slug) AS trip, s.label,
-           CASE WHEN s.slug <> 'trial' THEN '3.3 company approval, status and subscription not enforced server-side' END AS hole,
-           CASE WHEN s.slug <> 'trial' THEN '3.3 the planning RPCs read user_profiles.company_id, not the active-company helper' END AS rpc_hole,
+           s.slug = 'trial' AS allowed,
            0 AS grp
       FROM _mx_state_company s
     UNION ALL
     SELECT v.who, 'c0000000-0000-4000-8000-00000000000a'::uuid, _mx_id('drivers', 'a'), _mx_id('fahrtenbuch_trips', 'a'), v.label,
-           '3.3 a user''s own status not enforced server-side',
-           '3.3 the planning RPCs read user_profiles.company_id, not the active-company helper',
+           v.allowed,
            1
       FROM (VALUES
-        ('deactivated-a',   'deactivated user (admin) of an active company'),
-        ('suspended-a',     'suspended user (editor) of an active company'),
-        ('inactive-a',      'inactive user (editor) of an active company'),
-        ('pendinginvite-a', 'user (editor) with a pending invitation, of an active company')
-      ) AS v(who, label)
+        ('deactivated-a',   'deactivated user (admin) of an active company',                  false),
+        ('suspended-a',     'suspended user (editor) of an active company',                   false),
+        ('inactive-a',      'inactive user (editor) of an active company',                    false),
+        ('pendinginvite-a', 'user (editor) with a pending invitation, of an active company',  true)
+      ) AS v(who, label, allowed)
     ORDER BY grp, label
   LOOP
     got := left(_mx_try(r.who, NULL, format('SELECT count(*) FROM drivers WHERE id = %L', r.drv)), 1)
         || left(_mx_try(r.who, NULL, format('INSERT INTO drivers (company_id, name) VALUES (%L, %L)', r.co, 'MX state probe')), 1)
         || left(_mx_try(r.who, NULL, format('UPDATE drivers SET name = name WHERE id = %L', r.drv)), 1)
         || left(_mx_try(r.who, NULL, format('DELETE FROM drivers WHERE id = %L', r.drv)), 1);
-    PERFORM _mx_expect('state', r.label || ': drivers S I U D', got, 'YYYY', r.hole);
+    PERFORM _mx_expect('state', r.label || ': drivers S I U D', got,
+      CASE WHEN r.allowed THEN 'YYYY' ELSE '.R..' END);
     PERFORM _mx_expect('state', r.label || ': reassign_fahrtenbuch_trip on its own trip',
       _mx_call(r.who, format('SELECT reassign_fahrtenbuch_trip(%L, %L, %L)::text', r.trip, r.drv, 'MX state probe')),
-      'Y', r.rpc_hole);
+      CASE WHEN r.allowed THEN 'Y' ELSE 'T' END);
   END LOOP;
 END $$;
 
@@ -1963,6 +1972,23 @@ INSERT INTO _mx_rpc (label, stmt, want, hole) VALUES
     ('get_user_company_id() is company A',
      $q$SELECT (get_user_company_id() = 'c0000000-0000-4000-8000-00000000000a')::text$q$,
      '-YYYYN0', NULL),
+    -- 20260917100000: the business tables' predicate. The same answer as the
+    -- membership helper above for a healthy company, NULL for a platform
+    -- account, and no EXECUTE for anon — every policy that calls it is TO
+    -- authenticated. tests/rls/tenant-state.sql takes it through every state
+    ('get_active_company_id() is company A',
+     $q$SELECT (get_active_company_id() = 'c0000000-0000-4000-8000-00000000000a')::text$q$,
+     'PYYYYN0', NULL),
+    -- the two seams 3.4 fills. The write seam answers false to everyone, which
+    -- is what keeps a staff role out of every tenant write until the support
+    -- session exists; the read seam follows business.read, so billing reads no
+    -- company's data
+    ('platform_reads_company_data()',
+     $q$SELECT platform_reads_company_data()::text$q$,
+     'PNNNNNY', NULL),
+    ('platform_writes_company_data()',
+     $q$SELECT platform_writes_company_data()::text$q$,
+     'PNNNNNN', NULL),
     ('is_company_admin()',
      $q$SELECT is_company_admin()::text$q$,
      'NNNNYYN', NULL),

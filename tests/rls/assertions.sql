@@ -244,8 +244,12 @@ BEGIN
 
   PERFORM _check('super admin CAN UPDATE a companies row',
     _allowed(super_u, format('UPDATE companies SET plan = %L WHERE id = %L', 'premium', co_a)), true);
-  PERFORM _check('super admin CAN UPDATE an operational row in any company',
-    _allowed(super_u, format('UPDATE drivers SET name = %L WHERE id = %L', 'support-fix', drv_b)), true);
+  -- Allowed until 20260917100000 (plan 3.3), and the rule it broke is the one
+  -- this file exists to state: a staff role does not write a tenant's
+  -- operational data because it is staff. It reads through the audited read
+  -- models of 3.6b and, from 3.4, writes inside a logged support session.
+  PERFORM _check('super admin cannot UPDATE an operational row in another company',
+    _allowed(super_u, format('UPDATE drivers SET name = %L WHERE id = %L', 'support-fix', drv_b)), false);
 
   -- ── functions anon may not execute ────────────────────────────────────────
   -- Supabase's default privileges grant anon EXECUTE on every function created
