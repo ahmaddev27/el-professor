@@ -32,6 +32,12 @@ export default defineConfig({
   fullyParallel: false,
   retries: 0,
   timeout: 90_000,
+  // The first request after a staging release is slow: an edge function boots
+  // a fresh isolate, and the first page load warms the bundle and PostgREST.
+  // Two specs missed the 5 s default that way (forgot-password, then sign-in),
+  // and passed when rerun. 15 s absorbs that without hiding a real hang, which
+  // the 90 s test timeout still catches.
+  expect: { timeout: 15_000 },
   reporter: [['list']],
   globalSetup: './lib/global-setup.ts',
   use: {
