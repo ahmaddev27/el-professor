@@ -158,6 +158,24 @@ function PlanBadge({ plan }: { plan: Plan }) {
 
 // ─── KPI Card ─────────────────────────────────────────────────────────────────
 
+/*
+  The three per-company counts this screen shows — users, drivers and active
+  cars — and the platform-wide receipt total are read straight from the tenant
+  tables with the caller's own JWT. Since 20260917140000 (plan 3.4) a platform
+  account reaches none of those without an open company context, so every one of
+  them now comes back 0: not "this company has none", but "this account may not
+  count them here". A dash says that; a 0 asserts something false about every
+  customer we have.
+
+  The figures come back in 3.6c, from platform_companies_list — it already
+  returns user_count, active_driver_count and active_vehicle_count per company
+  and records the read. That switch is a screen change rather than part of this
+  database slice: the read model is capped at one page, so it needs paging for
+  the per-company rows, and the receipt total has no read model at all. Flip
+  this constant there, and the flags and ratios below come back with it.
+*/
+const COUNTS_UNAVAILABLE = true;
+
 interface KpiCardProps {
   label: string;
   value: number | string;
@@ -529,10 +547,16 @@ export default function SuperAdminDashboard() {
         const remaining = tPlural({ one: 'sa.dash.dayCount.one', other: 'sa.dash.dayCount.other' }, daysLeft);
         attentionItems.push({ id: `${c.id}-warning`, companyName: c.name, reason: t('sa.dash.attention.trialEndsIn', { remaining }), severity: 'warning', company: c });
       }
-      if (c.user_count === 0) {
+      // Both flags read 0 as "none". Since 20260917140000 (plan 3.4) a platform
+      // account reads no company's user_profiles, drivers or cars directly, so
+      // the counts behind them are 0 for *every* company and mean "unknown".
+      // Raising the flags would tell the owner that every customer has no users
+      // and no drivers, which is false for all of them. They come back with the
+      // counts in 3.6c — see COUNTS_UNAVAILABLE.
+      if (!COUNTS_UNAVAILABLE && c.user_count === 0) {
         attentionItems.push({ id: `${c.id}-nousers`, companyName: c.name, reason: t('sa.dash.attention.noUsers'), severity: 'info', company: c });
       }
-      if (c.driver_count === 0 && c.status !== 'inactive') {
+      if (!COUNTS_UNAVAILABLE && c.driver_count === 0 && c.status !== 'inactive') {
         attentionItems.push({ id: `${c.id}-nodrivers`, companyName: c.name, reason: t('sa.dash.attention.noDrivers'), severity: 'info', company: c });
       }
       if (c.status === 'suspended') {
@@ -845,9 +869,12 @@ export default function SuperAdminDashboard() {
       {kpis && (
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
           <KpiCard label={t('sa.dash.kpi.companies')} value={kpis.totalCompanies} icon={Building2} color="var(--accent)" trend={kpis.newThisMonth} sub={t('sa.dash.kpi.newThisMonth', { count: kpis.newThisMonth })} />
-          <KpiCard label={t('sa.dash.kpi.users')} value={kpis.totalUsers} icon={Users} color="#8b5cf6" />
-          <KpiCard label={t('sa.dash.kpi.drivers')} value={kpis.totalDrivers} icon={Car} color="#06b6d4" />
-          <KpiCard label={t('sa.dash.kpi.receipts')} value={kpis.totalReceipts} icon={FileText} color="#64748b" />
+          {/* Three figures a platform account can no longer count for itself
+              (see COUNTS_UNAVAILABLE). A dash says "not available here"; the
+              number they would otherwise show is 0 for every company. */}
+          <KpiCard label={t('sa.dash.kpi.users')} value={COUNTS_UNAVAILABLE ? '–' : kpis.totalUsers} icon={Users} color="#8b5cf6" />
+          <KpiCard label={t('sa.dash.kpi.drivers')} value={COUNTS_UNAVAILABLE ? '–' : kpis.totalDrivers} icon={Car} color="#06b6d4" />
+          <KpiCard label={t('sa.dash.kpi.receipts')} value={COUNTS_UNAVAILABLE ? '–' : kpis.totalReceipts} icon={FileText} color="#64748b" />
           <KpiCard label={t('sa.dash.kpi.inTrial')} value={kpis.trialCompanies} icon={Clock} color="var(--warning)" sub={kpis.expiringIn7Days > 0 ? t('sa.dash.kpi.endingSoon', { count: kpis.expiringIn7Days }) : undefined} />
         </div>
       )}
@@ -1148,16 +1175,16 @@ export default function SuperAdminDashboard() {
                         style={{ background: 'var(--bg-subtle)', color: 'var(--text-primary)' }}
                         title={t('sa.dash.carLimit')}
                       />
-                      <span className="text-[10px] whitespace-nowrap" style={{ color: c.active_car_count >= c.subscription_car_limit ? 'var(--danger)' : 'var(--text-tertiary)' }}>
-                        {c.active_car_count}/{c.subscription_car_limit}
+                      <span className="text-[10px] whitespace-nowrap" style={{ color: !COUNTS_UNAVAILABLE && c.active_car_count >= c.subscription_car_limit ? 'var(--danger)' : 'var(--text-tertiary)' }}>
+                        {COUNTS_UNAVAILABLE ? '–' : c.active_car_count}/{c.subscription_car_limit}
                       </span>
                     </div>
                   </td>
 
                   {/* Fahrer aktiv / limit */}
                   <td className="px-4 py-3">
-                    <span className="text-xs" style={{ color: c.driver_count >= (c.subscription_car_limit * c.drivers_per_car_limit) ? 'var(--danger)' : 'var(--text-secondary)' }}>
-                      {c.driver_count}/{c.subscription_car_limit * c.drivers_per_car_limit}
+                    <span className="text-xs" style={{ color: !COUNTS_UNAVAILABLE && c.driver_count >= (c.subscription_car_limit * c.drivers_per_car_limit) ? 'var(--danger)' : 'var(--text-secondary)' }}>
+                      {COUNTS_UNAVAILABLE ? '–' : c.driver_count}/{c.subscription_car_limit * c.drivers_per_car_limit}
                     </span>
                   </td>
 
