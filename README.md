@@ -92,7 +92,7 @@ Agents build in parallel git worktrees. Each branch ends in a reviewed PR into `
 | Support sessions and the company workspace (3.4) | — | next; 3.6c's workspace tab waits for it |
 | The staff roster read model, `platform_staff_list` (3.12) | — | next; the Team page reconstructs its roster from the audit log until it lands, and audit retention (D4) must not be implemented before it |
 
-No pull request was open into `staging` at the time this status was written.
+The post-3.3 cleanup is in flight on `chore/post-3-3-cleanup`: widening the Bargeldbestand ledger guard's scope to the `business.read` capability, since 3.3 grants the ledger read by capability and `billing` does not hold it, and adding the four missing `oauth_*` lines to the RLS matrix.
 
 ### Environments
 
