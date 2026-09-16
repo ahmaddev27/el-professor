@@ -16,6 +16,7 @@ import { de } from 'date-fns/locale';
 import { supabase } from '../lib/supabase';
 import { fetchAllPaginated } from '../utils/fetchAllPaginated';
 import type { CashMovementRow } from '../utils/cashLedger';
+import { receiptScope } from '../utils/salaryCashReceiptFlow';
 import {
   AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend
@@ -259,8 +260,14 @@ const PlanStatusCard: React.FC<{ planState: PlanState; effectivePlan: Plan }> = 
 // ── Main component ────────────────────────────────────────────────────────────
 const OverviewPage: React.FC = () => {
   const { t } = useTranslation();
-  const { isSuperAdmin } = useAuth();
-  const { effectiveCompanyId: companyId } = useSuperAdmin();
+  const { isSuperAdmin, companyId: ownCompanyId } = useAuth();
+  const { effectiveCompanyId: companyId, isViewingAsCompany } = useSuperAdmin();
+  // cash_movements answers for the caller's own company only — no super-admin
+  // branch, unlike income and receipts. Out of scope the ledger is unreadable,
+  // so the payout line below stays hidden rather than reporting a zero it never
+  // read. Remove with slice 3.3, which unifies the policy.
+  const ledgerInScope =
+    receiptScope({ companyId: ownCompanyId, effectiveCompanyId: companyId, isViewingAsCompany }) === 'own_company';
   const { planState, effectivePlan } = usePlan();
   const { receipts: receiptActions, drivers: driverActions, isLoading: dbLoading } = useDatabase();
   const [receipts, setReceipts] = useState<Receipt[]>([]);
@@ -373,6 +380,10 @@ const OverviewPage: React.FC = () => {
   // passes 1000 movements in under three years, and PostgREST truncates
   // without saying so.
   const loadCashMovements = async () => {
+    if (!ledgerInScope) {
+      setCashMovements([]);
+      return;
+    }
     setCashMovements(await fetchAllPaginated<CashMovementRow>(
       (from, to) => supabase
         .from('cash_movements')
@@ -867,7 +878,7 @@ const OverviewPage: React.FC = () => {
                   <Wallet size={22} style={{ color: cashSummary.cashRisk === 'ok' ? '#3b82f6' : '#f59e0b' }} />
                 </div>
               </div>
-              {cashSummary.salaryPayouts !== 0 && (
+              {ledgerInScope && cashSummary.salaryPayouts !== 0 && (
                 <p className="text-xs mt-2" style={{ color: 'var(--text-secondary)' }}>
                   {t('overview.cash.salaryPayouts')}: −{fmt(cashSummary.salaryPayouts)} €
                 </p>
