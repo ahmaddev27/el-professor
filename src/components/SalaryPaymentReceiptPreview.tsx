@@ -17,16 +17,15 @@ import {
 import { GehaltsquittungPreview, exportGehaltsquittungPdf } from './GehaltsquittungDocument';
 import { ReceiptAlert, useDocumentProblemMessage, useRefusalMessage } from './GehaltsquittungParts';
 import { loadReceiptById, type SalaryCashReceiptWithDriver } from '../lib/salaryCashReceipts';
+import { receiptCompany } from '../utils/salaryCashReceiptDocument';
 import {
-  buildReceiptDocumentText,
-  receiptCompany,
-  receiptDocumentProblem,
-  storedReceiptDocumentInput,
-  type ReceiptDocumentProblem,
-  type ReceiptDocumentText,
-} from '../utils/salaryCashReceiptDocument';
-import { receiptScope, scopeRefusal } from '../utils/salaryCashReceiptFlow';
-import { receiptPreviewView, type ReceiptLoadState } from '../utils/salaryPaymentReceiptRow';
+  currentLoadState,
+  loadReceiptForPreview,
+  receiptPreviewView,
+  receiptSheet,
+  type ReceiptLoadState,
+  type ReceiptSheet,
+} from '../utils/salaryPaymentReceiptRow';
 
 /**
  * The Gehaltsquittung behind one cash payment, shown over the salary screen.
@@ -50,11 +49,6 @@ export interface SalaryPaymentReceiptPreviewProps {
   onOpenDocuments: (receiptId: string) => void;
 }
 
-type SheetState =
-  | { kind: 'text'; text: ReceiptDocumentText }
-  | { kind: 'problem'; problem: ReceiptDocumentProblem }
-  | { kind: 'broken' };
-
 export default function SalaryPaymentReceiptPreview({
   receiptId,
   onClose,
@@ -67,7 +61,10 @@ export default function SalaryPaymentReceiptPreview({
   const { effectiveCompanyId, isViewingAsCompany } = useSuperAdmin();
   const { settings } = useCompanySettings();
 
-  const [state, setState] = useState<ReceiptLoadState<SalaryCashReceiptWithDriver>>({ status: 'loading' });
+  const [state, setState] = useState<ReceiptLoadState<SalaryCashReceiptWithDriver>>({
+    status: 'loading',
+    receiptId: null,
+  });
   const [exporting, setExporting] = useState(false);
   const [exportFailed, setExportFailed] = useState(false);
 
@@ -75,25 +72,16 @@ export default function SalaryPaymentReceiptPreview({
 
   useEffect(() => {
     if (!receiptId) return undefined;
-    setState({ status: 'loading' });
+    setState({ status: 'loading', receiptId });
     setExportFailed(false);
 
-    // The table's SELECT policy reads the caller's own company, so a platform
-    // account viewing a customer would get an empty answer that looks like a
-    // deleted receipt. Name the reason instead of loading across companies.
-    const refusal = scopeRefusal(receiptScope({ companyId, effectiveCompanyId, isViewingAsCompany }));
-    if (refusal || !companyId) {
-      setState({ status: 'failed', refusal: refusal ?? 'no_company' });
-      return undefined;
-    }
-
+    // loadReceiptForPreview settles the scope before it issues a query and never
+    // rejects: a platform account viewing a customer is refused by name rather
+    // than shown the empty answer the SELECT policy would give it.
     let active = true;
-    loadReceiptById(companyId, receiptId).then(
-      receipt => {
-        if (active) setState({ status: 'loaded', receipt });
-      },
-      () => {
-        if (active) setState({ status: 'failed', refusal: 'unexpected' });
+    void loadReceiptForPreview({ receiptId, companyId, effectiveCompanyId, isViewingAsCompany }, loadReceiptById).then(
+      next => {
+        if (active) setState(next);
       },
     );
     return () => {
@@ -101,24 +89,23 @@ export default function SalaryPaymentReceiptPreview({
     };
   }, [receiptId, companyId, effectiveCompanyId, isViewingAsCompany]);
 
-  const receipt = state.status === 'loaded' ? state.receipt : null;
+  // React commits and paints the newly opened receiptId a frame before the
+  // effect above runs. Anything this state still holds for the receipt shown
+  // before therefore counts as loading — one frame of the wrong receipt's
+  // number, amount and period is one frame of the wrong statutory document.
+  const current = currentLoadState(state, receiptId);
+  const receipt = current.status === 'loaded' ? current.receipt : null;
+  const view = receiptPreviewView(current);
 
-  const sheet = useMemo((): SheetState | null => {
+  const sheet = useMemo((): ReceiptSheet | null => {
     if (!receipt) return null;
     // The names are today's company settings and driver record, not a copy taken
     // at confirmation, so an empty one refuses the print instead of signing the
-    // receipt to nobody — the same rule the receipt list applies.
+    // receipt to nobody — the same rule the receipt list applies. A stored date
+    // or amount the builder refuses surfaces as a message, never as an exception
+    // thrown through the salary screen, which sits under no error boundary.
     const driver = { name: receipt.driver?.name ?? '', gender: receipt.driver?.gender ?? null };
-    const input = storedReceiptDocumentInput(receipt, driver, company);
-    const problem = receiptDocumentProblem(input);
-    if (problem) return { kind: 'problem', problem };
-    try {
-      return { kind: 'text', text: buildReceiptDocumentText(input) };
-    } catch {
-      // A stored date or amount the builder refuses. It must surface as a
-      // message here, not as an exception thrown through the salary screen.
-      return { kind: 'broken' };
-    }
+    return receiptSheet(receipt, driver, company);
   }, [receipt, company]);
 
   const downloadPdf = async () => {
@@ -134,8 +121,6 @@ export default function SalaryPaymentReceiptPreview({
       setExporting(false);
     }
   };
-
-  const view = receiptPreviewView(state);
 
   return (
     <Dialog
