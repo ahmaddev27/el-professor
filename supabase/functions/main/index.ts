@@ -203,6 +203,14 @@ Deno.serve(async (req: Request) => {
     // start: a syntax error, a bad import, a missing env var at module scope.
     // The detail names paths and imports, which is our business and not the
     // caller's: it goes to the log, and the request id ties the two together.
+    //
+    // Note what this router never answers: a bare 502. It answers 401, 404, or
+    // this JSON 500. So a 502 with no `ok` field on a /functions/v1 route did
+    // not come from here at all — it is Kong saying it could not reach this
+    // process, which on a release that recreates `functions` means it is still
+    // dialling the address that container had before. deploy/deploy.sh probes
+    // for exactly that before it calls a release healthy. (A 502 that *does*
+    // carry `"reason":"session_failed"` is otp-verify's own answer, not this.)
     const requestId = crypto.randomUUID().slice(0, 8)
     const detail = err instanceof Error ? err.message : String(err)
     console.error(JSON.stringify({ level: 'error', fn: 'main', step: 'worker-start', function: name,
