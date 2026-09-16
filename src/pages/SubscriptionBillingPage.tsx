@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
+import { callPlatformRpc } from '../lib/platformRpc';
 import { useAuth } from '../contexts/AuthContext';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { useToast } from '../contexts/ToastContext';
@@ -105,7 +106,9 @@ function fmtEur(v: number) {
 // ─── Component ──────────────────────────────────────────────────────────────
 
 export default function SubscriptionBillingPage() {
-  const { isSuperAdmin, user, profile } = useAuth();
+  // The platform write RPCs take the acting account from the caller's own token,
+  // so nothing here sends a user id any more.
+  const { isSuperAdmin, profile } = useAuth();
   // Hidden for a role without the capability; the database refuses regardless.
   const { platformCan } = useSuperAdmin();
   const canBilling = platformCan('billing.manage');
@@ -206,49 +209,27 @@ export default function SubscriptionBillingPage() {
 
   // ── Mark unpaid ──
   const handleMarkUnpaid = async (inv: Invoice) => {
-    const { error } = await supabase
-      .from('subscription_invoices')
-      .update({ status: 'open', paid_at: null, paid_by: null, collected_by: null, cash_received_amount: null })
-      .eq('id', inv.id);
-    if (error) {
-      showToast('error', t('sa.subs.errorWithMessage', { message: error.message }));
+    try {
+      // The invoice and its payment-trail row in one transaction. The trail keeps
+      // the German wording it was always written with, whatever language the
+      // operator's UI is in.
+      await callPlatformRpc('platform_invoice_mark_unpaid', { p_invoice_id: inv.id });
+    } catch (err: any) {
+      showToast('error', t('sa.subs.errorWithMessage', { message: err.message }));
       return;
     }
-    await supabase.from('subscription_payment_audit').insert({
-      invoice_id: inv.id,
-      company_id: inv.company_id,
-      action: 'marked_unpaid',
-      old_status: inv.status,
-      new_status: 'open',
-      amount: inv.amount,
-      changed_by: user!.id,
-      // Persisted audit-trail text, not a label: the row keeps the wording it
-      // was written with, whatever language the operator's UI was in.
-      note: 'Als unbezahlt markiert',
-    });
     showToast('success', t('sa.subs.markedOpen'));
     loadData();
   };
 
   // ── Cancel invoice ──
   const handleCancel = async (inv: Invoice) => {
-    const { error } = await supabase
-      .from('subscription_invoices')
-      .update({ status: 'canceled' })
-      .eq('id', inv.id);
-    if (error) {
-      showToast('error', t('sa.subs.errorWithMessage', { message: error.message }));
+    try {
+      await callPlatformRpc('platform_invoice_cancel', { p_invoice_id: inv.id });
+    } catch (err: any) {
+      showToast('error', t('sa.subs.errorWithMessage', { message: err.message }));
       return;
     }
-    await supabase.from('subscription_payment_audit').insert({
-      invoice_id: inv.id,
-      company_id: inv.company_id,
-      action: 'invoice_canceled',
-      old_status: inv.status,
-      new_status: 'canceled',
-      amount: inv.amount,
-      changed_by: user!.id,
-    });
     showToast('success', t('sa.subs.invoiceCanceled'));
     loadData();
   };

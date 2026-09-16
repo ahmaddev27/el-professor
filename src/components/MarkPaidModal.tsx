@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { X, Banknote, CheckCircle } from 'lucide-react';
-import { supabase } from '../lib/supabase';
+import { callPlatformRpc } from '../lib/platformRpc';
+import { parseGermanAmountToCents } from '../utils/money';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
 import { useTranslation } from '../contexts/LanguageContext';
@@ -34,37 +35,24 @@ export default function MarkPaidModal({ invoice, onClose, onConfirm }: Props) {
     if (!user) return;
     setSaving(true);
     try {
-      const parsedAmount = parseFloat(amount.replace(',', '.'));
-      if (isNaN(parsedAmount) || parsedAmount <= 0) {
+      // The amount is converted once, here, into integer cents: a German amount
+      // ("1.234,56") does not survive parseFloat, which read it as 1.234. The
+      // database stores round(cents / 100, 2) euros in cash_received_amount, the
+      // column's existing unit, so the figure recorded is the one typed.
+      const amountCents = parseGermanAmountToCents(amount);
+      if (amountCents === null || amountCents <= 0) {
         showToast('error', t('bill.markPaid.invalidAmount'));
         return;
       }
 
-      const { error } = await supabase
-        .from('subscription_invoices')
-        .update({
-          status: 'paid',
-          paid_at: new Date(paidAt).toISOString(),
-          paid_by: user.id,
-          collected_by: user.id,
-          cash_received_amount: parsedAmount,
-          receipt_note: note || null,
-        })
-        .eq('id', invoice.id);
-
-      if (error) throw error;
-
-      await supabase.from('subscription_payment_audit').insert({
-        invoice_id: invoice.id,
-        company_id: invoice.company_id,
-        action: 'marked_paid_cash',
-        old_status: invoice.status,
-        new_status: 'paid',
-        amount: parsedAmount,
-        changed_by: user.id,
-        // Persisted audit record, not a label: the payment trail must read the same
-        // regardless of which UI language happened to be active when it was written.
-        note: note || `Barzahlung von ${profile?.full_name || profile?.email || 'Admin'} erfasst`,
+      // The invoice, its payment-trail row and the platform audit row in one
+      // transaction. The collector and the trail's German wording come from the
+      // caller's own token, as this screen wrote them.
+      await callPlatformRpc('platform_invoice_mark_paid', {
+        p_invoice_id: invoice.id,
+        p_amount_cents: amountCents,
+        p_paid_at: new Date(paidAt).toISOString(),
+        p_note: note || null,
       });
 
       showToast('success', t('bill.markPaid.success'));

@@ -8,6 +8,7 @@ import {
   RefreshCw, Zap, BarChart3, AlertCircle, ChevronRight,
   ArrowUpRight, Shield, Activity, Tag, ClipboardCheck, Gift, KeyRound, PencilLine,
 } from 'lucide-react';
+import { callPlatformRpc } from '../lib/platformRpc';
 import DiscountCodesManagement from '../components/DiscountCodesManagement';
 import ReferralCodesManagement from '../components/ReferralCodesManagement';
 import ActivationCodesManagement from '../components/ActivationCodesManagement';
@@ -397,13 +398,9 @@ export default function SuperAdminDashboard() {
     if (!company.trial_end) return;
     setExtendingId(company.id);
     try {
-      const newEnd = new Date(company.trial_end);
-      newEnd.setDate(newEnd.getDate() + 7);
-      const { error } = await supabase
-        .from('companies')
-        .update({ trial_end: newEnd.toISOString(), updated_at: new Date().toISOString() })
-        .eq('id', company.id);
-      if (error) throw error;
+      // The database moves trial_end by whole days from the stored value, so two
+      // clicks cannot both extend from the same browser copy of the date.
+      await callPlatformRpc('platform_company_extend_trial', { p_company_id: company.id, p_days: 7 });
       showToast('success', t('sa.dash.toast.trialExtended', { name: company.name }));
       load(true);
     } catch (err: any) {
@@ -415,11 +412,7 @@ export default function SuperAdminDashboard() {
 
   const handleStatusChange = async (company: CompanyRow, status: CompanyStatus) => {
     try {
-      const { error } = await supabase
-        .from('companies')
-        .update({ status, updated_at: new Date().toISOString() })
-        .eq('id', company.id);
-      if (error) throw error;
+      await callPlatformRpc('platform_company_set_status', { p_company_id: company.id, p_status: status });
       const statusKey = STATUS_CFG[status]?.label;
       showToast('success', `${company.name} → ${statusKey ? t(statusKey) : status}`);
       load(true);
@@ -430,11 +423,7 @@ export default function SuperAdminDashboard() {
 
   const handlePlanChange = async (company: CompanyRow, plan: Plan) => {
     try {
-      const { error } = await supabase
-        .from('companies')
-        .update({ plan, updated_at: new Date().toISOString() })
-        .eq('id', company.id);
-      if (error) throw error;
+      await callPlatformRpc('platform_company_set_plan', { p_company_id: company.id, p_plan: plan });
       showToast('success', t('sa.dash.toast.planChanged', { name: company.name, plan: PLAN_LABEL[plan] }));
       load(true);
     } catch (err: any) {
@@ -444,11 +433,7 @@ export default function SuperAdminDashboard() {
 
   const handleBillingCycleChange = async (company: CompanyRow, billing_cycle: 'monthly' | 'yearly') => {
     try {
-      const { error } = await supabase
-        .from('companies')
-        .update({ billing_cycle, updated_at: new Date().toISOString() })
-        .eq('id', company.id);
-      if (error) throw error;
+      await callPlatformRpc('platform_company_set_plan', { p_company_id: company.id, p_billing_cycle: billing_cycle });
       showToast('success', `${company.name} → ${t(billing_cycle === 'yearly' ? 'sa.dash.cycle.yearly' : 'sa.dash.cycle.monthly')}`);
       load(true);
     } catch (err: any) {
@@ -459,11 +444,7 @@ export default function SuperAdminDashboard() {
   const handleCarLimitChange = async (company: CompanyRow, limit: number) => {
     if (limit < 1 || limit > 200) return;
     try {
-      const { error } = await supabase
-        .from('companies')
-        .update({ subscription_car_limit: limit, updated_at: new Date().toISOString() })
-        .eq('id', company.id);
-      if (error) throw error;
+      await callPlatformRpc('platform_company_set_plan', { p_company_id: company.id, p_car_limit: limit });
       showToast('success', t('sa.dash.toast.carLimitChanged', { name: company.name, limit }));
       load(true);
     } catch (err: any) {
@@ -474,18 +455,10 @@ export default function SuperAdminDashboard() {
   const handleApprove = async (company: CompanyRow) => {
     setApprovingId(company.id);
     try {
-      const { data: { user: me } } = await supabase.auth.getUser();
-      const { error } = await supabase
-        .from('companies')
-        .update({
-          approval_status: 'approved',
-          approved_at: new Date().toISOString(),
-          approved_by: me?.id ?? null,
-          rejection_reason: null,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', company.id);
-      if (error) throw error;
+      // Exactly what this screen wrote before: the approval columns and nothing
+      // else. No code and no mail at approval (the owner's decision of
+      // 15.09.2026); the approving account comes from the caller's own token.
+      await callPlatformRpc('platform_company_set_approval', { p_company_id: company.id, p_decision: 'approve' });
       showToast('success', t('sa.dash.toast.approved', { name: company.name }));
       load(true);
     } catch (err: any) {
@@ -500,18 +473,11 @@ export default function SuperAdminDashboard() {
     const company = rejectModal.company;
     setApprovingId(company.id);
     try {
-      const { data: { user: me } } = await supabase.auth.getUser();
-      const { error } = await supabase
-        .from('companies')
-        .update({
-          approval_status: 'rejected',
-          rejected_at: new Date().toISOString(),
-          rejected_by: me?.id ?? null,
-          rejection_reason: rejectReason.trim() || null,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', company.id);
-      if (error) throw error;
+      await callPlatformRpc('platform_company_set_approval', {
+        p_company_id: company.id,
+        p_decision: 'reject',
+        p_reason: rejectReason.trim() || null,
+      });
       showToast('success', t('sa.dash.toast.rejected', { name: company.name }));
       setRejectModal(null);
       setRejectReason('');
@@ -525,11 +491,7 @@ export default function SuperAdminDashboard() {
 
   const handleSuspendApproval = async (company: CompanyRow) => {
     try {
-      const { error } = await supabase
-        .from('companies')
-        .update({ approval_status: 'suspended', updated_at: new Date().toISOString() })
-        .eq('id', company.id);
-      if (error) throw error;
+      await callPlatformRpc('platform_company_set_approval', { p_company_id: company.id, p_decision: 'suspend' });
       showToast('success', t('sa.dash.toast.approvalSuspended', { name: company.name }));
       load(true);
     } catch (err: any) {
@@ -970,7 +932,9 @@ export default function SuperAdminDashboard() {
                     </div>
                   </div>
                   <div className="flex items-center gap-1.5 flex-shrink-0">
-                    {canBilling && (item.company.status === 'trial') && item.company.trial_end && (
+                    {/* Extending a trial asks companies.lifecycle, not billing.manage:
+                        plan 3.5 keeps the trial with the company's own lifecycle. */}
+                    {canLifecycle && (item.company.status === 'trial') && item.company.trial_end && (
                       <button
                         onClick={() => handleExtendTrial(item.company)}
                         disabled={extendingId === item.company.id}
@@ -1046,7 +1010,7 @@ export default function SuperAdminDashboard() {
                         <button
                           onClick={() => handleExtendTrial(c)}
                           disabled={extendingId === c.id}
-                          className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-opacity hover:opacity-80 ${canBilling ? 'flex' : 'hidden'} items-center gap-1`}
+                          className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-opacity hover:opacity-80 ${canLifecycle ? 'flex' : 'hidden'} items-center gap-1`}
                           style={{ background: 'var(--warning)', color: 'white' }}
                         >
                           {extendingId === c.id ? <RefreshCw size={11} className="animate-spin" /> : <Zap size={11} />}
