@@ -15,6 +15,7 @@ import { format, isWithinInterval, parseISO } from 'date-fns';
 import { de } from 'date-fns/locale';
 import { supabase } from '../lib/supabase';
 import { fetchAllPaginated } from '../utils/fetchAllPaginated';
+import type { CashMovementRow } from '../utils/cashLedger';
 import {
   AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend
@@ -270,6 +271,10 @@ const OverviewPage: React.FC = () => {
   const [werkstattChecks, setWerkstattChecks] = useState<WerkstattCheck[]>([]);
   const [userProfiles, setUserProfiles] = useState<UserProfileRecord[]>([]);
   const [cars, setCars] = useState<{ id: string; kennzeichen: string; tuev_gueltig_bis: string | null }[]>([]);
+  // The cash ledger: Gehaltsquittungen and their Stornos, the cash salaries
+  // take out of the till. Written only by confirm_salary_cash_payment and
+  // void_salary_cash_receipt.
+  const [cashMovements, setCashMovements] = useState<CashMovementRow[]>([]);
   const [selectedMonth, setSelectedMonth] = useState<string>(format(new Date(), 'yyyy-MM'));
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -291,6 +296,7 @@ const OverviewPage: React.FC = () => {
       await Promise.all([
         loadFixedCosts(), loadIncomes(), loadSalaries(),
         loadWerkstattChecks(), loadUserProfiles(), loadCars(),
+        loadCashMovements(),
       ]);
     } catch (err) {
       // Previously swallowed: a failed query left every array empty and the
@@ -363,6 +369,20 @@ const OverviewPage: React.FC = () => {
       .eq('company_id', companyId);
     setCars(data || []);
   };
+  // Paginated like the other three: a company that pays every salary in cash
+  // passes 1000 movements in under three years, and PostgREST truncates
+  // without saying so.
+  const loadCashMovements = async () => {
+    setCashMovements(await fetchAllPaginated<CashMovementRow>(
+      (from, to) => supabase
+        .from('cash_movements')
+        .select('id, direction, amount, movement_date, source_type, source_id, description')
+        .eq('company_id', companyId)
+        .order('id', { ascending: true })
+        .range(from, to),
+      { label: t('overview.load.bargeld') },
+    ));
+  };
 
   // ── Derived data ─────────────────────────────────────────────────────────
   const { start: monthStart, end: monthEnd } = getMonthRange(selectedMonth);
@@ -388,7 +408,7 @@ const OverviewPage: React.FC = () => {
 
   const driverPerformance = calcDriverPerformance(driverRecords, incomes, salaries, receipts, monthStart, monthEnd);
   const salaryAlerts      = calcSalaryAlerts(salaries, driverRecords);
-  const cashSummary       = calcCashSummary(incomes, receipts, monthStart, monthEnd);
+  const cashSummary       = calcCashSummary(incomes, receipts, monthStart, monthEnd, cashMovements);
   const trendData         = buildTrendData(selectedMonth, incomes, salaries, receipts, fixedCosts);
   const topExpenses       = getTopExpenses(receipts, fixedCosts, monthStart, monthEnd, 5);
   const insights          = generateInsights(currentMetrics, prevMetrics, driverPerformance, salaryAlerts, werkstattChecks);
@@ -847,6 +867,11 @@ const OverviewPage: React.FC = () => {
                   <Wallet size={22} style={{ color: cashSummary.cashRisk === 'ok' ? '#3b82f6' : '#f59e0b' }} />
                 </div>
               </div>
+              {cashSummary.salaryPayouts !== 0 && (
+                <p className="text-xs mt-2" style={{ color: 'var(--text-secondary)' }}>
+                  {t('overview.cash.salaryPayouts')}: −{fmt(cashSummary.salaryPayouts)} €
+                </p>
+              )}
               {cashSummary.cashRisk !== 'ok' && (
                 <div className="flex items-center gap-1.5 mt-2">
                   <AlertTriangle size={12} style={{ color: '#f59e0b' }} />
@@ -861,7 +886,7 @@ const OverviewPage: React.FC = () => {
               <span style={{ color: 'var(--text-secondary)' }}>{t('overview.cash.ratio')}</span>
               <span className="font-semibold" style={{ color: 'var(--text-primary)' }}>
                 {cashSummary.cashIncome > 0
-                  ? `${((cashSummary.cashFromExpenses / cashSummary.cashIncome) * 100).toFixed(0)}% ausgegeben`
+                  ? `${((cashSummary.cashOut / cashSummary.cashIncome) * 100).toFixed(0)}% ausgegeben`
                   : '—'}
               </span>
             </div>
