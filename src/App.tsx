@@ -52,8 +52,17 @@ import AccountBlockedPage from './pages/AccountBlockedPage';
 import AdminLayout from './components/AdminLayout';
 import { useTranslation } from './contexts/LanguageContext';
 import type { TranslationKey } from './i18n';
+import PlatformLoginPage from './pages/PlatformLoginPage';
 import { isDesignPreviewPath } from './design-preview/gate';
 import { needsCompanyRegistration } from './lib/googleAccount';
+import {
+  ADMIN_BASE,
+  ADMIN_LOGIN_PATH,
+  LEGACY_ADMIN_BASE,
+  legacyAdminTarget,
+  platformEntry,
+  platformEntryPath,
+} from './lib/adminGate';
 
 // ─── Design preview (Phase 2 prototype) ──────────────────────────────────────
 // The new design on invented data, for the owner to approve before any screen
@@ -149,7 +158,7 @@ const SubscriptionGuard: React.FC<{ children: React.ReactNode }> = ({ children }
  *
  * Sending the account to the platform panel is not a workaround for that
  * error, it is the model: a super admin reaches a company's screens by
- * entering it from /super-admin, which sets effectiveCompanyId, and the same
+ * entering it from /admin, which sets effectiveCompanyId, and the same
  * screens then work against that company.
  *
  * Outermost of the three guards, so it settles the question before
@@ -163,14 +172,14 @@ const SubscriptionGuard: React.FC<{ children: React.ReactNode }> = ({ children }
  * screens the account can never open, wrapped around a page that said it had no
  * company. The account page itself is not the problem — AccountPage reads only
  * the caller's own record (no company settings, no plan, no company id) — so it
- * is registered a second time at `/super-admin/konto`, under AdminLayout, where
+ * is registered a second time at `/admin/konto`, under AdminLayout, where
  * it renders identically inside the shell the account actually belongs to.
  *
  * The old path stays a working bookmark by redirecting here rather than falling
  * through to the dashboard, which would silently drop whoever followed it.
  */
 const PLATFORM_ACCOUNT_REDIRECTS: Record<string, string> = {
-  '/mein-konto': '/super-admin/konto',
+  '/mein-konto': '/admin/konto',
 };
 
 const PlatformAccountGuard: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -182,7 +191,7 @@ const PlatformAccountGuard: React.FC<{ children: React.ReactNode }> = ({ childre
   // has entered one keeps using /mein-konto in that company's shell, and a
   // company user never reaches this branch at all.
   if (isSuperAdmin && !effectiveCompanyId) {
-    return <Navigate to={PLATFORM_ACCOUNT_REDIRECTS[location.pathname] ?? '/super-admin'} replace />;
+    return <Navigate to={PLATFORM_ACCOUNT_REDIRECTS[location.pathname] ?? ADMIN_BASE} replace />;
   }
 
   return <>{children}</>;
@@ -197,6 +206,52 @@ const AuthLoadingScreen: React.FC = () => (
     </div>
   </div>
 );
+
+/**
+ * `/admin/login` — the platform team's own front door (plan slice 3.6a).
+ *
+ * Registered in both routers, because it has to answer for a browser with no
+ * session and for one that has just acquired a session on this very page:
+ * signing in swaps App's public router for the authenticated one, which starts
+ * at whatever the address bar still says. Deciding here, rather than with a
+ * navigate() inside the form, is what keeps that redirect out of the router
+ * being unmounted — the same reason useOtpSessionHandoff rewrites the address
+ * before it installs a session.
+ *
+ * Who goes where is `platformEntry()`, kept pure and covered by tests.
+ */
+const AdminLoginRoute: React.FC = () => {
+  const { user, profileLoaded, loading, isSuperAdmin } = useAuth();
+  const entry = platformEntry({
+    authLoading: loading,
+    hasSession: !!user,
+    profileLoaded,
+    isSuperAdmin,
+  });
+
+  if (entry === 'loading') return <AuthLoadingScreen />;
+  if (entry === 'signIn') return <PlatformLoginPage />;
+  // A company user that signs in here belongs in its own app, not in a shell
+  // with nothing it may open. Refusing it a session instead would be a
+  // permission notion of the browser's own invention: what any account may
+  // actually do is decided in the database, on every call.
+  return <Navigate to={platformEntryPath(entry) ?? ADMIN_BASE} replace />;
+};
+
+/**
+ * `/super-admin/*` — the panel's previous entry, until plan slice 3.13.
+ *
+ * The panel is registered once, under `/admin`, and every old path is rewritten
+ * onto it here. So a bookmark, and the in-app links that still say
+ * `/super-admin` (the company sidebar, the user menu, the overview card and the
+ * platform dashboard's own links), reach exactly the screen they always did,
+ * and there is no second copy of the routes that could drift from the first.
+ */
+const LegacyAdminRedirect: React.FC = () => {
+  const location = useLocation();
+  const target = legacyAdminTarget(location.pathname) ?? ADMIN_BASE;
+  return <Navigate to={`${target}${location.search}${location.hash}`} replace />;
+};
 
 /**
  * The profile never answered, after the bounded retries in AuthContext.
@@ -268,6 +323,11 @@ function App() {
           <Route path="/auth/verify-email" element={<VerifyEmailPage />} />
           <Route path="/einladung" element={<InviteAcceptPage />} />
           <Route path="/signup" element={<SignupPage />} />
+          {/* The platform team signs in here, not through the company login.
+              Anything else under /admin without a session lands on it: the
+              panel is never rendered for a browser that has no account at all. */}
+          <Route path={ADMIN_LOGIN_PATH} element={<AdminLoginRoute />} />
+          <Route path={`${ADMIN_BASE}/*`} element={<Navigate to={ADMIN_LOGIN_PATH} replace />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </BrowserRouter>
@@ -329,6 +389,9 @@ function App() {
               <Route path="/set-new-password" element={<SetPasswordPage />} />
               <Route path="/auth/forgot-password" element={<ForgotPasswordPage />} />
               <Route path="/einladung" element={<InviteAcceptPage />} />
+              {/* Already signed in: the sign-in page sends the account on to
+                  the panel, or to its own app when the panel is not for it. */}
+              <Route path={ADMIN_LOGIN_PATH} element={<AdminLoginRoute />} />
               <Route path="/" element={
                 <PlatformAccountGuard>
                 <MustChangePasswordGuard>
@@ -338,7 +401,7 @@ function App() {
                 </MustChangePasswordGuard>
                 </PlatformAccountGuard>
               }>
-                <Route index element={<Navigate to={isSuperAdmin ? "/super-admin" : "/overview"} replace />} />
+                <Route index element={<Navigate to={isSuperAdmin ? ADMIN_BASE : "/overview"} replace />} />
                 {/* Activation routes — inside AppLayout so sidebar is visible */}
                 <Route path="abo-aktivieren" element={<ActivationPage />} />
                 <Route path="aktivierung"    element={<ActivationPage />} />
@@ -372,10 +435,13 @@ function App() {
               </Route>
 
               {/* Platform administration — its own shell, with no company
-                  navigation. Registered only for super admins, and AdminLayout
-                  re-checks, so a direct URL cannot land a tenant user here. */}
+                  navigation, at its own entry since plan slice 3.6a. Registered
+                  only for super admins, and AdminLayout re-checks against
+                  platform_whoami(), so a direct URL cannot land a tenant user
+                  here: for it, /admin falls through to the tenant catch-all
+                  above and ends on /overview. */}
               {isSuperAdmin && (
-                <Route path="/super-admin" element={<AdminLayout />}>
+                <Route path={ADMIN_BASE} element={<AdminLayout />}>
                   <Route index                   element={<SuperAdminDashboard />} />
                   <Route path="companies"        element={<CompaniesPage />} />
                   <Route path="billing"          element={<SubscriptionBillingPage />} />
@@ -392,9 +458,15 @@ function App() {
                       own name, address and password without being handed a
                       company sidebar it cannot use. Before the catch-all. */}
                   <Route path="konto"            element={<AccountPage />} />
-                  <Route path="*" element={<Navigate to="/super-admin" replace />} />
+                  <Route path="*" element={<Navigate to={ADMIN_BASE} replace />} />
                 </Route>
               )}
+
+              {/* The panel's previous entry. One panel and not two: every
+                  /super-admin path is rewritten onto /admin, for a platform
+                  account and a company user alike. Plan slice 3.13 removes this
+                  together with the links that still point at it. */}
+              <Route path={`${LEGACY_ADMIN_BASE}/*`} element={<LegacyAdminRedirect />} />
             </Routes>
           </BrowserRouter>
         </PlanProvider>

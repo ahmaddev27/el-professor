@@ -26,21 +26,21 @@ interface AdminNavItem {
  * their own shell and are never rendered inside the company-facing sidebar.
  */
 const ADMIN_NAV_ITEMS: AdminNavItem[] = [
-  { path: '/super-admin',                  icon: BarChart3,   labelKey: 'admin.nav.platform',    requires: 'companies.read', end: true },
-  { path: '/super-admin/companies',        icon: Building2,   labelKey: 'admin.nav.companies',   requires: 'companies.read' },
-  { path: '/super-admin/billing',          icon: Receipt,     labelKey: 'admin.nav.billing',     requires: 'companies.read' },
+  { path: '/admin',                  icon: BarChart3,   labelKey: 'admin.nav.platform',    requires: 'companies.read', end: true },
+  { path: '/admin/companies',        icon: Building2,   labelKey: 'admin.nav.companies',   requires: 'companies.read' },
+  { path: '/admin/billing',          icon: Receipt,     labelKey: 'admin.nav.billing',     requires: 'companies.read' },
   // The diagnosis reads a company's Fahrtenbuch and planning data.
-  { path: '/super-admin/abnahme-diagnose', icon: Stethoscope, labelKey: 'admin.nav.diagnostics', requires: 'business.read' },
+  { path: '/admin/abnahme-diagnose', icon: Stethoscope, labelKey: 'admin.nav.diagnostics', requires: 'business.read' },
   // The directories read every company's vehicles, drivers and users through
   // the audited read models, which ask for business.read.
-  { path: '/super-admin/verzeichnisse',    icon: Library,          labelKey: 'admin.nav.directories', requires: 'business.read' },
+  { path: '/admin/verzeichnisse',    icon: Library,          labelKey: 'admin.nav.directories', requires: 'business.read' },
   // audit.read reads the whole log. Every other active role reads its own rows,
   // but the entry follows the capability the page is for.
-  { path: '/super-admin/protokoll',        icon: ScrollText,       labelKey: 'admin.nav.audit',       requires: 'audit.read' },
+  { path: '/admin/protokoll',        icon: ScrollText,       labelKey: 'admin.nav.audit',       requires: 'audit.read' },
   // Viewing needs settings.read; saving needs pricing.manage or settings.manage,
   // and the page and the database decide that per key.
-  { path: '/super-admin/einstellungen',    icon: SlidersHorizontal, labelKey: 'admin.nav.settings',   requires: 'settings.read' },
-  { path: '/super-admin/team',             icon: Users,            labelKey: 'admin.nav.team',        requires: 'staff.manage' },
+  { path: '/admin/einstellungen',    icon: SlidersHorizontal, labelKey: 'admin.nav.settings',   requires: 'settings.read' },
+  { path: '/admin/team',             icon: Users,            labelKey: 'admin.nav.team',        requires: 'staff.manage' },
 ];
 
 /**
@@ -146,11 +146,11 @@ const AdminSidebar: React.FC = () => {
         {/* Personal, not a platform destination: the account page shows the
             caller's own record, so it carries no capability requirement and
             every platform role — read_only included — reaches it. It points at
-            the copy registered under /super-admin, not at /mein-konto, which
-            lives in the company shell and would surround it with tenant
-            navigation this account cannot use. */}
+            the copy registered under /admin, not at /mein-konto, which lives in
+            the company shell and would surround it with tenant navigation this
+            account cannot use. */}
         <NavLink
-          to="/super-admin/konto"
+          to="/admin/konto"
           onClick={() => setIsMobileMenuOpen(false)}
           className={NAV_ITEM_CLASS}
           style={navItemStyle}

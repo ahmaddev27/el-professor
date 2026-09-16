@@ -7,6 +7,7 @@ import { useTranslation } from '../contexts/LanguageContext';
 import LanguageSwitcher from './LanguageSwitcher';
 import { useAuth } from '../contexts/AuthContext';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
+import { TENANT_HOME, decideAdminGate } from '../lib/adminGate';
 
 /**
  * Shell for the platform administration area.
@@ -25,11 +26,16 @@ const AdminLayout: React.FC = () => {
   const { isSuperAdmin, signOut } = useAuth();
   const { platformAccessStatus, isPlatformStaff, reloadPlatformAccess } = useSuperAdmin();
 
-  if (!isSuperAdmin) {
-    return <Navigate to="/overview" replace />;
+  // One decision, taken in a pure function the tests cover: the panel opens
+  // only for an account platform_whoami() reports an active role for, and an
+  // unanswered question is never read as permission.
+  const gate = decideAdminGate({ isSuperAdmin, platformAccessStatus, hasPlatformRole: isPlatformStaff });
+
+  if (gate === 'notPlatform') {
+    return <Navigate to={TENANT_HOME} replace />;
   }
 
-  if (platformAccessStatus === 'idle' || platformAccessStatus === 'loading') {
+  if (gate === 'loading') {
     return (
       <div className="min-h-screen flex items-center justify-center" style={{ background: 'var(--bg-base)' }}>
         <div className="text-center">
@@ -40,8 +46,8 @@ const AdminLayout: React.FC = () => {
     );
   }
 
-  if (platformAccessStatus === 'error' || !isPlatformStaff) {
-    const failed = platformAccessStatus === 'error';
+  if (gate === 'accessUnknown' || gate === 'noRole') {
+    const failed = gate === 'accessUnknown';
     return (
       <div className="min-h-screen flex items-center justify-center p-4" style={{ background: 'var(--bg-base)' }}>
         <div
