@@ -90,7 +90,7 @@ export default function BargeldbestandPage() {
   const [endDate, setEndDate] = useState('');
   const [drivers, setDrivers] = useState<string[]>([]);
   const { user, loading: authLoading, companyId: ownCompanyId } = useAuth();
-  const { effectiveCompanyId: companyId, isViewingAsCompany, platformCan } = useSuperAdmin();
+  const { effectiveCompanyId: companyId, isViewingAsCompany, platformReadsCompanyData } = useSuperAdmin();
   const { showToast } = useToast();
 
   // The same scope the Gehaltsquittung screens use, because it is the same two
@@ -101,7 +101,10 @@ export default function BargeldbestandPage() {
     companyId: ownCompanyId,
     effectiveCompanyId: companyId,
     isViewingAsCompany,
-    platformReadsCompanyData: platformCan('business.read'),
+    // The seam as the database now answers it: business.read *and* an open
+    // context on this company. The capability alone reads nothing since
+    // 20260917140000, so passing it here would make this guard a rubber stamp.
+    platformReadsCompanyData,
   });
 
   const ledgerLabels: CashLedgerLabels = {

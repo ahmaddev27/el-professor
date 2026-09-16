@@ -255,8 +255,22 @@ export default function AbnahmeDiagnosticPage() {
         .eq('id', STABLE_RUN_ID)
         .single();
 
-      if (runErr || !runData) {
-        criticalErrors.push(t('diag.errRunNotFound', { message: runErr?.message ?? t('diag.noResult') }));
+      /*
+        Absent with no error is not "missing" — it is a row this account cannot
+        see. Since 20260917140000 (plan 3.4) a platform account reads no
+        company's planning runs without an open context, and this page pins one
+        run id, so for such a caller everything below is computed from nothing:
+        errNoTrips, three errTripsMissingColumn and errTotalsMismatch all fire
+        and the page scores 0 for a run that is perfectly sound. A real query
+        error still reports as one; the invisible case is corrected once, just
+        before the result is set.
+
+        RLS cannot tell "no such run" from "not yours", so the message says what
+        is actually known: not readable from this account.
+      */
+      const unreadable = !runData && !runErr;
+      if (runErr) {
+        criticalErrors.push(t('diag.errRunNotFound', { message: runErr.message }));
       }
 
       const run: PlanningRunInfo | null = runData ? {
@@ -439,6 +453,15 @@ export default function AbnahmeDiagnosticPage() {
       const snTotal = stundennachweis.reduce((s, d) => s + d.fahrten, 0);
       if (snTotal !== nonCanceled.length) {
         criticalErrors.push(t('diag.errTotalsMismatch', { sheet: snTotal, assigned: nonCanceled.length }));
+      }
+
+      // One honest line instead of a cascade of false findings: none of the
+      // checks above saw real data, so none of them is a finding. A warning
+      // rather than a critical, because nothing here is wrong.
+      if (unreadable) {
+        criticalErrors.length = 0;
+        warnings.length = 0;
+        warnings.push(t('diag.warnNotAvailableHere'));
       }
 
       setResult({

@@ -709,32 +709,50 @@ DECLARE
   v_tbl   text;
   v_count int := 0;
 BEGIN
-  FOREACH v_tbl IN ARRAY ARRAY[
-    -- 20260917130000 section 2: the tenant tables
-    'receipts', 'income', 'drivers', 'cars', 'fixed_costs', 'salaries', 'salary_payments',
-    'werkstatt_checks', 'driver_notes', 'documents', 'car_driver_assignments', 'cash_transactions',
-    'document_templates', 'company_planning_runs', 'company_planning_run_blocks',
-    'monthly_planning_manual_exceptions', 'planning_finalizations', 'planning_run_adjustments',
-    'historical_reconciliations', 'historical_block_adjustments', 'historical_driver_hour_targets',
-    'historical_payroll_targets', 'historical_time_adjustments', 'historical_wh_saved_plans',
-    'saved_stundennachweise', 'fahrtenbuch_imports', 'fahrtenbuch_trips',
-    'fahrtenbuch_assignment_audit', 'notification_settings', 'cash_movements', 'salary_cash_receipts',
-    -- …and section 3: the tables that reach their company through a parent
-    'document_blocks', 'document_variables', 'historical_reconciliation_drivers',
-    'historical_reconciliation_results', 'historical_reconciliation_wh_drivers',
-    -- Three tables of the account shell belong here too, and for a reason that
-    -- is this slice's own doing. Their write predicates read
-    --   company_id = get_user_company_id() AND (is_company_admin() OR platform_can(…))
-    -- and before this file the first conjunct was NULL for a company-less
-    -- platform account, so the write was refused whatever the capability said.
-    -- Making that term answer the opened company completes the predicate, and
-    -- the capability supplies the rest — so without a trigger here a *view*
-    -- context could create a role, give it can_edit on every page through
-    -- role_permissions, and point a company's profile at it: three writes, no
-    -- reason recorded, in the mode that is supposed to write nothing. The plan
-    -- is explicit that a staff member writes inside a support session and
-    -- nowhere else.
-    'roles', 'role_permissions', 'activation_code_attempts'
+  /*
+    The tenant half is **derived, not copied**. Every table 20260917130000 gave
+    the tenant shape names get_active_company_id() in its policies — that is
+    what the shape *is* — so asking the catalogue for those tables is asking the
+    authoritative source directly. A hand-written list here would be a second
+    copy of 3.3's, and a table missing from both copies is a table nothing
+    notices: the self-check below restated the same literal, so it could only
+    ever confirm that the list matched itself.
+
+    It picks up the 31 tables of 3.3 section 2 and the 5 of section 3 (whose
+    policies name the helper inside their EXISTS on the parent), and it will
+    pick up any tenant table a later migration writes in the same shape, which
+    is the property worth having.
+
+    The three shell tables stay literal, because no derivation separates them
+    from their neighbours: their predicate is
+      company_id = get_user_company_id() AND (is_company_admin() OR platform_can(…))
+    and before this file the first conjunct was NULL for a company-less platform
+    account, so the write was refused whatever the capability said. Making that
+    term answer the opened company completes the predicate and the capability
+    supplies the rest — so without a trigger here a *view* context could create
+    a role, give it can_edit on every page through role_permissions, and point a
+    company's profile at it: three writes, no reason recorded, in the mode that
+    is supposed to write nothing. The plan is explicit that a staff member
+    writes inside a support session and nowhere else.
+
+    Four other tables carry a company term in 3.3 and deliberately get no
+    trigger — discount_code_redemptions, company_subscriptions,
+    subscription_invoices and subscription_payment_audit. In each the company
+    term is on the SELECT policy only; their writes ask billing.manage with no
+    company term at all, or have no write policy. So an open context widens what
+    a staff account may *read* there and never what it may write, which is the
+    read the workspace exists for. Nothing for this trigger to do.
+  */
+  FOR v_tbl IN
+    -- ::text on both branches: pg_policies.tablename is `name`, the literals
+    -- below are text, and a UNION has to agree on a type.
+    SELECT DISTINCT p.tablename::text
+      FROM pg_policies p
+     WHERE p.schemaname = 'public'
+       AND (coalesce(p.qual, '') || ' ' || coalesce(p.with_check, '')) ~ 'get_active_company_id'
+     UNION
+    SELECT v.tbl::text
+      FROM (VALUES ('roles'), ('role_permissions'), ('activation_code_attempts')) AS v(tbl)
     --
     -- `company_settings` was the fourth and has been taken back out, because
     -- the rule this trigger enforces is narrower than "a staff account must not
@@ -781,7 +799,23 @@ BEGIN
     v_count := v_count + 1;
   END LOOP;
 
-  RAISE NOTICE '3.4: a view context writes nothing on % tenant tables', v_count;
+  /*
+    A floor, because the list is derived. If the catalogue query ever matches
+    nothing — a changed helper name, a schema filter that stops being true — the
+    loop would install no triggers at all, and self-check 5 would agree with it,
+    since it derives from the same query. Then a view context would write every
+    tenant table and both checks would pass. The count is the one thing that
+    cannot be fooled by an empty derivation.
+
+    36 tenant tables (31 in 20260917130000 section 2, 5 in section 3) plus the
+    three shell tables above. A later migration that adds a tenant table in the
+    same shape raises this number; it must never fall.
+  */
+  IF v_count < 39 THEN
+    RAISE EXCEPTION '3.4: the refusal trigger went onto % tables, expected at least 39 — the derived list matched too little', v_count;
+  END IF;
+
+  RAISE NOTICE '3.4: a view context writes nothing on % tables', v_count;
 END $mig$;
 
 -- ─── 6. A role row cannot be pulled into the context company ────────────────
@@ -1436,28 +1470,28 @@ BEGIN
     RAISE EXCEPTION '3.4 self-check: does not read the open context: %', v_wrong;
   END IF;
 
-  -- 5. Every tenant table 20260917130000 wrote a policy for carries the
-  --    refusal trigger: those are the tables a view context must not write,
-  --    and twenty-two of them have no role gate that could refuse it.
+  -- 5. Every table a view context could reach carries the refusal trigger.
+  --
+  --    Asked of the catalogue, the same way the loop installs them, and not of
+  --    a literal list: a list here would restate the loop's own list, so it
+  --    could only ever confirm that the two copies agree — a table missing from
+  --    both would pass. What this proves is therefore narrower than it looks,
+  --    and worth stating exactly: every table whose policies name
+  --    get_active_company_id() (the tenant shape of 20260917130000), plus the
+  --    three shell tables this file adds, ended up with a trigger on it. It
+  --    catches a table the loop skipped; it cannot catch a table 3.3 should
+  --    have given the tenant shape and did not, because nothing here knows
+  --    3.3's intent apart from its policies.
   SELECT string_agg(t.tbl, ', ') INTO v_wrong
-    FROM (VALUES
-      ('receipts'), ('income'), ('drivers'), ('cars'), ('fixed_costs'), ('salaries'),
-      ('salary_payments'), ('werkstatt_checks'), ('driver_notes'), ('documents'),
-      ('car_driver_assignments'), ('cash_transactions'), ('document_templates'),
-      ('company_planning_runs'), ('company_planning_run_blocks'),
-      ('monthly_planning_manual_exceptions'), ('planning_finalizations'),
-      ('planning_run_adjustments'), ('historical_reconciliations'), ('historical_block_adjustments'),
-      ('historical_driver_hour_targets'), ('historical_payroll_targets'),
-      ('historical_time_adjustments'), ('historical_wh_saved_plans'), ('saved_stundennachweise'),
-      ('fahrtenbuch_imports'), ('fahrtenbuch_trips'), ('fahrtenbuch_assignment_audit'),
-      ('notification_settings'), ('cash_movements'), ('salary_cash_receipts'),
-      ('document_blocks'), ('document_variables'), ('historical_reconciliation_drivers'),
-      ('historical_reconciliation_results'), ('historical_reconciliation_wh_drivers'),
-      -- the three shell tables whose write predicate this file's own change
-      -- completes; see the trigger loop for why they are not optional, and for
-      -- why company_settings is deliberately not among them
-      ('roles'), ('role_permissions'), ('activation_code_attempts')
-    ) AS t(tbl)
+    FROM (
+      SELECT DISTINCT p.tablename::text AS tbl
+        FROM pg_policies p
+       WHERE p.schemaname = 'public'
+         AND (coalesce(p.qual, '') || ' ' || coalesce(p.with_check, '')) ~ 'get_active_company_id'
+       UNION
+      SELECT v.tbl::text
+        FROM (VALUES ('roles'), ('role_permissions'), ('activation_code_attempts')) AS v(tbl)
+    ) t
    WHERE to_regclass('public.' || t.tbl) IS NOT NULL
      AND NOT EXISTS (SELECT 1 FROM pg_trigger g
                       WHERE g.tgrelid = ('public.' || t.tbl)::regclass

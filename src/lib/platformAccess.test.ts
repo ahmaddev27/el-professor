@@ -38,9 +38,35 @@ describe('parsePlatformWhoami', () => {
     }
   });
 
-  it('reports nothing beyond the role and its capabilities', () => {
+  // This expectation moved with 20260917140000 (plan 3.4), deliberately and not
+  // by accident: `company_context` used to be dropped because nothing could act
+  // on it, and it is now the one thing that decides whether a company may be
+  // opened at all. Everything else is still dropped — `verified` below is the
+  // control that proves it.
+  it('reports the role, its capabilities and the open context, and nothing else', () => {
     expect(Object.keys(parsePlatformWhoami({ role: 'owner', capabilities: [], verified: true, company_context: null })))
-      .toEqual(['role', 'capabilities']);
+      .toEqual(['role', 'capabilities', 'companyContext']);
+  });
+
+  it('reads an open context, and refuses one it cannot trust', () => {
+    const open = parsePlatformWhoami({
+      role: 'support', capabilities: [],
+      company_context: {
+        company_id: 'c1', company_name: 'Test A', mode: 'support',
+        expires_at: '2026-09-17T12:00:00Z', seconds_remaining: 3599,
+      },
+    });
+    expect(open.companyContext).toEqual({
+      companyId: 'c1', companyName: 'Test A', mode: 'support',
+      expiresAt: '2026-09-17T12:00:00Z', secondsRemaining: 3599,
+    });
+
+    // No company, and a mode this build does not know: both read as no context,
+    // so the screens offer nothing rather than something the database refuses.
+    for (const bad of [{ mode: 'support' }, { company_id: 'c1', mode: 'peek' }, null, 'open', []]) {
+      expect(parsePlatformWhoami({ role: 'owner', capabilities: [], company_context: bad }).companyContext)
+        .toBeNull();
+    }
   });
 });
 

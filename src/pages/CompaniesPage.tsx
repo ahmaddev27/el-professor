@@ -8,7 +8,8 @@ import {
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { callPlatformRpc } from '../lib/platformRpc';
-import { fetchCompanies } from '../lib/platformDirectoryClient';
+import { fetchCompanies, fetchUsers } from '../lib/platformDirectoryClient';
+import { platformReadRefusalKey } from '../lib/platformReadModels';
 import { useAuth } from '../contexts/AuthContext';
 import { useSuperAdmin, CompanyListItem } from '../contexts/SuperAdminContext';
 import { useToast } from '../contexts/ToastContext';
@@ -601,6 +602,10 @@ interface CompanyDetailProps {
 
 function CompanyDetail({ company, onBack, onEdit, onLifecycleAction, onEnterCompany, onRefresh }: CompanyDetailProps) {
   const [users, setUsers] = useState<CompanyUser[]>([]);
+  // The true count, from the read model, so a company with more users than one
+  // page holds still shows the right figure; null means "not readable here".
+  const [usersTotal, setUsersTotal] = useState<number | null>(null);
+  const [usersProblem, setUsersProblem] = useState<TranslationKey | null>(null);
   const [loadingUsers, setLoadingUsers] = useState(true);
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [actionMenuOpen, setActionMenuOpen] = useState(false);
@@ -618,15 +623,54 @@ function CompanyDetail({ company, onBack, onEdit, onLifecycleAction, onEnterComp
   const isDeleted = company.status === 'deleted';
   const isOperational = !isArchived && !isDeleted;
 
+  /*
+    The drawer's user list comes from the audited read model, not from
+    user_profiles directly. Since 20260917140000 (plan 3.4) a platform account
+    reads no company's profiles with its own JWT, so the direct query returned
+    `[]` with `error === null` — no throw, no toast — and the drawer showed
+    "Benutzer 0" and its empty state for a company with twelve of them, while
+    the Benutzer-verwalten actions stayed enabled. platform_users_list answers
+    under business.read, takes the company as p_company_id, and records the read.
+
+    The counts come from the model's `total`, not from items.length, so they
+    stay true for a company with more users than one page holds while the table
+    lists the first page. A refusal or a transport failure leaves them unknown
+    and the figures show a dash, never a number that would be false.
+
+    Two differences are by design rather than losses: the directory omits
+    accounts carrying a platform_staff row (the team page is 3.12's), and it
+    returns reduced columns — `id` is mapped from user_id, whose only use here
+    is the row key.
+  */
   const loadUsers = useCallback(async () => {
     try {
       setLoadingUsers(true);
-      const { data, error } = await supabase.from('user_profiles')
-        .select('id, user_id, email, full_name, role, status, is_super_admin, created_at')
-        .eq('company_id', company.id).order('created_at');
-      if (error) throw error;
-      setUsers(data || []);
+      setUsersProblem(null);
+      const page = await fetchUsers({
+        companyId: company.id, search: '', status: null,
+        sort: 'created_at_asc', pageIndex: 0,
+      });
+      if (!page.ok) {
+        setUsers([]);
+        setUsersTotal(null);
+        setUsersProblem(platformReadRefusalKey(page.reason));
+        return;
+      }
+      setUsers(page.items.map(u => ({
+        id: u.user_id,
+        user_id: u.user_id,
+        email: u.email ?? '',
+        full_name: u.full_name,
+        role: u.role ?? '',
+        status: u.status ?? '',
+        is_super_admin: false,
+        created_at: u.created_at ?? '',
+      })));
+      setUsersTotal(page.total);
     } catch {
+      setUsers([]);
+      setUsersTotal(null);
+      setUsersProblem(platformReadRefusalKey('failed'));
       showToast('error', t('sa.companies.errorLoadUsers'));
     } finally {
       setLoadingUsers(false);
@@ -819,11 +863,15 @@ function CompanyDetail({ company, onBack, onEdit, onLifecycleAction, onEnterComp
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2 text-sm" style={{ color: 'var(--text-secondary)' }}><Users size={14} />{t('sa.companies.users')}</div>
-              <span className="font-bold text-lg" style={{ color: 'var(--text-primary)' }}>{users.length}</span>
+              <span className="font-bold text-lg" style={{ color: 'var(--text-primary)' }}>{usersTotal ?? '–'}</span>
             </div>
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2 text-sm" style={{ color: 'var(--text-secondary)' }}><Shield size={14} />{t('sa.companies.admins')}</div>
-              <span className="font-bold text-lg" style={{ color: 'var(--text-primary)' }}>{users.filter(u => u.role === 'admin').length}</span>
+              {/* Counted from the page in hand, so it is only the truth when
+                  the page holds every user; otherwise it says so. */}
+              <span className="font-bold text-lg" style={{ color: 'var(--text-primary)' }}>
+                {usersTotal !== null && usersTotal === users.length ? users.filter(u => u.role === 'admin').length : '–'}
+              </span>
             </div>
           </div>
         </div>
@@ -832,7 +880,9 @@ function CompanyDetail({ company, onBack, onEdit, onLifecycleAction, onEnterComp
       {/* Users table */}
       <div className="rounded-2xl overflow-hidden" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
         <div className="flex items-center justify-between px-5 py-4 border-b" style={{ borderColor: 'var(--border)' }}>
-          <h3 className="font-semibold" style={{ color: 'var(--text-primary)' }}>{t('sa.companies.usersCount', { count: users.length })}</h3>
+          <h3 className="font-semibold" style={{ color: 'var(--text-primary)' }}>
+            {usersTotal === null ? t('sa.companies.users') : t('sa.companies.usersCount', { count: usersTotal })}
+          </h3>
           {isOperational && canManageUsers && (
             <button onClick={() => setShowInviteModal(true)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold" style={{ background: 'var(--accent-subtle)', color: 'var(--accent)' }}
               onMouseEnter={e => (e.currentTarget.style.opacity = '0.8')}
@@ -843,6 +893,9 @@ function CompanyDetail({ company, onBack, onEdit, onLifecycleAction, onEnterComp
         </div>
         {loadingUsers ? (
           <div className="flex items-center justify-center py-10"><RefreshCw size={18} className="animate-spin" style={{ color: 'var(--text-tertiary)' }} /></div>
+        ) : usersProblem ? (
+          // "Not readable from here" is not "this company has no users".
+          <div className="py-10 text-center"><Users size={28} className="mx-auto mb-2" style={{ color: 'var(--text-tertiary)' }} /><p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>{t(usersProblem)}</p></div>
         ) : users.length === 0 ? (
           <div className="py-10 text-center"><Users size={28} className="mx-auto mb-2" style={{ color: 'var(--text-tertiary)' }} /><p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>{t('sa.companies.noUsers')}</p></div>
         ) : (
@@ -1044,8 +1097,14 @@ export default function CompaniesPage() {
     setLifecycleModal({ action, company });
   };
 
+  // Opening a company needs an open support session, not only business.read —
+  // without one the database answers every tenant query with nothing. Refuse
+  // and say so; do not report success for a company that was not opened.
   const handleEnterCompany = (company: CompanyListItem) => {
-    enterCompany(company);
+    if (!enterCompany(company)) {
+      showToast('error', t('sa.companies.needsSupportSession'));
+      return;
+    }
     showToast('success', t('sa.companies.toast.nowActiveAs', { name: company.name }));
   };
 

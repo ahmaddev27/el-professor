@@ -823,9 +823,14 @@ BEGIN
   PERFORM _pc_ok('roles: another company''s role is not even visible to be pulled in',
     _pc_try(u_o, s_o, format('UPDATE roles SET company_id = %L WHERE id = %L', co_x, _pc_id('role:y')))
       = 'rows 0');
+  -- Matched on the pin's own sentence, not on its SQLSTATE: both
+  -- refuse_column_change and refuse_read_only_context_write raise P0001, so the
+  -- code alone cannot say which one spoke, and an assertion that cannot tell
+  -- them apart does not prove the pin.
   PERFORM _pc_ok('roles: and the pin refuses its own company''s role being pushed out',
     _pc_try(u_o, s_o, format('UPDATE roles SET company_id = %L WHERE id = %L',
-                             _pc_id('company:y'), _pc_id('role:x'))) LIKE 'ERR P0001%');
+                             _pc_id('company:y'), _pc_id('role:x')))
+      LIKE 'ERR P0001 roles.company_id: is fixed when the row is written%');
   PERFORM _pc_ok('roles: the company''s own role is still readable and editable inside the session',
     _pc_try(u_o, s_o, format('SELECT count(*)::text FROM roles WHERE id = %L', _pc_id('role:x'))) = '1'
     AND _pc_try(u_o, s_o, format('UPDATE roles SET name = ''PC renamed'' WHERE id = %L', _pc_id('role:x')))
