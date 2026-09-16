@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import {
   BarChart3, Building2, Receipt, Stethoscope,
-  Menu, X, LogOut, ShieldCheck,
+  Menu, X, LogOut, ShieldCheck, UserCog,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
@@ -31,6 +31,35 @@ const ADMIN_NAV_ITEMS: AdminNavItem[] = [
   // The diagnosis reads a company's Fahrtenbuch and planning data.
   { path: '/super-admin/abnahme-diagnose', icon: Stethoscope, labelKey: 'admin.nav.diagnostics', requires: 'business.read' },
 ];
+
+/**
+ * One look for every sidebar destination. The account link sits in the footer
+ * rather than in the nav, so sharing these keeps the two from drifting apart.
+ */
+const NAV_ITEM_CLASS =
+  'flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-150 w-full';
+
+const navItemStyle = ({ isActive }: { isActive: boolean }): React.CSSProperties =>
+  isActive
+    ? { background: 'var(--warning)', color: 'white', boxShadow: '0 2px 10px rgba(245,158,11,0.2)' }
+    : { color: 'var(--text-secondary)', background: 'transparent' };
+
+// NavLink marks the active entry with aria-current; its colours must survive hover.
+const handleNavItemMouseEnter = (e: React.MouseEvent<HTMLAnchorElement>) => {
+  const el = e.currentTarget;
+  if (!el.getAttribute('aria-current')) {
+    el.style.background = 'var(--warning-subtle)';
+    el.style.color = 'var(--warning)';
+  }
+};
+
+const handleNavItemMouseLeave = (e: React.MouseEvent<HTMLAnchorElement>) => {
+  const el = e.currentTarget;
+  if (!el.getAttribute('aria-current')) {
+    el.style.background = 'transparent';
+    el.style.color = 'var(--text-secondary)';
+  }
+};
 
 const ROLE_LABEL_KEYS: Record<PlatformRole, TranslationKey> = {
   owner:     'admin.role.owner',
@@ -80,26 +109,10 @@ const AdminSidebar: React.FC = () => {
               to={item.path}
               end={item.end}
               onClick={() => setIsMobileMenuOpen(false)}
-              className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-150 w-full"
-              style={({ isActive }) =>
-                isActive
-                  ? { background: 'var(--warning)', color: 'white', boxShadow: '0 2px 10px rgba(245,158,11,0.2)' }
-                  : { color: 'var(--text-secondary)', background: 'transparent' }
-              }
-              onMouseEnter={e => {
-                const el = e.currentTarget as HTMLElement;
-                if (!el.getAttribute('aria-current')) {
-                  el.style.background = 'var(--warning-subtle)';
-                  el.style.color = 'var(--warning)';
-                }
-              }}
-              onMouseLeave={e => {
-                const el = e.currentTarget as HTMLElement;
-                if (!el.getAttribute('aria-current')) {
-                  el.style.background = 'transparent';
-                  el.style.color = 'var(--text-secondary)';
-                }
-              }}
+              className={NAV_ITEM_CLASS}
+              style={navItemStyle}
+              onMouseEnter={handleNavItemMouseEnter}
+              onMouseLeave={handleNavItemMouseLeave}
             >
               <Icon size={16} className="flex-shrink-0" />
               <span>{t(item.labelKey)}</span>
@@ -119,6 +132,20 @@ const AdminSidebar: React.FC = () => {
             {t(ROLE_LABEL_KEYS[platformAccess.role])}
           </p>
         )}
+        {/* Personal, not a platform destination: the account page shows the
+            caller's own record, so it carries no capability requirement and
+            every platform role — read_only included — reaches it. */}
+        <NavLink
+          to="/mein-konto"
+          onClick={() => setIsMobileMenuOpen(false)}
+          className={NAV_ITEM_CLASS}
+          style={navItemStyle}
+          onMouseEnter={handleNavItemMouseEnter}
+          onMouseLeave={handleNavItemMouseLeave}
+        >
+          <UserCog size={16} className="flex-shrink-0" />
+          <span>{t('admin.nav.account')}</span>
+        </NavLink>
         <button
           onClick={handleLogout}
           className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium w-full transition-all duration-150"

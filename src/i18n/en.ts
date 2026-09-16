@@ -46,6 +46,7 @@ export const en: PartialDictionary = {
   'admin.nav.companies':    'Companies',
   'admin.nav.billing':      'Subscriptions & payments',
   'admin.nav.diagnostics':  'Acceptance diagnostics',
+  'admin.nav.account':      'Account',
   'admin.access.checking':  'Checking platform access…',
   'admin.access.errorTitle': 'Platform access could not be checked',
   'admin.access.errorBody': 'The connection to the server failed. Please try again.',
