@@ -7,7 +7,7 @@ import { format, startOfMonth, endOfMonth } from 'date-fns';
 import { exportTableToExcel } from '../utils/excelExport';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { useTranslation } from '../contexts/LanguageContext';
-import { receiptScope } from '../utils/salaryCashReceiptFlow';
+import { cashLedgerInScope } from '../utils/salaryCashReceiptFlow';
 import { fetchAllPaginated } from '../utils/fetchAllPaginated';
 import { formatCentsDe } from '../utils/money';
 import {
@@ -44,21 +44,25 @@ import {
  * The arithmetic is integer cents (utils/cashLedger.ts); euros appear only in
  * the formatting below.
  *
- * ## One reader cannot see the third term
+ * ## Not every reader can see the third term
  *
- * cash_movements and salary_cash_receipts are SELECT-policied
- * `company_id = get_user_company_id()` with no super-admin branch — unlike
- * income and receipts, which have one. Platform staff who have entered a
- * customer therefore read that customer's real Bargeld and Belege and *no*
- * movements at all, and an empty set there is indistinguishable from "no
- * payouts". Printing 0,00 € under "Gehaltsauszahlungen (bar)" would turn a
- * missing read into a claim, for the one role that is supposed to read
- * everything.
+ * cash_movements and salary_cash_receipts used to be SELECT-policied
+ * `company_id = get_user_company_id()` with no platform branch — unlike income
+ * and receipts, which had one. Platform staff who had entered a customer
+ * therefore read that customer's real Bargeld and Belege and *no* movements at
+ * all, and an empty set there is indistinguishable from "no payouts". Printing
+ * 0,00 € under "Gehaltsauszahlungen (bar)" would turn a missing read into a
+ * claim.
  *
- * So when the ledger is out of scope this screen drops the payout card, keeps
- * the older `Bargeld − Belege` label and says why. Slice 3.3 gives both tables
- * the get_active_company_id() / platform_view_company_id() path; remove the
- * guard in that release.
+ * Slice 3.3 (20260917130000) did not lift that guard; it narrowed it. Both
+ * tables now carry the SELECT shape every business table carries, whose
+ * platform branch is `platform_reads_company_data()` — today
+ * `platform_can('business.read')`, held by `owner`, `support` and `read_only`
+ * and *not* by `billing`. So the ledger is in scope for the caller's own
+ * company or for a reader holding business.read, and a billing account still
+ * reads no movements. For that reader this screen still drops the payout card,
+ * keeps the older `Bargeld − Belege` label and says why, and the Excel dump
+ * carries the same caveat. The decision is cashLedgerInScope().
  */
 
 const EMPTY_TOTALS: CashLedgerTotals = {
@@ -86,14 +90,19 @@ export default function BargeldbestandPage() {
   const [endDate, setEndDate] = useState('');
   const [drivers, setDrivers] = useState<string[]>([]);
   const { user, loading: authLoading, companyId: ownCompanyId } = useAuth();
-  const { effectiveCompanyId: companyId, isViewingAsCompany } = useSuperAdmin();
+  const { effectiveCompanyId: companyId, isViewingAsCompany, platformCan } = useSuperAdmin();
   const { showToast } = useToast();
 
   // The same scope the Gehaltsquittung screens use, because it is the same two
-  // tables and the same policy. Not a bare !isViewingAsCompany: staff who enter
-  // their *own* company still read the ledger, and that would have hidden it.
-  const ledgerInScope =
-    receiptScope({ companyId: ownCompanyId, effectiveCompanyId: companyId, isViewingAsCompany }) === 'own_company';
+  // tables and the same policy — widened by the one capability 3.3 put into
+  // that policy. Not a bare !isViewingAsCompany: staff who enter their *own*
+  // company still read the ledger, and that would have hidden it.
+  const ledgerInScope = cashLedgerInScope({
+    companyId: ownCompanyId,
+    effectiveCompanyId: companyId,
+    isViewingAsCompany,
+    platformReadsCompanyData: platformCan('business.read'),
+  });
 
   const ledgerLabels: CashLedgerLabels = {
     bargeldIncome: t('bargeld.incomeEntry'),

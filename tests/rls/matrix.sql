@@ -2096,6 +2096,30 @@ INSERT INTO _mx_rpc (label, stmt, want, hole) VALUES
      'PPPPPPP', NULL),
     ('purge_unverified_signups(…)',
      $q$SELECT purge_unverified_signups(interval '24 hours')::text$q$,
+     'PPPPPPP', NULL),
+
+    -- Google signup (20260916100000, 20260916100020, plan step 1.6): the four
+    -- public oauth_* functions, service_role only by design. 20260916100020
+    -- revokes PUBLIC, anon and authenticated on each and grants service_role
+    -- alone, and its own self-check fails the release if anon or authenticated
+    -- can execute one. That migration is newer than the fixture, so those
+    -- grants are real here and every cell is probed rather than `-`. No
+    -- principal in _mx_who_logins() is service_role — anon logs in as anon and
+    -- the six others as authenticated — so EXECUTE is refused before any body
+    -- runs and the NULL arguments below are never evaluated. `oauth-account`
+    -- calls the first three with the service role, never the browser, and the
+    -- purge is deploy/otp-housekeeping.sh's daily job.
+    ('oauth_signup_create_company(…)',
+     $q$SELECT oauth_signup_create_company(NULL::uuid, NULL::text, NULL::text, NULL::text, NULL::text, NULL::integer, NULL::text, NULL::text)::text$q$,
+     'PPPPPPP', NULL),
+    ('oauth_session_reconcile(…)',
+     $q$SELECT oauth_session_reconcile(NULL::uuid)::text$q$,
+     'PPPPPPP', NULL),
+    ('oauth_signup_discard(…)',
+     $q$SELECT oauth_signup_discard(NULL::uuid)::text$q$,
+     'PPPPPPP', NULL),
+    ('purge_abandoned_oauth_signups(…)',
+     $q$SELECT purge_abandoned_oauth_signups(interval '24 hours')::text$q$,
      'PPPPPPP', NULL);
 
 DO $$

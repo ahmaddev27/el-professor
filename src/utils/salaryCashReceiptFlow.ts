@@ -430,6 +430,47 @@ export function scopeRefusal(scope: ReceiptScope): ReceiptActionRefusal | null {
   return null;
 }
 
+/**
+ * Whether the cash ledger's third term — the Gehaltsquittungen and their
+ * Stornos in `cash_movements` — is readable, and so whether the Bargeldbestand
+ * and the Overview's cash panel may present a till at all.
+ *
+ * Before `20260917130000` both ledger tables were SELECT-policied on the
+ * caller's own company with no platform branch, unlike `income` and
+ * `receipts`. Platform staff inside a customer therefore read that customer's
+ * real Bargeld and Belege and *no* movements, and an empty set there is
+ * indistinguishable from "no payouts" — the screen would have printed a
+ * confident and false `0,00 €` under "Gehaltsauszahlungen (bar)".
+ *
+ * Slice 3.3 did not lift that guard; it narrowed it. Both tables now carry the
+ * SELECT shape every business table carries,
+ * `company_id = get_active_company_id() OR platform_reads_company_data()`, so
+ * the ledger is readable exactly where Bargeld and Belege are. But
+ * `platform_reads_company_data()` is `platform_can('business.read')`, held by
+ * `owner`, `support` and `read_only` and **not** by `billing`. A billing
+ * account still reads no movements, so it still must not be shown a balance
+ * that looks complete. The read is granted by capability, not by staff status.
+ *
+ * `platformReadsCompanyData` is that one database seam and nothing else —
+ * today `platformCan('business.read')` from SuperAdminContext, the same source
+ * AdminSidebar gates on. Slice 3.4 moves the seam behind a recorded support
+ * session by changing that one function body, and this mirror changes with it.
+ */
+export function cashLedgerInScope({
+  companyId,
+  effectiveCompanyId,
+  isViewingAsCompany,
+  platformReadsCompanyData,
+}: {
+  companyId: string | null;
+  effectiveCompanyId: string | null;
+  isViewingAsCompany: boolean;
+  platformReadsCompanyData: boolean;
+}): boolean {
+  const scope = receiptScope({ companyId, effectiveCompanyId, isViewingAsCompany });
+  return scope === 'own_company' || platformReadsCompanyData;
+}
+
 // ─── A confirmation without an answer ───────────────────────────────────────
 
 export interface StorageLike {
