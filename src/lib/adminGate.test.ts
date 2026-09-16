@@ -8,6 +8,7 @@ import {
   legacyAdminTarget,
   platformEntry,
   platformEntryPath,
+  platformReturnPath,
   platformSignInMessageKey,
   type AdminGateState,
   type PlatformSessionState,
@@ -75,6 +76,40 @@ describe('platformEntry', () => {
 
   it('never reads a stale flag from a session that no longer exists', () => {
     expect(platformEntry({ ...PLATFORM_SESSION, hasSession: false })).toBe('signIn');
+  });
+});
+
+describe('platformReturnPath', () => {
+  it('keeps a deep link into the panel', () => {
+    expect(platformReturnPath(ADMIN_BASE)).toBe(ADMIN_BASE);
+    expect(platformReturnPath('/admin/protokoll')).toBe('/admin/protokoll');
+    expect(platformReturnPath('/admin/konto')).toBe('/admin/konto');
+  });
+
+  it('never goes back to the sign-in page, which would answer with itself forever', () => {
+    expect(platformReturnPath(ADMIN_LOGIN_PATH)).toBeNull();
+    expect(platformReturnPath(`${ADMIN_LOGIN_PATH}/`)).toBeNull();
+  });
+
+  it('drops a path that is not inside the panel', () => {
+    expect(platformReturnPath('/overview')).toBeNull();
+    expect(platformReturnPath('/super-admin/protokoll')).toBeNull();
+    expect(platformReturnPath('/administration')).toBeNull();
+    expect(platformReturnPath('')).toBeNull();
+  });
+
+  it('cannot be talked into leaving the panel, or the site', () => {
+    expect(platformReturnPath('//evil.example/admin')).toBeNull();
+    expect(platformReturnPath('https://evil.example/admin')).toBeNull();
+    expect(platformReturnPath('/admin/../evil')).toBeNull();
+    expect(platformReturnPath('/admin\\..\\evil')).toBeNull();
+  });
+
+  it('answers null for anything that is not a string', () => {
+    expect(platformReturnPath(undefined)).toBeNull();
+    expect(platformReturnPath(null)).toBeNull();
+    expect(platformReturnPath(42)).toBeNull();
+    expect(platformReturnPath({ from: ADMIN_BASE })).toBeNull();
   });
 });
 
