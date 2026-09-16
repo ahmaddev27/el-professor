@@ -533,10 +533,20 @@ BEGIN
       LIKE 'ERR 42501%row-level security%');
 
   -- Everything it wrote is still the company's own data, and the company's
-  -- people still see it: the session is a way in, not a second tenant.
+  -- people still see it: the session is a way in, not a second tenant. This is
+  -- the one assertion in the file whose subject is the *effect* of a write
+  -- rather than its outcome, so the write is made the way the context opens
+  -- above are made — become the principal, write, reset — and not through
+  -- _pc_try, which raises ZZ007 to unwind its own subtransaction and therefore
+  -- discards every write it measures. The rename probed at the top of this
+  -- section was rolled back with it; this one has to survive to be read back.
+  -- A name of its own, so what the company reads is unambiguously this write.
+  PERFORM _pc_as(u_o, s_o);
+  UPDATE drivers SET name = 'PC fixed by support' WHERE id = _pc_id('driver:x');
+  PERFORM _pc_reset();
   PERFORM _pc_ok('support: what it wrote belongs to the company, and the company reads it',
     _pc_try(_pc_id('user:admin-x'), _pc_id('session:admin-x'),
-            format('SELECT count(*)::text FROM drivers WHERE company_id = %L AND name = ''PC fixed''', co_x)) = '1');
+            format('SELECT count(*)::text FROM drivers WHERE company_id = %L AND name = ''PC fixed by support''', co_x)) = '1');
 END $$;
 
 -- ─── 7. expiry ends it ──────────────────────────────────────────────────────
@@ -758,7 +768,7 @@ BEGIN
             'SELECT (platform_whoami() ->> ''role'')') = '<null>');
 END $$;
 
--- ─── 13. a role row cannot be pulled into the company being supported ───────
+-- ─── 13. a role row cannot move between companies ───────────────────────────
 
 DO $$
 DECLARE
@@ -766,13 +776,28 @@ DECLARE
   u_o  constant uuid := _pc_id('user:owner');
   s_o  constant uuid := _pc_id('session:owner');
 BEGIN
-  -- company_users.manage names no company by design, and the shell term now
-  -- answers the context — so without the pin this UPDATE would satisfy the
-  -- WITH CHECK and move company Y's role into company X.
-  PERFORM _pc_ok('roles: a support session cannot pull another company''s role into the one it is supporting',
+  /*
+    company_users.manage names no company by design, and the shell term now
+    answers the open context, so a role row must be held to its company by
+    something. Two things do, depending on the direction, and this says both
+    rather than claiming the trigger for both:
+
+      pulling in    company Y's role is not visible to a context on company X.
+                    roles_select is `company_id IS NULL OR company_id =
+                    get_user_company_id()` and the read seam is false, so the
+                    UPDATE matches no row, returns `rows 0`, and the pin trigger
+                    is never reached at all.
+      pushing out   company X's role *is* visible and the write policy admits
+                    the statement through company_users.manage, so the pin is
+                    the only thing left to refuse it — and does.
+
+    Without the pin, that second one is the write that would have moved a
+    tenant's role into the company being supported.
+  */
+  PERFORM _pc_ok('roles: another company''s role is not even visible to be pulled in',
     _pc_try(u_o, s_o, format('UPDATE roles SET company_id = %L WHERE id = %L', co_x, _pc_id('role:y')))
-      LIKE 'ERR P0001%');
-  PERFORM _pc_ok('roles: nor push its own out',
+      = 'rows 0');
+  PERFORM _pc_ok('roles: and the pin refuses its own company''s role being pushed out',
     _pc_try(u_o, s_o, format('UPDATE roles SET company_id = %L WHERE id = %L',
                              _pc_id('company:y'), _pc_id('role:x'))) LIKE 'ERR P0001%');
   PERFORM _pc_ok('roles: the company''s own role is still readable and editable inside the session',
