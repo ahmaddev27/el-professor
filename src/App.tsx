@@ -1,4 +1,5 @@
 import React, { Suspense, lazy } from 'react';
+import { AlertCircle } from 'lucide-react';
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from './contexts/AuthContext';
 import { CompanySettingsProvider } from './contexts/CompanySettingsContext';
@@ -180,10 +181,48 @@ const AuthLoadingScreen: React.FC = () => (
   </div>
 );
 
+/**
+ * The profile never answered, after the bounded retries in AuthContext.
+ *
+ * The gate above stays closed — a profile that did not load must never be read
+ * as an account without one — so this is what keeps that from being an
+ * indefinite spinner: nothing else reloads the profile until a token refresh or
+ * a page reload, which can be an hour away.
+ */
+const ProfileUnavailableScreen: React.FC<{ onRetry: () => void; onSignOut: () => void }> = ({ onRetry, onSignOut }) => {
+  const { t } = useTranslation();
+
+  return (
+    <div className="min-h-screen bg-[#060a0f] flex items-center justify-center p-4">
+      <div className="w-full max-w-sm text-center bg-white/4 backdrop-blur-xl border border-white/10 rounded-2xl p-7">
+        <div className="w-12 h-12 rounded-full bg-amber-500/15 border border-amber-500/30 flex items-center justify-center mx-auto mb-4">
+          <AlertCircle className="text-amber-400" size={22} aria-hidden="true" />
+        </div>
+        <h2 className="text-white font-semibold mb-2">{t('profile.unavailable.title')}</h2>
+        <p className="text-white/60 text-sm leading-relaxed mb-6">{t('profile.unavailable.body')}</p>
+        <div className="flex flex-col gap-2">
+          <button
+            onClick={onRetry}
+            className="w-full bg-gradient-to-r from-cyan-500 to-blue-600 text-white py-3 px-4 rounded-xl font-semibold text-sm"
+          >
+            {t('profile.unavailable.retry')}
+          </button>
+          <button
+            onClick={onSignOut}
+            className="w-full text-white/50 hover:text-white/80 text-sm py-2 transition-colors"
+          >
+            {t('common.logout')}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 // ─── App ──────────────────────────────────────────────────────────────────────
 
 function App() {
-  const { user, profile, profileLoaded, loading: authLoading, isAdmin, isSuperAdmin, companyApprovalStatus, userBlockReason } = useAuth();
+  const { user, profile, profileLoaded, profileLoadFailed, refreshProfile, signOut, loading: authLoading, isAdmin, isSuperAdmin, companyApprovalStatus, userBlockReason } = useAuth();
 
   // Ahead of every gate: the preview reads no account or tenant data, and it
   // has to render for a reviewer whatever their session state is.
@@ -226,7 +265,11 @@ function App() {
   // company at all. The gates themselves are unchanged, and in the ordinary
   // case the profile is already loaded when `authLoading` clears.
   if (!profileLoaded) {
-    return <AuthLoadingScreen />;
+    // Retrying clears the failure in AuthContext, so this falls back to the
+    // spinner while the next attempts run.
+    return profileLoadFailed
+      ? <ProfileUnavailableScreen onRetry={() => { void refreshProfile(); }} onSignOut={() => { void signOut(); }} />
+      : <AuthLoadingScreen />;
   }
 
   // Account revocation gate. Runs before the company gates because it is the

@@ -4192,4 +4192,11 @@ export const de = {
   'gsignup.error.noPendingSignup':   'Für diesen Zugang liegt keine offene Registrierung vor. Bitte melden Sie sich erneut mit Google an.',
   'gsignup.error.invalid':           'Bitte prüfen Sie Ihre Eingaben.',
   'gsignup.error.failed':            'Die Registrierung konnte nicht abgeschlossen werden. Bitte versuchen Sie es erneut.',
+
+  // Das Profil entscheidet jede Zugangsprüfung. Antwortet die Abfrage nicht,
+  // wartet die App bewusst, statt ein fehlendes Profil anzunehmen — nach
+  // mehreren Versuchen erscheint dieser Ausweg.
+  'profile.unavailable.title': 'Konto konnte nicht geladen werden',
+  'profile.unavailable.body':  'Ihre Kontodaten konnten nicht abgerufen werden. Das liegt meist an der Verbindung. Bitte versuchen Sie es erneut oder melden Sie sich ab.',
+  'profile.unavailable.retry': 'Erneut versuchen',
 } as const;
