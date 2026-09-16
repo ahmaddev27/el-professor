@@ -62,6 +62,7 @@ import {
   legacyAdminTarget,
   platformEntry,
   platformEntryPath,
+  platformReturnPath,
 } from './lib/adminGate';
 
 // ─── Design preview (Phase 2 prototype) ──────────────────────────────────────
@@ -222,6 +223,7 @@ const AuthLoadingScreen: React.FC = () => (
  */
 const AdminLoginRoute: React.FC = () => {
   const { user, profileLoaded, loading, isSuperAdmin } = useAuth();
+  const location = useLocation();
   const entry = platformEntry({
     authLoading: loading,
     hasSession: !!user,
@@ -231,11 +233,20 @@ const AdminLoginRoute: React.FC = () => {
 
   if (entry === 'loading') return <AuthLoadingScreen />;
   if (entry === 'signIn') return <PlatformLoginPage />;
+
+  // Back to the page the visitor asked for before signing in, when there was
+  // one and it is a panel path — `platformReturnPath` is where that is decided.
+  // Only for an account the panel is actually for: a company user has no
+  // business at /admin/protokoll, so it goes to its own app whatever the
+  // browser remembers.
+  const state = location.state as { from?: unknown } | null;
+  const returnTo = entry === 'panel' ? platformReturnPath(state?.from) : null;
+
   // A company user that signs in here belongs in its own app, not in a shell
   // with nothing it may open. Refusing it a session instead would be a
   // permission notion of the browser's own invention: what any account may
   // actually do is decided in the database, on every call.
-  return <Navigate to={platformEntryPath(entry) ?? ADMIN_BASE} replace />;
+  return <Navigate to={returnTo ?? platformEntryPath(entry) ?? ADMIN_BASE} replace />;
 };
 
 /**
@@ -251,6 +262,26 @@ const LegacyAdminRedirect: React.FC = () => {
   const location = useLocation();
   const target = legacyAdminTarget(location.pathname) ?? ADMIN_BASE;
   return <Navigate to={`${target}${location.search}${location.hash}`} replace />;
+};
+
+/**
+ * A platform path asked for without a session: the sign-in page, remembering
+ * where the visitor was going.
+ *
+ * It answers for the old entry as well as the new one, and that is the case the
+ * front door exists for — signed out is exactly when a `/super-admin` bookmark
+ * gets followed, and without this it lands on the marketing landing page
+ * through the public catch-all.
+ *
+ * The remembered path travels in the router's own location state rather than in
+ * the query string, so it never appears in the address bar. It is not trusted
+ * on the way back: `platformReturnPath` validates it.
+ */
+const PlatformSignInRedirect: React.FC = () => {
+  const location = useLocation();
+  const intended = legacyAdminTarget(location.pathname) ?? location.pathname;
+  const from = platformReturnPath(intended);
+  return <Navigate to={ADMIN_LOGIN_PATH} state={from ? { from } : undefined} replace />;
 };
 
 /**
@@ -325,9 +356,13 @@ function App() {
           <Route path="/signup" element={<SignupPage />} />
           {/* The platform team signs in here, not through the company login.
               Anything else under /admin without a session lands on it: the
-              panel is never rendered for a browser that has no account at all. */}
+              panel is never rendered for a browser that has no account at all.
+              The old entry answers here too — signed out is exactly when a
+              /super-admin bookmark is followed, and the public catch-all below
+              would otherwise drop it on the landing page. */}
           <Route path={ADMIN_LOGIN_PATH} element={<AdminLoginRoute />} />
-          <Route path={`${ADMIN_BASE}/*`} element={<Navigate to={ADMIN_LOGIN_PATH} replace />} />
+          <Route path={`${ADMIN_BASE}/*`} element={<PlatformSignInRedirect />} />
+          <Route path={`${LEGACY_ADMIN_BASE}/*`} element={<PlatformSignInRedirect />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </BrowserRouter>

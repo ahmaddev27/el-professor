@@ -69,7 +69,7 @@ const PlatformLoginPage: React.FC = () => {
   const labelClass = 'block text-xs font-semibold uppercase tracking-wider mb-2';
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-4" style={{ background: 'var(--bg-base)' }}>
+    <div className="relative min-h-screen flex items-center justify-center p-4" style={{ background: 'var(--bg-base)' }}>
       <div className="absolute top-4 right-4 z-10">
         <LanguageSwitcher />
       </div>

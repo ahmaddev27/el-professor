@@ -97,6 +97,29 @@ export function platformEntryPath(entry: PlatformEntry): string | null {
   }
 }
 
+/**
+ * The panel path a signed-out visitor was heading for, if going back to it is
+ * safe — otherwise null, and the caller falls back to the panel's entry.
+ *
+ * Without this a bookmark of `/admin/protokoll` ends on the dashboard, because
+ * the sign-in page is reached by a redirect that remembers nothing.
+ *
+ * It is a validator and not a formality: a value that decides where a browser
+ * goes after signing in is an open redirect the moment it is taken on trust.
+ * Only a path inside the panel is kept — an absolute URL, a protocol-relative
+ * `//host`, a backslash the browser may read as a separator, and any `..`
+ * segment that would climb back out are all dropped. The sign-in page itself is
+ * dropped too: `AdminLoginRoute` would answer it with this same path, forever.
+ */
+export function platformReturnPath(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  if (value === ADMIN_LOGIN_PATH || value.startsWith(`${ADMIN_LOGIN_PATH}/`)) return null;
+  if (value !== ADMIN_BASE && !value.startsWith(`${ADMIN_BASE}/`)) return null;
+  if (value.includes('\\')) return null;
+  if (value.split('/').includes('..')) return null;
+  return value;
+}
+
 // ─── What the panel itself shows ─────────────────────────────────────────────
 
 /** Where the `platform_whoami()` answer for this account stands. */
