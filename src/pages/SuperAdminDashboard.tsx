@@ -299,18 +299,24 @@ export default function SuperAdminDashboard() {
   const canCodes = platformCan('codes.manage');
   const canOpenCompany = platformCan('business.read');
   const { showToast } = useToast();
+  const navigate = useNavigate();
+  const { t, tPlural } = useTranslation();
 
   // Entering a company needs an open support session, not only the capability:
   // since 20260917140000 the database answers a platform account with the
   // context's company and nothing else, so navigating without one would render
   // every tenant screen against rows it cannot read — and PlatformAccountGuard
   // would bounce it straight back. Refuse and say why, rather than navigate.
+  //
+  // Declared *after* navigate and t, deliberately: a useCallback dependency
+  // array is evaluated where it is written, so naming either of them above its
+  // own const is a use-before-declaration. That was four errors — the exact
+  // four the ratchet caught — and a render-time ReferenceError on the panel's
+  // landing page, which no type error would have described.
   const openCompany = useCallback((company: any) => {
     if (enterCompany(company)) { navigate('/overview'); return; }
     showToast('error', t('sa.companies.needsSupportSession'));
   }, [enterCompany, navigate, showToast, t]);
-  const navigate = useNavigate();
-  const { t, tPlural } = useTranslation();
 
   const [companies, setCompanies] = useState<CompanyRow[]>([]);
   const [kpis, setKpis] = useState<PlatformKPIs | null>(null);

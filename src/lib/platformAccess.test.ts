@@ -13,7 +13,15 @@ describe('parsePlatformWhoami', () => {
       role: 'billing',
       capabilities: ['billing.manage', 'codes.manage', 'companies.read'],
       company_context: null,
-    })).toEqual({ role: 'billing', capabilities: ['billing.manage', 'codes.manage', 'companies.read'] });
+      // `companyContext` is part of the answer since 20260917140000 (plan 3.4);
+      // null here because this account has opened nothing. toEqual is exact, so
+      // it has to be named — the NO_PLATFORM_ACCESS comparisons below need no
+      // change, that constant carries the field already.
+    })).toEqual({
+      role: 'billing',
+      capabilities: ['billing.manage', 'codes.manage', 'companies.read'],
+      companyContext: null,
+    });
   });
 
   it('is no access for an account without a role', () => {
