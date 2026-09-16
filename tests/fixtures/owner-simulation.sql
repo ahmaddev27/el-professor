@@ -23,6 +23,11 @@
       RLS_BEFORE_SQL=tests/fixtures/owner-simulation.sql \
       node scripts/rls-test.mjs
 
+  Both variables are required, so a plain `npm run test:rls` never loads this
+  file and never creates the role — measured 16.09.2026: the default run prints
+  no `running tests/fixtures…` step, no `owner simulation` line and no mention
+  of `kit_weak_owner`, and is green.
+
   Read the two "does not" sections at the end before relying on this file. A
   simulation is worth what its coverage claim is worth, and the coverage claim
   is the part that is easiest to get wrong in the flattering direction.
@@ -147,10 +152,18 @@
   it is the one deliberate fiction in the file: staging owns it with
   `supabase_admin`, not `postgres`. Its body calls three `app_private` helpers,
   so while it belongs to a weak owner it cannot run at all. 20260917130000 hands
-  it back with `ALTER FUNCTION … OWNER TO CURRENT_USER`; with the ownership
-  forced here that line is exercised rather than assumed, and a release that
-  dropped it would fail here instead of on the first profile write in
-  production. **It is therefore only handed over at the 20260917130000
+  it back with `ALTER FUNCTION … OWNER TO CURRENT_USER` at `:1208`; with the
+  ownership forced here that line is exercised rather than assumed, and a
+  release that dropped it fails here instead of on the first profile write in
+  production. Measured 16.09.2026 — delete `:1208` and run this fixture at the
+  20260917130000 position, and the kit stops in its first assertion file, exit 1:
+
+      ERROR:  FAIL: viewer CAN UPDATE its own profile — expected allowed, got denied
+
+  which is PR #25's `permission denied for function`, reaching the surface as a
+  refused UPDATE because the trigger's owner can call none of what it calls. The
+  same tree with `:1208` in place is green. **It is therefore only handed over
+  at the 20260917130000
   position**, the one migration that takes it back — `RLS_BEFORE` decides that,
   see the guard below. Handed over anywhere later it would stay with a role that
   can reach none of what it calls, which is a state the real databases never
@@ -203,8 +216,9 @@
   reads the same owner, which holds EXECUTE through the `ALTER … OWNER TO
   CURRENT_USER` at `:716` and USAGE through owning the schema, so it cannot
   fail. Delete the whole grant block from 20260919120000 and a run with this
-  fixture at that position still passes. That is a gap in coverage, stated here
-  rather than claimed away.
+  fixture at that position still passes — measured 16.09.2026, `sed -i 746,773d`
+  on the migration, exit 0, `RLS assertions passed.` with all eleven test files
+  reached. That is a gap in coverage, stated here rather than claimed away.
 
   **The reason it cannot be closed from this file** is that
   `tests/rls/platform-authority.sql:330-339` asserts, over every SECURITY
@@ -221,13 +235,16 @@
   `:839-849` while applying it to the rest of the file at `:812-818` — and
   **trips `platform-authority.sql` in the same run**. Measured, not reasoned: a
   run of this fixture at the 20260919120000 position with that function added to
-  the list below reaches `platform-authority.sql` and fails there,
+  the list below reaches `platform-authority.sql` and fails there (16.09.2026,
+  exit 1):
 
-      NOT OK: every SECURITY DEFINER function that references app_private
+      ERROR:  FAIL: every SECURITY DEFINER function that references app_private
               belongs to its owner or a superuser
 
   with every migration, `assertions.sql`, `matrix.sql`, `oauth-signup.sql` and
-  `otp.sql` green ahead of it. The other two callers are walled twice over:
+  `otp.sql` green ahead of it — so 20260919120000 itself passed, its grant loop
+  did enter its body, and what refuses the owner is the test that runs last.
+  The other two callers are walled twice over:
   `tests/rls/pricing.sql:204-214` repeats the identity rule over exactly the
   five functions of 20260916150000, `get_public_config` and `get_app_config`
   among them.
