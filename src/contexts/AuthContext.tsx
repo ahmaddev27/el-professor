@@ -3,7 +3,7 @@ import { User, Session } from '@supabase/supabase-js';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import type { TranslationKey } from '../i18n';
 import { consumeGoogleSignInIntent, readGoogleSignInIntent, type GoogleSignInIntent } from '../lib/googleSignIn';
-import { sessionCameFromGoogle } from '../lib/googleAccount';
+import { googleSessionIsSettled, sessionCameFromGoogle } from '../lib/googleAccount';
 import { nextAfterReconcile, reconcileOauthAccount } from '../lib/oauthAccountClient';
 
 const SESSION_TIMEOUT = 20 * 60 * 1000;
@@ -96,6 +96,17 @@ interface AuthContextType {
   user: User | null;
   profile: UserProfile | null;
   /**
+   * Whether the profile query has answered for the session in hand — true also
+   * when it answered "no row".
+   *
+   * `profile === null` cannot tell that apart from "not read yet", and every
+   * gate in App.tsx reads the profile: a failed or still-running load looked
+   * exactly like an account that has no profile row, which let a company-less
+   * account past the registration gate and the approval gates into the tenant
+   * router.
+   */
+  profileLoaded: boolean;
+  /**
    * Set when the *restored* session belongs to an account that has since been
    * revoked. Sign-in blocks are returned by signIn(); this covers reloads and
    * sessions installed from a one-time code, where signIn() is never called.
@@ -167,6 +178,8 @@ export const useAuth = () => {
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
+  // "The profile query has answered", which is not the same as "profile is set".
+  const [profileLoaded, setProfileLoaded] = useState(false);
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
   const [companyApprovalStatus, setCompanyApprovalStatus] = useState<'pending' | 'approved' | 'rejected' | 'suspended' | null>(null);
@@ -208,6 +221,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setUser(null);
     setSession(null);
     setProfile(null);
+    setProfileLoaded(false);
     setCompanyApprovalStatus(null);
     setRejectionReason(null);
     setSubscriptionStatus(null);
@@ -248,10 +262,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       if (error && error.code !== 'PGRST116') {
         console.error('Error loading profile:', error);
+        // A failure is not an answer, so `profileLoaded` is left exactly where
+        // it was: false on the first load, which holds App on the spinner
+        // rather than letting a gate read this as "the account has no profile
+        // row"; true on a later refresh, so one failed refresh cannot blank a
+        // session that is working.
         return;
       }
 
+      // The query answered — with a row, or with none. Those are different
+      // things from "not read yet", and the gates in App.tsx cannot tell them
+      // apart from `profile` alone.
       setProfile(data ?? null);
+      setProfileLoaded(true);
 
       // Account revocation must bite on every session, not only at sign-in.
       // signIn() calls checkProfileAccess, but a restored session and a session
@@ -302,6 +325,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setSubscriptionExpiresAt(null);
       }
     } catch (error) {
+      // As above: an exception is not an answer either, so the flag keeps its
+      // value and a first load that threw leaves App on the spinner.
       console.error('Profile loading exception:', error);
     }
   };
@@ -470,6 +495,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         await endSession('auth.google.error.platformStaff');
         return;
       }
+      // Nothing left to settle. `reconcile` cancels a password signup or
+      // accepts an invitation, and an account that already holds a company and
+      // is active has neither pending — the call could only answer
+      // `nothing_pending`. Without this, an owner who registered through Google
+      // months ago calls the edge function on every page load for the life of
+      // the account: `sessionCameFromGoogle` is true for a Google-created
+      // account with no marker at all, and the ref above starts empty each load.
+      if (googleSessionIsSettled(profile)) return;
       const routing = nextAfterReconcile(await reconcileOauthAccount(session.access_token));
       if (cancelled) return;
       // The database changed the profile: the gates must not read the old one.
@@ -626,6 +659,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const value = {
     user,
     profile,
+    profileLoaded,
     userBlockReason,
     session,
     loading,

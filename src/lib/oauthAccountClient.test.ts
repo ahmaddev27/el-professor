@@ -110,9 +110,11 @@ describe('reconcileOauthAccount', () => {
 describe('nextAfterReconcile', () => {
   const routing = (result: ReconcileResult) => nextAfterReconcile(result);
 
-  it('sends a cancelled signup to the registration screen, with a fresh profile', () => {
+  it('reloads the profile after a cancelled signup, and lets App s gate pick the screen', () => {
+    // The reloaded profile carries no company, which is what sends the account
+    // to the registration screen. This answer deliberately does not name it.
     expect(routing({ ok: true, action: 'pending_signup_cancelled' })).toEqual({
-      route: 'complete_registration', reloadProfile: true, message: null,
+      route: 'app', reloadProfile: true, message: null,
     });
   });
 

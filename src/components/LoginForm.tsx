@@ -191,15 +191,14 @@ const LoginForm: React.FC = () => {
             </button>
           </form>
 
-          {/* Renders nothing until GoTrue reports Google as enabled. */}
-          <div className="mt-5">
-            <GoogleButton
-              from="login"
-              labelKey="auth.google.signIn"
-              divider
-              onError={key => setError(t(key))}
-            />
-          </div>
+          {/* Renders nothing until GoTrue reports Google as enabled — its own
+              spacing included, so the card is unchanged while it is off. */}
+          <GoogleButton
+            from="login"
+            labelKey="auth.google.signIn"
+            divider
+            onError={key => setError(t(key))}
+          />
         </div>
 
         <p className="text-center mt-5 text-white/30 text-sm">

@@ -112,11 +112,57 @@ export interface CallbackErrorInput {
  * A Google failure is answered from the code. Everything else keeps the
  * behaviour the mail links have always had: an expired link says so, anything
  * else is an invalid link.
+ *
+ * **The Google mapping is consulted only for an actual Google attempt**, and the
+ * order matters more than it looks. GoTrue answers a dead mail link — measured
+ * on staging against `/auth/v1/verify`, identical for `type=recovery` and
+ * `type=invite` — with
+ *
+ *   #error=access_denied&error_code=otp_expired&error_description=Email+link+is+invalid+or+has+expired
+ *
+ * and `access_denied` is also the family of a cancelled Google sign-in. Asking
+ * the Google mapping first answered that shape with "cancelled at Google" and
+ * left `signup.callback.linkExpired` unreachable for every GoTrue failure in
+ * that family — together with the "Neuen Link anfordern" action, which the
+ * screen hides for a Google attempt.
+ *
+ * These mail-link paths are legacy: forgot-password, signup verification and
+ * invitations are all one-time codes now, nothing in the app calls
+ * `/auth/v1/recover` or `/auth/v1/invite`, and the branch is reachable only by
+ * a pre-code mail still in an inbox or a link an operator generates by hand. So
+ * this is a wrong answer to a shape that does arrive, not a broken customer
+ * flow — and the reason the test suite never saw it is that the case it pinned
+ * used an `error`/`error_code` pair GoTrue never sends.
  */
 export function callbackErrorMessageKey(input: CallbackErrorInput): TranslationKey {
-  const mapped = googleErrorMessageKey(input.error, input.errorCode);
-  if (mapped) return mapped;
-  if (input.fromGoogle) return 'auth.google.error.generic';
+  if (input.fromGoogle) return googleErrorMessageKey(input.error, input.errorCode) ?? 'auth.google.error.generic';
+  // `error_description` arrives plus-encoded in the fragment; the caller reads it
+  // through URLSearchParams, which turns "has+expired" back into "has expired".
   if (input.description.toLowerCase().includes('expired')) return 'signup.callback.linkExpired';
   return 'signup.callback.linkInvalid';
+}
+
+/** What the callback screen shows for a failure: the sentence, and the way out. */
+export interface CallbackFailureView {
+  messageKey: TranslationKey;
+  /**
+   * Whether to offer "Neuen Link anfordern". A mail link can be requested
+   * again, and losing that button is the one failure a person cannot recover
+   * from; a Google sign-in is simply started again from the sign-in screen.
+   */
+  offerNewLink: boolean;
+  /** Title the card as a sign-in rather than as a mail link. */
+  googleTitle: boolean;
+}
+
+/**
+ * Message and buttons from one input, so the two can never again disagree about
+ * where a failure came from.
+ */
+export function callbackFailureView(input: CallbackErrorInput): CallbackFailureView {
+  return {
+    messageKey: callbackErrorMessageKey(input),
+    offerNewLink: !input.fromGoogle,
+    googleTitle: input.fromGoogle,
+  };
 }

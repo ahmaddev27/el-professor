@@ -4,7 +4,7 @@ import { AlertCircle } from 'lucide-react';
 import { supabase, authRedirect } from '../lib/supabase';
 import { useTranslation } from '../contexts/LanguageContext';
 import { consumeGoogleSignInIntent, readGoogleSignInIntent } from '../lib/googleSignIn';
-import { callbackErrorMessageKey } from '../lib/oauthErrors';
+import { callbackFailureView } from '../lib/oauthErrors';
 
 type CallbackType = 'recovery' | 'invite' | 'signup' | 'magiclink' | 'email_change' | string;
 
@@ -34,16 +34,24 @@ const AuthCallbackPage: React.FC = () => {
     const type: CallbackType = authRedirect.type;
     // Peeked, not consumed: a Google sign-in that worked is settled by
     // AuthContext, which needs the marker to recognise this session.
-    const googleAttempt = readGoogleSignInIntent() !== null || authRedirect.errorCode !== '';
+    //
+    // The marker alone. An `error_code` in the fragment says nothing about
+    // where the failure came from: GoTrue sends `otp_expired` for a dead
+    // recovery or invite link too, and reading that as a Google attempt
+    // retitled the card and hid "Neuen Link anfordern", which is the only way
+    // out of an expired link. Those link paths are legacy — the app issues
+    // one-time codes — but the wrong answer was unconditional.
+    const googleAttempt = readGoogleSignInIntent() !== null;
 
     if (hashError) {
-      setFromGoogle(googleAttempt);
-      setError(t(callbackErrorMessageKey({
+      const view = callbackFailureView({
         error: authRedirect.errorFamily,
         errorCode: authRedirect.errorCode,
         description: hashError,
         fromGoogle: googleAttempt,
-      })));
+      });
+      setFromGoogle(view.googleTitle);
+      setError(t(view.messageKey));
       // This attempt is over; a retry starts a new one.
       consumeGoogleSignInIntent();
       return;

@@ -104,10 +104,15 @@ export async function reconcileOauthAccount(accessToken: string): Promise<Reconc
 export interface ReconcileRouting {
   /**
    * `app` lets the existing gates decide as they do for a password session;
-   * `complete_registration` sends the account to the registration screen;
    * `sign_out` ends the session and shows `message` on the sign-in screen.
+   *
+   * There is deliberately no `complete_registration`. It was returned for a
+   * cancelled signup and nothing ever read it: the registration screen is
+   * reached by App's own gate (`needsCompanyRegistration`), which re-decides
+   * from the profile this answer already asks the caller to reload. One
+   * authority for that screen, rather than two that can disagree.
    */
-  route: 'app' | 'complete_registration' | 'sign_out';
+  route: 'app' | 'sign_out';
   /** The database changed the profile: load it again before any gate reads it. */
   reloadProfile: boolean;
   message: TranslationKey | null;
@@ -143,10 +148,13 @@ export function nextAfterReconcile(result: ReconcileResult): ReconcileRouting {
 
   // Tested against 'none' rather than against each action in turn: that is the
   // test TypeScript narrows the union on, and it leaves `reason` readable below.
+  //
+  // Both actions changed the profile, so both ask for it to be read again. An
+  // accepted invitation then passes App's gates as a password session does, and
+  // a cancelled signup leaves a company-less account, which App's registration
+  // gate answers.
   if (result.action !== 'none') {
-    return result.action === 'invite_accepted'
-      ? { route: 'app', reloadProfile: true, message: null }
-      : { route: 'complete_registration', reloadProfile: true, message: null };
+    return { route: 'app', reloadProfile: true, message: null };
   }
 
   switch (result.reason) {

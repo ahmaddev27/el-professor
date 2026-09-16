@@ -397,16 +397,14 @@ const SignupPage: React.FC = () => {
                   screen that follows. The tier chosen above travels with the
                   marker, so it is still selected there. Nothing renders while
                   the provider is off. */}
-              <div className="mt-5">
-                <GoogleButton
-                  from="signup"
-                  labelKey="auth.google.signUp"
-                  hintKey="gsignup.signupHint"
-                  divider
-                  selection={{ plan: selectedPlan, carLimit, billingCycle }}
-                  onError={key => setError(t(key))}
-                />
-              </div>
+              <GoogleButton
+                from="signup"
+                labelKey="auth.google.signUp"
+                hintKey="gsignup.signupHint"
+                divider
+                selection={{ plan: selectedPlan, carLimit, billingCycle }}
+                onError={key => setError(t(key))}
+              />
             </>
           )}
         </div>
