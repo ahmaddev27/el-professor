@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, Plus, CreditCard as Edit2, Trash2, DollarSign, AlertCircle, FileText, CheckSquare, Square, Building2, Banknote, LayoutDashboard, Zap, Lock } from 'lucide-react';
+import { X, Plus, CreditCard as Edit2, Trash2, DollarSign, AlertCircle, FileText, CheckSquare, Square, Building2, Banknote, LayoutDashboard, Zap, Lock, Eye } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { SalaryPayment, SalaryCalculation } from '../types/receipt';
 import { supabase } from '../lib/supabase';
@@ -9,7 +9,9 @@ import { useToast } from '../contexts/ToastContext';
 import { useCompanySettings } from '../contexts/CompanySettingsContext';
 import { format } from 'date-fns';
 import SalaryPaymentModal from './SalaryPaymentModal';
+import SalaryPaymentReceiptPreview from './SalaryPaymentReceiptPreview';
 import ConfirmationModal from './ConfirmationModal';
+import { paymentRowActions } from '../utils/salaryPaymentReceiptRow';
 import { generateDriverSalaryPdf } from '../utils/driverSalaryPdf';
 import DriverSalarySummaryCard from './DriverSalarySummaryCard';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
@@ -43,6 +45,8 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
   const [selectedPayment, setSelectedPayment] = useState<SalaryPayment | undefined>();
   const [paymentToDelete, setPaymentToDelete] = useState<SalaryPayment | null>(null);
+  /** The Gehaltsquittung shown over this screen; null while none is open. */
+  const [receiptPreviewId, setReceiptPreviewId] = useState<string | null>(null);
   const [payrollData, setPayrollData] = useState<PayrollData>({
     payroll_gross_amount: null,
     payroll_net_amount: null,
@@ -762,7 +766,9 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
                       </tr>
                     </thead>
                     <tbody>
-                      {payments.map((payment, idx) => (
+                      {payments.map((payment, idx) => {
+                        const rowActions = paymentRowActions(payment, planIncludes('dokumente'));
+                        return (
                         <tr
                           key={payment.id}
                           style={{ borderTop: idx > 0 ? '1px solid var(--border)' : undefined }}
@@ -831,9 +837,11 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
                             {payment.description || '-'}
                           </td>
                           <td style={{ padding: '0.75rem 1rem', textAlign: 'right' }}>
-                            {payment.source_type === 'gehaltsquittung' ? (
+                            {rowActions.kind === 'receipt' ? (
                               // Written by confirm_salary_cash_payment; a trigger refuses any edit or
-                              // delete, so the row changes only by voiding its receipt.
+                              // delete, so the row changes only by voiding its receipt. The preview
+                              // shows the stored receipt in place; the Documents page is reachable
+                              // from inside it, where a copy is uploaded or the receipt voided.
                               <div className="flex items-center justify-end gap-2">
                                 <span
                                   role="img"
@@ -843,15 +851,19 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
                                 >
                                   <Lock size={16} />
                                 </span>
-                                {planIncludes('dokumente') && payment.source_reference && (
+                                {rowActions.preview && (
                                   <button
                                     type="button"
-                                    onClick={() => navigate('/dokumente', { state: { focusReceiptId: payment.source_reference } })}
-                                    style={{ color: 'var(--accent)', borderRadius: '0.25rem', padding: '0.25rem 0.375rem', fontSize: '0.8125rem', fontWeight: 500 }}
+                                    onClick={() => setReceiptPreviewId(rowActions.receiptId)}
+                                    aria-label={t('sal.payment.previewReceiptAria', {
+                                      date: format(new Date(payment.payment_date), 'dd.MM.yyyy'),
+                                    })}
+                                    style={{ color: 'var(--accent)', borderRadius: '0.25rem', padding: '0.25rem 0.375rem', fontSize: '0.8125rem', fontWeight: 500, display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}
                                     onMouseEnter={e => (e.currentTarget.style.background = 'var(--accent-subtle)')}
                                     onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
                                   >
-                                    {t('sal.payment.openReceipt')}
+                                    <Eye size={14} />
+                                    {t('sal.payment.previewReceipt')}
                                   </button>
                                 )}
                               </div>
@@ -879,7 +891,8 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
                             )}
                           </td>
                         </tr>
-                      ))}
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -909,6 +922,12 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
         salaryId={salary.salary_id!}
         remainingBalance={remainingBalance}
         payment={selectedPayment}
+      />
+
+      <SalaryPaymentReceiptPreview
+        receiptId={receiptPreviewId}
+        onClose={() => setReceiptPreviewId(null)}
+        onOpenDocuments={id => navigate('/dokumente', { state: { focusReceiptId: id } })}
       />
 
       <ConfirmationModal
