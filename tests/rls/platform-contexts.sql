@@ -416,11 +416,11 @@ END $$;
 
 -- ─── 5b. …and neither does it write the shell tables a context unlocks ──────
 --
--- Four tables of the account shell have the write predicate
+-- Three tables of the account shell have the write predicate
 --   company_id = get_user_company_id() AND (is_company_admin() OR platform_can(…))
 -- which refused a company-less platform account only because the first conjunct
 -- was NULL. Answering the open context there completes it, and the capability
--- supplies the rest — so without the trigger on these four, a view context
+-- supplies the rest — so without the trigger on these three, a view context
 -- could create a role, give it can_edit on every page through role_permissions,
 -- and point a company's profile at it: three writes, no reason recorded, in the
 -- mode that is supposed to write nothing.
@@ -437,9 +437,16 @@ BEGIN
   PERFORM _pc_ok('view: cannot grant a permission to a role that exists',
     _pc_try(u_o, s_o, format('INSERT INTO role_permissions (role_id, page_key, can_view, can_edit) VALUES (%L, ''salaries'', true, true)', _pc_id('role:x')))
       LIKE 'ERR P0001%');
-  PERFORM _pc_ok('view: cannot change the company''s settings',
+  -- company_settings is deliberately *not* behind the trigger. Its UPDATE names
+  -- no company at all (companies.lifecycle), so an owner edits any tenant's
+  -- settings with or without a context and refusing only the INSERT would be
+  -- incoherent — and a trigger there refuses platform_subscription_assign,
+  -- which names its own company, checks billing.manage and writes its own audit
+  -- row that the RAISE would roll back. Recorded as residual, like the matrix
+  -- tag, rather than asserted away.
+  PERFORM _pc_ok('view: …but companies.lifecycle still edits the company''s settings — residual, tagged for 3.4c/3.13',
     _pc_try(u_o, s_o, format('UPDATE company_settings SET company_name = ''PC view'' WHERE company_id = %L', co_x))
-      LIKE 'ERR P0001%');
+      = 'rows 1');
   PERFORM _pc_ok('view: cannot record an activation-code attempt in the company''s name',
     _pc_try(u_o, s_o, format('INSERT INTO activation_code_attempts (company_id, user_id, input_last4, success, reason, kind) VALUES (%L, %L, NULL, false, ''pc'', ''preview'')', co_x, u_o))
       LIKE 'ERR P0001%');
@@ -499,8 +506,11 @@ BEGIN
     _pc_try(u_o, s_o, format('UPDATE drivers SET company_id = %L WHERE id = %L', co_x, _pc_id('driver:y')))
       = 'rows 0');
 
-  -- The four shell tables of section 5b, from the other side: what a view
-  -- context is refused, a support session carries out — in its own company.
+  -- The shell tables of section 5b, from the other side: what a view context is
+  -- refused, a support session carries out — in its own company. company_settings
+  -- is here for completeness rather than as a contrast: it carries no refusal
+  -- trigger, so a support session writes it for the same reason an owner does
+  -- without one.
   PERFORM _pc_ok('support: a role and its permissions can be written for the company being supported',
     _pc_try(u_o, s_o, format('INSERT INTO roles (name, description, company_id, is_system) VALUES (''PC support role'', ''pc'', %L, false)', co_x))
       = 'rows 1'

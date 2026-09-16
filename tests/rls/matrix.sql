@@ -1329,7 +1329,7 @@ UPDATE _mx_expected x
 -- Both modes answer the same here — none of these is gated by
 -- current_role_permits() or is_company_admin(), so the support session makes no
 -- difference; company_users.manage and companies.lifecycle already did.
--- Four of them carry the refusal trigger too, and for a reason this slice
+-- Three of them carry the refusal trigger too, and for a reason this slice
 -- created: their write predicate is
 --   company_id = get_user_company_id() AND (is_company_admin() OR platform_can(…))
 -- which was refused for a company-less platform account only because the first
@@ -1337,9 +1337,15 @@ UPDATE _mx_expected x
 -- capability supplies the rest, so a *view* context could otherwise have
 -- created a role, given it can_edit on every page, and pointed a company's
 -- profile at it — three writes with no reason recorded. So on roles,
--- role_permissions, company_settings and activation_code_attempts the view
--- column reads like the tenant tables: T for every statement it issues, and
--- for a move only where the row could be locked first.
+-- role_permissions and activation_code_attempts the view column reads like the
+-- tenant tables: T for every statement it issues, and for a move only where the
+-- row could be locked first.
+--
+-- company_settings is the shell table that is deliberately *not* behind it: the
+-- context completes its INSERT and nothing else, since its UPDATE names no
+-- company at all, and a trigger there refuses platform_subscription_assign —
+-- an audited RPC that names its own company — and rolls back that RPC's audit
+-- row with the RAISE. The migration's self-check pins its absence.
 UPDATE _mx_expected x SET staff_view = o.sv, staff_support = o.ss
   FROM (VALUES
     -- roles and their permissions: visible for the context's company, written
@@ -1355,13 +1361,14 @@ UPDATE _mx_expected x SET staff_view = o.sv, staff_support = o.ss
     ('role_permissions',         'U', 'TT', 'Y.'),
     ('role_permissions',         'D', 'TT', 'Y.'),
     ('role_permissions',         'M', 'T.', 'T.'),
-    -- the company's legal details: both rows are visible through
-    -- companies.read, and companies.lifecycle writes either — until a view
-    -- context makes the trigger the first thing the statement meets
-    ('company_settings',         'I', 'TT', 'YR'),
-    ('company_settings',         'U', 'TT', 'YY'),
-    ('company_settings',         'D', 'TT', 'YY'),
-    ('company_settings',         'M', 'TT', 'YY'),
+    -- The company's legal details carry no refusal trigger, deliberately: the
+    -- context completes the INSERT's company term and nothing else, because
+    -- company_settings_update names no company at all (companies.lifecycle),
+    -- so an owner edits, deletes and re-points any tenant's settings row with
+    -- or without a context — the U, D and M cells above, tagged residual. Only
+    -- I moves, from RR to YR, and it moves for both modes because lifecycle,
+    -- not the session, is what satisfies the second half.
+    ('company_settings',         'I', 'YR', 'YR'),
     -- an attempt is recorded against the caller's own company, which is now
     -- the opened one; there is no UPDATE or DELETE policy, so a support
     -- session finds nothing to change and a view context is refused before
@@ -1655,16 +1662,41 @@ BEGIN
   PERFORM _mx_expect('guard', 'platform owner cannot move its own profile into company A',
     _mx_try('super', NULL, format('UPDATE user_profiles SET company_id = %L WHERE user_id = %L', co_a, super_u)),
     'T');
-  PERFORM _mx_expect('guard', 'platform owner cannot move a company B member into company A',
+  -- These three were T until 20260917140000, and what moved them is the read
+  -- seam, not the guard: platform_reads_company_data() is now a constant false,
+  -- so a staff account with no context open sees no company's profiles, the
+  -- UPDATE matches nothing and the guard is never reached. `.` is the same
+  -- character the company-admin line below already uses for a row RLS hides.
+  --
+  -- On its own that is a weaker claim than these lines were written to make —
+  -- at `.` they would pass with the guard dropped altogether — so each is
+  -- followed by the same probe run from inside a support context, where the row
+  -- is visible and the guard is what answers.
+  PERFORM _mx_expect('guard', 'platform owner with no context cannot even see a company B member to move',
     _mx_try('super', NULL, format('UPDATE user_profiles SET company_id = %L WHERE user_id = %L', co_a, member_b)),
-    'T');
-  PERFORM _mx_expect('guard', 'platform owner cannot grant is_super_admin to a company member',
+    '.');
+  PERFORM _mx_expect('guard', 'platform owner with no context cannot see a company member to flag',
     _mx_try('super', NULL, format('UPDATE user_profiles SET is_super_admin = true WHERE user_id = %L', member_a)),
-    'T');
+    '.');
   -- New with 20260916110010: no JWT hands a profile to another account. Both
   -- were Y before it, with no line here.
-  PERFORM _mx_expect('guard', 'platform owner cannot change a member''s user_id',
+  PERFORM _mx_expect('guard', 'platform owner with no context cannot see a member whose user_id to change',
     _mx_try('super', NULL, format('UPDATE user_profiles SET user_id = %L WHERE user_id = %L', gen_random_uuid(), member_a)),
+    '.');
+
+  -- …and from inside a support session on company A, where every one of these
+  -- rows is visible and the write policy admits the statement through
+  -- company_users.manage. The guard is the only thing left to refuse them, and
+  -- it does: a profile may not change company, may not be flagged, and may not
+  -- be handed to another account, whoever asks and from wherever.
+  PERFORM _mx_expect('guard', 'a support session cannot move the company''s member into another company',
+    _mx_try('staff-support', NULL, format('UPDATE user_profiles SET company_id = %L WHERE user_id = %L', co_b, member_a)),
+    'T');
+  PERFORM _mx_expect('guard', 'a support session cannot grant is_super_admin to the company''s member',
+    _mx_try('staff-support', NULL, format('UPDATE user_profiles SET is_super_admin = true WHERE user_id = %L', member_a)),
+    'T');
+  PERFORM _mx_expect('guard', 'a support session cannot change the company''s member''s user_id',
+    _mx_try('staff-support', NULL, format('UPDATE user_profiles SET user_id = %L WHERE user_id = %L', gen_random_uuid(), member_a)),
     'T');
   PERFORM _mx_expect('guard', 'company admin cannot change a member''s user_id',
     _mx_try('admin-a', NULL, format('UPDATE user_profiles SET user_id = %L WHERE user_id = %L', gen_random_uuid(), member_a)),
