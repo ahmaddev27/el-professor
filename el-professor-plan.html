@@ -472,7 +472,7 @@
         </li>
         <li><a href="#p1"><span class="no">1</span><h3>OTP وأمان الحسابات</h3></a><ul class="chips"><li class="chip">كبير</li><li class="chip">عالستيج</li></ul></li>
         <li><a href="#p2"><span class="no">2</span><h3>نظام التصميم والنموذج</h3></a><ul class="chips"><li class="chip">متوسط</li><li class="chip">اندمج عالستيج</li></ul><p class="gate">البوابة انفتحت: وافقت على النموذج بـ 15.09</p></li>
-        <li><a href="#p3"><span class="no">3</span><h3>فصل المنصة والصلاحيات</h3></a><ul class="chips"><li class="chip">كبير جداً</li><li class="chip">3.0 و3.1 و3.3 و3.5 و3.9 اندمجوا</li><li class="chip">قيد البناء</li></ul></li>
+        <li><a href="#p3"><span class="no">3</span><h3>فصل المنصة والصلاحيات</h3></a><ul class="chips"><li class="chip">كبير جداً</li><li class="chip">3.0 و3.1 و3.3 و3.5 و3.6 و3.9 اندمجوا</li><li class="chip">الجاي 3.4</li></ul></li>
         <li><a href="#p4"><span class="no">4</span><h3>إيصال الراتب النقدي</h3></a><ul class="chips"><li class="chip">متوسط</li><li class="chip">الأساس اندمج</li></ul></li>
         <li><a href="#p5"><span class="no">5</span><h3>تعميم التصميم</h3></a><ul class="chips"><li class="chip">كبير</li><li class="chip">ما بلّشت</li></ul></li>
       </ol>
@@ -492,7 +492,7 @@
             <tr><td class="num">0.4</td><td>كلمة مرور الستيج</td><td><span class="pill ok">مفعّل</span></td><td><code>app.elprofessor.eu</code> بيرد 401 وبيطلب دخول (المستخدم <code>admon</code>). <code>/version.txt</code> ولوغو الإيميلات مفتوحين. البرودكشن ورايدي 200.</td><td class="num">#5</td></tr>
             <tr><td class="num">0.5</td><td>أدوات الاختبار الآلي</td><td><span class="pill ok">خلص عالستيج</span></td><td>مجلد <code>e2e/</code> بـ Playwright: حماية الستيج، تسجيل الدخول، ونسيت كلمة المرور. أول تشغيل كشف إنه رابط الاستعادة والدعوة كانوا يطلّعوا المستخدم فوراً، وانحلّت. بعد النشر نجحوا الخمسة.</td><td class="num">#7</td></tr>
             <tr><td class="num">+</td><td>إيميلات الستيج بتوصل فعلياً</td><td><span class="pill ok">شغّال عالستيج</span></td><td>قرارك: Mailpit بيحتفظ بنسخة من كل إيميل وبيبعته لصاحبه عبر Resend تبع البرودكشن، إلا عناوين <code>example.com</code> تبع الاختبارات. إيميلين تجربة وصلوا، وResend سجّلهم <code>delivered</code>.</td><td class="num">#8</td></tr>
-            <tr><td class="num">0.6</td><td>أول نشر للبرودكشن من CI</td><td><span class="pill">بزر منك</span></td><td>المانع التقني الأخير راح: مفتاح <code>OTP_PEPPER</code> للبرودكشن انكتب بـ 16.09.2026 بموافقتك (48 حرف، مختلف عن الستيج). وتسجيل GoTrue على البرودكشن انسكّر بنفس اليوم. ضل زرّك.</td><td class="num">—</td></tr>
+            <tr><td class="num">0.6</td><td>أول نشر للبرودكشن من CI</td><td><span class="pill">بزر منك</span></td><td>المانع التقني الأخير راح: مفتاح <code>OTP_PEPPER</code> للبرودكشن انكتب بـ 16.09.2026 بموافقتك (48 حرف، مختلف عن الستيج). وتسجيل GoTrue على البرودكشن انسكّر بنفس اليوم (<code>disable_signup:true</code>، مفحوص). ضل زرّك. <strong>وخُذ بالحسبان:</strong> البرودكشن اليوم ما عنده الـ function تبع الأكواد أصلاً، وأول نشر بيجيبها ومعها سلوك معروف: أول طلب بعد فترة سكون بيرجّع 502 بسرعة، فالمستخدم بيشوف رسالة خطأ على طلب ما انبعت.</td><td class="num">—</td></tr>
           </tbody>
         </table>
       </div>
@@ -900,12 +900,13 @@ AND (c.subscription_expires_at IS NULL OR c.subscription_expires_at &gt; now())<
       </div>
 
       <div class="step">
-        <h3><span class="step-no">3.6</span>بوابة <code>/admin</code> (بالتصميم الجديد) <span class="pill ok">قوائم المنصة (3.6ب جزء 1) وصفحات اللوحة (3.6ج) اندمجوا</span></h3>
+        <h3><span class="step-no">3.6</span>بوابة <code>/admin</code> (بالتصميم الجديد) <span class="pill ok">البوابة (3.6أ) وقوائم المنصة (3.6ب جزء 1) وصفحات اللوحة (3.6ج) اندمجوا</span></h3>
         <ul class="list">
-          <li><code>/admin/login</code>: كلمة السر، ثم كود OTP، ثم اللوحة. فيها صفحة حسابي وتسجيل خروج.</li>
-          <li>جلسة المنصة محفوظة منفصلة عن جلسة الشركة. التنقل بين البوابتين بتحميل صفحة كامل.</li>
-          <li>صفحة دخول الشركات بترفض حساب المنصة، وصفحة المنصة بترفض حسابات الشركات.</li>
-          <li>مسارات الشركة بوضع الدعم تحت <code>/admin/support</code>، و<code>/super-admin</code> بيحوّل لـ <code>/admin</code>.</li>
+          <li><code>/admin/login</code>: إيميل وكلمة مرور وبس — <strong>بدون كود</strong>، لأنه الشريحة 3.2 انلغت بقرارك بـ 16.09. وبدون زر جوجل وبدون رابط تسجيل. فيها صفحة حسابي وتسجيل خروج. <span class="pill ok">نزلت (PR #57)</span></li>
+          <li>كل رفض بيطلع بنفس الجملة، عشان الصفحة ما تجاوب أي حدا بيسأل إذا هاد الإيميل من فريق المنصة. الاستثناء: حد المحاولات، وفشل الشبكة.</li>
+          <li>صفحة دخول الشركات بترفض حساب المنصة، وصفحة المنصة بتحوّل حساب الشركة على تطبيقه.</li>
+          <li>اللوحة مسجّلة مرة وحدة تحت <code>/admin</code>، و<code>/super-admin</code> بيتحوّل عليها بكل تفرّعاته. <span class="pill ok">نزل</span> والروابط القديمة جوّا التطبيق انتركت عن قصد، والشريحة 3.13 بتشيلها مع التحويل.</li>
+          <li>مسارات الشركة بوضع الدعم تحت <code>/admin/support</code>. <span class="pill">بتستنى 3.4</span></li>
         </ul>
       </div>
 
@@ -1061,7 +1062,7 @@ AND (c.subscription_expires_at IS NULL OR c.subscription_expires_at &gt; now())<
     <section class="block" id="needs" aria-labelledby="needs-title">
       <h2 id="needs-title">شو مطلوب منك</h2>
       <ul class="needs">
-        <li><span class="when">من قبل</span><span>سجل DNS <code>mail-staging</code> → <code>159.195.205.30</code>، وتشغيل <code>set-mailpit-password.sh</code>. لسا ما بينحل، فالاختبارات بتوصل Mailpit عبر نفق SSH وما بينفتح الصندوق من المتصفح؛ Caddy عنده كتلة الموقع وملف كلمة المرور، فناقص بس سجل A.</span><span class="pill warn">لسا</span></li>
+        <li><span class="when">من قبل</span><span>سجل DNS <code>mail-staging</code> → <code>159.195.205.30</code>. انضاف بـ 16.09.2026 والصندوق صار شغّال: بينحل وبيرد ورا كلمة المرور، فما عاد لازم نفق SSH.</span><span class="pill ok">خلص</span></li>
         <li><span class="when">المرحلة 0</span><span>كلمة مرور الستيج عبر <code>set-staging-password.sh</code>.</span><span class="pill ok">خلص</span></li>
         <li><span class="when">المرحلة 0</span><span>دمج <code>staging</code> لـ <code>main</code> وضغط زر الإنتاج بالخطوة 0.6، وبعد كل مرحلة.</span><span class="pill">لاحقاً</span></li>
         <li><span class="when">المرحلة 1</span><span>إيميل اختبار بتملكه لإثبات وصول الكود، وقرار بالحسابات القديمة غير المؤكدة.</span><span class="pill">لاحقاً</span></li>
