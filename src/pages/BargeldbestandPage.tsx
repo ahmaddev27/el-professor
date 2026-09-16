@@ -8,6 +8,8 @@ import { exportTableToExcel } from '../utils/excelExport';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { useTranslation } from '../contexts/LanguageContext';
 import { receiptScope } from '../utils/salaryCashReceiptFlow';
+import { fetchAllPaginated } from '../utils/fetchAllPaginated';
+import { formatCentsDe } from '../utils/money';
 import {
   bargeldIncomeEntries,
   belegEntries,
@@ -98,6 +100,7 @@ export default function BargeldbestandPage() {
     beleg: t('bargeld.beleg'),
     gehaltsquittung: t('bargeld.gehaltsquittung'),
     gehaltsquittungStorno: t('bargeld.gehaltsquittungStorno'),
+    other: t('bargeld.cashMovement'),
   };
 
   useEffect(() => {
@@ -148,15 +151,17 @@ export default function BargeldbestandPage() {
 
   /** The month's movements. Written only by confirm_salary_cash_payment and void_salary_cash_receipt. */
   async function loadCashMovements(monthStart: string, monthEnd: string): Promise<CashMovementRow[]> {
-    const { data, error } = await supabase
-      .from('cash_movements')
-      .select('id, direction, amount, movement_date, source_type, source_id, description')
-      .eq('company_id', companyId)
-      .gte('movement_date', monthStart)
-      .lte('movement_date', monthEnd)
-      .order('movement_date', { ascending: false });
-    if (error) throw error;
-    return (data ?? []) as CashMovementRow[];
+    return fetchAllPaginated<CashMovementRow>(
+      (from, to) => supabase
+        .from('cash_movements')
+        .select('id, direction, amount, movement_date, source_type, source_id, description')
+        .eq('company_id', companyId)
+        .gte('movement_date', monthStart)
+        .lte('movement_date', monthEnd)
+        .order('id', { ascending: true })
+        .range(from, to),
+      { label: t('bargeld.load.movements') },
+    );
   }
 
   async function loadCashData() {
@@ -171,37 +176,50 @@ export default function BargeldbestandPage() {
       const monthStart = format(startOfMonth(new Date(selectedMonth)), 'yyyy-MM-dd');
       const monthEnd = format(endOfMonth(new Date(selectedMonth)), 'yyyy-MM-dd');
 
-      const [incomeResult, receiptsResult, movementRows] = await Promise.all([
-        supabase
-          .from('income')
-          .select('id, amount, type, description, driver_name, date')
-          .eq('company_id', companyId)
-          .eq('type', 'bargeld')
-          .gte('date', monthStart)
-          .lte('date', monthEnd)
-          .order('date', { ascending: false }),
-        supabase
-          .from('receipts')
-          .select('id, expense, description, driver_name, date')
-          .eq('company_id', companyId)
-          .gte('date', monthStart)
-          .lte('date', monthEnd)
-          .order('date', { ascending: false }),
+      // All three sources are paginated, ordered by id so that a page boundary
+      // cannot duplicate or drop a row. PostgREST caps a response at 1000 rows
+      // and reports no error when it truncates, so a bare .select() would leave
+      // the balance, the cards and the Excel export quietly under-reporting
+      // cash. The largest company on staging already holds 836 Belege and 677
+      // income rows in a single month — one busy month from the cap. The
+      // OverviewPage reads the same tables this way.
+      const [incomeRows, receiptRows, movementRows] = await Promise.all([
+        fetchAllPaginated<BargeldIncomeRow>(
+          (from, to) => supabase
+            .from('income')
+            .select('id, amount, type, description, driver_name, date')
+            .eq('company_id', companyId)
+            .eq('type', 'bargeld')
+            .gte('date', monthStart)
+            .lte('date', monthEnd)
+            .order('id', { ascending: true })
+            .range(from, to),
+          { label: t('bargeld.load.income') },
+        ),
+        fetchAllPaginated<BelegRow>(
+          (from, to) => supabase
+            .from('receipts')
+            .select('id, expense, description, driver_name, date')
+            .eq('company_id', companyId)
+            .gte('date', monthStart)
+            .lte('date', monthEnd)
+            .order('id', { ascending: true })
+            .range(from, to),
+          { label: t('bargeld.load.belege') },
+        ),
         // Out of scope the policy answers an empty set, which reads exactly
         // like "no payouts". Don't ask, and don't claim a zero below.
         ledgerInScope ? loadCashMovements(monthStart, monthEnd) : Promise.resolve<CashMovementRow[]>([]),
       ]);
 
-      if (incomeResult.error) throw incomeResult.error;
-      if (receiptsResult.error) throw receiptsResult.error;
 
       const payoutDrivers = await loadPayoutDriverNames(
         Array.from(new Set(movementRows.filter(m => m.source_id).map(m => m.source_id))),
       );
 
       const allEntries = sortCashEntriesByDateDesc([
-        ...bargeldIncomeEntries((incomeResult.data ?? []) as BargeldIncomeRow[], ledgerLabels),
-        ...belegEntries((receiptsResult.data ?? []) as BelegRow[], ledgerLabels),
+        ...bargeldIncomeEntries(incomeRows, ledgerLabels),
+        ...belegEntries(receiptRows, ledgerLabels),
         ...cashMovementEntries(movementRows, ledgerLabels, payoutDrivers),
       ]);
 
@@ -236,10 +254,12 @@ export default function BargeldbestandPage() {
   }
 
   /**
-   * Cents to the euro text this screen has always shown. Not formatCentsDe:
-   * the screen writes a decimal point today, and moving it to the German comma
-   * is a visual change that belongs with the Phase 5 pass over this page, not
-   * with a change to what the figure means.
+   * Cents to the euro text the older parts of this screen have always shown —
+   * a decimal point, against the German comma rule. The two cards this slice
+   * adds use formatCentsDe instead, so a figure introduced here is written the
+   * German way from the start; rounding is identical either way, since cents
+   * are integers. Converting the older cards, the table and the Excel export
+   * is a visual change that belongs with the Phase 5 pass over this page.
    */
   function euro(cents: number): string {
     return (cents / 100).toFixed(2);
@@ -372,7 +392,7 @@ export default function BargeldbestandPage() {
               <h3 className="text-sm font-medium" style={{ color: 'var(--danger)' }}>{t('bargeld.salaryPayouts')}</h3>
             </div>
             <p className="text-3xl font-bold" style={{ color: 'var(--danger)' }}>
-              {euro(totals.salaryPayoutCents)} €
+              {formatCentsDe(totals.salaryPayoutCents)} €
             </p>
             <p className="text-xs mt-2" style={{ color: 'var(--danger)', opacity: 0.75 }}>{t('bargeld.salaryPayoutsHint')}</p>
           </div>
@@ -394,7 +414,7 @@ export default function BargeldbestandPage() {
             </h3>
           </div>
           <p className="text-3xl font-bold" style={{ color: balancePositive ? 'var(--accent-text)' : 'var(--warning)' }}>
-            {euro(totals.balanceCents)} €
+            {formatCentsDe(totals.balanceCents)} €
           </p>
           <p className="text-xs mt-2" style={{ color: balancePositive ? 'var(--accent-text)' : 'var(--warning)', opacity: 0.75 }}>
             {ledgerInScope ? t('bargeld.balanceFormula') : t('bargeld.balanceFormulaNoLedger')}

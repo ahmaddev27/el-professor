@@ -22,6 +22,7 @@ const LEDGER_LABELS: CashLedgerLabels = {
   beleg: 'Beleg',
   gehaltsquittung: 'Gehaltsquittung',
   gehaltsquittungStorno: 'Storno Gehaltsquittung',
+  other: 'Bargeldbewegung',
 };
 
 export interface FixedCostItem {

@@ -880,7 +880,16 @@ const OverviewPage: React.FC = () => {
               </div>
               {ledgerInScope && cashSummary.salaryPayouts !== 0 && (
                 <p className="text-xs mt-2" style={{ color: 'var(--text-secondary)' }}>
-                  {t('overview.cash.salaryPayouts')}: −{fmt(cashSummary.salaryPayouts)} €
+                  {/*
+                    The sign comes from the value, never as a literal: voiding a
+                    Gehaltsquittung books the cash back on the day of the void,
+                    so a receipt paid in March and voided in April makes April's
+                    payout −300, and a literal minus in front of an already
+                    signed number renders "−-300,00 €". A negative payout is
+                    money coming back into the till, and reads as +.
+                  */}
+                  {t('overview.cash.salaryPayouts')}:{' '}
+                  {cashSummary.salaryPayouts < 0 ? '+' : '−'}{fmt(Math.abs(cashSummary.salaryPayouts))} €
                 </p>
               )}
               {cashSummary.cashRisk !== 'ok' && (

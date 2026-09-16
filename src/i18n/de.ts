@@ -398,6 +398,10 @@ export const de = {
   'salaries.noConnection':   'Die Verbindung zur Datenbank konnte nicht hergestellt werden.',
   'bargeld.incomeEntry':     'Bargeld Einnahme',
   'bargeld.loadFailed':      'Fehler beim Laden der Bargeld-Daten',
+  // Interpolated into fetchAllPaginated's own German error text.
+  'bargeld.load.income':     'Bargeld-Einnahmen',
+  'bargeld.load.belege':     'Belege',
+  'bargeld.load.movements':  'Bargeld-Bewegungen',
   'bargeld.incomeCol':       'Einnahme',
   'bargeld.expenseCol':      'Ausgabe',
   'bargeld.amountEuro':      'Betrag (€)',
@@ -411,6 +415,8 @@ export const de = {
   'bargeld.beleg':           'Beleg',
   'bargeld.gehaltsquittung': 'Gehaltsquittung',
   'bargeld.gehaltsquittungStorno': 'Storno Gehaltsquittung',
+  // A cash_movements row whose source_type the ledger does not know yet.
+  'bargeld.cashMovement':    'Bargeldbewegung',
   'bargeld.salaryPayouts':   'Gehaltsauszahlungen (bar)',
   'bargeld.salaryPayoutsHint': 'Gehaltsquittungen abzüglich Stornos',
   'bargeld.currentBalance':  'Aktueller Bestand',
