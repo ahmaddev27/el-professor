@@ -558,9 +558,22 @@ BEGIN
   PERFORM _ts_ok('capabilities: billing cannot change the document categories (settings.manage is the owner''s), and an owner can',
     _ts_try(billing, format('UPDATE document_categories SET name = name WHERE id = %L', _ts_id('category'))) = 'rows 0'
     AND _ts_try(owner_u, format('UPDATE document_categories SET name = name WHERE id = %L', _ts_id('category'))) = 'rows 1');
-  PERFORM _ts_ok('capabilities: support manages a company''s users, billing does not',
+  -- Both answer `rows 0` since 20260917140000 (plan 3.4), and for two different
+  -- reasons, which is why the line no longer claims to contrast them: billing
+  -- holds no company_users.manage and never reaches the USING clause, while
+  -- support holds it and cannot see the row its UPDATE names —
+  -- platform_reads_company_data() is a constant false now, none of these
+  -- principals has a context open, and an UPDATE whose WHERE reads `user_id`
+  -- needs the SELECT policy to admit the row first.
+  --
+  -- The capability itself stays pinned in tests/rls/platform-authority.sql
+  -- (section 2's role x capability matrix, and 4b's platform_can_manage_account),
+  -- and what holding it *does* is pinned in tests/rls/matrix.sql, whose
+  -- staff_support column updates a profile of the company it has opened
+  -- (user_profiles U = 'Y.') and is refused on the other company's.
+  PERFORM _ts_ok('capabilities: with no context open, neither support nor billing reaches a company''s users',
     _ts_try(support, format('UPDATE user_profiles SET full_name = full_name WHERE user_id = %L',
-                            _ts_id('user:admin-ok'))) = 'rows 1'
+                            _ts_id('user:admin-ok'))) = 'rows 0'
     AND _ts_try(billing, format('UPDATE user_profiles SET full_name = full_name WHERE user_id = %L',
                                 _ts_id('user:admin-ok'))) = 'rows 0');
 END $$;
