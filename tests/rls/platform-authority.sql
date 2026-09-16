@@ -663,9 +663,29 @@ DECLARE
   r_viewer uuid := (SELECT id FROM roles WHERE name = 'viewer' AND company_id IS NULL LIMIT 1);
 BEGIN
   -- company_id: no JWT, whoever it belongs to
-  PERFORM _pa_ok('guard: an owner cannot move a member into another company',
+  --
+  -- This line and the flag line below prove something weaker than they used to,
+  -- and they say so rather than looking like refusals. Since 20260917140000
+  -- (plan 3.4) `platform_reads_company_data()` is a constant false, so a
+  -- company-less platform account with no open context cannot SELECT a member's
+  -- row — and an UPDATE whose WHERE reads `user_id` needs that SELECT, so the
+  -- statement matches nothing and enforce_user_profile_privilege_guard is never
+  -- reached. Invisibility, not refusal.
+  --
+  -- The refusal is pinned in tests/rls/matrix.sql instead, whose three
+  -- `staff-support` guard scenarios run these same probes from inside a support
+  -- context: there the row is visible, the write policy admits the statement
+  -- through company_users.manage, and the guard is the only thing left to
+  -- answer. That belongs there and not here — this file is about the capability
+  -- matrix and carries no context machinery, and it should not grow any.
+  --
+  -- The neighbouring lines are unaffected for reasons worth keeping in view: an
+  -- owner still sees its **own** profile (`user_id = auth.uid()`), a company
+  -- admin still sees a member of its own company, an INSERT needs no
+  -- visibility at all, and the service role is not guarded.
+  PERFORM _pa_ok('guard: an owner with no open context cannot even see a member to move',
     _pa_try(owner, format('UPDATE user_profiles SET company_id = %L WHERE user_id = %L', co_b, member))
-      LIKE 'ERR P0001 Not allowed: cannot change company assignment%');
+      = 'rows 0');
   PERFORM _pa_ok('guard: an owner cannot move its own profile into a company',
     _pa_try(owner, format('UPDATE user_profiles SET company_id = %L WHERE user_id = %L', co_b, owner))
       LIKE 'ERR P0001 Not allowed: cannot change company assignment%');
@@ -685,9 +705,12 @@ BEGIN
   PERFORM _pa_ok('guard: a company admin cannot flag itself',
     _pa_try(admin_a, format('UPDATE user_profiles SET is_super_admin = true WHERE user_id = %L', admin_a))
       LIKE 'ERR P0001 Not allowed: cannot modify is_super_admin%');
-  PERFORM _pa_ok('guard: an owner cannot flag a member who has no staff row',
+  -- Invisibility again, for the reason given above the company_id line; the
+  -- refusal itself is pinned by matrix.sql's staff-support scenario. The line
+  -- below it still refuses, because an owner sees its own row.
+  PERFORM _pa_ok('guard: an owner with no open context cannot see a member to flag either',
     _pa_try(owner, format('UPDATE user_profiles SET is_super_admin = true WHERE user_id = %L', member))
-      LIKE 'ERR P0001 Not allowed: cannot modify is_super_admin%');
+      = 'rows 0');
   PERFORM _pa_ok('guard: an owner cannot clear its own flag while its staff row is active',
     _pa_try(owner, format('UPDATE user_profiles SET is_super_admin = false WHERE user_id = %L', owner))
       LIKE 'ERR P0001 Not allowed: cannot modify is_super_admin%');
