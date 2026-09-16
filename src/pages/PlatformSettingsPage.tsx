@@ -118,6 +118,8 @@ interface Loaded<T> {
   value: T;
   version: number;
   updatedAt: string | null;
+  /** NULL until somebody saves: the seed writes no actor. */
+  updatedBy: string | null;
 }
 
 const PlatformSettingsPage: React.FC = () => {
@@ -259,7 +261,7 @@ const PriceBookEditor: React.FC = () => {
         setProblem('admin.settings.refusal.invalidValue');
         return;
       }
-      setLoaded({ value: book, version: answer.version, updatedAt: answer.updatedAt });
+      setLoaded({ value: book, version: answer.version, updatedAt: answer.updatedAt, updatedBy: answer.updatedBy });
       setForm(priceBookToForm(book));
     } catch (err) {
       setProblem('admin.settings.loadFailed');
@@ -293,7 +295,7 @@ const PriceBookEditor: React.FC = () => {
         return;
       }
       showToast('success', t('admin.settings.saved'));
-      setLoaded({ value: parsed.book, version: answer.version, updatedAt: answer.updatedAt });
+      setLoaded({ value: parsed.book, version: answer.version, updatedAt: answer.updatedAt, updatedBy: answer.updatedBy });
       // Every screen prices from AppConfigContext, so it reads the new book now.
       await refresh();
     } catch (err) {
@@ -492,7 +494,7 @@ const PlanFeaturesEditor: React.FC = () => {
         setProblem('admin.settings.refusal.invalidValue');
         return;
       }
-      setLoaded({ value: map, version: answer.version, updatedAt: answer.updatedAt });
+      setLoaded({ value: map, version: answer.version, updatedAt: answer.updatedAt, updatedBy: answer.updatedBy });
     } catch (err) {
       setProblem('admin.settings.loadFailed');
       setDetail(err instanceof Error ? err.message : null);
@@ -530,7 +532,7 @@ const PlanFeaturesEditor: React.FC = () => {
         return;
       }
       showToast('success', t('admin.settings.saved'));
-      setLoaded({ value: map, version: answer.version, updatedAt: answer.updatedAt });
+      setLoaded({ value: map, version: answer.version, updatedAt: answer.updatedAt, updatedBy: answer.updatedBy });
       setChanges({});
       await refresh();
     } catch (err) {
@@ -667,7 +669,7 @@ function useSettingEditor<T, F>(config: SettingEditorConfig<T, F>) {
         setProblem('admin.settings.refusal.invalidValue');
         return;
       }
-      setLoaded({ value, version: answer.version, updatedAt: answer.updatedAt });
+      setLoaded({ value, version: answer.version, updatedAt: answer.updatedAt, updatedBy: answer.updatedBy });
       setForm(config.toForm(value));
     } catch (err) {
       setProblem('admin.settings.loadFailed');
@@ -699,7 +701,7 @@ function useSettingEditor<T, F>(config: SettingEditorConfig<T, F>) {
         return;
       }
       showToast('success', t('admin.settings.saved'));
-      setLoaded({ value: parsed.value, version: answer.version, updatedAt: answer.updatedAt });
+      setLoaded({ value: parsed.value, version: answer.version, updatedAt: answer.updatedAt, updatedBy: answer.updatedBy });
       // The stored document, not what was typed: trimmed as the database has it.
       setForm(config.toForm(parsed.value));
       // Of these three only the trial reaches AppConfigContext today, as
@@ -789,6 +791,17 @@ const SellerEditor: React.FC = () => {
   const typed = form ? sellerFromForm(form) : null;
   const preview = typed && 'value' in typed ? sellerAddressBlock(typed.value) : null;
 
+  // Still the placeholder the migration seeded, never edited: version 1, no
+  // actor behind it, and no address. That is what both real databases got —
+  // no platform account sits in a company, so the seed had nothing to copy —
+  // and it is distinct from `notAppliedYet`, which says the invoice page does
+  // not read the value yet. This one says the value is not worth reading.
+  const notConfigured = !!loaded
+    && loaded.version === 1
+    && loaded.updatedBy === null
+    && loaded.value.street.trim() === ''
+    && loaded.value.iban.trim() === '';
+
   return (
     <EditorShell
       loading={loading}
@@ -802,6 +815,7 @@ const SellerEditor: React.FC = () => {
         <>
           <Note textKey="admin.settings.seller.hint" />
           <Note textKey="admin.settings.notAppliedYet" />
+          {notConfigured && <Note textKey="admin.settings.seller.notConfigured" />}
           {!maySave && <Note textKey="admin.settings.readOnly" />}
 
           <div className="rounded-2xl p-5 space-y-4" style={cardStyle}>

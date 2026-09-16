@@ -39,12 +39,19 @@
 
   - **`seller`** — eleven text fields, exactly the columns
     `SubscriptionBillingPage` selects today, with `company_name` under the name
-    `name`. **The values are copied from that very row**, not invented: the seed
-    below reads the `company_settings` of the company the oldest active platform
-    owner belongs to, which is the row that screen reads. Where there is no such
-    row — a fresh database, the RLS fixture, or after 3.7b — every field is the
-    empty string and `name` is 'El-Professor', which is the fallback that screen
-    already applies.
+    `name`. The seed below reads the `company_settings` of the company the
+    oldest active platform owner belongs to, which is the row that screen reads.
+
+    **On both real databases that lookup finds nothing, so what actually ships
+    is the fallback**: measured 16.09.2026, every platform account on staging
+    and on production has `company_id` NULL. Nothing is lost by that.
+    `SubscriptionBillingPage` guards its own lookup with
+    `if (isSuperAdmin && profile?.company_id)`, so the invoice PDF already
+    prints the bare 'El-Professor' with no address — precisely the document
+    seeded here. The copy matters only on a database where a platform account
+    does sit in a company; on a fresh database, in the RLS fixture, and after
+    3.7b, the fallback is the answer there too: every field the empty string,
+    `name` 'El-Professor'.
   - **`trial`** — `{"days": 14}`, and `signup_insert_company` now reads it.
   - **`invoice`** — `{"number_prefix": "INV", "number_digits": 4,
     "default_payment_method": "cash"}`.
@@ -73,12 +80,25 @@
 
   The old comparison (20260916150000, self-check 6) read the constant out of the
   function's source and compared it with `signup_trial_days()`. There is no
-  constant to read any more, so the comparison is replaced, not dropped, and it
-  is stricter: self-check 5 requires that the function's source *calls*
-  `signup_trial_days`, that it no longer carries a hard-coded day interval, that
-  `signup_trial_days()` returns what the `trial` setting holds, and that
-  `get_public_config()` reports the same number. A later migration that
-  hard-codes the trial again fails the release.
+  constant to read any more, so the comparison is replaced, not dropped:
+  self-check 5 requires that the source carry the expression itself —
+  `make_interval(days => app_private.signup_trial_days())` — that
+  `signup_trial_days()` return what the `trial` setting holds, and that
+  `get_public_config()` report the same number.
+
+  Pinning the expression rather than two proxies for it is deliberate. The first
+  draft asked only that the source mention `signup_trial_days` and carry no
+  `interval 'N days'` literal. A body reading
+  `make_interval(days => 30); -- was app_private.signup_trial_days()` satisfies
+  both — the mention survives in the comment — while handing every new customer
+  30 days in silence; and that same clause refused the perfectly correct
+  `app_private.signup_trial_days() * interval '1 day'`.
+
+  What self-check 5 does NOT do is police a *later* migration, and it never
+  could: a DO block runs once, at this file's own position in the ordered apply,
+  and its ledger row in `app_meta.schema_migrations` keeps it from running again.
+  A migration that rewrites the function afterwards is applied after this block
+  has already passed. The guard is over the body this file itself installs.
 
   `signup_trial_days()` is the one place that reads the key, for the signup and
   for `get_public_config()` alike, so the number a visitor is quoted and the
@@ -432,36 +452,50 @@ $$;
 -- ─── The three keys ─────────────────────────────────────────────────────────
 
 /*
-  `seller`, copied from the row SubscriptionBillingPage reads today: the
+  `seller`, read from the row SubscriptionBillingPage reads today: the
   company_settings of the company the oldest active platform owner belongs to.
   Ordered by created_at then user_id so two owners cannot make the result depend
   on which row the planner happens to return first.
 
-  The LEFT JOIN LATERAL is what makes the fallback work: with no platform owner,
-  no company, or no settings row — a fresh database, the RLS fixture, or a
-  database where 3.7b has already moved the platform account out of its company
-  — every column is NULL, so every field becomes the empty string and `name`
-  becomes 'El-Professor', which is exactly what that screen falls back to today
-  (`s?.company_name || 'El-Professor'`).
+  **On the two real databases this finds nothing, and the fallback is what is
+  stored.** Measured 16.09.2026: every platform account on staging and on
+  production has `company_id` NULL, so the subquery is NULL, the LATERAL yields
+  no row, and every field below falls back. That loses nothing, because
+  SubscriptionBillingPage loads the seller only
+  `if (isSuperAdmin && profile?.company_id)` — so the invoice PDF already prints
+  the same fallback this seeds (`s?.company_name || 'El-Professor'`). The copy
+  matters only on a database where a platform account does sit in a company.
 
-  Each value is trimmed and cut to the validator's 200 characters, so the seed
-  passes the validator this file installs whatever the source row holds; 200
+  The LEFT JOIN LATERAL is what makes the fallback work: with no platform owner,
+  no company, or no settings row — the two real databases, a fresh database, the
+  RLS fixture, or a database where 3.7b has already moved the platform account
+  out of its company — every column is NULL, so every field becomes the empty
+  string and `name` becomes 'El-Professor'.
+
+  Each value has its control characters replaced by a space, is then trimmed,
+  and is cut to the validator's 200 characters, so the seed passes the validator
+  this file installs whatever the source row holds. All eleven company_settings
+  columns are unconstrained `text`, so without that first step a newline or a tab
+  in any of them would make self-check 3's validator loop abort the release. 200
   characters is far beyond any real name, address line, IBAN or tax number, so
-  nothing real is shortened. Self-check 3 proves the copy against the source.
+  nothing real is shortened. Self-check 3 proves the copy against the source
+  through the same three steps.
 */
 INSERT INTO app_private.platform_settings (key, value)
+-- regexp_replace before btrim, not after: btrim(text) strips spaces only, so a
+-- leading newline would survive it and be left behind as a leading space.
 SELECT 'seller', jsonb_build_object(
-  'name',           coalesce(nullif(left(btrim(cs.company_name),    200), ''), 'El-Professor'),
-  'street',         coalesce(       left(btrim(cs.street),          200),      ''),
-  'house_number',   coalesce(       left(btrim(cs.house_number),    200),      ''),
-  'postal_code',    coalesce(       left(btrim(cs.postal_code),     200),      ''),
-  'city',           coalesce(       left(btrim(cs.city),            200),      ''),
-  'vat_id',         coalesce(       left(btrim(cs.vat_id),          200),      ''),
-  'tax_number',     coalesce(       left(btrim(cs.tax_number),      200),      ''),
-  'bank_name',      coalesce(       left(btrim(cs.bank_name),       200),      ''),
-  'iban',           coalesce(       left(btrim(cs.iban),            200),      ''),
-  'bic',            coalesce(       left(btrim(cs.bic),             200),      ''),
-  'account_holder', coalesce(       left(btrim(cs.account_holder),  200),      '')
+  'name',           coalesce(nullif(left(btrim(regexp_replace(cs.company_name,   '[[:cntrl:]]+', ' ', 'g')), 200), ''), 'El-Professor'),
+  'street',         coalesce(       left(btrim(regexp_replace(cs.street,         '[[:cntrl:]]+', ' ', 'g')), 200),      ''),
+  'house_number',   coalesce(       left(btrim(regexp_replace(cs.house_number,   '[[:cntrl:]]+', ' ', 'g')), 200),      ''),
+  'postal_code',    coalesce(       left(btrim(regexp_replace(cs.postal_code,    '[[:cntrl:]]+', ' ', 'g')), 200),      ''),
+  'city',           coalesce(       left(btrim(regexp_replace(cs.city,           '[[:cntrl:]]+', ' ', 'g')), 200),      ''),
+  'vat_id',         coalesce(       left(btrim(regexp_replace(cs.vat_id,         '[[:cntrl:]]+', ' ', 'g')), 200),      ''),
+  'tax_number',     coalesce(       left(btrim(regexp_replace(cs.tax_number,     '[[:cntrl:]]+', ' ', 'g')), 200),      ''),
+  'bank_name',      coalesce(       left(btrim(regexp_replace(cs.bank_name,      '[[:cntrl:]]+', ' ', 'g')), 200),      ''),
+  'iban',           coalesce(       left(btrim(regexp_replace(cs.iban,           '[[:cntrl:]]+', ' ', 'g')), 200),      ''),
+  'bic',            coalesce(       left(btrim(regexp_replace(cs.bic,            '[[:cntrl:]]+', ' ', 'g')), 200),      ''),
+  'account_holder', coalesce(       left(btrim(regexp_replace(cs.account_holder, '[[:cntrl:]]+', ' ', 'g')), 200),      '')
 )
   FROM (SELECT 1) AS one
   LEFT JOIN LATERAL (
@@ -848,13 +882,14 @@ BEGIN
    LIMIT 1;
 
   IF FOUND THEN
+    -- The same three steps the seed applies, in the same order.
     IF v_seller ->> 'name' IS DISTINCT FROM
-         coalesce(nullif(left(btrim(v_source.company_name), 200), ''), 'El-Professor')
-       OR v_seller ->> 'iban'        IS DISTINCT FROM coalesce(left(btrim(v_source.iban), 200), '')
-       OR v_seller ->> 'vat_id'      IS DISTINCT FROM coalesce(left(btrim(v_source.vat_id), 200), '')
-       OR v_seller ->> 'street'      IS DISTINCT FROM coalesce(left(btrim(v_source.street), 200), '')
-       OR v_seller ->> 'postal_code' IS DISTINCT FROM coalesce(left(btrim(v_source.postal_code), 200), '')
-       OR v_seller ->> 'city'        IS DISTINCT FROM coalesce(left(btrim(v_source.city), 200), '') THEN
+         coalesce(nullif(left(btrim(regexp_replace(v_source.company_name, '[[:cntrl:]]+', ' ', 'g')), 200), ''), 'El-Professor')
+       OR v_seller ->> 'iban'        IS DISTINCT FROM coalesce(left(btrim(regexp_replace(v_source.iban,        '[[:cntrl:]]+', ' ', 'g')), 200), '')
+       OR v_seller ->> 'vat_id'      IS DISTINCT FROM coalesce(left(btrim(regexp_replace(v_source.vat_id,      '[[:cntrl:]]+', ' ', 'g')), 200), '')
+       OR v_seller ->> 'street'      IS DISTINCT FROM coalesce(left(btrim(regexp_replace(v_source.street,      '[[:cntrl:]]+', ' ', 'g')), 200), '')
+       OR v_seller ->> 'postal_code' IS DISTINCT FROM coalesce(left(btrim(regexp_replace(v_source.postal_code, '[[:cntrl:]]+', ' ', 'g')), 200), '')
+       OR v_seller ->> 'city'        IS DISTINCT FROM coalesce(left(btrim(regexp_replace(v_source.city,        '[[:cntrl:]]+', ' ', 'g')), 200), '') THEN
       RAISE EXCEPTION '20260919120000 self-check: the seeded seller is not the company_settings row the invoice page reads';
     END IF;
     RAISE NOTICE '20260919120000: the seller was copied from the platform owner''s company settings (%)', v_seller ->> 'name';
@@ -927,11 +962,15 @@ BEGIN
     FROM pg_proc p
    WHERE p.oid = to_regprocedure('app_private.signup_insert_company(uuid,text,text,text,text,text,integer,uuid,text,text)');
 
-  IF v_src !~ 'signup_trial_days' THEN
-    RAISE EXCEPTION '20260919120000 self-check: signup_insert_company no longer reads the trial setting';
-  END IF;
-  IF v_src ~ $re$interval\s*'\d+ *days?'$re$ THEN
-    RAISE EXCEPTION '20260919120000 self-check: signup_insert_company has a hard-coded trial length again';
+  -- The expression itself, not two proxies for it. `v_src !~ 'signup_trial_days'`
+  -- was satisfied by the name appearing in a comment, and the second clause
+  -- matched only the literal spelling `interval 'N days'` — so a body declaring
+  -- `make_interval(days => 30)` with the old call left behind in a comment passed
+  -- both, and every new customer would have got 30 days in silence. That clause
+  -- also refused the perfectly correct
+  -- `app_private.signup_trial_days() * interval '1 day'`.
+  IF v_src !~ $re$make_interval\(days\s*=>\s*app_private\.signup_trial_days\(\)\)$re$ THEN
+    RAISE EXCEPTION '20260919120000 self-check: signup_insert_company no longer applies the trial setting';
   END IF;
 
   IF (public.get_public_config() ->> 'trial_days')::integer IS DISTINCT FROM app_private.signup_trial_days() THEN
@@ -979,9 +1018,15 @@ BEGIN
     END IF;
   END LOOP;
 
+  -- Category 'read', not 'settings'. platform_audit_record accepts only 'read'
+  -- and 'write', so a 'settings' call is refused on the category before the
+  -- action allow-list is ever consulted — and the allow-list is exactly what
+  -- this check is here to pin, because dropping it is the 20260916140000
+  -- accident. Both earlier migrations probe with 'read' for the same reason
+  -- (20260916150000 self-check 8, 20260917120000 self-check 7).
   FOREACH v_action IN ARRAY ARRAY['platform_settings.get', 'platform_settings.put'] LOOP
     BEGIN
-      PERFORM public.platform_audit_record('settings', v_action, 'ok');
+      PERFORM public.platform_audit_record('read', v_action, 'ok');
       RAISE EXCEPTION '20260919120000 self-check: platform_audit_record accepts the forbidden action %', v_action;
     EXCEPTION
       WHEN invalid_parameter_value THEN NULL;   -- 22023: the refusal this pins

@@ -36,10 +36,23 @@
   release that dropped it would fail on the first profile write instead of on
   production.
 
-  The three Gehaltsquittung RPCs that migration also rewrites are deliberately
-  NOT in the list. They were created in the chain, by 20260914140000, so on the
-  real databases they belong to the role that ran that migration — the same role
-  that runs this one, which is what the kit already reproduces. Handing them to
+  `app_private.signup_insert_company` is here for 20260919120000 (plan 3.10),
+  which is the next migration to add a call from an existing SECURITY DEFINER
+  function into `app_private` — `signup_trial_days()`. That file deliberately
+  leaves the function's owner alone and grants the owner USAGE and EXECUTE by
+  name instead, so its grant loop and its self-check 6 only mean anything against
+  an owner that does not already own the helper. Without this entry the kit owns
+  everything and both run empty.
+
+      RLS_BEFORE=20260919120000_platform_settings_seller_trial_invoice.sql \
+      RLS_BEFORE_SQL=tests/fixtures/owner-simulation.sql \
+      node scripts/rls-test.mjs
+
+  The three Gehaltsquittung RPCs that 20260917130000 also rewrites are
+  deliberately NOT in the list. They were created in the chain, by
+  20260914140000, so on the real databases they belong to the role that ran that
+  migration — the same role that runs this one, which is what the kit already
+  reproduces. Handing them to
   `postgres` here would test an ownership production does not have, and would
   fail on grants (current_role_permits, next_document_number) that production's
   owner holds anyway. Simulate an owner only where production really has one.
@@ -62,6 +75,12 @@ BEGIN
     'public.delete_or_archive_monthly_planning_run(uuid)',
     'public.purge_old_monthly_planning_runs(integer, integer)',
     'public.reassign_fahrtenbuch_trip(uuid, uuid, text, text, text, text)',
+    -- For 20260919120000 (plan 3.10), which teaches this function to call
+    -- app_private.signup_trial_days(). CREATE OR REPLACE never changes an owner,
+    -- so on the real databases this may still belong to postgres — the case that
+    -- migration's grant loop and its self-check 6 were written for, and which
+    -- nothing exercised while the kit owned it.
+    'app_private.signup_insert_company(uuid,text,text,text,text,text,integer,uuid,text,text)',
     -- Not for the grant loop: for the ALTER … OWNER TO CURRENT_USER in the
     -- migration's section 6. Owned by postgres, this trigger function cannot
     -- reach app_private at all.

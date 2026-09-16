@@ -471,8 +471,11 @@ BEGIN
       v_src ~ 'platform_settings_rate_limited' AND v_src ~ 'audit_write');
   END LOOP;
 
+  -- Category 'read', not 'settings': platform_audit_record accepts only 'read'
+  -- and 'write', so a 'settings' call is refused on the category before the
+  -- action allow-list is consulted, and it is the allow-list this pins.
   PERFORM _st_ok('scope: platform_audit_record still refuses to forge a settings row',
-    _st_do(owner, $q$SELECT platform_audit_record('settings', 'platform_settings.put', 'ok')::text$q$)
+    _st_do(owner, $q$SELECT platform_audit_record('read', 'platform_settings.put', 'ok')::text$q$)
       LIKE 'ERR 22023%');
 
   -- The signup path can reach app_private, whoever owns it. Without this every
