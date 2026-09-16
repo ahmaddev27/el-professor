@@ -75,7 +75,17 @@ export class Mailpit {
       }
       await new Promise((resolve) => setTimeout(resolve, 1_000));
     }
-    throw new Error(`No mail to ${to} arrived within ${timeoutMs / 1_000} s`);
+    // Named rather than left to the reader: otp-request answers a public
+    // purpose the same way whether or not it sent anything, so a run inside the
+    // one-code-per-minute cooldown, or past five codes for one address in an
+    // hour, is indistinguishable from a broken mail path until you count the
+    // runs. Seen twice while measuring this suite on 16.09.2026.
+    throw new Error(
+      `No mail to ${to} arrived within ${timeoutMs / 1_000} s. ` +
+        'If this follows other runs, it is most likely the one-time-code limits ' +
+        '(one code per address per minute, five per hour) rather than the mailer: ' +
+        'otp-request answers as if it had sent one either way. Wait, then run it again.',
+    );
   }
 }
 

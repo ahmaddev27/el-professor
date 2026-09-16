@@ -1,5 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { Mailpit } from './mailpit';
+import { pickResetAddress } from './resetAddress';
 import { warmStaging } from './warmup';
 
 // Mailpit listens only on the host's loopback. Until mail-staging.elprofessor.eu
@@ -25,6 +26,12 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
   // Either step can fail, and neither may leave the tunnel behind: Playwright
   // never calls the teardown below when global setup throws.
   try {
+    // Before anything slow, so a pool that was never seeded fails here by name
+    // rather than three steps into the test. Workers are forked after this
+    // returns, so they inherit the choice.
+    process.env.E2E_RESET_EMAIL = pickResetAddress();
+    console.log(`Password-reset address for this run: ${process.env.E2E_RESET_EMAIL}`);
+
     await waitForMailpit(url);
     await warmStaging();
   } catch (err) {
