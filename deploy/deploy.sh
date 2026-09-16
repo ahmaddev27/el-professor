@@ -535,6 +535,17 @@ code() { curl -s -o /dev/null -w '%{http_code}' --max-time 15 "$1"; }
 # 502 is read as the gateway's here because otp-request never returns one. Do not
 # point this at otp-verify without revisiting that: sessionFailed() answers 502
 # from inside the function.
+#
+# Whether an answer means Kong answered but could not reach the runtime behind
+# it. Exactly the statuses functions_probe_problem blames on the gateway, and the
+# only ones a `kong reload` can do anything about — the test pins the two lists
+# to each other. "No answer at all" is deliberately not one of them: nothing
+# answered, so the gateway may itself be down and a reload would be aimed at the
+# wrong thing.
+functions_probe_is_stale_upstream() {
+  case "$1" in 502|503|504) return 0 ;; *) return 1 ;; esac
+}
+
 functions_probe_problem() {
   local status="$1" body="$2"
   case "$status" in
@@ -593,8 +604,11 @@ for path in $CLOSED_ROUTES; do
 done
 
 # And the edge functions, end to end: Caddy, Kong, the runtime, a user worker.
-# Nothing checked them until now, so a broken router, a missing FUNCTION_ENV
-# entry or an unreachable runtime shipped silently and a customer found it.
+# Nothing checked them until now, so a broken router, an unreachable runtime or
+# an otp-request with no FUNCTION_ENV entry shipped silently and a customer found
+# it. Read it for exactly what it is: one route and one function. Another
+# function whose FUNCTION_ENV entry is missing still answers 404 from
+# main/index.ts, and this probe says nothing at all about it.
 #
 # It is also the one check this release needs most, because this release is what
 # breaks the route. `web` and `functions` are force-recreated together above, so
@@ -605,38 +619,109 @@ done
 # address `web` now holds, nginx refuses port 9000, and every POST to
 # /functions/v1/* is answered 502 in ~130 ms. Measured on staging 16.09.2026:
 # three such episodes in 21 h, each 19-78 s after a release finished, and none at
-# any other time — idle stretches of 6 min to 10.5 h all answered normally. For a
-# customer that window is "Passwort vergessen" showing "Ein unerwarteter Fehler
-# ist aufgetreten"; for the e2e suite it was four red merges in a row.
+# any other time — but nothing called the route in between, so those numbers
+# bound when a 502 was *seen*, not how long the window lasts. Its tail is
+# unmeasured, and the TTL above is the only thing that bounds it. For a customer
+# that window is "Passwort vergessen" showing "Ein unerwarteter Fehler ist
+# aufgetreten"; for the e2e suite it was four red merges in a row.
 #
 # So the release does not finish while that route is dead. `{}` is refused by
-# parseOtpRequest before any database, mail or rate-limit work, so the probe
+# parseOtpRequest before any database, mail or rate-limit work, so each probe
 # costs one worker boot and nothing else — no code is sent and no budget spent.
-# 30 tries, 5 s apart: every window seen was under 80 s, and a stall past 150 s
-# is worth a red deploy rather than a release nobody checked.
-fn_anon_key="$(env_value .env ANON_KEY)"
-[ -n "$fn_anon_key" ] || fail "ANON_KEY is missing from .env, so the edge functions cannot be probed"
+# The anon key goes on the command line and so into the host's process table.
+# That is the deliberate exception to this file's habit, not an oversight: it is
+# the publishable key, the same bytes nginx serves inside the bundle two steps
+# above, and the alternatives are a temp file holding it or a heredoc inside a
+# command substitution in the one script whose parse errors take a site down.
+#
+# Waiting the window out is explicitly not the plan, and the budget below does
+# not cover the TTL. A record refreshed seconds before the release still has
+# ~590 s on it — longer than a release may sit here — and grading a self-healing
+# window as a failed release is expensive in its own right: fail marks the
+# manifest failed, so a later rollback will not pick this release; it leaves
+# releases/current on the previous sha, so the host reports the wrong thing as
+# live; and it blocks the next production promotion, which requires status=ok.
+# All for a stack that is by then already live and correct. So the first answer
+# that says Kong could not reach the runtime buys one `kong reload` instead, and
+# the budget then only has to cover that reload and a worker boot.
+#
+# The pauses grow, 3 s to 15 s, the shape e2e/lib/warmup.ts settled on: a probe
+# that does reach the runtime makes main/index.ts create another 256 MB worker,
+# and a fixed short cadence is the one thing that file measured going badly. The
+# bound is wall-clock rather than a count of tries, because a single try can
+# itself take --max-time; the true worst case is this budget plus one of those,
+# so about 270 s inside a 25-minute job. 30 s is warmup.ts's timeout, and the
+# Caddy site in front of this allows 300 s.
+FN_PROBE_BUDGET=240
 
-# curl writes the body, then a newline, then the status, so the last line is the
-# status and everything before it is the body. The separator is held in a
-# variable because $'\n' inside a "${...}" expansion opens a quote bash never
-# closes, and the whole script stops parsing.
-fn_nl=$'\n'
-fn_problem="no answer at all"
-for i in $(seq 1 30); do
-  fn_answer="$(curl -s --max-time 15 -X POST "$PUBLIC_URL/functions/v1/otp-request" \
-    -H "apikey: $fn_anon_key" -H 'Content-Type: application/json' \
-    -d '{}' -w '\n%{http_code}')" || true
-  fn_problem="$(functions_probe_problem "${fn_answer##*"$fn_nl"}" "${fn_answer%"$fn_nl"*}")"
-  [ -z "$fn_problem" ] && break
-  sleep 5
-done
-unset fn_anon_key
-# Not spelled inline: an apostrophe inside ${x:-...} opens a quote bash never
-# closes, and the whole script stops parsing.
-fn_served="served by the function itself"
-echo "  $PUBLIC_URL/functions/v1/otp-request -> ${fn_problem:-$fn_served}"
-[ -z "$fn_problem" ] || fail "the edge functions do not answer through $PUBLIC_URL: $fn_problem. The bundle is live and every other service answered, so this is the functions service alone. If it is a 502, Kong is still dialling the address 'functions' held before this release; 'docker compose exec kong kong reload' from this directory drops its DNS cache without dropping a connection or recreating a container"
+# The probe names one function, and --activate brings back an older tree against
+# today's deploy.sh: otp-request only arrived on 15.09.2026, so a rollback far
+# enough back would probe a function the release does not ship, meet 404 until
+# the budget ran out, and fail the rollback for a reason that has nothing to do
+# with the gateway. Only the five newest clean releases are kept and all of them
+# have it, so this is a guard against a shape, not against a case seen.
+if [ ! -f "$ROOT/supabase/functions/otp-request/index.ts" ]; then
+  echo "  $PUBLIC_URL/functions/v1/otp-request -> not probed: this release ships no otp-request"
+else
+  fn_anon_key="$(env_value .env ANON_KEY)"
+  [ -n "$fn_anon_key" ] || fail "ANON_KEY is missing from .env, so the edge functions cannot be probed"
+
+  # curl writes the body, then a newline, then the status, so the last line is the
+  # status and everything before it is the body. The separator is held in a
+  # variable because $'\n' inside a "${...}" expansion opens a quote bash never
+  # closes, and the whole script stops parsing.
+  fn_nl=$'\n'
+  fn_problem="no answer at all"
+  fn_reload=""
+  fn_pause=0
+  fn_deadline=$(( SECONDS + FN_PROBE_BUDGET ))
+  while :; do
+    fn_answer="$(curl -s --max-time 30 -X POST "$PUBLIC_URL/functions/v1/otp-request" \
+      -H "apikey: $fn_anon_key" -H 'Content-Type: application/json' \
+      -d '{}' -w '\n%{http_code}')" || true
+    fn_status="${fn_answer##*"$fn_nl"}"
+    fn_problem="$(functions_probe_problem "$fn_status" "${fn_answer%"$fn_nl"*}")"
+    if [ -z "$fn_problem" ]; then break; fi
+    if [ "$SECONDS" -ge "$fn_deadline" ]; then break; fi
+    # Once, and only after an answer that says Kong could not reach the runtime,
+    # so this is not in the gateway's path on a release that is fine. A reload
+    # re-reads /home/kong/kong.yml — the file the entrypoint rendered before Kong
+    # started, so the same bytes this Kong already accepted, that a throwaway
+    # Kong parsed further up, and that answered 403 on the closed routes a minute
+    # ago. Its new nginx workers start with an empty DNS cache, which is the
+    # whole point; no connection is dropped and no container is recreated. It is
+    # the one-liner the failure message below has always told an operator to run.
+    #
+    # It is also the only thing in a release that changes the live gateway's
+    # state, and it stays unexercised until a release actually lands in the
+    # window. Hence three guards: never on a healthy release, never twice, and
+    # never fatal — if it fails, the loop goes back to waiting, which is exactly
+    # where this check stood without it.
+    if [ -z "$fn_reload" ] && functions_probe_is_stale_upstream "$fn_status"; then
+      if dc exec -T kong kong reload < /dev/null > /dev/null 2>&1; then fn_reload=reloaded; else fn_reload=refused; fi
+      echo "  kong reload after $fn_problem: $fn_reload"
+    fi
+    fn_pause=$(( fn_pause < 15 ? fn_pause + 3 : 15 ))
+    sleep "$fn_pause"
+  done
+  unset fn_anon_key
+
+  # Not spelled inline: an apostrophe inside ${x:-...} opens a quote bash never
+  # closes, and the whole script stops parsing.
+  fn_served="served by the function itself"
+  echo "  $PUBLIC_URL/functions/v1/otp-request -> ${fn_problem:-$fn_served}${fn_reload:+ (kong reload: $fn_reload)}"
+
+  # A rollback reaches this line with the site already broken, so the message
+  # must not read like a successful release that lost one route.
+  fn_context="The bundle is live and every other service answered, so this is the functions service alone."
+  [ "$MODE" != --activate ] || fn_context="This is a rollback: the files of $(basename "$RELEASE_DIR") are in place, Kong, the bundle and every other service were recreated from them and answered, and only this route did not. That release's own record is untouched, so it can be activated again."
+  case "$fn_reload" in
+    reloaded) fn_next="Kong was reloaded once and the route still did not come up, so a stale DNS cache is not what is left." ;;
+    refused)  fn_next="The reload this step tried was refused, so run 'docker compose exec kong kong reload' from this directory by hand. If the answer is a 502, Kong is still dialling the address 'functions' held before this release, and that record expires on its own within 600 s." ;;
+    *)        fn_next="Kong was not reloaded: no answer here was a 502, 503 or 504, so the gateway's DNS cache is not what is wrong. If nothing answered at all, look at Caddy and Kong before the functions service." ;;
+  esac
+  [ -z "$fn_problem" ] || fail "the edge functions do not answer through $PUBLIC_URL: $fn_problem. $fn_context $fn_next"
+fi
 
 if [ -n "$MANIFEST" ]; then
   if [ "$MODE" != --activate ]; then
