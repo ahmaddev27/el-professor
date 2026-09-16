@@ -56,6 +56,19 @@ export const de = {
   'admin.role.billing':     'Buchhaltung',
   'admin.role.read_only':   'Nur Lesen',
 
+  // ── Plattform-Anmeldung (/admin/login) ─────────────────────────────────────
+  // Jede Ablehnung lautet gleich: die Seite darf nicht verraten, ob eine
+  // Adresse zum Plattform-Team gehört.
+  'admin.login.title':           'Plattform-Anmeldung',
+  'admin.login.lead':            'Zugang nur für das Plattform-Team.',
+  'admin.login.noGoogle':        'Die Anmeldung erfolgt mit E-Mail-Adresse und Passwort. Für Plattform-Konten gibt es keine Anmeldung mit Google.',
+  'admin.login.submit':          'Anmelden',
+  'admin.login.failed':          'Anmeldung nicht möglich. Bitte prüfen Sie E-Mail-Adresse und Passwort.',
+  'admin.login.tooManyAttempts': 'Zu viele Anmeldeversuche. Bitte warten Sie einige Minuten und versuchen Sie es erneut.',
+  'admin.login.network':         'Keine Verbindung zum Server. Bitte versuchen Sie es erneut.',
+  'admin.login.companyHint':     'Sie arbeiten für ein Unternehmen?',
+  'admin.login.companyLink':     'Zur Unternehmens-Anmeldung',
+
   // ── Shell chrome ───────────────────────────────────────────────────────────
   'shell.systemName':       'Verwaltungssystem',
   'shell.superAdminView':   'Super Admin Ansicht',
