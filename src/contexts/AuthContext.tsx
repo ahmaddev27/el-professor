@@ -5,6 +5,7 @@ import type { TranslationKey } from '../i18n';
 import { consumeGoogleSignInIntent, readGoogleSignInIntent, type GoogleSignInIntent } from '../lib/googleSignIn';
 import { googleSessionIsSettled, sessionCameFromGoogle } from '../lib/googleAccount';
 import { nextAfterReconcile, reconcileOauthAccount } from '../lib/oauthAccountClient';
+import { attemptUntilAnswered } from '../lib/profileLoadRetry';
 
 const SESSION_TIMEOUT = 20 * 60 * 1000;
 const LAST_ACTIVITY_KEY = 'lastActivity';
@@ -107,6 +108,13 @@ interface AuthContextType {
    */
   profileLoaded: boolean;
   /**
+   * The profile load ran out of attempts without an answer. `profileLoaded`
+   * stays false — the gate keeps its meaning — and the screen offers a retry
+   * (`refreshProfile`) and a sign-out instead of waiting indefinitely, because
+   * nothing else reloads the profile until a token refresh or a page reload.
+   */
+  profileLoadFailed: boolean;
+  /**
    * Set when the *restored* session belongs to an account that has since been
    * revoked. Sign-in blocks are returned by signIn(); this covers reloads and
    * sessions installed from a one-time code, where signIn() is never called.
@@ -180,6 +188,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [profile, setProfile] = useState<UserProfile | null>(null);
   // "The profile query has answered", which is not the same as "profile is set".
   const [profileLoaded, setProfileLoaded] = useState(false);
+  // Every attempt is used up and none answered: show a way out, not a spinner.
+  const [profileLoadFailed, setProfileLoadFailed] = useState(false);
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
   const [companyApprovalStatus, setCompanyApprovalStatus] = useState<'pending' | 'approved' | 'rejected' | 'suspended' | null>(null);
@@ -222,6 +232,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setSession(null);
     setProfile(null);
     setProfileLoaded(false);
+    setProfileLoadFailed(false);
     setCompanyApprovalStatus(null);
     setRejectionReason(null);
     setSubscriptionStatus(null);
@@ -252,7 +263,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, [setupSessionTimer]);
 
-  const loadUserProfile = async (userId: string) => {
+  /**
+   * One attempt. Returns whether the profile query *answered* — with a row or
+   * with none — which is what `profileLoaded` means. A step after it that fails
+   * (the permission matrix, the company) leaves the profile loaded and is
+   * swallowed as before: it is not a reason to fetch the profile again.
+   */
+  const loadUserProfileOnce = async (userId: string): Promise<boolean> => {
+    let answered = false;
     try {
       const { data, error } = await supabase
         .from('user_profiles')
@@ -267,7 +285,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         // rather than letting a gate read this as "the account has no profile
         // row"; true on a later refresh, so one failed refresh cannot blank a
         // session that is working.
-        return;
+        return false;
       }
 
       // The query answered — with a row, or with none. Those are different
@@ -275,6 +293,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       // apart from `profile` alone.
       setProfile(data ?? null);
       setProfileLoaded(true);
+      answered = true;
 
       // Account revocation must bite on every session, not only at sign-in.
       // signIn() calls checkProfileAccess, but a restored session and a session
@@ -326,9 +345,25 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     } catch (error) {
       // As above: an exception is not an answer either, so the flag keeps its
-      // value and a first load that threw leaves App on the spinner.
+      // value and a load that threw before answering is retried below.
       console.error('Profile loading exception:', error);
     }
+    return answered;
+  };
+
+  /**
+   * The profile load every caller uses: a few bounded attempts, and then an
+   * admission of failure.
+   *
+   * Failing closed is the point — `profileLoaded` is still raised only by a
+   * query that answered — but a first load that fails would otherwise leave App
+   * on a spinner with nothing to press until a token refresh or a page reload.
+   * `profileLoadFailed` is what puts the retry and the sign-out on the screen.
+   */
+  const loadUserProfile = async (userId: string) => {
+    setProfileLoadFailed(false);
+    const answered = await attemptUntilAnswered(() => loadUserProfileOnce(userId));
+    if (!answered) setProfileLoadFailed(true);
   };
 
   // Check if a profile+company is allowed to access the app.
@@ -660,6 +695,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     user,
     profile,
     profileLoaded,
+    profileLoadFailed,
     userBlockReason,
     session,
     loading,

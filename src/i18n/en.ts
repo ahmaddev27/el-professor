@@ -4194,4 +4194,8 @@ export const en: PartialDictionary = {
   'gsignup.error.noPendingSignup':   'There is no open registration for this login. Please sign in with Google again.',
   'gsignup.error.invalid':           'Please check your details.',
   'gsignup.error.failed':            'The registration could not be completed. Please try again.',
+
+  'profile.unavailable.title': 'Your account could not be loaded',
+  'profile.unavailable.body':  'We could not fetch your account details. This is usually the connection. Please try again, or sign out.',
+  'profile.unavailable.retry': 'Try again',
 };
