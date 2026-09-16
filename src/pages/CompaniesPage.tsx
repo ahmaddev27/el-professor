@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { callPlatformRpc } from '../lib/platformRpc';
+import { fetchCompanies } from '../lib/platformDirectoryClient';
 import { useAuth } from '../contexts/AuthContext';
 import { useSuperAdmin, CompanyListItem } from '../contexts/SuperAdminContext';
 import { useToast } from '../contexts/ToastContext';
@@ -966,15 +967,29 @@ export default function CompaniesPage() {
       const { data, error } = await supabase.from('companies').select('*').order('created_at', { ascending: false });
       if (error) throw error;
 
-      const companyIds = (data || []).map(c => c.id);
-      if (companyIds.length > 0) {
-        const { data: profileCounts } = await supabase.from('user_profiles').select('company_id').in('company_id', companyIds);
-        const countMap: Record<string, number> = {};
-        profileCounts?.forEach(p => { if (p.company_id) countMap[p.company_id] = (countMap[p.company_id] || 0) + 1; });
-        setCompanies((data || []).map(c => ({ ...c, user_count: countMap[c.id] || 0 })));
-      } else {
-        setCompanies(data || []);
+      // The user count per company comes from the audited read model. Counting
+      // user_profiles here with the caller's own JWT returns 0 for every
+      // company since 20260917140000 (plan 3.4): a platform account reads no
+      // company's profiles directly any more, so the column would tell the
+      // owner that every customer has no users. platform_companies_list
+      // computes the same figure server-side, under companies.read, and records
+      // the read.
+      //
+      // One page, which is what fetchCompanies offers by design — it is a
+      // convenience and every call writes an audit row. A company beyond that
+      // page gets no count, and so does a refusal or a transport failure: the
+      // column then shows a dash, because a missing number is honest where a 0
+      // is not, and the list itself must still render either way.
+      const userCounts: Record<string, number> = {};
+      try {
+        const page = await fetchCompanies();
+        if (page.ok) {
+          for (const row of page.items) userCounts[row.id] = row.user_count;
+        }
+      } catch {
+        /* the count stays unknown; the companies still list */
       }
+      setCompanies((data || []).map(c => ({ ...c, user_count: userCounts[c.id] })) as CompanyListItem[]);
     } catch {
       showToast('error', t('sa.companies.errorLoad'));
     } finally {
@@ -1183,7 +1198,7 @@ export default function CompaniesPage() {
                     </td>
                     <td className="px-5 py-4">
                       <span className="flex items-center gap-1.5 text-sm" style={{ color: 'var(--text-secondary)' }}>
-                        <Users size={13} />{(company as any).user_count ?? 0}
+                        <Users size={13} />{(company as any).user_count ?? '–'}
                       </span>
                     </td>
                     <td className="px-5 py-4 text-xs" style={{ color: 'var(--text-tertiary)' }}>

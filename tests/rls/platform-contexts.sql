@@ -157,6 +157,16 @@ VALUES
   (_pc_id('company:y'), 'PC Y', 'pc-y', 'approved', 'active', 'basic', 'active')
 ON CONFLICT (id) DO NOTHING;
 
+-- Every company has one settings row, and sections 5b and 6 write it. Without
+-- it those UPDATEs match nothing and both assertions would record a refusal
+-- that is really an absent row — which is exactly what they did until this seed
+-- was added.
+INSERT INTO company_settings (company_id, company_name)
+VALUES
+  (_pc_id('company:x'), 'PC X'),
+  (_pc_id('company:y'), 'PC Y')
+ON CONFLICT (company_id) DO NOTHING;
+
 INSERT INTO auth.users (id, email, email_confirmed_at)
 SELECT _pc_id('user:' || v.who), 'pc-' || v.who || '@test.invalid', now()
 FROM (VALUES ('admin-x'), ('owner'), ('support'), ('readonly'), ('billing')) AS v(who)
