@@ -44,6 +44,7 @@ export const de = {
   'admin.nav.companies':    'Unternehmen',
   'admin.nav.billing':      'Abos & Zahlungen',
   'admin.nav.diagnostics':  'Abnahme-Diagnose',
+  'admin.nav.account':      'Konto',
   'admin.access.checking':  'Plattformzugriff wird geprüft …',
   'admin.access.errorTitle': 'Plattformzugriff konnte nicht geprüft werden',
   'admin.access.errorBody': 'Die Verbindung zum Server ist fehlgeschlagen. Bitte versuchen Sie es erneut.',
