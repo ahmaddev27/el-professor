@@ -555,7 +555,8 @@ DO $$
 DECLARE
   u_o constant uuid := _pc_id('user:owner');
   s_o constant uuid := _pc_id('session:owner');
-  v_id uuid;
+  v_id     uuid;
+  v_closed integer;
 BEGIN
   SELECT id INTO v_id FROM app_private.platform_company_contexts WHERE closed_at IS NULL;
 
@@ -574,9 +575,34 @@ BEGIN
 
   PERFORM _pc_ok('expiry: nothing has closed the row yet — it is ineffective, not tidied',
     (SELECT closed_at IS NULL FROM app_private.platform_company_contexts WHERE id = v_id));
-  PERFORM _pc_ok('expiry: platform_contexts_expire() writes it down',
-    app_private.platform_contexts_expire() >= 1
-    AND (SELECT closed_reason FROM app_private.platform_company_contexts WHERE id = v_id) = 'expired');
+  /*
+    One statement causes the effect, the next observes it — never both inside
+    one expression, which is what the previous version of these two lines did:
+
+        app_private.platform_contexts_expire() >= 1
+        AND (SELECT closed_reason FROM … WHERE id = v_id) = 'expired'
+
+    Three separate things make that unreliable, and any one of them is enough.
+    PostgreSQL does not define the evaluation order of an operator's operands
+    (§4.2.14, which is why CASE exists for when order matters). An uncorrelated
+    sub-SELECT like the second operand is normally executed as an InitPlan,
+    which runs once *before* the expression referencing it — so the read comes
+    first by construction, not by chance. And even under left-to-right
+    evaluation the whole conjunction is one SQL statement, whose snapshot is
+    fixed before it executes, so rows the volatile function modifies during that
+    statement are not visible to the statement's own sub-SELECT.
+
+    Split, each observation is made by a later statement with its own snapshot,
+    and a failure names which half was wrong instead of leaving it ambiguous.
+    The function itself was never at fault, and neither are its callers:
+    platform_context_open and platform_context_close PERFORM it as a statement
+    of its own and read the table in the next one.
+  */
+  v_closed := app_private.platform_contexts_expire();
+  PERFORM _pc_ok('expiry: platform_contexts_expire() closes the row whose time is past',
+    v_closed >= 1);
+  PERFORM _pc_ok('expiry: …and writes the reason down',
+    (SELECT closed_reason FROM app_private.platform_company_contexts WHERE id = v_id) = 'expired');
   PERFORM _pc_ok('expiry: …and a new context can be opened again afterwards',
     _pc_field(_pc_try(u_o, s_o, format('SELECT platform_context_open(%L, ''view'')::text', _pc_id('company:y'))),
               'success') = 'true');
