@@ -537,6 +537,8 @@
         <dd>الشركة اللي اشتراكها مش مفعّل أو منتهي، والشركة المعلّقة أو المرفوضة، والموظف الموقوف.</dd>
         <dt>"الصافي المستحق" بالإيصال</dt>
         <dd>الراتب المسجّل بـ Gehälter، يعني <code>COALESCE(netto_salary, amount_due)</code>، نفس أساس حالة الدفع.</dd>
+        <dt>إيميل الستيج</dt>
+        <dd>بيضل زي ما هو بقرارك بـ 16.09.2026، لأنه بيخدم الاختبارات. البرودكشن أصلاً بيبعت عبر Resend مباشرة، والستيج بيمر بـ Mailpit اللي بيحوّل كل إشي لـ Resend إلا <code>@example.com</code> — وهاد المصدر الوحيد اللي بتقدر اختبارات e2e تقرأ منه كود المرة الوحدة، لأنه قاعدة البيانات بتخزّن بصمة الكود بس. <span class="pill ok">ما تغيّر</span></dd>
       </dl>
     </section>
 
@@ -879,12 +881,13 @@ AND (c.subscription_expires_at IS NULL OR c.subscription_expires_at &gt; now())<
       </div>
 
       <div class="step">
-        <h3><span class="step-no">3.4</span>الدخول على شركة للدعم</h3>
+        <h3><span class="step-no">3.4</span>الدخول على شركة للدعم <span class="pill info">الشريحة الجاية بقرارك (16.09.2026)</span></h3>
         <ul class="list">
           <li>جلسة دعم محفوظة بالخادم: مين، على أي شركة، ليش، ومتى. بتنتهي بعد 60 دقيقة، ومسموح جلسة وحدة بس بنفس الوقت.</li>
           <li>كل دخول وخروج بينكتب بسجل المنصة.</li>
           <li>بدون جلسة دعم، مدير المنصة ما بيشوف بيانات أي شركة.</li>
           <li>جوّا الجلسة القراءة والتعديل شغالين، مع شريط ثابت "Support-Zugriff: {Firma} — beenden".</li>
+          <li><strong>ليش هي الجاية:</strong> الشريحة 3.3 نزلت بتنازل مؤقت وافقت عليه بنفس اليوم — أي دور منصة معه <code>business.read</code> بيقرأ بيانات كل الشركات مباشرة، بدون سطر تدقيق وبدون جلسة. و3.4 هي اللي بتسكّره، فكل ما تتأخر بيضل التنازل واقف أطول.</li>
         </ul>
       </div>
 
@@ -1058,7 +1061,7 @@ AND (c.subscription_expires_at IS NULL OR c.subscription_expires_at &gt; now())<
     <section class="block" id="needs" aria-labelledby="needs-title">
       <h2 id="needs-title">شو مطلوب منك</h2>
       <ul class="needs">
-        <li><span class="when">من قبل</span><span>سجل DNS <code>mail-staging</code> → <code>159.195.205.30</code>، وتشغيل <code>set-mailpit-password.sh</code>.</span><span class="pill warn">لسا</span></li>
+        <li><span class="when">من قبل</span><span>سجل DNS <code>mail-staging</code> → <code>159.195.205.30</code>، وتشغيل <code>set-mailpit-password.sh</code>. لسا ما بينحل، فالاختبارات بتوصل Mailpit عبر نفق SSH وما بينفتح الصندوق من المتصفح؛ Caddy عنده كتلة الموقع وملف كلمة المرور، فناقص بس سجل A.</span><span class="pill warn">لسا</span></li>
         <li><span class="when">المرحلة 0</span><span>كلمة مرور الستيج عبر <code>set-staging-password.sh</code>.</span><span class="pill ok">خلص</span></li>
         <li><span class="when">المرحلة 0</span><span>دمج <code>staging</code> لـ <code>main</code> وضغط زر الإنتاج بالخطوة 0.6، وبعد كل مرحلة.</span><span class="pill">لاحقاً</span></li>
         <li><span class="when">المرحلة 1</span><span>إيميل اختبار بتملكه لإثبات وصول الكود، وقرار بالحسابات القديمة غير المؤكدة.</span><span class="pill">لاحقاً</span></li>
