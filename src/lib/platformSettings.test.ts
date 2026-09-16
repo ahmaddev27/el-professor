@@ -2,13 +2,25 @@ import { describe, expect, it } from 'vitest';
 import {
   canReadSetting,
   canSaveSetting,
+  invoiceFromForm,
+  invoiceNumberExample,
+  invoiceToForm,
   isVersionConflict,
+  parseInvoice,
+  parseSeller,
   parseSettingAnswer,
+  parseTrial,
   planFeaturesFromForm,
   priceBookFromForm,
   priceBookToForm,
+  sellerAddressBlock,
+  sellerFromForm,
+  sellerToForm,
   settingRefusalKey,
+  trialFromForm,
+  trialToForm,
   writeCapabilityFor,
+  type Seller,
 } from './platformSettings';
 import { SEED_PLAN_FEATURES, SEED_PRICE_BOOK } from './appConfigSeed';
 import { parsePlatformWhoami } from './platformAccess';
@@ -192,5 +204,196 @@ describe('planFeaturesFromForm', () => {
 
   it('is null when a plan name is not one the database accepts', () => {
     expect(planFeaturesFromForm(SEED_PLAN_FEATURES, { belege: 'gold' as never })).toBeNull();
+  });
+});
+
+// ─── plan 3.10: the seller, the trial and the invoice defaults ──────────────
+
+/** The document 20260919120000 seeds where no company_settings row exists. */
+const EMPTY_SELLER: Seller = {
+  name: 'El-Professor',
+  street: '', house_number: '', postal_code: '', city: '',
+  vat_id: '', tax_number: '', bank_name: '', iban: '', bic: '', account_holder: '',
+};
+
+const FULL_SELLER: Seller = {
+  name: 'El-Professor GmbH',
+  street: 'Hauptstraße', house_number: '12', postal_code: '42651', city: 'Solingen',
+  vat_id: 'DE123456789', tax_number: '123/456/78901',
+  bank_name: 'Sparkasse', iban: 'DE02120300000000202051', bic: 'BYLADEM1001',
+  account_holder: 'El-Professor GmbH',
+};
+
+describe('who may read and save the three keys of 3.10', () => {
+  it('asks the owner-only settings.manage for all three', () => {
+    // The seller is printed on every invoice, the trial decides how long a
+    // company gets the product for nothing, and the invoice defaults name every
+    // document. Plan 3.A puts all of that under settings.manage, not under the
+    // pricing.manage billing also holds.
+    expect(writeCapabilityFor('seller')).toBe('settings.manage');
+    expect(writeCapabilityFor('trial')).toBe('settings.manage');
+    expect(writeCapabilityFor('invoice')).toBe('settings.manage');
+  });
+
+  it('refuses billing all three, on reading as well as saving', () => {
+    const billing = access('billing', ['pricing.manage', 'settings.read', 'billing.manage']);
+    for (const key of ['seller', 'trial', 'invoice'] as const) {
+      expect(canReadSetting(billing, key)).toBe(false);
+      expect(canSaveSetting(billing, key)).toBe(false);
+    }
+    // It keeps the prices, which is what settings.read means for that role.
+    expect(canReadSetting(billing, 'price_book')).toBe(true);
+  });
+
+  it('lets read_only read them and save none of them', () => {
+    const readOnly = access('read_only', ['settings.read']);
+    for (const key of ['seller', 'trial', 'invoice'] as const) {
+      expect(canReadSetting(readOnly, key)).toBe(true);
+      expect(canSaveSetting(readOnly, key)).toBe(false);
+    }
+  });
+
+  it('lets the owner save all three', () => {
+    const owner = access('owner', ['settings.read', 'settings.manage', 'pricing.manage']);
+    for (const key of ['seller', 'trial', 'invoice'] as const) {
+      expect(canSaveSetting(owner, key)).toBe(true);
+    }
+  });
+});
+
+describe('the seller', () => {
+  it('reads the document the migration seeds, and round-trips it through the form', () => {
+    expect(parseSeller(EMPTY_SELLER)).toEqual(EMPTY_SELLER);
+    const result = sellerFromForm(sellerToForm(FULL_SELLER));
+    expect('value' in result && result.value).toEqual(FULL_SELLER);
+  });
+
+  it('refuses a document with a field missing or one too many', () => {
+    // The database compares the key set exactly, so a screen that dropped a
+    // field would send a document refused as a whole.
+    const { bic, ...short } = FULL_SELLER;
+    expect(bic).toBe('BYLADEM1001');
+    expect(parseSeller(short)).toBeNull();
+    expect(parseSeller({ ...FULL_SELLER, country: 'Deutschland' })).toBeNull();
+  });
+
+  it('refuses a nameless seller — an invoice with no sender', () => {
+    expect(parseSeller({ ...FULL_SELLER, name: '   ' })).toBeNull();
+    expect(sellerFromForm(sellerToForm({ ...FULL_SELLER, name: '  ' }))).toEqual({ error: 'seller.name' });
+  });
+
+  it('lets every other field be blank', () => {
+    const result = sellerFromForm(sellerToForm(EMPTY_SELLER));
+    expect('value' in result && result.value.vat_id).toBe('');
+  });
+
+  it('names the field a control character is in — these lines are drawn into a PDF', () => {
+    expect(sellerFromForm({ ...sellerToForm(FULL_SELLER), street: 'Haupt\nstraße' }))
+      .toEqual({ error: 'seller.street' });
+    expect(parseSeller({ ...FULL_SELLER, iban: 'DE02\t1203' })).toBeNull();
+  });
+
+  it('names the field that is too long for the database', () => {
+    expect(sellerFromForm({ ...sellerToForm(FULL_SELLER), city: 'x'.repeat(201) }))
+      .toEqual({ error: 'seller.city' });
+    expect(parseSeller({ ...FULL_SELLER, city: 'x'.repeat(201) })).toBeNull();
+  });
+
+  it('trims on the way out, as the migration trimmed the row it copied', () => {
+    const result = sellerFromForm({ ...sellerToForm(FULL_SELLER), city: '  Solingen  ' });
+    expect('value' in result && result.value.city).toBe('Solingen');
+  });
+
+  it('lays the sender block out the way the invoice PDF composes it', () => {
+    // German labels in both languages: this block is printed on a German
+    // payment record (src/i18n/index.ts).
+    expect(sellerAddressBlock(FULL_SELLER)).toEqual([
+      'El-Professor GmbH',
+      'Hauptstraße 12',
+      '42651 Solingen',
+      'USt-IdNr: DE123456789 | Steuernr: 123/456/78901',
+      'Sparkasse | IBAN: DE02120300000000202051 | BIC: BYLADEM1001',
+    ]);
+  });
+
+  it('leaves out a line the seller has no values for', () => {
+    expect(sellerAddressBlock(EMPTY_SELLER)).toEqual(['El-Professor']);
+    expect(sellerAddressBlock({ ...EMPTY_SELLER, iban: 'DE02' }))
+      .toEqual(['El-Professor', 'IBAN: DE02']);
+  });
+});
+
+describe('the trial length', () => {
+  it('reads the seeded document', () => {
+    expect(parseTrial({ days: 14 })).toEqual({ days: 14 });
+    expect(trialFromForm(trialToForm({ days: 14 }))).toEqual({ value: { days: 14 } });
+  });
+
+  it('refuses a document with any other key', () => {
+    expect(parseTrial({ days: 14, weeks: 2 })).toBeNull();
+    expect(parseTrial({})).toBeNull();
+  });
+
+  it('refuses a trial of no days, of half a day, or of more than a year', () => {
+    // Below a day is not a trial; above a year is a typo that would give a
+    // company free access for years.
+    expect(parseTrial({ days: 0 })).toBeNull();
+    expect(parseTrial({ days: 0.5 })).toBeNull();
+    expect(parseTrial({ days: 366 })).toBeNull();
+    expect(parseTrial({ days: '14' })).toBeNull();
+    expect(trialFromForm({ days: '0' })).toEqual({ error: 'trial.days' });
+    expect(trialFromForm({ days: '366' })).toEqual({ error: 'trial.days' });
+    expect(trialFromForm({ days: '14,5' })).toEqual({ error: 'trial.days' });
+    expect(trialFromForm({ days: '' })).toEqual({ error: 'trial.days' });
+  });
+
+  it('accepts both ends of the range the database allows', () => {
+    expect(trialFromForm({ days: '1' })).toEqual({ value: { days: 1 } });
+    expect(trialFromForm({ days: '365' })).toEqual({ value: { days: 365 } });
+  });
+});
+
+describe('the invoice defaults', () => {
+  const INVOICE = { number_prefix: 'INV', number_digits: 4, default_payment_method: 'cash' };
+
+  it('reads the seeded document and round-trips it', () => {
+    expect(parseInvoice(INVOICE)).toEqual(INVOICE);
+    expect(invoiceFromForm(invoiceToForm(INVOICE))).toEqual({ value: INVOICE });
+  });
+
+  it('refuses a prefix with a dash — the dash separates the running number', () => {
+    // generate_invoice_number reads the sequence back with
+    // split_part(invoice_number, '-', 3).
+    expect(invoiceFromForm({ ...invoiceToForm(INVOICE), numberPrefix: 'IN-V' }))
+      .toEqual({ error: 'invoice.number_prefix' });
+    expect(parseInvoice({ ...INVOICE, number_prefix: 'IN-V' })).toBeNull();
+  });
+
+  it('refuses a lower-case or empty prefix', () => {
+    expect(invoiceFromForm({ ...invoiceToForm(INVOICE), numberPrefix: 'inv' }))
+      .toEqual({ error: 'invoice.number_prefix' });
+    expect(invoiceFromForm({ ...invoiceToForm(INVOICE), numberPrefix: '' }))
+      .toEqual({ error: 'invoice.number_prefix' });
+  });
+
+  it('refuses a running number of no digits or of more than ten', () => {
+    expect(invoiceFromForm({ ...invoiceToForm(INVOICE), numberDigits: '0' }))
+      .toEqual({ error: 'invoice.number_digits' });
+    expect(invoiceFromForm({ ...invoiceToForm(INVOICE), numberDigits: '11' }))
+      .toEqual({ error: 'invoice.number_digits' });
+    expect(parseInvoice({ ...INVOICE, number_digits: 0 })).toBeNull();
+  });
+
+  it('refuses a payment method that is not a plain identifier', () => {
+    expect(invoiceFromForm({ ...invoiceToForm(INVOICE), defaultPaymentMethod: 'Bar zahlung' }))
+      .toEqual({ error: 'invoice.default_payment_method' });
+    expect(parseInvoice({ ...INVOICE, default_payment_method: 'Cash' })).toBeNull();
+  });
+
+  it('builds the example number the way generate_invoice_number builds it', () => {
+    expect(invoiceNumberExample(INVOICE, 2026)).toBe('INV-2026-0001');
+    expect(invoiceNumberExample({ ...INVOICE, number_digits: 6 }, 2026)).toBe('INV-2026-000001');
+    expect(invoiceNumberExample({ ...INVOICE, number_prefix: 'RG', number_digits: 1 }, 2027))
+      .toBe('RG-2027-1');
   });
 });

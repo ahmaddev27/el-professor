@@ -20,6 +20,8 @@ const repoFile = (path: string) =>
 
 const SETTINGS_MIGRATION = repoFile('supabase/migrations/20260916150000_platform_settings_price_book.sql');
 const SIGNUP_MIGRATION = repoFile('supabase/migrations/20260916100010_signup_insert_company.sql');
+/** Plan 3.10, first half: the seller, the trial length and the invoice defaults. */
+const TRIAL_MIGRATION = repoFile('supabase/migrations/20260919120000_platform_settings_seller_trial_invoice.sql');
 
 /** The body of one `$tag$ … $tag$` dollar-quoted literal in a migration. */
 function dollarQuoted(sql: string, tag: string): string {
@@ -63,17 +65,36 @@ describe('the seed the app shows and the seed the migration writes', () => {
 });
 
 describe('the trial length', () => {
-  it('signup_trial_days() in the migration returns SEED_TRIAL_DAYS', () => {
-    const body = SETTINGS_MIGRATION.match(
-      /FUNCTION app_private\.signup_trial_days\(\)[\s\S]*?RETURN (\d+);/,
-    );
-    expect(body?.[1]).toBe(String(SEED_TRIAL_DAYS));
+  /**
+   * Plan 3.10 moved the trial out of `signup_insert_company`'s body and into the
+   * `trial` setting. What has to stay true is that one number governs three
+   * places at once — the setting, what a signup gives, and what
+   * `get_public_config()` quotes — so the tests below pin the seed and the
+   * wiring rather than a constant that no longer exists.
+   *
+   * `SIGNUP_MIGRATION` is still read: 20260916100010 is where the constant used
+   * to live, and it must not come back there either.
+   */
+  it('the seeded trial is SEED_TRIAL_DAYS', () => {
+    expect(JSON.parse(dollarQuoted(TRIAL_MIGRATION, 'seed_trial'))).toEqual({ days: SEED_TRIAL_DAYS });
   });
 
-  it('is the trial signup_insert_company actually gives a new company', () => {
-    const constant = SIGNUP_MIGRATION.match(
-      /c_trial_length\s+CONSTANT\s+interval\s*:=\s*interval\s*'(\d+) days'/,
-    );
-    expect(constant?.[1]).toBe(String(SEED_TRIAL_DAYS));
+  it('signup_insert_company reads the setting instead of carrying a constant', () => {
+    // The migration replaces the function; if it ever declares an interval of
+    // its own again, the setting becomes a value nothing honours.
+    expect(TRIAL_MIGRATION).toMatch(/v_trial_length\s+interval\s*:=\s*make_interval\(days => app_private\.signup_trial_days\(\)\)/);
+    expect(TRIAL_MIGRATION).not.toMatch(/c_trial_length\s+CONSTANT/);
+  });
+
+  it('and signup_trial_days() falls back to SEED_TRIAL_DAYS when the document is missing', () => {
+    // A single-row SELECT answers NULL when no row matches, and a NULL interval
+    // would write a company whose trial never ends.
+    const fallback = TRIAL_MIGRATION.match(/c_fallback\s+CONSTANT\s+integer\s*:=\s*(\d+);/);
+    expect(fallback?.[1]).toBe(String(SEED_TRIAL_DAYS));
+  });
+
+  it('the migration that used to hold the constant no longer does', () => {
+    expect(SIGNUP_MIGRATION.match(/c_trial_length\s+CONSTANT\s+interval\s*:=\s*interval\s*'(\d+) days'/)?.[1])
+      .toBe(String(SEED_TRIAL_DAYS));
   });
 });

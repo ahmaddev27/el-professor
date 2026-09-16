@@ -232,11 +232,14 @@ DECLARE
   v_book jsonb;
 BEGIN
   PERFORM _pr_reset();
-  PERFORM _pr_ok('exactly the two seeded keys, both at version 1',
+  -- 20260919120000 (plan 3.10, first half) seeds seller, trial and invoice;
+  -- tests/rls/settings.sql covers those three. This file still owns the two
+  -- keys 3.9 seeded.
+  PERFORM _pr_ok('the two keys of 3.9 are seeded, both at version 1, among the five that now exist',
     (SELECT count(*) = 2 AND bool_and(version = 1 AND updated_by IS NULL)
        FROM app_private.platform_settings
       WHERE key IN ('price_book', 'plan_features'))
-    AND (SELECT count(*) = 2 FROM app_private.platform_settings));
+    AND (SELECT count(*) = 5 FROM app_private.platform_settings));
 
   PERFORM _pr_ok('both seeds pass the validator they are written for',
     NOT EXISTS (SELECT 1 FROM app_private.platform_settings s
@@ -291,10 +294,13 @@ BEGIN
   -- Plan 3.A gives billing settings.read "(prices)". No capability can say
   -- that, so 3.9 narrows the key set instead: for billing a non-pricing key is
   -- refused, where a role with plain settings.read is only told it is missing.
+  -- `seller` is stored since 20260919120000 and `mail.sender` — the half of
+  -- 3.10 that is not built — is not. Billing is refused both alike, so it
+  -- cannot tell a stored key from an absent one.
   PERFORM _pr_ok('read: billing is refused a non-pricing key, and cannot tell whether it exists',
     _pr_get(billing, 'seller') = 'forbidden' AND _pr_get(billing, 'mail.sender') = 'forbidden');
-  PERFORM _pr_ok('read: an owner and read_only are told a non-pricing key is simply missing',
-    _pr_get(owner, 'seller') = 'not_found' AND _pr_get(readonly, 'seller') = 'not_found');
+  PERFORM _pr_ok('read: an owner and read_only are told an unseeded key is simply missing',
+    _pr_get(owner, 'mail.sender') = 'not_found' AND _pr_get(readonly, 'mail.sender') = 'not_found');
 
   PERFORM _pr_ok('read: support holds no settings.read at all',
     _pr_get(support, 'price_book') = 'forbidden' AND _pr_get(support, 'plan_features') = 'forbidden');
@@ -353,8 +359,10 @@ BEGIN
     _pr_put(admin_a, 'price_book', v_book, 1) = 'forbidden');
   PERFORM _pr_ok('write: billing holds pricing.manage but not settings.manage',
     _pr_put(billing, 'seller', '{"name": "x"}'::jsonb, 1) = 'forbidden');
+  -- `mail.sender` is the key with no validator now that 20260919120000 has
+  -- given `seller` one.
   PERFORM _pr_ok('write: an owner passes the capability check for any key, and then meets the validator',
-    _pr_put(owner, 'seller', '{"name": "x"}'::jsonb, 1) = 'unknown_key');
+    _pr_put(owner, 'mail.sender', '{"from": "x@example.com"}'::jsonb, 1) = 'unknown_key');
 
   -- the shape of a price book
   PERFORM _pr_ok('write: a price book missing the yearly discount is refused',

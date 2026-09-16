@@ -1,5 +1,8 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { RefreshCw, ShieldAlert, Info, Save, Plus, Trash2, Tags, SlidersHorizontal } from 'lucide-react';
+import {
+  RefreshCw, ShieldAlert, Info, Save, Plus, Trash2, Tags, SlidersHorizontal,
+  Building2, Hourglass, Receipt,
+} from 'lucide-react';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { useAppConfig } from '../contexts/AppConfigContext';
 import { useToast } from '../contexts/ToastContext';
@@ -11,15 +14,35 @@ import type { PlanFeatureMap } from '../utils/planFeatures';
 import {
   canReadSetting,
   canSaveSetting,
+  invoiceFromForm,
+  invoiceNumberExample,
+  invoiceToForm,
   isVersionConflict,
+  parseInvoice,
+  parseSeller,
+  parseTrial,
   planFeaturesFromAnswer,
   planFeaturesFromForm,
   priceBookFromAnswer,
   priceBookFromForm,
   priceBookToForm,
+  sellerAddressBlock,
+  sellerFromForm,
+  sellerToForm,
   settingRefusalKey,
+  trialFromForm,
+  trialToForm,
+  SELLER_FIELDS,
+  type InvoiceForm,
+  type InvoiceSettings,
   type PriceBookForm,
+  type Seller,
+  type SellerField,
+  type SellerForm,
   type SettingKey,
+  type SettingRecord,
+  type TrialForm,
+  type TrialSettings,
 } from '../lib/platformSettings';
 import { getSetting, putSetting } from '../lib/platformSettingsClient';
 import { deDateTime } from '../lib/platformFormat';
@@ -63,6 +86,19 @@ const PLAN_LABELS: Record<Plan, TranslationKey> = {
   premium:  'admin.settings.plan.premium',
 };
 
+/**
+ * Every settings key, in the order the tabs appear. A role sees only the tabs
+ * `canReadSetting` allows and only the save buttons `canSaveSetting` allows;
+ * both are courtesies, and the database refuses regardless.
+ */
+const SETTING_TABS: { id: SettingKey; icon: React.ElementType; labelKey: TranslationKey }[] = [
+  { id: 'price_book',    icon: Tags,              labelKey: 'admin.settings.tab.prices' },
+  { id: 'plan_features', icon: SlidersHorizontal, labelKey: 'admin.settings.tab.features' },
+  { id: 'seller',        icon: Building2,         labelKey: 'admin.settings.tab.seller' },
+  { id: 'trial',         icon: Hourglass,         labelKey: 'admin.settings.tab.trial' },
+  { id: 'invoice',       icon: Receipt,           labelKey: 'admin.settings.tab.invoice' },
+];
+
 const controlStyle: React.CSSProperties = {
   padding: '0.5rem 0.75rem',
   borderRadius: '0.75rem',
@@ -89,10 +125,12 @@ const PlatformSettingsPage: React.FC = () => {
   const { t } = useTranslation();
   const [tab, setTab] = useState<SettingKey>('price_book');
 
-  const mayReadPrices = canReadSetting(platformAccess, 'price_book');
-  const mayReadFeatures = canReadSetting(platformAccess, 'plan_features');
+  // Billing holds settings.read for the prices alone, so its panel is a single
+  // tab; a role without settings.read at all gets none, and is told so rather
+  // than shown a form that would fail on save.
+  const tabs = SETTING_TABS.filter(item => canReadSetting(platformAccess, item.id));
 
-  if (!mayReadPrices && !mayReadFeatures) {
+  if (tabs.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-20 rounded-2xl text-center" style={cardStyle}>
         <ShieldAlert size={40} className="mb-3" style={{ color: 'var(--warning)' }} />
@@ -102,11 +140,7 @@ const PlatformSettingsPage: React.FC = () => {
     );
   }
 
-  const tabs: { id: SettingKey; icon: React.ElementType; labelKey: TranslationKey; enabled: boolean }[] = [
-    { id: 'price_book',    icon: Tags,              labelKey: 'admin.settings.tab.prices',   enabled: mayReadPrices },
-    { id: 'plan_features', icon: SlidersHorizontal, labelKey: 'admin.settings.tab.features', enabled: mayReadFeatures },
-  ];
-  const active = tabs.find(item => item.id === tab && item.enabled) ? tab : (mayReadPrices ? 'price_book' : 'plan_features');
+  const active: SettingKey = tabs.some(item => item.id === tab) ? tab : tabs[0].id;
 
   return (
     <div className="space-y-6">
@@ -115,12 +149,14 @@ const PlatformSettingsPage: React.FC = () => {
         <p className="text-sm mt-0.5" style={{ color: 'var(--text-secondary)' }}>{t('admin.settings.subtitle')}</p>
       </div>
 
-      <div className="flex gap-1 p-1 rounded-xl" style={{ background: 'var(--bg-subtle)' }}>
-        {tabs.filter(item => item.enabled).map(({ id, icon: Icon, labelKey }) => (
+      {/* Five tabs do not fit one phone-width row, so the strip wraps onto a
+          second line rather than scrolling the page sideways. */}
+      <div className="flex flex-wrap gap-1 p-1 rounded-xl" style={{ background: 'var(--bg-subtle)' }}>
+        {tabs.map(({ id, icon: Icon, labelKey }) => (
           <button
             key={id}
             onClick={() => setTab(id)}
-            className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium transition-all"
+            className="grow basis-28 flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium transition-all"
             style={{
               background: active === id ? 'var(--bg-surface)' : 'transparent',
               color: active === id ? 'var(--text-primary)' : 'var(--text-tertiary)',
@@ -132,7 +168,11 @@ const PlatformSettingsPage: React.FC = () => {
         ))}
       </div>
 
-      {active === 'price_book' ? <PriceBookEditor /> : <PlanFeaturesEditor />}
+      {active === 'price_book'    ? <PriceBookEditor /> :
+       active === 'plan_features' ? <PlanFeaturesEditor /> :
+       active === 'seller'        ? <SellerEditor /> :
+       active === 'trial'         ? <TrialEditor /> :
+                                    <InvoiceEditor />}
     </div>
   );
 };
@@ -565,6 +605,357 @@ const PlanFeaturesEditor: React.FC = () => {
               </button>
             </div>
           )}
+        </>
+      )}
+    </EditorShell>
+  );
+};
+
+// ─── The three keys of plan 3.10 ────────────────────────────────────────────
+
+/**
+ * Load, edit and save one settings key.
+ *
+ * The seller, the trial and the invoice defaults have the same shape — read the
+ * value with its version, edit a form, send it back pinned to that version — so
+ * the shape lives here once rather than three times. The price book and the
+ * feature map keep their own bodies above: one carries a worked example, the
+ * other a table of changed rows, and neither would read more clearly through
+ * this.
+ *
+ * The version rule is the same one, and it is the reason this is worth sharing:
+ * on `version_conflict` the editor reloads, and the unsaved entries go with the
+ * old form. It is never re-sent with the version that came back, which would
+ * overwrite somebody else's change unseen.
+ *
+ * The configuration is a module-level constant per editor, so its identity is
+ * stable and the load effect runs once.
+ */
+interface SettingEditorConfig<T, F> {
+  key: SettingKey;
+  read: (record: SettingRecord) => T | null;
+  toForm: (value: T) => F;
+  fromForm: (form: F) => { value: T } | { error: string };
+}
+
+function useSettingEditor<T, F>(config: SettingEditorConfig<T, F>) {
+  const { refresh } = useAppConfig();
+  const { showToast } = useToast();
+  const { t } = useTranslation();
+
+  const [loading, setLoading] = useState(true);
+  const [problem, setProblem] = useState<TranslationKey | null>(null);
+  const [detail, setDetail] = useState<string | null>(null);
+  const [loaded, setLoaded] = useState<Loaded<T> | null>(null);
+  const [form, setForm] = useState<F | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setProblem(null);
+    setDetail(null);
+    try {
+      const answer = await getSetting(config.key);
+      if (!answer.ok) {
+        setProblem(settingRefusalKey(answer.reason));
+        return;
+      }
+      const value = config.read(answer);
+      if (value === null) {
+        // A stored document this build cannot read is not edited blindly: a
+        // save would send back whatever the form made of it.
+        setProblem('admin.settings.refusal.invalidValue');
+        return;
+      }
+      setLoaded({ value, version: answer.version, updatedAt: answer.updatedAt });
+      setForm(config.toForm(value));
+    } catch (err) {
+      setProblem('admin.settings.loadFailed');
+      setDetail(err instanceof Error ? err.message : null);
+    } finally {
+      setLoading(false);
+    }
+  }, [config]);
+
+  useEffect(() => { void load(); }, [load]);
+
+  const save = async () => {
+    if (!form || !loaded) return;
+    const parsed = config.fromForm(form);
+    if ('error' in parsed) {
+      showToast('error', t('admin.settings.invalidField', { field: parsed.error }));
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const answer = await putSetting(config.key, parsed.value, loaded.version);
+      if (!answer.ok) {
+        showToast('error', t(settingRefusalKey(answer.reason)));
+        // Somebody else saved first: show what is there now, so the change is
+        // made against their version rather than over it. load() replaces the
+        // form, so the unsaved entries are gone — the message says so.
+        if (isVersionConflict(answer)) await load();
+        return;
+      }
+      showToast('success', t('admin.settings.saved'));
+      setLoaded({ value: parsed.value, version: answer.version, updatedAt: answer.updatedAt });
+      // The stored document, not what was typed: trimmed as the database has it.
+      setForm(config.toForm(parsed.value));
+      // Of these three only the trial reaches AppConfigContext today, as
+      // trial_days; refreshing for all of them keeps one path.
+      await refresh();
+    } catch (err) {
+      showToast('error', err instanceof Error ? err.message : t('admin.settings.refusal.failed'));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return { loading, problem, detail, loaded, form, setForm, saving, load, save };
+}
+
+const SaveRow: React.FC<{ saving: boolean; onSave: () => void }> = ({ saving, onSave }) => {
+  const { t } = useTranslation();
+  return (
+    <div className="flex justify-end">
+      <button
+        onClick={onSave}
+        disabled={saving}
+        className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold text-white"
+        style={{ background: 'var(--accent)', opacity: saving ? 0.6 : 1 }}
+      >
+        <Save size={16} />{saving ? t('admin.common.saving') : t('admin.settings.save')}
+      </button>
+    </div>
+  );
+};
+
+const Field: React.FC<{
+  labelKey: TranslationKey;
+  value: string;
+  disabled: boolean;
+  width?: string;
+  onChange: (value: string) => void;
+}> = ({ labelKey, value, disabled, width, onChange }) => {
+  const { t } = useTranslation();
+  return (
+    <label className="block">
+      <span className="block text-xs font-semibold mb-1.5" style={{ color: 'var(--text-secondary)' }}>
+        {t(labelKey)}
+      </span>
+      <input
+        value={value}
+        disabled={disabled}
+        onChange={e => onChange(e.target.value)}
+        style={{ ...controlStyle, width: width ?? '100%', opacity: disabled ? 0.6 : 1 }}
+      />
+    </label>
+  );
+};
+
+// ─── The seller printed on invoices ─────────────────────────────────────────
+
+const SELLER_LABELS: Record<SellerField, TranslationKey> = {
+  name:           'admin.settings.seller.name',
+  street:         'admin.settings.seller.street',
+  house_number:   'admin.settings.seller.house_number',
+  postal_code:    'admin.settings.seller.postal_code',
+  city:           'admin.settings.seller.city',
+  vat_id:         'admin.settings.seller.vat_id',
+  tax_number:     'admin.settings.seller.tax_number',
+  bank_name:      'admin.settings.seller.bank_name',
+  iban:           'admin.settings.seller.iban',
+  bic:            'admin.settings.seller.bic',
+  account_holder: 'admin.settings.seller.account_holder',
+};
+
+const SELLER_EDITOR: SettingEditorConfig<Seller, SellerForm> = {
+  key: 'seller',
+  read: record => parseSeller(record.value),
+  toForm: sellerToForm,
+  fromForm: sellerFromForm,
+};
+
+const SellerEditor: React.FC = () => {
+  const { platformAccess } = useSuperAdmin();
+  const { t } = useTranslation();
+  const maySave = canSaveSetting(platformAccess, 'seller');
+  const { loading, problem, detail, loaded, form, setForm, saving, load, save } =
+    useSettingEditor(SELLER_EDITOR);
+
+  // The block as the invoice PDF composes it, from what is typed rather than
+  // from what is stored, so a correction is visible before it is saved.
+  const typed = form ? sellerFromForm(form) : null;
+  const preview = typed && 'value' in typed ? sellerAddressBlock(typed.value) : null;
+
+  return (
+    <EditorShell
+      loading={loading}
+      problem={problem}
+      detail={detail}
+      onReload={() => void load()}
+      version={loaded?.version ?? null}
+      updatedAt={loaded?.updatedAt ?? null}
+    >
+      {form && (
+        <>
+          <Note textKey="admin.settings.seller.hint" />
+          <Note textKey="admin.settings.notAppliedYet" />
+          {!maySave && <Note textKey="admin.settings.readOnly" />}
+
+          <div className="rounded-2xl p-5 space-y-4" style={cardStyle}>
+            <h2 className="font-bold" style={{ color: 'var(--text-primary)' }}>{t('admin.settings.seller.title')}</h2>
+            <div className="grid gap-4 sm:grid-cols-2">
+              {SELLER_FIELDS.map(field => (
+                <Field
+                  key={field}
+                  labelKey={SELLER_LABELS[field]}
+                  value={form[field]}
+                  disabled={!maySave}
+                  onChange={value => setForm({ ...form, [field]: value })}
+                />
+              ))}
+            </div>
+          </div>
+
+          <div className="rounded-2xl p-5 space-y-3" style={cardStyle}>
+            <h2 className="font-bold" style={{ color: 'var(--text-primary)' }}>{t('admin.settings.seller.preview')}</h2>
+            {preview ? (
+              <div className="text-sm space-y-0.5" style={{ color: 'var(--text-secondary)' }}>
+                {preview.map((line, index) => <p key={index}>{line}</p>)}
+              </div>
+            ) : (
+              <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>{t('admin.settings.exampleUnavailable')}</p>
+            )}
+          </div>
+
+          {maySave && <SaveRow saving={saving} onSave={() => void save()} />}
+        </>
+      )}
+    </EditorShell>
+  );
+};
+
+// ─── The trial length ───────────────────────────────────────────────────────
+
+const TRIAL_EDITOR: SettingEditorConfig<TrialSettings, TrialForm> = {
+  key: 'trial',
+  read: record => parseTrial(record.value),
+  toForm: trialToForm,
+  fromForm: trialFromForm,
+};
+
+const TrialEditor: React.FC = () => {
+  const { platformAccess } = useSuperAdmin();
+  const { t } = useTranslation();
+  const maySave = canSaveSetting(platformAccess, 'trial');
+  const { loading, problem, detail, loaded, form, setForm, saving, load, save } =
+    useSettingEditor(TRIAL_EDITOR);
+
+  return (
+    <EditorShell
+      loading={loading}
+      problem={problem}
+      detail={detail}
+      onReload={() => void load()}
+      version={loaded?.version ?? null}
+      updatedAt={loaded?.updatedAt ?? null}
+    >
+      {form && loaded && (
+        <>
+          {/* A longer trial is not retroactive and a shorter one locks nobody
+              out: trial_end is written once, when a company is created. */}
+          <Note textKey="admin.settings.trial.hint" />
+          {!maySave && <Note textKey="admin.settings.readOnly" />}
+
+          <div className="rounded-2xl p-5 space-y-4" style={cardStyle}>
+            <h2 className="font-bold" style={{ color: 'var(--text-primary)' }}>{t('admin.settings.trial.title')}</h2>
+            <Field
+              labelKey="admin.settings.trial.days"
+              value={form.days}
+              disabled={!maySave}
+              width="8rem"
+              onChange={days => setForm({ days })}
+            />
+            <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
+              {t('admin.settings.trial.current', { days: String(loaded.value.days) })}
+            </p>
+          </div>
+
+          {maySave && <SaveRow saving={saving} onSave={() => void save()} />}
+        </>
+      )}
+    </EditorShell>
+  );
+};
+
+// ─── The invoice defaults ───────────────────────────────────────────────────
+
+const INVOICE_EDITOR: SettingEditorConfig<InvoiceSettings, InvoiceForm> = {
+  key: 'invoice',
+  read: record => parseInvoice(record.value),
+  toForm: invoiceToForm,
+  fromForm: invoiceFromForm,
+};
+
+const InvoiceEditor: React.FC = () => {
+  const { platformAccess } = useSuperAdmin();
+  const { t } = useTranslation();
+  const maySave = canSaveSetting(platformAccess, 'invoice');
+  const { loading, problem, detail, loaded, form, setForm, saving, load, save } =
+    useSettingEditor(INVOICE_EDITOR);
+
+  const typed = form ? invoiceFromForm(form) : null;
+  const example = typed && 'value' in typed
+    ? invoiceNumberExample(typed.value, new Date().getFullYear())
+    : null;
+
+  return (
+    <EditorShell
+      loading={loading}
+      problem={problem}
+      detail={detail}
+      onReload={() => void load()}
+      version={loaded?.version ?? null}
+      updatedAt={loaded?.updatedAt ?? null}
+    >
+      {form && (
+        <>
+          <Note textKey="admin.settings.invoice.hint" />
+          <Note textKey="admin.settings.notAppliedYet" />
+          {!maySave && <Note textKey="admin.settings.readOnly" />}
+
+          <div className="rounded-2xl p-5 space-y-4" style={cardStyle}>
+            <h2 className="font-bold" style={{ color: 'var(--text-primary)' }}>{t('admin.settings.invoice.title')}</h2>
+            <div className="grid gap-4 sm:grid-cols-3">
+              <Field
+                labelKey="admin.settings.invoice.numberPrefix"
+                value={form.numberPrefix}
+                disabled={!maySave}
+                onChange={numberPrefix => setForm({ ...form, numberPrefix })}
+              />
+              <Field
+                labelKey="admin.settings.invoice.numberDigits"
+                value={form.numberDigits}
+                disabled={!maySave}
+                onChange={numberDigits => setForm({ ...form, numberDigits })}
+              />
+              <Field
+                labelKey="admin.settings.invoice.paymentMethod"
+                value={form.defaultPaymentMethod}
+                disabled={!maySave}
+                onChange={defaultPaymentMethod => setForm({ ...form, defaultPaymentMethod })}
+              />
+            </div>
+            <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+              {example
+                ? t('admin.settings.invoice.example', { number: example })
+                : t('admin.settings.exampleUnavailable')}
+            </p>
+          </div>
+
+          {maySave && <SaveRow saving={saving} onSave={() => void save()} />}
         </>
       )}
     </EditorShell>
