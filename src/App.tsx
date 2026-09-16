@@ -14,6 +14,7 @@ import SetPasswordPage from './pages/SetPasswordPage';
 import VerifyEmailPage from './pages/VerifyEmailPage';
 import InviteAcceptPage from './pages/InviteAcceptPage';
 import SignupPage from './pages/SignupPage';
+import CompleteRegistrationPage from './pages/CompleteRegistrationPage';
 import OverviewPage from './pages/OverviewPage';
 import AccountPage from './pages/AccountPage';
 import BelegePage from './pages/BelegePage';
@@ -47,6 +48,7 @@ import AdminLayout from './components/AdminLayout';
 import { useTranslation } from './contexts/LanguageContext';
 import type { TranslationKey } from './i18n';
 import { isDesignPreviewPath } from './design-preview/gate';
+import { needsCompanyRegistration } from './lib/googleAccount';
 
 // ─── Design preview (Phase 2 prototype) ──────────────────────────────────────
 // The new design on invented data, for the owner to approve before any screen
@@ -171,7 +173,7 @@ const PlatformAccountGuard: React.FC<{ children: React.ReactNode }> = ({ childre
 // ─── App ──────────────────────────────────────────────────────────────────────
 
 function App() {
-  const { user, loading: authLoading, isAdmin, isSuperAdmin, companyApprovalStatus, userBlockReason } = useAuth();
+  const { user, profile, loading: authLoading, isAdmin, isSuperAdmin, companyApprovalStatus, userBlockReason } = useAuth();
 
   // Ahead of every gate: the preview reads no account or tenant data, and it
   // has to render for a reviewer whatever their session state is.
@@ -220,6 +222,15 @@ function App() {
   // signIn() never runs.
   if (userBlockReason) {
     return <AccountBlockedPage reason={userBlockReason} />;
+  }
+
+  // A Google account that has registered no company yet (plan 1.6). Ahead of
+  // the approval gates because none of them can answer for it: there is no
+  // company to be pending, rejected or suspended. Without this the
+  // authenticated router would send it to /overview, where every tenant query
+  // asks for company_id null and PostgREST sends Postgres the string "null".
+  if (needsCompanyRegistration(user, profile)) {
+    return <CompleteRegistrationPage />;
   }
 
   // Approval status gates — only for non-super-admins with a company

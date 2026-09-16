@@ -3,13 +3,27 @@ import { useNavigate } from 'react-router-dom';
 import { AlertCircle } from 'lucide-react';
 import { supabase, authRedirect } from '../lib/supabase';
 import { useTranslation } from '../contexts/LanguageContext';
+import { consumeGoogleSignInIntent, readGoogleSignInIntent } from '../lib/googleSignIn';
+import { callbackErrorMessageKey } from '../lib/oauthErrors';
 
 type CallbackType = 'recovery' | 'invite' | 'signup' | 'magiclink' | 'email_change' | string;
 
+/**
+ * `/auth/callback`: where every mail link and, since plan 1.6, every Google
+ * sign-in comes back to.
+ *
+ * A failure arrives as `error`, `error_code` and `error_description` in the
+ * fragment. `lib/oauthErrors` turns the codes into a sentence in both
+ * languages; the English description GoTrue writes is never shown. The choice
+ * of buttons follows from where the failure came from: a mail link can be
+ * requested again, a Google sign-in is simply started again from the sign-in
+ * screen.
+ */
 const AuthCallbackPage: React.FC = () => {
   const navigate = useNavigate();
   const { t } = useTranslation();
   const [error, setError] = useState('');
+  const [fromGoogle, setFromGoogle] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -18,13 +32,20 @@ const AuthCallbackPage: React.FC = () => {
     // hash that carried these is already gone.
     const hashError = authRedirect.error;
     const type: CallbackType = authRedirect.type;
+    // Peeked, not consumed: a Google sign-in that worked is settled by
+    // AuthContext, which needs the marker to recognise this session.
+    const googleAttempt = readGoogleSignInIntent() !== null || authRedirect.errorCode !== '';
 
     if (hashError) {
-      if (hashError.toLowerCase().includes('expired')) {
-        setError(t('signup.callback.linkExpired'));
-      } else {
-        setError(t('signup.callback.linkInvalid'));
-      }
+      setFromGoogle(googleAttempt);
+      setError(t(callbackErrorMessageKey({
+        error: authRedirect.errorFamily,
+        errorCode: authRedirect.errorCode,
+        description: hashError,
+        fromGoogle: googleAttempt,
+      })));
+      // This attempt is over; a retry starts a new one.
+      consumeGoogleSignInIntent();
       return;
     }
 
@@ -50,7 +71,11 @@ const AuthCallbackPage: React.FC = () => {
 
         if (!cancelled) {
           // Session never appeared
-          if (type === 'recovery' || type === 'invite') {
+          setFromGoogle(googleAttempt);
+          if (googleAttempt) {
+            consumeGoogleSignInIntent();
+            setError(t('auth.google.error.generic'));
+          } else if (type === 'recovery' || type === 'invite') {
             setError(t('signup.callback.linkInvalid'));
           } else {
             setError(t('signup.callback.sessionFailed'));
@@ -75,18 +100,26 @@ const AuthCallbackPage: React.FC = () => {
             <div className="w-12 h-12 rounded-full bg-red-500/15 border border-red-500/30 flex items-center justify-center mx-auto mb-4">
               <AlertCircle className="text-red-400" size={22} />
             </div>
-            <h2 className="text-white font-semibold mb-2">{t('signup.callback.title')}</h2>
+            <h2 className="text-white font-semibold mb-2">
+              {fromGoogle ? t('auth.signIn') : t('signup.callback.title')}
+            </h2>
             <p className="text-white/60 text-sm leading-relaxed mb-6">{error}</p>
             <div className="flex flex-col gap-2">
-              <button
-                onClick={() => navigate('/auth/forgot-password', { replace: true })}
-                className="w-full bg-gradient-to-r from-cyan-500 to-blue-600 text-white py-3 px-4 rounded-xl font-semibold text-sm"
-              >
-                {t('signup.callback.requestNewLink')}
-              </button>
+              {/* A Google sign-in is restarted from the sign-in screen; there is
+                  no link to request again. */}
+              {!fromGoogle && (
+                <button
+                  onClick={() => navigate('/auth/forgot-password', { replace: true })}
+                  className="w-full bg-gradient-to-r from-cyan-500 to-blue-600 text-white py-3 px-4 rounded-xl font-semibold text-sm"
+                >
+                  {t('signup.callback.requestNewLink')}
+                </button>
+              )}
               <button
                 onClick={() => navigate('/login', { replace: true })}
-                className="w-full text-white/50 hover:text-white/80 text-sm py-2 transition-colors"
+                className={fromGoogle
+                  ? 'w-full bg-gradient-to-r from-cyan-500 to-blue-600 text-white py-3 px-4 rounded-xl font-semibold text-sm'
+                  : 'w-full text-white/50 hover:text-white/80 text-sm py-2 transition-colors'}
               >
                 {t('signup.callback.backToLogin')}
               </button>

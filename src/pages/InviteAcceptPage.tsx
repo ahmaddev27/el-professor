@@ -14,6 +14,7 @@ import {
 } from '../lib/otpClient';
 import AuthShell from '../components/auth/AuthShell';
 import EmphasizedText from '../components/auth/EmphasizedText';
+import GoogleButton from '../components/auth/GoogleButton';
 import NoticeBox from '../components/auth/NoticeBox';
 import OtpChallenge from '../components/auth/OtpChallenge';
 import {
@@ -47,6 +48,7 @@ const InviteAcceptPage: React.FC = () => {
   const [email, setEmail] = useState(linkEmail);
   const [draftInvalid, setDraftInvalid] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
+  const [googleError, setGoogleError] = useState('');
 
   const signOutAndContinue = async () => {
     setSigningOut(true);
@@ -141,6 +143,24 @@ const InviteAcceptPage: React.FC = () => {
   return (
     <AuthShell title={t('invite.accept.title')} subtitle={t('invite.accept.subtitle')}>
       {renderBody()}
+      {/* An invited employee whose address is a Google account can accept the
+          invitation by signing in with it: oauth_session_reconcile activates
+          the profile, exactly as the mailed code does — and only for the
+          address the invitation went to, because that is the account Google
+          returns. A different Google account ends up on the registration
+          screen, which says so. Nothing renders while the provider is off. */}
+      {!user && (
+        <div className="mt-5 space-y-3">
+          {googleError && <NoticeBox tone="error" announce>{googleError}</NoticeBox>}
+          <GoogleButton
+            from="invite"
+            labelKey="auth.google.signIn"
+            hintKey="gsignup.inviteHint"
+            divider
+            onError={key => setGoogleError(t(key))}
+          />
+        </div>
+      )}
     </AuthShell>
   );
 };

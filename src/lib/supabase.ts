@@ -9,13 +9,26 @@ const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
  * reset or invite link and then strips the hash — so by the time
  * AuthCallbackPage mounts, "type=recovery" is gone, and a password reset
  * landed on the dashboard instead of the password form.
+ *
+ * A failed Google sign-in comes back the same way and needs all three error
+ * parameters (plan 1.6): GoTrue redirects with `error` (the OAuth2 family),
+ * `error_code` (its own code, which is what the screens map to a sentence) and
+ * `error_description` (English prose written for a developer, never shown).
+ *
+ * `error` keeps its original meaning — the description if there is one, else
+ * the family — because that is what the mail-link screens have always read.
  */
-export const authRedirect: { type: string; error: string } = (() => {
-  if (typeof window === 'undefined') return { type: '', error: '' };
+export const authRedirect: { type: string; error: string; errorFamily: string; errorCode: string } = (() => {
+  if (typeof window === 'undefined') return { type: '', error: '', errorFamily: '', errorCode: '' };
   const hash = new URLSearchParams(window.location.hash.replace(/^#/, ''));
   const query = new URLSearchParams(window.location.search);
   const read = (key: string) => hash.get(key) ?? query.get(key) ?? '';
-  return { type: read('type'), error: read('error_description') || read('error') };
+  return {
+    type: read('type'),
+    error: read('error_description') || read('error'),
+    errorFamily: read('error'),
+    errorCode: read('error_code'),
+  };
 })();
 
 /**

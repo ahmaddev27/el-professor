@@ -2,6 +2,9 @@ import React, { createContext, useContext, useEffect, useState, useRef, useCallb
 import { User, Session } from '@supabase/supabase-js';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import type { TranslationKey } from '../i18n';
+import { consumeGoogleSignInIntent, readGoogleSignInIntent, type GoogleSignInIntent } from '../lib/googleSignIn';
+import { sessionCameFromGoogle } from '../lib/googleAccount';
+import { nextAfterReconcile, reconcileOauthAccount } from '../lib/oauthAccountClient';
 
 const SESSION_TIMEOUT = 20 * 60 * 1000;
 const LAST_ACTIVITY_KEY = 'lastActivity';
@@ -117,6 +120,17 @@ interface AuthContextType {
    */
   signIn: (email: string, password: string) => Promise<{ error: any; blockReason?: BlockReason }>;
   signOut: () => Promise<void>;
+  /**
+   * A sentence for the sign-in screen after a session was ended for a reason of
+   * our own — today only a Google sign-in that must not stand (plan 1.6).
+   * Whoever shows it clears it.
+   */
+  authNotice: TranslationKey | null;
+  clearAuthNotice: () => void;
+  /** The Google button press this session came from, while it is still relevant. */
+  googleSignInIntent: GoogleSignInIntent | null;
+  /** Re-reads the caller's own profile, company and subscription. */
+  refreshProfile: () => Promise<void>;
   isAdmin: boolean;
   isCreator: boolean;
   isViewer: boolean;
@@ -161,6 +175,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [subscriptionExpiresAt, setSubscriptionExpiresAt] = useState<string | null>(null);
   const [userBlockReason, setUserBlockReason] = useState<BlockReason | null>(null);
   const [permissions, setPermissions] = useState<Record<string, { canView: boolean; canEdit: boolean }>>({});
+  // Outside clearSessionData on purpose: the notice explains a sign-out and has
+  // to outlive it.
+  const [authNotice, setAuthNotice] = useState<TranslationKey | null>(null);
+  const [googleSignInIntent, setGoogleSignInIntent] = useState<GoogleSignInIntent | null>(null);
 
   const sessionTimerRef = useRef<NodeJS.Timeout | null>(null);
   const userRef = useRef<User | null>(null);
@@ -407,6 +425,65 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
   }, [user, handleUserActivity]);
 
+  // ─── Google sessions (plan step 1.6) ──────────────────────────────────────
+  //
+  // Every Google sign-in is settled once, by the `oauth-account` function:
+  // it cancels a password signup Google has just confirmed, or accepts a
+  // pending invitation. The database decides which, and refuses anything else.
+  //
+  // Two accounts never get that far. A platform account signs in with an email
+  // address and a password, never with Google (the owner's decision of
+  // 16.09.2026) — the database refuses it in all three actions, and this is the
+  // sentence that says so. And an account GoTrue no longer has, or has banned,
+  // is signed out rather than left holding a token for nothing.
+  //
+  // `sessionCameFromGoogle` is what decides, not "the account has a Google
+  // identity": a platform account whose address also exists at Google must keep
+  // signing in with its password.
+  const settledGoogleFor = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (loading || !user || !session || !profile) return;
+    const intent = readGoogleSignInIntent();
+    if (!sessionCameFromGoogle(user, intent !== null)) return;
+    if (settledGoogleFor.current === user.id) return;
+    settledGoogleFor.current = user.id;
+    // Kept in memory for the registration screen, and taken out of the store:
+    // the press it recorded has been answered.
+    if (intent) setGoogleSignInIntent(intent);
+    consumeGoogleSignInIntent();
+
+    let cancelled = false;
+
+    // Signing out swaps App's router, and the public one starts wherever the
+    // address points — without this the message below would land on the
+    // landing page, where nothing shows it. Same reason useOtpSessionHandoff
+    // rewrites the address before installing a session.
+    const endSession = async (message: TranslationKey) => {
+      window.history.replaceState(window.history.state, '', '/login');
+      setAuthNotice(message);
+      await signOutRef.current?.();
+    };
+
+    void (async () => {
+      if (profile.is_super_admin) {
+        await endSession('auth.google.error.platformStaff');
+        return;
+      }
+      const routing = nextAfterReconcile(await reconcileOauthAccount(session.access_token));
+      if (cancelled) return;
+      // The database changed the profile: the gates must not read the old one.
+      if (routing.reloadProfile) await loadUserProfile(user.id);
+      if (cancelled) return;
+      if (routing.route === 'sign_out') await endSession(routing.message ?? 'auth.google.error.generic');
+    })();
+
+    return () => { cancelled = true; };
+    // Deliberately not depending on loadUserProfile, which is re-created every
+    // render; signOut is reached through its ref for the same reason. The ref
+    // above is what keeps this to one run per session.
+  }, [loading, user, session, profile]);
+
   const signIn = async (email: string, password: string): Promise<{ error: any; blockReason?: BlockReason }> => {
     if (!isSupabaseConfigured) {
       return { error: { message: 'Supabase is not configured' } };
@@ -504,6 +581,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     subscriptionStatus === 'active' && subscriptionExpiresAt !== null && new Date(subscriptionExpiresAt) <= new Date() ? 'expired' :
     subscriptionStatus;
 
+  const clearAuthNotice = useCallback(() => setAuthNotice(null), []);
+
+  /** Re-reads the caller's own profile after something changed it server-side. */
+  const refreshProfile = async () => {
+    if (!user) return;
+    await loadUserProfile(user.id);
+  };
+
   const refreshSubscription = async () => {
     if (!profile?.company_id) return;
     try {
@@ -556,6 +641,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     mustChangePassword,
     signIn,
     signOut,
+    authNotice,
+    clearAuthNotice,
+    googleSignInIntent,
+    refreshProfile,
     isAdmin,
     isCreator,
     isViewer,

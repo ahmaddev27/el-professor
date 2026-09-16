@@ -172,6 +172,28 @@ export const en: PartialDictionary = {
   'auth.error.generic':            'Sign-in failed. Please try again.',
   'auth.error.network':            'Network error. Please check your internet connection.',
 
+  // Google sign-in (plan 1.6). The button appears only while GoTrue reports the
+  // provider enabled; the error texts translate the codes GoTrue returns after
+  // a failed attempt.
+  'auth.google.signIn':     'Sign in with Google',
+  'auth.google.signUp':     'Sign up with Google',
+  'auth.google.continue':   'Continue with Google',
+  'auth.google.or':         'or',
+  'auth.google.starting':   'Redirecting you to Google…',
+  'auth.google.error.cancelled':       'The Google sign-in was cancelled.',
+  'auth.google.error.generic':         'Signing in with Google failed. Please try again, or sign in with your password.',
+  'auth.google.error.startFailed':     'We could not send you to Google. Please try again.',
+  'auth.google.error.serverError':     'Google could not answer just now. Please try again in a few minutes.',
+  'auth.google.error.flowExpired':     'The Google sign-in took too long. Please start it again.',
+  'auth.google.error.providerDisabled': 'Signing in with Google is not available right now. Please sign in with your password.',
+  'auth.google.error.signupDisabled':  'No account can be created with this Google account right now. Please sign in with your password, or contact support.',
+  'auth.google.error.emailNotVerified': 'Google has not verified your email address. Please verify it with Google and try again.',
+  'auth.google.error.userBanned':      'This account is blocked. Please contact support.',
+  'auth.google.error.accountBlocked':  'This account is no longer active. Please contact support.',
+  'auth.google.error.accountConflict': 'This Google account cannot be linked to that login. Please sign in with your password.',
+  'auth.google.error.emailNotAllowed': 'This Google address cannot be used here. Please sign in with your password.',
+  'auth.google.error.platformStaff':   'Platform accounts sign in with an email address and a password, not with Google.',
+
   // ── Plan gating ────────────────────────────────────────────────────────────
   'locked.title':           '{feature} is not included in your plan',
   'locked.body.before':     'This module is available from the',
@@ -4148,4 +4170,28 @@ export const en: PartialDictionary = {
 
   // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
   'env.banner.notProduction': 'Test environment with a copy of production data – changes here never reach production',
+
+  // ── Google registration (plan 1.6) ───────────────────────────────────────
+  // The screen a Google account without a company lands on, and the hints on
+  // the sign-in, sign-up and invitation screens.
+  'gsignup.title':              'Complete your registration',
+  'gsignup.subtitle':           'Your Google login for {email} is ready. All that is missing is your company.',
+  'gsignup.heading':            'Your company',
+  'gsignup.intro':              'You will be the company\'s first administrator. Once you submit, our team reviews your registration.',
+  'gsignup.submit':             'Register company',
+  'gsignup.signupHint':         'With Google you need no password. The plan you picked is kept.',
+  'gsignup.inviteHint':         'Only with the email address your invitation was sent to.',
+  'gsignup.inviteMismatch':     'This Google address does not match any invitation. Sign in with the invited email address — or register your own company here.',
+  'gsignup.discard':            'Delete this account',
+  'gsignup.discardHint':        'Wrong Google account? You can delete this login again now.',
+  'gsignup.discardConfirm':     'This Google account will be deleted. You can sign in again at any time afterwards.',
+  'gsignup.discardFailed':      'The account could not be deleted. Please sign out and try again later.',
+  'gsignup.discountNotApplied': 'The discount code could not be redeemed. Your company is registered all the same.',
+  'gsignup.error.sessionGone':       'Your session is no longer valid. Please sign in with Google again.',
+  'gsignup.error.emailNotConfirmed': 'Your email address is not confirmed. Please sign in with Google again.',
+  'gsignup.error.notGoogle':         'This login is not linked to Google. Please sign in with your password.',
+  'gsignup.error.companyExists':     'This login already belongs to a company.',
+  'gsignup.error.noPendingSignup':   'There is no open registration for this login. Please sign in with Google again.',
+  'gsignup.error.invalid':           'Please check your details.',
+  'gsignup.error.failed':            'The registration could not be completed. Please try again.',
 };
