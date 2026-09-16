@@ -109,6 +109,16 @@
   - **No write-audit triggers.** Auditing each write a support session makes is
     slice 3.4c, and the refusal trigger this file installs is where they will
     go.
+  - **No grant is widened or narrowed.** Every function redefined here keeps the
+    EXECUTE list its own migration left it, restated next to the definition so a
+    CREATE OR REPLACE cannot drop one. Two of them, `is_company_admin()` and
+    `current_role_permits()`, have held an explicit anon grant since they were
+    created — `REVOKE … FROM PUBLIC` never removed the one Supabase's default
+    privileges give anon by name — and that is left alone: they answer false to
+    a caller without a subject (the self-check proves it), no policy applies TO
+    anon, and taking it away here would move a matrix cell that has nothing to
+    do with support sessions.
+
   - **`platform_audit_record` is not redefined.** Its allow-list
     (`app_private.platform_edge_audit_actions()`, 20260916150000) already
     refuses every action outside the list the edge functions send, which is
@@ -1145,6 +1155,11 @@ REVOKE ALL ON FUNCTION app_private.platform_contexts_expire(uuid)               
 REVOKE ALL ON FUNCTION app_private.refuse_read_only_context_write()                 FROM PUBLIC, anon, authenticated, service_role;
 REVOKE ALL ON FUNCTION app_private.refuse_column_change()                           FROM PUBLIC, anon, authenticated, service_role;
 REVOKE ALL ON FUNCTION app_private.platform_staff_close_contexts()                  FROM PUBLIC, anon, authenticated, service_role;
+-- Redefined above to add this slice's reasons. 20260916130000 already revoked
+-- it; restated because a CREATE OR REPLACE is exactly where such a revoke gets
+-- lost, and because the self-check below can then assert it rather than inherit
+-- it from a file three releases back.
+REVOKE ALL ON FUNCTION app_private.platform_rpc_response(text, jsonb)               FROM PUBLIC, anon, authenticated, service_role;
 
 -- The two named modes: for signed-in callers, like every other platform
 -- helper. The service role has no auth.uid() to answer for.
@@ -1229,16 +1244,19 @@ BEGIN
           ('public.platform_whoami()',                              true,  false, true,  false),
           ('public.get_active_company_id()',                        true,  false, true,  true),
           ('public.get_user_company_id()',                          true,  false, true,  true),
-          ('public.is_company_admin()',                             true,  false, true,  false),
           ('public.platform_reads_company_data()',                  false, false, true,  false),
           ('public.platform_writes_company_data()',                 false, false, true,  false),
           ('app_private.jwt_session_id()',                          false, false, false, false),
           ('app_private.platform_context_row()',                    true,  false, false, false),
           ('app_private.platform_context_company(boolean)',         true,  false, false, false),
           ('app_private.account_has_company(uuid)',                 false, false, false, false),
+          ('app_private.platform_context_json(app_private.platform_company_contexts)',
+                                                                    false, false, false, false),
           ('app_private.platform_contexts_expire(uuid)',            true,  false, false, false),
           ('app_private.refuse_read_only_context_write()',          true,  false, false, false),
-          ('app_private.platform_staff_close_contexts()',           true,  false, false, false)
+          ('app_private.refuse_column_change()',                    false, false, false, false),
+          ('app_private.platform_staff_close_contexts()',           true,  false, false, false),
+          ('app_private.platform_rpc_response(text,jsonb)',         false, false, false, false)
         ) AS v(sig, definer, anon, authn, service)
     ) f
    WHERE f.problem IS NOT NULL;
@@ -1247,10 +1265,58 @@ BEGIN
     RAISE EXCEPTION '3.4 self-check: %', v_wrong;
   END IF;
 
-  --    current_role_permits keeps the EXECUTE anon has always had here (it
-  --    answers false for a caller with no profile), so it is checked apart.
-  IF NOT has_function_privilege('authenticated', 'public.current_role_permits(text,boolean)', 'EXECUTE') THEN
-    RAISE EXCEPTION '3.4 self-check: authenticated lost EXECUTE on current_role_permits() — every write policy calls it';
+  --    is_company_admin() and current_role_permits() are checked apart, because
+  --    the grant list above is not theirs to state. Both predate this file, and
+  --    both were left by their own migrations (20260908104500, 20260910120000)
+  --    as `REVOKE … FROM PUBLIC` plus `GRANT … TO authenticated` — which does
+  --    not touch the explicit grants Supabase's default privileges gave anon
+  --    and the service role when each was created. So anon has always held
+  --    EXECUTE on these two, and matrix.sql records that cell as N (asked and
+  --    answered false), not P. This slice neither widens that nor narrows it:
+  --    narrowing would move a matrix cell that has nothing to do with support
+  --    sessions, and a self-check that demanded the narrower list would also
+  --    forbid a later migration from tightening it.
+  --
+  --    What is asserted instead is what actually matters: authenticated can
+  --    call them, because every write policy does, and they are SECURITY
+  --    DEFINER with a pinned search_path and an owner that can reach the
+  --    app_private helper they now ask for the open context.
+  SELECT string_agg(format('%s (%s)', f.sig, f.problem), '; ') INTO v_wrong
+    FROM (
+      SELECT v.sig, CASE
+               WHEN to_regprocedure(v.sig) IS NULL THEN 'missing'
+               WHEN NOT (SELECT p.prosecdef FROM pg_proc p WHERE p.oid = to_regprocedure(v.sig))
+                 THEN 'not SECURITY DEFINER'
+               WHEN NOT EXISTS (SELECT 1 FROM pg_proc p, unnest(p.proconfig) c(setting)
+                                 WHERE p.oid = to_regprocedure(v.sig) AND c.setting LIKE 'search_path=%')
+                 THEN 'no pinned search_path'
+               WHEN NOT EXISTS (
+                      SELECT 1 FROM pg_proc p
+                        JOIN pg_roles r ON r.oid = p.proowner
+                       WHERE p.oid = to_regprocedure(v.sig)
+                         AND (r.rolsuper OR r.oid = (SELECT nspowner FROM pg_namespace WHERE nspname = 'app_private')))
+                 THEN 'owner can call no app_private helper'
+               WHEN NOT has_function_privilege('authenticated', to_regprocedure(v.sig), 'EXECUTE')
+                 THEN 'authenticated needs EXECUTE — every write policy calls it'
+             END AS problem
+        FROM (VALUES ('public.is_company_admin()'),
+                     ('public.current_role_permits(text,boolean)')) AS v(sig)
+    ) f
+   WHERE f.problem IS NOT NULL;
+
+  IF v_wrong IS NOT NULL THEN
+    RAISE EXCEPTION '3.4 self-check: %', v_wrong;
+  END IF;
+
+  --    …and that they fail closed, which is what makes anon's historical
+  --    EXECUTE harmless: a caller without a subject is neither an administrator
+  --    of a company nor inside a support session. The migration itself carries
+  --    no JWT, so auth.uid() is NULL right here — that caller is exactly this
+  --    one. (It is also the state 20260915130000 found a hole in, one helper
+  --    over: a single-row SELECT answering NULL rather than false.)
+  IF public.is_company_admin() IS NOT FALSE
+     OR public.current_role_permits('drivers', true) IS NOT FALSE THEN
+    RAISE EXCEPTION '3.4 self-check: a role gate answers something other than false to a caller with no subject';
   END IF;
 
   -- 3. Both seams are constants. A `true` in either would undo the confinement
