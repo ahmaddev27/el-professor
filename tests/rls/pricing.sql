@@ -18,7 +18,9 @@
     4. config       get_public_config for anyone, get_app_config signed in
     5. writing      pricing.manage for the price book, settings.manage — owner
                     only — for the rest, the feature map included; the shape
-                    validator; the version check
+                    validator; the rule that a feature map must name every
+                    feature the application knows (20260917120000); the version
+                    check
     6. alien book   an alien price book, shared with
                     src/utils/pricing.parity.test.ts, priced by
                     price_book_price and by compute_plan_price. Both engines
@@ -30,6 +32,9 @@
     8. forgery      platform_audit_record cannot be used to forge a
                     platform_settings row: 3.5's action allow-list names none,
                     and the reserved namespaces still hold
+    9. the cap      one actor writes at most 120 settings audit rows a minute
+                    (20260917120000), and the refusal past that writes no row at
+                    all
 
   The money rule this file pins is the one the migration preserves:
 
@@ -247,6 +252,13 @@ BEGIN
     (SELECT count(*) = 16 AND bool_and(value #>> '{}' IN ('basic', 'advanced', 'premium'))
        FROM jsonb_each(app_private.platform_setting_value('plan_features'))));
 
+  -- Since 20260917120000 a written map must name every key the application
+  -- knows, so the stored map and that list cannot drift apart unnoticed.
+  PERFORM _pr_ok('the seeded feature map names exactly the keys plan_feature_keys() requires',
+    app_private.settings_object_keys(app_private.platform_setting_value('plan_features'))
+      = app_private.plan_feature_keys()
+    AND array_length(app_private.plan_feature_keys(), 1) = 16);
+
   -- The rule the browser applies to a key the map does not carry.
   PERFORM _pr_ok('the feature map says gehaelter needs premium and belege needs basic',
     app_private.platform_setting_value('plan_features') ->> 'gehaelter' = 'premium'
@@ -331,6 +343,7 @@ DECLARE
   readonly constant uuid := '3b000000-0000-4000-8000-000000000004';
   admin_a  constant uuid := 'a0000000-0000-4000-8000-000000000001';
   v_book   constant jsonb := app_private.platform_setting_value('price_book');
+  v_feat   constant jsonb := app_private.platform_setting_value('plan_features');
 BEGIN
   -- who may write what
   PERFORM _pr_ok('write: support and read_only may not touch the price book',
@@ -385,14 +398,37 @@ BEGIN
 
   -- the shape of a feature map, written by an owner (settings.manage)
   PERFORM _pr_ok('write: a feature map naming a plan that does not exist is refused',
-    _pr_put(owner, 'plan_features', '{"belege": "gold"}'::jsonb, 1, 'problem') = 'plan_features.belege');
-  PERFORM _pr_ok('write: a partial feature map is valid — the browser reads a missing key as premium',
-    _pr_put(owner, 'plan_features', '{"belege": "basic"}'::jsonb, 1, 'ok') = 'true');
+    _pr_put(owner, 'plan_features', jsonb_set(v_feat, '{belege}', '"gold"'::jsonb), 1, 'problem')
+      = 'plan_features.belege');
+
+  /*
+    20260917120000: a written map must name every feature the application
+    knows. The browser reads a feature the map does not name as premium
+    (src/utils/planFeatures.ts) — fail closed, and that rule stays — so a short
+    map would put those screens behind LockedFeaturePage for every non-trial
+    company on basic or advanced, silently. Before this, `{}` was a valid map.
+  */
+  PERFORM _pr_ok('write: an empty feature map is refused, naming the first key it lacks',
+    _pr_put(owner, 'plan_features', '{}'::jsonb, 1, 'problem') = 'plan_features.missing.abrechnung'
+    AND _pr_put(owner, 'plan_features', '{}'::jsonb, 1) = 'invalid_value');
+  PERFORM _pr_ok('write: a map one key short is refused, and the answer lists every key missing',
+    _pr_put(owner, 'plan_features', v_feat - 'gehaelter', 1, 'problem') = 'plan_features.missing.gehaelter'
+    AND _pr_do(owner, format($f$SELECT (platform_settings_put('plan_features', %L::jsonb, 1)
+                                        -> 'missing_features' = '["gehaelter","notizen"]'::jsonb)::text$f$,
+                             (v_feat - 'gehaelter' - 'notizen')::text)) = 'true');
+  PERFORM _pr_ok('write: a key this build does not know does not make an incomplete map complete',
+    _pr_put(owner, 'plan_features',
+            (v_feat - 'werkstatt') || '{"a_feature_of_a_later_release": "basic"}'::jsonb, 1, 'problem')
+      = 'plan_features.missing.werkstatt');
+  PERFORM _pr_ok('write: a complete map is accepted, extra keys and all',
+    _pr_put(owner, 'plan_features',
+            jsonb_set(v_feat, '{belege}', '"advanced"'::jsonb)
+              || '{"a_feature_of_a_later_release": "basic"}'::jsonb, 1, 'ok') = 'true');
 
   -- the version
   PERFORM _pr_ok('write: a stale version writes nothing and names the current one',
-    _pr_put(owner, 'plan_features', '{"belege": "basic"}'::jsonb, 1) = 'version_conflict'
-    AND _pr_put(owner, 'plan_features', '{"belege": "basic"}'::jsonb, 1, 'current_version') = '2');
+    _pr_put(owner, 'plan_features', v_feat, 1) = 'version_conflict'
+    AND _pr_put(owner, 'plan_features', v_feat, 1, 'current_version') = '2');
 
   PERFORM _pr_ok('write: a NULL value or version is a broken contract',
     _pr_do(owner, 'SELECT platform_settings_put(''price_book'', NULL, 1) ->> ''reason''') LIKE 'ERR 22023%'
@@ -634,6 +670,77 @@ BEGIN
   PERFORM _pr_ok('platform_audit_record still records a listed action',
     _pr_do(readonly, $q$SELECT (platform_audit_record('read', 'manage_users.list', 'ok') IS NOT NULL)::text$q$)
       = 'true');
+END $$;
+
+-- ─── 9. the per-actor cap on settings rows ──────────────────────────────────
+
+/*
+  20260917120000. Every settings call by an active staff role appends to the
+  append-only log — which nothing may delete from — and read_only holds
+  settings.read, so before this a loop over platform_settings_get grew the log
+  as fast as the network allowed.
+
+  One actor now gets 120 settings rows a minute: platform_audit_record's number,
+  counted the same way, over one budget for reads and writes together. The
+  refusal past that writes no row at all, because recording "you have written
+  too many rows" is the very row the cap exists to stop. It is a return value,
+  not an exception: these RPCs raise only on a broken argument contract.
+
+  A principal of its own, so the arithmetic is exactly 120 rather than "120
+  minus whatever the sections above spent". The whole file is one transaction,
+  so now() does not move and every row is inside the same minute.
+*/
+
+INSERT INTO auth.users (id, email) VALUES
+  ('3b000000-0000-4000-8000-000000000005', 'pr-capped@test.invalid');
+
+INSERT INTO user_profiles (user_id, email, full_name, role, role_id, company_id, is_super_admin, status) VALUES
+  ('3b000000-0000-4000-8000-000000000005', 'pr-capped@test.invalid', 'PR Capped', 'admin', NULL, NULL, false, 'active');
+
+INSERT INTO app_private.platform_staff (user_id, role, note) VALUES
+  ('3b000000-0000-4000-8000-000000000005', 'read_only', 'pr');
+
+DO $$
+DECLARE
+  capped  constant uuid := '3b000000-0000-4000-8000-000000000005';
+  owner   constant uuid := '3b000000-0000-4000-8000-000000000001';
+  admin_a constant uuid := 'a0000000-0000-4000-8000-000000000001';
+  v_index integer;
+  v_last  jsonb;
+BEGIN
+  PERFORM _pr_become(capped);
+  FOR v_index IN 1 .. 120 LOOP
+    v_last := public.platform_settings_get('price_book');
+  END LOOP;
+  PERFORM _pr_reset();
+
+  PERFORM _pr_ok('cap: the first 120 reads are answered, and each one recorded',
+    (v_last ->> 'ok') = 'true'
+    AND (SELECT count(*) FROM app_private.platform_audit_log
+          WHERE actor_user_id = capped AND action = 'platform_settings.get') = 120);
+
+  PERFORM _pr_ok('cap: the 121st read is refused as rate_limited',
+    _pr_get(capped, 'price_book') = 'rate_limited');
+  -- Reads and writes share one budget. The version below is never looked at:
+  -- the cap is checked before the capability and before the row.
+  PERFORM _pr_ok('cap: a write by the same actor is refused on the same budget',
+    _pr_put(capped, 'price_book', v_last -> 'value', 1) = 'rate_limited');
+
+  PERFORM _pr_reset();
+  PERFORM _pr_ok('cap: and those refusals wrote nothing — recording them is what the cap prevents',
+    (SELECT count(*) FROM app_private.platform_audit_log WHERE actor_user_id = capped) = 120);
+
+  -- The budget belongs to the actor, not to the platform.
+  PERFORM _pr_ok('cap: another staff account is unaffected',
+    _pr_get(owner, 'price_book', 'ok') = 'true');
+
+  -- Order matters: a caller who is not platform staff is still refused before
+  -- the cap is consulted, and still leaves no row.
+  PERFORM _pr_ok('cap: a company admin is forbidden, not rate limited, and writes nothing',
+    _pr_get(admin_a, 'price_book') = 'forbidden');
+  PERFORM _pr_reset();
+  PERFORM _pr_ok('cap: …and still has no row of its own',
+    NOT EXISTS (SELECT 1 FROM app_private.platform_audit_log WHERE actor_user_id = admin_a));
 END $$;
 
 DO $$ BEGIN RAISE NOTICE '── pricing: all checks passed ──'; END $$;
