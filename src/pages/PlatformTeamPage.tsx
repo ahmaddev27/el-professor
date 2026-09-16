@@ -35,18 +35,26 @@ import { EMPTY_CELL, deDateTime, shortId } from '../lib/platformFormat';
  * out of `platform_audit_list`. That needs `audit.read`, which today is the
  * same role that holds `staff.manage`.
  *
- * Two consequences the screen states rather than hides: the log records the
- * staff row and not the account, so a member is identified by user id; and a
- * roster that reached the page limit says so instead of looking complete.
+ * Four consequences the screen states rather than hides: the log records the
+ * staff row and not the account, so a member is identified by user id; the
+ * trigger records the row and not the actor, so the list cannot say who granted
+ * a membership; it shows only memberships whose log entries still exist, so
+ * audit retention (decision D4) would make a member with full access disappear
+ * from it; and a roster that reached the page limit, or that met a row it could
+ * not parse, says so instead of looking complete.
  *
- * ## Only owner, until plan step 3.3
+ * Only successful rows are folded. The `platform_staff.` prefix also matches the
+ * RPCs' `denied` rows, which any non-owner can produce at 30 a minute, so the
+ * read asks for `outcome: 'ok'` — see `platformStaffClient.ts`.
  *
- * Every policy still built on `is_user_super_admin()` gives an active staff row
- * an owner's writes on the tenant tables, so a `support` or `read_only` row
- * would hold more than its name says. `platform_staff_add` and
- * `platform_staff_enable` refuse any other role with reason `role_requires_3_3`
- * and write a `denied` row; this screen offers no other role, and shows that
- * refusal in full if one ever arrives.
+ * ## Only owner
+ *
+ * `platform_staff_add` and `platform_staff_enable` refuse any other role with
+ * reason `role_requires_3_3` and write a `denied` row; this screen offers no
+ * other role, and shows that refusal in full if one ever arrives. The policy
+ * argument the reason is named after is spent — 20260917130000 moved the tenant
+ * policies onto capabilities — so lifting the refusal is a migration that
+ * redefines those two functions, plan step 3.12.
  *
  * ## The last active owner
  *
@@ -89,6 +97,8 @@ const PlatformTeamPage: React.FC = () => {
 
   const [members, setMembers] = useState<StaffMember[]>([]);
   const [truncated, setTruncated] = useState(false);
+  /** Trigger rows this build could not read; those members are missing below. */
+  const [unreadable, setUnreadable] = useState(0);
   const [loading, setLoading] = useState(false);
   const [problem, setProblem] = useState<TranslationKey | null>(null);
   const [detail, setDetail] = useState<string | null>(null);
@@ -112,13 +122,16 @@ const PlatformTeamPage: React.FC = () => {
       const result = await loadStaffRoster();
       if (!result.ok) {
         setMembers([]);
+        setUnreadable(0);
         setProblem(auditRefusalKey(result.reason));
         return;
       }
       setMembers(result.members);
       setTruncated(result.truncated);
+      setUnreadable(result.unreadable);
     } catch (err) {
       setMembers([]);
+      setUnreadable(0);
       setProblem('admin.read.failed');
       setDetail(err instanceof Error ? err.message : null);
     } finally {
@@ -211,11 +224,11 @@ const PlatformTeamPage: React.FC = () => {
         </button>
       </div>
 
-      <Note textKey="admin.team.roleNote" />
+      <Note text={t('admin.team.roleNote')} />
 
       {/* The roster */}
       {!mayReadRoster ? (
-        <Note textKey="admin.team.rosterUnavailable" />
+        <Note text={t('admin.team.rosterUnavailable')} />
       ) : loading ? (
         <div className="flex items-center justify-center py-20">
           <RefreshCw size={24} className="animate-spin" style={{ color: 'var(--text-tertiary)' }} />
@@ -228,8 +241,11 @@ const PlatformTeamPage: React.FC = () => {
         </div>
       ) : (
         <>
-          <Note textKey="admin.team.sourceNote" />
-          {truncated && <Note textKey="admin.team.truncated" />}
+          <Note text={t('admin.team.sourceNote')} />
+          {truncated && <Note text={t('admin.team.truncated')} />}
+          {/* A row that could not be parsed removed that member from the fold,
+              so the omission is named rather than left to look like an absence. */}
+          {unreadable > 0 && <Note text={t('admin.team.unreadable', { count: unreadable })} />}
 
           {members.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 rounded-2xl" style={cardStyle}>
@@ -288,15 +304,27 @@ const PlatformTeamPage: React.FC = () => {
                           </td>
                           <td className="px-5 py-4">
                             <div className="flex items-center gap-2 justify-end">
-                              <button
-                                onClick={() => void runOnMember(member.userId, () => resendStaffInvite(member.userId), 'admin.team.invite.resent')}
-                                disabled={working}
-                                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold"
-                                style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)', opacity: working ? 0.6 : 1 }}
-                                title={t('admin.team.resendInvite')}
-                              >
-                                <Mail size={13} />{t('admin.team.resendInvite')}
-                              </button>
+                              {/* `otp_issue` issues an invite_activate code only
+                                  for a profile still in `pending_invite`, so for
+                                  an activated member the send fails and the
+                                  route answers by suggesting this very button.
+                                  A disabled member has no invitation to accept
+                                  at all, so it is not offered there; whether an
+                                  active member has already activated is not
+                                  knowable here — the roster reads the staff
+                                  table's log, and no read model returns a staff
+                                  account's profile — so the title says so. */}
+                              {active && (
+                                <button
+                                  onClick={() => void runOnMember(member.userId, () => resendStaffInvite(member.userId), 'admin.team.invite.resent')}
+                                  disabled={working}
+                                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold"
+                                  style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)', opacity: working ? 0.6 : 1 }}
+                                  title={t('admin.team.resendInviteHint')}
+                                >
+                                  <Mail size={13} />{t('admin.team.resendInvite')}
+                                </button>
+                              )}
                               {active ? (
                                 <button
                                   onClick={() => void runOnMember(member.userId, () => disableStaffMember(member.userId), 'admin.team.disabled')}
@@ -391,15 +419,13 @@ const PlatformTeamPage: React.FC = () => {
   );
 };
 
-const Note: React.FC<{ textKey: TranslationKey }> = ({ textKey }) => {
-  const { t } = useTranslation();
-  return (
-    <div className="flex items-start gap-2 rounded-xl p-3 text-xs"
-      style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)', color: 'var(--text-secondary)' }}>
-      <Info size={14} className="flex-shrink-0 mt-0.5" style={{ color: 'var(--text-tertiary)' }} />
-      <span>{t(textKey)}</span>
-    </div>
-  );
-};
+/** Takes the finished sentence, so a note may carry interpolated values. */
+const Note: React.FC<{ text: string }> = ({ text }) => (
+  <div className="flex items-start gap-2 rounded-xl p-3 text-xs"
+    style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)', color: 'var(--text-secondary)' }}>
+    <Info size={14} className="flex-shrink-0 mt-0.5" style={{ color: 'var(--text-tertiary)' }} />
+    <span>{text}</span>
+  </div>
+);
 
 export default PlatformTeamPage;

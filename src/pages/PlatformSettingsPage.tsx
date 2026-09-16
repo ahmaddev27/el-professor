@@ -245,7 +245,10 @@ const PriceBookEditor: React.FC = () => {
       if (!answer.ok) {
         showToast('error', t(settingRefusalKey(answer.reason)));
         // Somebody else saved first: show what is there now, so the change is
-        // made against their version rather than over it.
+        // made against their version rather than over it. load() replaces the
+        // form, so the unsaved entries are gone — the message says so, because
+        // an operator told to "save again" would otherwise press a button that
+        // now holds somebody else's values.
         if (isVersionConflict(answer)) await load();
         return;
       }
@@ -479,6 +482,10 @@ const PlanFeaturesEditor: React.FC = () => {
           ? t('admin.settings.missingFeatures', { keys: answer.missingFeatures.join(', ') })
           : t(settingRefusalKey(answer.reason));
         showToast('error', missing);
+        // As on the price book: load() replaces the map and clears `changes`,
+        // so the unsaved edits are discarded rather than kept for a retry. The
+        // message says so — never re-send with the version that came back,
+        // which would overwrite somebody else's change unseen.
         if (isVersionConflict(answer)) await load();
         return;
       }

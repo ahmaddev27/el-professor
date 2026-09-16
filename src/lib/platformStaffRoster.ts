@@ -64,20 +64,36 @@ const isRole = (value: unknown): value is PlatformRole =>
 
 const nullableStr = (value: unknown): string | null => (typeof value === 'string' ? value : null);
 
+export interface StaffRoster {
+  members: StaffMember[];
+  /**
+   * Trigger rows whose payload this build could not read as a staff row — an
+   * unknown role, or an `after` value that is not an object.
+   *
+   * Counted rather than ignored. The newest row for a user id is final, so an
+   * unreadable one removes that member from the list instead of showing them
+   * with stale values; on the screen that answers "who has access", silently
+   * omitting somebody is the wrong direction, and the count is what lets the
+   * page say the list may be short.
+   */
+  unreadable: number;
+}
+
 /**
  * Folds audit rows into today's team.
  *
  * `rows` arrive newest first, as `platform_audit_list` returns them, so the
  * first row seen for a user id is that row's latest state and every older one
  * is history. A `.delete` removes the member; an `.insert` or `.update` whose
- * payload is not a staff row is skipped rather than guessed at.
+ * payload is not a staff row is counted as unreadable rather than guessed at.
  *
  * Sorted for the screen: active members first, then by user id, so the order
  * does not jump around as rows are added.
  */
-export function rosterFromAuditRows(rows: readonly AuditRow[]): StaffMember[] {
+export function rosterFromAuditRows(rows: readonly AuditRow[]): StaffRoster {
   const settled = new Set<string>();
   const members: StaffMember[] = [];
+  let unreadable = 0;
 
   for (const row of rows) {
     const userId = row.target_id;
@@ -90,7 +106,10 @@ export function rosterFromAuditRows(rows: readonly AuditRow[]): StaffMember[] {
     if (row.action === 'platform_staff.delete') continue;
 
     const after = row.after_value;
-    if (!isRecord(after) || !isRole(after.role)) continue;
+    if (!isRecord(after) || !isRole(after.role)) {
+      unreadable += 1;
+      continue;
+    }
 
     members.push({
       userId,
@@ -103,10 +122,12 @@ export function rosterFromAuditRows(rows: readonly AuditRow[]): StaffMember[] {
     });
   }
 
-  return members.sort((a, b) => {
+  members.sort((a, b) => {
     const activeDiff = Number(a.disabledAt !== null) - Number(b.disabledAt !== null);
     return activeDiff !== 0 ? activeDiff : a.userId.localeCompare(b.userId);
   });
+
+  return { members, unreadable };
 }
 
 /** How many members are still active — what "the last active owner" counts. */
@@ -142,10 +163,13 @@ export function isUserId(value: string): boolean {
  * text, and `callPlatformRpc` throws exactly that — the screen shows it. These
  * two need the reason behind the rule as well:
  *
- * - `role_requires_3_3`: every policy still built on is_user_super_admin()
- *   gives an active staff row an owner's writes, so no path may create or
- *   re-enable a row with another role before plan step 3.3 rewrites them. The
- *   role was **not** created.
+ * - `role_requires_3_3`: `platform_staff_add` and `platform_staff_enable` refuse
+ *   any role but `owner`, and the role was **not** created. The reason is named
+ *   after the policy argument behind it, which no longer holds — 20260917130000
+ *   moved the tenant policies onto capabilities, and its self-check raises if a
+ *   policy, or a function a policy calls, still reads is_user_super_admin() — so
+ *   lifting the refusal is a migration that redefines those two functions, plan
+ *   step 3.12, not a policy problem.
  * - `last_owner`: the platform would be left with nobody who can administer it,
  *   so the database refuses before anything changes.
  *
