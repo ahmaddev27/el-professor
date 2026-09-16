@@ -41,7 +41,7 @@ A step counts once it is merged into `staging` and verified there. Production re
 | **0** | Releases, rollback, staging protection | `▰▰▰▰▰▱` **5/6** · 83% | ![live on staging](https://img.shields.io/badge/-live%20on%20staging-2ea44f) 0.6 waits for the production button |
 | **1** | OTP and account security | `▰▰▰▰▰▰▱` **6/7** · 86% | ![on staging](https://img.shields.io/badge/-on%20staging-2ea44f) PRs #11, #16, #14; done once the code flows pass on staging and a real code arrives from production. 1.6 Google sign-in: database (PR #22), deploy settings (PR #29) and the sign-in screens (PR #45, with the registration gate fixed in PR #51) are on staging, and the provider was **switched on for staging** on 16.09.2026. Production stays off, and must, until the server-side rule exists that a platform capability requires a password session — today the refusal of a platform-staff Google sign-in is enforced in the browser only. Production also waits for its own Google Cloud client, a privacy policy and an Impressum |
 | **2** | Design system and prototype | `▰▰▰` **3/3** · 100% | ![on staging](https://img.shields.io/badge/-on%20staging-2ea44f) PR #17; approved when the owner asked to merge every open PR |
-| **3** | Platform admin and permissions | `▰▰▰▰▰▰▱▱▱▱▱▱▱` **6/13** · 46% | ![building](https://img.shields.io/badge/-building-orange) restructured into slices on 15.09.2026; 3.0 (PR #12), 3.1 (PR #24), the first part of 3.6b (PR #36), 3.5 (PR #39), 3.9 (PR #38, hardened by PR #44) and 3.3 (PR #46, which raises `SCHEMA_EPOCH` to 2) merged; the 3.6c panel pages followed (PR #50, plus the Konto link in PR #48) inside the 3.6 slice already counted at PR #36; next are 3.4 (support sessions, which 3.6c's workspace tab waits for) and the rest of 3.6b; 3.2 cancelled on 16.09.2026 (platform admin sign-in stays password-only); the 3.8 conflict report merged (PR #21) |
+| **3** | Platform admin and permissions | `▰▰▰▰▰▰▱▱▱▱▱▱▱` **6/13** · 46% | ![building](https://img.shields.io/badge/-building-orange) restructured into slices on 15.09.2026; 3.0 (PR #12), 3.1 (PR #24), the first part of 3.6b (PR #36), 3.5 (PR #39), 3.9 (PR #38, hardened by PR #44) and 3.3 (PR #46, which raises `SCHEMA_EPOCH` to 2) merged; the 3.6c panel pages followed (PR #50, plus the Konto link in PR #48) inside the 3.6 slice already counted at PR #36; **3.4 (support sessions) was approved on 16.09.2026 as the next slice**, ahead of 3.6a, 3.12, 3.7, 3.8 and 3.10–3.13, because it closes the temporary concession 3.3 shipped with, and 3.6c's workspace tab waits for it; 3.2 cancelled on 16.09.2026 (platform admin sign-in stays password-only); the 3.8 conflict report merged (PR #21) |
 | **4** | Cash salary receipt | `▰▰▰` **3/3** · 100% | ![on staging](https://img.shields.io/badge/-on%20staging-2ea44f) logic and database (PR #13), screens, PDF and receipt list (PR #34), Bargeldbestand on the cash ledger (PR #43) and the receipt preview on the salary payment row (PR #49); the overlapping-salary and receipt-numbering decisions are still open |
 | **5** | Design rollout | `▱▱▱▱▱` **0/5** | ![not started](https://img.shields.io/badge/-not%20started-lightgrey) |
 
@@ -81,6 +81,7 @@ A step counts once it is merged into `staging` and verified there. Production re
 - [x] **3.6c** The four missing panel pages: Verzeichnisse (vehicles, drivers and users across all companies), Protokoll (the audit log), Einstellungen (the price book and the plan feature map) and Team, each reading the read models and write RPCs phase 3 already serves; the Konto link in the platform sidebar came with it — PR #50, #48
 - [x] **4.3** The Gehaltsquittung preview on the salary payment row: the row already showed a lock badge and a link that navigated away to Dokumente, and now previews the stored receipt in place, with a PDF download — PR #49
 - [x] **1.6, registration gate** A Google signup with no profile row is no longer read as "nothing to do": such an account reached `/overview` inside the tenant shell with `invalid input syntax for type uuid: "null"` errors instead of the complete-your-registration screen — PR #51
+- [x] **Post-3.3 cleanup:** the Bargeldbestand ledger guard widened to the `business.read` capability instead of deleted, since `billing` does not hold that capability and would otherwise have been shown a false `0,00 €`; and the four `oauth_*` RPCs added to the RLS matrix, which now records a refusal for all seven principals — PR #53
 - [ ] **0.6** First production release from CI — the owner presses the button
 
 ### Building now
@@ -89,10 +90,12 @@ Agents build in parallel git worktrees. Each branch ends in a reviewed PR into `
 
 | Stream | Branch | State |
 |---|---|---|
-| Support sessions and the company workspace (3.4) | — | next; 3.6c's workspace tab waits for it |
+| Support sessions and the company workspace (3.4) | — | **approved on 16.09.2026 as the next slice**, ahead of 3.6a, 3.12, 3.7, 3.8 and 3.10–3.13. 3.3 shipped with a temporary concession the owner approved the same day: any staff role holding `business.read` reads every company's Fahrtenbuch, planning, historical and ledger data directly, with no audit row and no session. **3.4 is what closes it**, so the longer it waits the longer that concession stands. 3.6c's workspace tab waits for it too |
 | The staff roster read model, `platform_staff_list` (3.12) | — | next; the Team page reconstructs its roster from the audit log until it lands, and audit retention (D4) must not be implemented before it |
 
-The post-3.3 cleanup is in flight on `chore/post-3-3-cleanup`: widening the Bargeldbestand ledger guard's scope to the `business.read` capability, since 3.3 grants the ledger read by capability and `billing` does not hold it, and adding the four missing `oauth_*` lines to the RLS matrix.
+The post-3.3 cleanup **merged as PR #53** and is live on staging. It widened the Bargeldbestand ledger guard rather than deleting it: the ledger is in scope when the reader is in their own company **or** holds the `business.read` capability, because 3.3 grants that read by capability and `billing` does not hold it — deleting the guard outright would have reintroduced a confident and false `0,00 €` for a billing account. It also added the four missing `oauth_*` lines to the RLS matrix, which now record a refusal for all seven principals. The RLS kit was run against it before merging: all assertions passed, and the four `UNCOVERED` warnings are gone.
+
+After 3.4, what remains of phase 3 is 3.6a, 3.12, 3.7a/b, 3.8 U1–U3, 3.10, 3.11 and 3.13.
 
 ### Environments
 
@@ -102,14 +105,14 @@ The post-3.3 cleanup is in flight on `chore/post-3-3-cleanup`: widening the Barg
 | web | https://elprofessor.eu | https://app.elprofessor.eu (login required) |
 | API | https://api.elprofessor.eu | https://api-staging.elprofessor.eu |
 | branch | `main` — deployed by a manual button | `staging` — deployed on every push |
-| mail | Resend | Mailpit keeps a copy and relays to Resend, except `@example.com` |
+| mail | Resend directly (`GOTRUE_SMTP_HOST=smtp.resend.com`) | Mailpit keeps a copy and relays to Resend, except `@example.com` — left as it is by the owner's decision of 16.09.2026, because the e2e suite has no other way to read a one-time code |
 | GoTrue signup | closed since 16.09.2026 (`disable_signup:true`) | closed; Kong answers 403 on signup, otp and magiclink |
 | Google sign-in | off, and stays off until the password-session rule exists | on since 16.09.2026 |
 
 ### Waiting on the owner
 
 - Step 0.6: merge `staging` into `main` and press the production button. Its last technical blocker is gone — a production `OTP_PEPPER` was written on 16.09.2026 with the owner's approval. After the release: receive a real code mail at an address you own.
-- DNS record `mail-staging` → `159.195.205.30`, then a Mailpit login.
+- DNS record `mail-staging` → `159.195.205.30`, then a Mailpit login. It still does not resolve, so the e2e suite reaches Mailpit through an SSH tunnel and the mailbox cannot be opened in a browser. Caddy already has the site block and the basic-auth file, so a single A record is all that is missing.
 - Rotate the secrets that were exposed in chat.
 - Answer the agents' open questions listed in HANDOFF.md.
 - Decide how overlapping salary rows are merged, and confirm the receipt numbering (details in HANDOFF.md).
