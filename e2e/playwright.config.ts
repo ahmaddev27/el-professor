@@ -11,6 +11,10 @@ const required = [
   'E2E_BASE_URL', 'E2E_API_URL', 'E2E_STAGING_USER', 'E2E_STAGING_PASS',
   'E2E_MAILPIT_URL', 'E2E_MAILPIT_USER', 'E2E_MAILPIT_PASS',
   'E2E_ADMIN_EMAIL', 'E2E_ADMIN_PASSWORD',
+  // The warm-up in global setup sends it to the functions, which refuse a
+  // request without it before they start a worker — so it is needed by every
+  // run now, not only by the two specs that call the API directly.
+  'E2E_ANON_KEY',
 ];
 const missing = required.filter((key) => !process.env[key]);
 if (missing.length > 0) {
@@ -32,11 +36,14 @@ export default defineConfig({
   fullyParallel: false,
   retries: 0,
   timeout: 90_000,
-  // The first request after a staging release is slow: an edge function boots
-  // a fresh isolate, and the first page load warms the bundle and PostgREST.
-  // Two specs missed the 5 s default that way (forgot-password, then sign-in),
-  // and passed when rerun. 15 s absorbs that without hiding a real hang, which
-  // the 90 s test timeout still catches.
+  // 15 s absorbs ordinary latency to the shared VPS without hiding a real hang,
+  // which the 90 s test timeout still catches.
+  //
+  // It is not what makes the suite survive a release, and raising it further
+  // would not: the first request after one is answered *fast* by the gateway
+  // rather than by the app — a 502 in ~130 ms — and no timeout can wait out an
+  // answer that already came. lib/warmup.ts carries the measurements and does
+  // that job in global setup instead.
   expect: { timeout: 15_000 },
   reporter: [['list']],
   globalSetup: './lib/global-setup.ts',
