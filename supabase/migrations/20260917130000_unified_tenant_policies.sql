@@ -98,6 +98,20 @@
   the third still compares against `v_company`, so a signed copy still has to
   land in the caller's own folder.
 
+  **`current_role_permits()` loses its `is_user_super_admin()` term.** It gates
+  ten business tables and three storage policies, and that term is the same
+  "platform right because the caller is staff" this slice removes from the
+  policies — one indirection below where a reader of a policy can see it.
+  Unreachable today, because the tenant half of each predicate already answers
+  NULL for a platform account; reachable the moment 3.4 widens that half with an
+  OR. Section 1 has the full reasoning.
+
+  **`company_id` is pinned on `company_subscriptions` and
+  `subscription_invoices`.** Their policies name a capability and no company at
+  all, which left `billing.manage` able to re-point an existing invoice at
+  another company and re-attribute money. A policy cannot express "the value it
+  already had" — WITH CHECK never sees the old row — so it is a trigger.
+
   **Storage.** The `salary-receipts` policies (20260914140000) move to the same
   helper. The older buckets' policies (`company_logos`, `document_templates`,
   `stundennachweise_pdfs`) predate the schema fixture, so the RLS kit cannot see
@@ -159,6 +173,20 @@ COMMENT ON FUNCTION public.get_user_company_id() IS
     c.subscription_*     App.tsx gate 5 (SubscriptionGuard) with
                          AuthContext.isSubscriptionActive: status must be
                          active, and the expiry must be absent or in the future.
+
+  On the status vocabulary, because the migration chain and the live database
+  disagree and only one of them is true: `user_profiles.status` accepts five
+  values on the real databases — active, inactive, pending_invite, suspended and
+  deactivated. That is what `tests/fixtures/schema.sql` carries (a --schema-only
+  dump of production, which is also what the RLS kit builds from), and it is
+  what 20260916130000 depends on when archiving a company sets its users to
+  'deactivated'. The chain says otherwise: 20260402100619 adds
+  user_profiles_status_check with three values and wraps it in IF NOT EXISTS, so
+  it never widened it and no later migration restates it — the widening happened
+  outside version control, like the CREATE TABLEs CLAUDE.md warns about. The
+  three values this function blocks are the deployed vocabulary, not the
+  chain's, and 'suspended' and 'deactivated' are reachable rows rather than
+  defensive ones.
 
   must_change_password is deliberately absent: App.tsx routes such a user to
   /set-new-password, but the flag is a hygiene prompt, not an authorization
@@ -251,13 +279,85 @@ COMMENT ON FUNCTION public.platform_writes_company_data() IS
 
 -- Policies call all three as the querying role, so `authenticated` needs
 -- EXECUTE. anon does not: every policy in public applies TO authenticated.
+--
+-- The service role gets the company helper, which it can answer (its own
+-- auth.uid() is NULL, so the answer is NULL), and neither seam. Both seams are
+-- SECURITY INVOKER wrappers around platform_can(), on which the service role
+-- holds no EXECUTE — a grant here would advertise a path that raises 42501
+-- rather than returning false, which is worse than no path at all.
 REVOKE ALL ON FUNCTION public.get_active_company_id()          FROM PUBLIC, anon;
-REVOKE ALL ON FUNCTION public.platform_reads_company_data()    FROM PUBLIC, anon;
-REVOKE ALL ON FUNCTION public.platform_writes_company_data()   FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.platform_reads_company_data()    FROM PUBLIC, anon, service_role;
+REVOKE ALL ON FUNCTION public.platform_writes_company_data()   FROM PUBLIC, anon, service_role;
 
 GRANT EXECUTE ON FUNCTION public.get_active_company_id()        TO authenticated, service_role;
-GRANT EXECUTE ON FUNCTION public.platform_reads_company_data()  TO authenticated, service_role;
-GRANT EXECUTE ON FUNCTION public.platform_writes_company_data() TO authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.platform_reads_company_data()  TO authenticated;
+GRANT EXECUTE ON FUNCTION public.platform_writes_company_data() TO authenticated;
+
+/*
+  current_role_permits() loses its super-admin term.
+
+  It opened with `SELECT is_user_super_admin() OR COALESCE(…)`, and it is the
+  write gate of ten business tables and of all three salary-receipts storage
+  policies. Since 20260916110010 `is_user_super_admin()` is true for *any*
+  active staff row whatever its role — so that first line is the same "a
+  platform right because the caller is staff" this slice removes everywhere
+  else, one indirection below where a reader of the policy can see it.
+
+  It is not reachable today. Every one of those predicates reads
+  `company_id = (SELECT get_active_company_id()) AND (SELECT current_role_permits(…))`,
+  and a platform account's get_active_company_id() is NULL, so the AND is false
+  whatever the role term answers. It becomes reachable the moment 3.4 widens the
+  tenant term with an OR — which is precisely what 3.4 does, on ten payroll
+  tables at once. Removing it here means 3.4 changes a seam and inherits no
+  latent branch, and it makes the invariant the self-check states actually true
+  rather than true only of the policy text.
+
+  What moves: nothing for a company user, whose answer never came from this
+  term, and nothing for a platform account reaching a business table, which the
+  tenant predicate already refuses. The one real narrowing is the three
+  Gehaltsquittung RPCs of 20260914140000, which ask this function directly: a
+  platform account that also holds a profile inside a company used to pass this
+  gate whatever role that profile carried, and is now judged by the role, like
+  everyone else.
+
+  The body is otherwise 20260910120000's, unchanged — the legacy text-role
+  fallback and the COALESCE that makes it fail closed included. CREATE OR
+  REPLACE keeps the owner and the existing grants, so anon keeps the EXECUTE it
+  has always had here and keeps getting `false` from it: it has no profile row.
+*/
+CREATE OR REPLACE FUNCTION public.current_role_permits(p_page text, p_need_edit boolean)
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public, pg_catalog
+AS $$
+  SELECT COALESCE((
+           SELECT CASE WHEN p_need_edit THEN rp.can_edit ELSE rp.can_view END
+             FROM public.user_profiles up
+             JOIN public.roles r
+               ON r.id = COALESCE(
+                    up.role_id,
+                    -- Legacy profiles carry only the text `role`. Prefer a
+                    -- company-scoped role of that name over the system one.
+                    (SELECT r2.id
+                       FROM public.roles r2
+                      WHERE r2.name = up.role
+                        AND (r2.company_id = up.company_id OR r2.company_id IS NULL)
+                      ORDER BY (r2.company_id IS NULL)
+                      LIMIT 1))
+             JOIN public.role_permissions rp
+               ON rp.role_id = r.id
+              AND rp.page_key = p_page
+            WHERE up.user_id = auth.uid()
+            LIMIT 1
+         ), false);
+$$;
+
+COMMENT ON FUNCTION public.current_role_permits(text, boolean) IS
+  'Does the calling user''s role permit view/edit on this page_key? Fails closed. '
+  'Since 20260917130000 being platform staff grants nothing here: the role on the '
+  'caller''s own profile decides, as it does for every other caller.';
 
 -- ─── 2. The business tables ─────────────────────────────────────────────────
 --
@@ -694,6 +794,56 @@ CREATE POLICY subscription_payment_audit_insert ON public.subscription_payment_a
   FOR INSERT TO authenticated
   WITH CHECK ((SELECT public.platform_can('billing.manage')));
 
+-- A billing row may be edited, not re-attributed.
+--
+-- The three policies above carry no company term at all: `billing.manage`
+-- decides, and the row's own company_id is not part of the predicate. That is
+-- right for reading and for the acts the audited RPCs perform, but it left an
+-- UPDATE free to point an existing subscription or invoice at a different
+-- company — re-attributing money raised for one customer to another, with
+-- nothing in the row to show it happened. matrix.sql recorded it as M = YY.
+--
+-- A policy cannot express this rule: WITH CHECK sees the new row and never the
+-- old one, so "company_id is what it already was" is not statable there. It is
+-- a trigger, the instrument fahrtenbuch_trips already uses for its immutable
+-- columns, and like that one it binds every writer — the service role and the
+-- billing RPCs included. None of them changes company_id: 20260916130000 keys
+-- mark-paid, mark-unpaid and cancel by the invoice's own company, and nothing
+-- in the repository updates company_subscriptions at all.
+--
+-- subscription_payment_audit needs no trigger: it has no UPDATE policy, so
+-- there is no path to move one of its rows, and the matrix records its U, D and
+-- M cells as refused for every principal, the platform account included.
+
+CREATE OR REPLACE FUNCTION public.pin_billing_company_id()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = pg_catalog, public
+AS $fn$
+BEGIN
+  IF NEW.company_id IS DISTINCT FROM OLD.company_id THEN
+    RAISE EXCEPTION
+      '%: company_id is fixed when the row is written. A billing record belongs to the company it was raised for — issue a new one rather than re-pointing this one.',
+      TG_TABLE_NAME;
+  END IF;
+  RETURN NEW;
+END;
+$fn$;
+
+-- Fired by a trigger, never called: triggers do not check EXECUTE.
+REVOKE ALL ON FUNCTION public.pin_billing_company_id()
+  FROM PUBLIC, anon, authenticated, service_role;
+
+DROP TRIGGER IF EXISTS pin_billing_company_id ON public.company_subscriptions;
+CREATE TRIGGER pin_billing_company_id
+  BEFORE UPDATE ON public.company_subscriptions
+  FOR EACH ROW EXECUTE FUNCTION public.pin_billing_company_id();
+
+DROP TRIGGER IF EXISTS pin_billing_company_id ON public.subscription_invoices;
+CREATE TRIGGER pin_billing_company_id
+  BEFORE UPDATE ON public.subscription_invoices
+  FOR EACH ROW EXECUTE FUNCTION public.pin_billing_company_id();
+
 -- The price list every signed-in screen reads and only pricing.manage writes.
 DROP POLICY IF EXISTS authenticated_read_plans ON public.subscription_plans;
 DROP POLICY IF EXISTS superadmin_insert_plans  ON public.subscription_plans;
@@ -816,7 +966,13 @@ END $mig$;
 -- or company with 42501 'Keine Berechtigung' (HINT not_authorized), which is
 -- what the screens already show. current_role_permits() reads the role matrix
 -- and nothing about state, so before this the state boundary stopped short of
--- exactly the path that moves cash.
+-- exactly the path that moves cash. Nothing else in these bodies is touched:
+-- the integer-cent arithmetic, the lock order and every `FOR NO KEY UPDATE`
+-- come back byte for byte from the catalogue.
+--
+-- It also puts the RPC and the bucket back in step: section 7 moves the
+-- salary-receipts storage policies to the same helper, and
+-- attach_salary_cash_receipt_signed_copy validates the path against v_company.
 --
 -- redeem_activation_code is deliberately NOT in this list: it is the way *out*
 -- of a blocked state — a company whose subscription lapsed redeems a code to
@@ -1156,6 +1312,34 @@ BEGIN
     RAISE EXCEPTION '3.3 self-check: policies still read is_user_super_admin(): %', v_wrong;
   END IF;
 
+  -- 3b. …and neither does any function a policy calls. The check above is one
+  --     indirection short, and that is where the term actually lived:
+  --     current_role_permits() opened with `is_user_super_admin() OR …` and
+  --     gates ten business tables and three storage policies, so "no policy
+  --     reads it" was true of the policy text and false of what the policy
+  --     evaluates. Section 1 rewrote that body; this makes the claim checkable.
+  --
+  --     One level, deliberately: it is exactly the vocabulary the policies
+  --     themselves name, and a deeper walk would need a recursive CTE over a
+  --     call graph nothing else in this schema models. A function that is not
+  --     named in any policy is out of scope here — create_user_profile_manual
+  --     still guards itself with the function, and should.
+  SELECT string_agg(DISTINCT f.proname::text, ', ') INTO v_wrong
+    FROM (
+      SELECT (regexp_matches(coalesce(p.qual, '') || ' ' || coalesce(p.with_check, ''),
+                             '([a-z_][a-z0-9_]*)\s*\(', 'g'))[1] AS name
+        FROM pg_policies p
+       WHERE p.schemaname IN ('public', 'storage')
+    ) c
+    JOIN pg_proc f      ON f.proname = c.name
+    JOIN pg_namespace n ON n.oid = f.pronamespace
+   WHERE n.nspname = 'public'
+     AND f.prosrc ~ 'is_user_super_admin';
+
+  IF v_wrong IS NOT NULL THEN
+    RAISE EXCEPTION '3.3 self-check: a function called from a policy still reads is_user_super_admin(): %', v_wrong;
+  END IF;
+
   -- 4. Every capability a policy names exists in the matrix. A typo would deny
   --    silently, for everyone, which is the one failure nobody reports.
   SELECT string_agg(DISTINCT c.name, ', ') INTO v_wrong
@@ -1300,6 +1484,28 @@ BEGIN
 
   IF v_wrong IS NOT NULL THEN
     RAISE EXCEPTION '3.3 self-check: the INSERT policy no longer pins the row to its author: %', v_wrong;
+  END IF;
+
+  -- 11. A billing row cannot be re-attributed. These two policies carry no
+  --     company term, so the trigger is the only thing holding an invoice to
+  --     the company it was raised for.
+  SELECT string_agg(v.tbl, ', ') INTO v_wrong
+    FROM (VALUES ('company_subscriptions'), ('subscription_invoices')) AS v(tbl)
+   WHERE NOT EXISTS (SELECT 1 FROM pg_trigger t
+                      WHERE t.tgrelid = ('public.' || v.tbl)::regclass
+                        AND t.tgname = 'pin_billing_company_id'
+                        AND NOT t.tgisinternal);
+
+  IF v_wrong IS NOT NULL THEN
+    RAISE EXCEPTION '3.3 self-check: company_id is not pinned on %', v_wrong;
+  END IF;
+
+  -- 12. The service role holds neither seam. Both are SECURITY INVOKER wrappers
+  --     around platform_can(), which it may not execute, so a grant here would
+  --     advertise a path that raises 42501 instead of answering false.
+  IF has_function_privilege('service_role', 'public.platform_reads_company_data()', 'EXECUTE')
+     OR has_function_privilege('service_role', 'public.platform_writes_company_data()', 'EXECUTE') THEN
+    RAISE EXCEPTION '3.3 self-check: the service role holds EXECUTE on a seam it cannot answer';
   END IF;
 
   RAISE NOTICE '3.3 self-check: passed';

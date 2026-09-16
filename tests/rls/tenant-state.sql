@@ -414,7 +414,7 @@ END $$;
   The Gehaltsquittung RPCs, the one other door a SECURITY DEFINER function opens
   for a write — and the one that moves money: a confirmation writes a gapless GQ
   receipt, a salary_payments row and an outgoing cash_movements row. Until
-  20260917100000 they read get_user_company_id(), and their only other guard was
+  20260917130000 they read get_user_company_id(), and their only other guard was
   current_role_permits('salaries', true), which reads the role matrix and
   nothing about state — so a blocked account or company paid a salary in cash
   with the token it already held, and voided receipts the same way.
@@ -572,6 +572,32 @@ BEGIN
      AND (coalesce(p.qual, '') || ' ' || coalesce(p.with_check, '')) ~ 'is_user_super_admin';
   PERFORM _ts_ok(format('shape: no policy decides by is_user_super_admin() any more [%s]', coalesce(v_wrong, 'none')),
     v_wrong IS NULL);
+
+  -- One indirection deeper, which is where the term actually survived:
+  -- current_role_permits() began with `is_user_super_admin() OR …` and gates
+  -- ten business tables, so the check above was true of the policy text and
+  -- false of what the policy evaluates. 20260917130000 rewrote that body.
+  SELECT string_agg(DISTINCT f.proname::text, ', ')
+    INTO v_wrong
+    FROM (
+      SELECT (regexp_matches(coalesce(p.qual, '') || ' ' || coalesce(p.with_check, ''),
+                             '([a-z_][a-z0-9_]*)\s*\(', 'g'))[1] AS name
+        FROM pg_policies p
+       WHERE p.schemaname IN ('public', 'storage')
+    ) c
+    JOIN pg_proc f      ON f.proname = c.name
+    JOIN pg_namespace n ON n.oid = f.pronamespace
+   WHERE n.nspname = 'public'
+     AND f.prosrc ~ 'is_user_super_admin';
+  PERFORM _ts_ok(format('shape: no function a policy calls reads is_user_super_admin() either [%s]',
+                        coalesce(v_wrong, 'none')),
+    v_wrong IS NULL);
+
+  -- The seams are SECURITY INVOKER wrappers around platform_can(), which the
+  -- service role may not execute: a grant would hand it a call that raises.
+  PERFORM _ts_ok('shape: the service role holds EXECUTE on neither seam',
+    NOT has_function_privilege('service_role', 'public.platform_reads_company_data()', 'EXECUTE')
+    AND NOT has_function_privilege('service_role', 'public.platform_writes_company_data()', 'EXECUTE'));
 
   -- The four old tenant shapes, gone from the business tables: a policy that
   -- reaches user_profiles for the caller's company instead of asking the helper.

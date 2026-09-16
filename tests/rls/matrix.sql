@@ -95,7 +95,7 @@
   member could read, and the last SECURITY DEFINER function without a pinned
   search_path. The cells and scenarios they moved are marked below.
 
-  3.3 (20260917100000) closed the write side and the state rules. Every tenant
+  3.3 (20260917130000) closed the write side and the state rules. Every tenant
   table now carries one shape; the tenant predicate is get_active_company_id(),
   which answers NULL for a company or an account App.tsx refuses, so a pending,
   rejected or suspended company, one whose subscription is inactive, expired or
@@ -807,9 +807,9 @@ INSERT INTO _mx_move VALUES
 ('notification_settings',                $q$company_id = {other_co}$q$,
                                          $q$DELETE FROM notification_settings WHERE id = {ref_other:notification_settings}$q$, 'Y', 'one per company and type'),
 ('subscription_plans',                   NULL, NULL, 'Y', 'no tenant: a platform catalogue'),
-('company_subscriptions',                $q$company_id = {other_co}$q$, NULL, 'Y', NULL),
+('company_subscriptions',                $q$company_id = {other_co}$q$, NULL, 'T', 'pin_billing_company_id refuses it even for the owner'),
 ('subscription_invoices',                $q$company_id = {other_co}$q$,
-                                         $q$DELETE FROM subscription_invoices WHERE id = {ref_other:subscription_invoices}$q$, 'Y', 'one per company and month'),
+                                         $q$DELETE FROM subscription_invoices WHERE id = {ref_other:subscription_invoices}$q$, 'T', 'pin_billing_company_id refuses it even for the owner'),
 ('subscription_payment_audit',           $q$company_id = {other_co}$q$, NULL, 'Y', NULL),
 ('subscription_admin_actions',           $q$company_id = {other_co}$q$, NULL, 'Y', NULL),
 ('discount_codes',                       $q$assigned_company_id = {other_co}$q$, NULL, 'Y', 'reassigns the code to the other company'),
@@ -892,9 +892,9 @@ INSERT INTO _mx_expected VALUES
 -- of a decision is the audit row platform_company_set_approval writes. The
 -- rejection reason stays — a rejected company's owner is shown it.
 ('companies',                          'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'YY', NULL),
-('companies',                          'I', 'RR', 'RR', 'RR', 'RR', 'RR', 'RR', 'YY', '3.3 platform right from any active staff role, not the capability'),
-('companies',                          'U', '..', '..', '..', '..', '..', '..', 'YY', '3.3 platform right from any active staff role, not the capability'),
-('companies',                          'D', '..', '..', '..', '..', '..', '..', 'YY', '3.3 platform right from any active staff role, not the capability'),
+('companies',                          'I', 'RR', 'RR', 'RR', 'RR', 'RR', 'RR', 'YY', NULL),
+('companies',                          'U', '..', '..', '..', '..', '..', '..', 'YY', NULL),
+('companies',                          'D', '..', '..', '..', '..', '..', '..', 'YY', NULL),
 ('companies',                          'M', '--', '--', '--', '--', '--', '--', '--', NULL),
 ('company_planning_run_blocks',       'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'YY', '3.4 super reaches tenant data with no support session'),
 ('company_planning_run_blocks',        'I', 'RR', 'YR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
@@ -909,13 +909,16 @@ INSERT INTO _mx_expected VALUES
 ('company_settings',                   'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'YY', '3.4 super reaches tenant data with no support session'),
 ('company_settings',                   'I', 'RR', 'RR', 'RR', 'RR', 'YR', 'RY', 'RR', NULL),
 ('company_settings',                   'U', '..', '..', '..', '..', 'Y.', '.Y', 'YY', '3.4 super reaches tenant data with no support session'),
-('company_settings',                   'D', '..', '..', '..', '..', '..', '..', 'YY', '3.3 platform right from any active staff role, not the capability'),
+('company_settings',                   'D', '..', '..', '..', '..', '..', '..', 'YY', NULL),
 ('company_settings',                   'M', '..', '..', '..', '..', 'R.', '.R', 'YY', '3.4 super moves tenant rows into another company with no support session'),
-('company_subscriptions',              'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'YY', '3.3 platform right from any active staff role, not the capability'),
-('company_subscriptions',              'I', 'RR', 'RR', 'RR', 'RR', 'RR', 'RR', 'YY', '3.3 platform right from any active staff role, not the capability'),
-('company_subscriptions',              'U', '..', '..', '..', '..', '..', '..', 'YY', '3.3 platform right from any active staff role, not the capability'),
-('company_subscriptions',              'D', '..', '..', '..', '..', '..', '..', 'YY', '3.3 platform right from any active staff role, not the capability'),
-('company_subscriptions',              'M', '..', '..', '..', '..', '..', '..', 'YY', '3.3 platform right from any active staff role, not the capability'),
+('company_subscriptions',              'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'YY', '3.4 every staff role reads it through companies.read, with no support session'),
+('company_subscriptions',              'I', 'RR', 'RR', 'RR', 'RR', 'RR', 'RR', 'YY', NULL),
+('company_subscriptions',              'U', '..', '..', '..', '..', '..', '..', 'YY', NULL),
+('company_subscriptions',              'D', '..', '..', '..', '..', '..', '..', 'YY', NULL),
+-- M was YY: billing.manage could re-point an existing subscription at another
+-- company, because these policies carry no company term at all. 20260917130000
+-- pins company_id with a trigger, so the row may be edited and not moved.
+('company_subscriptions',              'M', '..', '..', '..', '..', '..', '..', 'TT', NULL),
 ('discount_code_redemptions',          'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'YY', NULL),
 ('discount_code_redemptions',          'I', 'RR', 'RR', 'RR', 'RR', 'RR', 'RR', 'RR', NULL),
 ('discount_code_redemptions',          'U', '..', '..', '..', '..', '..', '..', '..', NULL),
@@ -935,9 +938,9 @@ INSERT INTO _mx_expected VALUES
 ('document_blocks',                   'D', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
 ('document_blocks',                   'M', '..', 'R.', 'R.', 'R.', 'R.', '.R', '..', NULL),
 ('document_categories',                'S', '..', 'YY', 'YY', 'YY', 'YY', 'YY', 'YY', NULL),
-('document_categories',                'I', 'RR', 'RR', 'RR', 'RR', 'RR', 'RR', 'YY', '3.3 platform right from any active staff role, not the capability'),
-('document_categories',                'U', '..', '..', '..', '..', '..', '..', 'YY', '3.3 platform right from any active staff role, not the capability'),
-('document_categories',                'D', '..', '..', '..', '..', '..', '..', 'YY', '3.3 platform right from any active staff role, not the capability'),
+('document_categories',                'I', 'RR', 'RR', 'RR', 'RR', 'RR', 'RR', 'YY', NULL),
+('document_categories',                'U', '..', '..', '..', '..', '..', '..', 'YY', NULL),
+('document_categories',                'D', '..', '..', '..', '..', '..', '..', 'YY', NULL),
 ('document_categories',                'M', '--', '--', '--', '--', '--', '--', '--', NULL),
 ('document_counters',                  'S', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', NULL),
 ('document_counters',                  'I', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', NULL),
@@ -1104,20 +1107,22 @@ INSERT INTO _mx_expected VALUES
 ('subscription_admin_actions',         'U', '..', '..', '..', '..', '..', '..', 'YY', NULL),
 ('subscription_admin_actions',         'D', '..', '..', '..', '..', '..', '..', 'YY', NULL),
 ('subscription_admin_actions',         'M', '..', '..', '..', '..', '..', '..', 'YY', NULL),
-('subscription_invoices',              'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'YY', '3.3 platform right from any active staff role, not the capability'),
-('subscription_invoices',              'I', 'RR', 'RR', 'RR', 'RR', 'RR', 'RR', 'YY', '3.3 platform right from any active staff role, not the capability'),
-('subscription_invoices',              'U', '..', '..', '..', '..', '..', '..', 'YY', '3.3 platform right from any active staff role, not the capability'),
-('subscription_invoices',              'D', '..', '..', '..', '..', '..', '..', 'YY', '3.3 platform right from any active staff role, not the capability'),
-('subscription_invoices',              'M', '..', '..', '..', '..', '..', '..', 'YY', '3.3 platform right from any active staff role, not the capability'),
-('subscription_payment_audit',         'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'YY', '3.3 platform right from any active staff role, not the capability'),
-('subscription_payment_audit',         'I', 'RR', 'RR', 'RR', 'RR', 'RR', 'RR', 'YY', '3.3 platform right from any active staff role, not the capability'),
+('subscription_invoices',              'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'YY', '3.4 every staff role reads it through companies.read, with no support session'),
+('subscription_invoices',              'I', 'RR', 'RR', 'RR', 'RR', 'RR', 'RR', 'YY', NULL),
+('subscription_invoices',              'U', '..', '..', '..', '..', '..', '..', 'YY', NULL),
+('subscription_invoices',              'D', '..', '..', '..', '..', '..', '..', 'YY', NULL),
+-- M was YY, and an invoice re-attributed to another company re-attributes
+-- money. Pinned by the same trigger.
+('subscription_invoices',              'M', '..', '..', '..', '..', '..', '..', 'TT', NULL),
+('subscription_payment_audit',         'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'YY', '3.4 every staff role reads it through companies.read, with no support session'),
+('subscription_payment_audit',         'I', 'RR', 'RR', 'RR', 'RR', 'RR', 'RR', 'YY', NULL),
 ('subscription_payment_audit',         'U', '..', '..', '..', '..', '..', '..', '..', NULL),
 ('subscription_payment_audit',         'D', '..', '..', '..', '..', '..', '..', '..', NULL),
 ('subscription_payment_audit',         'M', '..', '..', '..', '..', '..', '..', '..', NULL),
 ('subscription_plans',                 'S', '..', 'YY', 'YY', 'YY', 'YY', 'YY', 'YY', NULL),
-('subscription_plans',                 'I', 'RR', 'RR', 'RR', 'RR', 'RR', 'RR', 'YY', '3.3 platform right from any active staff role, not the capability'),
-('subscription_plans',                 'U', '..', '..', '..', '..', '..', '..', 'YY', '3.3 platform right from any active staff role, not the capability'),
-('subscription_plans',                 'D', '..', '..', '..', '..', '..', '..', 'YY', '3.3 platform right from any active staff role, not the capability'),
+('subscription_plans',                 'I', 'RR', 'RR', 'RR', 'RR', 'RR', 'RR', 'YY', NULL),
+('subscription_plans',                 'U', '..', '..', '..', '..', '..', '..', 'YY', NULL),
+('subscription_plans',                 'D', '..', '..', '..', '..', '..', '..', 'YY', NULL),
 ('subscription_plans',                 'M', '--', '--', '--', '--', '--', '--', '--', NULL),
 ('user_profiles',                      'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'YY', '3.4 super reaches tenant data with no support session'),
 -- anon and super: since 20260916110010 the profile guard refuses a JWT putting a
@@ -1418,7 +1423,7 @@ BEGIN
     _mx_try('admin-a', NULL, format('UPDATE user_profiles SET status = %L WHERE user_id = %L', 'deactivated', member_a)), 'Y');
   PERFORM _mx_expect('guard', 'suspended editor cannot reactivate itself',
     _mx_try('suspended-a', NULL, format('UPDATE user_profiles SET status = %L WHERE user_id = %L', 'active', _mx_id('user', 'suspended-a'))), 'T');
-  -- 20260917100000: the guard's company-admin exceptions now require the
+  -- 20260917130000: the guard's company-admin exceptions now require the
   -- caller's own account to be usable, so a deactivated administrator changes
   -- nobody's status, its own included. This line was Y, tagged HOLE[3.3].
   PERFORM _mx_expect('guard', 'deactivated company admin cannot reactivate itself',
@@ -1472,7 +1477,7 @@ END $$;
 -- ── 3.3: company and user state, decided by the database ───────────────────
 -- Each principal reads, inserts, updates and deletes a driver of its own
 -- company, and reassigns one of its own trips through the planning RPC. Since
--- 20260917100000 a company that may not be used, and an account that may not
+-- 20260917130000 a company that may not be used, and an account that may not
 -- use it, get nothing: the tenant helper answers NULL, so SELECT, UPDATE and
 -- DELETE match no row (.) and INSERT fails its WITH CHECK (R), and the planning
 -- RPCs, which read the same helper, refuse with their own "caller has no
@@ -1972,7 +1977,7 @@ INSERT INTO _mx_rpc (label, stmt, want, hole) VALUES
     ('get_user_company_id() is company A',
      $q$SELECT (get_user_company_id() = 'c0000000-0000-4000-8000-00000000000a')::text$q$,
      '-YYYYN0', NULL),
-    -- 20260917100000: the business tables' predicate. The same answer as the
+    -- 20260917130000: the business tables' predicate. The same answer as the
     -- membership helper above for a healthy company, NULL for a platform
     -- account, and no EXECUTE for anon — every policy that calls it is TO
     -- authenticated. tests/rls/tenant-state.sql takes it through every state
@@ -1994,7 +1999,13 @@ INSERT INTO _mx_rpc (label, stmt, want, hole) VALUES
      'NNNNYYN', NULL),
     -- false for a caller without a profile row. It answered NULL there until
     -- 20260915130000 made is_user_super_admin() answer false to that caller;
-    -- the platform_staff body of 20260916110010 keeps answering false
+    -- the platform_staff body of 20260916110010 keeps answering false.
+    -- 20260917130000 removed the `is_user_super_admin() OR …` term from the
+    -- body altogether, so the platform column still reads Y but now for a
+    -- different reason: seed.sql gives that account the text role `admin` and
+    -- the system admin role_id, and an admin may edit the drivers page. It
+    -- answers about the role on the caller's own profile, as it does for every
+    -- other caller, and no longer about the staff row
     ('current_role_permits(drivers, edit)',
      $q$SELECT current_role_permits('drivers', true)::text$q$,
      'NNYYYYY', NULL),

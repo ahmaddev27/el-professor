@@ -18,14 +18,23 @@
   migration under test, this reproduces that ownership so the failure shows up
   here instead:
 
-      RLS_BEFORE=20260917100000_unified_tenant_policies.sql \
+      RLS_BEFORE=20260917130000_unified_tenant_policies.sql \
       RLS_BEFORE_SQL=tests/fixtures/owner-simulation.sql \
       node scripts/rls-test.mjs
 
-  The five planning RPCs are the ones that matter for 20260917100000: it
+  The five planning RPCs are the ones that matter for 20260917130000: it
   rewrites them to call `public.get_active_company_id()`, and leaves them with
   the owner they have. Hand them to `postgres` here, and the migration's grant
   loop and self-check 8 have something real to prove.
+
+  `enforce_user_profile_privilege_guard()` is here for the opposite reason. Its
+  body calls three `app_private` helpers, and `postgres` holds USAGE on that
+  schema but EXECUTE on none of its functions (CLAUDE.md, *`app_private`*), so
+  while it belongs to `postgres` it cannot run at all. 20260917130000 hands it
+  to the migration role with `ALTER FUNCTION … OWNER TO CURRENT_USER`; with the
+  ownership simulated here, that line is exercised rather than assumed, and a
+  release that dropped it would fail on the first profile write instead of on
+  production.
 
   The three Gehaltsquittung RPCs that migration also rewrites are deliberately
   NOT in the list. They were created in the chain, by 20260914140000, so on the
@@ -52,7 +61,11 @@ BEGIN
     'public.replace_monthly_planning_run(jsonb, uuid)',
     'public.delete_or_archive_monthly_planning_run(uuid)',
     'public.purge_old_monthly_planning_runs(integer, integer)',
-    'public.reassign_fahrtenbuch_trip(uuid, uuid, text, text, text, text)'
+    'public.reassign_fahrtenbuch_trip(uuid, uuid, text, text, text, text)',
+    -- Not for the grant loop: for the ALTER … OWNER TO CURRENT_USER in the
+    -- migration's section 6. Owned by postgres, this trigger function cannot
+    -- reach app_private at all.
+    'public.enforce_user_profile_privilege_guard()'
   ]
   LOOP
     IF to_regprocedure(v_sig) IS NULL THEN
