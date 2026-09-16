@@ -7,6 +7,7 @@ import {
   SIGNED_COPY_MAX_BYTES,
   balanceMayHaveChanged,
   berlinToday,
+  cashLedgerInScope,
   checkPaymentDate,
   checkSignedCopyFile,
   clearPendingAttempt,
@@ -343,6 +344,54 @@ describe('receiptScope — whose receipts the screens may act on', () => {
     expect(scopeRefusal('no_company')).toBe('no_company');
     expect(scopeRefusal('other_company')).toBe('company_mismatch');
     expect(scopeRefusal('own_company')).toBeNull();
+  });
+});
+
+/*
+  The cash ledger is readable where `company_id = get_active_company_id() OR
+  platform_reads_company_data()` is true (20260917130000). The second term is
+  `platform_can('business.read')` — a capability, not staff status — so these
+  cases are the two halves of that policy, and the refusals are the readers the
+  screens must not show a complete-looking till.
+*/
+describe('cashLedgerInScope — when the till may be presented as complete', () => {
+  const ownCompany = { companyId: 'c1', effectiveCompanyId: 'c1', isViewingAsCompany: false };
+
+  it('is in scope inside the own company, capability or not', () => {
+    expect(cashLedgerInScope({ ...ownCompany, platformReadsCompanyData: false })).toBe(true);
+    expect(cashLedgerInScope({ ...ownCompany, platformReadsCompanyData: true })).toBe(true);
+  });
+
+  it('stays in scope for staff who entered their own company', () => {
+    // Not a bare !isViewingAsCompany, which would have hidden the ledger here.
+    expect(cashLedgerInScope({
+      companyId: 'c1', effectiveCompanyId: 'c1', isViewingAsCompany: true, platformReadsCompanyData: false,
+    })).toBe(true);
+  });
+
+  it('is in scope for a platform reader holding business.read', () => {
+    // owner, support and read_only: 3.3 gave them the movements alongside the
+    // Bargeld and Belege they already read, so no term is missing.
+    expect(cashLedgerInScope({
+      companyId: null, effectiveCompanyId: 'c2', isViewingAsCompany: true, platformReadsCompanyData: true,
+    })).toBe(true);
+  });
+
+  it('is out of scope for a platform reader without business.read — today billing', () => {
+    // The capability billing does not hold. It reads no movements, and a
+    // 0,00 € payout card would turn that missing read into a claim.
+    expect(cashLedgerInScope({
+      companyId: null, effectiveCompanyId: 'c2', isViewingAsCompany: true, platformReadsCompanyData: false,
+    })).toBe(false);
+    expect(cashLedgerInScope({
+      companyId: null, effectiveCompanyId: null, isViewingAsCompany: false, platformReadsCompanyData: false,
+    })).toBe(false);
+  });
+
+  it('is out of scope for an ordinary company user pointed at another company', () => {
+    expect(cashLedgerInScope({
+      companyId: 'c1', effectiveCompanyId: 'c2', isViewingAsCompany: true, platformReadsCompanyData: false,
+    })).toBe(false);
   });
 });
 
