@@ -273,7 +273,7 @@ export const SELLER_MAX_FIELD_LENGTH = 200;
  * silently on a document a customer receives. The range here is the wider one,
  * so the screen never sends something the database would refuse.
  */
-const CONTROL_CHARACTERS = /[ --]/;
+const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f-\u009f]/;
 
 export function parseSeller(value: unknown): Seller | null {
   if (!isRecord(value)) return null;

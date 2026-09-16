@@ -72,8 +72,10 @@ describe('the trial length', () => {
    * `get_public_config()` quotes — so the tests below pin the seed and the
    * wiring rather than a constant that no longer exists.
    *
-   * `SIGNUP_MIGRATION` is still read: 20260916100010 is where the constant used
-   * to live, and it must not come back there either.
+   * `SIGNUP_MIGRATION` is still read, for a different job: 20260916100010 is a
+   * frozen historical file, and the last test below pins the constant it applied
+   * so that the "same trial as before" claim keeps something to rest on. It
+   * asserts that the 14 days are still written there, not that they are gone.
    */
   it('the seeded trial is SEED_TRIAL_DAYS', () => {
     expect(JSON.parse(dollarQuoted(TRIAL_MIGRATION, 'seed_trial'))).toEqual({ days: SEED_TRIAL_DAYS });
@@ -93,7 +95,7 @@ describe('the trial length', () => {
     expect(fallback?.[1]).toBe(String(SEED_TRIAL_DAYS));
   });
 
-  it('the migration that used to hold the constant no longer does', () => {
+  it('the migration this one replaces applied 14 days', () => {
     expect(SIGNUP_MIGRATION.match(/c_trial_length\s+CONSTANT\s+interval\s*:=\s*interval\s*'(\d+) days'/)?.[1])
       .toBe(String(SEED_TRIAL_DAYS));
   });
