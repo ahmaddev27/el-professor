@@ -67,15 +67,21 @@
      gate of the ten role-gated tables, of the four administrator-gated ones,
      of the salary-receipts storage policies and of the three Gehaltsquittung
      RPCs.
-  2. A **statement-level** BEFORE INSERT/UPDATE/DELETE trigger on each of 40
-     tables — the 36 tenant tables, plus `roles`, `role_permissions`,
-     `company_settings` and `activation_code_attempts` — refuses a write by a
-     staff account that holds a *view* context. On the 36 it closes the ~20
-     tables 3.3 left with no role gate at all (the planning, historical and
-     Fahrtenbuch tables among them); on the four shell tables it closes a hole
-     this slice would otherwise have opened, because their predicate is
+  2. A **statement-level** BEFORE INSERT/UPDATE/DELETE trigger on each of 39
+     tables — the 36 tenant tables, plus `roles`, `role_permissions` and
+     `activation_code_attempts` — refuses a write by a staff account that holds
+     a *view* context. On the 36 it closes the ~20 tables 3.3 left with no role
+     gate at all (the planning, historical and Fahrtenbuch tables among them);
+     on the three shell tables it closes a hole this slice would otherwise have
+     opened, because their predicate is
      `company_id = get_user_company_id() AND (…)` and making that term answer
-     the opened company completes it (see the trigger loop). It is
+     the opened company completes it.
+
+     What it guards is therefore narrower than "a staff account must not
+     write": it is **a write whose company came from the context**. A write
+     that names its own company and records itself — the audited platform RPCs
+     of 3.5 — is none of its business, which is why `company_settings` is not
+     on the list (see the trigger loop). It is
      statement-level, not row-level, because the question is about the caller
      and not about the row: one lookup per statement, not per row, so a
      Fahrtenbuch import of several thousand trips pays it once per batch.
@@ -649,9 +655,17 @@ COMMENT ON FUNCTION public.platform_writes_company_data() IS
     a staff account with
     a company               judged by its own profile, as today
     an open support session  the write is what the session is for
-    no context at all        RLS already refuses it, exactly as before this
-                            file; letting the statement through keeps those
-                            answers (R / no rows) unchanged
+    no context at all       the statement goes through and RLS answers it, as
+                            it did before this trigger existed
+
+  That last line is about the trigger only, and the file as a whole is not so
+  quiet: turning `platform_reads_company_data()` into a constant `false`
+  (section 4) took away the rows a staff account with no context could see, so
+  a statement that used to match a row and be refused by something downstream
+  now matches nothing and is refused by no one. Three of matrix.sql's `guard`
+  scenarios moved from T to `.` for exactly that reason — the row is invisible,
+  so enforce_user_profile_privilege_guard is never reached. It still refuses
+  when it is reached, which the same file now probes from inside a context.
 
   which leaves precisely one case: a company-less platform account writing
   while it holds a *view* context.
@@ -708,7 +722,7 @@ BEGIN
     -- …and section 3: the tables that reach their company through a parent
     'document_blocks', 'document_variables', 'historical_reconciliation_drivers',
     'historical_reconciliation_results', 'historical_reconciliation_wh_drivers',
-    -- Four tables of the account shell belong here too, and for a reason that
+    -- Three tables of the account shell belong here too, and for a reason that
     -- is this slice's own doing. Their write predicates read
     --   company_id = get_user_company_id() AND (is_company_admin() OR platform_can(…))
     -- and before this file the first conjunct was NULL for a company-less
@@ -720,7 +734,39 @@ BEGIN
     -- reason recorded, in the mode that is supposed to write nothing. The plan
     -- is explicit that a staff member writes inside a support session and
     -- nowhere else.
-    'roles', 'role_permissions', 'company_settings', 'activation_code_attempts'
+    'roles', 'role_permissions', 'activation_code_attempts'
+    --
+    -- `company_settings` was the fourth and has been taken back out, because
+    -- the rule this trigger enforces is narrower than "a staff account must not
+    -- write": it is *a write whose company came from the context*. That table
+    -- is the one place where the two came apart.
+    --
+    --   Its UPDATE was never completed by the context. The platform branch of
+    --   company_settings_update is `platform_can('companies.lifecycle')` with
+    --   no company term at all, so an owner could already edit any tenant's
+    --   settings with no context open — matrix.sql records that as YY and tags
+    --   it residual for 3.4c/3.13. Only the INSERT is completed by the context,
+    --   and only for a role that already holds lifecycle over every company, so
+    --   refusing the INSERT while the UPDATE stays open is incoherent.
+    --
+    --   And the trigger cost more there than it bought. platform_subscription_assign
+    --   (20260916130000) ends by setting drivers_per_car_limit on the company
+    --   named in its argument. That write is capability-checked (billing.manage),
+    --   takes its company from a parameter rather than from any context, and
+    --   records itself — it is the audited path CLAUDE.md requires platform
+    --   writes to take. The trigger refused it whenever any view context
+    --   happened to be open, on any company, because a statement trigger sees
+    --   the caller and not the row; and it refused by RAISE, which rolled back
+    --   the RPC's own audit row, so the log kept nothing at all. The RLS kit
+    --   caught exactly that.
+    --
+    -- Nothing else collides: no audited platform RPC writes any of the 39
+    -- tables left, and every one of them is a table a staff account can reach
+    -- only through the context in the first place. The planning and
+    -- Gehaltsquittung RPCs do write them and are refused in a view context on
+    -- purpose — they resolve their company with get_active_company_id(), which
+    -- is to say from the context, and they write no audit row for a RAISE to
+    -- undo.
   ]
   LOOP
     IF to_regclass('public.' || v_tbl) IS NULL THEN
@@ -1407,9 +1453,10 @@ BEGIN
       ('notification_settings'), ('cash_movements'), ('salary_cash_receipts'),
       ('document_blocks'), ('document_variables'), ('historical_reconciliation_drivers'),
       ('historical_reconciliation_results'), ('historical_reconciliation_wh_drivers'),
-      -- the four shell tables whose write predicate this file's own change
-      -- completes; see the trigger loop for why they are not optional
-      ('roles'), ('role_permissions'), ('company_settings'), ('activation_code_attempts')
+      -- the three shell tables whose write predicate this file's own change
+      -- completes; see the trigger loop for why they are not optional, and for
+      -- why company_settings is deliberately not among them
+      ('roles'), ('role_permissions'), ('activation_code_attempts')
     ) AS t(tbl)
    WHERE to_regclass('public.' || t.tbl) IS NOT NULL
      AND NOT EXISTS (SELECT 1 FROM pg_trigger g
@@ -1419,6 +1466,25 @@ BEGIN
 
   IF v_wrong IS NOT NULL THEN
     RAISE EXCEPTION '3.4 self-check: a view context could write %', v_wrong;
+  END IF;
+
+  -- 5b. …and company_settings does not carry it, which is as deliberate as the
+  --     list above. Its writes do not take their company from the context —
+  --     company_settings_update names no company at all — and
+  --     platform_subscription_assign (20260916130000) ends by setting
+  --     drivers_per_car_limit on the company in its argument, with
+  --     billing.manage checked and an audit row of its own. A trigger here
+  --     refuses that RPC whenever any view context is open, on any company,
+  --     because a statement trigger sees the caller and not the row; and the
+  --     RAISE rolls back the RPC's audit row, so the log keeps nothing. The RLS
+  --     kit caught exactly that. Putting it back means teaching the trigger the
+  --     difference first.
+  IF to_regclass('public.company_settings') IS NOT NULL
+     AND EXISTS (SELECT 1 FROM pg_trigger g
+                  WHERE g.tgrelid = 'public.company_settings'::regclass
+                    AND g.tgname = 'refuse_read_only_context_write'
+                    AND NOT g.tgisinternal) THEN
+    RAISE EXCEPTION '3.4 self-check: company_settings carries the view-context refusal again — that refuses platform_subscription_assign and rolls back its audit row';
   END IF;
 
   -- 6. …and it is a statement trigger. Per row it would run once per imported
