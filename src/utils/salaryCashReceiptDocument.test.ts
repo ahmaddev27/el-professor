@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { MAX_AMOUNT_IN_WORDS_CENTS } from './germanAmountInWords';
 import {
+  ReceiptDocumentError,
   buildReceiptDocumentText,
   germanDate,
   receiptCompany,
+  receiptDocumentProblem,
   storedReceiptDocumentInput,
   type ReceiptDocumentInput,
 } from './salaryCashReceiptDocument';
@@ -215,5 +217,32 @@ describe('germanDate', () => {
     for (const bad of ['09/04/2026', '2026-9-4', '', '2026-09-04T00:00:00Z']) {
       expect(() => germanDate(bad)).toThrow(RangeError);
     }
+  });
+});
+
+describe('a receipt without names is not printed', () => {
+  it('names the missing driver or company name', () => {
+    expect(receiptDocumentProblem(partial)).toBeNull();
+    expect(receiptDocumentProblem({ ...partial, driver: { name: '   ', gender: 'male' } })).toBe('missing_driver_name');
+    expect(receiptDocumentProblem({ ...partial, company: receiptCompany(null) })).toBe('missing_company_name');
+  });
+
+  it('refuses to build an unnamed signature line, for a new receipt and a stored one', () => {
+    const unnamedDriver = () => buildReceiptDocumentText({ ...partial, driver: { name: '', gender: null } });
+    expect(unnamedDriver).toThrow(ReceiptDocumentError);
+    expect(unnamedDriver).toThrow(/missing_driver_name/);
+
+    const stored = storedReceiptDocumentInput(
+      {
+        receipt_number: 'GQ-2026-0012', status: 'confirmed', period_start: '2026-08-03', period_end: '2026-08-30',
+        payment_date: '2026-09-14', place: 'Berlin', due_amount: '2500.00', paid_bank_before: '1000.00',
+        paid_cash_manual_before: '20.00', paid_cash_weekly_before: '50.00', paid_cash_receipts_before: '0.00',
+        remaining_before: '1430.00', amount: '1234.56', remaining_after: '195.44', is_partial: true,
+        voided_at: null, void_reason: null,
+      },
+      partial.driver,
+      { name: ' ', addressLines: [] },
+    );
+    expect(() => buildReceiptDocumentText(stored)).toThrow(/missing_company_name/);
   });
 });

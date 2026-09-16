@@ -73,6 +73,26 @@ export function nextAttempt(
   return { requestId: newRequestId(), input, state: 'not_sent' };
 }
 
+/** The parts of Web Crypto a request id needs. */
+export interface RandomSource {
+  randomUUID?: () => string;
+  getRandomValues(array: Uint8Array): Uint8Array;
+}
+
+/**
+ * A v4 UUID for a request id. crypto.randomUUID exists only in secure contexts
+ * and newer browsers (older Safari has none); getRandomValues exists wherever
+ * the app runs, so it builds the id when randomUUID is missing.
+ */
+export function createRequestId(source: RandomSource = globalThis.crypto): string {
+  if (typeof source.randomUUID === 'function') return source.randomUUID();
+  const bytes = source.getRandomValues(new Uint8Array(16));
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
 // ─── Refusals ───────────────────────────────────────────────────────────────
 
 /** Every reason the Gehaltsquittung RPCs and the payment guard put in HINT. */
@@ -99,9 +119,11 @@ export type DatabaseRefusal = (typeof DATABASE_REFUSALS)[number];
 /**
  * A database refusal, or one the browser reaches itself:
  *
- * company_mismatch  a super admin is viewing another company, and the RPCs act
+ * company_mismatch  platform staff are viewing another company, and the RPCs act
  *                   on the caller's own (get_user_company_id()).
+ * no_company        the account belongs to no company at all.
  * stale_figures     the balance changed between the preview and the confirmation.
+ * not_sent          something failed before the request left, so nothing was booked.
  * no_response       the request failed before an answer arrived.
  * unexpected        an error that names no reason, such as an expired session.
  * file_*            a signed copy the bucket would refuse.
@@ -110,7 +132,9 @@ export type DatabaseRefusal = (typeof DATABASE_REFUSALS)[number];
 export type ReceiptActionRefusal =
   | DatabaseRefusal
   | 'company_mismatch'
+  | 'no_company'
   | 'stale_figures'
+  | 'not_sent'
   | 'no_response'
   | 'unexpected'
   | 'file_type'
@@ -184,7 +208,9 @@ export const REFUSAL_MESSAGE_KEYS: Record<ReceiptActionRefusal, TranslationKey> 
   receipt_voided: 'gq.refusal.receiptVoided',
   receipt_payment_locked: 'gq.refusal.receiptPaymentLocked',
   company_mismatch: 'gq.refusal.companyMismatch',
+  no_company: 'gq.refusal.noCompany',
   stale_figures: 'gq.refusal.staleFigures',
+  not_sent: 'gq.refusal.notSent',
   no_response: 'gq.refusal.noResponse',
   unexpected: 'gq.refusal.unexpected',
   file_type: 'gq.refusal.fileType',
@@ -371,4 +397,145 @@ export function signedCopyPath(
   }
   const stamp = uploadedAt.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
   return `${companyId}/${receipt.payment_date.slice(0, 4)}/${receipt.receipt_number}_${stamp}.${extension}`;
+}
+
+// ─── Whose receipts ─────────────────────────────────────────────────────────
+
+export type ReceiptScope = 'own_company' | 'other_company' | 'no_company';
+
+/**
+ * Whether the screens may act on receipts. The RPCs and the SELECT policies
+ * use the caller's own company (get_user_company_id()), so platform staff
+ * viewing a customer and an account with no company are both outside, for
+ * different reasons that get different messages.
+ */
+export function receiptScope({
+  companyId,
+  effectiveCompanyId,
+  isViewingAsCompany,
+}: {
+  companyId: string | null;
+  effectiveCompanyId: string | null;
+  isViewingAsCompany: boolean;
+}): ReceiptScope {
+  if (isViewingAsCompany && effectiveCompanyId !== companyId) return 'other_company';
+  if (!companyId) return 'no_company';
+  return effectiveCompanyId === companyId ? 'own_company' : 'other_company';
+}
+
+/** The refusal a scope outside the own company shows; null inside it. */
+export function scopeRefusal(scope: ReceiptScope): ReceiptActionRefusal | null {
+  if (scope === 'other_company') return 'company_mismatch';
+  if (scope === 'no_company') return 'no_company';
+  return null;
+}
+
+// ─── A confirmation without an answer ───────────────────────────────────────
+
+export interface StorageLike {
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): void;
+  removeItem(key: string): void;
+}
+
+/**
+ * A confirmation that went out and got no definitive answer. It is kept in
+ * the dialog and in the tab's sessionStorage from the moment it is sent until
+ * the database answers, so closing the dialog or reloading the tab cannot
+ * start the same payment again under a new request id.
+ */
+export interface PendingReceiptAttempt {
+  companyId: string;
+  requestId: string;
+  input: PaymentAttemptInput;
+  driver: { id: string; name: string; gender: 'male' | 'female' | null };
+  period: { start: string; end: string };
+  /** What the preview showed when it was sent; the retry shows the same. */
+  shown: ReceiptSnapshot;
+}
+
+export const pendingAttemptKey = (companyId: string) => `el-professor:gehaltsquittung:pending:${companyId}`;
+
+/** The tab's sessionStorage, or null where it cannot be reached: no window, private mode, blocked site data. */
+export function browserSessionStorage(): StorageLike | null {
+  try {
+    return typeof window === 'undefined' ? null : window.sessionStorage;
+  } catch {
+    return null;
+  }
+}
+
+/** False when it could not be written; the attempt held in the dialog still guards that session. */
+export function savePendingAttempt(storage: StorageLike | null, record: PendingReceiptAttempt): boolean {
+  if (!storage) return false;
+  try {
+    storage.setItem(pendingAttemptKey(record.companyId), JSON.stringify(record));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function clearPendingAttempt(storage: StorageLike | null, companyId: string): void {
+  if (!storage) return;
+  try {
+    storage.removeItem(pendingAttemptKey(companyId));
+  } catch {
+    // Storage that cannot be written holds nothing to clear.
+  }
+}
+
+const SNAPSHOT_CENT_KEYS = [
+  'dueCents',
+  'paidBankCents',
+  'paidCashManualCents',
+  'paidCashWeeklyCents',
+  'paidCashReceiptsCents',
+  'remainingBeforeCents',
+  'amountCents',
+  'remainingAfterCents',
+] as const;
+
+const asRecord = (value: unknown): Record<string, unknown> | null =>
+  value !== null && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+const isText = (value: unknown): value is string => typeof value === 'string';
+const isCents = (value: unknown): value is number => typeof value === 'number' && Number.isSafeInteger(value);
+
+function isPendingAttempt(value: unknown): value is PendingReceiptAttempt {
+  const record = asRecord(value);
+  const input = asRecord(record?.input);
+  const driver = asRecord(record?.driver);
+  const period = asRecord(record?.period);
+  const shown = asRecord(record?.shown);
+  if (!record || !input || !driver || !period || !shown) return false;
+  return (
+    isText(record.companyId) &&
+    isText(record.requestId) &&
+    record.requestId !== '' &&
+    isText(input.salaryId) &&
+    isCents(input.amountCents) &&
+    input.amountCents > 0 &&
+    isText(input.paymentDate) &&
+    isText(input.place) &&
+    isText(driver.id) &&
+    isText(driver.name) &&
+    (driver.gender === 'male' || driver.gender === 'female' || driver.gender === null) &&
+    isText(period.start) &&
+    isText(period.end) &&
+    SNAPSHOT_CENT_KEYS.every(key => isCents(shown[key])) &&
+    typeof shown.isPartial === 'boolean'
+  );
+}
+
+/** The company's pending attempt; null when there is none, or the stored record cannot be trusted. */
+export function readPendingAttempt(storage: StorageLike | null, companyId: string): PendingReceiptAttempt | null {
+  if (!storage) return null;
+  try {
+    const raw = storage.getItem(pendingAttemptKey(companyId));
+    if (!raw) return null;
+    const record: unknown = JSON.parse(raw);
+    return isPendingAttempt(record) && record.companyId === companyId ? record : null;
+  } catch {
+    return null;
+  }
 }

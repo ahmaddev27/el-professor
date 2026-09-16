@@ -27,8 +27,11 @@
  * the export module; otherwise translate it.
  *
  * **Domain vocabulary.** Stundennachweis, Fahrtenbuch, Abrechnung, Beleg,
- * Werkstatt, Lohnart and Bundesland stay German in the English UI. Operators use
- * these words daily and they must match what the documents say.
+ * Werkstatt, Lohnart, Bundesland and Gehaltsquittung stay German in the English
+ * UI. Operators use these words daily and they must match what the documents
+ * say, so the English dictionary names the document Gehaltsquittung and writes
+ * the sentence around it in English, as it already does for the Trinkgeld
+ * Quittung and the Mietwagenauftrag.
  *
  * That list is closed too. Trinkgeld joins it only because it is the subject of
  * the Quittung. **Kennzeichen, Fixkosten, Personalnummer and Inhaber are not on

@@ -30,7 +30,7 @@ import {
   type DataTableColumn,
 } from './ui';
 import { exportGehaltsquittungPdf } from './GehaltsquittungDocument';
-import { ReceiptAlert, useRefusalMessage, useSignedCopyPicker } from './GehaltsquittungParts';
+import { ReceiptAlert, useDocumentProblemMessage, useRefusalMessage, useSignedCopyPicker } from './GehaltsquittungParts';
 import {
   loadReceipts,
   openSignedCopy,
@@ -40,8 +40,19 @@ import {
   type SalaryCashReceiptWithDriver,
 } from '../lib/salaryCashReceipts';
 import { toCents } from '../utils/money';
-import { buildReceiptDocumentText, receiptCompany, storedReceiptDocumentInput } from '../utils/salaryCashReceiptDocument';
-import { berlinToday, outcomeIsUnknown, type ReceiptActionRefusal } from '../utils/salaryCashReceiptFlow';
+import {
+  buildReceiptDocumentText,
+  receiptCompany,
+  receiptDocumentProblem,
+  storedReceiptDocumentInput,
+} from '../utils/salaryCashReceiptDocument';
+import {
+  berlinToday,
+  outcomeIsUnknown,
+  receiptScope,
+  scopeRefusal,
+  type ReceiptActionRefusal,
+} from '../utils/salaryCashReceiptFlow';
 
 /**
  * The company's Gehaltsquittungen on DocumentsPage: number, driver, period,
@@ -69,13 +80,16 @@ export default function GehaltsquittungList({ refreshKey, focusReceiptId, onCrea
   const refusalMessage = useRefusalMessage();
   const { success } = useToast();
   const { companyId, can } = useAuth();
-  const { effectiveCompanyId } = useSuperAdmin();
+  const { effectiveCompanyId, isViewingAsCompany } = useSuperAdmin();
   const { settings } = useCompanySettings();
   const picker = useSignedCopyPicker();
+  const documentProblemMessage = useDocumentProblemMessage();
 
-  // The table's SELECT policy reads the caller's own company, so a super admin
-  // viewing another company would see an empty list that looks true.
-  const sameCompany = Boolean(companyId) && effectiveCompanyId === companyId;
+  // The table's SELECT policy reads the caller's own company, so platform staff
+  // viewing another company would see an empty list that looks true. An account
+  // with no company at all is a different situation, and says so.
+  const outsideCompany = scopeRefusal(receiptScope({ companyId, effectiveCompanyId, isViewingAsCompany }));
+  const sameCompany = outsideCompany === null;
   const mayEdit = can('salaries', 'edit');
   const company = useMemo(() => receiptCompany(settings), [settings]);
 
@@ -139,9 +153,15 @@ export default function GehaltsquittungList({ refreshKey, focusReceiptId, onCrea
 
   const downloadPdf = (row: Row) =>
     runRowAction(row, 'pdf', async () => {
+      // The names are today's company settings and driver record, not a copy
+      // taken at confirmation, so an empty one refuses the print instead of
+      // signing the receipt to nobody.
+      const driver = { name: row.driver?.name ?? '', gender: row.driver?.gender ?? null };
+      const input = storedReceiptDocumentInput(row, driver, company);
+      const problem = receiptDocumentProblem(input);
+      if (problem) return documentProblemMessage(problem);
       try {
-        const driver = { name: row.driver?.name ?? '', gender: row.driver?.gender ?? null };
-        await exportGehaltsquittungPdf(buildReceiptDocumentText(storedReceiptDocumentInput(row, driver, company)));
+        await exportGehaltsquittungPdf(buildReceiptDocumentText(input));
         return null;
       } catch {
         return t('gq.pdf.failed');
@@ -367,8 +387,8 @@ export default function GehaltsquittungList({ refreshKey, focusReceiptId, onCrea
           ) : null}
         </CardHeader>
         <CardContent className="grid gap-4">
-          {!sameCompany ? (
-            <ReceiptAlert tone="caution">{refusalMessage('company_mismatch')}</ReceiptAlert>
+          {outsideCompany ? (
+            <ReceiptAlert tone="caution">{refusalMessage(outsideCompany)}</ReceiptAlert>
           ) : (
             <>
               <div className="relative w-full max-w-sm">

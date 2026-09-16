@@ -162,8 +162,37 @@ export function storedReceiptDocumentInput(
   };
 }
 
-/** @throws RangeError for a date that is not YYYY-MM-DD, or an amount too large to write in words. */
+export type ReceiptDocumentProblem = 'missing_driver_name' | 'missing_company_name';
+
+/**
+ * Why a receipt cannot be printed, or null. A receipt with an empty name would
+ * carry an unnamed signature line. The names are today's company settings and
+ * driver record, not a copy taken at confirmation; keeping one on the receipt
+ * is database work.
+ */
+export function receiptDocumentProblem(input: Pick<ReceiptDocumentInput, 'driver' | 'company'>): ReceiptDocumentProblem | null {
+  if (!input.company.name.trim()) return 'missing_company_name';
+  if (!input.driver.name.trim()) return 'missing_driver_name';
+  return null;
+}
+
+export class ReceiptDocumentError extends Error {
+  readonly problem: ReceiptDocumentProblem;
+
+  constructor(problem: ReceiptDocumentProblem) {
+    super(`Gehaltsquittung cannot be printed: ${problem}`);
+    this.name = 'ReceiptDocumentError';
+    this.problem = problem;
+  }
+}
+
+/**
+ * @throws ReceiptDocumentError when the driver or company name is empty.
+ * @throws RangeError for a date that is not YYYY-MM-DD, or an amount too large to write in words.
+ */
 export function buildReceiptDocumentText(input: ReceiptDocumentInput): ReceiptDocumentText {
+  const problem = receiptDocumentProblem(input);
+  if (problem) throw new ReceiptDocumentError(problem);
   const { figures } = input;
   const period = `${germanDate(input.periodStart)} – ${germanDate(input.periodEnd)}`;
   const paymentDate = germanDate(input.paymentDate);
