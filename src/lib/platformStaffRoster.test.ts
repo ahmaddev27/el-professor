@@ -45,11 +45,12 @@ const member = (userId: string, disabledAt: string | null): StaffMember => ({
 
 describe('rosterFromAuditRows', () => {
   it('reads the table out of the trigger rows, newest first', () => {
-    const roster = rosterFromAuditRows([
+    const { members: roster, unreadable } = rosterFromAuditRows([
       staffRow('platform_staff.insert', OWNER_B, { user_id: OWNER_B, role: 'owner', disabled_at: null, note: 'Support-Lead', created_at: '2026-09-16T09:00:00Z', created_by: OWNER_A }),
       staffRow('platform_staff.insert', OWNER_A, { user_id: OWNER_A, role: 'owner', disabled_at: null, note: null, created_at: '2026-09-15T08:00:00Z', created_by: null }),
     ]);
 
+    expect(unreadable).toBe(0);
     expect(roster).toHaveLength(2);
     expect(roster.map(m => m.userId).sort()).toEqual([OWNER_A, OWNER_B]);
     expect(roster.find(m => m.userId === OWNER_B)?.note).toBe('Support-Lead');
@@ -57,7 +58,7 @@ describe('rosterFromAuditRows', () => {
   });
 
   it('lets the newest row for a member win', () => {
-    const roster = rosterFromAuditRows([
+    const { members: roster } = rosterFromAuditRows([
       staffRow('platform_staff.update', OWNER_B, { user_id: OWNER_B, role: 'owner', disabled_at: '2026-09-16T11:00:00Z', note: null }),
       staffRow('platform_staff.insert', OWNER_B, { user_id: OWNER_B, role: 'owner', disabled_at: null, note: null }),
     ]);
@@ -69,31 +70,42 @@ describe('rosterFromAuditRows', () => {
   it('removes a member whose newest row is a delete', () => {
     // GoTrue deleting the account cascades into the table; the roster must not
     // keep showing a row that no longer exists.
-    expect(rosterFromAuditRows([
+    const result = rosterFromAuditRows([
       staffRow('platform_staff.delete', OWNER_B, null),
       staffRow('platform_staff.update', OWNER_B, { user_id: OWNER_B, role: 'owner', disabled_at: null }),
       staffRow('platform_staff.insert', OWNER_B, { user_id: OWNER_B, role: 'owner', disabled_at: null }),
-    ])).toEqual([]);
+    ]);
+    expect(result.members).toEqual([]);
+    // A delete carries no row to read, so it is not an unreadable payload.
+    expect(result.unreadable).toBe(0);
   });
 
   it('ignores the RPC rows, which carry only what the call changed', () => {
     // platform_staff.add / .disable / .enable record the intent; the trigger
     // records the row. Folding the partial payload would invent a member.
-    expect(rosterFromAuditRows([
+    const result = rosterFromAuditRows([
       staffRow('platform_staff.add', OWNER_B, { role: 'owner', note: null }),
       staffRow('platform_staff.disable', OWNER_A, { role: 'owner' }),
-    ])).toEqual([]);
+    ]);
+    expect(result.members).toEqual([]);
+    expect(result.unreadable).toBe(0);
   });
 
-  it('skips a payload that is not a staff row rather than guessing', () => {
-    expect(rosterFromAuditRows([
+  it('counts a payload it cannot read instead of dropping the member silently', () => {
+    // The newest row for a user id is final, so a row this build cannot parse
+    // leaves that member out of the list altogether. On the screen that answers
+    // "who has access" an omission has to be visible, so the count is what the
+    // page shows beside the roster.
+    const result = rosterFromAuditRows([
       staffRow('platform_staff.insert', OWNER_B, { user_id: OWNER_B, role: 'superuser' }),
       staffRow('platform_staff.insert', OWNER_A, null),
-    ])).toEqual([]);
+    ]);
+    expect(result.members).toEqual([]);
+    expect(result.unreadable).toBe(2);
   });
 
   it('puts active members before disabled ones', () => {
-    const roster = rosterFromAuditRows([
+    const { members: roster } = rosterFromAuditRows([
       staffRow('platform_staff.insert', OWNER_A, { user_id: OWNER_A, role: 'owner', disabled_at: '2026-09-16T11:00:00Z' }),
       staffRow('platform_staff.insert', OWNER_B, { user_id: OWNER_B, role: 'owner', disabled_at: null }),
     ]);

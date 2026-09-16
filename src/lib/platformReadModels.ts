@@ -60,6 +60,24 @@ export function directoryPageCount(total: number, pageSize: number = DIRECTORY_P
 }
 
 /**
+ * How many pages a screen may *advertise*.
+ *
+ * `directoryPageCount` counts the pages the rows fill, which is not the same as
+ * the pages that can be opened: `platform_read_offset` refuses an offset past
+ * DIRECTORY_MAX_OFFSET, so a table of 50 000 rows fills 500 pages of which 101
+ * are reachable. "Seite 1 von 500" promised 399 pages the database answers with
+ * 22023. The Weiter button already stops at the ceiling — only the label was
+ * wrong — so this caps the label at the same place.
+ */
+export function directoryReachablePageCount(
+  total: number,
+  pageSize: number = DIRECTORY_PAGE_SIZE,
+): number {
+  const lastReachableIndex = Math.floor(DIRECTORY_MAX_OFFSET / pageSize);
+  return Math.min(directoryPageCount(total, pageSize), lastReachableIndex + 1);
+}
+
+/**
  * Whether a next page exists *and* the database would serve it. Rows past the
  * offset ceiling exist but cannot be paged to — `platform_read_offset` refuses
  * the call outright — so a screen must not offer a button that raises. A search

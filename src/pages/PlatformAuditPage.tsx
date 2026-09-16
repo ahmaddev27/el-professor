@@ -104,7 +104,10 @@ const PlatformAuditPage: React.FC = () => {
   const [applied, setApplied] = useState<Filters>(EMPTY_FILTERS);
   const [rows, setRows] = useState<AuditRow[]>([]);
   const [cursor, setCursor] = useState<AuditCursor | null>(null);
-  const [scope, setScope] = useState<string>('own');
+  // Null until the first answer says which scope this account actually got.
+  // Defaulting to 'own' told an owner, for as long as the first read took, that
+  // they were seeing only their own entries.
+  const [scope, setScope] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [problem, setProblem] = useState<TranslationKey | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
@@ -190,8 +193,8 @@ const PlatformAuditPage: React.FC = () => {
         </button>
       </div>
 
-      {/* What this account is actually allowed to see. */}
-      {scope !== 'all' && (
+      {/* What this account is actually allowed to see, once the answer says so. */}
+      {scope !== null && scope !== 'all' && (
         <div className="flex items-start gap-2 rounded-xl p-3 text-xs"
           style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)', color: 'var(--text-secondary)' }}>
           <Info size={14} className="flex-shrink-0 mt-0.5" style={{ color: 'var(--text-tertiary)' }} />

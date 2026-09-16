@@ -145,9 +145,12 @@ const AdminSidebar: React.FC = () => {
         )}
         {/* Personal, not a platform destination: the account page shows the
             caller's own record, so it carries no capability requirement and
-            every platform role — read_only included — reaches it. */}
+            every platform role — read_only included — reaches it. It points at
+            the copy registered under /super-admin, not at /mein-konto, which
+            lives in the company shell and would surround it with tenant
+            navigation this account cannot use. */}
         <NavLink
-          to="/mein-konto"
+          to="/super-admin/konto"
           onClick={() => setIsMobileMenuOpen(false)}
           className={NAV_ITEM_CLASS}
           style={navItemStyle}

@@ -5,6 +5,7 @@ import {
   directoryHasNextPage,
   directoryOffset,
   directoryPageCount,
+  directoryReachablePageCount,
   directoryRpcArgs,
   parseDriverRow,
   parsePlatformReadPage,
@@ -40,6 +41,27 @@ describe('directoryPageCount', () => {
     expect(directoryPageCount(100)).toBe(1);
     expect(directoryPageCount(101)).toBe(2);
     expect(directoryPageCount(250, 100)).toBe(3);
+  });
+});
+
+describe('directoryReachablePageCount', () => {
+  it('matches the page count while every page can be opened', () => {
+    expect(directoryReachablePageCount(0)).toBe(1);
+    expect(directoryReachablePageCount(250)).toBe(3);
+  });
+
+  it('never advertises a page the offset ceiling refuses', () => {
+    // 50 000 rows fill 500 pages, but page 102 starts at offset 10 100, which
+    // app_private.platform_read_offset answers with 22023. The label has to stop
+    // where the Weiter button already stops, or it promises 399 pages that do
+    // not exist for the reader.
+    expect(directoryPageCount(50_000)).toBe(500);
+    expect(directoryReachablePageCount(50_000)).toBe(101);
+    expect(directoryHasNextPage(100, 50_000)).toBe(false);
+  });
+
+  it('follows the page size it is given', () => {
+    expect(directoryReachablePageCount(1_000_000, 25)).toBe(401);
   });
 });
 

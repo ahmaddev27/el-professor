@@ -7,12 +7,14 @@
  * They go through `callPlatformRpc`, which throws the German sentence the
  * function wrote, carrying its reason.
  *
- * **Only `owner` may be created or re-enabled until plan step 3.3.** Every
- * policy still built on is_user_super_admin() gives an active staff row an
- * owner's writes on the tenant tables, so a `support` or `read_only` row would
- * hold more than its name says. The database refuses the others with reason
- * `role_requires_3_3`; this module never offers another role in the first
- * place, so the two agree.
+ * **Only `owner` may be created or re-enabled.** The refusal now lives in
+ * `platform_staff_add` and `platform_staff_enable` themselves, which answer with
+ * reason `role_requires_3_3`; this module never offers another role in the first
+ * place, so the two agree. The policy argument the reason is named after is
+ * spent: 20260917130000 moved the tenant policies onto capabilities and its
+ * self-check raises if any policy, or any function a policy calls, still reads
+ * is_user_super_admin(). Lifting the restriction is therefore a migration that
+ * redefines those two functions — plan step 3.12 — and not a policy problem.
  *
  * Reading is the audit log — see `platformStaffRoster.ts` for why there is no
  * list to read instead.
@@ -33,7 +35,12 @@ import {
   type StaffMember,
 } from './platformStaffRoster';
 
-/** The only role a staff row may carry until plan step 3.3; see the header. */
+/**
+ * The only role a staff row may carry; see the header. The name keeps the
+ * database's `role_requires_3_3` reason findable — the rule itself now lives in
+ * platform_staff_add and platform_staff_enable, and plan step 3.12 is what
+ * lifts it.
+ */
 export const STAFF_ROLE_UNTIL_3_3 = 'owner';
 
 /**
@@ -45,7 +52,7 @@ export const STAFF_ROLE_UNTIL_3_3 = 'owner';
 const MAX_ROSTER_PAGES = 20;
 
 export type StaffRosterResult =
-  | { ok: true; members: StaffMember[]; truncated: boolean }
+  | { ok: true; members: StaffMember[]; truncated: boolean; unreadable: number }
   | { ok: false; reason: string };
 
 /**
@@ -60,6 +67,13 @@ export async function loadStaffRoster(): Promise<StaffRosterResult> {
   for (let page = 0; page < MAX_ROSTER_PAGES; page += 1) {
     const result = await fetchAuditPage({
       actionPrefix: STAFF_ACTION_PREFIX,
+      // Successful rows only. The prefix also matches the RPCs' `denied` rows,
+      // which any non-owner can produce at 30 a minute by calling
+      // platform_staff_add; roughly an hour of that pushes the trigger rows the
+      // roster is built from past this window, and a real member drops off the
+      // screen that answers "who has access". The trigger rows and the RPC rows
+      // that changed anything are all `ok`, so nothing real is lost.
+      outcome: 'ok',
       cursor,
       limit: AUDIT_PAGE_SIZE,
     });
@@ -67,10 +81,10 @@ export async function loadStaffRoster(): Promise<StaffRosterResult> {
 
     rows = appendAuditRows(rows, result.items);
     cursor = result.nextCursor;
-    if (!cursor) return { ok: true, members: rosterFromAuditRows(rows), truncated: false };
+    if (!cursor) return { ok: true, ...rosterFromAuditRows(rows), truncated: false };
   }
 
-  return { ok: true, members: rosterFromAuditRows(rows), truncated: true };
+  return { ok: true, ...rosterFromAuditRows(rows), truncated: true };
 }
 
 /** An existing account joins the team. It must have no company of its own. */

@@ -156,20 +156,33 @@ const SubscriptionGuard: React.FC<{ children: React.ReactNode }> = ({ children }
  * SubscriptionGuard can route a company-less account to /abo-aktivieren.
  */
 /**
- * Personal pages a platform account may still reach. `/mein-konto` shows the
- * caller's own record and no tenant data, so the reason to redirect does not
- * apply to it — and without this the super admin would have no way to change
- * its own password from inside the app.
+ * Where a company-less platform account goes instead of a tenant path.
+ *
+ * `/mein-konto` used to be let through this guard, which kept the account on a
+ * route registered inside AppLayout: the company sidebar, with fourteen tenant
+ * screens the account can never open, wrapped around a page that said it had no
+ * company. The account page itself is not the problem — AccountPage reads only
+ * the caller's own record (no company settings, no plan, no company id) — so it
+ * is registered a second time at `/super-admin/konto`, under AdminLayout, where
+ * it renders identically inside the shell the account actually belongs to.
+ *
+ * The old path stays a working bookmark by redirecting here rather than falling
+ * through to the dashboard, which would silently drop whoever followed it.
  */
-const PLATFORM_ACCOUNT_PATHS = ['/mein-konto'];
+const PLATFORM_ACCOUNT_REDIRECTS: Record<string, string> = {
+  '/mein-konto': '/super-admin/konto',
+};
 
 const PlatformAccountGuard: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { isSuperAdmin } = useAuth();
   const { effectiveCompanyId } = useSuperAdmin();
   const location = useLocation();
 
-  if (isSuperAdmin && !effectiveCompanyId && !PLATFORM_ACCOUNT_PATHS.includes(location.pathname)) {
-    return <Navigate to="/super-admin" replace />;
+  // Only a platform account that has not entered a company: a super admin who
+  // has entered one keeps using /mein-konto in that company's shell, and a
+  // company user never reaches this branch at all.
+  if (isSuperAdmin && !effectiveCompanyId) {
+    return <Navigate to={PLATFORM_ACCOUNT_REDIRECTS[location.pathname] ?? '/super-admin'} replace />;
   }
 
   return <>{children}</>;
@@ -373,6 +386,12 @@ function App() {
                   <Route path="protokoll"        element={<PlatformAuditPage />} />
                   <Route path="einstellungen"    element={<PlatformSettingsPage />} />
                   <Route path="team"             element={<PlatformTeamPage />} />
+                  {/* The same AccountPage the company shell registers. It reads
+                      only the caller's own record, so it needs nothing this
+                      shell does not provide, and a platform account changes its
+                      own name, address and password without being handed a
+                      company sidebar it cannot use. Before the catch-all. */}
+                  <Route path="konto"            element={<AccountPage />} />
                   <Route path="*" element={<Navigate to="/super-admin" replace />} />
                 </Route>
               )}

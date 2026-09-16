@@ -9,7 +9,7 @@ import {
   USER_SORTS,
   VEHICLE_SORTS,
   directoryHasNextPage,
-  directoryPageCount,
+  directoryReachablePageCount,
   platformReadRefusalKey,
   type DirectoryQuery,
   type PlatformCompanyRow,
@@ -233,7 +233,10 @@ const PlatformDirectoriesPage: React.FC = () => {
     );
   }
 
-  const pages = directoryPageCount(total);
+  // The pages that can actually be opened, not the pages the rows fill: past
+  // the offset ceiling the database refuses the call, so a larger number here
+  // would advertise pages the Weiter button correctly declines to reach.
+  const pages = directoryReachablePageCount(total);
   const hasNext = directoryHasNextPage(query.pageIndex, total);
 
   return (
