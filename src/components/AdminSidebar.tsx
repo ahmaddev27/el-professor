@@ -3,6 +3,7 @@ import { NavLink } from 'react-router-dom';
 import {
   BarChart3, Building2, Receipt, Stethoscope,
   Menu, X, LogOut, ShieldCheck, UserCog,
+  Library, ScrollText, SlidersHorizontal, Users,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
@@ -30,6 +31,16 @@ const ADMIN_NAV_ITEMS: AdminNavItem[] = [
   { path: '/super-admin/billing',          icon: Receipt,     labelKey: 'admin.nav.billing',     requires: 'companies.read' },
   // The diagnosis reads a company's Fahrtenbuch and planning data.
   { path: '/super-admin/abnahme-diagnose', icon: Stethoscope, labelKey: 'admin.nav.diagnostics', requires: 'business.read' },
+  // The directories read every company's vehicles, drivers and users through
+  // the audited read models, which ask for business.read.
+  { path: '/super-admin/verzeichnisse',    icon: Library,          labelKey: 'admin.nav.directories', requires: 'business.read' },
+  // audit.read reads the whole log. Every other active role reads its own rows,
+  // but the entry follows the capability the page is for.
+  { path: '/super-admin/protokoll',        icon: ScrollText,       labelKey: 'admin.nav.audit',       requires: 'audit.read' },
+  // Viewing needs settings.read; saving needs pricing.manage or settings.manage,
+  // and the page and the database decide that per key.
+  { path: '/super-admin/einstellungen',    icon: SlidersHorizontal, labelKey: 'admin.nav.settings',   requires: 'settings.read' },
+  { path: '/super-admin/team',             icon: Users,            labelKey: 'admin.nav.team',        requires: 'staff.manage' },
 ];
 
 /**
