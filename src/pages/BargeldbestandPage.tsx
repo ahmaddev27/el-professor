@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Wallet, Receipt as ReceiptIcon, Filter, TrendingUp, TrendingDown, Calendar, Download } from 'lucide-react';
+import { Wallet, Receipt as ReceiptIcon, Filter, TrendingUp, TrendingDown, Calendar, Download, Banknote } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
@@ -7,23 +7,58 @@ import { format, startOfMonth, endOfMonth } from 'date-fns';
 import { exportTableToExcel } from '../utils/excelExport';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { useTranslation } from '../contexts/LanguageContext';
+import {
+  bargeldIncomeEntries,
+  belegEntries,
+  cashLedgerDriverNames,
+  cashMovementEntries,
+  filterCashEntries,
+  sortCashEntriesByDateDesc,
+  summarizeCashLedger,
+  type BargeldIncomeRow,
+  type BelegRow,
+  type CashLedgerEntry,
+  type CashLedgerLabels,
+  type CashLedgerTotals,
+  type CashMovementRow,
+} from '../utils/cashLedger';
 
-interface Transaction {
-  id: string;
-  type: 'income' | 'expense';
-  amount: number;
-  description: string;
-  driver_name?: string;
-  date: string;
-}
+/**
+ * Bargeldbestand reads one ledger.
+ *
+ * The money rule: cash in is the Bargeld a driver hands over; cash out is a
+ * Beleg and a Gehaltsquittung, the cash salary payment
+ * confirm_salary_cash_payment books into public.cash_movements. Voiding one
+ * books the cash back on the day of the void. The weekly "Bar zurück" counts
+ * as paid and writes no movement, so it never leaves the till here.
+ *
+ * Before this the screen summed Bargeld minus Belege and knew nothing of the
+ * third term, so a salary paid out of the till left the balance untouched.
+ * Adding it changes no company's figure for any month without a
+ * Gehaltsquittung — which was every month up to this release; the comparison
+ * in tests/staging/cash-ledger-parity.sql is the evidence.
+ *
+ * The arithmetic is integer cents (utils/cashLedger.ts); euros appear only in
+ * the formatting below.
+ */
+
+const EMPTY_TOTALS: CashLedgerTotals = {
+  cashInCents: 0,
+  cashOutCents: 0,
+  balanceCents: 0,
+  bargeldIncomeCents: 0,
+  belegExpenseCents: 0,
+  salaryPayoutCents: 0,
+};
+
+/** PostgREST puts the whole `.in()` list in the URL, so ask in chunks. */
+const RECEIPT_LOOKUP_CHUNK = 200;
 
 export default function BargeldbestandPage() {
   const { t } = useTranslation();
-  const [totalCashIncome, setTotalCashIncome] = useState(0);
-  const [totalBelegeExpenses, setTotalBelegeExpenses] = useState(0);
-  const [cashBalance, setCashBalance] = useState(0);
-  const [transactions, setTransactions] = useState<Transaction[]>([]);
-  const [filteredTransactions, setFilteredTransactions] = useState<Transaction[]>([]);
+  const [totals, setTotals] = useState<CashLedgerTotals>(EMPTY_TOTALS);
+  const [entries, setEntries] = useState<CashLedgerEntry[]>([]);
+  const [filteredEntries, setFilteredEntries] = useState<CashLedgerEntry[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [selectedDriver, setSelectedDriver] = useState<string>('all');
   const [selectedType, setSelectedType] = useState<string>('all');
@@ -35,6 +70,13 @@ export default function BargeldbestandPage() {
   const { effectiveCompanyId: companyId } = useSuperAdmin();
   const { showToast } = useToast();
 
+  const ledgerLabels: CashLedgerLabels = {
+    bargeldIncome: t('bargeld.incomeEntry'),
+    beleg: t('bargeld.beleg'),
+    gehaltsquittung: t('bargeld.gehaltsquittung'),
+    gehaltsquittungStorno: t('bargeld.gehaltsquittungStorno'),
+  };
+
   useEffect(() => {
     if (!authLoading) {
       loadCashData();
@@ -43,7 +85,41 @@ export default function BargeldbestandPage() {
 
   useEffect(() => {
     applyFilters();
-  }, [transactions, selectedDriver, selectedType, startDate, endDate]);
+  }, [entries, selectedDriver, selectedType, startDate, endDate]);
+
+  /**
+   * The driver behind each payout. cash_movements carries none on purpose —
+   * source_id names the Gehaltsquittung, and the driver is on that. Without
+   * this lookup a payout would vanish whenever the driver filter is used.
+   */
+  async function loadPayoutDriverNames(sourceIds: string[]): Promise<Record<string, string>> {
+    if (sourceIds.length === 0) return {};
+
+    const { data: driverRows, error: driversError } = await supabase
+      .from('drivers')
+      .select('id, name')
+      .eq('company_id', companyId);
+    if (driversError) throw driversError;
+
+    const nameByDriverId = new Map((driverRows ?? []).map(d => [d.id as string, d.name as string]));
+    const nameBySourceId: Record<string, string> = {};
+
+    for (let i = 0; i < sourceIds.length; i += RECEIPT_LOOKUP_CHUNK) {
+      const { data, error } = await supabase
+        .from('salary_cash_receipts')
+        .select('id, driver_id')
+        .eq('company_id', companyId)
+        .in('id', sourceIds.slice(i, i + RECEIPT_LOOKUP_CHUNK));
+      if (error) throw error;
+
+      for (const receipt of data ?? []) {
+        const name = nameByDriverId.get(receipt.driver_id as string);
+        if (name) nameBySourceId[receipt.id as string] = name;
+      }
+    }
+
+    return nameBySourceId;
+  }
 
   async function loadCashData() {
     if (!user?.email) {
@@ -57,62 +133,51 @@ export default function BargeldbestandPage() {
       const monthStart = format(startOfMonth(new Date(selectedMonth)), 'yyyy-MM-dd');
       const monthEnd = format(endOfMonth(new Date(selectedMonth)), 'yyyy-MM-dd');
 
-      const { data: incomeData, error: incomeError } = await supabase
-        .from('income')
-        .select('id, amount, type, description, driver_name, date')
-        .eq('company_id', companyId)
-        .eq('type', 'bargeld')
-        .gte('date', monthStart)
-        .lte('date', monthEnd)
-        .order('date', { ascending: false });
+      const [incomeResult, receiptsResult, movementsResult] = await Promise.all([
+        supabase
+          .from('income')
+          .select('id, amount, type, description, driver_name, date')
+          .eq('company_id', companyId)
+          .eq('type', 'bargeld')
+          .gte('date', monthStart)
+          .lte('date', monthEnd)
+          .order('date', { ascending: false }),
+        supabase
+          .from('receipts')
+          .select('id, expense, description, driver_name, date')
+          .eq('company_id', companyId)
+          .gte('date', monthStart)
+          .lte('date', monthEnd)
+          .order('date', { ascending: false }),
+        // Written only by confirm_salary_cash_payment and void_salary_cash_receipt.
+        supabase
+          .from('cash_movements')
+          .select('id, direction, amount, movement_date, source_type, source_id, description')
+          .eq('company_id', companyId)
+          .gte('movement_date', monthStart)
+          .lte('movement_date', monthEnd)
+          .order('movement_date', { ascending: false }),
+      ]);
 
-      if (incomeError) throw incomeError;
+      if (incomeResult.error) throw incomeResult.error;
+      if (receiptsResult.error) throw receiptsResult.error;
+      if (movementsResult.error) throw movementsResult.error;
 
-      const cashIncome = incomeData?.reduce((sum, item) => sum + Number(item.amount), 0) || 0;
-      setTotalCashIncome(cashIncome);
+      const movementRows = (movementsResult.data ?? []) as CashMovementRow[];
+      const payoutDrivers = await loadPayoutDriverNames(
+        Array.from(new Set(movementRows.filter(m => m.source_id).map(m => m.source_id))),
+      );
 
-      const { data: receiptsData, error: receiptsError } = await supabase
-        .from('receipts')
-        .select('id, expense, description, driver_name, date')
-        .eq('company_id', companyId)
-        .gte('date', monthStart)
-        .lte('date', monthEnd)
-        .order('date', { ascending: false });
+      const allEntries = sortCashEntriesByDateDesc([
+        ...bargeldIncomeEntries((incomeResult.data ?? []) as BargeldIncomeRow[], ledgerLabels),
+        ...belegEntries((receiptsResult.data ?? []) as BelegRow[], ledgerLabels),
+        ...cashMovementEntries(movementRows, ledgerLabels, payoutDrivers),
+      ]);
 
-      if (receiptsError) throw receiptsError;
-
-      const belegeExpenses = receiptsData?.reduce((sum, r) => sum + Number(r.expense), 0) || 0;
-      setTotalBelegeExpenses(belegeExpenses);
-      setCashBalance(cashIncome - belegeExpenses);
-
-      const incomeTransactions: Transaction[] = incomeData?.map(item => ({
-        id: item.id,
-        type: 'income' as const,
-        amount: Number(item.amount),
-        description: item.description || t('bargeld.incomeEntry'),
-        driver_name: item.driver_name,
-        date: item.date,
-      })) || [];
-
-      const expenseTransactions: Transaction[] = receiptsData?.map(item => ({
-        id: item.id,
-        type: 'expense' as const,
-        amount: Number(item.expense),
-        description: item.description || 'Beleg',
-        driver_name: item.driver_name,
-        date: item.date,
-      })) || [];
-
-      const allTransactions = [...incomeTransactions, ...expenseTransactions]
-        .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-
-      setTransactions(allTransactions);
-
-      const uniqueDrivers = Array.from(
-        new Set(allTransactions.map(tx => tx.driver_name).filter(Boolean))
-      ) as string[];
-      setDrivers(uniqueDrivers.sort());
-
+      // The cards describe the month, not the filtered table — as they always did.
+      setTotals(summarizeCashLedger(allEntries));
+      setEntries(allEntries);
+      setDrivers(cashLedgerDriverNames(allEntries));
     } catch (error: any) {
       console.error('Error loading cash data:', error);
       showToast('error', t('bargeld.loadFailed'));
@@ -122,12 +187,14 @@ export default function BargeldbestandPage() {
   }
 
   function applyFilters() {
-    let filtered = [...transactions];
-    if (selectedDriver !== 'all') filtered = filtered.filter(tx => tx.driver_name === selectedDriver);
-    if (selectedType !== 'all') filtered = filtered.filter(tx => tx.type === selectedType);
-    if (startDate) filtered = filtered.filter(tx => tx.date >= startDate);
-    if (endDate) filtered = filtered.filter(tx => tx.date <= endDate);
-    setFilteredTransactions(filtered);
+    setFilteredEntries(
+      filterCashEntries(entries, {
+        driverName: selectedDriver !== 'all' ? selectedDriver : undefined,
+        direction: selectedType === 'income' ? 'in' : selectedType === 'expense' ? 'out' : undefined,
+        from: startDate || undefined,
+        to: endDate || undefined,
+      }),
+    );
   }
 
   function resetFilters() {
@@ -137,6 +204,16 @@ export default function BargeldbestandPage() {
     setEndDate('');
   }
 
+  /**
+   * Cents to the euro text this screen has always shown. Not formatCentsDe:
+   * the screen writes a decimal point today, and moving it to the German comma
+   * is a visual change that belongs with the Phase 5 pass over this page, not
+   * with a change to what the figure means.
+   */
+  function euro(cents: number): string {
+    return (cents / 100).toFixed(2);
+  }
+
   function handleExport() {
     const filters: string[] = [`Monat: ${selectedMonth}`];
     if (selectedDriver !== 'all') filters.push(`Fahrer: ${selectedDriver}`);
@@ -144,8 +221,7 @@ export default function BargeldbestandPage() {
     if (startDate) filters.push(`Von: ${new Date(startDate).toLocaleDateString('de-DE')}`);
     if (endDate) filters.push(`Bis: ${new Date(endDate).toLocaleDateString('de-DE')}`);
 
-    const totalIncome = filteredTransactions.filter(tx => tx.type === 'income').reduce((sum, tx) => sum + tx.amount, 0);
-    const totalExpense = filteredTransactions.filter(tx => tx.type === 'expense').reduce((sum, tx) => sum + tx.amount, 0);
+    const filteredTotals = summarizeCashLedger(filteredEntries);
 
     exportTableToExcel({
       filename: `bargeldbestand_${selectedMonth}`,
@@ -159,9 +235,15 @@ export default function BargeldbestandPage() {
         { key: 'description', label: t('common.description'),  width: 36 },
         { key: 'amount',      label: t('bargeld.amountEuro'),    width: 16, align: 'right', format: v => (v as number).toFixed(2) },
       ],
-      rows: filteredTransactions as unknown as Record<string, unknown>[],
+      rows: filteredEntries.map(entry => ({
+        date: entry.date,
+        type: entry.direction === 'in' ? 'income' : 'expense',
+        driver_name: entry.driverName,
+        description: entry.description,
+        amount: entry.amountCents / 100,
+      })),
       totals: {
-        amount: `+${totalIncome.toFixed(2)} / -${totalExpense.toFixed(2)}`,
+        amount: `+${euro(filteredTotals.cashInCents)} / -${euro(filteredTotals.cashOutCents)}`,
       },
     });
   }
@@ -184,6 +266,8 @@ export default function BargeldbestandPage() {
       </div>
     );
   }
+
+  const balancePositive = totals.balanceCents >= 0;
 
   return (
     <div className="space-y-6">
@@ -209,7 +293,7 @@ export default function BargeldbestandPage() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
         <div className="rounded-xl p-6" style={{ background: 'var(--success-subtle)', border: '1px solid rgba(5,150,105,0.25)' }}>
           <div className="flex items-center gap-3 mb-2">
             <div className="p-2 rounded-lg" style={{ background: 'rgba(5,150,105,0.15)' }}>
@@ -218,7 +302,7 @@ export default function BargeldbestandPage() {
             <h3 className="text-sm font-medium" style={{ color: 'var(--success)' }}>{t('bargeld.cashIncome')}</h3>
           </div>
           <p className="text-3xl font-bold" style={{ color: 'var(--success)' }}>
-            {totalCashIncome.toFixed(2)} €
+            {euro(totals.bargeldIncomeCents)} €
           </p>
           <p className="text-xs mt-2" style={{ color: 'var(--success)', opacity: 0.75 }}>{t('bargeld.totalCash')}</p>
         </div>
@@ -231,31 +315,44 @@ export default function BargeldbestandPage() {
             <h3 className="text-sm font-medium" style={{ color: 'var(--danger)' }}>{t('bargeld.belegExpenses')}</h3>
           </div>
           <p className="text-3xl font-bold" style={{ color: 'var(--danger)' }}>
-            {totalBelegeExpenses.toFixed(2)} €
+            {euro(totals.belegExpenseCents)} €
           </p>
           <p className="text-xs mt-2" style={{ color: 'var(--danger)', opacity: 0.75 }}>{t('bargeld.totalBelege')}</p>
+        </div>
+
+        <div className="rounded-xl p-6" style={{ background: 'var(--danger-subtle)', border: '1px solid rgba(220,38,38,0.25)' }}>
+          <div className="flex items-center gap-3 mb-2">
+            <div className="p-2 rounded-lg" style={{ background: 'rgba(220,38,38,0.15)' }}>
+              <Banknote className="w-6 h-6" style={{ color: 'var(--danger)' }} />
+            </div>
+            <h3 className="text-sm font-medium" style={{ color: 'var(--danger)' }}>{t('bargeld.salaryPayouts')}</h3>
+          </div>
+          <p className="text-3xl font-bold" style={{ color: 'var(--danger)' }}>
+            {euro(totals.salaryPayoutCents)} €
+          </p>
+          <p className="text-xs mt-2" style={{ color: 'var(--danger)', opacity: 0.75 }}>{t('bargeld.salaryPayoutsHint')}</p>
         </div>
 
         <div
           className="rounded-xl p-6"
           style={{
-            background: cashBalance >= 0 ? 'var(--accent-subtle)' : 'var(--warning-subtle)',
-            border: `1px solid ${cashBalance >= 0 ? 'rgba(37,99,235,0.25)' : 'rgba(217,119,6,0.25)'}`,
+            background: balancePositive ? 'var(--accent-subtle)' : 'var(--warning-subtle)',
+            border: `1px solid ${balancePositive ? 'rgba(37,99,235,0.25)' : 'rgba(217,119,6,0.25)'}`,
           }}
         >
           <div className="flex items-center gap-3 mb-2">
-            <div className="p-2 rounded-lg" style={{ background: cashBalance >= 0 ? 'rgba(37,99,235,0.15)' : 'rgba(217,119,6,0.15)' }}>
-              <Wallet className="w-6 h-6" style={{ color: cashBalance >= 0 ? 'var(--accent-text)' : 'var(--warning)' }} />
+            <div className="p-2 rounded-lg" style={{ background: balancePositive ? 'rgba(37,99,235,0.15)' : 'rgba(217,119,6,0.15)' }}>
+              <Wallet className="w-6 h-6" style={{ color: balancePositive ? 'var(--accent-text)' : 'var(--warning)' }} />
             </div>
-            <h3 className="text-sm font-medium" style={{ color: cashBalance >= 0 ? 'var(--accent-text)' : 'var(--warning)' }}>
-              Aktueller Bestand
+            <h3 className="text-sm font-medium" style={{ color: balancePositive ? 'var(--accent-text)' : 'var(--warning)' }}>
+              {t('bargeld.currentBalance')}
             </h3>
           </div>
-          <p className="text-3xl font-bold" style={{ color: cashBalance >= 0 ? 'var(--accent-text)' : 'var(--warning)' }}>
-            {cashBalance.toFixed(2)} €
+          <p className="text-3xl font-bold" style={{ color: balancePositive ? 'var(--accent-text)' : 'var(--warning)' }}>
+            {euro(totals.balanceCents)} €
           </p>
-          <p className="text-xs mt-2" style={{ color: cashBalance >= 0 ? 'var(--accent-text)' : 'var(--warning)', opacity: 0.75 }}>
-            Bargeld - Belege
+          <p className="text-xs mt-2" style={{ color: balancePositive ? 'var(--accent-text)' : 'var(--warning)', opacity: 0.75 }}>
+            {t('bargeld.balanceFormula')}
           </p>
         </div>
       </div>
@@ -321,50 +418,53 @@ export default function BargeldbestandPage() {
               </tr>
             </thead>
             <tbody>
-              {filteredTransactions.length === 0 ? (
+              {filteredEntries.length === 0 ? (
                 <tr>
                   <td colSpan={5} className="px-6 py-8 text-center text-sm" style={{ color: 'var(--text-tertiary)' }}>
                     Keine Transaktionen gefunden
                   </td>
                 </tr>
               ) : (
-                filteredTransactions.map((transaction) => (
-                  <tr
-                    key={transaction.id}
-                    className="border-t"
-                    style={{ borderColor: 'var(--border)' }}
-                    onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'var(--bg-subtle)'; }}
-                    onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'transparent'; }}
-                  >
-                    <td className="px-6 py-4 whitespace-nowrap text-sm" style={{ color: 'var(--text-primary)' }}>
-                      {format(new Date(transaction.date), 'dd.MM.yyyy')}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <span
-                        className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium"
-                        style={{
-                          background: transaction.type === 'income' ? 'var(--success-subtle)' : 'var(--danger-subtle)',
-                          color: transaction.type === 'income' ? 'var(--success)' : 'var(--danger)',
-                        }}
-                      >
-                        {transaction.type === 'income' ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
-                        {transaction.type === 'income' ? t('bargeld.incomeCol') : t('bargeld.expenseCol')}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 text-sm" style={{ color: 'var(--text-primary)' }}>
-                      {transaction.driver_name || '-'}
-                    </td>
-                    <td className="px-6 py-4 text-sm" style={{ color: 'var(--text-primary)' }}>
-                      {transaction.description}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-right font-medium">
-                      <span style={{ color: transaction.type === 'income' ? 'var(--success)' : 'var(--danger)' }}>
-                        {transaction.type === 'income' ? '+' : '-'}
-                        {transaction.amount.toFixed(2)} €
-                      </span>
-                    </td>
-                  </tr>
-                ))
+                filteredEntries.map((entry) => {
+                  const isIncome = entry.direction === 'in';
+                  return (
+                    <tr
+                      key={entry.id}
+                      className="border-t"
+                      style={{ borderColor: 'var(--border)' }}
+                      onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'var(--bg-subtle)'; }}
+                      onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'transparent'; }}
+                    >
+                      <td className="px-6 py-4 whitespace-nowrap text-sm" style={{ color: 'var(--text-primary)' }}>
+                        {format(new Date(entry.date), 'dd.MM.yyyy')}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <span
+                          className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium"
+                          style={{
+                            background: isIncome ? 'var(--success-subtle)' : 'var(--danger-subtle)',
+                            color: isIncome ? 'var(--success)' : 'var(--danger)',
+                          }}
+                        >
+                          {isIncome ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
+                          {isIncome ? t('bargeld.incomeCol') : t('bargeld.expenseCol')}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 text-sm" style={{ color: 'var(--text-primary)' }}>
+                        {entry.driverName || '-'}
+                      </td>
+                      <td className="px-6 py-4 text-sm" style={{ color: 'var(--text-primary)' }}>
+                        {entry.description}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-right font-medium">
+                        <span style={{ color: isIncome ? 'var(--success)' : 'var(--danger)' }}>
+                          {isIncome ? '+' : '-'}
+                          {euro(entry.amountCents)} €
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>
