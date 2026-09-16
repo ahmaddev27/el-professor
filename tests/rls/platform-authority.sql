@@ -516,7 +516,7 @@ BEGIN
     _pa_try(NULL, format('SELECT revoke_activation_code(%L)::text', code)) LIKE 'ERR 42501%'
     AND _pa_try(NULL, $q$SELECT update_company_subscription_manual('c0000000-0000-4000-8000-00000000000b', 'active')::text$q$) LIKE 'ERR 42501%');
 
-  -- Until 20260917100000 is_user_super_admin() was true for any active staff
+  -- Until 20260917130000 is_user_super_admin() was true for any active staff
   -- role, so every policy built on it gave read_only the writes of an owner.
   -- The companies policies now ask companies.lifecycle, which read_only does
   -- not hold, so the row it used to update is not visible to its UPDATE at all.
@@ -704,7 +704,7 @@ BEGIN
   -- the other rules, by capability
   PERFORM _pa_ok('guard: support (company_users.manage) changes a member''s role',
     _pa_try(support, format('UPDATE user_profiles SET role_id = %L WHERE user_id = %L', r_viewer, member)) = 'rows 1');
-  -- Since 20260917100000 the profile policies ask company_users.manage rather
+  -- Since 20260917130000 the profile policies ask company_users.manage rather
   -- than whether the caller is staff at all, so billing never reaches the
   -- guard: the row is not visible to its UPDATE. The refusal moved one layer
   -- out, from the trigger to RLS, and says the same thing.

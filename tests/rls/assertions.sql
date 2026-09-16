@@ -244,7 +244,7 @@ BEGIN
 
   PERFORM _check('super admin CAN UPDATE a companies row',
     _allowed(super_u, format('UPDATE companies SET plan = %L WHERE id = %L', 'premium', co_a)), true);
-  -- Allowed until 20260917100000 (plan 3.3), and the rule it broke is the one
+  -- Allowed until 20260917130000 (plan 3.3), and the rule it broke is the one
   -- this file exists to state: a staff role does not write a tenant's
   -- operational data because it is staff. It reads through the audited read
   -- models of 3.6b and, from 3.4, writes inside a logged support session.

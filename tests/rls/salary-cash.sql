@@ -316,7 +316,7 @@ BEGIN
   SELECT count(*) INTO n FROM salary_cash_receipts;
   RESET ROLE;
   PERFORM _sc_eq('a viewer reads its company''s receipts', n, 5::bigint);
-  -- Since 20260917100000 (plan 3.3) the Gehaltsquittung tables carry the same
+  -- Since 20260917130000 (plan 3.3) the Gehaltsquittung tables carry the same
   -- SELECT shape as every other business table, so an active staff role holding
   -- business.read reads them too. matrix.sql records that as HOLE[3.4]: 3.4
   -- confines it to an open read or support context. Writing them stays
@@ -466,6 +466,71 @@ BEGIN
   PERFORM _sc_eq('... while the cash it paid out stays in the ledger', n, 1::bigint);
 
   RAISE NOTICE '── salary cash assertions passed ──';
+END $$;
+
+-- ─── the state gate reaches inside the RPCs ─────────────────────────────────
+--
+-- These three are SECURITY DEFINER, so they run past RLS: without a gate of
+-- their own, a company whose subscription has lapsed or that has been suspended
+-- could still write a GQ receipt, its salary_payments row and an outgoing
+-- cash_movements row — real money in the ledger — while the SELECT policies of
+-- 20260917130000 returned it nothing. The write would succeed and be invisible
+-- to the screen that made it. Since 20260917130000 they resolve the company
+-- with get_active_company_id(), so a refused company takes their existing
+-- not_authorized branch.
+--
+-- Company A is suspended for the length of this block and restored at the end;
+-- nothing here writes a receipt, so the numbering the blocks above assert is
+-- untouched.
+
+DO $$
+DECLARE
+  co_a     uuid := 'c0000000-0000-4000-8000-00000000000a';
+  admin_a  uuid := 'a0000000-0000-4000-8000-000000000001';
+  s2       uuid := '5a1a0000-0000-4000-8000-000000000002';
+  was      text;
+  receipt  uuid;
+  n        bigint;
+BEGIN
+  SELECT id INTO receipt
+    FROM salary_cash_receipts
+   WHERE company_id = co_a AND status = 'confirmed'
+   ORDER BY receipt_number
+   LIMIT 1;
+  IF receipt IS NULL THEN
+    RAISE EXCEPTION 'FAIL: the state-gate block needs a confirmed company A receipt to aim at';
+  END IF;
+
+  SELECT status INTO was FROM companies WHERE id = co_a;
+  UPDATE companies SET status = 'suspended' WHERE id = co_a;
+
+  PERFORM _sc_eq('a suspended company cannot confirm a cash salary payment',
+    _sc_try(admin_a, _sc_confirm_sql(gen_random_uuid(), s2, 10)), 'not_authorized'::text);
+  PERFORM _sc_eq('a suspended company cannot void a receipt',
+    _sc_try(admin_a, format('SELECT void_salary_cash_receipt(%L, %L)', receipt, 'x')), 'not_authorized'::text);
+  PERFORM _sc_eq('a suspended company cannot attach a signed copy',
+    _sc_try(admin_a, format('SELECT attach_salary_cash_receipt_signed_copy(%L, %L)',
+                            receipt, co_a::text || '/2026/suspended.pdf')), 'not_authorized'::text);
+
+  -- The other half of the finding: the reads are already gone, which is what
+  -- made an ungated write invisible rather than merely wrong.
+  PERFORM _sc_as(admin_a);
+  SELECT count(*) INTO n FROM salary_cash_receipts;
+  RESET ROLE;
+  PERFORM _sc_eq('... and reads none of its own receipts while suspended', n, 0::bigint);
+  PERFORM _sc_as(admin_a);
+  SELECT count(*) INTO n FROM cash_movements;
+  RESET ROLE;
+  PERFORM _sc_eq('... nor its own cash movements', n, 0::bigint);
+
+  UPDATE companies SET status = was WHERE id = co_a;
+
+  -- The control, and it writes nothing: with the company restored the gate is
+  -- open again, so the next refusal comes from the amount, not from authority.
+  PERFORM _sc_eq('the gate reopens with the company: the refusal is the amount again',
+    _sc_try(admin_a, _sc_confirm_sql(gen_random_uuid(), s2, 0)), 'invalid_amount'::text);
+
+  RAISE NOTICE '── state gate assertions passed ──';
 END $$;
 
 -- ─── two sessions, one balance ──────────────────────────────────────────────

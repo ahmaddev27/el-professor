@@ -616,9 +616,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
    * Does this role permit `action` on `page`?
    *
    * The matrix is the authority; `isAdmin` is only the fallback for the window
-   * before it loads, and for a profile whose role resolves to no rows. Super
-   * admins pass unconditionally, matching `current_role_permits()` in the
-   * database.
+   * before it loads, and for a profile whose role resolves to no rows.
+   *
+   * Super admins pass unconditionally here, and since 20260917130000 (plan 3.3)
+   * the database no longer agrees: `current_role_permits()` lost its
+   * `is_user_super_admin()` term, and a platform account is judged by the role
+   * its own profile carries. Nothing depends on the two agreeing, because a
+   * platform account has no company and every tenant predicate asks
+   * `get_active_company_id()`, which is NULL for it — so the screens this
+   * unlocks reach no tenant row either way. 3.4 replaces this with the support
+   * session, and the button should follow that, not the flag.
    */
   const can = (page: PageKey, action: 'view' | 'edit' = 'edit'): boolean => {
     if (isSuperAdmin) return true;

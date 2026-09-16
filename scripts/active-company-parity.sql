@@ -10,7 +10,7 @@
   Two expressions are compared, written from two different sources:
 
     db_allows      the WHERE clause of get_active_company_id()
-                   (supabase/migrations/20260917100000_unified_tenant_policies.sql)
+                   (supabase/migrations/20260917130000_unified_tenant_policies.sql)
     screen_reason  App.tsx's gates in their own order, with
                    AuthContext.checkProfileAccess() and
                    AuthContext.isSubscriptionActive
@@ -18,6 +18,32 @@
   `mismatches` must be 0. Anything else means the migration would take access
   away from an account the app admits today, or leave it with an account the app
   refuses — either way, read the *reasons* it prints, not the rows.
+
+  ## What this proves, and what it does not
+
+  Both expressions are **hand-written here**, from one person's reading of
+  App.tsx and of the migration, and this runs *before* the migration: it never
+  calls `public.get_active_company_id()`. So a zero says the two texts agree
+  with each other against real data — a cross-check of the reading against the
+  population, not a test of the function. A misreading shared by both, or a
+  later edit to the migration that is not mirrored here, still reports zero.
+  What actually exercises the function is `tests/rls/tenant-state.sql`, which
+  calls it as each principal through twelve company states and four account
+  statuses.
+
+  Two further limits, both deliberate:
+
+  - It compares **whether** a profile is admitted, never **which** company the
+    helper would return. The helper ends in `LIMIT 1` with no `ORDER BY`, so for
+    an account with more than one profile row the company it picks is not
+    defined by the query. No account has two today; if one ever does, this file
+    would not notice.
+  - `db_allows` is wrapped in `coalesce(…, false)` below. Without it a NULL
+    column makes the three-valued expression NULL, and a NULL is counted by
+    *none* of the six `count(*) FILTER` buckets — mismatches included — so the
+    one case that matters (a profile the UI admits and the database refuses)
+    would be invisible. The assertion after section 1 is what makes that
+    impossible to miss: the buckets must account for every profile.
 
   ## How to run it
 
@@ -47,13 +73,17 @@ BEGIN READ ONLY;
 \echo '-- 1. the comparison: mismatches must be 0 --'
 WITH parity AS (
   SELECT
-    (up.company_id IS NOT NULL
-     AND up.status NOT IN ('inactive', 'suspended', 'deactivated')
-     AND c.approval_status = 'approved'
-     AND c.status IN ('active', 'trial')
-     AND c.subscription_status = 'active'
-     AND (c.subscription_expires_at IS NULL OR c.subscription_expires_at > now())
-    ) AS db_allows,
+    -- coalesce: NOT IN over a NULL status yields NULL, and a NULL row would be
+    -- counted in none of the buckets below — not even `mismatches`. The helper
+    -- itself refuses such a row (its WHERE drops it), so false is what it means.
+    coalesce(
+      (up.company_id IS NOT NULL
+       AND up.status NOT IN ('inactive', 'suspended', 'deactivated')
+       AND c.approval_status = 'approved'
+       AND c.status IN ('active', 'trial')
+       AND c.subscription_status = 'active'
+       AND (c.subscription_expires_at IS NULL OR c.subscription_expires_at > now())
+      ), false) AS db_allows,
     CASE
       WHEN up.status IN ('inactive', 'suspended', 'deactivated')
         THEN 'user blocked (AuthContext.userStatusBlockReason)'
@@ -80,6 +110,87 @@ SELECT count(*)                                                             AS p
        count(*) FILTER (WHERE NOT db_allows AND screen_reason = 'allowed')  AS would_lose_access,
        count(*) FILTER (WHERE db_allows AND screen_reason <> 'allowed')     AS db_more_permissive
 FROM parity;
+
+\echo
+\echo '-- 1b. the gate itself: the buckets must account for every profile --'
+/*
+  `both_allow` and `both_refuse` must together be every profile, which is the
+  same statement as `mismatches = 0` — printed above, and enforced here, because
+  a number nobody checks is not a gate. It also catches the failure the printed
+  row cannot show: a value outside the vocabulary either side reads. The
+  screen_reason CASE falls through to 'allowed' for any status it does not
+  recognise, mirroring AuthContext.userStatusBlockReason(), which is fail-open;
+  so an unknown status would be reported as agreement while the database
+  refused the account. Both are checked, and both raise.
+*/
+DO $$
+DECLARE
+  v_profiles   bigint;
+  v_agreed     bigint;
+  v_unknown    text;
+BEGIN
+  SELECT count(*),
+         count(*) FILTER (WHERE p.db_allows = (p.screen_reason = 'allowed'))
+    INTO v_profiles, v_agreed
+    FROM (
+      SELECT
+        coalesce(
+          (up.company_id IS NOT NULL
+           AND up.status NOT IN ('inactive', 'suspended', 'deactivated')
+           AND c.approval_status = 'approved'
+           AND c.status IN ('active', 'trial')
+           AND c.subscription_status = 'active'
+           AND (c.subscription_expires_at IS NULL OR c.subscription_expires_at > now())
+          ), false) AS db_allows,
+        CASE
+          WHEN up.status IN ('inactive', 'suspended', 'deactivated') THEN 'blocked'
+          WHEN up.company_id IS NULL                                 THEN 'blocked'
+          WHEN c.status IN ('suspended', 'inactive', 'deleted', 'archived') THEN 'blocked'
+          WHEN c.approval_status IN ('pending', 'rejected', 'suspended')    THEN 'blocked'
+          WHEN NOT (c.subscription_status = 'active'
+                    AND (c.subscription_expires_at IS NULL OR c.subscription_expires_at > now()))
+            THEN 'blocked'
+          ELSE 'allowed'
+        END AS screen_reason
+      FROM public.user_profiles up
+      LEFT JOIN public.companies c ON c.id = up.company_id
+    ) p;
+
+  IF v_agreed <> v_profiles THEN
+    RAISE EXCEPTION
+      'parity: % of % profiles are classified differently by the two readings. Read section 1 and section 2 above before going further — this is the gate refusing, not a warning.',
+      v_profiles - v_agreed, v_profiles;
+  END IF;
+
+  -- A value neither side has a rule for. The database refuses such an account
+  -- (its WHERE drops it); the screens admit it. That disagreement is invisible
+  -- to the buckets, because both texts above are written from the same list.
+  SELECT string_agg(DISTINCT t.what || '=' || t.val, ', ') INTO v_unknown
+    FROM (
+      SELECT 'user_profiles.status' AS what, up.status AS val
+        FROM public.user_profiles up
+       WHERE up.status IS NULL
+          OR up.status NOT IN ('active', 'inactive', 'pending_invite', 'suspended', 'deactivated')
+      UNION ALL
+      SELECT 'companies.status', c.status
+        FROM public.companies c
+       WHERE c.status IS NULL
+          OR c.status NOT IN ('active', 'suspended', 'inactive', 'trial', 'deleted', 'archived')
+      UNION ALL
+      SELECT 'companies.approval_status', c.approval_status
+        FROM public.companies c
+       WHERE c.approval_status IS NULL
+          OR c.approval_status NOT IN ('pending', 'approved', 'rejected', 'suspended')
+    ) t;
+
+  IF v_unknown IS NOT NULL THEN
+    RAISE EXCEPTION
+      'parity: a state neither reading has a rule for (%). The screens fail open on it and the database fails closed, so the comparison above cannot be trusted.',
+      v_unknown;
+  END IF;
+
+  RAISE NOTICE 'parity: % profiles, all classified the same way by both readings', v_profiles;
+END $$;
 
 \echo
 \echo '-- 2. why each refused account is refused (counts only) --'
