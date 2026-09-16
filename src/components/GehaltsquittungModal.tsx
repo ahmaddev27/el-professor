@@ -29,7 +29,7 @@ import {
   formatEuroCents,
 } from './ui';
 import { GehaltsquittungPreview, exportGehaltsquittungPdf } from './GehaltsquittungDocument';
-import { ReceiptAlert, useRefusalMessage, useSignedCopyPicker } from './GehaltsquittungParts';
+import { ReceiptAlert, useDocumentProblemMessage, useRefusalMessage, useSignedCopyPicker } from './GehaltsquittungParts';
 import { FLOW_STEPS, useGehaltsquittungFlow, type FlowStep, type GehaltsquittungFlow } from '../hooks/useGehaltsquittungFlow';
 import { openSignedCopy, type ReceiptSalary } from '../lib/salaryCashReceipts';
 import { toCents } from '../utils/money';
@@ -37,10 +37,12 @@ import type { BalanceFigures, ReceiptFigures } from '../utils/salaryCashReceipt'
 import {
   buildReceiptDocumentText,
   receiptCompany,
+  receiptDocumentProblem,
   storedReceiptDocumentInput,
+  type ReceiptDocumentInput,
   type ReceiptDocumentText,
 } from '../utils/salaryCashReceiptDocument';
-import { balanceMayHaveChanged, snapshotFromFigures } from '../utils/salaryCashReceiptFlow';
+import { balanceMayHaveChanged, receiptScope, scopeRefusal, snapshotFromFigures } from '../utils/salaryCashReceiptFlow';
 
 /**
  * Gehaltsquittung (cash salary receipt): choose the driver and salary, see the
@@ -78,14 +80,16 @@ export default function GehaltsquittungModal({ open, onOpenChange, onChanged }: 
   const { t } = useTranslation();
   const refusalMessage = useRefusalMessage();
   const { companyId, can } = useAuth();
-  const { effectiveCompanyId } = useSuperAdmin();
+  const { effectiveCompanyId, isViewingAsCompany } = useSuperAdmin();
   const { settings } = useCompanySettings();
+  const [closeAsk, setCloseAsk] = useState(false);
 
   // The RPCs act on the caller's own company and need edit rights on salaries
   // (current_role_permits('salaries', true)); say so before anything is typed.
-  const sameCompany = Boolean(companyId) && effectiveCompanyId === companyId;
+  // Viewing another company and having none at all are different situations.
+  const scope = receiptScope({ companyId, effectiveCompanyId, isViewingAsCompany });
   const mayConfirm = can('salaries', 'edit');
-  const blocked = !sameCompany ? 'company_mismatch' : !mayConfirm ? 'not_authorized' : null;
+  const blocked = scopeRefusal(scope) ?? (mayConfirm ? null : 'not_authorized');
 
   const flow = useGehaltsquittungFlow({
     enabled: open && blocked === null,
@@ -98,9 +102,20 @@ export default function GehaltsquittungModal({ open, onOpenChange, onChanged }: 
   const width = blocked === null && flow.step === 'preview' ? 'max-w-4xl' : blocked === null && flow.step === 'amount' ? 'max-w-3xl' : 'max-w-xl';
 
   const handleOpenChange = (next: boolean) => {
-    // Closing mid-send would hide whether the payment was booked.
-    if (!next && flow.sending) return;
-    onOpenChange(next);
+    if (next) {
+      onOpenChange(true);
+      return;
+    }
+    // Closing mid-send would hide whether the payment was booked. While the
+    // outcome is unknown the attempt is kept either way, but the X, Escape and
+    // the overlay only close it through the confirmation below, so nobody
+    // leaves thinking the payment did not happen.
+    if (flow.sending) return;
+    if (flow.unresolved) {
+      setCloseAsk(true);
+      return;
+    }
+    onOpenChange(false);
   };
 
   return (
@@ -135,6 +150,29 @@ export default function GehaltsquittungModal({ open, onOpenChange, onChanged }: 
             {flow.step === 'amount' ? <AmountStep flow={flow} /> : null}
             {flow.step === 'preview' ? <PreviewStep flow={flow} company={company} /> : null}
             {flow.step === 'done' ? <DoneStep flow={flow} company={company} /> : null}
+
+            {/* Nested so the dialog underneath keeps its focus trap while this asks. */}
+            <Dialog open={closeAsk} onOpenChange={setCloseAsk}>
+              <DialogContent className="max-w-md">
+                <DialogHeader>
+                  <DialogTitle>{t('gq.closeUnresolved.title')}</DialogTitle>
+                  <DialogDescription>{t('gq.closeUnresolved.body')}</DialogDescription>
+                </DialogHeader>
+                <DialogFooter>
+                  <DialogClose asChild>
+                    <Button variant="secondary">{t('gq.closeUnresolved.stay')}</Button>
+                  </DialogClose>
+                  <Button
+                    onClick={() => {
+                      setCloseAsk(false);
+                      onOpenChange(false);
+                    }}
+                  >
+                    {t('gq.closeUnresolved.close')}
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
           </>
         )}
       </DialogContent>
@@ -436,28 +474,49 @@ function BalanceRow({ label, hint, cents, strong = false }: { label: string; hin
 function PreviewStep({ flow, company }: { flow: GehaltsquittungFlow; company: Company }) {
   const { t } = useTranslation();
   const refusalMessage = useRefusalMessage();
-  const { figures, salary, driver, paymentDate, place } = flow;
+  const documentProblemMessage = useDocumentProblemMessage();
+  const { figures, salary, driver, paymentDate, place, pending } = flow;
 
-  const text = useMemo((): ReceiptDocumentText | null => {
-    if (!figures || !salary || !driver) return null;
+  // While a confirmation is unanswered the receipt shows what was sent, not
+  // the live figures: that request may already have changed the balance.
+  let documentInput: ReceiptDocumentInput | null = null;
+  if (pending) {
+    documentInput = {
+      status: 'preview',
+      receiptNumber: null,
+      company,
+      driver: { name: pending.driver.name, gender: pending.driver.gender },
+      periodStart: pending.period.start,
+      periodEnd: pending.period.end,
+      paymentDate: pending.input.paymentDate,
+      place: pending.input.place,
+      figures: pending.shown,
+    };
+  } else if (figures && salary && driver) {
+    documentInput = {
+      status: 'preview',
+      receiptNumber: null,
+      company,
+      driver: { name: driver.name, gender: driver.gender },
+      periodStart: salary.period_start,
+      periodEnd: salary.period_end,
+      paymentDate,
+      place,
+      figures: snapshotFromFigures(figures),
+    };
+  }
+
+  const problem = documentInput ? receiptDocumentProblem(documentInput) : null;
+  let text: ReceiptDocumentText | null = null;
+  if (documentInput && !problem) {
     try {
-      return buildReceiptDocumentText({
-        status: 'preview',
-        receiptNumber: null,
-        company,
-        driver: { name: driver.name, gender: driver.gender },
-        periodStart: salary.period_start,
-        periodEnd: salary.period_end,
-        paymentDate,
-        place,
-        figures: snapshotFromFigures(figures),
-      });
+      text = buildReceiptDocumentText(documentInput);
     } catch {
-      return null;
+      text = null;
     }
-  }, [figures, salary, driver, paymentDate, place, company]);
+  }
 
-  const uncertain = flow.attempt?.state === 'uncertain' && !flow.sending;
+  const uncertain = flow.unresolved && !flow.sending;
   const remaining = flow.balanceFigures ? formatEuroCents(flow.balanceFigures.remainingBeforeCents) : '';
 
   return (
@@ -466,14 +525,21 @@ function PreviewStep({ flow, company }: { flow: GehaltsquittungFlow; company: Co
         <div className="grid gap-3 md:order-2">
           <p className="text-[13px] text-fg-muted">{t('gq.preview.germanNote')}</p>
           {/* The sheet is scaled down; what is confirmed is repeated here at a readable size. */}
-          {figures && driver ? (
+          {documentInput ? (
             <dl className="grid gap-2.5 rounded-surface border border-line bg-sunken/40 p-3 text-sm">
-              <SummaryRow label={t('common.driver')} value={driver.name} />
-              <SummaryRow label={t('gq.balance.thisPayment')} value={formatEuroCents(figures.thisPaymentCents)} strong />
+              <SummaryRow label={t('common.driver')} value={documentInput.driver.name} />
+              <SummaryRow
+                label={t('gq.balance.thisPayment')}
+                value={formatEuroCents(documentInput.figures.amountCents)}
+                strong
+              />
               {text ? <SummaryRow label={t('gq.preview.inWords')} value={text.amount.words} /> : null}
-              <SummaryRow label={t('gq.balance.remainingAfter')} value={formatEuroCents(figures.remainingAfterCents)} />
-              <SummaryRow label={t('gq.date.label')} value={formatDate(paymentDate)} />
-              <SummaryRow label={t('gq.place.label')} value={place.trim()} />
+              <SummaryRow
+                label={t('gq.balance.remainingAfter')}
+                value={formatEuroCents(documentInput.figures.remainingAfterCents)}
+              />
+              <SummaryRow label={t('gq.date.label')} value={formatDate(documentInput.paymentDate)} />
+              <SummaryRow label={t('gq.place.label')} value={documentInput.place.trim()} />
             </dl>
           ) : null}
           <ReceiptAlert tone="caution">{t('gq.confirm.warning')}</ReceiptAlert>
@@ -488,7 +554,9 @@ function PreviewStep({ flow, company }: { flow: GehaltsquittungFlow; company: Co
           {text ? (
             <GehaltsquittungPreview text={text} label={t('gq.preview.label')} />
           ) : (
-            <ReceiptAlert tone="critical">{refusalMessage('unexpected')}</ReceiptAlert>
+            <ReceiptAlert tone="critical">
+              {problem ? documentProblemMessage(problem) : refusalMessage('unexpected')}
+            </ReceiptAlert>
           )}
         </div>
       </div>
@@ -503,7 +571,8 @@ function PreviewStep({ flow, company }: { flow: GehaltsquittungFlow; company: Co
             <Button>{t('common.close')}</Button>
           </DialogClose>
         ) : (
-          <Button onClick={() => void flow.confirm()} loading={flow.sending} disabled={!text}>
+          // An unanswered request is always retryable: settling it matters more than the preview.
+          <Button onClick={() => void flow.confirm()} loading={flow.sending} disabled={!text && !flow.unresolved}>
             {uncertain ? <RotateCw aria-hidden /> : null}
             {uncertain ? t('gq.retry') : t('gq.confirm.button')}
           </Button>
@@ -528,8 +597,9 @@ function DoneStep({ flow, company }: { flow: GehaltsquittungFlow; company: Compa
   const { t } = useTranslation();
   const refusalMessage = useRefusalMessage();
   const picker = useSignedCopyPicker();
+  const documentProblemMessage = useDocumentProblemMessage();
   const [exporting, setExporting] = useState(false);
-  const [pdfFailed, setPdfFailed] = useState(false);
+  const [pdfProblem, setPdfProblem] = useState<string | null>(null);
   const [openFailed, setOpenFailed] = useState(false);
   const { receipt, driver } = flow;
 
@@ -537,12 +607,20 @@ function DoneStep({ flow, company }: { flow: GehaltsquittungFlow; company: Compa
   const receiptDriver = { name: driver.name, gender: driver.gender };
 
   const downloadPdf = async () => {
+    // The names come from today's settings and driver record, so a receipt
+    // without them is refused rather than printed unnamed.
+    const input = storedReceiptDocumentInput(receipt, receiptDriver, company);
+    const problem = receiptDocumentProblem(input);
+    if (problem) {
+      setPdfProblem(documentProblemMessage(problem));
+      return;
+    }
     setExporting(true);
-    setPdfFailed(false);
+    setPdfProblem(null);
     try {
-      await exportGehaltsquittungPdf(buildReceiptDocumentText(storedReceiptDocumentInput(receipt, receiptDriver, company)));
+      await exportGehaltsquittungPdf(buildReceiptDocumentText(input));
     } catch {
-      setPdfFailed(true);
+      setPdfProblem(t('gq.pdf.failed'));
     } finally {
       setExporting(false);
     }
@@ -570,7 +648,7 @@ function DoneStep({ flow, company }: { flow: GehaltsquittungFlow; company: Compa
             {exporting ? null : <Download aria-hidden />}
             {exporting ? t('gq.pdf.exporting') : t('gq.pdf.download')}
           </Button>
-          {pdfFailed ? <ReceiptAlert tone="critical">{t('gq.pdf.failed')}</ReceiptAlert> : null}
+          {pdfProblem ? <ReceiptAlert tone="critical">{pdfProblem}</ReceiptAlert> : null}
         </div>
 
         <section aria-labelledby="gq-signed-heading" className="grid gap-3 rounded-surface border border-line p-4">

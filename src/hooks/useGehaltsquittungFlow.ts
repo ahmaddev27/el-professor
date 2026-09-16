@@ -14,17 +14,24 @@ import { computeBalanceFigures, computeReceiptFigures, type SalaryPaymentInput }
 import {
   balanceMayHaveChanged,
   berlinToday,
+  browserSessionStorage,
   checkPaymentDate,
+  clearPendingAttempt,
+  createRequestId,
   findOverlappingSalary,
   nextAttempt,
   outcomeIsUnknown,
   readAmountField,
+  readPendingAttempt,
   sameSnapshot,
+  savePendingAttempt,
   snapshotFromFigures,
   snapshotFromReceiptRow,
   type PaymentAttempt,
+  type PendingReceiptAttempt,
   type ReceiptActionRefusal,
   type ReceiptSnapshot,
+  type StorageLike,
 } from '../utils/salaryCashReceiptFlow';
 
 /**
@@ -35,6 +42,13 @@ import {
  * computeReceiptFigures, in integer cents. The database reads the salary again
  * under lock and decides at confirmation; after it, the stored row and not the
  * preview is what the receipt prints.
+ *
+ * A confirmation whose outcome is unknown outlives this dialog. From the
+ * moment the request leaves until the database answers, the attempt is held
+ * here and in the tab's sessionStorage, and it is resumed when the dialog
+ * opens again or after a reload — so the same payment is never sent a second
+ * time under a new request id, which the database would book as a second
+ * receipt.
  */
 
 export const FLOW_STEPS = ['select', 'amount', 'preview', 'done'] as const;
@@ -57,6 +71,8 @@ export interface GehaltsquittungFlowOptions {
   defaultPlace: string;
   /** After a receipt is issued or its signed copy attached. */
   onChanged?: () => void;
+  /** Where an unanswered attempt is kept; the tab's sessionStorage by default. */
+  storage?: StorageLike | null;
 }
 
 /** Loads whenever `key` changes to a new non-null value; a response for an older key is dropped. */
@@ -91,7 +107,13 @@ function useLoadable<T>(key: string | null, load: () => Promise<T>) {
   return { state, reload, replace };
 }
 
-export function useGehaltsquittungFlow({ enabled, companyId, defaultPlace, onChanged }: GehaltsquittungFlowOptions) {
+export function useGehaltsquittungFlow({
+  enabled,
+  companyId,
+  defaultPlace,
+  onChanged,
+  storage,
+}: GehaltsquittungFlowOptions) {
   const [step, setStep] = useState<FlowStep>('select');
   const [driverId, setDriverId] = useState('');
   const [salaryId, setSalaryId] = useState('');
@@ -100,6 +122,7 @@ export function useGehaltsquittungFlow({ enabled, companyId, defaultPlace, onCha
   const [place, setPlace] = useState(defaultPlace);
   const [showMissing, setShowMissing] = useState(false);
   const [attempt, setAttempt] = useState<PaymentAttempt | null>(null);
+  const [pending, setPending] = useState<PendingReceiptAttempt | null>(null);
   const [sending, setSending] = useState(false);
   const [refusal, setRefusal] = useState<ReceiptActionRefusal | null>(null);
   const [receipt, setReceipt] = useState<SalaryCashReceipt | null>(null);
@@ -114,27 +137,55 @@ export function useGehaltsquittungFlow({ enabled, companyId, defaultPlace, onCha
   onChangedRef.current = onChanged;
   const defaultPlaceRef = useRef(defaultPlace);
   defaultPlaceRef.current = defaultPlace;
+  const attemptRef = useRef<PaymentAttempt | null>(null);
+  attemptRef.current = attempt;
+  const store = useMemo(() => (storage === undefined ? browserSessionStorage() : storage), [storage]);
+  const storeRef = useRef(store);
+  storeRef.current = store;
 
-  // Cleared when the dialog closes, so no loader starts for the last session's
-  // selection when it opens again; today's date and the place are set on open.
+  /** True while a confirmation is out and the database has not answered it. */
+  const unresolved = attempt?.state === 'uncertain';
+
+  // Opening resumes an unanswered confirmation, from this dialog session or
+  // from the tab's storage after a reload. Closing keeps it; only a settled
+  // dialog is cleared, so the next open starts from a clean selection.
   useEffect(() => {
     if (enabled) {
+      if (attemptRef.current?.state === 'uncertain') {
+        setStep('preview');
+        return;
+      }
+      const stored = companyId ? readPendingAttempt(storeRef.current, companyId) : null;
+      if (stored) {
+        setPending(stored);
+        setAttempt({ requestId: stored.requestId, input: stored.input, state: 'uncertain' });
+        setDriverId(stored.driver.id);
+        setSalaryId(stored.input.salaryId);
+        setAmountText(formatCentsForInput(stored.input.amountCents));
+        setPaymentDate(stored.input.paymentDate);
+        setPlace(stored.input.place);
+        setRefusal('no_response');
+        setStep('preview');
+        return;
+      }
       setPaymentDate(berlinToday());
       setPlace(defaultPlaceRef.current);
       return;
     }
+    if (attemptRef.current?.state === 'uncertain') return;
     setStep('select');
     setDriverId('');
     setSalaryId('');
     setAmountText('');
     setShowMissing(false);
     setAttempt(null);
+    setPending(null);
     setRefusal(null);
     setReceipt(null);
     setConfirmedPreview(null);
     setUploadRefusal(null);
     setUploaded(false);
-  }, [enabled]);
+  }, [enabled, companyId]);
 
   // Company settings can arrive after the dialog opened.
   useEffect(() => {
@@ -184,7 +235,7 @@ export function useGehaltsquittungFlow({ enabled, companyId, defaultPlace, onCha
   const placeMissing = place.trim() === '';
   const alreadyPaid = balanceFigures !== null && balanceFigures.remainingBeforeCents === 0;
   const canContinue = salary !== null && balanceInputs !== null && overlap === null;
-  const outcomeUnknown = attempt?.state === 'uncertain' && refusal !== null && outcomeIsUnknown(refusal);
+  const outcomeUnknown = unresolved && refusal !== null && outcomeIsUnknown(refusal);
   const conflict = refusal === 'request_id_conflict';
   const differsFromPreview =
     receipt !== null && confirmedPreview !== null && !sameSnapshot(snapshotFromReceiptRow(receipt), confirmedPreview);
@@ -225,64 +276,98 @@ export function useGehaltsquittungFlow({ enabled, companyId, defaultPlace, onCha
   };
 
   const goBack = () => {
-    if (sending || attempt?.state === 'uncertain' || conflict) return;
+    if (sending || unresolved || conflict) return;
     setRefusal(null);
     setStep(step === 'preview' ? 'amount' : 'select');
   };
 
   const confirm = async () => {
-    if (sendingRef.current || !companyId || !figures || amountField.cents === null) return;
+    if (sendingRef.current || !companyId) return;
+    const resume = unresolved ? pending : null;
+    if (!resume && (!figures || amountField.cents === null || !driver || !salary)) return;
+
     sendingRef.current = true;
     setSending(true);
     setRefusal(null);
-
-    const input = { salaryId, amountCents: amountField.cents, paymentDate, place: place.trim() };
-    const shown = snapshotFromFigures(figures);
-    let current = nextAttempt(attempt, input, () => crypto.randomUUID());
+    let sent = false;
 
     try {
-      // Before a first send, make sure the preview still shows the database's
-      // balance. A retry skips this: its first send may be the booking that
-      // changed the balance, and the database hands that receipt back.
-      if (current.state !== 'uncertain') {
-        const fresh = await loadSalaryBalanceInputs(companyId, salaryId);
+      let record: PendingReceiptAttempt;
+      let outgoing: PaymentAttempt;
+
+      if (resume) {
+        // The same request, field for field: the database answers a repeat
+        // with the receipt it already stored.
+        record = resume;
+        outgoing = { requestId: resume.requestId, input: resume.input, state: 'uncertain' };
+      } else {
+        // Checked above; repeated so the types narrow inside the guarded block,
+        // where creating the request id may also throw.
+        if (!figures || amountField.cents === null || !driver || !salary) return;
+        const input = { salaryId, amountCents: amountField.cents, paymentDate, place: place.trim() };
+        outgoing = nextAttempt(attempt, input, createRequestId);
+        record = {
+          companyId,
+          requestId: outgoing.requestId,
+          input,
+          driver: { id: driver.id, name: driver.name, gender: driver.gender },
+          period: { start: salary.period_start, end: salary.period_end },
+          shown: snapshotFromFigures(figures),
+        };
+
+        // Before a first send, make sure the preview still shows the database's
+        // balance. A retry skips this: its first send may be the booking that
+        // changed the balance, and the database hands that receipt back.
+        const fresh = await loadSalaryBalanceInputs(companyId, input.salaryId);
         if (!fresh) {
-          setAttempt(current);
+          setAttempt(outgoing);
           setRefusal('salary_not_found');
           return;
         }
         const freshResult = computeReceiptFigures(fresh.salary, fresh.payments, input.amountCents);
-        if (!freshResult.ok || !sameSnapshot(snapshotFromFigures(freshResult.figures), shown)) {
+        if (!freshResult.ok || !sameSnapshot(snapshotFromFigures(freshResult.figures), record.shown)) {
           balance.replace(fresh);
-          setAttempt(current);
+          setAttempt(outgoing);
           setRefusal('stale_figures');
           setStep('amount');
           return;
         }
       }
 
-      current = { ...current, state: 'uncertain' };
-      setAttempt(current);
-      const result = await confirmCashPayment({ requestId: current.requestId, ...input });
+      // From here the outcome is unknown: the request may commit even when no
+      // answer comes back, so the id is stored before it leaves. A reload in
+      // flight then resumes it instead of starting a second payment.
+      setAttempt({ ...outgoing, state: 'uncertain' });
+      setPending(record);
+      savePendingAttempt(storeRef.current, record);
+      sent = true;
+
+      const result = await confirmCashPayment({ requestId: record.requestId, ...record.input });
 
       if (result.ok) {
+        clearPendingAttempt(storeRef.current, companyId);
+        setPending(null);
         setAttempt(null);
         setReceipt(result.receipt);
-        setConfirmedPreview(shown);
+        setConfirmedPreview(record.shown);
         setStep('done');
         onChangedRef.current?.();
         return;
       }
 
       setRefusal(result.refusal);
-      // No answer: the attempt stays uncertain, and only a retry with the same id is offered.
-      // The payment may have been booked, so a list beside the dialog reloads to show it.
+      // No answer: the attempt stays uncertain in the dialog and in storage,
+      // and only a retry with the same id is offered. The payment may have been
+      // booked, so a list beside the dialog reloads to show it.
       if (outcomeIsUnknown(result.refusal)) {
         onChangedRef.current?.();
         return;
       }
 
-      setAttempt({ ...current, state: 'refused' });
+      // The database refused, so its transaction rolled back and nothing is pending.
+      clearPendingAttempt(storeRef.current, companyId);
+      setPending(null);
+      setAttempt({ ...outgoing, state: 'refused' });
       if (result.refusal === 'request_id_conflict') {
         balance.reload();
       } else if (balanceMayHaveChanged(result.refusal)) {
@@ -290,9 +375,9 @@ export function useGehaltsquittungFlow({ enabled, companyId, defaultPlace, onCha
         setStep('amount');
       }
     } catch {
-      // Only the balance check before sending can throw; an RPC error is a result.
-      setAttempt(current);
-      setRefusal('no_response');
+      // Before the send: the balance check or the request id failed, and nothing
+      // was booked. After it: the request is out with an unknown outcome.
+      setRefusal(sent ? 'no_response' : 'not_sent');
     } finally {
       sendingRef.current = false;
       setSending(false);
@@ -327,6 +412,7 @@ export function useGehaltsquittungFlow({ enabled, companyId, defaultPlace, onCha
     setShowMissing(false);
     setRefusal(null);
     setAttempt(null);
+    setPending(null);
     setReceipt(null);
     setConfirmedPreview(null);
     setUploadRefusal(null);
@@ -364,6 +450,8 @@ export function useGehaltsquittungFlow({ enabled, companyId, defaultPlace, onCha
     showMissing,
     canContinue,
     attempt,
+    pending,
+    unresolved,
     sending,
     refusal,
     outcomeUnknown,

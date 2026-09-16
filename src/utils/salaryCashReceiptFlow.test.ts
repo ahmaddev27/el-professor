@@ -9,18 +9,27 @@ import {
   berlinToday,
   checkPaymentDate,
   checkSignedCopyFile,
+  clearPendingAttempt,
+  createRequestId,
   findOverlappingSalary,
   nextAttempt,
   outcomeIsUnknown,
+  pendingAttemptKey,
   readAmountField,
+  readPendingAttempt,
+  receiptScope,
   refusalFromRpcError,
   refusalFromStorageError,
   sameSnapshot,
+  savePendingAttempt,
+  scopeRefusal,
   signedCopyPath,
   snapshotFromFigures,
   snapshotFromReceiptRow,
   type PaymentAttempt,
   type PaymentAttemptInput,
+  type PendingReceiptAttempt,
+  type StorageLike,
 } from './salaryCashReceiptFlow';
 
 function idSource() {
@@ -292,5 +301,128 @@ describe('signed copies', () => {
     expect(checkSignedCopyFile({ type: 'image/heic', size: 1 })).toBe('file_type');
     expect(checkSignedCopyFile({ type: 'toString', size: 1 })).toBe('file_type');
     expect(checkSignedCopyFile({ type: 'application/pdf', size: 0 })).toBe('file_empty');
+  });
+});
+
+describe('createRequestId', () => {
+  const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+
+  it('uses crypto.randomUUID where the browser has it', () => {
+    expect(createRequestId({ randomUUID: () => 'from-random-uuid', getRandomValues: array => array })).toBe('from-random-uuid');
+  });
+
+  it('builds a v4 UUID from getRandomValues where randomUUID is missing (older Safari, plain http)', () => {
+    const allOnes = {
+      getRandomValues: (array: Uint8Array) => {
+        array.fill(0xff);
+        return array;
+      },
+    };
+    expect(createRequestId(allOnes)).toBe('ffffffff-ffff-4fff-bfff-ffffffffffff');
+    expect(createRequestId(allOnes)).toMatch(UUID_V4);
+  });
+
+  it('gives a fresh v4 id for every call from real random bytes', () => {
+    const noRandomUuid = { getRandomValues: (array: Uint8Array) => globalThis.crypto.getRandomValues(array) };
+    const ids = new Set(Array.from({ length: 50 }, () => createRequestId(noRandomUuid)));
+    expect(ids.size).toBe(50);
+    for (const id of ids) expect(id).toMatch(UUID_V4);
+  });
+});
+
+describe('receiptScope — whose receipts the screens may act on', () => {
+  it('is the own company unless platform staff view another', () => {
+    expect(receiptScope({ companyId: 'c1', effectiveCompanyId: 'c1', isViewingAsCompany: false })).toBe('own_company');
+    expect(receiptScope({ companyId: 'c1', effectiveCompanyId: 'c1', isViewingAsCompany: true })).toBe('own_company');
+    expect(receiptScope({ companyId: 'c1', effectiveCompanyId: 'c2', isViewingAsCompany: true })).toBe('other_company');
+    expect(receiptScope({ companyId: null, effectiveCompanyId: 'c2', isViewingAsCompany: true })).toBe('other_company');
+  });
+
+  it('tells an account without a company apart from one viewing another company', () => {
+    expect(receiptScope({ companyId: null, effectiveCompanyId: null, isViewingAsCompany: false })).toBe('no_company');
+    expect(scopeRefusal('no_company')).toBe('no_company');
+    expect(scopeRefusal('other_company')).toBe('company_mismatch');
+    expect(scopeRefusal('own_company')).toBeNull();
+  });
+});
+
+function memoryStorage(): StorageLike & { data: Map<string, string> } {
+  const data = new Map<string, string>();
+  return {
+    data,
+    getItem: key => data.get(key) ?? null,
+    setItem: (key, value) => {
+      data.set(key, value);
+    },
+    removeItem: key => {
+      data.delete(key);
+    },
+  };
+}
+
+const pendingRecord: PendingReceiptAttempt = {
+  companyId: 'c1',
+  requestId: 'req-1',
+  input: payment,
+  driver: { id: 'd1', name: 'Max Mustermann', gender: 'male' },
+  period: { start: '2026-08-03', end: '2026-08-30' },
+  shown: {
+    dueCents: 100000,
+    paidBankCents: 10000,
+    paidCashManualCents: 2000,
+    paidCashWeeklyCents: 5000,
+    paidCashReceiptsCents: 65000,
+    remainingBeforeCents: 18000,
+    amountCents: 18000,
+    remainingAfterCents: 0,
+    isPartial: false,
+  },
+};
+
+describe('pending attempts in sessionStorage', () => {
+  it('keeps the attempt of one company until it is cleared', () => {
+    const storage = memoryStorage();
+    expect(savePendingAttempt(storage, pendingRecord)).toBe(true);
+    expect(readPendingAttempt(storage, 'c1')).toEqual(pendingRecord);
+    expect(readPendingAttempt(storage, 'c2')).toBeNull();
+    expect([...storage.data.keys()]).toEqual([pendingAttemptKey('c1')]);
+    clearPendingAttempt(storage, 'c1');
+    expect(readPendingAttempt(storage, 'c1')).toBeNull();
+  });
+
+  it('ignores a record it cannot trust', () => {
+    const storage = memoryStorage();
+    const key = pendingAttemptKey('c1');
+    for (const bad of [
+      '{not json',
+      JSON.stringify({ ...pendingRecord, requestId: '' }),
+      JSON.stringify({ ...pendingRecord, companyId: 'c2' }),
+      JSON.stringify({ ...pendingRecord, input: { ...payment, amountCents: '180.00' } }),
+      JSON.stringify({ ...pendingRecord, shown: { ...pendingRecord.shown, dueCents: 1000.5 } }),
+      JSON.stringify({ ...pendingRecord, driver: { id: 'd1', name: 'Max', gender: 'x' } }),
+      JSON.stringify([pendingRecord]),
+    ]) {
+      storage.data.set(key, bad);
+      expect(readPendingAttempt(storage, 'c1')).toBeNull();
+    }
+  });
+
+  it('never throws when storage is missing or blocked', () => {
+    const blocked: StorageLike = {
+      getItem: () => {
+        throw new Error('SecurityError');
+      },
+      setItem: () => {
+        throw new Error('QuotaExceededError');
+      },
+      removeItem: () => {
+        throw new Error('SecurityError');
+      },
+    };
+    expect(savePendingAttempt(blocked, pendingRecord)).toBe(false);
+    expect(readPendingAttempt(blocked, 'c1')).toBeNull();
+    expect(() => clearPendingAttempt(blocked, 'c1')).not.toThrow();
+    expect(savePendingAttempt(null, pendingRecord)).toBe(false);
+    expect(readPendingAttempt(null, 'c1')).toBeNull();
   });
 });
