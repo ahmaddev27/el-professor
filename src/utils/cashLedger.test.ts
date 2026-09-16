@@ -16,6 +16,7 @@ const labels: CashLedgerLabels = {
   beleg: 'Beleg',
   gehaltsquittung: 'Gehaltsquittung',
   gehaltsquittungStorno: 'Storno Gehaltsquittung',
+  other: 'Bargeldbewegung',
 };
 
 /** A month of Bargeld, as income rows read. */
@@ -136,19 +137,45 @@ describe('summarizeCashLedger', () => {
     // The weekly cash difference is a salary_payments row with
     // source_type = 'weekly_cash_difference' and no cash_movements row at all:
     // paid, but kept back from a settlement rather than handed out. The ledger
-    // is the only source here, so there is nothing to double-count.
-    const entries = cashMovementEntries(
-      [
-        movement({ id: 'm1', amount: '300.00' }),
-        // What a weekly_cash_difference row would look like if anything ever
-        // wrote one into the ledger: it is not a source this screen reads.
-        movement({ id: 'm2', amount: '90.00', source_type: 'weekly_cash_difference', source_id: 'w1' }),
-      ],
-      labels,
-    );
+    // is the only source here and salary_payments is never read, so a weekly
+    // settlement contributes no entry to count in the first place.
+    const entries = cashMovementEntries([movement({ id: 'm1', amount: '300.00' })], labels);
 
     expect(entries).toHaveLength(1);
     expect(summarizeCashLedger(entries).salaryPayoutCents).toBe(30000);
+  });
+
+  it('keeps a movement of an unknown source in the balance instead of losing the cash', () => {
+    // The CHECK in 20260914140000 allows only the two Gehaltsquittung sources
+    // today, so this row cannot exist yet. When a later migration adds one —
+    // a float top-up, a deposit — it moves real cash, and a till that hides
+    // cash is worse than one that categorises it loosely. Direction decides
+    // the balance; only the categorisation falls back to "other".
+    const entries = cashMovementEntries(
+      [
+        movement({ id: 'm1', amount: '300.00' }),
+        movement({
+          id: 'm2',
+          amount: '90.00',
+          direction: 'in',
+          source_type: 'kassensturz_einlage',
+          source_id: 'k1',
+          description: null,
+        }),
+      ],
+      labels,
+    );
+    const totals = summarizeCashLedger(entries);
+
+    expect(entries.map(e => e.source)).toEqual(['gehaltsquittung', 'other']);
+    // No source label of its own, so it falls back to the neutral one.
+    expect(entries[1].description).toBe('Bargeldbewegung');
+    expect(totals.cashInCents).toBe(9000);
+    expect(totals.balanceCents).toBe(9000 - 30000);
+    // It belongs to no card: the three categories do not explain the balance
+    // any more, which is the visible consequence of not dropping the row.
+    expect(totals.salaryPayoutCents).toBe(30000);
+    expect(totals.bargeldIncomeCents).toBe(0);
   });
 
   it('reads a NULL expense as zero, the way the column default does', () => {

@@ -44,7 +44,9 @@ export type CashLedgerSource =
   | 'bargeld_income'
   | 'beleg'
   | 'gehaltsquittung'
-  | 'gehaltsquittung_storno';
+  | 'gehaltsquittung_storno'
+  /** A `cash_movements.source_type` this module does not know yet. */
+  | 'other';
 
 export interface CashLedgerEntry {
   id: string;
@@ -61,7 +63,12 @@ export interface CashLedgerEntry {
 export interface CashLedgerTotals {
   cashInCents: number;
   cashOutCents: number;
-  /** cashIn − cashOut. */
+  /**
+   * cashIn − cashOut, so every movement counts towards the till whatever its
+   * source. It equals `bargeldIncome − beleg − salaryPayout` only while every
+   * row belongs to a source this module knows; an `other` movement is in the
+   * balance and in none of the three categories below.
+   */
   balanceCents: number;
   bargeldIncomeCents: number;
   belegExpenseCents: number;
@@ -103,6 +110,8 @@ export interface CashLedgerLabels {
   beleg: string;
   gehaltsquittung: string;
   gehaltsquittungStorno: string;
+  /** A movement whose `source_type` this module does not know yet. */
+  other: string;
 }
 
 /**
@@ -157,35 +166,51 @@ export function belegEntries(
  * with no entry there simply has no driver, the way an income row without one
  * does.
  *
- * A `source_type` this module does not know is skipped rather than guessed at:
- * a future source would otherwise land in the balance under a direction nobody
- * checked.
+ * A `source_type` this module does not know still moved real cash, so its
+ * `direction` decides the balance exactly as a known one does; only the
+ * categorisation falls back to `other`. The CHECK constraint in
+ * 20260914140000 allows the two Gehaltsquittung sources and nothing else, so
+ * no such row exists today — but a later migration adding one (a float
+ * top-up, a deposit) must not make cash disappear from a till. For a till,
+ * invisible cash is worse than loosely categorised cash: the balance is what
+ * an owner counts against, and a figure that silently omits a movement is
+ * wrong with no signal, while an uncategorised one is merely coarse and still
+ * visible in the table.
  */
 export function cashMovementEntries(
   rows: readonly CashMovementRow[],
   labels: CashLedgerLabels,
   driverNameBySourceId: Readonly<Record<string, string>> = {},
 ): CashLedgerEntry[] {
-  const entries: CashLedgerEntry[] = [];
-
-  for (const row of rows) {
-    if (row.source_type !== 'gehaltsquittung' && row.source_type !== 'gehaltsquittung_storno') {
-      continue;
-    }
-    entries.push({
+  return rows.map(row => {
+    const source = cashMovementSource(row.source_type);
+    return {
       id: row.id,
       direction: row.direction,
       amountCents: amountToCents(row.amount),
       date: row.movement_date,
-      description:
-        row.description ||
-        (row.source_type === 'gehaltsquittung' ? labels.gehaltsquittung : labels.gehaltsquittungStorno),
+      description: row.description || sourceLabel(source, labels),
       driverName: driverNameBySourceId[row.source_id] || '',
-      source: row.source_type,
-    });
-  }
+      source,
+    };
+  });
+}
 
-  return entries;
+function cashMovementSource(sourceType: string): CashLedgerSource {
+  return sourceType === 'gehaltsquittung' || sourceType === 'gehaltsquittung_storno'
+    ? sourceType
+    : 'other';
+}
+
+function sourceLabel(source: CashLedgerSource, labels: CashLedgerLabels): string {
+  switch (source) {
+    case 'gehaltsquittung':
+      return labels.gehaltsquittung;
+    case 'gehaltsquittung_storno':
+      return labels.gehaltsquittungStorno;
+    default:
+      return labels.other;
+  }
 }
 
 // ── Aggregation ──────────────────────────────────────────────────────────────
@@ -213,6 +238,10 @@ export function summarizeCashLedger(entries: readonly CashLedgerEntry[]): CashLe
         break;
       case 'gehaltsquittung_storno':
         salaryPayoutCents -= entry.amountCents;
+        break;
+      case 'other':
+        // Already counted in cashIn/cashOut above, so the balance holds it;
+        // no category claims it, because nothing here knows what it is.
         break;
     }
   }
