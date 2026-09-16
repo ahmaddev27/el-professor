@@ -785,7 +785,6 @@ BEGIN
     -- purpose — they resolve their company with get_active_company_id(), which
     -- is to say from the context, and they write no audit row for a RAISE to
     -- undo.
-  ]
   LOOP
     IF to_regclass('public.' || v_tbl) IS NULL THEN
       RAISE NOTICE '3.4: % is not present — skipping', v_tbl;
