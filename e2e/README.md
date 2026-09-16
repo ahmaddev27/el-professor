@@ -40,6 +40,7 @@ Until `mail-staging.elprofessor.eu` resolves, the suite reaches Mailpit through 
 
 ## Things to know
 
+- **Global setup warms staging first, and that is what makes the suite survive a release.** `lib/warmup.ts` loads the app shell until the SPA actually mounts, then pokes `otp-request` and `otp-verify` with a body they reject before they reach the database, the rate limits or the mailer — retrying while the gateway, rather than the app, is what answers. Four merges in a row failed without it, always on a `toBeVisible()`: the artifact shows a 502 from a cold function worker, on screen 0.45 s after the click. A longer timeout was tried twice and could not help, because the answer had already arrived. The warm-up prints a line per step, so a boot that needed more than one try stays visible instead of silently disappearing.
 - **One code per address per minute.** otp-request enforces this and answers exactly as if it had sent one, so a second `forgot-password` run less than a minute after the first times out waiting for the mail.
 - **Login attempts are rate-limited per client** (60 per 5 minutes on `/token`). A test that loops over logins will hit 429.
 - **Tests change the E2E admin's password.** A failed run may leave it changed; `bash setup-staging.sh --reset-admin-password` puts it back.

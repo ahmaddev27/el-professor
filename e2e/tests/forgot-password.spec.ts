@@ -20,8 +20,10 @@ test('forgot password: the code arrives, a wrong one is refused, the right one o
   await page.goto('/auth/forgot-password');
   await page.locator('input[type="email"]').fill(email);
   await page.getByRole('button', { name: 'Code senden' }).click();
-  // The first call after a staging release boots a fresh otp-request isolate,
-  // which took longer than the default 5 s right after PRs #29 and #30.
+  // Room for ordinary latency to the shared VPS. The cold worker this used to
+  // be blamed on is not what this covers: it answered 502 in ~130 ms and put an
+  // error box on screen 0.45 s after the click, so the wait ran out every time.
+  // lib/warmup.ts boots it in global setup instead.
   await expect(page.getByText('Falls ein Konto zu dieser Adresse existiert')).toBeVisible({ timeout: 20_000 });
 
   const mail = await mailpit.waitForMessage(email);
