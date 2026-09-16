@@ -39,10 +39,17 @@ const AppConfigContext = createContext<AppConfigContextValue>({
 
 type ConfigRpc = 'get_app_config' | 'get_public_config';
 
+/**
+ * Which RPC answers for an account. At module level, so the effect that reloads
+ * on a change of account can name the RPC while keying on the account itself.
+ */
+const rpcForAccount = (accountId: string | null): ConfigRpc =>
+  accountId ? 'get_app_config' : 'get_public_config';
+
 export const AppConfigProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const { user, loading: authLoading } = useAuth();
   const userId = user?.id ?? null;
-  const rpc: ConfigRpc = userId ? 'get_app_config' : 'get_public_config';
+  const rpc: ConfigRpc = rpcForAccount(userId);
 
   const [config, setConfig] = useState<AppConfig>(SEED_APP_CONFIG);
   const [source, setSource] = useState<'seed' | 'database'>('seed');
@@ -64,12 +71,13 @@ export const AppConfigProvider: React.FC<{ children: ReactNode }> = ({ children 
   }, []);
 
   /**
-   * `withSpinner` is for the load the screens have to wait for — the first one,
-   * and the one after the account changes. A background refresh leaves
-   * `loading` alone, so nothing flashes.
+   * `withSpinner` decides only whether `loading` is *raised*: the load the
+   * screens wait for — the first one, and the one after the account changes —
+   * raises it, and a background refresh leaves it alone so nothing flashes.
+   * Lowering it is not conditional; see the `finally` below.
    *
-   * A change of account starts a second request while the first may still be
-   * open, so only the newest one installs an answer.
+   * A change of account, or a refresh, starts a second request while the first
+   * may still be open, so only the newest one installs an answer.
    */
   const load = useCallback(async (which: ConfigRpc, withSpinner: boolean) => {
     const request = ++latestRequest.current;
@@ -94,19 +102,30 @@ export const AppConfigProvider: React.FC<{ children: ReactNode }> = ({ children 
     } finally {
       if (request === latestRequest.current) {
         requestOpen.current = false;
-        if (mounted.current && withSpinner) setLoading(false);
+        // The newest request settling means no load is outstanding any more,
+        // whatever started it. Clearing this only for a request that carried
+        // the spinner left `loading` true for the life of the tab as soon as a
+        // refresh overtook the load on mount: that load's `finally` no longer
+        // matched, and the refresh's matched but carried no spinner.
+        if (mounted.current) setLoading(false);
       }
     }
   }, []);
 
-  // Which account is signed in decides which RPC answers, so a change of
-  // account is a fresh load the screens wait for.
+  // Which account is signed in decides which configuration applies, so a change
+  // of account is a fresh load the screens wait for.
+  //
+  // The effect keys on `userId` and not on `rpc`: `get_app_config` answers for
+  // every signed-in account alike, so an account swapped straight in for
+  // another — a session installed by useOtpSessionHandoff, an accepted
+  // invitation, an email change — leaves `rpc` untouched, and both the
+  // configuration and `loadedAt` would stay anchored to the first account.
   useEffect(() => {
     // The account is not known yet; asking now would ask for the wrong one.
     if (authLoading) return;
     loadedAt.current = null;
-    void load(rpc, true);
-  }, [authLoading, rpc, load]);
+    void load(rpcForAccount(userId), true);
+  }, [authLoading, userId, load]);
 
   // A tab left open for days would otherwise keep quoting the prices of the day
   // it was opened.
