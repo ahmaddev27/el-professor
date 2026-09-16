@@ -12,6 +12,7 @@ import SalaryPaymentModal from './SalaryPaymentModal';
 import SalaryPaymentReceiptPreview from './SalaryPaymentReceiptPreview';
 import ConfirmationModal from './ConfirmationModal';
 import { paymentRowActions } from '../utils/salaryPaymentReceiptRow';
+import { receiptScope } from '../utils/salaryCashReceiptFlow';
 import { generateDriverSalaryPdf } from '../utils/driverSalaryPdf';
 import DriverSalarySummaryCard from './DriverSalarySummaryCard';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
@@ -54,11 +55,17 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
   });
 
   const { showToast } = useToast();
-  const { user } = useAuth();
+  const { user, companyId: ownCompanyId } = useAuth();
   const navigate = useNavigate();
   const { can: planIncludes } = usePlan();
-  const { effectiveCompanyId: companyId } = useSuperAdmin();
+  const { effectiveCompanyId: companyId, isViewingAsCompany } = useSuperAdmin();
   const { settings } = useCompanySettings();
+
+  // This screen reads the effective company, so platform staff who have entered
+  // a customer see that customer's payment rows. A Gehaltsquittung behind one of
+  // them loads with the caller's own company, so the preview is offered only
+  // inside it — see paymentRowActions.
+  const receiptsScope = receiptScope({ companyId: ownCompanyId, effectiveCompanyId: companyId, isViewingAsCompany });
 
   // The system-calculated total salary
   const calculatedSalaryTotal = salary.netto_salary ?? salary.amount_due ?? 0;
@@ -767,7 +774,10 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
                     </thead>
                     <tbody>
                       {payments.map((payment, idx) => {
-                        const rowActions = paymentRowActions(payment, planIncludes('dokumente'));
+                        const rowActions = paymentRowActions(payment, {
+                          planIncludesDokumente: planIncludes('dokumente'),
+                          scope: receiptsScope,
+                        });
                         return (
                         <tr
                           key={payment.id}
