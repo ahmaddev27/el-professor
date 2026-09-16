@@ -5,6 +5,7 @@ import {
   NO_PLATFORM_ACCESS,
   parsePlatformWhoami,
   platformAccessCan,
+  platformContextCompanyId,
   type PlatformAccess,
   type PlatformCapability,
 } from '../lib/platformAccess';
@@ -35,7 +36,12 @@ interface SuperAdminContextType {
   activeCompanyId: string | null;
   activeCompany: CompanyListItem | null;
   isViewingAsCompany: boolean;
-  enterCompany: (company: CompanyListItem) => void;
+  /**
+   * Opens a company, and answers whether it opened. False when no support
+   * session covers that company — the caller must not navigate on false, or the
+   * tenant router would render against rows the database returns nothing for.
+   */
+  enterCompany: (company: CompanyListItem) => boolean;
   exitCompany: () => void;
   // The effective company id to use for queries (own company OR switched-to company)
   effectiveCompanyId: string | null;
@@ -49,6 +55,15 @@ interface SuperAdminContextType {
   /** An active staff role. False while the answer is loading or failed. */
   isPlatformStaff: boolean;
   platformCan: (capability: PlatformCapability) => boolean;
+  /**
+   * Whether this account can actually read the effective company's business
+   * data — `business.read` *and* an open context on that very company. It is
+   * the browser's mirror of the database seam, and the screens that refuse to
+   * print a figure they could not read (the cash ledger) ask this and not the
+   * capability alone: since 20260917140000 the capability by itself reads
+   * nothing at all.
+   */
+  platformReadsCompanyData: boolean;
   reloadPlatformAccess: () => void;
 }
 
@@ -102,26 +117,58 @@ export const SuperAdminProvider: React.FC<{ children: ReactNode }> = ({ children
 
   const reloadPlatformAccess = useCallback(() => setReloadKey(k => k + 1), []);
 
-  // Opening a company shows its business data, which only a role holding
-  // business.read may see.
-  const enterCompany = useCallback((company: CompanyListItem) => {
-    if (!platformAccessCan(platformAccess, 'business.read')) return;
+  /*
+    Opening a company needs an open support session on that company, not just
+    the capability to read business data.
+
+    Until 20260917140000 (plan 3.4) `business.read` was the whole story: the
+    database answered a staff account with every company's rows, so entering was
+    only a question of what the screens should show. That is no longer true.
+    `get_active_company_id()` now answers with the *context's* company and
+    nothing else, so entering without one renders all nineteen tenant routes
+    against rows the database returns nothing for — every list empty, every
+    total a confident zero, and no error anywhere to say why. One gate here is
+    worth more than a guard on each of those screens, because it is also what
+    the database actually says.
+
+    It returns whether it opened; the callers must not navigate on false. 3.4b
+    builds the screens that open a session, and reloadPlatformAccess() is how
+    they make this see one.
+  */
+  const enterCompany = useCallback((company: CompanyListItem): boolean => {
+    if (!platformAccessCan(platformAccess, 'business.read')) return false;
+    if (platformContextCompanyId(platformAccess) !== company.id) return false;
     setActiveCompany(company);
+    return true;
   }, [platformAccess]);
 
   const exitCompany = useCallback(() => {
     setActiveCompany(null);
   }, []);
 
-  // Losing the role, or the right to read business data, closes the company.
+  // Losing the role, the right to read business data, or the context that
+  // covers this company closes it — an expired session leaves the screens the
+  // moment the next whoami answer comes back.
   useEffect(() => {
-    if (!platformAccessCan(platformAccess, 'business.read')) setActiveCompany(null);
+    setActiveCompany(current => {
+      if (!current) return current;
+      if (!platformAccessCan(platformAccess, 'business.read')) return null;
+      return platformContextCompanyId(platformAccess) === current.id ? current : null;
+    });
   }, [platformAccess]);
 
   const isViewingAsCompany = isPlatformStaff && activeCompany !== null;
   const activeCompanyId = activeCompany?.id ?? null;
   // Super admin viewing as another company uses that company's id; otherwise own
   const effectiveCompanyId = isViewingAsCompany ? activeCompanyId : companyId;
+
+  // The seam as the database now answers it: the capability, and a context on
+  // this very company. A company user is not staff and reads its own data
+  // through its own membership, so this is false for it and means nothing.
+  const platformReadsCompanyData =
+    platformAccessCan(platformAccess, 'business.read')
+    && effectiveCompanyId !== null
+    && platformContextCompanyId(platformAccess) === effectiveCompanyId;
 
   return (
     <SuperAdminContext.Provider value={{
@@ -135,6 +182,7 @@ export const SuperAdminProvider: React.FC<{ children: ReactNode }> = ({ children
       platformAccessStatus,
       isPlatformStaff,
       platformCan,
+      platformReadsCompanyData,
       reloadPlatformAccess,
     }}>
       {children}

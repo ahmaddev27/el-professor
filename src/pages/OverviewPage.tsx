@@ -261,7 +261,7 @@ const PlanStatusCard: React.FC<{ planState: PlanState; effectivePlan: Plan }> = 
 const OverviewPage: React.FC = () => {
   const { t } = useTranslation();
   const { isSuperAdmin, companyId: ownCompanyId } = useAuth();
-  const { effectiveCompanyId: companyId, isViewingAsCompany, platformCan } = useSuperAdmin();
+  const { effectiveCompanyId: companyId, isViewingAsCompany, platformReadsCompanyData } = useSuperAdmin();
   // Since 3.3 cash_movements answers for the caller's active company or for a
   // reader holding business.read — the same shape income and receipts carry.
   // Out of scope, which today means a platform role without that capability
@@ -271,7 +271,10 @@ const OverviewPage: React.FC = () => {
     companyId: ownCompanyId,
     effectiveCompanyId: companyId,
     isViewingAsCompany,
-    platformReadsCompanyData: platformCan('business.read'),
+    // The seam as the database now answers it: business.read *and* an open
+    // context on this company. The capability alone reads nothing since
+    // 20260917140000, so passing it here would make this guard a rubber stamp.
+    platformReadsCompanyData,
   });
   const { planState, effectivePlan } = usePlan();
   const { receipts: receiptActions, drivers: driverActions, isLoading: dbLoading } = useDatabase();
