@@ -416,6 +416,8 @@ export const en: PartialDictionary = {
   'bargeld.salaryPayoutsHint': 'Gehaltsquittungen less voided ones',
   'bargeld.currentBalance':  'Current balance',
   'bargeld.balanceFormula':  'Cash − Belege − salaries',
+  'bargeld.balanceFormulaNoLedger': 'Cash − Belege',
+  'bargeld.ledgerUnavailable': 'Gehaltsquittungen cannot be read in this view. This balance covers cash and Belege only.',
   'werkstatt.loadFailed':    'The checks could not be loaded:',
   'werkstatt.deleted':       'Check deleted successfully',
   'werkstatt.deleteFailed':  'Could not delete:',

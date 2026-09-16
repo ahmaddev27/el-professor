@@ -7,6 +7,7 @@ import { format, startOfMonth, endOfMonth } from 'date-fns';
 import { exportTableToExcel } from '../utils/excelExport';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { useTranslation } from '../contexts/LanguageContext';
+import { receiptScope } from '../utils/salaryCashReceiptFlow';
 import {
   bargeldIncomeEntries,
   belegEntries,
@@ -40,6 +41,22 @@ import {
  *
  * The arithmetic is integer cents (utils/cashLedger.ts); euros appear only in
  * the formatting below.
+ *
+ * ## One reader cannot see the third term
+ *
+ * cash_movements and salary_cash_receipts are SELECT-policied
+ * `company_id = get_user_company_id()` with no super-admin branch — unlike
+ * income and receipts, which have one. Platform staff who have entered a
+ * customer therefore read that customer's real Bargeld and Belege and *no*
+ * movements at all, and an empty set there is indistinguishable from "no
+ * payouts". Printing 0,00 € under "Gehaltsauszahlungen (bar)" would turn a
+ * missing read into a claim, for the one role that is supposed to read
+ * everything.
+ *
+ * So when the ledger is out of scope this screen drops the payout card, keeps
+ * the older `Bargeld − Belege` label and says why. Slice 3.3 gives both tables
+ * the get_active_company_id() / platform_view_company_id() path; remove the
+ * guard in that release.
  */
 
 const EMPTY_TOTALS: CashLedgerTotals = {
@@ -66,9 +83,15 @@ export default function BargeldbestandPage() {
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [drivers, setDrivers] = useState<string[]>([]);
-  const { user, loading: authLoading } = useAuth();
-  const { effectiveCompanyId: companyId } = useSuperAdmin();
+  const { user, loading: authLoading, companyId: ownCompanyId } = useAuth();
+  const { effectiveCompanyId: companyId, isViewingAsCompany } = useSuperAdmin();
   const { showToast } = useToast();
+
+  // The same scope the Gehaltsquittung screens use, because it is the same two
+  // tables and the same policy. Not a bare !isViewingAsCompany: staff who enter
+  // their *own* company still read the ledger, and that would have hidden it.
+  const ledgerInScope =
+    receiptScope({ companyId: ownCompanyId, effectiveCompanyId: companyId, isViewingAsCompany }) === 'own_company';
 
   const ledgerLabels: CashLedgerLabels = {
     bargeldIncome: t('bargeld.incomeEntry'),
@@ -81,7 +104,9 @@ export default function BargeldbestandPage() {
     if (!authLoading) {
       loadCashData();
     }
-  }, [user, authLoading, selectedMonth]);
+    // companyId and ledgerInScope: entering or leaving a company changes both
+    // which rows to load and whether the ledger is among them.
+  }, [user, authLoading, selectedMonth, companyId, ledgerInScope]);
 
   useEffect(() => {
     applyFilters();
@@ -121,6 +146,19 @@ export default function BargeldbestandPage() {
     return nameBySourceId;
   }
 
+  /** The month's movements. Written only by confirm_salary_cash_payment and void_salary_cash_receipt. */
+  async function loadCashMovements(monthStart: string, monthEnd: string): Promise<CashMovementRow[]> {
+    const { data, error } = await supabase
+      .from('cash_movements')
+      .select('id, direction, amount, movement_date, source_type, source_id, description')
+      .eq('company_id', companyId)
+      .gte('movement_date', monthStart)
+      .lte('movement_date', monthEnd)
+      .order('movement_date', { ascending: false });
+    if (error) throw error;
+    return (data ?? []) as CashMovementRow[];
+  }
+
   async function loadCashData() {
     if (!user?.email) {
       setIsLoading(false);
@@ -133,7 +171,7 @@ export default function BargeldbestandPage() {
       const monthStart = format(startOfMonth(new Date(selectedMonth)), 'yyyy-MM-dd');
       const monthEnd = format(endOfMonth(new Date(selectedMonth)), 'yyyy-MM-dd');
 
-      const [incomeResult, receiptsResult, movementsResult] = await Promise.all([
+      const [incomeResult, receiptsResult, movementRows] = await Promise.all([
         supabase
           .from('income')
           .select('id, amount, type, description, driver_name, date')
@@ -149,21 +187,14 @@ export default function BargeldbestandPage() {
           .gte('date', monthStart)
           .lte('date', monthEnd)
           .order('date', { ascending: false }),
-        // Written only by confirm_salary_cash_payment and void_salary_cash_receipt.
-        supabase
-          .from('cash_movements')
-          .select('id, direction, amount, movement_date, source_type, source_id, description')
-          .eq('company_id', companyId)
-          .gte('movement_date', monthStart)
-          .lte('movement_date', monthEnd)
-          .order('movement_date', { ascending: false }),
+        // Out of scope the policy answers an empty set, which reads exactly
+        // like "no payouts". Don't ask, and don't claim a zero below.
+        ledgerInScope ? loadCashMovements(monthStart, monthEnd) : Promise.resolve<CashMovementRow[]>([]),
       ]);
 
       if (incomeResult.error) throw incomeResult.error;
       if (receiptsResult.error) throw receiptsResult.error;
-      if (movementsResult.error) throw movementsResult.error;
 
-      const movementRows = (movementsResult.data ?? []) as CashMovementRow[];
       const payoutDrivers = await loadPayoutDriverNames(
         Array.from(new Set(movementRows.filter(m => m.source_id).map(m => m.source_id))),
       );
@@ -220,6 +251,9 @@ export default function BargeldbestandPage() {
     if (selectedType !== 'all') filters.push(`Typ: ${selectedType === 'income' ? t('common.income') : t('common.expenses')}`);
     if (startDate) filters.push(`Von: ${new Date(startDate).toLocaleDateString('de-DE')}`);
     if (endDate) filters.push(`Bis: ${new Date(endDate).toLocaleDateString('de-DE')}`);
+    // The dump carries the screen's caveat, so a file saved from a platform
+    // view cannot later be read as a complete till.
+    if (!ledgerInScope) filters.push(t('bargeld.ledgerUnavailable'));
 
     const filteredTotals = summarizeCashLedger(filteredEntries);
 
@@ -293,7 +327,16 @@ export default function BargeldbestandPage() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
+      {!ledgerInScope && (
+        <div
+          className="rounded-xl px-4 py-3 text-sm"
+          style={{ background: 'var(--warning-subtle)', border: '1px solid rgba(217,119,6,0.25)', color: 'var(--warning)' }}
+        >
+          {t('bargeld.ledgerUnavailable')}
+        </div>
+      )}
+
+      <div className={`grid grid-cols-1 md:grid-cols-2 gap-6 ${ledgerInScope ? 'xl:grid-cols-4' : 'xl:grid-cols-3'}`}>
         <div className="rounded-xl p-6" style={{ background: 'var(--success-subtle)', border: '1px solid rgba(5,150,105,0.25)' }}>
           <div className="flex items-center gap-3 mb-2">
             <div className="p-2 rounded-lg" style={{ background: 'rgba(5,150,105,0.15)' }}>
@@ -320,18 +363,20 @@ export default function BargeldbestandPage() {
           <p className="text-xs mt-2" style={{ color: 'var(--danger)', opacity: 0.75 }}>{t('bargeld.totalBelege')}</p>
         </div>
 
-        <div className="rounded-xl p-6" style={{ background: 'var(--danger-subtle)', border: '1px solid rgba(220,38,38,0.25)' }}>
-          <div className="flex items-center gap-3 mb-2">
-            <div className="p-2 rounded-lg" style={{ background: 'rgba(220,38,38,0.15)' }}>
-              <Banknote className="w-6 h-6" style={{ color: 'var(--danger)' }} />
+        {ledgerInScope && (
+          <div className="rounded-xl p-6" style={{ background: 'var(--danger-subtle)', border: '1px solid rgba(220,38,38,0.25)' }}>
+            <div className="flex items-center gap-3 mb-2">
+              <div className="p-2 rounded-lg" style={{ background: 'rgba(220,38,38,0.15)' }}>
+                <Banknote className="w-6 h-6" style={{ color: 'var(--danger)' }} />
+              </div>
+              <h3 className="text-sm font-medium" style={{ color: 'var(--danger)' }}>{t('bargeld.salaryPayouts')}</h3>
             </div>
-            <h3 className="text-sm font-medium" style={{ color: 'var(--danger)' }}>{t('bargeld.salaryPayouts')}</h3>
+            <p className="text-3xl font-bold" style={{ color: 'var(--danger)' }}>
+              {euro(totals.salaryPayoutCents)} €
+            </p>
+            <p className="text-xs mt-2" style={{ color: 'var(--danger)', opacity: 0.75 }}>{t('bargeld.salaryPayoutsHint')}</p>
           </div>
-          <p className="text-3xl font-bold" style={{ color: 'var(--danger)' }}>
-            {euro(totals.salaryPayoutCents)} €
-          </p>
-          <p className="text-xs mt-2" style={{ color: 'var(--danger)', opacity: 0.75 }}>{t('bargeld.salaryPayoutsHint')}</p>
-        </div>
+        )}
 
         <div
           className="rounded-xl p-6"
@@ -352,7 +397,7 @@ export default function BargeldbestandPage() {
             {euro(totals.balanceCents)} €
           </p>
           <p className="text-xs mt-2" style={{ color: balancePositive ? 'var(--accent-text)' : 'var(--warning)', opacity: 0.75 }}>
-            {t('bargeld.balanceFormula')}
+            {ledgerInScope ? t('bargeld.balanceFormula') : t('bargeld.balanceFormulaNoLedger')}
           </p>
         </div>
       </div>

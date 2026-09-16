@@ -415,6 +415,10 @@ export const de = {
   'bargeld.salaryPayoutsHint': 'Gehaltsquittungen abzüglich Stornos',
   'bargeld.currentBalance':  'Aktueller Bestand',
   'bargeld.balanceFormula':  'Bargeld − Belege − Gehalt',
+  // The ledger's two tables answer for the caller's own company only, so out of
+  // scope the balance keeps its older label and says what is missing from it.
+  'bargeld.balanceFormulaNoLedger': 'Bargeld − Belege',
+  'bargeld.ledgerUnavailable': 'Gehaltsquittungen sind in dieser Ansicht nicht lesbar. Dieser Bestand enthält nur Bargeld und Belege.',
   'werkstatt.loadFailed':    'Fehler beim Laden der Checks:',
   'werkstatt.deleted':       'Check erfolgreich gelöscht',
   'werkstatt.deleteFailed':  'Fehler beim Löschen:',
