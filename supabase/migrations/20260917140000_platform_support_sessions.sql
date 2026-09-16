@@ -12,11 +12,20 @@
   receipt data, with no audit row and no session. matrix.sql recorded it as
   HOLE[3.4]. This file is what closes it.
 
-  After this migration a platform account reaches a company's data only while
-  it holds an open **context** on that company:
+  After this migration a platform account reaches a company's **operational**
+  data — the tables a tenant works in — only while it holds an open **context**
+  on that company:
 
     view      60 minutes, no reason, reads only
     support   60 minutes, a mandatory reason, reads and writes
+
+  That is the concession's scope and no more. The account shell is a capability
+  and not a session, exactly as 20260917130000 left it: `companies`,
+  `company_settings`, the subscription tables and the profile and role writes
+  that `company_users.manage` grants still act across companies with no context
+  and no audit row. Those are residual, they are recorded as such in
+  tests/rls/matrix.sql, and narrowing them is 3.4c's and 3.13's, not this
+  file's.
 
   ## The design decision, and why it is this one
 
@@ -58,10 +67,15 @@
      gate of the ten role-gated tables, of the four administrator-gated ones,
      of the salary-receipts storage policies and of the three Gehaltsquittung
      RPCs.
-  2. A **statement-level** BEFORE INSERT/UPDATE/DELETE trigger on each of the
-     36 tenant tables refuses a write by a staff account that holds a *view*
-     context, which is what closes the ~20 tables 3.3 left with no role gate at
-     all (the planning, historical and Fahrtenbuch tables among them). It is
+  2. A **statement-level** BEFORE INSERT/UPDATE/DELETE trigger on each of 40
+     tables — the 36 tenant tables, plus `roles`, `role_permissions`,
+     `company_settings` and `activation_code_attempts` — refuses a write by a
+     staff account that holds a *view* context. On the 36 it closes the ~20
+     tables 3.3 left with no role gate at all (the planning, historical and
+     Fahrtenbuch tables among them); on the four shell tables it closes a hole
+     this slice would otherwise have opened, because their predicate is
+     `company_id = get_user_company_id() AND (…)` and making that term answer
+     the opened company completes it (see the trigger loop). It is
      statement-level, not row-level, because the question is about the caller
      and not about the row: one lookup per statement, not per row, so a
      Fahrtenbuch import of several thousand trips pays it once per batch.
@@ -129,19 +143,24 @@
 
   ## Compatibility — this does NOT bump deploy/SCHEMA_EPOCH
 
-  Every object here is additive or a body replacement that the previous release
-  can live with. Rolling back to the release before this one leaves the table,
-  the triggers and the helpers in place: the helpers' extra branch is reached
-  only by a company-less platform account with an open context row, and nothing
-  in the previous release's code opens one. The refusal trigger is reached only
-  by such an account. A company user, the service role and every edge function
-  see exactly the behaviour they saw before. The previous release's platform
-  screens read tenant tables again as they did — which is the 3.3 concession
-  coming back with the code that needs it, not a broken pair. Nothing is
-  dropped, no column changes meaning, and no data is rewritten.
+  Every object here is additive or a body replacement, nothing is dropped, no
+  column changes meaning and no data is rewritten. A company user, the service
+  role and every edge function see exactly what they saw before: the helpers'
+  extra branch and the refusal trigger are both reached only by a company-less
+  platform account with an open context row.
 
-  (3.3 bumped the epoch from 1 to 2 in its own commit, so a rollback across
-  *that* release is refused either way.)
+  Be clear about what a rollback does and does not do, because the tempting
+  argument here is wrong: `deploy.sh --activate` puts back code, not function
+  bodies, so after a rollback `platform_reads_company_data()` is still false and
+  the previous release's platform screens read a tenant's tables and find
+  nothing. The concession does not come back with the code that assumed it.
+
+  No bump all the same, for two reasons that hold. 20260917130000 already moved
+  the epoch from 1 to 2, and 3.3 and 3.4 ship to production as one release, so
+  no rollback can land between them. And on staging, where they can be released
+  apart, the state after a rollback across this file is no worse than the state
+  the branch is deployed in: staff screens that read tenant data directly show
+  nothing either way until 3.4b gives them a context to open.
 */
 
 -- ─── 1. The contexts table ──────────────────────────────────────────────────
@@ -609,9 +628,17 @@ COMMENT ON FUNCTION public.platform_writes_company_data() IS
 /*
   The tenant term cannot tell a read from a write: it is the USING of the
   SELECT policy and the WITH CHECK of the INSERT policy at once. The role gates
-  close the fourteen tables that have one; this closes the other twenty-two,
-  which 20260917130000 left with no gate at all because a company's own viewer
-  writes them.
+  close the fourteen tenant tables that have one; this closes the other
+  twenty-two, which 20260917130000 left with no gate at all because a company's
+  own viewer writes them.
+
+  And it closes four tables of the account shell, where the gate exists but does
+  not help: `roles`, `role_permissions`, `company_settings` and
+  `activation_code_attempts` read
+  `company_id = get_user_company_id() AND (is_company_admin() OR platform_can(…))`,
+  and a capability satisfies the second half for a platform account whatever the
+  mode. Only the first half refused it before this file, and only because it was
+  NULL — which is precisely what this file changes. See the trigger loop.
 
   Statement-level, and it returns before doing any work for everyone who is not
   the case it exists for:
@@ -628,6 +655,9 @@ COMMENT ON FUNCTION public.platform_writes_company_data() IS
 
   which leaves precisely one case: a company-less platform account writing
   while it holds a *view* context.
+
+  TRUNCATE is deliberately not among the events: `authenticated` holds no
+  TRUNCATE on any of these tables, so there is no path to refuse.
 */
 CREATE OR REPLACE FUNCTION app_private.refuse_read_only_context_write()
 RETURNS trigger
@@ -677,7 +707,20 @@ BEGIN
     'fahrtenbuch_assignment_audit', 'notification_settings', 'cash_movements', 'salary_cash_receipts',
     -- …and section 3: the tables that reach their company through a parent
     'document_blocks', 'document_variables', 'historical_reconciliation_drivers',
-    'historical_reconciliation_results', 'historical_reconciliation_wh_drivers'
+    'historical_reconciliation_results', 'historical_reconciliation_wh_drivers',
+    -- Four tables of the account shell belong here too, and for a reason that
+    -- is this slice's own doing. Their write predicates read
+    --   company_id = get_user_company_id() AND (is_company_admin() OR platform_can(…))
+    -- and before this file the first conjunct was NULL for a company-less
+    -- platform account, so the write was refused whatever the capability said.
+    -- Making that term answer the opened company completes the predicate, and
+    -- the capability supplies the rest — so without a trigger here a *view*
+    -- context could create a role, give it can_edit on every page through
+    -- role_permissions, and point a company's profile at it: three writes, no
+    -- reason recorded, in the mode that is supposed to write nothing. The plan
+    -- is explicit that a staff member writes inside a support session and
+    -- nowhere else.
+    'roles', 'role_permissions', 'company_settings', 'activation_code_attempts'
   ]
   LOOP
     IF to_regclass('public.' || v_tbl) IS NULL THEN
@@ -983,10 +1026,20 @@ BEGIN
                                              jsonb_build_object('open_company_id', v_open.company_id));
     END IF;
     IF v_open.mode = p_mode AND v_open.session_id = v_sid THEN
-      -- Already open, same company, same mode: hand it back untouched.
+      -- Already open, same company, same mode: hand it back with the expiry it
+      -- already has, because re-asking must not extend a session.
+      --
+      -- The row keeps the reason it was opened with — a justification is of the
+      -- moment it was given, and rewriting it would lose the first one. A
+      -- *different* reason given now would then vanish entirely, so it goes
+      -- into this call's audit row: the log records every reach into the
+      -- company with the reason given for it, timestamped, whether or not the
+      -- row changed.
       RETURN app_private.platform_rpc_finish('support', c_action, NULL, p_company_id,
-                                             'platform_company_context', v_open.id::text, NULL,
-                                             jsonb_build_object('mode', v_open.mode, 'reopened', true),
+                                             'platform_company_context', v_open.id::text,
+                                             jsonb_build_object('reason', v_open.reason),
+                                             jsonb_build_object('mode', v_open.mode, 'reopened', true,
+                                                                'reason', coalesce(v_reason, v_open.reason)),
                                              jsonb_build_object('context', app_private.platform_context_json(v_open)));
     END IF;
     -- Same company, other mode (the view → support step the bar offers), or a
@@ -1353,7 +1406,10 @@ BEGIN
       ('fahrtenbuch_imports'), ('fahrtenbuch_trips'), ('fahrtenbuch_assignment_audit'),
       ('notification_settings'), ('cash_movements'), ('salary_cash_receipts'),
       ('document_blocks'), ('document_variables'), ('historical_reconciliation_drivers'),
-      ('historical_reconciliation_results'), ('historical_reconciliation_wh_drivers')
+      ('historical_reconciliation_results'), ('historical_reconciliation_wh_drivers'),
+      -- the four shell tables whose write predicate this file's own change
+      -- completes; see the trigger loop for why they are not optional
+      ('roles'), ('role_permissions'), ('company_settings'), ('activation_code_attempts')
     ) AS t(tbl)
    WHERE to_regclass('public.' || t.tbl) IS NOT NULL
      AND NOT EXISTS (SELECT 1 FROM pg_trigger g
