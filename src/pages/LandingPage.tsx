@@ -511,7 +511,9 @@ const FuhrparkPanel: React.FC = () => {
 
 // ─── Pricing ──────────────────────────────────────────────────────────────────
 
-import { calcPricing, fleetDiscountPercent, PRICE_PER_CAR, YEARLY_DISCOUNT_PERCENT, fmt as fmtPrice } from '../utils/pricing';
+import { calcPricing, fleetDiscountPercent, fmtPricePerCar, fmt as fmtPrice } from '../utils/pricing';
+import { fleetDiscountSummary } from '../utils/pricingText';
+import { useAppConfig } from '../contexts/AppConfigContext';
 import type { Plan as PricingPlan } from '../contexts/PlanContext';
 
 // `label` is the product tier name and stays untranslated. `sub`, `badge` and
@@ -543,11 +545,16 @@ const PRICING_PLANS: {
 ];
 
 const PricingSection: React.FC = () => {
-  const { t } = useTranslation();
+  const { t, tPlural } = useTranslation();
+  // Every number on this section comes from the price book the database holds
+  // (plan 3.9), which is also what compute_plan_price charges from. Until the
+  // first answer arrives it is the seed, which is what the database was
+  // seeded with, so the page never renders without prices.
+  const { priceBook, trialDays } = useAppConfig();
   const [billing, setBilling] = useState<'monthly'|'yearly'>('monthly');
   const [carCount, setCarCount] = useState(5);
 
-  const fleetPct = fleetDiscountPercent(carCount);
+  const fleetPct = fleetDiscountPercent(priceBook, carCount);
 
   return (
     <section id="pricing" style={{ position: 'relative', zIndex: 10 }} className="px-4 py-[72px] md:px-5 md:py-[120px]">
@@ -576,7 +583,7 @@ const PricingSection: React.FC = () => {
               }}>
                 {b === 'monthly' ? t('landing.pricing.monthly') : (
                   <><span>{t('landing.pricing.yearly')}</span>
-                  <span style={{ fontSize: 10, fontWeight: 800, background: billing === 'yearly' ? 'rgba(255,255,255,0.2)' : 'rgba(6,182,212,0.15)', color: billing === 'yearly' ? '#fff' : '#06b6d4', padding: '1px 6px', borderRadius: 100 }}>-{YEARLY_DISCOUNT_PERCENT}%</span>
+                  <span style={{ fontSize: 10, fontWeight: 800, background: billing === 'yearly' ? 'rgba(255,255,255,0.2)' : 'rgba(6,182,212,0.15)', color: billing === 'yearly' ? '#fff' : '#06b6d4', padding: '1px 6px', borderRadius: 100 }}>-{priceBook.yearly_discount_percent}%</span>
                   </>
                 )}
               </button>
@@ -607,7 +614,7 @@ const PricingSection: React.FC = () => {
         {/* Cards */}
         <div className="grid grid-cols-1 lg:grid-cols-3" style={{ gap: 20, alignItems: 'center', justifyContent: 'center', justifyItems: 'center', maxWidth: 1080, margin: '0 auto' }}>
           {PRICING_PLANS.map((p) => {
-            const bp = calcPricing(p.id, carCount, billing);
+            const bp = calcPricing(priceBook, p.id, carCount, billing);
             const displayMonthly = bp.monthlyEquivalent;
             const displayYearly  = bp.yearlyTotal;
             return (
@@ -641,7 +648,7 @@ const PricingSection: React.FC = () => {
                 {/* Price per car badge */}
                 <div style={{ marginBottom: 10 }}>
                   <span style={{ fontSize: 11, color: '#06b6d4', background: 'rgba(6,182,212,0.08)', border: '1px solid rgba(6,182,212,0.15)', padding: '2px 10px', borderRadius: 100, fontWeight: 700 }}>
-                    {PRICE_PER_CAR[p.id]} € {t('landing.pricing.perVehiclePerMonth')}
+                    {fmtPricePerCar(priceBook.price_per_car_cents[p.id])} € {t('landing.pricing.perVehiclePerMonth')}
                   </span>
                 </div>
 
@@ -655,7 +662,7 @@ const PricingSection: React.FC = () => {
                   </div>
                   {billing === 'yearly' && (
                     <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.35)', marginTop: 2 }}>
-                      = {fmtPrice(displayYearly)} € {t('landing.pricing.perYearInclDiscount', { pct: YEARLY_DISCOUNT_PERCENT })}
+                      = {fmtPrice(displayYearly)} € {t('landing.pricing.perYearInclDiscount', { pct: priceBook.yearly_discount_percent })}
                     </div>
                   )}
                 </div>
@@ -669,7 +676,7 @@ const PricingSection: React.FC = () => {
                   )}
                   {billing === 'yearly' && (
                     <span style={{ fontSize: 10, fontWeight: 700, color: '#fbbf24', background: 'rgba(251,191,36,0.1)', border: '1px solid rgba(251,191,36,0.2)', padding: '2px 8px', borderRadius: 100 }}>
-                      -{YEARLY_DISCOUNT_PERCENT}% {t('landing.pricing.yearlyDiscount')}
+                      -{priceBook.yearly_discount_percent}% {t('landing.pricing.yearlyDiscount')}
                     </span>
                   )}
                 </div>
@@ -682,7 +689,7 @@ const PricingSection: React.FC = () => {
                   color: '#fff',
                   boxShadow: p.highlight ? '0 4px 28px rgba(6,182,212,0.3)' : '0 0 0 1px rgba(255,255,255,0.07)',
                 }}>
-                  {t('landing.pricing.cta')}
+                  {t('landing.pricing.cta', { days: trialDays })}
                 </a>
 
                 <div style={{ height: 1, background: p.highlight ? 'rgba(6,182,212,0.15)' : 'rgba(255,255,255,0.05)', marginBottom: 20 }} />
@@ -705,9 +712,9 @@ const PricingSection: React.FC = () => {
         {/* Pricing explanation */}
         <div style={{ marginTop: 40, padding: '20px 24px', background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.05)', borderRadius: 16, maxWidth: 700, margin: '40px auto 0' }}>
           <p style={{ fontSize: 12, color: 'rgba(255,255,255,0.35)', lineHeight: 1.7, textAlign: 'center', margin: 0 }}>
-            <strong style={{ color: 'rgba(255,255,255,0.55)' }}>{t('landing.pricing.fleetDiscount')}:</strong> {t('landing.pricing.fleetTiers')}
+            <strong style={{ color: 'rgba(255,255,255,0.55)' }}>{t('landing.pricing.fleetDiscount')}:</strong> {fleetDiscountSummary(priceBook, t, tPlural)}
             &nbsp;&nbsp;|&nbsp;&nbsp;
-            <strong style={{ color: 'rgba(255,255,255,0.55)' }}>{t('landing.pricing.yearlyDiscount')}:</strong> {t('landing.pricing.yearlyNote')}
+            <strong style={{ color: 'rgba(255,255,255,0.55)' }}>{t('landing.pricing.yearlyDiscount')}:</strong> {t('landing.pricing.yearlyNote', { pct: priceBook.yearly_discount_percent })}
           </p>
         </div>
       </div>

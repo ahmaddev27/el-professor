@@ -4,7 +4,6 @@ import { useAuth } from './contexts/AuthContext';
 import { CompanySettingsProvider } from './contexts/CompanySettingsContext';
 import { SuperAdminProvider, useSuperAdmin } from './contexts/SuperAdminContext';
 import { PlanProvider, usePlan, FeatureKey } from './contexts/PlanContext';
-import { FEATURE_MIN_PLAN } from './contexts/PlanContext';
 import AppLayout from './components/AppLayout';
 import LockedFeaturePage from './components/LockedFeaturePage';
 import LoginForm from './components/LoginForm';
@@ -76,14 +75,16 @@ const FEATURE_LABEL_KEYS: Partial<Record<FeatureKey, TranslationKey>> = {
 };
 
 const PlanGate: React.FC<{ feature: FeatureKey; children: React.ReactNode }> = ({ feature, children }) => {
-  const { can } = usePlan();
+  // The plan a feature needs comes from the database's feature map (plan 3.9),
+  // through PlanContext, so the locked screen names the same plan the gate used.
+  const { can, minPlanFor } = usePlan();
   const { t } = useTranslation();
   if (can(feature)) return <>{children}</>;
   const labelKey = FEATURE_LABEL_KEYS[feature];
   return (
     <LockedFeaturePage
       featureName={labelKey ? t(labelKey) : feature}
-      requiredPlan={FEATURE_MIN_PLAN[feature]}
+      requiredPlan={minPlanFor(feature)}
     />
   );
 };

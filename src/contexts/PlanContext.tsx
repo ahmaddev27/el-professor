@@ -1,7 +1,9 @@
 import React, { createContext, useContext, useEffect, useState, useCallback, ReactNode } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from './AuthContext';
+import { useAppConfig } from './AppConfigContext';
 import { calcPricing, PriceBreakdown, BillingCycle } from '../utils/pricing';
+import { minPlanForFeature, planHasFeature } from '../utils/planFeatures';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -42,35 +44,16 @@ export type FeatureKey =
   | 'trinkgeld_quittung'
   | 'stundennachweis';
 
-const FEATURE_MIN_PLAN: Record<FeatureKey, Plan> = {
-  overview:           'basic',
-  belege:             'basic',
-  fahrer:             'basic',
-  fahrzeuge:          'basic',
-  umsaetze:           'basic',
-  fixkosten:          'basic',
-  bargeldbestand:     'basic',
-  werkstatt:            'advanced',
-  abrechnung:           'advanced',
-  notizen:              'advanced',
-  rollen_nutzer:        'advanced',
-  benachrichtigungen:   'advanced',
-  gehaelter:          'premium',
-  dokumente:          'premium',
-  trinkgeld_quittung: 'premium',
-  stundennachweis:    'premium',
-};
-
-const PLAN_RANK: Record<Plan, number> = { basic: 0, advanced: 1, premium: 2 };
-
-function planHasFeature(userPlan: Plan, feature: FeatureKey): boolean {
-  return PLAN_RANK[userPlan] >= PLAN_RANK[FEATURE_MIN_PLAN[feature]];
-}
-
 interface PlanContextType {
   planState: PlanState;
   loading: boolean;
   can: (feature: FeatureKey) => boolean;
+  /**
+   * The lowest plan that unlocks a feature, as the database's feature map says.
+   * A feature the map does not name needs premium, so a build that knows a
+   * feature the database has not heard of locks it rather than opening it.
+   */
+  minPlanFor: (feature: FeatureKey) => Plan;
   effectivePlan: Plan;
   /** Calculated pricing breakdown based on stored plan + carLimit + billingCycle */
   pricing: PriceBreakdown;
@@ -149,6 +132,10 @@ function buildPlanState(raw: {
 
 export const PlanProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const { companyId, isSuperAdmin } = useAuth();
+  // The price book and the feature map come from app_private.platform_settings
+  // through get_app_config() (plan 3.9). Until the database answers, these are
+  // the values it was seeded with, so a screen never prices from nothing.
+  const { priceBook, planFeatures } = useAppConfig();
   const [planState, setPlanState] = useState<PlanState>(buildPlanState(null));
   const [loading, setLoading] = useState(true);
 
@@ -193,18 +180,16 @@ export const PlanProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (isSuperAdmin) return true;
     if (planState.status === 'archived' || planState.status === 'deleted') return false;
     if (!planState.isActive && feature !== 'overview') return false;
-    return planHasFeature(effectivePlan, feature);
+    return planHasFeature(planFeatures, effectivePlan, feature);
   };
 
-  const pricing = calcPricing(planState.plan, planState.carLimit, planState.billingCycle);
+  const minPlanFor = (feature: FeatureKey): Plan => minPlanForFeature(planFeatures, feature);
+
+  const pricing = calcPricing(priceBook, planState.plan, planState.carLimit, planState.billingCycle);
 
   return (
-    <PlanContext.Provider value={{ planState, loading, can, effectivePlan, pricing, refresh: load }}>
+    <PlanContext.Provider value={{ planState, loading, can, minPlanFor, effectivePlan, pricing, refresh: load }}>
       {children}
     </PlanContext.Provider>
   );
 };
-
-// ─── Exports ─────────────────────────────────────────────────────────────────
-
-export { FEATURE_MIN_PLAN, PLAN_RANK, planHasFeature };

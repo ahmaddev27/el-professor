@@ -1,28 +1,44 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { calcPricing, type BillingCycle } from './pricing';
+import { calcPricing, type BillingCycle, type PriceBook } from './pricing';
+import { SEED_PRICE_BOOK } from '../lib/appConfigSeed';
 import type { Plan } from '../contexts/PlanContext';
 
 /**
- * The price exists in two places, and they must not drift.
+ * The price is computed twice, and the two must not drift.
  *
- * `calcPricing()` here is what the signup screen shows. `compute_plan_price()`
- * in 20260911120000_redeem_discount_code_rpc.sql is what the database charges —
- * it has to compute the price itself, because the browser used to send it and a
- * modified client could name its own.
+ * `calcPricing()` here is what the landing page, the signup screen and the
+ * platform dashboard show. `compute_plan_price()` is what the database charges
+ * — it has to compute the price itself, because the browser used to send it and
+ * a modified client could name its own.
  *
- * Duplication is the cost of not trusting the client. This test is what keeps
- * the cost bounded: change one formula without the other and it fails, rather
- * than quietly putting a different number on the invoice than on the screen.
+ * Since plan 3.9 both read the same price book from
+ * `app_private.platform_settings`, so the numbers can no longer drift by
+ * someone editing one constant. What can still drift is the *formula*, and that
+ * is what this file pins, in two ways:
  *
- * EXPECTED is the output of, against the live schema:
+ *  1. Today's book must still produce today's 42 numbers — the prices as they
+ *     stood when they lived in the code. The migration's own self-check compares
+ *     the same 42 combinations against 20260911120000's body in SQL.
+ *  2. An alien book, one nobody would ship, must produce the numbers listed
+ *     beside it. That list lives in `tests/rls/pricing.sql` and is read from
+ *     there, so the SQL engine and this one are checked against one document: a
+ *     formula that ignores the book (a constant left behind, a tier read the
+ *     wrong way round) passes test 1 and fails test 2.
+ *
+ * The car counts are not arbitrary — they sit either side of each fleet
+ * discount threshold, which is where an off-by-one shows up.
+ */
+
+// ─── 1. today's book, today's numbers ───────────────────────────────────────
+
+/**
+ * The output of, against the live schema before 3.9:
  *
  *   SELECT p || '|' || c || '|' || b || '|' || round(compute_plan_price(p, c, b)::numeric, 4)
  *   FROM (VALUES ('basic'),('advanced'),('premium')) AS a(p),
  *        (VALUES (1),(3),(5),(6),(10),(11),(25))     AS d(c),
  *        (VALUES ('monthly'),('yearly'))             AS e(b);
- *
- * The car counts are not arbitrary: 5/6 and 10/11 sit either side of the fleet
- * discount thresholds, which is where an off-by-one in either formula shows up.
  */
 const EXPECTED: Record<string, number> = {
   'basic|1|monthly': 20, 'basic|1|yearly': 216,
@@ -54,13 +70,13 @@ const PLANS: Plan[] = ['basic', 'advanced', 'premium'];
 const CARS = [1, 3, 5, 6, 10, 11, 25];
 const CYCLES: BillingCycle[] = ['monthly', 'yearly'];
 
-describe('pricing parity between calcPricing() and compute_plan_price()', () => {
+describe("today's price book still prices what the constants priced", () => {
   for (const plan of PLANS) {
     for (const cars of CARS) {
       for (const cycle of CYCLES) {
         const key = `${plan}|${cars}|${cycle}`;
         it(key, () => {
-          expect(calcPricing(plan, cars, cycle).finalTotal).toBeCloseTo(EXPECTED[key], 4);
+          expect(calcPricing(SEED_PRICE_BOOK, plan, cars, cycle).finalTotal).toBeCloseTo(EXPECTED[key], 4);
         });
       }
     }
@@ -69,4 +85,37 @@ describe('pricing parity between calcPricing() and compute_plan_price()', () => 
   it('covers every combination the SQL query produced', () => {
     expect(Object.keys(EXPECTED)).toHaveLength(PLANS.length * CARS.length * CYCLES.length);
   });
+});
+
+// ─── 2. the alien book, shared with tests/rls/pricing.sql ───────────────────
+
+/** The body of one `$tag$ … $tag$` block of the SQL suite. */
+function dollarQuoted(tag: string): string {
+  const sql = readFileSync(new URL('../../tests/rls/pricing.sql', import.meta.url), 'utf8');
+  const match = sql.match(new RegExp(`\\$${tag}\\$([\\s\\S]*?)\\$${tag}\\$`));
+  if (!match) throw new Error(`tests/rls/pricing.sql has no $${tag}$ block`);
+  return match[1];
+}
+
+const ALIEN_BOOK = JSON.parse(dollarQuoted('alien_book')) as PriceBook;
+const ALIEN_EXPECTED = JSON.parse(dollarQuoted('alien_expected')) as Record<string, number>;
+
+describe('an alien price book: both engines follow the data', () => {
+  it('is nothing like the one we ship', () => {
+    expect(ALIEN_BOOK.price_per_car_cents).not.toEqual(SEED_PRICE_BOOK.price_per_car_cents);
+    expect(ALIEN_BOOK.yearly_discount_percent).not.toBe(SEED_PRICE_BOOK.yearly_discount_percent);
+    expect(ALIEN_BOOK.fleet_discount_tiers).toHaveLength(3);
+  });
+
+  it('lists the same 42 combinations as the grid above', () => {
+    expect(Object.keys(ALIEN_EXPECTED)).toHaveLength(42);
+  });
+
+  for (const [key, expected] of Object.entries(ALIEN_EXPECTED)) {
+    it(key, () => {
+      const [plan, cars, cycle] = key.split('|');
+      expect(calcPricing(ALIEN_BOOK, plan as Plan, Number(cars), cycle as BillingCycle).finalTotal)
+        .toBeCloseTo(expected, 6);
+    });
+  }
 });

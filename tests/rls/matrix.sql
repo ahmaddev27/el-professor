@@ -1818,7 +1818,9 @@ INSERT INTO _mx_rpc (label, stmt, want, hole) VALUES
     ('redeem_discount_code(unused code, company A)',
      $q$SELECT redeem_discount_code('MX-OPEN', 'c0000000-0000-4000-8000-00000000000a', 'basic', 'monthly', 1)::text$q$,
      'PPPPPPP', NULL),
-    -- anon's EXECUTE revoked by 20260915120000
+    -- anon's EXECUTE revoked by 20260915120000. 20260916150000 made it
+    -- SECURITY DEFINER so it can read the price book out of app_private, and
+    -- restates the same grants, so no cell moves with it
     ('compute_plan_price(basic, 5, monthly)',
      $q$SELECT compute_plan_price('basic', 5, 'monthly')::text$q$,
      'PYYYYYY', NULL),
@@ -1884,6 +1886,23 @@ INSERT INTO _mx_rpc (label, stmt, want, hole) VALUES
     ('platform_staff_enable(a disabled owner)',
      $q$SELECT platform_staff_enable({ref:rpc_staff_disabled})::text$q$,
      'PNNNNNY', NULL),
+    -- the settings RPCs of 20260916150000. Both answer ok=false without an
+    -- active staff role, so only the platform principal gets Y; anon holds
+    -- EXECUTE on neither. tests/rls/pricing.sql probes them by role
+    ('platform_settings_get(price_book) is ok',
+     $q$SELECT (platform_settings_get('price_book') ->> 'ok')::text$q$,
+     'PNNNNNY', NULL),
+    ('platform_settings_put(price_book, the seeded book, version 1) is ok',
+     $q$SELECT (platform_settings_put('price_book', '{"price_per_car_cents":{"basic":2000,"advanced":4000,"premium":7000},"fleet_discount_tiers":[{"min_cars":6,"percent":5},{"min_cars":11,"percent":10}],"yearly_discount_percent":10}'::jsonb, 1) ->> 'ok')::text$q$,
+     'PNNNNNY', NULL),
+    -- the product configuration: the price book is public (the landing page
+    -- prices plans before anyone signs in), the feature map is not
+    ('get_public_config() carries a price book',
+     $q$SELECT (get_public_config() -> 'price_book' IS NOT NULL)::text$q$,
+     'YYYYYYY', NULL),
+    ('get_app_config() carries the feature map',
+     $q$SELECT (get_app_config() -> 'plan_features' IS NOT NULL)::text$q$,
+     'PYYYYYY', NULL),
 
     -- the planning RPCs, on company A's import, trip and runs. Company B's
     -- admin makes the same calls with company A's ids. None checks the role,

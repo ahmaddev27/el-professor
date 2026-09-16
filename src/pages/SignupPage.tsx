@@ -6,8 +6,9 @@ import {
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { Plan } from '../contexts/PlanContext';
-import { calcPricing, fleetDiscountPercent, PRICE_PER_CAR, YEARLY_DISCOUNT_PERCENT, fmt as fmtPrice } from '../utils/pricing';
+import { calcPricing, fleetDiscountPercent, fmtPricePerCar, fmt as fmtPrice } from '../utils/pricing';
 import type { BillingCycle, DiscountResult } from '../utils/pricing';
+import { useAppConfig } from '../contexts/AppConfigContext';
 import { useTranslation } from '../contexts/LanguageContext';
 import type { TranslationKey } from '../i18n';
 import { useOtpSessionHandoff } from '../hooks/useOtpSessionHandoff';
@@ -21,8 +22,6 @@ import { authPrimaryButtonClass } from '../components/auth/authStyles';
 // 'verify' follows a successful company-signup: the account exists and waits
 // for the code, so there is no way back to the earlier steps from there.
 type Step = 'plan' | 'company' | 'account' | 'verify';
-
-const TRIAL_DAYS = 14;
 
 const inputClass =
   'w-full px-4 py-3 bg-white/5 border border-white/10 text-white placeholder-white/20 rounded-xl focus:outline-none focus:ring-2 focus:ring-cyan-500/50 focus:border-cyan-500/40 transition-all text-sm';
@@ -87,8 +86,10 @@ const PricePreview: React.FC<{
   discount?: DiscountResult | null;
 }> = ({ plan, carLimit, billingCycle, discount }) => {
   const { t } = useTranslation();
-  const bp = calcPricing(plan, carLimit, billingCycle);
-  const fleetPct = fleetDiscountPercent(carLimit);
+  // The same price book compute_plan_price charges from (plan 3.9).
+  const { priceBook } = useAppConfig();
+  const bp = calcPricing(priceBook, plan, carLimit, billingCycle);
+  const fleetPct = fleetDiscountPercent(priceBook, carLimit);
   const planColor = PLANS.find(p => p.id === plan)?.color ?? '#06b6d4';
 
   // current_price that was passed to edge fn = bp.finalTotal
@@ -104,7 +105,7 @@ const PricePreview: React.FC<{
       </p>
       <div className="space-y-1.5 text-xs">
         <div className="flex justify-between text-white/50">
-          <span>{t('signup.price.base')} ({carLimit} × {PRICE_PER_CAR[plan]} €)</span>
+          <span>{t('signup.price.base')} ({carLimit} × {fmtPricePerCar(priceBook.price_per_car_cents[plan])} €)</span>
           <span>{fmtPrice(bp.baseMonthly)} €</span>
         </div>
         {fleetPct > 0 && (
@@ -115,7 +116,7 @@ const PricePreview: React.FC<{
         )}
         {billingCycle === 'yearly' && (
           <div className="flex justify-between" style={{ color: '#fbbf24' }}>
-            <span>{t('landing.pricing.yearlyDiscount')} -{YEARLY_DISCOUNT_PERCENT}%</span>
+            <span>{t('landing.pricing.yearlyDiscount')} -{priceBook.yearly_discount_percent}%</span>
             <span>
               -{fmtPrice(billingCycle === 'yearly' ? bp.monthlyAfterFleet * 12 - bp.yearlyTotal : 0)} €
             </span>
@@ -264,6 +265,9 @@ const DiscountCodeInput: React.FC<{
 // ─── Component ────────────────────────────────────────────────────────────────
 
 const SignupPage: React.FC = () => {
+  // Prices and the trial length come from the database (plan 3.9), so the
+  // screen quotes what the database will charge and what a signup will grant.
+  const { priceBook, trialDays } = useAppConfig();
   const { t, tPlural } = useTranslation();
   const completeSignIn = useOtpSessionHandoff();
   const [step, setStep] = useState<Step>('plan');
@@ -286,7 +290,7 @@ const SignupPage: React.FC = () => {
   const stepIndex = STEPS.indexOf(step);
 
   const trialEndDate = new Date();
-  trialEndDate.setDate(trialEndDate.getDate() + TRIAL_DAYS);
+  trialEndDate.setDate(trialEndDate.getDate() + trialDays);
   const trialEndFormatted = trialEndDate.toLocaleDateString('de-DE', {
     day: '2-digit', month: 'long', year: 'numeric',
   });
@@ -382,7 +386,7 @@ const SignupPage: React.FC = () => {
             <img src="/professor_logo_white.svg" alt="El-Professor" className="w-14 h-14 object-contain drop-shadow-[0_0_16px_rgba(6,182,212,0.5)]" />
           </div>
           <h1 className="text-2xl font-bold text-white mb-1">{t('signup.cta')}</h1>
-          <p className="text-white/40 text-sm">{t('signup.subtitle', { days: TRIAL_DAYS })}</p>
+          <p className="text-white/40 text-sm">{t('signup.subtitle', { days: trialDays })}</p>
         </div>
 
         {/* Step indicators */}
@@ -457,7 +461,7 @@ const SignupPage: React.FC = () => {
             <div className="space-y-5">
               <div>
                 <h2 className="text-base font-semibold text-white mb-1">{t('signup.plan.heading')}</h2>
-                <p className="text-xs text-white/40">{t('signup.plan.subheading', { days: TRIAL_DAYS })}</p>
+                <p className="text-xs text-white/40">{t('signup.plan.subheading', { days: trialDays })}</p>
               </div>
 
               {/* Plan cards */}
@@ -489,7 +493,7 @@ const SignupPage: React.FC = () => {
                     )}
                     <p className="font-bold text-white text-sm mb-0.5">{plan.name}</p>
                     <p className="text-xs mb-1" style={{ color: plan.color }}>
-                      {PRICE_PER_CAR[plan.id]} €<span className="text-white/30"> {t('landing.pricing.perVehiclePerMonth')}</span>
+                      {fmtPricePerCar(priceBook.price_per_car_cents[plan.id])} €<span className="text-white/30"> {t('landing.pricing.perVehiclePerMonth')}</span>
                     </p>
                     <ul className="space-y-1">
                       {plan.features.map(featureKey => (
@@ -520,9 +524,9 @@ const SignupPage: React.FC = () => {
                 </div>
                 <p className="text-[11px] text-white/30 mt-1">
                   {t('signup.cars.driverLimit', { count: carLimit * 4 })}
-                  {fleetDiscountPercent(carLimit) > 0 && (
+                  {fleetDiscountPercent(priceBook, carLimit) > 0 && (
                     <span className="ml-2 text-emerald-400 font-semibold">
-                      -{fleetDiscountPercent(carLimit)}% {t('landing.pricing.fleetDiscount')}
+                      -{fleetDiscountPercent(priceBook, carLimit)}% {t('landing.pricing.fleetDiscount')}
                     </span>
                   )}
                 </p>
@@ -547,7 +551,7 @@ const SignupPage: React.FC = () => {
                       {bc === 'monthly' ? t('landing.pricing.monthly') : (
                         <><span>{t('landing.pricing.yearly')}</span>
                           <span className="px-1.5 py-0.5 rounded-full text-[10px]" style={{ background: 'rgba(251,191,36,0.15)', color: '#fbbf24' }}>
-                            -{YEARLY_DISCOUNT_PERCENT}%
+                            -{priceBook.yearly_discount_percent}%
                           </span>
                         </>
                       )}
@@ -558,7 +562,7 @@ const SignupPage: React.FC = () => {
 
               {/* Discount code */}
               {(() => {
-                const bp = calcPricing(selectedPlan, carLimit, billingCycle);
+                const bp = calcPricing(priceBook, selectedPlan, carLimit, billingCycle);
                 return (
                   <DiscountCodeInput
                     plan={selectedPlan}
@@ -580,7 +584,7 @@ const SignupPage: React.FC = () => {
               <div className="p-3.5 rounded-xl border border-cyan-500/20 bg-cyan-500/5 flex items-start gap-2.5">
                 <Zap size={14} className="text-cyan-400 flex-shrink-0 mt-0.5" />
                 <p className="text-xs text-white/50">
-                  <span className="text-cyan-300 font-semibold">{t('signup.trial.badge', { days: TRIAL_DAYS })}</span>{' '}
+                  <span className="text-cyan-300 font-semibold">{t('signup.trial.badge', { days: trialDays })}</span>{' '}
                   {t('signup.trial.bodyLead', { date: trialEndFormatted })}{' '}
                   <span className="text-white/70">Premium</span>{t('signup.trial.bodyTail')}
                 </p>
@@ -722,7 +726,7 @@ const SignupPage: React.FC = () => {
               </button>
 
               <p className="text-center text-white/25 text-xs pt-1">
-                {t('signup.summaryLead', { days: TRIAL_DAYS })}
+                {t('signup.summaryLead', { days: trialDays })}
                 <strong className="text-white/40">{selectedPlanDef.name}</strong>
                 {t('signup.summaryTail', {
                   cars: carLimit,

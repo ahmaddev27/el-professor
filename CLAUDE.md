@@ -121,7 +121,9 @@ Two full, separate stacks run on one VPS (159.195.205.30), behind ridy's Caddy.
 
 ### Provider stack
 
-`main.tsx` mounts `ThemeProvider → AuthProvider → ToastProvider → App`. `App.tsx` then adds `CompanySettingsProvider → SuperAdminProvider → PlanProvider → BrowserRouter`. Anything needing `usePlan()` must live below that — which is why the plan-gated routes are all inside `App`, not `main`.
+`main.tsx` mounts `ThemeProvider → AuthProvider → ToastProvider → AppConfigProvider → App`. `App.tsx` then adds `CompanySettingsProvider → SuperAdminProvider → PlanProvider → BrowserRouter`. Anything needing `usePlan()` must live below that — which is why the plan-gated routes are all inside `App`, not `main`.
+
+`AppConfigProvider` sits above `App` rather than beside `PlanProvider` because the landing page and the signup screen price plans before anyone is signed in. It loads `get_public_config()` (anonymous) or `get_app_config()` (signed in) once per account and holds the price book, the plan feature map and the trial length; `useAppConfig()` reads them, and the seed in `src/lib/appConfigSeed.ts` stands in until the first answer arrives. See *Settings, the price book and the feature map* below.
 
 ### Auth is a chain of gates, not a single check
 
@@ -165,7 +167,29 @@ Platform rights live in `app_private.platform_staff` (since `20260916110000`): o
 
 ### Plan gating
 
-`PlanContext` maps `FeatureKey → minimum Plan` in `FEATURE_MIN_PLAN` (`basic` < `advanced` < `premium`). Two behaviors are easy to miss: a company **in trial** gets `effectivePlan = 'premium'` regardless of its stored plan, and a super admin's `can()` always returns `true`. Add a new gated feature by extending `FeatureKey` + `FEATURE_MIN_PLAN` in `PlanContext.tsx` and `FEATURE_LABELS` in `App.tsx`, then wrapping the route in `<PlanGate>`.
+`PlanContext` maps `FeatureKey → minimum Plan` (`basic` < `advanced` < `premium`), and since `20260916150000` that map is **the `plan_features` setting in the database**, not a constant: `useAppConfig().planFeatures`, with `SEED_PLAN_FEATURES` standing in until the answer arrives. **A feature the map does not name needs premium** — a build that knows a screen the database has not heard of locks it rather than opening it. Three behaviors are easy to miss: a company **in trial** gets `effectivePlan = 'premium'` regardless of its stored plan, a super admin's `can()` always returns `true`, and `minPlanFor(feature)` (what `LockedFeaturePage` prints) reads the same live map, so the gate and the message can never disagree.
+
+Add a new gated feature by extending `FeatureKey` in `PlanContext.tsx` and `SEED_PLAN_FEATURES` in `src/lib/appConfigSeed.ts` (typed `Record<FeatureKey, Plan>`, so a missing seed fails to compile), adding `FEATURE_LABEL_KEYS` in `App.tsx`, wrapping the route in `<PlanGate>` — and **seeding the key into `plan_features` in a migration**, or every plan sees it as premium.
+
+### Settings, the price book and the feature map
+
+Since `20260916150000` the prices and the plan feature map live in `app_private.platform_settings` (one JSON value per key, with a `version` every write bumps), not in code. Two keys are seeded, with the values the constants held: `price_book` and `plan_features`.
+
+**The pricing rule, in both engines:** the price per car is **integer cents** per plan, the fleet discount tiers and the yearly discount are **whole percents**, and
+
+```
+monthly = cars × price per car × (1 − fleet %)
+yearly  = monthly × 12 × (1 − yearly %)
+billed  = yearly for the cycle 'yearly', monthly otherwise
+```
+
+`compute_plan_price(plan, cars, cycle)` keeps its signature and its edge cases (a NULL car count counts as 1; a count below 1 is billed as one car but looks its tier up with the count as given; an unknown or NULL plan pays the basic price; any cycle but `'yearly'` is monthly) and now reads the book, through `app_private.price_book_price(book, …)`. `calcPricing(book, …)` in `src/utils/pricing.ts` takes the book as its first argument and computes the same. **No price is written anywhere else** — the only copy outside the database is `SEED_PRICE_BOOK` in `src/lib/appConfigSeed.ts`, and `appConfigSeed.test.ts` fails when it and the migration's seed differ.
+
+Four tests keep the two engines together, and the fourth is the one that matters: `pricing.parity.test.ts` pins today's 42 numbers, `appConfigSeed.test.ts` compares the TypeScript seed with the migration's, a `DO` block in the migration compares 42 combinations against `20260911120000`'s body in SQL, and **an alien price book in `tests/rls/pricing.sql` is priced by both engines from the same 42 listed numbers** — a formula that ignored the book and kept a constant would pass the first three and fail only that one.
+
+Reading and writing: `platform_settings_get(key)` needs `settings.read`, and **billing holds that capability for `price_book` alone** (plan 3.A says "settings.read … billing ✓ (prices)", which no single capability can express), so for billing any other key is `forbidden` where a role with plain `settings.read` is merely told it is `not_found`. `platform_settings_put(key, value, expected_version)` needs `pricing.manage` for `price_book` and `settings.manage` — owner only — for every other key, **`plan_features` included**: `pricing.manage` is held by billing as well as owner, the feature map decides what every customer may open, and a feature the map does not name reads as premium, so one billing write of `{}` would lock every gated screen for every non-trial company on basic or advanced. Plan 3.A lists "features" under `settings.manage`. It validates the value's shape per key, refuses a stale version, and records the value before and after. A key with no validator is refused as `unknown_key`: **plan 3.10 and 3.11 add their validators and seed their keys in the migration that introduces them.** Every call by an active staff role writes an audit row — a read as category `read` naming only the version it returned, a write as `settings` — and a refusal is audited too; a caller who is not platform staff is refused with no row at all, as in `platform_audit_record`. **This slice does not redefine `platform_audit_record`**: 3.5's action allow-list already refuses every `platform_settings.` action, which is stricter than a reserved namespace, and a redefinition here would sort after `20260916150000_platform_audit_record_allowlist.sql` and silently drop both of that function's rules. `tests/rls/pricing.sql` section 8 and self-check 8 in the migration assert the refusal instead, so the property this slice depends on still fails loudly if it ever goes away.
+
+`get_public_config()` (anyone: the price book and the trial length) and `get_app_config()` (signed in: plus the feature map, and empty `feature_flags` and `announcements` until 3.11) are what the browser reads, through `AppConfigProvider`. The trial length is still the constant `app_private.signup_insert_company` applies, reported by `app_private.signup_trial_days()`; the migration's self-check fails the release if the two disagree, and plan 3.10 moves it into the settings.
 
 ### Data access
 

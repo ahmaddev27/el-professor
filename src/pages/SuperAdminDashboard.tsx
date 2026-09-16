@@ -16,6 +16,7 @@ import ManualSubscriptionModal from '../components/ManualSubscriptionModal';
 import { format, differenceInDays, isAfter, isBefore, addDays, startOfMonth } from 'date-fns';
 import { de } from 'date-fns/locale';
 import { calcPricing, fmt as fmtPrice } from '../utils/pricing';
+import { useAppConfig } from '../contexts/AppConfigContext';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { useTranslation } from '../contexts/LanguageContext';
 import type { TranslationKey } from '../i18n';
@@ -258,6 +259,9 @@ function PlanDistributionBar({ kpis, total }: { kpis: PlatformKPIs; total: numbe
 // ─── Main Dashboard ───────────────────────────────────────────────────────────
 
 export default function SuperAdminDashboard() {
+  // The prices this screen shows come from the same price book the database
+  // charges from (plan 3.9), so a changed price shows here without a release.
+  const { priceBook } = useAppConfig();
   const { enterCompany, platformCan } = useSuperAdmin();
   // What the platform role may do, from platform_whoami(). Actions a role lacks
   // are hidden; the database refuses them regardless.
@@ -1160,7 +1164,7 @@ export default function SuperAdminDashboard() {
                   {/* Calculated price */}
                   <td className="px-4 py-3">
                     {(() => {
-                      const bp = calcPricing(c.plan ?? 'basic', c.subscription_car_limit, c.billing_cycle);
+                      const bp = calcPricing(priceBook, c.plan ?? 'basic', c.subscription_car_limit, c.billing_cycle);
                       return (
                         <div>
                           <p className="text-xs font-semibold" style={{ color: 'var(--text-primary)' }}>
