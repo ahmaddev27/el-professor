@@ -81,8 +81,11 @@ const GoogleButton: React.FC<GoogleButtonProps> = ({
     // button disabled keeps a second press from starting a second flow.
   };
 
+  // The spacing above the button belongs here, not to a wrapper on the screens:
+  // a wrapper still occupies its margin while this returns null, which would
+  // move every signed-out screen by 20 px with the provider switched off.
   return (
-    <div className="space-y-4">
+    <div className="mt-5 space-y-4">
       {divider && (
         <div className="flex items-center gap-3" aria-hidden="true">
           <span className="h-px flex-1 bg-white/10" />

@@ -170,10 +170,20 @@ const PlatformAccountGuard: React.FC<{ children: React.ReactNode }> = ({ childre
   return <>{children}</>;
 };
 
+/** The full-page spinner shown while the session, or its profile, is still being read. */
+const AuthLoadingScreen: React.FC = () => (
+  <div className="min-h-screen bg-[#060a0f] flex items-center justify-center">
+    <div className="text-center">
+      <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-cyan-400 mx-auto mb-4" />
+      <p className="text-white/40 text-sm">Wird geladen...</p>
+    </div>
+  </div>
+);
+
 // ─── App ──────────────────────────────────────────────────────────────────────
 
 function App() {
-  const { user, profile, loading: authLoading, isAdmin, isSuperAdmin, companyApprovalStatus, userBlockReason } = useAuth();
+  const { user, profile, profileLoaded, loading: authLoading, isAdmin, isSuperAdmin, companyApprovalStatus, userBlockReason } = useAuth();
 
   // Ahead of every gate: the preview reads no account or tenant data, and it
   // has to render for a reviewer whatever their session state is.
@@ -186,14 +196,7 @@ function App() {
   }
 
   if (authLoading) {
-    return (
-      <div className="min-h-screen bg-[#060a0f] flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-cyan-400 mx-auto mb-4" />
-          <p className="text-white/40 text-sm">Wird geladen...</p>
-        </div>
-      </div>
-    );
+    return <AuthLoadingScreen />;
   }
 
   if (!user) {
@@ -213,6 +216,17 @@ function App() {
         </Routes>
       </BrowserRouter>
     );
+  }
+
+  // Every gate below reads the profile, and a null one means two different
+  // things: the query has not answered yet (or failed), or this account has no
+  // row. Waiting here is what keeps the first from being read as the second —
+  // one failed profile load after a Google redirect otherwise fell past the
+  // registration gate and the approval gates into the tenant router, with no
+  // company at all. The gates themselves are unchanged, and in the ordinary
+  // case the profile is already loaded when `authLoading` clears.
+  if (!profileLoaded) {
+    return <AuthLoadingScreen />;
   }
 
   // Account revocation gate. Runs before the company gates because it is the

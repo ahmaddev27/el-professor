@@ -153,7 +153,10 @@ const CompleteRegistrationPage: React.FC = () => {
             </div>
           </div>
         )}
-        <PendingApprovalPage />
+        {/* Its sign-out goes through leaveToLogin: this page is rendered inside
+            the registration screen, and the address may still be
+            /auth/callback. */}
+        <PendingApprovalPage onSignOut={leaveToLogin} />
       </>
     );
   }

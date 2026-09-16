@@ -150,8 +150,15 @@ const InviteAcceptPage: React.FC = () => {
           returns. A different Google account ends up on the registration
           screen, which says so. Nothing renders while the provider is off. */}
       {!user && (
-        <div className="mt-5 space-y-3">
-          {googleError && <NoticeBox tone="error" announce>{googleError}</NoticeBox>}
+        <>
+          {/* Only the button below ever sets this, so with the provider off
+              nothing here renders and nothing takes up space: the wrapper that
+              used to hold both carried its margin even when empty. */}
+          {googleError && (
+            <div className="mt-5">
+              <NoticeBox tone="error" announce>{googleError}</NoticeBox>
+            </div>
+          )}
           <GoogleButton
             from="invite"
             labelKey="auth.google.signIn"
@@ -159,7 +166,7 @@ const InviteAcceptPage: React.FC = () => {
             divider
             onError={key => setGoogleError(t(key))}
           />
-        </div>
+        </>
       )}
     </AuthShell>
   );

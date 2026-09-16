@@ -57,6 +57,32 @@ export function sessionCameFromGoogle(user: GoogleAccountUser | null, hasIntent:
 }
 
 /**
+ * Whether a Google session still has anything for `oauth-account` to settle.
+ *
+ * `reconcile` does two things: it cancels a password signup Google has just
+ * confirmed, and it accepts a pending invitation. An account that already
+ * belongs to a company and is active has neither pending, so every call it
+ * makes can only answer `nothing_pending`.
+ *
+ * Without this test the call goes out on *every page load* for the rest of that
+ * account's life: `sessionCameFromGoogle` is true for a Google-created account
+ * with no marker at all, and the "already settled" ref in AuthContext starts
+ * empty each load.
+ *
+ * `status` has to be part of it: an invited employee accepting through Google
+ * carries a company on a `pending_invite` profile, and that is exactly the
+ * session reconcile exists for.
+ *
+ * This is not a substitute for the platform-staff refusal, which is decided
+ * before it, on a profile that carries no company at all.
+ */
+export function googleSessionIsSettled(
+  profile: { company_id?: string | null; status?: string | null } | null,
+): boolean {
+  return !!profile?.company_id && profile.status === 'active';
+}
+
+/**
  * Whether this account still has to register a company: a Google account whose
  * profile belongs to no company. Platform accounts are company-less by design
  * and never belong here.

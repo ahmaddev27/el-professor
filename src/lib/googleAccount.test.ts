@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { hasGoogleIdentity, needsCompanyRegistration, sessionCameFromGoogle } from './googleAccount';
+import {
+  googleSessionIsSettled,
+  hasGoogleIdentity,
+  needsCompanyRegistration,
+  sessionCameFromGoogle,
+} from './googleAccount';
 
 const googleNative = { app_metadata: { provider: 'google', providers: ['google'] } };
 const passwordOnly = { app_metadata: { provider: 'email', providers: ['email'] } };
@@ -31,6 +36,24 @@ describe('sessionCameFromGoogle', () => {
 
   it('is false for a password account even with a stale marker in the tab', () => {
     expect(sessionCameFromGoogle(passwordOnly, true)).toBe(false);
+  });
+});
+
+describe('googleSessionIsSettled', () => {
+  it('is true for a company account in good standing: reconcile has nothing to do', () => {
+    expect(googleSessionIsSettled({ company_id: 'c-1', status: 'active' })).toBe(true);
+  });
+
+  it('is false for an invited employee, whose invitation is what reconcile accepts', () => {
+    expect(googleSessionIsSettled({ company_id: 'c-1', status: 'pending_invite' })).toBe(false);
+  });
+
+  it.each([
+    ['an account with no company yet', { company_id: null, status: 'active' }],
+    ['a company account that is not active', { company_id: 'c-1', status: 'suspended' }],
+    ['a profile that has not loaded', null],
+  ])('is false for %s', (_label, profile) => {
+    expect(googleSessionIsSettled(profile)).toBe(false);
   });
 });
 
