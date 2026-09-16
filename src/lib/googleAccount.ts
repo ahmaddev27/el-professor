@@ -83,16 +83,37 @@ export function googleSessionIsSettled(
 }
 
 /**
- * Whether this account still has to register a company: a Google account whose
- * profile belongs to no company. Platform accounts are company-less by design
- * and never belong here.
+ * Whether this account still has to register a company: a Google account that
+ * belongs to no company — **an account with no `user_profiles` row at all
+ * included**.
+ *
+ * No profile is the *first* state of a Google signup, not an anomaly. Between
+ * GoTrue creating the account and `oauth_signup_create_company` writing the
+ * company, nothing writes a profile row: no trigger on `auth.users` creates
+ * one on the live database (`public.handle_new_user` exists, but nothing
+ * invokes it), and both signup RPCs write the owner's profile themselves,
+ * through `app_private.signup_insert_company`.
+ *
+ * Reading that state as "nothing to do" is what let such an account past this
+ * gate into the tenant router, where every query asks for `company_id` null,
+ * PostgREST sends Postgres the string "null" and the screen fills with
+ * `invalid input syntax for type uuid: "null"`.
+ *
+ * The missing profile decides nothing on its own: the answer still hangs on a
+ * Google identity, so an ordinary password account whose profile is missing is
+ * never sent to the Google registration screen. Platform accounts are
+ * company-less by design and never belong here either.
+ *
+ * The caller must already know the profile query has *answered* — App.tsx
+ * waits on `profileLoaded` before any gate — or a load still in flight would be
+ * read as an account that has no row.
  */
 export function needsCompanyRegistration(
   user: GoogleAccountUser | null,
   profile: { company_id?: string | null; is_super_admin?: boolean } | null,
 ): boolean {
-  if (!user || !profile) return false;
-  if (profile.is_super_admin) return false;
-  if (profile.company_id) return false;
+  if (!user) return false;
+  if (profile?.is_super_admin) return false;
+  if (profile?.company_id) return false;
   return hasGoogleIdentity(user);
 }
