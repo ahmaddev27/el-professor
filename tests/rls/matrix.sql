@@ -1585,6 +1585,15 @@ END $$;
 -- Supabase's default privileges give anon at creation, here and — to be
 -- confirmed on a copy of staging — there.
 
+-- The fixture was dumped with --schema=public, so auth.users carries only what
+-- the foreign keys needed. platform_users_list reads two of GoTrue's own
+-- columns, and without them its probe would raise 42703 and record a hole that
+-- only this database has. otp.sql and platform-authority.sql stub the same
+-- columns for their own transactions; this one is rolled back with the file.
+ALTER TABLE auth.users
+  ADD COLUMN IF NOT EXISTS email_confirmed_at timestamptz,
+  ADD COLUMN IF NOT EXISTS last_sign_in_at    timestamptz;
+
 -- Two planning runs of company A for the planning RPCs to act on: an archived
 -- one that nothing references, and an applied one in a month no other probe uses.
 INSERT INTO company_planning_runs (id, company_id, month, year, import_id, status, applied_at)
@@ -1651,6 +1660,27 @@ INSERT INTO _mx_rpc (label, stmt, want, hole) VALUES
     ('account_is_platform_staff(member of A)',
      $q$SELECT account_is_platform_staff({ref:user_profiles})::text$q$,
      'PPPPPPP', NULL),
+    -- the read models of 20260916140000 (plan 3.6b). Each is authenticated
+    -- only, and answers {"ok": false, "reason": "not_authorized"} without the
+    -- capability rather than raising, so the probe asks for `ok` and a refusal
+    -- reads N. `super` is an owner, which holds companies.read, business.read
+    -- and audit.read; no company principal holds any of them. Each call also
+    -- writes its audit row, which this file's ROLLBACK takes back
+    ('platform_companies_list() is allowed',
+     $q$SELECT platform_companies_list() ->> 'ok'$q$,
+     'PNNNNNY', NULL),
+    ('platform_vehicles_list(company A) is allowed',
+     $q$SELECT platform_vehicles_list({co}) ->> 'ok'$q$,
+     'PNNNNNY', NULL),
+    ('platform_drivers_list(company A) is allowed',
+     $q$SELECT platform_drivers_list({co}) ->> 'ok'$q$,
+     'PNNNNNY', NULL),
+    ('platform_users_list(company A) is allowed',
+     $q$SELECT platform_users_list({co}) ->> 'ok'$q$,
+     'PNNNNNY', NULL),
+    ('platform_audit_list() is allowed',
+     $q$SELECT platform_audit_list() ->> 'ok'$q$,
+     'PNNNNNY', NULL),
     -- anon's EXECUTE revoked by 20260915120000; the platform's invoice screen
     -- calls it signed in
     ('generate_invoice_number(2026)',
