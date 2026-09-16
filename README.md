@@ -14,7 +14,7 @@
 ![Playwright](https://img.shields.io/badge/Playwright-e2e-2EAD33?logo=playwright&logoColor=white)
 ![Languages](https://img.shields.io/badge/UI-Deutsch%20%7C%20English-555555)
 
-![Requirements plan](https://img.shields.io/badge/requirements%20plan-21%20of%2037%20steps-yellow)
+![Requirements plan](https://img.shields.io/badge/requirements%20plan-22%20of%2037%20steps-yellow)
 ![Phase 0](https://img.shields.io/badge/phase%200-5%2F6-yellowgreen)
 ![Phases 1–4](https://img.shields.io/badge/phases%201%E2%80%934-building-orange)
 ![Phase 5](https://img.shields.io/badge/phase%205-not%20started-lightgrey)
@@ -41,11 +41,11 @@ A step counts once it is merged into `staging` and verified there. Production re
 | **0** | Releases, rollback, staging protection | `▰▰▰▰▰▱` **5/6** · 83% | ![live on staging](https://img.shields.io/badge/-live%20on%20staging-2ea44f) 0.6 waits for the production button |
 | **1** | OTP and account security | `▰▰▰▰▰▰▱` **6/7** · 86% | ![on staging](https://img.shields.io/badge/-on%20staging-2ea44f) PRs #11, #16, #14; done once the code flows pass on staging and a real code arrives from production. 1.6 Google sign-in: database (PR #22) and deploy settings (PR #29) are on staging, switched off; the sign-in screens wait for the Google Cloud clients, a privacy policy and an Impressum |
 | **2** | Design system and prototype | `▰▰▰` **3/3** · 100% | ![on staging](https://img.shields.io/badge/-on%20staging-2ea44f) PR #17; approved when the owner asked to merge every open PR |
-| **3** | Platform admin and permissions | `▰▰▰▰▱▱▱▱▱▱▱▱▱` **4/13** · 31% | ![building](https://img.shields.io/badge/-building-orange) restructured into slices on 15.09.2026; 3.0 (PR #12), 3.1 (PR #24), the first part of 3.6b (PR #36) and 3.5 (PR #39) merged; 3.9 building; 3.2 cancelled on 16.09.2026 (platform admin sign-in stays password-only); the 3.8 conflict report merged (PR #21) |
+| **3** | Platform admin and permissions | `▰▰▰▰▰▱▱▱▱▱▱▱▱` **5/13** · 38% | ![building](https://img.shields.io/badge/-building-orange) restructured into slices on 15.09.2026; 3.0 (PR #12), 3.1 (PR #24), the first part of 3.6b (PR #36), 3.5 (PR #39) and 3.9 (PR #38) merged; 3.3, 3.4 and the /admin screens are next; 3.2 cancelled on 16.09.2026 (platform admin sign-in stays password-only); the 3.8 conflict report merged (PR #21) |
 | **4** | Cash salary receipt | `▰▰▰` **3/3** · 100% | ![on staging](https://img.shields.io/badge/-on%20staging-2ea44f) logic and database (PR #13), screens, PDF and receipt list (PR #34); the Bargeldbestand page still reads the old source (4.3b) |
 | **5** | Design rollout | `▱▱▱▱▱` **0/5** | ![not started](https://img.shields.io/badge/-not%20started-lightgrey) |
 
-**Overall:** `▰▰▰▰▰▰▰▰▰▰▰▱▱▱▱▱▱▱▱▱` 21 of 37 steps · 57%
+**Overall:** `▰▰▰▰▰▰▰▰▰▰▰▰▱▱▱▱▱▱▱▱` 22 of 37 steps · 59%
 
 ### Live on staging
 
@@ -73,6 +73,7 @@ A step counts once it is merged into `staging` and verified there. Production re
 - [x] **4.3a** Gehaltsquittung screens: issue a cash salary receipt from the salary balance, a German PDF with the amount in words, the receipt list on Dokumente with void and signed-copy upload, and receipt payments locked in the salary details — PR #34
 - [x] **3.6b, part 1** Audited platform read models: paginated company, vehicle, driver, user and audit-log lists for platform staff, each checking its capability and refusing to answer when its audit row cannot be written — PR #36
 - [x] **3.5** Audited platform write RPCs: company approval, lifecycle, trial, plan, subscriptions, invoices and codes all go through one audited path, staff can be invited (owner role only until 3.3), and the discount-code, activation-attempt and approval-note holes are closed — PR #39
+- [x] **3.9** Prices and the feature map move into the database: one price book and one plan-feature map, read by `compute_plan_price` and the app, written only by the roles the capability matrix allows (the feature map by the owner alone), with parity tests that pin today's numbers — PR #38
 - [ ] **0.6** First production release from CI — the owner presses the button
 
 ### Building now
@@ -81,7 +82,7 @@ Agents build in parallel git worktrees. Each branch ends in a reviewed PR into `
 
 | Stream | Branch | State |
 |---|---|---|
-| Prices and features in the database (3.9) | `phase3/pricing-settings` | PR #38, fixing review findings |
+| _nothing building right now_ | — | next: 3.3 (one policy shape, server-side status), 3.4 (support sessions), the /admin screens, and 4.3b |
 
 ### Environments
 
