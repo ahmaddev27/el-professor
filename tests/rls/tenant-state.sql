@@ -25,11 +25,13 @@
                        is not a way around the state rules — and
                        redeem_activation_code, the way out of the blocked state,
                        still answers
-    5. the seams       platform_writes_company_data() is false, so no staff role
-                       writes a tenant's rows; platform_reads_company_data()
-                       follows business.read, so billing reads none of it
-    6. staff           an owner reads every company's business data and writes
-                       none of it, and cannot move a row between companies
+    5. the seams       both are false since 20260917140000: neither names a
+                       company, and each sits in an OR beside the tenant term,
+                       so neither can confine anything
+    6. staff           an owner with no open context reads none of a company's
+                       business data and writes none of it, and cannot move a
+                       row between companies. What an open context changes is
+                       tests/rls/platform-contexts.sql's
     7. the shape       every business table asks the same helper, in every
                        command it admits
 
@@ -490,22 +492,30 @@ DECLARE
   co_ok     constant uuid := _ts_id('company:ok');
   drv_ok    constant uuid := _ts_id('driver:ok');
 BEGIN
-  PERFORM _ts_ok('seam: platform_writes_company_data() is false — no staff role writes tenant data before 3.4',
+  -- Both seams are constants since 20260917140000 (plan 3.4): neither takes a
+  -- company, and each sits in an OR beside the tenant term, so a true in either
+  -- would open every company at once. What a staff account may reach is the
+  -- company its open context names, answered by get_active_company_id();
+  -- tests/rls/platform-contexts.sql takes that through every mode and every way
+  -- a context ends.
+  PERFORM _ts_ok('seam: platform_writes_company_data() is false — a support session writes through the tenant term, not through this branch',
     _ts_try(owner_u, 'SELECT platform_writes_company_data()::text') = 'false'
     AND _ts_try(support, 'SELECT platform_writes_company_data()::text') = 'false');
-  PERFORM _ts_ok('seam: platform_reads_company_data() follows business.read',
-    _ts_try(owner_u,  'SELECT platform_reads_company_data()::text') = 'true'
-    AND _ts_try(support,  'SELECT platform_reads_company_data()::text') = 'true'
-    AND _ts_try(readonly, 'SELECT platform_reads_company_data()::text') = 'true'
+  PERFORM _ts_ok('seam: platform_reads_company_data() is false for every staff role, business.read included',
+    _ts_try(owner_u,  'SELECT platform_reads_company_data()::text') = 'false'
+    AND _ts_try(support,  'SELECT platform_reads_company_data()::text') = 'false'
+    AND _ts_try(readonly, 'SELECT platform_reads_company_data()::text') = 'false'
     AND _ts_try(billing,  'SELECT platform_reads_company_data()::text') = 'false');
   PERFORM _ts_ok('seam: a company user holds neither',
     _ts_try('a0000000-0000-4000-8000-000000000001', 'SELECT platform_reads_company_data()::text') = 'false'
     AND _ts_try('a0000000-0000-4000-8000-000000000001', 'SELECT platform_writes_company_data()::text') = 'false');
 
-  -- Reading stays as it is until 3.4 gives staff a session to read inside.
-  PERFORM _ts_ok('staff: an owner reads a company''s drivers and its Fahrtenbuch (HOLE[3.4])',
-    _ts_try(owner_u, format('SELECT count(*)::text FROM drivers WHERE id = %L', drv_ok)) = '1'
-    AND _ts_try(owner_u, format('SELECT count(*)::text FROM fahrtenbuch_trips WHERE id = %L', _ts_id('trip:ok'))) = '1');
+  -- Reading is now the context's too: none of these principals has opened one,
+  -- and _ts_become carries no session claim, so an owner reads a company's
+  -- operational data exactly as anon does.
+  PERFORM _ts_ok('staff: an owner with no open context reads neither a company''s drivers nor its Fahrtenbuch',
+    _ts_try(owner_u, format('SELECT count(*)::text FROM drivers WHERE id = %L', drv_ok)) = '0'
+    AND _ts_try(owner_u, format('SELECT count(*)::text FROM fahrtenbuch_trips WHERE id = %L', _ts_id('trip:ok'))) = '0');
   PERFORM _ts_ok('staff: billing holds no business.read, so it reads no company''s drivers',
     _ts_try(billing, format('SELECT count(*)::text FROM drivers WHERE id = %L', drv_ok)) = '0');
 
