@@ -20,8 +20,11 @@
     3. the shell       …and still read the pages that explain the block: the
                        company row, its settings, the caller's own profile, the
                        role matrix, the subscription and its invoices
-    4. the RPCs        the planning RPCs refuse the same callers, so a SECURITY
-                       DEFINER function is not a way around the state rules
+    4. the RPCs        the planning RPCs and the three Gehaltsquittung RPCs
+                       refuse the same callers, so a SECURITY DEFINER function
+                       is not a way around the state rules — and
+                       redeem_activation_code, the way out of the blocked state,
+                       still answers
     5. the seams       platform_writes_company_data() is false, so no staff role
                        writes a tenant's rows; platform_reads_company_data()
                        follows business.read, so billing reads none of it
@@ -368,9 +371,10 @@ BEGIN
       = 'rows 1');
 END $$;
 
--- ─── 4. the planning RPCs ───────────────────────────────────────────────────
+-- ─── 4. the planning and Gehaltsquittung RPCs ───────────────────────────────
 -- SECURITY DEFINER functions run past RLS, so the state rules have to hold
--- inside them too, or a suspended company would still reassign its trips.
+-- inside them too, or a suspended company would still reassign its trips — and,
+-- through the Gehaltsquittung RPCs, still pay a salary in cash.
 
 DO $$
 DECLARE
@@ -404,6 +408,75 @@ BEGIN
                         'change_rows', jsonb_build_array()))::text$q$,
                    _ts_id('import:ok')))
       NOT LIKE 'ERR P0001%caller has no company%');
+END $$;
+
+/*
+  The Gehaltsquittung RPCs, the one other door a SECURITY DEFINER function opens
+  for a write — and the one that moves money: a confirmation writes a gapless GQ
+  receipt, a salary_payments row and an outgoing cash_movements row. Until
+  20260917100000 they read get_user_company_id(), and their only other guard was
+  current_role_permits('salaries', true), which reads the role matrix and
+  nothing about state — so a blocked account or company paid a salary in cash
+  with the token it already held, and voided receipts the same way.
+
+  A refused caller gets 42501 (HINT not_authorized). The control is a healthy
+  administrator, who passes the guard and is then refused by the business rule
+  for the salary or the receipt that does not exist (P0002) — which is the only
+  way to tell "refused for state" from "refused for everything".
+*/
+
+DO $$
+DECLARE
+  u       record;
+  got     text;
+  absent  constant uuid := _ts_id('absent');   -- no salary and no receipt has it
+BEGIN
+  FOR u IN SELECT * FROM _ts_user ORDER BY who LOOP
+    got := _ts_try(_ts_id('user:' || u.who),
+                   format('SELECT confirm_salary_cash_payment(%L, %L, 10.00, %L, %L)::text',
+                          gen_random_uuid(), absent, current_date, 'Berlin'));
+    PERFORM _ts_ok(format('confirm_salary_cash_payment: %s %s', u.label,
+                          CASE WHEN u.allowed THEN 'gets past the state guard'
+                               ELSE 'is refused' END),
+      CASE WHEN u.allowed THEN got LIKE 'ERR P0002%'
+           ELSE got LIKE 'ERR 42501%' END);
+  END LOOP;
+
+  PERFORM _ts_ok('void_salary_cash_receipt: a suspended company''s admin is refused',
+    _ts_try(_ts_id('user:admin-suspended'),
+            format('SELECT void_salary_cash_receipt(%L, %L)::text', absent, 'TS'))
+      LIKE 'ERR 42501%');
+  PERFORM _ts_ok('void_salary_cash_receipt: a deactivated administrator is refused',
+    _ts_try(_ts_id('user:deactivated'),
+            format('SELECT void_salary_cash_receipt(%L, %L)::text', absent, 'TS'))
+      LIKE 'ERR 42501%');
+  PERFORM _ts_ok('void_salary_cash_receipt: the healthy company''s admin gets past the state guard',
+    _ts_try(_ts_id('user:admin-ok'),
+            format('SELECT void_salary_cash_receipt(%L, %L)::text', absent, 'TS'))
+      LIKE 'ERR P0002%');
+
+  PERFORM _ts_ok('attach_salary_cash_receipt_signed_copy: a suspended company''s admin is refused',
+    _ts_try(_ts_id('user:admin-suspended'),
+            format('SELECT attach_salary_cash_receipt_signed_copy(%L, %L)::text', absent,
+                   _ts_id('company:suspended')::text || '/gq.pdf'))
+      LIKE 'ERR 42501%');
+  PERFORM _ts_ok('attach_salary_cash_receipt_signed_copy: the healthy company''s admin gets past the state guard',
+    _ts_try(_ts_id('user:admin-ok'),
+            format('SELECT attach_salary_cash_receipt_signed_copy(%L, %L)::text', absent,
+                   _ts_id('company:ok')::text || '/gq.pdf'))
+      LIKE 'ERR P0002%');
+
+  -- The way out stays open. redeem_activation_code is how a company whose
+  -- subscription lapsed comes back, so it reads the caller's membership and not
+  -- the active helper, which would answer NULL for exactly that caller. It
+  -- answers rather than refusing: the code below is not six digits, so what
+  -- comes back is its own JSON, from past the company check.
+  PERFORM _ts_ok('redeem_activation_code: a suspended company''s admin is still let in to redeem a code',
+    _ts_try(_ts_id('user:admin-suspended'), 'SELECT redeem_activation_code(''NOPE'')::text')
+      LIKE '%Aktivierungscode%');
+  PERFORM _ts_ok('redeem_activation_code: … and a subscription that expired yesterday, the case it exists for',
+    _ts_try(_ts_id('user:admin-subpast'), 'SELECT redeem_activation_code(''NOPE'')::text')
+      LIKE '%Aktivierungscode%');
 END $$;
 
 -- ─── 5. the seams, and 6. platform staff ────────────────────────────────────

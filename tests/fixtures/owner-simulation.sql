@@ -26,6 +26,14 @@
   rewrites them to call `public.get_active_company_id()`, and leaves them with
   the owner they have. Hand them to `postgres` here, and the migration's grant
   loop and self-check 8 have something real to prove.
+
+  The three Gehaltsquittung RPCs that migration also rewrites are deliberately
+  NOT in the list. They were created in the chain, by 20260914140000, so on the
+  real databases they belong to the role that ran that migration — the same role
+  that runs this one, which is what the kit already reproduces. Handing them to
+  `postgres` here would test an ownership production does not have, and would
+  fail on grants (current_role_permits, next_document_number) that production's
+  owner holds anyway. Simulate an owner only where production really has one.
 */
 
 \set ON_ERROR_STOP on

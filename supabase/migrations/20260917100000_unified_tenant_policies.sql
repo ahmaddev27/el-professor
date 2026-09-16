@@ -81,6 +81,23 @@
   clause. Each keeps its own "caller has no company" message; the sentence is
   now also what a caller whose company may not be used is told.
 
+  **And so do the three Gehaltsquittung RPCs.** `confirm_salary_cash_payment`,
+  `void_salary_cash_receipt` and `attach_salary_cash_receipt_signed_copy`
+  (20260914140000) are SECURITY DEFINER too, and read `get_user_company_id()`.
+  Their only other guard is `current_role_permits('salaries', true)`, which
+  reads the role matrix and never the state of the account or of the company —
+  so a deactivated employee, or any user of a suspended, rejected, unapproved or
+  unsubscribed company, could still POST a Gehaltsquittung with the token it
+  already held and write a gapless GQ receipt, a `salary_payments` row and an
+  outgoing `cash_movements` row, and void receipts the same way. GoTrue keeps
+  refreshing that token from its own tables and never consults `user_profiles`,
+  so the window is not the 20-minute inactivity logout. The same one-fragment
+  rewrite puts all three on `get_active_company_id()`, and each function's
+  existing `IF v_caller IS NULL OR v_company IS NULL … RAISE 42501` then refuses
+  the blocked caller. Nothing else in them changes — the path prefix check in
+  the third still compares against `v_company`, so a signed copy still has to
+  land in the caller's own folder.
+
   **Storage.** The `salary-receipts` policies (20260914140000) move to the same
   helper. The older buckets' policies (`company_logos`, `document_templates`,
   `stundennachweise_pdfs`) predate the schema fixture, so the RLS kit cannot see
@@ -95,6 +112,11 @@
   - It does not change `user_sessions`, the code and referral tables
     (20260916110010 already put those on capabilities), or
     `activation_code_attempts` (20260916130020).
+  - It does not move `redeem_activation_code` onto the active helper. That RPC
+    is the way *out* of a blocked state — a company whose subscription lapsed
+    redeems a code to get it back — so the helper would answer NULL for exactly
+    the caller who needs it. It keeps reading the caller's membership from
+    `user_profiles` directly, the way 20260916130020 wrote it.
 
   ## Compatibility — this bumps deploy/SCHEMA_EPOCH
 
@@ -779,13 +801,83 @@ BEGIN
   RAISE NOTICE '3.3: % planning functions now read get_active_company_id()', v_changed;
 END $mig$;
 
+-- ─── 5b. …and so do the three Gehaltsquittung RPCs ──────────────────────────
+--
+-- The same rewrite at the one other door a SECURITY DEFINER function opens for
+-- a write, and the door money goes through: a confirmation writes a gapless GQ
+-- receipt, a salary_payments row and an outgoing cash_movements row. One
+-- fragment each —
+--
+--     v_company uuid := get_user_company_id();
+--  -> v_company uuid := public.get_active_company_id();
+--
+-- — and their existing `IF v_caller IS NULL OR v_company IS NULL OR NOT
+-- current_role_permits('salaries', true)` branch then refuses a blocked account
+-- or company with 42501 'Keine Berechtigung' (HINT not_authorized), which is
+-- what the screens already show. current_role_permits() reads the role matrix
+-- and nothing about state, so before this the state boundary stopped short of
+-- exactly the path that moves cash.
+--
+-- redeem_activation_code is deliberately NOT in this list: it is the way *out*
+-- of a blocked state — a company whose subscription lapsed redeems a code to
+-- get it back — and the active helper would answer NULL for precisely the
+-- caller who needs it. It keeps reading the caller's membership from
+-- user_profiles, as 20260916130020 wrote it, and tests/rls/tenant-state.sql
+-- section 4 pins that it still answers a suspended company's administrator.
+
+DO $mig$
+DECLARE
+  v_sig     text;
+  v_def     text;
+  v_new     text;
+  v_changed int := 0;
+  -- The fragment as all three write it, in the DECLARE block and nowhere else.
+  v_pattern constant text :=
+    'v_company\s+uuid\s*:=\s*(?:public\.)?get_user_company_id\(\)\s*;';
+BEGIN
+  FOREACH v_sig IN ARRAY ARRAY[
+    'public.confirm_salary_cash_payment(uuid, uuid, numeric, date, text)',
+    'public.void_salary_cash_receipt(uuid, text)',
+    'public.attach_salary_cash_receipt_signed_copy(uuid, text)'
+  ]
+  LOOP
+    IF to_regprocedure(v_sig) IS NULL THEN
+      RAISE EXCEPTION '3.3: % does not exist', v_sig;
+    END IF;
+
+    v_def := pg_get_functiondef(to_regprocedure(v_sig));
+    v_new := regexp_replace(v_def, v_pattern,
+                            'v_company uuid := public.get_active_company_id();', 'g');
+
+    IF v_new = v_def THEN
+      RAISE EXCEPTION '3.3: % does not read the company the way this migration expects — read its body before changing this', v_sig;
+    END IF;
+    -- A second reader of the membership would leave half the function on the
+    -- old rule, which is worse than leaving all of it there.
+    IF v_new ~ 'get_user_company_id' THEN
+      RAISE EXCEPTION '3.3: % reads get_user_company_id() somewhere else too — read its body before changing this', v_sig;
+    END IF;
+
+    EXECUTE v_new;
+    v_changed := v_changed + 1;
+  END LOOP;
+
+  IF v_changed <> 3 THEN
+    RAISE EXCEPTION '3.3: rewrote % Gehaltsquittung functions, expected 3', v_changed;
+  END IF;
+  RAISE NOTICE '3.3: % Gehaltsquittung functions now read get_active_company_id()', v_changed;
+END $mig$;
+
 /*
-  A SECURITY DEFINER function runs as its owner, and on the live databases these
-  five belong to `postgres` rather than to the role running the migrations
-  (CREATE OR REPLACE keeps the owner). `postgres` holds no EXECUTE on
-  get_active_company_id() through PUBLIC, because the grant block above revoked
-  it — so without this the rewritten functions would fail at call time, inside
-  the planning apply step. Granted to whoever owns them, whatever that is here.
+  A SECURITY DEFINER function runs as its owner, and on the live databases the
+  five planning functions belong to `postgres` rather than to the role running
+  the migrations (CREATE OR REPLACE keeps the owner). `postgres` holds no
+  EXECUTE on get_active_company_id() through PUBLIC, because the grant block
+  above revoked it — so without this the rewritten functions would fail at call
+  time, inside the planning apply step. Granted to whoever owns them, whatever
+  that is here. The loop asks the catalogue rather than a list, so the three
+  Gehaltsquittung functions are covered by the same grant, and so is anything a
+  later migration rewrites onto the helper.
 */
 DO $mig$
 DECLARE
@@ -1148,6 +1240,23 @@ BEGIN
 
   IF v_n <> 5 THEN
     RAISE EXCEPTION '3.3 self-check: % of 5 planning functions read get_active_company_id()', v_n;
+  END IF;
+
+  --    And the three Gehaltsquittung RPCs, the one other place where a SECURITY
+  --    DEFINER function decides a company for a write — and the place that
+  --    writes money. None of the three may still read the membership helper:
+  --    half a function on each rule is worse than all of it on the old one.
+  SELECT count(*) INTO v_n
+    FROM pg_proc p
+    JOIN pg_namespace n ON n.oid = p.pronamespace
+   WHERE n.nspname = 'public'
+     AND p.proname IN ('confirm_salary_cash_payment', 'void_salary_cash_receipt',
+                       'attach_salary_cash_receipt_signed_copy')
+     AND p.prosrc ~ 'get_active_company_id'
+     AND p.prosrc !~ 'get_user_company_id';
+
+  IF v_n <> 3 THEN
+    RAISE EXCEPTION '3.3 self-check: % of 3 Gehaltsquittung functions read get_active_company_id()', v_n;
   END IF;
 
   -- 8. The owner of every SECURITY DEFINER function that calls the helper can
