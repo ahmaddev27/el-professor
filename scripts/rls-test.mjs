@@ -49,6 +49,14 @@ const MIGRATIONS_AFTER = '20260908';
 /** Loaded before the assertions; never run as a test file. */
 const SEEDS = new Set(['seed.sql', 'roles-seed.sql']);
 
+/**
+ * Optional hook: run RLS_BEFORE_SQL just before the migration named in
+ * RLS_BEFORE. It exists for the one difference the fixture cannot carry —
+ * function ownership — see tests/fixtures/owner-simulation.sql.
+ */
+const BEFORE = process.env.RLS_BEFORE;
+const BEFORE_SQL = process.env.RLS_BEFORE_SQL;
+
 const PSQL = ['exec', '-i', NAME, 'psql', '-v', 'ON_ERROR_STOP=1', '-q',
               '-U', 'supabase_admin', '-d', 'postgres'];
 const MAX_BUFFER = 64 * 1024 * 1024;
@@ -150,6 +158,16 @@ try {
   const migrations = migrationsAfterFixture();
   step(`applying ${migrations.length} migrations newer than the fixture…`);
   for (const m of migrations) {
+    // A hook for the difference the fixture cannot carry: it was dumped without
+    // owners, so in here every function belongs to the role applying the
+    // migrations, while on the real databases many belong to `postgres`. A
+    // SECURITY DEFINER function runs as its owner, so that difference decides
+    // whether it may call a helper whose EXECUTE was revoked from PUBLIC.
+    // tests/fixtures/owner-simulation.sql reproduces it; see its header.
+    if (BEFORE && BEFORE_SQL && path.basename(m) === BEFORE) {
+      step(`  running ${BEFORE_SQL} before ${BEFORE}…`);
+      psqlFile(path.resolve(ROOT, BEFORE_SQL));
+    }
     try {
       psqlFile(m);
     } catch (err) {

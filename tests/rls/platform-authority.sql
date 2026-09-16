@@ -516,12 +516,15 @@ BEGIN
     _pa_try(NULL, format('SELECT revoke_activation_code(%L)::text', code)) LIKE 'ERR 42501%'
     AND _pa_try(NULL, $q$SELECT update_company_subscription_manual('c0000000-0000-4000-8000-00000000000b', 'active')::text$q$) LIKE 'ERR 42501%');
 
-  -- Recorded, not wanted: is_user_super_admin() is true for any active staff
-  -- role, so the older policies built on it give read_only the writes of an
-  -- owner. HOLE[3.3]: when 3.3 asks the capability instead, this check fails on
-  -- purpose and is turned around.
-  PERFORM _pa_ok('HOLE[3.3] read_only updates a company through a policy built on is_user_super_admin()',
-    _pa_try(readonly, $q$UPDATE companies SET plan = plan WHERE id = 'c0000000-0000-4000-8000-00000000000a'$q$) = 'rows 1');
+  -- Until 20260917100000 is_user_super_admin() was true for any active staff
+  -- role, so every policy built on it gave read_only the writes of an owner.
+  -- The companies policies now ask companies.lifecycle, which read_only does
+  -- not hold, so the row it used to update is not visible to its UPDATE at all.
+  -- This check was the HOLE[3.3] the plan named; it is turned around here.
+  PERFORM _pa_ok('read_only cannot update a company: the policy asks companies.lifecycle, not whether the caller is staff',
+    _pa_try(readonly, $q$UPDATE companies SET plan = plan WHERE id = 'c0000000-0000-4000-8000-00000000000a'$q$) = 'rows 0');
+  PERFORM _pa_ok('…and an owner, which holds companies.lifecycle, still updates it',
+    _pa_try(owner, $q$UPDATE companies SET plan = plan WHERE id = 'c0000000-0000-4000-8000-00000000000a'$q$) = 'rows 1');
 END $$;
 
 -- ─── 4b. who may act on an account: platform_can_manage_account ─────────────
@@ -701,12 +704,14 @@ BEGIN
   -- the other rules, by capability
   PERFORM _pa_ok('guard: support (company_users.manage) changes a member''s role',
     _pa_try(support, format('UPDATE user_profiles SET role_id = %L WHERE user_id = %L', r_viewer, member)) = 'rows 1');
-  PERFORM _pa_ok('guard: billing cannot change a member''s role',
-    _pa_try(billing, format('UPDATE user_profiles SET role_id = %L WHERE user_id = %L', r_viewer, member))
-      LIKE 'ERR P0001 Not allowed: cannot change role assignment%');
-  PERFORM _pa_ok('guard: read_only cannot change a member''s status',
-    _pa_try(readonly, format($q$UPDATE user_profiles SET status = 'suspended' WHERE user_id = %L$q$, member))
-      LIKE 'ERR P0001 Not allowed: cannot change account status%');
+  -- Since 20260917100000 the profile policies ask company_users.manage rather
+  -- than whether the caller is staff at all, so billing never reaches the
+  -- guard: the row is not visible to its UPDATE. The refusal moved one layer
+  -- out, from the trigger to RLS, and says the same thing.
+  PERFORM _pa_ok('guard: billing cannot change a member''s role — RLS refuses before the guard',
+    _pa_try(billing, format('UPDATE user_profiles SET role_id = %L WHERE user_id = %L', r_viewer, member)) = 'rows 0');
+  PERFORM _pa_ok('guard: read_only cannot change a member''s status — RLS refuses before the guard',
+    _pa_try(readonly, format($q$UPDATE user_profiles SET status = 'suspended' WHERE user_id = %L$q$, member)) = 'rows 0');
   PERFORM _pa_ok('guard: support changes a member''s status',
     _pa_try(support, format($q$UPDATE user_profiles SET status = 'suspended' WHERE user_id = %L$q$, member)) = 'rows 1');
   PERFORM _pa_ok('guard: an owner changes a member''s role and status (unchanged for owners)',
