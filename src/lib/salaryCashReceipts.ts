@@ -156,6 +156,24 @@ export async function loadReceipts(companyId: string): Promise<SalaryCashReceipt
   );
 }
 
+/**
+ * One receipt of the company by id, or null when there is none to show.
+ *
+ * Filtered on the company as well as relying on RLS, like every other read
+ * here: the SELECT policy reads the caller's own company, so a receipt of
+ * another company answers as no row rather than as an error.
+ */
+export async function loadReceiptById(companyId: string, receiptId: string): Promise<SalaryCashReceiptWithDriver | null> {
+  const { data, error } = await supabase
+    .from('salary_cash_receipts')
+    .select(RECEIPT_COLUMNS)
+    .eq('company_id', companyId)
+    .eq('id', receiptId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  return (data as SalaryCashReceiptWithDriver | null) ?? null;
+}
+
 /** A short-lived link to a signed copy; null when storage refuses it. */
 export async function signedCopyUrl(path: string): Promise<string | null> {
   const { data, error } = await supabase.storage.from(SALARY_RECEIPTS_BUCKET).createSignedUrl(path, SIGNED_URL_SECONDS);
