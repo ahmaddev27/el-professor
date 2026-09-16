@@ -286,10 +286,13 @@ AS $$
 DECLARE
   c_rows_per_minute CONSTANT integer := 120;
 BEGIN
-  -- No actor, no row to attribute. Both callers refuse such a caller before
-  -- they reach this, and neither grants EXECUTE to anon.
+  -- No actor, no budget that can be counted, so the answer is "spent", never
+  -- "untouched": a guard in app_private fails closed. Unreachable today — both
+  -- callers return `forbidden` for a NULL role before they ask, and neither
+  -- grants EXECUTE to anon — which is exactly why the default must not be the
+  -- permissive one.
   IF p_actor IS NULL THEN
-    RETURN false;
+    RETURN true;
   END IF;
 
   RETURN (SELECT count(*)
@@ -573,6 +576,13 @@ BEGIN
   --    every key the application knows. A release that adds a FeatureKey to
   --    plan_feature_keys() without writing it into the setting fails here
   --    rather than locking the screen for every customer.
+  --
+  --    Completeness is the whole rule, and platform_settings_problem() is what
+  --    states it. Set *equality* is deliberately not asserted: a map that also
+  --    carries a key this build does not know is valid — that is how a feature
+  --    is seeded before the release that gates it (CLAUDE.md, "Add a new gated
+  --    feature"), and self-check 5 below pins it. Demanding equality here would
+  --    abort a release for exactly what the validator permits.
   v_keys := app_private.plan_feature_keys();
   v_seed := app_private.platform_setting_value('plan_features');
 
@@ -583,9 +593,8 @@ BEGIN
     RAISE EXCEPTION '20260917120000 self-check: the stored feature map is refused by the new validator: %',
       app_private.platform_settings_problem('plan_features', v_seed);
   END IF;
-  IF array_length(v_keys, 1) <> 16
-     OR v_keys IS DISTINCT FROM app_private.settings_object_keys(v_seed) THEN
-    RAISE EXCEPTION '20260917120000 self-check: plan_feature_keys() and the stored feature map name different features';
+  IF array_length(v_keys, 1) <> 16 THEN
+    RAISE EXCEPTION '20260917120000 self-check: plan_feature_keys() no longer names the sixteen FeatureKeys';
   END IF;
 
   -- 5. A map that is one key short is refused, and named.
