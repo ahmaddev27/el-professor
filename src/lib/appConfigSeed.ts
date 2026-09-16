@@ -40,5 +40,14 @@ export const SEED_PLAN_FEATURES: Readonly<Record<FeatureKey, Plan>> = {
   stundennachweis:    'premium',
 };
 
-/** `app_private.signup_trial_days()`, the trial `signup_insert_company` applies. */
+/**
+ * The trial `app_private.signup_insert_company` gives a new company.
+ *
+ * Since 20260919120000 (plan 3.10) it is the `trial` setting, read through
+ * `app_private.signup_trial_days()` by the signup and by `get_public_config()`
+ * alike, so the number a visitor is quoted and the number a company is given
+ * cannot come apart. This constant is the value that migration seeds, and the
+ * fallback that function answers when the document is missing or malformed;
+ * `appConfigSeed.test.ts` fails when the two differ.
+ */
 export const SEED_TRIAL_DAYS = 14;
