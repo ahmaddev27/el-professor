@@ -131,18 +131,21 @@ Two full, separate stacks run on one VPS (159.195.205.30), behind ridy's Caddy.
 
 1. `authLoading` → spinner
 2. no `user` → public routes only (`/`, `/login`, `/signup`, `/auth/*`)
-3. `companyApprovalStatus` `pending` / `rejected` / `suspended` → full-page takeover, no router at all
-4. `MustChangePasswordGuard` → forces `/set-new-password`
-5. `SubscriptionGuard` → forces `/abo-aktivieren` when an approved company's subscription is inactive
-6. `PlanGate` per route → `LockedFeaturePage` when the plan tier is too low
-7. `isAdmin` / `isSuperAdmin` conditionally *register* the route at all
+3. `userBlockReason` → `AccountBlockedPage`
+4. a Google account whose profile has no company (`needsCompanyRegistration` in `src/lib/googleAccount.ts`) → `CompleteRegistrationPage`, no router at all. Ahead of the company gates because none of them can answer for an account with no company, and the authenticated router would send it to `/overview`, where every tenant query asks for `company_id = null`.
+5. `companyApprovalStatus` `pending` / `rejected` / `suspended` → full-page takeover, no router at all
+6. `MustChangePasswordGuard` → forces `/set-new-password`
+7. `SubscriptionGuard` → forces `/abo-aktivieren` when an approved company's subscription is inactive
+8. `PlanGate` per route → `LockedFeaturePage` when the plan tier is too low
+9. `isAdmin` / `isSuperAdmin` conditionally *register* the route at all
 
 `AuthContext` also enforces a 20-minute inactivity logout (`SESSION_TIMEOUT`, tracked in `localStorage.lastActivity`).
 
-Two rules about how a session comes to exist:
+Three rules about how a session comes to exist:
 
-- **Owners of a pending or rejected company stay signed in.** `signIn` signs the session back out only for user blocks and for suspended, inactive or deleted companies; gate 3 then shows the waiting or rejected page. A new owner lands on the waiting page straight after entering the signup code.
+- **Owners of a pending or rejected company stay signed in.** `signIn` signs the session back out only for user blocks and for suspended, inactive or deleted companies; gate 5 then shows the waiting or rejected page. A new owner lands on the waiting page straight after entering the signup code.
 - **One-time codes go through `src/lib/otpClient.ts` and nothing else.** Forgot password, the signup verification step, `/auth/verify-email`, `/einladung` and the email change on `/mein-konto` all render `OtpChallenge` from `src/components/auth/`. A session returned by `otp-verify` is installed with `useOtpSessionHandoff`, never with a bare `setSession()` followed by `navigate()`: installing it swaps App's public router for the authenticated one, and a `navigate()` issued around that swap can land in the router being unmounted, leaving the new one on the code screen.
+- **A Google sign-in is one button, one marker and one function** (plan 1.6). `GoogleButton` renders **nothing** until `GET /auth/v1/settings` reports the provider enabled (`src/lib/authProviderSettings.ts`, read once per page load, and "off" for every failure), so the screens are unchanged while `GOOGLE_SIGNIN_ENABLED` is false. `src/lib/googleSignIn.ts` sends the browser with `prompt=select_account` and **no `access_type`** — we call no Google API, so a refresh token would be a secret kept for nothing — and leaves a one-time marker in `sessionStorage` that says which screen started the flow. `AuthContext` then settles the session exactly once through `oauth-account`'s `reconcile`, and `nextAfterReconcile` (`src/lib/oauthAccountClient.ts`) is the whole routing decision. Two things must not drift: **platform staff never sign in with Google** (owner decision, 16.09.2026) — the session is ended and `LoginForm` shows why — and the test for that is `sessionCameFromGoogle`, never "the account has a Google identity", or a platform account whose address also exists at Google would be signed out of a correct password sign-in.
 
 ### Multi-tenancy and the two company IDs
 

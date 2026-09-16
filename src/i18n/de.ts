@@ -170,6 +170,28 @@ export const de = {
   'auth.error.generic':            'Anmeldung nicht möglich. Bitte versuchen Sie es erneut.',
   'auth.error.network':            'Netzwerkfehler. Bitte prüfen Sie Ihre Internetverbindung.',
 
+  // Anmeldung mit Google (Plan 1.6). Der Knopf erscheint nur, solange GoTrue
+  // den Anbieter als aktiv meldet; die Fehlertexte übersetzen die Codes, die
+  // GoTrue nach einem fehlgeschlagenen Versuch zurückgibt.
+  'auth.google.signIn':     'Mit Google anmelden',
+  'auth.google.signUp':     'Mit Google registrieren',
+  'auth.google.continue':   'Mit Google fortfahren',
+  'auth.google.or':         'oder',
+  'auth.google.starting':   'Weiterleitung zu Google…',
+  'auth.google.error.cancelled':       'Die Anmeldung mit Google wurde abgebrochen.',
+  'auth.google.error.generic':         'Die Anmeldung mit Google ist fehlgeschlagen. Bitte versuchen Sie es erneut oder melden Sie sich mit Ihrem Passwort an.',
+  'auth.google.error.startFailed':     'Die Weiterleitung zu Google ist fehlgeschlagen. Bitte versuchen Sie es erneut.',
+  'auth.google.error.serverError':     'Google konnte gerade nicht antworten. Bitte versuchen Sie es in einigen Minuten erneut.',
+  'auth.google.error.flowExpired':     'Die Anmeldung mit Google hat zu lange gedauert. Bitte starten Sie sie erneut.',
+  'auth.google.error.providerDisabled': 'Die Anmeldung mit Google ist derzeit nicht verfügbar. Bitte melden Sie sich mit Ihrem Passwort an.',
+  'auth.google.error.signupDisabled':  'Mit diesem Google-Konto kann derzeit kein Zugang angelegt werden. Bitte melden Sie sich mit Ihrem Passwort an oder wenden Sie sich an den Support.',
+  'auth.google.error.emailNotVerified': 'Ihre E-Mail-Adresse ist bei Google nicht bestätigt. Bitte bestätigen Sie sie bei Google und versuchen Sie es erneut.',
+  'auth.google.error.userBanned':      'Dieser Zugang ist gesperrt. Bitte kontaktieren Sie den Support.',
+  'auth.google.error.accountBlocked':  'Dieser Zugang ist nicht mehr aktiv. Bitte kontaktieren Sie den Support.',
+  'auth.google.error.accountConflict': 'Dieses Google-Konto lässt sich diesem Zugang nicht zuordnen. Bitte melden Sie sich mit Ihrem Passwort an.',
+  'auth.google.error.emailNotAllowed': 'Diese Google-Adresse kann hier nicht verwendet werden. Bitte melden Sie sich mit Ihrem Passwort an.',
+  'auth.google.error.platformStaff':   'Plattform-Zugänge melden sich mit E-Mail-Adresse und Passwort an, nicht mit Google.',
+
   // ── Plan gating ────────────────────────────────────────────────────────────
   'locked.title':           '{feature} ist nicht in Ihrem Plan',
   'locked.body.before':     'Dieses Modul ist ab dem',
@@ -4146,4 +4168,28 @@ export const de = {
 
   // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
   'env.banner.notProduction': 'Testumgebung mit einer Kopie der Produktionsdaten – Änderungen hier erreichen die Produktion nicht',
+
+  // ── Registrierung mit Google (Plan 1.6) ──────────────────────────────────
+  // Der Bildschirm, auf dem ein Google-Zugang ohne Unternehmen landet, und die
+  // Hinweise auf den Anmelde-, Registrierungs- und Einladungsseiten.
+  'gsignup.title':              'Registrierung abschließen',
+  'gsignup.subtitle':           'Ihr Google-Zugang für {email} steht. Jetzt fehlt nur noch Ihr Unternehmen.',
+  'gsignup.heading':            'Ihr Unternehmen',
+  'gsignup.intro':              'Sie werden der erste Administrator des Unternehmens. Nach dem Absenden prüft unser Team Ihre Registrierung.',
+  'gsignup.submit':             'Unternehmen registrieren',
+  'gsignup.signupHint':         'Mit Google brauchen Sie kein Passwort. Ihr gewählter Tarif bleibt erhalten.',
+  'gsignup.inviteHint':         'Nur mit der E-Mail-Adresse, an die Ihre Einladung ging.',
+  'gsignup.inviteMismatch':     'Diese Google-Adresse gehört zu keiner Einladung. Melden Sie sich mit der eingeladenen E-Mail-Adresse an — oder registrieren Sie hier Ihr eigenes Unternehmen.',
+  'gsignup.discard':            'Dieses Konto löschen',
+  'gsignup.discardHint':        'Falsches Google-Konto? Sie können diesen Zugang jetzt wieder löschen.',
+  'gsignup.discardConfirm':     'Dieses Google-Konto wird gelöscht. Sie können sich danach jederzeit neu anmelden.',
+  'gsignup.discardFailed':      'Das Konto konnte nicht gelöscht werden. Bitte melden Sie sich ab und versuchen Sie es später erneut.',
+  'gsignup.discountNotApplied': 'Der Rabattcode konnte nicht eingelöst werden. Ihr Unternehmen ist trotzdem registriert.',
+  'gsignup.error.sessionGone':       'Ihre Sitzung ist nicht mehr gültig. Bitte melden Sie sich erneut mit Google an.',
+  'gsignup.error.emailNotConfirmed': 'Ihre E-Mail-Adresse ist nicht bestätigt. Bitte melden Sie sich erneut mit Google an.',
+  'gsignup.error.notGoogle':         'Dieser Zugang ist nicht mit Google verknüpft. Bitte melden Sie sich mit Ihrem Passwort an.',
+  'gsignup.error.companyExists':     'Dieser Zugang gehört bereits zu einem Unternehmen.',
+  'gsignup.error.noPendingSignup':   'Für diesen Zugang liegt keine offene Registrierung vor. Bitte melden Sie sich erneut mit Google an.',
+  'gsignup.error.invalid':           'Bitte prüfen Sie Ihre Eingaben.',
+  'gsignup.error.failed':            'Die Registrierung konnte nicht abgeschlossen werden. Bitte versuchen Sie es erneut.',
 } as const;

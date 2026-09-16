@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { LogIn, Mail, Lock, Eye, EyeOff, AlertCircle, MailCheck } from 'lucide-react';
 import { useAuth, BLOCK_MESSAGE_KEYS } from '../contexts/AuthContext';
 import { useTranslation } from '../contexts/LanguageContext';
 import LanguageSwitcher from './LanguageSwitcher';
+import GoogleButton from './auth/GoogleButton';
 import type { TranslationKey } from '../i18n';
 
 /**
@@ -47,7 +48,17 @@ const LoginForm: React.FC = () => {
   const [error, setError] = useState('');
   const [needsVerification, setNeedsVerification] = useState(false);
   const [loading, setLoading] = useState(false);
-  const { signIn } = useAuth();
+  const { signIn, authNotice, clearAuthNotice } = useAuth();
+
+  // A session AuthContext ended for a reason of our own — today a Google
+  // sign-in that must not stand, a platform account above all (plan 1.6). It
+  // belongs in the same box as every other sign-in error, and leaves the
+  // context as soon as it is shown.
+  useEffect(() => {
+    if (!authNotice) return;
+    setError(t(authNotice));
+    clearAuthNotice();
+  }, [authNotice, clearAuthNotice, t]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -179,6 +190,16 @@ const LoginForm: React.FC = () => {
               )}
             </button>
           </form>
+
+          {/* Renders nothing until GoTrue reports Google as enabled. */}
+          <div className="mt-5">
+            <GoogleButton
+              from="login"
+              labelKey="auth.google.signIn"
+              divider
+              onError={key => setError(t(key))}
+            />
+          </div>
         </div>
 
         <p className="text-center mt-5 text-white/30 text-sm">
