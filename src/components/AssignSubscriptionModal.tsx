@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { X, Plus, Loader2 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { callPlatformRpc } from '../lib/platformRpc';
 import { useToast } from '../contexts/ToastContext';
 import { useTranslation } from '../contexts/LanguageContext';
 
@@ -46,32 +47,17 @@ export default function AssignSubscriptionModal({ plans, onClose, onAssigned }: 
       showToast('error', t('bill.assign.selectBoth'));
       return;
     }
-    const plan = activePlans.find(p => p.id === planId);
-    if (!plan) return;
-
     setSaving(true);
     try {
-      const { error } = await supabase.from('company_subscriptions').insert({
-        company_id: companyId,
-        plan_id: planId,
-        status: 'active',
-        starts_at: new Date().toISOString().split('T')[0],
-        billing_day: parseInt(billingDay) || 1,
-        monthly_price: plan.monthly_price,
-        payment_method: 'cash',
-        notes: notes || null,
+      // One transaction instead of three requests: the subscription row, the
+      // company's car limit and the settings' drivers-per-car limit are the
+      // plan's, read from the plan in the database rather than sent from here.
+      await callPlatformRpc('platform_subscription_assign', {
+        p_company_id: companyId,
+        p_plan_id: planId,
+        p_billing_day: parseInt(billingDay) || 1,
+        p_notes: notes || null,
       });
-
-      if (error) throw error;
-
-      // Sync plan limits to company
-      await supabase.from('companies').update({
-        subscription_car_limit: plan.included_cars,
-      }).eq('id', companyId);
-
-      await supabase.from('company_settings').update({
-        drivers_per_car_limit: plan.drivers_per_car_limit,
-      }).eq('company_id', companyId);
 
       showToast('success', t('bill.assign.success'));
       onAssigned();

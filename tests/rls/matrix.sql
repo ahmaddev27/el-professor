@@ -87,6 +87,14 @@
   password, with no second step (the owner's decision of 16.09.2026), so no step
   of the plan adds one and nothing here is tagged for it.
 
+  3.5 (20260916130000, 20260916130010, 20260916130020) closed six more: every
+  platform write is now an RPC that checks a capability and audits itself, and
+  with them went the discount codes any signed-in user could read, the attempts
+  anyone could forge in another company's name, a preview that neither counted
+  nor recorded a guess, a redeem open to every member, the approval note every
+  member could read, and the last SECURITY DEFINER function without a pinned
+  search_path. The cells and scenarios they moved are marked below.
+
     3.3  is_user_super_admin() is true for any active platform_staff row, whatever
          its role, so the policies built on it (companies, subscriptions,
          invoices, plans, document categories) give support, billing and
@@ -103,13 +111,6 @@
          is recorded untagged: it is the control that must stay allowed
     3.4  the super admin reads and writes every tenant's operational data with no
          support session, and moves a tenant's rows into another company (M)
-    3.5  discount_codes (code text, assigned company) readable by any signed-in user
-    3.5  activation_code_attempts INSERT WITH CHECK (true) — anyone can write
-         attempts for any company, enough to lock another company out of redeem
-    3.5  preview_activation_code has no rate limit and records no attempt
-    3.5  redeem_activation_code is open to every member, not only the company admin
-    3.5  approval_note and rejection_reason are readable by every company member
-    3.5  SECURITY DEFINER functions without a pinned search_path
 
   ## Recorded without a plan step
 
@@ -851,7 +852,12 @@ CREATE TEMP TABLE _mx_expected (
 INSERT INTO _mx_expected VALUES
 --                                          anon  viewer editor superv admin other super
 ('activation_code_attempts',           'S', '..', '..', '..', '..', '..', '..', 'YY', NULL),
-('activation_code_attempts',           'I', 'RR', 'YY', 'YY', 'YY', 'YY', 'YY', 'YY', '3.5 WITH CHECK (true): any member writes attempts for any company'),
+-- 20260916130020: own_company_insert_attempts replaced WITH CHECK (true), so a
+-- member writes an attempt only for its own company (the second character is
+-- the other company's row) and the platform account, which has none, writes
+-- none. The two activation-code RPCs keep their own auth.uid() as SECURITY
+-- DEFINER, so this policy admits their inserts as before.
+('activation_code_attempts',           'I', 'RR', 'YR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
 ('activation_code_attempts',           'U', '..', '..', '..', '..', '..', '..', '..', NULL),
 ('activation_code_attempts',           'D', '..', '..', '..', '..', '..', '..', '..', NULL),
 ('activation_code_attempts',           'M', '..', '..', '..', '..', '..', '..', '..', NULL),
@@ -880,7 +886,11 @@ INSERT INTO _mx_expected VALUES
 ('cash_transactions',                  'U', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'RR', NULL),
 ('cash_transactions',                  'D', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'YY', '3.4 super reaches tenant data with no support session'),
 ('cash_transactions',                  'M', '..', 'R.', 'R.', 'R.', 'R.', '.R', 'RR', NULL),
-('companies',                          'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'YY', '3.5 approval_note and rejection_reason readable by members'),
+-- A member still reads its own company row. What it can no longer read there is
+-- an approval note: 20260916130020 retired the column, and the platform's record
+-- of a decision is the audit row platform_company_set_approval writes. The
+-- rejection reason stays — a rejected company's owner is shown it.
+('companies',                          'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'YY', NULL),
 ('companies',                          'I', 'RR', 'RR', 'RR', 'RR', 'RR', 'RR', 'YY', '3.3 platform right from any active staff role, not the capability'),
 ('companies',                          'U', '..', '..', '..', '..', '..', '..', 'YY', '3.3 platform right from any active staff role, not the capability'),
 ('companies',                          'D', '..', '..', '..', '..', '..', '..', 'YY', '3.3 platform right from any active staff role, not the capability'),
@@ -910,7 +920,10 @@ INSERT INTO _mx_expected VALUES
 ('discount_code_redemptions',          'U', '..', '..', '..', '..', '..', '..', '..', NULL),
 ('discount_code_redemptions',          'D', '..', '..', '..', '..', '..', '..', '..', NULL),
 ('discount_code_redemptions',          'M', '..', '..', '..', '..', '..', '..', '..', NULL),
-('discount_codes',                     'S', '..', 'YY', 'YY', 'YY', 'YY', 'YY', 'YY', '3.5 every signed-in user reads all active discount codes'),
+-- 20260916130020 dropped the member-facing SELECT policy: only codes.manage
+-- reads them now. The signup form validates a code through the
+-- validate-discount-code function, which runs with the service role.
+('discount_codes',                     'S', '..', '..', '..', '..', '..', '..', 'YY', NULL),
 ('discount_codes',                     'I', 'RR', 'RR', 'RR', 'RR', 'RR', 'RR', 'YY', NULL),
 ('discount_codes',                     'U', '..', '..', '..', '..', '..', '..', 'YY', NULL),
 ('discount_codes',                     'D', '..', '..', '..', '..', '..', '..', 'YY', NULL),
@@ -1446,9 +1459,10 @@ BEGIN
      AND p.prosecdef
      AND NOT EXISTS (SELECT 1 FROM unnest(coalesce(p.proconfig, '{}'::text[])) c WHERE c LIKE 'search_path=%');
   PERFORM _mx_expect('catalogue', 'SECURITY DEFINER functions without a pinned search_path', v,
-    -- was 5: the four platform RPCs gained one when 20260916110010 rewrote them
-    '1: enforce_car_limit',
-    '3.5 pin search_path');
+    -- was 1 (enforce_car_limit): 20260916130020 pins every one of them with
+    -- ALTER FUNCTION … SET, so no body created outside version control is
+    -- rewritten. A new one without a pinned path fails here.
+    '0: ');
 END $$;
 
 -- ── 3.3: company and user state are not enforced by the database ────────────
@@ -1504,35 +1518,52 @@ DECLARE
   v_refused int;
   i        int;
 BEGIN
-  PERFORM _mx_expect('codes', 'viewer of company A reads the text of a code assigned to company B',
+  -- Each check below is the hole's own probe turned around by 20260916130020:
+  -- what used to be allowed is refused, and what the fix must not break is
+  -- checked next to it.
+  PERFORM _mx_expect('codes', 'viewer of company A cannot read a code assigned to company B',
     _mx_try('viewer-a', NULL, format('SELECT count(*) FROM discount_codes WHERE code = %L AND assigned_company_id = %L', 'MX-CODE-b', co_b)),
-    'Y', '3.5 every signed-in user reads all active discount codes');
+    '.');
+  PERFORM _mx_expect('codes', 'the platform still reads every discount code',
+    _mx_try('super', NULL, format('SELECT count(*) FROM discount_codes WHERE code = %L', 'MX-CODE-b')),
+    'Y');
 
-  PERFORM _mx_expect('codes', 'viewer of company A records a failed attempt in company B''s name',
+  PERFORM _mx_expect('codes', 'viewer of company A cannot record an attempt in company B''s name',
     _mx_try('viewer-a', NULL, format('INSERT INTO activation_code_attempts (company_id, user_id, success, reason) VALUES (%L, %L, false, %L)', co_b, admin_b, 'forged')),
-    'Y', '3.5 WITH CHECK (true): any member writes attempts for any company');
+    'R');
+  PERFORM _mx_expect('codes', '…and still records one for its own company, which is what the RPCs write',
+    _mx_try('viewer-a', NULL, format('INSERT INTO activation_code_attempts (company_id, user_id, success, reason) VALUES (%L, %L, false, %L)',
+      'c0000000-0000-4000-8000-00000000000a', 'a0000000-0000-4000-8000-000000000003', 'own')),
+    'Y');
 
-  -- …and ten of those lock company B out of redeeming its own valid code.
+  -- Ten forged attempts used to lock company B out of its own valid code.
   BEGIN
     PERFORM _mx_become('viewer-a');
-    INSERT INTO activation_code_attempts (company_id, user_id, success, reason)
-      SELECT co_b, admin_b, false, 'forged' FROM generate_series(1, 10);
+    BEGIN
+      INSERT INTO activation_code_attempts (company_id, user_id, success, reason)
+        SELECT co_b, admin_b, false, 'forged' FROM generate_series(1, 10);
+      v_out := 'forged';
+    EXCEPTION WHEN insufficient_privilege THEN
+      v_out := 'refused';
+    END;
     PERFORM _mx_become('admin-b');
-    v_out := redeem_activation_code('731604')::text;
+    v_out := v_out || ', ' || CASE WHEN (redeem_activation_code('731604')::jsonb ->> 'success') = 'true'
+                                   THEN 'redeemed' ELSE 'not redeemed' END;
     RAISE EXCEPTION USING ERRCODE = 'ZZ003', MESSAGE = v_out;
   EXCEPTION
     WHEN SQLSTATE 'ZZ003' THEN v_out := SQLERRM;
     WHEN OTHERS THEN v_out := 'error: ' || SQLERRM;
   END;
-  PERFORM _mx_expect('codes', 'forged attempts lock company B out of redeeming its own valid code',
-    CASE WHEN v_out LIKE '%Zu viele Versuche%' THEN 'locked' ELSE v_out END,
-    'locked', '3.5 WITH CHECK (true): any member writes attempts for any company');
+  PERFORM _mx_expect('codes', 'the forging is refused and company B''s admin still redeems its own code',
+    v_out, 'refused, redeemed');
 
+  -- preview now records every guess and has a budget of its own: twenty in
+  -- fifteen minutes, so the twenty-first through twenty-fifth are refused.
   BEGIN
     SELECT count(*) INTO v_before FROM activation_code_attempts;
     PERFORM _mx_become('viewer-a');
     v_refused := 0;
-    FOR i IN 1 .. 15 LOOP
+    FOR i IN 1 .. 25 LOOP
       v_out := preview_activation_code(lpad(i::text, 6, '9'))::text;
       IF v_out NOT LIKE '%nicht gefunden%' THEN
         v_refused := v_refused + 1;
@@ -1541,13 +1572,42 @@ BEGIN
     PERFORM _mx_become('owner');
     SELECT count(*) INTO v_after FROM activation_code_attempts;
     RAISE EXCEPTION USING ERRCODE = 'ZZ003',
-      MESSAGE = format('15 wrong guesses, %s refused, %s recorded', v_refused, v_after - v_before);
+      MESSAGE = format('25 wrong guesses, %s refused, %s recorded', v_refused, v_after - v_before);
   EXCEPTION
     WHEN SQLSTATE 'ZZ003' THEN v_out := SQLERRM;
     WHEN OTHERS THEN v_out := 'error: ' || SQLERRM;
   END;
-  PERFORM _mx_expect('codes', 'preview_activation_code answers every guess and records none', v_out,
-    '15 wrong guesses, 0 refused, 0 recorded', '3.5 preview_activation_code has no limit');
+  PERFORM _mx_expect('codes', 'preview_activation_code records every guess and refuses after twenty', v_out,
+    '25 wrong guesses, 5 refused, 25 recorded');
+
+  -- The two budgets are separate, which is what keeps previews from locking a
+  -- company out of redeeming — the shape of the forging hole, from the inside.
+  BEGIN
+    PERFORM _mx_become('viewer-a');
+    FOR i IN 1 .. 25 LOOP
+      PERFORM preview_activation_code(lpad(i::text, 6, '9'));
+    END LOOP;
+    PERFORM _mx_become('admin-a');
+    v_out := redeem_activation_code('999999')::text;
+    RAISE EXCEPTION USING ERRCODE = 'ZZ003', MESSAGE = v_out;
+  EXCEPTION
+    WHEN SQLSTATE 'ZZ003' THEN v_out := SQLERRM;
+    WHEN OTHERS THEN v_out := 'error: ' || SQLERRM;
+  END;
+  PERFORM _mx_expect('codes', 'twenty-five failed previews do not spend the redeem budget',
+    CASE WHEN v_out LIKE '%ungültig%' THEN 'answered' ELSE v_out END, 'answered');
+
+  -- Redeeming spends the company's money, so it is the administrator's.
+  BEGIN
+    PERFORM _mx_become('viewer-a');
+    v_out := redeem_activation_code('482915')::text;
+    RAISE EXCEPTION USING ERRCODE = 'ZZ003', MESSAGE = v_out;
+  EXCEPTION
+    WHEN SQLSTATE 'ZZ003' THEN v_out := SQLERRM;
+    WHEN OTHERS THEN v_out := 'error: ' || SQLERRM;
+  END;
+  PERFORM _mx_expect('codes', 'a viewer cannot redeem its company''s activation code',
+    CASE WHEN v_out LIKE '%Nur Administratoren%' THEN 'refused' ELSE v_out END, 'refused');
 
   BEGIN
     PERFORM _mx_become('admin-a');
@@ -1562,11 +1622,19 @@ BEGIN
   PERFORM _mx_expect('codes', 'redeem_activation_code refuses after ten failed guesses',
     CASE WHEN v_out LIKE '%Zu viele Versuche%' THEN 'limited' ELSE v_out END, 'limited');
 
-  PERFORM _mx_expect('codes', 'viewer reads its company''s approval_note and rejection_reason',
+  -- The approval note is retired: the column is cleared on the way in, so there
+  -- is nothing for a member to read. The rejection reason stays — a rejected
+  -- company's owner is shown it on the rejected page.
+  PERFORM _mx_expect('codes', 'no approval note is stored on a company row any more',
     _mx_try('viewer-a',
-      $q$UPDATE companies SET approval_note = 'mx note', rejection_reason = 'mx reason' WHERE slug = 'test-a'$q$,
-      $q$SELECT count(*) FROM companies WHERE slug = 'test-a' AND approval_note = 'mx note' AND rejection_reason = 'mx reason'$q$),
-    'Y', '3.5 approval_note and rejection_reason readable by members');
+      $q$UPDATE companies SET approval_note = 'mx note' WHERE slug = 'test-a'$q$,
+      $q$SELECT count(*) FROM companies WHERE slug = 'test-a' AND approval_note IS NOT NULL$q$),
+    '.');
+  PERFORM _mx_expect('codes', 'a member still reads its company''s rejection reason',
+    _mx_try('viewer-a',
+      $q$UPDATE companies SET rejection_reason = 'mx reason' WHERE slug = 'test-a'$q$,
+      $q$SELECT count(*) FROM companies WHERE slug = 'test-a' AND rejection_reason = 'mx reason'$q$),
+    'Y');
 END $$;
 
 -- ── RPCs ────────────────────────────────────────────────────────────────────
@@ -1610,6 +1678,42 @@ VALUES (_mx_id('rpc_salary', 'a'), _mx_id('drivers2', 'a'), '2026-04-01', '2026-
         'a0000000-0000-4000-8000-000000000001', 'c0000000-0000-4000-8000-00000000000a', 100)
 ON CONFLICT (id) DO NOTHING;
 
+-- Plan 3.5's write RPCs need a target each: a trial to extend, an active plan
+-- to assign, an invoice that is already paid (so "mark unpaid" has something to
+-- undo), and three company-less accounts for the staff functions — one free,
+-- one on the team, one disabled.
+UPDATE companies SET trial_end = now() + interval '7 days'
+ WHERE id = 'c0000000-0000-4000-8000-00000000000a' AND trial_end IS NULL;
+
+INSERT INTO subscription_plans (id, name, monthly_price, included_cars, drivers_per_car_limit, is_active)
+VALUES (_mx_id('rpc_plan', 'a'), 'MX rpc plan', 20, 1, 4, true)
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO subscription_invoices (id, company_id, subscription_id, invoice_month, invoice_year,
+                                   invoice_number, amount, due_date, status, paid_at, cash_received_amount)
+VALUES (_mx_id('rpc_paid_invoice', 'a'), 'c0000000-0000-4000-8000-00000000000a',
+        _mx_id('company_subscriptions', 'a'), 9, 2026, 'INV-2026-3901', 20, '2026-09-30', 'paid', now(), 20)
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO auth.users (id, email) VALUES
+  (_mx_id('rpc_staff_free', 'a'),     'mx-staff-free@test.invalid'),
+  (_mx_id('rpc_staff_active', 'a'),   'mx-staff-active@test.invalid'),
+  (_mx_id('rpc_staff_disabled', 'a'), 'mx-staff-disabled@test.invalid')
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO user_profiles (user_id, email, full_name, role, company_id, status) VALUES
+  (_mx_id('rpc_staff_free', 'a'),     'mx-staff-free@test.invalid',     'MX Staff Free',     'viewer', NULL, 'active'),
+  (_mx_id('rpc_staff_active', 'a'),   'mx-staff-active@test.invalid',   'MX Staff Active',   'viewer', NULL, 'active'),
+  (_mx_id('rpc_staff_disabled', 'a'), 'mx-staff-disabled@test.invalid', 'MX Staff Disabled', 'viewer', NULL, 'active')
+ON CONFLICT (user_id) DO NOTHING;
+
+-- Owner rows: disabling one leaves the seeded platform principal active, so the
+-- last-owner trigger is not what the probe measures.
+INSERT INTO app_private.platform_staff (user_id, role, disabled_at, note) VALUES
+  (_mx_id('rpc_staff_active', 'a'),   'owner', NULL,  'mx rpc'),
+  (_mx_id('rpc_staff_disabled', 'a'), 'owner', now(), 'mx rpc')
+ON CONFLICT (user_id) DO NOTHING;
+
 -- Checked in the order listed. `stmt` is filled for company A (see _mx_fill).
 CREATE TEMP TABLE _mx_rpc (ord serial, label text, stmt text, want text, hole text);
 
@@ -1649,10 +1753,20 @@ INSERT INTO _mx_rpc (label, stmt, want, hole) VALUES
     ('platform_whoami() names a role',
      $q$SELECT (platform_whoami() ->> 'role' IS NOT NULL)::text$q$,
      'PNNNNNY', NULL),
-    -- writes a row for staff only; NULL, so N, for everyone else
-    ('platform_audit_record(read)',
-     $q$SELECT (platform_audit_record('read', 'matrix.probe', 'ok') IS NOT NULL)::text$q$,
+    -- writes a row for staff only; NULL, so N, for everyone else. 20260916130000
+    -- narrowed it to the actions the edge functions actually send, so the probe
+    -- names one of them; `matrix.probe` is now refused, which the next line
+    -- records. The platform principal is an owner and holds business.read, the
+    -- capability manage_users.list needs to be recorded as anything but denied.
+    ('platform_audit_record(read manage_users.list)',
+     $q$SELECT (platform_audit_record('read', 'manage_users.list', 'ok') IS NOT NULL)::text$q$,
      'PNNNNNY', NULL),
+    -- An action no function sends is an argument error (22023) for every caller
+    -- that may open the door at all, so nothing can write a row that passes for
+    -- one the database itself wrote.
+    ('platform_audit_record(an action nothing sends)',
+     $q$SELECT platform_audit_record('read', 'matrix.probe', 'ok')::text$q$,
+     'PEEEEEE', NULL),
     ('platform_can_manage_account(member of A)',
      $q$SELECT platform_can_manage_account({ref:user_profiles})::text$q$,
      'PNNNNNY', NULL),
@@ -1687,12 +1801,16 @@ INSERT INTO _mx_rpc (label, stmt, want, hole) VALUES
      $q$SELECT generate_invoice_number(2026)$q$,
      'PYYYYYY', NULL),
     -- anon's EXECUTE on both activation-code RPCs revoked by 20260915110000
+    -- 20260916130020: a member of the code's own company still previews it, and
+    -- the super admin no longer does — it belongs to no company, and the
+    -- binding comparison that used to read NULL and fall through now refuses.
     ('preview_activation_code(valid code of A)',
      $q$SELECT preview_activation_code('482915')::text$q$,
-     'PYYYYNY', '3.5 preview_activation_code has no limit'),
+     'PYYYYNN', NULL),
+    -- …and redeeming is the company administrator's alone.
     ('redeem_activation_code(valid code of A)',
      $q$SELECT redeem_activation_code('482915')::text$q$,
-     'PYYYYNN', '3.5 redeem_activation_code open to every member, not only the admin'),
+     'PNNNYNN', NULL),
     -- service_role only. 20260911120000 revoked PUBLIC and authenticated and
     -- left the explicit grant Supabase's default privileges give anon, so anyone
     -- holding the anon key could redeem a code against any company, until
@@ -1704,6 +1822,68 @@ INSERT INTO _mx_rpc (label, stmt, want, hole) VALUES
     ('compute_plan_price(basic, 5, monthly)',
      $q$SELECT compute_plan_price('basic', 5, 'monthly')::text$q$,
      'PYYYYYY', NULL),
+
+    -- Plan 3.5's platform write RPCs (20260916130000, 20260916130010). Each
+    -- asks platform_can for its capability and writes its own audit row, the
+    -- refusal included, so a member's N here is a recorded `denied`. anon holds
+    -- EXECUTE on none of them, and neither does the service role, which has no
+    -- auth.uid() to be an actor. The platform principal is an owner and so holds
+    -- every capability; tests/rls/platform-rpcs.sql takes the other three roles
+    -- through the same list.
+    ('platform_company_create(new company)',
+     $q$SELECT platform_company_create('MX RPC', 'mx-rpc-company')::text$q$,
+     'PNNNNNY', NULL),
+    ('platform_company_update(company A)',
+     $q$SELECT platform_company_update('c0000000-0000-4000-8000-00000000000a', 'Test A', 'test-a')::text$q$,
+     'PNNNNNY', NULL),
+    ('platform_company_set_approval(company A, approve)',
+     $q$SELECT platform_company_set_approval('c0000000-0000-4000-8000-00000000000a', 'approve')::text$q$,
+     'PNNNNNY', NULL),
+    ('platform_company_set_status(company A, suspended)',
+     $q$SELECT platform_company_set_status('c0000000-0000-4000-8000-00000000000a', 'suspended')::text$q$,
+     'PNNNNNY', NULL),
+    ('platform_company_lifecycle(company A, archive)',
+     $q$SELECT platform_company_lifecycle('c0000000-0000-4000-8000-00000000000a', 'archive')::text$q$,
+     'PNNNNNY', NULL),
+    ('platform_company_extend_trial(company A, 7)',
+     $q$SELECT platform_company_extend_trial('c0000000-0000-4000-8000-00000000000a', 7)::text$q$,
+     'PNNNNNY', NULL),
+    ('platform_company_set_plan(company A, premium)',
+     $q$SELECT platform_company_set_plan('c0000000-0000-4000-8000-00000000000a', 'premium')::text$q$,
+     'PNNNNNY', NULL),
+    ('platform_subscription_assign(company A)',
+     $q$SELECT platform_subscription_assign('c0000000-0000-4000-8000-00000000000a', {ref:rpc_plan})::text$q$,
+     'PNNNNNY', NULL),
+    ('platform_invoice_mark_paid(invoice of A, 2000 cents)',
+     $q$SELECT platform_invoice_mark_paid({ref:subscription_invoices}, 2000)::text$q$,
+     'PNNNNNY', NULL),
+    ('platform_invoice_mark_unpaid(paid invoice of A)',
+     $q$SELECT platform_invoice_mark_unpaid({ref:rpc_paid_invoice})::text$q$,
+     'PNNNNNY', NULL),
+    ('platform_invoice_cancel(invoice of A)',
+     $q$SELECT platform_invoice_cancel({ref:subscription_invoices})::text$q$,
+     'PNNNNNY', NULL),
+    ('platform_discount_code_save(create)',
+     $q$SELECT platform_discount_code_save(NULL, '{"code":"MX-RPC","discount_type":"percentage","discount_value":5,"usage_mode":"once","audience_type":"multiple"}'::jsonb)::text$q$,
+     'PNNNNNY', NULL),
+    ('platform_discount_code_save(update code of A)',
+     $q$SELECT platform_discount_code_save({ref:discount_codes}, '{"discount_value":7}'::jsonb)::text$q$,
+     'PNNNNNY', NULL),
+    ('platform_discount_code_set_active(code of A, false)',
+     $q$SELECT platform_discount_code_set_active({ref:discount_codes}, false)::text$q$,
+     'PNNNNNY', NULL),
+    ('platform_discount_code_delete(code of A)',
+     $q$SELECT platform_discount_code_delete({ref:discount_codes})::text$q$,
+     'PNNNNNY', NULL),
+    ('platform_staff_add(a company-less account, owner)',
+     $q$SELECT platform_staff_add({ref:rpc_staff_free}, 'owner', 'mx')::text$q$,
+     'PNNNNNY', NULL),
+    ('platform_staff_disable(another owner)',
+     $q$SELECT platform_staff_disable({ref:rpc_staff_active})::text$q$,
+     'PNNNNNY', NULL),
+    ('platform_staff_enable(a disabled owner)',
+     $q$SELECT platform_staff_enable({ref:rpc_staff_disabled})::text$q$,
+     'PNNNNNY', NULL),
 
     -- the planning RPCs, on company A's import, trip and runs. Company B's
     -- admin makes the same calls with company A's ids. None checks the role,

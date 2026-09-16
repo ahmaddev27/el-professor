@@ -37,8 +37,11 @@
     8. audit log      append-only (UPDATE, DELETE, TRUNCATE refused); actor,
                       role and session come from the JWT; platform_audit_record
                       writes for staff only, only read and write rows, and no
-                      action in a namespace the database writes; attempt rows;
-                      staff changes are audited
+                      action in a namespace the database writes; since
+                      20260916130000 only the actions the edge functions send
+                      (app_private.platform_edge_audit_actions()), and a role
+                      without an action's capability records only its refusal;
+                      attempt rows; staff changes are audited
     9. signup         a staff account is never signed up or discarded; every
                       signup path asks oauth_account_is_platform_staff
    10. backfill       every flagged profile that existed before this file ran
@@ -859,19 +862,22 @@ BEGIN
   PERFORM set_config('request.jwt.claims',
     jsonb_build_object('sub', billing, 'role', 'authenticated', 'session_id', sess)::text, true);
   EXECUTE 'SET LOCAL ROLE authenticated';
-  v_id := public.platform_audit_record('write', 'pa.record', 'ok', 'c0000000-0000-4000-8000-00000000000a',
+  -- Since 20260916130000 the action must be one the edge functions send, and
+  -- the caller must hold its capability to record anything but a refusal.
+  -- `activation_code.generate` needs codes.manage, which billing holds.
+  v_id := public.platform_audit_record('write', 'activation_code.generate', 'ok', 'c0000000-0000-4000-8000-00000000000a',
                                        'company', 'c0000000-0000-4000-8000-00000000000a', NULL, '{"x": 1}'::jsonb)::text;
   PERFORM _pa_reset();
   SELECT * INTO r FROM app_private.platform_audit_log WHERE id = v_id::bigint;
   PERFORM _pa_ok('audit: platform_audit_record writes for staff, with actor, role and session from the JWT',
     r.actor_user_id = billing AND r.actor_role = 'billing' AND r.session_id = sess
-    AND r.category = 'write' AND r.action = 'pa.record' AND r.outcome = 'ok'
+    AND r.category = 'write' AND r.action = 'activation_code.generate' AND r.outcome = 'ok'
     AND r.company_id = 'c0000000-0000-4000-8000-00000000000a' AND r.after_value = '{"x": 1}'::jsonb);
 
   PERFORM _pa_ok('audit: platform_audit_record writes nothing for a company admin',
-    _pa_try(admin_a, $q$SELECT platform_audit_record('write', 'pa.record', 'denied')::text$q$) = '<null>');
+    _pa_try(admin_a, $q$SELECT platform_audit_record('write', 'activation_code.generate', 'denied')::text$q$) = '<null>');
   PERFORM _pa_ok('audit: platform_audit_record writes nothing for the flag alone',
-    _pa_try(flag, $q$SELECT platform_audit_record('write', 'pa.record', 'denied')::text$q$) = '<null>');
+    _pa_try(flag, $q$SELECT platform_audit_record('write', 'activation_code.generate', 'denied')::text$q$) = '<null>');
   PERFORM _pa_ok('audit: platform_audit_record accepts only the read and write categories',
     _pa_try(billing, $q$SELECT platform_audit_record('legacy', 'pa.record', 'ok')::text$q$) LIKE 'ERR 22023%'
     AND _pa_try(billing, $q$SELECT platform_audit_record('auth', 'pa.record', 'ok')::text$q$) LIKE 'ERR 22023%'
@@ -888,14 +894,25 @@ BEGIN
     _pa_try(readonly, $q$SELECT platform_audit_record('write', 'legacy.subscription_admin_actions', 'ok')::text$q$) LIKE 'ERR 22023%'
     AND _pa_try(readonly, $q$SELECT platform_audit_record('read', 'auth.sign_in', 'ok')::text$q$) LIKE 'ERR 22023%'
     AND _pa_try(readonly, $q$SELECT platform_audit_record('write', 'legacy', 'ok')::text$q$) LIKE 'ERR 22023%');
+  -- `platform_staff_invite.create` starts like the reserved `platform_staff`
+  -- namespace but is a different name, and the pattern only reserves the name
+  -- followed by a dot or the end. read_only lacks staff.manage, so what it may
+  -- record under that action is its own refusal — which is what it does here.
   PERFORM _pa_ok('audit: a name that only starts like a reserved namespace is not refused',
-    _pa_try(readonly, $q$SELECT (platform_audit_record('read', 'platform_staffing.list', 'ok') IS NOT NULL)::text$q$) = 'true');
+    _pa_try(readonly, $q$SELECT (platform_audit_record('write', 'platform_staff_invite.create', 'denied') IS NOT NULL)::text$q$) = 'true');
+  PERFORM _pa_ok('audit: an action no edge function sends is refused (20260916130000)',
+    _pa_try(billing, $q$SELECT platform_audit_record('write', 'pa.record', 'ok')::text$q$) LIKE 'ERR 22023%'
+    AND _pa_try(billing, $q$SELECT platform_audit_record('read', 'manage_users.create', 'ok')::text$q$) LIKE 'ERR 22023%');
+  PERFORM _pa_ok('audit: a role without an action''s capability records only its refusal',
+    _pa_try(readonly, $q$SELECT platform_audit_record('write', 'activation_code.generate', 'ok')::text$q$) LIKE 'ERR 42501%'
+    AND _pa_try(readonly, $q$SELECT platform_audit_record('write', 'activation_code.generate', 'attempt')::text$q$) LIKE 'ERR 42501%'
+    AND _pa_try(readonly, $q$SELECT (platform_audit_record('write', 'activation_code.generate', 'denied') IS NOT NULL)::text$q$) = 'true');
 
   v_ro_id := _pa_do(readonly, $q$SELECT platform_audit_record('read', 'manage_users.list', 'ok')::text$q$);
   PERFORM _pa_ok('audit: read_only records a read, attributed to itself and its role',
     (SELECT actor_user_id = readonly AND actor_role = 'read_only' AND category = 'read' AND outcome = 'ok'
        FROM app_private.platform_audit_log WHERE id = v_ro_id::bigint));
-  v_ro_id := _pa_do(billing, $q$SELECT platform_audit_record('write', 'manage_users.update', 'attempt')::text$q$);
+  v_ro_id := _pa_do(billing, $q$SELECT platform_audit_record('write', 'activation_code.generate', 'attempt')::text$q$);
   PERFORM _pa_ok('audit: an attempt row is accepted, for a write about to start',
     (SELECT outcome = 'attempt' AND actor_role = 'billing' FROM app_private.platform_audit_log WHERE id = v_ro_id::bigint));
   PERFORM _pa_ok('audit: a malformed action is refused',
@@ -917,7 +934,7 @@ BEGIN
   PERFORM _pa_ok('audit: TRUNCATE is refused',
     _pa_raises('TRUNCATE app_private.platform_audit_log') = 'P0001');
   PERFORM _pa_ok('audit: the row is still there',
-    EXISTS (SELECT 1 FROM app_private.platform_audit_log WHERE id = v_id::bigint AND action = 'pa.record'));
+    EXISTS (SELECT 1 FROM app_private.platform_audit_log WHERE id = v_id::bigint AND action = 'activation_code.generate'));
 END $$;
 
 -- ─── 9. signup never takes a staff account ──────────────────────────────────

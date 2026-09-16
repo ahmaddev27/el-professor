@@ -831,8 +831,17 @@ BEGIN
     _rm_try(owner,    $q$SELECT platform_audit_record('read', 'platform_read.companies_list', 'ok')::text$q$) LIKE 'ERR 22023%'
     AND _rm_try(readonly, $q$SELECT platform_audit_record('write', 'platform_read.anything', 'ok')::text$q$) LIKE 'ERR 22023%'
     AND _rm_try(readonly, $q$SELECT platform_audit_record('read', 'platform_read', 'ok')::text$q$) LIKE 'ERR 22023%');
-  PERFORM _rm_ok('a name that only starts like it is still accepted',
-    _rm_try(readonly, $q$SELECT (platform_audit_record('read', 'platform_readiness.check', 'ok') IS NOT NULL)::text$q$) = 'true');
+  -- This read a name that only starts like the namespace as still accepted,
+  -- which it was while any action could be recorded. Since 20260916130000,
+  -- restated in 20260916150000, the door also takes only the actions the edge
+  -- functions send, so `platform_readiness.check` is refused as well — for not
+  -- being on that list, not for the namespace. The distinction the line was
+  -- written for lives on in the regex itself: a listed action could never be
+  -- placed inside `platform_read.`, while one merely starting with those
+  -- letters would pass the namespace check.
+  PERFORM _rm_ok('a name that only starts like it is refused by the action list, not by the namespace',
+    _rm_try(readonly, $q$SELECT platform_audit_record('read', 'platform_readiness.check', 'ok')::text$q$) LIKE 'ERR 22023%'
+    AND _rm_try(readonly, $q$SELECT (platform_audit_record('read', 'manage_users.list', 'ok') IS NOT NULL)::text$q$) = 'true');
   PERFORM _rm_ok('the namespaces of 20260916110000 are still refused',
     _rm_try(readonly, $q$SELECT platform_audit_record('write', 'platform_staff.delete', 'ok')::text$q$) LIKE 'ERR 22023%'
     AND _rm_try(readonly, $q$SELECT platform_audit_record('write', 'legacy.subscription_admin_actions', 'ok')::text$q$) LIKE 'ERR 22023%'

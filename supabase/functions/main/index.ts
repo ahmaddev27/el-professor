@@ -93,6 +93,8 @@ const FUNCTION_ENV: ReadonlyMap<string, readonly string[]> = new Map<string, rea
   ['otp-verify', [...BASE_ENV, ...SERVICE_ENV, ...OTP_MAIL_ENV]],
   // Invites send an OTP.
   ['manage-users', [...BASE_ENV, ...SERVICE_ENV, ...OTP_MAIL_ENV]],
+  // Invites a member of the platform team the same way, with a code.
+  ['platform-staff', [...BASE_ENV, ...SERVICE_ENV, ...OTP_MAIL_ENV]],
   // Mails the generated code to its target address or its company's admins.
   ['generate-activation-code', [...BASE_ENV, ...SERVICE_ENV, ...SMTP_ENV]],
   // Google sign-in: calls the oauth_* RPCs as service_role for the signed-in

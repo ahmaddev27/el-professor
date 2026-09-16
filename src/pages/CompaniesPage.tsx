@@ -7,6 +7,7 @@ import {
   RotateCcw, Lock, ChevronDown,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { callPlatformRpc } from '../lib/platformRpc';
 import { useAuth } from '../contexts/AuthContext';
 import { useSuperAdmin, CompanyListItem } from '../contexts/SuperAdminContext';
 import { useToast } from '../contexts/ToastContext';
@@ -306,19 +307,18 @@ function CreateCompanyModal({ onClose, onCreated }: CreateCompanyModalProps) {
     if (!form.name.trim() || !form.slug.trim()) { showToast('error', t('sa.companies.errorNameSlugRequired')); return; }
     try {
       setSaving(true);
-      const { data, error } = await supabase.from('companies').insert({
-        name: form.name.trim(), slug: form.slug.trim(),
-        legal_name: form.legal_name.trim() || null, email: form.email.trim() || null,
-        phone: form.phone.trim() || null, address: form.address.trim() || null,
-        city: form.city.trim() || null, postal_code: form.postal_code.trim() || null,
-        country: form.country.trim() || 'Deutschland', status: form.status,
-      }).select().single();
-      if (error) throw error;
-      setCreatedCompany(data as CompanyListItem);
+      const result = await callPlatformRpc('platform_company_create', {
+        p_name: form.name.trim(), p_slug: form.slug.trim(),
+        p_legal_name: form.legal_name.trim() || null, p_email: form.email.trim() || null,
+        p_phone: form.phone.trim() || null, p_address: form.address.trim() || null,
+        p_city: form.city.trim() || null, p_postal_code: form.postal_code.trim() || null,
+        p_country: form.country.trim() || 'Deutschland', p_status: form.status,
+      });
+      setCreatedCompany(result.company as CompanyListItem);
       setStep(2);
       showToast('success', t('sa.companies.toast.created'));
     } catch (err: any) {
-      showToast('error', err.message?.includes('unique') ? t('sa.companies.errorSlugTaken') : err.message || t('common.error'));
+      showToast('error', err?.reason === 'slug_taken' ? t('sa.companies.errorSlugTaken') : err.message || t('common.error'));
     } finally {
       setSaving(false);
     }
@@ -459,19 +459,18 @@ function EditCompanyModal({ company, onClose, onUpdated }: EditCompanyModalProps
     if (!form.name.trim() || !form.slug.trim()) { showToast('error', t('sa.companies.errorNameSlugRequired')); return; }
     try {
       setSaving(true);
-      const { data, error } = await supabase.from('companies').update({
-        name: form.name.trim(), slug: form.slug.trim(),
-        legal_name: form.legal_name.trim() || null, email: form.email.trim() || null,
-        phone: form.phone.trim() || null, address: form.address.trim() || null,
-        city: form.city.trim() || null, postal_code: form.postal_code.trim() || null,
-        country: form.country.trim() || 'Deutschland', status: form.status,
-        updated_at: new Date().toISOString(),
-      }).eq('id', company.id).select().single();
-      if (error) throw error;
+      const result = await callPlatformRpc('platform_company_update', {
+        p_company_id: company.id,
+        p_name: form.name.trim(), p_slug: form.slug.trim(),
+        p_legal_name: form.legal_name.trim() || null, p_email: form.email.trim() || null,
+        p_phone: form.phone.trim() || null, p_address: form.address.trim() || null,
+        p_city: form.city.trim() || null, p_postal_code: form.postal_code.trim() || null,
+        p_country: form.country.trim() || 'Deutschland', p_status: form.status,
+      });
       showToast('success', t('sa.companies.toast.updated'));
-      onUpdated(data as CompanyListItem);
+      onUpdated(result.company as CompanyListItem);
     } catch (err: any) {
-      showToast('error', err.message || t('common.error'));
+      showToast('error', err?.reason === 'slug_taken' ? t('sa.companies.errorSlugTaken') : err.message || t('common.error'));
     } finally {
       setSaving(false);
     }
@@ -986,47 +985,29 @@ export default function CompaniesPage() {
   useEffect(() => { loadCompanies(); }, [loadCompanies]);
 
   // Execute lifecycle action
+  // The company row and its users' status change together, in one transaction,
+  // and the change is audited. The RPC skips a user who is platform staff, as
+  // this screen skipped the profiles it saw flagged.
+  const LIFECYCLE_RPC_ACTION: Record<Exclude<LifecycleAction, 'hardDelete'>, string> = {
+    suspend: 'suspend', reactivate: 'reactivate', archive: 'archive',
+    restore: 'restore', softDelete: 'mark_deleted',
+  };
+
   const executeLifecycleAction = async (action: LifecycleAction, company: CompanyListItem): Promise<void> => {
-    const now = new Date().toISOString();
-
-    if (action === 'suspend') {
-      const { error } = await supabase.from('companies').update({ status: 'suspended', updated_at: now }).eq('id', company.id);
-      if (error) throw error;
-      // Deactivate all company users
-      await supabase.from('user_profiles').update({ status: 'suspended' }).eq('company_id', company.id).neq('is_super_admin', true);
-      showToast('success', t('sa.companies.toast.suspended', { name: company.name }));
-    }
-
-    if (action === 'reactivate') {
-      const { error } = await supabase.from('companies').update({ status: 'active', updated_at: now }).eq('id', company.id);
-      if (error) throw error;
-      // Restore users to active
-      await supabase.from('user_profiles').update({ status: 'active' }).eq('company_id', company.id).eq('status', 'suspended');
-      showToast('success', t('sa.companies.toast.reactivated', { name: company.name }));
-    }
-
-    if (action === 'archive') {
-      const { error } = await supabase.from('companies').update({ status: 'archived', archived_at: now, updated_at: now }).eq('id', company.id);
-      if (error) throw error;
-      // Deactivate all company users
-      await supabase.from('user_profiles').update({ status: 'deactivated' }).eq('company_id', company.id).neq('is_super_admin', true);
-      showToast('success', t('sa.companies.toast.archived', { name: company.name }));
-    }
-
-    if (action === 'restore') {
-      const { error } = await supabase.from('companies').update({
-        status: 'inactive', archived_at: null, deleted_at: null, updated_at: now,
-      }).eq('id', company.id);
-      if (error) throw error;
-      showToast('success', t('sa.companies.toast.restored', { name: company.name, status: t('sa.status.inactive') }));
-    }
-
-    if (action === 'softDelete') {
-      const { error } = await supabase.from('companies').update({ status: 'deleted', deleted_at: now, updated_at: now }).eq('id', company.id);
-      if (error) throw error;
-      // Deactivate all company users
-      await supabase.from('user_profiles').update({ status: 'deactivated' }).eq('company_id', company.id).neq('is_super_admin', true);
-      showToast('success', t('sa.companies.toast.softDeleted', { name: company.name }));
+    if (action !== 'hardDelete') {
+      await callPlatformRpc('platform_company_lifecycle', {
+        p_company_id: company.id,
+        p_action: LIFECYCLE_RPC_ACTION[action],
+      });
+      const toastKey = {
+        suspend: 'sa.companies.toast.suspended', reactivate: 'sa.companies.toast.reactivated',
+        archive: 'sa.companies.toast.archived', softDelete: 'sa.companies.toast.softDeleted',
+      }[action as Exclude<LifecycleAction, 'hardDelete' | 'restore'>];
+      if (action === 'restore') {
+        showToast('success', t('sa.companies.toast.restored', { name: company.name, status: t('sa.status.inactive') }));
+      } else {
+        showToast('success', t(toastKey as TranslationKey, { name: company.name }));
+      }
     }
 
     if (action === 'hardDelete') {
