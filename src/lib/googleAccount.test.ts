@@ -64,19 +64,49 @@ describe('needsCompanyRegistration', () => {
     expect(needsCompanyRegistration(googleNative, profile())).toBe(true);
   });
 
+  /*
+    The state the owner hit minutes after Google sign-in went live on staging.
+
+    Nothing writes a profile between GoTrue creating the account and
+    oauth_signup_create_company writing the company — no trigger on auth.users
+    creates one, and both signup RPCs write the owner's profile themselves — so
+    "no row at all" is the ordinary first state of a Google signup, not a load
+    that has not answered. Answering `false` here let the account into the
+    tenant router with no company, where every query asked for company_id null
+    and Postgres answered `invalid input syntax for type uuid: "null"`.
+
+    App.tsx waits on `profileLoaded` before any gate, so a null profile reaching
+    this function is a decided answer, never a query still in flight.
+  */
+  it('is true for a Google account with no profile row at all', () => {
+    expect(needsCompanyRegistration(googleNative, null)).toBe(true);
+  });
+
+  it('is true with no profile row however the Google identity is recorded', () => {
+    expect(needsCompanyRegistration(linked, null)).toBe(true);
+    expect(needsCompanyRegistration(linkedByIdentity, null)).toBe(true);
+  });
+
+  it('never claims a password account with no profile row: it is no Google signup', () => {
+    expect(needsCompanyRegistration(passwordOnly, null)).toBe(false);
+  });
+
   it('is false once the account belongs to a company', () => {
     expect(needsCompanyRegistration(googleNative, profile({ company_id: 'c-1' }))).toBe(false);
   });
 
   it('never claims a platform account, which is company-less by design', () => {
     expect(needsCompanyRegistration(googleNative, profile({ is_super_admin: true }))).toBe(false);
+    expect(needsCompanyRegistration(googleNative, profile({ is_super_admin: true, company_id: 'c-1' }))).toBe(false);
   });
 
   it('leaves a password account where it is, whatever state it is in', () => {
     expect(needsCompanyRegistration(passwordOnly, profile())).toBe(false);
+    expect(needsCompanyRegistration(passwordOnly, profile({ company_id: 'c-1' }))).toBe(false);
   });
 
-  it('waits for the profile rather than guessing', () => {
-    expect(needsCompanyRegistration(googleNative, null)).toBe(false);
+  it('is false with no user at all, whatever the profile says', () => {
+    expect(needsCompanyRegistration(null, null)).toBe(false);
+    expect(needsCompanyRegistration(null, profile())).toBe(false);
   });
 });
