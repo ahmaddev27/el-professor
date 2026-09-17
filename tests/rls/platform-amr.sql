@@ -44,7 +44,9 @@
     4. the helpers       platform_staff_role(), platform_whoami(),
                          is_user_super_admin(), platform_can_manage_account()
     5. the RPCs          a read model, a settings read, a write RPC and
-                         platform_audit_record all refuse
+                         platform_audit_record all refuse — and the one row a
+                         refused session still leaves, platform_rpc_authorize's
+                         `denied`, names the role the account holds
     6. the policies      a tenant table's platform branch admits nothing
     7. the other methods otp (a code-minted session), a missing amr, sso/saml,
                          anonymous, and password beside oauth
@@ -84,33 +86,32 @@ END $$;
   call an app_private helper the way a SECURITY DEFINER function does.
 
   `p_amr` is the array as JSON text, or NULL for a token that carries no amr at
-  all (GoTrue's `omitempty`). `p_json` chooses where the **amr** comes from:
+  all (GoTrue's `omitempty`). `p_json` chooses which document describes the
+  session — **subject and amr together, never split across the two**, because
+  that is the invariant `app_private.jwt_subject_source()` exists to hold:
   false writes the singular request.jwt.claim.* GUCs the kit uses elsewhere,
   true writes the one request.jwt.claims document PostgREST sets.
 
-  The subject is written in **both** forms either way. `auth.uid()` is not ours
-  and its body differs — the supabase/postgres image's reads only
-  `request.jwt.claim.sub` (see `_as()` in assertions.sql), the live databases'
-  read both — so a check that goes through a function calling it would otherwise
-  measure the image rather than the rule. The gate itself asks
-  `app_private.jwt_has_subject()`, which reads both, and section 1 pins each
-  form on its own.
+  Section 2b pins each form on its own, and pins what happens when both are set
+  and disagree.
 */
 CREATE OR REPLACE FUNCTION _amr_claims(p_user uuid, p_amr text, p_json boolean DEFAULT false) RETURNS void
 LANGUAGE plpgsql AS $$
 DECLARE v_claims jsonb;
 BEGIN
   PERFORM _amr_reset();
-  PERFORM set_config('request.jwt.claim.sub', p_user::text, true);
-  PERFORM set_config('request.jwt.claim.role', 'authenticated', true);
   IF p_json THEN
     v_claims := jsonb_build_object('sub', p_user, 'role', 'authenticated');
     IF p_amr IS NOT NULL THEN
       v_claims := v_claims || jsonb_build_object('amr', p_amr::jsonb);
     END IF;
     PERFORM set_config('request.jwt.claims', v_claims::text, true);
-  ELSIF p_amr IS NOT NULL THEN
-    PERFORM set_config('request.jwt.claim.amr', p_amr, true);
+  ELSE
+    PERFORM set_config('request.jwt.claim.sub', p_user::text, true);
+    PERFORM set_config('request.jwt.claim.role', 'authenticated', true);
+    IF p_amr IS NOT NULL THEN
+      PERFORM set_config('request.jwt.claim.amr', p_amr, true);
+    END IF;
   END IF;
 END $$;
 
@@ -304,9 +305,9 @@ DECLARE
   owner   CONSTANT uuid := '50000000-0000-4000-8000-000000000001';
   admin_a CONSTANT uuid := 'a0000000-0000-4000-8000-000000000001';
 BEGIN
-  -- No JWT at all: a trigger, a migration, GoTrue. This is the case that must
-  -- not break, and the reason the gate compares against auth.uid() rather than
-  -- asking "is this session password-backed" on its own.
+  -- No token at all: a trigger, a migration, GoTrue. This is the case that must
+  -- not break, and the reason the gate asks whether there is a session rather
+  -- than asking "is this session password-backed" on its own.
   PERFORM _amr_reset();
   PERFORM _amr_ok('seam: a caller with no session still reads the staff role',
     app_private.platform_staff_role_of(owner) = 'owner');
@@ -367,10 +368,16 @@ END $$;
   `AND` was NULL, the `IF` never fired, and a Google session kept its platform
   role while every pure-rule assertion around it passed. Both claim forms are
   pinned separately below so that cannot come back quietly.
+
+  The second half of this section pins the symmetry: the `amr` is read out of
+  the same document the subject came from, so the session the rest of the schema
+  resolves the caller as and the sign-in method judged here can never be two
+  different sessions.
 */
 DO $$
 DECLARE
-  owner CONSTANT uuid := '50000000-0000-4000-8000-000000000001';
+  owner   CONSTANT uuid := '50000000-0000-4000-8000-000000000001';
+  admin_a CONSTANT uuid := 'a0000000-0000-4000-8000-000000000001';
 BEGIN
   PERFORM _amr_reset();
   PERFORM _amr_ok('session: no claims at all is not a session',
@@ -429,6 +436,47 @@ BEGIN
   PERFORM set_config('request.jwt.claim.sub', '', true);
   PERFORM _amr_ok('session: malformed claims alone are not a session',
     app_private.jwt_has_subject() = false);
+
+  /*
+    The symmetry the two helpers exist for: the amr is read out of the document
+    the **subject** came from, never out of the other one.
+
+    Without it the two could describe different sessions wherever both forms are
+    set — which is only ever the RLS kit, since PostgREST sets the document
+    alone, but "only in the kit" is where this migration's first defect lived
+    too. The singular claim wins, which is the order `auth.uid()` checks in both
+    of its known bodies, so the session every capability lookup resolves the
+    caller as and the sign-in method judged here are always the same session.
+  */
+  PERFORM _amr_reset();
+  PERFORM set_config('request.jwt.claim.sub', owner::text, true);
+  PERFORM set_config('request.jwt.claim.amr', _amr_password(), true);
+  PERFORM set_config('request.jwt.claims',
+    format('{"sub": "%s", "role": "authenticated", "amr": %s}', admin_a, _amr_oauth()), true);
+  PERFORM _amr_ok('symmetry: the singular subject wins, as it does for auth.uid()',
+    app_private.jwt_subject_source() = 'claim');
+  PERFORM _amr_ok('symmetry: …so the singular amr is the one judged',
+    app_private.session_amr_permits_platform());
+  PERFORM _amr_ok('symmetry: and the owner keeps the role that session established',
+    app_private.platform_staff_role_of(owner) = 'owner');
+
+  -- Take the singular subject away and the document becomes the session, amr
+  -- and all: the singular amr does not outlive the subject it belonged to.
+  PERFORM set_config('request.jwt.claim.sub', '', true);
+  PERFORM _amr_ok('symmetry: without a singular subject the document is the session',
+    app_private.jwt_subject_source() = 'claims');
+  PERFORM _amr_ok('symmetry: …and the singular amr no longer counts',
+    app_private.session_amr_permits_platform() = false);
+  PERFORM _amr_ok('symmetry: so the owner holds nothing through it',
+    app_private.platform_staff_role_of(owner) IS NULL);
+
+  -- An amr with no subject beside it describes no session, so there is no amr
+  -- to read. This is the shape an independent jwt_amr() would have admitted.
+  PERFORM _amr_reset();
+  PERFORM set_config('request.jwt.claims',
+    format('{"role": "authenticated", "amr": %s}', _amr_password()), true);
+  PERFORM _amr_ok('symmetry: an amr with no subject is not a session''s amr',
+    app_private.jwt_amr() IS NULL AND app_private.session_amr_permits_platform() = false);
 
   PERFORM _amr_reset();
 END $$;
@@ -503,9 +551,11 @@ END $$;
 
 DO $$
 DECLARE
-  owner CONSTANT uuid := '50000000-0000-4000-8000-000000000001';
-  co_a  CONSTANT uuid := 'c0000000-0000-4000-8000-00000000000a';
-  v_rows bigint;
+  owner   CONSTANT uuid := '50000000-0000-4000-8000-000000000001';
+  admin_a CONSTANT uuid := 'a0000000-0000-4000-8000-000000000001';
+  co_a    CONSTANT uuid := 'c0000000-0000-4000-8000-00000000000a';
+  v_rows  bigint;
+  v_role  text;
 BEGIN
   -- An audited read model. A refusal is a return value, so the denied row can
   -- still be written; for a caller with no role there is no row at all.
@@ -525,6 +575,57 @@ BEGIN
   PERFORM _amr_ok('rpc: a platform write refuses a Google session',
     _amr_reason(_amr_try(owner, _amr_oauth(),
       format('SELECT platform_company_set_status(%L, ''active'')::text', co_a))) = 'denied');
+
+  /*
+    …and the `denied` row it leaves names the role the account holds.
+
+    This is the one row a refused session can still produce: platform_rpc_authorize
+    (20260916130000:209-222) writes it for *any* actor, staff or not. Left on the
+    gated helper, audit_write would have stamped it NULL — and the log is read by
+    role, so a platform account probing the write RPCs from a Google session
+    would have been indistinguishable from an ordinary company user being
+    refused, on exactly the event this migration exists to record. `actor_role`
+    is a fact about the actor (20260916110000: "the actor's role is always looked
+    up here, never passed"), so it reads platform_staff_role_of_account().
+
+    _amr_do, not _amr_try: the row is the point, and _amr_try would roll it back.
+  */
+  PERFORM _amr_do(owner, _amr_oauth(),
+    format('SELECT platform_company_set_status(%L, ''active'')::text', co_a));
+  PERFORM _amr_reset();
+  SELECT l.actor_role INTO v_role
+    FROM app_private.platform_audit_log l
+   WHERE l.actor_user_id = owner
+     AND l.action = 'company.set_status'
+     AND l.outcome = 'denied'
+   ORDER BY l.id DESC
+   LIMIT 1;
+  PERFORM _amr_ok('rpc: the refused Google session''s denied row names the account''s role, not NULL',
+    v_role = 'owner');
+
+  -- And a company admin refused the same way is still told apart from it: same
+  -- row shape, no role, which is what the column would have said for both if
+  -- audit_write had been left on the gated helper.
+  PERFORM _amr_do(admin_a, _amr_password(),
+    format('SELECT platform_company_set_status(%L, ''active'')::text', co_a));
+  PERFORM _amr_reset();
+  -- The row has to exist for its NULL role to mean anything: `SELECT … INTO`
+  -- leaves the variable alone when nothing matches, so "no row" would read as
+  -- "a row with no role".
+  SELECT count(*) INTO v_rows
+    FROM app_private.platform_audit_log l
+   WHERE l.actor_user_id = admin_a
+     AND l.action = 'company.set_status'
+     AND l.outcome = 'denied';
+  SELECT l.actor_role INTO v_role
+    FROM app_private.platform_audit_log l
+   WHERE l.actor_user_id = admin_a
+     AND l.action = 'company.set_status'
+     AND l.outcome = 'denied'
+   ORDER BY l.id DESC
+   LIMIT 1;
+  PERFORM _amr_ok('rpc: a company admin''s denied row exists and still carries no role',
+    v_rows > 0 AND v_role IS NULL);
 
   -- The edge functions' audit door. It writes for staff and answers NULL for
   -- anyone else — so a Google session cannot even file a row in its own name.
