@@ -82,6 +82,7 @@ BEGIN
   PERFORM set_config('request.jwt.claim.sub', '', true);
   PERFORM set_config('request.jwt.claim.role', '', true);
   PERFORM set_config('request.jwt.claim.session_id', '', true);
+  PERFORM set_config('request.jwt.claim.amr', '', true);
 END $$;
 
 /*
@@ -100,6 +101,12 @@ BEGIN
   END IF;
   PERFORM set_config('request.jwt.claim.sub', p_user::text, true);
   PERFORM set_config('request.jwt.claim.role', 'authenticated', true);
+  -- A password sign-in. Since 20260919130000 a platform capability requires
+  -- one, and app_private.jwt_subject_source() reads the amr out of the same
+  -- form the subject came from — the singular claims, here as in _as().
+  -- Without it every principal below would hold no staff role and this file
+  -- would fail on the rule rather than on what it means to test.
+  PERFORM set_config('request.jwt.claim.amr', '[{"method": "password", "timestamp": 1789416052}]', true);
   IF p_session IS NOT NULL THEN
     PERFORM set_config('request.jwt.claim.session_id', p_session::text, true);
   END IF;
