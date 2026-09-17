@@ -106,7 +106,23 @@ BEGIN
   RETURN v_co IS NOT NULL;
 END $$;
 
-/** Run p_sql as p_user and answer the scalar, `rows N`, or `ERR <state> <msg>`. */
+/*
+  Run p_sql as p_user **in a subtransaction that is always rolled back**, and
+  answer the scalar it returned, `rows N` for a statement without a result, or
+  `ERR <sqlstate> <message>`.
+
+  The rollback is the point and it is not incidental: a block with an EXCEPTION
+  clause is a subtransaction, so raising ZZ006 on the success path and catching
+  it undoes everything the statement did. That is what makes this safe to point
+  at a write — the probe leaves nothing behind — and it is why `_ts_try` in
+  tenant-state.sql and `_pr_try` in platform-rpcs.sql are written the same way.
+
+  **So it cannot be used for a write whose effect is then asserted.** Use
+  `_sub_do` below for that. Getting this wrong does not look like a bug: the
+  statement runs, the RPC answers `success: true`, and the answer survives
+  because it is a value and not a row — only the assertion that reads the table
+  afterwards fails, one line later.
+*/
 CREATE OR REPLACE FUNCTION _sub_try(p_user uuid, p_sql text) RETURNS text
 LANGUAGE plpgsql AS $$
 DECLARE
@@ -132,6 +148,28 @@ BEGIN
     WHEN OTHERS THEN
       GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE, v_msg = MESSAGE_TEXT;
       v_out := 'ERR ' || v_state || ' ' || v_msg;
+  END;
+  PERFORM _sub_reset();
+  RETURN v_out;
+END $$;
+
+/** Like _sub_try, but keeps what the statement did — as `_pr_do` does. */
+CREATE OR REPLACE FUNCTION _sub_do(p_user uuid, p_sql text) RETURNS text
+LANGUAGE plpgsql AS $$
+DECLARE
+  v_out   text;
+  v_state text;
+  v_msg   text;
+BEGIN
+  BEGIN
+    PERFORM _sub_become(p_user);
+    EXECUTE p_sql INTO v_out;
+    v_out := coalesce(v_out, '<null>');
+  EXCEPTION WHEN OTHERS THEN
+    -- Only a statement that actually failed reaches here, and its own effects
+    -- are the only thing this rolls back.
+    GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE, v_msg = MESSAGE_TEXT;
+    v_out := 'ERR ' || v_state || ' ' || v_msg;
   END;
   PERFORM _sub_reset();
   RETURN v_out;
@@ -546,6 +584,10 @@ END $$;
 
 -- ─── 4. an activation code extends ──────────────────────────────────────────
 
+--
+-- Every redemption here goes through `_sub_do`, never `_sub_try`: the effect is
+-- what is asserted, and `_sub_try` rolls its subtransaction back.
+
 DO $$
 DECLARE
   v_bounded uuid;
@@ -554,6 +596,7 @@ DECLARE
   v_end     timestamptz := now() + interval '10 days';
   v_out     text;
   v_exp     timestamptz;
+  v_cov_end timestamptz;
 BEGIN
   -- a company whose coverage runs out in ten days
   v_bounded := _sub_company('code-bounded', 'approved', 'active', 'active', now(), v_end,
@@ -564,18 +607,26 @@ BEGIN
   VALUES (_sub_id('code:bounded'), encode(sha256(convert_to('300111', 'UTF8')), 'hex'),
           '1_monat', now() + interval '7 days', _sub_id('user:code-bounded'), v_bounded);
 
-  v_out := _sub_try(_sub_id('user:code-bounded'), 'SELECT redeem_activation_code(''300111'')::text');
+  v_out := _sub_do(_sub_id('user:code-bounded'), 'SELECT redeem_activation_code(''300111'')::text');
   SELECT subscription_expires_at INTO v_exp FROM companies WHERE id = v_bounded;
+  SELECT period_end INTO v_cov_end
+    FROM subscription_coverage
+   WHERE company_id = v_bounded AND source = 'activation_code'
+     AND source_id = _sub_id('code:bounded') AND status = 'active' AND grants_access;
 
   PERFORM _sub_ok('activation: redeeming succeeds and extends from the running expiry',
     _sub_succeeded(v_out));
-  PERFORM _sub_ok('activation: the company''s expiry is the code''s period end, one month past the old one',
-    v_exp = v_end + interval '1 month');
   PERFORM _sub_ok('activation: the period is recorded as coverage, against the code that granted it',
-    EXISTS (SELECT 1 FROM subscription_coverage
-             WHERE company_id = v_bounded AND source = 'activation_code'
-               AND source_id = _sub_id('code:bounded')
-               AND status = 'active' AND grants_access AND period_end = v_end + interval '1 month'));
+    v_cov_end = v_end + interval '1 month');
+  /*
+    The property the whole slice exists for, stated as one comparison: the
+    company's expiry and the coverage row's end are the same instant, because
+    one of them is derived from the other. Two places deciding one fact is the
+    defect this would catch, so the values are printed either way.
+  */
+  PERFORM _sub_ok(format('activation: the company''s expiry IS the code''s period end (old %s, coverage end %s, company %s)',
+                         v_end, v_cov_end, v_exp),
+    v_exp = v_cov_end AND v_exp = v_end + interval '1 month');
 
   -- rule 1: an open-ended company keeps its open end. Before U1 a redemption
   -- overwrote it with now() + one month, which took open-ended access away from
@@ -587,11 +638,20 @@ BEGIN
   VALUES (_sub_id('code:open'), encode(sha256(convert_to('300222', 'UTF8')), 'hex'),
           '1_monat', now() + interval '7 days', _sub_id('user:code-open'), v_open);
 
-  PERFORM _sub_try(_sub_id('user:code-open'), 'SELECT redeem_activation_code(''300222'')::text');
+  v_out := _sub_do(_sub_id('user:code-open'), 'SELECT redeem_activation_code(''300222'')::text');
   SELECT subscription_expires_at INTO v_exp FROM companies WHERE id = v_open;
-  PERFORM _sub_ok('activation: an open-ended company keeps its open end (rule 1)',
-    v_exp IS NULL
-    AND (SELECT subscription_status FROM companies WHERE id = v_open) = 'active');
+  PERFORM _sub_ok(format('activation: an open-ended company keeps its open end (rule 1) — answered %s, company expiry %s',
+                         _sub_succeeded(v_out), coalesce(v_exp::text, 'open')),
+    _sub_succeeded(v_out)
+    AND v_exp IS NULL
+    AND (SELECT subscription_status FROM companies WHERE id = v_open) = 'active'
+    -- …and the code's own bounded period really was recorded, so the open end
+    -- stands because an open-ended row outranks it and not because nothing
+    -- was written.
+    AND EXISTS (SELECT 1 FROM subscription_coverage
+                 WHERE company_id = v_open AND source = 'activation_code'
+                   AND source_id = _sub_id('code:open')
+                   AND status = 'active' AND grants_access AND period_end IS NOT NULL));
 
   -- the hole at 20260916130020:430: a redemption used to write
   -- subscription_status = 'active' unconditionally, so a company suspended
@@ -603,10 +663,15 @@ BEGIN
   VALUES (_sub_id('code:susp'), encode(sha256(convert_to('300333', 'UTF8')), 'hex'),
           '1_monat', now() + interval '7 days', _sub_id('user:code-susp'), v_susp);
 
+  v_out := _sub_do(_sub_id('user:code-susp'), 'SELECT redeem_activation_code(''300333'')::text');
   PERFORM _sub_ok('activation: a suspended company''s administrator is still let in to redeem',
-    _sub_succeeded(_sub_try(_sub_id('user:code-susp'), 'SELECT redeem_activation_code(''300333'')::text')));
+    _sub_succeeded(v_out));
   PERFORM _sub_ok('activation: …and redeeming no longer un-suspends the company (20260916130020:430)',
     (SELECT status FROM companies WHERE id = v_susp) = 'suspended'
+    -- the redemption really landed, so the company stays out because of its
+    -- status and not because the code was refused
+    AND EXISTS (SELECT 1 FROM subscription_coverage
+                 WHERE company_id = v_susp AND source = 'activation_code' AND status = 'active')
     AND NOT _sub_admitted(_sub_id('user:code-susp')));
 END $$;
 
@@ -638,11 +703,15 @@ BEGIN
   PERFORM _sub_ok('invoices: the company is refused before the invoice is paid',
     NOT _sub_admitted(_sub_id('user:inv')));
 
+  -- _sub_do, not _sub_try: if the payment were rolled back, "paying writes no
+  -- coverage row" would pass because nothing happened at all.
   SELECT count(*) INTO v_before FROM subscription_coverage WHERE company_id = v_co;
-  v_out := _sub_try(v_owner, format('SELECT platform_invoice_mark_paid(%L, %s)::text', v_invoice, 2000));
+  v_out := _sub_do(v_owner, format('SELECT platform_invoice_mark_paid(%L, %s)::text', v_invoice, 2000));
   SELECT count(*) INTO v_after FROM subscription_coverage WHERE company_id = v_co;
 
   PERFORM _sub_ok('invoices: an owner still marks one paid', _sub_succeeded(v_out));
+  PERFORM _sub_ok('invoices: …and the payment really landed, so the checks below are not vacuous',
+    (SELECT status FROM subscription_invoices WHERE id = v_invoice) = 'paid');
   PERFORM _sub_ok('invoices: paying writes no coverage row (rule 5 — that is U2''s)', v_after = v_before);
   PERFORM _sub_ok('invoices: …and the company is still refused',
     NOT _sub_admitted(_sub_id('user:inv')));
@@ -671,11 +740,12 @@ END $$;
 
 DO $$
 DECLARE
-  v_co    uuid;
-  v_short timestamptz := now() + interval '10 days';
-  v_long  timestamptz := now() + interval '40 days';
-  v_exp   timestamptz;
-  v_n     bigint;
+  v_co     uuid;
+  v_short  timestamptz := now() + interval '10 days';
+  v_long   timestamptz := now() + interval '40 days';
+  v_exp    timestamptz;
+  v_first  text;
+  v_second text;
 BEGIN
   v_co := _sub_company('race', 'approved', 'active', 'inactive', NULL, NULL, now() - interval '1 year');
 
@@ -692,13 +762,16 @@ BEGIN
   PERFORM _sub_ok('two at once: …and the same answer with the writes reversed', v_exp = v_long);
 
   -- A second row for the same source is refused, so a double-submitted payment
-  -- or a retried redemption is counted once.
-  SELECT count(*) INTO v_n FROM subscription_coverage WHERE company_id = v_co;
-  PERFORM _sub_ok('two at once: a second period for the same source is refused by the unique index',
-    _sub_raises(format($q$SELECT app_private.subscription_coverage_record(%L, 'activation_code', %L, now(), now() + interval '1 month')$q$,
-                       v_co, _sub_id('code:bounded'))) = 'none'
-    AND _sub_raises(format($q$SELECT app_private.subscription_coverage_record(%L, 'activation_code', %L, now(), now() + interval '2 months')$q$,
-                           v_co, _sub_id('code:bounded'))) = '23505');
+  -- or a retried redemption is counted once. Two statements, not one `AND`: the
+  -- second call only conflicts because the first one landed, and PostgreSQL
+  -- does not promise to evaluate the operands of AND left to right.
+  v_first := _sub_raises(format($q$SELECT app_private.subscription_coverage_record(%L, 'activation_code', %L, now(), now() + interval '1 month')$q$,
+                                v_co, _sub_id('code:bounded')));
+  v_second := _sub_raises(format($q$SELECT app_private.subscription_coverage_record(%L, 'activation_code', %L, now(), now() + interval '2 months')$q$,
+                                 v_co, _sub_id('code:bounded')));
+  PERFORM _sub_ok(format('two at once: a second period for the same source is refused by the unique index (first %s, second %s)',
+                         v_first, v_second),
+    v_first = 'none' AND v_second = '23505');
 
   -- p_replace is what a manual edit uses: it withdraws the picture rather than
   -- adding to it, so an older period cannot stay behind as the newest date.
