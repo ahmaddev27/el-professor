@@ -337,4 +337,74 @@ describe('a preselected salary', () => {
     });
     expect(world.confirmCashPayment.mock.calls[1][0]).toEqual(sent);
   });
+
+  it('switches to the waiting payment once the resumed one is refused', async () => {
+    // Without this the dialog stays on the resumed payment: its retry is
+    // refused, the flow lands back on the amount step still holding that
+    // salary and amount, and the user — who opened this for another salary —
+    // confirms it. That pays the wrong row.
+    const storage = memoryStorage();
+    world.confirmCashPayment.mockResolvedValueOnce({ ok: false, refusal: 'no_response' });
+    const first = await mount(options(storage));
+    await reachPreview();
+    await act(async () => {
+      await probe.flow.confirm();
+    });
+    await act(async () => {
+      first.unmount();
+    });
+
+    const waiting = { driverId: 'd1', salaryId: 's1', amountCents: 12345, paymentDate: '2026-09-17' };
+    await mount({ ...options(storage), preselect: waiting });
+    await waitFor(() => probe.flow.unresolved, 'the resumed attempt');
+    expect(probe.flow.preselectWaiting).toBe(true);
+    expect(probe.flow.amountText).toBe('300,00');
+
+    world.confirmCashPayment.mockResolvedValueOnce({ ok: false, refusal: 'overpayment' });
+    await act(async () => {
+      await probe.flow.confirm();
+    });
+    await waitFor(() => probe.flow.step === 'amount' && !probe.flow.preselectWaiting, 'the waiting payment');
+    expect(probe.flow.amountText).toBe('123,45');
+    expect(probe.flow.paymentDate).toBe('2026-09-17');
+    // Nothing of the settled attempt is carried across: its refusal on this
+    // screen would read as a refusal of the payment now shown.
+    expect(probe.flow.refusal).toBeNull();
+    expect(probe.flow.attempt).toBeNull();
+    expect(probe.flow.pending).toBeNull();
+  });
+
+  it('keeps an issued receipt on screen and offers the waiting payment as the next one', async () => {
+    const storage = memoryStorage();
+    world.confirmCashPayment.mockResolvedValueOnce({ ok: false, refusal: 'no_response' });
+    const first = await mount(options(storage));
+    await reachPreview();
+    await act(async () => {
+      await probe.flow.confirm();
+    });
+    await act(async () => {
+      first.unmount();
+    });
+
+    await mount({
+      ...options(storage),
+      preselect: { driverId: 'd1', salaryId: 's1', amountCents: 12345, paymentDate: '2026-09-17' },
+    });
+    await waitFor(() => probe.flow.unresolved, 'the resumed attempt');
+
+    world.confirmCashPayment.mockResolvedValueOnce({ ok: true, receipt: RECEIPT });
+    await act(async () => {
+      await probe.flow.confirm();
+    });
+    // The receipt just issued is the only place its number is shown, so it stays.
+    expect(probe.flow.step).toBe('done');
+    expect(probe.flow.receipt?.receipt_number).toBe('GQ-2026-0005');
+    expect(probe.flow.preselectWaiting).toBe(true);
+
+    await act(async () => probe.flow.startAnother());
+    expect(probe.flow.step).toBe('amount');
+    expect(probe.flow.amountText).toBe('123,45');
+    expect(probe.flow.receipt).toBeNull();
+    expect(probe.flow.preselectWaiting).toBe(false);
+  });
 });
