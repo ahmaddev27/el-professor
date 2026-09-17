@@ -70,11 +70,23 @@
      bounded one and the expiry stays NULL. Strictly in the customer's favour,
      and `tests/rls/subscriptions.sql` pins it.
   3. **`update_company_subscription_manual` stores the derived word, not the
-     picked one.** `expired` with an end in the future is stored `inactive`, and
-     `inactive` with an end in the past is stored `expired`. Neither grants, so
-     access is unchanged, but `ManualSubscriptionModal` re-opens on the stored
-     word. The trail row records the stored word too (see 8b), and the platform
-     audit row keeps `requested_status` beside it.
+     picked one.** `expired` with an end in the future is stored `inactive`,
+     `inactive` with an end in the past is stored `expired`, and `suspended` is
+     stored as whichever of those two the dates make it. None of the four
+     grants, so access is unchanged for every pick, but `ManualSubscriptionModal`
+     re-opens on the stored word. The trail row records the stored word too (see
+     8b), and the platform audit row keeps `requested_status` beside it.
+  4. **Reactivating from the Freigaben table returns a company to `active`,
+     not to `trial`.** Suspending there now writes `companies.status`, and
+     `platform_company_lifecycle('reactivate')` (20260916130000:609) writes
+     `status = 'active'` unconditionally — it has always done so for
+     CompaniesPage's lifecycle menu. So a company suspended during a running
+     trial comes back `active`, and `buildPlanState` stops granting it the
+     trial's premium although `trial_end` is still ahead. The server admits both
+     words, so access is unchanged; what is lost is the trial tier. Left as a
+     declared change rather than fixed here because restoring the prior status
+     needs the prior status, and neither suspending path records it — see
+     HANDOFF.md for the measurement that decides whether it is worth building.
 
   ## The owner's six rules, answered 17.09.2026
 
@@ -245,7 +257,9 @@ CREATE TABLE IF NOT EXISTS public.subscription_coverage (
 COMMENT ON TABLE public.subscription_coverage IS
   'Plan 3.F: the periods a company is paid or granted. '
   'app_private.recompute_company_subscription() reads it and is the only writer '
-  'of companies.subscription_status, .subscription_expires_at and .plan.';
+  'of companies.subscription_status and .subscription_expires_at. It derives '
+  '.plan too, but platform_company_set_plan writes that column and these rows '
+  'together, so a company with no coverage can still be given a tier.';
 
 -- The recompute reads the live rows of one company and orders them by period_end.
 CREATE INDEX IF NOT EXISTS idx_subscription_coverage_company
@@ -1020,11 +1034,12 @@ END $mig$;
                                       subscription_status / _expires_at
     update_company_subscription_manual replaces the company's coverage from the
                                       values the administrator typed; a chosen
-                                      `suspended` now sets companies.status
+                                      `suspended` records a period that grants
+                                      nothing and never touches companies.status
     platform_company_set_plan         keeps writing companies.plan and carries
-                                      the tier onto the coverage rows that
-                                      cover now, so the next recompute agrees
-                                      with it instead of reverting it
+                                      the tier onto every live granting period
+                                      that has not ended, so the next recompute
+                                      agrees with it instead of reverting it
 */
 
 -- 8a. redeem_activation_code
@@ -1269,10 +1284,12 @@ ALTER FUNCTION public.redeem_activation_code(text) OWNER TO CURRENT_USER;
 -- subscription_admin_actions row, its audit row, its answers and its argument
 -- contract untouched. What changes:
 --
---   * `suspended` is no longer a subscription status. The administrator picking
---     it in ManualSubscriptionModal now suspends the company where suspension
---     lives — companies.status — which is the one place every gate already
---     reads, and the period they typed is still recorded;
+--   * `suspended` is no longer a stored subscription status. It is accepted,
+--     it records the period the administrator typed, and it grants nothing —
+--     which blocks the company exactly as the stored word used to. It does not
+--     touch `companies.status`: this modal is the Abo-Status, not a lifecycle
+--     control, and suspending a company is `companies.lifecycle`'s act. See the
+--     note in the body;
 --   * the period replaces the company's coverage (p_replace), so a revocation
 --     leaves no older period behind as the newest date on record;
 --   * subscription_status and subscription_expires_at come back from the
@@ -1327,22 +1344,38 @@ BEGIN
   -- What was asked for is kept beside it, in the platform audit row's
   -- `requested_status`.
 
-  -- The columns this function still owns. `suspended` is the one value that no
-  -- longer lands in subscription_status: it suspends the company itself, which
-  -- is what the administrator meant and what every gate reads.
+  -- The columns this function still owns. It does **not** write
+  -- `companies.status`: see the note on `suspended` below.
   UPDATE public.companies
      SET subscription_started_at    = COALESCE(p_subscription_started_at, subscription_started_at),
          subscription_duration_type = COALESCE(p_subscription_duration_type, subscription_duration_type),
-         status                     = CASE WHEN p_subscription_status = 'suspended'
-                                           THEN 'suspended' ELSE status END,
          updated_at                 = now()
    WHERE id = p_company_id;
 
-  -- `active` and `suspended` describe a period the company holds; `inactive`
-  -- and `expired` describe one it does not. Either way the dates are recorded,
-  -- and p_replace makes this the only live row so the recompute reads back
-  -- exactly what was typed.
-  v_grants := p_subscription_status IN ('active', 'suspended');
+  /*
+    Only `active` describes a period the company holds. The other three —
+    `inactive`, `expired` and `suspended` — describe one it does not, so each
+    records the dates and grants nothing. Either way p_replace makes this the
+    only live row, so the recompute reads back what was typed.
+
+    **A picked `suspended` does not suspend the company**, and an earlier draft
+    of this function had it write `companies.status` instead. Three things were
+    wrong with that. This modal is the *Abo-Status* (`bill.subStatus.*`), not a
+    lifecycle control: suspending a company is `companies.lifecycle`, which is
+    owners-only under open decision D2, while this RPC asks `billing.manage`,
+    which billing holds — so it handed billing an owner's act. It was one-way,
+    because the CASE only ever set `suspended` and never cleared it, leaving the
+    modal no exit. And because `suspended` was then treated as *granting*, the
+    recompute stored `subscription_status = 'active'` and the modal re-opened on
+    **Aktiv** for a company it had just blocked, with the trail row saying the
+    same.
+
+    As a non-granting period it blocks exactly as it did before U1 — the gate
+    reads `subscription_status = 'active'` and finds `inactive` or `expired` —
+    the capability boundary holds, and picking `Aktiv` afterwards restores a
+    granting period, so the door swings both ways.
+  */
+  v_grants := p_subscription_status = 'active';
   v_start  := COALESCE(p_subscription_started_at, v_company.subscription_started_at,
                        p_subscription_expires_at, v_company.created_at, now());
 
@@ -1394,9 +1427,10 @@ ALTER FUNCTION public.update_company_subscription_manual(uuid, text, timestamptz
 
 -- 8c. platform_company_set_plan
 --
--- The body of 20260916130000 with one addition: the tier is carried onto the
--- coverage rows that cover now, so the next recompute agrees with the screen
--- instead of reverting it. Nothing else moves — the same capability, the same
+-- The body of 20260916130000 with one addition: the tier is carried onto every
+-- live granting period that has not ended — current and future, not only the
+-- one covering today — so the next recompute agrees with the screen instead of
+-- reverting it. Nothing else moves — the same capability, the same
 -- validation, the same audit row, the same answer.
 CREATE OR REPLACE FUNCTION public.platform_company_set_plan(
   p_company_id    uuid,
