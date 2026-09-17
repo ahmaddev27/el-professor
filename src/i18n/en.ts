@@ -58,18 +58,9 @@ export const en: PartialDictionary = {
   'admin.role.billing':     'Billing',
   'admin.role.read_only':   'Read only',
 
-  // ── Platform sign-in (/admin/login) ────────────────────────────────────────
-  // Every refusal reads the same: the page must not answer whether an address
-  // belongs to the platform team.
-  'admin.login.title':           'Platform sign-in',
-  'admin.login.lead':            'For the platform team only.',
-  'admin.login.noGoogle':        'Sign in with an email address and a password. Platform accounts cannot sign in with Google.',
-  'admin.login.submit':          'Sign in',
-  'admin.login.failed':          'Sign-in failed. Please check the email address and the password.',
-  'admin.login.tooManyAttempts': 'Too many sign-in attempts. Please wait a few minutes and try again.',
-  'admin.login.network':         'No connection to the server. Please try again.',
-  'admin.login.companyHint':     'Do you work for a company?',
-  'admin.login.companyLink':     'Go to the company sign-in',
+  // The platform's own sign-in page at /admin/login is gone since 17.09.2026:
+  // platform accounts and company users sign in on the same screen (/login) and
+  // are routed by account afterwards. The 'admin.login.*' strings went with it.
 
   // ── Shell chrome ───────────────────────────────────────────────────────────
   'shell.systemName':       'Management system',
@@ -206,7 +197,9 @@ export const en: PartialDictionary = {
   'auth.google.error.accountBlocked':  'This account is no longer active. Please contact support.',
   'auth.google.error.accountConflict': 'This Google account cannot be linked to that login. Please sign in with your password.',
   'auth.google.error.emailNotAllowed': 'This Google address cannot be used here. Please sign in with your password.',
-  'auth.google.error.platformStaff':   'Platform accounts sign in with an email address and a password, not with Google.',
+  // The refusal on the shared sign-in screen; wording set by the owner on
+  // 17.09.2026.
+  'auth.google.error.platformStaff':   'Administration accounts sign in with email and password only.',
 
   // ── Plan gating ────────────────────────────────────────────────────────────
   'locked.title':           '{feature} is not included in your plan',

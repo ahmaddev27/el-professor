@@ -56,18 +56,10 @@ export const de = {
   'admin.role.billing':     'Buchhaltung',
   'admin.role.read_only':   'Nur Lesen',
 
-  // ── Plattform-Anmeldung (/admin/login) ─────────────────────────────────────
-  // Jede Ablehnung lautet gleich: die Seite darf nicht verraten, ob eine
-  // Adresse zum Plattform-Team gehört.
-  'admin.login.title':           'Plattform-Anmeldung',
-  'admin.login.lead':            'Zugang nur für das Plattform-Team.',
-  'admin.login.noGoogle':        'Die Anmeldung erfolgt mit E-Mail-Adresse und Passwort. Für Plattform-Konten gibt es keine Anmeldung mit Google.',
-  'admin.login.submit':          'Anmelden',
-  'admin.login.failed':          'Anmeldung nicht möglich. Bitte prüfen Sie E-Mail-Adresse und Passwort.',
-  'admin.login.tooManyAttempts': 'Zu viele Anmeldeversuche. Bitte warten Sie einige Minuten und versuchen Sie es erneut.',
-  'admin.login.network':         'Keine Verbindung zum Server. Bitte versuchen Sie es erneut.',
-  'admin.login.companyHint':     'Sie arbeiten für ein Unternehmen?',
-  'admin.login.companyLink':     'Zur Unternehmens-Anmeldung',
+  // Die eigene Plattform-Anmeldung unter /admin/login gibt es seit dem
+  // 17.09.2026 nicht mehr: Plattform-Konten und Unternehmens-Konten melden sich
+  // auf derselben Seite an (/login), die Zuordnung erfolgt danach. Die Texte
+  // 'admin.login.*' sind mit der Seite entfallen.
 
   // ── Shell chrome ───────────────────────────────────────────────────────────
   'shell.systemName':       'Verwaltungssystem',
@@ -204,7 +196,9 @@ export const de = {
   'auth.google.error.accountBlocked':  'Dieser Zugang ist nicht mehr aktiv. Bitte kontaktieren Sie den Support.',
   'auth.google.error.accountConflict': 'Dieses Google-Konto lässt sich diesem Zugang nicht zuordnen. Bitte melden Sie sich mit Ihrem Passwort an.',
   'auth.google.error.emailNotAllowed': 'Diese Google-Adresse kann hier nicht verwendet werden. Bitte melden Sie sich mit Ihrem Passwort an.',
-  'auth.google.error.platformStaff':   'Plattform-Zugänge melden sich mit E-Mail-Adresse und Passwort an, nicht mit Google.',
+  // Die Ablehnung auf der gemeinsamen Anmeldeseite, Wortlaut vom Inhaber
+  // festgelegt am 17.09.2026.
+  'auth.google.error.platformStaff':   'Verwaltungskonten melden sich nur mit E-Mail und Passwort an.',
 
   // ── Plan gating ────────────────────────────────────────────────────────────
   'locked.title':           '{feature} ist nicht in Ihrem Plan',

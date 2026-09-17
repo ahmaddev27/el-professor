@@ -1,11 +1,15 @@
 /**
- * The platform panel's front door (plan slice 3.6a).
+ * The platform panel's front door (plan slice 3.6a, unified on 17.09.2026).
  *
- * `/admin` is the panel's own entry, and `/admin/login` its own sign-in page:
- * platform staff no longer reach the panel by signing in through the company
- * login and being routed onward. `/super-admin` was that entry and keeps
- * working — every one of its paths is rewritten onto `/admin` below, so there
- * is one panel and not two — until plan slice 3.13 removes it.
+ * `/admin` is the panel's entry, and its sign-in is **the company sign-in**.
+ * The owner decided on 17.09.2026 that there is one sign-in screen for platform
+ * accounts and company users alike, routed by account once a session exists —
+ * which reverses the half of slice 3.6a that gave the panel a front door of its
+ * own. So `/login` is the only place anyone types a password, `/admin/login`
+ * (that front door, 16.–17.09.2026) is kept as a redirect onto it so bookmarks
+ * and the remembered return path keep working, and `/super-admin` (the entry
+ * before both) is still rewritten onto `/admin` until plan slice 3.13 removes
+ * it. One panel and one sign-in, with no second copy of either to drift.
  *
  * **None of this is a security boundary.** It decides which screen a browser is
  * shown. What a platform account may read or write is decided in the database,
@@ -23,7 +27,21 @@ import type { TranslationKey } from '../i18n';
 /** The panel's entry. Every platform screen lives below it. */
 export const ADMIN_BASE = '/admin';
 
-/** The platform team's own sign-in page: email and password, nothing else. */
+/**
+ * The one sign-in screen, for platform accounts and company users alike.
+ *
+ * Nothing knows who a visitor is before they sign in, so this screen offers
+ * everything any of them may need — the Google button included — and the
+ * account decides where the session goes afterwards. A platform account that
+ * arrives here by Google is refused: see `googleSignInRefusal` below.
+ */
+export const SIGN_IN_PATH = '/login';
+
+/**
+ * The panel's own sign-in page, 16.–17.09.2026. It is not deleted: it redirects
+ * onto `SIGN_IN_PATH`, carrying any remembered return path with it, so a
+ * bookmark taken during that day still ends somewhere that signs people in.
+ */
 export const ADMIN_LOGIN_PATH = '/admin/login';
 
 /** The panel's previous entry, kept working until plan slice 3.13. */
@@ -70,10 +88,10 @@ export interface PlatformSessionState {
 }
 
 /**
- * What the browser gets at `/admin` and at `/admin/login`.
+ * What the browser gets at `/login`, and at every platform path.
  *
  * - `loading` — wait; the session or its profile has not answered.
- * - `signIn` — no session: the platform sign-in page.
+ * - `signIn` — no session: the one sign-in screen.
  * - `panel` — an account the panel is for. Whether it may actually use it is
  *   `decideAdminGate` below, and then the database.
  * - `tenant` — a signed-in company user: its own app, not an empty shell.
@@ -90,7 +108,7 @@ export function platformEntry(state: PlatformSessionState): PlatformEntry {
 /** Where an entry decision points, or null while there is nothing to decide. */
 export function platformEntryPath(entry: PlatformEntry): string | null {
   switch (entry) {
-    case 'signIn': return ADMIN_LOGIN_PATH;
+    case 'signIn': return SIGN_IN_PATH;
     case 'panel':  return ADMIN_BASE;
     case 'tenant': return TENANT_HOME;
     default:       return null;
@@ -108,8 +126,9 @@ export function platformEntryPath(entry: PlatformEntry): string | null {
  * goes after signing in is an open redirect the moment it is taken on trust.
  * Only a path inside the panel is kept — an absolute URL, a protocol-relative
  * `//host`, a backslash the browser may read as a separator, and any `..`
- * segment that would climb back out are all dropped. The sign-in page itself is
- * dropped too: `AdminLoginRoute` would answer it with this same path, forever.
+ * segment that would climb back out are all dropped. The old panel sign-in is
+ * dropped too, because it now redirects onto `SIGN_IN_PATH` and would hand the
+ * path straight back; `SIGN_IN_PATH` itself never passes the panel-path test.
  */
 export function platformReturnPath(value: unknown): string | null {
   if (typeof value !== 'string') return null;
@@ -118,6 +137,36 @@ export function platformReturnPath(value: unknown): string | null {
   if (value.includes('\\')) return null;
   if (value.split('/').includes('..')) return null;
   return value;
+}
+
+/**
+ * The remembered panel path a router location carries, validated.
+ *
+ * It travels in the router's own location state rather than in the query
+ * string, so it never appears in the address bar — and it survives the router
+ * swap that signing in performs, because react-router keeps that state in the
+ * history entry, which a freshly mounted router reads back.
+ *
+ * Read through `platformReturnPath`, and read that way **every** time it
+ * changes hands: `/admin/login` validates it before passing it on and the
+ * sign-in screen validates it again before following it. Nothing about a value
+ * that has been checked once makes it safe the second time it is used.
+ */
+export function rememberedPanelPath(state: unknown): string | null {
+  const from = (state as { from?: unknown } | null | undefined)?.from;
+  return platformReturnPath(from);
+}
+
+/**
+ * Where `/admin/login` sends a browser, and what it takes along.
+ *
+ * The owner's decision of 17.09.2026 left the path in place rather than
+ * deleting it: a bookmark from the day the panel had its own front door, and
+ * the `PlatformSignInRedirect` that still remembers where a signed-out visitor
+ * was heading, both end on the one sign-in screen with that destination intact.
+ */
+export function legacyAdminLoginRedirect(state: unknown): { to: string; from: string | null } {
+  return { to: SIGN_IN_PATH, from: rememberedPanelPath(state) };
 }
 
 // ─── What the panel itself shows ─────────────────────────────────────────────
@@ -152,33 +201,43 @@ export function decideAdminGate(state: AdminGateState): AdminGateDecision {
   return state.hasPlatformRole ? 'panel' : 'noRole';
 }
 
-// ─── What a failed platform sign-in says ─────────────────────────────────────
+// ─── A platform account that arrived by Google ───────────────────────────────
+
+/** What a refused Google session is shown, and where. */
+export interface GoogleSignInRefusal {
+  /** The address the browser is put on before the session ends. */
+  to: string;
+  /** The sentence that screen then shows. */
+  messageKey: TranslationKey;
+}
 
 /**
- * The message the platform sign-in page shows for a failure.
+ * Whether a settled Google session must be ended because it belongs to a
+ * platform account — the owner's decision of 16.09.2026, that platform staff
+ * sign in with an email address and a password and never with Google.
  *
- * Every refusal reads the same: a wrong password, an address nobody has, an
- * unconfirmed one, a suspended account, a company that is not approved. The
- * page is a directory of the people who administer the platform, so a message
- * that told those apart would answer, to anyone who asked, whether an address
- * is one of them. The company login is free to be more helpful — it has a
- * signup page beside it, so the same question is already answerable there.
+ * **`cameFromGoogle` is `sessionCameFromGoogle(user, hasIntent)`: "this session
+ * was minted by Google", and never "this account has a Google identity".** A
+ * platform account whose address also exists at Google would otherwise be
+ * signed out of a correct password sign-in — the whole reason that test is
+ * written the way it is (`src/lib/googleAccount.ts`).
  *
- * Two answers are kept, because neither says anything about an address:
+ * The browser's refusal is the **message**, not the wall. Since
+ * `20260919130000` the database itself answers NULL to every platform
+ * capability asked from a session GoTrue did not mint with a password
+ * (`app_private.session_amr_permits_platform`), so a Google session reaches the
+ * panel's data no matter what this decides. What it decides is whether the
+ * person is told why, or left staring at an empty panel — which is exactly why
+ * it must not be "simplified away" on the grounds that the server covers it.
  *
- * - the rate limit, which GoTrue applies per client address (the `X-Client-IP`
- *   Caddy writes), so it is reached by guessing, not by existing. Collapsing it
- *   into the generic message would leave a locked-out owner retrying a password
- *   that is correct.
- * - a request that never arrived.
+ * One sign-in screen means one place for that sentence, and `SIGN_IN_PATH` is
+ * where the caller puts the address before ending the session: signing out
+ * swaps the public router in, and it starts wherever the address points.
  */
-export function platformSignInMessageKey(error: { message?: unknown } | null | undefined): TranslationKey {
-  const message = typeof error?.message === 'string' ? error.message.toLowerCase() : '';
-  if (message.includes('too many requests') || message.includes('rate limit')) {
-    return 'admin.login.tooManyAttempts';
-  }
-  if (message.includes('network') || message.includes('failed to fetch')) {
-    return 'admin.login.network';
-  }
-  return 'admin.login.failed';
+export function googleSignInRefusal(session: {
+  cameFromGoogle: boolean;
+  isPlatformAccount: boolean;
+}): GoogleSignInRefusal | null {
+  if (!session.cameFromGoogle || !session.isPlatformAccount) return null;
+  return { to: SIGN_IN_PATH, messageKey: 'auth.google.error.platformStaff' };
 }
