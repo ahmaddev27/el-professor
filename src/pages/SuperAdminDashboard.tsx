@@ -21,6 +21,7 @@ import { calcPricing, fmt as fmtPrice } from '../utils/pricing';
 import { useAppConfig } from '../contexts/AppConfigContext';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { useTranslation } from '../contexts/LanguageContext';
+import { subscriptionIsActive } from '../utils/planState';
 import type { TranslationKey } from '../i18n';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -228,6 +229,29 @@ function CountdownCell({ trialEnd }: { trialEnd: string | null }) {
   );
 }
 
+/**
+ * Does this company's trial clock still say anything about it?
+ *
+ * `redeem_activation_code` writes the five `subscription_*` columns and **never**
+ * `companies.status`, so a customer who has paid keeps `status = 'trial'` and a
+ * `trial_end` in the past for ever. Judging a trial by the date alone therefore
+ * turns every paying customer into an expired trial: a red tile, a critical
+ * *Testphase abgelaufen* and an extend-trial button, one more of each with every
+ * sale — against a company that reads *Aktiv* on its own overview.
+ *
+ * This is `isTrialExpired` in `utils/planState.ts`, asked about another
+ * company's row, and it goes through the same `subscriptionIsActive()`: the
+ * trial ended only if nothing replaced it. A **running** trial is still a trial
+ * whether or not a code has been redeemed, exactly as `isInTrial` ignores the
+ * subscription on the customer's screens — so this can only be false past
+ * `trial_end`, and the running-trial counts are unchanged by it.
+ */
+const readsAsTrial = (c: CompanyRow, now: Date = new Date()): boolean => {
+  if (c.status !== 'trial' || !c.trial_end) return false;
+  if (isAfter(new Date(c.trial_end), now)) return true;
+  return !subscriptionIsActive(c.subscription_status, c.subscription_expires_at, now);
+};
+
 // ─── Attention Item ───────────────────────────────────────────────────────────
 
 interface AttentionItem {
@@ -417,14 +441,16 @@ export default function SuperAdminDashboard() {
         // The totals are sums over every company, so one company whose counts
         // were not read makes them unknown too.
         countsKnown: counts.known && enriched.every(c => c.counts_known),
-        trialCompanies: enriched.filter(c => c.status === 'trial' && c.trial_end && isAfter(new Date(c.trial_end), now)).length,
+        // Every trial figure below goes through readsAsTrial(), so the platform
+        // and the customer read one company the same way.
+        trialCompanies: enriched.filter(c => readsAsTrial(c, now) && c.trial_end && isAfter(new Date(c.trial_end), now)).length,
         activeCompanies: enriched.filter(c => c.status === 'active').length,
         suspendedCompanies: enriched.filter(c => c.status === 'suspended').length,
         inactiveCompanies: enriched.filter(c => c.status === 'inactive').length,
         archivedCompanies: enriched.filter(c => c.status === 'archived').length,
         deletedCompanies: enriched.filter(c => c.status === 'deleted').length,
-        expiredTrials: enriched.filter(c => c.status === 'trial' && c.trial_end && isBefore(new Date(c.trial_end), now)).length,
-        expiringIn7Days: enriched.filter(c => c.status === 'trial' && c.trial_end && isAfter(new Date(c.trial_end), now) && isBefore(new Date(c.trial_end), soon)).length,
+        expiredTrials: enriched.filter(c => readsAsTrial(c, now) && c.trial_end && isBefore(new Date(c.trial_end), now)).length,
+        expiringIn7Days: enriched.filter(c => readsAsTrial(c, now) && c.trial_end && isAfter(new Date(c.trial_end), now) && isBefore(new Date(c.trial_end), soon)).length,
         newThisMonth: enriched.filter(c => isAfter(new Date(c.created_at), monthStart)).length,
         basicCount: enriched.filter(c => (c.plan ?? 'basic') === 'basic').length,
         advancedCount: enriched.filter(c => c.plan === 'advanced').length,
@@ -569,14 +595,19 @@ export default function SuperAdminDashboard() {
       const trialEnd = c.trial_end ? new Date(c.trial_end) : null;
       const daysLeft = trialEnd ? differenceInDays(trialEnd, now) : null;
 
-      if (c.status === 'trial' && trialEnd && isBefore(trialEnd, now)) {
+      // The whole chain, not only its first branch: gating the expired branch
+      // alone would drop a paying customer into the next one, whose daysLeft is
+      // negative and so "≤ 2" — trading one wrong critical item for another.
+      const onTrialClock = readsAsTrial(c, now);
+
+      if (onTrialClock && trialEnd && isBefore(trialEnd, now)) {
         attentionItems.push({ id: `${c.id}-expired`, companyName: c.name, reason: t('sa.dash.attention.trialExpired'), severity: 'critical', company: c });
-      } else if (c.status === 'trial' && daysLeft !== null && daysLeft <= 2) {
+      } else if (onTrialClock && daysLeft !== null && daysLeft <= 2) {
         const remaining = daysLeft <= 0
           ? t('sa.dash.attention.lessThanOneDay')
           : tPlural({ one: 'sa.dash.dayCount.one', other: 'sa.dash.dayCount.other' }, daysLeft);
         attentionItems.push({ id: `${c.id}-critical`, companyName: c.name, reason: t('sa.dash.attention.trialEndsIn', { remaining }), severity: 'critical', company: c });
-      } else if (c.status === 'trial' && daysLeft !== null && daysLeft <= 5) {
+      } else if (onTrialClock && daysLeft !== null && daysLeft <= 5) {
         const remaining = tPlural({ one: 'sa.dash.dayCount.one', other: 'sa.dash.dayCount.other' }, daysLeft);
         attentionItems.push({ id: `${c.id}-warning`, companyName: c.name, reason: t('sa.dash.attention.trialEndsIn', { remaining }), severity: 'warning', company: c });
       }
@@ -602,7 +633,7 @@ export default function SuperAdminDashboard() {
   }
 
   const expiringSoon = companies.filter(c => {
-    if (c.status !== 'trial' || !c.trial_end) return false;
+    if (!readsAsTrial(c) || !c.trial_end) return false;
     const end = new Date(c.trial_end);
     return isAfter(end, new Date()) && isBefore(end, addDays(new Date(), 7));
   });
@@ -997,7 +1028,7 @@ export default function SuperAdminDashboard() {
                   <div className="flex items-center gap-1.5 flex-shrink-0">
                     {/* Extending a trial asks companies.lifecycle, not billing.manage:
                         plan 3.5 keeps the trial with the company's own lifecycle. */}
-                    {canLifecycle && (item.company.status === 'trial') && item.company.trial_end && (
+                    {canLifecycle && readsAsTrial(item.company) && item.company.trial_end && (
                       <button
                         onClick={() => handleExtendTrial(item.company)}
                         disabled={extendingId === item.company.id}
@@ -1266,7 +1297,7 @@ export default function SuperAdminDashboard() {
 
                   {/* Trial countdown */}
                   <td className="px-4 py-3">
-                    {c.status === 'trial' && c.trial_end ? (
+                    {readsAsTrial(c) && c.trial_end ? (
                       <div>
                         <CountdownCell trialEnd={c.trial_end} />
                         <p className="text-[10px] mt-0.5" style={{ color: 'var(--text-tertiary)' }}>
@@ -1283,7 +1314,7 @@ export default function SuperAdminDashboard() {
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-1 justify-end">
-                      {c.status === 'trial' && c.trial_end && (
+                      {readsAsTrial(c) && c.trial_end && (
                         <button
                           hidden={!canBilling}
                           onClick={() => handleExtendTrial(c)}

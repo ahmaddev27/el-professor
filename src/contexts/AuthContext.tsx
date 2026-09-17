@@ -652,11 +652,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // must not drift — from each other, or from `get_active_company_id()`.
   const isSubscriptionActive = subscriptionIsActive(subscriptionStatus, subscriptionExpiresAt);
 
-  // Effective status: if DB says 'active' but expiry is in the past, treat as 'expired'
+  // The label for the screens: the database says `active`, but the subscription
+  // is not. It asks `isSubscriptionActive` rather than comparing the expiry a
+  // second time, so the word on the screen and the rule that decides access
+  // cannot disagree — a date that does not parse now reads `expired` here as
+  // well as failing the predicate, instead of being labelled `active`.
   const effectiveSubscriptionStatus: 'inactive' | 'active' | 'expired' | 'suspended' | null =
     subscriptionStatus === null ? null :
     subscriptionStatus === 'suspended' ? 'suspended' :
-    subscriptionStatus === 'active' && subscriptionExpiresAt !== null && new Date(subscriptionExpiresAt) <= new Date() ? 'expired' :
+    subscriptionStatus === 'active' && !isSubscriptionActive ? 'expired' :
     subscriptionStatus;
 
   const clearAuthNotice = useCallback(() => setAuthNotice(null), []);
