@@ -98,7 +98,9 @@
   `platform_can()`, `platform_whoami()`, `platform_can_manage_account()`,
   `platform_audit_record()`, `is_user_super_admin()`, the five audited read
   models, both settings RPCs, every platform write RPC's capability check, the
-  profile privilege guard — and, when 20260917140000 lands, `platform_context_row()`.
+  profile privilege guard — and, since 20260917140000 (plan 3.4a),
+  `platform_context_row()` and the platform branches of `current_role_permits()`
+  and `is_company_admin()`.
   Nothing has to be redefined twice and nothing can be forgotten.
 
   The condition is about the *session*, and it has exactly two states:
@@ -132,13 +134,18 @@
     migrations, so there it prints a NOTICE and skips. A green kit is not
     evidence that section ran; `tests/rls/platform-amr.sql` is what covers those
     cases, and section 3 is for the live databases, which do have staff rows.
-  - **This file sorts after 20260917140000** (plan 3.4, support sessions), so the
-    live ledger applies it *after* that migration while the kit — which applies
-    every migration from 20260908 in filename order against a fixture that has
-    neither — applies them in the same order. Nothing here redefines anything
-    that file redefines, and every platform read it makes goes through the gate,
-    so the two orders agree; whichever lands second should still re-read the
-    other before merging.
+  - **This file sorts after 20260917140000** (plan 3.4a, support sessions),
+    which is already on staging, so the live ledger and the kit apply the two in
+    the same order. They define nine and twenty-two functions and **share none**,
+    and every place 3.4a asks about platform rights passes `auth.uid()` —
+    `platform_context_row()`, the new platform branches of
+    `current_role_permits()` and `is_company_admin()`,
+    `platform_support_company_id()` and `platform_whoami()` — so all of them
+    inherit this gate. That is the outcome to want: a session Google minted can
+    neither open a support context nor gain edit rights through one. 3.4a also
+    made `platform_reads_company_data()` a constant `false`, so section 6 of
+    tests/rls/platform-amr.sql takes its documented "seam already closed" branch
+    and says so rather than comparing.
 
   **Why not `p_user_id = auth.uid()`.** That is what this migration first said,
   and the RLS kit rejected it. Two defects in one line. `auth.uid()` is not
