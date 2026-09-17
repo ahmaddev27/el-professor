@@ -84,21 +84,42 @@
   disabled account is not the platform's any more, and it has no company either,
   so the code path would have nothing to fall back to.
 
-  ## Coordination with the open branches
+  ## Which helper, and why it is the account one
 
-  Nothing here is redefined by either open pull request. #65
-  (`phase3/platform-amr-check`, `20260919130000`) rewrites
-  `app_private.platform_staff_role_of`, `platform_staff_role_of_account`,
-  `platform_staff_sync_profile`, `jwt_amr`, `session_amr_permits_platform` and
-  `public.enforce_user_profile_privilege_guard`; #56
-  (`phase3/support-sessions-db`, `20260917140000`) rewrites twenty-two platform
-  functions. This file creates two new names and replaces none.
+  This file redefines nothing. `20260917140000` (#56, support sessions) rewrote
+  twenty-two platform functions and `20260919130000` (#65, the amr rule) nine
+  more; both are merged and sort before this file, and the two new names here
+  collide with neither.
 
-  Both functions go on calling `app_private.platform_staff_role_of(user_id)`,
-  the documented helper for SECURITY DEFINER code that holds a user id rather
-  than a session, and both keep working under #65: its gate fires only when
-  `auth.uid()` equals the id being asked about, and `auth.uid()` is NULL for the
-  service role, so the answer stays the account's own fact.
+  `20260919130000` split "the active role of an account" in two, and the choice
+  between them is load-bearing:
+
+  - `app_private.platform_staff_role_of_account(user_id)` — the **fact about the
+    row**, ungated.
+  - `app_private.platform_staff_role_of(user_id)` — the **authority the asking
+    session may exercise**, which returns NULL whenever the request carries a
+    JWT subject whose session was not established with a password.
+
+  Both functions here ask the **account** helper. They are answering "does this
+  account hold an active staff row", which is a fact about the row, and they are
+  reached only through the service role, whose key carries a role and no `sub`
+  (`app_private.jwt_has_subject()` is false for it — asserted in
+  `tests/rls/platform-amr.sql`, "the service role still reads the staff role").
+  So either helper would answer the same today; the account one is named for
+  what is being asked and does not depend on the caller never holding a subject.
+  It is also the helper `app_private.audit_write` itself now uses to stamp a
+  row's `actor_role`, so the check and the row it leads to agree by
+  construction.
+
+  The route does its own session test, and it is stricter than the amr rule on
+  the password axis: `20260919130000` asks that the session names `password`,
+  and `platform-staff/email-change` asks that **and** that the sign-in is no
+  more than `PASSWORD_PROOF_MAX_AGE_SECONDS` old.
+
+  `audit_write`'s signature is unchanged by `20260919130000` — the same eleven
+  parameters in the same order — and the call below passes ten of them
+  positionally, leaving `p_occurred_at` to default, which it must: the function
+  refuses a timestamp for any category but `legacy`.
 
   ## Which of otp_issue's eligibility tests this route keeps, and which it drops
 
@@ -202,9 +223,10 @@ BEGIN
     RAISE EXCEPTION 'platform_self_email_change_check: invalid arguments' USING ERRCODE = '22023';
   END IF;
 
-  -- The account fact, not a session: auth.uid() is NULL for the service role
-  -- that calls this, so 20260919130000's amr gate (if merged) never fires here.
-  IF app_private.platform_staff_role_of(p_user_id) IS NULL THEN
+  -- The account fact, under the name 20260919130000 gave it. This asks whether
+  -- the row exists, not what the asking session may exercise, so it must be the
+  -- ungated helper; see "Which helper" in the header.
+  IF app_private.platform_staff_role_of_account(p_user_id) IS NULL THEN
     RETURN 'not_platform_account';
   END IF;
 
@@ -318,7 +340,9 @@ BEGIN
     RAISE EXCEPTION 'platform_self_email_change_record: invalid arguments' USING ERRCODE = '22023';
   END IF;
 
-  IF app_private.platform_staff_role_of(p_user_id) IS NULL THEN
+  -- The account fact again, and the same helper `audit_write` itself uses for
+  -- the row's `actor_role` since 20260919130000.
+  IF app_private.platform_staff_role_of_account(p_user_id) IS NULL THEN
     RETURN NULL;
   END IF;
 
@@ -423,6 +447,17 @@ BEGIN
        !~ 'c_changes_per_hour' THEN
     RAISE EXCEPTION '20260919140000 self-check: the per-account rate limit is gone from %', c_check;
   END IF;
+
+  -- 4c. both ask the account helper, not the session-gated one. They answer a
+  --     fact about a row, and swapping them would make the answer depend on the
+  --     caller's session — today a no-op, because the service role carries no
+  --     subject, and a silent NULL the first time that stops being true.
+  FOREACH v_sig IN ARRAY ARRAY[c_check, c_record] LOOP
+    IF (SELECT p.prosrc FROM pg_proc p WHERE p.oid = to_regprocedure(v_sig))
+         !~ 'platform_staff_role_of_account' THEN
+      RAISE EXCEPTION '20260919140000 self-check: % no longer asks the account helper of 20260919130000', v_sig;
+    END IF;
+  END LOOP;
 
   -- 5. the edge functions' own door still refuses that action, so this row can
   --    be written by this function and by nothing a staff role can reach
