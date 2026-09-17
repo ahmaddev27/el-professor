@@ -52,17 +52,19 @@ import AccountBlockedPage from './pages/AccountBlockedPage';
 import AdminLayout from './components/AdminLayout';
 import { useTranslation } from './contexts/LanguageContext';
 import type { TranslationKey } from './i18n';
-import PlatformLoginPage from './pages/PlatformLoginPage';
 import { isDesignPreviewPath } from './design-preview/gate';
 import { needsCompanyRegistration } from './lib/googleAccount';
 import {
   ADMIN_BASE,
   ADMIN_LOGIN_PATH,
   LEGACY_ADMIN_BASE,
+  SIGN_IN_PATH,
+  TENANT_HOME,
+  legacyAdminLoginRedirect,
   legacyAdminTarget,
   platformEntry,
   platformEntryPath,
-  platformReturnPath,
+  rememberedPanelPath,
 } from './lib/adminGate';
 
 // ─── Design preview (Phase 2 prototype) ──────────────────────────────────────
@@ -209,7 +211,14 @@ const AuthLoadingScreen: React.FC = () => (
 );
 
 /**
- * `/admin/login` — the platform team's own front door (plan slice 3.6a).
+ * `/login` — the one sign-in screen (the owner's decision of 17.09.2026).
+ *
+ * Platform accounts and company users type their password in the same place,
+ * and the account decides where the session goes: `/admin` for a platform
+ * account, its own app for everyone else. Nothing knows which it is before the
+ * session exists, so the screen is the company one, Google button and all —
+ * and a platform account that presses that button is refused with a sentence
+ * (AuthContext, `googleSignInRefusal`), not with an empty panel.
  *
  * Registered in both routers, because it has to answer for a browser with no
  * session and for one that has just acquired a session on this very page:
@@ -221,7 +230,7 @@ const AuthLoadingScreen: React.FC = () => (
  *
  * Who goes where is `platformEntry()`, kept pure and covered by tests.
  */
-const AdminLoginRoute: React.FC = () => {
+const SignInRoute: React.FC = () => {
   const { user, profileLoaded, loading, isSuperAdmin } = useAuth();
   const location = useLocation();
   const entry = platformEntry({
@@ -232,21 +241,35 @@ const AdminLoginRoute: React.FC = () => {
   });
 
   if (entry === 'loading') return <AuthLoadingScreen />;
-  if (entry === 'signIn') return <PlatformLoginPage />;
+  if (entry === 'signIn') return <LoginForm />;
 
   // Back to the page the visitor asked for before signing in, when there was
-  // one and it is a panel path — `platformReturnPath` is where that is decided.
-  // Only for an account the panel is actually for: a company user has no
-  // business at /admin/protokoll, so it goes to its own app whatever the
-  // browser remembers.
-  const state = location.state as { from?: unknown } | null;
-  const returnTo = entry === 'panel' ? platformReturnPath(state?.from) : null;
+  // one and it is a panel path — `rememberedPanelPath` is where that is
+  // decided, and it validates the value again rather than trusting the one
+  // `/admin/login` or PlatformSignInRedirect already checked. Only for an
+  // account the panel is actually for: a company user has no business at
+  // /admin/protokoll, so it goes to its own app whatever the browser remembers.
+  const returnTo = entry === 'panel' ? rememberedPanelPath(location.state) : null;
 
   // A company user that signs in here belongs in its own app, not in a shell
   // with nothing it may open. Refusing it a session instead would be a
   // permission notion of the browser's own invention: what any account may
   // actually do is decided in the database, on every call.
-  return <Navigate to={returnTo ?? platformEntryPath(entry) ?? ADMIN_BASE} replace />;
+  return <Navigate to={returnTo ?? platformEntryPath(entry) ?? TENANT_HOME} replace />;
+};
+
+/**
+ * `/admin/login` — the panel's own front door for one day, 16.–17.09.2026.
+ *
+ * It is not deleted, it redirects: a bookmark taken that day, and anything
+ * still linking there, land on the one sign-in screen with the remembered
+ * return path intact. Registered in both routers for the same reason
+ * `SignInRoute` is — a browser can be on it with or without a session.
+ */
+const AdminLoginRedirect: React.FC = () => {
+  const location = useLocation();
+  const { to, from } = legacyAdminLoginRedirect(location.state);
+  return <Navigate to={to} state={from ? { from } : undefined} replace />;
 };
 
 /**
@@ -265,23 +288,23 @@ const LegacyAdminRedirect: React.FC = () => {
 };
 
 /**
- * A platform path asked for without a session: the sign-in page, remembering
- * where the visitor was going.
+ * A platform path asked for without a session: the one sign-in screen,
+ * remembering where the visitor was going.
  *
- * It answers for the old entry as well as the new one, and that is the case the
- * front door exists for — signed out is exactly when a `/super-admin` bookmark
- * gets followed, and without this it lands on the marketing landing page
- * through the public catch-all.
+ * It answers for the old entry as well as the new one — signed out is exactly
+ * when a `/super-admin` bookmark gets followed, and without this it lands on the
+ * marketing landing page through the public catch-all.
  *
  * The remembered path travels in the router's own location state rather than in
  * the query string, so it never appears in the address bar. It is not trusted
- * on the way back: `platformReturnPath` validates it.
+ * on the way back: `rememberedPanelPath` validates it, here and again at the
+ * sign-in screen.
  */
 const PlatformSignInRedirect: React.FC = () => {
   const location = useLocation();
   const intended = legacyAdminTarget(location.pathname) ?? location.pathname;
-  const from = platformReturnPath(intended);
-  return <Navigate to={ADMIN_LOGIN_PATH} state={from ? { from } : undefined} replace />;
+  const from = rememberedPanelPath({ from: intended });
+  return <Navigate to={SIGN_IN_PATH} state={from ? { from } : undefined} replace />;
 };
 
 /**
@@ -346,7 +369,10 @@ function App() {
       <BrowserRouter>
         <Routes>
           <Route path="/" element={<LandingPage />} />
-          <Route path="/login" element={<LoginForm />} />
+          {/* The one sign-in screen, for platform accounts and company users
+              alike (the owner's decision of 17.09.2026). Without a session it
+              renders the form; the account is routed once it has one. */}
+          <Route path={SIGN_IN_PATH} element={<SignInRoute />} />
           <Route path="/auth/forgot-password" element={<ForgotPasswordPage />} />
           <Route path="/auth/callback" element={<AuthCallbackPage />} />
           <Route path="/auth/set-password" element={<SetPasswordPage />} />
@@ -354,13 +380,14 @@ function App() {
           <Route path="/auth/verify-email" element={<VerifyEmailPage />} />
           <Route path="/einladung" element={<InviteAcceptPage />} />
           <Route path="/signup" element={<SignupPage />} />
-          {/* The platform team signs in here, not through the company login.
-              Anything else under /admin without a session lands on it: the
+          {/* The panel's own front door of 16.–17.09.2026, kept as a redirect
+              onto the sign-in screen above. Anything else under /admin without
+              a session goes there too, remembering where it was headed: the
               panel is never rendered for a browser that has no account at all.
-              The old entry answers here too — signed out is exactly when a
+              The old entry answers here as well — signed out is exactly when a
               /super-admin bookmark is followed, and the public catch-all below
               would otherwise drop it on the landing page. */}
-          <Route path={ADMIN_LOGIN_PATH} element={<AdminLoginRoute />} />
+          <Route path={ADMIN_LOGIN_PATH} element={<AdminLoginRedirect />} />
           <Route path={`${ADMIN_BASE}/*`} element={<PlatformSignInRedirect />} />
           <Route path={`${LEGACY_ADMIN_BASE}/*`} element={<PlatformSignInRedirect />} />
           <Route path="*" element={<Navigate to="/" replace />} />
@@ -424,9 +451,13 @@ function App() {
               <Route path="/set-new-password" element={<SetPasswordPage />} />
               <Route path="/auth/forgot-password" element={<ForgotPasswordPage />} />
               <Route path="/einladung" element={<InviteAcceptPage />} />
-              {/* Already signed in: the sign-in page sends the account on to
-                  the panel, or to its own app when the panel is not for it. */}
-              <Route path={ADMIN_LOGIN_PATH} element={<AdminLoginRoute />} />
+              {/* Already signed in: the sign-in screen sends the account on to
+                  the panel, or to its own app when the panel is not for it —
+                  and to the panel page it was heading for before it signed in,
+                  which is what registering /login here is for. The old panel
+                  front door redirects onto it, carrying that path along. */}
+              <Route path={SIGN_IN_PATH} element={<SignInRoute />} />
+              <Route path={ADMIN_LOGIN_PATH} element={<AdminLoginRedirect />} />
               <Route path="/" element={
                 <PlatformAccountGuard>
                 <MustChangePasswordGuard>

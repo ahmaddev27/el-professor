@@ -3,13 +3,16 @@ import {
   ADMIN_BASE,
   ADMIN_LOGIN_PATH,
   LEGACY_ADMIN_BASE,
+  SIGN_IN_PATH,
   TENANT_HOME,
   decideAdminGate,
+  googleSignInRefusal,
+  legacyAdminLoginRedirect,
   legacyAdminTarget,
   platformEntry,
   platformEntryPath,
   platformReturnPath,
-  platformSignInMessageKey,
+  rememberedPanelPath,
   type AdminGateState,
   type PlatformSessionState,
 } from './adminGate';
@@ -68,10 +71,13 @@ describe('platformEntry', () => {
     expect(platformEntryPath('loading')).toBeNull();
   });
 
-  it('asks a visitor without a session to sign in at the platform page', () => {
+  it('asks a visitor without a session to sign in at the one sign-in screen', () => {
     const entry = platformEntry({ ...PLATFORM_SESSION, hasSession: false, isSuperAdmin: false });
     expect(entry).toBe('signIn');
-    expect(platformEntryPath(entry)).toBe(ADMIN_LOGIN_PATH);
+    // The owner's decision of 17.09.2026: one screen, not the panel's own.
+    expect(platformEntryPath(entry)).toBe(SIGN_IN_PATH);
+    expect(SIGN_IN_PATH).toBe('/login');
+    expect(platformEntryPath(entry)).not.toBe(ADMIN_LOGIN_PATH);
   });
 
   it('never reads a stale flag from a session that no longer exists', () => {
@@ -86,9 +92,10 @@ describe('platformReturnPath', () => {
     expect(platformReturnPath('/admin/konto')).toBe('/admin/konto');
   });
 
-  it('never goes back to the sign-in page, which would answer with itself forever', () => {
+  it('never goes back to a sign-in page, which would answer with itself forever', () => {
     expect(platformReturnPath(ADMIN_LOGIN_PATH)).toBeNull();
     expect(platformReturnPath(`${ADMIN_LOGIN_PATH}/`)).toBeNull();
+    expect(platformReturnPath(SIGN_IN_PATH)).toBeNull();
   });
 
   it('drops a path that is not inside the panel', () => {
@@ -142,25 +149,83 @@ describe('decideAdminGate', () => {
   });
 });
 
-describe('platformSignInMessageKey', () => {
-  it('says the same thing whatever the refusal was', () => {
-    const generic = 'admin.login.failed';
-    expect(platformSignInMessageKey({ message: 'Invalid login credentials' })).toBe(generic);
-    expect(platformSignInMessageKey({ message: 'Email not confirmed' })).toBe(generic);
-    expect(platformSignInMessageKey({ message: 'User not found' })).toBe(generic);
-    // AuthContext hands a blocked account its message as a translation key.
-    expect(platformSignInMessageKey({ message: 'blocked.msg.userSuspended' })).toBe(generic);
-    expect(platformSignInMessageKey({})).toBe(generic);
-    expect(platformSignInMessageKey(null)).toBe(generic);
-    expect(platformSignInMessageKey(undefined)).toBe(generic);
-    expect(platformSignInMessageKey({ message: 42 })).toBe(generic);
+describe('rememberedPanelPath', () => {
+  it('reads the panel path out of a router location state', () => {
+    expect(rememberedPanelPath({ from: '/admin/protokoll' })).toBe('/admin/protokoll');
+    expect(rememberedPanelPath({ from: ADMIN_BASE })).toBe(ADMIN_BASE);
   });
 
-  it('keeps the two answers that say nothing about an address', () => {
-    expect(platformSignInMessageKey({ message: 'Too many requests' })).toBe('admin.login.tooManyAttempts');
-    expect(platformSignInMessageKey({ message: 'Request rate limit reached' })).toBe('admin.login.tooManyAttempts');
-    expect(platformSignInMessageKey({ message: 'TypeError: Failed to fetch' })).toBe('admin.login.network');
-    expect(platformSignInMessageKey({ message: 'NetworkError when attempting to fetch resource' }))
-      .toBe('admin.login.network');
+  it('validates the value again rather than trusting whoever passed it on', () => {
+    // Every guard platformReturnPath applies, reached through this door too:
+    // the value changes hands twice on its way back (the redirect, then the
+    // sign-in screen), and being checked once does not make it safe the second
+    // time it is used.
+    expect(rememberedPanelPath({ from: 'https://evil.example/admin' })).toBeNull();
+    expect(rememberedPanelPath({ from: '//evil.example/admin' })).toBeNull();
+    expect(rememberedPanelPath({ from: '/admin/../evil' })).toBeNull();
+    expect(rememberedPanelPath({ from: '/admin\\..\\evil' })).toBeNull();
+    expect(rememberedPanelPath({ from: '/overview' })).toBeNull();
+    expect(rememberedPanelPath({ from: ADMIN_LOGIN_PATH })).toBeNull();
+    expect(rememberedPanelPath({ from: SIGN_IN_PATH })).toBeNull();
+  });
+
+  it('answers null for a state that carries nothing usable', () => {
+    expect(rememberedPanelPath(null)).toBeNull();
+    expect(rememberedPanelPath(undefined)).toBeNull();
+    expect(rememberedPanelPath({})).toBeNull();
+    expect(rememberedPanelPath('/admin/protokoll')).toBeNull();
+    expect(rememberedPanelPath(42)).toBeNull();
+  });
+});
+
+describe('legacyAdminLoginRedirect', () => {
+  it('sends the panel’s old front door to the one sign-in screen', () => {
+    expect(legacyAdminLoginRedirect(null)).toEqual({ to: SIGN_IN_PATH, from: null });
+    expect(legacyAdminLoginRedirect(undefined).to).toBe(SIGN_IN_PATH);
+  });
+
+  it('carries the remembered panel path across, so a bookmark still lands right', () => {
+    // A signed-out visitor asks for /admin/protokoll: PlatformSignInRedirect
+    // remembers it, the old front door hands it on, and the sign-in screen
+    // returns the account there once it has a session.
+    expect(legacyAdminLoginRedirect({ from: '/admin/protokoll' }))
+      .toEqual({ to: SIGN_IN_PATH, from: '/admin/protokoll' });
+  });
+
+  it('drops a remembered path it would not have accepted itself', () => {
+    expect(legacyAdminLoginRedirect({ from: 'https://evil.example/admin' }).from).toBeNull();
+    expect(legacyAdminLoginRedirect({ from: '/overview' }).from).toBeNull();
+    // Its own path, which would bounce between the two screens for ever.
+    expect(legacyAdminLoginRedirect({ from: ADMIN_LOGIN_PATH }).from).toBeNull();
+  });
+});
+
+describe('googleSignInRefusal', () => {
+  it('refuses a platform account whose session Google minted', () => {
+    expect(googleSignInRefusal({ cameFromGoogle: true, isPlatformAccount: true })).toEqual({
+      to: SIGN_IN_PATH,
+      messageKey: 'auth.google.error.platformStaff',
+    });
+  });
+
+  it('never refuses a password session, whatever identities the account holds', () => {
+    // The rule that must not drift. It asks how *this session* was minted —
+    // `sessionCameFromGoogle` — and never whether the account has a Google
+    // identity: a platform account whose address also exists at Google would
+    // otherwise be signed out of a correct password sign-in.
+    expect(googleSignInRefusal({ cameFromGoogle: false, isPlatformAccount: true })).toBeNull();
+  });
+
+  it('leaves a company user’s Google sign-in alone', () => {
+    expect(googleSignInRefusal({ cameFromGoogle: true, isPlatformAccount: false })).toBeNull();
+    expect(googleSignInRefusal({ cameFromGoogle: false, isPlatformAccount: false })).toBeNull();
+  });
+
+  it('shows the refusal on the screen the visitor can sign in again from', () => {
+    const refusal = googleSignInRefusal({ cameFromGoogle: true, isPlatformAccount: true });
+    // Not a screen of its own: the one sign-in screen, which is also where
+    // platformEntry() sends a browser with no session — so the sentence and the
+    // form the account must now use are the same page.
+    expect(refusal?.to).toBe(platformEntryPath('signIn'));
   });
 });

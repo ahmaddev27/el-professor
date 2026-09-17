@@ -5,6 +5,7 @@ import type { TranslationKey } from '../i18n';
 import { consumeGoogleSignInIntent, readGoogleSignInIntent, type GoogleSignInIntent } from '../lib/googleSignIn';
 import { googleSessionIsSettled, sessionCameFromGoogle } from '../lib/googleAccount';
 import { nextAfterReconcile, reconcileOauthAccount } from '../lib/oauthAccountClient';
+import { SIGN_IN_PATH, googleSignInRefusal } from '../lib/adminGate';
 import { attemptUntilAnswered } from '../lib/profileLoadRetry';
 import { subscriptionIsActive } from '../utils/planState';
 
@@ -506,7 +507,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => {
     if (loading || !user || !session || !profile) return;
     const intent = readGoogleSignInIntent();
-    if (!sessionCameFromGoogle(user, intent !== null)) return;
+    const cameFromGoogle = sessionCameFromGoogle(user, intent !== null);
+    if (!cameFromGoogle) return;
     if (settledGoogleFor.current === user.id) return;
     settledGoogleFor.current = user.id;
     // Kept in memory for the registration screen, and taken out of the store:
@@ -519,16 +521,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // Signing out swaps App's router, and the public one starts wherever the
     // address points — without this the message below would land on the
     // landing page, where nothing shows it. Same reason useOtpSessionHandoff
-    // rewrites the address before installing a session.
-    const endSession = async (message: TranslationKey) => {
-      window.history.replaceState(window.history.state, '', '/login');
+    // rewrites the address before installing a session. `SIGN_IN_PATH` is the
+    // one sign-in screen since the owner's decision of 17.09.2026, so this is
+    // also the screen a platform account is sent back to.
+    const endSession = async (message: TranslationKey, to: string = SIGN_IN_PATH) => {
+      window.history.replaceState(window.history.state, '', to);
       setAuthNotice(message);
       await signOutRef.current?.();
     };
 
     void (async () => {
-      if (profile.is_super_admin) {
-        await endSession('auth.google.error.platformStaff');
+      // Platform staff sign in with an address and a password, never with
+      // Google. The rule, and why it asks how this *session* was minted rather
+      // than whether the account has a Google identity, is in
+      // `googleSignInRefusal` — where it is also tested.
+      const refusal = googleSignInRefusal({ cameFromGoogle, isPlatformAccount: profile.is_super_admin });
+      if (refusal) {
+        await endSession(refusal.messageKey, refusal.to);
         return;
       }
       // Nothing left to settle. `reconcile` cancels a password signup or
