@@ -256,7 +256,7 @@ const AccountPage: React.FC = () => {
   };
   const btn = (busy: boolean): React.CSSProperties => ({
     background: busy ? 'var(--bg-muted)' : 'var(--accent)',
-    color: busy ? 'var(--text-tertiary)' : '#fff',
+    color: busy ? 'var(--text-tertiary)' : 'var(--text-inverse)',
     cursor: busy ? 'not-allowed' : 'pointer',
   });
 

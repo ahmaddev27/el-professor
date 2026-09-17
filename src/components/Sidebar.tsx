@@ -76,7 +76,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isSupportAdmin }) => {
         className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-150 w-full"
         style={({ isActive }) =>
           isActive
-            ? { background: 'var(--accent)', color: 'white', boxShadow: '0 2px 10px rgba(6,182,212,0.2)' }
+            ? { background: 'var(--accent)', color: 'var(--text-inverse)', boxShadow: '0 2px 10px rgba(6,182,212,0.2)' }
             : { color: 'var(--text-secondary)', background: 'transparent' }
         }
         onMouseEnter={e => {

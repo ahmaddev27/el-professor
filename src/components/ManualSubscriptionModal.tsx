@@ -114,7 +114,7 @@ export default function ManualSubscriptionModal({ company, onClose, onSaved }: P
                   onClick={() => setStatus(opt.value)}
                   className="px-3 py-2 rounded-xl text-xs font-semibold transition-all"
                   style={status === opt.value
-                    ? { background: 'var(--accent)', color: '#fff' }
+                    ? { background: 'var(--accent)', color: 'var(--text-inverse)' }
                     : { background: 'var(--bg-subtle)', border: '1px solid var(--border)', color: 'var(--text-secondary)' }
                   }
                 >

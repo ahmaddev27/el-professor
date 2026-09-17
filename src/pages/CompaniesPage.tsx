@@ -404,7 +404,7 @@ function CreateCompanyModal({ onClose, onCreated }: CreateCompanyModalProps) {
               <button type="button" onClick={onClose} className="px-4 py-2 rounded-lg text-sm font-medium" style={{ color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
                 onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-muted)')}
                 onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>{t('common.cancel')}</button>
-              <button type="submit" disabled={saving} className="px-5 py-2 rounded-lg text-sm font-semibold flex items-center gap-2" style={{ background: 'var(--accent)', color: 'white', opacity: saving ? 0.7 : 1 }}>
+              <button type="submit" disabled={saving} className="px-5 py-2 rounded-lg text-sm font-semibold flex items-center gap-2" style={{ background: 'var(--accent)', color: 'var(--text-inverse)', opacity: saving ? 0.7 : 1 }}>
                 {saving ? <RefreshCw size={14} className="animate-spin" /> : <Building2 size={14} />}{t('sa.companies.createButton')}</button>
             </div>
           </form>
@@ -424,7 +424,7 @@ function CreateCompanyModal({ onClose, onCreated }: CreateCompanyModalProps) {
                 <button type="button" onClick={() => onCreated(createdCompany)} className="px-4 py-2 rounded-lg text-sm font-medium" style={{ color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
                   onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-muted)')}
                   onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>{t('sa.companies.skip')}</button>
-                <button type="submit" disabled={adminSaving} className="px-5 py-2 rounded-lg text-sm font-semibold flex items-center gap-2" style={{ background: 'var(--accent)', color: 'white', opacity: adminSaving ? 0.7 : 1 }}>
+                <button type="submit" disabled={adminSaving} className="px-5 py-2 rounded-lg text-sm font-semibold flex items-center gap-2" style={{ background: 'var(--accent)', color: 'var(--text-inverse)', opacity: adminSaving ? 0.7 : 1 }}>
                   {adminSaving ? <RefreshCw size={14} className="animate-spin" /> : <User size={14} />}{t('sa.companies.createAdmin')}</button>
               </div>
             </form>
@@ -509,7 +509,7 @@ function EditCompanyModal({ company, onClose, onUpdated }: EditCompanyModalProps
             <button type="button" onClick={onClose} className="px-4 py-2 rounded-lg text-sm font-medium" style={{ color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
               onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-muted)')}
               onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>{t('common.cancel')}</button>
-            <button type="submit" disabled={saving} className="px-5 py-2 rounded-lg text-sm font-semibold flex items-center gap-2" style={{ background: 'var(--accent)', color: 'white', opacity: saving ? 0.7 : 1 }}>
+            <button type="submit" disabled={saving} className="px-5 py-2 rounded-lg text-sm font-semibold flex items-center gap-2" style={{ background: 'var(--accent)', color: 'var(--text-inverse)', opacity: saving ? 0.7 : 1 }}>
               {saving ? <RefreshCw size={14} className="animate-spin" /> : <Save size={14} />}{t('common.save')}</button>
           </div>
         </form>
@@ -580,7 +580,7 @@ function InviteAdminModal({ company, onClose, onInvited }: InviteAdminModalProps
             <button type="button" onClick={onClose} className="px-4 py-2 rounded-lg text-sm font-medium" style={{ color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
               onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-muted)')}
               onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>{t('common.cancel')}</button>
-            <button type="submit" disabled={saving} className="px-5 py-2 rounded-lg text-sm font-semibold flex items-center gap-2" style={{ background: 'var(--accent)', color: 'white', opacity: saving ? 0.7 : 1 }}>
+            <button type="submit" disabled={saving} className="px-5 py-2 rounded-lg text-sm font-semibold flex items-center gap-2" style={{ background: 'var(--accent)', color: 'var(--text-inverse)', opacity: saving ? 0.7 : 1 }}>
               {saving ? <RefreshCw size={14} className="animate-spin" /> : <User size={14} />}{t('sa.companies.create')}</button>
           </div>
         </form>
@@ -707,7 +707,7 @@ function CompanyDetail({ company, onBack, onEdit, onLifecycleAction, onEnterComp
         <div className="flex items-center gap-2 flex-wrap">
           {isOperational && canOpenCompany && (
             <button onClick={() => onEnterCompany(company)} className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold"
-              style={{ background: 'var(--accent)', color: 'white' }}
+              style={{ background: 'var(--accent)', color: 'var(--text-inverse)' }}
               onMouseEnter={e => (e.currentTarget.style.opacity = '0.85')}
               onMouseLeave={e => (e.currentTarget.style.opacity = '1')}>
               <ExternalLink size={14} />{t('sa.companies.openAsCompany')}
@@ -960,7 +960,7 @@ function CompanyDetail({ company, onBack, onEdit, onLifecycleAction, onEnterComp
                   </div>
                   <button onClick={() => onLifecycleAction(company, 'softDelete')}
                     className="ml-4 flex-shrink-0 px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5"
-                    style={{ background: 'var(--danger)', color: 'white' }}>
+                    style={{ background: 'var(--danger)', color: 'var(--text-inverse)' }}>
                     <Trash2 size={12} />{t('sa.companies.markForDeletion')}
                   </button>
                 </div>
@@ -977,7 +977,7 @@ function CompanyDetail({ company, onBack, onEdit, onLifecycleAction, onEnterComp
                   </div>
                   <button onClick={() => onLifecycleAction(company, 'hardDelete')}
                     className="ml-4 flex-shrink-0 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5"
-                    style={{ background: 'var(--danger)', color: 'white' }}>
+                    style={{ background: 'var(--danger)', color: 'var(--text-inverse)' }}>
                     <Trash2 size={12} />{t('sa.lifecycle.hardDelete.confirm')}
                   </button>
                 </div>
@@ -1178,7 +1178,7 @@ export default function CompaniesPage() {
           <p className="text-sm mt-0.5" style={{ color: 'var(--text-secondary)' }}>{t('sa.companies.subtitle', { count: companies.length })}</p>
         </div>
         <button onClick={() => setShowCreateModal(true)} className={`${canLifecycle ? 'flex' : 'hidden'} items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold`}
-          style={{ background: 'var(--accent)', color: 'white' }}
+          style={{ background: 'var(--accent)', color: 'var(--text-inverse)' }}
           onMouseEnter={e => (e.currentTarget.style.opacity = '0.85')}
           onMouseLeave={e => (e.currentTarget.style.opacity = '1')}>
           <Plus size={16} />{t('sa.companies.createButton')}
@@ -1195,7 +1195,7 @@ export default function CompaniesPage() {
           {filterOptions.map(s => (
             <button key={s} onClick={() => setStatusFilter(s)}
               className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors"
-              style={{ background: statusFilter === s ? 'var(--accent)' : 'var(--bg-subtle)', color: statusFilter === s ? 'white' : 'var(--text-secondary)', border: '1px solid var(--border)' }}>
+              style={{ background: statusFilter === s ? 'var(--accent)' : 'var(--bg-subtle)', color: statusFilter === s ? 'var(--text-inverse)' : 'var(--text-secondary)', border: '1px solid var(--border)' }}>
               {t(filterLabels[s])}
             </button>
           ))}

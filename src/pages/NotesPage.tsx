@@ -458,7 +458,7 @@ export function NotesPage() {
           <button
             onClick={() => setShowModal(true)}
             className="flex items-center gap-2 px-4 py-2 rounded-lg transition-colors"
-            style={{ background: 'var(--accent)', color: 'white' }}
+            style={{ background: 'var(--accent)', color: 'var(--text-inverse)' }}
             onMouseEnter={e => (e.currentTarget.style.background = 'var(--accent-hover)')}
             onMouseLeave={e => (e.currentTarget.style.background = 'var(--accent)')}
           >
@@ -496,7 +496,7 @@ export function NotesPage() {
                   onClick={() => setFilterMode(mode)}
                   className="px-3 py-1 text-sm rounded-lg transition-colors"
                   style={filterMode === mode
-                    ? { background: 'var(--accent)', color: 'white' }
+                    ? { background: 'var(--accent)', color: 'var(--text-inverse)' }
                     : { background: 'var(--bg-muted)', color: 'var(--text-secondary)' }}
                 >
                   {mode === 'all' ? t('common.all') : mode === 'date' ? t('common.date') : mode === 'week' ? t('common.week') : t('common.month')}
@@ -769,7 +769,7 @@ export function NotesPage() {
                   onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>{t('common.cancel')}</button>
                 <button type="submit"
                   className="flex-1 px-4 py-2 rounded-lg transition-colors"
-                  style={{ background: 'var(--accent)', color: 'white' }}
+                  style={{ background: 'var(--accent)', color: 'var(--text-inverse)' }}
                   onMouseEnter={e => (e.currentTarget.style.background = 'var(--accent-hover)')}
                   onMouseLeave={e => (e.currentTarget.style.background = 'var(--accent)')}>
                   {editingNote ? t('common.update') : t('common.add')}

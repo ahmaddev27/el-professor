@@ -385,7 +385,7 @@ const SettingsPage: React.FC = () => {
                     />
                     <div
                       className="flex items-center justify-center space-x-2 px-4 py-2 rounded-lg transition-colors cursor-pointer disabled:opacity-50"
-                      style={{ background: 'var(--accent)', color: 'white' }}
+                      style={{ background: 'var(--accent)', color: 'var(--text-inverse)' }}
                       onMouseEnter={e => (e.currentTarget.style.background = 'var(--accent-hover)')}
                       onMouseLeave={e => (e.currentTarget.style.background = 'var(--accent)')}
                     >
@@ -952,7 +952,7 @@ const SettingsPage: React.FC = () => {
               type="submit"
               disabled={saving}
               className="px-6 py-2 rounded-lg transition-colors flex items-center space-x-2 disabled:opacity-50"
-              style={{ background: 'var(--accent)', color: 'white' }}
+              style={{ background: 'var(--accent)', color: 'var(--text-inverse)' }}
               onMouseEnter={e => (e.currentTarget.style.background = 'var(--accent-hover)')}
               onMouseLeave={e => (e.currentTarget.style.background = 'var(--accent)')}
             >

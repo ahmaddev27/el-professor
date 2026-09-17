@@ -97,7 +97,7 @@ const UserMenu: React.FC = () => {
       >
         <div
           className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0"
-          style={{ background: 'var(--accent)', color: 'white' }}
+          style={{ background: 'var(--accent)', color: 'var(--text-inverse)' }}
         >
           {initials}
         </div>
@@ -132,7 +132,7 @@ const UserMenu: React.FC = () => {
               <div className="flex items-center gap-3">
                 <div
                   className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0"
-                  style={{ background: 'var(--accent)', color: 'white' }}
+                  style={{ background: 'var(--accent)', color: 'var(--text-inverse)' }}
                 >
                   {initials}
                 </div>

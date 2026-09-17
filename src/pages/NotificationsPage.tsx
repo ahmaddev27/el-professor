@@ -416,7 +416,7 @@ export default function NotificationsPage() {
             onClick={handleSave}
             disabled={saving || !dirty}
             className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium transition-opacity disabled:opacity-40"
-            style={{ background: 'var(--accent)', color: 'white' }}
+            style={{ background: 'var(--accent)', color: 'var(--text-inverse)' }}
             onMouseEnter={e => { if (!saving && dirty) e.currentTarget.style.background = 'var(--accent-hover)'; }}
             onMouseLeave={e => (e.currentTarget.style.background = 'var(--accent)')}
           >

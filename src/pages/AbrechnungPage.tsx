@@ -759,7 +759,7 @@ export function AbrechnungPage() {
               onClick={() => setViewMode('weekly')}
               className="px-4 py-2 rounded-lg font-medium transition-colors"
               style={viewMode === 'weekly'
-                ? { background: 'var(--accent)', color: 'white' }
+                ? { background: 'var(--accent)', color: 'var(--text-inverse)' }
                 : { background: 'var(--bg-muted)', color: 'var(--text-secondary)' }
               }
             >
@@ -769,7 +769,7 @@ export function AbrechnungPage() {
               onClick={() => setViewMode('monthly')}
               className="px-4 py-2 rounded-lg font-medium transition-colors"
               style={viewMode === 'monthly'
-                ? { background: 'var(--accent)', color: 'white' }
+                ? { background: 'var(--accent)', color: 'var(--text-inverse)' }
                 : { background: 'var(--bg-muted)', color: 'var(--text-secondary)' }
               }
             >

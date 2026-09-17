@@ -871,7 +871,7 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
                     className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium"
                     style={{
                       background: 'var(--accent)',
-                      color: 'var(--accent-text)',
+                      color: 'var(--text-inverse)',
                       border: 'none',
                       cursor: savingPayroll ? 'not-allowed' : 'pointer',
                       opacity: savingPayroll ? 0.7 : 1,
@@ -913,7 +913,7 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
                 <button
                   onClick={() => { setSelectedPayment(undefined); setIsPaymentModalOpen(true); }}
                   disabled={remainingBalance <= 0}
-                  style={{ background: 'var(--accent)', color: 'var(--accent-text)', borderRadius: '0.5rem', padding: '0.5rem 1rem', border: 'none' }}
+                  style={{ background: 'var(--accent)', color: 'var(--text-inverse)', borderRadius: '0.5rem', padding: '0.5rem 1rem', border: 'none' }}
                   onMouseEnter={e => { if (remainingBalance > 0) e.currentTarget.style.background = 'var(--accent-hover)'; }}
                   onMouseLeave={e => (e.currentTarget.style.background = 'var(--accent)')}
                   className="flex items-center space-x-2 disabled:opacity-50 disabled:cursor-not-allowed"

@@ -400,7 +400,7 @@ export default function SubscriptionBillingPage() {
           <button
             onClick={() => setShowGenerateModal(true)}
             className={`${canBilling ? 'flex' : 'hidden'} items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all`}
-            style={{ background: 'var(--accent)', color: 'white' }}
+            style={{ background: 'var(--accent)', color: 'var(--text-inverse)' }}
             onMouseEnter={e => (e.currentTarget.style.opacity = '0.9')}
             onMouseLeave={e => (e.currentTarget.style.opacity = '1')}
           >
@@ -675,7 +675,7 @@ export default function SubscriptionBillingPage() {
                 hidden={!canPricing}
                 onClick={() => setShowPlanModal(true)}
                 className="mt-4 px-4 py-2 rounded-xl text-sm font-medium"
-                style={{ background: 'var(--accent)', color: 'white' }}
+                style={{ background: 'var(--accent)', color: 'var(--text-inverse)' }}
               >
                 {t('sa.subs.createPlan')}
               </button>

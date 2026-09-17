@@ -16,15 +16,30 @@ type Theme = 'light' | 'dark';
 
 const css = readFileSync(new URL('../../index.css', import.meta.url), 'utf8');
 
-function parseTokens(theme: Theme): Record<string, Rgb> {
-  const marker = `/* @tokens ${theme} */`;
+function blockAfter(marker: string): string {
   const start = css.indexOf(marker);
   if (start < 0) throw new Error(`index.css has no "${marker}" block`);
   const open = css.indexOf('{', start);
-  const close = css.indexOf('}', open);
+  return css.slice(open + 1, css.indexOf('}', open));
+}
+
+function parseTokens(theme: Theme): Record<string, Rgb> {
   const tokens: Record<string, Rgb> = {};
-  for (const match of css.slice(open + 1, close).matchAll(/--([a-z-]+):\s*(\d{1,3})\s+(\d{1,3})\s+(\d{1,3})\s*;/g)) {
+  for (const match of blockAfter(`/* @tokens ${theme} */`).matchAll(/--([a-z-]+):\s*(\d{1,3})\s+(\d{1,3})\s+(\d{1,3})\s*;/g)) {
     tokens[match[1]] = [Number(match[2]), Number(match[3]), Number(match[4])];
+  }
+  return tokens;
+}
+
+/**
+ * The legacy blocks spell their tokens as hex, not RGB channels. Every screen
+ * built before Phase 2 still renders from them, so they need the same guard.
+ */
+function parseLegacyTokens(theme: Theme): Record<string, Rgb> {
+  const tokens: Record<string, Rgb> = {};
+  for (const match of blockAfter(`/* @legacy-tokens ${theme} */`).matchAll(/--([a-z-]+):\s*#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})\s*;/g)) {
+    const hex = match[2].length === 3 ? match[2].split('').map(c => c + c).join('') : match[2];
+    tokens[match[1]] = [0, 2, 4].map(i => parseInt(hex.slice(i, i + 2), 16)) as Rgb;
   }
   return tokens;
 }
@@ -66,6 +81,56 @@ const PAIRS: Array<{ fg: string; bg: string; min: number }> = [
     { fg: 'signal', bg, min: NON_TEXT },
   ]),
 ];
+
+/**
+ * Legacy on-a-filled-background pairs.
+ *
+ * `--accent` is the accent BACKGROUND; `--accent-text` is accent-coloured text
+ * for a NORMAL background. The names look interchangeable and are not: in the
+ * light theme both hold #2563eb, so `color: var(--accent-text)` on
+ * `background: var(--accent)` renders the label in the button's own colour and
+ * it disappears completely (1.00:1). In the dark theme it is #22d3ee on
+ * #06b6d4 — 1.34:1, just legible enough to look like a rendering glitch rather
+ * than a bug. A label sitting ON one of these filled backgrounds must use
+ * `--text-inverse`, which is what `.btn-primary` in index.css already does.
+ *
+ * `--success` and `--warning` are deliberately absent: at their current light
+ * values no foreground token reaches 4.5:1 on them (white is 3.77:1 and
+ * 3.19:1), so listing them here would fail the build rather than guard it.
+ * Fixing those needs the token values themselves darkened — a design decision,
+ * recorded in HANDOFF.md, not a token swap.
+ */
+const LEGACY_PAIRS: Array<{ fg: string; bg: string; min: number }> = [
+  { fg: 'text-inverse', bg: 'accent', min: TEXT },
+  { fg: 'text-inverse', bg: 'accent-hover', min: TEXT },
+  { fg: 'text-inverse', bg: 'danger', min: TEXT },
+  // accent-coloured text belongs on a neutral background, and must stay legible there
+  ...['bg-base', 'bg-surface', 'bg-elevated', 'bg-subtle'].map(bg => ({ fg: 'accent-text', bg, min: TEXT })),
+];
+
+describe.each<Theme>(['light', 'dark'])('%s legacy theme tokens', theme => {
+  const tokens = parseLegacyTokens(theme);
+
+  it('defines every token the legacy pairs refer to', () => {
+    const missing = LEGACY_PAIRS.flatMap(({ fg, bg }) => [fg, bg]).filter(name => !tokens[name]);
+    expect([...new Set(missing)]).toEqual([]);
+  });
+
+  it.each(LEGACY_PAIRS)('$fg on $bg reaches $min:1', ({ fg, bg, min }) => {
+    const ratio = contrast(tokens[fg], tokens[bg]);
+    if (process.env.PRINT_CONTRAST) {
+      console.log(`${theme}\tlegacy\t${fg}\t${bg}\t${ratio.toFixed(2)}\t${min}`);
+    }
+    expect(ratio).toBeGreaterThanOrEqual(min);
+  });
+
+  it('--accent-text is NOT usable as a label on --accent', () => {
+    // Pins the defect itself: if these two ever became far enough apart to pass,
+    // the pairing would still be wrong by intent, but this assertion is what
+    // documents why the codebase never pairs them. See accentLabel.contrast.test.ts.
+    expect(contrast(tokens['accent-text'], tokens['accent'])).toBeLessThan(TEXT);
+  });
+});
 
 describe.each<Theme>(['light', 'dark'])('%s theme tokens', theme => {
   const tokens = parseTokens(theme);
