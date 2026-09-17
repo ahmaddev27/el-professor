@@ -472,7 +472,7 @@
         </li>
         <li><a href="#p1"><span class="no">1</span><h3>OTP وأمان الحسابات</h3></a><ul class="chips"><li class="chip">كبير</li><li class="chip">عالستيج</li></ul></li>
         <li><a href="#p2"><span class="no">2</span><h3>نظام التصميم والنموذج</h3></a><ul class="chips"><li class="chip">متوسط</li><li class="chip">اندمج عالستيج</li></ul><p class="gate">البوابة انفتحت: وافقت على النموذج بـ 15.09</p></li>
-        <li><a href="#p3"><span class="no">3</span><h3>فصل المنصة والصلاحيات</h3></a><ul class="chips"><li class="chip">كبير جداً</li><li class="chip">3.0 و3.1 و3.3 و3.5 و3.6 و3.9 اندمجوا</li><li class="chip">الجاي 3.4</li></ul></li>
+        <li><a href="#p3"><span class="no">3</span><h3>فصل المنصة والصلاحيات</h3></a><ul class="chips"><li class="chip">كبير جداً</li><li class="chip">3.0 و3.1 و3.3 و3.5 و3.6 و3.9 اندمجوا</li><li class="chip">الجاي 3.4</li><li class="chip">3.8-U1 بالمراجعة</li></ul></li>
         <li><a href="#p4"><span class="no">4</span><h3>إيصال الراتب النقدي</h3></a><ul class="chips"><li class="chip">متوسط</li><li class="chip">الأساس اندمج</li></ul></li>
         <li><a href="#p5"><span class="no">5</span><h3>تعميم التصميم</h3></a><ul class="chips"><li class="chip">كبير</li><li class="chip">ما بلّشت</li></ul></li>
       </ol>
@@ -932,6 +932,18 @@ AND (c.subscription_expires_at IS NULL OR c.subscription_expires_at &gt; now())<
         </ul>
       </div>
 
+      <div class="step">
+        <h3><span class="step-no">3.8</span>نموذج اشتراك واحد <span class="pill ok">U0 اندمج</span> <span class="pill warn">U1 بالمراجعة</span></h3>
+        <ul class="list">
+          <li><strong>U0 (PR #21):</strong> تقرير قراءة بس على الستيج، لقى 15 صنف تعارض بين الأنظمة الأربعة اللي بتقرر إذا الشركة مشتركة.</li>
+          <li><strong>U1 (هالـ PR):</strong> جدول واحد للفترات المدفوعة أو الممنوحة (<code>subscription_coverage</code>)، ودالة وحدة بتشتق منه حالة الاشتراك وتاريخ الانتهاء والخطة. الكتّاب القدام ضلوا شغالين متل ما هم، بس صاروا يسجّلوا الفترة بدل ما يكتبوا الأعمدة بإيدهم.</li>
+          <li><strong>قراراتك الستة (17.09.2026):</strong> الشركة المفتوحة بدون تاريخ انتهاء بتضل مفتوحة؛ واللي انتهت بتنكتب «منتهية»؛ وحالة تعليق وحدة بس؛ والسعر بينثبت وقت الإسناد وبالسنت؛ والفواتير ما بتأثر على الوصول بهالخطوة؛ والكود القديم بدون فترة مسجّلة ما بناخد له فترة مخمّنة.</li>
+          <li><strong>الترحيل بيفشل إذا تغيّر وصول أي شركة</strong> — بينحسب جواب الخادم نفسه لكل مستخدم ولكل شركة قبل وبعد، بنفس المعاملة.</li>
+          <li><strong>ملاحظة تشغيلية:</strong> قبل ما حدا يرفع التعليق عن شركة «مفتوحة بدون تاريخ انتهاء»، لازم إنسان يحطّ لها تاريخ بإيده.</li>
+          <li><strong>U2 بتستنّاك:</strong> رقم أيام السماح للفواتير. بدونه الدفع ما بيمدّد والتأخير ما بيقفل.</li>
+        </ul>
+      </div>
+
       <div class="check">
         <h3>فحص المرحلة 3</h3>
         <ul class="list">
@@ -1085,7 +1097,7 @@ AND (c.subscription_expires_at IS NULL OR c.subscription_expires_at &gt; now())<
         <li><span class="when">المرحلة 1</span><span>إيميل اختبار بتملكه لإثبات وصول الكود، وقرار بالحسابات القديمة غير المؤكدة.</span><span class="pill">لاحقاً</span></li>
         <li><span class="when">المرحلة 2</span><span>الموافقة على النموذج الأولي للتصميم.</span><span class="pill ok">خلص</span></li>
         <li><span class="when">المرحلة 3</span><span>إيميل أدمن شركة Y&amp;A Mobility.</span><span class="pill">لاحقاً</span></li>
-        <li><span class="when">المرحلة 3</span><span>قرارات D1–D13 وبيانات البائع للفواتير (التفاصيل بالخطة).</span><span class="pill warn">لسا</span></li>
+        <li><span class="when">المرحلة 3</span><span>قرارات D1–D13 وبيانات البائع للفواتير (التفاصيل بالخطة). <strong>D8–D10 انحسمت بـ 17.09.2026</strong> مع قواعد الاشتراك الستة؛ اللي ضل منها لـ U2 هو رقم أيام السماح للفواتير.</span><span class="pill warn">لسا</span></li>
         <li><span class="when">المرحلة 0</span><span>مفتاح <code>OTP_PEPPER</code> للبرودكشن.</span><span class="pill ok">خلص</span></li>
         <li><span class="when">جوجل 1.6</span><span>سياسة خصوصية وImpressum، وقرارَي G1 وG2. <b>G3 انحسم بـ 17.09.2026: عميل Google واحد للبيئتين</b>، فالبرودكشن ما عاد بدّه عميل خاص — بس بدنا نضيف رابط رجوع البرودكشن للعميل نفسه، ونكتب <code>GOOGLE_CLIENT_SHARED=true</code> بملفّي <code>.env</code> الاثنين، وإلا <code>deploy.sh</code> بيرفض النشر. الخطر اللي وافقت عليه: الستيج على نسخة من حسابات البرودكشن، فعميل واحد يعني شاشة موافقة وحدة وجمهور توكن واحد بالبيئتين. (عميل الستيج جاهز وجوجل شغّال عليه من 16.09.2026؛ وقاعدة "الجلسة بكلمة مرور" من الخادم انبنت بـ 17.09.2026، فبضل على البرودكشن السياسة والImpressum.)</span><span class="pill warn">لسا</span></li>
         <li><span class="when">المرحلة 4</span><span><b>قرار دمج صفوف الرواتب المتداخلة انحسم بـ 17.09.2026: بتدمجها بإيدك قبل الدفع، ورفض الدفع النقدي بيضل مقصود.</b> وPR #71 بيخلّيها بتنشاف على شاشة الرواتب، وبيثبت إنه ما في غير مسارين بينشئوا صف راتب — الاثنين بضغطة يد على نفس الشاشة — فالتداخل من خانتَي التاريخ الحرّتين مش من أي workflow مدعوم. وPR #73 نزل بعده بنفس اليوم وهو النص التاني: حذف الصف من نفس الشاشة، فما عاد الدمج بده تعديل مباشر بقاعدة البيانات. <b>اللي ضل عليك:</b> تختار كيف نمنع الجديد من الاقتراح المكتوب بوصف PR #71 (فحص بالواجهة، ثم trigger عند الإنشاء، ومنصوح ضد exclusion constraint) — وخلّي ببالك إنه trigger عند <b>التعديل</b> رح يكسر خطوة التوسيع بالدمج، فالمنع لازم يكون عند الإنشاء بس.</span><span class="pill warn">ناقص اختيار المنع</span></li>

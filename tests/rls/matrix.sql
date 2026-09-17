@@ -462,17 +462,27 @@ CREATE TEMP TABLE _mx_failures (section text, item text, detail text);
 -- blocks today (App.tsx, AuthContext.tsx), plus one it does not block: a trial
 -- company with an active subscription, the control that must stay allowed when
 -- phase 3.3 moves enforcement into the database.
+--
+-- Two states this list used to carry are gone with 20260919150000 (plan 3.F
+-- step U1), and their absence is the point: approval_status and
+-- subscription_status no longer admit 'suspended', so a suspension lives in
+-- companies.status and nowhere else. The CHECK constraints refuse the other two
+-- values outright, which is asserted in tests/rls/subscriptions.sql rather than
+-- here — a row this file cannot insert is not a matrix cell.
+--
+--   was ('subsuspended', …, 'approved', 'active', 'suspended', NULL)
+--   was ('suspended',    …, 'suspended', 'suspended', 'active', NULL)
 
 CREATE TEMP TABLE _mx_state_company (slug text, label text, approval_status text, status text,
                                      subscription_status text, subscription_expires_at timestamptz);
 INSERT INTO _mx_state_company VALUES
   ('subinactive',     'company whose subscription is inactive',        'approved',  'active',    'inactive',  NULL),
   ('subexpiredstatus','company whose subscription status is expired',  'approved',  'active',    'expired',   NULL),
-  ('subsuspended',    'company whose subscription is suspended',       'approved',  'active',    'suspended', NULL),
   ('subexpired',      'company whose subscription expired yesterday',  'approved',  'active',    'active',    now() - interval '1 day'),
   ('pending',         'company still pending approval',                'pending',   'active',    'active',    NULL),
   ('rejected',        'rejected company',                              'rejected',  'active',    'active',    NULL),
-  ('suspended',       'suspended company',                             'suspended', 'suspended', 'active',    NULL),
+  ('suspended',       'suspended company (companies.status, the one suspension state)',
+                                                                       'approved',  'suspended', 'active',    NULL),
   ('statusinactive',  'approved company whose status is inactive',     'approved',  'inactive',  'active',    NULL),
   ('trial',           'trial company with an active subscription',     'approved',  'trial',     'active',    now() + interval '30 days');
 
@@ -829,7 +839,16 @@ INSERT INTO _mx_spec VALUES
                                        remaining_before, remaining_after)
      VALUES ({co}, {ref:receipt_request_new}, 'GQ-2000-0002', {ref:receipt_salary}, {ref:drivers2}, '2026-03-01', '2026-03-31',
              3, 2026, 1, '2026-03-31', 'MX', false, 1, 0, 0, 0, 0, 1, 0)$q$,
-  $q$place = place$q$);
+  $q$place = place$q$),
+-- The one subscription model (20260919150000, plan 3.F step U1). Like the
+-- Gehaltsquittung ledger above, only its SECURITY DEFINER helpers write it, so
+-- no client role holds more than SELECT; unlike the tenant tables, its SELECT
+-- predicate is the account shell, because a company whose coverage ran out is
+-- exactly the one whose owner has to read it.
+(55, 'subscription_coverage', $q$id = {id}$q$,
+  $q$INSERT INTO subscription_coverage (id, company_id, source, period_start, period_end) VALUES ({id}, {co}, 'manual', '2026-01-01', '2026-02-01')$q$, NULL,
+  $q$INSERT INTO subscription_coverage (company_id, source, period_start, period_end) VALUES ({co}, 'manual', '2026-02-01', '2026-03-01')$q$,
+  $q$note = note$q$);
 
 -- ─── how each row is moved to the other tenant ──────────────────────────────
 -- The M probe takes the row through `key` and sets `mov` on it (`_mx_move_try`),
@@ -910,7 +929,8 @@ INSERT INTO _mx_move VALUES
                                          $q$DELETE FROM document_counters WHERE company_id = {other_co} AND doc_type = 'mx' AND year = 2026$q$, 'Y', 'one counter per company, type and year'),
 ('cash_movements',                       $q$company_id = {other_co}$q$, NULL, 'Y', NULL),
 ('salary_cash_receipts',                 $q$company_id = {other_co}$q$,
-                                         $q$DELETE FROM salary_cash_receipts WHERE id = {ref_other:salary_cash_receipts}$q$, 'Y', 'one receipt number per company');
+                                         $q$DELETE FROM salary_cash_receipts WHERE id = {ref_other:salary_cash_receipts}$q$, 'Y', 'one receipt number per company'),
+('subscription_coverage',                $q$company_id = {other_co}$q$, NULL, 'T', 'pin_billing_company_id refuses it even for the owner');
 
 -- Fixtures go in once; the file can be re-run against a kept container.
 DO $$
@@ -1224,6 +1244,17 @@ INSERT INTO _mx_expected (tbl, op, anon, viewer, editor, supervisor, admin, othe
 ('saved_stundennachweise',            'U', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
 ('saved_stundennachweise',            'D', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
 ('saved_stundennachweise',            'M', '..', 'R.', 'R.', 'R.', 'R.', '.R', '..', NULL),
+-- 20260919150000 (plan 3.F step U1). Its SELECT predicate is the account shell
+-- plus companies.read, exactly like company_subscriptions above, so a member
+-- reads its own company's periods whatever state that company is in — which is
+-- the point, since the page explaining the block is the one that shows them.
+-- Every other cell is PP: `authenticated` is granted SELECT and nothing else,
+-- and the only writers are the SECURITY DEFINER helpers in app_private.
+('subscription_coverage',              'S', 'PP', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'YY', NULL),
+('subscription_coverage',              'I', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', NULL),
+('subscription_coverage',              'U', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', NULL),
+('subscription_coverage',              'D', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', NULL),
+('subscription_coverage',              'M', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', NULL),
 ('subscription_admin_actions',         'S', '..', '..', '..', '..', '..', '..', 'YY', NULL),
 ('subscription_admin_actions',         'I', 'RR', 'RR', 'RR', 'RR', 'RR', 'RR', 'YY', NULL),
 ('subscription_admin_actions',         'U', '..', '..', '..', '..', '..', '..', 'YY', NULL),
