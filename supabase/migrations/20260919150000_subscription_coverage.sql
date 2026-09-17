@@ -80,13 +80,24 @@
      not to `trial`.** Suspending there now writes `companies.status`, and
      `platform_company_lifecycle('reactivate')` (20260916130000:609) writes
      `status = 'active'` unconditionally — it has always done so for
-     CompaniesPage's lifecycle menu. So a company suspended during a running
-     trial comes back `active`, and `buildPlanState` stops granting it the
-     trial's premium although `trial_end` is still ahead. The server admits both
-     words, so access is unchanged; what is lost is the trial tier. Left as a
-     declared change rather than fixed here because restoring the prior status
-     needs the prior status, and neither suspending path records it — see
-     HANDOFF.md for the measurement that decides whether it is worth building.
+     CompaniesPage's lifecycle menu, so this slice adds a second door to a
+     pre-existing behaviour rather than creating one.
+
+     **What is and is not lost, read off `src/utils/planState.ts` rather than
+     assumed.** `isInTrial` (:128) reads `trial_end` alone and never `status`,
+     and `effectivePlanOf` (:190) returns premium whenever it is true — so the
+     company **keeps the trial's premium tier**. What changes is narrower:
+     `readsAsTrial()` in SuperAdminDashboard requires `status = 'trial'`, so the
+     company drops out of the platform's own trial counters; and `buildPlanState`'s
+     `active` branch resolves to `inactive` when the company is *also*
+     unsubscribed, which `planAllows` (:207) turns into everything but the
+     overview being locked. The server admits `active` and `trial` alike, so
+     `get_active_company_id()` is unchanged either way.
+
+     Measured on production: **one** company is in that population and **none**
+     carries a stale future `trial_end`. Left declared rather than fixed — the
+     reasoning, and the two candidate fixes with why neither was taken now, are
+     in HANDOFF.md.
 
   ## The owner's six rules, answered 17.09.2026
 
