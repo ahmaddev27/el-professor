@@ -10,9 +10,13 @@ import { useCompanySettings } from '../contexts/CompanySettingsContext';
 import { format } from 'date-fns';
 import SalaryPaymentModal from './SalaryPaymentModal';
 import SalaryPaymentReceiptPreview from './SalaryPaymentReceiptPreview';
+import GehaltsquittungModal from './GehaltsquittungModal';
 import ConfirmationModal from './ConfirmationModal';
 import { paymentRowActions } from '../utils/salaryPaymentReceiptRow';
-import { receiptScope } from '../utils/salaryCashReceiptFlow';
+import { PAYMENT_WRITE_REFUSAL_KEYS, decidePaymentWrite } from '../utils/salaryPaymentWrite';
+import { REFUSAL_MESSAGE_KEYS, confirmationBlock, receiptScope } from '../utils/salaryCashReceiptFlow';
+import { toCents } from '../utils/money';
+import type { GehaltsquittungPreselect } from '../hooks/useGehaltsquittungFlow';
 import { generateDriverSalaryPdf } from '../utils/driverSalaryPdf';
 import DriverSalarySummaryCard from './DriverSalarySummaryCard';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
@@ -48,6 +52,8 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
   const [paymentToDelete, setPaymentToDelete] = useState<SalaryPayment | null>(null);
   /** The Gehaltsquittung shown over this screen; null while none is open. */
   const [receiptPreviewId, setReceiptPreviewId] = useState<string | null>(null);
+  /** The cash payment handed to the Gehaltsquittung flow; null while none is being issued. */
+  const [receiptDraft, setReceiptDraft] = useState<GehaltsquittungPreselect | null>(null);
   const [payrollData, setPayrollData] = useState<PayrollData>({
     payroll_gross_amount: null,
     payroll_net_amount: null,
@@ -55,7 +61,7 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
   });
 
   const { showToast } = useToast();
-  const { user, companyId: ownCompanyId } = useAuth();
+  const { user, companyId: ownCompanyId, can: rolePermits } = useAuth();
   const navigate = useNavigate();
   const { can: planIncludes } = usePlan();
   const { effectiveCompanyId: companyId, isViewingAsCompany } = useSuperAdmin();
@@ -299,6 +305,14 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
       const userId = authData.user?.id;
       if (!userId) throw new Error(t('sal.notSignedIn'));
 
+      // "Bar zurück" is stored as cash but never left the till: it is money the
+      // driver kept out of a weekly settlement. It stays a plain row — no
+      // receipt, no cash_movements — and the rule is asked by origin here so a
+      // change to it fails loudly instead of booking a payout that never
+      // happened.
+      const weekly = decidePaymentWrite({ origin: 'weekly_cash_difference' });
+      if (weekly.kind !== 'insert') throw new Error(t('sal.weekly.errorCreate'));
+
       const { error: insertErr } = await supabase.from('salary_payments').insert({
         salary_id: salaryId,
         payment_type: 'cash',
@@ -335,38 +349,87 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
     }
   };
 
-  const handleSavePayment = async (paymentData: Omit<SalaryPayment, 'id' | 'created_by' | 'created_at' | 'updated_at'>) => {
+  /**
+   * Hands a cash payment the user just entered to the Gehaltsquittung flow, or
+   * names why it cannot go there. Nothing is written here: the receipt, the
+   * salary_payments row and the outgoing cash_movements row are one transaction
+   * inside confirm_salary_cash_payment, and the browser has no write on any of
+   * the three.
+   *
+   * The refusal is thrown so the payment form shows it in its own error box —
+   * the caller may be platform staff inside a customer, whose token the RPC
+   * answers for their own company, or a role without edit rights on salaries.
+   */
+  const startGehaltsquittung = (paymentData: Pick<SalaryPayment, 'amount' | 'payment_date'>) => {
+    const blocked = confirmationBlock(receiptsScope, rolePermits('salaries', 'edit'));
+    if (blocked) throw new Error(t(REFUSAL_MESSAGE_KEYS[blocked]));
+    if (!salary.salary_id) throw new Error(t('gq.refusal.salaryNotFound'));
+
+    // toCents refuses anything that is not a finite decimal amount rather than
+    // rounding it to a silent 0, so the form says so instead of throwing.
+    let amountCents: number;
     try {
-      const { data: { user: authUser } } = await supabase.auth.getUser();
-      if (!authUser) throw new Error(t('sal.notSignedIn'));
-
-      if (selectedPayment) {
-        const { error } = await supabase
-          .from('salary_payments')
-          .update({
-            payment_type: paymentData.payment_type,
-            amount: paymentData.amount,
-            payment_date: paymentData.payment_date,
-            description: paymentData.description,
-          })
-          .eq('id', selectedPayment.id);
-        if (error) throw error;
-        showToast('success', t('sal.payment.updated'));
-      } else {
-        const { error } = await supabase
-          .from('salary_payments')
-          .insert({ ...paymentData, created_by: authUser.id, company_id: companyId });
-        if (error) throw error;
-        showToast('success', t('sal.payment.added'));
-      }
-
-      await fetchPayments();
-      setIsPaymentModalOpen(false);
-      setSelectedPayment(undefined);
-      await onUpdate();
-    } catch (error: any) {
-      throw error;
+      amountCents = toCents(paymentData.amount);
+    } catch {
+      throw new Error(t('gq.refusal.invalidAmount'));
     }
+
+    setIsPaymentModalOpen(false);
+    setSelectedPayment(undefined);
+    setReceiptDraft({
+      driverId: salary.driver_id,
+      salaryId: salary.salary_id,
+      amountCents,
+      paymentDate: paymentData.payment_date,
+    });
+  };
+
+  const handleSavePayment = async (paymentData: Omit<SalaryPayment, 'id' | 'created_by' | 'created_at' | 'updated_at'>) => {
+    // Owner decision, 17.09.2026: a cash payment added here is a Gehaltsquittung.
+    // The rule is keyed on this deliberate action and on the stored row, never
+    // on payment_type alone — the weekly "Bar zurück" is also cash and must not
+    // book a payout from the till. See utils/salaryPaymentWrite.ts.
+    const decision = decidePaymentWrite({
+      origin: selectedPayment ? 'edit' : 'add',
+      paymentType: paymentData.payment_type,
+      existing: selectedPayment
+        ? { payment_type: selectedPayment.payment_type, source_type: selectedPayment.source_type ?? null }
+        : null,
+    });
+
+    if (decision.kind === 'refused') throw new Error(t(PAYMENT_WRITE_REFUSAL_KEYS[decision.refusal]));
+    if (decision.kind === 'gehaltsquittung') {
+      startGehaltsquittung(paymentData);
+      return;
+    }
+
+    const { data: { user: authUser } } = await supabase.auth.getUser();
+    if (!authUser) throw new Error(t('sal.notSignedIn'));
+
+    if (decision.kind === 'update' && selectedPayment) {
+      const { error } = await supabase
+        .from('salary_payments')
+        .update({
+          payment_type: paymentData.payment_type,
+          amount: paymentData.amount,
+          payment_date: paymentData.payment_date,
+          description: paymentData.description,
+        })
+        .eq('id', selectedPayment.id);
+      if (error) throw error;
+      showToast('success', t('sal.payment.updated'));
+    } else {
+      const { error } = await supabase
+        .from('salary_payments')
+        .insert({ ...paymentData, created_by: authUser.id, company_id: companyId });
+      if (error) throw error;
+      showToast('success', t('sal.payment.added'));
+    }
+
+    await fetchPayments();
+    setIsPaymentModalOpen(false);
+    setSelectedPayment(undefined);
+    await onUpdate();
   };
 
   const handleDeletePayment = async () => {
@@ -938,6 +1001,18 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
         receiptId={receiptPreviewId}
         onClose={() => setReceiptPreviewId(null)}
         onOpenDocuments={id => navigate('/dokumente', { state: { focusReceiptId: id } })}
+      />
+
+      {/* The cash payment entered above, continued as a Gehaltsquittung: the
+          balance, the place of payment, the German receipt and its one
+          confirmation. Once it is issued the new row carries
+          source_type = 'gehaltsquittung', so paymentRowActions gives it the
+          preview button and its lock by itself. */}
+      <GehaltsquittungModal
+        open={receiptDraft !== null}
+        onOpenChange={next => { if (!next) setReceiptDraft(null); }}
+        preselect={receiptDraft}
+        onChanged={() => { void fetchPayments(); void onUpdate(); }}
       />
 
       <ConfirmationModal

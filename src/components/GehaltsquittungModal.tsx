@@ -30,7 +30,13 @@ import {
 } from './ui';
 import { GehaltsquittungPreview, exportGehaltsquittungPdf } from './GehaltsquittungDocument';
 import { ReceiptAlert, useDocumentProblemMessage, useRefusalMessage, useSignedCopyPicker } from './GehaltsquittungParts';
-import { FLOW_STEPS, useGehaltsquittungFlow, type FlowStep, type GehaltsquittungFlow } from '../hooks/useGehaltsquittungFlow';
+import {
+  FLOW_STEPS,
+  useGehaltsquittungFlow,
+  type FlowStep,
+  type GehaltsquittungFlow,
+  type GehaltsquittungPreselect,
+} from '../hooks/useGehaltsquittungFlow';
 import { openSignedCopy, type ReceiptSalary } from '../lib/salaryCashReceipts';
 import { toCents } from '../utils/money';
 import type { BalanceFigures, ReceiptFigures } from '../utils/salaryCashReceipt';
@@ -42,7 +48,7 @@ import {
   type ReceiptDocumentInput,
   type ReceiptDocumentText,
 } from '../utils/salaryCashReceiptDocument';
-import { balanceMayHaveChanged, receiptScope, scopeRefusal, snapshotFromFigures } from '../utils/salaryCashReceiptFlow';
+import { balanceMayHaveChanged, confirmationBlock, receiptScope, snapshotFromFigures } from '../utils/salaryCashReceiptFlow';
 
 /**
  * Gehaltsquittung (cash salary receipt): choose the driver and salary, see the
@@ -74,9 +80,14 @@ export interface GehaltsquittungModalProps {
   onOpenChange: (open: boolean) => void;
   /** After a receipt is issued or its signed copy attached, so a list can refresh. */
   onChanged?: () => void;
+  /**
+   * A driver and salary chosen before this opened — the cash payment added on
+   * the salary screen. The first step is then skipped and its choices fixed.
+   */
+  preselect?: GehaltsquittungPreselect | null;
 }
 
-export default function GehaltsquittungModal({ open, onOpenChange, onChanged }: GehaltsquittungModalProps) {
+export default function GehaltsquittungModal({ open, onOpenChange, onChanged, preselect = null }: GehaltsquittungModalProps) {
   const { t } = useTranslation();
   const refusalMessage = useRefusalMessage();
   const { companyId, can } = useAuth();
@@ -88,17 +99,19 @@ export default function GehaltsquittungModal({ open, onOpenChange, onChanged }: 
   // (current_role_permits('salaries', true)); say so before anything is typed.
   // Viewing another company and having none at all are different situations.
   const scope = receiptScope({ companyId, effectiveCompanyId, isViewingAsCompany });
-  const mayConfirm = can('salaries', 'edit');
-  const blocked = scopeRefusal(scope) ?? (mayConfirm ? null : 'not_authorized');
+  const blocked = confirmationBlock(scope, can('salaries', 'edit'));
 
   const flow = useGehaltsquittungFlow({
     enabled: open && blocked === null,
     companyId,
     defaultPlace: settings?.default_signature_city || settings?.city || '',
     onChanged,
+    preselect,
   });
   const company = useMemo(() => receiptCompany(settings), [settings]);
-  const stepIndex = FLOW_STEPS.indexOf(flow.step);
+  // A preselected flow never shows the first step, so it is not counted either.
+  const steps = flow.locked ? FLOW_STEPS.slice(1) : FLOW_STEPS;
+  const stepIndex = Math.max(steps.indexOf(flow.step), 0);
   const width = blocked === null && flow.step === 'preview' ? 'max-w-4xl' : blocked === null && flow.step === 'amount' ? 'max-w-3xl' : 'max-w-xl';
 
   const handleOpenChange = (next: boolean) => {
@@ -128,7 +141,7 @@ export default function GehaltsquittungModal({ open, onOpenChange, onChanged }: 
               ? t('gq.description')
               : t('gq.step.progress', {
                   current: stepIndex + 1,
-                  total: FLOW_STEPS.length,
+                  total: steps.length,
                   name: t(STEP_KEYS[flow.step]),
                 })}
           </DialogDescription>
@@ -145,7 +158,7 @@ export default function GehaltsquittungModal({ open, onOpenChange, onChanged }: 
           </>
         ) : (
           <>
-            <StepIndicator current={stepIndex} />
+            <StepIndicator current={stepIndex} total={steps.length} />
             {flow.step === 'select' ? <SelectStep flow={flow} /> : null}
             {flow.step === 'amount' ? <AmountStep flow={flow} /> : null}
             {flow.step === 'preview' ? <PreviewStep flow={flow} company={company} /> : null}
@@ -182,12 +195,12 @@ export default function GehaltsquittungModal({ open, onOpenChange, onChanged }: 
 
 // ── Pieces ──────────────────────────────────────────────────────────────────
 
-function StepIndicator({ current }: { current: number }) {
+function StepIndicator({ current, total }: { current: number; total: number }) {
   // Decorative: the dialog description names the step in words.
   return (
-    <ol aria-hidden className="grid grid-cols-4 gap-1.5">
-      {FLOW_STEPS.map((step, index) => (
-        <li key={step} className={cn('h-1 rounded-full', index <= current ? 'bg-brand' : 'bg-sunken')} />
+    <ol aria-hidden className="grid auto-cols-fr grid-flow-col gap-1.5">
+      {Array.from({ length: total }, (_, index) => (
+        <li key={index} className={cn('h-1 rounded-full', index <= current ? 'bg-brand' : 'bg-sunken')} />
       ))}
     </ol>
   );
@@ -223,12 +236,32 @@ function LoadError({ onRetry, message }: { onRetry: () => void; message?: string
   );
 }
 
+/**
+ * Why the chosen salary cannot be paid at all. Shown on the select step and,
+ * for a preselected flow that never sees it, on the amount step: without it the
+ * balance panel would sit there as an empty skeleton with nothing said.
+ */
+function SelectionAlerts({ flow }: { flow: GehaltsquittungFlow }) {
+  const { t } = useTranslation();
+  const refusalMessage = useRefusalMessage();
+  return (
+    <>
+      {flow.overlap ? (
+        <ReceiptAlert tone="critical">
+          {refusalMessage('overlapping_salary')} {t('gq.overlap.with', { period: periodLabel(flow.overlap) })}
+        </ReceiptAlert>
+      ) : null}
+      {flow.balance.status === 'error' ? <LoadError onRetry={flow.reloadBalance} /> : null}
+      {flow.salaryMissing ? <ReceiptAlert tone="critical">{refusalMessage('salary_not_found')}</ReceiptAlert> : null}
+    </>
+  );
+}
+
 // ── Step 1: driver and salary ───────────────────────────────────────────────
 
 function SelectStep({ flow }: { flow: GehaltsquittungFlow }) {
   const { t } = useTranslation();
-  const refusalMessage = useRefusalMessage();
-  const { drivers, salaries, balance, overlap } = flow;
+  const { drivers, salaries } = flow;
 
   return (
     <>
@@ -282,20 +315,14 @@ function SelectStep({ flow }: { flow: GehaltsquittungFlow }) {
           </Field>
         ) : null}
 
-        {overlap ? (
-          <ReceiptAlert tone="critical">
-            {refusalMessage('overlapping_salary')} {t('gq.overlap.with', { period: periodLabel(overlap) })}
-          </ReceiptAlert>
-        ) : null}
-        {balance.status === 'error' ? <LoadError onRetry={flow.reloadBalance} /> : null}
-        {flow.salaryMissing ? <ReceiptAlert tone="critical">{refusalMessage('salary_not_found')}</ReceiptAlert> : null}
+        <SelectionAlerts flow={flow} />
       </div>
 
       <DialogFooter>
         <DialogClose asChild>
           <Button variant="secondary">{t('common.cancel')}</Button>
         </DialogClose>
-        <Button onClick={flow.goToAmount} disabled={!flow.canContinue} loading={balance.status === 'loading'}>
+        <Button onClick={flow.goToAmount} disabled={!flow.canContinue} loading={flow.balance.status === 'loading'}>
           {t('gq.next')}
           <ChevronRight aria-hidden />
         </Button>
@@ -346,6 +373,8 @@ function AmountStep({ flow }: { flow: GehaltsquittungFlow }) {
         )}
 
         <div className="grid content-start gap-4">
+          {/* A preselected flow never passed the select step, so its refusals land here. */}
+          <SelectionAlerts flow={flow} />
           {flow.refusal && balanceFigures ? (
             balanceMayHaveChanged(flow.refusal) ? (
               <ReceiptAlert tone="caution">{refusalMessage('stale_figures')}</ReceiptAlert>
@@ -395,11 +424,20 @@ function AmountStep({ flow }: { flow: GehaltsquittungFlow }) {
       </div>
 
       <DialogFooter>
-        <Button variant="secondary" onClick={flow.goBack}>
-          <ArrowLeft aria-hidden />
-          {t('common.back')}
-        </Button>
-        <Button onClick={flow.goToPreview} disabled={flow.alreadyPaid || !balanceFigures}>
+        {flow.locked ? (
+          <DialogClose asChild>
+            <Button variant="secondary">{t('common.cancel')}</Button>
+          </DialogClose>
+        ) : (
+          <Button variant="secondary" onClick={flow.goBack}>
+            <ArrowLeft aria-hidden />
+            {t('common.back')}
+          </Button>
+        )}
+        <Button
+          onClick={flow.goToPreview}
+          disabled={flow.alreadyPaid || !balanceFigures || flow.overlap !== null || flow.salaryMissing}
+        >
           {t('gq.toPreview')}
           <ChevronRight aria-hidden />
         </Button>
@@ -689,9 +727,12 @@ function DoneStep({ flow, company }: { flow: GehaltsquittungFlow; company: Compa
       </div>
 
       <DialogFooter>
-        <Button variant="secondary" onClick={flow.startAnother}>
-          {t('gq.done.another')}
-        </Button>
+        {/* A preselected flow is about one payment; there is no second one to start here. */}
+        {flow.locked ? null : (
+          <Button variant="secondary" onClick={flow.startAnother}>
+            {t('gq.done.another')}
+          </Button>
+        )}
         <DialogClose asChild>
           <Button>{t('common.close')}</Button>
         </DialogClose>
