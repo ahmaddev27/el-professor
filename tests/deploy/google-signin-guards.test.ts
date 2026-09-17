@@ -77,7 +77,11 @@ const SECRET = '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-like-one';
 const NO_PEER = join(dir, 'no-such-peer.env').replace(/\\/g, '/');
 
 const env = (lines: string[]) => file(`${lines.join('\n')}\n`);
-const guard = (envFile: string, peer = NO_PEER) => run(['google_signin_guard', envFile, peer]);
+const guard = (envFile: string, peer = NO_PEER, peerName?: string) =>
+  run(['google_signin_guard', envFile, peer, ...(peerName === undefined ? [] : [peerName])]);
+/** The refusal for a shared client id, whichever side is missing the opt-in. */
+const SHARED_REFUSAL =
+  'REFUSED: staging and production share a GOOGLE_CLIENT_ID; sharing one Google OAuth client needs GOOGLE_CLIENT_SHARED=true in both .env files, and it is missing from';
 
 describe.skipIf(!hasBash)('google_signin_guard', () => {
   it('lets the switch be missing, empty or false without a client', () => {
@@ -124,17 +128,82 @@ describe.skipIf(!hasBash)('google_signin_guard', () => {
     expect(guard(complete, env(['GOOGLE_SIGNIN_ENABLED=false'])).output).toBe('PASSED');
   });
 
-  it('refuses a client id the other environment also uses, switched on or not, without printing it', () => {
-    const peer = env(['GOOGLE_SIGNIN_ENABLED=true', `GOOGLE_CLIENT_ID=${CLIENT}`, 'GOOGLE_CLIENT_SECRET=other']);
-    for (const lines of [
-      ['GOOGLE_SIGNIN_ENABLED=true', `GOOGLE_CLIENT_ID=${CLIENT}`, `GOOGLE_CLIENT_SECRET=${SECRET}`],
-      ['GOOGLE_SIGNIN_ENABLED=false', `GOOGLE_CLIENT_ID=${CLIENT}`],
-    ]) {
-      const { output, status } = guard(env(lines), peer);
-      expect(status).toBe(1);
-      expect(output).toBe('REFUSED: staging and production share a GOOGLE_CLIENT_ID; each environment needs its own Google OAuth client');
-      expect(output).not.toContain(CLIENT);
-    }
+  // Owner decision G3, 17.09.2026: the two environments may share one Google
+  // OAuth client, but only when both .env files say so. The same id with no
+  // opt-in is still what a .env copied from the other environment looks like.
+  describe('a shared client id (owner decision G3)', () => {
+    const OPTED_IN = 'GOOGLE_CLIENT_SHARED=true';
+    const sameId = (...extra: string[]) => ['GOOGLE_SIGNIN_ENABLED=false', `GOOGLE_CLIENT_ID=${CLIENT}`, ...extra];
+    const peerWithId = (...extra: string[]) =>
+      env(['GOOGLE_SIGNIN_ENABLED=true', `GOOGLE_CLIENT_ID=${CLIENT}`, 'GOOGLE_CLIENT_SECRET=other', ...extra]);
+
+    it('passes when both sides opted in, switched on or not', () => {
+      const peer = peerWithId(OPTED_IN);
+      for (const lines of [
+        ['GOOGLE_SIGNIN_ENABLED=true', `GOOGLE_CLIENT_ID=${CLIENT}`, `GOOGLE_CLIENT_SECRET=${SECRET}`, OPTED_IN],
+        sameId(OPTED_IN),
+        // CRs and a repeated key: env_value takes the last line, CR removed.
+        sameId('GOOGLE_CLIENT_SHARED=false', `${OPTED_IN}\r`),
+      ]) {
+        expect(guard(env(lines), peer).output).toBe('PASSED');
+      }
+      // The peer's own CR is stripped the same way.
+      expect(guard(env(sameId(OPTED_IN)), peerWithId(`${OPTED_IN}\r`)).output).toBe('PASSED');
+    });
+
+    it('refuses the opt-in on one side only, naming the side that is missing it', () => {
+      const thisSideOnly = guard(env(sameId(OPTED_IN)), peerWithId(), 'production');
+      expect(thisSideOnly.status).toBe(1);
+      expect(thisSideOnly.output).toBe(`${SHARED_REFUSAL} production's .env`);
+
+      const peerOnly = guard(env(sameId()), peerWithId(OPTED_IN), 'production');
+      expect(peerOnly.status).toBe(1);
+      expect(peerOnly.output).toBe(`${SHARED_REFUSAL} this environment's .env`);
+
+      // The peer's name is deploy.sh's; without one the refusal still stands.
+      expect(guard(env(sameId(OPTED_IN)), peerWithId()).output).toBe(`${SHARED_REFUSAL} the other environment's .env`);
+    });
+
+    it('refuses the same id with neither side opting in, switched on or not, without printing it', () => {
+      for (const lines of [
+        ['GOOGLE_SIGNIN_ENABLED=true', `GOOGLE_CLIENT_ID=${CLIENT}`, `GOOGLE_CLIENT_SECRET=${SECRET}`],
+        sameId(),
+        sameId('GOOGLE_CLIENT_SHARED='),
+        sameId('GOOGLE_CLIENT_SHARED=false'),
+      ]) {
+        const { output, status } = guard(env(lines), peerWithId(), 'production');
+        expect(status).toBe(1);
+        expect(output).toBe(`${SHARED_REFUSAL} this environment's .env and production's .env`);
+        expect(output).not.toContain(CLIENT);
+      }
+    });
+
+    it('refuses any other value for the opt-in, read whatever the switch says', () => {
+      for (const value of ['TRUE', 'True', '1', 'yes', 'on', '"true"', ' true', 'true ', SECRET]) {
+        // No peer file at all: the spelling is checked before anything is compared.
+        const { output, status } = guard(env([`GOOGLE_CLIENT_SHARED=${value}`]));
+        expect(status).toBe(1);
+        expect(output).toBe('REFUSED: GOOGLE_CLIENT_SHARED must be empty, true or false; .env holds something else');
+        expect(output).not.toContain(SECRET);
+      }
+    });
+
+    it('a peer value that is not exactly true is not an opt-in', () => {
+      for (const value of ['TRUE', 'True', '1', 'yes', ' true']) {
+        const { output, status } = guard(env(sameId(OPTED_IN)), peerWithId(`GOOGLE_CLIENT_SHARED=${value}`), 'production');
+        expect(status).toBe(1);
+        expect(output).toBe(`${SHARED_REFUSAL} production's .env`);
+      }
+    });
+
+    it('leaves two different client ids alone, opted in or not', () => {
+      const complete = ['GOOGLE_SIGNIN_ENABLED=true', `GOOGLE_CLIENT_ID=${CLIENT}`, `GOOGLE_CLIENT_SECRET=${SECRET}`];
+      const otherPeer = env([`GOOGLE_CLIENT_ID=${OTHER_CLIENT}`, OPTED_IN]);
+      expect(guard(env(complete), otherPeer).output).toBe('PASSED');
+      expect(guard(env([...complete, OPTED_IN]), env([`GOOGLE_CLIENT_ID=${OTHER_CLIENT}`])).output).toBe('PASSED');
+      // An empty id on both sides is not a shared client.
+      expect(guard(env(['GOOGLE_SIGNIN_ENABLED=false', 'GOOGLE_CLIENT_ID=']), env(['GOOGLE_CLIENT_ID='])).output).toBe('PASSED');
+    });
   });
 });
 
