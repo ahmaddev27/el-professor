@@ -6,6 +6,7 @@ import { consumeGoogleSignInIntent, readGoogleSignInIntent, type GoogleSignInInt
 import { googleSessionIsSettled, sessionCameFromGoogle } from '../lib/googleAccount';
 import { nextAfterReconcile, reconcileOauthAccount } from '../lib/oauthAccountClient';
 import { attemptUntilAnswered } from '../lib/profileLoadRetry';
+import { subscriptionIsActive } from '../utils/planState';
 
 const SESSION_TIMEOUT = 20 * 60 * 1000;
 const LAST_ACTIVITY_KEY = 'lastActivity';
@@ -644,10 +645,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const canCreate = isSuperAdmin || isAdmin ||
     Object.values(permissions).some(p => p.canEdit);
 
-  // Subscription is active when status=active AND expiry is in the future (or null = no expiry set = legacy active)
-  const isSubscriptionActive =
-    subscriptionStatus === 'active' &&
-    (subscriptionExpiresAt === null || new Date(subscriptionExpiresAt) > new Date());
+  // Subscription is active when status=active AND expiry is in the future (or
+  // null = no expiry set = legacy active). The predicate is
+  // `subscriptionIsActive()` and lives in `utils/planState.ts`, because
+  // PlanContext decides the same question about the same company and the two
+  // must not drift — from each other, or from `get_active_company_id()`.
+  const isSubscriptionActive = subscriptionIsActive(subscriptionStatus, subscriptionExpiresAt);
 
   // Effective status: if DB says 'active' but expiry is in the past, treat as 'expired'
   const effectiveSubscriptionStatus: 'inactive' | 'active' | 'expired' | 'suspended' | null =
