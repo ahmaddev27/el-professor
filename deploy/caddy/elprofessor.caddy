@@ -1,0 +1,161 @@
+# El-Professor's public routes, served by ridy's Caddy.
+#
+# ridy owns ports 80 and 443 on this host, so these blocks live in a marked
+# section at the end of ridy's Caddyfile (/root/ridy/docker/Caddyfile). ridy's
+# deploy resets that file with `git reset --hard`, which drops the section, and
+# ridy itself is off limits. The guard (guard.sh, run by systemd) puts the
+# section back within seconds, from the copy of this file installed at
+# /srv/caddy-sites/elprofessor.caddy.
+#
+# Edit this copy, then run deploy/caddy/publish.sh. Never edit the section in
+# ridy's file or the installed copy by hand: the guard and the next publish
+# overwrite both.
+#
+# The stacks publish no host ports. Their containers join ridy_default and are
+# reached here by container name.
+#
+# Every API host sets X-Client-IP from the connecting address. GoTrue keys its
+# per-client limits on login, /verify and password recovery on that header
+# (GOTRUE_RATE_LIMIT_HEADER in deploy/docker-compose.yml) and applies none of
+# them without it. It has to be set here, at the edge: header_up replaces
+# whatever a client sent, and past Kong every request comes from one container.
+
+# Retired: the .de domain is kept only so existing links and mails still land.
+api.elprofessor.de {
+	encode zstd gzip
+
+	# Fahrtenbuch XLSX uploads and PDF batches outlast Caddy's default read
+	# timeout long before they hit any body limit.
+	reverse_proxy ya-mobility-kong-1:8000 {
+		header_up X-Client-IP {remote_host}
+		transport http {
+			read_timeout 300s
+			write_timeout 300s
+		}
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+}
+
+app.elprofessor.de {
+	redir https://elprofessor.eu{uri} permanent
+}
+
+# Production API.
+api.elprofessor.eu {
+	encode zstd gzip
+
+	reverse_proxy ya-mobility-kong-1:8000 {
+		header_up X-Client-IP {remote_host}
+		transport http {
+			read_timeout 300s
+			write_timeout 300s
+		}
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+}
+
+# Staging web. It runs on a copy of production data and shows a STAGING banner
+# on every screen, so nobody works here by mistake — and it sits behind a login.
+#
+# The marker line below is not Caddy syntax. The guard replaces it with a
+# basic_auth block built from /root/el-professor-secrets/staging-web-auth (set
+# with deploy/set-staging-password.sh), so the password hash never enters git.
+# Without a valid file the guard renders a 503 there instead: staging is locked,
+# never open, and production's routes are written either way.
+#
+# /version.txt and the mail logo stay public. deploy.sh reads the first to prove
+# a release is live; mail clients load the second without a login.
+app.elprofessor.eu {
+	encode zstd gzip
+
+	@public path /version.txt /email-templates/logo.png
+	handle @public {
+		reverse_proxy ya-mobility-staging-web-1:80
+	}
+	handle {
+		__STAGING_WEB_AUTH__
+		reverse_proxy ya-mobility-staging-web-1:80
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+	header X-Robots-Tag "noindex, nofollow"
+}
+
+www.elprofessor.eu {
+	redir https://elprofessor.eu{uri} permanent
+}
+
+# Production web.
+elprofessor.eu {
+	encode zstd gzip
+
+	reverse_proxy ya-mobility-web-1:80
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+}
+
+# Staging API.
+api-staging.elprofessor.eu {
+	encode zstd gzip
+
+	reverse_proxy ya-mobility-staging-kong-1:8000 {
+		header_up X-Client-IP {remote_host}
+		transport http {
+			read_timeout 300s
+			write_timeout 300s
+		}
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+	header X-Robots-Tag "noindex, nofollow"
+}
+
+# Staging mail catcher. The login is enforced by Mailpit itself (MP_UI_AUTH_FILE,
+# set with deploy/set-mailpit-password.sh): the inbox holds live reset links for
+# the real accounts copied into staging.
+mail-staging.elprofessor.eu {
+	encode zstd gzip
+
+	reverse_proxy ya-mobility-staging-mailpit-1:8025
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "no-referrer"
+		X-Robots-Tag "noindex, nofollow"
+		-Server
+	}
+}

@@ -8,6 +8,7 @@ import {
   RefreshCw, Zap, BarChart3, AlertCircle, ChevronRight,
   ArrowUpRight, Shield, Activity, Tag, ClipboardCheck, Gift, KeyRound, PencilLine,
 } from 'lucide-react';
+import { callPlatformRpc } from '../lib/platformRpc';
 import DiscountCodesManagement from '../components/DiscountCodesManagement';
 import ReferralCodesManagement from '../components/ReferralCodesManagement';
 import ActivationCodesManagement from '../components/ActivationCodesManagement';
@@ -15,6 +16,7 @@ import ManualSubscriptionModal from '../components/ManualSubscriptionModal';
 import { format, differenceInDays, isAfter, isBefore, addDays, startOfMonth } from 'date-fns';
 import { de } from 'date-fns/locale';
 import { calcPricing, fmt as fmtPrice } from '../utils/pricing';
+import { useAppConfig } from '../contexts/AppConfigContext';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { useTranslation } from '../contexts/LanguageContext';
 import type { TranslationKey } from '../i18n';
@@ -257,7 +259,16 @@ function PlanDistributionBar({ kpis, total }: { kpis: PlatformKPIs; total: numbe
 // ─── Main Dashboard ───────────────────────────────────────────────────────────
 
 export default function SuperAdminDashboard() {
-  const { enterCompany } = useSuperAdmin();
+  // The prices this screen shows come from the same price book the database
+  // charges from (plan 3.9), so a changed price shows here without a release.
+  const { priceBook } = useAppConfig();
+  const { enterCompany, platformCan } = useSuperAdmin();
+  // What the platform role may do, from platform_whoami(). Actions a role lacks
+  // are hidden; the database refuses them regardless.
+  const canLifecycle = platformCan('companies.lifecycle');
+  const canBilling = platformCan('billing.manage');
+  const canCodes = platformCan('codes.manage');
+  const canOpenCompany = platformCan('business.read');
   const { showToast } = useToast();
   const navigate = useNavigate();
   const { t, tPlural } = useTranslation();
@@ -391,13 +402,9 @@ export default function SuperAdminDashboard() {
     if (!company.trial_end) return;
     setExtendingId(company.id);
     try {
-      const newEnd = new Date(company.trial_end);
-      newEnd.setDate(newEnd.getDate() + 7);
-      const { error } = await supabase
-        .from('companies')
-        .update({ trial_end: newEnd.toISOString(), updated_at: new Date().toISOString() })
-        .eq('id', company.id);
-      if (error) throw error;
+      // The database moves trial_end by whole days from the stored value, so two
+      // clicks cannot both extend from the same browser copy of the date.
+      await callPlatformRpc('platform_company_extend_trial', { p_company_id: company.id, p_days: 7 });
       showToast('success', t('sa.dash.toast.trialExtended', { name: company.name }));
       load(true);
     } catch (err: any) {
@@ -409,11 +416,7 @@ export default function SuperAdminDashboard() {
 
   const handleStatusChange = async (company: CompanyRow, status: CompanyStatus) => {
     try {
-      const { error } = await supabase
-        .from('companies')
-        .update({ status, updated_at: new Date().toISOString() })
-        .eq('id', company.id);
-      if (error) throw error;
+      await callPlatformRpc('platform_company_set_status', { p_company_id: company.id, p_status: status });
       const statusKey = STATUS_CFG[status]?.label;
       showToast('success', `${company.name} → ${statusKey ? t(statusKey) : status}`);
       load(true);
@@ -424,11 +427,7 @@ export default function SuperAdminDashboard() {
 
   const handlePlanChange = async (company: CompanyRow, plan: Plan) => {
     try {
-      const { error } = await supabase
-        .from('companies')
-        .update({ plan, updated_at: new Date().toISOString() })
-        .eq('id', company.id);
-      if (error) throw error;
+      await callPlatformRpc('platform_company_set_plan', { p_company_id: company.id, p_plan: plan });
       showToast('success', t('sa.dash.toast.planChanged', { name: company.name, plan: PLAN_LABEL[plan] }));
       load(true);
     } catch (err: any) {
@@ -438,11 +437,7 @@ export default function SuperAdminDashboard() {
 
   const handleBillingCycleChange = async (company: CompanyRow, billing_cycle: 'monthly' | 'yearly') => {
     try {
-      const { error } = await supabase
-        .from('companies')
-        .update({ billing_cycle, updated_at: new Date().toISOString() })
-        .eq('id', company.id);
-      if (error) throw error;
+      await callPlatformRpc('platform_company_set_plan', { p_company_id: company.id, p_billing_cycle: billing_cycle });
       showToast('success', `${company.name} → ${t(billing_cycle === 'yearly' ? 'sa.dash.cycle.yearly' : 'sa.dash.cycle.monthly')}`);
       load(true);
     } catch (err: any) {
@@ -453,11 +448,7 @@ export default function SuperAdminDashboard() {
   const handleCarLimitChange = async (company: CompanyRow, limit: number) => {
     if (limit < 1 || limit > 200) return;
     try {
-      const { error } = await supabase
-        .from('companies')
-        .update({ subscription_car_limit: limit, updated_at: new Date().toISOString() })
-        .eq('id', company.id);
-      if (error) throw error;
+      await callPlatformRpc('platform_company_set_plan', { p_company_id: company.id, p_car_limit: limit });
       showToast('success', t('sa.dash.toast.carLimitChanged', { name: company.name, limit }));
       load(true);
     } catch (err: any) {
@@ -468,18 +459,10 @@ export default function SuperAdminDashboard() {
   const handleApprove = async (company: CompanyRow) => {
     setApprovingId(company.id);
     try {
-      const { data: { user: me } } = await supabase.auth.getUser();
-      const { error } = await supabase
-        .from('companies')
-        .update({
-          approval_status: 'approved',
-          approved_at: new Date().toISOString(),
-          approved_by: me?.id ?? null,
-          rejection_reason: null,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', company.id);
-      if (error) throw error;
+      // Exactly what this screen wrote before: the approval columns and nothing
+      // else. No code and no mail at approval (the owner's decision of
+      // 15.09.2026); the approving account comes from the caller's own token.
+      await callPlatformRpc('platform_company_set_approval', { p_company_id: company.id, p_decision: 'approve' });
       showToast('success', t('sa.dash.toast.approved', { name: company.name }));
       load(true);
     } catch (err: any) {
@@ -494,18 +477,11 @@ export default function SuperAdminDashboard() {
     const company = rejectModal.company;
     setApprovingId(company.id);
     try {
-      const { data: { user: me } } = await supabase.auth.getUser();
-      const { error } = await supabase
-        .from('companies')
-        .update({
-          approval_status: 'rejected',
-          rejected_at: new Date().toISOString(),
-          rejected_by: me?.id ?? null,
-          rejection_reason: rejectReason.trim() || null,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', company.id);
-      if (error) throw error;
+      await callPlatformRpc('platform_company_set_approval', {
+        p_company_id: company.id,
+        p_decision: 'reject',
+        p_reason: rejectReason.trim() || null,
+      });
       showToast('success', t('sa.dash.toast.rejected', { name: company.name }));
       setRejectModal(null);
       setRejectReason('');
@@ -519,11 +495,7 @@ export default function SuperAdminDashboard() {
 
   const handleSuspendApproval = async (company: CompanyRow) => {
     try {
-      const { error } = await supabase
-        .from('companies')
-        .update({ approval_status: 'suspended', updated_at: new Date().toISOString() })
-        .eq('id', company.id);
-      if (error) throw error;
+      await callPlatformRpc('platform_company_set_approval', { p_company_id: company.id, p_decision: 'suspend' });
       showToast('success', t('sa.dash.toast.approvalSuspended', { name: company.name }));
       load(true);
     } catch (err: any) {
@@ -642,12 +614,12 @@ export default function SuperAdminDashboard() {
       {/* ── Section tabs ───────────────────────────────────────────────────────── */}
       <div className="flex gap-1 p-1 rounded-xl flex-wrap" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', width: 'fit-content' }}>
         {([
-          { id: 'overview',    label: t('sa.dash.tab.overview'),   icon: BarChart3 },
-          { id: 'approvals',   label: t('sa.dash.tab.approvals'),  icon: ClipboardCheck, badge: pendingCompanies.length },
-          { id: 'discounts',   label: t('sa.dash.tab.discounts'),  icon: Tag },
-          { id: 'referrals',   label: t('sa.dash.tab.referrals'),  icon: Gift },
-          { id: 'activation',  label: t('sa.dash.tab.activation'), icon: KeyRound },
-        ] as const).map(tab => (
+          { id: 'overview',    label: t('sa.dash.tab.overview'),   icon: BarChart3,      visible: true },
+          { id: 'approvals',   label: t('sa.dash.tab.approvals'),  icon: ClipboardCheck, visible: true, badge: pendingCompanies.length },
+          { id: 'discounts',   label: t('sa.dash.tab.discounts'),  icon: Tag,            visible: canCodes },
+          { id: 'referrals',   label: t('sa.dash.tab.referrals'),  icon: Gift,           visible: canCodes },
+          { id: 'activation',  label: t('sa.dash.tab.activation'), icon: KeyRound,       visible: canCodes },
+        ] as const).filter(tab => tab.visible).map(tab => (
           <button
             key={tab.id}
             onClick={() => setActiveSection(tab.id)}
@@ -669,13 +641,13 @@ export default function SuperAdminDashboard() {
       </div>
 
       {/* ── Discount Codes section ─────────────────────────────────────────────── */}
-      {activeSection === 'discounts' && <DiscountCodesManagement />}
+      {canCodes && activeSection === 'discounts' && <DiscountCodesManagement />}
 
       {/* ── Referral Codes section ─────────────────────────────────────────────── */}
-      {activeSection === 'referrals' && <ReferralCodesManagement companies={companies} />}
+      {canCodes && activeSection === 'referrals' && <ReferralCodesManagement companies={companies} />}
 
       {/* ── Activation Codes section ───────────────────────────────────────────── */}
-      {activeSection === 'activation' && <ActivationCodesManagement companies={companies} />}
+      {canCodes && activeSection === 'activation' && <ActivationCodesManagement companies={companies} />}
 
       {/* ── Approvals section ────────────────────────────────────────────────── */}
       {activeSection === 'approvals' && (
@@ -725,7 +697,7 @@ export default function SuperAdminDashboard() {
                         </span>
                       </div>
                     </div>
-                    <div className="flex items-center gap-2 flex-shrink-0">
+                    <div className={`${canLifecycle ? 'flex' : 'hidden'} items-center gap-2 flex-shrink-0`}>
                       <button
                         onClick={() => handleApprove(c)}
                         disabled={approvingId === c.id}
@@ -795,7 +767,7 @@ export default function SuperAdminDashboard() {
                             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold" style={{ background: apBg, color: apColor }}>
                               {apLabel}
                             </span>
-                            {ap === 'approved' && (
+                            {canLifecycle && ap === 'approved' && (
                               <button
                                 onClick={() => handleSuspendApproval(c)}
                                 className="text-[11px] px-2 py-0.5 rounded border transition-colors"
@@ -806,7 +778,7 @@ export default function SuperAdminDashboard() {
                                 {t('sa.dash.suspend')}
                               </button>
                             )}
-                            {(ap === 'rejected' || ap === 'suspended') && (
+                            {canLifecycle && (ap === 'rejected' || ap === 'suspended') && (
                               <button
                                 onClick={() => handleApprove(c)}
                                 disabled={approvingId === c.id}
@@ -816,7 +788,7 @@ export default function SuperAdminDashboard() {
                                 {t('sa.dash.approve')}
                               </button>
                             )}
-                            {ap === 'pending' && (
+                            {canLifecycle && ap === 'pending' && (
                               <button
                                 onClick={() => handleApprove(c)}
                                 disabled={approvingId === c.id}
@@ -847,7 +819,7 @@ export default function SuperAdminDashboard() {
                         </td>
                         <td className="px-4 py-3">
                           <button
-                            onClick={() => { enterCompany(c as any); navigate('/overview'); }}
+                            hidden={!canOpenCompany} onClick={() => { enterCompany(c as any); navigate('/overview'); }}
                             className="p-1.5 rounded-lg transition-colors"
                             style={{ color: 'var(--text-tertiary)' }}
                             onMouseEnter={e => { (e.currentTarget.style.background = 'var(--bg-muted)'); (e.currentTarget.style.color = 'var(--accent)'); }}
@@ -964,7 +936,9 @@ export default function SuperAdminDashboard() {
                     </div>
                   </div>
                   <div className="flex items-center gap-1.5 flex-shrink-0">
-                    {(item.company.status === 'trial') && item.company.trial_end && (
+                    {/* Extending a trial asks companies.lifecycle, not billing.manage:
+                        plan 3.5 keeps the trial with the company's own lifecycle. */}
+                    {canLifecycle && (item.company.status === 'trial') && item.company.trial_end && (
                       <button
                         onClick={() => handleExtendTrial(item.company)}
                         disabled={extendingId === item.company.id}
@@ -975,7 +949,7 @@ export default function SuperAdminDashboard() {
                       </button>
                     )}
                     <button
-                      onClick={() => { enterCompany(item.company as any); navigate('/overview'); }}
+                      hidden={!canOpenCompany} onClick={() => { enterCompany(item.company as any); navigate('/overview'); }}
                       className="p-1.5 rounded-lg transition-colors"
                       style={{ color: severityColor }}
                       title={t('sa.dash.openCompany')}
@@ -1040,13 +1014,14 @@ export default function SuperAdminDashboard() {
                         <button
                           onClick={() => handleExtendTrial(c)}
                           disabled={extendingId === c.id}
-                          className="px-2.5 py-1 rounded-lg text-xs font-semibold transition-opacity hover:opacity-80 flex items-center gap-1"
+                          className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-opacity hover:opacity-80 ${canLifecycle ? 'flex' : 'hidden'} items-center gap-1`}
                           style={{ background: 'var(--warning)', color: 'white' }}
                         >
                           {extendingId === c.id ? <RefreshCw size={11} className="animate-spin" /> : <Zap size={11} />}
                           {t('sa.dash.extendSevenDays')}
                         </button>
                         <button
+                          hidden={!canLifecycle}
                           onClick={() => handleStatusChange(c, 'active')}
                           className="px-2.5 py-1 rounded-lg text-xs font-semibold transition-opacity hover:opacity-80"
                           style={{ background: 'var(--success)', color: 'white' }}
@@ -1054,7 +1029,7 @@ export default function SuperAdminDashboard() {
                           {t('sa.dash.activate')}
                         </button>
                         <button
-                          onClick={() => { enterCompany(c as any); navigate('/overview'); }}
+                          hidden={!canOpenCompany} onClick={() => { enterCompany(c as any); navigate('/overview'); }}
                           className="p-1.5 rounded-lg transition-colors"
                           style={{ color: 'var(--text-tertiary)' }}
                           onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-muted)')}
@@ -1128,6 +1103,7 @@ export default function SuperAdminDashboard() {
                   <td className="px-4 py-3">
                     <select
                       value={c.plan ?? 'basic'}
+                      disabled={!canBilling}
                       onChange={e => handlePlanChange(c, e.target.value as Plan)}
                       className="text-xs rounded-lg px-2 py-1 font-semibold border-0 outline-none cursor-pointer"
                       style={{ background: PLAN_BG[c.plan ?? 'basic'], color: PLAN_COLOR[c.plan ?? 'basic'] }}
@@ -1144,6 +1120,7 @@ export default function SuperAdminDashboard() {
                   <td className="px-4 py-3">
                     <select
                       value={c.billing_cycle}
+                      disabled={!canBilling}
                       onChange={e => handleBillingCycleChange(c, e.target.value as 'monthly' | 'yearly')}
                       className="text-xs rounded-lg px-2 py-1 border-0 outline-none cursor-pointer"
                       style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)' }}
@@ -1162,6 +1139,7 @@ export default function SuperAdminDashboard() {
                         min={1}
                         max={200}
                         defaultValue={c.subscription_car_limit}
+                        disabled={!canBilling}
                         onBlur={e => {
                           const v = parseInt(e.target.value);
                           if (!isNaN(v) && v !== c.subscription_car_limit) handleCarLimitChange(c, v);
@@ -1186,7 +1164,7 @@ export default function SuperAdminDashboard() {
                   {/* Calculated price */}
                   <td className="px-4 py-3">
                     {(() => {
-                      const bp = calcPricing(c.plan ?? 'basic', c.subscription_car_limit, c.billing_cycle);
+                      const bp = calcPricing(priceBook, c.plan ?? 'basic', c.subscription_car_limit, c.billing_cycle);
                       return (
                         <div>
                           <p className="text-xs font-semibold" style={{ color: 'var(--text-primary)' }}>
@@ -1209,6 +1187,7 @@ export default function SuperAdminDashboard() {
                     ) : (
                       <select
                         value={c.status}
+                        disabled={!canLifecycle}
                         onChange={e => handleStatusChange(c, e.target.value as CompanyStatus)}
                         className="text-xs rounded-lg px-2 py-1 font-semibold border-0 outline-none cursor-pointer"
                         style={{
@@ -1247,6 +1226,7 @@ export default function SuperAdminDashboard() {
                     <div className="flex items-center gap-1 justify-end">
                       {c.status === 'trial' && c.trial_end && (
                         <button
+                          hidden={!canBilling}
                           onClick={() => handleExtendTrial(c)}
                           disabled={extendingId === c.id}
                           className="p-1.5 rounded-lg transition-colors"
@@ -1259,6 +1239,7 @@ export default function SuperAdminDashboard() {
                         </button>
                       )}
                       <button
+                        hidden={!canBilling}
                         onClick={() => setManualSubModal(c)}
                         className="p-1.5 rounded-lg transition-colors"
                         style={{ color: 'var(--text-tertiary)' }}
@@ -1269,7 +1250,7 @@ export default function SuperAdminDashboard() {
                         <PencilLine size={13} />
                       </button>
                       <button
-                        onClick={() => { enterCompany(c as any); navigate('/overview'); }}
+                        hidden={!canOpenCompany} onClick={() => { enterCompany(c as any); navigate('/overview'); }}
                         className="p-1.5 rounded-lg transition-colors"
                         style={{ color: 'var(--accent)' }}
                         title={t('sa.dash.openAsCompany')}
@@ -1320,7 +1301,7 @@ export default function SuperAdminDashboard() {
                 {format(new Date(c.created_at), 'dd. MMM', { locale: de })}
               </span>
               <button
-                onClick={() => { enterCompany(c as any); navigate('/overview'); }}
+                hidden={!canOpenCompany} onClick={() => { enterCompany(c as any); navigate('/overview'); }}
                 className="p-1.5 rounded-lg transition-colors"
                 style={{ color: 'var(--text-tertiary)' }}
                 onMouseEnter={e => { (e.currentTarget.style.background = 'var(--bg-muted)'); (e.currentTarget.style.color = 'var(--accent)'); }}
@@ -1360,7 +1341,7 @@ export default function SuperAdminDashboard() {
           ))}
           <button
             onClick={() => setActiveSection('discounts')}
-            className="flex flex-col items-center gap-2 p-4 rounded-xl text-center text-xs font-medium transition-all hover:-translate-y-0.5 hover:shadow-md"
+            className={`${canCodes ? 'flex' : 'hidden'} flex-col items-center gap-2 p-4 rounded-xl text-center text-xs font-medium transition-all hover:-translate-y-0.5 hover:shadow-md`}
             style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
             onMouseEnter={e => { (e.currentTarget.style.borderColor = '#06b6d4'); (e.currentTarget.style.color = '#06b6d4'); }}
             onMouseLeave={e => { (e.currentTarget.style.borderColor = 'var(--border)'); (e.currentTarget.style.color = 'var(--text-secondary)'); }}
@@ -1385,7 +1366,7 @@ export default function SuperAdminDashboard() {
           </button>
           <button
             onClick={() => setActiveSection('referrals')}
-            className="flex flex-col items-center gap-2 p-4 rounded-xl text-center text-xs font-medium transition-all hover:-translate-y-0.5 hover:shadow-md"
+            className={`${canCodes ? 'flex' : 'hidden'} flex-col items-center gap-2 p-4 rounded-xl text-center text-xs font-medium transition-all hover:-translate-y-0.5 hover:shadow-md`}
             style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
             onMouseEnter={e => { (e.currentTarget.style.borderColor = '#10b981'); (e.currentTarget.style.color = '#10b981'); }}
             onMouseLeave={e => { (e.currentTarget.style.borderColor = 'var(--border)'); (e.currentTarget.style.color = 'var(--text-secondary)'); }}
@@ -1395,7 +1376,7 @@ export default function SuperAdminDashboard() {
           </button>
           <button
             onClick={() => setActiveSection('activation')}
-            className="flex flex-col items-center gap-2 p-4 rounded-xl text-center text-xs font-medium transition-all hover:-translate-y-0.5 hover:shadow-md"
+            className={`${canCodes ? 'flex' : 'hidden'} flex-col items-center gap-2 p-4 rounded-xl text-center text-xs font-medium transition-all hover:-translate-y-0.5 hover:shadow-md`}
             style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
             onMouseEnter={e => { (e.currentTarget.style.borderColor = 'var(--accent)'); (e.currentTarget.style.color = 'var(--accent)'); }}
             onMouseLeave={e => { (e.currentTarget.style.borderColor = 'var(--border)'); (e.currentTarget.style.color = 'var(--text-secondary)'); }}

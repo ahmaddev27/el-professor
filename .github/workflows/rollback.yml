@@ -1,0 +1,55 @@
+# Put an environment back on its previous release that deployed cleanly.
+#
+# Code only: the bundle, edge functions, Kong and nginx config return to that
+# release, and the database stays as it is. The host (deploy/ci-release.sh)
+# refuses when the earlier release predates a schema change marked incompatible
+# in deploy/SCHEMA_EPOCH, or when it would change the database service, the auth
+# settings (signup, autoconfirm, login limits, the identity-provider switches),
+# the auth entrypoint that derives signup from the Google switch, or Kong's
+# plugin list or auth-v1-closed block. To undo a rollback, run the Deploy
+# workflow again.
+
+name: Rollback
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Environment to roll back
+        type: choice
+        options: [staging, production]
+        required: true
+      confirm:
+        description: Type the environment name again to confirm
+        required: true
+
+permissions:
+  contents: read
+
+# Shares the Deploy workflow's groups, so a rollback never interleaves with a
+# release of the same environment. The host takes the same lock as well.
+concurrency:
+  group: deploy-${{ inputs.environment }}
+  cancel-in-progress: false
+
+jobs:
+  rollback:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Refuse unless confirmed
+        shell: bash
+        env:
+          ENVIRONMENT: ${{ inputs.environment }}
+          CONFIRM: ${{ inputs.confirm }}
+        run: |
+          [ "$CONFIRM" = "$ENVIRONMENT" ] \
+            || { echo "::error::the confirmation does not match '$ENVIRONMENT' — nothing was rolled back"; exit 1; }
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/host
+        with:
+          command: rollback
+          environment: ${{ inputs.environment }}
+          ssh-key: ${{ secrets.DEPLOY_SSH_KEY }}
+          known-hosts: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          host: ${{ secrets.DEPLOY_HOST }}

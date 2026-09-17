@@ -2,6 +2,7 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { Plus, CreditCard as Edit2, Trash2, ToggleLeft, ToggleRight, Tag, ChevronDown, ChevronUp, Users, Building2, Calendar, Hash, Percent, Euro, Check, X, AlertTriangle } from 'lucide-react';
 import ConfirmationModal from './ConfirmationModal';
 import { supabase } from '../lib/supabase';
+import { callPlatformRpc } from '../lib/platformRpc';
 import { useToast } from '../contexts/ToastContext';
 import { useTranslation } from '../contexts/LanguageContext';
 import type { TranslationKey } from '../i18n';
@@ -140,11 +141,16 @@ const DiscountCodeModal: React.FC<ModalProps> = ({ dc, companies, onClose, onSav
       max_cars: form.max_cars !== '' ? Number(form.max_cars) : null,
       assigned_company_id: form.assigned_company_id || null,
     };
-    const { error } = dc
-      ? await supabase.from('discount_codes').update(payload).eq('id', dc.id)
-      : await supabase.from('discount_codes').insert(payload);
+    try {
+      // p_fields carries exactly the columns of this form; the database refuses
+      // any other key, and checks the same rules again before it writes.
+      await callPlatformRpc('platform_discount_code_save', { p_id: dc ? dc.id : null, p_fields: payload });
+    } catch (err: any) {
+      setSaving(false);
+      showToast('error', err.message);
+      return;
+    }
     setSaving(false);
-    if (error) { showToast('error', error.message); return; }
     showToast('success', dc ? t('codes.discount.updated') : t('codes.discount.created'));
     onSaved();
     onClose();
@@ -395,9 +401,15 @@ const DiscountCodesManagement: React.FC = () => {
 
   useEffect(() => { load(); }, [load]);
 
+  // Revoking a discount code is switching it off, and the same switch turns it
+  // back on.
   const toggleActive = async (dc: DiscountCode) => {
-    const { error } = await supabase.from('discount_codes').update({ active: !dc.active }).eq('id', dc.id);
-    if (error) { showToast('error', error.message); return; }
+    try {
+      await callPlatformRpc('platform_discount_code_set_active', { p_id: dc.id, p_active: !dc.active });
+    } catch (err: any) {
+      showToast('error', err.message);
+      return;
+    }
     setCodes(prev => prev.map(c => c.id === dc.id ? { ...c, active: !c.active } : c));
   };
 
@@ -409,8 +421,12 @@ const DiscountCodesManagement: React.FC = () => {
     const dc = deleteConfirm.dc;
     setDeleteConfirm({ open: false, dc: null });
     if (!dc) return;
-    const { error } = await supabase.from('discount_codes').delete().eq('id', dc.id);
-    if (error) { showToast('error', error.message); return; }
+    try {
+      await callPlatformRpc('platform_discount_code_delete', { p_id: dc.id });
+    } catch (err: any) {
+      showToast('error', err.message);
+      return;
+    }
     setCodes(prev => prev.filter(c => c.id !== dc.id));
     showToast('success', t('codes.discount.deleted'));
   };

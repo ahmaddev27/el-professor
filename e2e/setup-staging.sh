@@ -1,0 +1,262 @@
+#!/usr/bin/env bash
+# Prepare staging for the end-to-end tests. Idempotent: run it once, and again
+# whenever staging's data is refreshed from production.
+#
+#   cd e2e && npm run setup                          # everything
+#   bash e2e/setup-staging.sh --pool-only            # only the reset accounts
+#   bash e2e/setup-staging.sh --reset-admin-password # an admin password changed by hand
+#
+# On staging only, never production, it makes sure there is:
+#   - a login "e2e" in front of the staging web app, next to the owner's;
+#   - a Mailpit login "e2e", so tests can read the mail staging sends;
+#   - the company "E2E Test GmbH" with its admin e2e-admin@example.com,
+#     approved and with an active subscription;
+#   - six password-reset accounts e2e-reset-1..6@example.com, each approved,
+#     subscribed and confirmed.
+#
+# --pool-only does the last of those and nothing else, so the pool can be seeded
+# while a merge run is using staging. A full setup is not safe to run then, and
+# the password is not the reason — `ensure` only generates one when the key is
+# empty, so a re-run normally re-applies the same value. The disruptive parts
+# are elsewhere: it may recreate the Mailpit container, which destroys the
+# mailbox an in-flight run is reading; it may reload Caddy, blipping the staging
+# web host; and it rewrites E2E_ANON_KEY in .env.local underneath a running
+# suite. The password does become a hazard when the .env.local doing the setup
+# is not the one the running suite loaded, which is the ordinary case across two
+# machines. Seeding has to be safe by construction rather than safe by timing.
+#
+# Passwords are generated here and kept only in e2e/.env.local (gitignored)
+# and, as bcrypt hashes or GoTrue's own hash, on the host. None is printed.
+# Secrets reach the host in a root-only temp file, never on a command line.
+set -euo pipefail
+
+HERE="$(cd "$(dirname "$0")" && pwd)"
+ENV_FILE="$HERE/.env.local"
+MODE="${1:-all}"
+case "$MODE" in all|--reset-admin-password|--pool-only) ;; *) echo "usage: setup-staging.sh [--reset-admin-password|--pool-only]" >&2; exit 2 ;; esac
+
+rand() { head -c 48 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 28; }
+getv() { grep -E "^$1=" "$ENV_FILE" 2>/dev/null | tail -1 | cut -d= -f2- || true; }
+setv() {
+  touch "$ENV_FILE"
+  { grep -vE "^$1=" "$ENV_FILE" || true; printf '%s=%s\n' "$1" "$2"; } > "$ENV_FILE.tmp"
+  mv "$ENV_FILE.tmp" "$ENV_FILE"
+}
+ensure() { [ -n "$(getv "$1")" ] || setv "$1" "$2"; }
+
+ensure E2E_BASE_URL https://app.elprofessor.eu
+ensure E2E_API_URL https://api-staging.elprofessor.eu
+ensure E2E_SSH_HOST elprofessor
+ensure E2E_MAILPIT_URL http://127.0.0.1:18025
+ensure E2E_STAGING_USER e2e
+ensure E2E_STAGING_PASS "$(rand)"
+ensure E2E_MAILPIT_USER e2e
+ensure E2E_MAILPIT_PASS "$(rand)"
+ensure E2E_ADMIN_EMAIL e2e-admin@example.com
+ensure E2E_ADMIN_PASSWORD "$(rand)"
+# One address per run for forgot-password: five codes per address per hour is a
+# security constant, so the suite rotates rather than sharing one account.
+ensure E2E_RESET_EMAILS "e2e-reset-1@example.com,e2e-reset-2@example.com,e2e-reset-3@example.com,e2e-reset-4@example.com,e2e-reset-5@example.com,e2e-reset-6@example.com"
+chmod 600 "$ENV_FILE" 2>/dev/null || true
+
+[ "$(getv E2E_BASE_URL)" = https://app.elprofessor.eu ] || { echo "refusing: E2E_BASE_URL must be staging" >&2; exit 1; }
+SSH_HOST="$(getv E2E_SSH_HOST)"
+
+# Staging's anon key, for the tests that call the API the way supabase-js does.
+# It ships in the web bundle and is therefore public; it is read from the host
+# on every full setup, so a rotated key follows. --pool-only reads it too:
+# company-signup is how a missing reset account is created.
+if [ "$MODE" = all ] || [ "$MODE" = --pool-only ]; then
+  anon_key="$(ssh "$SSH_HOST" "grep -E '^ANON_KEY=' /srv/PRO-staging/deploy/.env | tail -n 1 | cut -d= -f2- | tr -d '\r'")"
+  [ -n "$anon_key" ] || { echo "could not read staging's ANON_KEY from the host" >&2; exit 1; }
+  setv E2E_ANON_KEY "$anon_key"
+  unset anon_key
+  chmod 600 "$ENV_FILE" 2>/dev/null || true
+fi
+
+# Hand the values to the host in a root-only file; the remote script deletes it.
+secrets="$(grep -E '^E2E_' "$ENV_FILE" | tr -d '\r' | ssh "$SSH_HOST" 'umask 077; f="$(mktemp /root/e2e-setup.XXXXXX)"; cat > "$f"; echo "$f"')"
+
+ssh "$SSH_HOST" bash -s -- "$secrets" "$MODE" <<'REMOTE'
+set -euo pipefail
+S="$1"; MODE="$2"
+work="$(mktemp -d)"
+trap 'rm -rf "$S" "$work"' EXIT
+val() { grep -E "^$1=" "$S" | tail -1 | cut -d= -f2-; }
+
+cd /srv/PRO-staging/deploy
+[ "$(grep -E '^PROJECT_NAME=' .env | cut -d= -f2- | tr -d '\r')" = ya-mobility-staging ] || { echo "refusing: /srv/PRO-staging is not staging"; exit 1; }
+envget() { grep -E "^$1=" .env | cut -d= -f2- | tr -d '\r'; }
+psqlq() { docker compose exec -T db psql -U supabase_admin -d postgres -X -q -tA -v ON_ERROR_STOP=1 -c "$1" < /dev/null; }
+
+IMG="$(docker inspect ridy-caddy-1 --format '{{.Image}}' 2>/dev/null || echo caddy:2-alpine)"
+hash_pw() { printf '%s\n' "$1" | docker run --rm -i --pull never --network none "$IMG" caddy hash-password 2>/dev/null | tail -1; }
+hash_ok() { [[ "$1" =~ ^\$2[aby]\$[0-9]{2}\$[./A-Za-z0-9]{53}$ ]]; }
+# Replace one user's line in a user:bcrypt file, keeping every other line.
+upsert_login() {
+  local file="$1" user="$2" hash="$3"
+  { awk -F: -v u="$user" '$1 != u' "$file" 2>/dev/null || true; printf '%s:%s\n' "$user" "$hash"; } > "$work/login"
+  install -m 600 "$work/login" "$file.new"
+  mv "$file.new" "$file"
+}
+basic() { printf 'Authorization: Basic %s' "$(printf '%s:%s' "$1" "$2" | base64 -w0)"; }
+
+EMAIL="$(val E2E_ADMIN_EMAIL)"
+ADMIN_PW="$(val E2E_ADMIN_PASSWORD)"
+# The only account this script may create or change.
+[[ "$EMAIL" =~ ^e2e[a-z0-9.-]*@example\.com$ ]] || { echo "refusing: the E2E admin must be an e2e…@example.com address"; exit 1; }
+ANON="$(envget ANON_KEY)"
+SERVICE="$(envget SERVICE_ROLE_KEY)"
+API=https://api-staging.elprofessor.eu
+
+json_string() { python3 -c 'import json,sys; print(json.dumps(sys.stdin.read().rstrip("\n")))'; }
+
+set_admin_password() {
+  local uid="$1"
+  printf '{"password":%s,"email_confirm":true}' "$(printf '%s' "$ADMIN_PW" | json_string)" > "$work/body"
+  printf 'apikey: %s\nAuthorization: Bearer %s\n' "$SERVICE" "$SERVICE" \
+    | curl -s -o /dev/null -w '%{http_code}' --max-time 20 -X PUT "$API/auth/v1/admin/users/$uid" \
+        -H @- -H 'Content-Type: application/json' --data-binary @"$work/body"
+}
+
+sign_in_code() {
+  printf '{"email":%s,"password":%s}' "$(printf '%s' "$EMAIL" | json_string)" "$(printf '%s' "$ADMIN_PW" | json_string)" > "$work/login.json"
+  printf 'apikey: %s\n' "$ANON" \
+    | curl -s -o /dev/null -w '%{http_code}' --max-time 20 -X POST "$API/auth/v1/token?grant_type=password" \
+        -H @- -H 'Content-Type: application/json' --data-binary @"$work/login.json"
+}
+
+if [ "$MODE" = --reset-admin-password ]; then
+  uid="$(psqlq "SELECT id FROM auth.users WHERE email = '$EMAIL'")"
+  [ -n "$uid" ] || { echo "the E2E admin does not exist yet; run setup-staging.sh without arguments"; exit 1; }
+  [ "$(set_admin_password "$uid")" = 200 ] || { echo "resetting the E2E admin password failed"; exit 1; }
+  echo "E2E admin password reset"
+  exit 0
+fi
+
+# Everything from here to the admin sign-in is a full setup, and each part can
+# disturb a run that is already going: recreating Mailpit throws away the
+# mailbox that run is reading, reloading Caddy blips the web host, and the admin
+# password is re-applied from whichever .env.local is doing the setup.
+# --pool-only skips the lot. What it must still reach is above this line — the
+# staging URL assertion, the PROJECT_NAME check — and below it, the address
+# guard and the confirm that keeps the purge away.
+if [ "$MODE" = all ]; then
+
+# ── Staging web login ────────────────────────────────────────────────────────
+U="$(val E2E_STAGING_USER)"; P="$(val E2E_STAGING_PASS)"
+web_code() { basic "$U" "$P" | curl -s -o /dev/null -w '%{http_code}' --max-time 10 -H @- --resolve app.elprofessor.eu:443:127.0.0.1 https://app.elprofessor.eu/; }
+if [ "$(web_code)" = 200 ]; then
+  echo "staging login '$U': in place"
+else
+  h="$(hash_pw "$P")"; hash_ok "$h" || { echo "hashing failed"; exit 1; }
+  upsert_login /root/el-professor-secrets/staging-web-auth "$U" "$h"
+  /usr/local/sbin/el-professor-caddy-guard --reload > /dev/null
+  sleep 2
+  [ "$(web_code)" = 200 ] && echo "staging login '$U': added" || { echo "staging login '$U' does not work after the reload"; exit 1; }
+fi
+
+# ── Mailpit login ────────────────────────────────────────────────────────────
+MU="$(val E2E_MAILPIT_USER)"; MP="$(val E2E_MAILPIT_PASS)"
+mail_code() { basic "$MU" "$MP" | curl -s -o /dev/null -w '%{http_code}' --max-time 10 -H @- http://127.0.0.1:8025/api/v1/info; }
+if [ "$(mail_code)" = 200 ]; then
+  echo "mailpit login '$MU': in place"
+else
+  h="$(hash_pw "$MP")"; hash_ok "$h" || { echo "hashing failed"; exit 1; }
+  upsert_login mailpit-ui-auth "$MU" "$h"
+  docker compose up -d --force-recreate --no-deps mailpit < /dev/null > /dev/null 2>&1
+  for i in $(seq 1 30); do [ "$(mail_code)" = 200 ] && break; sleep 1; done
+  [ "$(mail_code)" = 200 ] && echo "mailpit login '$MU': added" || { echo "mailpit login '$MU' does not work"; exit 1; }
+fi
+
+# ── Test company and its admin ───────────────────────────────────────────────
+uid="$(psqlq "SELECT id FROM auth.users WHERE email = '$EMAIL'")"
+if [ -z "$uid" ]; then
+  python3 - "$EMAIL" > "$work/signup.json" <<PY
+import json, sys
+print(json.dumps({
+  "company_name": "E2E Test GmbH",
+  "full_name": "E2E Admin",
+  "email": sys.argv[1],
+  "password": """$ADMIN_PW""",
+  "plan": "premium",
+  "billing_cycle": "monthly",
+  "subscription_car_limit": 5,
+}))
+PY
+  code="$(printf 'apikey: %s\n' "$ANON" | curl -s -o "$work/signup.out" -w '%{http_code}' --max-time 30 -X POST "$API/functions/v1/company-signup" -H @- -H 'Content-Type: application/json' --data-binary @"$work/signup.json")"
+  [ "$code" = 200 ] || { echo "company-signup answered $code: $(head -c 300 "$work/signup.out")"; exit 1; }
+  uid="$(psqlq "SELECT id FROM auth.users WHERE email = '$EMAIL'")"
+  echo "E2E company and admin: created"
+else
+  [ "$(set_admin_password "$uid")" = 200 ] || { echo "updating the E2E admin password failed"; exit 1; }
+  echo "E2E company and admin: in place (password synced)"
+fi
+
+# Approved, subscribed and active, so a sign-in lands in the app.
+psqlq "UPDATE public.companies c
+          SET approval_status = 'approved', subscription_status = 'active',
+              subscription_expires_at = now() + interval '10 years'
+         FROM public.user_profiles p
+        WHERE p.user_id = '$uid' AND c.id = p.company_id" > /dev/null
+psqlq "UPDATE public.user_profiles SET status = 'active', must_change_password = false WHERE user_id = '$uid'" > /dev/null
+
+[ "$(sign_in_code)" = 200 ] && echo "E2E admin sign-in: works" || { echo "E2E admin cannot sign in"; exit 1; }
+
+fi  # end of the full-setup section
+
+# ── Password-reset pool ──────────────────────────────────────────────────────
+# forgot-password spends one of five hourly codes per address, so it rotates
+# over these instead of the admin's. Each one is confirmed below, which is also
+# what keeps the nightly purge away: purge_unverified_signups only deletes
+# accounts whose address was never confirmed.
+rand_pw() { head -c 48 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 28; }
+n=0
+IFS=',' read -r -a POOL <<< "$(val E2E_RESET_EMAILS)"
+for addr in "${POOL[@]}"; do
+  n=$((n + 1))
+  [[ "$addr" =~ ^e2e[a-z0-9.-]*@example\.com$ ]] || { echo "refusing: '$addr' is not an e2e…@example.com address"; exit 1; }
+  ruid="$(psqlq "SELECT id FROM auth.users WHERE email = '$addr'")"
+  if [ -z "$ruid" ]; then
+    # The password goes through the environment, never argv: a command line is
+    # readable by every user in the process table, and this host is shared.
+    POOL_PW="$(rand_pw)" python3 - "$addr" "$n" > "$work/pool.json" <<'PY'
+import json, os, sys
+print(json.dumps({
+  "company_name": "E2E Reset Pool %s" % sys.argv[2],
+  "full_name": "E2E Reset %s" % sys.argv[2],
+  "email": sys.argv[1],
+  "password": os.environ["POOL_PW"],
+  "plan": "premium",
+  "billing_cycle": "monthly",
+  "subscription_car_limit": 5,
+}))
+PY
+    code="$(printf 'apikey: %s\n' "$ANON" | curl -s -o "$work/pool.out" -w '%{http_code}' --max-time 30 -X POST "$API/functions/v1/company-signup" -H @- -H 'Content-Type: application/json' --data-binary @"$work/pool.json")"
+    [ "$code" = 200 ] || { echo "company-signup for $addr answered $code: $(head -c 200 "$work/pool.out")"; exit 1; }
+    ruid="$(psqlq "SELECT id FROM auth.users WHERE email = '$addr'")"
+    [ -n "$ruid" ] || { echo "company-signup for $addr created no account"; exit 1; }
+    echo "reset pool $addr: created"
+  else
+    echo "reset pool $addr: in place"
+  fi
+  # The password is deliberately not kept anywhere: the test sets its own and
+  # signs in with that. This call is here to confirm the address.
+  printf '{"password":%s,"email_confirm":true}' "$(printf '%s' "$(rand_pw)" | json_string)" > "$work/pool.pw"
+  rc="$(printf 'apikey: %s\nAuthorization: Bearer %s\n' "$SERVICE" "$SERVICE" \
+    | curl -s -o /dev/null -w '%{http_code}' --max-time 20 -X PUT "$API/auth/v1/admin/users/$ruid" \
+        -H @- -H 'Content-Type: application/json' --data-binary @"$work/pool.pw")"
+  [ "$rc" = 200 ] || { echo "confirming $addr answered $rc"; exit 1; }
+  # Approved, subscribed and active, so the sign-in at the end of the test lands
+  # in the app rather than on a gate.
+  psqlq "UPDATE public.companies c
+            SET approval_status = 'approved', subscription_status = 'active',
+                subscription_expires_at = now() + interval '10 years'
+           FROM public.user_profiles p
+          WHERE p.user_id = '$ruid' AND c.id = p.company_id" > /dev/null
+  psqlq "UPDATE public.user_profiles SET status = 'active', must_change_password = false WHERE user_id = '$ruid'" > /dev/null
+done
+echo "reset pool: $n addresses ready"
+REMOTE
+
+echo "Done. Values are in $ENV_FILE (not in git). Run the suite with: cd e2e && npm test"

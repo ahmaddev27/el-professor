@@ -3,7 +3,22 @@ import { Clock, LogOut, Mail } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useTranslation } from '../contexts/LanguageContext';
 
-const PendingApprovalPage: React.FC = () => {
+interface PendingApprovalPageProps {
+  /**
+   * What the sign-out button does.
+   *
+   * The default ends the session where it stands, which is right when App's
+   * approval gate rendered this page: the public router then starts at the
+   * address the person was already on. A screen that renders this page *inside
+   * itself* — CompleteRegistrationPage, after a Google registration — passes a
+   * handler that rewrites the address first, because that address is still
+   * `/auth/callback` whenever the router swap raced the navigate, and signing
+   * out there mounts the callback screen with no session to find.
+   */
+  onSignOut?: () => void | Promise<void>;
+}
+
+const PendingApprovalPage: React.FC<PendingApprovalPageProps> = ({ onSignOut }) => {
   const { signOut, profile } = useAuth();
   const { t } = useTranslation();
 
@@ -47,7 +62,7 @@ const PendingApprovalPage: React.FC = () => {
           </div>
 
           <button
-            onClick={signOut}
+            onClick={() => { void (onSignOut ?? signOut)(); }}
             className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl border border-white/10 text-white/50 hover:text-white/80 hover:border-white/20 transition-all text-sm"
           >
             <LogOut size={14} />

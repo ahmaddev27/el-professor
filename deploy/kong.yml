@@ -33,9 +33,49 @@ acls:
     group: admin
 
 services:
+  # ── Auth: the routes that would create an account without Google ──────────
+  # GoTrue keeps its own signup closed until GOOGLE_SIGNIN_ENABLED=true, and it
+  # has to open it then: GoTrue v2.170.0 refuses to create a new Google account
+  # while signup is disabled. Open, GoTrue would also create accounts on these
+  # three routes, with no company, no code and no limit:
+  #   /signup     email and password, and anonymous sign-ins
+  #   /otp        signInWithOtp, which creates the account it mails
+  #   /magiclink  the older name of the same
+  # So they answer 403 here, whatever GoTrue says, and Google stays the only
+  # way GoTrue creates an account. Companies and their owners are created by
+  # company-signup and oauth-account through the admin API, which is not
+  # matched here.
+  #
+  # Kong 2.8.1 tries prefix paths longest first, so these win over the /auth/v1/
+  # of auth-v1-open whatever the order in this file. It normalises the path
+  # before matching, so //auth/v1/signup, /auth/v1/./signup and /auth/v1/%73ignup
+  # land here too. Letter case and a double-encoded %2573 are left alone and
+  # reach GoTrue, whose router answers them 404. Both were proven against
+  # kong:2.8.1 and GoTrue v2.170.0 containers; tests/deploy pins this block.
+  #
+  # The upstream is a closed port on purpose. If the plugin were ever lost, the
+  # route would fail with 502 instead of reaching GoTrue. deploy.sh refuses a
+  # release without this block and probes all three paths before it starts
+  # GoTrue, and ci-release.sh refuses a rollback to a release without it.
+  - name: auth-v1-closed
+    url: http://127.0.0.1:1/
+    routes:
+      - name: auth-v1-closed
+        strip_path: true
+        paths:
+          - /auth/v1/signup
+          - /auth/v1/otp
+          - /auth/v1/magiclink
+    plugins:
+      - name: request-termination
+        config:
+          status_code: 403
+          message: This route is closed by the gateway
+
   # ── Auth ──────────────────────────────────────────────────────────────────
-  # Open by design: sign-in, sign-up, password recovery and the OAuth callback
-  # all have to be reachable without a session.
+  # Open by design: sign-in, token refresh, password recovery, the settings
+  # the app reads and the Google redirect and callback all have to be
+  # reachable without a session. Account creation is not: see above.
   - name: auth-v1-open
     url: http://auth:9999/
     routes:

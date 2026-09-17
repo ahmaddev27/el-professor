@@ -37,3 +37,18 @@ deploy/.env
 
 # Generated per environment into dist/ by scripts/build-email-templates.mjs.
 public/email-templates/*.html
+
+# Mailpit UI login for staging (bcrypt), provisioned on the host by
+# deploy/set-mailpit-password.sh. Never committed.
+deploy/mailpit-ui-auth
+
+# Staging mail relay settings, holding production's Resend key. Written on the
+# host by deploy/set-staging-mail-relay.sh. Never committed.
+deploy/mailpit-relay.yml
+
+# End-to-end test output (e2e/). Credentials live in e2e/.env.local, covered by *.local.
+e2e/test-results
+e2e/playwright-report
+
+# Worktrees Claude Code agents create for parallel work.
+.claude/worktrees/

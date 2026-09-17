@@ -1,0 +1,51 @@
+# Build and test every pull request before it is merged.
+#
+# A pull request into `staging` deploys the moment it is merged, so this is the
+# last point at which a broken build can be caught before it reaches a running
+# environment. A pull request into `main` is checked too, since that is the
+# code a production release will be built from.
+#
+# `npm run build` is the whole gate: the typecheck ratchet, the golden-master
+# tests, the Vite build and the mail-template generator. It builds against the
+# committed .env.production because a check needs no environment's secrets —
+# the deploy workflows rebuild with the real values.
+#
+# This account's GitHub plan cannot make a check *required* on a private repo,
+# so a red result does not block the merge button. It is information for the
+# person merging, and it should be read as a stop sign.
+
+name: PR checks
+
+on:
+  pull_request:
+    branches: [staging, main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-checks-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - name: Typecheck ratchet, tests, build, mail templates
+        run: npm run build
+      - name: Nothing environment-specific or secret in the bundle
+        shell: bash
+        run: |
+          js=$(ls dist/assets/index-*.js)
+          if grep -q 'service_role' $js; then echo "::error::bundle contains service_role"; exit 1; fi
+          # This build sets no VITE_DEPLOY_ENV, exactly like production's, so
+          # the design preview (staging and dev server only) must be absent.
+          if grep -rq 'data-design-preview' dist/assets; then echo "::error::the design preview is in a production-shaped build"; exit 1; fi
+          echo "bundle clean"

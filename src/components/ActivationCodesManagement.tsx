@@ -161,16 +161,26 @@ function CodeCountdown({ expiresAt }: { expiresAt: string }) {
 
 // ─── Generated Code Modal ─────────────────────────────────────────────────────
 
+/** What generate-activation-code reported about mailing the code. */
+interface GeneratedCodeMail {
+  sent: boolean;
+  recipientCount: number;
+  /** Whether the form named a target address or a company. */
+  hadRecipient: boolean;
+}
+
 function GeneratedCodeModal({
   code,
   expiresAt,
+  mail,
   onClose,
 }: {
   code: string;
   expiresAt: string;
+  mail: GeneratedCodeMail | null;
   onClose: () => void;
 }) {
-  const { t } = useTranslation();
+  const { t, tPlural } = useTranslation();
   const [copied, setCopied] = useState(false);
 
   const handleCopy = async () => {
@@ -209,6 +219,19 @@ function GeneratedCodeModal({
             <CodeCountdown expiresAt={expiresAt} />
           </div>
         </div>
+
+        {mail && (
+          <p
+            className="text-xs"
+            style={{ color: mail.sent ? 'var(--success)' : mail.hadRecipient ? 'var(--warning)' : 'var(--text-tertiary)' }}
+          >
+            {mail.sent
+              ? tPlural({ one: 'codes.generated.mailSent.one', other: 'codes.generated.mailSent.other' }, mail.recipientCount)
+              : mail.hadRecipient
+                ? t('codes.generated.mailFailed')
+                : t('codes.generated.mailNoRecipient')}
+          </p>
+        )}
 
         <div className="flex gap-2">
           <button
@@ -324,7 +347,7 @@ export default function ActivationCodesManagement({ companies: propCompanies }: 
   const [fCustomMode, setFCustomMode] = useState<'days' | 'date'>('days');
 
   // Generated code modal
-  const [generatedCode, setGeneratedCode] = useState<{ code: string; expiresAt: string } | null>(null);
+  const [generatedCode, setGeneratedCode] = useState<{ code: string; expiresAt: string; mail: GeneratedCodeMail | null } | null>(null);
 
   const cardStyle: React.CSSProperties = {
     background: 'var(--bg-surface)',
@@ -440,7 +463,18 @@ export default function ActivationCodesManagement({ companies: propCompanies }: 
       const data = await res.json();
       if (!data.success) throw new Error(data.error || t('codes.generateFailed'));
 
-      setGeneratedCode({ code: data.code, expiresAt: data.expires_at });
+      setGeneratedCode({
+        code: data.code,
+        expiresAt: data.expires_at,
+        // Absent when an older function answered; then the screen says nothing about mail.
+        mail: typeof data.mail_sent === 'boolean'
+          ? {
+              sent: data.mail_sent,
+              recipientCount: Number(data.recipient_count) || 0,
+              hadRecipient: Boolean(fCompanyId) || Boolean(fEmail.trim()),
+            }
+          : null,
+      });
       setShowForm(false);
       setFCompanyId(''); setFEmail(''); setFDuration('1_monat');
       setFCustomDays(''); setFCustomDate('');
@@ -898,6 +932,7 @@ export default function ActivationCodesManagement({ companies: propCompanies }: 
         <GeneratedCodeModal
           code={generatedCode.code}
           expiresAt={generatedCode.expiresAt}
+          mail={generatedCode.mail}
           onClose={() => setGeneratedCode(null)}
         />
       )}

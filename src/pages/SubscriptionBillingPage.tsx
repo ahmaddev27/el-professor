@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
+import { callPlatformRpc } from '../lib/platformRpc';
 import { useAuth } from '../contexts/AuthContext';
+import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { useToast } from '../contexts/ToastContext';
 import {
   CreditCard, Receipt, CheckCircle, AlertTriangle, Clock,
@@ -104,7 +106,13 @@ function fmtEur(v: number) {
 // ─── Component ──────────────────────────────────────────────────────────────
 
 export default function SubscriptionBillingPage() {
-  const { isSuperAdmin, user, profile } = useAuth();
+  // The platform write RPCs take the acting account from the caller's own token,
+  // so nothing here sends a user id any more.
+  const { isSuperAdmin, profile } = useAuth();
+  // Hidden for a role without the capability; the database refuses regardless.
+  const { platformCan } = useSuperAdmin();
+  const canBilling = platformCan('billing.manage');
+  const canPricing = platformCan('pricing.manage');
   const { showToast } = useToast();
   const { t } = useTranslation();
 
@@ -201,49 +209,27 @@ export default function SubscriptionBillingPage() {
 
   // ── Mark unpaid ──
   const handleMarkUnpaid = async (inv: Invoice) => {
-    const { error } = await supabase
-      .from('subscription_invoices')
-      .update({ status: 'open', paid_at: null, paid_by: null, collected_by: null, cash_received_amount: null })
-      .eq('id', inv.id);
-    if (error) {
-      showToast('error', t('sa.subs.errorWithMessage', { message: error.message }));
+    try {
+      // The invoice and its payment-trail row in one transaction. The trail keeps
+      // the German wording it was always written with, whatever language the
+      // operator's UI is in.
+      await callPlatformRpc('platform_invoice_mark_unpaid', { p_invoice_id: inv.id });
+    } catch (err: any) {
+      showToast('error', t('sa.subs.errorWithMessage', { message: err.message }));
       return;
     }
-    await supabase.from('subscription_payment_audit').insert({
-      invoice_id: inv.id,
-      company_id: inv.company_id,
-      action: 'marked_unpaid',
-      old_status: inv.status,
-      new_status: 'open',
-      amount: inv.amount,
-      changed_by: user!.id,
-      // Persisted audit-trail text, not a label: the row keeps the wording it
-      // was written with, whatever language the operator's UI was in.
-      note: 'Als unbezahlt markiert',
-    });
     showToast('success', t('sa.subs.markedOpen'));
     loadData();
   };
 
   // ── Cancel invoice ──
   const handleCancel = async (inv: Invoice) => {
-    const { error } = await supabase
-      .from('subscription_invoices')
-      .update({ status: 'canceled' })
-      .eq('id', inv.id);
-    if (error) {
-      showToast('error', t('sa.subs.errorWithMessage', { message: error.message }));
+    try {
+      await callPlatformRpc('platform_invoice_cancel', { p_invoice_id: inv.id });
+    } catch (err: any) {
+      showToast('error', t('sa.subs.errorWithMessage', { message: err.message }));
       return;
     }
-    await supabase.from('subscription_payment_audit').insert({
-      invoice_id: inv.id,
-      company_id: inv.company_id,
-      action: 'invoice_canceled',
-      old_status: inv.status,
-      new_status: 'canceled',
-      amount: inv.amount,
-      changed_by: user!.id,
-    });
     showToast('success', t('sa.subs.invoiceCanceled'));
     loadData();
   };
@@ -339,7 +325,7 @@ export default function SubscriptionBillingPage() {
               >
                 <Eye size={14} /> {t('sa.subs.actionView')}
               </button>
-              {inv.status !== 'paid' && inv.status !== 'canceled' && (
+              {canBilling && inv.status !== 'paid' && inv.status !== 'canceled' && (
                 <button className="w-full text-left px-3 py-2 text-sm flex items-center gap-2 transition-colors"
                   style={{ color: 'var(--success)' }}
                   onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-muted)')}
@@ -349,7 +335,7 @@ export default function SubscriptionBillingPage() {
                   <Banknote size={14} /> {t('sa.subs.actionMarkPaidCash')}
                 </button>
               )}
-              {inv.status === 'paid' && (
+              {canBilling && inv.status === 'paid' && (
                 <button className="w-full text-left px-3 py-2 text-sm flex items-center gap-2 transition-colors"
                   style={{ color: 'var(--warning)' }}
                   onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-muted)')}
@@ -359,7 +345,7 @@ export default function SubscriptionBillingPage() {
                   <XCircle size={14} /> {t('sa.subs.actionMarkUnpaid')}
                 </button>
               )}
-              {inv.status !== 'canceled' && (
+              {canBilling && inv.status !== 'canceled' && (
                 <button className="w-full text-left px-3 py-2 text-sm flex items-center gap-2 transition-colors"
                   style={{ color: 'var(--danger)' }}
                   onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-muted)')}
@@ -413,7 +399,7 @@ export default function SubscriptionBillingPage() {
         <div className="flex flex-wrap gap-2">
           <button
             onClick={() => setShowGenerateModal(true)}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all"
+            className={`${canBilling ? 'flex' : 'hidden'} items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all`}
             style={{ background: 'var(--accent)', color: 'white' }}
             onMouseEnter={e => (e.currentTarget.style.opacity = '0.9')}
             onMouseLeave={e => (e.currentTarget.style.opacity = '1')}
@@ -422,7 +408,7 @@ export default function SubscriptionBillingPage() {
           </button>
           <button
             onClick={() => setShowAssignModal(true)}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all"
+            className={`${canBilling ? 'flex' : 'hidden'} items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all`}
             style={{ background: 'var(--bg-surface)', color: 'var(--text-primary)', border: '1px solid var(--border)' }}
             onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-muted)')}
             onMouseLeave={e => (e.currentTarget.style.background = 'var(--bg-surface)')}
@@ -431,7 +417,7 @@ export default function SubscriptionBillingPage() {
           </button>
           <button
             onClick={() => setShowPlanModal(true)}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all"
+            className={`${canPricing ? 'flex' : 'hidden'} items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all`}
             style={{ background: 'var(--bg-surface)', color: 'var(--text-primary)', border: '1px solid var(--border)' }}
             onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-muted)')}
             onMouseLeave={e => (e.currentTarget.style.background = 'var(--bg-surface)')}
@@ -686,6 +672,7 @@ export default function SubscriptionBillingPage() {
               <CreditCard size={40} className="mx-auto mb-3 opacity-40" />
               <p className="text-sm">{t('sa.subs.noPlans')}</p>
               <button
+                hidden={!canPricing}
                 onClick={() => setShowPlanModal(true)}
                 className="mt-4 px-4 py-2 rounded-xl text-sm font-medium"
                 style={{ background: 'var(--accent)', color: 'white' }}

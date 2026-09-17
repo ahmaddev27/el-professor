@@ -1,0 +1,107 @@
+// Reads the mail staging sends. Staging's GoTrue delivers to Mailpit, which
+// keeps every message and delivers none, so a test can wait for a mail to a
+// test address and pull the link or code out of it.
+
+interface MessageSummary {
+  ID: string;
+  Subject: string;
+  Created: string;
+}
+
+export interface Mail {
+  id: string;
+  subject: string;
+  html: string;
+  text: string;
+}
+
+export class Mailpit {
+  constructor(
+    private readonly baseUrl: string,
+    private readonly user: string,
+    private readonly password: string,
+  ) {}
+
+  static fromEnv(): Mailpit {
+    return new Mailpit(process.env.E2E_MAILPIT_URL!, process.env.E2E_MAILPIT_USER!, process.env.E2E_MAILPIT_PASS!);
+  }
+
+  private async call(path: string, init: RequestInit = {}): Promise<Response> {
+    const auth = Buffer.from(`${this.user}:${this.password}`).toString('base64');
+    const response = await fetch(`${this.baseUrl}${path}`, {
+      ...init,
+      headers: { Authorization: `Basic ${auth}`, 'Content-Type': 'application/json', ...init.headers },
+    });
+    if (!response.ok) {
+      throw new Error(`Mailpit ${init.method ?? 'GET'} ${path} answered ${response.status}`);
+    }
+    return response;
+  }
+
+  async isReachable(): Promise<boolean> {
+    try {
+      await this.call('/api/v1/info');
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  private async search(to: string): Promise<MessageSummary[]> {
+    const query = encodeURIComponent(`to:"${to}"`);
+    const body = (await (await this.call(`/api/v1/search?query=${query}&limit=50`)).json()) as { messages: MessageSummary[] };
+    return body.messages ?? [];
+  }
+
+  /** Removes every message to this address, so the next wait sees only new mail. */
+  async clear(to: string): Promise<void> {
+    const ids = (await this.search(to)).map((message) => message.ID);
+    if (ids.length > 0) {
+      await this.call('/api/v1/messages', { method: 'DELETE', body: JSON.stringify({ IDs: ids }) });
+    }
+  }
+
+  async waitForMessage(to: string, timeoutMs = 45_000): Promise<Mail> {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const [latest] = await this.search(to);
+      if (latest) {
+        const message = (await (await this.call(`/api/v1/message/${latest.ID}`)).json()) as {
+          Subject: string;
+          HTML: string;
+          Text: string;
+        };
+        return { id: latest.ID, subject: message.Subject, html: message.HTML, text: message.Text };
+      }
+      await new Promise((resolve) => setTimeout(resolve, 1_000));
+    }
+    // Named rather than left to the reader: otp-request answers a public
+    // purpose the same way whether or not it sent anything, so a run inside the
+    // one-code-per-minute cooldown, or past five codes for one address in an
+    // hour, is indistinguishable from a broken mail path until you count the
+    // runs. Seen twice while measuring this suite on 16.09.2026.
+    throw new Error(
+      `No mail to ${to} arrived within ${timeoutMs / 1_000} s. ` +
+        'If this follows other runs, it is most likely the one-time-code limits ' +
+        '(one code per address per minute, five per hour) rather than the mailer: ' +
+        'otp-request answers as if it had sent one either way. Wait, then run it again.',
+    );
+  }
+}
+
+/**
+ * The six-digit code in a one-time-code mail. The plain-text part carries it on
+ * a line of its own; the HTML part only letter-spaces it for reading.
+ */
+export function codeFrom(mail: Mail): string {
+  const match = mail.text.match(/^\s*(\d{6})\s*$/m);
+  if (!match) throw new Error('The mail contains no line holding a six-digit code');
+  return match[1];
+}
+
+/** The GoTrue verification link in a mail, with HTML entities decoded. */
+export function verifyLinkFrom(html: string): string {
+  const match = html.match(/href="([^"]*\/auth\/v1\/verify[^"]*)"/);
+  if (!match) throw new Error('The mail contains no /auth/v1/verify link');
+  return match[1].replaceAll('&amp;', '&');
+}

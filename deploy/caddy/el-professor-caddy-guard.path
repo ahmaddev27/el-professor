@@ -1,0 +1,9 @@
+[Unit]
+Description=Watch ridy's Caddyfile for deploys that drop El-Professor's routes
+
+[Path]
+PathChanged=/root/ridy/docker/Caddyfile
+Unit=el-professor-caddy-guard.service
+
+[Install]
+WantedBy=multi-user.target

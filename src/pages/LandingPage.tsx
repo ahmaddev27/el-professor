@@ -146,7 +146,7 @@ const HeroDashboard: React.FC = () => {
         <span style={{ width: 10, height: 10, borderRadius: '50%', background: 'rgba(245,158,11,0.5)' }} />
         <span style={{ width: 10, height: 10, borderRadius: '50%', background: 'rgba(16,185,129,0.5)' }} />
         <span style={{ flex: 1 }} />
-        <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.2)', fontFamily: 'monospace' }}>YA · Dashboard</span>
+        <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.2)', fontFamily: 'monospace' }}>El-Professor · Dashboard</span>
       </div>
 
       <div style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -259,7 +259,7 @@ const HeroDashboard: React.FC = () => {
     <div
       className="hidden lg:block hero-float-card-2"
       style={{
-        position: 'absolute', top: 100, right: -56, width: 142,
+        position: 'absolute', top: 100, right: -28, width: 142,
         background: 'rgba(13,17,23,0.92)', backdropFilter: 'blur(20px)',
         border: '1px solid rgba(255,255,255,0.11)', borderRadius: 14,
         padding: '12px 14px',
@@ -297,7 +297,7 @@ const HeroDashboard: React.FC = () => {
     <div
       className="hidden lg:block hero-float-card-3"
       style={{
-        position: 'absolute', bottom: 80, right: -52, width: 148,
+        position: 'absolute', bottom: 80, right: -28, width: 148,
         background: 'rgba(13,17,23,0.92)', backdropFilter: 'blur(20px)',
         border: '1px solid rgba(255,255,255,0.11)', borderRadius: 14,
         padding: '12px 14px',
@@ -511,7 +511,9 @@ const FuhrparkPanel: React.FC = () => {
 
 // ─── Pricing ──────────────────────────────────────────────────────────────────
 
-import { calcPricing, fleetDiscountPercent, PRICE_PER_CAR, YEARLY_DISCOUNT_PERCENT, fmt as fmtPrice } from '../utils/pricing';
+import { calcPricing, fleetDiscountPercent, fmtPricePerCar, fmt as fmtPrice } from '../utils/pricing';
+import { fleetDiscountSummary } from '../utils/pricingText';
+import { useAppConfig } from '../contexts/AppConfigContext';
 import type { Plan as PricingPlan } from '../contexts/PlanContext';
 
 // `label` is the product tier name and stays untranslated. `sub`, `badge` and
@@ -543,14 +545,19 @@ const PRICING_PLANS: {
 ];
 
 const PricingSection: React.FC = () => {
-  const { t } = useTranslation();
+  const { t, tPlural } = useTranslation();
+  // Every number on this section comes from the price book the database holds
+  // (plan 3.9), which is also what compute_plan_price charges from. Until the
+  // first answer arrives it is the seed, which is what the database was
+  // seeded with, so the page never renders without prices.
+  const { priceBook, trialDays } = useAppConfig();
   const [billing, setBilling] = useState<'monthly'|'yearly'>('monthly');
   const [carCount, setCarCount] = useState(5);
 
-  const fleetPct = fleetDiscountPercent(carCount);
+  const fleetPct = fleetDiscountPercent(priceBook, carCount);
 
   return (
-    <section id="pricing" style={{ position: 'relative', zIndex: 10, padding: '120px 20px' }}>
+    <section id="pricing" style={{ position: 'relative', zIndex: 10 }} className="px-4 py-[72px] md:px-5 md:py-[120px]">
       <div style={{ maxWidth: 1140, margin: '0 auto' }}>
         <div style={{ textAlign: 'center', maxWidth: 560, margin: '0 auto 16px' }}>
           <Tag>{t('landing.nav.pricing')}</Tag>
@@ -576,7 +583,7 @@ const PricingSection: React.FC = () => {
               }}>
                 {b === 'monthly' ? t('landing.pricing.monthly') : (
                   <><span>{t('landing.pricing.yearly')}</span>
-                  <span style={{ fontSize: 10, fontWeight: 800, background: billing === 'yearly' ? 'rgba(255,255,255,0.2)' : 'rgba(6,182,212,0.15)', color: billing === 'yearly' ? '#fff' : '#06b6d4', padding: '1px 6px', borderRadius: 100 }}>-{YEARLY_DISCOUNT_PERCENT}%</span>
+                  <span style={{ fontSize: 10, fontWeight: 800, background: billing === 'yearly' ? 'rgba(255,255,255,0.2)' : 'rgba(6,182,212,0.15)', color: billing === 'yearly' ? '#fff' : '#06b6d4', padding: '1px 6px', borderRadius: 100 }}>-{priceBook.yearly_discount_percent}%</span>
                   </>
                 )}
               </button>
@@ -584,7 +591,7 @@ const PricingSection: React.FC = () => {
           </div>
 
           {/* Car count slider */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', alignItems: 'center', gap: 14 }}>
             <span style={{ fontSize: 12, fontWeight: 600, color: 'rgba(255,255,255,0.35)', whiteSpace: 'nowrap' }}>{t('landing.pricing.vehiclesLabel')}</span>
             <input
               type="range" min={1} max={20} value={carCount}
@@ -605,14 +612,15 @@ const PricingSection: React.FC = () => {
         </div>
 
         {/* Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-3" style={{ gap: 20, alignItems: 'center', justifyContent: 'center', justifyItems: 'center', maxWidth: 1080, margin: '0 auto' }}>
+        <div className="grid grid-cols-1 lg:grid-cols-3" style={{ gap: 20, alignItems: 'center', justifyContent: 'center', justifyItems: 'center', maxWidth: 1080, margin: '0 auto' }}>
           {PRICING_PLANS.map((p) => {
-            const bp = calcPricing(p.id, carCount, billing);
+            const bp = calcPricing(priceBook, p.id, carCount, billing);
             const displayMonthly = bp.monthlyEquivalent;
             const displayYearly  = bp.yearlyTotal;
             return (
               <div key={p.id} style={{
                 position: 'relative',
+                width: '100%', maxWidth: 420,
                 borderRadius: 20,
                 padding: p.highlight ? '32px 28px' : '28px 24px',
                 marginTop: p.highlight ? 0 : 12,
@@ -640,7 +648,7 @@ const PricingSection: React.FC = () => {
                 {/* Price per car badge */}
                 <div style={{ marginBottom: 10 }}>
                   <span style={{ fontSize: 11, color: '#06b6d4', background: 'rgba(6,182,212,0.08)', border: '1px solid rgba(6,182,212,0.15)', padding: '2px 10px', borderRadius: 100, fontWeight: 700 }}>
-                    {PRICE_PER_CAR[p.id]} € {t('landing.pricing.perVehiclePerMonth')}
+                    {fmtPricePerCar(priceBook.price_per_car_cents[p.id])} € {t('landing.pricing.perVehiclePerMonth')}
                   </span>
                 </div>
 
@@ -654,7 +662,7 @@ const PricingSection: React.FC = () => {
                   </div>
                   {billing === 'yearly' && (
                     <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.35)', marginTop: 2 }}>
-                      = {fmtPrice(displayYearly)} € {t('landing.pricing.perYearInclDiscount', { pct: YEARLY_DISCOUNT_PERCENT })}
+                      = {fmtPrice(displayYearly)} € {t('landing.pricing.perYearInclDiscount', { pct: priceBook.yearly_discount_percent })}
                     </div>
                   )}
                 </div>
@@ -668,7 +676,7 @@ const PricingSection: React.FC = () => {
                   )}
                   {billing === 'yearly' && (
                     <span style={{ fontSize: 10, fontWeight: 700, color: '#fbbf24', background: 'rgba(251,191,36,0.1)', border: '1px solid rgba(251,191,36,0.2)', padding: '2px 8px', borderRadius: 100 }}>
-                      -{YEARLY_DISCOUNT_PERCENT}% {t('landing.pricing.yearlyDiscount')}
+                      -{priceBook.yearly_discount_percent}% {t('landing.pricing.yearlyDiscount')}
                     </span>
                   )}
                 </div>
@@ -681,7 +689,7 @@ const PricingSection: React.FC = () => {
                   color: '#fff',
                   boxShadow: p.highlight ? '0 4px 28px rgba(6,182,212,0.3)' : '0 0 0 1px rgba(255,255,255,0.07)',
                 }}>
-                  {t('landing.pricing.cta')}
+                  {t('landing.pricing.cta', { days: trialDays })}
                 </a>
 
                 <div style={{ height: 1, background: p.highlight ? 'rgba(6,182,212,0.15)' : 'rgba(255,255,255,0.05)', marginBottom: 20 }} />
@@ -704,9 +712,9 @@ const PricingSection: React.FC = () => {
         {/* Pricing explanation */}
         <div style={{ marginTop: 40, padding: '20px 24px', background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.05)', borderRadius: 16, maxWidth: 700, margin: '40px auto 0' }}>
           <p style={{ fontSize: 12, color: 'rgba(255,255,255,0.35)', lineHeight: 1.7, textAlign: 'center', margin: 0 }}>
-            <strong style={{ color: 'rgba(255,255,255,0.55)' }}>{t('landing.pricing.fleetDiscount')}:</strong> {t('landing.pricing.fleetTiers')}
+            <strong style={{ color: 'rgba(255,255,255,0.55)' }}>{t('landing.pricing.fleetDiscount')}:</strong> {fleetDiscountSummary(priceBook, t, tPlural)}
             &nbsp;&nbsp;|&nbsp;&nbsp;
-            <strong style={{ color: 'rgba(255,255,255,0.55)' }}>{t('landing.pricing.yearlyDiscount')}:</strong> {t('landing.pricing.yearlyNote')}
+            <strong style={{ color: 'rgba(255,255,255,0.55)' }}>{t('landing.pricing.yearlyDiscount')}:</strong> {t('landing.pricing.yearlyNote', { pct: priceBook.yearly_discount_percent })}
           </p>
         </div>
       </div>
@@ -760,9 +768,11 @@ const LandingPage: React.FC = () => {
     { href: '#faq', label: t('landing.nav.faq') },
   ];
 
-  const sectionStyle = (py = 120): React.CSSProperties => ({
-    position: 'relative', zIndex: 10, padding: `${py}px 20px`,
-  });
+  // Padding lives in classes, not in the style object: inline styles cannot
+  // change with the screen width, and sections need less of it on a phone.
+  const sectionStyle = (): React.CSSProperties => ({ position: 'relative', zIndex: 10 });
+  const sectionClass = (compact = false) =>
+    compact ? 'px-4 py-14 md:px-5 md:py-20' : 'px-4 py-[72px] md:px-5 md:py-[120px]';
 
   const sectionHead = (centered = true): React.CSSProperties => ({
     textAlign: centered ? 'center' : 'left',
@@ -771,7 +781,7 @@ const LandingPage: React.FC = () => {
   });
 
   const h2Style: React.CSSProperties = {
-    fontSize: 'clamp(32px,4vw,52px)', fontWeight: 900, lineHeight: 1.1,
+    fontSize: 'clamp(28px,4vw,52px)', fontWeight: 900, lineHeight: 1.1,
     letterSpacing: '-0.025em', marginBottom: 18,
   };
 
@@ -791,10 +801,10 @@ const LandingPage: React.FC = () => {
         borderBottom: scrolled ? '1px solid rgba(255,255,255,0.06)' : '1px solid transparent',
         transition: 'all 0.3s',
       }}>
-        <div style={{ maxWidth: 1200, margin: '0 auto', padding: '0 24px', height: 64, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div className="px-4 md:px-6" style={{ maxWidth: 1200, margin: '0 auto', height: 64, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <img src="/professor_logo_white.svg" alt="El-Professor" style={{ height: 30, objectFit: 'contain' }} />
 
-          <nav style={{ display: 'flex', alignItems: 'center', gap: 28 }} className="hidden md:flex">
+          <nav style={{ alignItems: 'center', gap: 28 }} className="hidden md:flex">
             {navLinks.map(l => (
               <a key={l.href} href={l.href} style={{ fontSize: 13, color: 'rgba(255,255,255,0.5)', textDecoration: 'none', transition: 'color 0.2s' }}
                 onMouseEnter={e => (e.currentTarget.style.color = '#fff')}
@@ -830,7 +840,10 @@ const LandingPage: React.FC = () => {
             {navLinks.map(l => (
               <a key={l.href} href={l.href} onClick={() => setMobileOpen(false)} style={{ display: 'block', fontSize: 14, color: 'rgba(255,255,255,0.6)', textDecoration: 'none', padding: '10px 0', borderBottom: `1px solid ${BORDER}` }}>{l.label}</a>
             ))}
-            <Link to="/signup" onClick={() => setMobileOpen(false)} style={{ display: 'block', textAlign: 'center', marginTop: 14, fontSize: 14, fontWeight: 700, color: '#fff', textDecoration: 'none', padding: '12px', borderRadius: 12, background: 'linear-gradient(90deg,#06b6d4,#818cf8)' }}>
+            <Link to="/login" onClick={() => setMobileOpen(false)} style={{ display: 'block', textAlign: 'center', marginTop: 14, fontSize: 14, fontWeight: 600, color: 'rgba(255,255,255,0.8)', textDecoration: 'none', padding: '12px', borderRadius: 12, border: '1px solid rgba(255,255,255,0.12)' }}>
+              {t('auth.signIn')}
+            </Link>
+            <Link to="/signup" onClick={() => setMobileOpen(false)} style={{ display: 'block', textAlign: 'center', marginTop: 10, fontSize: 14, fontWeight: 700, color: '#fff', textDecoration: 'none', padding: '12px', borderRadius: 12, background: 'linear-gradient(90deg,#06b6d4,#818cf8)' }}>
               {t('landing.nav.tryFree')}
             </Link>
           </div>
@@ -838,12 +851,12 @@ const LandingPage: React.FC = () => {
       </header>
 
       {/* ── Hero ── */}
-      <section style={{ ...sectionStyle(0), paddingTop: 120, paddingBottom: 100 }}>
+      <section style={sectionStyle()} className="px-4 pt-[104px] pb-16 md:px-5 md:pt-[120px] md:pb-[100px]">
         <div style={{ maxWidth: 1200, margin: '0 auto' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 64, alignItems: 'center' }} className="lg:grid-cols-2 grid-cols-1">
+          <div className="grid grid-cols-1 items-center gap-12 lg:grid-cols-2 lg:gap-16">
 
             {/* Left */}
-            <div style={{ maxWidth: 540 }}>
+            <div style={{ maxWidth: 540, minWidth: 0 }}>
               <div style={{
                 display: 'inline-flex', alignItems: 'center', gap: 8,
                 background: 'rgba(6,182,212,0.08)', border: '1px solid rgba(6,182,212,0.2)',
@@ -854,7 +867,7 @@ const LandingPage: React.FC = () => {
                 {t('landing.hero.badge')}
               </div>
 
-              <h1 style={{ fontSize: 'clamp(40px,5vw,68px)', fontWeight: 900, lineHeight: 1.0, letterSpacing: '-0.03em', marginBottom: 24 }}>
+              <h1 className="max-lg:break-words max-lg:[hyphens:auto]" style={{ fontSize: 'clamp(32px,5vw,68px)', fontWeight: 900, lineHeight: 1.0, letterSpacing: '-0.03em', marginBottom: 24 }}>
                 {t('landing.hero.titleLead')}<br />
                 <GradientText>{t('landing.hero.titleHighlight')}</GradientText><br />
                 {t('landing.hero.titleTail')}
@@ -909,9 +922,9 @@ const LandingPage: React.FC = () => {
       </section>
 
       {/* ── Stats strip ── */}
-      <section style={{ position: 'relative', zIndex: 10, padding: '0 20px' }}>
-        <div style={{ maxWidth: 1000, margin: '0 auto', background: CARD, border: `1px solid ${BORDER}`, borderRadius: 16, padding: '32px 40px' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 20 }}>
+      <section style={{ position: 'relative', zIndex: 10 }} className="px-4 md:px-5">
+        <div className="px-5 py-6 md:px-10 md:py-8" style={{ maxWidth: 1000, margin: '0 auto', background: CARD, border: `1px solid ${BORDER}`, borderRadius: 16 }}>
+          <div className="grid grid-cols-2 gap-5 md:grid-cols-4">
             {[
               { v: '500+', l: t('landing.stats.bookings') },
               { v: '98%', l: t('landing.stats.satisfaction') },
@@ -928,7 +941,7 @@ const LandingPage: React.FC = () => {
       </section>
 
       {/* ── Pain section ── */}
-      <section style={sectionStyle()}>
+      <section style={sectionStyle()} className={sectionClass()}>
         <div style={{ maxWidth: 1100, margin: '0 auto' }}>
           <div style={sectionHead()}>
             <Tag>{t('landing.pain.tag')}</Tag>
@@ -938,11 +951,11 @@ const LandingPage: React.FC = () => {
             <p style={bodyStyle}>{t('landing.pain.body')}</p>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: 16, marginBottom: 16 }}>
+          <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
             <PainCard value="90%" label={t('landing.pain.time.label')} desc={t('landing.pain.time.desc')} accent="linear-gradient(90deg,#06b6d4,#22d3ee)" />
             <PainCard value="0" label={t('landing.pain.payrollErrors.label')} desc={t('landing.pain.payrollErrors.desc')} accent="linear-gradient(90deg,#818cf8,#a78bfa)" />
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: 16 }}>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <PainCard value="100%" label={t('landing.pain.fleet.label')} desc={t('landing.pain.fleet.desc')} accent="linear-gradient(90deg,#34d399,#06b6d4)" />
             <PainCard value="1" label={t('landing.pain.onePlatform.label')} desc={t('landing.pain.onePlatform.desc')} accent="linear-gradient(90deg,#f472b6,#818cf8)" />
           </div>
@@ -950,7 +963,7 @@ const LandingPage: React.FC = () => {
       </section>
 
       {/* ── Features ── */}
-      <section id="features" style={sectionStyle()}>
+      <section id="features" style={sectionStyle()} className={sectionClass()}>
         <div style={{ maxWidth: 1100, margin: '0 auto' }}>
           <div style={sectionHead()}>
             <Tag>{t('landing.features.tag')}</Tag>
@@ -960,7 +973,7 @@ const LandingPage: React.FC = () => {
             <p style={bodyStyle}>{t('landing.features.body')}</p>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 12 }}>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {[
               { icon: <TrendingUp size={18}/>, title: t('landing.feature.revenue.title'), desc: t('landing.feature.revenue.desc'), accent: '#06b6d4' },
               { icon: <FileText size={18}/>, title: t('landing.feature.belege.title'), desc: t('landing.feature.belege.desc'), accent: '#818cf8' },
@@ -982,7 +995,7 @@ const LandingPage: React.FC = () => {
       </section>
 
       {/* ── How it works ── */}
-      <section id="workflow" style={sectionStyle()}>
+      <section id="workflow" style={sectionStyle()} className={sectionClass()}>
         <div style={{ maxWidth: 1100, margin: '0 auto' }}>
           <div style={{ textAlign: 'center', marginBottom: 64 }}>
             <Tag>{t('landing.how.tag')}</Tag>
@@ -990,7 +1003,7 @@ const LandingPage: React.FC = () => {
             <p style={bodyStyle}>{t('landing.how.body')}</p>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 16 }}>
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
             {[
               { n: '01', title: t('landing.how.step1.title'), desc: t('landing.how.step1.desc') },
               { n: '02', title: t('landing.how.step2.title'), desc: t('landing.how.step2.desc') },
@@ -1029,7 +1042,7 @@ const LandingPage: React.FC = () => {
       </section>
 
       {/* ── Product screenshots ── */}
-      <section id="screenshots" style={sectionStyle()}>
+      <section id="screenshots" style={sectionStyle()} className={sectionClass()}>
         <div style={{ maxWidth: 1100, margin: '0 auto' }}>
           <div style={sectionHead()}>
             <Tag>{t('landing.nav.insights')}</Tag>
@@ -1040,7 +1053,7 @@ const LandingPage: React.FC = () => {
           </div>
 
           {/* Row 1 */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, marginBottom: 20 }}>
+          <div className="mb-5 grid grid-cols-1 gap-5 md:grid-cols-2">
             <div>
               <div style={{ marginBottom: 20 }}>
                 <div style={{ fontSize: 16, fontWeight: 800, color: '#fff', marginBottom: 6 }}>{t('landing.screens.payout.title')}</div>
@@ -1056,9 +1069,9 @@ const LandingPage: React.FC = () => {
           </div>
 
           {/* Row 2 */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, marginBottom: 20 }}>
+          <div className="mb-5 grid grid-cols-1 gap-5 md:grid-cols-2">
             <KassePanel />
-            <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+            <div className="order-first md:order-none" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
               <div style={{ fontSize: 16, fontWeight: 800, color: '#fff', marginBottom: 6 }}>{t('landing.screens.cash.title')}</div>
               <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.42)', lineHeight: 1.65, marginBottom: 16 }}>{t('landing.screens.cash.body')}</div>
               {[t('landing.screens.cash.point1'),t('landing.screens.cash.point2'),t('landing.screens.cash.point3'),t('landing.screens.cash.point4')].map((f,i) => (
@@ -1070,7 +1083,7 @@ const LandingPage: React.FC = () => {
           </div>
 
           {/* Row 3 */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
+          <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
             <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
               <div style={{ fontSize: 16, fontWeight: 800, color: '#fff', marginBottom: 6 }}>{t('landing.screens.fleet.title')}</div>
               <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.42)', lineHeight: 1.65, marginBottom: 16 }}>{t('landing.screens.fleet.body')}</div>
@@ -1086,9 +1099,9 @@ const LandingPage: React.FC = () => {
       </section>
 
       {/* ── Trust strip ── */}
-      <section style={{ position: 'relative', zIndex: 10, padding: '0 20px 80px' }}>
+      <section style={{ position: 'relative', zIndex: 10 }} className="px-4 pb-16 md:px-5 md:pb-20">
         <div style={{ maxWidth: 1000, margin: '0 auto' }}>
-          <div style={{ background: CARD, border: `1px solid ${BORDER}`, borderRadius: 16, padding: '24px 40px', display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 20 }}>
+          <div className="grid grid-cols-1 gap-4 px-5 py-5 sm:grid-cols-2 md:px-10 md:py-6 lg:grid-cols-4 lg:gap-5" style={{ background: CARD, border: `1px solid ${BORDER}`, borderRadius: 16 }}>
             {[
               { icon: <Shield size={16} style={{ color: '#34d399' }} />, label: t('landing.trust.gdpr'), sub: t('landing.trust.gdprSub') },
               { icon: <Zap size={16} style={{ color: '#06b6d4' }} />, label: t('landing.trust.realtime.label'), sub: t('landing.trust.realtime.sub') },
@@ -1113,13 +1126,13 @@ const LandingPage: React.FC = () => {
       <PricingSection />
 
       {/* ── Testimonials ── */}
-      <section style={sectionStyle(80)}>
+      <section style={sectionStyle()} className={sectionClass(true)}>
         <div style={{ maxWidth: 1100, margin: '0 auto' }}>
           <div style={{ textAlign: 'center', marginBottom: 48 }}>
             <Tag>{t('landing.testimonials.tag')}</Tag>
             <h2 style={{ ...h2Style, fontSize: 'clamp(28px,3vw,42px)' }}>{t('landing.testimonials.title')}</h2>
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 16 }}>
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
             {[
               { name: 'Mehmet A.', role: t('landing.testimonials.role1'), quote: t('landing.testimonials.quote1') },
               { name: 'Klaus T.', role: t('landing.testimonials.role2'), quote: t('landing.testimonials.quote2') },
@@ -1149,7 +1162,7 @@ const LandingPage: React.FC = () => {
       </section>
 
       {/* ── FAQ ── */}
-      <section id="faq" style={sectionStyle()}>
+      <section id="faq" style={sectionStyle()} className={sectionClass()}>
         <div style={{ maxWidth: 720, margin: '0 auto' }}>
           <div style={{ textAlign: 'center', marginBottom: 56 }}>
             <Tag>{t('landing.nav.faq')}</Tag>
@@ -1171,17 +1184,16 @@ const LandingPage: React.FC = () => {
       </section>
 
       {/* ── Final CTA ── */}
-      <section style={sectionStyle(80)}>
+      <section style={sectionStyle()} className={sectionClass(true)}>
         <div style={{ maxWidth: 860, margin: '0 auto', position: 'relative' }}>
           {/* Glow */}
           <div style={{ position: 'absolute', inset: 0, background: 'radial-gradient(ellipse at 50% 50%, rgba(6,182,212,0.12) 0%, rgba(129,140,248,0.08) 40%, transparent 70%)', filter: 'blur(40px)', pointerEvents: 'none' }} />
 
-          <div style={{
+          <div className="px-5 py-12 md:px-12 md:py-[72px]" style={{
             position: 'relative',
             background: 'linear-gradient(160deg, rgba(13,28,52,0.9) 0%, rgba(7,13,26,0.95) 100%)',
             border: '1px solid rgba(6,182,212,0.18)',
             borderRadius: 24,
-            padding: '72px 48px',
             textAlign: 'center',
             boxShadow: '0 0 0 1px rgba(129,140,248,0.08), 0 40px 100px rgba(0,0,0,0.6)',
             overflow: 'hidden',
@@ -1229,8 +1241,8 @@ const LandingPage: React.FC = () => {
       {/* ── Footer ── */}
       <footer style={{ position: 'relative', zIndex: 10, borderTop: `1px solid ${BORDER}`, padding: '48px 24px 32px' }}>
         <div style={{ maxWidth: 1200, margin: '0 auto' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr', gap: 40, marginBottom: 48 }}>
-            <div>
+          <div className="mb-10 grid grid-cols-2 gap-x-6 gap-y-8 md:mb-12 md:grid-cols-[2fr_1fr_1fr_1fr] md:gap-10">
+            <div className="col-span-2 md:col-span-1">
               <img src="/professor_logo_white.svg" alt="El-Professor" style={{ height: 28, objectFit: 'contain', marginBottom: 14, opacity: 0.8 }} />
               <p style={{ fontSize: 13, color: 'rgba(255,255,255,0.35)', lineHeight: 1.65, maxWidth: 260 }}>
                 {t('landing.footer.tagline')}
@@ -1255,7 +1267,7 @@ const LandingPage: React.FC = () => {
             ))}
           </div>
           <div style={{ borderTop: `1px solid ${BORDER}`, paddingTop: 24, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
-            <p style={{ fontSize: 12, color: 'rgba(255,255,255,0.22)' }}>© 2025 YA Software. {t('landing.footer.rights')}</p>
+            <p style={{ fontSize: 12, color: 'rgba(255,255,255,0.22)' }}>© {new Date().getFullYear()} El-Professor. {t('landing.footer.rights')}</p>
             <p style={{ fontSize: 12, color: 'rgba(255,255,255,0.22)' }}>{t('landing.trust.gdpr')} · {t('landing.trust.madeInGermany')}</p>
           </div>
         </div>

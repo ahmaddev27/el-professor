@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Lock, Eye, EyeOff, AlertCircle, CheckCircle2, ShieldCheck } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useTranslation } from '../contexts/LanguageContext';
+import EmphasizedText from '../components/auth/EmphasizedText';
 
 const MIN_LEN = 8;
 
@@ -57,7 +58,7 @@ const SetPasswordPage: React.FC = () => {
     setError('');
 
     if (password.length < MIN_LEN) {
-      setError(`Das Passwort muss mindestens ${MIN_LEN} Zeichen lang sein.`);
+      setError(t('setpw.minLength', { n: MIN_LEN }));
       return;
     }
     if (password !== confirm) {
@@ -118,13 +119,13 @@ const SetPasswordPage: React.FC = () => {
           </div>
           <h2 className="text-white font-semibold mb-2">{t('setpw.sessionExpired')}</h2>
           <p className="text-white/60 text-sm mb-6">
-            Der Link ist ungültig oder abgelaufen. Bitte fordern Sie einen neuen Link an.
+            {t('setpw.noSessionBody')}
           </p>
           <button
             onClick={() => navigate('/auth/forgot-password', { replace: true })}
             className="w-full bg-gradient-to-r from-cyan-500 to-blue-600 text-white py-3 px-4 rounded-xl font-semibold text-sm"
           >
-            Neuen Link anfordern
+            {t('setpw.requestNewCode')}
           </button>
         </div>
       </div>
@@ -144,15 +145,15 @@ const SetPasswordPage: React.FC = () => {
           <h1 className="text-2xl font-bold text-white mb-1">{title}</h1>
           <p className="text-white/40 text-sm">{subtitle}</p>
           {email && (
-            <p className="text-white/60 text-xs mt-3">
-              für <span className="text-cyan-300">{email}</span>
+            <p className="text-white/60 text-xs mt-3 break-words">
+              <EmphasizedText template={t('setpw.forEmail')} placeholder="email" value={email} className="text-cyan-300" />
             </p>
           )}
         </div>
 
         <div className="bg-white/4 backdrop-blur-xl border border-white/10 rounded-2xl p-7 shadow-[0_24px_64px_rgba(0,0,0,0.5)]">
           {success ? (
-            <div className="text-center">
+            <div className="text-center" role="status">
               <div className="w-12 h-12 rounded-full bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center mx-auto mb-4">
                 <CheckCircle2 className="text-emerald-400" size={22} />
               </div>
@@ -162,7 +163,7 @@ const SetPasswordPage: React.FC = () => {
           ) : (
             <>
               {error && (
-                <div className="mb-5 p-3.5 bg-red-500/10 border border-red-500/20 rounded-xl flex items-center gap-2.5">
+                <div role="alert" className="mb-5 p-3.5 bg-red-500/10 border border-red-500/20 rounded-xl flex items-center gap-2.5">
                   <AlertCircle className="text-red-400 flex-shrink-0" size={16} />
                   <span className="text-red-300 text-sm">{error}</span>
                 </div>
@@ -170,23 +171,26 @@ const SetPasswordPage: React.FC = () => {
 
               <form onSubmit={handleSubmit} className="space-y-4">
                 <div>
-                  <label className="block text-xs font-semibold text-white/40 uppercase tracking-wider mb-2">
-                    Neues Passwort
+                  <label htmlFor="set-password-new" className="block text-xs font-semibold text-white/40 uppercase tracking-wider mb-2">
+                    {t('setpw.newPasswordLabel')}
                   </label>
                   <div className="relative">
                     <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 text-white/25" size={16} />
                     <input
+                      id="set-password-new"
                       type={show ? 'text' : 'password'}
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
                       className="w-full pl-10 pr-12 py-3 bg-white/5 border border-white/10 text-white placeholder-white/20 rounded-xl focus:outline-none focus:ring-2 focus:ring-cyan-500/50 focus:border-cyan-500/40 transition-all text-sm"
                       placeholder={t('setpw.minChars')}
+                      autoComplete="new-password"
                       required
                       minLength={MIN_LEN}
                     />
                     <button
                       type="button"
                       onClick={() => setShow(!show)}
+                      aria-label={show ? t('auth.hidePassword') : t('auth.showPassword')}
                       className="absolute right-3.5 top-1/2 -translate-y-1/2 text-white/25 hover:text-white/60"
                     >
                       {show ? <EyeOff size={16} /> : <Eye size={16} />}
@@ -195,17 +199,19 @@ const SetPasswordPage: React.FC = () => {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-white/40 uppercase tracking-wider mb-2">
-                    Passwort bestätigen
+                  <label htmlFor="set-password-confirm" className="block text-xs font-semibold text-white/40 uppercase tracking-wider mb-2">
+                    {t('setpw.confirmLabel')}
                   </label>
                   <div className="relative">
                     <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 text-white/25" size={16} />
                     <input
+                      id="set-password-confirm"
                       type={show ? 'text' : 'password'}
                       value={confirm}
                       onChange={(e) => setConfirm(e.target.value)}
                       className="w-full pl-10 pr-4 py-3 bg-white/5 border border-white/10 text-white placeholder-white/20 rounded-xl focus:outline-none focus:ring-2 focus:ring-cyan-500/50 focus:border-cyan-500/40 transition-all text-sm"
                       placeholder={t('setpw.repeat')}
+                      autoComplete="new-password"
                       required
                       minLength={MIN_LEN}
                     />

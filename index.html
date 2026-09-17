@@ -2,14 +2,32 @@
 <html lang="de">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/professor_logo_black.svg" />
-    <link rel="icon" type="image/png" href="/fav-icon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>El-Professor | Buchhaltung</title>
-    <meta property="og:image" content="https://bolt.new/static/og_default.png">
-    <meta name="twitter:card" content="summary_large_image">
-    <meta name="twitter:image" content="https://bolt.new/static/og_default.png">
-</head>
+    <meta name="description" content="Digitales Verwaltungssystem für Taxi- und Mietwagenunternehmen." />
+    <meta name="theme-color" content="#0A0F1C" />
+
+    <link rel="icon" href="/brand/favicon.ico" sizes="16x16 32x32 48x48" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/brand/favicon-32.png" />
+    <link rel="apple-touch-icon" href="/brand/apple-touch-icon.png" />
+    <!-- use-credentials: a manifest is fetched without credentials by default,
+         and staging's Basic Auth would answer that with 401 on every load. -->
+    <link rel="manifest" href="/brand/site.webmanifest" crossorigin="use-credentials" />
+
+    <!-- Share previews need an absolute image URL. VITE_APP_URL is the origin
+         each environment is built for (see .env.production and the deploy
+         workflow), so staging and production each point at their own copy. -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="El-Professor" />
+    <meta property="og:title" content="El-Professor" />
+    <meta property="og:description" content="Digitales Verwaltungssystem für Taxi- und Mietwagenunternehmen." />
+    <meta property="og:image" content="%VITE_APP_URL%/brand/og-image.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="El-Professor, digitales Verwaltungssystem für Taxi- und Mietwagenunternehmen" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:image" content="%VITE_APP_URL%/brand/og-image.png" />
+  </head>
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>

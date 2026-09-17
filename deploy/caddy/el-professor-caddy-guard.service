@@ -1,0 +1,18 @@
+[Unit]
+Description=Keep El-Professor's routes in ridy's Caddy (never restarts ridy)
+Documentation=file:///usr/local/sbin/el-professor-caddy-guard
+After=docker.service
+
+[Service]
+Type=oneshot
+# Triggered by the .path unit the moment git rewrites ridy's Caddyfile: give
+# the writer time to finish before the file is read.
+ExecStartPre=/bin/sleep 6
+ExecStart=/usr/local/sbin/el-professor-caddy-guard
+# 75 = deferred to the next run, 76 = waiting for ridy to recreate its Caddy.
+# Both are expected states, not failures.
+SuccessExitStatus=75 76
+Nice=10
+# Keep only what the guard reports (notice and up). A run every minute would
+# otherwise fill the journal with start/finish lines that say nothing.
+LogLevelMax=notice

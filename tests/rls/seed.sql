@@ -50,6 +50,13 @@ FROM (VALUES
 ) AS v(user_id, email, full_name, role, company_id, is_super)
 ON CONFLICT (user_id) DO NOTHING;
 
+-- The platform principal is an owner through app_private.platform_staff. Since
+-- 20260916110010 the profile flag above grants nothing by itself; it only
+-- routes the browser, and the staff row keeps it in step.
+INSERT INTO app_private.platform_staff (user_id, role, note)
+VALUES ('50000000-0000-4000-8000-000000000001', 'owner', 'rls seed')
+ON CONFLICT (user_id) DO NOTHING;
+
 -- one driver per tenant, so a cross-tenant write has a real target to miss
 INSERT INTO drivers (id, company_id, name)
 VALUES

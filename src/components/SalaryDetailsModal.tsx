@@ -1,13 +1,18 @@
 import React, { useState, useEffect } from 'react';
-import { X, Plus, CreditCard as Edit2, Trash2, DollarSign, AlertCircle, FileText, CheckSquare, Square, Building2, Banknote, LayoutDashboard, Zap } from 'lucide-react';
+import { X, Plus, CreditCard as Edit2, Trash2, DollarSign, AlertCircle, FileText, CheckSquare, Square, Building2, Banknote, LayoutDashboard, Zap, Lock, Eye } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { SalaryPayment, SalaryCalculation } from '../types/receipt';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
+import { usePlan } from '../contexts/PlanContext';
 import { useToast } from '../contexts/ToastContext';
 import { useCompanySettings } from '../contexts/CompanySettingsContext';
 import { format } from 'date-fns';
 import SalaryPaymentModal from './SalaryPaymentModal';
+import SalaryPaymentReceiptPreview from './SalaryPaymentReceiptPreview';
 import ConfirmationModal from './ConfirmationModal';
+import { paymentRowActions } from '../utils/salaryPaymentReceiptRow';
+import { receiptScope } from '../utils/salaryCashReceiptFlow';
 import { generateDriverSalaryPdf } from '../utils/driverSalaryPdf';
 import DriverSalarySummaryCard from './DriverSalarySummaryCard';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
@@ -41,6 +46,8 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
   const [selectedPayment, setSelectedPayment] = useState<SalaryPayment | undefined>();
   const [paymentToDelete, setPaymentToDelete] = useState<SalaryPayment | null>(null);
+  /** The Gehaltsquittung shown over this screen; null while none is open. */
+  const [receiptPreviewId, setReceiptPreviewId] = useState<string | null>(null);
   const [payrollData, setPayrollData] = useState<PayrollData>({
     payroll_gross_amount: null,
     payroll_net_amount: null,
@@ -48,9 +55,17 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
   });
 
   const { showToast } = useToast();
-  const { user } = useAuth();
-  const { effectiveCompanyId: companyId } = useSuperAdmin();
+  const { user, companyId: ownCompanyId } = useAuth();
+  const navigate = useNavigate();
+  const { can: planIncludes } = usePlan();
+  const { effectiveCompanyId: companyId, isViewingAsCompany } = useSuperAdmin();
   const { settings } = useCompanySettings();
+
+  // This screen reads the effective company, so platform staff who have entered
+  // a customer see that customer's payment rows. A Gehaltsquittung behind one of
+  // them loads with the caller's own company, so the preview is offered only
+  // inside it — see paymentRowActions.
+  const receiptsScope = receiptScope({ companyId: ownCompanyId, effectiveCompanyId: companyId, isViewingAsCompany });
 
   // The system-calculated total salary
   const calculatedSalaryTotal = salary.netto_salary ?? salary.amount_due ?? 0;
@@ -758,7 +773,12 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
                       </tr>
                     </thead>
                     <tbody>
-                      {payments.map((payment, idx) => (
+                      {payments.map((payment, idx) => {
+                        const rowActions = paymentRowActions(payment, {
+                          planIncludesDokumente: planIncludes('dokumente'),
+                          scope: receiptsScope,
+                        });
+                        return (
                         <tr
                           key={payment.id}
                           style={{ borderTop: idx > 0 ? '1px solid var(--border)' : undefined }}
@@ -802,6 +822,22 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
                                   <Zap size={10} />{t('sal.weekly.badge')}
                                 </span>
                               )}
+                              {payment.source_type === 'gehaltsquittung' && (
+                                <span style={{
+                                  background: 'var(--bg-muted)',
+                                  color: 'var(--text-secondary)',
+                                  borderRadius: '0.25rem',
+                                  padding: '0.125rem 0.375rem',
+                                  fontSize: '0.6875rem',
+                                  fontWeight: 500,
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '0.25rem',
+                                  width: 'fit-content',
+                                }}>
+                                  <Lock size={10} />{t('sal.payment.receiptBadge')}
+                                </span>
+                              )}
                             </div>
                           </td>
                           <td style={{ color: 'var(--text-primary)', padding: '0.75rem 1rem', fontSize: '0.875rem', textAlign: 'right', fontWeight: 600 }}>
@@ -811,6 +847,37 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
                             {payment.description || '-'}
                           </td>
                           <td style={{ padding: '0.75rem 1rem', textAlign: 'right' }}>
+                            {rowActions.kind === 'receipt' ? (
+                              // Written by confirm_salary_cash_payment; a trigger refuses any edit or
+                              // delete, so the row changes only by voiding its receipt. The preview
+                              // shows the stored receipt in place; the Documents page is reachable
+                              // from inside it, where a copy is uploaded or the receipt voided.
+                              <div className="flex items-center justify-end gap-2">
+                                <span
+                                  role="img"
+                                  aria-label={t('sal.payment.receiptLocked')}
+                                  title={t('sal.payment.receiptLocked')}
+                                  style={{ color: 'var(--text-tertiary)', display: 'inline-flex' }}
+                                >
+                                  <Lock size={16} />
+                                </span>
+                                {rowActions.preview && (
+                                  <button
+                                    type="button"
+                                    onClick={() => setReceiptPreviewId(rowActions.receiptId)}
+                                    aria-label={t('sal.payment.previewReceiptAria', {
+                                      date: format(new Date(payment.payment_date), 'dd.MM.yyyy'),
+                                    })}
+                                    style={{ color: 'var(--accent)', borderRadius: '0.25rem', padding: '0.25rem 0.375rem', fontSize: '0.8125rem', fontWeight: 500, display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}
+                                    onMouseEnter={e => (e.currentTarget.style.background = 'var(--accent-subtle)')}
+                                    onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+                                  >
+                                    <Eye size={14} />
+                                    {t('sal.payment.previewReceipt')}
+                                  </button>
+                                )}
+                              </div>
+                            ) : (
                             <div className="flex items-center justify-end space-x-2">
                               <button
                                 onClick={() => { setSelectedPayment(payment); setIsPaymentModalOpen(true); }}
@@ -831,9 +898,11 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
                                 <Trash2 size={16} />
                               </button>
                             </div>
+                            )}
                           </td>
                         </tr>
-                      ))}
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -863,6 +932,12 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
         salaryId={salary.salary_id!}
         remainingBalance={remainingBalance}
         payment={selectedPayment}
+      />
+
+      <SalaryPaymentReceiptPreview
+        receiptId={receiptPreviewId}
+        onClose={() => setReceiptPreviewId(null)}
+        onOpenDocuments={id => navigate('/dokumente', { state: { focusReceiptId: id } })}
       />
 
       <ConfirmationModal

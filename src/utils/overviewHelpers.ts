@@ -1,6 +1,29 @@
 import { startOfMonth, endOfMonth, isWithinInterval, parseISO, subMonths, format } from 'date-fns';
 import { de } from 'date-fns/locale';
 import { Income, Receipt } from '../types/receipt';
+import {
+  bargeldIncomeEntries,
+  belegEntries,
+  cashMovementEntries,
+  summarizeCashLedger,
+  type CashLedgerLabels,
+  type CashMovementRow,
+} from './cashLedger';
+
+export type { CashMovementRow };
+
+/**
+ * calcCashSummary totals and never renders an entry, so these fallbacks reach
+ * no screen; the ledger builders ask for them all the same. The screen that
+ * does render entries (BargeldbestandPage) passes translated ones.
+ */
+const LEDGER_LABELS: CashLedgerLabels = {
+  bargeldIncome: 'Bargeld',
+  beleg: 'Beleg',
+  gehaltsquittung: 'Gehaltsquittung',
+  gehaltsquittungStorno: 'Storno Gehaltsquittung',
+  other: 'Bargeldbewegung',
+};
 
 export interface FixedCostItem {
   id: string;
@@ -253,15 +276,37 @@ export function calcSalaryAlerts(
 export interface CashSummary {
   cashIncome: number;
   cashFromExpenses: number;
+  /** Gehaltsquittungen minus their Stornos: the cash salaries took out of the till. */
+  salaryPayouts: number;
+  /** Everything that left the till: Belege plus salary payouts. */
+  cashOut: number;
   cashBalance: number;
   cashRisk: 'ok' | 'warning' | 'danger';
 }
 
+/**
+ * The till for a period, from the same ledger the Bargeldbestand screen reads.
+ *
+ * The money rule: cash in is Bargeld handed over by a driver; cash out is a
+ * Beleg and a Gehaltsquittung (`cash_movements`, written by
+ * confirm_salary_cash_payment), and voiding a Gehaltsquittung books the cash
+ * back on the day of the void. The weekly "Bar zurück" writes no movement and
+ * so moves no cash.
+ *
+ * `movements` defaults to empty, which reproduces the figure this returned
+ * before the ledger existed — and is what it still returns for any period in
+ * which no Gehaltsquittung was confirmed.
+ *
+ * Deliberately **not** in calcPeriodMetrics: profit already subtracts the full
+ * `salaries` amount due, so counting the payout again would subtract the same
+ * salary twice. A payout moves cash, it does not add cost.
+ */
 export function calcCashSummary(
   incomes: Income[],
   receipts: Receipt[],
   start: Date,
-  end: Date
+  end: Date,
+  movements: readonly CashMovementRow[] = []
 ): CashSummary {
   const periodIncomes = incomes.filter(i =>
     isWithinInterval(new Date(i.date), { start, end })
@@ -269,18 +314,35 @@ export function calcCashSummary(
   const periodReceipts = receipts.filter(r =>
     isWithinInterval(new Date(r.date), { start, end })
   );
+  const periodMovements = movements.filter(m =>
+    isWithinInterval(new Date(m.movement_date), { start, end })
+  );
 
-  const cashIncome = periodIncomes
-    .filter(i => i.type === 'bargeld')
-    .reduce((s, i) => s + Number(i.amount), 0);
-  const cashFromExpenses = periodReceipts.reduce((s, r) => s + r.expense, 0);
-  const cashBalance = cashIncome - cashFromExpenses;
+  // Integer cents: a month of euro floats accumulates drift, and this figure is
+  // the one a fleet owner counts the till against.
+  const totals = summarizeCashLedger([
+    ...bargeldIncomeEntries(
+      periodIncomes.filter(i => i.type === 'bargeld'),
+      LEDGER_LABELS
+    ),
+    ...belegEntries(
+      periodReceipts.map(r => ({ id: r.id, expense: r.expense, description: r.description, driver_name: r.driverName, date: r.date })),
+      LEDGER_LABELS
+    ),
+    ...cashMovementEntries(periodMovements, LEDGER_LABELS),
+  ]);
+
+  const cashIncome = totals.bargeldIncomeCents / 100;
+  const cashFromExpenses = totals.belegExpenseCents / 100;
+  const salaryPayouts = totals.salaryPayoutCents / 100;
+  const cashOut = totals.cashOutCents / 100;
+  const cashBalance = totals.balanceCents / 100;
 
   let cashRisk: 'ok' | 'warning' | 'danger' = 'ok';
   if (cashBalance < 0) cashRisk = 'danger';
   else if (cashBalance < cashIncome * 0.1) cashRisk = 'warning';
 
-  return { cashIncome, cashFromExpenses, cashBalance, cashRisk };
+  return { cashIncome, cashFromExpenses, salaryPayouts, cashOut, cashBalance, cashRisk };
 }
 
 // ── 6-month trend data ────────────────────────────────────────────────────────

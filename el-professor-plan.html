@@ -1,0 +1,1104 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>خطة متطلبات El-Professor</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&amp;family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&amp;family=Noto+Kufi+Arabic:wght@600;700&amp;display=swap">
+<style>
+  :root {
+    color-scheme: light;
+    --ground: #F3F6FB;
+    --surface: #FFFFFF;
+    --surface-2: #E8EEF8;
+    --ink: #0C1730;
+    --ink-2: #46536F;
+    --line: #D3DCEA;
+    --accent: #146BFF;
+    --accent-ink: #0B55D6;
+    --signal: #007F99;
+    --ok: #0E7446;
+    --ok-fill: #E3F4EA;
+    --warn: #9A4A06;
+    --warn-fill: #FDF0DC;
+    --crit: #B3232B;
+    --crit-fill: #FCE9EA;
+    --info: #0B55D6;
+    --info-fill: #E6EEFE;
+    --idle: #46536F;
+    --idle-fill: #E8EEF8;
+    --f-display: "Noto Kufi Arabic", "IBM Plex Sans Arabic", "Segoe UI", Tahoma, sans-serif;
+    --f-body: "IBM Plex Sans Arabic", "Segoe UI", Tahoma, sans-serif;
+    --f-mono: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      color-scheme: dark;
+      --ground: #0A0F1C;
+      --surface: #0C1730;
+      --surface-2: #112145;
+      --ink: #E6ECF7;
+      --ink-2: #9CAAC6;
+      --line: #1F3159;
+      --accent: #146BFF;
+      --accent-ink: #7AA9FF;
+      --signal: #00E7FF;
+      --ok: #52D49C;
+      --ok-fill: #0E2A21;
+      --warn: #F3B55E;
+      --warn-fill: #2B1F0C;
+      --crit: #FF7C82;
+      --crit-fill: #2C1318;
+      --info: #7AA9FF;
+      --info-fill: #12244A;
+      --idle: #9CAAC6;
+      --idle-fill: #16264A;
+    }
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    html { scroll-behavior: smooth; }
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--f-body);
+    font-size: 17px;
+    line-height: 1.85;
+    padding-inline: 20px;
+    padding-block: 0;
+  }
+
+  .page {
+    max-width: 1160px;
+    margin-inline: auto;
+    padding-block: 44px 96px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 36px;
+  }
+
+  a { color: var(--accent-ink); text-underline-offset: 3px; }
+  a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+
+  code {
+    font-family: var(--f-mono);
+    font-size: 0.84em;
+    direction: ltr;
+    unicode-bidi: isolate;
+    background: var(--surface-2);
+    color: var(--ink);
+    padding: 0.05em 0.4em;
+    border-radius: 5px;
+    overflow-wrap: anywhere;
+  }
+
+  h1, h2, h3, h4 { text-wrap: balance; margin: 0; }
+
+  /* ── Masthead ── */
+  .masthead {
+    grid-column: 1 / -1;
+    display: grid;
+    gap: 14px;
+    padding-block-end: 28px;
+    border-block-end: 1px solid var(--line);
+  }
+  .eyebrow {
+    margin: 0;
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    color: var(--signal);
+  }
+  .masthead h1 {
+    font-family: var(--f-display);
+    font-weight: 700;
+    font-size: clamp(30px, 4.4vw, 42px);
+    line-height: 1.35;
+  }
+  .masthead h1 .brand { direction: ltr; unicode-bidi: isolate; color: var(--accent-ink); }
+  .lede { margin: 0; max-width: 66ch; color: var(--ink-2); font-size: 18px; }
+  .meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 18px;
+    font-size: 14px;
+    color: var(--ink-2);
+  }
+  .num { font-variant-numeric: tabular-nums; direction: ltr; unicode-bidi: isolate; }
+
+  /* ── Pills and chips ── */
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45em;
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1.6;
+    padding: 0.1em 0.7em;
+    border-radius: 999px;
+    white-space: nowrap;
+    color: var(--idle);
+    background: var(--idle-fill);
+  }
+  .pill::before {
+    content: "";
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+  }
+  .pill.ok { color: var(--ok); background: var(--ok-fill); }
+  .pill.warn { color: var(--warn); background: var(--warn-fill); }
+  .pill.crit { color: var(--crit); background: var(--crit-fill); }
+  .pill.info { color: var(--info); background: var(--info-fill); }
+
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
+  .chip {
+    font-size: 13px;
+    color: var(--ink-2);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 0.05em 0.6em;
+    background: var(--surface);
+  }
+
+  /* ── Contents ── */
+  .toc { font-size: 14px; }
+  .toc h2 { font-size: 13px; font-weight: 600; letter-spacing: 0.04em; color: var(--ink-2); margin-block-end: 8px; }
+  .toc ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+  .toc a {
+    display: flex;
+    gap: 10px;
+    padding: 5px 10px;
+    border-radius: 7px;
+    text-decoration: none;
+    color: var(--ink);
+  }
+  .toc a:hover { background: var(--surface-2); }
+  .toc .n { font-family: var(--f-mono); font-size: 13px; color: var(--accent-ink); min-width: 1.2em; }
+  .toc .sub { margin-block-start: 10px; padding-block-start: 10px; border-block-start: 1px solid var(--line); }
+
+  /* ── Document column ── */
+  .doc { display: grid; gap: 56px; min-width: 0; }
+  .block { display: grid; gap: 18px; min-width: 0; }
+  .block > h2 {
+    font-family: var(--f-display);
+    font-size: 24px;
+    font-weight: 700;
+    line-height: 1.5;
+  }
+  .block p { margin: 0; max-width: 72ch; }
+  .muted { color: var(--ink-2); }
+
+  ul.list { margin: 0; padding-inline-start: 1.2em; display: grid; gap: 6px; max-width: 74ch; }
+  ul.list li::marker { color: var(--accent); }
+
+  /* Phase track */
+  ol.track {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px;
+  }
+  ol.track > li {
+    display: grid;
+    align-content: start;
+    gap: 6px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 14px 16px;
+  }
+  ol.track > li.now { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+  ol.track a { color: var(--ink); text-decoration: none; }
+  ol.track a:hover h3 { color: var(--accent-ink); }
+  .track .no { font-family: var(--f-display); font-size: 28px; line-height: 1; color: var(--accent-ink); font-weight: 700; }
+  .track h3 { font-size: 16px; font-weight: 600; line-height: 1.6; }
+  .track .gate {
+    margin: 0;
+    font-size: 13px;
+    color: var(--warn);
+    border-block-start: 1px dashed var(--line);
+    padding-block-start: 6px;
+    margin-block-start: 2px;
+  }
+
+  /* Progress bar for phase 0 */
+  .progress { display: grid; gap: 6px; }
+  .progress .bar {
+    height: 8px;
+    border-radius: 999px;
+    background: var(--surface-2);
+    overflow: hidden;
+  }
+  .progress .bar span { display: block; height: 100%; background: var(--accent); border-radius: 999px; }
+  .progress .label { font-size: 13px; color: var(--ink-2); }
+
+  /* Tables */
+  .table-wrap {
+    overflow-x: auto;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+  }
+  table { width: 100%; border-collapse: collapse; font-size: 15px; line-height: 1.7; }
+  th, td { text-align: start; vertical-align: top; padding: 11px 14px; border-block-end: 1px solid var(--line); }
+  tr:last-child td { border-block-end: 0; }
+  th { font-size: 13px; font-weight: 600; color: var(--ink-2); background: var(--surface-2); white-space: nowrap; }
+  td.num { font-family: var(--f-mono); color: var(--accent-ink); font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+  /* Label / value pairs */
+  dl.pairs {
+    margin: 0;
+    display: grid;
+    grid-template-columns: minmax(0, 12rem) minmax(0, 1fr);
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    overflow: hidden;
+  }
+  dl.pairs dt, dl.pairs dd {
+    margin: 0;
+    padding: 12px 16px;
+    border-block-end: 1px solid var(--line);
+  }
+  dl.pairs dt { font-weight: 600; background: var(--surface-2); }
+  dl.pairs dt:last-of-type, dl.pairs dd:last-of-type { border-block-end: 0; }
+
+  /* Findings */
+  ul.findings { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+  ul.findings li {
+    display: grid;
+    grid-template-columns: 8rem minmax(0, 1fr);
+    gap: 14px;
+    align-items: start;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 14px 16px;
+  }
+  ul.findings .pill { justify-self: start; margin-block-start: 3px; }
+  ul.findings p { margin: 0; }
+  ul.findings .where { font-size: 14px; color: var(--ink-2); margin-block-start: 4px; }
+
+  /* Phases */
+  .phase { display: grid; gap: 22px; min-width: 0; scroll-margin-block-start: 20px; }
+  .phase-head {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 18px;
+    align-items: start;
+    padding-block-end: 16px;
+    border-block-end: 2px solid var(--ink);
+  }
+  .phase-num {
+    font-family: var(--f-display);
+    font-size: 58px;
+    line-height: 1;
+    font-weight: 700;
+    color: var(--accent);
+    min-width: 0.8em;
+    text-align: center;
+  }
+  .phase-head h2 { font-family: var(--f-display); font-size: 25px; font-weight: 700; line-height: 1.5; }
+  .phase-head .eyebrow { margin-block-end: 2px; }
+  .phase-head .chips { margin-block-start: 8px; }
+
+  .step { display: grid; gap: 10px; min-width: 0; }
+  .step h3 {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 4px 10px;
+    font-size: 18px;
+    font-weight: 600;
+    line-height: 1.6;
+  }
+  .step-no {
+    font-family: var(--f-mono);
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--accent-ink);
+    direction: ltr;
+    unicode-bidi: isolate;
+    font-variant-numeric: tabular-nums;
+  }
+  .step .result {
+    margin: 0;
+    font-size: 15px;
+    color: var(--ok);
+    background: var(--ok-fill);
+    border-radius: 8px;
+    padding: 8px 12px;
+    max-width: 74ch;
+  }
+
+  .why {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 14px 18px;
+    display: grid;
+    gap: 6px;
+  }
+  .why strong { font-size: 14px; color: var(--ink-2); font-weight: 600; }
+
+  .check {
+    background: var(--surface-2);
+    border-radius: 12px;
+    padding: 16px 20px;
+    display: grid;
+    gap: 8px;
+  }
+  .check h3 { font-size: 15px; font-weight: 600; color: var(--signal); letter-spacing: 0.02em; }
+  .check .must { color: var(--crit); font-weight: 600; }
+
+  pre.sql {
+    margin: 0;
+    direction: ltr;
+    text-align: left;
+    overflow-x: auto;
+    font-family: var(--f-mono);
+    font-size: 13.5px;
+    line-height: 1.7;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 12px 16px;
+    max-width: 74ch;
+  }
+
+  /* Needs list */
+  ul.needs { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+  ul.needs li {
+    display: grid;
+    grid-template-columns: 7.5rem minmax(0, 1fr) auto;
+    gap: 14px;
+    align-items: baseline;
+    padding-block-end: 10px;
+    border-block-end: 1px solid var(--line);
+  }
+  ul.needs li:last-child { border-block-end: 0; padding-block-end: 0; }
+  ul.needs .when { font-size: 14px; font-weight: 600; color: var(--accent-ink); }
+
+  .foot { font-size: 14px; color: var(--ink-2); border-block-start: 1px solid var(--line); padding-block-start: 18px; }
+
+  @media (min-width: 1040px) {
+    .page { grid-template-columns: 220px minmax(0, 1fr); column-gap: 56px; }
+    .toc { position: sticky; top: 24px; align-self: start; max-height: calc(100vh - 48px); overflow-y: auto; }
+  }
+  @media (max-width: 1039px) {
+    .toc ol { grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr)); }
+  }
+  @media (max-width: 760px) {
+    ol.track { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    dl.pairs { grid-template-columns: minmax(0, 1fr); }
+    dl.pairs dt { border-block-end: 0; padding-block-end: 4px; }
+    ul.findings li { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+    ul.needs li { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+    .phase-num { font-size: 44px; }
+  }
+  @media (max-width: 440px) {
+    body { font-size: 16px; }
+    ol.track { grid-template-columns: minmax(0, 1fr); }
+  }
+  @media print {
+    body { background: #fff; }
+    .toc { display: none; }
+    .page { grid-template-columns: minmax(0, 1fr); }
+    .phase { break-before: page; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <header class="masthead">
+    <p class="eyebrow">El-Professor · خطة تنفيذ</p>
+    <h1>خطة متطلبات <span class="brand">El-Professor</span></h1>
+    <p class="lede">الطلبات الخمسة من ملف المتطلبات، مقسومة على 6 مراحل. كل مرحلة بتنبني وبتنفحص على الستيج، وبعدين بتنشر على البرودكشن بزر منك، ومعها زر رجوع إذا صار إشي.</p>
+    <div class="meta">
+      <span class="pill info">قيد التنفيذ · المراحل 0–4</span>
+      <span>آخر تحديث: <span class="num">16.09.2026</span></span>
+      <span>المصدر: <code>elprofessor_requirements_ar.pdf</code></span>
+    </div>
+  </header>
+
+  <nav class="toc" aria-label="محتويات الخطة">
+    <h2>المحتويات</h2>
+    <ol>
+      <li><a href="#progress"><span class="n">·</span>وين وصلنا</a></li>
+      <li><a href="#status"><span class="n">·</span>الوضع قبل الخطة</a></li>
+      <li><a href="#decisions"><span class="n">·</span>قراراتك</a></li>
+      <li><a href="#findings"><span class="n">·</span>ملاحظات مهمة</a></li>
+      <li><a href="#rules"><span class="n">·</span>قواعد لكل المراحل</a></li>
+    </ol>
+    <ol class="sub">
+      <li><a href="#p0"><span class="n">0</span>الإصدارات والحماية</a></li>
+      <li><a href="#p1"><span class="n">1</span>OTP وأمان الحسابات</a></li>
+      <li><a href="#p2"><span class="n">2</span>نظام التصميم</a></li>
+      <li><a href="#p3"><span class="n">3</span>فصل إدارة المنصة</a></li>
+      <li><a href="#p4"><span class="n">4</span>إيصال الراتب النقدي</a></li>
+      <li><a href="#p5"><span class="n">5</span>تعميم التصميم</a></li>
+    </ol>
+    <ol class="sub">
+      <li><a href="#order"><span class="n">·</span>الترتيب والحجم</a></li>
+      <li><a href="#needs"><span class="n">·</span>شو مطلوب منك</a></li>
+      <li><a href="#risks"><span class="n">·</span>مخاطر وانتباه</a></li>
+    </ol>
+  </nav>
+
+  <main class="doc">
+
+    <section class="block" aria-labelledby="track-title">
+      <h2 id="track-title">المراحل بالترتيب</h2>
+      <ol class="track">
+        <li class="now">
+          <a href="#p0"><span class="no">0</span><h3>الإصدارات والحماية</h3></a>
+          <div class="progress">
+            <div class="bar" aria-hidden="true"><span style="width: 83%"></span></div>
+            <span class="label">5 من 6 خطوات خلصت</span>
+          </div>
+        </li>
+        <li><a href="#p1"><span class="no">1</span><h3>OTP وأمان الحسابات</h3></a><ul class="chips"><li class="chip">كبير</li><li class="chip">عالستيج</li></ul></li>
+        <li><a href="#p2"><span class="no">2</span><h3>نظام التصميم والنموذج</h3></a><ul class="chips"><li class="chip">متوسط</li><li class="chip">اندمج عالستيج</li></ul><p class="gate">البوابة انفتحت: وافقت على النموذج بـ 15.09</p></li>
+        <li><a href="#p3"><span class="no">3</span><h3>فصل المنصة والصلاحيات</h3></a><ul class="chips"><li class="chip">كبير جداً</li><li class="chip">3.0 و3.1 و3.3 و3.5 و3.6 و3.9 اندمجوا</li><li class="chip">الجاي 3.4</li></ul></li>
+        <li><a href="#p4"><span class="no">4</span><h3>إيصال الراتب النقدي</h3></a><ul class="chips"><li class="chip">متوسط</li><li class="chip">الأساس اندمج</li></ul></li>
+        <li><a href="#p5"><span class="no">5</span><h3>تعميم التصميم</h3></a><ul class="chips"><li class="chip">كبير</li><li class="chip">ما بلّشت</li></ul></li>
+      </ol>
+    </section>
+
+    <section class="block" id="progress" aria-labelledby="progress-title">
+      <h2 id="progress-title">وين وصلنا بالمرحلة 0</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>الخطوة</th><th>الاسم</th><th>الحالة</th><th>شو انفحص</th><th>PR</th></tr>
+          </thead>
+          <tbody>
+            <tr><td class="num">0.1</td><td>حد محاولات تسجيل الدخول</td><td><span class="pill ok">خلص عالستيج</span></td><td>52 محاولة غلط انقبلت، والمحاولة 53 انرفضت بـ 429. عنوان تاني ما تأثر.</td><td class="num">#2</td></tr>
+            <tr><td class="num">0.2</td><td>إصدارات محفوظة وزر رجوع</td><td><span class="pill ok">خلص عالستيج</span></td><td>رجوع من <code>1310e01</code> لـ <code>60d62a5</code> بدون ما تنلمس قاعدة البيانات. رجعة لآخر إصدار. ورفض الرجوع لما ما في إصدار أقدم.</td><td class="num">#3</td></tr>
+            <tr><td class="num">0.3</td><td>البرودكشن بينشر بس نفس كود الستيج</td><td><span class="pill warn">مبني</span></td><td>بيشتغل أول ما الكود يوصل <code>main</code>. السيرفر صار يعرف شو شغّال على الستيج.</td><td class="num">#3</td></tr>
+            <tr><td class="num">0.4</td><td>كلمة مرور الستيج</td><td><span class="pill ok">مفعّل</span></td><td><code>app.elprofessor.eu</code> بيرد 401 وبيطلب دخول (المستخدم <code>admon</code>). <code>/version.txt</code> ولوغو الإيميلات مفتوحين. البرودكشن ورايدي 200.</td><td class="num">#5</td></tr>
+            <tr><td class="num">0.5</td><td>أدوات الاختبار الآلي</td><td><span class="pill ok">خلص عالستيج</span></td><td>مجلد <code>e2e/</code> بـ Playwright: حماية الستيج، تسجيل الدخول، ونسيت كلمة المرور. أول تشغيل كشف إنه رابط الاستعادة والدعوة كانوا يطلّعوا المستخدم فوراً، وانحلّت. بعد النشر نجحوا الخمسة.</td><td class="num">#7</td></tr>
+            <tr><td class="num">+</td><td>إيميلات الستيج بتوصل فعلياً</td><td><span class="pill ok">شغّال عالستيج</span></td><td>قرارك: Mailpit بيحتفظ بنسخة من كل إيميل وبيبعته لصاحبه عبر Resend تبع البرودكشن، إلا عناوين <code>example.com</code> تبع الاختبارات. إيميلين تجربة وصلوا، وResend سجّلهم <code>delivered</code>.</td><td class="num">#8</td></tr>
+            <tr><td class="num">0.6</td><td>أول نشر للبرودكشن من CI</td><td><span class="pill">بزر منك</span></td><td>المانع التقني الأخير راح: مفتاح <code>OTP_PEPPER</code> للبرودكشن انكتب بـ 16.09.2026 بموافقتك (48 حرف، مختلف عن الستيج). وتسجيل GoTrue على البرودكشن انسكّر بنفس اليوم (<code>disable_signup:true</code>، مفحوص). ضل زرّك. <strong>وخُذ بالحسبان:</strong> البرودكشن اليوم ما عنده الـ function تبع الأكواد أصلاً، وأول نشر بيجيبها ومعها سلوك معروف: أول طلب بعد فترة سكون بيرجّع 502 بسرعة، فالمستخدم بيشوف رسالة خطأ على طلب ما انبعت.</td><td class="num">—</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="muted">التوثيق بـ <code>CLAUDE.md</code> تحدّث بـ PR #4.</p>
+      <p class="muted">المراحل 1–4: المرحلة 1 كلها صارت عالستيج (PRs #11 و#16 و#14)، وناقصها الفحص النهائي. أساس إيصال الراتب اندمج (PR #13). PRs مفتوحة: #12 خط أساس الصلاحيات، و#17 التصميم وهو تحت المراجعة.</p>
+      <p class="muted"><strong>إصلاح أمني 15.09.2026:</strong> كان في دوال مفتوحة للزوار بدون تسجيل دخول، أخطرها قائمة كل المستخدمين بإيميلاتهم. انسكّرت يدوياً على البرودكشن والستيج بموافقتك، والـ migration بيثبّت الإغلاق بالكود.</p>
+    </section>
+
+    <section class="block" id="status" aria-labelledby="status-title">
+      <h2 id="status-title">الوضع قبل الخطة</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>#</th><th>الطلب</th><th>الوضع</th><th>التفصيل</th><th>المرحلة</th></tr>
+          </thead>
+          <tbody>
+            <tr><td class="num">1</td><td>فصل إدارة المنصة</td><td><span class="pill warn">جزئي</span></td><td>اللوحة المستقلة موجودة من commit <code>0e4eebf</code>، بس الدخول واحد، وصلاحيات المنصة بتعتمد على عمود واحد بدون حماية كافية بالخادم.</td><td class="num">3</td></tr>
+            <tr><td class="num">2</td><td>OTP</td><td><span class="pill crit">مش موجود</span></td><td>الإيميلات روابط بس، والتسجيل ما بيتحقق إن الإيميل لصاحبه.</td><td class="num">1</td></tr>
+            <tr><td class="num">3</td><td>فصل البيئات</td><td><span class="pill ok">معظمه منفّذ</span></td><td>كان ناقص: الرجوع لإصدار سابق، ترقية نفس الإصدار، وحماية الستيج. هدول صاروا بالمرحلة 0.</td><td class="num">0</td></tr>
+            <tr><td class="num">4</td><td>إعادة التصميم</td><td><span class="pill">ما بلّش</span></td><td>الهوية جاهزة (<code>pro.jpeg</code>، <code>pro2.jpeg</code>).</td><td class="num">2، 5</td></tr>
+            <tr><td class="num">5</td><td>إيصال الراتب النقدي</td><td><span class="pill">ما بلّش</span></td><td>جدول <code>salary_payments</code> بيدعم نقدي وتحويل ودفعات جزئية.</td><td class="num">4</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="block" id="decisions" aria-labelledby="decisions-title">
+      <h2 id="decisions-title">قراراتك</h2>
+      <p class="muted">هاي القرارات بتتقدّم على الملف لما يختلفوا، مثلاً الملف كان بدّه الستيج على <code>.de</code>.</p>
+      <dl class="pairs">
+        <dt>دومين الستيج</dt>
+        <dd><code>app.elprofessor.eu</code> و<code>api-staging.elprofessor.eu</code>. دومين <code>.de</code> بيضل يحوّل على الإنتاج.</dd>
+        <dt>حماية الستيج</dt>
+        <dd>كلمة مرور قبل ما يفتح الموقع. <span class="pill ok">مفعّل</span></dd>
+        <dt>كود OTP بالإيميل</dt>
+        <dd>تسجيل شركة، نسيت كلمة المرور، تفعيل موظف مدعو، تغيير الإيميل، وكل تسجيل دخول لمدير المنصة.</dd>
+        <dt>لوحة مدير المنصة</dt>
+        <dd>على المسار <code>/admin</code> بنفس الموقع، مع صفحة دخول خاصة.</dd>
+        <dt>الدخول على شركة</dt>
+        <dd>للدعم، من اللوحة بس، مع شريط واضح وتسجيل كل دخول.</dd>
+        <dt>المنع الكامل من الخادم</dt>
+        <dd>الشركة اللي اشتراكها مش مفعّل أو منتهي، والشركة المعلّقة أو المرفوضة، والموظف الموقوف.</dd>
+        <dt>"الصافي المستحق" بالإيصال</dt>
+        <dd>الراتب المسجّل بـ Gehälter، يعني <code>COALESCE(netto_salary, amount_due)</code>، نفس أساس حالة الدفع.</dd>
+        <dt>إيميل الستيج</dt>
+        <dd>بيضل زي ما هو بقرارك بـ 16.09.2026، لأنه بيخدم الاختبارات. البرودكشن أصلاً بيبعت عبر Resend مباشرة، والستيج بيمر بـ Mailpit اللي بيحوّل كل إشي لـ Resend إلا <code>@example.com</code> — وهاد المصدر الوحيد اللي بتقدر اختبارات e2e تقرأ منه كود المرة الوحدة، لأنه قاعدة البيانات بتخزّن بصمة الكود بس. <span class="pill ok">ما تغيّر</span></dd>
+      </dl>
+    </section>
+
+    <section class="block" id="findings" aria-labelledby="findings-title">
+      <h2 id="findings-title">ملاحظات مهمة من الفحص</h2>
+      <ul class="findings">
+        <li>
+          <span class="pill warn">انحلّت عالستيج</span>
+          <div>
+            <p>ما كان في حد لمحاولات تسجيل الدخول، يعني ممكن تخمين كلمات السر بلا حدود.</p>
+            <p class="where">صار الحد شغّال على الستيج (0.1)، وبيوصل البرودكشن بالخطوة 0.6.</p>
+          </div>
+        </li>
+        <li>
+          <span class="pill crit">مفتوح</span>
+          <div>
+            <p>كلمة سر مدير المنصة لحالها بتعطي سيطرة كاملة: بتقدر تغيّر إيميل أو كلمة سر أي مستخدم، وتربط حسابه بأي شركة.</p>
+            <p class="where">المصدر: <code>manage-users</code> وtrigger <code>enforce_user_profile_privilege_guard</code>. الحل بالمرحلة 3.1.</p>
+          </div>
+        </li>
+        <li>
+          <span class="pill warn">مهم</span>
+          <div>
+            <p>البرودكشن أقدم من الستيج: زر نشر البرودكشن ما انضغط ولا مرة.</p>
+            <p class="where">الحل بالمرحلة 0.6.</p>
+          </div>
+        </li>
+        <li>
+          <span class="pill ok">اتجرّب فعلياً</span>
+          <div>
+            <p>رايدي نشر مرتين يوم 14.09.2026 (الساعة 10:57 و11:11 بتوقيت ألمانيا)، والدبلوي تبعه مسح مسارات موقعنا. الحارس رجّعها خلال ثواني بالمرتين، والبرودكشن والستيج ضلّوا شغالين.</p>
+          </div>
+        </li>
+        <li>
+          <span class="pill info">معلومة</span>
+          <div>
+            <p>صورة القائمة الجانبية بالملف قديمة. قسم SUPER ADMIN انشال من قائمة الشركة، ولوحة المنصة المستقلة موجودة على البرودكشن.</p>
+          </div>
+        </li>
+        <li>
+          <span class="pill info">معلومة</span>
+          <div>
+            <p>فترة التجربة اليوم ما بتعطي وصول إلا إذا الاشتراك مفعّل. المرحلة 3 بتحافظ على نفس السلوك.</p>
+          </div>
+        </li>
+      </ul>
+    </section>
+
+    <section class="block" id="rules" aria-labelledby="rules-title">
+      <h2 id="rules-title">قواعد لكل المراحل</h2>
+      <ul class="list">
+        <li><strong>الفروع:</strong> كل شغل على فرع من <code>staging</code>، ثم PR لـ <code>staging</code> (نشر تلقائي)، ثم مراجعة، ثم PR لـ <code>main</code>، ثم زر الإنتاج.</li>
+        <li><strong>رايدي ممنوع:</strong> لا commit، ولا إعادة تشغيل، ولا دخول على كونتينراته.</li>
+        <li><strong>قاعدة البيانات:</strong> التغييرات توسعية، عشان الرجوع يضل آمن. أي تغيير مش متوافق مع الإصدار السابق لازم يرفع <code>deploy/SCHEMA_EPOCH</code>.</li>
+        <li><strong>المال والرواتب:</strong> القاعدة بتنكتب قبل التعديل، المنطق دوال معها اختبارات، والحساب بالسنت.</li>
+        <li><strong>الترجمة:</strong> كل نص جديد بالألماني والإنجليزي. المستندات القانونية بتضل ألمانية.</li>
+        <li><strong>الدمج:</strong> البناء لازم ينجح بدون ما يزيد عدد أخطاء TypeScript، والفحوصات لازم تكون خضراء.</li>
+      </ul>
+    </section>
+
+    <!-- ── Phase 0 ── -->
+    <section class="phase" id="p0" aria-labelledby="p0-title">
+      <header class="phase-head">
+        <span class="phase-num" aria-hidden="true">0</span>
+        <div>
+          <p class="eyebrow">الطلب 3 · وثغرة عاجلة</p>
+          <h2 id="p0-title">تجهيز الإصدارات والحماية</h2>
+          <ul class="chips"><li class="chip">الحجم: صغير–متوسط</li><li class="chip">بتعتمد على: ما في</li><li class="chip">4 من 6 خطوات خلصت</li></ul>
+        </div>
+      </header>
+      <p>بنجهّز الأرضية قبل أي تغيير كبير: رجوع سريع لإصدار سابق، حماية الستيج، وسد ثغرة محاولات الدخول.</p>
+
+      <div class="step">
+        <h3><span class="step-no">0.1</span>IP العميل وحد محاولات الدخول <span class="pill ok">خلص عالستيج</span></h3>
+        <ul class="list">
+          <li>Caddy بيكتب عنوان العميل الحقيقي بـ <code>X-Client-IP</code> بكتل الـ API، وبيكتب فوق أي قيمة جاية من العميل.</li>
+          <li><code>GOTRUE_RATE_LIMIT_HEADER: X-Client-IP</code> مع حدود صريحة: 60 للدخول وتجديد الجلسة، 30 للتحقق، و30 للاستعادة، لكل عميل كل 5 دقايق.</li>
+          <li>طلبات الـ functions الداخلية ما بتمر على Caddy، فما عليها حد.</li>
+        </ul>
+        <p class="result">مجرّب: 52 محاولة غلط انقبلت، والـ 53 انرفضت بـ 429، وعنوان تاني ما تأثر.</p>
+      </div>
+
+      <div class="step">
+        <h3><span class="step-no">0.2</span>إصدارات محفوظة وزر رجوع <span class="pill ok">خلص عالستيج</span></h3>
+        <ul class="list">
+          <li>كل إصدار بينحفظ بـ <code>/srv/PRO*/releases/&lt;utc&gt;-&lt;sha7&gt;/</code> مع manifest، و<code>releases/current</code> بيأشر عالشغّال. بنحتفظ بالشغّال وآخر 5.</li>
+          <li>أوامر جديدة للمفتاح المقيّد: <code>rollback &lt;env&gt;</code> و<code>status &lt;env&gt;</code>.</li>
+          <li>الرجوع بيرجّع الواجهة والـ functions وKong وnginx، بدون migrations. بيرفض إذا الإصدار أقدم من <code>SCHEMA_EPOCH</code>، أو إعداد قاعدة البيانات تغيّر، أو إعداد أمان بيرجع مفتوح.</li>
+          <li>فحص الصحة بيقرأ <code>/version.txt</code> من الموقع وبيقارنه برقم الـ commit.</li>
+          <li>أي تعديل على <code>kong.yml</code> أو <code>nginx-spa.conf</code> صار يوصل لحاله.</li>
+          <li>زر <strong>Rollback</strong> بـ GitHub Actions بيظهر لما الملف يوصل <code>main</code>.</li>
+        </ul>
+        <p class="result">مجرّب: رجوع من <code>1310e01</code> لـ <code>60d62a5</code>، والموقع قدّم النسخة القديمة. الإصدار الملغى انعلّم <code>rolled_back</code>. رجوع تاني انرفض. إعادة النشر رجّعت آخر إصدار.</p>
+      </div>
+
+      <div class="step">
+        <h3><span class="step-no">0.3</span>ترقية نفس الإصدار المجرَّب <span class="pill warn">مبني</span></h3>
+        <ul class="list">
+          <li>زر الإنتاج بيسأل السيرفر شو شغّال على الستيج (<code>status staging</code>).</li>
+          <li>بيرفض النشر إلا إذا كود <code>main</code> مطابق حرفياً للكود الشغّال على الستيج، وحالته <code>ok</code>.</li>
+        </ul>
+      </div>
+
+      <div class="step">
+        <h3><span class="step-no">0.4</span>كلمة مرور على الستيج <span class="pill ok">مفعّل</span></h3>
+        <ul class="list">
+          <li><code>app.elprofessor.eu</code> بيطلب اسم مستخدم وكلمة مرور. <code>/version.txt</code> ولوغو الإيميلات مفتوحين. الـ API محمي بمفاتيحه وبحد المحاولات.</li>
+          <li>الـ hash مش بالريبو: الحارس بيعبّيه من <code>/root/el-professor-secrets/staging-web-auth</code>. إذا الملف ناقص أو خربان، الستيج بيرد 503 والإنتاج ما بيتأثر.</li>
+          <li>العلامة مكان كلمة المرور بيرفضها Caddy إذا ضلت بدون تعبئة، فالستيج ما بيضل مفتوح بالغلط.</li>
+          <li>تغيير كلمة المرور: <code>ssh -t root@159.195.205.30 /srv/PRO-staging/deploy/set-staging-password.sh</code></li>
+        </ul>
+        <p class="result">مجرّب: الستيج 401 مع <code>Www-Authenticate: Basic</code>، و<code>/version.txt</code> 200، والبرودكشن ورايدي 200. اسم المستخدم الحالي <code>admon</code>.</p>
+      </div>
+
+      <div class="step">
+        <h3><span class="step-no">0.5</span>أدوات اختبار end-to-end <span class="pill ok">مبني</span></h3>
+        <ul class="list">
+          <li>Playwright مع Chrome المثبّت عالجهاز، ضد الستيج.</li>
+          <li>حساب دخول خاص للاختبارات على الستيج، عشان ما نحتاج كلمة مرورك.</li>
+          <li>مستخدم Mailpit للاختبارات، ومساعد بيقرأ الكود من الإيميل.</li>
+          <li>شركة اختبار ثابتة على الستيج، وتنظيف بعد كل تشغيل.</li>
+        </ul>
+      </div>
+
+      <div class="step">
+        <h3><span class="step-no">0.6</span>أول نشر على البرودكشن من CI <span class="pill">بزر منك</span></h3>
+        <ul class="list">
+          <li>PR من <code>staging</code> لـ <code>main</code>، وبعدين بتضغط زر الإنتاج.</li>
+          <li><code>deploy.sh</code> بياخد <code>pg_dump</code> وبيطبّق الـ migrations الناقصة، والبرودكشن بيلحق الستيج.</li>
+          <li>الفحص بعدها: الدخول، "نسيت كلمة المرور" بإيميل حقيقي، لوحة المنصة، حد المحاولات، و<code>/version.txt</code>.</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- ── Phase 1 ── -->
+    <section class="phase" id="p1" aria-labelledby="p1-title">
+      <header class="phase-head">
+        <span class="phase-num" aria-hidden="true">1</span>
+        <div>
+          <p class="eyebrow">الطلب 2</p>
+          <h2 id="p1-title">OTP وأمان الحسابات</h2>
+          <ul class="chips"><li class="chip">الحجم: كبير</li><li class="chip">بتعتمد على: 0</li></ul>
+        </div>
+      </header>
+
+      <div class="why">
+        <strong>ليش نظام خاص فينا بدل روابط GoTrue؟</strong>
+        <ul class="list">
+          <li>الطلب بدّه حد محاولات لكل كود، وحدود إرسال لكل إيميل ولكل IP، وهاد مش موجود بـ GoTrue.</li>
+          <li>الرابط فيه الرمز، و Kong بيسجّله بسجلاته.</li>
+          <li>برامج فحص الإيميل ممكن تفتح الرابط قبل العميل وتستهلكه.</li>
+        </ul>
+      </div>
+
+      <div class="step">
+        <h3><span class="step-no">1.0</span>شو اتأكدنا منه، وشو ضل للتجربة</h3>
+        <ul class="list">
+          <li><strong>مؤكد من مصدر GoTrue v2.170.0:</strong> توليد رابط من الخادم ما بيبعت إيميل. التحقق بالحقلين <code>{type, token_hash}</code> بس بيرجّع جلسة دخول. تغيير الإيميل من الأدمن ما بيبعت إيميل. الدخول بكلمة السر بيرفض الإيميل غير المؤكد.</li>
+          <li><strong>بدها تجربة قبل البناء:</strong> إرسال SMTP من كونتينر الـ functions (Mailpit للستيج، Resend للإنتاج). البديل إذا فشل: Resend HTTP API.</li>
+        </ul>
+      </div>
+
+      <div class="step">
+        <h3><span class="step-no">1.1</span>قاعدة البيانات</h3>
+        <ul class="list">
+          <li><code>otp_challenges</code> بمنطقة مش مكشوفة للـ API. الأغراض: تسجيل، استعادة كلمة السر، تفعيل دعوة، تغيير إيميل، ودخول مدير المنصة.</li>
+          <li>الكود بينحفظ مشفّر بسر (HMAC)، صالح 10 دقايق، وبيقفل بعد 5 محاولات غلط. الكود الجديد بيلغي القديم.</li>
+          <li>حدود الإرسال: 60 ثانية بين كل إرسالين، 5 بالساعة لكل إيميل، و20 بالساعة لكل IP.</li>
+          <li>دوال <code>otp_issue</code> و<code>otp_verify</code> بقفل على الصف، والخادم بس بيقدر ينادي عليها.</li>
+        </ul>
+      </div>
+
+      <div class="step">
+        <h3><span class="step-no">1.2</span>الإرسال والأسرار</h3>
+        <ul class="list">
+          <li>عميل SMTP بنفس إعدادات GoTrue: الستيج بيبعت لـ Mailpit، والإنتاج لـ Resend.</li>
+          <li>كل function بتاخد بس المتغيرات اللي بتحتاجها. اليوم كلها بتاخد البيئة كاملة.</li>
+          <li>قالب إيميل بالهوية، فيه خانة كود كبيرة، وبدون روابط فيها رموز.</li>
+          <li>الكود ما بينسجّل أبداً: لا بالسجلات ولا بأي استجابة API.</li>
+        </ul>
+      </div>
+
+      <div class="step">
+        <h3><span class="step-no">1.3</span>الـ Functions</h3>
+        <ul class="list">
+          <li><code>otp-request</code>: بيدوّر عالمستخدم أولاً، وإذا ما لقاه ما بيبعت إشي. بحالة نسيت كلمة المرور الرد نفسه دايماً.</li>
+          <li><code>otp-verify</code>:
+            <ul class="list">
+              <li>التسجيل: بيأكّد الإيميل وبيفعّل البروفايل.</li>
+              <li>الاستعادة والدعوة: جلسة دخول، ثم صفحة كلمة المرور.</li>
+              <li>تغيير الإيميل: بيتأكد إنه مش مستخدم، وبعدين بيغيّره.</li>
+              <li>دخول مدير المنصة: بيسجّل تحقق للجلسة.</li>
+            </ul>
+          </li>
+        </ul>
+      </div>
+
+      <div class="step">
+        <h3><span class="step-no">1.4</span>الواجهة</h3>
+        <ul class="list">
+          <li>مكوّن إدخال الكود: 6 خانات، لصق، وعداد 60 ثانية لإعادة الإرسال.</li>
+          <li>رسائل واضحة: انبعت، فشل الإرسال، كود غلط مع المحاولات الباقية، منتهي، مقفل.</li>
+          <li>الصفحات: نسيت كلمة المرور، تأكيد الإيميل بالتسجيل، <code>/einladung</code>، وتغيير الإيميل بصفحة حسابي.</li>
+        </ul>
+      </div>
+
+      <div class="step">
+        <h3><span class="step-no">1.5</span>إصلاحات أمان بتنزل معها</h3>
+        <ul class="list">
+          <li>سكّر التسجيل العام المفتوح بالخادم.</li>
+          <li>تسجيل الشركة ما بيعطي دخول إلا بعد الكود. كود الإحالة الغلط بيطلع "الكود غير صالح". ما بيضل حساب يتيم.</li>
+          <li>التسجيلات اللي ما تأكدت بتنحذف تلقائياً بعد 24 ساعة.</li>
+          <li>الحسابات القديمة غير المؤكدة: بنعرض عليك قائمة، وإنت بتقرر.</li>
+          <li>شيل زر "الدخول بجوجل" المعطّل، وشيل طباعة كلمة المرور بالـ console.</li>
+          <li>صاحب الشركة اللي بانتظار الموافقة بيشوف صفحة الانتظار.</li>
+          <li>النظام القديم (الروابط) بينشال بعد ما البديل يشتغل.</li>
+        </ul>
+      </div>
+
+      <div class="check">
+        <h3>فحص المرحلة 1</h3>
+        <ul class="list">
+          <li>اختبارات قاعدة البيانات: الصلاحية، مرة وحدة، إلغاء الكود القديم، القفل، الحدود، والصلاحيات.</li>
+          <li>على الستيج: المسارات الأربعة، كود غلط، كود منتهي، إعادة إرسال مبكرة، وإيميل مش موجود.</li>
+          <li class="must">بالإنتاج: كود حقيقي بيوصل على إيميل بتملكه. بدون هاد المرحلة مش مكتملة.</li>
+          <li>ولا كود بسجلات الخادم.</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- ── Phase 2 ── -->
+    <section class="phase" id="p2" aria-labelledby="p2-title">
+      <header class="phase-head">
+        <span class="phase-num" aria-hidden="true">2</span>
+        <div>
+          <p class="eyebrow">الطلب 4 · الجزء أ</p>
+          <h2 id="p2-title">نظام التصميم والنموذج الأولي</h2>
+          <ul class="chips"><li class="chip">الحجم: متوسط</li><li class="chip">بتعتمد على: 0</li><li class="chip">بوابة موافقة بالآخر</li></ul>
+        </div>
+      </header>
+
+      <div class="why">
+        <strong>الوضع الحالي</strong>
+        <ul class="list">
+          <li>5,377 تنسيق مكتوب يدوياً، و1,844 لون مكتوب يدوياً.</li>
+          <li>88 جدول و57 نافذة مبنيين كل واحد لحاله، وما في مكونات مشتركة.</li>
+          <li>قالبين وقائمتين مكررين للشركة وللمنصة.</li>
+          <li>لوحة المعلومات فيها 1,230 سطر.</li>
+          <li>الأيقونة (favicon) مكسورة، وصور المشاركة لسا من bolt.new.</li>
+        </ul>
+      </div>
+
+      <div class="step">
+        <h3><span class="step-no">2.1</span>مراجعة الواجهات <span class="pill ok">اندمج عالستيج</span></h3>
+        <ul class="list">
+          <li>لقطات لكل الصفحات على الموبايل والتابلت والكمبيوتر، وقائمة مشاكل مرتّبة حسب الأولوية.</li>
+        </ul>
+      </div>
+
+      <div class="step">
+        <h3><span class="step-no">2.2</span>نظام التصميم <span class="pill ok">اندمج عالستيج</span></h3>
+        <ul class="list">
+          <li><strong>الألوان:</strong> من لوحة الهوية <code>#0A0F1C</code> و<code>#0C1730</code> و<code>#146BFF</code> و<code>#00E7FF</code>. وضع فاتح مشتق منها، وتباين WCAG AA.</li>
+          <li><strong>الخط:</strong> مستضاف على سيرفرنا (بسبب الخصوصية بألمانيا)، وأرقام بعرض ثابت للمبالغ.</li>
+          <li><strong>ملفات الهوية:</strong> العلامة، الاسم، أيقونة التطبيق، favicons، وصورة مشاركة 1200×630.</li>
+          <li><strong>مكونات مشتركة:</strong> أزرار، حقول، بطاقات، شارات، جدول بيانات، ونوافذ بتنفتح وبتتنقل بالكيبورد.</li>
+          <li><strong>إطار واحد</strong> بقائمة جانبية قابلة للطي ودرج للموبايل. الشركة والمنصة بيستخدموه، كل واحد بقائمته.</li>
+        </ul>
+      </div>
+
+      <div class="step">
+        <h3><span class="step-no">2.3</span>النموذج الأولي <span class="pill ok">اندمج عالستيج</span></h3>
+        <ul class="list">
+          <li>القائمة الجانبية، ولوحة معلومات أوضح، وصفحة Fahrzeuge فيها جدول ونموذج.</li>
+          <li>على الستيج بس، ورا مفتاح "واجهة جديدة".</li>
+          <li>لقطات بالوضعين الفاتح والداكن، على 3 مقاسات.</li>
+        </ul>
+      </div>
+
+      <div class="check">
+        <h3>فحص المرحلة 2</h3>
+        <ul class="list">
+          <li>البناء ناجح، وفحص الوصولية والتباين والتنقل بالكيبورد.</li>
+          <li class="must">ما بنبني واجهات المرحلة 3، ولا بنبلّش المرحلة 5، قبل موافقتك على الاتجاه البصري.</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- ── Phase 3 ── -->
+    <section class="phase" id="p3" aria-labelledby="p3-title">
+      <header class="phase-head">
+        <span class="phase-num" aria-hidden="true">3</span>
+        <div>
+          <p class="eyebrow">الطلب 1</p>
+          <h2 id="p3-title">فصل إدارة المنصة وأمان الصلاحيات</h2>
+          <ul class="chips"><li class="chip">الحجم: كبير جداً</li><li class="chip">بتعتمد على: 1، و2 للواجهة</li></ul>
+        </div>
+      </header>
+      <p>أخطر مرحلة، لأنها بتعيد كتابة قواعد الحماية بقاعدة البيانات. شغل الخادم (3.0–3.5) ممكن يمشي بالتوازي مع انتظار موافقة التصميم.</p>
+
+      <div class="step">
+        <h3><span class="step-no">3.0</span>خط أساس قبل أي تغيير <span class="pill ok">اندمج عالستيج</span></h3>
+        <ul class="list">
+          <li>اختبارات بتصف مين بيقدر يعمل شو اليوم: كل دور، على كل جدول، بكل عملية. أي تغيير بنتيجتها لازم يكون مقصود ومكتوب.</li>
+        </ul>
+      </div>
+
+      <div class="step">
+        <h3><span class="step-no">3.1</span>مصدر واحد لصلاحية المنصة <span class="pill ok">اندمج عالستيج</span></h3>
+        <ul class="list">
+          <li>كل فحص لمدير المنصة بيمر من <code>is_user_super_admin()</code>: الـ functions، دوال قاعدة البيانات، و15 قاعدة حماية بتقرأ العمود مباشرة.</li>
+          <li>ما حدا بيقدر يغيّر <code>company_id</code> أو صلاحية المنصة لحسابه بنفسه.</li>
+          <li>فحص تلقائي بيفشّل النشر إذا رجع حدا قرأ العمود مباشرة.</li>
+        </ul>
+      </div>
+
+      <div class="step">
+        <h3><span class="step-no">3.2</span>كود المدير مفروض من الخادم <span class="pill">انلغت: الدخول بكلمة المرور بس</span></h3>
+        <ul class="list">
+          <li>كل جلسة دخول لمدير المنصة إلها سجل تحقق بالكود، صالح 12 ساعة.</li>
+          <li>صلاحيات المنصة بتشتغل بس بـ 3 شروط: الحساب مدير منصة، والجلسة عليها تحقق فعّال، والجلسة لسا موجودة.</li>
+        </ul>
+      </div>
+
+      <div class="step">
+        <h3><span class="step-no">3.3</span>توحيد قواعد الحماية وفرض الحالة <span class="pill ok">اندمج عالستيج (PR #46)</span></h3>
+        <ul class="list">
+          <li>حوالي 69 قاعدة حماية مكتوبة بطريقة مختلفة، ومعها قواعد الملفات المخزّنة، بتتوحّد على دالة وحدة.</li>
+          <li>دالة جديدة بتعطي بيانات الشركة بس إذا تحققت الشروط:</li>
+        </ul>
+        <pre class="sql">up.status = 'active' AND c.approval_status = 'approved'
+AND c.status NOT IN ('suspended','inactive','deleted','archived')
+AND c.subscription_status = 'active'
+AND (c.subscription_expires_at IS NULL OR c.subscription_expires_at &gt; now())</pre>
+        <ul class="list">
+          <li>قائمة استثناء صريحة لصفحات الانتظار وتفعيل الاشتراك: البروفايل، الأدوار، صف الشركة، إعدادات الشركة، وأكواد التفعيل.</li>
+          <li>دوال التخطيط اللي بتقرأ الشركة مباشرة (<code>apply_monthly_planning_run</code> وأخواتها) بتتحوّل لنفس الدالة.</li>
+          <li>إيقاف موظف بيوقف حسابه بـ GoTrue، وبيحذف جلساته المفتوحة.</li>
+        </ul>
+      </div>
+
+      <div class="step">
+        <h3><span class="step-no">3.4</span>الدخول على شركة للدعم <span class="pill info">الشريحة الجاية بقرارك (16.09.2026)</span></h3>
+        <ul class="list">
+          <li>جلسة دعم محفوظة بالخادم: مين، على أي شركة، ليش، ومتى. بتنتهي بعد 60 دقيقة، ومسموح جلسة وحدة بس بنفس الوقت.</li>
+          <li>كل دخول وخروج بينكتب بسجل المنصة.</li>
+          <li>بدون جلسة دعم، مدير المنصة ما بيشوف بيانات أي شركة.</li>
+          <li>جوّا الجلسة القراءة والتعديل شغالين، مع شريط ثابت "Support-Zugriff: {Firma} — beenden".</li>
+          <li><strong>ليش هي الجاية:</strong> الشريحة 3.3 نزلت بتنازل مؤقت وافقت عليه بنفس اليوم — أي دور منصة معه <code>business.read</code> بيقرأ بيانات كل الشركات مباشرة، بدون سطر تدقيق وبدون جلسة. و3.4 هي اللي بتسكّره، فكل ما تتأخر بيضل التنازل واقف أطول.</li>
+        </ul>
+      </div>
+
+      <div class="step">
+        <h3><span class="step-no">3.5</span>عمليات المنصة من الخادم، وثغرات الأكواد <span class="pill ok">اندمج عالستيج</span></h3>
+        <ul class="list">
+          <li>الموافقة، الرفض، التعليق، التجربة، الخطة، تسجيل الدفعة، تعيين الاشتراك: كل وحدة عملية كاملة بالخادم مع سجل ما بيتزوّر.</li>
+          <li><strong>سد الثغرات:</strong> أكواد الخصم مقروءة لكل مستخدم، قفل تفعيل شركة غيرك، تخمين أكواد التفعيل بدون حد، كود التفعيل لأي عضو، وملاحظات الموافقة المكشوفة.</li>
+        </ul>
+      </div>
+
+      <div class="step">
+        <h3><span class="step-no">3.6</span>بوابة <code>/admin</code> (بالتصميم الجديد) <span class="pill ok">البوابة (3.6أ) وقوائم المنصة (3.6ب جزء 1) وصفحات اللوحة (3.6ج) اندمجوا</span></h3>
+        <ul class="list">
+          <li><code>/admin/login</code>: إيميل وكلمة مرور وبس — <strong>بدون كود</strong>، لأنه الشريحة 3.2 انلغت بقرارك بـ 16.09. وبدون زر جوجل وبدون رابط تسجيل. فيها صفحة حسابي وتسجيل خروج. <span class="pill ok">نزلت (PR #57)</span></li>
+          <li>كل رفض بيطلع بنفس الجملة، عشان الصفحة ما تجاوب أي حدا بيسأل إذا هاد الإيميل من فريق المنصة. الاستثناء: حد المحاولات، وفشل الشبكة.</li>
+          <li>صفحة دخول الشركات بترفض حساب المنصة، وصفحة المنصة بتحوّل حساب الشركة على تطبيقه.</li>
+          <li>اللوحة مسجّلة مرة وحدة تحت <code>/admin</code>، و<code>/super-admin</code> بيتحوّل عليها بكل تفرّعاته. <span class="pill ok">نزل</span> والروابط القديمة جوّا التطبيق انتركت عن قصد، والشريحة 3.13 بتشيلها مع التحويل.</li>
+          <li>مسارات الشركة بوضع الدعم تحت <code>/admin/support</code>. <span class="pill">بتستنى 3.4</span></li>
+        </ul>
+      </div>
+
+      <div class="step">
+        <h3><span class="step-no">3.7</span>حساب شركة Y&amp;A منفصل</h3>
+        <ul class="list">
+          <li>حساب مدير المنصة بيضل للمنصة بس. إذا Y&amp;A Mobility ما عندها أدمن شركة، بتنبعتله دعوة بكود على إيميل بتحدده إنت.</li>
+        </ul>
+      </div>
+
+      <div class="check">
+        <h3>فحص المرحلة 3</h3>
+        <ul class="list">
+          <li>كلمة سر بدون كود: صفر صلاحيات منصة.</li>
+          <li>مدير منصة بدون جلسة دعم: صفر بيانات شركات.</li>
+          <li>شركة معلّقة، أو اشتراكها منتهي، أو موظف موقوف: صفر قراءة وصفر كتابة، حتى بالملفات.</li>
+          <li>جلسة الدعم بتقرأ وبتكتب، وبتنتهي بوقتها، وبتنسجّل.</li>
+          <li class="must">قبل النشر: مقارنة كل شركة على نسخة الستيج، ولازم ولا شركة شغالة تنقطع.</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- ── Phase 4 ── -->
+    <section class="phase" id="p4" aria-labelledby="p4-title">
+      <header class="phase-head">
+        <span class="phase-num" aria-hidden="true">4</span>
+        <div>
+          <p class="eyebrow">الطلب 5</p>
+          <h2 id="p4-title">إيصال الراتب النقدي — Gehaltsquittung (Barzahlung)</h2>
+          <ul class="chips"><li class="chip">الحجم: متوسط</li><li class="chip">بتعتمد على: 2 للواجهة</li></ul>
+        </div>
+      </header>
+
+      <div class="why">
+        <strong>شو لقينا اليوم</strong>
+        <ul class="list">
+          <li>ما في أي منع للدفع أكتر من المستحق، ولا حماية لو شخصين دفعوا بنفس اللحظة.</li>
+          <li>صفوف الرواتب ممكن تتكرر لنفس السائق والشهر.</li>
+          <li>الدفعة النقدية للراتب ما بتنقص Bargeldbestand، والصفحة بتخصم كمان الإيصالات المدفوعة بالتحويل.</li>
+          <li>إيصال الإكراميات بيخرّب أي مبلغ من 1000€ وطالع، مثلاً 1234,56 بيصير 1.234.</li>
+        </ul>
+      </div>
+
+      <div class="step">
+        <h3><span class="step-no">4.0</span>القواعد اللي بنلتزم فيها</h3>
+        <ul class="list">
+          <li>حالة الراتب (مدفوع، جزئي، مش مدفوع) بتنحسب بالخادم بس.</li>
+          <li>تأكيد الدفعة عملية وحدة: الإيصال والدفعة وخروج النقدية بينكتبوا سوا، أو ولا واحد منهم.</li>
+          <li>"Bar zurück" الأسبوعي بينحسب مدفوع، بس ما بينقص النقدية.</li>
+          <li>المعاينة والمسودة وإعادة تصدير الـ PDF ما بيسجّلوا دفعة، وما بيخصموا مرة تانية.</li>
+          <li>المبالغ بالسنت.</li>
+        </ul>
+      </div>
+
+      <div class="step">
+        <h3><span class="step-no">4.1</span>قاعدة البيانات</h3>
+        <ul class="list">
+          <li>أولاً تقرير بصفوف الرواتب المكررة، وإنت بتقرر كيف ندمجها. بعدها منع التكرار.</li>
+          <li>رقم فريد لكل إيصال، مثل <code>GQ-2026-0001</code>.</li>
+          <li>الإيصال بيحفظ لقطة من الأرقام وقت الدفع: المستحق، المدفوع نقداً، المدفوع تحويل، هالدفعة، والمتبقي.</li>
+          <li>دالة تأكيد بقفل على الراتب: بترفض أي مبلغ أكبر من المتبقي، والضغطة المكررة بترجّع نفس الإيصال.</li>
+          <li>إلغاء إيصال مؤكد بيعكس الدفعة والنقدية مع بعض، والإيصال بيضل محفوظ كملغى.</li>
+          <li>مكان خاص لرفع النسخة الموقّعة (PDF أو صورة، لحد 10MB).</li>
+        </ul>
+      </div>
+
+      <div class="step">
+        <h3><span class="step-no">4.2</span>منطق مع اختبارات</h3>
+        <ul class="list">
+          <li>المبلغ بالحروف بالألماني ("… Euro und … Cent") بينتقل لملف مشترك مع اختبارات.</li>
+          <li>حساب أرقام الإيصال بالسنت مع اختبارات، وإصلاح خطأ مبالغ إيصال الإكراميات.</li>
+        </ul>
+      </div>
+
+      <div class="step">
+        <h3><span class="step-no">4.3</span>الواجهة <span class="pill ok">اندمج عالستيج (4.3أ و4.3ب)</span></h3>
+        <ul class="list">
+          <li>كرت جديد بصفحة Dokumente، وأرشيف مرتّب حسب السائق والشهر.</li>
+          <li>الخطوات: السائق والشهر، ثم المبلغ والتاريخ والمكان مع ملخص الأرقام، ثم معاينة، ثم "Zahlung bestätigen"، ثم PDF، ثم رفع النسخة الموقّعة.</li>
+          <li>نص الإيصال ألماني: المبلغ بالأرقام والحروف، وخانة توقيع للسائق وخانة لصاحب العمل.</li>
+          <li>بالدفعة الجزئية: "Teilzahlung"، مع جملة إن التوقيع بيأكد استلام هالدفعة بس.</li>
+          <li>Bargeldbestand بيعرض الحساب القديم والجديد جنب بعض على الستيج قبل النشر.</li>
+        </ul>
+      </div>
+
+      <div class="check">
+        <h3>فحص المرحلة 4</h3>
+        <ul class="list">
+          <li>دفع كامل، جزئي، أكتر من دفعة، وتحويل مع نقد. رفض أي دفعة أكبر من المتبقي.</li>
+          <li>الضغطة المكررة بتعطي دفعة وحدة، وشخصين بنفس اللحظة بتنجح وحدة بس.</li>
+          <li>الإلغاء بيعكس كل إشي، وحذف السائق بيضل شغّال.</li>
+          <li>على الستيج: إيصال جزئي، ثم PDF، ثم تأكيد. النقدية بتنقص مرة وحدة، وإعادة التصدير ما بتغيّر إشي.</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- ── Phase 5 ── -->
+    <section class="phase" id="p5" aria-labelledby="p5-title">
+      <header class="phase-head">
+        <span class="phase-num" aria-hidden="true">5</span>
+        <div>
+          <p class="eyebrow">الطلب 4 · الجزء ب</p>
+          <h2 id="p5-title">تعميم التصميم على باقي الصفحات</h2>
+          <ul class="chips"><li class="chip">الحجم: كبير</li><li class="chip">بتعتمد على: موافقة المرحلة 2</li></ul>
+        </div>
+      </header>
+
+      <div class="step">
+        <h3>الدفعات (كل دفعة بتنشر لحالها)</h3>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>الدفعة</th><th>الصفحات</th></tr></thead>
+            <tbody>
+              <tr><td class="num">1</td><td>Belege، Fahrer، Fahrzeuge، Umsätze، Fixkosten</td></tr>
+              <tr><td class="num">2</td><td>Gehälter، Abrechnung، Bargeldbestand</td></tr>
+              <tr><td class="num">3</td><td>Dokumente، Monatsplanung، Stundennachweis (العرض بس)</td></tr>
+              <tr><td class="num">4</td><td>Benutzer، Rollen، Einstellungen، Abonnement، وصفحات الدخول</td></tr>
+              <tr><td class="num">5</td><td>لوحة المنصة</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="step">
+        <h3>قواعد</h3>
+        <ul class="list">
+          <li>التغيير بالشكل بس، وولا سطر منطق بيتغيّر.</li>
+          <li>ممنوع نلمس منطق التخطيط والرواتب، وملفات تصدير PDF وExcel.</li>
+          <li>فحص تلقائي بيمنع التنسيقات والألوان المكتوبة يدوياً إنها ترجع تزيد.</li>
+          <li>كل دفعة: البناء، مقارنة لقطات قبل وبعد، وفحص القسم على الستيج.</li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="block" id="order" aria-labelledby="order-title">
+      <h2 id="order-title">الترتيب والحجم</h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>المرحلة</th><th>الاسم</th><th>الحجم</th><th>بتعتمد على</th><th>الحالة</th></tr></thead>
+          <tbody>
+            <tr><td class="num">0</td><td>الإصدارات والحماية</td><td>صغير–متوسط</td><td>ما في</td><td><span class="pill info">قيد التنفيذ</span></td></tr>
+            <tr><td class="num">1</td><td>OTP وأمان الحسابات</td><td>كبير</td><td>0</td><td><span class="pill ok">عالستيج</span></td></tr>
+            <tr><td class="num">2</td><td>التصميم والنموذج</td><td>متوسط</td><td>0، وموافقتك</td><td><span class="pill ok">اندمج</span></td></tr>
+            <tr><td class="num">3</td><td>المنصة والصلاحيات</td><td>كبير جداً</td><td>1، و2 للواجهة</td><td><span class="pill info">قيد البناء</span></td></tr>
+            <tr><td class="num">4</td><td>إيصال الراتب</td><td>متوسط</td><td>2 للواجهة، وقرار صفوف الرواتب المكررة</td><td><span class="pill ok">اندمج عالستيج</span></td></tr>
+            <tr><td class="num">5</td><td>تعميم التصميم</td><td>كبير</td><td>2</td><td><span class="pill">ما بلّشت</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="muted">ليش التصميم قبل المرحلتين 3 و4؟ لأنه إذا بنينا صفحاتهم بالشكل القديم، رح نرجع نعيد تصميمها.</p>
+    </section>
+
+    <section class="block" id="needs" aria-labelledby="needs-title">
+      <h2 id="needs-title">شو مطلوب منك</h2>
+      <ul class="needs">
+        <li><span class="when">من قبل</span><span>سجل DNS <code>mail-staging</code> → <code>159.195.205.30</code>. انضاف بـ 16.09.2026 والصندوق صار شغّال: بينحل وبيرد ورا كلمة المرور، فما عاد لازم نفق SSH.</span><span class="pill ok">خلص</span></li>
+        <li><span class="when">المرحلة 0</span><span>كلمة مرور الستيج عبر <code>set-staging-password.sh</code>.</span><span class="pill ok">خلص</span></li>
+        <li><span class="when">المرحلة 0</span><span>دمج <code>staging</code> لـ <code>main</code> وضغط زر الإنتاج بالخطوة 0.6، وبعد كل مرحلة.</span><span class="pill">لاحقاً</span></li>
+        <li><span class="when">المرحلة 1</span><span>إيميل اختبار بتملكه لإثبات وصول الكود، وقرار بالحسابات القديمة غير المؤكدة.</span><span class="pill">لاحقاً</span></li>
+        <li><span class="when">المرحلة 2</span><span>الموافقة على النموذج الأولي للتصميم.</span><span class="pill ok">خلص</span></li>
+        <li><span class="when">المرحلة 3</span><span>إيميل أدمن شركة Y&amp;A Mobility.</span><span class="pill">لاحقاً</span></li>
+        <li><span class="when">المرحلة 3</span><span>قرارات D1–D13 وبيانات البائع للفواتير (التفاصيل بالخطة).</span><span class="pill warn">لسا</span></li>
+        <li><span class="when">المرحلة 0</span><span>مفتاح <code>OTP_PEPPER</code> للبرودكشن.</span><span class="pill ok">خلص</span></li>
+        <li><span class="when">جوجل 1.6</span><span>عميل Google Cloud للبرودكشن، وسياسة خصوصية وImpressum، وقرارات G1–G3. (عميل الستيج جاهز وجوجل شغّال عليه من 16.09.2026؛ البرودكشن بيضل مطفي لحد ما تنبني قاعدة "الجلسة بكلمة مرور" من الخادم.)</span><span class="pill warn">لسا</span></li>
+        <li><span class="when">المرحلة 4</span><span>قرار دمج صفوف الرواتب المكررة.</span><span class="pill">لاحقاً</span></li>
+      </ul>
+    </section>
+
+    <section class="block" id="risks" aria-labelledby="risks-title">
+      <h2 id="risks-title">مخاطر وانتباه</h2>
+      <ul class="findings">
+        <li>
+          <span class="pill crit">عالي</span>
+          <p>المرحلة 3 ممكن تقطع شركات شغالة إذا صار أي اختلاف بالمنطق. الحماية منه: اختبارات خط الأساس، مقارنة كل شركة على الستيج، و<code>SCHEMA_EPOCH</code> بيمنع الرجوع لإصدار ما بيفهم قاعدة البيانات.</p>
+        </li>
+        <li>
+          <span class="pill warn">متوسط</span>
+          <p>الرجوع لإصدار سابق بيرجّع الكود بس. البيانات بترجع من نسخة <code>pg_dump</code> اللي بتنعمل قبل كل نشر للبرودكشن.</p>
+        </li>
+        <li>
+          <span class="pill warn">متوسط</span>
+          <p>إصلاح Bargeldbestand رح يغيّر أرقام بتشوفها الشركات. بنعرض قبل وبعد على الستيج قبل النشر.</p>
+        </li>
+        <li>
+          <span class="pill info">منخفض</span>
+          <p>إرسال الإيميل مباشرة من الـ functions لسا ما انجرّب. في بديل جاهز عبر Resend HTTP API.</p>
+        </li>
+      </ul>
+      <p class="foot">النسخة الكاملة بالتفاصيل التقنية (مسارات الملفات وأرقام الأسطر): <code>C:\Users\ahmad\.claude\plans\sunny-shimmying-koala.md</code></p>
+    </section>
+
+  </main>
+</div>
+</body>
+</html>
