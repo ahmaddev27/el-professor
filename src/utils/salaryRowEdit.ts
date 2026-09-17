@@ -1,46 +1,67 @@
 /**
- * Editing a salary row's period, and removing a salary row.
+ * Removing a salary row — the way a driver's overlapping salary rows are merged.
  *
  * The owner decided on 17.09.2026 that he merges overlapping salary rows
  * himself, so the product has to let him. `unique_driver_period` is only
  * `UNIQUE (driver_id, period_start)`, so one driver can hold a business month
  * beside the calendar month of the same name (CLAUDE.md, *Domain rules that are
  * easy to break*), and `confirm_salary_cash_payment` refuses a cash payment on
- * either of them as `overlapping_salary` until one is gone. Merging means:
- * widen the row that stays, delete the one that goes.
+ * either of them as `overlapping_salary` until one is gone.
  *
- * **The order is delete first, then widen.** While both rows exist they overlap
- * by definition, so every period the survivor could be widened to still
- * overlaps the other row and is refused here — the same condition the RPC
- * applies. That is not an obstacle to the merge, it is the merge's order, and
- * `findSalaryPeriodProblem` names the row in the way so the screen can say so.
+ * **The merge is a delete, and deliberately nothing more.** Deleting the
+ * hand-entered calendar row and leaving the business-month row untouched is the
+ * whole operation, and it is the one path the rest of the screen already
+ * understands. An earlier draft of this module also let the surviving row's
+ * period be widened over both, which reads like the obvious other half and is
+ * in fact a trap — the review of PR #73 found four ways it bites, and they are
+ * recorded here so the widen is not added back by someone who sees only the
+ * gap:
  *
- * Everything here is a pure decision taken before a write. The database is the
- * boundary, not this file:
+ * - **The screen would lose the row.** `SalariesManagement` matches a driver's
+ *   stored row to the selected period by *exact equality of both ends*, so a
+ *   row widened to `01.03.–31.03.` no longer matches the computed business
+ *   range `02.03.–29.03.`; `calc.salary_id` goes undefined, the table falls
+ *   back to a recomputed `amount_due`, and the stored `netto_salary`,
+ *   `total_paid`, `paid_at` and `status` disappear — a part-paid driver is
+ *   redrawn as unpaid with 0,00 paid. The overlap badge then *stays*, because
+ *   the widened row overlaps the computed range with no id to exclude, and the
+ *   next click on *Zahlungen verwalten* runs `ensureSalaryExists` and inserts a
+ *   **third** row. The merge would undo itself and leave a fresh overlap.
+ * - **It would re-file issued Gehaltsquittungen.** `business_month` comes from
+ *   `get_business_month(period_start)`, and a week belongs to the month
+ *   containing its Monday — `01.03.2026`'s Monday is `23.02.` So moving a start
+ *   across a week boundary puts the row in business February while the Overview
+ *   still filters it by calendar March.
+ * - **It would invalidate a signed document.** The due figure is read off the
+ *   row (`COALESCE(netto_salary, amount_due)`) and never recomputed, and a
+ *   receipt copies the period verbatim and prints "für den Zeitraum … den
+ *   Betrag von …". After a widen the paper the driver signs states a period the
+ *   amount was never computed for, and it goes to the Steuerberater.
+ * - **Nothing would stop it storing a new overlap.** There is no CHECK and no
+ *   exclusion constraint on the table, and the browser's list of rows can be
+ *   stale.
  *
- * - `salaries_update` and `salaries_delete` (20260917130000) are both
- *   `company_id = get_active_company_id() AND current_role_permits('salaries', true)`,
- *   as USING and — for UPDATE — as WITH CHECK. `tests/rls/matrix.sql` pins the
- *   editor, supervisor and company administrator at `Y` on both and the viewer,
- *   anon and a platform account at `.` (rows 'salaries' U and D).
+ * So the rule this module keeps is only: which rows may be removed. The
+ * database is the boundary, not this file.
+ *
+ * - `salaries_delete` (20260917130000) is
+ *   `company_id = get_active_company_id() AND current_role_permits('salaries', true)`.
+ *   `tests/rls/matrix.sql:1210` pins the editor, supervisor and company
+ *   administrator at `Y` and the viewer, anon and a platform account at `.`.
  * - `salary_cash_receipts.salary_id` is `ON DELETE RESTRICT`, so a salary that
  *   produced a Gehaltsquittung cannot be deleted at all — pinned as SQLSTATE
- *   23503 by `tests/rls/salary-cash.sql` ("a salary with a receipt cannot be
- *   deleted on its own").
+ *   23503 by `tests/rls/salary-cash.sql:361` ("a salary with a receipt cannot
+ *   be deleted on its own").
  * - `salary_payments.salary_id` is `ON DELETE CASCADE`, so the database deletes
  *   a row's payments **silently** with it. Nothing in the database refuses
  *   that, which is exactly why `findSalaryDeletionBlock` has to.
  *
- * Dates are `YYYY-MM-DD` text and are compared as text, so text order is date
- * order, no `Date` is constructed and the browser's timezone cannot shift a
- * period by a day. That is the convention `salaryPeriodOverlap` already uses.
+ * Dates are `YYYY-MM-DD` text and are compared and formatted as text, so no
+ * `Date` is constructed and the browser's timezone cannot shift a period by a
+ * day. That is the convention `salaryPeriodOverlap` already uses.
  */
 
-import {
-  findOverlappingSalaryPeriods,
-  type IdentifiedSalaryPeriod,
-  type SalaryPeriod,
-} from './salaryPeriodOverlap';
+import type { SalaryPeriod } from './salaryPeriodOverlap';
 import type { ReceiptScope } from './salaryCashReceiptFlow';
 
 // ─── Who may write a salary row ─────────────────────────────────────────────
@@ -48,10 +69,10 @@ import type { ReceiptScope } from './salaryCashReceiptFlow';
 export type SalaryRowWriteRefusal = 'company_mismatch' | 'no_company' | 'not_authorized';
 
 /**
- * Why this caller may not edit or delete a salary row at all, before anything
- * is typed; null when they may.
+ * Why this caller may not delete a salary row at all, before anything is
+ * clicked; null when they may.
  *
- * The two terms are the two the policies carry. The scope stands for
+ * The two terms are the two the policy carries. The scope stands for
  * `get_active_company_id()`: platform staff viewing a customer hold no
  * membership in it, so the helper answers NULL for them and every write is
  * refused however the browser's `can()` answers — `AuthContext.can` returns
@@ -61,7 +82,7 @@ export type SalaryRowWriteRefusal = 'company_mismatch' | 'no_company' | 'not_aut
  *
  * This is the same pair `confirmationBlock` applies before a Gehaltsquittung,
  * for the same reason — `confirm_salary_cash_payment` is gated on the same two
- * terms — but the refusals are worded for an edit, not for a receipt.
+ * terms — but the refusals are worded for a deletion, not for a receipt.
  */
 export function salaryRowWriteRefusal(
   scope: ReceiptScope,
@@ -70,47 +91,6 @@ export function salaryRowWriteRefusal(
   if (scope === 'other_company') return 'company_mismatch';
   if (scope === 'no_company') return 'no_company';
   return mayEditSalaries ? null : 'not_authorized';
-}
-
-// ─── Editing the period ─────────────────────────────────────────────────────
-
-export type SalaryPeriodProblem<Row extends IdentifiedSalaryPeriod = IdentifiedSalaryPeriod> =
-  /** One of the two dates is missing. */
-  | { reason: 'incomplete' }
-  /** `period_start` is after `period_end`. */
-  | { reason: 'reversed' }
-  /** The period would overlap these rows of the same driver, earliest first. */
-  | { reason: 'overlap'; conflicts: Row[] };
-
-/**
- * Why this period may not be stored, or null when it may.
- *
- * `driverRows` must already be one driver's rows, and `excludeId` the row being
- * edited — the same contract as `findOverlappingSalaryPeriods`, whose condition
- * is the browser's single mirror of the RPC's. No second spelling of the
- * overlap rule is written here.
- *
- * A period of one day (start equal to end) is allowed: the rule is only that
- * the end may not come before the start.
- */
-export function findSalaryPeriodProblem<Row extends IdentifiedSalaryPeriod>(
-  period: SalaryPeriod,
-  driverRows: readonly Row[],
-  excludeId?: string | null,
-): SalaryPeriodProblem<Row> | null {
-  if (!period.period_start || !period.period_end) return { reason: 'incomplete' };
-  if (period.period_start > period.period_end) return { reason: 'reversed' };
-
-  const conflicts = findOverlappingSalaryPeriods(period, driverRows, excludeId);
-  return conflicts.length > 0 ? { reason: 'overlap', conflicts } : null;
-}
-
-/**
- * Whether the period actually moved, so the screen can close without a write
- * rather than sending an UPDATE that changes nothing and bumps `updated_at`.
- */
-export function salaryPeriodChanged(before: SalaryPeriod, after: SalaryPeriod): boolean {
-  return before.period_start !== after.period_start || before.period_end !== after.period_end;
 }
 
 // ─── Deleting a row ─────────────────────────────────────────────────────────
@@ -133,7 +113,7 @@ export type SalaryDeletionBlock =
   /**
    * A Gehaltsquittung was issued for this row. It is a ledger document and its
    * number is gapless per company and year, so the salary it settles can never
-   * be deleted — merge the other way round.
+   * be deleted — the other row of the pair is the one to remove.
    */
   | { reason: 'gehaltsquittung'; receipts: number; confirmed: number; voided: number }
   /**
@@ -180,7 +160,7 @@ export function findSalaryDeletionBlock(facts: SalaryDeletionFacts): SalaryDelet
 // ─── Display ────────────────────────────────────────────────────────────────
 //
 // Both formatters were local to SalariesManagement.tsx and are needed by the
-// dialog that edits the periods too. They live here rather than in either
+// dialog that removes the rows too. They live here rather than in either
 // component so the table and the dialog can never print the same row two ways.
 
 /** `YYYY-MM-DD` as `DD.MM.YYYY`, without a Date the browser's zone could shift by a day. */
@@ -200,33 +180,4 @@ export function formatSalaryDue(row: { netto_salary?: number | null; amount_due?
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
-}
-
-/**
- * A different row of the same driver that already covers every day of
- * `period`, or null — the merge's last step, seen from the row about to go.
- *
- * When the survivor has been widened over the whole of the row being deleted,
- * nothing is lost by deleting it and the confirmation can say so. When nothing
- * covers it, some days stop being accounted for anywhere, and the confirmation
- * has to say that instead. Containment is a text comparison of two dates, so
- * it needs no date arithmetic and no notion of adjacent days.
- */
-export function rowCoveringPeriod<Row extends IdentifiedSalaryPeriod>(
-  period: SalaryPeriod,
-  driverRows: readonly Row[],
-  excludeId?: string | null,
-): Row | null {
-  if (!period.period_start || !period.period_end) return null;
-
-  return (
-    driverRows.find(
-      row =>
-        row.id !== excludeId &&
-        !!row.period_start &&
-        !!row.period_end &&
-        row.period_start <= period.period_start! &&
-        row.period_end >= period.period_end!,
-    ) ?? null
-  );
 }
