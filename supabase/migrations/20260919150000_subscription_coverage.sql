@@ -1617,18 +1617,32 @@ ALTER FUNCTION public.platform_company_set_approval(uuid, text, text) OWNER TO C
 -- ─── 9. Self-check ──────────────────────────────────────────────────────────
 
 /*
-  A function's body with its `--` comments removed, for the checks below.
+  A function's body with its comments removed — both `/* … *​/` blocks and `--`
+  lines — for the checks below.
 
   `pg_proc.prosrc` keeps comments verbatim, so a check that greps a body greps
-  its prose too — and the prose in this file names the very predicates the
-  checks forbid, in order to explain why they are forbidden. The first version
-  of check 7b matched `period_start <= now()` and found it in the comment that
-  says that term must not be there, stopping the release over a defect that had
-  been fixed.
+  its prose too, and the prose in this file names the very things the checks
+  forbid in order to explain why they are forbidden. That has now stopped a
+  release twice, both times over a defect that had been fixed:
 
-  Only line comments are stripped, which is all this file's function bodies use.
-  A `--` inside a string literal would be stripped too; none of these bodies has
-  one, and over-stripping can only make a check laxer, never fire it falsely.
+    - check 7b matched `period_start <= now()` in the `--` comment saying that
+      term must not be there;
+    - check 7 matched `subscription_status = 'active'` twice in the `/* … *​/`
+      comment explaining what the earlier draft got wrong — and the first
+      version of this function stripped only `--` lines, while asserting in this
+      very header that line comments were "all this file's function bodies use".
+      They were, until that comment was written.
+
+  So stripping both is the floor, not the fix. The fix is that checks 7 and 8
+  read only the `SET` clause of an `UPDATE` of `companies` (see
+  `companies_set_clauses`), so a column *mentioned* anywhere else — an INSERT
+  column list, a VALUES expression, a comparison, or prose that survives
+  stripping — cannot fire them. What forbids an assignment should look at
+  assignments.
+
+  A `--` or `/*` inside a string literal would be stripped too; none of these
+  bodies has one, and over-stripping can only make a check laxer, never fire it
+  falsely.
 */
 CREATE OR REPLACE FUNCTION app_private.function_code(p_signature text)
 RETURNS text
@@ -1639,7 +1653,9 @@ AS $$
 DECLARE
   v_src text;
 BEGIN
-  SELECT regexp_replace(p.prosrc, '--[^\n]*', '', 'g')
+  -- Block comments first: a `/* … */` may contain `--`, and stripping the
+  -- lines first would leave its opener behind.
+  SELECT regexp_replace(regexp_replace(p.prosrc, '/\*.*?\*/', '', 'g'), '--[^\n]*', '', 'g')
     INTO v_src
     FROM pg_proc p
    WHERE p.oid = to_regprocedure(p_signature);
@@ -1658,6 +1674,35 @@ $$;
 
 REVOKE ALL ON FUNCTION app_private.function_code(text) FROM PUBLIC, anon, authenticated, service_role;
 ALTER FUNCTION app_private.function_code(text) OWNER TO CURRENT_USER;
+
+/*
+  Every `UPDATE … companies … SET …` in a function, concatenated — the only
+  place a function can assign one of the three derived columns.
+
+  This is what lets checks 7 and 8 forbid and require *assignments* rather than
+  mentions. `subscription_status` appears in this file's writers as an INSERT
+  column name, as a VALUES expression (`v_company.subscription_status`), inside
+  a comparison (`p_subscription_status = 'active'`) and in prose; none of those
+  writes the column, and none of them is inside a companies SET clause.
+
+  The capture runs to the statement's `;`, so it carries the WHERE clause too.
+  That is harmless for both uses: an assignment is `column =` and the WHERE in
+  the recompute compares with `IS DISTINCT FROM`. Empty string, never NULL, so a
+  function with no such UPDATE fails a positive check instead of passing it.
+*/
+CREATE OR REPLACE FUNCTION app_private.companies_set_clauses(p_signature text)
+RETURNS text
+LANGUAGE sql
+STABLE
+SET search_path = pg_catalog, public
+AS $$
+  SELECT coalesce(string_agg(m.parts[1], E'\n| '), '')
+    FROM regexp_matches(app_private.function_code(p_signature),
+                        'update\s+(?:public\.)?companies\s+set(.*?);', 'gi') AS m(parts);
+$$;
+
+REVOKE ALL ON FUNCTION app_private.companies_set_clauses(text) FROM PUBLIC, anon, authenticated, service_role;
+ALTER FUNCTION app_private.companies_set_clauses(text) OWNER TO CURRENT_USER;
 
 DO $mig$
 DECLARE
@@ -1795,13 +1840,20 @@ BEGIN
       'public.redeem_activation_code(text)',
       'public.update_company_subscription_manual(uuid,text,timestamptz,timestamptz,text,text)']
   LOOP
-    v_txt := app_private.function_code(v_sig);
-    -- \m is a word boundary: the column, not the p_subscription_status argument
-    -- that update_company_subscription_manual still compares against.
-    IF v_txt ~ '\msubscription_status\s*=\s*''' OR v_txt ~ '\msubscription_expires_at\s*=\s*p_' THEN
-      RAISE EXCEPTION '20260919150000 self-check: % assigns a column the recompute owns', v_sig;
+    --  Only the SET clauses of an UPDATE of `companies`: that is the one place
+    --  these columns can be assigned. Both writers name them elsewhere — as
+    --  INSERT column names, as `v_company.subscription_status` in a VALUES list,
+    --  and in a `p_subscription_status = 'active'` comparison — and none of that
+    --  is a write. Matching the mention rather than the assignment is what
+    --  stopped a release on this very check.
+    v_txt := app_private.companies_set_clauses(v_sig);
+    IF v_txt ~ '\msubscription_status\s*='
+       OR v_txt ~ '\msubscription_expires_at\s*='
+       OR v_txt ~ '\mplan\s*=' THEN
+      RAISE EXCEPTION '20260919150000 self-check: % assigns a column the recompute owns: %',
+        v_sig, regexp_replace(v_txt, '\s+', ' ', 'g');
     END IF;
-    IF v_txt !~ 'recompute_company_subscription|subscription_coverage_record' THEN
+    IF app_private.function_code(v_sig) !~ 'recompute_company_subscription|subscription_coverage_record' THEN
       RAISE EXCEPTION '20260919150000 self-check: % no longer records coverage', v_sig;
     END IF;
   END LOOP;
@@ -1829,10 +1881,16 @@ BEGIN
     RAISE EXCEPTION '20260919150000 self-check: platform_company_set_plan filters the coverage rows by period_start again — an early renewal would be silently downgraded';
   END IF;
 
-  -- 8. …and the recompute is the thing that does assign them
-  v_txt := app_private.function_code(c_recompute);
-  IF v_txt !~ 'subscription_status' OR v_txt !~ 'subscription_expires_at' OR v_txt !~ '\mplan\M' THEN
-    RAISE EXCEPTION '20260919150000 self-check: % no longer writes all three derived columns', c_recompute;
+  -- 8. …and the recompute is the thing that does assign them — asked of its
+  --    companies SET clause, so a mention in a comment or a WHERE cannot
+  --    satisfy it. `companies_set_clauses` answers '' rather than NULL, so a
+  --    recompute that stopped updating `companies` at all fails here.
+  v_txt := app_private.companies_set_clauses(c_recompute);
+  IF v_txt !~ '\msubscription_status\s*='
+     OR v_txt !~ '\msubscription_expires_at\s*='
+     OR v_txt !~ '\mplan\s*=' THEN
+    RAISE EXCEPTION '20260919150000 self-check: % no longer assigns all three derived columns: %',
+      c_recompute, regexp_replace(v_txt, '\s+', ' ', 'g');
   END IF;
 
   -- 9. rule 5: no invoice grants access in U1. A coverage row from an invoice
