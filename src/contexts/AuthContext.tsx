@@ -44,6 +44,15 @@ export type PageKey =
   | 'fixed-costs' | 'income' | 'notes' | 'overview' | 'receipts'
   | 'roles' | 'salaries' | 'settings' | 'statistics' | 'users' | 'werkstatt';
 
+/**
+ * The six values `companies_status_check` allows (20260916130000).
+ *
+ * Since 20260919150000 this column is the **only** place a suspension is
+ * recorded: `approval_status` and `subscription_status` no longer admit
+ * `'suspended'`, and their CHECK constraints refuse it.
+ */
+export type CompanyStatus = 'active' | 'trial' | 'suspended' | 'inactive' | 'archived' | 'deleted';
+
 // Reason codes returned when login is blocked
 export type BlockReason =
   | 'user_inactive'
@@ -125,6 +134,15 @@ interface AuthContextType {
   session: Session | null;
   loading: boolean;
   companyId: string | null;
+  /**
+   * `companies.status`, and since 20260919150000 the **one** place a suspension
+   * is recorded. Read on every load and refresh, not only at sign-in: before
+   * that migration a suspension could also sit in `approval_status` or
+   * `subscription_status`, and it was one of those two that App.tsx's gate
+   * happened to see. `checkProfileAccess()` below reads the same column but
+   * runs only on `signIn`.
+   */
+  companyStatus: CompanyStatus | null;
   companyApprovalStatus: 'pending' | 'approved' | 'rejected' | 'suspended' | null;
   rejectionReason: string | null;
   subscriptionStatus: 'inactive' | 'active' | 'expired' | 'suspended' | null;
@@ -201,6 +219,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [profileLoadFailed, setProfileLoadFailed] = useState(false);
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
+  const [companyStatus, setCompanyStatus] = useState<CompanyStatus | null>(null);
   const [companyApprovalStatus, setCompanyApprovalStatus] = useState<'pending' | 'approved' | 'rejected' | 'suspended' | null>(null);
   const [rejectionReason, setRejectionReason] = useState<string | null>(null);
   const [subscriptionStatus, setSubscriptionStatus] = useState<'inactive' | 'active' | 'expired' | 'suspended' | null>(null);
@@ -242,6 +261,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setProfile(null);
     setProfileLoaded(false);
     setProfileLoadFailed(false);
+    setCompanyStatus(null);
     setCompanyApprovalStatus(null);
     setRejectionReason(null);
     setSubscriptionStatus(null);
@@ -337,16 +357,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (data?.company_id && !data.is_super_admin) {
         const { data: company } = await supabase
           .from('companies')
-          .select('approval_status, rejection_reason, subscription_status, subscription_expires_at')
+          .select('status, approval_status, rejection_reason, subscription_status, subscription_expires_at')
           .eq('id', data.company_id)
           .maybeSingle();
         if (company) {
+          setCompanyStatus(company.status as CompanyStatus);
           setCompanyApprovalStatus(company.approval_status as 'pending' | 'approved' | 'rejected' | 'suspended');
           setRejectionReason(company.rejection_reason ?? null);
           setSubscriptionStatus(company.subscription_status as 'inactive' | 'active' | 'expired' | 'suspended');
           setSubscriptionExpiresAt(company.subscription_expires_at ?? null);
         }
       } else {
+        setCompanyStatus(null);
         setCompanyApprovalStatus(null);
         setRejectionReason(null);
         setSubscriptionStatus(null);
@@ -732,10 +754,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       const { data: company } = await supabase
         .from('companies')
-        .select('subscription_status, subscription_expires_at, approval_status, rejection_reason')
+        .select('status, subscription_status, subscription_expires_at, approval_status, rejection_reason')
         .eq('id', profile.company_id)
         .maybeSingle();
       if (company) {
+        setCompanyStatus(company.status as CompanyStatus);
         setSubscriptionStatus(company.subscription_status as 'inactive' | 'active' | 'expired' | 'suspended');
         setSubscriptionExpiresAt(company.subscription_expires_at ?? null);
         setCompanyApprovalStatus(company.approval_status as 'pending' | 'approved' | 'rejected' | 'suspended');
@@ -770,6 +793,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     session,
     loading,
     companyId,
+    companyStatus,
     companyApprovalStatus,
     rejectionReason,
     subscriptionStatus,

@@ -24,6 +24,15 @@
                        — which is the hole rule 3 closes, because before U1 a
                        suspension could sit in one of two other columns that
                        `reactivate` never touched
+   3b. the writers     `platform_company_set_approval('suspend')` and
+                       `update_company_subscription_manual('suspended')` are
+                       this slice's two declared behaviour changes, so both are
+                       asserted here rather than described in a header — each
+                       writes `companies.status`, leaves the retired column
+                       alone, and refuses the company afterwards
+   3c. early renewal   an upgrade must reach the period that has not started
+                       yet, or the daily sweep reads the old tier off it and
+                       silently downgrades a paying customer
     4. activation      a redeemed code extends the coverage and the company's
                        expiry follows; a suspended company's administrator may
                        still redeem, and it no longer un-suspends the company
@@ -580,6 +589,120 @@ BEGIN
   UPDATE companies SET status = 'active' WHERE id = v_co;
   PERFORM _sub_ok('suspension: resetting companies.status alone brings the company back (rule 3)',
     _sub_admitted(_sub_id('user:c04')));
+END $$;
+
+-- ─── 3b. the two writers that now suspend through companies.status ──────────
+--
+-- Both are declared behaviour changes of this slice, so both are asserted here
+-- rather than described in a header. Each goes through _sub_do, as a platform
+-- owner: the effect on the row is the whole point.
+
+DO $$
+DECLARE
+  v_co    uuid;
+  v_out   text;
+  v_owner constant uuid := '50000000-0000-4000-8000-000000000001';
+BEGIN
+  -- platform_company_set_approval('suspend') used to write
+  -- approval_status = 'suspended', a value the CHECK now refuses.
+  v_co := _sub_company('setappr', 'approved', 'active', 'active', now(), now() + interval '30 days',
+                       now() - interval '1 year');
+  PERFORM app_private.subscription_backfill_company(v_co);
+  PERFORM _sub_ok('set_approval: the company is admitted before it is suspended',
+    _sub_admitted(_sub_id('user:setappr')));
+
+  v_out := _sub_do(v_owner, format('SELECT platform_company_set_approval(%L, %L)::text', v_co, 'suspend'));
+  PERFORM _sub_ok('set_approval(suspend): answers success', _sub_succeeded(v_out));
+  PERFORM _sub_ok('set_approval(suspend): writes companies.status and leaves the approval alone',
+    (SELECT status FROM companies WHERE id = v_co) = 'suspended'
+    AND (SELECT approval_status FROM companies WHERE id = v_co) = 'approved');
+  PERFORM _sub_ok('set_approval(suspend): …and the company is refused',
+    NOT _sub_admitted(_sub_id('user:setappr')));
+
+  -- approve and reject are untouched, so the way back from a *rejection* still
+  -- runs through the approval column.
+  v_out := _sub_do(v_owner, format('SELECT platform_company_set_approval(%L, %L, %L)::text', v_co, 'reject', 'sub'));
+  PERFORM _sub_ok('set_approval(reject): still writes the approval column, not the status',
+    _sub_succeeded(v_out)
+    AND (SELECT approval_status FROM companies WHERE id = v_co) = 'rejected');
+
+  -- update_company_subscription_manual('suspended') used to write
+  -- subscription_status = 'suspended', the other retired value.
+  v_co := _sub_company('manualsusp', 'approved', 'active', 'active', now(), now() + interval '30 days',
+                       now() - interval '1 year');
+  PERFORM app_private.subscription_backfill_company(v_co);
+  PERFORM _sub_ok('manual update: the company is admitted before it is suspended',
+    _sub_admitted(_sub_id('user:manualsusp')));
+
+  v_out := _sub_do(v_owner, format(
+    'SELECT update_company_subscription_manual(%L, %L, NULL, %L, NULL, %L)::text',
+    v_co, 'suspended', now() + interval '30 days', 'sub test'));
+  PERFORM _sub_ok('manual update(suspended): answers success', _sub_succeeded(v_out));
+  PERFORM _sub_ok('manual update(suspended): suspends through companies.status, never subscription_status',
+    (SELECT status FROM companies WHERE id = v_co) = 'suspended'
+    AND (SELECT subscription_status FROM companies WHERE id = v_co) <> 'suspended');
+  PERFORM _sub_ok('manual update(suspended): …and the company is refused',
+    NOT _sub_admitted(_sub_id('user:manualsusp')));
+
+  -- The trail row records what the column holds, not what was asked for: the
+  -- two can differ now that the word is derived.
+  PERFORM _sub_ok('manual update: the trail row agrees with the column it describes',
+    (SELECT a.new_status FROM subscription_admin_actions a
+      WHERE a.company_id = v_co ORDER BY a.created_at DESC LIMIT 1)
+    = (SELECT subscription_status FROM companies WHERE id = v_co));
+END $$;
+
+-- ─── 3c. an early renewal must not be downgraded by the next sweep ──────────
+--
+-- The shape that broke it: set_plan wrote the new tier only onto periods that
+-- had already started, while the recompute takes the plan from the granting row
+-- with the furthest end. A company that renews early owns a row starting in the
+-- future, so the upgrade skipped exactly the row the recompute would read, and
+-- the next `recompute_all_company_subscriptions()` — which HANDOFF.md tells the
+-- operator to schedule — wrote the old tier back over it.
+
+DO $$
+DECLARE
+  v_co    uuid;
+  v_out   text;
+  v_owner constant uuid := '50000000-0000-4000-8000-000000000001';
+BEGIN
+  -- on basic, paid to 01.12, and renewing a year early
+  v_co := _sub_company('renew', 'approved', 'active', 'active', now() - interval '1 year',
+                       now() + interval '60 days', now() - interval '1 year');
+  PERFORM app_private.subscription_backfill_company(v_co);
+  PERFORM app_private.subscription_coverage_record(
+    v_co, 'activation_code', _sub_id('code:renew'),
+    now() + interval '60 days', now() + interval '425 days', true, 'basic', NULL, 'early renewal', false);
+  -- …and a period it already used up, so the last assertion is not vacuous
+  PERFORM app_private.subscription_coverage_record(
+    v_co, 'manual', NULL,
+    now() - interval '2 years', now() - interval '1 year', true, 'basic', NULL, 'last year', false);
+
+  PERFORM _sub_ok('early renewal: the company is on basic, covered past the renewal',
+    (SELECT plan FROM companies WHERE id = v_co) = 'basic');
+
+  v_out := _sub_do(v_owner, format('SELECT platform_company_set_plan(%L, %L)::text', v_co, 'premium'));
+  PERFORM _sub_ok('early renewal: the upgrade answers success', _sub_succeeded(v_out));
+  PERFORM _sub_ok('early renewal: …and reaches the period that has not started yet',
+    (SELECT count(*) FROM subscription_coverage
+      WHERE company_id = v_co AND status = 'active' AND grants_access
+        AND (period_end IS NULL OR period_end > now())
+        AND plan IS DISTINCT FROM 'premium') = 0
+    AND (SELECT count(*) FROM subscription_coverage
+          WHERE company_id = v_co AND period_start > now() AND plan = 'premium') = 1);
+
+  -- The sweep is the instrument that used to undo it.
+  PERFORM app_private.recompute_all_company_subscriptions();
+  PERFORM _sub_ok('early renewal: the daily sweep leaves the upgrade standing',
+    (SELECT plan FROM companies WHERE id = v_co) = 'premium');
+
+  -- A period that is already over keeps the tier it was sold at: it is history,
+  -- and the recompute never reads it.
+  PERFORM _sub_ok('early renewal: a period that has ended keeps the tier it was sold at',
+    (SELECT count(*) FROM subscription_coverage
+      WHERE company_id = v_co AND period_end IS NOT NULL AND period_end <= now()
+        AND plan = 'premium') = 0);
 END $$;
 
 -- ─── 4. an activation code extends ──────────────────────────────────────────

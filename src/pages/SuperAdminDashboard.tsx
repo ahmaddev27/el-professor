@@ -580,6 +580,25 @@ export default function SuperAdminDashboard() {
     }
   };
 
+  /**
+   * The way back from a suspension.
+   *
+   * Since 20260919150000 `platform_company_set_approval('suspend')` writes
+   * `companies.status`, so approval is not what was taken away and re-approving
+   * would leave the company suspended behind a green badge. This is the same
+   * RPC the lifecycle menu on CompaniesPage calls, which also lifts the
+   * `suspended` state from the company's users.
+   */
+  const handleReactivate = async (company: CompanyRow) => {
+    try {
+      await callPlatformRpc('platform_company_lifecycle', { p_company_id: company.id, p_action: 'reactivate' });
+      showToast('success', t('sa.companies.toast.reactivated', { name: company.name }));
+      load(true);
+    } catch (err: any) {
+      showToast('error', err.message || t('common.error'));
+    }
+  };
+
   // Compute attention items
   const attentionItems: AttentionItem[] = [];
   const pendingCompanies = companies.filter(c => c.approval_status === 'pending');
@@ -831,13 +850,29 @@ export default function SuperAdminDashboard() {
                 <tbody>
                   {companies.filter(c => c.status !== 'deleted').map(c => {
                     const ap = c.approval_status;
-                    const apColor = ap === 'approved' ? 'var(--success)' : ap === 'pending' ? 'var(--warning)' : 'var(--danger)';
-                    const apBg = ap === 'approved' ? 'var(--success-subtle)' : ap === 'pending' ? 'var(--warning-subtle)' : 'var(--danger-subtle)';
+                    /*
+                      Suspension is `companies.status` since 20260919150000
+                      (plan 3.F step U1), and this table has no status column —
+                      it renders one badge, from the approval status. So the
+                      badge asks the suspension first: without this a company
+                      suspended from this very table would go on reading green
+                      *Genehmigt*, keep offering *Sperren*, and lose its way
+                      back, because the reactivate button below was keyed on an
+                      `approval_status` value that no longer occurs.
+                    */
+                    const suspended = c.status === 'suspended';
+                    const apColor = suspended || ap === 'rejected' ? 'var(--danger)'
+                      : ap === 'approved' ? 'var(--success)'
+                        : ap === 'pending' ? 'var(--warning)' : 'var(--danger)';
+                    const apBg = suspended || ap === 'rejected' ? 'var(--danger-subtle)'
+                      : ap === 'approved' ? 'var(--success-subtle)'
+                        : ap === 'pending' ? 'var(--warning-subtle)' : 'var(--danger-subtle)';
                     const apLabel = t(
-                      ap === 'approved' ? 'sa.dash.approval.approved'
-                        : ap === 'pending' ? 'sa.dash.approval.pending'
-                          : ap === 'rejected' ? 'sa.dash.approval.rejected'
-                            : 'sa.dash.approval.suspended',
+                      suspended ? 'sa.dash.approval.suspended'
+                        : ap === 'approved' ? 'sa.dash.approval.approved'
+                          : ap === 'pending' ? 'sa.dash.approval.pending'
+                            : ap === 'rejected' ? 'sa.dash.approval.rejected'
+                              : 'sa.dash.approval.suspended',
                     );
                     return (
                       <tr key={c.id} style={{ borderBottom: '1px solid var(--border)' }}>
@@ -854,7 +889,7 @@ export default function SuperAdminDashboard() {
                             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold" style={{ background: apBg, color: apColor }}>
                               {apLabel}
                             </span>
-                            {canLifecycle && ap === 'approved' && (
+                            {canLifecycle && ap === 'approved' && !suspended && (
                               <button
                                 onClick={() => handleSuspendApproval(c)}
                                 className="text-[11px] px-2 py-0.5 rounded border transition-colors"
@@ -865,7 +900,23 @@ export default function SuperAdminDashboard() {
                                 {t('sa.dash.suspend')}
                               </button>
                             )}
-                            {canLifecycle && (ap === 'rejected' || ap === 'suspended') && (
+                            {/*
+                              The way back from a suspension is `reactivate`,
+                              not `approve`: approval is not what was taken
+                              away, and re-approving an already-approved company
+                              would leave it suspended with a green badge.
+                            */}
+                            {canLifecycle && suspended && (
+                              <button
+                                onClick={() => handleReactivate(c)}
+                                disabled={approvingId === c.id}
+                                className="text-[11px] px-2 py-0.5 rounded border transition-colors"
+                                style={{ borderColor: 'var(--success)', color: 'var(--success)' }}
+                              >
+                                {approvingId === c.id ? '…' : t('sa.lifecycle.reactivate.confirm')}
+                              </button>
+                            )}
+                            {canLifecycle && !suspended && ap === 'rejected' && (
                               <button
                                 onClick={() => handleApprove(c)}
                                 disabled={approvingId === c.id}
@@ -875,7 +926,7 @@ export default function SuperAdminDashboard() {
                                 {t('sa.dash.approve')}
                               </button>
                             )}
-                            {canLifecycle && ap === 'pending' && (
+                            {canLifecycle && !suspended && ap === 'pending' && (
                               <button
                                 onClick={() => handleApprove(c)}
                                 disabled={approvingId === c.id}

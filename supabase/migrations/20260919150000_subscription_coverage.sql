@@ -16,14 +16,65 @@
       public.subscription_coverage                 the periods a company is paid
                                                    or granted, with their source
       app_private.recompute_company_subscription   the only thing that writes
-                                                   companies.subscription_status,
-                                                   .subscription_expires_at and
-                                                   .plan
+                                                   companies.subscription_status
+                                                   and .subscription_expires_at,
+                                                   and the only thing that
+                                                   *derives* .plan
+
+  **Be exact about `plan`.** `platform_company_set_plan` still assigns
+  `companies.plan` directly, because a company with no coverage at all has no
+  period for a tier to be derived from and the screen must still be able to set
+  one. What it also does is carry the tier onto every live granting period that
+  has not ended, so the recompute reads back the value the screen wrote instead
+  of undoing it. Two writers, one value, and the self-check pins the second half.
 
   Every existing writer keeps its signature, its answers and everything else it
   writes. Each one now also records the period it granted and calls the
-  recompute in the same transaction, which writes the three columns back. The
-  release must look identical to a customer.
+  recompute in the same transaction, which writes the three columns back.
+
+  ## What the client had to change, and why this is not a server-only slice
+
+  Moving suspension onto one column (rule 3) only works if that is the column
+  the client reads, and it was not. `AuthContext.checkProfileAccess()` does read
+  `companies.status`, but its only caller is `signIn`. The path every reload and
+  every token refresh takes, `loadUserProfile`, selected
+  `approval_status, rejection_reason, subscription_status, subscription_expires_at`
+  and **not `status`** — so once this migration empties the two columns it read,
+  a suspended company would have walked through App.tsx's gate 5, been let into
+  `/overview` with zeros, and been told by `LockedFeaturePage` that its **plan**
+  was too low. `CompanySuspendedPage` would have become dead code.
+
+  What made that reachable is an asymmetry: `platform_company_lifecycle
+  ('suspend')` also sets every `user_profiles.status` to `suspended`, and it is
+  the *profile* gate that makes today's suspension visible. The backfill,
+  `platform_company_set_approval('suspend')` and
+  `update_company_subscription_manual('suspended')` all write `companies.status`
+  and touch no profile.
+
+  So `AuthContext` now carries `companyStatus`, read in the same two queries
+  beside the approval status, and App.tsx's suspension gate asks it. One state,
+  one reader, and `CompanySuspendedPage` is reached by every path that suspends.
+  The platform's own Freigaben table changed with it — see 8d.
+
+  ## Three behaviour changes, declared
+
+  Everything else looks identical to a customer. These three do not:
+
+  1. **A suspended company sees `CompanySuspendedPage` instead of
+     `/abo-aktivieren`** where the suspension had been carried by
+     `subscription_status`. Both are a block; the new one names the real reason.
+  2. **Redeeming a code on an open-ended company no longer caps it.** Before,
+     `redeem_activation_code` overwrote a NULL expiry with `now() + 1 month`,
+     taking open-ended access away from a company that had it. Rule 1 says such
+     a company stays open, so the open-ended coverage row outranks the code's
+     bounded one and the expiry stays NULL. Strictly in the customer's favour,
+     and `tests/rls/subscriptions.sql` pins it.
+  3. **`update_company_subscription_manual` stores the derived word, not the
+     picked one.** `expired` with an end in the future is stored `inactive`, and
+     `inactive` with an end in the past is stored `expired`. Neither grants, so
+     access is unchanged, but `ManualSubscriptionModal` re-opens on the stored
+     word. The trail row records the stored word too (see 8b), and the platform
+     audit row keeps `requested_status` beside it.
 
   ## The owner's six rules, answered 17.09.2026
 
@@ -43,7 +94,13 @@
        - a company suspended only through `subscription_status` could be
          un-suspended by its own administrator redeeming any valid activation
          code (20260916130020:430 set it to `'active'` unconditionally).
-  4. **A subscription row keeps the price it was assigned.** Money in the new
+  4. **A subscription row keeps the price it was assigned.** The column exists
+     and is integer cents, and **every path in this slice writes it NULL**: the
+     backfill has no per-period price to recover (`companies` stores none, and
+     `company_subscriptions.monthly_price` is a rate, not what a period cost),
+     and neither a redemption nor a manual grant knows one. So U2 inherits a
+     coverage table with no prices, and filling them is U2's first job rather
+     than a surprise. Money in the new
      structures is **integer cents** (`price_cents`).
   5. **Invoices do not affect access in U1.** Paying extends nothing and being
      overdue locks nothing, so this file writes no coverage row from an
@@ -90,6 +147,21 @@
   to account for every row, so a NULL cannot slip through unmeasured (the trap
   `scripts/active-company-parity.sql` describes in its header). It also prints
   what it found, per bucket and per U0 conflict class.
+
+  ## …and the census that makes the gate mean something
+
+  That gate is satisfied by a migration that changes nothing at all: a backfill
+  which silently wrote zero rows produces exactly the same clean before/after as
+  one that worked. So section 5b reads the table back and prints what is in it —
+  rows, companies covered out of the total, how many grant access, how many are
+  open-ended, the count per `source`, and how many companies still carry a
+  suspension outside `companies.status`. A reader of the release log can tell
+  "it worked" from "it did nothing" without querying anything.
+
+  One of those numbers is a gate rather than a number: every company whose
+  stored state described a period must carry its `migration` row, and a shortfall
+  raises. Section 5b's header lists which of the others can legitimately be zero
+  and when — on a database with no companies, all of them, which is the RLS kit.
 
   ## SCHEMA_EPOCH stays at 2
 
@@ -337,7 +409,9 @@ $$;
 
 COMMENT ON FUNCTION app_private.recompute_company_subscription(uuid) IS
   'Plan 3.F: derives companies.subscription_status, .subscription_expires_at '
-  'and .plan from public.subscription_coverage. The only writer of those three.';
+  'and .plan from public.subscription_coverage. The only writer of the first '
+  'two; for .plan see platform_company_set_plan, which writes the column and '
+  'the coverage rows together so the two cannot disagree.';
 
 /*
   The daily sweep, for a job runner to call. **Nothing calls it yet**, and that
@@ -485,12 +559,16 @@ BEGIN
            updated_at      = now()
      WHERE id = p_company_id;
 
+    -- No `p_occurred_at`: this is a correction made on the day of the release,
+    -- not a record that was always there. 20260916130020's approval-note move
+    -- backdated to the company's own row because the note it was filing had
+    -- existed since then; here the event is the migration itself, and dating it
+    -- to a company's registration would bury it years back in the log.
     PERFORM app_private.audit_write(
       'legacy', 'legacy.subscription_u1_suspension', 'ok', p_company_id, 'company', p_company_id::text,
       jsonb_build_object('status', c.status, 'approval_status', c.approval_status,
                          'subscription_status', c.subscription_status),
-      jsonb_build_object('status', 'suspended', 'approval_status', v_appr),
-      NULL, NULL, coalesce(c.created_at, now()));
+      jsonb_build_object('status', 'suspended', 'approval_status', v_appr));
   END IF;
 
   IF c.subscription_status IN ('active', 'suspended') THEN
@@ -629,6 +707,112 @@ BEGIN
 
   RAISE NOTICE '3.F U1 backfill: % coverage row(s) written, % company(ies) with nothing to record, % already had one, % suspension(s) moved onto companies.status',
     v_rows, v_none, v_skipped, v_susp;
+END $mig$;
+
+-- ─── 5b. The census: what is actually in the table ──────────────────────────
+
+/*
+  The counters above are what the loop believes it did. This reads the table.
+
+  It exists because the access gate in section 7 is satisfied by a migration
+  that changes nothing at all: a backfill that silently wrote zero rows produces
+  the same clean before/after as one that worked. So the release log has to
+  carry enough for a reader to tell "it worked" from "it did nothing" without
+  querying anything afterwards.
+
+  `v_expected` is counted from `_u1_company_before`, not from `companies`,
+  because by now the recompute has rewritten `subscription_status` — a company
+  that was `active` past its expiry already reads `expired`, so counting the
+  live rows would compare the backfill against its own output. The snapshot is
+  the state the backfill was handed, and the predicate below is
+  `subscription_backfill_company()`'s own branch condition, transcribed.
+
+  **Which of these can legitimately be zero, and when:**
+
+  - **All of them, on a database with no companies.** That is the RLS kit: the
+    fixture is a `--schema-only` dump, so there is nothing for the loop to walk
+    and every number is 0, including the equality below, which holds as 0 = 0.
+    What covers the rule there is `tests/rls/subscriptions.sql`, which seeds a
+    company per conflict class and calls the same function.
+  - **`grants_access = false` rows**, when no company is in U0's class 06 — an
+    expiry in the future while the subscription status blocks it. Zero there is
+    the good outcome, not a missing write.
+  - **Open-ended rows**, when no company is `active` with no expiry (rule 1).
+  - **Suspensions moved**, when no company carried one outside
+    `companies.status`.
+  - **Every `source` but `migration`**, always, on the day this applies: the
+    backfill writes only `migration` rows. `activation_code` and `manual` rows
+    appear as customers redeem and administrators edit, and `invoice` stays
+    empty until U2 (rule 5, pinned by self-check 9).
+
+  The one number that may **not** be short is the company count: every company
+  whose stored state described a period must now carry its `migration` row, and
+  the mismatch raises rather than printing.
+*/
+DO $mig$
+DECLARE
+  v_companies bigint;
+  v_expected  bigint;
+  v_covered   bigint;
+  v_rows      bigint;
+  v_granting  bigint;
+  v_open      bigint;
+  v_recorded  bigint;
+  v_void      bigint;
+  v_stray     bigint;
+  r           record;
+BEGIN
+  SELECT count(*) INTO v_companies FROM public.companies;
+
+  -- subscription_backfill_company()'s own branch condition, over the state it
+  -- was handed: anything else answered `no_period` and correctly wrote nothing.
+  SELECT count(*) INTO v_expected
+    FROM _u1_company_before b
+   WHERE b.subscription_status IN ('active', 'suspended')
+      OR b.subscription_expires_at IS NOT NULL;
+
+  SELECT count(DISTINCT c.company_id) INTO v_covered
+    FROM public.subscription_coverage c
+   WHERE c.source = 'migration';
+
+  SELECT count(*),
+         count(*) FILTER (WHERE c.status = 'active' AND c.grants_access),
+         count(*) FILTER (WHERE c.status = 'active' AND c.grants_access AND c.period_end IS NULL),
+         count(*) FILTER (WHERE c.status = 'active' AND NOT c.grants_access),
+         count(*) FILTER (WHERE c.status = 'void')
+    INTO v_rows, v_granting, v_open, v_recorded, v_void
+    FROM public.subscription_coverage c;
+
+  SELECT count(*) INTO v_stray
+    FROM public.companies c
+   WHERE c.approval_status = 'suspended' OR c.subscription_status = 'suspended';
+
+  RAISE NOTICE '3.F U1 census: subscription_coverage holds % row(s), covering % of % company(ies)',
+    v_rows, v_covered, v_companies;
+  RAISE NOTICE '3.F U1 census:   % grant access, of which % open-ended (rule 1); % recorded but granting nothing; % void',
+    v_granting, v_open, v_recorded, v_void;
+
+  FOR r IN SELECT c.source, count(*) AS n
+             FROM public.subscription_coverage c
+            GROUP BY c.source ORDER BY c.source
+  LOOP
+    RAISE NOTICE '3.F U1 census:   source %: % row(s)', r.source, r.n;
+  END LOOP;
+
+  RAISE NOTICE '3.F U1 census: % company(ies) still carry a suspension outside companies.status (must be 0; the CHECK below makes it permanent)',
+    v_stray;
+
+  -- The "it did nothing" gate. Zero companies makes this 0 = 0 and says so.
+  IF v_covered <> v_expected THEN
+    RAISE EXCEPTION '3.F U1 census: % company(ies) described a subscription period but only % carry a migration coverage row — the backfill did not run over all of them',
+      v_expected, v_covered;
+  END IF;
+
+  IF v_companies = 0 THEN
+    RAISE NOTICE '3.F U1 census: no companies on this database, so every number above is 0 and proves nothing — tests/rls/subscriptions.sql is what covers the rule here';
+  ELSIF v_expected = 0 THEN
+    RAISE NOTICE '3.F U1 census: % company(ies), none of which described a subscription period, so no migration row was due', v_companies;
+  END IF;
 END $mig$;
 
 -- ─── 6. The vocabulary: suspension lives in one column ──────────────────────
@@ -897,6 +1081,10 @@ BEGIN
     RETURN json_build_object('success', false, 'error', 'Kein Unternehmenskonto gefunden.');
   END IF;
 
+  -- Spending an activation code changes what the company pays for. Plan 3.5
+  -- puts it with the company's administrators; the conservative reading of
+  -- "administrator" is the role itself, not a page permission that happens to
+  -- include settings. coalesce(): a profile without a role is not one.
   IF coalesce(v_caller_role, '') <> 'admin' THEN
     INSERT INTO activation_code_attempts(company_id, user_id, input_last4, success, reason, kind)
     VALUES (v_company_id, v_caller_id, NULL, false, 'Keine Berechtigung', 'redeem');
@@ -912,6 +1100,8 @@ BEGIN
     RETURN json_build_object('success', false, 'error', 'Aktivierungscode muss genau 6 Ziffern haben.');
   END IF;
 
+  -- Only redeem attempts count here. A preview has its own budget, so previews
+  -- can no longer spend this one.
   SELECT COUNT(*) INTO v_attempt_count
   FROM activation_code_attempts
   WHERE company_id = v_company_id
@@ -1126,13 +1316,16 @@ BEGIN
     RETURN jsonb_build_object('success', false, 'error', 'Unternehmen nicht gefunden', 'reason', 'not_found');
   END IF;
 
-  INSERT INTO public.subscription_admin_actions
-    (company_id, action_type, old_status, new_status, old_expires_at, new_expires_at, reason, created_by)
-  VALUES
-    (p_company_id, 'manual_edit',
-     v_company.subscription_status, p_subscription_status,
-     v_company.subscription_expires_at, p_subscription_expires_at,
-     p_reason, v_caller_id);
+  -- The trail row is written at the end of this function, not here, so that
+  -- `new_status` and `new_expires_at` are the values the column actually ends
+  -- up holding rather than the ones that were asked for. Since the recompute
+  -- derives both, the two can differ: a period the administrator labels
+  -- `expired` whose end is still in the future is stored `inactive`, and one
+  -- labelled `inactive` whose end has passed is stored `expired`. Both are
+  -- access-neutral — neither grants — but a trail that records the request as
+  -- though it were the outcome is the kind of record that is worse than none.
+  -- What was asked for is kept beside it, in the platform audit row's
+  -- `requested_status`.
 
   -- The columns this function still owns. `suspended` is the one value that no
   -- longer lands in subscription_status: it suspends the company itself, which
@@ -1168,6 +1361,15 @@ BEGIN
   END IF;
 
   SELECT * INTO v_after FROM public.companies WHERE id = p_company_id;
+
+  -- …and now the trail row, with what the column holds (see the note above).
+  INSERT INTO public.subscription_admin_actions
+    (company_id, action_type, old_status, new_status, old_expires_at, new_expires_at, reason, created_by)
+  VALUES
+    (p_company_id, 'manual_edit',
+     v_company.subscription_status, v_after.subscription_status,
+     v_company.subscription_expires_at, v_after.subscription_expires_at,
+     p_reason, v_caller_id);
 
   PERFORM app_private.platform_rpc_record('write', c_action, NULL, p_company_id, 'company', p_company_id::text,
     jsonb_build_object('subscription_status', v_company.subscription_status,
@@ -1236,13 +1438,21 @@ BEGIN
   -- The period the company is on now carries the tier it was bought at (rule 4
   -- is about the price; the tier travels with it). Without this the recompute
   -- would read the old tier off the coverage row and undo the change.
+  --
+  -- Every live granting period that has **not ended**, not only the one
+  -- covering today. An early renewal creates a row that starts in the future —
+  -- a company on `basic` expiring 01.12 redeems a year's code on 01.10 and gets
+  -- `[01.12.2026, 01.12.2027)` at `basic`. A `period_start <= now()` term here
+  -- skips that row, and the recompute takes its plan from the row with the
+  -- furthest end, so the next sweep would write `basic` back over the upgrade
+  -- and silently downgrade a paying customer. Periods that are already over
+  -- keep the tier they were sold at; they are history.
   IF p_plan IS NOT NULL THEN
     UPDATE public.subscription_coverage
        SET plan = p_plan
      WHERE company_id = p_company_id
        AND status = 'active'
        AND grants_access
-       AND period_start <= now()
        AND (period_end IS NULL OR period_end > now());
   END IF;
 
@@ -1271,10 +1481,19 @@ ALTER FUNCTION public.platform_company_set_plan(uuid, text, text, integer) OWNER
 -- (rule 3). It suspends the company where suspension lives. Approve and reject
 -- are untouched, and so are the action names, the audit row and the answer.
 --
--- What a platform administrator sees: a company suspended from the Freigaben
--- table stays listed under `approved` and shows `suspended` in the lifecycle
--- column, and the way back is the lifecycle menu's `reactivate` — which now
--- works, where before it reset only one of three flags.
+-- **The screens had to change with it**, and the first draft of this header was
+-- wrong about that. The Freigaben table on SuperAdminDashboard has no lifecycle
+-- column at all: it renders one badge, from `approval_status`. Left alone it
+-- would show a company suspended here as green *Genehmigt*, go on offering
+-- *Sperren*, and lose the way back — its reactivate button is keyed on
+-- `approval_status IN ('rejected','suspended')`, a value that no longer occurs.
+-- So that table now reads `companies.status` for the badge and for both
+-- buttons, and the way back from a suspension is `platform_company_lifecycle`
+-- ('reactivate') rather than `approve`, because approval is not what was taken
+-- away.
+--
+-- The same went for the customer's own screens, and that one was worse: see
+-- "What the client had to change" in this file's header.
 CREATE OR REPLACE FUNCTION public.platform_company_set_approval(
   p_company_id uuid,
   p_decision   text,
@@ -1478,6 +1697,20 @@ BEGIN
       RAISE EXCEPTION '20260919150000 self-check: % no longer records coverage', v_sig;
     END IF;
   END LOOP;
+
+  -- 7b. platform_company_set_plan carries the tier onto the coverage rows, and
+  --     onto every live granting period that has not ended rather than only the
+  --     one covering today. Dropping either makes the next sweep write the old
+  --     tier back over an upgrade: an early renewal's row starts in the future,
+  --     and the recompute takes the plan from the row with the furthest end.
+  v_txt := (SELECT p.prosrc FROM pg_proc p
+             WHERE p.oid = to_regprocedure('public.platform_company_set_plan(uuid,text,text,integer)'));
+  IF v_txt !~ 'subscription_coverage' THEN
+    RAISE EXCEPTION '20260919150000 self-check: platform_company_set_plan no longer carries the tier onto the coverage rows, so the next recompute would undo it';
+  END IF;
+  IF v_txt ~ 'period_start\s*<=\s*now\(\)' THEN
+    RAISE EXCEPTION '20260919150000 self-check: platform_company_set_plan skips periods that start in the future again — an early renewal would be silently downgraded';
+  END IF;
 
   -- 8. …and the recompute is the thing that does assign them
   v_txt := (SELECT p.prosrc FROM pg_proc p WHERE p.oid = to_regprocedure(c_recompute));
