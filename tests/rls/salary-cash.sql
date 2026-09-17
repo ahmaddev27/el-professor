@@ -1,11 +1,18 @@
 /*
   Gehaltsquittung: confirm, void, signed copies, and the ledger underneath.
 
-  Runs after seed.sql, against 20260914140000_salary_cash_receipts.sql. Every
-  call goes through the real RPCs and policies as a real principal — the JWT
-  claim plus SET LOCAL ROLE authenticated, as in assertions.sql — so what is
-  tested is what PostgREST runs. Each check raises on failure; a silent run is
-  a pass.
+  Runs after seed.sql, against 20260914140000_salary_cash_receipts.sql and
+  20260919160000_gehaltsquittung_number_salary_year.sql. Every call goes through
+  the real RPCs and policies as a real principal — the JWT claim plus SET LOCAL
+  ROLE authenticated, as in assertions.sql — so what is tested is what PostgREST
+  runs. Each check raises on failure; a silent run is a pass.
+
+  **The receipt number carries the year of the salary, not of the payment**
+  (owner decision 17.09.2026, 20260919160000): the YYYY in GQ-YYYY-NNNN is
+  `business_year`, the business year of `period_start` — the month containing
+  that week's Monday. The sequence stays gapless per company and per that year.
+  S7, S12 and S13 are the three fixtures that tell the rule apart from both
+  alternatives it replaced; see the numbering section below.
 
   The amounts are the scenario src/utils/salaryCashReceipt.test.ts walks in the
   browser mirror: salary S1 is due 1000,00 and is paid 400 and 250 in cash on
@@ -114,7 +121,14 @@ VALUES
   -- S8, S9 and S11: the concurrency blocks
   ('5a1a0000-0000-4000-8000-000000000008', 'c0000000-0000-4000-8000-00000000000a', 'd0000000-0000-4000-8000-00000000000a', '2026-03-02', '2026-03-29', 500.00,  NULL,   'a0000000-0000-4000-8000-000000000001'),
   ('5a1a0000-0000-4000-8000-000000000009', 'c0000000-0000-4000-8000-00000000000a', 'd0000000-0000-4000-8000-00000000000a', '2026-02-02', '2026-03-01', 999.00,  NULL,   'a0000000-0000-4000-8000-000000000001'),
-  ('5a1a0000-0000-4000-8000-000000000011', 'c0000000-0000-4000-8000-00000000000a', 'd0000000-0000-4000-8000-00000000000a', '2025-10-06', '2025-11-02', 300.00,  NULL,   'a0000000-0000-4000-8000-000000000001')
+  ('5a1a0000-0000-4000-8000-000000000011', 'c0000000-0000-4000-8000-00000000000a', 'd0000000-0000-4000-8000-00000000000a', '2025-10-06', '2025-11-02', 300.00,  NULL,   'a0000000-0000-4000-8000-000000000001'),
+  -- S12: a 2025 salary, paid in 2026. The case that distinguishes the salary's
+  -- year from the payment's — under the old rule this would be a GQ-2026 number.
+  ('5a1a0000-0000-4000-8000-000000000012', 'c0000000-0000-4000-8000-00000000000a', 'd0000000-0000-4000-8000-00000000000a', '2025-12-01', '2025-12-28', 60.00,   NULL,   'a0000000-0000-4000-8000-000000000001'),
+  -- S13: starts Thursday 2026-01-01, whose week began Monday 2025-12-29, so its
+  -- business year is 2025 while period_start's calendar year is 2026. The case
+  -- that distinguishes the *business* year from period_start's calendar year.
+  ('5a1a0000-0000-4000-8000-000000000013', 'c0000000-0000-4000-8000-00000000000a', 'd0000000-0000-4000-8000-00000000000a', '2026-01-01', '2026-01-04', 50.00,   NULL,   'a0000000-0000-4000-8000-000000000001')
 ON CONFLICT (id) DO NOTHING;
 
 -- ─── confirm, void, attach ──────────────────────────────────────────────────
@@ -137,6 +151,8 @@ DECLARE
   s5 uuid := '5a1a0000-0000-4000-8000-000000000005';
   s6 uuid := '5a1a0000-0000-4000-8000-000000000006';
   s7 uuid := '5a1a0000-0000-4000-8000-000000000007';
+  s12 uuid := '5a1a0000-0000-4000-8000-000000000012';
+  s13 uuid := '5a1a0000-0000-4000-8000-000000000013';
   req1 uuid := gen_random_uuid();
   r1 salary_cash_receipts;
   r2 salary_cash_receipts;
@@ -145,6 +161,8 @@ DECLARE
   r_s3 salary_cash_receipts;
   r_s4 salary_cash_receipts;
   r_s7 salary_cash_receipts;
+  r_s12 salary_cash_receipts;
+  r_s13 salary_cash_receipts;
   v salary_cash_receipts;
   sal salaries;
   n bigint;
@@ -298,12 +316,52 @@ BEGIN
   r_s4 := _sc_confirm(admin_b, gen_random_uuid(), s4, 300.00);
   PERFORM _sc_eq('numbers are per company: company B starts at 0001', r_s4.receipt_number, 'GQ-2026-0001'::text);
 
-  -- The RPC does not judge whether a payment date suits the period; it only
-  -- refuses one in the future. Here it exercises numbering by payment year.
+  -- ── the year in the number is the salary's, not the payment's ────────────
+  -- Owner decision 17.09.2026, 20260919160000. The RPC does not judge whether a
+  -- payment date suits the period; it only refuses one in the future. These
+  -- three receipts pay salaries whose business year is not the year of their
+  -- payment, in both directions, and one whose business year is not even the
+  -- calendar year its period starts in.
+
+  -- S7 runs one way: a 2026 salary paid on the last day of 2025. Under the old
+  -- rule this was GQ-2025-0001; it now continues company A's 2026 sequence.
   r_s7 := _sc_confirm(admin_a, gen_random_uuid(), s7, 40.00, DATE '2025-12-31');
-  PERFORM _sc_eq('numbers follow the year of the payment date', r_s7.receipt_number, 'GQ-2025-0001'::text);
   PERFORM _sc_eq('a period starting Wednesday 2026-04-01 belongs to business month 3', r_s7.business_month, 3);
   PERFORM _sc_eq('... of 2026', r_s7.business_year, 2026);
+  PERFORM _sc_eq('... so a payment made in 2025 still takes a 2026 number',
+    r_s7.receipt_number, 'GQ-2026-0005'::text);
+
+  -- S12 runs the other way: a December-2025 salary paid in 2026. This is the
+  -- one the decision is about, and the first number of a year company A has
+  -- issued nothing in — the 2026 sequence is at 0005 and does not move.
+  r_s12 := _sc_confirm(admin_a, gen_random_uuid(), s12, 60.00, DATE '2026-06-01');
+  PERFORM _sc_eq('a period starting Monday 2025-12-01 is business month 12', r_s12.business_month, 12);
+  PERFORM _sc_eq('... of 2025', r_s12.business_year, 2025);
+  PERFORM _sc_eq('... so a payment made in 2026 takes the salary''s 2025 number',
+    r_s12.receipt_number, 'GQ-2025-0001'::text);
+
+  -- S13 pins which year: its period starts on Thursday 2026-01-01, but that
+  -- week began on Monday 2025-12-29, so the salary belongs to 2025. Reading
+  -- period_start's calendar year instead would number this GQ-2026-xxxx.
+  r_s13 := _sc_confirm(admin_a, gen_random_uuid(), s13, 50.00, DATE '2026-06-01');
+  PERFORM _sc_eq('a period starting Thursday 2026-01-01 belongs to business month 12', r_s13.business_month, 12);
+  PERFORM _sc_eq('... of 2025, because its week began on Monday 2025-12-29', r_s13.business_year, 2025);
+  PERFORM _sc_eq('... so the number is the business year, not period_start''s calendar year',
+    r_s13.receipt_number, 'GQ-2025-0002'::text);
+
+  -- Two counters for company A, one per salary year, each gapless on its own.
+  -- Aliased, because document_counters.n and the variable n share a name.
+  SELECT dc.n INTO n FROM document_counters dc
+   WHERE dc.company_id = co_a AND dc.doc_type = 'gehaltsquittung' AND dc.year = 2026;
+  PERFORM _sc_eq('company A''s 2026 counter counts only 2026 salaries', n, 5::bigint);
+  SELECT dc.n INTO n FROM document_counters dc
+   WHERE dc.company_id = co_a AND dc.doc_type = 'gehaltsquittung' AND dc.year = 2025;
+  PERFORM _sc_eq('... and its 2025 counter only 2025 salaries', n, 2::bigint);
+  SELECT count(*) INTO n FROM document_counters dc WHERE dc.company_id = co_a;
+  PERFORM _sc_eq('... and there are no others', n, 2::bigint);
+  SELECT dc.n INTO n FROM document_counters dc
+   WHERE dc.company_id = co_b AND dc.doc_type = 'gehaltsquittung' AND dc.year = 2026;
+  PERFORM _sc_eq('company B''s counter is its own', n, 1::bigint);
 
   -- ── reads ───────────────────────────────────────────────────────────────
   PERFORM _sc_as(admin_b);
@@ -317,7 +375,7 @@ BEGIN
   PERFORM _sc_as(viewer_a);
   SELECT count(*) INTO n FROM salary_cash_receipts;
   RESET ROLE;
-  PERFORM _sc_eq('a viewer reads its company''s receipts', n, 5::bigint);
+  PERFORM _sc_eq('a viewer reads its company''s receipts', n, 7::bigint);
   -- Since 20260917130000 (plan 3.3) the Gehaltsquittung tables carry the same
   -- SELECT shape as every other business table, and since 20260917140000 (plan
   -- 3.4) that shape is confined to the company a staff account has open. This
@@ -404,8 +462,10 @@ BEGIN
     FROM salary_cash_receipts WHERE company_id = co_a AND status = 'confirmed';
   PERFORM _sc_eq('after the void, cash out still equals the confirmed receipts', cash_out, receipted);
 
+  -- S1 is a 2026 salary, so this continues the 2026 sequence past R_S7's 0005;
+  -- the 2025 numbers S12 and S13 took are on a counter of their own.
   v := _sc_confirm(admin_a, gen_random_uuid(), s1, 250.00);
-  PERFORM _sc_eq('the voided amount can be paid again, under a new number', v.receipt_number, 'GQ-2026-0005'::text);
+  PERFORM _sc_eq('the voided amount can be paid again, under a new number', v.receipt_number, 'GQ-2026-0006'::text);
   PERFORM _sc_eq('... which settles S1 again', v.is_partial, false);
 
   -- ── signed copy ─────────────────────────────────────────────────────────
@@ -466,6 +526,19 @@ BEGIN
   PERFORM _sc_eq('... and the receipt''s payment', n, 0::bigint);
   SELECT count(*) INTO n FROM cash_movements WHERE id = r_s3.cash_movement_id;
   PERFORM _sc_eq('... while the cash it paid out stays in the ledger', n, 1::bigint);
+
+  -- ── the rule as a rule, over every receipt this file issued ─────────────
+  -- Stated once as an invariant rather than receipt by receipt, so a receipt
+  -- added to this file later is covered without anyone remembering to. Voided
+  -- receipts are included: a void keeps the number it printed. This holds only
+  -- for receipts issued under 20260919160000; the ones production issued before
+  -- it carry the year of their payment and are deliberately never renumbered.
+  SELECT count(*) INTO n
+    FROM salary_cash_receipts
+   WHERE substring(receipt_number from 4 for 4) IS DISTINCT FROM business_year::text;
+  PERFORM _sc_eq('every number''s year is the salary''s business year', n, 0::bigint);
+  SELECT count(*) INTO n FROM salary_cash_receipts;
+  PERFORM _sc_eq('... over every receipt this file issued', n, 9::bigint);
 
   RAISE NOTICE '── salary cash assertions passed ──';
 END $$;

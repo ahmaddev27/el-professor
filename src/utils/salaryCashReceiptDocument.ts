@@ -25,7 +25,17 @@ export type ReceiptDocumentStatus = 'preview' | 'confirmed' | 'voided';
 
 export interface ReceiptDocumentInput {
   status: ReceiptDocumentStatus;
-  /** GQ-YYYY-NNNN, issued by the database; null in the preview. */
+  /**
+   * GQ-YYYY-NNNN, issued by the database; null in the preview.
+   *
+   * **Never predict it here.** `confirm_salary_cash_payment` draws it from a
+   * counter row it locks inside its own transaction, so only that transaction
+   * knows the sequence. The YYYY is the *salary's* business year — the
+   * `business_year` the receipt stores, not the year of the payment date
+   * (owner decision 17.09.2026, migration `20260919160000`) — and receipts
+   * issued before that migration carry the payment year instead, so the number
+   * cannot be derived from the row's other fields either.
+   */
   receiptNumber: string | null;
   company: { name: string; addressLines: readonly string[] };
   driver: { name: string; gender: 'male' | 'female' | null };
