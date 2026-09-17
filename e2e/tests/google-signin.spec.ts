@@ -42,7 +42,7 @@ test('the sign-in screen offers no Google button while the provider is off', asy
   await expect(page.getByRole('button', { name: BUTTON })).toHaveCount(0);
 });
 
-test('the Google button sends the browser to Google with the staging client', async ({ page }) => {
+test('the Google button sends the browser to Google with the configured client', async ({ page }) => {
   test.skip(!googleEnabled, 'GOOGLE_SIGNIN_ENABLED is false on staging; set it to true and redeploy to run this.');
 
   await page.goto('/login');
@@ -68,8 +68,10 @@ test('the Google button sends the browser to Google with the staging client', as
   expect(asked.searchParams.get('access_type')).toBeNull();
   expect(asked.searchParams.get('redirect_to')).toBe(`${appOrigin}/auth/callback`);
 
-  // GoTrue's own redirect: the staging client, the staging callback, and the
-  // three scopes the Google Cloud project is registered for.
+  // GoTrue's own redirect: the configured client — one client may serve both
+  // environments since owner decision G3, 17.09.2026, so the id is only checked
+  // to be present — staging's own callback, and the three scopes the Google
+  // Cloud project is registered for.
   const redirect = await fetch(authorizeUrl, { redirect: 'manual' });
   expect(redirect.status).toBeGreaterThanOrEqual(300);
   expect(redirect.status).toBeLessThan(400);

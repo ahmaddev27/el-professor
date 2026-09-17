@@ -451,24 +451,45 @@ export function scopeRefusal(scope: ReceiptScope): ReceiptActionRefusal | null {
  * account still reads no movements, so it still must not be shown a balance
  * that looks complete. The read is granted by capability, not by staff status.
  *
- * `platformReadsCompanyData` is that one database seam and nothing else —
- * today `platformCan('business.read')` from SuperAdminContext, the same source
- * AdminSidebar gates on. Slice 3.4 moves the seam behind a recorded support
- * session by changing that one function body, and this mirror changes with it.
+ * `platformReadsCompanyData` is that one database seam and nothing else, and
+ * slice 3.4 (20260917140000) has now moved it: `platform_reads_company_data()`
+ * is a constant false, and what a platform account may read is the company its
+ * open support session names, answered by `get_active_company_id()`. So the
+ * capability alone is no longer the seam — held by itself it reads *nothing*,
+ * and passing it here would have turned this guard into a rubber stamp: it
+ * would pass, the query would return an empty set, and the screen would print
+ * the confident `0,00 €` this function exists to prevent.
+ *
+ * Its mirror is `platformReadsCompanyData` from SuperAdminContext, which is
+ * `business.read` **and** a context open on the very company being read. A
+ * company user is unaffected: it reads its own ledger through its own
+ * membership, and this flag is false and means nothing for it.
+ *
+ * "Own company" is not a free pass either. `get_active_company_id()` answers a
+ * member's company only while that company is approved, active or in trial and
+ * subscribed, and the member's account is not blocked. For a company user
+ * App.tsx refuses every one of those states before this screen renders. A
+ * platform account skips those gates, yet the database still applies them to
+ * the platform account's own company — so a staff member whose company is
+ * pending or unsubscribed would be shown a till of 0,00 €.
+ * `ownCompanyReadable` is the database's own answer for that account, from
+ * SuperAdminContext, and is true for every company user.
  */
 export function cashLedgerInScope({
   companyId,
   effectiveCompanyId,
   isViewingAsCompany,
   platformReadsCompanyData,
+  ownCompanyReadable,
 }: {
   companyId: string | null;
   effectiveCompanyId: string | null;
   isViewingAsCompany: boolean;
   platformReadsCompanyData: boolean;
+  ownCompanyReadable: boolean;
 }): boolean {
   const scope = receiptScope({ companyId, effectiveCompanyId, isViewingAsCompany });
-  return scope === 'own_company' || platformReadsCompanyData;
+  return (scope === 'own_company' && ownCompanyReadable) || platformReadsCompanyData;
 }
 
 // ─── A confirmation without an answer ───────────────────────────────────────

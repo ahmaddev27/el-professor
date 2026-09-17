@@ -2,6 +2,8 @@ import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { useToast } from '../contexts/ToastContext';
+import { fetchCompanies } from '../lib/platformDirectoryClient';
+import { collectCompanyCounts, UNKNOWN_COMPANY_COUNTS, type CompanyCounts } from '../lib/platformReadModels';
 import {
   Building2, Users, Car, FileText, TrendingUp, AlertTriangle,
   CheckCircle, Clock, XCircle, PauseCircle, Plus, ExternalLink,
@@ -46,6 +48,13 @@ interface CompanyRow {
   user_count: number;
   driver_count: number;
   active_car_count: number;
+  /**
+   * Whether the three counts above were read for this company. False when the
+   * counts could not be read at all, and for a company created since they were
+   * last read — the counts are read on opening and on refresh, not on the
+   * minute tick. Where it is false the counts are 0 and mean nothing.
+   */
+  counts_known: boolean;
   drivers_per_car_limit: number;
   subscription_status: string | null;
   subscription_expires_at: string | null;
@@ -57,7 +66,19 @@ interface PlatformKPIs {
   totalCompanies: number;
   totalUsers: number;
   totalDrivers: number;
-  totalReceipts: number;
+  /**
+   * Platform-wide, and null because no read model returns it: a platform
+   * account reads no company's receipts directly since 20260917140000, and this
+   * screen renders for platform accounts only, so the figure is unknown here
+   * rather than zero.
+   */
+  totalReceipts: number | null;
+  /**
+   * Whether the per-company counts could be read at all. False means the
+   * figures are unknown and must show a dash — never a zero, which on this
+   * screen would say that every customer has no users and no drivers.
+   */
+  countsKnown: boolean;
   trialCompanies: number;
   activeCompanies: number;
   suspendedCompanies: number;
@@ -273,6 +294,22 @@ export default function SuperAdminDashboard() {
   const navigate = useNavigate();
   const { t, tPlural } = useTranslation();
 
+  // Entering a company needs an open support session, not only the capability:
+  // since 20260917140000 the database answers a platform account with the
+  // context's company and nothing else, so navigating without one would render
+  // every tenant screen against rows it cannot read — and PlatformAccountGuard
+  // would bounce it straight back. Refuse and say why, rather than navigate.
+  //
+  // Declared *after* navigate and t, deliberately: a useCallback dependency
+  // array is evaluated where it is written, so naming either of them above its
+  // own const is a use-before-declaration. That was four errors — the exact
+  // four the ratchet caught — and a render-time ReferenceError on the panel's
+  // landing page, which no type error would have described.
+  const openCompany = useCallback((company: any) => {
+    if (enterCompany(company)) { navigate('/overview'); return; }
+    showToast('error', t('sa.companies.needsSupportSession'));
+  }, [enterCompany, navigate, showToast, t]);
+
   const [companies, setCompanies] = useState<CompanyRow[]>([]);
   const [kpis, setKpis] = useState<PlatformKPIs | null>(null);
   const [loading, setLoading] = useState(true);
@@ -283,8 +320,18 @@ export default function SuperAdminDashboard() {
   const [rejectModal, setRejectModal] = useState<{ company: CompanyRow } | null>(null);
   const [rejectReason, setRejectReason] = useState('');
   const [manualSubModal, setManualSubModal] = useState<CompanyRow | null>(null);
+  // The per-company counts as last read. Kept between loads so the minute tick
+  // and the reload after each action reuse them instead of reading them again.
+  const companyCounts = useRef<CompanyCounts>(UNKNOWN_COMPANY_COUNTS);
 
-  const load = useCallback(async (silent = false) => {
+  /**
+   * `silent` keeps the page on screen while it reloads. `readCounts` reads the
+   * per-company counts again, which writes one audit row per page — so only the
+   * page opening and the refresh button pass it. The minute tick and the
+   * reloads after an action never do: one tab left open would otherwise write
+   * some 1 440 rows a day into an append-only log that keeps them all.
+   */
+  const load = useCallback(async (silent = false, readCounts = false) => {
     if (!silent) setLoading(true); else setRefreshing(true);
     try {
       // 1. Companies with plan + trial + subscription data
@@ -296,47 +343,45 @@ export default function SuperAdminDashboard() {
       if (cErr) throw cErr;
       const raw = companiesRaw ?? [];
 
-      // 2. User counts per company
-      const { data: userCounts } = await supabase
-        .from('user_profiles')
-        .select('company_id')
-        .not('company_id', 'is', null)
-        .eq('is_super_admin', false);
+      /*
+        2-3b. Users, drivers and active vehicles per company, from the audited
+        read model rather than counted here by hand.
 
-      // 3. Driver counts per company (active only)
-      const { data: driverCounts } = await supabase
-        .from('drivers')
-        .select('company_id')
-        .not('company_id', 'is', null)
-        .neq('status', 'inactive');
+        The three queries that stood here read user_profiles, drivers and cars
+        across every company with the caller's own JWT, and none of them even
+        bound `error`. Since 20260917140000 (plan 3.4) a platform account reads
+        none of those three without an open context, so each returned `[]` in
+        silence and this page — the panel's landing page — rendered 0 users and
+        0 drivers as headline figures, `0/3` and `0/12` per company, and an
+        attention list naming every customer on the platform as empty.
 
-      // 3b. Active car counts per company
-      const { data: carCounts } = await supabase
-        .from('cars')
-        .select('company_id')
-        .not('company_id', 'is', null)
-        .neq('status', 'inactive');
+        platform_companies_list computes all three server-side under
+        companies.read and records the read — one row per page, which is why
+        they are read only when asked for (see `readCounts`). It is paged, so a
+        platform with more companies than one page holds still gets every
+        count. A refusal, a transport error or companies past the reachable
+        pages leave them unknown, the figures show a dash, and the company table
+        and approvals below still render.
+      */
+      if (readCounts) {
+        companyCounts.current = await collectCompanyCounts(fetchCompanies);
+      }
+      const counts = companyCounts.current;
+      const ucMap = counts.users;
+      const dcMap = counts.drivers;
+      const ccMap = counts.vehicles;
 
       // 4. drivers_per_car_limit from company_settings
       const { data: settingsData } = await supabase
         .from('company_settings')
         .select('company_id, drivers_per_car_limit');
 
-      // 5. Total receipts (platform-wide)
-      const { count: receiptCount } = await supabase
-        .from('receipts')
-        .select('id', { count: 'exact', head: true });
+      // 5. The platform-wide receipt total is gone rather than wrong: a
+      //    platform account reads no company's receipts since 20260917140000,
+      //    so this query could only ever return 0 now, and no read model
+      //    reports the figure. It is unknown here, and the card says so.
 
       // Build maps
-      const ucMap: Record<string, number> = {};
-      (userCounts ?? []).forEach(u => { if (u.company_id) ucMap[u.company_id] = (ucMap[u.company_id] || 0) + 1; });
-
-      const dcMap: Record<string, number> = {};
-      (driverCounts ?? []).forEach(d => { if (d.company_id) dcMap[d.company_id] = (dcMap[d.company_id] || 0) + 1; });
-
-      const ccMap: Record<string, number> = {};
-      (carCounts ?? []).forEach(c => { if (c.company_id) ccMap[c.company_id] = (ccMap[c.company_id] || 0) + 1; });
-
       const dpcMap: Record<string, number> = {};
       (settingsData ?? []).forEach((s: { company_id: string; drivers_per_car_limit: number }) => { if (s.company_id) dpcMap[s.company_id] = s.drivers_per_car_limit; });
 
@@ -350,6 +395,7 @@ export default function SuperAdminDashboard() {
         user_count: ucMap[c.id] || 0,
         driver_count: dcMap[c.id] || 0,
         active_car_count: ccMap[c.id] || 0,
+        counts_known: counts.known && ucMap[c.id] !== undefined,
         drivers_per_car_limit: dpcMap[c.id] ?? 4,
       }));
 
@@ -367,7 +413,10 @@ export default function SuperAdminDashboard() {
         totalCompanies: enriched.filter(c => c.status !== 'archived' && c.status !== 'deleted').length,
         totalUsers,
         totalDrivers,
-        totalReceipts: receiptCount ?? 0,
+        totalReceipts: null,
+        // The totals are sums over every company, so one company whose counts
+        // were not read makes them unknown too.
+        countsKnown: counts.known && enriched.every(c => c.counts_known),
         trialCompanies: enriched.filter(c => c.status === 'trial' && c.trial_end && isAfter(new Date(c.trial_end), now)).length,
         activeCompanies: enriched.filter(c => c.status === 'active').length,
         suspendedCompanies: enriched.filter(c => c.status === 'suspended').length,
@@ -390,9 +439,11 @@ export default function SuperAdminDashboard() {
     }
   }, [t]);
 
-  useEffect(() => { load(); }, [load]);
+  // Opening the page is a deliberate read, so it reads the counts.
+  useEffect(() => { load(false, true); }, [load]);
 
-  // Auto-refresh every 60s for countdowns
+  // Auto-refresh every 60s for countdowns — and never the counts, which cost an
+  // audit row a page.
   useEffect(() => {
     const id = setInterval(() => load(true), 60_000);
     return () => clearInterval(id);
@@ -529,10 +580,14 @@ export default function SuperAdminDashboard() {
         const remaining = tPlural({ one: 'sa.dash.dayCount.one', other: 'sa.dash.dayCount.other' }, daysLeft);
         attentionItems.push({ id: `${c.id}-warning`, companyName: c.name, reason: t('sa.dash.attention.trialEndsIn', { remaining }), severity: 'warning', company: c });
       }
-      if (c.user_count === 0) {
+      // Both flags read 0 as "none", so they may only be raised where this
+      // company's counts were actually read. Unread, a count is 0 and means
+      // "unknown": every company would look empty, and the list would name
+      // every customer on the platform.
+      if (c.counts_known && c.user_count === 0) {
         attentionItems.push({ id: `${c.id}-nousers`, companyName: c.name, reason: t('sa.dash.attention.noUsers'), severity: 'info', company: c });
       }
-      if (c.driver_count === 0 && c.status !== 'inactive') {
+      if (c.counts_known && c.driver_count === 0 && c.status !== 'inactive') {
         attentionItems.push({ id: `${c.id}-nodrivers`, companyName: c.name, reason: t('sa.dash.attention.noDrivers'), severity: 'info', company: c });
       }
       if (c.status === 'suspended') {
@@ -589,8 +644,9 @@ export default function SuperAdminDashboard() {
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
+          {/* The one reload besides opening the page that reads the counts again. */}
           <button
-            onClick={() => load(true)}
+            onClick={() => load(true, true)}
             disabled={refreshing}
             className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium transition-colors"
             style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
@@ -819,7 +875,7 @@ export default function SuperAdminDashboard() {
                         </td>
                         <td className="px-4 py-3">
                           <button
-                            hidden={!canOpenCompany} onClick={() => { enterCompany(c as any); navigate('/overview'); }}
+                            hidden={!canOpenCompany} onClick={() => openCompany(c as any)}
                             className="p-1.5 rounded-lg transition-colors"
                             style={{ color: 'var(--text-tertiary)' }}
                             onMouseEnter={e => { (e.currentTarget.style.background = 'var(--bg-muted)'); (e.currentTarget.style.color = 'var(--accent)'); }}
@@ -845,9 +901,12 @@ export default function SuperAdminDashboard() {
       {kpis && (
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
           <KpiCard label={t('sa.dash.kpi.companies')} value={kpis.totalCompanies} icon={Building2} color="var(--accent)" trend={kpis.newThisMonth} sub={t('sa.dash.kpi.newThisMonth', { count: kpis.newThisMonth })} />
-          <KpiCard label={t('sa.dash.kpi.users')} value={kpis.totalUsers} icon={Users} color="#8b5cf6" />
-          <KpiCard label={t('sa.dash.kpi.drivers')} value={kpis.totalDrivers} icon={Car} color="#06b6d4" />
-          <KpiCard label={t('sa.dash.kpi.receipts')} value={kpis.totalReceipts} icon={FileText} color="#64748b" />
+          {/* Users and drivers are summed from the audited read model. The
+              receipt total has no read model at all, so it is unknown rather
+              than zero — a dash, never a number nobody read. */}
+          <KpiCard label={t('sa.dash.kpi.users')} value={kpis.countsKnown ? kpis.totalUsers : '–'} icon={Users} color="#8b5cf6" />
+          <KpiCard label={t('sa.dash.kpi.drivers')} value={kpis.countsKnown ? kpis.totalDrivers : '–'} icon={Car} color="#06b6d4" />
+          <KpiCard label={t('sa.dash.kpi.receipts')} value={kpis.totalReceipts ?? '–'} icon={FileText} color="#64748b" />
           <KpiCard label={t('sa.dash.kpi.inTrial')} value={kpis.trialCompanies} icon={Clock} color="var(--warning)" sub={kpis.expiringIn7Days > 0 ? t('sa.dash.kpi.endingSoon', { count: kpis.expiringIn7Days }) : undefined} />
         </div>
       )}
@@ -949,7 +1008,7 @@ export default function SuperAdminDashboard() {
                       </button>
                     )}
                     <button
-                      hidden={!canOpenCompany} onClick={() => { enterCompany(item.company as any); navigate('/overview'); }}
+                      hidden={!canOpenCompany} onClick={() => openCompany(item.company as any)}
                       className="p-1.5 rounded-lg transition-colors"
                       style={{ color: severityColor }}
                       title={t('sa.dash.openCompany')}
@@ -1029,7 +1088,7 @@ export default function SuperAdminDashboard() {
                           {t('sa.dash.activate')}
                         </button>
                         <button
-                          hidden={!canOpenCompany} onClick={() => { enterCompany(c as any); navigate('/overview'); }}
+                          hidden={!canOpenCompany} onClick={() => openCompany(c as any)}
                           className="p-1.5 rounded-lg transition-colors"
                           style={{ color: 'var(--text-tertiary)' }}
                           onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-muted)')}
@@ -1148,16 +1207,16 @@ export default function SuperAdminDashboard() {
                         style={{ background: 'var(--bg-subtle)', color: 'var(--text-primary)' }}
                         title={t('sa.dash.carLimit')}
                       />
-                      <span className="text-[10px] whitespace-nowrap" style={{ color: c.active_car_count >= c.subscription_car_limit ? 'var(--danger)' : 'var(--text-tertiary)' }}>
-                        {c.active_car_count}/{c.subscription_car_limit}
+                      <span className="text-[10px] whitespace-nowrap" style={{ color: c.counts_known && c.active_car_count >= c.subscription_car_limit ? 'var(--danger)' : 'var(--text-tertiary)' }}>
+                        {c.counts_known ? c.active_car_count : '–'}/{c.subscription_car_limit}
                       </span>
                     </div>
                   </td>
 
                   {/* Fahrer aktiv / limit */}
                   <td className="px-4 py-3">
-                    <span className="text-xs" style={{ color: c.driver_count >= (c.subscription_car_limit * c.drivers_per_car_limit) ? 'var(--danger)' : 'var(--text-secondary)' }}>
-                      {c.driver_count}/{c.subscription_car_limit * c.drivers_per_car_limit}
+                    <span className="text-xs" style={{ color: c.counts_known && c.driver_count >= (c.subscription_car_limit * c.drivers_per_car_limit) ? 'var(--danger)' : 'var(--text-secondary)' }}>
+                      {c.counts_known ? c.driver_count : '–'}/{c.subscription_car_limit * c.drivers_per_car_limit}
                     </span>
                   </td>
 
@@ -1250,7 +1309,7 @@ export default function SuperAdminDashboard() {
                         <PencilLine size={13} />
                       </button>
                       <button
-                        hidden={!canOpenCompany} onClick={() => { enterCompany(c as any); navigate('/overview'); }}
+                        hidden={!canOpenCompany} onClick={() => openCompany(c as any)}
                         className="p-1.5 rounded-lg transition-colors"
                         style={{ color: 'var(--accent)' }}
                         title={t('sa.dash.openAsCompany')}
@@ -1301,7 +1360,7 @@ export default function SuperAdminDashboard() {
                 {format(new Date(c.created_at), 'dd. MMM', { locale: de })}
               </span>
               <button
-                hidden={!canOpenCompany} onClick={() => { enterCompany(c as any); navigate('/overview'); }}
+                hidden={!canOpenCompany} onClick={() => openCompany(c as any)}
                 className="p-1.5 rounded-lg transition-colors"
                 style={{ color: 'var(--text-tertiary)' }}
                 onMouseEnter={e => { (e.currentTarget.style.background = 'var(--bg-muted)'); (e.currentTarget.style.color = 'var(--accent)'); }}

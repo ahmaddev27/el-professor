@@ -25,11 +25,13 @@
                        is not a way around the state rules — and
                        redeem_activation_code, the way out of the blocked state,
                        still answers
-    5. the seams       platform_writes_company_data() is false, so no staff role
-                       writes a tenant's rows; platform_reads_company_data()
-                       follows business.read, so billing reads none of it
-    6. staff           an owner reads every company's business data and writes
-                       none of it, and cannot move a row between companies
+    5. the seams       both are false since 20260917140000: neither names a
+                       company, and each sits in an OR beside the tenant term,
+                       so neither can confine anything
+    6. staff           an owner with no open context reads none of a company's
+                       business data and writes none of it, and cannot move a
+                       row between companies. What an open context changes is
+                       tests/rls/platform-contexts.sql's
     7. the shape       every business table asks the same helper, in every
                        command it admits
 
@@ -60,6 +62,7 @@ BEGIN
   EXECUTE 'SET LOCAL ROLE NONE';
   PERFORM set_config('request.jwt.claim.sub', '', true);
   PERFORM set_config('request.jwt.claim.role', '', true);
+  PERFORM set_config('request.jwt.claim.amr', '', true);
 END $$;
 
 /** Become a signed-in user, or anon when p_user is NULL. */
@@ -73,6 +76,8 @@ BEGIN
   ELSE
     PERFORM set_config('request.jwt.claim.sub', p_user::text, true);
     PERFORM set_config('request.jwt.claim.role', 'authenticated', true);
+    -- A password sign-in: since 20260919130000 a platform capability needs one.
+    PERFORM set_config('request.jwt.claim.amr', '[{"method": "password", "timestamp": 1789416052}]', true);
     EXECUTE 'SET LOCAL ROLE authenticated';
   END IF;
 END $$;
@@ -490,22 +495,30 @@ DECLARE
   co_ok     constant uuid := _ts_id('company:ok');
   drv_ok    constant uuid := _ts_id('driver:ok');
 BEGIN
-  PERFORM _ts_ok('seam: platform_writes_company_data() is false — no staff role writes tenant data before 3.4',
+  -- Both seams are constants since 20260917140000 (plan 3.4): neither takes a
+  -- company, and each sits in an OR beside the tenant term, so a true in either
+  -- would open every company at once. What a staff account may reach is the
+  -- company its open context names, answered by get_active_company_id();
+  -- tests/rls/platform-contexts.sql takes that through every mode and every way
+  -- a context ends.
+  PERFORM _ts_ok('seam: platform_writes_company_data() is false — a support session writes through the tenant term, not through this branch',
     _ts_try(owner_u, 'SELECT platform_writes_company_data()::text') = 'false'
     AND _ts_try(support, 'SELECT platform_writes_company_data()::text') = 'false');
-  PERFORM _ts_ok('seam: platform_reads_company_data() follows business.read',
-    _ts_try(owner_u,  'SELECT platform_reads_company_data()::text') = 'true'
-    AND _ts_try(support,  'SELECT platform_reads_company_data()::text') = 'true'
-    AND _ts_try(readonly, 'SELECT platform_reads_company_data()::text') = 'true'
+  PERFORM _ts_ok('seam: platform_reads_company_data() is false for every staff role, business.read included',
+    _ts_try(owner_u,  'SELECT platform_reads_company_data()::text') = 'false'
+    AND _ts_try(support,  'SELECT platform_reads_company_data()::text') = 'false'
+    AND _ts_try(readonly, 'SELECT platform_reads_company_data()::text') = 'false'
     AND _ts_try(billing,  'SELECT platform_reads_company_data()::text') = 'false');
   PERFORM _ts_ok('seam: a company user holds neither',
     _ts_try('a0000000-0000-4000-8000-000000000001', 'SELECT platform_reads_company_data()::text') = 'false'
     AND _ts_try('a0000000-0000-4000-8000-000000000001', 'SELECT platform_writes_company_data()::text') = 'false');
 
-  -- Reading stays as it is until 3.4 gives staff a session to read inside.
-  PERFORM _ts_ok('staff: an owner reads a company''s drivers and its Fahrtenbuch (HOLE[3.4])',
-    _ts_try(owner_u, format('SELECT count(*)::text FROM drivers WHERE id = %L', drv_ok)) = '1'
-    AND _ts_try(owner_u, format('SELECT count(*)::text FROM fahrtenbuch_trips WHERE id = %L', _ts_id('trip:ok'))) = '1');
+  -- Reading is now the context's too: none of these principals has opened one,
+  -- and _ts_become carries no session claim, so an owner reads a company's
+  -- operational data exactly as anon does.
+  PERFORM _ts_ok('staff: an owner with no open context reads neither a company''s drivers nor its Fahrtenbuch',
+    _ts_try(owner_u, format('SELECT count(*)::text FROM drivers WHERE id = %L', drv_ok)) = '0'
+    AND _ts_try(owner_u, format('SELECT count(*)::text FROM fahrtenbuch_trips WHERE id = %L', _ts_id('trip:ok'))) = '0');
   PERFORM _ts_ok('staff: billing holds no business.read, so it reads no company''s drivers',
     _ts_try(billing, format('SELECT count(*)::text FROM drivers WHERE id = %L', drv_ok)) = '0');
 
@@ -548,9 +561,22 @@ BEGIN
   PERFORM _ts_ok('capabilities: billing cannot change the document categories (settings.manage is the owner''s), and an owner can',
     _ts_try(billing, format('UPDATE document_categories SET name = name WHERE id = %L', _ts_id('category'))) = 'rows 0'
     AND _ts_try(owner_u, format('UPDATE document_categories SET name = name WHERE id = %L', _ts_id('category'))) = 'rows 1');
-  PERFORM _ts_ok('capabilities: support manages a company''s users, billing does not',
+  -- Both answer `rows 0` since 20260917140000 (plan 3.4), and for two different
+  -- reasons, which is why the line no longer claims to contrast them: billing
+  -- holds no company_users.manage and never reaches the USING clause, while
+  -- support holds it and cannot see the row its UPDATE names —
+  -- platform_reads_company_data() is a constant false now, none of these
+  -- principals has a context open, and an UPDATE whose WHERE reads `user_id`
+  -- needs the SELECT policy to admit the row first.
+  --
+  -- The capability itself stays pinned in tests/rls/platform-authority.sql
+  -- (section 2's role x capability matrix, and 4b's platform_can_manage_account),
+  -- and what holding it *does* is pinned in tests/rls/matrix.sql, whose
+  -- staff_support column updates a profile of the company it has opened
+  -- (user_profiles U = 'Y.') and is refused on the other company's.
+  PERFORM _ts_ok('capabilities: with no context open, neither support nor billing reaches a company''s users',
     _ts_try(support, format('UPDATE user_profiles SET full_name = full_name WHERE user_id = %L',
-                            _ts_id('user:admin-ok'))) = 'rows 1'
+                            _ts_id('user:admin-ok'))) = 'rows 0'
     AND _ts_try(billing, format('UPDATE user_profiles SET full_name = full_name WHERE user_id = %L',
                                 _ts_id('user:admin-ok'))) = 'rows 0');
 END $$;

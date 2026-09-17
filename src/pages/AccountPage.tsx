@@ -12,6 +12,7 @@ import {
   type OtpRequestFailure,
   type OtpVerifyFailure,
 } from '../lib/otpClient';
+import { changePlatformEmail, platformEmailChangeMessageKey } from '../lib/platformEmailChange';
 import EmphasizedText from '../components/auth/EmphasizedText';
 import OtpChallenge from '../components/auth/OtpChallenge';
 
@@ -33,10 +34,20 @@ type EmailChallenge = { newEmail: string; accessToken: string; cooldownSeconds: 
  * - Password: `supabase.auth.updateUser()` accepts a new password on the
  *   strength of the session alone, so the current password is verified with a
  *   sign-in call before the update is sent.
- * - Email address: the same sign-in is the password proof otp-request demands
- *   (at most ten minutes old), and the address changes only once the code sent
- *   to the new address is entered. The trigger sync_user_profile_email keeps
- *   user_profiles.email in step with auth.users.
+ * - Email address: the same sign-in is the password proof the server demands
+ *   (at most ten minutes old, read from the token's `amr` claim). The trigger
+ *   sync_user_profile_email keeps user_profiles.email in step with auth.users.
+ *
+ * The email address takes one of two paths, and the sign-in above is the same
+ * in both:
+ *
+ * - **A company user** gets a code at the new address and the change happens
+ *   when it is entered (otp-request / otp-verify, unchanged).
+ * - **A platform account** changes it at once (the owner's decision of
+ *   17.09.2026: the code goes to the new mailbox, which the owner could not
+ *   read). `platform-staff/email-change` re-checks on the server that the
+ *   account really is platform staff and that the password proof behind the
+ *   token is fresh, so the branch below chooses a form, never a permission.
  */
 const AccountPage: React.FC = () => {
   const { t, tPlural } = useTranslation();
@@ -101,25 +112,41 @@ const AccountPage: React.FC = () => {
       : { ok: true, text: t('account.saved.name') });
   };
 
+  /**
+   * The current password, spent on a sign-in against the *current* address.
+   *
+   * That call is what proves the password to GoTrue and mints the session whose
+   * `amr` claim both servers then read: otp-request for the code path, and
+   * platform-staff/email-change for the direct one. It is not a browser-side
+   * check — the browser only carries the resulting token.
+   */
+  const provePassword = async (): Promise<string | null> => {
+    const { data, error } = await supabase.auth.signInWithPassword({ email: signInEmail, password: emailPw });
+    return error || !data.session ? null : data.session.access_token;
+  };
+
+  /** The address as typed, or null with the message already shown. */
+  const validatedNewEmail = (): string | null => {
+    const next = normalizeEmail(email);
+    if (!isPlausibleEmail(next)) { setEmailMsg({ ok: false, text: t('account.error.emailInvalid') }); return null; }
+    if (next === normalizeEmail(signInEmail)) { setEmailMsg({ ok: false, text: t('account.error.emailUnchanged') }); return null; }
+    return next;
+  };
+
   const requestEmailChange = async (e: React.FormEvent) => {
     e.preventDefault();
     setEmailMsg(null);
-    const next = normalizeEmail(email);
-    if (!isPlausibleEmail(next)) { setEmailMsg({ ok: false, text: t('account.error.emailInvalid') }); return; }
-    if (next === normalizeEmail(signInEmail)) { setEmailMsg({ ok: false, text: t('account.error.emailUnchanged') }); return; }
+    const next = validatedNewEmail();
+    if (!next) return;
 
     setEmailBusy(true);
-    const { data, error: authErr } = await supabase.auth.signInWithPassword({
-      email: signInEmail,
-      password: emailPw,
-    });
-    if (authErr || !data.session) {
+    const accessToken = await provePassword();
+    if (!accessToken) {
       setEmailBusy(false);
       setEmailMsg({ ok: false, text: t('account.error.pwCurrentWrong') });
       return;
     }
 
-    const accessToken = data.session.access_token;
     const result = await requestOtp({ purpose: 'email_change', newEmail: next, accessToken });
     setEmailBusy(false);
     if (!result.ok) {
@@ -129,6 +156,41 @@ const AccountPage: React.FC = () => {
     }
     setEmailPw('');
     setEmailChallenge({ newEmail: next, accessToken, cooldownSeconds: result.cooldownSeconds });
+  };
+
+  /**
+   * The platform account's path: no code, the change happens in the request.
+   *
+   * The server checks again that this account holds an active platform staff
+   * row (`not_platform_account`) and that the token's password proof is fresh
+   * (`reauth_required`), so nothing here is the control.
+   */
+  const changeEmailDirectly = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setEmailMsg(null);
+    const next = validatedNewEmail();
+    if (!next) return;
+
+    setEmailBusy(true);
+    const accessToken = await provePassword();
+    if (!accessToken) {
+      setEmailBusy(false);
+      setEmailMsg({ ok: false, text: t('account.error.pwCurrentWrong') });
+      return;
+    }
+
+    const result = await changePlatformEmail({ newEmail: next, accessToken });
+    if (!result.ok) {
+      setEmailBusy(false);
+      setEmailMsg({ ok: false, text: t(platformEmailChangeMessageKey(result.reason)) });
+      return;
+    }
+    // A refreshed token carries the new address, and AuthContext's listener
+    // reloads the profile the trigger has already updated.
+    await supabase.auth.refreshSession();
+    setEmailBusy(false);
+    setEmailPw('');
+    setEmailMsg({ ok: true, text: t('account.saved.email') });
   };
 
   const handleEmailVerified = async () => {
@@ -278,7 +340,8 @@ const AccountPage: React.FC = () => {
         </button>
       </form>
 
-      {/* Email: the form sends a code to the new address; the challenge completes the change */}
+      {/* Email. A company user gets a code at the new address and the challenge
+          below completes the change; a platform account changes it in one step. */}
       {emailChallenge ? (
         <section className="rounded-xl p-5" style={card}>
           {emailHeading}
@@ -309,10 +372,10 @@ const AccountPage: React.FC = () => {
           </div>
         </section>
       ) : (
-        <form onSubmit={requestEmailChange} className="rounded-xl p-5" style={card}>
+        <form onSubmit={isSuperAdmin ? changeEmailDirectly : requestEmailChange} className="rounded-xl p-5" style={card}>
           {emailHeading}
           <p className="text-xs mt-1" style={{ color: 'var(--text-secondary)' }}>
-            {t('account.email.hint')}
+            {isSuperAdmin ? t('account.email.platformHint') : t('account.email.hint')}
           </p>
           <div className="mt-3 space-y-3">
             <input
@@ -340,7 +403,9 @@ const AccountPage: React.FC = () => {
           <button type="submit" disabled={emailBusy || !emailPw}
             className="mt-4 rounded-lg px-4 py-2 text-sm font-medium transition-colors"
             style={btn(emailBusy || !emailPw)}>
-            {emailBusy ? t('otp.verifying') : t('account.email.sendCode')}
+            {emailBusy
+              ? (isSuperAdmin ? t('common.saving') : t('otp.verifying'))
+              : (isSuperAdmin ? t('account.email.changeNow') : t('account.email.sendCode'))}
           </button>
         </form>
       )}

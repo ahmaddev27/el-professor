@@ -54,15 +54,17 @@ import {
  * 0,00 € under "Gehaltsauszahlungen (bar)" would turn a missing read into a
  * claim.
  *
- * Slice 3.3 (20260917130000) did not lift that guard; it narrowed it. Both
- * tables now carry the SELECT shape every business table carries, whose
- * platform branch is `platform_reads_company_data()` — today
- * `platform_can('business.read')`, held by `owner`, `support` and `read_only`
- * and *not* by `billing`. So the ledger is in scope for the caller's own
- * company or for a reader holding business.read, and a billing account still
- * reads no movements. For that reader this screen still drops the payout card,
- * keeps the older `Bargeld − Belege` label and says why, and the Excel dump
- * carries the same caveat. The decision is cashLedgerInScope().
+ * Slice 3.3 (20260917130000) did not lift that guard; it narrowed it, giving
+ * both tables the SELECT shape every business table carries. Slice 3.4
+ * (20260917140000) then moved the platform half: `platform_reads_company_data()`
+ * is a constant false, and a platform account reads a company's ledger only
+ * through a support session open on that company. So the ledger is in scope
+ * for the caller's own company — while the database still admits it — or
+ * inside such a session, and nowhere else: not for `billing`, which holds no
+ * `business.read`, and not for any role with the capability and no session.
+ * Out of scope this screen drops the payout card, keeps the older
+ * `Bargeld − Belege` label and says why, and the Excel dump carries the same
+ * caveat. The decision is cashLedgerInScope().
  */
 
 const EMPTY_TOTALS: CashLedgerTotals = {
@@ -90,18 +92,26 @@ export default function BargeldbestandPage() {
   const [endDate, setEndDate] = useState('');
   const [drivers, setDrivers] = useState<string[]>([]);
   const { user, loading: authLoading, companyId: ownCompanyId } = useAuth();
-  const { effectiveCompanyId: companyId, isViewingAsCompany, platformCan } = useSuperAdmin();
+  const {
+    effectiveCompanyId: companyId, isViewingAsCompany, platformReadsCompanyData, ownCompanyReadable,
+  } = useSuperAdmin();
   const { showToast } = useToast();
 
   // The same scope the Gehaltsquittung screens use, because it is the same two
-  // tables and the same policy — widened by the one capability 3.3 put into
-  // that policy. Not a bare !isViewingAsCompany: staff who enter their *own*
-  // company still read the ledger, and that would have hidden it.
+  // tables and the same policy. Not a bare !isViewingAsCompany: staff who enter
+  // their *own* company still read the ledger, and that would have hidden it.
   const ledgerInScope = cashLedgerInScope({
     companyId: ownCompanyId,
     effectiveCompanyId: companyId,
     isViewingAsCompany,
-    platformReadsCompanyData: platformCan('business.read'),
+    // The seam as the database now answers it: business.read *and* a live
+    // context on this company. The capability alone reads nothing since
+    // 20260917140000, so passing it here would make this guard a rubber stamp.
+    platformReadsCompanyData,
+    // And the own company only while the database still admits it: a platform
+    // account is let past App.tsx's approval and subscription gates, the
+    // database's tenant term is not.
+    ownCompanyReadable,
   });
 
   const ledgerLabels: CashLedgerLabels = {

@@ -262,6 +262,9 @@ export const de = {
   'account.email.submit':      'Neue Adresse bestätigen',
   'account.email.currentPassword': 'Aktuelles Passwort',
   'account.email.sendCode':    'Bestätigungscode senden',
+  // Plattform-Konten ändern die Adresse ohne Code (Entscheidung des Inhabers, 17.09.2026).
+  'account.email.platformHint':'Mit dieser Adresse melden Sie sich an. Als Plattform-Konto ändern Sie sie sofort — ohne Bestätigungscode, aber mit Ihrem aktuellen Passwort.',
+  'account.email.changeNow':   'Adresse jetzt ändern',
   'account.email.codeSentTo':  'Wir haben einen 6-stelligen Code an {email} gesendet. Geben Sie ihn ein, um die Änderung abzuschließen.',
   'account.password.heading':  'Passwort',
   'account.password.hint':     'Mindestens {n} Zeichen. Zur Bestätigung wird Ihr aktuelles Passwort abgefragt.',
@@ -277,6 +280,7 @@ export const de = {
   'account.error.nameEmpty':   'Bitte geben Sie einen Namen ein.',
   'account.error.emailInvalid':'Bitte geben Sie eine gültige E-Mail-Adresse ein.',
   'account.error.emailUnchanged':'Das ist bereits Ihre aktuelle E-Mail-Adresse.',
+  'account.error.emailChangeTooOften':'Die E-Mail-Adresse wurde in der letzten Stunde zu oft geändert. Bitte versuchen Sie es später erneut.',
   'account.error.pwShort':     'Das Passwort muss mindestens {n} Zeichen lang sein.',
   'account.error.pwMismatch':  'Die beiden Passwörter stimmen nicht überein.',
   'account.error.pwSame':      'Das neue Passwort muss sich vom aktuellen unterscheiden.',
@@ -1627,6 +1631,7 @@ export const de = {
   'sa.companies.noUsers':                  'Keine Benutzer',
   'sa.companies.noneYet':                  'Noch keine Unternehmen',
   'sa.companies.openAsCompany':            'Als Unternehmen öffnen',
+  'sa.companies.needsSupportSession':      'Für den Zugriff auf ein Unternehmen ist eine offene Support-Sitzung nötig.',
   'sa.companies.phone':                    'Telefon',
   'sa.companies.role.admin':               'Administrator',
   'sa.companies.role.creator':             'Ersteller',
@@ -2228,6 +2233,7 @@ export const de = {
   'diag.duplicateIdsSample':               'Doppelte IDs (Stichprobe):',
   'diag.errDuplicateTripIds':              '{count} doppelte Trip-IDs gefunden',
   'diag.errNoTrips':                       'Keine Fahrten gefunden für diese Planning Run ID',
+  'diag.warnNotAvailableHere':             'Diese Planning Run ID ist von diesem Konto aus nicht lesbar. Die Prüfung sagt hier nichts aus — sie ist kein Befund.',
   'diag.errRunNotFound':                   'Planning Run nicht gefunden: {message}',
   'diag.errRunStatus':                     'Planning Run Status ist "{status}", erwartet "{expected}"',
   'diag.errTotalsMismatch':                'Stundennachweis-Fahrten ({sheet}) ≠ zugewiesene Fahrten ({assigned})',
@@ -4197,6 +4203,9 @@ export const de = {
   'activation.codePlaceholder': '6-stelliger Code',
   'forgot.emailPlaceholder':    'ihre@email.de',
   'setpw.redirecting':          'Sie werden weitergeleitet...',
+  // Plattform-Konten melden sich mit E-Mail-Adresse und Passwort an, nie über
+  // eine Einladung oder einen Code (Entscheidung des Inhabers, 16.09.2026).
+  'setpw.platformSignInAgain':  'Bitte melden Sie sich jetzt mit Ihrem neuen Passwort an.',
   'umsaetze.title':             'Umsätze',
   'users.export.createdAt':     'Erstellt am',
   'users.export.customRole':    'Benutzerdefinierte Rolle',

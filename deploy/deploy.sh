@@ -94,17 +94,61 @@ env_value() {
 # before it gets that far. Switched on, it needs a Google web client id and a
 # secret.
 #
-# Each environment has its own Google client (owner decision G3 is still open;
-# the plan recommends separate clients and this takes that): a client shared
-# with production would accept production's consent and tokens on a host that
-# runs a copy of production's accounts. The ids are compared by hash, like
-# OTP_PEPPER, from whichever side deploys. No value read here is ever printed.
+# Staging and production may share one Google OAuth client (owner decision G3,
+# taken 17.09.2026). The risk the owner accepted with it: staging runs a copy of
+# production's accounts, so one client is one consent screen and one token
+# audience across both environments — a token Google minted for staging carries
+# the same audience production trusts, and a change to the client's redirect
+# URIs, its branding or its verification state reaches both stacks at once.
+#
+# So sharing is allowed but never inferred. GOOGLE_CLIENT_SHARED=true has to
+# stand in *both* .env files, which makes a shared client a written decision
+# rather than an accident of editing. What that still catches is the partial
+# mistake: the other environment's client id pasted into GOOGLE_CLIENT_ID while
+# no opt-in was written. Only one side carrying the opt-in is a
+# misconfiguration too — half a decision — and the refusal names the side that
+# is missing it, or holds something other than true. Empty or false means "not
+# shared", and any other value is refused like the switch, so a typo never
+# reads as "not shared".
+#
+# Be exact about the limit, because the next person will trust this comment:
+# once both files carry the opt-in, this check can no longer tell a deliberate
+# share from a wholesale copy of the other environment's .env, since such a
+# copy brings the opt-in with it. A copied .env is caught by the PROJECT_NAME
+# guard, which runs before this one, and again by the JWT_SECRET, SMTP_HOST,
+# COMPOSE_PROFILES and OTP_PEPPER guards. This check does not repeat their work
+# — the release path is the wrong place to carry a fourth way of refusing what
+# three earlier guards already refuse.
+#
+# The opt-in is read on the same terms as the comparison it governs: whenever
+# GOOGLE_CLIENT_ID is non-empty, whatever the switch says and from whichever
+# side deploys, because the id is written into .env before the switch is
+# flipped. Its spelling is checked unconditionally, next to the switch's, and
+# the peer's the same way once the ids turn out to match. The ids are still
+# compared by hash, like OTP_PEPPER; no value read here is ever printed.
+
+# Why one side fails the shared-client rule: the key is absent, or it is there
+# and is not the opt-in. Any other value is refused before this is reached, so
+# "not true" can only mean false.
+shared_optin_problem() {
+  case "$1" in
+    '') printf 'missing from %s' "$2" ;;
+    *)  printf 'not true in %s' "$2" ;;
+  esac
+}
+
 google_signin_guard() {
-  local env_file="$1" peer_env_file="$2" flag client_id peer_client_id
+  local env_file="$1" peer_env_file="$2" peer_name="${3:-the other environment}"
+  local flag shared client_id peer_client_id peer_shared problems
   flag="$(env_value "$env_file" GOOGLE_SIGNIN_ENABLED)"
   case "$flag" in
     ''|true|false) ;;
     *) fail "GOOGLE_SIGNIN_ENABLED must be empty, true or false; .env holds something else" ;;
+  esac
+  shared="$(env_value "$env_file" GOOGLE_CLIENT_SHARED)"
+  case "$shared" in
+    ''|true|false) ;;
+    *) fail "GOOGLE_CLIENT_SHARED must be empty, true or false; .env holds something else" ;;
   esac
   client_id="$(env_value "$env_file" GOOGLE_CLIENT_ID)"
   if [ "$flag" = true ]; then
@@ -115,8 +159,19 @@ google_signin_guard() {
   fi
   if [ -n "$client_id" ] && [ -f "$peer_env_file" ]; then
     peer_client_id="$(env_value "$peer_env_file" GOOGLE_CLIENT_ID)"
-    [ "$(printf '%s' "$client_id" | sha256sum | cut -c1-16)" != "$(printf '%s' "$peer_client_id" | sha256sum | cut -c1-16)" ] \
-      || fail "staging and production share a GOOGLE_CLIENT_ID; each environment needs its own Google OAuth client"
+    if [ "$(printf '%s' "$client_id" | sha256sum | cut -c1-16)" = "$(printf '%s' "$peer_client_id" | sha256sum | cut -c1-16)" ]; then
+      peer_shared="$(env_value "$peer_env_file" GOOGLE_CLIENT_SHARED)"
+      case "$peer_shared" in
+        ''|true|false) ;;
+        *) fail "GOOGLE_CLIENT_SHARED in $peer_name's .env must be empty, true or false; it holds something else" ;;
+      esac
+      problems=""
+      [ "$shared" = true ] || problems="$(shared_optin_problem "$shared" "this environment's .env")"
+      [ "$peer_shared" = true ] \
+        || problems="${problems:+$problems and }$(shared_optin_problem "$peer_shared" "$peer_name's .env")"
+      [ -z "$problems" ] \
+        || fail "staging and production share a GOOGLE_CLIENT_ID; sharing one Google OAuth client is declared with GOOGLE_CLIENT_SHARED=true in both .env files, and it is $problems"
+    fi
   fi
 }
 
@@ -282,8 +337,12 @@ unset OTP_PEPPER
 # its own signup, and Kong's auth-v1-closed block is then all that keeps
 # /signup, /otp and /magiclink from creating accounts, so a release without the
 # block is refused whatever the switch says.
-if [ "$ENVIRONMENT" = staging ]; then PEER_ENV=/srv/PRO/deploy/.env; else PEER_ENV=/srv/PRO-staging/deploy/.env; fi
-google_signin_guard .env "$PEER_ENV"
+if [ "$ENVIRONMENT" = staging ]; then
+  PEER_ENV=/srv/PRO/deploy/.env; PEER_NAME=production
+else
+  PEER_ENV=/srv/PRO-staging/deploy/.env; PEER_NAME=staging
+fi
+google_signin_guard .env "$PEER_ENV" "$PEER_NAME"
 kong_closed_block_guard kong.yml
 GOOGLE_SIGNIN="$(env_value .env GOOGLE_SIGNIN_ENABLED)"
 

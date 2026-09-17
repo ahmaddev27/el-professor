@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Lock, Eye, EyeOff, AlertCircle, CheckCircle2, ShieldCheck } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useTranslation } from '../contexts/LanguageContext';
+import { ADMIN_LOGIN_PATH } from '../lib/adminGate';
 import EmphasizedText from '../components/auth/EmphasizedText';
 
 const MIN_LEN = 8;
@@ -18,8 +19,54 @@ const SetPasswordPage: React.FC = () => {
   const [hasSession, setHasSession] = useState(false);
   const [email, setEmail] = useState<string>('');
   const [status, setStatus] = useState<string>('');
+  /**
+   * Whether **this session** must be replaced by a password sign-in before the
+   * panel will work.
+   *
+   * Since 20260919130000 a platform capability requires a session GoTrue
+   * established with a password, and a session minted from a one-time code
+   * carries `amr: [{method: "otp"}]` (`POST /auth/v1/verify`, verify.go:279).
+   * Such a session holds no role, so a platform account that has just chosen a
+   * password is signed out here and sent to `/admin/login` to use it, rather
+   * than landing on the panel's "no platform role" screen, which would say the
+   * wrong thing.
+   *
+   * **The question is about the session, not the account.** Keying this on
+   * `user_profiles.is_super_admin` — "is this account platform staff" — would
+   * sign out a colleague who arrived from a real password sign-in: an owner
+   * sets a temporary password, the colleague signs in with it (`amr: password`,
+   * the panel fully usable), `MustChangePasswordGuard` sends them here, and
+   * they would be signed out for nothing. So the account flag only decides
+   * whether the question is worth asking, and `platform_whoami()` answers it —
+   * the database's own answer, so it cannot drift from the rule.
+   *
+   * Unanswered is not "sign out": an error leaves the session alone and the
+   * page behaves as it always did. The panel's own screen still offers a
+   * logout, so that path is recoverable; wrongly ending a usable session is
+   * not.
+   */
+  const [isPlatformAccount, setIsPlatformAccount] = useState(false);
+  /** The success panel says "sign in again" only once that is what will happen. */
+  const [signOutPending, setSignOutPending] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
+
+  /**
+   * Does the session in hand hold a platform role? `platform_whoami()` is the
+   * database's own answer, so this can never disagree with the server-side rule.
+   * An error answers `true` — "nothing to do here" — because an unanswered
+   * question is not a reason to end somebody's session.
+   */
+  const sessionHoldsPlatformRole = async (): Promise<boolean> => {
+    try {
+      const { data, error: rpcError } = await supabase.rpc('platform_whoami');
+      if (rpcError) return true;
+      const role = (data as { role?: unknown } | null)?.role;
+      return typeof role === 'string' && role.length > 0;
+    } catch {
+      return true;
+    }
+  };
 
   useEffect(() => {
     let mounted = true;
@@ -32,10 +79,13 @@ const SetPasswordPage: React.FC = () => {
         try {
           const { data: profile } = await supabase
             .from('user_profiles')
-            .select('status')
+            .select('status, is_super_admin')
             .eq('user_id', data.session.user.id)
             .maybeSingle();
-          if (mounted) setStatus(profile?.status ?? '');
+          if (mounted) {
+            setStatus(profile?.status ?? '');
+            setIsPlatformAccount(profile?.is_super_admin === true);
+          }
         } catch {
           /* ignore */
         }
@@ -94,6 +144,42 @@ const SetPasswordPage: React.FC = () => {
       }
 
       setSuccess(true);
+
+      if (isPlatformAccount && !(await sessionHoldsPlatformRole())) {
+        setSignOutPending(true);
+        /*
+          The session in hand holds no platform capability — the database just
+          said so — so ending it is what turns the password just chosen into a
+          usable sign-in.
+
+          The address is rewritten *before* signOut, not navigated to after it:
+          signing out swaps App's authenticated router for the public one, and a
+          navigate() issued around that swap can land in the router being
+          unmounted. Same reason as useOtpSessionHandoff.
+
+          If the sign-out does not happen — blocked storage, a dead network —
+          the address is put back and the ordinary redirect runs, because the
+          alternative is a URL saying /admin/login while the authenticated panel
+          is still on screen, with nothing to click but reload. Both failure
+          shapes are handled: supabase-js resolves with an `error` for most of
+          them and rejects only for the rest.
+        */
+        const here = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+        const stayPut = () => {
+          setSignOutPending(false);
+          window.history.replaceState(window.history.state, '', here);
+          navigate('/', { replace: true });
+        };
+        setTimeout(() => {
+          window.history.replaceState(window.history.state, '', ADMIN_LOGIN_PATH);
+          supabase.auth
+            .signOut({ scope: 'local' })
+            .then(({ error: signOutError }) => { if (signOutError) stayPut(); })
+            .catch(stayPut);
+        }, 1600);
+        return;
+      }
+
       setTimeout(() => navigate('/', { replace: true }), 1200);
     } catch {
       setError(t('forgot.unexpected'));
@@ -158,7 +244,9 @@ const SetPasswordPage: React.FC = () => {
                 <CheckCircle2 className="text-emerald-400" size={22} />
               </div>
               <h2 className="text-white font-semibold mb-2">{t('setpw.saved')}</h2>
-              <p className="text-white/60 text-sm">{t('setpw.redirecting')}</p>
+              <p className="text-white/60 text-sm">
+                {signOutPending ? t('setpw.platformSignInAgain') : t('setpw.redirecting')}
+              </p>
             </div>
           ) : (
             <>

@@ -92,6 +92,7 @@ BEGIN
   EXECUTE 'SET LOCAL ROLE NONE';
   PERFORM set_config('request.jwt.claim.sub', '', true);
   PERFORM set_config('request.jwt.claim.role', '', true);
+  PERFORM set_config('request.jwt.claim.amr', '', true);
   PERFORM set_config('request.jwt.claims', '', true);
 END $$;
 
@@ -113,6 +114,8 @@ BEGIN
   ELSE
     PERFORM set_config('request.jwt.claim.sub', p_user::text, true);
     PERFORM set_config('request.jwt.claim.role', 'authenticated', true);
+    -- A password sign-in: since 20260919130000 a platform capability needs one.
+    PERFORM set_config('request.jwt.claim.amr', '[{"method": "password", "timestamp": 1789416052}]', true);
     EXECUTE 'SET LOCAL ROLE authenticated';
   END IF;
 END $$;
@@ -662,10 +665,64 @@ DECLARE
   co_b     constant uuid := 'c0000000-0000-4000-8000-00000000000b';
   r_viewer uuid := (SELECT id FROM roles WHERE name = 'viewer' AND company_id IS NULL LIMIT 1);
 BEGIN
-  -- company_id: no JWT, whoever it belongs to
-  PERFORM _pa_ok('guard: an owner cannot move a member into another company',
-    _pa_try(owner, format('UPDATE user_profiles SET company_id = %L WHERE user_id = %L', co_b, member))
-      LIKE 'ERR P0001 Not allowed: cannot change company assignment%');
+  /*
+    One rule governs every probe in this section where a platform account acts
+    on somebody else's profile, and it is stated once here rather than line by
+    line. Since 20260917140000 (plan 3.4) `platform_reads_company_data()` is a
+    constant false, so user_profiles_select reads
+
+        user_id = auth.uid() OR company_id = get_user_company_id()
+
+    and a company-less platform account therefore sees **exactly one row — its
+    own**. Not a company member's: it has no company for the second term to
+    match. Not another staff account's either: both are company-less, and
+    NULL = NULL is NULL, not true. And not with a context open, which names a
+    *company* while every staff row's company_id stays NULL.
+
+    An UPDATE whose WHERE reads `user_id` needs that SELECT before any policy or
+    trigger is consulted, so each of those probes now matches nothing, whatever
+    capability the caller holds. They are written as `rows 0` and grouped, so
+    that none of them reads as a refusal it no longer proves.
+
+    Where the properties they used to carry now live:
+      * the capability itself — section 2 (role x capability) and section 4b
+        (platform_can_manage_account), neither of which depends on visibility;
+      * what holding it *does* — tests/rls/matrix.sql, whose staff_support
+        principal updates and deletes a profile of the company it has opened
+        (user_profiles U and D = 'Y.') and is refused on the other company's;
+      * the guard's own refusals — the same file's three staff-support guard
+        scenarios, which run these probes from inside a context where the row is
+        visible and the guard is the only thing left to answer.
+    That division is deliberate: this file is about the capability matrix and
+    carries no context machinery, and it should not grow any.
+
+    No product path is affected, which is the reason this is a test change and
+    not a regression: manage-users and platform-staff perform every
+    user_profiles write with the service role (`supabaseAdmin`), using the
+    caller's JWT only for platformCan(), platformCanManageAccount() and the
+    audit row. Direct DML on another account's profile with a platform
+    account's own JWT is a capability no product path uses.
+
+    The neighbours left alone here each survive for a reason worth keeping in
+    view: an owner still sees its **own** profile, a company admin still sees a
+    member of its own company, an INSERT needs no visibility at all, and the
+    service role is not guarded.
+  */
+  PERFORM _pa_ok('no context: a platform account reaches no other profile — not a member''s, not another staff account''s',
+    _pa_try(owner,    format('UPDATE user_profiles SET company_id = %L WHERE user_id = %L', co_b, member)) = 'rows 0'
+    AND _pa_try(owner,    format('UPDATE user_profiles SET is_super_admin = true WHERE user_id = %L', member)) = 'rows 0'
+    AND _pa_try(owner,    format('UPDATE user_profiles SET user_id = %L WHERE user_id = %L', gen_random_uuid(), member)) = 'rows 0'
+    AND _pa_try(owner,    format('UPDATE user_profiles SET is_super_admin = true WHERE user_id = %L', support)) = 'rows 0');
+  PERFORM _pa_ok('no context: …and neither role nor status, whatever capability the role holds',
+    _pa_try(owner,    format('UPDATE user_profiles SET role_id = %L WHERE user_id = %L', r_viewer, member)) = 'rows 0'
+    AND _pa_try(support,  format('UPDATE user_profiles SET role_id = %L WHERE user_id = %L', r_viewer, member)) = 'rows 0'
+    AND _pa_try(billing,  format('UPDATE user_profiles SET role_id = %L WHERE user_id = %L', r_viewer, member)) = 'rows 0'
+    AND _pa_try(readonly, format($q$UPDATE user_profiles SET status = 'suspended' WHERE user_id = %L$q$, member)) = 'rows 0'
+    AND _pa_try(support,  format($q$UPDATE user_profiles SET status = 'suspended' WHERE user_id = %L$q$, member)) = 'rows 0');
+  -- …including a staff profile that still sits inside a company (3.7b detaches
+  -- those): company A is not the owner's company either.
+  PERFORM _pa_ok('no context: an owner does not reach a staff profile sitting in a company',
+    _pa_try(owner, format($q$UPDATE user_profiles SET status = 'deactivated' WHERE user_id = %L$q$, staff_a)) = 'rows 0');
   PERFORM _pa_ok('guard: an owner cannot move its own profile into a company',
     _pa_try(owner, format('UPDATE user_profiles SET company_id = %L WHERE user_id = %L', co_b, owner))
       LIKE 'ERR P0001 Not allowed: cannot change company assignment%');
@@ -685,9 +742,6 @@ BEGIN
   PERFORM _pa_ok('guard: a company admin cannot flag itself',
     _pa_try(admin_a, format('UPDATE user_profiles SET is_super_admin = true WHERE user_id = %L', admin_a))
       LIKE 'ERR P0001 Not allowed: cannot modify is_super_admin%');
-  PERFORM _pa_ok('guard: an owner cannot flag a member who has no staff row',
-    _pa_try(owner, format('UPDATE user_profiles SET is_super_admin = true WHERE user_id = %L', member))
-      LIKE 'ERR P0001 Not allowed: cannot modify is_super_admin%');
   PERFORM _pa_ok('guard: an owner cannot clear its own flag while its staff row is active',
     _pa_try(owner, format('UPDATE user_profiles SET is_super_admin = false WHERE user_id = %L', owner))
       LIKE 'ERR P0001 Not allowed: cannot modify is_super_admin%');
@@ -695,27 +749,19 @@ BEGIN
     _pa_try(NULL, format('UPDATE user_profiles SET is_super_admin = true WHERE user_id = %L', member), true) = 'rows 1');
   -- A divergence only the service role or a migration can create; a JWT may
   -- then set the flag back to what platform_staff says, and to nothing else.
+  -- Probed on the owner's **own** row, which is the only profile a platform
+  -- account can still see: the same probe aimed at another staff account now
+  -- matches nothing, and is grouped with the other `rows 0` lines above.
   PERFORM _pa_reset();
-  UPDATE user_profiles SET is_super_admin = false WHERE user_id = support;
+  UPDATE user_profiles SET is_super_admin = false WHERE user_id = owner;
   PERFORM _pa_ok('guard: a JWT may set the flag back to what platform_staff says',
-    _pa_try(owner, format('UPDATE user_profiles SET is_super_admin = true WHERE user_id = %L', support)) = 'rows 1');
-  UPDATE user_profiles SET is_super_admin = true WHERE user_id = support;
+    _pa_try(owner, format('UPDATE user_profiles SET is_super_admin = true WHERE user_id = %L', owner)) = 'rows 1');
+  PERFORM _pa_reset();
+  UPDATE user_profiles SET is_super_admin = true WHERE user_id = owner;
 
-  -- the other rules, by capability
-  PERFORM _pa_ok('guard: support (company_users.manage) changes a member''s role',
-    _pa_try(support, format('UPDATE user_profiles SET role_id = %L WHERE user_id = %L', r_viewer, member)) = 'rows 1');
-  -- Since 20260917130000 the profile policies ask company_users.manage rather
-  -- than whether the caller is staff at all, so billing never reaches the
-  -- guard: the row is not visible to its UPDATE. The refusal moved one layer
-  -- out, from the trigger to RLS, and says the same thing.
-  PERFORM _pa_ok('guard: billing cannot change a member''s role — RLS refuses before the guard',
-    _pa_try(billing, format('UPDATE user_profiles SET role_id = %L WHERE user_id = %L', r_viewer, member)) = 'rows 0');
-  PERFORM _pa_ok('guard: read_only cannot change a member''s status — RLS refuses before the guard',
-    _pa_try(readonly, format($q$UPDATE user_profiles SET status = 'suspended' WHERE user_id = %L$q$, member)) = 'rows 0');
-  PERFORM _pa_ok('guard: support changes a member''s status',
-    _pa_try(support, format($q$UPDATE user_profiles SET status = 'suspended' WHERE user_id = %L$q$, member)) = 'rows 1');
-  PERFORM _pa_ok('guard: an owner changes a member''s role and status (unchanged for owners)',
-    _pa_try(owner, format($q$UPDATE user_profiles SET role_id = %L, status = 'suspended' WHERE user_id = %L$q$, r_viewer, member)) = 'rows 1');
+  -- the other rules, by capability. What a platform account may do to a
+  -- company's users is grouped above as `rows 0`, for the reason stated there;
+  -- a company administrator's own reach is unchanged and stays here.
   PERFORM _pa_ok('guard: a company admin changes its member''s role (unchanged)',
     _pa_try(admin_a, format('UPDATE user_profiles SET role_id = %L WHERE user_id = %L', r_viewer, member)) = 'rows 1');
 
@@ -727,9 +773,11 @@ BEGIN
   PERFORM _pa_ok('guard: a company admin cannot change the status of a same-company staff profile',
     _pa_try(admin_a, format($q$UPDATE user_profiles SET status = 'deactivated' WHERE user_id = %L$q$, staff_a))
       LIKE 'ERR P0001 Not allowed: cannot change account status%');
-  PERFORM _pa_ok('guard: a platform owner and the service role still can',
-    _pa_try(owner, format($q$UPDATE user_profiles SET status = 'deactivated' WHERE user_id = %L$q$, staff_a)) = 'rows 1'
-    AND _pa_try(NULL, format($q$UPDATE user_profiles SET status = 'deactivated' WHERE user_id = %L$q$, staff_a), true) = 'rows 1');
+  -- The owner's half of this moved into the grouped `rows 0` lines above: a
+  -- company-less platform account does not see a profile sitting in company A
+  -- either. The service role does, and still may.
+  PERFORM _pa_ok('guard: the service role still changes a same-company staff profile',
+    _pa_try(NULL, format($q$UPDATE user_profiles SET status = 'deactivated' WHERE user_id = %L$q$, staff_a), true) = 'rows 1');
 
   -- The NULL hole: the company-admin exception compared a NULL company and let
   -- the condition fall through. A company-less admin-role profile without a
@@ -747,9 +795,8 @@ BEGIN
   PERFORM _pa_ok('guard: a company admin cannot change a member''s user_id',
     _pa_try(admin_a, format('UPDATE user_profiles SET user_id = %L WHERE user_id = %L', gen_random_uuid(), member))
       LIKE 'ERR P0001 Not allowed: cannot change user_id%');
-  PERFORM _pa_ok('guard: an owner cannot change a member''s user_id',
-    _pa_try(owner, format('UPDATE user_profiles SET user_id = %L WHERE user_id = %L', gen_random_uuid(), member))
-      LIKE 'ERR P0001 Not allowed: cannot change user_id%');
+  -- An owner aimed at a member is grouped above as `rows 0`; aimed at its own
+  -- row, which it can still see, the guard answers as it always did.
   PERFORM _pa_ok('guard: an owner cannot hand its own profile to another account',
     _pa_try(owner, format('UPDATE user_profiles SET user_id = %L WHERE user_id = %L', gen_random_uuid(), owner))
       LIKE 'ERR P0001 Not allowed: cannot change user_id%');
@@ -864,8 +911,17 @@ BEGIN
   -- PostgREST sets them
   PERFORM set_config('request.jwt.claim.sub', billing::text, true);
   PERFORM set_config('request.jwt.claim.role', 'authenticated', true);
+  -- `amr` too: since 20260919130000 a staff role belongs to a password session
+  -- and to no other. Both forms are set, and they describe the same session:
+  -- app_private.jwt_subject_source() prefers the singular subject, which this
+  -- block sets, so the singular amr is the one read — while the document below
+  -- is what audit_write takes the session_id from, the way PostgREST writes it.
+  PERFORM set_config('request.jwt.claim.amr',
+    '[{"method": "password", "timestamp": 1789416052}]', true);
   PERFORM set_config('request.jwt.claims',
-    jsonb_build_object('sub', billing, 'role', 'authenticated', 'session_id', sess)::text, true);
+    jsonb_build_object('sub', billing, 'role', 'authenticated', 'session_id', sess,
+                       'amr', jsonb_build_array(
+                                jsonb_build_object('method', 'password', 'timestamp', 1789416052)))::text, true);
   EXECUTE 'SET LOCAL ROLE authenticated';
   -- Since 20260916130000 the action must be one the edge functions send, and
   -- the caller must hold its capability to record anything but a refusal.

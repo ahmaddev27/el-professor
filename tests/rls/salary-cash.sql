@@ -25,6 +25,8 @@ LANGUAGE plpgsql AS $$
 BEGIN
   PERFORM set_config('request.jwt.claim.sub', p_user::text, true);
   PERFORM set_config('request.jwt.claim.role', 'authenticated', true);
+  -- A password sign-in: since 20260919130000 a platform capability needs one.
+  PERFORM set_config('request.jwt.claim.amr', '[{"method": "password", "timestamp": 1789416052}]', true);
   EXECUTE 'SET LOCAL ROLE authenticated';
 END $$;
 
@@ -317,15 +319,15 @@ BEGIN
   RESET ROLE;
   PERFORM _sc_eq('a viewer reads its company''s receipts', n, 5::bigint);
   -- Since 20260917130000 (plan 3.3) the Gehaltsquittung tables carry the same
-  -- SELECT shape as every other business table, so an active staff role holding
-  -- business.read reads them too. matrix.sql records that as HOLE[3.4]: 3.4
-  -- confines it to an open read or support context. Writing them stays
-  -- nobody's — authenticated holds SELECT and nothing else, which is what the
-  -- checks below prove.
+  -- SELECT shape as every other business table, and since 20260917140000 (plan
+  -- 3.4) that shape is confined to the company a staff account has open. This
+  -- one has opened nothing — _sc_as carries no session claim — so it reads no
+  -- receipts at all. Writing them stays nobody's: authenticated holds SELECT
+  -- and nothing else, which is what the checks below prove.
   PERFORM _sc_as(super_u);
   SELECT count(DISTINCT company_id) INTO n FROM salary_cash_receipts;
   RESET ROLE;
-  PERFORM _sc_eq('the platform account reads both companies receipts through business.read', n, 2::bigint);
+  PERFORM _sc_eq('a platform account with no open context reads no receipts', n, 0::bigint);
 
   -- ── nothing is written around the RPCs ──────────────────────────────────
   PERFORM _sc_eq('no one inserts a receipt directly',
