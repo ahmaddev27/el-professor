@@ -95,7 +95,22 @@ export function passwordProofState(claims: Record<string, unknown>, nowSec: numb
   return age <= PASSWORD_PROOF_MAX_AGE_SECONDS ? 'fresh' : 'stale';
 }
 
-export const CHECK_RESULTS = ['ok', 'not_platform_account', 'no_account', 'same_email', 'email_taken'] as const;
+export const CHECK_RESULTS = [
+  'ok',
+  'not_platform_account',
+  'no_account',
+  // Banned or deleted in GoTrue. GoTrue does not revoke an issued access token
+  // when an account is banned, so without this the obvious containment lever —
+  // ban the compromised account — would not stop it moving its own address for
+  // the rest of the password window.
+  'account_blocked',
+  // Five completed changes in the last hour. Not aimed at a stranger, who
+  // cannot reach the route: it bounds an insider loop that would mail the
+  // change notice from the product's domain at request rate.
+  'rate_limited',
+  'same_email',
+  'email_taken',
+] as const;
 
 export type CheckResult = (typeof CHECK_RESULTS)[number];
 
@@ -123,16 +138,40 @@ export const sameEmail = (): HttpReply =>
 export const noAccount = (): HttpReply =>
   ({ status: 404, body: { ok: false, reason: 'no_account' } });
 
+/** 403: banned or deleted in GoTrue, whatever the staff row still says. */
+export const accountBlocked = (): HttpReply =>
+  ({ status: 403, body: { ok: false, reason: 'account_blocked' } });
+
+/** 429: the per-account hourly cap on completed changes. */
+export const rateLimited = (): HttpReply =>
+  ({ status: 429, body: { ok: false, reason: 'rate_limited' } });
+
+/** 500: the audit row that must precede the change could not be written. */
+export const auditUnavailable = (): HttpReply =>
+  ({ status: 500, body: { ok: false, reason: 'audit_unavailable' } });
+
 export const emailChanged = (email: string): HttpReply =>
   ({ status: 200, body: { ok: true, email } });
 
 /**
+ * Whether a verdict is about the account's standing rather than the request.
+ *
+ * These three are reported **before** the freshness test, so the answer "this
+ * account may not use this route at all" never depends on how the caller signed
+ * in: a company user is always told to use the code path, and a banned or
+ * deleted account is always refused. Everything else — the hourly cap, the
+ * address itself — is about the request and is reported after it, so a caller
+ * holding a stale token learns nothing about the account's history.
+ */
+export function isAccountStanding(result: CheckResult): boolean {
+  return result === 'not_platform_account' || result === 'account_blocked' || result === 'no_account';
+}
+
+/**
  * The check's refusal as HTTP, or null for `ok`.
  *
- * `not_platform_account` is reported by the route before the freshness test, so
- * that a company user is told to use the code path whatever its session looks
- * like; the address verdicts come after it. Both shapes match the code path's,
- * so `email_taken` reads identically whichever route produced it.
+ * Every shape matches the code path's, so `email_taken` reads identically
+ * whichever route produced it.
  */
 export function checkResultReply(result: CheckResult): HttpReply | null {
   switch (result) {
@@ -142,6 +181,10 @@ export function checkResultReply(result: CheckResult): HttpReply | null {
       return notPlatformAccount();
     case 'no_account':
       return noAccount();
+    case 'account_blocked':
+      return accountBlocked();
+    case 'rate_limited':
+      return rateLimited();
     case 'same_email':
       return sameEmail();
     case 'email_taken':
