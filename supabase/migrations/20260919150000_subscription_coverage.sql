@@ -1616,34 +1616,19 @@ ALTER FUNCTION public.platform_company_set_approval(uuid, text, text) OWNER TO C
 
 -- ─── 9. Self-check ──────────────────────────────────────────────────────────
 
-/*
-  A function's body with its comments removed — both `/* … *​/` blocks and `--`
-  lines — for the checks below.
-
-  `pg_proc.prosrc` keeps comments verbatim, so a check that greps a body greps
-  its prose too, and the prose in this file names the very things the checks
-  forbid in order to explain why they are forbidden. That has now stopped a
-  release twice, both times over a defect that had been fixed:
-
-    - check 7b matched `period_start <= now()` in the `--` comment saying that
-      term must not be there;
-    - check 7 matched `subscription_status = 'active'` twice in the `/* … *​/`
-      comment explaining what the earlier draft got wrong — and the first
-      version of this function stripped only `--` lines, while asserting in this
-      very header that line comments were "all this file's function bodies use".
-      They were, until that comment was written.
-
-  So stripping both is the floor, not the fix. The fix is that checks 7 and 8
-  read only the `SET` clause of an `UPDATE` of `companies` (see
-  `companies_set_clauses`), so a column *mentioned* anywhere else — an INSERT
-  column list, a VALUES expression, a comparison, or prose that survives
-  stripping — cannot fire them. What forbids an assignment should look at
-  assignments.
-
-  A `--` or `/*` inside a string literal would be stripped too; none of these
-  bodies has one, and over-stripping can only make a check laxer, never fire it
-  falsely.
-*/
+-- A function's body with its comments removed, for the checks below. Strips
+-- block comments first, then line comments: a block comment may contain the
+-- line-comment marker, and removing lines first would leave its opener behind.
+--
+-- Why the checks need this, what bit twice before it existed, and why they read
+-- an UPDATE's SET clause rather than the whole body, is written up once in the
+-- header of tests/rls/subscriptions.sql, beside the behavioural assertions it
+-- belongs with. It is deliberately not repeated here: prose that quotes the
+-- patterns these checks forbid is the most dangerous text in this file.
+--
+-- A comment marker inside a string literal would be stripped too. None of these
+-- bodies has one, and over-stripping can only make a check laxer, never fire it
+-- falsely.
 CREATE OR REPLACE FUNCTION app_private.function_code(p_signature text)
 RETURNS text
 LANGUAGE plpgsql
@@ -1653,8 +1638,11 @@ AS $$
 DECLARE
   v_src text;
 BEGIN
-  -- Block comments first: a `/* … */` may contain `--`, and stripping the
-  -- lines first would leave its opener behind.
+  -- Block comments first, then line comments: a block comment may contain a
+  -- line-comment marker, and stripping lines first would leave its opener
+  -- behind. The delimiters are named in words here, not written out: this file
+  -- stopped parsing once because prose quoted an opener inside a block comment,
+  -- and PostgreSQL nests those.
   SELECT regexp_replace(regexp_replace(p.prosrc, '/\*.*?\*/', '', 'g'), '--[^\n]*', '', 'g')
     INTO v_src
     FROM pg_proc p
@@ -1814,25 +1802,11 @@ BEGIN
     RAISE EXCEPTION '20260919150000 self-check: companies.status no longer admits ''suspended''';
   END IF;
 
-  /*
-    Checks 7, 7b and 8 read a function body. All three read it through
-    `app_private.function_code()`, which strips `--` comments, and none of them
-    reads `pg_proc.prosrc` directly.
-
-    The first version of 7b did, and it failed on its own explanation. `prosrc`
-    keeps a function's comments verbatim, and the comment above the UPDATE in
-    `platform_company_set_plan` names `period_start <= now()` in order to say
-    why that term must not be there. The regex found the prose, the release
-    stopped, and the check reported a defect that had been fixed — the shipped
-    UPDATE carries no `period_start` term at all.
-
-    A body check is a tripwire, not a proof: it fires on a phrase, so a
-    predicate rewritten a different way would slip past it. What proves the
-    behaviour is section 3c of tests/rls/subscriptions.sql, which calls the RPC
-    as a platform owner on a company with an early renewal and then runs the
-    sweep that used to undo the upgrade. These run on every deploy, which the
-    kit does not, so both are worth having — as long as the tripwire tests code.
-  */
+  -- Checks 7, 7b and 8 read a function body, through app_private.function_code
+  -- and app_private.companies_set_clauses. They are tripwires that run on every
+  -- deploy, not proofs: each matches a phrase. The behaviour they stand in for
+  -- is asserted in tests/rls/subscriptions.sql, whose header also records why
+  -- they are shaped this way and what four rounds of false failures taught.
 
   -- 7. the writers no longer assign the two derived columns, and the recompute
   --    does. A rewrite that puts an assignment back is what this catches.
