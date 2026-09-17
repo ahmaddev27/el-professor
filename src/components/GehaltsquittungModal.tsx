@@ -566,6 +566,14 @@ function PreviewStep({ flow, company }: { flow: GehaltsquittungFlow; company: Co
           {documentInput ? (
             <dl className="grid gap-2.5 rounded-surface border border-line bg-sunken/40 p-3 text-sm">
               <SummaryRow label={t('common.driver')} value={documentInput.driver.name} />
+              {/* The period, not only the driver: a driver can hold several
+                  salary rows, and after a resumed confirmation the dialog can be
+                  showing a different one than the caller started from. The name
+                  alone does not tell them apart. */}
+              <SummaryRow
+                label={t('gq.salary.label')}
+                value={`${formatDate(documentInput.periodStart)} – ${formatDate(documentInput.periodEnd)}`}
+              />
               <SummaryRow
                 label={t('gq.balance.thisPayment')}
                 value={formatEuroCents(documentInput.figures.amountCents)}
@@ -727,12 +735,14 @@ function DoneStep({ flow, company }: { flow: GehaltsquittungFlow; company: Compa
       </div>
 
       <DialogFooter>
-        {/* A preselected flow is about one payment; there is no second one to start here. */}
-        {flow.locked ? null : (
+        {/* A preselected flow is about one payment, so this is offered only when
+            a second one is genuinely waiting: the payment the caller asked for,
+            which stood behind a resumed confirmation until it settled here. */}
+        {!flow.locked || flow.preselectWaiting ? (
           <Button variant="secondary" onClick={flow.startAnother}>
             {t('gq.done.another')}
           </Button>
-        )}
+        ) : null}
         <DialogClose asChild>
           <Button>{t('common.close')}</Button>
         </DialogClose>

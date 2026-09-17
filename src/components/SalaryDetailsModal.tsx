@@ -14,8 +14,14 @@ import GehaltsquittungModal from './GehaltsquittungModal';
 import ConfirmationModal from './ConfirmationModal';
 import { paymentRowActions } from '../utils/salaryPaymentReceiptRow';
 import { PAYMENT_WRITE_REFUSAL_KEYS, decidePaymentWrite } from '../utils/salaryPaymentWrite';
-import { REFUSAL_MESSAGE_KEYS, confirmationBlock, receiptScope } from '../utils/salaryCashReceiptFlow';
+import {
+  REFUSAL_MESSAGE_KEYS,
+  confirmationBlock,
+  findOverlappingSalary,
+  receiptScope,
+} from '../utils/salaryCashReceiptFlow';
 import { toCents } from '../utils/money';
+import { formatEuroCents } from './ui';
 import type { GehaltsquittungPreselect } from '../hooks/useGehaltsquittungFlow';
 import { generateDriverSalaryPdf } from '../utils/driverSalaryPdf';
 import DriverSalarySummaryCard from './DriverSalarySummaryCard';
@@ -33,6 +39,30 @@ interface PayrollData {
   payroll_gross_amount: number | null;
   payroll_net_amount: number | null;
   tax_review_confirmed: boolean;
+}
+
+/** The columns the overlap refusal needs to name the other salary row. */
+interface OverlappingSalaryRow {
+  id: string;
+  period_start: string;
+  period_end: string;
+  amount_due: number | string | null;
+  netto_salary: number | string | null;
+}
+
+/**
+ * The other row's due amount, so the refusal names a figure the user can match
+ * on the salaries screen. COALESCE(netto_salary, amount_due, 0), the same base
+ * salaryDueCents uses, and an unreadable value becomes "—" rather than throwing
+ * inside a message about something else.
+ */
+function overlappingSalaryAmount(row: OverlappingSalaryRow): string {
+  const due = row.netto_salary ?? row.amount_due ?? 0;
+  try {
+    return formatEuroCents(toCents(due));
+  } catch {
+    return '—';
+  }
 }
 
 const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
@@ -54,6 +84,19 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
   const [receiptPreviewId, setReceiptPreviewId] = useState<string | null>(null);
   /** The cash payment handed to the Gehaltsquittung flow; null while none is being issued. */
   const [receiptDraft, setReceiptDraft] = useState<GehaltsquittungPreselect | null>(null);
+  /**
+   * Another salary row of this driver whose period overlaps this one, or null.
+   *
+   * `confirm_salary_cash_payment` refuses such a salary (`overlapping_salary`),
+   * and since a cash payment is now always a Gehaltsquittung that refusal
+   * reaches the payment form. The owner's rule, 17.09.2026: he merges the two
+   * rows by hand and the system keeps refusing until he has — so the row is
+   * looked up here to be *named* in the refusal, not to route around it. One
+   * staging company holds 16 such pairs and another 25 rows in one company, so
+   * "these rows overlap" without saying which is not something anyone can act
+   * on.
+   */
+  const [overlappingSalary, setOverlappingSalary] = useState<OverlappingSalaryRow | null>(null);
   const [payrollData, setPayrollData] = useState<PayrollData>({
     payroll_gross_amount: null,
     payroll_net_amount: null,
@@ -96,10 +139,34 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
     if (isOpen && salary.salary_id) {
       fetchPayments();
       fetchPayrollData();
+      fetchOverlappingSalary();
     } else if (isOpen && !salary.salary_id) {
       ensureSalaryExists();
     }
   }, [isOpen, salary.salary_id]);
+
+  /**
+   * The other salary row of this driver whose period overlaps this one, so the
+   * cash refusal can name it. A failed read leaves it null: the database
+   * refuses the payment either way, and inventing an overlap would block a
+   * payment that is fine.
+   */
+  const fetchOverlappingSalary = async () => {
+    setOverlappingSalary(null);
+    if (!salary.salary_id || !salary.period_start || !salary.period_end || !companyId) return;
+    const { data, error } = await supabase
+      .from('salaries')
+      .select('id, period_start, period_end, amount_due, netto_salary')
+      .eq('company_id', companyId)
+      .eq('driver_id', salary.driver_id);
+    if (error || !data) return;
+    setOverlappingSalary(
+      findOverlappingSalary(
+        { id: salary.salary_id, period_start: salary.period_start, period_end: salary.period_end },
+        data as OverlappingSalaryRow[],
+      ),
+    );
+  };
 
   const ensureSalaryExists = async () => {
     if (salary.salary_id) return;
@@ -350,19 +417,50 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
   };
 
   /**
+   * Why a cash payment cannot be recorded for this salary at all, ready to
+   * show; null when it can.
+   *
+   * Every cash payment is now a Gehaltsquittung, so the Gehaltsquittung's own
+   * conditions decide, and they are answered **before** the payment form
+   * closes: the form is where the user can still choose a bank transfer
+   * instead. Computed once and used twice — for the notice beside the type
+   * select and as the guard in startGehaltsquittung — so the sentence shown and
+   * the reason the write is refused cannot differ.
+   *
+   * The order is the order in which they stop being fixable by this user:
+   * scope and role, then the plan, then the overlapping salary rows the owner
+   * merges by hand.
+   */
+  const cashBlockedMessage = ((): string | null => {
+    const blocked = confirmationBlock(receiptsScope, rolePermits('salaries', 'edit'));
+    if (blocked) return t(REFUSAL_MESSAGE_KEYS[blocked]);
+    // The row's own preview button asks the same feature (paymentRowActions):
+    // without it a company could create receipts it can neither preview nor
+    // void, since plan_features is writable and could put gehaelter below
+    // dokumente.
+    if (!planIncludes('dokumente')) return t('sal.payment.cashNeedsDokumente');
+    if (overlappingSalary) {
+      return t('sal.payment.cashBlockedOverlap', {
+        period: `${format(new Date(overlappingSalary.period_start), 'dd.MM.yyyy')} – ${format(new Date(overlappingSalary.period_end), 'dd.MM.yyyy')}`,
+        amount: overlappingSalaryAmount(overlappingSalary),
+      });
+    }
+    return null;
+  })();
+
+  /**
    * Hands a cash payment the user just entered to the Gehaltsquittung flow, or
    * names why it cannot go there. Nothing is written here: the receipt, the
    * salary_payments row and the outgoing cash_movements row are one transaction
    * inside confirm_salary_cash_payment, and the browser has no write on any of
    * the three.
    *
-   * The refusal is thrown so the payment form shows it in its own error box —
-   * the caller may be platform staff inside a customer, whose token the RPC
-   * answers for their own company, or a role without edit rights on salaries.
+   * The refusal is thrown so the payment form shows it in its own error box.
+   * The form already disables its submit for the same reasons; this is the
+   * second wall, because the form is told what to show and this is what acts.
    */
   const startGehaltsquittung = (paymentData: Pick<SalaryPayment, 'amount' | 'payment_date'>) => {
-    const blocked = confirmationBlock(receiptsScope, rolePermits('salaries', 'edit'));
-    if (blocked) throw new Error(t(REFUSAL_MESSAGE_KEYS[blocked]));
+    if (cashBlockedMessage) throw new Error(cashBlockedMessage);
     if (!salary.salary_id) throw new Error(t('gq.refusal.salaryNotFound'));
 
     // toCents refuses anything that is not a finite decimal amount rather than
@@ -392,8 +490,13 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
     const decision = decidePaymentWrite({
       origin: selectedPayment ? 'edit' : 'add',
       paymentType: paymentData.payment_type,
+      amount: paymentData.amount,
       existing: selectedPayment
-        ? { payment_type: selectedPayment.payment_type, source_type: selectedPayment.source_type ?? null }
+        ? {
+            payment_type: selectedPayment.payment_type,
+            source_type: selectedPayment.source_type ?? null,
+            amount: selectedPayment.amount,
+          }
         : null,
     });
 
@@ -406,7 +509,12 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
     const { data: { user: authUser } } = await supabase.auth.getUser();
     if (!authUser) throw new Error(t('sal.notSignedIn'));
 
-    if (decision.kind === 'update' && selectedPayment) {
+    // Each write is reached by naming its decision, and anything else stops.
+    // The fallthrough used to be the plain INSERT, so an `update` that had lost
+    // its row — or a kind added later — would have landed in exactly the write
+    // this path exists to keep cash payments out of.
+    if (decision.kind === 'update') {
+      if (!selectedPayment) throw new Error(t('sal.payment.rowNotFound'));
       const { error } = await supabase
         .from('salary_payments')
         .update({
@@ -418,12 +526,14 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
         .eq('id', selectedPayment.id);
       if (error) throw error;
       showToast('success', t('sal.payment.updated'));
-    } else {
+    } else if (decision.kind === 'insert') {
       const { error } = await supabase
         .from('salary_payments')
         .insert({ ...paymentData, created_by: authUser.id, company_id: companyId });
       if (error) throw error;
       showToast('success', t('sal.payment.added'));
+    } else {
+      throw new Error(t('sal.payment.errorSave'));
     }
 
     await fetchPayments();
@@ -995,6 +1105,7 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
         salaryId={salary.salary_id!}
         remainingBalance={remainingBalance}
         payment={selectedPayment}
+        cashBlockedMessage={cashBlockedMessage}
       />
 
       <SalaryPaymentReceiptPreview
