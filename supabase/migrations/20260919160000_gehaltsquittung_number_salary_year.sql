@@ -254,15 +254,24 @@ BEGIN
 
   -- 10. The counter itself is untouched: same key, same uniqueness, still
   --     unreachable from the API roles.
+  --
+  --     `pg_attribute.attname` is `name`, not `text`, so array_agg over it
+  --     yields `name[]` while a bare ARRAY[...] of literals is `text[]` — and
+  --     there is no `name[] = text[]` operator, which is a *plan*-time error
+  --     rather than a wrong answer. The first version of this check had exactly
+  --     that and the kit caught it. Both sides are cast explicitly, including
+  --     the ORDER BY, so neither the element type nor the sort collation is
+  --     inferred. (`conkey` is `int2[]`; `pg_index.indkey` would be `int2vector`
+  --     and unnest would need a cast.)
   IF NOT EXISTS (
        SELECT 1
          FROM pg_constraint c
         WHERE c.conrelid = 'public.document_counters'::regclass
           AND c.contype = 'p'
-          AND (SELECT array_agg(a.attname ORDER BY a.attname)
+          AND (SELECT array_agg(a.attname::text ORDER BY a.attname::text)
                  FROM unnest(c.conkey) AS k(attnum)
                  JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.attnum)
-              = ARRAY['company_id', 'doc_type', 'year']) THEN
+              = ARRAY['company_id', 'doc_type', 'year']::text[]) THEN
     RAISE EXCEPTION 'GQ year self-check 10: document_counters is no longer keyed on (company_id, doc_type, year)';
   END IF;
   IF has_table_privilege('anon', 'public.document_counters', 'SELECT')
