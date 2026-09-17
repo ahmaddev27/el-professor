@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { de } from '../i18n/de';
 import { en } from '../i18n/en';
 import { computeReceiptFigures } from './salaryCashReceipt';
+import { findOverlappingSalaryPeriods, salaryPeriodsOverlap } from './salaryPeriodOverlap';
 import {
   REFUSAL_MESSAGE_KEYS,
   SIGNED_COPY_MAX_BYTES,
@@ -188,6 +189,34 @@ describe('findOverlappingSalary — the overlapping_salary condition', () => {
   });
 
   it('ignores the row itself and rows that only touch', () => {
+    expect(findOverlappingSalary(august, [august, september])).toBeNull();
+  });
+
+  /*
+    PR #71 marks an overlapping row on the salaries list and this names one in
+    the payment form. They must be the same judgement and the same row, or one
+    of the two screens is telling the user something the RPC does not agree
+    with. Since this function *is* findOverlappingSalaryPeriods, the check is
+    that nobody has quietly reintroduced a second comparison here.
+  */
+  it('is the salaries screen\'s own rule, applied to one row', () => {
+    const rows = [august, calendarAugust, september];
+    for (const subject of rows) {
+      const listed = findOverlappingSalaryPeriods(subject, rows, subject.id);
+      expect(findOverlappingSalary(subject, rows)).toBe(listed[0] ?? null);
+      // Never the row itself, whichever way it is asked.
+      expect(listed.some(row => row.id === subject.id)).toBe(false);
+    }
+  });
+
+  it('agrees with salaryPeriodsOverlap on a shared boundary day, which the RPC refuses', () => {
+    // 31.08 is calendarAugust's last day and september's first. The RPC
+    // compares with <= and >=, so that single shared day is an overlap; a
+    // business month and the month after it end and begin a day apart and are
+    // not.
+    expect(salaryPeriodsOverlap(september, calendarAugust)).toBe(true);
+    expect(findOverlappingSalary(september, [september, calendarAugust])).toBe(calendarAugust);
+    expect(salaryPeriodsOverlap(august, september)).toBe(false);
     expect(findOverlappingSalary(august, [august, september])).toBeNull();
   });
 });

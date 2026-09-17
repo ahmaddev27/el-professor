@@ -2,6 +2,7 @@ import type { TranslationKey } from '../i18n';
 import { MAX_AMOUNT_IN_WORDS_CENTS } from './germanAmountInWords';
 import { parseGermanAmountToCents, toCents } from './money';
 import type { ReceiptFigures } from './salaryCashReceipt';
+import { findOverlappingSalaryPeriods } from './salaryPeriodOverlap';
 
 /**
  * The browser side of a Gehaltsquittung: which request id a confirmation
@@ -231,23 +232,27 @@ export interface SalaryPeriodRow {
 
 /**
  * Another salary row of the same driver whose period overlaps this one: the
- * condition confirm_salary_cash_payment refuses as overlapping_salary. The
- * dates are YYYY-MM-DD text, so text order is date order.
+ * condition confirm_salary_cash_payment refuses as overlapping_salary.
+ *
+ * **The condition itself is not spelled here.** It lives once, in
+ * `./salaryPeriodOverlap`, and this is the single-row form of it for the two
+ * screens that have to *name* one conflicting row — the Gehaltsquittung
+ * dialog's select step and the cash payment added on the salary screen. The
+ * salaries list marks every overlapping row from the same module, so the row
+ * named in the payment form and the first row its badge lists are the same
+ * row, decided by the same comparison. Two spellings of one rule is how the
+ * two screens come to disagree about what the RPC will accept.
  *
  * Found before an amount is typed, so the refusal does not wait for the last
- * step. Which row is the salary of record is the owner's decision; this only
- * names the other row.
+ * step. Which row is the salary of record is the owner's decision — he merges
+ * the two by hand and the RPC keeps refusing until he has — so this only names
+ * the other one.
  */
 export function findOverlappingSalary<Row extends SalaryPeriodRow>(
   salary: SalaryPeriodRow,
   driverSalaries: readonly Row[],
 ): Row | null {
-  return (
-    driverSalaries.find(
-      other =>
-        other.id !== salary.id && other.period_start <= salary.period_end && other.period_end >= salary.period_start,
-    ) ?? null
-  );
+  return findOverlappingSalaryPeriods(salary, driverSalaries, salary.id)[0] ?? null;
 }
 
 // ─── Amount field ───────────────────────────────────────────────────────────
