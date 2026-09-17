@@ -529,7 +529,7 @@ const SalariesManagement: React.FC<SalariesManagementProps> = ({ drivers }) => {
             style={
               calculations.length === 0
                 ? { background: 'var(--bg-subtle)', color: 'var(--text-tertiary)', cursor: 'not-allowed' }
-                : { background: 'var(--accent)', color: 'white' }
+                : { background: 'var(--accent)', color: 'var(--text-inverse)' }
             }
             title={calculations.length === 0 ? t('sal.export.noDataTooltip') : t('common.exportExcelShort')}
             aria-disabled={calculations.length === 0}

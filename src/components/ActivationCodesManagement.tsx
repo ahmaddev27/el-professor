@@ -562,7 +562,7 @@ export default function ActivationCodesManagement({ companies: propCompanies }: 
         <button
           onClick={() => setShowForm(v => !v)}
           className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold transition-opacity hover:opacity-85"
-          style={{ background: 'var(--accent)', color: '#fff' }}
+          style={{ background: 'var(--accent)', color: 'var(--text-inverse)' }}
         >
           {showForm ? <X size={14} /> : <Plus size={14} />}
           {showForm ? t('common.cancel') : t('codes.create')}
@@ -617,7 +617,7 @@ export default function ActivationCodesManagement({ companies: propCompanies }: 
                   onClick={() => setFDuration(d)}
                   className="px-3 py-2 rounded-xl text-sm font-semibold transition-all"
                   style={fDuration === d
-                    ? { background: 'var(--accent)', color: '#fff' }
+                    ? { background: 'var(--accent)', color: 'var(--text-inverse)' }
                     : { background: 'var(--bg-subtle)', border: '1px solid var(--border)', color: 'var(--text-secondary)' }
                   }
                 >
@@ -637,7 +637,7 @@ export default function ActivationCodesManagement({ companies: propCompanies }: 
                     onClick={() => setFCustomMode(m)}
                     className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
                     style={fCustomMode === m
-                      ? { background: 'var(--accent)', color: '#fff' }
+                      ? { background: 'var(--accent)', color: 'var(--text-inverse)' }
                       : { border: '1px solid var(--border)', color: 'var(--text-secondary)' }
                     }
                   >
@@ -692,7 +692,7 @@ export default function ActivationCodesManagement({ companies: propCompanies }: 
               onClick={handleGenerate}
               disabled={generating || !canGenerate}
               className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-opacity hover:opacity-85 disabled:opacity-50"
-              style={{ background: 'var(--accent)', color: '#fff' }}
+              style={{ background: 'var(--accent)', color: 'var(--text-inverse)' }}
             >
               {generating ? <RefreshCw size={13} className="animate-spin" /> : <KeyRound size={13} />}
               {generating ? t('codes.creating') : t('codes.create')}
@@ -730,7 +730,7 @@ export default function ActivationCodesManagement({ companies: propCompanies }: 
                 onClick={() => setActiveFilter(tab.id)}
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
                 style={activeFilter === tab.id
-                  ? { background: 'var(--accent)', color: '#fff' }
+                  ? { background: 'var(--accent)', color: 'var(--text-inverse)' }
                   : { background: 'var(--bg-subtle)', border: '1px solid var(--border)', color: 'var(--text-secondary)' }
                 }
               >

@@ -279,7 +279,7 @@ const DriverSalarySummaryCard: React.FC<DriverSalarySummaryProps> = ({
           className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium"
           style={{
             background: 'var(--accent)',
-            color: 'var(--accent-text)',
+            color: 'var(--text-inverse)',
             border: 'none',
             cursor: downloading ? 'not-allowed' : 'pointer',
             opacity: downloading ? 0.7 : 1,

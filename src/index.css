@@ -94,6 +94,7 @@
 }
 
 /* ── Legacy theme tokens (every screen built before Phase 2) ─────────────── */
+/* @legacy-tokens light */
 :root {
   /* Light */
   --bg-base:        #f4f6fa;
@@ -122,6 +123,7 @@
   --shadow-lg:      0 8px 24px rgba(0,0,0,0.1), 0 4px 8px rgba(0,0,0,0.04);
 }
 
+/* @legacy-tokens dark */
 .dark {
   --bg-base:        #0b0f17;
   --bg-surface:     #111827;

@@ -789,7 +789,7 @@ const MietwagenauftragModal: React.FC<Props> = ({ isOpen, onClose }) => {
             onClick={handleExport}
             disabled={exporting}
             className="flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-medium transition-opacity"
-            style={{ background: 'var(--accent)', color: 'white', opacity: exporting ? 0.7 : 1 }}
+            style={{ background: 'var(--accent)', color: 'var(--text-inverse)', opacity: exporting ? 0.7 : 1 }}
             onMouseEnter={e => { if (!exporting) e.currentTarget.style.background = 'var(--accent-hover)'; }}
             onMouseLeave={e => (e.currentTarget.style.background = 'var(--accent)')}
           >

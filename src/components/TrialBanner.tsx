@@ -81,7 +81,7 @@ const TrialBanner: React.FC = () => {
         <a
           href="mailto:support@el-professor.de?subject=Plan upgraden"
           className="flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-semibold flex-shrink-0 transition-opacity hover:opacity-80"
-          style={{ background: 'var(--danger)', color: 'white' }}
+          style={{ background: 'var(--danger)', color: 'var(--text-inverse)' }}
         >
           <Zap size={10} />
           Plan wählen

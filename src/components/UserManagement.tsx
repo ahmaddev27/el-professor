@@ -291,7 +291,7 @@ const UserModal: React.FC<UserModalProps> = ({ isOpen, onClose, onSave, user, ti
             </button>
             <button
               type="submit"
-              style={{ background: 'var(--accent)', color: 'white', borderRadius: '0.375rem', padding: '0.5rem 1rem' }}
+              style={{ background: 'var(--accent)', color: 'var(--text-inverse)', borderRadius: '0.375rem', padding: '0.5rem 1rem' }}
               className="transition-colors hover:opacity-90 flex items-center space-x-2 disabled:opacity-50"
               disabled={loading}
             >

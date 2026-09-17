@@ -320,7 +320,7 @@ const SalaryPaymentModal: React.FC<SalaryPaymentModalProps> = ({
             <button
               type="submit"
               disabled={loading || blocked !== null}
-              style={{ background: 'var(--accent)', color: 'var(--accent-text)', borderRadius: '0.5rem', padding: '0.5rem 1rem', border: 'none' }}
+              style={{ background: 'var(--accent)', color: 'var(--text-inverse)', borderRadius: '0.5rem', padding: '0.5rem 1rem', border: 'none' }}
               onMouseEnter={e => { if (!loading && !blocked) e.currentTarget.style.background = 'var(--accent-hover)'; }}
               onMouseLeave={e => (e.currentTarget.style.background = 'var(--accent)')}
               className="flex items-center space-x-2 disabled:opacity-50 disabled:cursor-not-allowed"

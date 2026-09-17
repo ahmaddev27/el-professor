@@ -79,7 +79,7 @@ export default function BackupManagement() {
           style={{
             width: '100%',
             background: isLoading ? 'var(--bg-muted)' : 'var(--accent)',
-            color: isLoading ? 'var(--text-tertiary)' : 'var(--accent-text)',
+            color: isLoading ? 'var(--text-tertiary)' : 'var(--text-inverse)',
             borderRadius: '0.5rem',
             padding: '0.5rem 1rem',
             border: 'none',

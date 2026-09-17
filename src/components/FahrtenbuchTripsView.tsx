@@ -228,7 +228,7 @@ const FahrtenbuchTripsView: React.FC<Props> = ({ drivers, cars }) => {
         <button
           onClick={() => setShowImportModal(true)}
           className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium"
-          style={{ background: 'var(--accent)', color: 'white' }}
+          style={{ background: 'var(--accent)', color: 'var(--text-inverse)' }}
         >
           <Upload size={15} /> {t('imp.trips.import')}
         </button>
@@ -349,7 +349,7 @@ const FahrtenbuchTripsView: React.FC<Props> = ({ drivers, cars }) => {
             <button
               onClick={() => setShowImportModal(true)}
               className="mt-4 px-4 py-2 rounded-lg text-sm font-medium"
-              style={{ background: 'var(--accent)', color: 'white' }}
+              style={{ background: 'var(--accent)', color: 'var(--text-inverse)' }}
             >
               {t('imp.trips.importFahrtenbuch')}
             </button>
@@ -528,7 +528,7 @@ const FahrtenbuchTripsView: React.FC<Props> = ({ drivers, cars }) => {
                   onClick={() => handleDeleteImport(confirmDeleteId)}
                   disabled={deleting}
                   className="px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
-                  style={{ background: 'var(--danger)', color: 'white' }}
+                  style={{ background: 'var(--danger)', color: 'var(--text-inverse)' }}
                 >
                   <Trash2 size={14} />
                   {deleting ? t('common.deleting') : t('imp.trips.deleteForever')}

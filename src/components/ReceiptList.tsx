@@ -282,7 +282,7 @@ const ReceiptList: React.FC<ReceiptListProps> = ({
             <Filter size={16} />
             <span>{t('rec.filter')}</span>
             {hasActiveFilters && (
-              <span className="text-xs rounded-full px-2 py-0.5" style={{ background: 'var(--accent)', color: 'white' }}>
+              <span className="text-xs rounded-full px-2 py-0.5" style={{ background: 'var(--accent)', color: 'var(--text-inverse)' }}>
                 {activeFilterCount}
               </span>
             )}

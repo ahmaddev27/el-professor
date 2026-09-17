@@ -196,7 +196,7 @@ const RolesManagement: React.FC = () => {
             setIsModalOpen(true);
           }}
           className="flex items-center space-x-2 px-4 py-2 rounded-lg transition-colors hover:opacity-90"
-          style={{ background: 'var(--accent)', color: 'white' }}
+          style={{ background: 'var(--accent)', color: 'var(--text-inverse)' }}
         >
           <Plus size={20} />
           <span>{t('users.roles.new')}</span>

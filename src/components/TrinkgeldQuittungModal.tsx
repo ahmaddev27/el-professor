@@ -697,7 +697,7 @@ const TrinkgeldQuittungModal: React.FC<Props> = ({ isOpen, onClose }) => {
                 disabled={!driverId || loading}
                 className="flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-semibold transition-all"
                 style={driverId
-                  ? { background: 'var(--accent)', color: 'white' }
+                  ? { background: 'var(--accent)', color: 'var(--text-inverse)' }
                   : { background: 'var(--bg-muted)', color: 'var(--text-tertiary)', cursor: 'not-allowed' }}
               >
                 {loading
@@ -721,7 +721,7 @@ const TrinkgeldQuittungModal: React.FC<Props> = ({ isOpen, onClose }) => {
                 disabled={exporting || !amountIsPrintable}
                 className="flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-semibold transition-all"
                 style={amountIsPrintable
-                  ? { background: 'var(--accent)', color: 'white' }
+                  ? { background: 'var(--accent)', color: 'var(--text-inverse)' }
                   : { background: 'var(--bg-muted)', color: 'var(--text-tertiary)', cursor: 'not-allowed' }}
               >
                 <Download size={14} />

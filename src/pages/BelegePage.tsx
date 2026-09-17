@@ -174,7 +174,7 @@ const BelegePage: React.FC = () => {
           <button
             onClick={handleExportExcel}
             className="flex items-center justify-center rounded-lg transition-colors w-11 h-11 sm:w-auto sm:h-auto sm:px-4 sm:py-2"
-            style={{ background: 'var(--accent)', color: 'white' }}
+            style={{ background: 'var(--accent)', color: 'var(--text-inverse)' }}
             title={t('common.exportExcelShort')}
             onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'var(--accent-hover)'; }}
             onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'var(--accent)'; }}

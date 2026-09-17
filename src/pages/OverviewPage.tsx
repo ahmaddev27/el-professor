@@ -994,7 +994,7 @@ const OverviewPage: React.FC = () => {
                       <span className="w-5 text-xs font-bold flex-shrink-0 text-center" style={{ color: isTop ? '#10b981' : 'var(--text-tertiary)' }}>
                         {idx + 1}
                       </span>
-                      <div className="w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: 'var(--accent)', color: 'white' }}>
+                      <div className="w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: 'var(--accent)', color: 'var(--text-inverse)' }}>
                         <span className="text-xs font-bold">{driver.name.charAt(0).toUpperCase()}</span>
                       </div>
                       <div className="flex-1 min-w-0">
@@ -1154,7 +1154,7 @@ const OverviewPage: React.FC = () => {
                   >
                     <td className="py-2.5 px-3">
                       <div className="flex items-center gap-2">
-                        <div className="w-6 h-6 rounded-full flex items-center justify-center" style={{ background: 'var(--accent)', color: 'white' }}>
+                        <div className="w-6 h-6 rounded-full flex items-center justify-center" style={{ background: 'var(--accent)', color: 'var(--text-inverse)' }}>
                           <span className="text-xs font-bold">{alert.driverName.charAt(0).toUpperCase()}</span>
                         </div>
                         <div>

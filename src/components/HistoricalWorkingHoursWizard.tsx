@@ -5870,7 +5870,7 @@ function InhaberFreeWindowSearchView({
           onClick={onApplyAutoShiftPlan}
           disabled={isCreatingPlan}
           className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-opacity hover:opacity-90 disabled:opacity-60 disabled:cursor-not-allowed"
-          style={{ background: 'var(--accent)', color: '#fff' }}
+          style={{ background: 'var(--accent)', color: 'var(--text-inverse)' }}
         >
           <Play size={14} />
           {isCreatingPlan ? t('hwh.shiftPlanCreating') : t('hwh.shiftPlanCreateAuto')}
