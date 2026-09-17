@@ -431,6 +431,21 @@ export function scopeRefusal(scope: ReceiptScope): ReceiptActionRefusal | null {
 }
 
 /**
+ * Why this caller cannot issue a Gehaltsquittung at all, before anything is
+ * typed; null when they can.
+ *
+ * `confirm_salary_cash_payment` acts on the caller's own company
+ * (get_active_company_id()) and needs edit rights on salaries
+ * (current_role_permits('salaries', true)). Both screens that can start a
+ * confirmation — the Gehaltsquittung dialog and the salary payment form — ask
+ * this one function, so a caller is refused with the same sentence in both
+ * rather than one of them handing the work to a dialog that then refuses it.
+ */
+export function confirmationBlock(scope: ReceiptScope, mayEditSalaries: boolean): ReceiptActionRefusal | null {
+  return scopeRefusal(scope) ?? (mayEditSalaries ? null : 'not_authorized');
+}
+
+/**
  * Whether the cash ledger's third term — the Gehaltsquittungen and their
  * Stornos in `cash_movements` — is readable, and so whether the Bargeldbestand
  * and the Overview's cash panel may present a till at all.

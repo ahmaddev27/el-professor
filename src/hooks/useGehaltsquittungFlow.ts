@@ -63,6 +63,21 @@ export interface BalanceInputs {
 
 export type AmountError = 'invalid' | 'too_large' | 'already_paid' | 'overpayment';
 
+/**
+ * A salary and an amount the caller already chose elsewhere — the cash payment
+ * added on the salary screen. Read once, when the dialog opens: the driver and
+ * the salary are then fixed and the flow starts at the amount step, which is
+ * also where the place of payment is, a field the salary form does not have.
+ */
+export interface GehaltsquittungPreselect {
+  driverId: string;
+  salaryId: string;
+  /** Prefilled, still editable; the balance decides whether it may be paid. */
+  amountCents?: number | null;
+  /** YYYY-MM-DD */
+  paymentDate?: string | null;
+}
+
 export interface GehaltsquittungFlowOptions {
   /** Loads and acts only while true: the dialog is open and the caller may confirm in their own company. */
   enabled: boolean;
@@ -73,6 +88,8 @@ export interface GehaltsquittungFlowOptions {
   onChanged?: () => void;
   /** Where an unanswered attempt is kept; the tab's sessionStorage by default. */
   storage?: StorageLike | null;
+  /** A driver and salary chosen before the dialog opened; null for the free flow. */
+  preselect?: GehaltsquittungPreselect | null;
 }
 
 /** Loads whenever `key` changes to a new non-null value; a response for an older key is dropped. */
@@ -113,6 +130,7 @@ export function useGehaltsquittungFlow({
   defaultPlace,
   onChanged,
   storage,
+  preselect = null,
 }: GehaltsquittungFlowOptions) {
   const [step, setStep] = useState<FlowStep>('select');
   const [driverId, setDriverId] = useState('');
@@ -137,6 +155,10 @@ export function useGehaltsquittungFlow({
   onChangedRef.current = onChanged;
   const defaultPlaceRef = useRef(defaultPlace);
   defaultPlaceRef.current = defaultPlace;
+  // A ref, because the caller builds this object while it renders: reading it
+  // through the dependency list would restart the flow on every parent render.
+  const preselectRef = useRef(preselect);
+  preselectRef.current = preselect;
   const attemptRef = useRef<PaymentAttempt | null>(null);
   attemptRef.current = attempt;
   const store = useMemo(() => (storage === undefined ? browserSessionStorage() : storage), [storage]);
@@ -168,8 +190,18 @@ export function useGehaltsquittungFlow({
         setStep('preview');
         return;
       }
-      setPaymentDate(berlinToday());
+      // A preselected salary skips the first step. It is read after the stored
+      // attempt on purpose: an unanswered confirmation has to be settled first,
+      // whichever screen started it, or the same payment could be sent twice.
+      const chosen = preselectRef.current;
+      setPaymentDate(chosen?.paymentDate || berlinToday());
       setPlace(defaultPlaceRef.current);
+      if (chosen) {
+        setDriverId(chosen.driverId);
+        setSalaryId(chosen.salaryId);
+        setAmountText(chosen.amountCents != null ? formatCentsForInput(chosen.amountCents) : '');
+        setStep('amount');
+      }
       return;
     }
     if (attemptRef.current?.state === 'uncertain') return;
@@ -235,6 +267,8 @@ export function useGehaltsquittungFlow({
   const placeMissing = place.trim() === '';
   const alreadyPaid = balanceFigures !== null && balanceFigures.remainingBeforeCents === 0;
   const canContinue = salary !== null && balanceInputs !== null && overlap === null;
+  /** The driver and the salary were chosen elsewhere, so this flow has no select step. */
+  const locked = preselect !== null;
   const outcomeUnknown = unresolved && refusal !== null && outcomeIsUnknown(refusal);
   const conflict = refusal === 'request_id_conflict';
   const differsFromPreview =
@@ -278,7 +312,13 @@ export function useGehaltsquittungFlow({
   const goBack = () => {
     if (sending || unresolved || conflict) return;
     setRefusal(null);
-    setStep(step === 'preview' ? 'amount' : 'select');
+    if (step === 'preview') {
+      setStep('amount');
+      return;
+    }
+    // A preselected flow has no step to go back to; its dialog offers a cancel.
+    if (locked) return;
+    setStep('select');
   };
 
   const confirm = async () => {
@@ -437,6 +477,7 @@ export function useGehaltsquittungFlow({
     balanceFigures,
     figures,
     alreadyPaid,
+    locked,
     amountText,
     setAmountText,
     amountError,

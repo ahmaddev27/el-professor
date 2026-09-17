@@ -247,3 +247,94 @@ describe('a confirmation without an answer keeps its request id', () => {
     expect(readPendingAttempt(storage, 'c1')).toBeNull();
   });
 });
+
+/*
+  A cash payment added on the salary screen arrives with its driver, its salary
+  and its amount already chosen. It must land on the amount step — where the
+  place of payment is, a field the salary form does not have — and it must never
+  push an unanswered confirmation aside, whichever screen started that one.
+*/
+describe('a preselected salary', () => {
+  const preselected = (storage: StorageLike, enabled = true): GehaltsquittungFlowOptions => ({
+    ...options(storage, enabled),
+    preselect: { driverId: 'd1', salaryId: 's1', amountCents: 30000, paymentDate: '2026-09-16' },
+  });
+
+  beforeEach(() => {
+    world.confirmCashPayment.mockReset();
+    world.loadSalaryBalanceInputs.mockClear();
+  });
+
+  it('opens on the amount step with the payment already filled in', async () => {
+    await mount(preselected(memoryStorage()));
+    await waitFor(() => probe.flow.balance.status === 'ready', 'the balance');
+    expect(probe.flow.step).toBe('amount');
+    expect(probe.flow.locked).toBe(true);
+    expect(probe.flow.driverId).toBe('d1');
+    expect(probe.flow.salaryId).toBe('s1');
+    expect(probe.flow.amountText).toBe('300,00');
+    expect(probe.flow.paymentDate).toBe('2026-09-16');
+    expect(probe.flow.figures?.thisPaymentCents).toBe(30000);
+  });
+
+  it('has no step to go back to, so the choices stay the ones handed in', async () => {
+    await mount(preselected(memoryStorage()));
+    await waitFor(() => probe.flow.balance.status === 'ready', 'the balance');
+    await act(async () => probe.flow.goToPreview());
+    expect(probe.flow.step).toBe('preview');
+    await act(async () => probe.flow.goBack());
+    expect(probe.flow.step).toBe('amount');
+    await act(async () => probe.flow.goBack());
+    expect(probe.flow.step).toBe('amount');
+    expect(probe.flow.salaryId).toBe('s1');
+  });
+
+  it('confirms the payment it was handed', async () => {
+    world.confirmCashPayment.mockResolvedValueOnce({ ok: true, receipt: RECEIPT });
+    await mount(preselected(memoryStorage()));
+    await waitFor(() => probe.flow.balance.status === 'ready', 'the balance');
+    await act(async () => probe.flow.goToPreview());
+    await act(async () => {
+      await probe.flow.confirm();
+    });
+    expect(world.confirmCashPayment).toHaveBeenCalledTimes(1);
+    expect(world.confirmCashPayment.mock.calls[0][0]).toMatchObject({
+      salaryId: 's1',
+      amountCents: 30000,
+      paymentDate: '2026-09-16',
+      place: 'Berlin',
+    });
+    expect(probe.flow.step).toBe('done');
+  });
+
+  it('settles an unanswered confirmation first instead of starting the new payment', async () => {
+    const storage = memoryStorage();
+    world.confirmCashPayment.mockResolvedValueOnce({ ok: false, refusal: 'no_response' });
+    const first = await mount(options(storage));
+    await reachPreview();
+    await act(async () => {
+      await probe.flow.confirm();
+    });
+    const sent = world.confirmCashPayment.mock.calls[0][0];
+    await act(async () => {
+      first.unmount();
+    });
+
+    // The salary screen now hands over a different payment. The stored attempt
+    // may already be booked, so it wins: a second id would book it twice.
+    await mount({
+      ...options(storage),
+      preselect: { driverId: 'd1', salaryId: 's1', amountCents: 12345, paymentDate: '2026-09-17' },
+    });
+    await waitFor(() => probe.flow.unresolved, 'the resumed attempt');
+    expect(probe.flow.step).toBe('preview');
+    expect(probe.flow.pending?.requestId).toBe(sent.requestId);
+    expect(probe.flow.pending?.input.amountCents).toBe(sent.amountCents);
+
+    world.confirmCashPayment.mockResolvedValueOnce({ ok: true, receipt: RECEIPT });
+    await act(async () => {
+      await probe.flow.confirm();
+    });
+    expect(world.confirmCashPayment.mock.calls[1][0]).toEqual(sent);
+  });
+});

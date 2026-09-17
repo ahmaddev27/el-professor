@@ -11,6 +11,7 @@ import {
   checkPaymentDate,
   checkSignedCopyFile,
   clearPendingAttempt,
+  confirmationBlock,
   createRequestId,
   findOverlappingSalary,
   nextAttempt,
@@ -344,6 +345,28 @@ describe('receiptScope — whose receipts the screens may act on', () => {
     expect(scopeRefusal('no_company')).toBe('no_company');
     expect(scopeRefusal('other_company')).toBe('company_mismatch');
     expect(scopeRefusal('own_company')).toBeNull();
+  });
+});
+
+/*
+  Two screens can start a confirmation now — the Gehaltsquittung dialog and the
+  cash payment added on the salary screen — and both must refuse the same caller
+  with the same sentence, before anything is typed or handed over.
+*/
+describe('confirmationBlock — who may issue a Gehaltsquittung at all', () => {
+  it('lets an editor inside their own company through', () => {
+    expect(confirmationBlock('own_company', true)).toBeNull();
+  });
+
+  it('names the scope first, because a caller outside their company cannot act at all', () => {
+    expect(confirmationBlock('other_company', true)).toBe('company_mismatch');
+    expect(confirmationBlock('no_company', true)).toBe('no_company');
+    // Even with no edit right, the scope is the more specific answer.
+    expect(confirmationBlock('other_company', false)).toBe('company_mismatch');
+  });
+
+  it('refuses a role without edit rights on salaries', () => {
+    expect(confirmationBlock('own_company', false)).toBe('not_authorized');
   });
 });
 

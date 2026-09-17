@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { X, Save, AlertCircle, DollarSign, Calendar, FileText } from 'lucide-react';
+import { X, Save, AlertCircle, DollarSign, Calendar, FileText, ChevronRight, Lock } from 'lucide-react';
 import { SalaryPayment } from '../types/receipt';
 import { format } from 'date-fns';
 import { useTranslation } from '../contexts/LanguageContext';
+import { PAYMENT_WRITE_REFUSAL_KEYS, decidePaymentWrite } from '../utils/salaryPaymentWrite';
 
 interface SalaryPaymentModalProps {
   isOpen: boolean;
@@ -63,9 +64,25 @@ const SalaryPaymentModal: React.FC<SalaryPaymentModalProps> = ({
     }
   }, [isOpen, payment]);
 
+  // What this form's current selection will do. The same function decides the
+  // write itself in SalaryDetailsModal, so the notice below and the button's
+  // label cannot promise something the save does differently.
+  const decision = decidePaymentWrite({
+    origin: payment ? 'edit' : 'add',
+    paymentType: formData.payment_type,
+    existing: payment ? { payment_type: payment.payment_type, source_type: payment.source_type ?? null } : null,
+  });
+  const makesReceipt = decision.kind === 'gehaltsquittung';
+  const refused = decision.kind === 'refused' ? t(PAYMENT_WRITE_REFUSAL_KEYS[decision.refusal]) : null;
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+
+    if (refused) {
+      setError(refused);
+      return;
+    }
 
     const amount = parseFloat(formData.amount);
 
@@ -143,6 +160,24 @@ const SalaryPaymentModal: React.FC<SalaryPaymentModalProps> = ({
               <option value="cash">{t('sal.payment.cash')}</option>
               <option value="bank">{t('sal.payment.bankTransfer')}</option>
             </select>
+
+            {/* Said before the payment is committed, not after a refusal. */}
+            {makesReceipt && (
+              <div
+                style={{ background: 'var(--warning-subtle)', border: '1px solid var(--warning)', borderRadius: '0.5rem', padding: '0.75rem', marginTop: '0.75rem', display: 'flex', alignItems: 'flex-start', gap: '0.5rem' }}
+              >
+                <Lock size={16} style={{ color: 'var(--warning)', flexShrink: 0, marginTop: '0.125rem' }} />
+                <span style={{ color: 'var(--warning)', fontSize: '0.8125rem' }}>{t('sal.payment.cashReceiptNotice')}</span>
+              </div>
+            )}
+            {refused && (
+              <div
+                style={{ background: 'var(--danger-subtle)', border: '1px solid var(--danger)', borderRadius: '0.5rem', padding: '0.75rem', marginTop: '0.75rem', display: 'flex', alignItems: 'flex-start', gap: '0.5rem' }}
+              >
+                <AlertCircle size={16} style={{ color: 'var(--danger)', flexShrink: 0, marginTop: '0.125rem' }} />
+                <span style={{ color: 'var(--danger)', fontSize: '0.8125rem' }}>{refused}</span>
+              </div>
+            )}
           </div>
 
           <div>
@@ -196,22 +231,26 @@ const SalaryPaymentModal: React.FC<SalaryPaymentModalProps> = ({
             </div>
           </div>
 
-          <div>
-            <label style={{ color: 'var(--text-secondary)' }} className="block text-sm font-medium mb-2">
-              {t('common.description')}
-            </label>
-            <div className="relative">
-              <FileText style={{ color: 'var(--text-tertiary)', position: 'absolute', left: '0.75rem', top: '0.75rem' }} size={18} />
-              <textarea
-                value={formData.description}
-                onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                style={{ ...inputStyle, paddingLeft: '2.25rem', resize: 'vertical' }}
-                placeholder={t('sal.payment.descriptionPlaceholder')}
-                rows={3}
-                disabled={loading}
-              />
+          {/* A Gehaltsquittung writes its own description ("Gehaltsquittung GQ-…"),
+              so the field is not offered on that path rather than silently dropped. */}
+          {!makesReceipt && (
+            <div>
+              <label style={{ color: 'var(--text-secondary)' }} className="block text-sm font-medium mb-2">
+                {t('common.description')}
+              </label>
+              <div className="relative">
+                <FileText style={{ color: 'var(--text-tertiary)', position: 'absolute', left: '0.75rem', top: '0.75rem' }} size={18} />
+                <textarea
+                  value={formData.description}
+                  onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                  style={{ ...inputStyle, paddingLeft: '2.25rem', resize: 'vertical' }}
+                  placeholder={t('sal.payment.descriptionPlaceholder')}
+                  rows={3}
+                  disabled={loading}
+                />
+              </div>
             </div>
-          </div>
+          )}
 
           <div className="flex justify-end space-x-3 pt-4">
             <button
@@ -226,14 +265,20 @@ const SalaryPaymentModal: React.FC<SalaryPaymentModalProps> = ({
             </button>
             <button
               type="submit"
-              disabled={loading}
+              disabled={loading || refused !== null}
               style={{ background: 'var(--accent)', color: 'var(--accent-text)', borderRadius: '0.5rem', padding: '0.5rem 1rem', border: 'none' }}
-              onMouseEnter={e => { if (!loading) e.currentTarget.style.background = 'var(--accent-hover)'; }}
+              onMouseEnter={e => { if (!loading && !refused) e.currentTarget.style.background = 'var(--accent-hover)'; }}
               onMouseLeave={e => (e.currentTarget.style.background = 'var(--accent)')}
-              className="flex items-center space-x-2 disabled:opacity-50"
+              className="flex items-center space-x-2 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              <Save size={20} />
-              <span>{loading ? t('common.saving') : t('common.save')}</span>
+              {makesReceipt ? <ChevronRight size={20} /> : <Save size={20} />}
+              <span>
+                {loading
+                  ? t('common.saving')
+                  : makesReceipt
+                    ? t('sal.payment.cashReceiptContinue')
+                    : t('common.save')}
+              </span>
             </button>
           </div>
         </form>
