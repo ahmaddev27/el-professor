@@ -8,15 +8,19 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
+  accountBlocked,
   asCheckResult,
+  auditUnavailable,
   CHECK_RESULTS,
   checkResultReply,
   emailChanged,
+  isAccountStanding,
   matchPlatformEmailChangeRoute,
   noAccount,
   notPlatformAccount,
   parseEmailChangeBody,
   passwordProofState,
+  rateLimited,
   sameEmail,
   type CheckResult,
 } from './platform-email-change.ts';
@@ -144,11 +148,31 @@ describe('asCheckResult', () => {
   });
 });
 
+describe('isAccountStanding', () => {
+  // These three are answered before the freshness test, so "this account may not
+  // use this route at all" never depends on how the caller signed in. The rest
+  // are about the request and must come after it.
+  it('is the three verdicts about the account, and only those', () => {
+    expect(CHECK_RESULTS.filter(isAccountStanding))
+      .toEqual(['not_platform_account', 'no_account', 'account_blocked']);
+  });
+
+  it('does not treat the hourly cap or the address as standing', () => {
+    for (const result of ['ok', 'rate_limited', 'same_email', 'email_taken'] as CheckResult[]) {
+      expect(isAccountStanding(result), result).toBe(false);
+    }
+  });
+});
+
 describe('checkResultReply', () => {
   it('gives every refusal its own stable reason and status', () => {
     const replies: Record<Exclude<CheckResult, 'ok'>, { status: number; reason: string }> = {
       not_platform_account: { status: 403, reason: 'not_platform_account' },
       no_account: { status: 404, reason: 'no_account' },
+      // A banned or deleted account: GoTrue keeps an issued token valid to its
+      // exp, so the ban has to be re-read here or containment would not hold.
+      account_blocked: { status: 403, reason: 'account_blocked' },
+      rate_limited: { status: 429, reason: 'rate_limited' },
       same_email: { status: 400, reason: 'same_email' },
       email_taken: { status: 409, reason: 'email_taken' },
     };
@@ -186,9 +210,16 @@ describe('the successful answer', () => {
 
 describe('the refusal helpers', () => {
   it('say nothing beyond ok and reason', () => {
-    for (const reply of [notPlatformAccount(), sameEmail(), noAccount()]) {
+    for (const reply of [notPlatformAccount(), sameEmail(), noAccount(), accountBlocked(), rateLimited(), auditUnavailable()]) {
       expect(Object.keys(reply.body).sort()).toEqual(['ok', 'reason']);
       expect(reply.body.ok).toBe(false);
     }
+  });
+
+  // The route answers this instead of changing the address when the `attempt`
+  // audit row cannot be written. An address the log cannot record is an address
+  // that does not move; a 200 here would be the one unrecorded change.
+  it('reports a missing audit row as a server failure, not as a success', () => {
+    expect(auditUnavailable()).toEqual({ status: 500, body: { ok: false, reason: 'audit_unavailable' } });
   });
 });

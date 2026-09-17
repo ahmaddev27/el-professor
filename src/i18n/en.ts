@@ -282,6 +282,7 @@ export const en: PartialDictionary = {
   'account.error.nameEmpty':   'Please enter a name.',
   'account.error.emailInvalid':'Please enter a valid email address.',
   'account.error.emailUnchanged':'That is already your current email address.',
+  'account.error.emailChangeTooOften':'The email address has been changed too often in the past hour. Please try again later.',
   'account.error.pwShort':     'The password must be at least {n} characters long.',
   'account.error.pwMismatch':  'The two passwords do not match.',
   'account.error.pwSame':      'The new password must differ from the current one.',

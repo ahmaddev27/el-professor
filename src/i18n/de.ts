@@ -280,6 +280,7 @@ export const de = {
   'account.error.nameEmpty':   'Bitte geben Sie einen Namen ein.',
   'account.error.emailInvalid':'Bitte geben Sie eine gültige E-Mail-Adresse ein.',
   'account.error.emailUnchanged':'Das ist bereits Ihre aktuelle E-Mail-Adresse.',
+  'account.error.emailChangeTooOften':'Die E-Mail-Adresse wurde in der letzten Stunde zu oft geändert. Bitte versuchen Sie es später erneut.',
   'account.error.pwShort':     'Das Passwort muss mindestens {n} Zeichen lang sein.',
   'account.error.pwMismatch':  'Die beiden Passwörter stimmen nicht überein.',
   'account.error.pwSame':      'Das neue Passwort muss sich vom aktuellen unterscheiden.',

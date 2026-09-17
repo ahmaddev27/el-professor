@@ -27,23 +27,33 @@
  *
  * ## The order of refusals, and why it is that order
  *
- * 1. `unauthorized`         — no session, or one GoTrue no longer knows.
- * 2. `not_platform_account` — no **active** staff row. A company user is told
- *    this whatever its session looks like, so it is asked before the session
- *    test: the answer "use the code" must not depend on how you signed in.
- * 3. `reauth_required`      — the session's amr does not name a password
- *    sign-in inside PASSWORD_PROOF_MAX_AGE_SECONDS. With the code gone this is
- *    the only proof that the person at the keyboard knows the password.
- * 4. `same_email` / `email_taken` / `no_account` — the address itself.
+ * 1. `unauthorized`      — no session, or one GoTrue no longer knows.
+ * 2. the account's standing, asked before the session is looked at because the
+ *    answer must not depend on how the caller signed in:
+ *    `not_platform_account` (no **active** staff row — a company user keeps the
+ *    code path), `account_blocked` (banned or deleted in GoTrue, the
+ *    containment lever that must work even while an issued token is still
+ *    valid), `no_account`.
+ * 3. `reauth_required`   — the session's amr does not name a password sign-in
+ *    inside PASSWORD_PROOF_MAX_AGE_SECONDS. With the code gone this is the only
+ *    proof that the person at the keyboard knows the password.
+ * 4. the request itself: `rate_limited` (five completed changes this hour),
+ *    `same_email`, `email_taken`.
  *
  * Steps 2 and 4 are one round trip: `platform_self_email_change_check` answers
  * both in one snapshot, and its verdicts are reported in the order above.
  *
- * ## After the change
+ * ## The audit fails closed
  *
- * One audit row (`auth` / `auth.platform_email_change`), written by the
- * database, and the same "your address changed" notice to the **old** address
- * the code path sends — which is what makes a mistyped address visible to
+ * `auditedPlatformWrite()`'s shape, in `_shared/platform-access.ts`: an
+ * `attempt` row before GoTrue is asked to move the address — and the route
+ * answers 500 `audit_unavailable` without moving it when that row cannot be
+ * written — then `ok` or `error` afterwards, best-effort, because by then the
+ * change has happened or failed and a 500 would report a failure that did not
+ * occur.
+ *
+ * Afterwards the same "your address changed" notice goes to the **old** address
+ * the code path sends, which is what makes a mistyped address visible to
  * someone who can still read the old mailbox.
  */
 import {
@@ -68,9 +78,10 @@ import {
 } from '../_shared/otp-core.ts';
 import {
   asCheckResult,
+  auditUnavailable,
   checkResultReply,
   emailChanged,
-  notPlatformAccount,
+  isAccountStanding,
   parseEmailChangeBody,
   passwordProofState,
 } from '../_shared/platform-email-change.ts';
@@ -108,8 +119,10 @@ async function changeEmail(req: Request, newEmail: string, requestId: string): P
     if (error) throw error;
     const check = asCheckResult(data);
 
-    // 2. A company user keeps the code path, whatever its session looks like.
-    if (check === 'not_platform_account') return notPlatformAccount();
+    // 2. The account's standing, before the session is looked at: a company
+    //    user keeps the code path, and a banned or deleted account is refused,
+    //    whatever either one's session looks like.
+    if (isAccountStanding(check)) return checkResultReply(check)!;
 
     // 3. The password proof. This is the control the emailed code did not
     //    provide and does not replace: the code went to the *new* address,
@@ -118,9 +131,16 @@ async function changeEmail(req: Request, newEmail: string, requestId: string): P
       return reauthRequired();
     }
 
-    // 4. The address itself.
+    // 4. The hourly cap and the address itself.
     const refusal = checkResultReply(check);
     if (refusal) return refusal;
+
+    // The attempt row, before anything moves. This is what makes the audit fail
+    // closed: an address the log cannot record is an address that does not
+    // change. The outcome row below is the best-effort half, exactly as in
+    // _shared/platform-access.ts's auditedPlatformWrite().
+    step = 'audit_attempt';
+    if (!(await record(caller, newEmail, 'attempt', requestId))) return auditUnavailable();
 
     // The same admin update the code path applies (otp-verify's
     // completeEmailChange): no mail from GoTrue, no pending change, and the
@@ -132,18 +152,24 @@ async function changeEmail(req: Request, newEmail: string, requestId: string): P
       email_confirm: true,
     });
     if (updateError) {
-      // The check above closed the ordinary case; this catches a registration
-      // that landed between the two.
+      await record(caller, newEmail, 'error', requestId);
+      // The check above closed the ordinary case. This catches a registration
+      // that landed between the two — but only when GoTrue names the refusal:
+      // v2.170.0 answers a taken address on update with a 500 "Error updating
+      // user" that cannot be told from any other failed update (otp-core.ts's
+      // isEmailTakenOnUpdate says so), so that race ends as `internal`, not as
+      // `email_taken`. The caller's next attempt gets the check's own verdict.
       if (isEmailTakenOnUpdate(updateError)) return emailTakenReply();
       throw updateError;
     }
 
-    // The one audit row. Best effort by necessity: the address has already
-    // moved, so answering 500 would report a failure that did not happen and
-    // send the user into a retry loop against their own new address. A row
-    // that could not be written is logged loudly instead, with the request id.
-    step = 'audit';
-    await recordChange(caller.userId, caller.email, newEmail, caller.sessionId, requestId);
+    // The outcome row. Best effort by necessity: the address has already moved,
+    // so answering 500 would report a failure that did not happen and send the
+    // user into a retry loop against their own new address. The attempt row
+    // above is already in the log, so a lost outcome leaves a trace of what was
+    // being attempted rather than nothing at all.
+    step = 'audit_outcome';
+    await record(caller, newEmail, 'ok', requestId);
 
     // Best effort, as on the code path: the old mailbox learns what happened.
     const notice = sendEmailChangedNotice(caller.email, newEmail, {
@@ -160,30 +186,35 @@ async function changeEmail(req: Request, newEmail: string, requestId: string): P
   }
 }
 
-/** Never rejects: the change has already happened by the time this is called. */
-async function recordChange(
-  userId: string,
-  oldEmail: string,
+/**
+ * Writes one audit row and says whether it landed. Never rejects, so the caller
+ * decides what a lost row means: fatal for `attempt`, logged for the rest.
+ *
+ * A NULL answer means the database saw no active staff row for an account this
+ * route had just accepted as one, which is no more a reason to go on than a
+ * failed call.
+ */
+async function record(
+  caller: { userId: string; email: string; sessionId: string | null },
   newEmail: string,
-  sessionId: string | null,
+  outcome: 'attempt' | 'ok' | 'error',
   requestId: string,
-): Promise<void> {
-  const context = { request_id: requestId, purpose: 'email_change', user_id: userId };
+): Promise<boolean> {
   try {
     const { data, error } = await serviceClient().rpc('platform_self_email_change_record', {
-      p_user_id: userId,
-      p_old_email: oldEmail,
+      p_user_id: caller.userId,
+      p_old_email: caller.email,
       p_new_email: newEmail,
-      p_session_id: sessionId,
+      p_outcome: outcome,
+      p_session_id: caller.sessionId,
     });
     if (error) throw error;
-    // NULL means the database saw no active staff row for an account this route
-    // had just accepted as one. The change stands; the log is the only place it
-    // can still be noticed.
     if (data === null || data === undefined) {
       throw new Error('platform_self_email_change_record wrote no row');
     }
+    return true;
   } catch (err) {
-    logFailure(FN, `${STEP}_audit_lost`, context, err);
+    logFailure(FN, `${STEP}_audit_${outcome}`, { request_id: requestId, purpose: 'email_change', user_id: caller.userId }, err);
+    return false;
   }
 }

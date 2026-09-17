@@ -26,11 +26,16 @@
                   refused by privilege, not by the function's own guard
     2. verdicts   every answer platform_self_email_change_check can give, for a
                   platform owner, a company admin, a disabled staff row and an
-                  id with no account; and 22023 for a broken contract
-    3. audit      exactly one row per recorded change, with category auth, the
-                  account as actor, its platform role, the session from the
-                  caller, and the two addresses; NULL and no row for an account
-                  with no active staff row; 22023 for a broken contract
+                  id with no account; the ban predicate (GoTrue keeps an issued
+                  token valid through a ban, so containment depends on it); the
+                  hourly cap on completed changes, which counts one actor's `ok`
+                  rows and not its attempts; and 22023 for a broken contract
+    3. audit      one row per call, with category auth, the account as actor,
+                  its platform role, the session from the caller and the two
+                  addresses; the `attempt` row that makes the audit fail closed,
+                  and the `error` row for a change GoTrue refused; NULL and no
+                  row for an account with no active staff row; 22023 for a
+                  broken contract
     4. door       platform_audit_record still refuses the action, it is not on
                   the edge functions' list, and the row stays append-only
 
@@ -162,7 +167,7 @@ ON CONFLICT (user_id) DO NOTHING;
 DO $$
 DECLARE
   c_check  CONSTANT text := 'public.platform_self_email_change_check(uuid,text)';
-  c_record CONSTANT text := 'public.platform_self_email_change_record(uuid,text,text,uuid)';
+  c_record CONSTANT text := 'public.platform_self_email_change_record(uuid,text,text,text,uuid)';
   v_sig text;
 BEGIN
   PERFORM _ec_reset();
@@ -253,6 +258,75 @@ BEGIN
       '50000000-0000-4000-8000-000000000001'::uuid, 'neu@example.com')$q$, true) = 'no_account');
   UPDATE auth.users SET email = 'super@test.invalid' WHERE id = c_owner;
 
+  -- The containment lever. GoTrue does not revoke an issued access token when
+  -- an account is banned, so a responder who bans a compromised platform
+  -- account without also disabling its staff row must still stop it moving its
+  -- own address. A ban that has already lapsed must not.
+  UPDATE auth.users SET banned_until = now() + interval '1 day' WHERE id = c_owner;
+  PERFORM _ec_ok('check() answers account_blocked for a banned account with an active staff row',
+    _ec_try(NULL, $q$SELECT platform_self_email_change_check(
+      '50000000-0000-4000-8000-000000000001'::uuid, 'neu@example.com')$q$, true) = 'account_blocked');
+  UPDATE auth.users SET banned_until = now() - interval '1 day' WHERE id = c_owner;
+  PERFORM _ec_ok('a ban that has lapsed does not block',
+    _ec_try(NULL, $q$SELECT platform_self_email_change_check(
+      '50000000-0000-4000-8000-000000000001'::uuid, 'neu@example.com')$q$, true) = 'ok');
+  UPDATE auth.users SET banned_until = NULL, deleted_at = now() WHERE id = c_owner;
+  PERFORM _ec_ok('check() answers account_blocked for a deleted account',
+    _ec_try(NULL, $q$SELECT platform_self_email_change_check(
+      '50000000-0000-4000-8000-000000000001'::uuid, 'neu@example.com')$q$, true) = 'account_blocked');
+  UPDATE auth.users SET deleted_at = NULL WHERE id = c_owner;
+
+  -- The hourly cap on completed changes. It bounds the notice mail an insider
+  -- loop would send; only `ok` rows count, and it is deliberately high enough
+  -- that correcting a mistyped address is immediate.
+  --
+  -- The seeded rows are written as the connecting superuser, because nobody
+  -- else holds EXECUTE on audit_write, and each subtransaction below is rolled
+  -- back on the way out: the log is append-only, so they cannot be deleted
+  -- again and would otherwise reach section 3's counts.
+  BEGIN
+    PERFORM app_private.audit_write('auth', 'auth.platform_email_change', 'ok', NULL::uuid,
+              'user_account', c_owner::text, NULL::jsonb, NULL::jsonb, c_owner)
+       FROM generate_series(1, 4);
+    PERFORM _ec_ok('four completed changes in the hour still leave a fifth open',
+      _ec_try(NULL, $q$SELECT platform_self_email_change_check(
+        '50000000-0000-4000-8000-000000000001'::uuid, 'neu@example.com')$q$, true) = 'ok');
+
+    PERFORM app_private.audit_write('auth', 'auth.platform_email_change', 'ok', NULL::uuid,
+              'user_account', c_owner::text, NULL::jsonb, NULL::jsonb, c_owner);
+    PERFORM _ec_ok('the fifth closes it',
+      _ec_try(NULL, $q$SELECT platform_self_email_change_check(
+        '50000000-0000-4000-8000-000000000001'::uuid, 'neu@example.com')$q$, true) = 'rate_limited');
+
+    RAISE EXCEPTION USING ERRCODE = 'ZZ007';
+  EXCEPTION WHEN SQLSTATE 'ZZ007' THEN NULL;
+  END;
+
+  -- Attempt rows are not counted: they mail nothing, and counting them would
+  -- let a failing GoTrue lock the owner out of correcting his own address.
+  BEGIN
+    PERFORM app_private.audit_write('auth', 'auth.platform_email_change', 'attempt', NULL::uuid,
+              'user_account', c_owner::text, NULL::jsonb, NULL::jsonb, c_owner)
+       FROM generate_series(1, 20);
+    PERFORM _ec_ok('twenty attempt rows do not close it',
+      _ec_try(NULL, $q$SELECT platform_self_email_change_check(
+        '50000000-0000-4000-8000-000000000001'::uuid, 'neu@example.com')$q$, true) = 'ok');
+    RAISE EXCEPTION USING ERRCODE = 'ZZ007';
+  EXCEPTION WHEN SQLSTATE 'ZZ007' THEN NULL;
+  END;
+
+  -- Another account's changes are not this account's.
+  BEGIN
+    PERFORM app_private.audit_write('auth', 'auth.platform_email_change', 'ok', NULL::uuid,
+              'user_account', c_admin::text, NULL::jsonb, NULL::jsonb, c_admin)
+       FROM generate_series(1, 9);
+    PERFORM _ec_ok('the cap counts one actor, not the whole log',
+      _ec_try(NULL, $q$SELECT platform_self_email_change_check(
+        '50000000-0000-4000-8000-000000000001'::uuid, 'neu@example.com')$q$, true) = 'ok');
+    RAISE EXCEPTION USING ERRCODE = 'ZZ007';
+  EXCEPTION WHEN SQLSTATE 'ZZ007' THEN NULL;
+  END;
+
   -- A broken argument contract raises 22023 with a fixed message and never
   -- returns a verdict, so the route can tell "the migration and I disagree"
   -- from "this address is refused".
@@ -290,7 +364,7 @@ BEGIN
   SELECT count(*) INTO v_before FROM app_private.platform_audit_log WHERE action = c_action;
 
   v_answer := _ec_do(NULL, format(
-    $q$SELECT platform_self_email_change_record(%L::uuid, 'super@test.invalid', '  NEU@Example.COM ', %L::uuid)::text$q$,
+    $q$SELECT platform_self_email_change_record(%L::uuid, 'super@test.invalid', '  NEU@Example.COM ', 'ok', %L::uuid)::text$q$,
     c_owner, c_session), true);
   PERFORM _ec_ok('record() returns the id of the row it wrote', v_answer ~ '^[0-9]+$');
 
@@ -338,6 +412,36 @@ BEGIN
   PERFORM _ec_reset();
   PERFORM _ec_ok('and writes no row for either',
     (SELECT count(*) FROM app_private.platform_audit_log WHERE action = c_action) = v_before);
+
+  -- The attempt row: written before the change, so an address the log cannot
+  -- record is an address that does not move. It names both addresses, so an
+  -- attempt with no outcome still says what was being attempted.
+  SELECT count(*) INTO v_before FROM app_private.platform_audit_log WHERE action = c_action;
+  PERFORM _ec_ok('record() writes an attempt row',
+    _ec_do(NULL, format(
+      $q$SELECT platform_self_email_change_record(%L::uuid, 'super@test.invalid', 'drei@example.com', 'attempt')::text$q$,
+      c_owner), true) ~ '^[0-9]+$');
+  PERFORM _ec_reset();
+  SELECT * INTO v_row FROM app_private.platform_audit_log WHERE action = c_action ORDER BY id DESC LIMIT 1;
+  PERFORM _ec_ok('the attempt row is outcome attempt and names both addresses',
+    v_row.outcome = 'attempt' AND v_row.category = 'auth'
+    AND v_row.before_value = jsonb_build_object('email', 'super@test.invalid')
+    AND v_row.after_value = jsonb_build_object('email', 'drei@example.com'));
+
+  PERFORM _ec_ok('record() writes an error row for a change GoTrue refused',
+    _ec_do(NULL, format(
+      $q$SELECT platform_self_email_change_record(%L::uuid, 'super@test.invalid', 'drei@example.com', 'error')::text$q$,
+      c_owner), true) ~ '^[0-9]+$');
+  PERFORM _ec_reset();
+  PERFORM _ec_ok('and only those three outcomes exist',
+    (SELECT count(*) FROM app_private.platform_audit_log WHERE action = c_action) = v_before + 2);
+
+  -- `denied` belongs to the RPCs a client can call; this one is only ever
+  -- reached after the route has already authorized the caller.
+  PERFORM _ec_ok('record() refuses an outcome outside the three',
+    _ec_try(NULL, format(
+      $q$SELECT platform_self_email_change_record(%L::uuid, 'a@b.de', 'c@d.de', 'denied')::text$q$,
+      c_owner), true) LIKE 'ERR 22023 %');
 
   -- A broken contract raises rather than writing a misleading row.
   PERFORM _ec_ok('record(NULL account) raises 22023',

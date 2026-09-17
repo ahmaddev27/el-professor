@@ -2093,6 +2093,17 @@ INSERT INTO _mx_rpc (label, stmt, want, hole) VALUES
     ('account_is_platform_staff(member of A)',
      $q$SELECT account_is_platform_staff({ref:user_profiles})::text$q$,
      'PPPPPPP', NULL),
+    -- 20260919140000, the codeless email change for a platform account. Both are
+    -- service role only, like account_is_platform_staff above: the caller is the
+    -- platform-staff edge function acting for a user id it has just verified, so
+    -- every principal a client can be — the platform owner included — is refused
+    -- by privilege before either function's own guard is reached.
+    ('platform_self_email_change_check(member of A)',
+     $q$SELECT platform_self_email_change_check({ref:user_profiles}, 'mx-probe@test.invalid')$q$,
+     'PPPPPPP', NULL),
+    ('platform_self_email_change_record(member of A)',
+     $q$SELECT platform_self_email_change_record({ref:user_profiles}, 'mx-old@test.invalid', 'mx-new@test.invalid')::text$q$,
+     'PPPPPPP', NULL),
     -- the read models of 20260916140000 (plan 3.6b). Each is authenticated
     -- only, and answers {"ok": false, "reason": "not_authorized"} without the
     -- capability rather than raising, so the probe asks for `ok` and a refusal

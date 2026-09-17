@@ -29,8 +29,11 @@ export type PlatformEmailChangeReason =
   | 'reauth_required'
   | 'not_platform_account'
   | 'no_account'
+  | 'account_blocked'
+  | 'rate_limited'
   | 'same_email'
   | 'email_taken'
+  | 'audit_unavailable'
   | 'internal'
   | 'network';
 
@@ -46,7 +49,8 @@ export interface PlatformEmailChangeInput {
 
 const FAILURE_REASONS: ReadonlySet<string> = new Set<PlatformEmailChangeReason>([
   'invalid_request', 'unauthorized', 'reauth_required', 'not_platform_account',
-  'no_account', 'same_email', 'email_taken', 'internal', 'network',
+  'no_account', 'account_blocked', 'rate_limited', 'same_email', 'email_taken',
+  'audit_unavailable', 'internal', 'network',
 ]);
 
 /** The message each refusal shows. A Record over the union: a new reason must get one. */
@@ -57,8 +61,14 @@ const FAILURE_KEYS: Record<PlatformEmailChangeReason, TranslationKey> = {
   // The profile's routing hint said platform, the database says otherwise.
   not_platform_account: 'otp.error.forbidden',
   no_account:           'otp.error.forbidden',
+  // Banned or deleted in GoTrue: the account is being contained, and it must
+  // not learn more than that from this screen.
+  account_blocked:      'otp.error.forbidden',
+  rate_limited:         'account.error.emailChangeTooOften',
   same_email:           'account.error.emailUnchanged',
   email_taken:          'otp.error.emailTaken',
+  // The change did not happen, because its audit row could not be written.
+  audit_unavailable:    'otp.error.internal',
   internal:             'otp.error.internal',
   network:              'otp.error.network',
 };
