@@ -53,6 +53,35 @@
   The companies here are created inside this file rather than in seed.sql for
   the same reason tenant-state.sql creates its own: they exist to be refused,
   and every one of them would otherwise widen what the other test files see.
+
+  ## Why this file carries the behaviour, and the migration only a tripwire
+
+  20260919150000 ends in a self-check that runs on every deploy, which this kit
+  does not. Three of its checks read a function body as text, and the shape they
+  settled on was paid for four times over:
+
+    1. a check forbidding `period_start <= now()` matched the line comment that
+       says that term must not be there;
+    2. a check forbidding an assignment of `subscription_status` matched a block
+       comment quoting what an earlier draft got wrong — the comment stripper
+       handled line comments only, and its own header had claimed that was all
+       the file used;
+    3. writing that stripper's explanation reintroduced the delimiters as prose,
+       and because PostgreSQL nests block comments, the file stopped parsing;
+    4. so the explanation now lives here instead, and the migration keeps one
+       short line-comment per check.
+
+  The rule that came out of it: **a check that forbids an assignment must read
+  assignments**, not the body. So checks 7 and 8 read only the `SET` clause of an
+  `UPDATE` of `companies` — the one place those columns can be written — and a
+  column named anywhere else (an INSERT column list, a VALUES expression, a
+  comparison, surviving prose) cannot fire them.
+
+  A text tripwire is still not a proof: it matches a phrase, so a predicate
+  rewritten another way slips past. That is what the sections below are for, and
+  why every behavioural claim about a writer is asserted here rather than
+  described there — 3b for the two suspension writers, 3c for the early-renewal
+  downgrade, 4 for the redemption, 5 for the invoice rule.
 */
 
 \set ON_ERROR_STOP on
