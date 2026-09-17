@@ -35,9 +35,11 @@
     1. the rule          jwt_amr() and session_amr_permits_platform() on their
                          own: every method, both claim forms, and everything
                          malformed
-    2. the seam          platform_staff_role_of() is scoped to the caller's own
-                         session; the account fact and every caller without a
+    2. the seam          platform_staff_role_of() answers the session, not the
+                         argument; the account fact and every caller without a
                          session are untouched
+   2b. the session       jwt_has_subject(), which the gate asks instead of
+                         auth.uid(), in both claim forms — see its own note
     3. capabilities      an oauth session holds none of the fourteen
     4. the helpers       platform_staff_role(), platform_whoami(),
                          is_user_super_admin(), platform_can_manage_account()
@@ -82,27 +84,33 @@ END $$;
   call an app_private helper the way a SECURITY DEFINER function does.
 
   `p_amr` is the array as JSON text, or NULL for a token that carries no amr at
-  all (GoTrue's `omitempty`). `p_json` chooses the form: false writes the
-  singular request.jwt.claim.* GUCs the kit uses elsewhere, true writes the one
-  request.jwt.claims document PostgREST sets.
+  all (GoTrue's `omitempty`). `p_json` chooses where the **amr** comes from:
+  false writes the singular request.jwt.claim.* GUCs the kit uses elsewhere,
+  true writes the one request.jwt.claims document PostgREST sets.
+
+  The subject is written in **both** forms either way. `auth.uid()` is not ours
+  and its body differs — the supabase/postgres image's reads only
+  `request.jwt.claim.sub` (see `_as()` in assertions.sql), the live databases'
+  read both — so a check that goes through a function calling it would otherwise
+  measure the image rather than the rule. The gate itself asks
+  `app_private.jwt_has_subject()`, which reads both, and section 1 pins each
+  form on its own.
 */
 CREATE OR REPLACE FUNCTION _amr_claims(p_user uuid, p_amr text, p_json boolean DEFAULT false) RETURNS void
 LANGUAGE plpgsql AS $$
 DECLARE v_claims jsonb;
 BEGIN
   PERFORM _amr_reset();
+  PERFORM set_config('request.jwt.claim.sub', p_user::text, true);
+  PERFORM set_config('request.jwt.claim.role', 'authenticated', true);
   IF p_json THEN
     v_claims := jsonb_build_object('sub', p_user, 'role', 'authenticated');
     IF p_amr IS NOT NULL THEN
       v_claims := v_claims || jsonb_build_object('amr', p_amr::jsonb);
     END IF;
     PERFORM set_config('request.jwt.claims', v_claims::text, true);
-  ELSE
-    PERFORM set_config('request.jwt.claim.sub', p_user::text, true);
-    PERFORM set_config('request.jwt.claim.role', 'authenticated', true);
-    IF p_amr IS NOT NULL THEN
-      PERFORM set_config('request.jwt.claim.amr', p_amr, true);
-    END IF;
+  ELSIF p_amr IS NOT NULL THEN
+    PERFORM set_config('request.jwt.claim.amr', p_amr, true);
   END IF;
 END $$;
 
@@ -324,14 +332,21 @@ BEGIN
   PERFORM _amr_ok('seam: the account fact is not touched by the session',
     app_private.platform_staff_role_of_account(owner) = 'owner');
 
-  -- Somebody else's Google session says nothing about this account: the gate is
-  -- about authority, and authority is the caller's.
+  -- The condition is the session, not the argument. A Google session exercises
+  -- no platform authority for *any* account — asking about somebody else is not
+  -- a way round it — while the account fact stays readable for the two triggers
+  -- that ask about a row.
   PERFORM _amr_claims(admin_a, _amr_oauth(), true);
-  PERFORM _amr_ok('seam: another account''s Google session does not hide the staff row',
-    app_private.platform_staff_role_of(owner) = 'owner');
+  PERFORM _amr_ok('seam: a Google session reads no account''s platform role, not even another''s',
+    app_private.platform_staff_role_of(owner) IS NULL);
+  PERFORM _amr_ok('seam: and the account fact is still readable underneath it',
+    app_private.platform_staff_role_of_account(owner) = 'owner');
 
-  -- A caller that is not staff answers NULL either way, never an error.
+  -- A password session that is not staff reads the fact as before: the gate did
+  -- not fire, so the NULL below is "no staff row", not "no authority".
   PERFORM _amr_claims(admin_a, _amr_password(), true);
+  PERFORM _amr_ok('seam: a password session reads the staff row it is not asking about',
+    app_private.platform_staff_role_of(owner) = 'owner');
   PERFORM _amr_ok('seam: a company admin holds no role, password session or not',
     app_private.platform_staff_role_of(admin_a) IS NULL);
 
@@ -339,6 +354,83 @@ BEGIN
   PERFORM _amr_ok('seam: a NULL account id answers NULL',
     app_private.platform_staff_role_of(NULL) IS NULL
     AND app_private.platform_staff_role_of_account(NULL) IS NULL);
+END $$;
+
+-- ─── 2b. the other half of the condition: is there a session at all? ────────
+
+/*
+  `jwt_has_subject()` is what the gate asks instead of `auth.uid()`. That is not
+  a style choice: `auth.uid()` is not ours, its body differs between the
+  supabase/postgres image (singular claim only) and the live databases (both),
+  and the first version of this migration hung the gate on `p_user_id =
+  auth.uid()` — a three-valued comparison that came back NULL here, so the
+  `AND` was NULL, the `IF` never fired, and a Google session kept its platform
+  role while every pure-rule assertion around it passed. Both claim forms are
+  pinned separately below so that cannot come back quietly.
+*/
+DO $$
+DECLARE
+  owner CONSTANT uuid := '50000000-0000-4000-8000-000000000001';
+BEGIN
+  PERFORM _amr_reset();
+  PERFORM _amr_ok('session: no claims at all is not a session',
+    app_private.jwt_has_subject() = false);
+
+  PERFORM _amr_reset();
+  PERFORM set_config('request.jwt.claim.role', 'service_role', true);
+  PERFORM _amr_ok('session: the service role is not a session — its key carries a role and no sub',
+    app_private.jwt_has_subject() = false);
+
+  PERFORM _amr_reset();
+  PERFORM set_config('request.jwt.claims', '{"role": "anon"}', true);
+  PERFORM _amr_ok('session: the anon key is not a session',
+    app_private.jwt_has_subject() = false);
+
+  -- Each form on its own, because only one of them reaches auth.uid() here.
+  PERFORM _amr_reset();
+  PERFORM set_config('request.jwt.claim.sub', owner::text, true);
+  PERFORM _amr_ok('session: the singular claim alone is a session',
+    app_private.jwt_has_subject());
+
+  PERFORM _amr_reset();
+  PERFORM set_config('request.jwt.claims',
+    format('{"sub": "%s", "role": "authenticated"}', owner), true);
+  PERFORM _amr_ok('session: the claims document alone is a session',
+    app_private.jwt_has_subject());
+
+  -- …and so the gate fires from the claims document alone, which is the exact
+  -- case the first version of this file failed on.
+  PERFORM set_config('request.jwt.claims',
+    format('{"sub": "%s", "role": "authenticated", "amr": %s}', owner, _amr_oauth()), true);
+  PERFORM _amr_ok('session: a Google session set only through the claims document is still refused',
+    app_private.platform_staff_role_of(owner) IS NULL);
+
+  -- A subject that is not a uuid is still a session: parsing it would turn a
+  -- malformed token into "no token", and fail open.
+  PERFORM _amr_reset();
+  PERFORM set_config('request.jwt.claims', '{"sub": "not-a-uuid", "role": "authenticated"}', true);
+  PERFORM _amr_ok('session: a malformed subject is still a session',
+    app_private.jwt_has_subject());
+  PERFORM _amr_ok('session: …and it holds no platform role',
+    app_private.platform_staff_role_of(owner) IS NULL);
+
+  -- An empty subject is not one.
+  PERFORM _amr_reset();
+  PERFORM set_config('request.jwt.claims', '{"sub": "", "role": "authenticated"}', true);
+  PERFORM _amr_ok('session: an empty subject is not a session',
+    app_private.jwt_has_subject() = false);
+
+  -- Claims that are not JSON: the singular claim still decides, and nothing raises.
+  PERFORM _amr_reset();
+  PERFORM set_config('request.jwt.claims', 'not json at all', true);
+  PERFORM set_config('request.jwt.claim.sub', owner::text, true);
+  PERFORM _amr_ok('session: malformed claims do not lose the singular subject',
+    app_private.jwt_has_subject());
+  PERFORM set_config('request.jwt.claim.sub', '', true);
+  PERFORM _amr_ok('session: malformed claims alone are not a session',
+    app_private.jwt_has_subject() = false);
+
+  PERFORM _amr_reset();
 END $$;
 
 -- ─── 3. an oauth session holds none of the fourteen capabilities ────────────
