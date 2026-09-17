@@ -264,6 +264,9 @@ export const en: PartialDictionary = {
   'account.email.submit':      'Confirm new address',
   'account.email.currentPassword': 'Current password',
   'account.email.sendCode':    'Send confirmation code',
+  // Platform accounts change the address without a code (owner's decision, 17.09.2026).
+  'account.email.platformHint':'This is the address you sign in with. As a platform account you change it at once — no confirmation code, but your current password is required.',
+  'account.email.changeNow':   'Change address now',
   'account.email.codeSentTo':  'We have sent a 6-digit code to {email}. Enter it to complete the change.',
   'account.password.heading':  'Password',
   'account.password.hint':     'At least {n} characters. Your current password is required to confirm.',
