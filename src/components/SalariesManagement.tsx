@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { DollarSign, Download, Calendar, RefreshCw, CheckCircle, XCircle, Eye, FileText } from 'lucide-react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { DollarSign, Download, Calendar, RefreshCw, CheckCircle, XCircle, Eye, FileText, AlertTriangle } from 'lucide-react';
 import { Driver, Income, Salary, SalaryCalculation } from '../types/receipt';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
@@ -12,6 +12,7 @@ import { handleDatabaseError } from '../utils/errorHandler';
 import { fetchAllPaginated } from '../utils/fetchAllPaginated';
 import { exportSalariesToExcel } from '../utils/excelExport';
 import { getBusinessMonthRange } from '../utils/weekCalculations';
+import { findOverlappingSalaryPeriods, groupSalaryPeriodsByDriver } from '../utils/salaryPeriodOverlap';
 import { generateDriverSalaryPdf } from '../utils/driverSalaryPdf';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { useTranslation } from '../contexts/LanguageContext';
@@ -19,6 +20,19 @@ import { useTranslation } from '../contexts/LanguageContext';
 interface SalariesManagementProps {
   drivers: Driver[];
 }
+
+/** `YYYY-MM-DD` as `DD.MM.YYYY`, without a Date the browser's zone could shift by a day. */
+const formatStoredDate = (value: string): string => {
+  const [year, month, day] = value.split('-');
+  return year && month && day ? `${day}.${month}.${year}` : value;
+};
+
+/** The figure a Gehaltsquittung settles, the way the RPC reads it: COALESCE(netto_salary, amount_due). */
+const formatSalaryDue = (row: Salary): string =>
+  Number(row.netto_salary ?? row.amount_due ?? 0).toLocaleString('de-DE', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
 
 const SalariesManagement: React.FC<SalariesManagementProps> = ({ drivers }) => {
   const { t } = useTranslation();
@@ -196,6 +210,35 @@ const SalariesManagement: React.FC<SalariesManagementProps> = ({ drivers }) => {
 
     setCalculations(filtered);
   };
+
+  /**
+   * Per driver, the other salary rows whose period overlaps the one on screen.
+   *
+   * `confirm_salary_cash_payment` refuses such a salary (`overlapping_salary`)
+   * until the owner has merged the rows by hand, and `unique_driver_period` is
+   * only `UNIQUE (driver_id, period_start)`, so nothing else makes the pair
+   * visible — the screen shows one period at a time. Folded out of the rows
+   * already loaded, so no query is added.
+   *
+   * A driver with no stored row for the selected period is checked too: the
+   * period is the one `ensureSalaryExists` would write the moment the payments
+   * dialog is opened, so the warning arrives before the second row exists.
+   */
+  const overlapsByDriver = useMemo(() => {
+    const rowsByDriver = groupSalaryPeriodsByDriver(salaries);
+    const found = new Map<string, Salary[]>();
+    for (const calc of calculations) {
+      const driverRows = rowsByDriver.get(calc.driver_id);
+      if (!driverRows || driverRows.length === 0) continue;
+      const overlapping = findOverlappingSalaryPeriods(
+        { period_start: calc.period_start, period_end: calc.period_end },
+        driverRows,
+        calc.salary_id ?? null,
+      );
+      if (overlapping.length > 0) found.set(calc.driver_id, overlapping);
+    }
+    return found;
+  }, [calculations, salaries]);
 
   const handleMonthChange = (month: string) => {
     setSelectedMonth(month);
@@ -543,15 +586,43 @@ const SalariesManagement: React.FC<SalariesManagementProps> = ({ drivers }) => {
                   </td>
                 </tr>
               ) : (
-                calculations.map(calc => (
+                calculations.map(calc => {
+                  const overlaps = overlapsByDriver.get(calc.driver_id);
+                  // One line per overlapping row, so the owner can go straight to
+                  // the period he has to merge instead of hunting for it.
+                  const overlapHint = overlaps
+                    ? [
+                        t('sal.overlap.tooltip'),
+                        ...overlaps.map(other =>
+                          t('sal.overlap.entry', {
+                            period: `${formatStoredDate(other.period_start)} – ${formatStoredDate(other.period_end)}`,
+                            amount: formatSalaryDue(other),
+                          }),
+                        ),
+                      ].join('\n')
+                    : '';
+                  return (
                   <tr
                     key={calc.driver_id}
                     style={{ borderBottom: '1px solid var(--border)' }}
                     onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--bg-subtle)')}
                     onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
                   >
-                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
-                      {calc.driver_name}
+                    <td className="px-6 py-4 text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
+                      <div className="flex items-center gap-2">
+                        <span className="whitespace-nowrap">{calc.driver_name}</span>
+                        {overlaps && (
+                          <span
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium whitespace-nowrap"
+                            style={{ background: 'var(--warning-subtle)', color: 'var(--warning)' }}
+                            title={overlapHint}
+                            aria-label={overlapHint}
+                          >
+                            <AlertTriangle size={12} aria-hidden />
+                            {t('sal.overlap.badge')}
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-right" style={{ color: 'var(--text-primary)' }}>
                       {calc.revenue.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
@@ -632,7 +703,8 @@ const SalariesManagement: React.FC<SalariesManagementProps> = ({ drivers }) => {
                       </div>
                     </td>
                   </tr>
-                ))
+                  );
+                })
               )}
             </tbody>
           </table>
