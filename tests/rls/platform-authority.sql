@@ -92,6 +92,7 @@ BEGIN
   EXECUTE 'SET LOCAL ROLE NONE';
   PERFORM set_config('request.jwt.claim.sub', '', true);
   PERFORM set_config('request.jwt.claim.role', '', true);
+  PERFORM set_config('request.jwt.claim.amr', '', true);
   PERFORM set_config('request.jwt.claims', '', true);
 END $$;
 
@@ -113,6 +114,8 @@ BEGIN
   ELSE
     PERFORM set_config('request.jwt.claim.sub', p_user::text, true);
     PERFORM set_config('request.jwt.claim.role', 'authenticated', true);
+    -- A password sign-in: since 20260919130000 a platform capability needs one.
+    PERFORM set_config('request.jwt.claim.amr', '[{"method": "password", "timestamp": 1789416052}]', true);
     EXECUTE 'SET LOCAL ROLE authenticated';
   END IF;
 END $$;
@@ -908,8 +911,13 @@ BEGIN
   -- PostgREST sets them
   PERFORM set_config('request.jwt.claim.sub', billing::text, true);
   PERFORM set_config('request.jwt.claim.role', 'authenticated', true);
+  -- `amr` too: since 20260919130000 a staff role belongs to a password session
+  -- and to no other, and here the JSON is the only form set. It is the form
+  -- app_private.jwt_amr() reads first, exactly as PostgREST writes it.
   PERFORM set_config('request.jwt.claims',
-    jsonb_build_object('sub', billing, 'role', 'authenticated', 'session_id', sess)::text, true);
+    jsonb_build_object('sub', billing, 'role', 'authenticated', 'session_id', sess,
+                       'amr', jsonb_build_array(
+                                jsonb_build_object('method', 'password', 'timestamp', 1789416052)))::text, true);
   EXECUTE 'SET LOCAL ROLE authenticated';
   -- Since 20260916130000 the action must be one the edge functions send, and
   -- the caller must hold its capability to record anything but a refusal.

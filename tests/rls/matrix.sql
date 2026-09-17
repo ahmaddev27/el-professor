@@ -223,6 +223,7 @@ BEGIN
     PERFORM set_config('request.jwt.claim.sub', '', true);
     PERFORM set_config('request.jwt.claim.role', 'anon', true);
     PERFORM set_config('request.jwt.claim.session_id', '', true);
+    PERFORM set_config('request.jwt.claim.amr', '', true);
     EXECUTE 'SET LOCAL ROLE anon';
     RETURN;
   END IF;
@@ -233,6 +234,11 @@ BEGIN
   -- support context only to the session that opened it. One fixed session per
   -- principal, the same one the rows below are seeded with.
   PERFORM set_config('request.jwt.claim.session_id', _mx_id('session', p_who)::text, true);
+  -- Every principal here is a password sign-in; since 20260919130000 the
+  -- platform ones hold no capability without it. See _as() in assertions.sql.
+  -- The singular claims are one session: app_private.jwt_subject_source()
+  -- prefers them, and reads the amr out of the same form the subject came from.
+  PERFORM set_config('request.jwt.claim.amr', '[{"method": "password", "timestamp": 1789416052}]', true);
   EXECUTE 'SET LOCAL ROLE authenticated';
 END $$;
 

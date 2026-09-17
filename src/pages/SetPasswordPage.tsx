@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Lock, Eye, EyeOff, AlertCircle, CheckCircle2, ShieldCheck } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useTranslation } from '../contexts/LanguageContext';
+import { ADMIN_LOGIN_PATH } from '../lib/adminGate';
 import EmphasizedText from '../components/auth/EmphasizedText';
 
 const MIN_LEN = 8;
@@ -18,6 +19,18 @@ const SetPasswordPage: React.FC = () => {
   const [hasSession, setHasSession] = useState(false);
   const [email, setEmail] = useState<string>('');
   const [status, setStatus] = useState<string>('');
+  /**
+   * `user_profiles.is_super_admin`, which routes the browser and grants
+   * nothing. Read here for one reason: since 20260919130000 a platform
+   * capability requires a session GoTrue established with a password, and this
+   * page is only ever reached with one that it did not — an `invite_activate`
+   * or `password_reset` code, which `POST /auth/v1/verify` mints with
+   * `amr: [{method: "otp"}]`. So a platform account that has just chosen a
+   * password is signed out here and sent to `/admin/login` to use it, rather
+   * than landing on the panel's "no platform role" screen, which would be the
+   * wrong sentence. A company user keeps its session and goes to its own app.
+   */
+  const [isPlatformAccount, setIsPlatformAccount] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
 
@@ -32,10 +45,13 @@ const SetPasswordPage: React.FC = () => {
         try {
           const { data: profile } = await supabase
             .from('user_profiles')
-            .select('status')
+            .select('status, is_super_admin')
             .eq('user_id', data.session.user.id)
             .maybeSingle();
-          if (mounted) setStatus(profile?.status ?? '');
+          if (mounted) {
+            setStatus(profile?.status ?? '');
+            setIsPlatformAccount(profile?.is_super_admin === true);
+          }
         } catch {
           /* ignore */
         }
@@ -94,6 +110,25 @@ const SetPasswordPage: React.FC = () => {
       }
 
       setSuccess(true);
+
+      if (isPlatformAccount) {
+        /*
+          The session in hand was minted by a one-time code, so it holds no
+          platform capability (20260919130000). Ending it is what turns the
+          password just chosen into a usable sign-in.
+
+          The address is rewritten *before* signOut, not navigated to after it:
+          signing out swaps App's authenticated router for the public one, and a
+          navigate() issued around that swap can land in the router being
+          unmounted. Same reason as useOtpSessionHandoff.
+        */
+        setTimeout(() => {
+          window.history.replaceState(window.history.state, '', ADMIN_LOGIN_PATH);
+          void supabase.auth.signOut({ scope: 'local' });
+        }, 1600);
+        return;
+      }
+
       setTimeout(() => navigate('/', { replace: true }), 1200);
     } catch {
       setError(t('forgot.unexpected'));
@@ -158,7 +193,9 @@ const SetPasswordPage: React.FC = () => {
                 <CheckCircle2 className="text-emerald-400" size={22} />
               </div>
               <h2 className="text-white font-semibold mb-2">{t('setpw.saved')}</h2>
-              <p className="text-white/60 text-sm">{t('setpw.redirecting')}</p>
+              <p className="text-white/60 text-sm">
+                {isPlatformAccount ? t('setpw.platformSignInAgain') : t('setpw.redirecting')}
+              </p>
             </div>
           ) : (
             <>

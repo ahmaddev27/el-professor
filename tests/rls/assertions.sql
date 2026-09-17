@@ -44,11 +44,21 @@
   pass for the wrong reason, because a NULL uid matches no tenant and denies
   everything. The singular claim is checked first and is unambiguous.
 */
+/*
+  Since 20260919130000 every principal also carries an `amr` naming `password`.
+  A platform capability requires a password-backed session, so without it a
+  staff principal would hold no role — and a probe that should have failed on a
+  policy would pass for the wrong reason. `password` is what these principals
+  are: a session GoTrue minted from /token?grant_type=password. The sessions
+  that are *not* password-backed are the subject of tests/rls/platform-amr.sql,
+  and only that file makes them.
+*/
 CREATE OR REPLACE FUNCTION _as(p_user uuid) RETURNS void
 LANGUAGE plpgsql AS $$
 BEGIN
   PERFORM set_config('request.jwt.claim.sub', p_user::text, true);
   PERFORM set_config('request.jwt.claim.role', 'authenticated', true);
+  PERFORM set_config('request.jwt.claim.amr', '[{"method": "password", "timestamp": 1789416052}]', true);
   EXECUTE 'SET LOCAL ROLE authenticated';
 END $$;
 
@@ -88,6 +98,7 @@ LANGUAGE plpgsql AS $$
 BEGIN
   PERFORM set_config('request.jwt.claim.sub', '', true);
   PERFORM set_config('request.jwt.claim.role', 'anon', true);
+  PERFORM set_config('request.jwt.claim.amr', '', true);
   EXECUTE 'SET LOCAL ROLE anon';
 END $$;
 

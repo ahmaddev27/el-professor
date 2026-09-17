@@ -62,6 +62,7 @@ BEGIN
   EXECUTE 'SET LOCAL ROLE NONE';
   PERFORM set_config('request.jwt.claim.sub', '', true);
   PERFORM set_config('request.jwt.claim.role', '', true);
+  PERFORM set_config('request.jwt.claim.amr', '', true);
 END $$;
 
 /** Become a signed-in user, or anon when p_user is NULL. */
@@ -75,6 +76,8 @@ BEGIN
   ELSE
     PERFORM set_config('request.jwt.claim.sub', p_user::text, true);
     PERFORM set_config('request.jwt.claim.role', 'authenticated', true);
+    -- A password sign-in: since 20260919130000 a platform capability needs one.
+    PERFORM set_config('request.jwt.claim.amr', '[{"method": "password", "timestamp": 1789416052}]', true);
     EXECUTE 'SET LOCAL ROLE authenticated';
   END IF;
 END $$;
