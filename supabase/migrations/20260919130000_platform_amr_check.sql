@@ -116,12 +116,29 @@
     session — `otp_issue`'s `platform_login` eligibility above all — is
     untouched.
   - **The account fact keeps its own name.** `platform_staff_role_of_account()`
-    is the old body, unguarded. Two callers must have it because they ask about
-    a row, not about a session: `platform_staff_sync_profile()` (the
+    is the old body, unguarded. Three callers must have it because they ask
+    about a row, not about a session: `platform_staff_sync_profile()` (the
     `is_super_admin` routing hint follows `platform_staff`, whoever is writing
-    and however they signed in) and `enforce_user_profile_privilege_guard()`
+    and however they signed in), `enforce_user_profile_privilege_guard()`
     (`staff_flag` protects the profile being written; `caller_platform` is
-    authority and stays gated).
+    authority and stays gated), and `audit_write()`'s `actor_role`, which is a
+    fact about the actor and would otherwise go NULL on exactly the event this
+    migration exists to record (section 5b).
+
+  ## Two things a reader should not assume
+
+  - **Self-check section 3 does not always run.** It needs an active
+    `app_private.platform_staff` row, and the RLS kit seeds its staff *after* the
+    migrations, so there it prints a NOTICE and skips. A green kit is not
+    evidence that section ran; `tests/rls/platform-amr.sql` is what covers those
+    cases, and section 3 is for the live databases, which do have staff rows.
+  - **This file sorts after 20260917140000** (plan 3.4, support sessions), so the
+    live ledger applies it *after* that migration while the kit — which applies
+    every migration from 20260908 in filename order against a fixture that has
+    neither — applies them in the same order. Nothing here redefines anything
+    that file redefines, and every platform read it makes goes through the gate,
+    so the two orders agree; whichever lands second should still re-read the
+    other before merging.
 
   **Why not `p_user_id = auth.uid()`.** That is what this migration first said,
   and the RLS kit rejected it. Two defects in one line. `auth.uid()` is not
@@ -156,28 +173,108 @@
 
   `platform_staff_role_of()` is SECURITY INVOKER and stays so: it runs as the
   owner of whichever SECURITY DEFINER function called it, and every caller is
-  one, since `authenticated` holds EXECUTE on nothing in `app_private`. The two
-  SECURITY DEFINER functions replaced here gain no new schema but are handed to
-  the migration role anyway, because CREATE OR REPLACE keeps the owner and on
-  the live databases that owner is a non-superuser `postgres` that holds EXECUTE
-  on no `app_private` function.
+  one, since `authenticated` holds EXECUTE on nothing in `app_private`. The
+  three SECURITY DEFINER functions replaced here — `audit_write`,
+  `platform_staff_sync_profile` and `enforce_user_profile_privilege_guard` —
+  gain no new schema but are handed to the migration role anyway, because
+  CREATE OR REPLACE keeps the owner and on the live databases that owner is a
+  non-superuser `postgres` that holds EXECUTE on no `app_private` function. The
+  self-check asks it of the invoker functions too: an owner is what a later
+  ALTER could change.
 */
 
 -- ─── 1. Reading the claim ───────────────────────────────────────────────────
 
 /*
-  The token's `amr` array, or NULL.
+  Which document the caller's session is described by, or NULL when there is no
+  end user's token at all: `claim` for the singular `request.jwt.claim.*` GUCs,
+  `claims` for the one `request.jwt.claims` document PostgREST sets.
 
-  PostgREST puts the verified claims in `request.jwt.claims`, and that is read
-  **first** — the opposite order to `app_private.jwt_session_id()`, and
-  deliberately. The singular `request.jwt.claim.*` GUCs are how the RLS kit and
-  assertions.sql address a claim from inside a DO block (see `_as()` in
-  tests/rls/assertions.sql); in production PostgREST sets only the JSON. Reading
-  the JSON first means the form a request actually carries always wins, and the
-  test affordance can never raise a real session's authority.
+  **The order is `auth.uid()`'s**, singular first. Not because the singular form
+  is trusted more — in production PostgREST sets only the document, so the
+  branch is unreachable there — but because the whole point of this function is
+  that one source describes the session. `auth.uid()` checks the singular claim
+  first, and every capability lookup in the schema resolves the caller through
+  it; if the `amr` were read from the other document, a database where both are
+  set could name one session's subject and another session's sign-in method.
+  Reading both out of the same place is what makes that impossible, and
+  `jwt_amr()` below is built on this rather than on its own precedence.
 
-  Anything malformed — not JSON, not an array, absent — is NULL rather than an
-  error: a claim that cannot be read is not a sign-in method.
+  Only presence is asked, never a uuid: a subject that does not parse is still a
+  session, and turning a malformed token into "no token" would fail open.
+
+  A `request.jwt.claims` that is not JSON is not an error — but note it is only
+  ever parsed when the singular subject is absent, so a caller who has one is
+  never affected by the other being broken.
+*/
+CREATE OR REPLACE FUNCTION app_private.jwt_subject_source()
+RETURNS text
+LANGUAGE plpgsql
+STABLE
+SET search_path = pg_catalog, public
+AS $$
+BEGIN
+  IF nullif(current_setting('request.jwt.claim.sub', true), '') IS NOT NULL THEN
+    RETURN 'claim';
+  END IF;
+  IF nullif((nullif(current_setting('request.jwt.claims', true), '')::jsonb) ->> 'sub', '')
+     IS NOT NULL THEN
+    RETURN 'claims';
+  END IF;
+  RETURN NULL;
+EXCEPTION WHEN others THEN
+  -- request.jwt.claims that is not valid JSON, and no singular subject beside
+  -- it: no session, not an error.
+  RETURN NULL;
+END;
+$$;
+
+COMMENT ON FUNCTION app_private.jwt_subject_source() IS
+  'Which document describes the caller''s session — claim (the singular GUCs, '
+  'the form auth.uid() checks first) or claims (PostgREST''s document) — or '
+  'NULL for a request with no end user token. Never raises.';
+
+/*
+  Whether the request carries an end user's token at all.
+
+  Deliberately **not** `auth.uid() IS NOT NULL`. `auth.uid()` is not ours: its
+  body differs between the supabase/postgres image and the live databases — the
+  image's reads only `request.jwt.claim.sub`, which is why `_as()` in
+  tests/rls/assertions.sql sets the singular claim and says the JSON one "does
+  not reach the function". A gate that asks it is a gate that can silently
+  switch itself off on a database where it answers NULL for a real session. That
+  is the NULL-safety defect class this repository has already shipped twice
+  (CLAUDE.md, *Known defects*), and the first version of this migration walked
+  straight into it: the gate read `p_user_id = auth.uid()`, the comparison was
+  NULL in the RLS kit, the `AND` was NULL, and a Google session kept its
+  platform role while every rule assertion around it passed.
+
+  False, never NULL, never an exception.
+*/
+CREATE OR REPLACE FUNCTION app_private.jwt_has_subject()
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SET search_path = pg_catalog, public
+AS $$
+  SELECT app_private.jwt_subject_source() IS NOT NULL;
+$$;
+
+COMMENT ON FUNCTION app_private.jwt_has_subject() IS
+  'Whether the request carries an end user''s token. Not auth.uid(), whose body '
+  'differs between the image and the live databases, and not parsed as a uuid. '
+  'False, never NULL, never raises.';
+
+/*
+  The `amr` array of the session `jwt_subject_source()` named, or NULL —
+  **read out of the same document as that session's subject**, never out of the
+  other one, so the sign-in method always belongs to the account the rest of the
+  schema resolves the caller as.
+
+  Anything malformed — not JSON, not an array, absent, or no session at all — is
+  NULL rather than an error: a claim that cannot be read is not a sign-in
+  method. The handler is the function's own, so a broken `amr` loses the amr and
+  not the session, which would fail open.
 */
 CREATE OR REPLACE FUNCTION app_private.jwt_amr()
 RETURNS jsonb
@@ -186,14 +283,15 @@ STABLE
 SET search_path = pg_catalog, public
 AS $$
 DECLARE
-  v_claims text;
+  v_source text := app_private.jwt_subject_source();
   v_amr    jsonb;
 BEGIN
-  v_claims := nullif(current_setting('request.jwt.claims', true), '');
-  IF v_claims IS NOT NULL THEN
-    v_amr := v_claims::jsonb -> 'amr';
-  ELSE
+  IF v_source IS NULL THEN
+    RETURN NULL;
+  ELSIF v_source = 'claim' THEN
     v_amr := nullif(current_setting('request.jwt.claim.amr', true), '')::jsonb;
+  ELSE
+    v_amr := (nullif(current_setting('request.jwt.claims', true), '')::jsonb) -> 'amr';
   END IF;
 
   IF v_amr IS NULL OR jsonb_typeof(v_amr) <> 'array' THEN
@@ -201,66 +299,14 @@ BEGIN
   END IF;
   RETURN v_amr;
 EXCEPTION WHEN others THEN
-  -- request.jwt.claims that is not valid JSON: no amr, not an error.
   RETURN NULL;
 END;
 $$;
 
 COMMENT ON FUNCTION app_private.jwt_amr() IS
-  'The access token''s amr array, or NULL. Reads request.jwt.claims first '
-  '(what PostgREST sets), then the singular request.jwt.claim.amr the RLS kit '
-  'uses. Never raises.';
-
-/*
-  Whether the request carries an end user's token at all: a `sub` claim, in
-  either form, that is present and not empty.
-
-  Deliberately **not** `auth.uid() IS NOT NULL`, and deliberately not a uuid:
-
-  - `auth.uid()` is not ours. Its body differs between the supabase/postgres
-    image and the live databases — the image's reads only
-    `request.jwt.claim.sub`, which is why `_as()` in tests/rls/assertions.sql
-    sets the singular claim and says the JSON one "does not reach the function".
-    A gate that asks it is a gate that can silently switch itself off on a
-    database where it answers NULL for a real session. That is the NULL-safety
-    defect class this repository has already shipped twice (CLAUDE.md, *Known
-    defects*), and the first version of this migration walked straight into it:
-    the gate read `p_user_id = auth.uid()`, the comparison was NULL in the RLS
-    kit, the `AND` was NULL, and a Google session kept its platform role.
-  - A subject that is not a uuid is still a session. Parsing it would turn a
-    malformed token into "no session", which is the wrong way to fail.
-
-  False, never NULL, never an exception.
-*/
-CREATE OR REPLACE FUNCTION app_private.jwt_has_subject()
-RETURNS boolean
-LANGUAGE plpgsql
-STABLE
-SET search_path = pg_catalog, public
-AS $$
-DECLARE
-  v_claims text;
-  v_sub    text;
-BEGIN
-  v_claims := nullif(current_setting('request.jwt.claims', true), '');
-  IF v_claims IS NOT NULL THEN
-    v_sub := v_claims::jsonb ->> 'sub';
-    IF nullif(v_sub, '') IS NOT NULL THEN
-      RETURN true;
-    END IF;
-  END IF;
-  RETURN nullif(current_setting('request.jwt.claim.sub', true), '') IS NOT NULL;
-EXCEPTION WHEN others THEN
-  -- request.jwt.claims that is not valid JSON. It came with the request, so it
-  -- is a request: fall back to the singular claim, and on to false.
-  RETURN nullif(current_setting('request.jwt.claim.sub', true), '') IS NOT NULL;
-END;
-$$;
-
-COMMENT ON FUNCTION app_private.jwt_has_subject() IS
-  'Whether the request carries an end user''s token (a non-empty sub claim, in '
-  'either form). Not auth.uid(), whose body differs between the image and the '
-  'live databases, and not parsed as a uuid. False, never NULL, never raises.';
+  'The amr array of the caller''s session, taken from the same document its '
+  'subject came from (app_private.jwt_subject_source()). NULL for a request '
+  'with no session, no amr or a malformed one. Never raises.';
 
 -- ─── 2. The rule ────────────────────────────────────────────────────────────
 
@@ -602,6 +648,115 @@ BEGIN
 END;
 $fn$;
 
+-- ─── 5b. The audit log records the actor's role, not the session's ──────────
+
+/*
+  `actor_role` is a fact about the actor — the column's own header in
+  20260916110000 says "the actor's role is always looked up here, never passed"
+  — so it reads the account fact, exactly like `staff_flag` and the sync trigger
+  above.
+
+  Left on the gated helper it would answer NULL for the one event this migration
+  exists to record. The only row a refused session can still produce is the
+  `denied` row `platform_rpc_authorize` writes (20260916130000:209-222), which
+  is written for *any* actor, staff or not; with a NULL role, a platform account
+  probing the write RPCs from a Google session would be indistinguishable in the
+  log from an ordinary company user being refused. The `actor_user_id` is there
+  either way, but the log is read by role, and a column that silently means two
+  different things is worse than one that is occasionally uninteresting.
+
+  **This is 20260916110000's body with one call renamed and nothing else.** Every
+  rule it carries is restated deliberately, because this repository has already
+  shipped a defect by re-creating a function from an older body and dropping one
+  of its rules (`platform_audit_record`, 20260916140000 → 20260916150000, in
+  CLAUDE.md). Carried over, in order:
+
+    1. the seven categories, and `legacy` among them;
+    2. the action's 100-character limit and its dotted lower-case pattern;
+    3. the four outcomes;
+    4. `target_type`'s 60 characters and pattern, and `target_id`'s 200;
+    5. the 32 KiB cap on `before` and `after`;
+    6. **`p_occurred_at` is refused for every category but `legacy`**, so
+       nothing but the legacy copy can backdate a row;
+    7. the actor defaults to `auth.uid()`, the session to the JWT's
+       `session_id`, read from `request.jwt.claims` and uuid-checked, a
+       malformed one leaving the column empty rather than failing the action;
+    8. `legacy` rows carry no role;
+    9. `VOLATILE`, `SECURITY DEFINER`, the pinned search_path, the signature and
+       the RETURNS.
+
+  `tests/rls/platform-amr.sql` section 5 pins what the `denied` row carries, so
+  the behaviour is chosen rather than inherited.
+*/
+CREATE OR REPLACE FUNCTION app_private.audit_write(
+  p_category      text,
+  p_action        text,
+  p_outcome       text        DEFAULT 'ok',
+  p_company_id    uuid        DEFAULT NULL,
+  p_target_type   text        DEFAULT NULL,
+  p_target_id     text        DEFAULT NULL,
+  p_before        jsonb       DEFAULT NULL,
+  p_after         jsonb       DEFAULT NULL,
+  p_actor_user_id uuid        DEFAULT NULL,
+  p_session_id    uuid        DEFAULT NULL,
+  p_occurred_at   timestamptz DEFAULT NULL
+)
+RETURNS bigint
+LANGUAGE plpgsql
+VOLATILE
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $$
+DECLARE
+  c_max_value_bytes CONSTANT integer := 32768;
+  c_uuid_pattern    CONSTANT text    := '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$';
+
+  v_actor   uuid;
+  v_session uuid := p_session_id;
+  v_claim   text;
+  v_id      bigint;
+BEGIN
+  IF p_category IS NULL
+     OR p_category NOT IN ('read','write','support','auth','settings','staff','legacy')
+     OR p_action IS NULL OR length(p_action) > 100
+     OR p_action !~ '^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*$'
+     OR p_outcome IS NULL OR p_outcome NOT IN ('attempt','ok','denied','error')
+     OR (p_target_type IS NOT NULL AND (length(p_target_type) > 60 OR p_target_type !~ '^[a-z][a-z0-9_]*$'))
+     OR (p_target_id IS NOT NULL AND length(p_target_id) > 200)
+     OR (p_before IS NOT NULL AND octet_length(p_before::text) > c_max_value_bytes)
+     OR (p_after  IS NOT NULL AND octet_length(p_after::text)  > c_max_value_bytes)
+     OR (p_occurred_at IS NOT NULL AND p_category <> 'legacy')
+  THEN
+    RAISE EXCEPTION 'audit_write: invalid arguments' USING ERRCODE = '22023';
+  END IF;
+
+  v_actor := coalesce(p_actor_user_id, auth.uid());
+
+  -- PostgREST puts the verified claims here. A missing or malformed session_id
+  -- leaves the column empty rather than failing the action being recorded.
+  IF v_session IS NULL THEN
+    v_claim := nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'session_id';
+    IF v_claim ~ c_uuid_pattern THEN
+      v_session := v_claim::uuid;
+    END IF;
+  END IF;
+
+  INSERT INTO app_private.platform_audit_log
+    (occurred_at, actor_user_id, actor_role, session_id, company_id, category, action, outcome,
+     target_type, target_id, before_value, after_value)
+  VALUES
+    (coalesce(p_occurred_at, now()), v_actor,
+     -- The one changed line: the account's role, not the role this session may
+     -- exercise. 20260919130000.
+     CASE WHEN p_category = 'legacy' THEN NULL ELSE app_private.platform_staff_role_of_account(v_actor) END,
+     v_session, p_company_id, p_category, p_action, p_outcome,
+     p_target_type, p_target_id, p_before, p_after)
+  RETURNING id INTO v_id;
+
+  RETURN v_id;
+END;
+$$;
+
 -- ─── 6. Ownership and privileges ────────────────────────────────────────────
 
 /*
@@ -612,7 +767,9 @@ $fn$;
   for the SECURITY DEFINER ones, which are the ones where the owner decides what
   the body may call.
 */
+ALTER FUNCTION app_private.jwt_subject_source()                   OWNER TO CURRENT_USER;
 ALTER FUNCTION app_private.jwt_amr()                              OWNER TO CURRENT_USER;
+ALTER FUNCTION app_private.audit_write(text, text, text, uuid, text, text, jsonb, jsonb, uuid, uuid, timestamptz) OWNER TO CURRENT_USER;
 ALTER FUNCTION app_private.jwt_has_subject()                      OWNER TO CURRENT_USER;
 ALTER FUNCTION app_private.session_amr_permits_platform()         OWNER TO CURRENT_USER;
 ALTER FUNCTION app_private.platform_staff_role_of_account(uuid)   OWNER TO CURRENT_USER;
@@ -627,7 +784,10 @@ ALTER FUNCTION public.enforce_user_profile_privilege_guard()      OWNER TO CURRE
   be revoked per schema. Restated for the replaced functions too, so this file's
   self-check does not depend on an earlier one.
 */
+REVOKE ALL ON FUNCTION app_private.jwt_subject_source()                 FROM PUBLIC, anon, authenticated, service_role;
 REVOKE ALL ON FUNCTION app_private.jwt_amr()                            FROM PUBLIC, anon, authenticated, service_role;
+REVOKE ALL ON FUNCTION app_private.audit_write(text, text, text, uuid, text, text, jsonb, jsonb, uuid, uuid, timestamptz)
+  FROM PUBLIC, anon, authenticated, service_role;
 REVOKE ALL ON FUNCTION app_private.jwt_has_subject()                    FROM PUBLIC, anon, authenticated, service_role;
 REVOKE ALL ON FUNCTION app_private.session_amr_permits_platform()       FROM PUBLIC, anon, authenticated, service_role;
 REVOKE ALL ON FUNCTION app_private.platform_staff_role_of_account(uuid) FROM PUBLIC, anon, authenticated, service_role;
@@ -648,58 +808,67 @@ DECLARE
   c_both     CONSTANT text := '[{"method": "password", "timestamp": 1}, {"method": "oauth", "timestamp": 2}]';
   c_mfa      CONSTANT text := '[{"method": "password", "timestamp": 1}, {"method": "totp",  "timestamp": 2}]';
   c_saml     CONSTANT text := '[{"method": "sso/saml", "timestamp": 1, "provider": "acme"}]';
+  c_doc      CONSTANT text := '{"sub":"%s","role":"authenticated","amr":%s}';
   v_staff    uuid;
   v_other    uuid := '00000000-0000-4000-8000-0000000000ff';
   v_src      text;
+  v_role     text;
+  v_id       bigint;
   v_wrong    text;
 BEGIN
   -- 1. The rule itself, with no data at all. Each case is set the way PostgREST
-  --    sets it: one JSON document in request.jwt.claims.
+  --    sets it: one JSON document in request.jwt.claims, and each carries a
+  --    subject, because jwt_amr() reads the amr out of the document the
+  --    *subject* came from. There is no such thing as the amr of a request that
+  --    describes no session.
   PERFORM set_config('request.jwt.claim.sub', '', true);
   PERFORM set_config('request.jwt.claim.amr', '', true);
 
-  PERFORM set_config('request.jwt.claims', format('{"role":"authenticated","amr":%s}', c_password), true);
+  PERFORM set_config('request.jwt.claims', format(c_doc, v_other, c_password), true);
   IF app_private.session_amr_permits_platform() IS NOT TRUE THEN
     RAISE EXCEPTION '20260919130000 self-check: a password session is refused';
   END IF;
 
-  PERFORM set_config('request.jwt.claims', format('{"role":"authenticated","amr":%s}', c_mfa), true);
+  PERFORM set_config('request.jwt.claims', format(c_doc, v_other, c_mfa), true);
   IF app_private.session_amr_permits_platform() IS NOT TRUE THEN
     RAISE EXCEPTION '20260919130000 self-check: password plus an MFA method is refused';
   END IF;
 
-  PERFORM set_config('request.jwt.claims', format('{"role":"authenticated","amr":%s}', c_oauth), true);
+  PERFORM set_config('request.jwt.claims', format(c_doc, v_other, c_oauth), true);
   IF app_private.session_amr_permits_platform() IS NOT FALSE THEN
     RAISE EXCEPTION '20260919130000 self-check: a Google session is admitted';
   END IF;
 
-  PERFORM set_config('request.jwt.claims', format('{"role":"authenticated","amr":%s}', c_saml), true);
+  PERFORM set_config('request.jwt.claims', format(c_doc, v_other, c_saml), true);
   IF app_private.session_amr_permits_platform() IS NOT FALSE THEN
     RAISE EXCEPTION '20260919130000 self-check: an SSO session is admitted';
   END IF;
 
-  PERFORM set_config('request.jwt.claims', format('{"role":"authenticated","amr":%s}', c_both), true);
+  PERFORM set_config('request.jwt.claims', format(c_doc, v_other, c_both), true);
   IF app_private.session_amr_permits_platform() IS NOT FALSE THEN
     RAISE EXCEPTION '20260919130000 self-check: oauth beside password is admitted';
   END IF;
 
   -- POST /verify writes `otp` whatever the type is (verify.go:279), so this is
   -- every session issueSession() mints.
-  PERFORM set_config('request.jwt.claims', format('{"role":"authenticated","amr":%s}', c_otp), true);
+  PERFORM set_config('request.jwt.claims', format(c_doc, v_other, c_otp), true);
   IF app_private.session_amr_permits_platform() IS NOT FALSE THEN
     RAISE EXCEPTION '20260919130000 self-check: a code-minted session is admitted';
   END IF;
 
   -- Absent, empty, the wrong type, and not JSON at all: all false, none an error.
-  PERFORM set_config('request.jwt.claims', '{"role":"authenticated"}', true);
+  PERFORM set_config('request.jwt.claims',
+    format('{"sub":"%s","role":"authenticated"}', v_other), true);
   IF app_private.session_amr_permits_platform() IS NOT FALSE THEN
     RAISE EXCEPTION '20260919130000 self-check: a token without amr is admitted';
   END IF;
-  PERFORM set_config('request.jwt.claims', '{"role":"authenticated","amr":[]}', true);
+  PERFORM set_config('request.jwt.claims',
+    format('{"sub":"%s","role":"authenticated","amr":[]}', v_other), true);
   IF app_private.session_amr_permits_platform() IS NOT FALSE THEN
     RAISE EXCEPTION '20260919130000 self-check: an empty amr is admitted';
   END IF;
-  PERFORM set_config('request.jwt.claims', '{"role":"authenticated","amr":"password"}', true);
+  PERFORM set_config('request.jwt.claims',
+    format('{"sub":"%s","role":"authenticated","amr":"password"}', v_other), true);
   IF app_private.session_amr_permits_platform() IS NOT FALSE THEN
     RAISE EXCEPTION '20260919130000 self-check: an amr that is not an array is admitted';
   END IF;
@@ -712,10 +881,44 @@ BEGIN
     RAISE EXCEPTION '20260919130000 self-check: a caller with no claims is admitted';
   END IF;
 
+  -- An amr with no subject beside it describes no session, so there is no amr
+  -- to read. This is the shape the old, independent jwt_amr() would have
+  -- admitted.
+  PERFORM set_config('request.jwt.claims', format('{"role":"authenticated","amr":%s}', c_password), true);
+  IF app_private.session_amr_permits_platform() IS NOT FALSE THEN
+    RAISE EXCEPTION '20260919130000 self-check: an amr without a subject is admitted';
+  END IF;
+
+  -- The symmetry the two helpers exist to guarantee: the amr is read out of the
+  -- document the subject came from, and never out of the other one. The
+  -- singular claim wins, which is the order auth.uid() checks — so the session
+  -- every capability lookup resolves and the sign-in method judged here can
+  -- never be two different sessions.
+  PERFORM set_config('request.jwt.claim.sub', v_other::text, true);
+  PERFORM set_config('request.jwt.claim.amr', c_password, true);
+  PERFORM set_config('request.jwt.claims',
+    format('{"sub":"00000000-0000-4000-8000-00000000000e","role":"authenticated","amr":%s}', c_oauth), true);
+  IF app_private.jwt_subject_source() IS DISTINCT FROM 'claim' THEN
+    RAISE EXCEPTION '20260919130000 self-check: the singular subject no longer wins';
+  END IF;
+  IF app_private.session_amr_permits_platform() IS NOT TRUE THEN
+    RAISE EXCEPTION '20260919130000 self-check: the amr is read from a document the subject did not come from';
+  END IF;
+
+  PERFORM set_config('request.jwt.claim.sub', '', true);
+  IF app_private.jwt_subject_source() IS DISTINCT FROM 'claims' THEN
+    RAISE EXCEPTION '20260919130000 self-check: the claims document is not the fallback source';
+  END IF;
+  IF app_private.session_amr_permits_platform() IS NOT FALSE THEN
+    RAISE EXCEPTION '20260919130000 self-check: the singular amr outlived the singular subject';
+  END IF;
+  PERFORM set_config('request.jwt.claim.amr', '', true);
+  PERFORM set_config('request.jwt.claims', '', true);
+
   -- 1b. The other half of the condition: is there an end user's token at all?
-  --     Both claim forms, because the image's auth.uid() reads only the
-  --     singular one and the live databases' reads both — which is precisely
-  --     why the gate does not ask auth.uid().
+  --      Each claim form on its own, because the image's auth.uid() reads only
+  --      the singular one and the live databases' reads both — which is
+  --      precisely why the gate does not ask auth.uid().
   PERFORM set_config('request.jwt.claims', '', true);
   PERFORM set_config('request.jwt.claim.sub', '', true);
   IF app_private.jwt_has_subject() IS NOT FALSE THEN
@@ -811,10 +1014,13 @@ BEGIN
   IF v_staff IS NULL THEN
     RAISE NOTICE '20260919130000 self-check: no active platform_staff row — the session cases are checked by tests/rls/platform-amr.sql';
   ELSE
-    -- Both claim forms are set together throughout this section, because
-    -- is_user_super_admin() goes through auth.uid(), whose body reads only the
-    -- singular claim on the supabase/postgres image and both on the live
-    -- databases. The gate itself needs neither, which is the point.
+    -- Both claim forms are set together throughout this section, and they
+    -- describe the same session, because is_user_super_admin() goes through
+    -- auth.uid(), whose body reads only the singular claim on the
+    -- supabase/postgres image and both on the live databases. The gate itself
+    -- needs neither. jwt_subject_source() prefers the singular subject, so the
+    -- singular amr is what is read here; the document carries the same one so
+    -- the two can never be read as different sessions.
 
     -- No token at all: a trigger, a migration, GoTrue, the service role.
     PERFORM set_config('request.jwt.claims', '', true);
@@ -825,6 +1031,7 @@ BEGIN
 
     -- A password session.
     PERFORM set_config('request.jwt.claim.sub', v_staff::text, true);
+    PERFORM set_config('request.jwt.claim.amr', c_password, true);
     PERFORM set_config('request.jwt.claims',
       format('{"sub":"%s","role":"authenticated","amr":%s}', v_staff, c_password), true);
     IF app_private.platform_staff_role_of(v_staff) IS NULL THEN
@@ -835,6 +1042,7 @@ BEGIN
     END IF;
 
     -- A session minted by Google.
+    PERFORM set_config('request.jwt.claim.amr', c_oauth, true);
     PERFORM set_config('request.jwt.claims',
       format('{"sub":"%s","role":"authenticated","amr":%s}', v_staff, c_oauth), true);
     IF app_private.platform_staff_role_of(v_staff) IS NOT NULL THEN
@@ -852,6 +1060,7 @@ BEGIN
     END IF;
 
     -- A session with no amr at all.
+    PERFORM set_config('request.jwt.claim.amr', '', true);
     PERFORM set_config('request.jwt.claims',
       format('{"sub":"%s","role":"authenticated"}', v_staff), true);
     IF app_private.platform_staff_role_of(v_staff) IS NOT NULL THEN
@@ -861,6 +1070,7 @@ BEGIN
     -- The condition is the session, not the argument: a Google session reads no
     -- account's platform role, its own or anyone else's.
     PERFORM set_config('request.jwt.claim.sub', v_other::text, true);
+    PERFORM set_config('request.jwt.claim.amr', c_oauth, true);
     PERFORM set_config('request.jwt.claims',
       format('{"sub":"%s","role":"authenticated","amr":%s}', v_other, c_oauth), true);
     IF app_private.platform_staff_role_of(v_staff) IS NOT NULL THEN
@@ -872,11 +1082,40 @@ BEGIN
 
     -- A password session of an account that is not staff: NULL because there is
     -- no row, not because of the gate.
+    PERFORM set_config('request.jwt.claim.amr', c_password, true);
     PERFORM set_config('request.jwt.claims',
       format('{"sub":"%s","role":"authenticated","amr":%s}', v_other, c_password), true);
     IF app_private.platform_staff_role_of(v_staff) IS NULL THEN
       RAISE EXCEPTION '20260919130000 self-check: a password session cannot read a staff role it is not asking about';
     END IF;
+
+    -- 3b. audit_write() records the role the *account* holds. Asked of the
+    --     gated helper it would answer NULL for exactly the caller this
+    --     migration exists to record — the only row a refused session can still
+    --     produce is platform_rpc_authorize's denied one — and that row would
+    --     then be indistinguishable from an ordinary company user's refusal.
+    --     Written inside a subtransaction that is rolled back, so the check
+    --     leaves the live log untouched.
+    PERFORM set_config('request.jwt.claim.sub', v_staff::text, true);
+    PERFORM set_config('request.jwt.claim.amr', c_oauth, true);
+    PERFORM set_config('request.jwt.claims',
+      format('{"sub":"%s","role":"authenticated","amr":%s}', v_staff, c_oauth), true);
+    BEGIN
+      -- Into a variable first: audit_write is VOLATILE, and a volatile call left
+      -- in a WHERE clause is evaluated per row scanned — one probe would become
+      -- as many rows as the log is long.
+      v_id := app_private.audit_write('write', 'company.set_status', 'denied');
+      SELECT l.actor_role INTO v_role
+        FROM app_private.platform_audit_log l
+       WHERE l.id = v_id;
+      IF v_role IS DISTINCT FROM app_private.platform_staff_role_of_account(v_staff) THEN
+        RAISE EXCEPTION '20260919130000 self-check: audit_write records the session''s role, not the account''s (got %)',
+          coalesce(v_role, 'NULL');
+      END IF;
+      RAISE EXCEPTION USING ERRCODE = 'ZZ010';
+    EXCEPTION WHEN SQLSTATE 'ZZ010' THEN
+      NULL;   -- the row is rolled back with this subtransaction
+    END;
   END IF;
 
   PERFORM set_config('request.jwt.claims', '', true);
@@ -915,7 +1154,10 @@ BEGIN
              END AS problem
         FROM (VALUES
           -- signature                                          definer anon   authn  service
+          ('app_private.jwt_subject_source()',                  false,  false, false, false),
           ('app_private.jwt_amr()',                             false,  false, false, false),
+          ('app_private.audit_write(text,text,text,uuid,text,text,jsonb,jsonb,uuid,uuid,timestamptz)',
+                                                                true,   false, false, false),
           ('app_private.jwt_has_subject()',                     false,  false, false, false),
           ('app_private.session_amr_permits_platform()',        false,  false, false, false),
           ('app_private.platform_staff_role_of_account(uuid)',  false,  false, false, false),

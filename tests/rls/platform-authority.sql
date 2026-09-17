@@ -912,8 +912,12 @@ BEGIN
   PERFORM set_config('request.jwt.claim.sub', billing::text, true);
   PERFORM set_config('request.jwt.claim.role', 'authenticated', true);
   -- `amr` too: since 20260919130000 a staff role belongs to a password session
-  -- and to no other, and here the JSON is the only form set. It is the form
-  -- app_private.jwt_amr() reads first, exactly as PostgREST writes it.
+  -- and to no other. Both forms are set, and they describe the same session:
+  -- app_private.jwt_subject_source() prefers the singular subject, which this
+  -- block sets, so the singular amr is the one read — while the document below
+  -- is what audit_write takes the session_id from, the way PostgREST writes it.
+  PERFORM set_config('request.jwt.claim.amr',
+    '[{"method": "password", "timestamp": 1789416052}]', true);
   PERFORM set_config('request.jwt.claims',
     jsonb_build_object('sub', billing, 'role', 'authenticated', 'session_id', sess,
                        'amr', jsonb_build_array(
