@@ -22,12 +22,14 @@ import { useAppConfig } from '../contexts/AppConfigContext';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { useTranslation } from '../contexts/LanguageContext';
 import { subscriptionIsActive } from '../utils/planState';
+import type { CompanyStatus } from '../contexts/AuthContext';
 import type { TranslationKey } from '../i18n';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type Plan = 'basic' | 'advanced' | 'premium';
-type CompanyStatus = 'active' | 'trial' | 'suspended' | 'inactive' | 'archived' | 'deleted';
+// CompanyStatus is imported from AuthContext, which reads the column on every
+// load: the six values companies_status_check allows, declared once.
 
 interface CompanyRow {
   id: string;
@@ -590,12 +592,17 @@ export default function SuperAdminDashboard() {
    * `suspended` state from the company's users.
    */
   const handleReactivate = async (company: CompanyRow) => {
+    // approvingId is what the button's `disabled` reads; without setting it the
+    // busy state is dead and a double click fires two reactivate calls.
+    setApprovingId(company.id);
     try {
       await callPlatformRpc('platform_company_lifecycle', { p_company_id: company.id, p_action: 'reactivate' });
       showToast('success', t('sa.companies.toast.reactivated', { name: company.name }));
       load(true);
     } catch (err: any) {
       showToast('error', err.message || t('common.error'));
+    } finally {
+      setApprovingId(null);
     }
   };
 

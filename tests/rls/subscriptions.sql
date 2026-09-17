@@ -24,12 +24,14 @@
                        — which is the hole rule 3 closes, because before U1 a
                        suspension could sit in one of two other columns that
                        `reactivate` never touched
-   3b. the writers     `platform_company_set_approval('suspend')` and
-                       `update_company_subscription_manual('suspended')` are
-                       this slice's two declared behaviour changes, so both are
-                       asserted here rather than described in a header — each
-                       writes `companies.status`, leaves the retired column
-                       alone, and refuses the company afterwards
+   3b. the writers     `platform_company_set_approval('suspend')` writes
+                       `companies.status` and leaves the approval alone;
+                       `update_company_subscription_manual('suspended')` records
+                       a period that grants nothing and does **not** reach
+                       `companies.status` — suspending a company is
+                       `companies.lifecycle`'s act and that RPC asks
+                       `billing.manage`. Both refuse the company afterwards, and
+                       the manual one comes back when `Aktiv` is picked again
    3c. early renewal   an upgrade must reach the period that has not started
                        yet, or the daily sweep reads the old tier off it and
                        silently downgrades a paying customer
@@ -626,21 +628,33 @@ BEGIN
     _sub_succeeded(v_out)
     AND (SELECT approval_status FROM companies WHERE id = v_co) = 'rejected');
 
-  -- update_company_subscription_manual('suspended') used to write
-  -- subscription_status = 'suspended', the other retired value.
+  /*
+    update_company_subscription_manual('suspended') used to write
+    subscription_status = 'suspended', the other retired value.
+
+    It now records a period that grants nothing, which blocks the company the
+    same way — and it does **not** write companies.status. This modal is the
+    Abo-Status, not a lifecycle control: suspending a company is
+    `companies.lifecycle`, owners-only under D2, while this RPC asks
+    `billing.manage`. Writing the status here would hand billing an owner's act,
+    and a one-way one, since nothing in the modal clears it.
+  */
   v_co := _sub_company('manualsusp', 'approved', 'active', 'active', now(), now() + interval '30 days',
                        now() - interval '1 year');
   PERFORM app_private.subscription_backfill_company(v_co);
-  PERFORM _sub_ok('manual update: the company is admitted before it is suspended',
+  PERFORM _sub_ok('manual update: the company is admitted before it is blocked',
     _sub_admitted(_sub_id('user:manualsusp')));
 
   v_out := _sub_do(v_owner, format(
     'SELECT update_company_subscription_manual(%L, %L, NULL, %L, NULL, %L)::text',
     v_co, 'suspended', now() + interval '30 days', 'sub test'));
   PERFORM _sub_ok('manual update(suspended): answers success', _sub_succeeded(v_out));
-  PERFORM _sub_ok('manual update(suspended): suspends through companies.status, never subscription_status',
-    (SELECT status FROM companies WHERE id = v_co) = 'suspended'
-    AND (SELECT subscription_status FROM companies WHERE id = v_co) <> 'suspended');
+  PERFORM _sub_ok('manual update(suspended): blocks through a period that grants nothing',
+    (SELECT subscription_status FROM companies WHERE id = v_co) <> 'active'
+    AND (SELECT count(*) FROM subscription_coverage
+          WHERE company_id = v_co AND status = 'active' AND grants_access) = 0);
+  PERFORM _sub_ok('manual update(suspended): …and does not reach companies.status — that is lifecycle''s',
+    (SELECT status FROM companies WHERE id = v_co) = 'active');
   PERFORM _sub_ok('manual update(suspended): …and the company is refused',
     NOT _sub_admitted(_sub_id('user:manualsusp')));
 
@@ -650,6 +664,17 @@ BEGIN
     (SELECT a.new_status FROM subscription_admin_actions a
       WHERE a.company_id = v_co ORDER BY a.created_at DESC LIMIT 1)
     = (SELECT subscription_status FROM companies WHERE id = v_co));
+
+  -- …and the door swings both ways: picking Aktiv again restores a granting
+  -- period. Under the earlier draft this was a silent no-op, because the only
+  -- exit from a manual suspension was lifecycle('reactivate') on another screen.
+  v_out := _sub_do(v_owner, format(
+    'SELECT update_company_subscription_manual(%L, %L, NULL, %L, NULL, %L)::text',
+    v_co, 'active', now() + interval '30 days', 'sub test back'));
+  PERFORM _sub_ok('manual update(active): brings the company back, so the modal is not a one-way door',
+    _sub_succeeded(v_out)
+    AND (SELECT subscription_status FROM companies WHERE id = v_co) = 'active'
+    AND _sub_admitted(_sub_id('user:manualsusp')));
 END $$;
 
 -- ─── 3c. an early renewal must not be downgraded by the next sweep ──────────
