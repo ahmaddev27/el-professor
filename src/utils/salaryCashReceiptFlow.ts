@@ -464,20 +464,32 @@ export function scopeRefusal(scope: ReceiptScope): ReceiptActionRefusal | null {
  * `business.read` **and** a context open on the very company being read. A
  * company user is unaffected: it reads its own ledger through its own
  * membership, and this flag is false and means nothing for it.
+ *
+ * "Own company" is not a free pass either. `get_active_company_id()` answers a
+ * member's company only while that company is approved, active or in trial and
+ * subscribed, and the member's account is not blocked. For a company user
+ * App.tsx refuses every one of those states before this screen renders. A
+ * platform account skips those gates, yet the database still applies them to
+ * the platform account's own company — so a staff member whose company is
+ * pending or unsubscribed would be shown a till of 0,00 €.
+ * `ownCompanyReadable` is the database's own answer for that account, from
+ * SuperAdminContext, and is true for every company user.
  */
 export function cashLedgerInScope({
   companyId,
   effectiveCompanyId,
   isViewingAsCompany,
   platformReadsCompanyData,
+  ownCompanyReadable,
 }: {
   companyId: string | null;
   effectiveCompanyId: string | null;
   isViewingAsCompany: boolean;
   platformReadsCompanyData: boolean;
+  ownCompanyReadable: boolean;
 }): boolean {
   const scope = receiptScope({ companyId, effectiveCompanyId, isViewingAsCompany });
-  return scope === 'own_company' || platformReadsCompanyData;
+  return (scope === 'own_company' && ownCompanyReadable) || platformReadsCompanyData;
 }
 
 // ─── A confirmation without an answer ───────────────────────────────────────

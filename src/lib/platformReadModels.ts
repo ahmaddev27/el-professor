@@ -277,6 +277,74 @@ export function parseCompanyRow(raw: Record<string, unknown>): PlatformCompanyRo
   };
 }
 
+// ─── Per-company counts, across every page ───────────────────────────────────
+
+/**
+ * Users, active drivers and active vehicles per company id, or `known: false`.
+ * Unknown is a state the screens show as a dash, never as zero: a zero here
+ * would say a customer has no users.
+ */
+export interface CompanyCounts {
+  known: boolean;
+  users: Record<string, number>;
+  drivers: Record<string, number>;
+  vehicles: Record<string, number>;
+}
+
+export const UNKNOWN_COMPANY_COUNTS: CompanyCounts = Object.freeze({
+  known: false,
+  users: Object.freeze({}),
+  drivers: Object.freeze({}),
+  vehicles: Object.freeze({}),
+}) as CompanyCounts;
+
+/**
+ * Reads the counts of `platform_companies_list` page by page.
+ *
+ * Every page is one audited read — one row in an append-only log with no
+ * retention — so this is for a deliberate read (a screen opening, a refresh
+ * button) and never for a timer. It stops where the database stops serving:
+ * `directoryHasNextPage` is false past the offset ceiling, so a platform with
+ * more companies than the reachable pages hold ends after page 101 with the
+ * counts unknown, instead of asking for offset 10 000 forever.
+ *
+ * A refusal, a malformed answer and a thrown transport error all leave the
+ * counts unknown rather than failing the caller, so a screen that also shows
+ * other things still renders them.
+ *
+ * `fetchPage` is injected so the paging is testable without a database.
+ */
+export async function collectCompanyCounts(
+  fetchPage: (pageIndex: number) => Promise<PlatformReadResult<PlatformCompanyRow>>,
+): Promise<CompanyCounts> {
+  const counts: CompanyCounts = { known: false, users: {}, drivers: {}, vehicles: {} };
+  for (let pageIndex = 0; ; pageIndex += 1) {
+    let page: PlatformReadResult<PlatformCompanyRow>;
+    try {
+      page = await fetchPage(pageIndex);
+    } catch {
+      return UNKNOWN_COMPANY_COUNTS;
+    }
+    if (!page.ok) return UNKNOWN_COMPANY_COUNTS;
+
+    for (const row of page.items) {
+      counts.users[row.id] = row.user_count;
+      counts.drivers[row.id] = row.active_driver_count;
+      counts.vehicles[row.id] = row.active_vehicle_count;
+    }
+
+    if (!directoryHasNextPage(pageIndex, page.total)) {
+      // Known only if nothing lies past this page: rows beyond the offset
+      // ceiling exist, and no page can reach them.
+      counts.known = (pageIndex + 1) * DIRECTORY_PAGE_SIZE >= page.total;
+      return counts.known ? counts : UNKNOWN_COMPANY_COUNTS;
+    }
+    // A page that comes back empty while the total promises more means the
+    // table changed under the read; what was collected is not the whole.
+    if (page.items.length === 0) return UNKNOWN_COMPANY_COUNTS;
+  }
+}
+
 // ─── The sorts each directory accepts ────────────────────────────────────────
 //
 // The database refuses any other value with 22023 before it reads anything, so
