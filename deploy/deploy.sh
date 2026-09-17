@@ -94,17 +94,39 @@ env_value() {
 # before it gets that far. Switched on, it needs a Google web client id and a
 # secret.
 #
-# Each environment has its own Google client (owner decision G3 is still open;
-# the plan recommends separate clients and this takes that): a client shared
-# with production would accept production's consent and tokens on a host that
-# runs a copy of production's accounts. The ids are compared by hash, like
-# OTP_PEPPER, from whichever side deploys. No value read here is ever printed.
+# Staging and production may share one Google OAuth client (owner decision G3,
+# taken 17.09.2026). The risk the owner accepted with it: staging runs a copy of
+# production's accounts, so one client is one consent screen and one token
+# audience across both environments — a token Google minted for staging carries
+# the same audience production trusts, and a change to the client's redirect
+# URIs, its branding or its verification state reaches both stacks at once.
+#
+# So sharing is allowed but never inferred. GOOGLE_CLIENT_SHARED=true has to
+# stand in *both* .env files: with it, the same id in both is a deliberate,
+# recorded act; without it, the same id is what a .env copied from the other
+# environment looks like, and the release is still refused. Only one side
+# carrying it is a misconfiguration — half a decision — and the refusal names
+# the side that is missing it. Empty or false means "not shared", and any other
+# value is refused like the switch, so a typo never reads as "not shared".
+#
+# The opt-in is read on the same terms as the comparison it governs: whenever
+# GOOGLE_CLIENT_ID is non-empty, whatever the switch says and from whichever
+# side deploys, because the id is written into .env before the switch is
+# flipped. Its spelling is checked unconditionally, next to the switch's. The
+# ids are still compared by hash, like OTP_PEPPER; no value read here is ever
+# printed.
 google_signin_guard() {
-  local env_file="$1" peer_env_file="$2" flag client_id peer_client_id
+  local env_file="$1" peer_env_file="$2" peer_name="${3:-the other environment}"
+  local flag shared client_id peer_client_id missing
   flag="$(env_value "$env_file" GOOGLE_SIGNIN_ENABLED)"
   case "$flag" in
     ''|true|false) ;;
     *) fail "GOOGLE_SIGNIN_ENABLED must be empty, true or false; .env holds something else" ;;
+  esac
+  shared="$(env_value "$env_file" GOOGLE_CLIENT_SHARED)"
+  case "$shared" in
+    ''|true|false) ;;
+    *) fail "GOOGLE_CLIENT_SHARED must be empty, true or false; .env holds something else" ;;
   esac
   client_id="$(env_value "$env_file" GOOGLE_CLIENT_ID)"
   if [ "$flag" = true ]; then
@@ -115,8 +137,14 @@ google_signin_guard() {
   fi
   if [ -n "$client_id" ] && [ -f "$peer_env_file" ]; then
     peer_client_id="$(env_value "$peer_env_file" GOOGLE_CLIENT_ID)"
-    [ "$(printf '%s' "$client_id" | sha256sum | cut -c1-16)" != "$(printf '%s' "$peer_client_id" | sha256sum | cut -c1-16)" ] \
-      || fail "staging and production share a GOOGLE_CLIENT_ID; each environment needs its own Google OAuth client"
+    if [ "$(printf '%s' "$client_id" | sha256sum | cut -c1-16)" = "$(printf '%s' "$peer_client_id" | sha256sum | cut -c1-16)" ]; then
+      missing=""
+      [ "$shared" = true ] || missing="this environment's .env"
+      [ "$(env_value "$peer_env_file" GOOGLE_CLIENT_SHARED)" = true ] \
+        || missing="${missing:+$missing and }$peer_name's .env"
+      [ -z "$missing" ] \
+        || fail "staging and production share a GOOGLE_CLIENT_ID; sharing one Google OAuth client needs GOOGLE_CLIENT_SHARED=true in both .env files, and it is missing from $missing"
+    fi
   fi
 }
 
@@ -282,8 +310,12 @@ unset OTP_PEPPER
 # its own signup, and Kong's auth-v1-closed block is then all that keeps
 # /signup, /otp and /magiclink from creating accounts, so a release without the
 # block is refused whatever the switch says.
-if [ "$ENVIRONMENT" = staging ]; then PEER_ENV=/srv/PRO/deploy/.env; else PEER_ENV=/srv/PRO-staging/deploy/.env; fi
-google_signin_guard .env "$PEER_ENV"
+if [ "$ENVIRONMENT" = staging ]; then
+  PEER_ENV=/srv/PRO/deploy/.env; PEER_NAME=production
+else
+  PEER_ENV=/srv/PRO-staging/deploy/.env; PEER_NAME=staging
+fi
+google_signin_guard .env "$PEER_ENV" "$PEER_NAME"
 kong_closed_block_guard kong.yml
 GOOGLE_SIGNIN="$(env_value .env GOOGLE_SIGNIN_ENABLED)"
 

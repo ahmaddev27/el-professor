@@ -259,10 +259,13 @@ services:
       # Google sign-in (plan step 1.6). Off unless GOOGLE_SIGNIN_ENABLED=true in
       # .env; the entrypoint above opens signup and turns autoconfirm off with it.
       # deploy.sh refuses any value but empty, true or false, a client id that is
-      # not one Google web client id, a missing secret, and a client id the other
-      # environment also uses. The redirect URI is GoTrue's own callback behind
-      # Kong, and the Google client must list exactly this URL. The kill switch
-      # is GOOGLE_SIGNIN_ENABLED=false and a redeploy.
+      # not one Google web client id, and a missing secret. One client may serve
+      # both environments (owner decision G3, 17.09.2026), but only with
+      # GOOGLE_CLIENT_SHARED=true in both .env files; the same id without that
+      # opt-in is refused as a copied .env. The redirect URI is GoTrue's own
+      # callback behind Kong, and the Google client must list exactly this URL —
+      # both environments' URLs when the client is shared. The kill switch is
+      # GOOGLE_SIGNIN_ENABLED=false and a redeploy.
       GOTRUE_EXTERNAL_GOOGLE_ENABLED: ${GOOGLE_SIGNIN_ENABLED:-false}
       GOTRUE_EXTERNAL_GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       GOTRUE_EXTERNAL_GOOGLE_SECRET: ${GOOGLE_CLIENT_SECRET:-}

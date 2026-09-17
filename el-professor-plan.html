@@ -1070,7 +1070,7 @@ AND (c.subscription_expires_at IS NULL OR c.subscription_expires_at &gt; now())<
         <li><span class="when">المرحلة 3</span><span>إيميل أدمن شركة Y&amp;A Mobility.</span><span class="pill">لاحقاً</span></li>
         <li><span class="when">المرحلة 3</span><span>قرارات D1–D13 وبيانات البائع للفواتير (التفاصيل بالخطة).</span><span class="pill warn">لسا</span></li>
         <li><span class="when">المرحلة 0</span><span>مفتاح <code>OTP_PEPPER</code> للبرودكشن.</span><span class="pill ok">خلص</span></li>
-        <li><span class="when">جوجل 1.6</span><span>عميل Google Cloud للبرودكشن، وسياسة خصوصية وImpressum، وقرارات G1–G3. (عميل الستيج جاهز وجوجل شغّال عليه من 16.09.2026؛ البرودكشن بيضل مطفي لحد ما تنبني قاعدة "الجلسة بكلمة مرور" من الخادم.)</span><span class="pill warn">لسا</span></li>
+        <li><span class="when">جوجل 1.6</span><span>سياسة خصوصية وImpressum، وقرارَي G1 وG2. <b>G3 انحسم بـ 17.09.2026: عميل Google واحد للبيئتين</b>، فالبرودكشن ما عاد بدّه عميل خاص — بس بدنا نضيف رابط رجوع البرودكشن للعميل نفسه، ونكتب <code>GOOGLE_CLIENT_SHARED=true</code> بملفّي <code>.env</code> الاثنين، وإلا <code>deploy.sh</code> بيرفض النشر. الخطر اللي وافقت عليه: الستيج على نسخة من حسابات البرودكشن، فعميل واحد يعني شاشة موافقة وحدة وجمهور توكن واحد بالبيئتين. (عميل الستيج جاهز وجوجل شغّال عليه من 16.09.2026؛ البرودكشن بيضل مطفي لحد ما تنبني قاعدة "الجلسة بكلمة مرور" من الخادم.)</span><span class="pill warn">لسا</span></li>
         <li><span class="when">المرحلة 4</span><span>قرار دمج صفوف الرواتب المكررة.</span><span class="pill">لاحقاً</span></li>
       </ul>
     </section>
