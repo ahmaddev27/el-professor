@@ -25,6 +25,8 @@ LANGUAGE plpgsql AS $$
 BEGIN
   PERFORM set_config('request.jwt.claim.sub', p_user::text, true);
   PERFORM set_config('request.jwt.claim.role', 'authenticated', true);
+  -- A password sign-in: since 20260919130000 a platform capability needs one.
+  PERFORM set_config('request.jwt.claim.amr', '[{"method": "password", "timestamp": 1789416052}]', true);
   EXECUTE 'SET LOCAL ROLE authenticated';
 END $$;
 

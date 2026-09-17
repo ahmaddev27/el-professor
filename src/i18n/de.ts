@@ -4199,6 +4199,9 @@ export const de = {
   'activation.codePlaceholder': '6-stelliger Code',
   'forgot.emailPlaceholder':    'ihre@email.de',
   'setpw.redirecting':          'Sie werden weitergeleitet...',
+  // Plattform-Konten melden sich mit E-Mail-Adresse und Passwort an, nie über
+  // eine Einladung oder einen Code (Entscheidung des Inhabers, 16.09.2026).
+  'setpw.platformSignInAgain':  'Bitte melden Sie sich jetzt mit Ihrem neuen Passwort an.',
   'umsaetze.title':             'Umsätze',
   'users.export.createdAt':     'Erstellt am',
   'users.export.customRole':    'Benutzerdefinierte Rolle',

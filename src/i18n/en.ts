@@ -4196,6 +4196,7 @@ export const en: PartialDictionary = {
   'activation.codePlaceholder': '6-digit code',
   'forgot.emailPlaceholder':    'you@example.com',
   'setpw.redirecting':          'Redirecting you…',
+  'setpw.platformSignInAgain':  'Please sign in now with your new password.',
   'umsaetze.title':             'Revenue',
   'users.export.createdAt':     'Created on',
   'users.export.customRole':    'Custom role',
