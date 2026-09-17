@@ -144,11 +144,19 @@ export function buildPlanState(
     status = 'archived';
   } else if (rawStatus === 'deleted') {
     status = 'deleted';
-  } else {
-    // `active`, and anything the CHECK constraint might add later. The server
-    // asks for a live subscription here too, so the browser does not say
-    // `active` where `get_active_company_id()` answers NULL.
+  } else if (rawStatus === 'active') {
+    // The server asks for a live subscription here too, so the browser does not
+    // say `active` where `get_active_company_id()` answers NULL.
     status = subscribed ? 'active' : 'inactive';
+  } else {
+    // A status this build does not know — today unreachable, because
+    // `companies_status_check` (20260916130000) pins the column to six values.
+    // It locks rather than opens, for the same reason an unknown *plan* ranks
+    // below every feature: `get_active_company_id()` admits `active` and `trial`
+    // and nothing else, so a seventh status added by a later migration would be
+    // refused by the server while an opening browser showed empty screens — the
+    // failure this module exists to remove.
+    status = 'inactive';
   }
 
   // `isActive` reads as it always did; what changed is that `active` and

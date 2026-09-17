@@ -233,6 +233,23 @@ describe('the short circuits', () => {
     expect(planAllows(buildPlanState(null, NOW), SEED_PLAN_FEATURES, PREMIUM_FEATURE, false)).toBe(false);
   });
 
+  it('a status this build does not know locks, as an unknown plan does', () => {
+    // Unreachable while `companies_status_check` pins the column to six values.
+    // It is here so that a seventh status added by a later migration — which
+    // `get_active_company_id()` would refuse — cannot open the screens instead.
+    const unknown = row({ status: 'dormant', subscription_status: 'active', subscription_expires_at: FUTURE });
+    const state = buildPlanState(unknown, NOW);
+    expect(state.status).toBe('inactive');
+    expect(state.isActive).toBe(false);
+    expect(can(unknown, BASIC_FEATURE)).toBe(false);
+  });
+
+  it('a row with no status at all is still read as `active`, as it always was', () => {
+    const noStatus = row({ status: null, subscription_status: 'active', subscription_expires_at: FUTURE });
+    expect(buildPlanState(noStatus, NOW).status).toBe('active');
+    expect(buildPlanState(row({ status: null, subscription_status: 'inactive', subscription_expires_at: null }), NOW).status).toBe('inactive');
+  });
+
   it('a feature the map does not name needs premium', () => {
     const paying = row({ status: 'trial', trial_end: PAST, plan: 'advanced' });
     expect(planAllows(buildPlanState(paying, NOW), {}, BASIC_FEATURE, false)).toBe(false);
@@ -244,6 +261,19 @@ describe('the short circuits', () => {
  * The table the PR body carries, as an assertion: for every combination of
  * company status, subscription status and expiry, the browser must not open
  * what `get_active_company_id()` closes.
+ *
+ * **What this does and does not prove.** The oracle below transcribes the
+ * server's `status IN ('active','trial')` itself, but for the server's last two
+ * terms it calls `subscriptionIsActive()` — the very function under test. For
+ * that half the 126 cases assert `f(x) === f(x)`: they pin the *shape* of the
+ * state machine (which branch each combination lands in, and that the one
+ * permissive cell is the carve-out and no other), not the subscription rule.
+ * **The rule is pinned by the five hardcoded assertions in
+ * `describe('subscriptionIsActive …')` above**, which name the expected answer
+ * for a future, an absent and a past expiry and for every non-`active` status.
+ * Change the helper to something the SQL does not say and those five fail while
+ * all 126 of these still pass — so read them as the wiring, and those as the
+ * rule.
  */
 describe('the browser is never more permissive than the server', () => {
   const companyStatuses = ['trial', 'active', 'suspended', 'inactive', 'archived', 'deleted'];
