@@ -261,8 +261,9 @@ services:
       # deploy.sh refuses any value but empty, true or false, a client id that is
       # not one Google web client id, and a missing secret. One client may serve
       # both environments (owner decision G3, 17.09.2026), but only with
-      # GOOGLE_CLIENT_SHARED=true in both .env files; the same id without that
-      # opt-in is refused as a copied .env. The redirect URI is GoTrue's own
+      # GOOGLE_CLIENT_SHARED=true in both .env files, so that sharing is written
+      # down rather than inferred from two files that happen to agree; the same
+      # id with no opt-in is refused. The redirect URI is GoTrue's own
       # callback behind Kong, and the Google client must list exactly this URL —
       # both environments' URLs when the client is shared. The kill switch is
       # GOOGLE_SIGNIN_ENABLED=false and a redeploy.

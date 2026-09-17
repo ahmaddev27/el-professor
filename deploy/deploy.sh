@@ -102,22 +102,44 @@ env_value() {
 # URIs, its branding or its verification state reaches both stacks at once.
 #
 # So sharing is allowed but never inferred. GOOGLE_CLIENT_SHARED=true has to
-# stand in *both* .env files: with it, the same id in both is a deliberate,
-# recorded act; without it, the same id is what a .env copied from the other
-# environment looks like, and the release is still refused. Only one side
-# carrying it is a misconfiguration — half a decision — and the refusal names
-# the side that is missing it. Empty or false means "not shared", and any other
-# value is refused like the switch, so a typo never reads as "not shared".
+# stand in *both* .env files, which makes a shared client a written decision
+# rather than an accident of editing. What that still catches is the partial
+# mistake: the other environment's client id pasted into GOOGLE_CLIENT_ID while
+# no opt-in was written. Only one side carrying the opt-in is a
+# misconfiguration too — half a decision — and the refusal names the side that
+# is missing it, or holds something other than true. Empty or false means "not
+# shared", and any other value is refused like the switch, so a typo never
+# reads as "not shared".
+#
+# Be exact about the limit, because the next person will trust this comment:
+# once both files carry the opt-in, this check can no longer tell a deliberate
+# share from a wholesale copy of the other environment's .env, since such a
+# copy brings the opt-in with it. A copied .env is caught by the PROJECT_NAME
+# guard, which runs before this one, and again by the JWT_SECRET, SMTP_HOST,
+# COMPOSE_PROFILES and OTP_PEPPER guards. This check does not repeat their work
+# — the release path is the wrong place to carry a fourth way of refusing what
+# three earlier guards already refuse.
 #
 # The opt-in is read on the same terms as the comparison it governs: whenever
 # GOOGLE_CLIENT_ID is non-empty, whatever the switch says and from whichever
 # side deploys, because the id is written into .env before the switch is
-# flipped. Its spelling is checked unconditionally, next to the switch's. The
-# ids are still compared by hash, like OTP_PEPPER; no value read here is ever
-# printed.
+# flipped. Its spelling is checked unconditionally, next to the switch's, and
+# the peer's the same way once the ids turn out to match. The ids are still
+# compared by hash, like OTP_PEPPER; no value read here is ever printed.
+
+# Why one side fails the shared-client rule: the key is absent, or it is there
+# and is not the opt-in. Any other value is refused before this is reached, so
+# "not true" can only mean false.
+shared_optin_problem() {
+  case "$1" in
+    '') printf 'missing from %s' "$2" ;;
+    *)  printf 'not true in %s' "$2" ;;
+  esac
+}
+
 google_signin_guard() {
   local env_file="$1" peer_env_file="$2" peer_name="${3:-the other environment}"
-  local flag shared client_id peer_client_id missing
+  local flag shared client_id peer_client_id peer_shared problems
   flag="$(env_value "$env_file" GOOGLE_SIGNIN_ENABLED)"
   case "$flag" in
     ''|true|false) ;;
@@ -138,12 +160,17 @@ google_signin_guard() {
   if [ -n "$client_id" ] && [ -f "$peer_env_file" ]; then
     peer_client_id="$(env_value "$peer_env_file" GOOGLE_CLIENT_ID)"
     if [ "$(printf '%s' "$client_id" | sha256sum | cut -c1-16)" = "$(printf '%s' "$peer_client_id" | sha256sum | cut -c1-16)" ]; then
-      missing=""
-      [ "$shared" = true ] || missing="this environment's .env"
-      [ "$(env_value "$peer_env_file" GOOGLE_CLIENT_SHARED)" = true ] \
-        || missing="${missing:+$missing and }$peer_name's .env"
-      [ -z "$missing" ] \
-        || fail "staging and production share a GOOGLE_CLIENT_ID; sharing one Google OAuth client needs GOOGLE_CLIENT_SHARED=true in both .env files, and it is missing from $missing"
+      peer_shared="$(env_value "$peer_env_file" GOOGLE_CLIENT_SHARED)"
+      case "$peer_shared" in
+        ''|true|false) ;;
+        *) fail "GOOGLE_CLIENT_SHARED in $peer_name's .env must be empty, true or false; it holds something else" ;;
+      esac
+      problems=""
+      [ "$shared" = true ] || problems="$(shared_optin_problem "$shared" "this environment's .env")"
+      [ "$peer_shared" = true ] \
+        || problems="${problems:+$problems and }$(shared_optin_problem "$peer_shared" "$peer_name's .env")"
+      [ -z "$problems" ] \
+        || fail "staging and production share a GOOGLE_CLIENT_ID; sharing one Google OAuth client is declared with GOOGLE_CLIENT_SHARED=true in both .env files, and it is $problems"
     fi
   fi
 }
