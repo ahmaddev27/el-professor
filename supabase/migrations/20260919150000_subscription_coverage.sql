@@ -1571,6 +1571,49 @@ ALTER FUNCTION public.platform_company_set_approval(uuid, text, text) OWNER TO C
 
 -- ─── 9. Self-check ──────────────────────────────────────────────────────────
 
+/*
+  A function's body with its `--` comments removed, for the checks below.
+
+  `pg_proc.prosrc` keeps comments verbatim, so a check that greps a body greps
+  its prose too — and the prose in this file names the very predicates the
+  checks forbid, in order to explain why they are forbidden. The first version
+  of check 7b matched `period_start <= now()` and found it in the comment that
+  says that term must not be there, stopping the release over a defect that had
+  been fixed.
+
+  Only line comments are stripped, which is all this file's function bodies use.
+  A `--` inside a string literal would be stripped too; none of these bodies has
+  one, and over-stripping can only make a check laxer, never fire it falsely.
+*/
+CREATE OR REPLACE FUNCTION app_private.function_code(p_signature text)
+RETURNS text
+LANGUAGE plpgsql
+STABLE
+SET search_path = pg_catalog, public
+AS $$
+DECLARE
+  v_src text;
+BEGIN
+  SELECT regexp_replace(p.prosrc, '--[^\n]*', '', 'g')
+    INTO v_src
+    FROM pg_proc p
+   WHERE p.oid = to_regprocedure(p_signature);
+
+  -- Never NULL. A signature that does not resolve — a renamed function, a
+  -- changed argument list — would make every `!~` check below evaluate to NULL,
+  -- so every one of them would pass and the self-check would report nothing
+  -- while testing nothing.
+  IF v_src IS NULL THEN
+    RAISE EXCEPTION 'function_code: % does not resolve to a function', p_signature
+      USING ERRCODE = '22023';
+  END IF;
+  RETURN v_src;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION app_private.function_code(text) FROM PUBLIC, anon, authenticated, service_role;
+ALTER FUNCTION app_private.function_code(text) OWNER TO CURRENT_USER;
+
 DO $mig$
 DECLARE
   c_recompute CONSTANT text := 'app_private.recompute_company_subscription(uuid)';
@@ -1681,13 +1724,33 @@ BEGIN
     RAISE EXCEPTION '20260919150000 self-check: companies.status no longer admits ''suspended''';
   END IF;
 
+  /*
+    Checks 7, 7b and 8 read a function body. All three read it through
+    `app_private.function_code()`, which strips `--` comments, and none of them
+    reads `pg_proc.prosrc` directly.
+
+    The first version of 7b did, and it failed on its own explanation. `prosrc`
+    keeps a function's comments verbatim, and the comment above the UPDATE in
+    `platform_company_set_plan` names `period_start <= now()` in order to say
+    why that term must not be there. The regex found the prose, the release
+    stopped, and the check reported a defect that had been fixed — the shipped
+    UPDATE carries no `period_start` term at all.
+
+    A body check is a tripwire, not a proof: it fires on a phrase, so a
+    predicate rewritten a different way would slip past it. What proves the
+    behaviour is section 3c of tests/rls/subscriptions.sql, which calls the RPC
+    as a platform owner on a company with an early renewal and then runs the
+    sweep that used to undo the upgrade. These run on every deploy, which the
+    kit does not, so both are worth having — as long as the tripwire tests code.
+  */
+
   -- 7. the writers no longer assign the two derived columns, and the recompute
   --    does. A rewrite that puts an assignment back is what this catches.
   FOREACH v_sig IN ARRAY ARRAY[
       'public.redeem_activation_code(text)',
       'public.update_company_subscription_manual(uuid,text,timestamptz,timestamptz,text,text)']
   LOOP
-    v_txt := (SELECT p.prosrc FROM pg_proc p WHERE p.oid = to_regprocedure(v_sig));
+    v_txt := app_private.function_code(v_sig);
     -- \m is a word boundary: the column, not the p_subscription_status argument
     -- that update_company_subscription_manual still compares against.
     IF v_txt ~ '\msubscription_status\s*=\s*''' OR v_txt ~ '\msubscription_expires_at\s*=\s*p_' THEN
@@ -1703,17 +1766,26 @@ BEGIN
   --     one covering today. Dropping either makes the next sweep write the old
   --     tier back over an upgrade: an early renewal's row starts in the future,
   --     and the recompute takes the plan from the row with the furthest end.
-  v_txt := (SELECT p.prosrc FROM pg_proc p
-             WHERE p.oid = to_regprocedure('public.platform_company_set_plan(uuid,text,text,integer)'));
+  v_txt := app_private.function_code('public.platform_company_set_plan(uuid,text,text,integer)');
   IF v_txt !~ 'subscription_coverage' THEN
     RAISE EXCEPTION '20260919150000 self-check: platform_company_set_plan no longer carries the tier onto the coverage rows, so the next recompute would undo it';
   END IF;
-  IF v_txt ~ 'period_start\s*<=\s*now\(\)' THEN
-    RAISE EXCEPTION '20260919150000 self-check: platform_company_set_plan skips periods that start in the future again — an early renewal would be silently downgraded';
+  --  The shape that is right, asserted as well as the absence of the one that
+  --  is wrong: a check that only forbids can be satisfied by deleting the
+  --  predicate altogether.
+  IF v_txt !~ 'period_end\s+IS\s+NULL\s+OR\s+period_end\s*>\s*now\(\)' THEN
+    RAISE EXCEPTION '20260919150000 self-check: platform_company_set_plan no longer names the periods that have not ended, so an upgrade may miss the row the recompute reads';
+  END IF;
+  --  …and the column itself, not one spelling of one comparison. This function
+  --  has no other reason to mention `period_start`, so any mention of it is a
+  --  start-date filter coming back — including `period_start < now()` and
+  --  `NOT (period_start > now())`, which the old check would have let through.
+  IF v_txt ~ 'period_start' THEN
+    RAISE EXCEPTION '20260919150000 self-check: platform_company_set_plan filters the coverage rows by period_start again — an early renewal would be silently downgraded';
   END IF;
 
   -- 8. …and the recompute is the thing that does assign them
-  v_txt := (SELECT p.prosrc FROM pg_proc p WHERE p.oid = to_regprocedure(c_recompute));
+  v_txt := app_private.function_code(c_recompute);
   IF v_txt !~ 'subscription_status' OR v_txt !~ 'subscription_expires_at' OR v_txt !~ '\mplan\M' THEN
     RAISE EXCEPTION '20260919150000 self-check: % no longer writes all three derived columns', c_recompute;
   END IF;
