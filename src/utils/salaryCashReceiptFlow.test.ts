@@ -349,13 +349,17 @@ describe('receiptScope — whose receipts the screens may act on', () => {
 
 /*
   The cash ledger is readable where `company_id = get_active_company_id() OR
-  platform_reads_company_data()` is true (20260917130000). The second term is
-  `platform_can('business.read')` — a capability, not staff status — so these
-  cases are the two halves of that policy, and the refusals are the readers the
-  screens must not show a complete-looking till.
+  platform_reads_company_data()` is true (20260917130000). Since 20260917140000
+  the second term is a constant false and the first answers a platform account
+  with the company its support session is open on, so a platform reader is in
+  scope only through `platformReadsCompanyData` — the capability *and* a live
+  context. The refusals are the readers the screens must not show a
+  complete-looking till.
 */
 describe('cashLedgerInScope — when the till may be presented as complete', () => {
-  const ownCompany = { companyId: 'c1', effectiveCompanyId: 'c1', isViewingAsCompany: false };
+  // `ownCompanyReadable` is true for every company user; only a platform
+  // account whose own company the database refuses has it false.
+  const ownCompany = { companyId: 'c1', effectiveCompanyId: 'c1', isViewingAsCompany: false, ownCompanyReadable: true };
 
   it('is in scope inside the own company, capability or not', () => {
     expect(cashLedgerInScope({ ...ownCompany, platformReadsCompanyData: false })).toBe(true);
@@ -366,7 +370,16 @@ describe('cashLedgerInScope — when the till may be presented as complete', () 
     // Not a bare !isViewingAsCompany, which would have hidden the ledger here.
     expect(cashLedgerInScope({
       companyId: 'c1', effectiveCompanyId: 'c1', isViewingAsCompany: true, platformReadsCompanyData: false,
+      ownCompanyReadable: true,
     })).toBe(true);
+  });
+
+  it('is out of scope for staff whose own company the database refuses', () => {
+    // App.tsx lets a platform account past the approval and subscription
+    // gates; get_active_company_id() does not, and answers NULL. Its ledger
+    // reads empty, and the till would say 0,00 €.
+    expect(cashLedgerInScope({ ...ownCompany, platformReadsCompanyData: false, ownCompanyReadable: false }))
+      .toBe(false);
   });
 
   it('is in scope for a platform reader holding business.read', () => {
@@ -374,6 +387,7 @@ describe('cashLedgerInScope — when the till may be presented as complete', () 
     // Bargeld and Belege they already read, so no term is missing.
     expect(cashLedgerInScope({
       companyId: null, effectiveCompanyId: 'c2', isViewingAsCompany: true, platformReadsCompanyData: true,
+      ownCompanyReadable: false,
     })).toBe(true);
   });
 
@@ -382,15 +396,18 @@ describe('cashLedgerInScope — when the till may be presented as complete', () 
     // 0,00 € payout card would turn that missing read into a claim.
     expect(cashLedgerInScope({
       companyId: null, effectiveCompanyId: 'c2', isViewingAsCompany: true, platformReadsCompanyData: false,
+      ownCompanyReadable: false,
     })).toBe(false);
     expect(cashLedgerInScope({
       companyId: null, effectiveCompanyId: null, isViewingAsCompany: false, platformReadsCompanyData: false,
+      ownCompanyReadable: false,
     })).toBe(false);
   });
 
   it('is out of scope for an ordinary company user pointed at another company', () => {
     expect(cashLedgerInScope({
       companyId: 'c1', effectiveCompanyId: 'c2', isViewingAsCompany: true, platformReadsCompanyData: false,
+      ownCompanyReadable: true,
     })).toBe(false);
   });
 });

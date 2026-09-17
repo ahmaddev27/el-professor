@@ -719,9 +719,12 @@ BEGIN
     ever confirm that the list matched itself.
 
     It picks up the 31 tables of 3.3 section 2 and the 5 of section 3 (whose
-    policies name the helper inside their EXISTS on the parent), and it will
-    pick up any tenant table a later migration writes in the same shape, which
-    is the property worth having.
+    policies name the helper inside their EXISTS on the parent). It does so
+    once, when this file applies: a DO block is not a rule the database goes on
+    keeping. A tenant table that a later migration adds gets no trigger from
+    here — that migration has to add it — and what fails a release that forgets
+    is section 14 of tests/rls/platform-contexts.sql, which asks the catalogue
+    the same question after the whole chain has applied.
 
     The three shell tables stay literal, because no derivation separates them
     from their neighbours: their predicate is
@@ -799,16 +802,15 @@ BEGIN
   END LOOP;
 
   /*
-    A floor, because the list is derived. If the catalogue query ever matches
-    nothing — a changed helper name, a schema filter that stops being true — the
-    loop would install no triggers at all, and self-check 5 would agree with it,
-    since it derives from the same query. Then a view context would write every
-    tenant table and both checks would pass. The count is the one thing that
-    cannot be fooled by an empty derivation.
+    A floor, because the list is derived. If the catalogue query ever matched
+    nothing — a changed helper name, a schema filter that stopped being true —
+    the loop would install no triggers at all, and a view context would write
+    every tenant table. This is the cheap early stop; self-check 5 is the exact
+    comparison, table by table, against the list this slice means.
 
     36 tenant tables (31 in 20260917130000 section 2, 5 in section 3) plus the
-    three shell tables above. A later migration that adds a tenant table in the
-    same shape raises this number; it must never fall.
+    three shell tables above. The count is taken once, when this file applies,
+    and says nothing about a table a later migration adds.
   */
   IF v_count < 39 THEN
     RAISE EXCEPTION '3.4: the refusal trigger went onto % tables, expected at least 39 — the derived list matched too little', v_count;
@@ -1328,8 +1330,9 @@ GRANT EXECUTE ON FUNCTION public.platform_whoami() TO authenticated;
 
 DO $mig$
 DECLARE
-  v_wrong text;
-  v_n     int;
+  v_wrong    text;
+  v_n        int;
+  v_expected text[];
 BEGIN
   -- 1. app_private stays shut, table and functions alike.
   FOREACH v_wrong IN ARRAY ARRAY['anon', 'authenticated', 'service_role'] LOOP
@@ -1469,36 +1472,62 @@ BEGIN
     RAISE EXCEPTION '3.4 self-check: does not read the open context: %', v_wrong;
   END IF;
 
-  -- 5. Every table a view context could reach carries the refusal trigger.
+  -- 5. The refusal trigger sits on exactly the tables this slice means to
+  --    confine: the 36 of 20260917130000's tenant shape and the three shell
+  --    tables, no fewer and no more.
   --
-  --    Asked of the catalogue, the same way the loop installs them, and not of
-  --    a literal list: a list here would restate the loop's own list, so it
-  --    could only ever confirm that the two copies agree — a table missing from
-  --    both would pass. What this proves is therefore narrower than it looks,
-  --    and worth stating exactly: every table whose policies name
-  --    get_active_company_id() (the tenant shape of 20260917130000), plus the
-  --    three shell tables this file adds, ended up with a trigger on it. It
-  --    catches a table the loop skipped; it cannot catch a table 3.3 should
-  --    have given the tenant shape and did not, because nothing here knows
-  --    3.3's intent apart from its policies.
-  SELECT string_agg(t.tbl, ', ') INTO v_wrong
+  --    Compared against a list written out here, and deliberately not against
+  --    the catalogue query the loop installs from: asking that query again in
+  --    the same transaction could only confirm that it matched itself. The two
+  --    sources are independent. The catalogue says which tables 3.3 actually
+  --    gave the tenant shape; this list says which ones 3.4 means to confine.
+  --    A disagreement either way fails the release — a table the list names
+  --    that carries no trigger (its policy lost the tenant term, or the loop
+  --    skipped it), or a trigger on a table the list does not name (a table
+  --    that matched the shape without anyone deciding it should be confined,
+  --    the way company_settings once was).
+  --
+  --    It runs once, like the loop. What keeps a table added by a *later*
+  --    migration covered is section 14 of tests/rls/platform-contexts.sql.
+  v_expected := ARRAY[
+    -- 20260917130000 section 2: the tenant tables
+    'receipts', 'income', 'drivers', 'cars', 'fixed_costs', 'salaries', 'salary_payments',
+    'werkstatt_checks', 'driver_notes', 'documents', 'car_driver_assignments', 'cash_transactions',
+    'document_templates', 'company_planning_runs', 'company_planning_run_blocks',
+    'monthly_planning_manual_exceptions', 'planning_finalizations', 'planning_run_adjustments',
+    'historical_reconciliations', 'historical_block_adjustments', 'historical_driver_hour_targets',
+    'historical_payroll_targets', 'historical_time_adjustments', 'historical_wh_saved_plans',
+    'saved_stundennachweise', 'fahrtenbuch_imports', 'fahrtenbuch_trips',
+    'fahrtenbuch_assignment_audit', 'notification_settings', 'cash_movements', 'salary_cash_receipts',
+    -- section 3: the tables that reach their company through a parent
+    'document_blocks', 'document_variables', 'historical_reconciliation_drivers',
+    'historical_reconciliation_results', 'historical_reconciliation_wh_drivers',
+    -- the three shell tables whose write predicate this file completes
+    'roles', 'role_permissions', 'activation_code_attempts'
+  ];
+
+  SELECT string_agg(d.problem, '; ' ORDER BY d.problem) INTO v_wrong
     FROM (
-      SELECT DISTINCT p.tablename::text AS tbl
-        FROM pg_policies p
-       WHERE p.schemaname = 'public'
-         AND (coalesce(p.qual, '') || ' ' || coalesce(p.with_check, '')) ~ 'get_active_company_id'
-       UNION
-      SELECT v.tbl::text
-        FROM (VALUES ('roles'), ('role_permissions'), ('activation_code_attempts')) AS v(tbl)
-    ) t
-   WHERE to_regclass('public.' || t.tbl) IS NOT NULL
-     AND NOT EXISTS (SELECT 1 FROM pg_trigger g
-                      WHERE g.tgrelid = ('public.' || t.tbl)::regclass
-                        AND g.tgname = 'refuse_read_only_context_write'
-                        AND NOT g.tgisinternal);
+      SELECT format('%s carries no refusal trigger', e.tbl) AS problem
+        FROM unnest(v_expected) AS e(tbl)
+       WHERE to_regclass('public.' || e.tbl) IS NOT NULL
+         AND NOT EXISTS (SELECT 1 FROM pg_trigger g
+                          WHERE g.tgrelid = to_regclass('public.' || e.tbl)
+                            AND g.tgname = 'refuse_read_only_context_write'
+                            AND NOT g.tgisinternal)
+      UNION ALL
+      SELECT format('%s carries a refusal trigger this list does not name', c.relname)
+        FROM pg_trigger g
+        JOIN pg_class c     ON c.oid = g.tgrelid
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+       WHERE n.nspname = 'public'
+         AND g.tgname = 'refuse_read_only_context_write'
+         AND NOT g.tgisinternal
+         AND c.relname::text <> ALL (v_expected)
+    ) d;
 
   IF v_wrong IS NOT NULL THEN
-    RAISE EXCEPTION '3.4 self-check: a view context could write %', v_wrong;
+    RAISE EXCEPTION '3.4 self-check: the refusal trigger is not where this slice means it: %', v_wrong;
   END IF;
 
   -- 5b. …and company_settings does not carry it, which is as deliberate as the

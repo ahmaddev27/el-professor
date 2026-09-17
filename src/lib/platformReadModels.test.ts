@@ -1,7 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   DIRECTORY_MAX_OFFSET,
   DIRECTORY_PAGE_SIZE,
+  UNKNOWN_COMPANY_COUNTS,
+  collectCompanyCounts,
   directoryHasNextPage,
   directoryOffset,
   directoryPageCount,
@@ -187,5 +189,94 @@ describe('the reduced columns', () => {
       driver_usage_type: null,
       created_at: null,
     });
+  });
+});
+
+/*
+  collectCompanyCounts pages platform_companies_list, and every page it asks for
+  is one row in an append-only audit log. So the number of calls is itself an
+  assertion here, not a detail.
+*/
+describe('collectCompanyCounts', () => {
+  /** A company row with only what the counts read. */
+  const row = (id: string, users: number) => ({
+    id, name: id, slug: null, status: null, approval_status: null, plan: null, trial_state: null,
+    subscription_status: null, subscription_expires_at: null, open_invoice_count: 0, overdue_invoice_count: 0,
+    user_count: users, active_driver_count: users + 1, active_vehicle_count: users + 2,
+  });
+
+  /** A fake read model holding `total` companies, served DIRECTORY_PAGE_SIZE at a time. */
+  const readModel = (total: number) => vi.fn(async (pageIndex: number) => {
+    const offset = Math.min(pageIndex * DIRECTORY_PAGE_SIZE, DIRECTORY_MAX_OFFSET);
+    const count = Math.max(0, Math.min(DIRECTORY_PAGE_SIZE, total - offset));
+    return {
+      ok: true as const,
+      total,
+      limit: DIRECTORY_PAGE_SIZE,
+      offset,
+      items: Array.from({ length: count }, (_, i) => row(`c${offset + i}`, (offset + i) % 5)),
+    };
+  });
+
+  it('reads every page, and asks for no page past the last', async () => {
+    const fetchPage = readModel(250);
+    const counts = await collectCompanyCounts(fetchPage);
+    expect(fetchPage).toHaveBeenCalledTimes(3);
+    expect(counts.known).toBe(true);
+    expect(Object.keys(counts.users)).toHaveLength(250);
+    expect(counts.users.c249).toBe(4);
+    expect(counts.drivers.c249).toBe(5);
+    expect(counts.vehicles.c249).toBe(6);
+  });
+
+  it('knows a platform with no companies at all after one call', async () => {
+    const fetchPage = readModel(0);
+    const counts = await collectCompanyCounts(fetchPage);
+    expect(fetchPage).toHaveBeenCalledTimes(1);
+    expect(counts.known).toBe(true);
+  });
+
+  it('stops at the offset ceiling instead of asking for offset 10 000 forever', async () => {
+    // The loop this replaced paged until offset + items >= total. Past 10 100
+    // companies directoryOffset clamps, every page is offset 10 000 again, and
+    // that condition never came true — an audit row per iteration, unbounded.
+    const fetchPage = readModel(20_000);
+    const counts = await collectCompanyCounts(fetchPage);
+    expect(fetchPage).toHaveBeenCalledTimes(DIRECTORY_MAX_OFFSET / DIRECTORY_PAGE_SIZE + 1);
+    // Companies past the ceiling were never read, so the counts are not known.
+    expect(counts).toBe(UNKNOWN_COMPANY_COUNTS);
+  });
+
+  it('is known right up to the last reachable page', async () => {
+    const fetchPage = readModel(DIRECTORY_MAX_OFFSET + DIRECTORY_PAGE_SIZE);
+    const counts = await collectCompanyCounts(fetchPage);
+    expect(fetchPage).toHaveBeenCalledTimes(DIRECTORY_MAX_OFFSET / DIRECTORY_PAGE_SIZE + 1);
+    expect(counts.known).toBe(true);
+  });
+
+  it('leaves the counts unknown on a refusal, and asks nothing further', async () => {
+    const fetchPage = vi.fn(async () => ({ ok: false as const, reason: 'not_authorized' }));
+    expect(await collectCompanyCounts(fetchPage)).toBe(UNKNOWN_COMPANY_COUNTS);
+    expect(fetchPage).toHaveBeenCalledTimes(1);
+  });
+
+  it('leaves the counts unknown on a transport error instead of throwing', async () => {
+    // fetchCompanies throws on a Supabase error. Uncaught, it aborted the whole
+    // dashboard load, and the company table and approvals never rendered.
+    const first = readModel(250);
+    const fetchPage = vi.fn(async (pageIndex: number) => {
+      if (pageIndex === 1) throw new Error('Failed to fetch');
+      return first(pageIndex);
+    });
+    await expect(collectCompanyCounts(fetchPage)).resolves.toBe(UNKNOWN_COMPANY_COUNTS);
+  });
+
+  it('does not call a table that shrank mid-read complete', async () => {
+    const fetchPage = vi.fn(async (pageIndex: number) => ({
+      ok: true as const, total: 250, limit: DIRECTORY_PAGE_SIZE, offset: pageIndex * DIRECTORY_PAGE_SIZE,
+      items: pageIndex === 0 ? [row('c0', 1)] : [],
+    }));
+    expect(await collectCompanyCounts(fetchPage)).toBe(UNKNOWN_COMPANY_COUNTS);
+    expect(fetchPage).toHaveBeenCalledTimes(2);
   });
 });

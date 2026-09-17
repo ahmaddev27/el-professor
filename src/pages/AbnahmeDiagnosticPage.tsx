@@ -249,19 +249,29 @@ export default function AbnahmeDiagnosticPage() {
       const warnings: string[] = [];
 
       // ── 1. Planning Run Info ───────────────────────────────────────────────
+      /*
+        maybeSingle, not single. With `.single()` PostgREST answers zero rows
+        with 406 PGRST116, and supabase-js clears that error only for
+        `maybeSingle` — so under `.single()` an invisible run arrived as an
+        *error*, `runErr` was set, and the "unreadable" branch below could never
+        be taken. `maybeSingle` answers zero rows as data null, error null, and
+        keeps a real failure an error.
+      */
       const { data: runData, error: runErr } = await supabase
         .from('company_planning_runs')
         .select('id, status, company_id, applied_at, apply_summary_json')
         .eq('id', STABLE_RUN_ID)
-        .single();
+        .maybeSingle();
 
       /*
         Absent with no error is not "missing" — it is a row this account cannot
         see. Since 20260917140000 (plan 3.4) a platform account reads no
         company's planning runs without an open context, and this page pins one
         run id, so for such a caller everything below is computed from nothing:
-        errNoTrips, three errTripsMissingColumn and errTotalsMismatch all fire
-        and the page scores 0 for a run that is perfectly sound. A real query
+        the trip query returns no rows, so errNoTrips fires as a critical and
+        both distinct-count warnings fire, 0 blocks and 0 drivers against the
+        expected counts — for a run that is perfectly sound. (The missing-column and totals checks stay
+        quiet, because they count over those same zero trips.) A real query
         error still reports as one; the invisible case is corrected once, just
         before the result is set.
 

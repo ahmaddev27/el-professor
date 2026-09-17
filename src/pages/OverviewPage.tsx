@@ -261,20 +261,23 @@ const PlanStatusCard: React.FC<{ planState: PlanState; effectivePlan: Plan }> = 
 const OverviewPage: React.FC = () => {
   const { t } = useTranslation();
   const { isSuperAdmin, companyId: ownCompanyId } = useAuth();
-  const { effectiveCompanyId: companyId, isViewingAsCompany, platformReadsCompanyData } = useSuperAdmin();
-  // Since 3.3 cash_movements answers for the caller's active company or for a
-  // reader holding business.read — the same shape income and receipts carry.
-  // Out of scope, which today means a platform role without that capability
-  // (`billing`), the ledger is unreadable, so the payout line below stays
-  // hidden rather than reporting a zero it never read.
+  const {
+    effectiveCompanyId: companyId, isViewingAsCompany, platformReadsCompanyData, ownCompanyReadable,
+  } = useSuperAdmin();
+  // cash_movements answers for the caller's active company, and — since 3.4 —
+  // for a platform account only inside a support session open on that
+  // company. Outside both the ledger reads empty, so the payout line below
+  // stays hidden rather than reporting a zero it never read.
   const ledgerInScope = cashLedgerInScope({
     companyId: ownCompanyId,
     effectiveCompanyId: companyId,
     isViewingAsCompany,
-    // The seam as the database now answers it: business.read *and* an open
+    // The seam as the database now answers it: business.read *and* a live
     // context on this company. The capability alone reads nothing since
     // 20260917140000, so passing it here would make this guard a rubber stamp.
     platformReadsCompanyData,
+    // And the own company only while the database still admits it.
+    ownCompanyReadable,
   });
   const { planState, effectivePlan } = usePlan();
   const { receipts: receiptActions, drivers: driverActions, isLoading: dbLoading } = useDatabase();

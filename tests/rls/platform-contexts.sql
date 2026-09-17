@@ -34,6 +34,8 @@
    12. whoami         carries the open context, and writes nothing
    13. roles          a support session cannot pull another company's role or
                       permission row into the company it is supporting
+   14. the shape      every table with the tenant shape carries the refusal
+                      trigger, whichever migration wrote it
 
   What is deliberately not here: the storage policies (the file half of plan
   3.C is not built), and the browser, which is slice 3.4b.
@@ -835,6 +837,61 @@ BEGIN
     _pc_try(u_o, s_o, format('SELECT count(*)::text FROM roles WHERE id = %L', _pc_id('role:x'))) = '1'
     AND _pc_try(u_o, s_o, format('UPDATE roles SET name = ''PC renamed'' WHERE id = %L', _pc_id('role:x')))
       = 'rows 1');
+END $$;
+
+-- ─── 14. every tenant table carries the trigger, whichever migration wrote it ─
+--
+-- 20260917140000 installs the trigger from the catalogue once, when it applies,
+-- and its self-check compares that moment against a written list. Neither sees
+-- a migration that comes after it. This does: the kit runs after the whole chain
+-- has applied, so a tenant table added later in 20260917130000's shape — a
+-- policy naming get_active_company_id() — without the trigger fails here. It is
+-- the one place "a view context writes nothing" is checked against every table
+-- that exists, rather than every table that existed on the day.
+--
+-- A catalogue read at top level, as supabase_admin: no _pc_try, so nothing a
+-- subtransaction discards is involved, and no evaluation order is assumed.
+--
+-- A table that must deliberately not carry the trigger is named below with its
+-- reason, as company_settings is, rather than filtered out of the shape.
+
+DO $$
+DECLARE
+  v_missing text;
+  v_shell   bigint;
+BEGIN
+  SELECT string_agg(t.tbl, ', ' ORDER BY t.tbl) INTO v_missing
+    FROM (SELECT DISTINCT p.tablename::text AS tbl
+            FROM pg_policies p
+           WHERE p.schemaname = 'public'
+             AND (coalesce(p.qual, '') || ' ' || coalesce(p.with_check, '')) ~ 'get_active_company_id') t
+   WHERE NOT EXISTS (SELECT 1 FROM pg_trigger g
+                      WHERE g.tgrelid = to_regclass(format('public.%I', t.tbl))
+                        AND g.tgname = 'refuse_read_only_context_write'
+                        AND NOT g.tgisinternal);
+  PERFORM _pc_ok('shape: every table whose policies name get_active_company_id() carries the refusal trigger'
+                 || coalesce(' — missing on ' || v_missing, ''),
+    v_missing IS NULL);
+
+  -- The shell tables have no tenant term to derive them by, so they are named.
+  SELECT count(*) INTO v_shell
+    FROM pg_trigger g
+   WHERE g.tgrelid IN (to_regclass('public.roles'),
+                       to_regclass('public.role_permissions'),
+                       to_regclass('public.activation_code_attempts'))
+     AND g.tgname = 'refuse_read_only_context_write'
+     AND NOT g.tgisinternal;
+  PERFORM _pc_ok('shape: …and so do the three shell tables whose write a context completes',
+    v_shell = 3);
+
+  -- Its writes do not take their company from the context, and a trigger here
+  -- refused platform_subscription_assign and rolled back its audit row (see
+  -- section 5b and the migration's self-check 5b).
+  PERFORM _pc_ok('shape: …and company_settings deliberately does not',
+    NOT EXISTS (SELECT 1 FROM pg_trigger g
+                 WHERE g.tgrelid = to_regclass('public.company_settings')
+                   AND g.tgname = 'refuse_read_only_context_write'
+                   AND NOT g.tgisinternal));
 END $$;
 
 DO $$ BEGIN RAISE NOTICE '── platform contexts: all checks passed ──'; END $$;
