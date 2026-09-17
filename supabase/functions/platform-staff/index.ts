@@ -42,6 +42,8 @@ import {
   STAFF_ROLE_UNTIL_3_3,
   staffRoleIsAllowed,
 } from '../_shared/platform-staff-routes.ts'
+import { matchPlatformEmailChangeRoute } from '../_shared/platform-email-change.ts'
+import { changeOwnPlatformEmail } from './email-change.ts'
 
 interface InviteRequest {
   email: string
@@ -68,6 +70,17 @@ interface StaffAddResult {
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { status: 200, headers: corsFor(req) })
+  }
+
+  // The caller's own address, changed with a password and no code (owner's
+  // decision, 17.09.2026). It is matched first and handled entirely on its own:
+  // it needs no capability, it authorizes on an active staff row rather than on
+  // `platform_can`, and its audit row is written by the database under an
+  // action platform_audit_record refuses — so it is not a row in
+  // PLATFORM_STAFF_ROUTES and must not be run through the table's audit wrapper.
+  const emailChange = matchPlatformEmailChangeRoute(req.method, new URL(req.url).pathname)
+  if (emailChange !== 'no_match') {
+    return await changeOwnPlatformEmail(req, emailChange === 'match')
   }
 
   // Set once the caller is authorized, until the audited write takes over its

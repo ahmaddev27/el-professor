@@ -262,6 +262,9 @@ export const de = {
   'account.email.submit':      'Neue Adresse bestätigen',
   'account.email.currentPassword': 'Aktuelles Passwort',
   'account.email.sendCode':    'Bestätigungscode senden',
+  // Plattform-Konten ändern die Adresse ohne Code (Entscheidung des Inhabers, 17.09.2026).
+  'account.email.platformHint':'Mit dieser Adresse melden Sie sich an. Als Plattform-Konto ändern Sie sie sofort — ohne Bestätigungscode, aber mit Ihrem aktuellen Passwort.',
+  'account.email.changeNow':   'Adresse jetzt ändern',
   'account.email.codeSentTo':  'Wir haben einen 6-stelligen Code an {email} gesendet. Geben Sie ihn ein, um die Änderung abzuschließen.',
   'account.password.heading':  'Passwort',
   'account.password.hint':     'Mindestens {n} Zeichen. Zur Bestätigung wird Ihr aktuelles Passwort abgefragt.',
