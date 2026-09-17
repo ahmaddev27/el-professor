@@ -185,6 +185,12 @@ export const en: PartialDictionary = {
   'auth.google.continue':   'Continue with Google',
   'auth.google.or':         'or',
   'auth.google.starting':   'Redirecting you to Google…',
+  // Notices on the shared sign-in screen, for a session we ended ourselves.
+  // There is only one sign-in screen and it says nothing about the platform
+  // administration on its own, so without this sentence an administration
+  // account lands on the company form with no explanation.
+  'auth.notice.platformPasswordSignIn': 'Your new password is saved. Please sign in now with your email and password to open the platform administration.',
+
   'auth.google.error.cancelled':       'The Google sign-in was cancelled.',
   'auth.google.error.generic':         'Signing in with Google failed. Please try again, or sign in with your password.',
   'auth.google.error.startFailed':     'We could not send you to Google. Please try again.',

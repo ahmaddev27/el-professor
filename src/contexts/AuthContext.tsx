@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useEffect, useState, useRef, useCallback } from 'react';
 import { User, Session } from '@supabase/supabase-js';
-import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import { AUTH_STORAGE_KEY, supabase, isSupabaseConfigured } from '../lib/supabase';
 import type { TranslationKey } from '../i18n';
 import { consumeGoogleSignInIntent, readGoogleSignInIntent, type GoogleSignInIntent } from '../lib/googleSignIn';
 import { googleSessionIsSettled, sessionCameFromGoogle } from '../lib/googleAccount';
@@ -143,10 +143,17 @@ interface AuthContextType {
   signOut: () => Promise<void>;
   /**
    * A sentence for the sign-in screen after a session was ended for a reason of
-   * our own — today only a Google sign-in that must not stand (plan 1.6).
-   * Whoever shows it clears it.
+   * our own: a Google sign-in that must not stand (plan 1.6), or a platform
+   * account sent back to sign in with the password it has just chosen
+   * (`SetPasswordPage`). Whoever shows it clears it.
+   *
+   * It is state above `App` and outside `clearSessionData` on purpose, so it
+   * outlives both the sign-out and the router swap that follows it. A caller
+   * that sets one and then does *not* end the session must clear it again, or
+   * it surfaces on the next sign-in screen anyone opens.
    */
   authNotice: TranslationKey | null;
+  setAuthNotice: (notice: TranslationKey) => void;
   clearAuthNotice: () => void;
   /** The Google button press this session came from, while it is still relevant. */
   googleSignInIntent: GoogleSignInIntent | null;
@@ -607,11 +614,51 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return;
     }
 
+    /*
+      A sign-out that did not happen must not leave the session on screen.
+
+      supabase-js reports most failures as a **value** and only the rest by
+      throwing, so reading the exception alone left the caller signed in with
+      nothing to show that anything had gone wrong. Read from the installed
+      source (`@supabase/auth-js` 2.98.0, `GoTrueClient._signOut`): it POSTs
+      `/logout` first and returns early with `{ error }` for any failure that
+      is not 404, 401, 403 or a missing session, **before** `_removeSession()`
+      — so on a dead network the stored session survives too. `scope: 'local'`
+      is not a way around that: `GoTrueAdminApi.signOut` makes the same request
+      whatever the scope.
+
+      That is worst on the path this now matters for. A Google session refused
+      for a platform account would keep `user`, the authenticated router would
+      stay mounted, the address would say /login and nothing would render the
+      sentence — the empty panel `googleSignInRefusal` exists to prevent.
+
+      So both shapes are handled, and the local session is dropped here rather
+      than left to a call that cannot do it offline: `AUTH_STORAGE_KEY` is the
+      one place that name is written, and `clearSessionData()` is what the
+      React tree reads. The refresh token stays valid at GoTrue until it
+      expires — the cost of signing out with no network, and not an access
+      grant: every platform capability is refused in the database, and a
+      company user's rows are refused by RLS the moment the account is blocked.
+    */
+    const dropLocalSession = () => {
+      try {
+        localStorage.removeItem(AUTH_STORAGE_KEY);
+      } catch (error) {
+        // Blocked storage: the React state below is then the whole sign-out.
+        console.error('Could not remove the stored session:', error);
+      }
+      clearSessionData();
+    };
+
     try {
-      await supabase.auth.signOut();
+      const { error } = await supabase.auth.signOut();
+      if (error) {
+        console.error('Sign out failed:', error);
+        dropLocalSession();
+      }
     } catch (error) {
       console.error('Sign out exception:', error);
-      clearSessionData();
+      dropLocalSession();
     }
   };
 
@@ -735,6 +782,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     signIn,
     signOut,
     authNotice,
+    setAuthNotice,
     clearAuthNotice,
     googleSignInIntent,
     refreshProfile,

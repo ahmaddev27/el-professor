@@ -184,6 +184,12 @@ export const de = {
   'auth.google.continue':   'Mit Google fortfahren',
   'auth.google.or':         'oder',
   'auth.google.starting':   'Weiterleitung zu Google…',
+  // Hinweise auf der gemeinsamen Anmeldeseite, wenn wir selbst eine Sitzung
+  // beendet haben. Es gibt nur eine Anmeldeseite, und sie sagt von sich aus
+  // nichts über die Plattform-Verwaltung — ohne diesen Satz landet ein
+  // Verwaltungskonto ohne Erklärung auf dem Unternehmens-Formular.
+  'auth.notice.platformPasswordSignIn': 'Ihr neues Passwort ist gespeichert. Bitte melden Sie sich jetzt mit E-Mail und Passwort an, um die Plattform-Verwaltung zu öffnen.',
+
   'auth.google.error.cancelled':       'Die Anmeldung mit Google wurde abgebrochen.',
   'auth.google.error.generic':         'Die Anmeldung mit Google ist fehlgeschlagen. Bitte versuchen Sie es erneut oder melden Sie sich mit Ihrem Passwort an.',
   'auth.google.error.startFailed':     'Die Weiterleitung zu Google ist fehlgeschlagen. Bitte versuchen Sie es erneut.',
