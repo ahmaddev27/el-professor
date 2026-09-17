@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Lock, Eye, EyeOff, AlertCircle, CheckCircle2, ShieldCheck } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { useAuth } from '../contexts/AuthContext';
 import { useTranslation } from '../contexts/LanguageContext';
 import { SIGN_IN_PATH } from '../lib/adminGate';
 import EmphasizedText from '../components/auth/EmphasizedText';
@@ -10,6 +11,7 @@ const MIN_LEN = 8;
 
 const SetPasswordPage: React.FC = () => {
   const { t } = useTranslation();
+  const { setAuthNotice, clearAuthNotice } = useAuth();
   const navigate = useNavigate();
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
@@ -163,14 +165,25 @@ const SetPasswordPage: React.FC = () => {
           still on screen, with nothing to click but reload. Both failure
           shapes are handled: supabase-js resolves with an `error` for most of
           them and rejects only for the rest.
+
+          It also leaves a sentence behind. Since 17.09.2026 there is one
+          sign-in screen, and it is the company card — it says nothing about
+          the platform, so without this the account arrives at a generic form
+          with no idea why it was signed out of a password it had just set. The
+          notice lives above App and outside clearSessionData, so it survives
+          the sign-out and the router swap; `stayPut` takes it back, because a
+          session that is still on screen must not leave a message waiting on
+          the next sign-in screen anyone opens.
         */
         const here = `${window.location.pathname}${window.location.search}${window.location.hash}`;
         const stayPut = () => {
           setSignOutPending(false);
+          clearAuthNotice();
           window.history.replaceState(window.history.state, '', here);
           navigate('/', { replace: true });
         };
         setTimeout(() => {
+          setAuthNotice('auth.notice.platformPasswordSignIn');
           window.history.replaceState(window.history.state, '', SIGN_IN_PATH);
           supabase.auth
             .signOut({ scope: 'local' })

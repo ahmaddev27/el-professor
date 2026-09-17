@@ -225,10 +225,14 @@ export interface GoogleSignInRefusal {
  * The browser's refusal is the **message**, not the wall. Since
  * `20260919130000` the database itself answers NULL to every platform
  * capability asked from a session GoTrue did not mint with a password
- * (`app_private.session_amr_permits_platform`), so a Google session reaches the
- * panel's data no matter what this decides. What it decides is whether the
- * person is told why, or left staring at an empty panel — which is exactly why
- * it must not be "simplified away" on the grounds that the server covers it.
+ * (`app_private.session_amr_permits_platform`), so a Google session reaches
+ * **none** of the panel's data whatever this decides — `platform_whoami`,
+ * `platform_can`, the five read models, both settings RPCs and every write RPC
+ * refuse together. What this decides is only whether the person is told why, or
+ * left staring at an empty panel. So it must not be "simplified away" on the
+ * grounds that the server covers it — and equally, it must not be *promoted*
+ * into the wall: the wall is in the database on purpose, because a browser
+ * check protects nothing that a direct call to PostgREST cannot skip.
  *
  * One sign-in screen means one place for that sentence, and `SIGN_IN_PATH` is
  * where the caller puts the address before ending the session: signing out

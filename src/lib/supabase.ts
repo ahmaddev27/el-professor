@@ -55,6 +55,18 @@ console.log('✅ Supabase Configured:', isSupabaseConfigured);
 const defaultUrl = 'https://placeholder.supabase.co';
 const defaultKey = 'placeholder-key';
 
+/**
+ * Where supabase-js persists the session, named once.
+ *
+ * It is exported because a sign-out that the network refused has to be able to
+ * drop the stored session itself: `auth.signOut()` POSTs `/logout` **before**
+ * it removes anything, and returns early with `{ error }` on any failure that
+ * is not 404/401/403, so the session stays in storage — `scope: 'local'` makes
+ * that same request and is no help (`@supabase/auth-js` 2.98.0,
+ * `GoTrueClient._signOut`). See `AuthContext.signOut`.
+ */
+export const AUTH_STORAGE_KEY = 'receipt-app-auth';
+
 export const supabase = createClient(
   supabaseUrl || defaultUrl,
   supabaseAnonKey || defaultKey,
@@ -63,7 +75,7 @@ export const supabase = createClient(
       persistSession: true,
       autoRefreshToken: true,
       detectSessionInUrl: true,
-      storageKey: 'receipt-app-auth',
+      storageKey: AUTH_STORAGE_KEY,
     }
   }
 );
