@@ -177,7 +177,9 @@ function LifecycleConfirmModal({ action, company, onConfirm, onClose }: Lifecycl
       ? 'rgba(245,158,11,0.5)'
       : 'var(--border)';
 
-  const btnColor = meta.dangerLevel === 'medium' ? 'var(--warning)' : 'var(--danger)';
+  // A FILL under a white label, so it names the `-solid` twin: the text tokens
+  // are too light for white in the dark theme (index.css, dark block).
+  const btnColor = meta.dangerLevel === 'medium' ? 'var(--warning-solid)' : 'var(--danger-solid)';
 
   const handleConfirm = async () => {
     if (!canConfirm) return;
@@ -961,7 +963,7 @@ function CompanyDetail({ company, onBack, onEdit, onLifecycleAction, onEnterComp
                   </div>
                   <button onClick={() => onLifecycleAction(company, 'softDelete')}
                     className="ml-4 flex-shrink-0 px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5"
-                    style={{ background: 'var(--danger)', color: 'var(--text-inverse)' }}>
+                    style={{ background: 'var(--danger-solid)', color: 'white' }}>
                     <Trash2 size={12} />{t('sa.companies.markForDeletion')}
                   </button>
                 </div>
@@ -978,7 +980,7 @@ function CompanyDetail({ company, onBack, onEdit, onLifecycleAction, onEnterComp
                   </div>
                   <button onClick={() => onLifecycleAction(company, 'hardDelete')}
                     className="ml-4 flex-shrink-0 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5"
-                    style={{ background: 'var(--danger)', color: 'var(--text-inverse)' }}>
+                    style={{ background: 'var(--danger-solid)', color: 'white' }}>
                     <Trash2 size={12} />{t('sa.lifecycle.hardDelete.confirm')}
                   </button>
                 </div>

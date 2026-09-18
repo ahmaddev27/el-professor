@@ -115,48 +115,63 @@ const PAIRS: Array<{ fg: string; bg: string; min: number }> = [
  * values (#059669 and #d97706) no foreground reached 4.5:1 on them — white was
  * 3.77:1 and 3.19:1. The owner's decision of 17.09.2026 darkened them, and the
  * split that came with it is the second rule this block pins; see SOLID_PAIRS.
+ *
+ * `--danger` followed on 18.09.2026, and note what left this block with it:
+ * `{ fg: 'text-inverse', bg: 'danger' }`. That pair was PR #72's answer to a
+ * white label failing on the dark `--danger` — it moved the label to
+ * `--text-inverse` instead of moving the fill. With `--danger-solid` there is
+ * now a fill built for a white label, all six of those call sites name it, and
+ * nothing in the codebase pairs `--text-inverse` with `--danger` any more. An
+ * assertion about a combination no screen renders is worse than no assertion:
+ * it reads as coverage. The rule that replaced it is in
+ * accentLabel.contrast.test.ts, which refuses `--text-inverse` ON a `-solid`
+ * fill — in the dark theme that is #111827 on #D63A40, 3.83:1.
  */
 const LEGACY_PAIRS: Array<{ fg: string; bg: string; min: number }> = [
   { fg: 'text-inverse', bg: 'accent', min: TEXT },
   { fg: 'text-inverse', bg: 'accent-hover', min: TEXT },
-  { fg: 'text-inverse', bg: 'danger', min: TEXT },
   // accent-coloured text belongs on a neutral background, and must stay legible there
   ...['bg-base', 'bg-surface', 'bg-elevated', 'bg-subtle'].map(bg => ({ fg: 'accent-text', bg, min: TEXT })),
-  // ...and so does status-coloured text, which is what --success / --warning are
-  // everywhere except the filled buttons and badges covered by SOLID_PAIRS.
+  // ...and so does status-coloured text, which is what --success / --warning /
+  // --danger are everywhere except the filled buttons and badges covered by
+  // SOLID_PAIRS. --danger is by far the most used of the three: some 157 `color`
+  // sites, and at #ef4444 it reached only 4.21:1 on the dark --bg-elevated.
   ...['bg-base', 'bg-surface', 'bg-elevated', 'bg-subtle'].flatMap(bg => [
     { fg: 'success', bg, min: TEXT },
     { fg: 'warning', bg, min: TEXT },
+    { fg: 'danger', bg, min: TEXT },
   ]),
 ];
 
 /** The pale status fills, which are translucent in the dark theme. */
 const SUBTLE_SURFACES = ['bg-base', 'bg-surface', 'bg-elevated', 'bg-subtle'];
 const SUBTLE_PAIRS: Array<{ fg: string; fill: string; over: string; min: number }> =
-  ['success', 'warning'].flatMap(fg =>
+  ['success', 'warning', 'danger'].flatMap(fg =>
     SUBTLE_SURFACES.map(over => ({ fg, fill: `${fg}-subtle`, over, min: TEXT })));
 
 /**
  * The filled-background role, and the reason it has its own token.
  *
- * Every filled `--success` / `--warning` button and count badge in the codebase
- * paints its label literally white — `color: 'white'`, `'#fff'`, or Tailwind's
- * `text-white` in the className — so WHITE, not a token, is what has to reach
- * 4.5:1 on the fill. `--text-inverse` cannot stand in for it: it is #111827 in
- * the dark theme, which none of these call sites use.
+ * Every filled `--success` / `--warning` / `--danger` button and count badge in
+ * the codebase paints its label literally white — `color: 'white'`, `'#fff'`, or
+ * Tailwind's `text-white` in the className — so WHITE, not a token, is what has
+ * to reach 4.5:1 on the fill. `--text-inverse` cannot stand in for it: it is
+ * #111827 in the dark theme, and on --danger-solid that is 3.83:1.
  *
  * In the dark theme that role and the text role are arithmetically
  * incompatible. A white label needs the fill at relative luminance <= 0.183;
- * reading as text on --bg-surface (#111827) needs the token at >= 0.237. No
- * value satisfies both, so the fill is a separate token — --success-solid and
- * --warning-solid, named after --critical-solid in the Phase-2 block. In the
- * light theme both roles want the same darkness and the two tokens hold one
- * value; the split exists only where it is forced.
+ * reading as text on --bg-surface (#111827) needs the token at >= 0.237, and for
+ * --danger the binding surface is its own -subtle fill over --bg-elevated, which
+ * pushes the text role to >= 0.274. No value satisfies both, so the fill is a
+ * separate token — --success-solid, --warning-solid and --danger-solid, named
+ * after --critical-solid in the Phase-2 block. In the light theme both roles
+ * want the same darkness and the two tokens hold one value; the split exists
+ * only where it is forced.
  *
  * Do not "simplify" this by pointing the call sites back at --success.
  */
 const WHITE_LABEL: Rgb = [255, 255, 255];
-const SOLID_PAIRS = ['success-solid', 'warning-solid'];
+const SOLID_PAIRS = ['success-solid', 'warning-solid', 'danger-solid'];
 
 describe.each<Theme>(['light', 'dark'])('%s legacy theme tokens', theme => {
   const tokens = parseLegacyTokens(theme);

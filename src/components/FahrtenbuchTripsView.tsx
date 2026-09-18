@@ -528,7 +528,7 @@ const FahrtenbuchTripsView: React.FC<Props> = ({ drivers, cars }) => {
                   onClick={() => handleDeleteImport(confirmDeleteId)}
                   disabled={deleting}
                   className="px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
-                  style={{ background: 'var(--danger)', color: 'var(--text-inverse)' }}
+                  style={{ background: 'var(--danger-solid)', color: 'white' }}
                 >
                   <Trash2 size={14} />
                   {deleting ? t('common.deleting') : t('imp.trips.deleteForever')}

@@ -1229,7 +1229,7 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
                         }}
                         disabled={importing || replacingImport}
                         className="flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-medium"
-                        style={{ background: 'var(--danger)', color: 'var(--text-inverse)' }}
+                        style={{ background: 'var(--danger-solid)', color: 'white' }}
                       >
                         <RefreshCw size={14} />
                         {replacingImport ? t('imp.replacing') : t('imp.replaceExisting')}
