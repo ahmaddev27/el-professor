@@ -1121,17 +1121,21 @@ DECLARE
   v_co    uuid;
   v_inv   uuid;
   v_row   subscription_coverage%ROWTYPE;
-  -- TEMPORARY, kit round 3 diagnostic. Removed with the notices below.
-  v_out   text;
-  v_diag  record;
 BEGIN
   v_co  := _sub_billed_company('inv_cancel');
   v_inv := _sub_invoice('inv_cancel', v_co, v_year, v_month,
                         make_date(v_year, v_month, 1) + 4, 20);
 
+  -- Split for the same reason, although this one is safe as it stands: both
+  -- operands are volatile plpgsql calls, so there is no sub-SELECT to become an
+  -- InitPlan and the planner may not reorder them — the payment really did run
+  -- before the read. It is split anyway, because the rule above has no
+  -- exception worth carrying in anyone's head, and one shape in a file beats
+  -- two with a footnote.
   PERFORM _sub_ok('cancel: the invoice is paid first, so there is coverage to withdraw',
-    _sub_succeeded(_sub_do(v_owner, format('SELECT platform_invoice_mark_paid(%L, %s)::text', v_inv, 2000)))
-    AND _sub_admitted(_sub_id('user:inv_cancel')));
+    _sub_succeeded(_sub_do(v_owner, format('SELECT platform_invoice_mark_paid(%L, %s)::text', v_inv, 2000))));
+  PERFORM _sub_ok('cancel: …and it admits the company, so there is access to lose',
+    _sub_admitted(_sub_id('user:inv_cancel')));
 
   PERFORM _sub_ok('cancel: an owner cancels a paid invoice',
     _sub_succeeded(_sub_do(v_owner, format('SELECT platform_invoice_cancel(%L)::text', v_inv))));
@@ -1164,71 +1168,30 @@ BEGIN
   v_inv := _sub_invoice('inv_reopen', v_co, 2026, 1, DATE '2026-01-02', 20);
 
   /*
-    ─── TEMPORARY DIAGNOSTIC, kit round 3 — remove before merge ──────────────
+    **The write and the read of that write are two statements, always.**
 
-    The assertion this replaces combined the write and the read of that write
-    into one expression:
+    This assertion was one expression — `_sub_succeeded(_sub_do(… mark_paid …))
+    AND (SELECT period_end FROM subscription_coverage …) = …` — and it failed
+    while the row it read was perfectly correct. An uncorrelated scalar
+    sub-SELECT is planned as an InitPlan, and an InitPlan is not an operand of
+    the AND: `ExecEvalAnd`'s left-to-right short-circuit orders the operands, it
+    does not make the InitPlan wait for them. So the read ran before the payment
+    it was meant to observe, found nothing, and the comparison was NULL — which
+    `_sub_ok` reports as a failure, indistinguishable from a wrong value.
 
-      _sub_ok(desc, _sub_succeeded(_sub_do(… mark_paid …))
-                    AND (SELECT period_end FROM subscription_coverage …) = …)
-
-    It reported FAIL rather than raising, so the scalar subquery returned at
-    most one row — which is guaranteed anyway: U1's
-    `idx_subscription_coverage_source` is UNIQUE (company_id, source, source_id)
-    WHERE source_id IS NOT NULL, with **no status term**, so a company can hold
-    at most one coverage row per invoice, voided or not. The coordinator's
-    "two rows" outcome is therefore impossible by construction, and 21000 was
-    never on the table.
-
-    That leaves: the payment was refused (and `_sub_succeeded` swallowed the
-    reason), or it landed and the row does not carry the end this expects, or
-    it landed and the filter matched nothing so the comparison was NULL and
-    `_sub_ok` read NULL as a failure.
-
-    So: run the payment as its own statement, keep its answer, and print the
-    company's whole coverage table before comparing anything. If the row is
-    present and correct here, the code is right and the combined expression was
-    the defect; if it is absent or wrong, the code is.
-
-    Note this invoice was **never cancelled** — `inv_cancel` above is a
-    different company and a different invoice — so no paid → cancelled → paid
-    sequence is involved in this failure.
+    The rule, and it has no exception in this file: **an assertion must not
+    write and read the same rows in one expression.** Do the write, then assert.
   */
-  v_out := _sub_do(v_owner, format('SELECT platform_invoice_mark_paid(%L, %s)::text', v_inv, 2000));
-  RAISE NOTICE 'DIAG reopen: mark_paid answered %', v_out;
-  SELECT i.status, i.invoice_year, i.invoice_month, i.due_date, i.amount,
-         i.cash_received_amount, i.company_id
-    INTO v_diag
-    FROM subscription_invoices i WHERE i.id = v_inv;
-  RAISE NOTICE 'DIAG reopen: invoice status=% year=% month=% due=% amount=% received=% company=% (v_co=%)',
-    v_diag.status, v_diag.invoice_year, v_diag.invoice_month, v_diag.due_date,
-    v_diag.amount, v_diag.cash_received_amount, v_diag.company_id, v_co;
-
-  FOR v_diag IN
-    SELECT c.id, c.source, c.source_id, c.status, c.grants_access,
-           c.period_start, c.period_end, c.price_cents, c.void_reason
-      FROM subscription_coverage c
-     WHERE c.company_id = v_co
-     ORDER BY c.created_at, c.id
-  LOOP
-    RAISE NOTICE 'DIAG reopen: coverage id=% source=% source_id=% status=% grants=% start=% end=% price=% void=%',
-      v_diag.id, v_diag.source, v_diag.source_id, v_diag.status, v_diag.grants_access,
-      v_diag.period_start, v_diag.period_end, v_diag.price_cents, v_diag.void_reason;
-  END LOOP;
-
-  RAISE NOTICE 'DIAG reopen: rows matching (company, invoice, source_id) = %',
-    (SELECT count(*) FROM subscription_coverage
-      WHERE company_id = v_co AND source = 'invoice' AND source_id = v_inv);
-  RAISE NOTICE 'DIAG reopen: expected period_end = % / actual scalar = % / equal = %',
-    _sub_period(2026, 1, 'end'),
+  PERFORM _sub_ok('reopen: an owner marks the invoice paid',
+    _sub_succeeded(_sub_do(v_owner, format('SELECT platform_invoice_mark_paid(%L, %s)::text', v_inv, 2000))));
+  PERFORM _sub_ok('reopen: …and a paid invoice covers its whole month',
     (SELECT period_end FROM subscription_coverage
-      WHERE company_id = v_co AND source = 'invoice' AND source_id = v_inv),
-    ((SELECT period_end FROM subscription_coverage
-       WHERE company_id = v_co AND source = 'invoice' AND source_id = v_inv)
-     = _sub_period(2026, 1, 'end'));
-  RAISE NOTICE 'DIAG reopen: grace end for 02.01.2026 = %, month end = %',
-    app_private.invoice_grace_end(DATE '2026-01-02'), _sub_period(2026, 1, 'end');
-  -- ─── end of the temporary diagnostic ────────────────────────────────────
+      WHERE company_id = v_co AND source = 'invoice' AND source_id = v_inv)
+      = _sub_period(2026, 1, 'end'));
+  -- U1 shipped price_cents NULL on every path; filling it was U2's first job.
+  PERFORM _sub_ok('reopen: …carrying the invoice''s amount in integer cents',
+    (SELECT price_cents FROM subscription_coverage
+      WHERE company_id = v_co AND source = 'invoice' AND source_id = v_inv) = 2000);
 
   PERFORM _sub_ok('reopen: marking it unpaid is accepted',
     _sub_succeeded(_sub_do(v_owner, format('SELECT platform_invoice_mark_unpaid(%L)::text', v_inv))));
