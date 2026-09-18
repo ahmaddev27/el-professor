@@ -10,7 +10,7 @@ import { supabase } from '../lib/supabase';
 import { callPlatformRpc } from '../lib/platformRpc';
 import { fetchCompanies, fetchUsers } from '../lib/platformDirectoryClient';
 import { platformReadRefusalKey } from '../lib/platformReadModels';
-import { useAuth } from '../contexts/AuthContext';
+import { useAuth, type CompanyStatus } from '../contexts/AuthContext';
 import { useSuperAdmin, CompanyListItem } from '../contexts/SuperAdminContext';
 import { useToast } from '../contexts/ToastContext';
 import { format, differenceInDays } from 'date-fns';
@@ -20,7 +20,8 @@ import type { TranslationKey } from '../i18n';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type CompanyStatus = 'active' | 'trial' | 'suspended' | 'inactive' | 'archived' | 'deleted';
+// CompanyStatus is imported from AuthContext, which reads the column on every
+// load: the six values companies_status_check allows, declared once.
 
 interface CompanyUser {
   id: string;

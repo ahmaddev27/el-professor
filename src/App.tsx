@@ -348,7 +348,7 @@ const ProfileUnavailableScreen: React.FC<{ onRetry: () => void; onSignOut: () =>
 // ─── App ──────────────────────────────────────────────────────────────────────
 
 function App() {
-  const { user, profile, profileLoaded, profileLoadFailed, refreshProfile, signOut, loading: authLoading, isAdmin, isSuperAdmin, companyApprovalStatus, userBlockReason } = useAuth();
+  const { user, profile, profileLoaded, profileLoadFailed, refreshProfile, signOut, loading: authLoading, isAdmin, isSuperAdmin, companyStatus, companyApprovalStatus, userBlockReason } = useAuth();
 
   // Ahead of every gate: the preview reads no account or tenant data, and it
   // has to render for a reviewer whatever their session state is.
@@ -436,7 +436,24 @@ function App() {
   if (!isSuperAdmin && companyApprovalStatus === 'rejected') {
     return <RejectedPage />;
   }
-  if (!isSuperAdmin && companyApprovalStatus === 'suspended') {
+  /*
+    Suspension, from the one column that records it.
+
+    `companyStatus` is the test since 20260919150000 (plan 3.F step U1), which
+    moved every suspended flag onto `companies.status` and stopped
+    `approval_status` and `subscription_status` from carrying the value at all.
+    Before that this gate read `companyApprovalStatus`, and only
+    `platform_company_set_approval('suspend')` ever set it — a suspension from
+    the lifecycle menu was visible instead through the *profile* status it also
+    writes, which gate 3 above catches. Reading the approval status alone would
+    now let a suspended company through to `/overview` and tell it, through
+    `LockedFeaturePage`, that its plan was too low.
+
+    `companyApprovalStatus` is kept in the test so that a rollback to the
+    previous release, which leaves this database as it is, still blocks a
+    company that was suspended before the migration ran and never re-read.
+  */
+  if (!isSuperAdmin && (companyStatus === 'suspended' || companyApprovalStatus === 'suspended')) {
     return <CompanySuspendedPage />;
   }
 

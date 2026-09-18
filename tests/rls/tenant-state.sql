@@ -2,6 +2,9 @@
   Plan 3.3: one policy shape, and company and user state decided by the
   database.
 
+  Since 20260919150000 (plan 3.F step U1) two of the twelve company states this
+  file was written with no longer exist — see the note above `_ts_company`.
+
   Runs after the migrations and the seeds, as supabase_admin, in one transaction
   that is rolled back at the end, so the files after it see the database as the
   seeds left it.
@@ -130,6 +133,16 @@ LANGUAGE sql IMMUTABLE AS $$ SELECT md5('ts:' || p_what)::uuid $$;
 -- The company states are transcribed from AuthContext.checkProfileAccess()
 -- (company status and approval) and App.tsx's SubscriptionGuard together with
 -- AuthContext.isSubscriptionActive (subscription status and expiry).
+--
+-- Ten companies, not the twelve this file was written with. 20260919150000
+-- (plan 3.F step U1) narrowed both CHECK constraints: a suspension lives in
+-- companies.status and `approval_status = 'suspended'` and
+-- `subscription_status = 'suspended'` no longer exist, so the two rows below
+-- could not be inserted at all. That the database refuses them is asserted in
+-- tests/rls/subscriptions.sql, next to the backfill that removed them.
+--
+--   was ('approvsusp',   'approval suspended',     'suspended', 'active', 'active', NULL, false)
+--   was ('subsuspended', 'subscription suspended', 'approved',  'active', 'suspended', NULL, false)
 
 CREATE TEMP TABLE _ts_company (slug text, label text, approval_status text, status text,
                                subscription_status text, expires_at timestamptz, allowed boolean);
@@ -139,12 +152,10 @@ INSERT INTO _ts_company VALUES
   ('future',          'subscription that expires tomorrow',          'approved',  'active',    'active',    now() + interval '1 day',   true),
   ('pending',         'still waiting for approval',                  'pending',   'active',    'active',    NULL,                      false),
   ('rejected',        'rejected',                                    'rejected',  'active',    'active',    NULL,                      false),
-  ('approvsusp',      'approval suspended',                          'suspended', 'active',    'active',    NULL,                      false),
   ('suspended',       'suspended',                                   'approved',  'suspended', 'active',    NULL,                      false),
   ('statusinactive',  'company status inactive',                     'approved',  'inactive',  'active',    NULL,                      false),
   ('subinactive',     'subscription inactive',                       'approved',  'active',    'inactive',  NULL,                      false),
   ('subexpiredstate', 'subscription status expired',                 'approved',  'active',    'expired',   NULL,                      false),
-  ('subsuspended',    'subscription suspended',                      'approved',  'active',    'suspended', NULL,                      false),
   ('subpast',         'subscription expired yesterday',              'approved',  'active',    'active',    now() - interval '1 day',   false);
 
 INSERT INTO companies (id, name, slug, approval_status, status, plan, subscription_status, subscription_expires_at)
