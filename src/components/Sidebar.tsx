@@ -121,7 +121,13 @@ const Sidebar: React.FC<SidebarProps> = ({ isSupportAdmin }) => {
       <nav className="flex-1 overflow-y-auto py-3 px-2 space-y-0.5">
         {NAV_ITEMS.map(renderNavItem)}
 
-        {isSupportAdmin && (
+        {/* `isSupportAdmin` is the profile's `admin` role. A platform account
+            inside a company carries `viewer` on its profile and still belongs
+            here: these four screens are what a support session is opened for,
+            and `CompanyAdminRoute` decides the same question for the route
+            (3.4b). What may be *written* on them is the scope's business, and
+            the database's. */}
+        {(isSupportAdmin || isViewingAsCompany) && (
           <>
             <div className="pt-3 pb-1 px-3">
               <p className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>

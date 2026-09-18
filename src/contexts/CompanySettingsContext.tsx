@@ -30,11 +30,17 @@ export const CompanySettingsProvider: React.FC<{ children: ReactNode }> = ({ chi
     These settings are the company's name, logo and letterhead — the things the
     shell and every document print. Read from `AuthContext.companyId` they were
     null for a platform account, so a support session saw "El-Professor" in the
-    sidebar and an empty Einstellungen form for the company it had just opened,
-    while the logo upload on that very screen already wrote to the right one.
+    sidebar and an empty Einstellungen form for the company it had just opened.
     `company_settings` is part of the account shell, whose policy term is
     `get_user_company_id()` — which answers the open context — so the row is
     readable exactly when this id names it.
+
+    The logo on that screen is **not** fixed by this. Its path already named
+    `effectiveCompanyId`, but `company-logos`' own policies (20260507193515)
+    resolve the company from `user_profiles` and additionally demand
+    `role IN ('admin','super_admin')` on that profile, so the upload is refused
+    for a company-less platform account before this context is reached at all.
+    SettingsPage says so in words; the policy is the storage half of plan 3.C.
   */
   const { effectiveCompanyId: companyId } = useSuperAdmin();
   const [settings, setSettings] = useState<CompanySettings | null>(null);

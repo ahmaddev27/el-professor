@@ -200,6 +200,55 @@ const PlatformAccountGuard: React.FC<{ children: React.ReactNode }> = ({ childre
   return <>{children}</>;
 };
 
+/**
+ * The tenant shell, keyed on the company the session is in (plan 3.4b).
+ *
+ * Before this slice `effectiveCompanyId` could not move while a tenant screen
+ * was mounted: it was React state, set by a click in the panel that had already
+ * navigated away from the tenant app. Now it is the database's answer, so it
+ * *can* move underneath a mounted screen — a second tab opens another company,
+ * this tab regains focus, `platform_whoami()` answers the new one.
+ *
+ * Most tenant screens load once and keep the rows in state. `useDatabase`'s four
+ * (`OverviewPage`, `BelegePage`, `FahrerPage`, `UmsaetzePage`) key their load
+ * effect on `dbLoading` alone, and there are more of the same shape behind the
+ * plan gates. Meanwhile `CompanySettingsContext` *does* follow the company, so
+ * the sidebar name, the logo and every document header would become company B
+ * while the figures on screen were still company A's — no leak, since the rows
+ * were read under A's own policy, but a payroll figure presented under the
+ * wrong customer's name, with nothing on screen to say so.
+ *
+ * A key is one line and covers every screen, including the ones nobody has
+ * thought about yet; patching four dependency arrays fixes four screens and
+ * leaves the next one to be found by a customer. The cost is a remount and a
+ * refetch when the company changes — which is exactly what should happen.
+ */
+const TenantShell: React.FC<{ isSupportAdmin: boolean }> = ({ isSupportAdmin }) => {
+  const { effectiveCompanyId } = useSuperAdmin();
+  return <AppLayout key={effectiveCompanyId ?? 'no-company'} isSupportAdmin={isSupportAdmin} />;
+};
+
+/**
+ * A route a company administrator may open — and a platform account inside a
+ * company, which is what the four screens behind it are for.
+ *
+ * `isAdmin` is `user_profiles.role === 'admin'`, and a platform account's
+ * profile carries `viewer` (that is what `platform-staff` writes for every
+ * invited member), so registering these routes on it left Benutzer, Rollen,
+ * Abonnement and Einstellungen unreachable for exactly the accounts a support
+ * session exists for. The screens themselves decide what may be *written*
+ * there: a read context is refused by `refuse_read_only_context_write` and by
+ * `current_role_permits`, and `useCompanyScope()` is how each one asks.
+ */
+const CompanyAdminRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { isAdmin } = useAuth();
+  const { companyScope } = useSuperAdmin();
+  if (!isAdmin && !companyScope.isPlatformSession) {
+    return <Navigate to={TENANT_HOME} replace />;
+  }
+  return <>{children}</>;
+};
+
 /** The full-page spinner shown while the session, or its profile, is still being read. */
 const AuthLoadingScreen: React.FC = () => (
   <div className="min-h-screen bg-[#060a0f] flex items-center justify-center">
@@ -489,7 +538,7 @@ function App() {
                 <PlatformAccountGuard>
                 <MustChangePasswordGuard>
                 <SubscriptionGuard>
-                  <AppLayout isSupportAdmin={isAdmin} />
+                  <TenantShell isSupportAdmin={isAdmin} />
                 </SubscriptionGuard>
                 </MustChangePasswordGuard>
                 </PlatformAccountGuard>
@@ -519,11 +568,15 @@ function App() {
                 <Route path="dokumente/:id/bearbeiten" element={<PlanGate feature="dokumente"><DocumentsPage /></PlanGate>} />
                 <Route path="stundennachweis" element={<PlanGate feature="dokumente"><StundennachweisPage /></PlanGate>} />
                 <Route path="company-planner" element={<PlanGate feature="dokumente"><CompanyPlannerPage /></PlanGate>} />
-                {/* Admin-only */}
-                {isAdmin && <Route path="users"    element={<PlanGate feature="rollen_nutzer"><UsersPage /></PlanGate>} />}
-                {isAdmin && <Route path="roles"    element={<PlanGate feature="rollen_nutzer"><RolesPage /></PlanGate>} />}
-                {isAdmin && <Route path="billing"  element={<CompanyBillingPage />} />}
-                {isAdmin && <Route path="settings" element={<SettingsPage />} />}
+                {/* An administrator of this company — or a platform account
+                    inside it (3.4b). Registered unconditionally and decided in
+                    CompanyAdminRoute, because the answer needs the session's
+                    company and this element tree is built above the providers
+                    that know it. */}
+                <Route path="users"    element={<CompanyAdminRoute><PlanGate feature="rollen_nutzer"><UsersPage /></PlanGate></CompanyAdminRoute>} />
+                <Route path="roles"    element={<CompanyAdminRoute><PlanGate feature="rollen_nutzer"><RolesPage /></PlanGate></CompanyAdminRoute>} />
+                <Route path="billing"  element={<CompanyAdminRoute><CompanyBillingPage /></CompanyAdminRoute>} />
+                <Route path="settings" element={<CompanyAdminRoute><SettingsPage /></CompanyAdminRoute>} />
                 <Route path="*" element={<Navigate to="/overview" replace />} />
               </Route>
 

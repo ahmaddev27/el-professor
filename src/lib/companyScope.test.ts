@@ -66,8 +66,13 @@ describe('whether the screens may write', () => {
     expect(companyScope({ ownCompanyId: null, context: context('c', 'support') }).readOnly).toBe(false);
   });
 
-  // refuse_read_only_context_write() raises on every INSERT, UPDATE and DELETE
-  // a view context attempts, on all 39 tables.
+  /*
+    A read context is read-only *as far as the screens are concerned*, which is
+    what this flag decides. It is not the same claim as "the database refuses
+    every write": `refuse_read_only_context_write` covers 39 tables, and
+    `user_profiles`, `company_settings` and `storage.objects` are outside it.
+    The flag's own doc comment names all three; do not restate it here as proof.
+  */
   it('refuses a read context', () => {
     expect(companyScope({ ownCompanyId: null, context: context('c', 'view') }).readOnly).toBe(true);
   });
