@@ -1,6 +1,7 @@
 import { useState, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
+import { useSuperAdmin } from '../contexts/SuperAdminContext';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -107,7 +108,14 @@ async function fetchAllRows<T>(
 // ── Hook ──────────────────────────────────────────────────────────────────────
 
 export function useFahrtenbuch() {
-  const { companyId, user } = useAuth();
+  const { user } = useAuth();
+  /*
+    The company the session is in (plan 3.4b), not the account's membership.
+    The Fahrtenbuch screens showed nothing inside a support session for the
+    same reason useDatabase's did: `AuthContext.companyId` is null for a
+    platform account, so every filter and every storage path named "null".
+  */
+  const { effectiveCompanyId: companyId } = useSuperAdmin();
   const [imports, setImports] = useState<FahrtenbuchImport[]>([]);
   const [trips, setTrips] = useState<FahrtenbuchTrip[]>([]);
   const [loadingImports, setLoadingImports] = useState(false);

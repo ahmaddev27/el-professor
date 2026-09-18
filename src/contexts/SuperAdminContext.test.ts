@@ -59,15 +59,33 @@ const HOUR = 60 * 60 * 1000;
 const company = (id: string) => ({ id, name: id }) as CompanyListItem;
 
 /** A support account's whoami answer, with a context on `companyId` for `seconds`, or none. */
-const whoami = (companyId: string | null, seconds = 3600) => ({
+const whoami = (companyId: string | null, seconds = 3600, mode: 'view' | 'support' = 'view') => ({
   data: {
     role: 'support',
-    capabilities: ['business.read'],
+    capabilities: ['business.read', 'support.session'],
     company_context: companyId === null ? null : {
-      company_id: companyId, company_name: companyId, mode: 'view',
+      company_id: companyId, company_name: companyId, mode,
       expires_at: new Date(Date.now() + seconds * 1000).toISOString(), seconds_remaining: seconds,
     },
   },
+  error: null,
+});
+
+/** What platform_context_open answers: success, with the row it wrote. */
+const opened = (companyId: string, mode: 'view' | 'support' = 'view', seconds = 3600) => ({
+  data: {
+    success: true,
+    context: {
+      company_id: companyId, company_name: companyId, mode,
+      expires_at: new Date(Date.now() + seconds * 1000).toISOString(), seconds_remaining: seconds,
+    },
+  },
+  error: null,
+});
+
+/** What it answers when it refuses — a return value, never an exception. */
+const refused = (reason: string) => ({
+  data: { success: false, reason, error: 'German sentence' },
   error: null,
 });
 
@@ -218,6 +236,130 @@ describe('asking again', () => {
     expect(probe.value.activeCompany).toBeNull();
     expect(probe.value.isPlatformStaff).toBe(true);
     expect(probe.value.platformAccessStatus).toBe('ready');
+  });
+});
+
+/**
+ * 3.4b: the company a platform account is in comes from the database, so it
+ * survives a reload and follows what the server says — the defect being fixed
+ * is that it used to live in this provider's own state and nowhere else.
+ */
+describe('the company comes from the server', () => {
+  it('is open after a reload, with nothing clicked in this tab', async () => {
+    // A fresh mount is a reload: no enterCompany has ever run here.
+    answering({ platform_whoami: () => whoami('c1') });
+    await mount();
+
+    expect(probe.value.effectiveCompanyId).toBe('c1');
+    expect(probe.value.isViewingAsCompany).toBe(true);
+    // The name comes from the context when no panel screen handed a row over.
+    expect(probe.value.activeCompany?.name).toBe('c1');
+  });
+
+  it('carries the mode, so a read context writes nothing', async () => {
+    answering({ platform_whoami: () => whoami('c1', 3600, 'view') });
+    await mount();
+    expect(probe.value.companyScope).toMatchObject({ kind: 'view', readOnly: true, companyId: 'c1' });
+  });
+
+  it('lets a support session write', async () => {
+    answering({ platform_whoami: () => whoami('c1', 3600, 'support') });
+    await mount();
+    expect(probe.value.companyScope).toMatchObject({ kind: 'support', readOnly: false });
+  });
+
+  it('closes the company when the context expires mid-screen, with nothing clicked', async () => {
+    answering({ platform_whoami: () => whoami('c1', 600) });
+    await mount();
+    expect(probe.value.effectiveCompanyId).toBe('c1');
+
+    pending();
+    await act(async () => { vi.advanceTimersByTime(600 * 1000 + 1); });
+    expect(probe.value.effectiveCompanyId).toBeNull();
+    expect(probe.value.companyScope.kind).toBe('none');
+    expect(probe.value.companyScope.readOnly).toBe(true);
+  });
+});
+
+describe('opening and closing a company', () => {
+  /*
+    The point of installing the RPC's own answer: between a successful
+    platform_context_open and the platform_whoami that would confirm it, the
+    provider must already hold the context — otherwise the caller navigates and
+    PlatformAccountGuard bounces it straight back to /admin.
+  */
+  it('holds the company the moment the RPC answers, before any whoami', async () => {
+    answering({
+      platform_whoami: () => whoami(null),
+      platform_context_open: () => opened('c1'),
+    });
+    await mount();
+    expect(probe.value.effectiveCompanyId).toBeNull();
+
+    // whoami hangs from here: only the open call's own answer can explain it.
+    world.rpc.mockImplementation((fn: string) =>
+      fn === 'platform_context_open' ? Promise.resolve(opened('c1')) : new Promise(() => {}));
+
+    await act(async () => { await probe.value.openCompany(company('c1'), 'view'); });
+    expect(probe.value.effectiveCompanyId).toBe('c1');
+    expect(probe.value.companyScope.kind).toBe('view');
+  });
+
+  it('raises a read context to a support session in place', async () => {
+    let mode: 'view' | 'support' = 'view';
+    answering({
+      platform_whoami: () => whoami('c1', 3600, mode),
+      platform_context_open: () => { mode = 'support'; return opened('c1', 'support'); },
+    });
+    await mount();
+    expect(probe.value.companyScope.readOnly).toBe(true);
+
+    await act(async () => { await probe.value.openCompany(company('c1'), 'support', 'Beleg prüfen'); });
+    expect(probe.value.companyScope).toMatchObject({ kind: 'support', readOnly: false, companyId: 'c1' });
+  });
+
+  // A refusal is a return value from the RPC; callPlatformRpc turns it into a
+  // throw, and nothing may open on the back of it.
+  it('opens nothing when the database refuses', async () => {
+    answering({
+      platform_whoami: () => whoami(null),
+      platform_context_open: () => refused('context_open'),
+    });
+    await mount();
+
+    let thrown: unknown = null;
+    await act(async () => {
+      await probe.value.openCompany(company('c1'), 'view').catch((error: unknown) => { thrown = error; });
+    });
+    expect((thrown as { reason?: string } | null)?.reason).toBe('context_open');
+    expect(probe.value.effectiveCompanyId).toBeNull();
+  });
+
+  /*
+    Closing takes access away here first and asks the server after: the
+    optimistic half can only ever show less than the account holds, and leaving
+    the company on screen for a round trip after someone asked to leave it is
+    the one thing that would be wrong.
+  */
+  it('closes the company before the server has answered', async () => {
+    let closeResolved: (value: unknown) => void = () => {};
+    answering({ platform_whoami: () => whoami('c1') });
+    await mount();
+    expect(probe.value.effectiveCompanyId).toBe('c1');
+
+    world.rpc.mockImplementation((fn: string) =>
+      fn === 'platform_context_close'
+        ? new Promise(resolve => { closeResolved = resolve; })
+        : Promise.resolve(whoami('c1')));
+
+    let closing!: Promise<void>;
+    await act(async () => { closing = probe.value.closeCompany(); });
+    expect(probe.value.effectiveCompanyId).toBeNull();
+
+    await act(async () => {
+      closeResolved({ data: { success: true }, error: null });
+      await closing;
+    });
   });
 });
 

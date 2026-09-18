@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useState, useCallback, ReactNode } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from './AuthContext';
+import { useSuperAdmin } from './SuperAdminContext';
 import { useAppConfig } from './AppConfigContext';
 import { calcPricing, PriceBreakdown, BillingCycle } from '../utils/pricing';
 import { minPlanForFeature } from '../utils/planFeatures';
@@ -74,7 +75,18 @@ export const usePlan = (): PlanContextType => {
 // ─── Provider ─────────────────────────────────────────────────────────────────
 
 export const PlanProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const { companyId, isSuperAdmin } = useAuth();
+  const { isSuperAdmin } = useAuth();
+  /*
+    The company the session is in (plan 3.4b). Inside a support session the
+    plan on screen must be the customer's own, or the staff member reads the
+    fabricated premium below and is told a locked screen is available — or,
+    worse, reports a plan to the customer that the customer does not hold.
+
+    What this does *not* change is the gate: `planAllows(..., isSuperAdmin)`
+    still answers true for a platform account whatever the plan says, so
+    reading the real plan cannot lock a support session out of a screen.
+  */
+  const { effectiveCompanyId: companyId } = useSuperAdmin();
   // The price book and the feature map come from app_private.platform_settings
   // through get_app_config() (plan 3.9). Until the database answers, these are
   // the values it was seeded with, so a screen never prices from nothing.
