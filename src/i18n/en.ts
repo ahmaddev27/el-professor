@@ -2459,6 +2459,9 @@ export const en: PartialDictionary = {
   'gq.closeUnresolved.close':              'Close anyway',
   'gq.closeUnresolved.stay':               'Back to the request',
   'gq.closeUnresolved.title':              'Close without settling the request?',
+  // The Gehaltsquittung prints "Abrechnungsmonat"; the screen's own label follows
+  // the UI language, as only the document is German in both.
+  'gq.col.businessMonth':                  'Business month',
   'gq.col.number':                         'No.',
   'gq.col.paymentDate':                    'Paid on',
   'gq.col.signedCopy':                     'Signed',

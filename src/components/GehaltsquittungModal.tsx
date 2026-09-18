@@ -42,9 +42,11 @@ import { toCents } from '../utils/money';
 import type { BalanceFigures, ReceiptFigures } from '../utils/salaryCashReceipt';
 import {
   buildReceiptDocumentText,
+  businessMonthOfPeriod,
   receiptCompany,
   receiptDocumentProblem,
   storedReceiptDocumentInput,
+  type ReceiptBusinessMonth,
   type ReceiptDocumentInput,
   type ReceiptDocumentText,
 } from '../utils/salaryCashReceiptDocument';
@@ -509,16 +511,40 @@ function BalanceRow({ label, hint, cents, strong = false }: { label: string; hin
 
 // ── Step 3: preview and confirmation ────────────────────────────────────────
 
+/**
+ * The period's business month, or null when it cannot be read.
+ *
+ * An unresolved confirmation is restored from this tab's sessionStorage, so
+ * `pending.period.start` is whatever was written there. This screen sits under
+ * no error boundary: a throw during render would unmount the application, so an
+ * unreadable period leaves no preview — and the "unexpected" alert already in
+ * place — instead.
+ */
+function previewBusinessMonth(periodStart: string | undefined): ReceiptBusinessMonth | null {
+  if (!periodStart) return null;
+  try {
+    return businessMonthOfPeriod(periodStart);
+  } catch {
+    return null;
+  }
+}
+
 function PreviewStep({ flow, company }: { flow: GehaltsquittungFlow; company: Company }) {
   const { t } = useTranslation();
   const refusalMessage = useRefusalMessage();
   const documentProblemMessage = useDocumentProblemMessage();
   const { figures, salary, driver, paymentDate, place, pending } = flow;
 
+  // The preview is the one place the Abrechnungsmonat is derived rather than
+  // read: no receipt row exists yet. It follows get_business_month()'s rule, so
+  // the sheet on screen names the month the confirmed receipt will store — and
+  // the year that will appear in its number.
+  const businessMonth = previewBusinessMonth(pending ? pending.period.start : salary?.period_start);
+
   // While a confirmation is unanswered the receipt shows what was sent, not
   // the live figures: that request may already have changed the balance.
   let documentInput: ReceiptDocumentInput | null = null;
-  if (pending) {
+  if (pending && businessMonth) {
     documentInput = {
       status: 'preview',
       receiptNumber: null,
@@ -526,11 +552,12 @@ function PreviewStep({ flow, company }: { flow: GehaltsquittungFlow; company: Co
       driver: { name: pending.driver.name, gender: pending.driver.gender },
       periodStart: pending.period.start,
       periodEnd: pending.period.end,
+      businessMonth,
       paymentDate: pending.input.paymentDate,
       place: pending.input.place,
       figures: pending.shown,
     };
-  } else if (figures && salary && driver) {
+  } else if (figures && salary && driver && businessMonth) {
     documentInput = {
       status: 'preview',
       receiptNumber: null,
@@ -538,6 +565,7 @@ function PreviewStep({ flow, company }: { flow: GehaltsquittungFlow; company: Co
       driver: { name: driver.name, gender: driver.gender },
       periodStart: salary.period_start,
       periodEnd: salary.period_end,
+      businessMonth,
       paymentDate,
       place,
       figures: snapshotFromFigures(figures),

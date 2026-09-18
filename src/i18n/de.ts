@@ -2463,6 +2463,7 @@ export const de = {
   'gq.closeUnresolved.close':              'Trotzdem schließen',
   'gq.closeUnresolved.stay':               'Zurück zum Vorgang',
   'gq.closeUnresolved.title':              'Schließen, ohne den Vorgang zu klären?',
+  'gq.col.businessMonth':                  'Abrechnungsmonat',
   'gq.col.number':                         'Nr.',
   'gq.col.paymentDate':                    'Gezahlt am',
   'gq.col.signedCopy':                     'Unterschrieben',

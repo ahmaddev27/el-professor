@@ -6,6 +6,7 @@ import {
   type ReceiptSnapshot,
   type ReceiptSnapshotRow,
 } from './salaryCashReceiptFlow';
+import { getBusinessMonth } from './weekCalculations';
 
 /**
  * The text of a Gehaltsquittung (cash salary receipt).
@@ -17,11 +18,29 @@ import {
  *
  * Every figure arrives as a ReceiptSnapshot and is only formatted here: before
  * confirmation the preview's computeReceiptFigures result, after it the row
- * the database stored. The wording of the confirmation follows the
- * Trinkgeld-Quittung.
+ * the database stored. The same rule holds for the Abrechnungsmonat, which is
+ * printed because the number's GQ-YYYY is the salary's business year rather
+ * than the payment's: a confirmed receipt prints the stored business_month /
+ * business_year, and only the preview — where no row exists — derives it. The
+ * wording of the confirmation follows the Trinkgeld-Quittung.
  */
 
 export type ReceiptDocumentStatus = 'preview' | 'confirmed' | 'voided';
+
+/**
+ * A salary's business month — the month that owns the Monday of its period's
+ * first week, the rule `get_business_month()` applies in the database and
+ * `utils/weekCalculations` in the browser.
+ *
+ * **`month` counts from 1**, like the `business_month` column and
+ * `get_business_month()`, and unlike `weekCalculations`, whose months count
+ * from 0. The conversion happens once, in businessMonthOfPeriod().
+ */
+export interface ReceiptBusinessMonth {
+  /** 1–12. */
+  month: number;
+  year: number;
+}
 
 export interface ReceiptDocumentInput {
   status: ReceiptDocumentStatus;
@@ -43,6 +62,17 @@ export interface ReceiptDocumentInput {
   periodStart: string;
   /** YYYY-MM-DD */
   periodEnd: string;
+  /**
+   * The salary's Abrechnungsmonat, printed so that the GQ-YYYY in the number
+   * explains itself: a period starting Thursday 01.01.2026 belongs to the
+   * business month December 2025 and is numbered GQ-2025-….
+   *
+   * For a confirmed receipt this is the stored `business_month` /
+   * `business_year` pair, never a value recomputed here —
+   * storedReceiptDocumentInput is the only way it is filled. The preview, where
+   * no row exists yet, derives it with businessMonthOfPeriod().
+   */
+  businessMonth: ReceiptBusinessMonth;
   /** YYYY-MM-DD */
   paymentDate: string;
   place: string;
@@ -94,6 +124,56 @@ export function germanDate(isoDate: string): string {
   return `${match[3]}.${match[2]}.${match[1]}`;
 }
 
+/** Indexed from 0, so month 1 is MONTHS_DE[0]. The receipt is German in both UI languages. */
+const MONTHS_DE = [
+  'Januar', 'Februar', 'März', 'April', 'Mai', 'Juni',
+  'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember',
+] as const;
+
+/**
+ * A business month as the receipt prints it: "Dezember 2025".
+ *
+ * `month` counts from 1. A month outside 1–12 or a year that is not a whole
+ * number cannot be printed, and throws for the reason germanDate does: a
+ * receipt must not print a period it cannot read. The database's CHECK keeps
+ * the stored column inside that range, so this only ever fires on data that
+ * never came from confirm_salary_cash_payment.
+ */
+export function germanBusinessMonth(businessMonth: ReceiptBusinessMonth): string {
+  const { month, year } = businessMonth;
+  const name = Number.isInteger(month) ? MONTHS_DE[month - 1] : undefined;
+  if (!name || !Number.isInteger(year)) {
+    throw new RangeError(`germanBusinessMonth: ${month}/${year} is not a business month`);
+  }
+  return `${name} ${year}`;
+}
+
+/**
+ * The business month a salary period falls in, for the **preview only**.
+ *
+ * A confirmed receipt prints the `business_month` / `business_year` the
+ * database stored; recomputing those would let a later change to the calendar
+ * rule silently reprint an issued document under a different month. Before
+ * confirmation there is no row, so the preview derives the same value the RPC
+ * will store, from the same rule — getBusinessMonth(), which is
+ * get_business_month()'s browser twin.
+ *
+ * The date is read as local calendar parts rather than through
+ * `new Date("YYYY-MM-DD")`, which parses as UTC midnight and lands on the
+ * previous day west of Greenwich — which would move the week, and with it the
+ * month, for every period starting on a Monday.
+ *
+ * @throws RangeError for anything that is not a YYYY-MM-DD date.
+ */
+export function businessMonthOfPeriod(periodStart: string): ReceiptBusinessMonth {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(periodStart);
+  if (!match) throw new RangeError(`businessMonthOfPeriod: "${periodStart}" is not a YYYY-MM-DD date`);
+  const local = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+  const { month, year } = getBusinessMonth(local);
+  // getBusinessMonth counts months from 0; the stored column counts from 1.
+  return { month: month + 1, year };
+}
+
 const euro = (cents: number) => `${formatCentsDe(cents)} EUR`;
 
 function salutation(gender: 'male' | 'female' | null): string {
@@ -139,6 +219,9 @@ export interface StoredReceiptFields extends ReceiptSnapshotRow {
   status: 'confirmed' | 'voided';
   period_start: string;
   period_end: string;
+  /** 1–12, from get_business_month(period_start). The number's GQ-YYYY is business_year. */
+  business_month: number;
+  business_year: number;
   payment_date: string;
   place: string;
   voided_at: string | null;
@@ -146,9 +229,9 @@ export interface StoredReceiptFields extends ReceiptSnapshotRow {
 }
 
 /**
- * The document for a receipt the database stored: its own number, status and
- * snapshot, never a figure recomputed in the browser. A voided receipt carries
- * the Berlin day it was voided on.
+ * The document for a receipt the database stored: its own number, status,
+ * snapshot and Abrechnungsmonat, never a value recomputed in the browser. A
+ * voided receipt carries the Berlin day it was voided on.
  */
 export function storedReceiptDocumentInput(
   receipt: StoredReceiptFields,
@@ -162,6 +245,7 @@ export function storedReceiptDocumentInput(
     driver,
     periodStart: receipt.period_start,
     periodEnd: receipt.period_end,
+    businessMonth: { month: receipt.business_month, year: receipt.business_year },
     paymentDate: receipt.payment_date,
     place: receipt.place,
     figures: snapshotFromReceiptRow(receipt),
@@ -205,6 +289,7 @@ export function buildReceiptDocumentText(input: ReceiptDocumentInput): ReceiptDo
   if (problem) throw new ReceiptDocumentError(problem);
   const { figures } = input;
   const period = `${germanDate(input.periodStart)} – ${germanDate(input.periodEnd)}`;
+  const businessMonth = germanBusinessMonth(input.businessMonth);
   const paymentDate = germanDate(input.paymentDate);
   const amountFigures = euro(figures.amountCents);
   const amountWords = amountInWordsFromCents(figures.amountCents);
@@ -229,8 +314,12 @@ export function buildReceiptDocumentText(input: ReceiptDocumentInput): ReceiptDo
       `${period} den Betrag von ${amountFigures} (in Worten: ${amountWords}) vom Arbeitgeber erhalten zu haben. ` +
       'Mit seiner Unterschrift bestätigt der Arbeitnehmer den Erhalt des oben genannten Betrages.',
     amount: { label: 'Betrag (EUR)', figures: amountFigures, words: amountWords },
+    // Abrechnungsmonat sits between the two dates it is derived from and paid
+    // against, because it is the one fact on the sheet that explains the
+    // GQ-YYYY in the number: a January period can carry December's year.
     facts: [
       { label: 'Zeitraum', value: period, emphasis: false },
+      { label: 'Abrechnungsmonat', value: businessMonth, emphasis: false },
       { label: 'Zahlungsdatum', value: paymentDate, emphasis: false },
     ],
     balanceHeading: 'Stand des Gehalts bei dieser Zahlung',
