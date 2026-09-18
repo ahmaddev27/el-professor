@@ -20,6 +20,8 @@ import { de } from 'date-fns/locale';
 import { calcPricing, fmt as fmtPrice } from '../utils/pricing';
 import { useAppConfig } from '../contexts/AppConfigContext';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
+import { contextRefusalMessage } from '../lib/supportSession';
+import { TENANT_HOME } from '../lib/adminGate';
 import { useTranslation } from '../contexts/LanguageContext';
 import { subscriptionIsActive } from '../utils/planState';
 import type { CompanyStatus } from '../contexts/AuthContext';
@@ -309,7 +311,7 @@ export default function SuperAdminDashboard() {
   // The prices this screen shows come from the same price book the database
   // charges from (plan 3.9), so a changed price shows here without a release.
   const { priceBook } = useAppConfig();
-  const { enterCompany, platformCan } = useSuperAdmin();
+  const { openCompany, platformCan } = useSuperAdmin();
   // What the platform role may do, from platform_whoami(). Actions a role lacks
   // are hidden; the database refuses them regardless.
   const canLifecycle = platformCan('companies.lifecycle');
@@ -320,21 +322,27 @@ export default function SuperAdminDashboard() {
   const navigate = useNavigate();
   const { t, tPlural } = useTranslation();
 
-  // Entering a company needs an open support session, not only the capability:
-  // since 20260917140000 the database answers a platform account with the
-  // context's company and nothing else, so navigating without one would render
-  // every tenant screen against rows it cannot read — and PlatformAccountGuard
-  // would bounce it straight back. Refuse and say why, rather than navigate.
+  // Entering a company opens a **read** context on it (plan 3.4b): since
+  // 20260917140000 the database answers a platform account with the context's
+  // company and nothing else, so navigating without one renders every tenant
+  // screen against rows it cannot read — and PlatformAccountGuard bounces it
+  // straight back. Writing needs the support session the bar offers inside the
+  // company; opening one here would ask for a justification before anyone knows
+  // whether one is needed.
   //
   // Declared *after* navigate and t, deliberately: a useCallback dependency
   // array is evaluated where it is written, so naming either of them above its
   // own const is a use-before-declaration. That was four errors — the exact
   // four the ratchet caught — and a render-time ReferenceError on the panel's
   // landing page, which no type error would have described.
-  const openCompany = useCallback((company: any) => {
-    if (enterCompany(company)) { navigate('/overview'); return; }
-    showToast('error', t('sa.companies.needsSupportSession'));
-  }, [enterCompany, navigate, showToast, t]);
+  const enterCompany = useCallback(async (company: any) => {
+    try {
+      await openCompany(company, 'view');
+      navigate(TENANT_HOME);
+    } catch (error) {
+      showToast('error', contextRefusalMessage(error, t));
+    }
+  }, [openCompany, navigate, showToast, t]);
 
   const [companies, setCompanies] = useState<CompanyRow[]>([]);
   const [kpis, setKpis] = useState<PlatformKPIs | null>(null);
@@ -964,7 +972,7 @@ export default function SuperAdminDashboard() {
                         </td>
                         <td className="px-4 py-3">
                           <button
-                            hidden={!canOpenCompany} onClick={() => openCompany(c as any)}
+                            hidden={!canOpenCompany} onClick={() => { void enterCompany(c as any); }}
                             className="p-1.5 rounded-lg transition-colors"
                             style={{ color: 'var(--text-tertiary)' }}
                             onMouseEnter={e => { (e.currentTarget.style.background = 'var(--bg-muted)'); (e.currentTarget.style.color = 'var(--accent)'); }}
@@ -1097,7 +1105,7 @@ export default function SuperAdminDashboard() {
                       </button>
                     )}
                     <button
-                      hidden={!canOpenCompany} onClick={() => openCompany(item.company as any)}
+                      hidden={!canOpenCompany} onClick={() => { void enterCompany(item.company as any); }}
                       className="p-1.5 rounded-lg transition-colors"
                       style={{ color: severityColor }}
                       title={t('sa.dash.openCompany')}
@@ -1177,7 +1185,7 @@ export default function SuperAdminDashboard() {
                           {t('sa.dash.activate')}
                         </button>
                         <button
-                          hidden={!canOpenCompany} onClick={() => openCompany(c as any)}
+                          hidden={!canOpenCompany} onClick={() => { void enterCompany(c as any); }}
                           className="p-1.5 rounded-lg transition-colors"
                           style={{ color: 'var(--text-tertiary)' }}
                           onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-muted)')}
@@ -1398,7 +1406,7 @@ export default function SuperAdminDashboard() {
                         <PencilLine size={13} />
                       </button>
                       <button
-                        hidden={!canOpenCompany} onClick={() => openCompany(c as any)}
+                        hidden={!canOpenCompany} onClick={() => { void enterCompany(c as any); }}
                         className="p-1.5 rounded-lg transition-colors"
                         style={{ color: 'var(--accent)' }}
                         title={t('sa.dash.openAsCompany')}
@@ -1449,7 +1457,7 @@ export default function SuperAdminDashboard() {
                 {format(new Date(c.created_at), 'dd. MMM', { locale: de })}
               </span>
               <button
-                hidden={!canOpenCompany} onClick={() => openCompany(c as any)}
+                hidden={!canOpenCompany} onClick={() => { void enterCompany(c as any); }}
                 className="p-1.5 rounded-lg transition-colors"
                 style={{ color: 'var(--text-tertiary)' }}
                 onMouseEnter={e => { (e.currentTarget.style.background = 'var(--bg-muted)'); (e.currentTarget.style.color = 'var(--accent)'); }}

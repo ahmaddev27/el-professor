@@ -69,6 +69,34 @@ export const de = {
   'shell.exitCompanyView':  'Unternehmensansicht beenden',
   'shell.language':         'Sprache',
 
+  // ── Support sessions (plan 3.C) ────────────────────────────────────────────
+  // The two bar sentences are the plan's own wording. "Support-Zugriff" and
+  // "Nur-Lese-Ansicht" are ordinary German, not statutory document text and not
+  // on the closed domain list in i18n/index.ts, so English gets English.
+  'support.bar.supportLabel':   'Support-Zugriff',
+  'support.bar.viewLabel':      'Nur-Lese-Ansicht',
+  'support.bar.minutesLeft':    'noch {minutes} Min',
+  'support.bar.startSupport':   'Support-Sitzung starten',
+  'support.bar.end':            'Beenden',
+  'support.bar.unknownCompany': 'Unbekanntes Unternehmen',
+  'support.bar.startedTitle':   'Support-Sitzung für "{company}" gestartet',
+  'support.bar.expiredTitle':   'Zugriff beendet',
+  'support.bar.expiredBody':    'Der Zugriff auf das Unternehmen ist abgelaufen. Bitte erneut öffnen.',
+  'support.reason.title':       'Support-Sitzung für "{company}"',
+  'support.reason.body':        'Eine Support-Sitzung erlaubt Änderungen an den Daten dieses Unternehmens für 60 Minuten. Der Grund wird protokolliert.',
+  'support.reason.placeholder': 'Warum ist der Zugriff nötig?',
+  'support.reason.required':    'Bitte einen Grund angeben.',
+  'support.reason.tooLong':     'Der Grund ist zu lang.',
+  'support.reason.confirm':     'Support-Sitzung starten',
+  'support.error.denied':           'Keine Berechtigung für diese Aktion.',
+  'support.error.contextOpen':      'Es ist bereits ein Zugriff auf ein anderes Unternehmen offen. Bitte zuerst beenden.',
+  'support.error.reasonRequired':   'Für eine Support-Sitzung ist ein Grund erforderlich.',
+  'support.error.noSession':        'Diese Anmeldung ist nicht mehr gültig. Bitte erneut anmelden.',
+  'support.error.noContext':        'Es ist kein Unternehmenszugriff offen.',
+  'support.error.accountInCompany': 'Dieses Konto gehört zu einem Unternehmen und kann kein anderes öffnen.',
+  'support.error.notFound':         'Unternehmen nicht gefunden.',
+  'support.error.invalid':          'Die Aktion konnte nicht ausgeführt werden.',
+
   // ── Design system primitives (src/components/ui) ──────────────────────────
   'ui.kpi.trendDown':         'Rückgang',
   'ui.kpi.trendFlat':         'Unverändert',
@@ -2156,6 +2184,8 @@ export const de = {
   'users.resetPassword.label':             'Neues temporäres Passwort',
   'users.resetPassword.nextLoginHint':     'Der Benutzer muss dieses Passwort beim nächsten Login ändern.',
   'users.resetPassword.success':           'Passwort zurückgesetzt. Der Benutzer muss es beim nächsten Login ändern.',
+  'users.readOnlyBody':                    'Diese Ansicht ist schreibgeschützt. Die Benutzerverwaltung ist nur in einer Support-Sitzung möglich; eine reine Übersicht der Konten steht unter "Verzeichnisse" im Plattform-Bereich.',
+  'users.readOnlyTitle':                   'Nur-Lese-Ansicht',
   'users.roleNone':                        'Keine',
   'users.roles.areasSelected.one':         '{count} Bereich ausgewählt',
   'users.roles.areasSelected.other':       '{count} Bereiche ausgewählt',

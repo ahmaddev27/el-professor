@@ -457,9 +457,19 @@ function App() {
     return <CompanySuspendedPage />;
   }
 
+  /*
+    SuperAdminProvider is outermost of the three since 3.4b.
+
+    It answers which company the session is actually in — its own for a company
+    user, the open support context's for a platform account — and both providers
+    below it now ask it that, rather than reading the membership in AuthContext,
+    which is null for a platform account and so left every screen under them
+    querying `company_id = null`. SuperAdminProvider itself reads only
+    AuthContext, so nothing is inverted by the move.
+  */
   return (
-    <CompanySettingsProvider>
-      <SuperAdminProvider>
+    <SuperAdminProvider>
+      <CompanySettingsProvider>
         <PlanProvider>
           <BrowserRouter>
             <Routes>
@@ -553,8 +563,8 @@ function App() {
             </Routes>
           </BrowserRouter>
         </PlanProvider>
-      </SuperAdminProvider>
-    </CompanySettingsProvider>
+      </CompanySettingsProvider>
+    </SuperAdminProvider>
   );
 }
 

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Plus, Download } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
+import { useCompanyScope } from '../hooks/useCompanyScope';
 import { useToast } from '../contexts/ToastContext';
 import { useDatabase } from '../hooks/useDatabase';
 import { useCompanySettings } from '../contexts/CompanySettingsContext';
@@ -24,7 +25,10 @@ interface ConfirmModalState {
 
 const BelegePage: React.FC = () => {
   const { t } = useTranslation();
-  const { user, canEdit, canDelete, canCreate } = useAuth();
+  const { user } = useAuth();
+  // The rights of the company the session is in: a read context writes nothing
+  // (plan 3.4b), and the database refuses these three the same way.
+  const { canEdit, canDelete, canCreate } = useCompanyScope();
   const { success, error: showError } = useToast();
   const { receipts: receiptActions, drivers: driverActions, isLoading: dbLoading } = useDatabase();
   const { settings } = useCompanySettings();

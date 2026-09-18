@@ -3,6 +3,7 @@ import { TrendingUp, Plus, CreditCard as Edit2, Trash2, Save, X, DollarSign, Dow
 import { Income, IncomeFormData, Driver, INCOME_TYPES } from '../types/receipt';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
+import { useCompanyScope } from '../hooks/useCompanyScope';
 import { useToast } from '../contexts/ToastContext';
 import { format, startOfWeek, endOfWeek, startOfMonth, endOfMonth, startOfYear, endOfYear, subMonths, getMonth, getYear } from 'date-fns';
 import ConfirmationModal from './ConfirmationModal';
@@ -91,7 +92,9 @@ const IncomeManagement: React.FC<IncomeManagementProps> = ({ drivers }) => {
   const [selectedType, setSelectedType] = useState<string>('');
   const [hoveredRow, setHoveredRow] = useState<string | null>(null);
 
-  const { user, profile, canEdit, canDelete, canCreate } = useAuth();
+  const { user, profile } = useAuth();
+  // The rights of the company the session is in — see BelegePage.
+  const { canEdit, canDelete, canCreate } = useCompanyScope();
   const { effectiveCompanyId: companyId } = useSuperAdmin();
   const { success, error: showError, warning } = useToast();
   const { t, tPlural } = useTranslation();

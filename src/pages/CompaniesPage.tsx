@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Building2, Plus, Search, Eye, CreditCard as Edit2, MoreVertical,
   CheckCircle, XCircle, PauseCircle, AlertCircle, Users, ChevronRight,
@@ -10,6 +11,8 @@ import { supabase } from '../lib/supabase';
 import { callPlatformRpc } from '../lib/platformRpc';
 import { fetchCompanies, fetchUsers } from '../lib/platformDirectoryClient';
 import { platformReadRefusalKey } from '../lib/platformReadModels';
+import { contextRefusalMessage } from '../lib/supportSession';
+import { TENANT_HOME } from '../lib/adminGate';
 import { useAuth, type CompanyStatus } from '../contexts/AuthContext';
 import { useSuperAdmin, CompanyListItem } from '../contexts/SuperAdminContext';
 import { useToast } from '../contexts/ToastContext';
@@ -1001,7 +1004,8 @@ function CompanyDetail({ company, onBack, onEdit, onLifecycleAction, onEnterComp
 
 export default function CompaniesPage() {
   const { isSuperAdmin } = useAuth();
-  const { enterCompany, platformCan } = useSuperAdmin();
+  const { openCompany, platformCan } = useSuperAdmin();
+  const navigate = useNavigate();
   // Hidden for a role without the capability; the database refuses regardless.
   const canLifecycle = platformCan('companies.lifecycle');
   const canOpenCompany = platformCan('business.read');
@@ -1100,15 +1104,26 @@ export default function CompaniesPage() {
     setLifecycleModal({ action, company });
   };
 
-  // Opening a company needs an open support session, not only business.read —
-  // without one the database answers every tenant query with nothing. Refuse
-  // and say so; do not report success for a company that was not opened.
-  const handleEnterCompany = (company: CompanyListItem) => {
-    if (!enterCompany(company)) {
-      showToast('error', t('sa.companies.needsSupportSession'));
-      return;
+  /*
+    Opening a company asks the database for a **read** context (plan 3.4b).
+
+    Least privilege, and it is also the shorter road: `view` needs no reason,
+    and the bar inside the company offers "Support-Sitzung starten" for the
+    moment something actually has to be written. Opening straight into a write
+    session would mean asking for a justification before anyone knows whether
+    one is needed.
+
+    The context is the database's answer, not this click's: on success the tab
+    goes into the company, on refusal it says which refusal it was and stays.
+  */
+  const handleEnterCompany = async (company: CompanyListItem) => {
+    try {
+      await openCompany(company, 'view');
+      showToast('success', t('sa.companies.toast.nowActiveAs', { name: company.name }));
+      navigate(TENANT_HOME);
+    } catch (error) {
+      showToast('error', contextRefusalMessage(error, t));
     }
-    showToast('success', t('sa.companies.toast.nowActiveAs', { name: company.name }));
   };
 
   const filtered = companies.filter(c => {
@@ -1141,7 +1156,7 @@ export default function CompaniesPage() {
           onBack={() => setViewingCompany(null)}
           onEdit={c => { setEditingCompany(c); setViewingCompany(null); }}
           onLifecycleAction={handleLifecycleAction}
-          onEnterCompany={handleEnterCompany}
+          onEnterCompany={company => { void handleEnterCompany(company); }}
           onRefresh={loadCompanies}
         />
         {lifecycleModal && (
@@ -1280,7 +1295,7 @@ export default function CompaniesPage() {
                               onMouseLeave={e => { (e.currentTarget.style.background = 'transparent'); (e.currentTarget.style.color = 'var(--text-tertiary)'); }}>
                               <Edit2 size={14} />
                             </button>
-                            <button hidden={!canOpenCompany} onClick={() => handleEnterCompany(company)} className="p-1.5 rounded-lg transition-colors" style={{ color: 'var(--accent)' }} title={t('sa.companies.openAsCompany')}
+                            <button hidden={!canOpenCompany} onClick={() => { void handleEnterCompany(company); }} className="p-1.5 rounded-lg transition-colors" style={{ color: 'var(--accent)' }} title={t('sa.companies.openAsCompany')}
                               onMouseEnter={e => (e.currentTarget.style.background = 'var(--accent-subtle)')}
                               onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
                               <ExternalLink size={14} />
