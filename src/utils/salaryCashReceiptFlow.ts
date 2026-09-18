@@ -413,20 +413,49 @@ export type ReceiptScope = 'own_company' | 'other_company' | 'no_company';
  * outside, and so is platform staff inside a customer — for different reasons,
  * which get different messages.
  *
- * **The second half is now a decision, not a consequence** (3.4b). It used to
- * follow from the database: the three Gehaltsquittung RPCs resolved the caller
- * from `user_profiles`, so a platform account was refused whatever the screens
- * did. Since 20260917130000 they ask `get_active_company_id()` and since
+ * **The second half is a decided product rule, permanent, and waiting on
+ * nothing** (owner's decision, 18.09.2026). It used to follow from the
+ * database: the three Gehaltsquittung RPCs resolved the caller from
+ * `user_profiles`, so a platform account was refused whatever the screens did.
+ * Since 20260917130000 they ask `get_active_company_id()` and since
  * 20260917140000 that answers an open context, so a support session *could*
- * issue, void and attach a signed copy — and this function is what still stops
- * it.
+ * issue, void and attach a signed copy — and this function is what stops it.
  *
- * It stops it on purpose. A Gehaltsquittung is a statutory cash receipt issued
- * in the company's own name, numbered gaplessly per company and year, and
- * handed to a driver against a signature; it is not a support act. And there is
- * nowhere to record that a platform employee issued one — the receipt stores no
- * actor, and the write-audit triggers that would catch it are 3.4c. Until the
- * owner says otherwise, a support session reads the ledger and issues nothing.
+ * **The reason is attestation, not traceability.** A Gehaltsquittung attests to
+ * a physical handover of cash: the company counts banknotes into a driver's
+ * hand, and the driver signs the paper for having received them. A platform
+ * support agent was not in the room. Issuing one from a support session would
+ * record a physical event nobody at the platform witnessed, and no amount of
+ * audit logging changes that — which is why the rule is permanent rather than
+ * provisional, 3.4c's write-audit triggers included.
+ *
+ * **An earlier version of this comment said the receipt "records no actor" and
+ * rested the refusal on that. It was wrong**, and the correction matters more
+ * than the claim did: `salary_cash_receipts.confirmed_by`
+ * (20260914140000:174, written at :517) and `.voided_by` (:176, written at
+ * :618), and `cash_movements.created_by` (:117, written at :535 and :629), all
+ * take `auth.uid()` — the platform employee's own id would be on every row. A
+ * reason that expires invites the first person to ship the missing triggers to
+ * reopen a rule that was never about traceability.
+ *
+ * Two facts support the rule without being the reason for it:
+ *
+ * - The actor is recorded but not legible to the person whose books it sits in.
+ *   An account inside a context has no company of its own —
+ *   `platform_context_open` refuses one that has (`account_in_company`) — so a
+ *   customer reading `user_profiles`, which answers for its own company,
+ *   resolves `confirmed_by` to no name. Nothing on these screens selects the
+ *   column at all (`RECEIPT_COLUMNS` in `src/lib/salaryCashReceipts.ts`).
+ * - The act is close to irreversible on a customer's books. The receipt
+ *   consumes a gapless number and moves cash, and the only undo is a Storno,
+ *   which stays on the record itself. One mistake leaves two permanent marks.
+ *
+ * **This refusal is the browser's alone, and that is the open half.** All three
+ * RPCs still succeed inside a support context, so the rule binds only callers
+ * who come through these screens: a staff member who can open a context can
+ * call them straight through PostgREST with their own token and the anon key
+ * that ships in the bundle. Moving it into the three functions is the follow-up
+ * recorded in HANDOFF.md.
  */
 export function receiptScope({
   companyId,
