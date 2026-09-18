@@ -147,9 +147,6 @@ describe('the gate has a clock', () => {
     answering({ platform_whoami: () => whoami('c1') });
     await mount();
 
-    let opened = false;
-    await act(async () => { opened = probe.value.enterCompany(company('c1')); });
-    expect(opened).toBe(true);
     expect(probe.value.effectiveCompanyId).toBe('c1');
     expect(probe.value.platformReadsCompanyData).toBe(true);
 
@@ -169,8 +166,6 @@ describe('the gate has a clock', () => {
     let contextOpen = true;
     answering({ platform_whoami: () => whoami(contextOpen ? 'c1' : null) });
     await mount();
-    await act(async () => { probe.value.enterCompany(company('c1')); });
-    await settle();
     expect(probe.value.effectiveCompanyId).toBe('c1');
 
     contextOpen = false;
@@ -180,21 +175,32 @@ describe('the gate has a clock', () => {
     expect(probe.value.activeCompany).toBeNull();
   });
 
-  it('sees a context opened elsewhere on the next attempt to enter', async () => {
-    let contextOpen = false;
+  /*
+    The case neither the wake-up nor the expiry timer covers: the session ends
+    at the server — closed from another tab, or the staff row disabled — while
+    this tab keeps the focus. Without this re-ask every screen goes on querying
+    a company the database no longer answers for, and shows confident zeros for
+    the rest of the hour.
+  */
+  it('notices a context ended at the server while the tab keeps the focus', async () => {
+    let contextOpen = true;
     answering({ platform_whoami: () => whoami(contextOpen ? 'c1' : null) });
     await mount();
+    expect(probe.value.effectiveCompanyId).toBe('c1');
 
-    // Opened in another tab: the answer this tab holds still says none, and the
-    // click is judged by it — but the refusal asks again.
-    contextOpen = true;
-    let opened = true;
-    await act(async () => { opened = probe.value.enterCompany(company('c1')); });
-    expect(opened).toBe(false);
-
+    contextOpen = false;
+    // No focus event, no expiry: only the interval can find this.
+    await act(async () => { vi.advanceTimersByTime(60_000); });
     await settle();
-    await act(async () => { opened = probe.value.enterCompany(company('c1')); });
-    expect(opened).toBe(true);
+    expect(probe.value.effectiveCompanyId).toBeNull();
+  });
+
+  it('asks nothing on that interval when no company is open', async () => {
+    answering({ platform_whoami: () => whoami(null) });
+    await mount();
+    const callsBefore = world.rpc.mock.calls.length;
+    await act(async () => { vi.advanceTimersByTime(10 * 60_000); });
+    expect(world.rpc.mock.calls.length).toBe(callsBefore);
   });
 });
 
@@ -231,8 +237,7 @@ describe('asking again', () => {
   it('closes the company and keeps the panel when a re-ask fails', async () => {
     answering({ platform_whoami: () => whoami('c1') });
     await mount();
-    await act(async () => { probe.value.enterCompany(company('c1')); });
-    await settle();
+    expect(probe.value.effectiveCompanyId).toBe('c1');
 
     world.rpc.mockImplementation(() => Promise.resolve({ data: null, error: { message: 'offline' } }));
     await act(async () => { vi.advanceTimersByTime(10_000); });

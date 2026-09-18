@@ -13,7 +13,7 @@
  * the same `company_context` and writes nothing, which is what
  * `SuperAdminContext` polls.
  */
-import { callPlatformRpc } from './platformRpc';
+import { callPlatformRpc, PlatformRpcError } from './platformRpc';
 import { parsePlatformCompanyContext, type PlatformCompanyContext, type PlatformContextMode } from './platformAccess';
 import { normalizeSupportReason } from './supportSession';
 
@@ -26,16 +26,21 @@ import { normalizeSupportReason } from './supportSession';
  * `account_in_company` for a staff account that still sits inside a company.
  *
  * The returned context is the answer's own `context` field, not a guess, and it
- * is what the provider installs so the caller can navigate at once. Null when
- * the answer carried nothing this build can read — the caller then waits for
- * `platform_whoami()` like any other change.
+ * is what the provider installs so the caller can navigate at once.
+ *
+ * **An answer whose context cannot be read is a failure, not a success.** It
+ * would otherwise resolve, the screen would report "now working as …" and
+ * navigate into the company, and `PlatformAccountGuard` would bounce the tab
+ * straight back to the panel with no message — a success message followed by a
+ * silent rejection. A context may well have been opened in the database; the
+ * re-ask that follows will find it, and `context_open` then says so.
  */
 export async function openCompanyContext(
   companyId: string,
   mode: PlatformContextMode,
   reason?: string | null,
   receivedAt: number = Date.now(),
-): Promise<PlatformCompanyContext | null> {
+): Promise<PlatformCompanyContext> {
   const result = await callPlatformRpc('platform_context_open', {
     p_company_id: companyId,
     // A reason on a `view` context is refused as `invalid` by the RPC, so it is
@@ -43,7 +48,11 @@ export async function openCompanyContext(
     p_mode: mode,
     p_reason: mode === 'support' ? normalizeSupportReason(reason) : null,
   });
-  return parsePlatformCompanyContext(result.context, receivedAt);
+  const context = parsePlatformCompanyContext(result.context, receivedAt);
+  if (context === null) {
+    throw new PlatformRpcError('Die Aktion konnte nicht ausgeführt werden.', 'invalid');
+  }
+  return context;
 }
 
 /** Ends the caller's open context, whichever company and mode it is on. */

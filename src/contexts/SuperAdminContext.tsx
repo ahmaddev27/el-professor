@@ -10,7 +10,6 @@ import {
   ownCompanyDataReadable,
   parsePlatformWhoami,
   platformAccessCan,
-  platformCanEnterCompany,
   platformReadsCompany,
   samePlatformAccess,
   withoutCompanyContext,
@@ -48,18 +47,6 @@ interface SuperAdminContextType {
   activeCompanyId: string | null;
   activeCompany: CompanyListItem | null;
   isViewingAsCompany: boolean;
-  /**
-   * Opens a company, and answers whether it opened. False when no live support
-   * session covers that company — the caller must not navigate on false, or the
-   * tenant router would render against rows the database returns nothing for.
-   * Either way it asks the database again, so a session opened in another tab
-   * is seen by the next attempt.
-   *
-   * It opens nothing itself: `openCompany` is what asks the database for a
-   * context. This only records the fuller company row for the shell to show,
-   * and re-checks that a context covers it.
-   */
-  enterCompany: (company: CompanyListItem) => boolean;
   exitCompany: () => void;
   /**
    * Asks the database for a context on this company (plan 3.4b) — `view` reads,
@@ -126,6 +113,13 @@ const MAX_TIMER_MS = 2_147_483_647;
  * second question a moment after the first would bring no second answer.
  */
 const WAKE_GAP_MS = 2_000;
+
+/**
+ * How often a focused tab re-asks while a company is open — the bound on how
+ * long a context ended at the server can go unnoticed. See the effect that uses
+ * it for why a minute, and why only then.
+ */
+const CONTEXT_RECHECK_MS = 60_000;
 
 interface RpcAnswer {
   data: unknown;
@@ -295,37 +289,44 @@ export const SuperAdminProvider: React.FC<{ children: ReactNode }> = ({ children
     return () => clearTimeout(timer);
   }, [platformAccess, clock, reloadPlatformAccess]);
 
+  /*
+    …and a slow re-ask while a company is open, because a context can also end
+    at the server without this tab being touched.
+
+    The two triggers above cover a tab that comes back and a context that runs
+    its full hour. Neither covers a session closed from another tab, a staff row
+    disabled by an owner, or a sign-out elsewhere, while this tab keeps the
+    focus. Until the next answer every screen goes on querying — and since
+    `platform_reads_company_data()` is false, the database answers each query
+    with nothing at all: empty lists and confident zeros, for up to an hour,
+    with no error anywhere. Zeros that look like data are the one failure this
+    product cannot afford.
+
+    A minute is the interval, and it is a deliberate trade. `platform_whoami()`
+    is STABLE and writes no audit row, so the cost is one request a minute per
+    open company per focused tab — nothing, next to bounding that window at 60
+    seconds. It asks only while a company is actually open (a company user and
+    an idle panel ask nothing at all) and only while the tab is visible, since a
+    hidden tab is covered by the wake-up above. `WAKE_GAP_MS` still applies, so
+    a tick that lands just after a focus does not ask twice.
+  */
+  useEffect(() => {
+    if (!userId || !isSuperAdmin) return;
+    if (platformAccess.companyContext === null) return;
+    const timer = setInterval(() => {
+      if (document.visibilityState !== 'visible') return;
+      if (Date.now() - lastAskedAt.current < WAKE_GAP_MS) return;
+      reloadPlatformAccess();
+    }, CONTEXT_RECHECK_MS);
+    return () => clearInterval(timer);
+  }, [userId, isSuperAdmin, platformAccess.companyContext, reloadPlatformAccess]);
+
   const isPlatformStaff = platformAccess.role !== null;
 
   const platformCan = useCallback(
     (capability: PlatformCapability) => platformAccessCan(platformAccess, capability),
     [platformAccess],
   );
-
-  /*
-    Opening a company needs a live support session on that company, not just
-    the capability to read business data.
-
-    Until 20260917140000 (plan 3.4) `business.read` was the whole story: the
-    database answered a staff account with every company's rows, so entering was
-    only a question of what the screens should show. That is no longer true.
-    `get_active_company_id()` now answers with the *context's* company and
-    nothing else, so entering without one renders all nineteen tenant routes
-    against rows the database returns nothing for — every list empty, every
-    total a confident zero, and no error anywhere to say why. One gate here is
-    worth more than a guard on each of those screens, because it is also what
-    the database actually says. The rule itself is platformCanEnterCompany().
-
-    It returns whether it opened; the callers must not navigate on false. 3.4b
-    builds the screens that open a session, and reloadPlatformAccess() is how
-    they make this see one.
-  */
-  const enterCompany = useCallback((company: CompanyListItem): boolean => {
-    reloadPlatformAccess();
-    if (!platformCanEnterCompany(platformAccess, company.id, Date.now())) return false;
-    setEnteredCompany(company);
-    return true;
-  }, [platformAccess, reloadPlatformAccess]);
 
   /*
     Opening a company is one RPC, and the answer it returns is the context.
@@ -343,13 +344,13 @@ export const SuperAdminProvider: React.FC<{ children: ReactNode }> = ({ children
     mode: PlatformContextMode,
     reason?: string | null,
   ): Promise<void> => {
+    // Throws when the database refuses, and when its answer carries no context
+    // this build can read — the caller must not report a company it cannot show.
     const context = await openCompanyContext(company.id, mode, reason);
     const receivedAt = Date.now();
     setEnteredCompany(company);
-    if (context !== null) {
-      setPlatformAccess(previous => ({ ...previous, companyContext: context }));
-      setClock(receivedAt);
-    }
+    setPlatformAccess(previous => ({ ...previous, companyContext: context }));
+    setClock(receivedAt);
     lastAskedAt.current = receivedAt;
     setReloadKey(k => k + 1);
   }, []);
@@ -427,7 +428,18 @@ export const SuperAdminProvider: React.FC<{ children: ReactNode }> = ({ children
     const live = companyContext !== null;
     const was = hadCompanyContext.current;
     hadCompanyContext.current = live;
-    if (!was || live) return;
+    if (live) return;
+    /*
+      Nothing was open, so there is nothing to report — and the mark is cleared
+      here rather than only on a transition. `closeCompany` sets it before
+      `withoutCompanyContext`, which returns the *same* object when no context
+      is open, so a close of nothing left the mark standing and the next real
+      expiry would have been swallowed by it.
+    */
+    if (!was) {
+      endedOnPurpose.current = false;
+      return;
+    }
     if (endedOnPurpose.current) {
       endedOnPurpose.current = false;
       return;
@@ -451,7 +463,6 @@ export const SuperAdminProvider: React.FC<{ children: ReactNode }> = ({ children
       activeCompanyId,
       activeCompany,
       isViewingAsCompany,
-      enterCompany,
       exitCompany,
       openCompany,
       closeCompany,

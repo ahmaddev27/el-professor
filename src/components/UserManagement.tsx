@@ -327,17 +327,25 @@ const UserManagement: React.FC = () => {
   const { companyScope } = useSuperAdmin();
   const scopeCompanyId = companyScope.isPlatformSession ? companyScope.companyId : null;
   /*
-    Who may work this screen.
+    Who may work this screen — asked of the **scope**, not of the profile.
 
-    A company administrator, as before — and a platform account **inside a
-    support session**, which is precisely what `is_company_admin()` answers
-    since 20260917140000, so the browser and the database agree on one
-    sentence. In a read context the screen is refused rather than shown with
-    its buttons: every one of them writes, and `manage-users` would answer each
-    with a refusal. The read-only view of a company's accounts is
+    `isAdmin || kind === 'support'` was wrong in both directions. A platform
+    account whose own profile happens to carry `admin` would have had a fully
+    editable screen inside a *read* context, and every button here calls
+    `manage-users`, which is a service-role function that never looks at the
+    context: those writes would go through. So the profile role decides only
+    when the scope is the account's own company, and a platform session is
+    judged by its mode and nothing else.
+
+    In a read context the screen is refused rather than shown with its buttons:
+    every one of them writes. The read-only view of a company's accounts is
     /admin/verzeichnisse, which is paged, column-reduced and audited.
+
+    (The other direction — a platform account never reaching this screen at all
+    because its profile carries `viewer`, which is what `platform-staff` writes
+    for every invited member — was in App.tsx, and is `CompanyAdminRoute`.)
   */
-  const canManageUsers = isAdmin || companyScope.kind === 'support';
+  const canManageUsers = companyScope.kind === 'own' ? isAdmin : companyScope.kind === 'support';
   const [users, setUsers] = useState<UserData[]>([]);
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);

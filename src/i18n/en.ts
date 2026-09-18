@@ -86,6 +86,7 @@ export const en: PartialDictionary = {
   'support.reason.required':    'Please give a reason.',
   'support.reason.tooLong':     'The reason is too long.',
   'support.reason.confirm':     'Start support session',
+  'support.storage.membershipOnly': 'This company\'s files are not reachable in a support session yet. File storage still follows the account\'s own company membership.',
   'support.error.denied':           'You are not allowed to do this.',
   'support.error.contextOpen':      'Another company is still open. Please end that access first.',
   'support.error.reasonRequired':   'A support session needs a reason.',

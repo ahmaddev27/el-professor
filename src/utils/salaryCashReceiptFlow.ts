@@ -409,10 +409,24 @@ export function signedCopyPath(
 export type ReceiptScope = 'own_company' | 'other_company' | 'no_company';
 
 /**
- * Whether the screens may act on receipts. The RPCs and the SELECT policies
- * use the caller's own company (get_user_company_id()), so platform staff
- * viewing a customer and an account with no company are both outside, for
- * different reasons that get different messages.
+ * Whether the screens may act on receipts. An account with no company is
+ * outside, and so is platform staff inside a customer — for different reasons,
+ * which get different messages.
+ *
+ * **The second half is now a decision, not a consequence** (3.4b). It used to
+ * follow from the database: the three Gehaltsquittung RPCs resolved the caller
+ * from `user_profiles`, so a platform account was refused whatever the screens
+ * did. Since 20260917130000 they ask `get_active_company_id()` and since
+ * 20260917140000 that answers an open context, so a support session *could*
+ * issue, void and attach a signed copy — and this function is what still stops
+ * it.
+ *
+ * It stops it on purpose. A Gehaltsquittung is a statutory cash receipt issued
+ * in the company's own name, numbered gaplessly per company and year, and
+ * handed to a driver against a signature; it is not a support act. And there is
+ * nowhere to record that a platform employee issued one — the receipt stores no
+ * actor, and the write-audit triggers that would catch it are 3.4c. Until the
+ * owner says otherwise, a support session reads the ledger and issues nothing.
  */
 export function receiptScope({
   companyId,
