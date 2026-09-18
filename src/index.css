@@ -112,9 +112,14 @@
   --accent-hover:   #1d4ed8;
   --accent-subtle:  #eff6ff;
   --accent-text:    #2563eb;
-  --success:        #059669;
+  /* Darkened 17.09.2026 (owner's decision) from #059669 / #d97706, which were
+     too light to carry a white label: 3.77:1 and 3.19:1. See the note above the
+     dark block for why the fill needs its own token. */
+  --success:        #0A7A45;
+  --success-solid:  #0A7A45;
   --success-subtle: #ecfdf5;
-  --warning:        #d97706;
+  --warning:        #8F5200;
+  --warning-solid:  #8F5200;
   --warning-subtle: #fffbeb;
   --danger:         #dc2626;
   --danger-subtle:  #fef2f2;
@@ -140,9 +145,22 @@
   --accent-hover:   #0891b2;
   --accent-subtle:  rgba(6,182,212,0.1);
   --accent-text:    #22d3ee;
+  /* --success / --warning are TEXT here and keep their values: on a dark
+     surface a status colour has to be light, and they already reach 5.35:1 to
+     8.93:1 that way.
+
+     --success-solid / --warning-solid are the same status colour as a FILL
+     under a white label, and in the dark theme they cannot be the same value.
+     A label needs the fill at luminance <= 0.183; reading as text on
+     --bg-surface needs the token at >= 0.237. Those windows do not overlap, so
+     one token cannot do both — which is why the fill has its own name, exactly
+     as --critical-solid does in the Phase-2 block above. In the light theme
+     both roles want the same darkness and the two tokens hold one value. */
   --success:        #10b981;
+  --success-solid:  #0B824A;
   --success-subtle: rgba(16,185,129,0.1);
   --warning:        #f59e0b;
+  --warning-solid:  #A85F00;
   --warning-subtle: rgba(245,158,11,0.1);
   --danger:         #ef4444;
   --danger-subtle:  rgba(239,68,68,0.1);

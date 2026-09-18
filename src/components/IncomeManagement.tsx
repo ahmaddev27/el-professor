@@ -583,7 +583,7 @@ const IncomeManagement: React.FC<IncomeManagementProps> = ({ drivers }) => {
                   className="px-3 py-2 rounded-lg text-sm font-medium transition-colors"
                   style={
                     datePreset === preset
-                      ? { background: 'var(--success)', color: 'white' }
+                      ? { background: 'var(--success-solid)', color: 'white' }
                       : { background: 'var(--bg-subtle)', color: 'var(--text-secondary)' }
                   }
                 >
@@ -691,7 +691,7 @@ const IncomeManagement: React.FC<IncomeManagementProps> = ({ drivers }) => {
                 style={
                   filteredIncomes.length === 0
                     ? { background: 'var(--bg-subtle)', color: 'var(--text-tertiary)', cursor: 'not-allowed' }
-                    : { background: 'var(--success)', color: 'white' }
+                    : { background: 'var(--success-solid)', color: 'white' }
                 }
                 title={filteredIncomes.length === 0 ? t('inc.nothingToExport') : t('common.exportExcelShort')}
                 aria-disabled={filteredIncomes.length === 0}
@@ -787,7 +787,7 @@ const IncomeManagement: React.FC<IncomeManagementProps> = ({ drivers }) => {
             <button
               onClick={() => setIsAdding(true)}
               className="w-full flex items-center justify-center gap-2 px-4 py-3 text-white rounded-lg transition-colors"
-              style={{ background: 'var(--success)' }}
+              style={{ background: 'var(--success-solid)' }}
             >
               <Plus size={20} />
               {t('inc.addNew')}
@@ -987,7 +987,7 @@ const IncomeManagement: React.FC<IncomeManagementProps> = ({ drivers }) => {
                         onClick={handleBatchAdd}
                         disabled={willCreate === 0}
                         className="flex items-center gap-2 px-5 py-2 text-white rounded-lg text-sm font-semibold transition-opacity"
-                        style={{ background: 'var(--success)', opacity: willCreate === 0 ? 0.5 : 1, cursor: willCreate === 0 ? 'not-allowed' : 'pointer' }}
+                        style={{ background: 'var(--success-solid)', opacity: willCreate === 0 ? 0.5 : 1, cursor: willCreate === 0 ? 'not-allowed' : 'pointer' }}
                       >
                         <Save size={15} />
                         {t('common.save')}

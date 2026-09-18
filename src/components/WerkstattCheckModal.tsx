@@ -440,7 +440,7 @@ export default function WerkstattCheckModal({
             </button>
             <button
               type="submit"
-              style={{ flex: 1, padding: '0.5rem 1rem', background: loading ? 'var(--bg-muted)' : 'var(--warning)', color: loading ? 'var(--text-tertiary)' : '#fff', borderRadius: '0.5rem', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}
+              style={{ flex: 1, padding: '0.5rem 1rem', background: loading ? 'var(--bg-muted)' : 'var(--warning-solid)', color: loading ? 'var(--text-tertiary)' : '#fff', borderRadius: '0.5rem', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}
               onMouseEnter={e => { if (!loading) e.currentTarget.style.opacity = '0.9'; }}
               onMouseLeave={e => (e.currentTarget.style.opacity = '1')}
               disabled={loading}

@@ -1177,7 +1177,7 @@ const UserManagement: React.FC = () => {
                   <button
                     onClick={submitResetPassword}
                     className="flex-1 py-2 px-4 rounded-lg font-medium flex items-center justify-center space-x-2"
-                    style={{ background: 'var(--warning)', color: 'white' }}
+                    style={{ background: 'var(--warning-solid)', color: 'white' }}
                     disabled={resetPasswordLoading || resetPasswordValue.length < 8}
                   >
                     {resetPasswordLoading ? (

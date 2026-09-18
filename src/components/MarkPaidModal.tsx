@@ -146,7 +146,7 @@ export default function MarkPaidModal({ invoice, onClose, onConfirm }: Props) {
             onClick={handleSubmit}
             disabled={saving}
             className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold text-white"
-            style={{ background: 'var(--success)', opacity: saving ? 0.6 : 1 }}
+            style={{ background: 'var(--success-solid)', opacity: saving ? 0.6 : 1 }}
           >
             <CheckCircle size={16} /> {saving ? t('common.saving') : t('bill.markPaid.submit')}
           </button>

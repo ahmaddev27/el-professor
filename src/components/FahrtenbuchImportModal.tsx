@@ -1395,7 +1395,7 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
               onClick={handleImport}
               disabled={importing || validRows.length === 0}
               className="flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-semibold transition-opacity"
-              style={{ background: 'var(--success)', color: 'white', opacity: importing || validRows.length === 0 ? 0.5 : 1 }}
+              style={{ background: 'var(--success-solid)', color: 'white', opacity: importing || validRows.length === 0 ? 0.5 : 1 }}
             >
               {importing ? t('imp.importing') : (() => {
                 const valid    = validRows.filter(r => !r.is_canceled).length;
