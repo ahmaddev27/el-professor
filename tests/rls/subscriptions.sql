@@ -903,6 +903,18 @@ $$;
 
   The subscription row is looked up from the company rather than derived from
   the slug, so a company may carry several invoices under slugs of its own.
+  `ORDER BY s.id` and not a bare `LIMIT 1`: every company here has exactly one
+  subscription row today, so an unordered pick would be right by accident and
+  would start choosing arbitrarily the day one of them has two.
+
+  **Year before month, in all three places.** The arguments, the column list and
+  the values are written in the same order on purpose. The first version of this
+  helper listed the columns `invoice_month, invoice_year` and passed
+  `p_year, p_month`, so 2026 went into `invoice_month` and the table's
+  `CHECK (invoice_month BETWEEN 1 AND 12)` refused every insert — which aborted
+  the file and left all of section 5 unproven. Keeping one order end to end is
+  what removes the transposition rather than moving it: `_sub_period` and
+  `make_date` are year-first too, so nothing in this section reads month-first.
 */
 CREATE OR REPLACE FUNCTION _sub_invoice(
   p_slug  text,
@@ -916,11 +928,13 @@ LANGUAGE plpgsql AS $$
 DECLARE
   v_id uuid := _sub_id('invoice:' || p_slug);
 BEGIN
-  INSERT INTO subscription_invoices (id, company_id, subscription_id, invoice_month, invoice_year,
+  INSERT INTO subscription_invoices (id, company_id, subscription_id,
+                                     invoice_year, invoice_month,
                                      invoice_number, amount, due_date)
   VALUES (v_id, p_co,
-          (SELECT s.id FROM company_subscriptions s WHERE s.company_id = p_co LIMIT 1),
-          p_year, p_month, 'INV-SUB-' || upper(p_slug), p_amount, p_due);
+          (SELECT s.id FROM company_subscriptions s WHERE s.company_id = p_co ORDER BY s.id LIMIT 1),
+          p_year, p_month,
+          'INV-SUB-' || upper(p_slug), p_amount, p_due);
   RETURN v_id;
 END $$;
 
@@ -1006,13 +1020,19 @@ DECLARE
   v_owner constant uuid := '50000000-0000-4000-8000-000000000001';
   v_month constant integer := extract(month FROM (now() AT TIME ZONE 'Europe/Berlin'))::integer;
   v_year  constant integer := extract(year  FROM (now() AT TIME ZONE 'Europe/Berlin'))::integer;
+  -- One clock for the month and for the due date. `current_date` reads the
+  -- session's TimeZone, which is UTC in the kit's container, while the month
+  -- above is Berlin — so on the last night of a month the two name different
+  -- months and an invoice would be filed under one while its due date sat in
+  -- the other. Deriving both from the same expression removes the question.
+  v_today constant date    := (now() AT TIME ZONE 'Europe/Berlin')::date;
   v_co    uuid;
   v_inv   uuid;
 BEGIN
   v_co  := _sub_billed_company('inv_late');
   -- Due 30 days ago, so it is past whatever day the kit runs on, and paid only
   -- now. Being late is not a reason to buy less than the month that was billed.
-  v_inv := _sub_invoice('inv_late', v_co, v_year, v_month, (current_date - 30), 20);
+  v_inv := _sub_invoice('inv_late', v_co, v_year, v_month, (v_today - 30), 20);
 
   PERFORM _sub_ok('invoices: a late payment is accepted',
     _sub_succeeded(_sub_do(v_owner, format('SELECT platform_invoice_mark_paid(%L, %s)::text', v_inv, 2000))));
@@ -1029,13 +1049,18 @@ DO $$
 DECLARE
   v_month constant integer := extract(month FROM (now() AT TIME ZONE 'Europe/Berlin'))::integer;
   v_year  constant integer := extract(year  FROM (now() AT TIME ZONE 'Europe/Berlin'))::integer;
+  -- The same one clock as 5b, and for the same reason.
+  v_today constant date    := (now() AT TIME ZONE 'Europe/Berlin')::date;
   v_co    uuid;
   v_inv   uuid;
   v_row   subscription_coverage%ROWTYPE;
 BEGIN
-  -- Inside the grace: due today, so the close is two business days ahead.
+  -- Inside the grace: due today, so the close is two business days ahead. That
+  -- is at least tomorrow at Berlin midnight whatever weekday this runs on, so
+  -- the period is live and the company is admitted on every day of the week —
+  -- the one claim here that the calendar could otherwise have decided.
   v_co  := _sub_billed_company('inv_grace');
-  v_inv := _sub_invoice('inv_grace', v_co, v_year, v_month, current_date, 20);
+  v_inv := _sub_invoice('inv_grace', v_co, v_year, v_month, v_today, 20);
   PERFORM app_private.subscription_invoice_apply(v_inv);
 
   SELECT * INTO v_row FROM subscription_coverage
@@ -1044,7 +1069,9 @@ BEGIN
   PERFORM _sub_ok('grace: an unpaid invoice grants, and its row is live and granting like any other',
     v_row.status = 'active' AND v_row.grants_access);
   PERFORM _sub_ok('grace: …until two business days after the due date, and that is where it ends',
-    v_row.period_end = app_private.invoice_grace_end(current_date));
+    v_row.period_end = app_private.invoice_grace_end(v_today));
+  PERFORM _sub_ok('grace: …and that end is ahead of now, on whatever weekday this runs',
+    v_row.period_end > now());
   PERFORM _sub_ok('grace: …so the company is admitted while the grace runs',
     _sub_admitted(_sub_id('user:inv_grace')));
 
