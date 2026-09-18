@@ -1,15 +1,17 @@
 import React, { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Eye, LifeBuoy, LogOut } from 'lucide-react';
+import { ArrowRight, Eye, LifeBuoy, LogOut } from 'lucide-react';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { useTranslation } from '../contexts/LanguageContext';
 import { useToast } from '../contexts/ToastContext';
 import {
   contextRefusalMessage,
+  isPanelPath,
   pathAfterContextChange,
   supportSessionBar,
   type SupportSessionBar as BarState,
 } from '../lib/supportSession';
+import { TENANT_HOME } from '../lib/adminGate';
 import SupportReasonModal from './SupportReasonModal';
 
 /**
@@ -145,6 +147,26 @@ const SupportSessionBar: React.FC = () => {
               className="underline underline-offset-2 disabled:opacity-50"
             >
               {t('support.bar.startSupport')}
+            </button>
+          </>
+        )}
+
+        {/* In the panel the bar names a company that is not on screen, so it
+            offers the way in. A reload of a tenant address lands back on that
+            screen by itself — the guard no longer redirects it — so this is for
+            the person who navigated to /admin with a session still open, and
+            for a reload of /admin itself. */}
+        {isPanelPath(location.pathname) && (
+          <>
+            <span aria-hidden="true">·</span>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => navigate(TENANT_HOME)}
+              className="inline-flex items-center gap-1 underline underline-offset-2 disabled:opacity-50"
+            >
+              <ArrowRight size={14} />
+              {t('support.bar.openCompanyView')}
             </button>
           </>
         )}

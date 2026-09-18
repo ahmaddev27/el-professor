@@ -62,6 +62,7 @@ import {
   TENANT_HOME,
   legacyAdminLoginRedirect,
   legacyAdminTarget,
+  platformAccountRoute,
   platformEntry,
   platformEntryPath,
   rememberedPanelPath,
@@ -187,13 +188,28 @@ const PLATFORM_ACCOUNT_REDIRECTS: Record<string, string> = {
 
 const PlatformAccountGuard: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { isSuperAdmin } = useAuth();
-  const { effectiveCompanyId } = useSuperAdmin();
+  const { effectiveCompanyId, platformAccessStatus } = useSuperAdmin();
   const location = useLocation();
 
-  // Only a platform account that has not entered a company: a super admin who
-  // has entered one keeps using /mein-konto in that company's shell, and a
-  // company user never reaches this branch at all.
-  if (isSuperAdmin && !effectiveCompanyId) {
+  /*
+    Three answers, not two, and the third is why a reload used to throw a
+    support session out of the company it was working in: on a fresh load this
+    guard ran before `platform_whoami()` had answered, read "no company" out of
+    an unanswered question, and redirected to /admin — where the context then
+    arrived and the bar named a company that was no longer on screen.
+
+    The rule is `platformAccountRoute()`, kept pure and tested beside the other
+    two routing decisions. `wait` is a spinner and never a pass: see that
+    function for what "assume allowed" cost the last time.
+  */
+  const route = platformAccountRoute({
+    isSuperAdmin,
+    platformAccessStatus,
+    hasCompany: effectiveCompanyId !== null,
+  });
+
+  if (route === 'wait') return <AuthLoadingScreen />;
+  if (route === 'panel') {
     return <Navigate to={PLATFORM_ACCOUNT_REDIRECTS[location.pathname] ?? ADMIN_BASE} replace />;
   }
 

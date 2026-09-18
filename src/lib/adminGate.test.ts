@@ -9,11 +9,13 @@ import {
   googleSignInRefusal,
   legacyAdminLoginRedirect,
   legacyAdminTarget,
+  platformAccountRoute,
   platformEntry,
   platformEntryPath,
   platformReturnPath,
   rememberedPanelPath,
   type AdminGateState,
+  type PlatformAccountRouteState,
   type PlatformSessionState,
 } from './adminGate';
 
@@ -117,6 +119,60 @@ describe('platformReturnPath', () => {
     expect(platformReturnPath(null)).toBeNull();
     expect(platformReturnPath(42)).toBeNull();
     expect(platformReturnPath({ from: ADMIN_BASE })).toBeNull();
+  });
+});
+
+describe('platformAccountRoute', () => {
+  /** A platform account on a fresh load: no company yet, no answer yet. */
+  const FRESH: PlatformAccountRouteState = {
+    isSuperAdmin: true,
+    platformAccessStatus: 'loading',
+    hasCompany: false,
+  };
+
+  /*
+    The staging defect of 18.09.2026, as a test.
+
+    Opening a company and reloading the page landed on /admin with the
+    read-only bar still naming the company — because the guard read "no
+    company" out of a question that had not been answered yet. The distinction
+    this pins is the whole bug: **unanswered is not the same as answered with
+    no context**, and only the first one may wait.
+  */
+  it('waits while platform_whoami() has not answered, so a reload keeps the company', () => {
+    expect(platformAccountRoute(FRESH)).toBe('wait');
+    // The same unknown one render earlier, before the provider's effect ran.
+    expect(platformAccountRoute({ ...FRESH, platformAccessStatus: 'idle' })).toBe('wait');
+  });
+
+  it('sends a platform account to the panel once the answer says no company', () => {
+    expect(platformAccountRoute({ ...FRESH, platformAccessStatus: 'ready' })).toBe('panel');
+  });
+
+  /*
+    Not `wait`: an unanswered question is not permission, and a question that
+    failed is not a reason to spin for ever. /admin is where AdminLayout shows
+    the failure and offers the retry.
+  */
+  it('sends it to the panel when the question failed', () => {
+    expect(platformAccountRoute({ ...FRESH, platformAccessStatus: 'error' })).toBe('panel');
+  });
+
+  it('never waits once a company is in hand, whatever the status says', () => {
+    for (const status of ['idle', 'loading', 'ready', 'error'] as const) {
+      expect(platformAccountRoute({ ...FRESH, platformAccessStatus: status, hasCompany: true })).toBe('tenant');
+    }
+  });
+
+  /*
+    A company user is not this guard's business at all — and must never be made
+    to wait for an answer that is never asked for it: `SuperAdminContext` leaves
+    the status at `idle` for every account that is not platform staff, so a
+    `wait` here would be a permanent spinner over the whole tenant app.
+  */
+  it('lets a company user straight through, including while the status is idle', () => {
+    expect(platformAccountRoute({ isSuperAdmin: false, platformAccessStatus: 'idle', hasCompany: true })).toBe('tenant');
+    expect(platformAccountRoute({ isSuperAdmin: false, platformAccessStatus: 'idle', hasCompany: false })).toBe('tenant');
   });
 });
 

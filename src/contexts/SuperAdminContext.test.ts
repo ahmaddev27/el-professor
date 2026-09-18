@@ -295,6 +295,35 @@ describe('the company comes from the server', () => {
   });
 });
 
+/*
+  The two states the guard used to confuse, which is what threw a support
+  session out of its company on every reload (18.09.2026, seen on staging).
+  Both have no company; only one of them is an *answer*. The provider is what
+  tells them apart, and `platformAccountRoute()` is what acts on the difference.
+*/
+describe('an unanswered question is not an answer', () => {
+  it('is still loading while platform_whoami() has not come back', async () => {
+    pending();
+    await mount();
+    expect(probe.value.platformAccessStatus).toBe('loading');
+    expect(probe.value.effectiveCompanyId).toBeNull();
+  });
+
+  it('is ready, with no company, once it has', async () => {
+    answering({ platform_whoami: () => whoami(null) });
+    await mount();
+    expect(probe.value.platformAccessStatus).toBe('ready');
+    expect(probe.value.effectiveCompanyId).toBeNull();
+  });
+
+  it('is ready, with the company, when the answer carries a context', async () => {
+    answering({ platform_whoami: () => whoami('c1') });
+    await mount();
+    expect(probe.value.platformAccessStatus).toBe('ready');
+    expect(probe.value.effectiveCompanyId).toBe('c1');
+  });
+});
+
 describe('opening and closing a company', () => {
   /*
     The point of installing the RPC's own answer: between a successful

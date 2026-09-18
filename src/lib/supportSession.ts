@@ -201,8 +201,18 @@ export function pathAfterContextChange(
   after: PlatformContextMode | null,
   currentPath: string,
 ): string | null {
-  const inPanel = currentPath === ADMIN_BASE || currentPath.startsWith(`${ADMIN_BASE}/`);
-  if (after === null) return before !== null && !inPanel ? ADMIN_BASE : null;
-  if (before === null) return inPanel ? TENANT_HOME : null;
+  if (after === null) return before !== null && !isPanelPath(currentPath) ? ADMIN_BASE : null;
+  if (before === null) return isPanelPath(currentPath) ? TENANT_HOME : null;
   return null;
+}
+
+/**
+ * Whether this address is inside the platform panel.
+ *
+ * Used twice: to decide where a session change sends the browser, and to decide
+ * whether the bar offers a way *into* the company it names — which it does only
+ * where the company is not already on screen.
+ */
+export function isPanelPath(currentPath: string): boolean {
+  return currentPath === ADMIN_BASE || currentPath.startsWith(`${ADMIN_BASE}/`);
 }

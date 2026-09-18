@@ -201,6 +201,66 @@ export function decideAdminGate(state: AdminGateState): AdminGateDecision {
   return state.hasPlatformRole ? 'panel' : 'noRole';
 }
 
+// ─── Where a platform account belongs, on this load ──────────────────────────
+
+/**
+ * What `PlatformAccountGuard` (App.tsx) renders.
+ *
+ * - `tenant` — the company app, because this session is in a company.
+ * - `panel` — `/admin`, because it is not.
+ * - `wait` — **neither, yet.** The account is platform staff and
+ *   `platform_whoami()` has not answered, so which of the two is right is not
+ *   known.
+ *
+ * ## Why `wait` exists, measured rather than reasoned
+ *
+ * Opening a company and then reloading the page threw the session out of it —
+ * seen on staging on 18.09.2026: after the reload the address was `/admin`, the
+ * platform overview was on screen, and the read-only bar above it still named
+ * the company. No `platform_context_close` was ever sent and `platform_whoami`
+ * went on being asked, so the context had survived exactly as designed. What
+ * had not survived was the routing: on a fresh load this guard ran before the
+ * first whoami answered, saw no company, and redirected; the answer arrived a
+ * moment later, too late to matter.
+ *
+ * So the state this reads is not "is there a company" but "do we know yet", and
+ * `platformAccessStatus` is where that is recorded. It is `loading` only for the
+ * *first* question — a re-ask keeps the previous answer on screen — so this
+ * blocks a fresh load and never a tab regaining focus. `idle` is the same
+ * unknown one render earlier, before the provider's effect has run.
+ *
+ * ## What `wait` must not become
+ *
+ * A spinner, and never "assume allowed". A guard that lets the tenant router
+ * mount before it knows is the shape that put the owner's own Google signup
+ * into a company-less tenant router, where every query asked for
+ * `company_id = null` and the screens filled with
+ * `invalid input syntax for type uuid: "null"` — the incident
+ * `needsCompanyRegistration` was written for.
+ *
+ * A failed whoami is **not** `wait`: it is `panel`, which is where AdminLayout
+ * shows the failure with a retry. An unanswered question is not permission, and
+ * a question that failed is not a reason to spin for ever.
+ */
+export type PlatformAccountRoute = 'tenant' | 'panel' | 'wait';
+
+export interface PlatformAccountRouteState {
+  /** The profile flag: routing only, never a right. */
+  isSuperAdmin: boolean;
+  platformAccessStatus: PlatformAccessState;
+  /** `SuperAdminContext.effectiveCompanyId` — own company, or the open context. */
+  hasCompany: boolean;
+}
+
+export function platformAccountRoute(state: PlatformAccountRouteState): PlatformAccountRoute {
+  // A company user is never this guard's business, and a platform account that
+  // already has a company — its own, or an open context — needs no answer to
+  // decide: the tenant router is right either way.
+  if (!state.isSuperAdmin || state.hasCompany) return 'tenant';
+  if (state.platformAccessStatus === 'idle' || state.platformAccessStatus === 'loading') return 'wait';
+  return 'panel';
+}
+
 // ─── A platform account that arrived by Google ───────────────────────────────
 
 /** What a refused Google session is shown, and where. */
