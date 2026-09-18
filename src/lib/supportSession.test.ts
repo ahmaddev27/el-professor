@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   contextRefusalKey,
   contextRefusalMessage,
+  isPanelPath,
   minutesLeft,
   normalizeSupportReason,
   pathAfterContextChange,
@@ -184,5 +185,13 @@ describe('where the browser goes', () => {
   // company) must not be thrown back to /overview.
   it('does not move a tab that is already inside the company', () => {
     expect(pathAfterContextChange(null, 'view', '/fahrtenbuch')).toBeNull();
+  });
+
+  it('knows the panel from the company app', () => {
+    expect(isPanelPath('/admin')).toBe(true);
+    expect(isPanelPath('/admin/companies')).toBe(true);
+    expect(isPanelPath('/overview')).toBe(false);
+    // Not a prefix match on the string: a tenant path may not start with it.
+    expect(isPanelPath('/administration')).toBe(false);
   });
 });

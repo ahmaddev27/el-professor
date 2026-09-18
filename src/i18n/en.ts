@@ -76,6 +76,7 @@ export const en: PartialDictionary = {
   'support.bar.minutesLeft':    '{minutes} min left',
   'support.bar.startSupport':   'Start support session',
   'support.bar.end':            'End',
+  'support.bar.openCompanyView': 'Open company view',
   'support.bar.unknownCompany': 'Unknown company',
   'support.bar.startedTitle':   'Support session started for "{company}"',
   'support.bar.expiredTitle':   'Access ended',

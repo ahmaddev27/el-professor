@@ -78,6 +78,7 @@ export const de = {
   'support.bar.minutesLeft':    'noch {minutes} Min',
   'support.bar.startSupport':   'Support-Sitzung starten',
   'support.bar.end':            'Beenden',
+  'support.bar.openCompanyView': 'Zur Unternehmensansicht',
   'support.bar.unknownCompany': 'Unbekanntes Unternehmen',
   'support.bar.startedTitle':   'Support-Sitzung für "{company}" gestartet',
   'support.bar.expiredTitle':   'Zugriff beendet',
