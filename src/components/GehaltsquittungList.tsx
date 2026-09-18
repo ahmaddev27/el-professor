@@ -4,6 +4,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useCompanySettings } from '../contexts/CompanySettingsContext';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { useTranslation } from '../contexts/LanguageContext';
+import type { TranslationKey } from '../i18n';
 import { useToast } from '../contexts/ToastContext';
 import {
   Badge,
@@ -62,6 +63,12 @@ import {
  * bucket's SELECT policies); voiding and uploading need edit rights on salaries,
  * which the RPCs check again.
  */
+
+const MONTH_KEYS: readonly TranslationKey[] = [
+  'doc.month.january', 'doc.month.february', 'doc.month.march',     'doc.month.april',
+  'doc.month.may',     'doc.month.june',     'doc.month.july',      'doc.month.august',
+  'doc.month.september', 'doc.month.october', 'doc.month.november', 'doc.month.december',
+];
 
 type Row = SalaryCashReceiptWithDriver;
 type ListState = { status: 'loading' } | { status: 'error' } | { status: 'ready'; rows: Row[] };
@@ -210,6 +217,21 @@ export default function GehaltsquittungList({ refreshKey, focusReceiptId, onCrea
       cell: row => (
         <span className="whitespace-nowrap tabular-nums">
           {formatDate(row.period_start)} – {formatDate(row.period_end)}
+        </span>
+      ),
+    },
+    // The number's GQ-YYYY is the salary's business year, so a January period
+    // can carry the previous year's number. The column that explains it is a
+    // stored value, never one derived from the period shown beside it.
+    {
+      id: 'businessMonth',
+      header: t('gq.col.businessMonth'),
+      value: row => row.business_year * 12 + row.business_month,
+      sortable: true,
+      hideBelow: 'lg',
+      cell: row => (
+        <span className="whitespace-nowrap">
+          {MONTH_KEYS[row.business_month - 1] ? t(MONTH_KEYS[row.business_month - 1]) : row.business_month} {row.business_year}
         </span>
       ),
     },

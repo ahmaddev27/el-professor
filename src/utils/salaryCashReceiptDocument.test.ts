@@ -3,12 +3,15 @@ import { MAX_AMOUNT_IN_WORDS_CENTS } from './germanAmountInWords';
 import {
   ReceiptDocumentError,
   buildReceiptDocumentText,
+  businessMonthOfPeriod,
+  germanBusinessMonth,
   germanDate,
   receiptCompany,
   receiptDocumentProblem,
   storedReceiptDocumentInput,
   type ReceiptDocumentInput,
 } from './salaryCashReceiptDocument';
+import { getBusinessMonth } from './weekCalculations';
 
 /**
  * The Gehaltsquittung text is German in both UI languages, so these strings are
@@ -22,6 +25,7 @@ const partial: ReceiptDocumentInput = {
   driver: { name: 'Max Mustermann', gender: 'male' },
   periodStart: '2026-08-03',
   periodEnd: '2026-08-30',
+  businessMonth: { month: 8, year: 2026 },
   paymentDate: '2026-09-14',
   place: ' Berlin ',
   figures: {
@@ -73,6 +77,7 @@ describe('buildReceiptDocumentText — a confirmed partial payment', () => {
     );
     expect(text.facts).toEqual([
       { label: 'Zeitraum', value: '03.08.2026 – 30.08.2026', emphasis: false },
+      { label: 'Abrechnungsmonat', value: 'August 2026', emphasis: false },
       { label: 'Zahlungsdatum', value: '14.09.2026', emphasis: false },
     ]);
   });
@@ -139,8 +144,26 @@ describe('buildReceiptDocumentText — other states', () => {
     expect(text.fileName).toBe('Gehaltsquittung_GQ-2026-0012_Ali_Özdemir-Nowak');
   });
 
+  it('names the Abrechnungsmonat on the preview too, where the number is not issued yet', () => {
+    const text = buildReceiptDocumentText({
+      ...partial,
+      status: 'preview',
+      receiptNumber: null,
+      periodStart: '2026-01-01',
+      periodEnd: '2026-01-25',
+      businessMonth: businessMonthOfPeriod('2026-01-01'),
+    });
+    expect(text.number).toBe('Nr. wird bei der Bestätigung vergeben');
+    expect(text.facts).toEqual([
+      { label: 'Zeitraum', value: '01.01.2026 – 25.01.2026', emphasis: false },
+      { label: 'Abrechnungsmonat', value: 'Dezember 2025', emphasis: false },
+      { label: 'Zahlungsdatum', value: '14.09.2026', emphasis: false },
+    ]);
+  });
+
   it('refuses what it cannot print correctly', () => {
     expect(() => buildReceiptDocumentText({ ...partial, paymentDate: '14.09.2026' })).toThrow(RangeError);
+    expect(() => buildReceiptDocumentText({ ...partial, businessMonth: { month: 0, year: 2026 } })).toThrow(RangeError);
     expect(() =>
       buildReceiptDocumentText({ ...partial, figures: { ...partial.figures, amountCents: MAX_AMOUNT_IN_WORDS_CENTS + 1 } }),
     ).toThrow(RangeError);
@@ -176,6 +199,8 @@ describe('storedReceiptDocumentInput — a stored receipt prints its own snapsho
     status: 'voided' as const,
     period_start: '2026-08-03',
     period_end: '2026-08-30',
+    business_month: 8,
+    business_year: 2026,
     payment_date: '2026-09-14',
     place: 'Berlin',
     due_amount: '2500.00',
@@ -199,10 +224,76 @@ describe('storedReceiptDocumentInput — a stored receipt prints its own snapsho
     expect(buildReceiptDocumentText(input).banner).toBe('STORNIERT am 16.09.2026 – Grund: Falscher Betrag erfasst');
   });
 
+  it('takes the Abrechnungsmonat from business_month and business_year, never from the period', () => {
+    // The row is the authority once a receipt is confirmed. A stored pair that
+    // the period alone would not produce must still print as stored: a value
+    // recomputed here would let a later change to the calendar rule reprint an
+    // issued document under a different month than the one it was numbered by.
+    const input = storedReceiptDocumentInput({ ...stored, business_month: 12, business_year: 2025 }, partial.driver, partial.company);
+    expect(input.businessMonth).toEqual({ month: 12, year: 2025 });
+    expect(buildReceiptDocumentText(input).facts).toContainEqual({
+      label: 'Abrechnungsmonat',
+      value: 'Dezember 2025',
+      emphasis: false,
+    });
+  });
+
   it('prints no void notice on a confirmed receipt', () => {
     const input = storedReceiptDocumentInput({ ...stored, status: 'confirmed', voided_at: null, void_reason: null }, partial.driver, partial.company);
     expect(input.voided).toBeNull();
     expect(buildReceiptDocumentText(input).banner).toBeNull();
+  });
+});
+
+describe('germanBusinessMonth — the month that explains the number', () => {
+  it('writes the German month name and the year, months counting from 1', () => {
+    expect(germanBusinessMonth({ month: 1, year: 2026 })).toBe('Januar 2026');
+    expect(germanBusinessMonth({ month: 3, year: 2026 })).toBe('März 2026');
+    expect(germanBusinessMonth({ month: 12, year: 2025 })).toBe('Dezember 2025');
+  });
+
+  it('refuses a month outside 1–12, so a 0-indexed caller cannot print silently wrong', () => {
+    for (const bad of [0, 13, -1, 1.5, Number.NaN]) {
+      expect(() => germanBusinessMonth({ month: bad, year: 2026 })).toThrow(RangeError);
+    }
+    expect(() => germanBusinessMonth({ month: 8, year: Number.NaN })).toThrow(RangeError);
+  });
+});
+
+describe('businessMonthOfPeriod — the preview derives what the RPC will store', () => {
+  it('counts a week to the month of its Monday, so January can belong to December', () => {
+    // 01.01.2026 is a Thursday; its week's Monday is 29.12.2025. The stored
+    // receipt's business_year is therefore 2025, and so is the GQ-YYYY in its
+    // number — which is exactly what the printed Abrechnungsmonat explains.
+    expect(businessMonthOfPeriod('2026-01-01')).toEqual({ month: 12, year: 2025 });
+    expect(germanBusinessMonth(businessMonthOfPeriod('2026-01-01'))).toBe('Dezember 2025');
+  });
+
+  it('counts months from 1, unlike weekCalculations', () => {
+    // getBusinessMonth('2026-08-03') is { month: 7 }; the stored column is 8.
+    expect(businessMonthOfPeriod('2026-08-03')).toEqual({ month: 8, year: 2026 });
+    expect(businessMonthOfPeriod('2026-01-05')).toEqual({ month: 1, year: 2026 });
+  });
+
+  it('keeps a period that starts on a Monday in its own month', () => {
+    // Read as UTC midnight this would fall back a day west of Greenwich, moving
+    // the week and with it the month.
+    expect(businessMonthOfPeriod('2026-06-01')).toEqual({ month: 6, year: 2026 });
+    expect(businessMonthOfPeriod('2026-03-02')).toEqual({ month: 3, year: 2026 });
+  });
+
+  it('agrees with weekCalculations, the rule get_business_month() mirrors', () => {
+    for (const iso of ['2026-01-01', '2026-04-01', '2025-12-29', '2026-08-03', '2026-11-30']) {
+      const [year, month, day] = iso.split('-').map(Number);
+      const reference = getBusinessMonth(new Date(year, month - 1, day));
+      expect(businessMonthOfPeriod(iso)).toEqual({ month: reference.month + 1, year: reference.year });
+    }
+  });
+
+  it('refuses anything that is not a YYYY-MM-DD date', () => {
+    for (const bad of ['01.01.2026', '2026-1-1', '', '2026-01-01T00:00:00Z']) {
+      expect(() => businessMonthOfPeriod(bad)).toThrow(RangeError);
+    }
   });
 });
 
@@ -235,6 +326,7 @@ describe('a receipt without names is not printed', () => {
     const stored = storedReceiptDocumentInput(
       {
         receipt_number: 'GQ-2026-0012', status: 'confirmed', period_start: '2026-08-03', period_end: '2026-08-30',
+        business_month: 8, business_year: 2026,
         payment_date: '2026-09-14', place: 'Berlin', due_amount: '2500.00', paid_bank_before: '1000.00',
         paid_cash_manual_before: '20.00', paid_cash_weekly_before: '50.00', paid_cash_receipts_before: '0.00',
         remaining_before: '1430.00', amount: '1234.56', remaining_after: '195.44', is_partial: true,
