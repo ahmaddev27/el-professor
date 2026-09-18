@@ -1578,7 +1578,7 @@ export default function SuperAdminDashboard() {
               onClick={handleReject}
               disabled={approvingId === rejectModal.company.id}
               className="flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold transition-opacity hover:opacity-85 disabled:opacity-50"
-              style={{ background: 'var(--danger)', color: 'var(--text-inverse)' }}
+              style={{ background: 'var(--danger-solid)', color: 'white' }}
             >
               {approvingId === rejectModal.company.id ? t('sa.dash.rejecting') : t('sa.dash.reject')}
             </button>

@@ -26,6 +26,14 @@ const TrialBanner: React.FC = () => {
       : warning
         ? 'var(--warning)'
         : 'var(--accent)';
+    // The CTA below is a FILL under a white label, which is a different role
+    // from `color`, the banner's text on its pale `bg`. In the dark theme the
+    // two cannot be one value — see the note above the dark block in index.css.
+    const fill = urgent
+      ? 'var(--danger-solid)'
+      : warning
+        ? 'var(--warning-solid)'
+        : 'var(--accent)';
     const Icon = urgent ? AlertTriangle : Clock;
 
     return (
@@ -48,7 +56,7 @@ const TrialBanner: React.FC = () => {
           <a
             href="mailto:support@el-professor.de?subject=Plan upgraden"
             className="flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-semibold transition-opacity hover:opacity-80"
-            style={{ background: color, color: 'white' }}
+            style={{ background: fill, color: 'white' }}
           >
             <Zap size={10} />
             {t('trial.choosePlan')}
@@ -81,7 +89,7 @@ const TrialBanner: React.FC = () => {
         <a
           href="mailto:support@el-professor.de?subject=Plan upgraden"
           className="flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-semibold flex-shrink-0 transition-opacity hover:opacity-80"
-          style={{ background: 'var(--danger)', color: 'var(--text-inverse)' }}
+          style={{ background: 'var(--danger-solid)', color: 'white' }}
         >
           <Zap size={10} />
           Plan wählen

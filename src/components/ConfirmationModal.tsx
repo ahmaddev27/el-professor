@@ -48,11 +48,15 @@ const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
     }
   };
 
+  // The button below carries `text-white` in its className, so this is a FILL
+  // under a white label and every status names its `-solid` twin. The plain
+  // --success / --warning / --danger are the TEXT tokens and are too light for
+  // white in the dark theme — see the note above the dark block in index.css.
   const getConfirmBgColor = () => {
     switch (type) {
-      case 'confirm': return confirmHover ? 'var(--warning)' : 'var(--warning)';
-      case 'success': return confirmHover ? 'var(--success)' : 'var(--success)';
-      case 'error': return confirmHover ? 'var(--danger)' : 'var(--danger)';
+      case 'confirm': return confirmHover ? 'var(--warning-solid)' : 'var(--warning-solid)';
+      case 'success': return confirmHover ? 'var(--success-solid)' : 'var(--success-solid)';
+      case 'error': return confirmHover ? 'var(--danger-solid)' : 'var(--danger-solid)';
       case 'info': return confirmHover ? 'var(--accent-hover)' : 'var(--accent)';
       default: return confirmHover ? 'var(--accent-hover)' : 'var(--accent)';
     }
