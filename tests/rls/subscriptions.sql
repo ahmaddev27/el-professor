@@ -1,6 +1,7 @@
 /*
-  Plan 3.F step U1: one subscription model — the coverage table, the recompute,
-  and the backfill that filled it without changing anybody's access.
+  Plan 3.F steps U1 and U2: one subscription model — the coverage table, the
+  recompute, the backfill that filled it without changing anybody's access, and
+  the invoice and payment rules that came next.
 
   Runs after the migrations and the seeds, as supabase_admin, in one transaction
   that is rolled back at the end, so the files after it see the database as the
@@ -40,9 +41,17 @@
                        still redeem, and it no longer un-suspends the company
                        (the hole at 20260916130020:430); an open-ended company
                        keeps its open end (rule 1)
-    5. invoices        paying one changes nothing in U1 (rule 5), and the
-                       mechanism that will extend in U2 is the same
-                       `subscription_coverage_record` a manual grant uses
+    5. invoices        U2. Paying one records the calendar month it names and
+                       admits the company; the money on that period is the
+                       invoice's own amount in integer cents, not what was
+                       handed over. An unpaid one grants until two business days
+                       after its due date and no longer, so a Friday due date
+                       closes on the Tuesday. Re-opening a paid invoice shrinks
+                       its period back to that window without voiding it;
+                       cancelling voids it and keeps the invoice. Applying the
+                       same invoice twice leaves one row. And an open-ended U1
+                       period outranks every invoice, so paying never caps a
+                       company that rule 1 carried in with no expiry
     6. two at once     two periods recorded at the same instant leave the later
                        end standing, and a second row for the same source is
                        refused by the unique index rather than counted twice
@@ -82,6 +91,15 @@
   why every behavioural claim about a writer is asserted here rather than
   described there — 3b for the two suspension writers, 3c for the early-renewal
   downgrade, 4 for the redemption, 5 for the invoice rule.
+
+  20260919170000 (U2) follows the same division and for the same reason. Its
+  self-check holds seven tripwires — the helpers exist, are unreachable by the
+  API roles, are owned by a role that can reach app_private; the three RPCs call
+  the rule and assign no column the recompute owns; the grace is asked for
+  rather than written at a call site; Friday plus two business days is Tuesday;
+  and the migration itself writes no coverage row. Everything else about U2 is
+  section 5 below, including the one property the migration cannot assert about
+  itself: that the rule produces the right period.
 */
 
 \set ON_ERROR_STOP on
@@ -852,59 +870,378 @@ BEGIN
     AND NOT _sub_admitted(_sub_id('user:code-susp')));
 END $$;
 
--- ─── 5. invoices do not affect access in U1 (rule 5) ────────────────────────
+-- ─── 5. invoices: paying extends, the grace closes (U2) ─────────────────────
+--
+-- U1's rule 5 was that an invoice affects nothing; 20260919170000 replaced it
+-- with the owner's three rules of 18.09.2026, and this section is those rules.
+--
+-- Two kinds of date are used here, on purpose. A claim about **access** needs a
+-- period that is live on the day the kit runs, so it is written against the
+-- current calendar month — a hard-coded 2026 would stop meaning "the month has
+-- not ended" the year after next. A claim about the **shape of a period** needs
+-- both of its ends to be the same on every day the kit can run, so it is
+-- written against a fixed month whose weekdays are known (02.01.2026 is a
+-- Friday). Mixing the two is what would make a check pass on a Wednesday in
+-- March and fail on the first of a month.
+--
+-- One plan is shared; each company gets its own subscription row and its own
+-- invoices, because `subscription_invoices` is unique on
+-- (company_id, invoice_month, invoice_year) and on invoice_number.
 
-DO $$
+/** The calendar month an invoice for (p_year, p_month) covers, as U2 maps it. */
+CREATE OR REPLACE FUNCTION _sub_period(p_year integer, p_month integer, p_which text)
+RETURNS timestamptz
+LANGUAGE sql STABLE AS $$
+  SELECT CASE p_which
+           WHEN 'start' THEN make_date(p_year, p_month, 1)::timestamp AT TIME ZONE 'Europe/Berlin'
+           ELSE (make_date(p_year, p_month, 1) + interval '1 month') AT TIME ZONE 'Europe/Berlin'
+         END
+$$;
+
+/**
+  An invoice for one of this section's companies. Answers its id.
+
+  The subscription row is looked up from the company rather than derived from
+  the slug, so a company may carry several invoices under slugs of its own.
+*/
+CREATE OR REPLACE FUNCTION _sub_invoice(
+  p_slug  text,
+  p_co    uuid,
+  p_year  integer,
+  p_month integer,
+  p_due   date,
+  p_amount numeric DEFAULT 20
+) RETURNS uuid
+LANGUAGE plpgsql AS $$
 DECLARE
-  v_co      uuid;
-  v_plan    uuid := _sub_id('plan');
-  v_sub     uuid := _sub_id('subscription:inv');
-  v_invoice uuid := _sub_id('invoice:inv');
-  v_before  bigint;
-  v_after   bigint;
-  v_out     text;
-  v_owner   constant uuid := '50000000-0000-4000-8000-000000000001';
+  v_id uuid := _sub_id('invoice:' || p_slug);
 BEGIN
-  v_co := _sub_company('inv', 'approved', 'active', 'inactive', now() - interval '1 year',
-                       now() - interval '1 day', now() - interval '1 year');
-  PERFORM app_private.subscription_backfill_company(v_co);
-
-  INSERT INTO subscription_plans (id, name, monthly_price, included_cars)
-  VALUES (v_plan, 'SUB plan', 20, 1);
-  INSERT INTO company_subscriptions (id, company_id, plan_id, monthly_price)
-  VALUES (v_sub, v_co, v_plan, 20);
   INSERT INTO subscription_invoices (id, company_id, subscription_id, invoice_month, invoice_year,
                                      invoice_number, amount, due_date)
-  VALUES (v_invoice, v_co, v_sub, 1, 2026, 'INV-2026-SUB1', 20, now()::date);
+  VALUES (v_id, p_co,
+          (SELECT s.id FROM company_subscriptions s WHERE s.company_id = p_co LIMIT 1),
+          p_year, p_month, 'INV-SUB-' || upper(p_slug), p_amount, p_due);
+  RETURN v_id;
+END $$;
 
-  PERFORM _sub_ok('invoices: the company is refused before the invoice is paid',
+/** A company for this section, with the subscription row its invoices hang off. */
+CREATE OR REPLACE FUNCTION _sub_billed_company(p_slug text, p_sub_status text DEFAULT 'inactive',
+                                               p_expires timestamptz DEFAULT NULL)
+RETURNS uuid
+LANGUAGE plpgsql AS $$
+DECLARE
+  v_co uuid;
+BEGIN
+  v_co := _sub_company(p_slug, 'approved', 'active', p_sub_status,
+                       now() - interval '1 year', p_expires, now() - interval '1 year');
+  PERFORM app_private.subscription_backfill_company(v_co);
+  INSERT INTO company_subscriptions (id, company_id, plan_id, monthly_price)
+  VALUES (_sub_id('subscription:' || p_slug), v_co, _sub_id('plan'), 20);
+  RETURN v_co;
+END $$;
+
+-- 5a. paying records the month, and the money on it is the invoice's own amount
+DO $$
+DECLARE
+  v_owner constant uuid := '50000000-0000-4000-8000-000000000001';
+  v_month constant integer := extract(month FROM (now() AT TIME ZONE 'Europe/Berlin'))::integer;
+  v_year  constant integer := extract(year  FROM (now() AT TIME ZONE 'Europe/Berlin'))::integer;
+  v_co    uuid;
+  v_inv   uuid;
+  v_row   subscription_coverage%ROWTYPE;
+  v_out   text;
+BEGIN
+  INSERT INTO subscription_plans (id, name, monthly_price, included_cars)
+  VALUES (_sub_id('plan'), 'SUB plan', 20, 1);
+
+  v_co  := _sub_billed_company('inv');
+  -- Due in the middle of the month it invoices, the way GenerateInvoicesModal
+  -- writes one: `min(billing_day, 28)` of the invoiced month.
+  v_inv := _sub_invoice('inv', v_co, v_year, v_month,
+                        make_date(v_year, v_month, 1) + 4, 20);
+
+  PERFORM _sub_ok('invoices: the company is refused while the invoice is neither paid nor applied',
     NOT _sub_admitted(_sub_id('user:inv')));
 
-  -- _sub_do, not _sub_try: if the payment were rolled back, "paying writes no
-  -- coverage row" would pass because nothing happened at all.
-  SELECT count(*) INTO v_before FROM subscription_coverage WHERE company_id = v_co;
-  v_out := _sub_do(v_owner, format('SELECT platform_invoice_mark_paid(%L, %s)::text', v_invoice, 2000));
-  SELECT count(*) INTO v_after FROM subscription_coverage WHERE company_id = v_co;
-
-  PERFORM _sub_ok('invoices: an owner still marks one paid', _sub_succeeded(v_out));
+  -- _sub_do, not _sub_try: the effect is what is asserted, and _sub_try rolls
+  -- every probe back — the RPC would still answer `success` and every check
+  -- below would read a table nothing had touched.
+  --
+  -- 1500 cents handed over against an invoice of 20,00 €, so the coverage price
+  -- cannot accidentally be the RPC's argument: it is the invoice's `amount`,
+  -- because that is what the period cost.
+  v_out := _sub_do(v_owner, format('SELECT platform_invoice_mark_paid(%L, %s)::text', v_inv, 1500));
+  PERFORM _sub_ok('invoices: an owner marks one paid', _sub_succeeded(v_out));
   PERFORM _sub_ok('invoices: …and the payment really landed, so the checks below are not vacuous',
-    (SELECT status FROM subscription_invoices WHERE id = v_invoice) = 'paid');
-  PERFORM _sub_ok('invoices: paying writes no coverage row (rule 5 — that is U2''s)', v_after = v_before);
-  PERFORM _sub_ok('invoices: …and the company is still refused',
-    NOT _sub_admitted(_sub_id('user:inv')));
-  PERFORM _sub_ok('invoices: no coverage row anywhere carries source = invoice in U1',
-    NOT EXISTS (SELECT 1 FROM subscription_coverage WHERE source = 'invoice'));
+    (SELECT status FROM subscription_invoices WHERE id = v_inv) = 'paid');
 
-  -- The mechanism U2 will use is the one a manual grant already uses; nothing
-  -- about the model is waiting to be built, only the decision about grace days.
-  PERFORM app_private.subscription_coverage_record(
-    v_co, 'manual', NULL, now(), now() + interval '30 days', true, 'basic', 2000,
-    'the U2 shape, exercised here as a manual grant', false);
-  PERFORM _sub_ok('invoices: recording a paid period is what admits the company, and it is one call',
-    _sub_admitted(_sub_id('user:inv')));
-  PERFORM _sub_ok('invoices: …and the money on that period is integer cents (rule 4)',
-    (SELECT price_cents FROM subscription_coverage
-      WHERE company_id = v_co AND source = 'manual' AND status = 'active') = 2000);
+  SELECT * INTO v_row FROM subscription_coverage
+   WHERE company_id = v_co AND source = 'invoice' AND source_id = v_inv;
+
+  PERFORM _sub_ok('invoices: paying writes exactly one coverage row, live and granting',
+    v_row.id IS NOT NULL AND v_row.status = 'active' AND v_row.grants_access
+    AND (SELECT count(*) FROM subscription_coverage WHERE company_id = v_co AND source = 'invoice') = 1);
+  PERFORM _sub_ok('invoices: …covering the calendar month the invoice names, in Europe/Berlin',
+    v_row.period_start = _sub_period(v_year, v_month, 'start')
+    AND v_row.period_end = _sub_period(v_year, v_month, 'end'));
+  PERFORM _sub_ok('invoices: …priced at the invoice''s own amount in integer cents, not at what was handed over',
+    v_row.price_cents = 2000
+    AND (SELECT cash_received_amount FROM subscription_invoices WHERE id = v_inv) = 15.00);
+  PERFORM _sub_ok('invoices: …and the company is admitted, on the expiry the recompute derived',
+    _sub_admitted(_sub_id('user:inv'))
+    AND (SELECT subscription_expires_at FROM companies WHERE id = v_co) = _sub_period(v_year, v_month, 'end'));
+
+  -- Applying the same invoice again must move the row, never add one: the
+  -- partial unique index on (company_id, source, source_id) is what keeps that
+  -- true, and the sweep calls this over every invoice.
+  PERFORM app_private.subscription_invoice_apply(v_inv);
+  PERFORM app_private.subscription_invoice_apply(v_inv);
+  PERFORM _sub_ok('invoices: applying the same invoice three times leaves one row',
+    (SELECT count(*) FROM subscription_coverage WHERE company_id = v_co AND source = 'invoice') = 1);
+END $$;
+
+-- 5b. a payment two days past its due date still extends
+DO $$
+DECLARE
+  v_owner constant uuid := '50000000-0000-4000-8000-000000000001';
+  v_month constant integer := extract(month FROM (now() AT TIME ZONE 'Europe/Berlin'))::integer;
+  v_year  constant integer := extract(year  FROM (now() AT TIME ZONE 'Europe/Berlin'))::integer;
+  v_co    uuid;
+  v_inv   uuid;
+BEGIN
+  v_co  := _sub_billed_company('inv_late');
+  -- Due 30 days ago, so it is past whatever day the kit runs on, and paid only
+  -- now. Being late is not a reason to buy less than the month that was billed.
+  v_inv := _sub_invoice('inv_late', v_co, v_year, v_month, (current_date - 30), 20);
+
+  PERFORM _sub_ok('invoices: a late payment is accepted',
+    _sub_succeeded(_sub_do(v_owner, format('SELECT platform_invoice_mark_paid(%L, %s)::text', v_inv, 2000))));
+  PERFORM _sub_ok('invoices: …and still buys the whole month it was for',
+    (SELECT period_end FROM subscription_coverage
+      WHERE company_id = v_co AND source = 'invoice' AND source_id = v_inv)
+      = _sub_period(v_year, v_month, 'end')
+    AND _sub_admitted(_sub_id('user:inv_late')));
+END $$;
+
+-- 5c. the grace: an unpaid invoice grants until two business days after its due
+--     date, and not one hour longer
+DO $$
+DECLARE
+  v_month constant integer := extract(month FROM (now() AT TIME ZONE 'Europe/Berlin'))::integer;
+  v_year  constant integer := extract(year  FROM (now() AT TIME ZONE 'Europe/Berlin'))::integer;
+  v_co    uuid;
+  v_inv   uuid;
+  v_row   subscription_coverage%ROWTYPE;
+BEGIN
+  -- Inside the grace: due today, so the close is two business days ahead.
+  v_co  := _sub_billed_company('inv_grace');
+  v_inv := _sub_invoice('inv_grace', v_co, v_year, v_month, current_date, 20);
+  PERFORM app_private.subscription_invoice_apply(v_inv);
+
+  SELECT * INTO v_row FROM subscription_coverage
+   WHERE company_id = v_co AND source = 'invoice' AND source_id = v_inv;
+
+  PERFORM _sub_ok('grace: an unpaid invoice grants, and its row is live and granting like any other',
+    v_row.status = 'active' AND v_row.grants_access);
+  PERFORM _sub_ok('grace: …until two business days after the due date, and that is where it ends',
+    v_row.period_end = app_private.invoice_grace_end(current_date));
+  PERFORM _sub_ok('grace: …so the company is admitted while the grace runs',
+    _sub_admitted(_sub_id('user:inv_grace')));
+
+  -- Past the grace: a fixed month, and not the current one with a due date 30
+  -- days back. An unpaid period ends at `greatest(grace end, period start)`,
+  -- because a live period has to run forwards, and a due date before the month
+  -- it invoices would otherwise be clamped — on the 25th of a month a due date
+  -- 30 days ago sits before the 1st, and the end would be the period start
+  -- rather than the grace. January 2026 due on Friday the 2nd has both ends
+  -- known and in the past on every day this can run.
+  v_co  := _sub_billed_company('inv_overdue');
+  v_inv := _sub_invoice('inv_overdue', v_co, 2026, 1, DATE '2026-01-02', 20);
+  PERFORM app_private.subscription_invoice_apply(v_inv);
+
+  PERFORM _sub_ok('grace: an invoice two business days past due grants a period that has ended',
+    (SELECT period_end FROM subscription_coverage
+      WHERE company_id = v_co AND source = 'invoice' AND source_id = v_inv)
+      = app_private.invoice_grace_end(DATE '2026-01-02'));
+  PERFORM _sub_ok('grace: …so the company with nothing paid is refused',
+    NOT _sub_admitted(_sub_id('user:inv_overdue')));
+
+  -- The owner's own case, and the reason the number is business days: a Friday
+  -- due date must not close on the Sunday. 02.01.2026 is a Friday, 03. and 04.
+  -- are the weekend, 05. is a Monday.
+  PERFORM _sub_ok('grace: a Friday due date closes on the Tuesday, not on the Sunday',
+    app_private.add_business_days(DATE '2026-01-02', 2) = DATE '2026-01-06'
+    AND app_private.invoice_grace_end(DATE '2026-01-02')
+        = (DATE '2026-01-06')::timestamp AT TIME ZONE 'Europe/Berlin');
+  PERFORM _sub_ok('grace: …and a Monday due date closes on the Wednesday, two days later',
+    app_private.add_business_days(DATE '2026-01-05', 2) = DATE '2026-01-07');
+  PERFORM _sub_ok('grace: the number is two business days, from the one place that holds it',
+    app_private.subscription_grace_business_days() = 2);
+
+  -- Paying must never shorten what being open already granted: a due date on
+  -- the 28th plus two business days can land in the following month.
+  PERFORM _sub_ok('grace: a period that outruns its own month survives the payment',
+    app_private.invoice_grace_end(DATE '2026-02-27') > _sub_period(2026, 2, 'end'));
+END $$;
+
+-- 5d. cancelling withdraws the coverage and keeps the record (rule 3);
+--     re-opening shrinks it to the grace window without withdrawing it
+DO $$
+DECLARE
+  v_owner constant uuid := '50000000-0000-4000-8000-000000000001';
+  v_month constant integer := extract(month FROM (now() AT TIME ZONE 'Europe/Berlin'))::integer;
+  v_year  constant integer := extract(year  FROM (now() AT TIME ZONE 'Europe/Berlin'))::integer;
+  v_co    uuid;
+  v_inv   uuid;
+  v_row   subscription_coverage%ROWTYPE;
+BEGIN
+  v_co  := _sub_billed_company('inv_cancel');
+  v_inv := _sub_invoice('inv_cancel', v_co, v_year, v_month,
+                        make_date(v_year, v_month, 1) + 4, 20);
+
+  PERFORM _sub_ok('cancel: the invoice is paid first, so there is coverage to withdraw',
+    _sub_succeeded(_sub_do(v_owner, format('SELECT platform_invoice_mark_paid(%L, %s)::text', v_inv, 2000)))
+    AND _sub_admitted(_sub_id('user:inv_cancel')));
+
+  PERFORM _sub_ok('cancel: an owner cancels a paid invoice',
+    _sub_succeeded(_sub_do(v_owner, format('SELECT platform_invoice_cancel(%L)::text', v_inv))));
+
+  SELECT * INTO v_row FROM subscription_coverage
+   WHERE company_id = v_co AND source = 'invoice' AND source_id = v_inv;
+
+  PERFORM _sub_ok('cancel: the coverage row is voided and names why',
+    v_row.status = 'void' AND v_row.void_reason = 'invoice_canceled');
+  PERFORM _sub_ok('cancel: …the period it withdrew is kept exactly as it was recorded',
+    v_row.period_end = _sub_period(v_year, v_month, 'end'));
+  PERFORM _sub_ok('cancel: …the company loses the access it bought',
+    NOT _sub_admitted(_sub_id('user:inv_cancel')));
+  PERFORM _sub_ok('cancel: …and the invoice keeps its record, payment and all',
+    (SELECT status = 'canceled' AND paid_at IS NOT NULL AND cash_received_amount = 20.00
+       FROM subscription_invoices WHERE id = v_inv));
+
+  -- Re-opening is the other half, and it is not a cancellation: the invoice is
+  -- still owed, so it still grants until its grace ends.
+  --
+  -- A **fixed** month here, not the current one, and deliberately: what is
+  -- asserted is the two exact period ends, and only a fixed month makes both
+  -- deterministic on every day the kit can run. 02.01.2026 is a Friday, so the
+  -- grace ends on Tuesday 06.01. and the month on 01.02. — far apart, and
+  -- neither can collide with the period start the way a due date relative to
+  -- today can. Whether the company is admitted is not claimed here: both ends
+  -- are in the past, so it is refused before and after, and 5c is where the
+  -- refusal is earned.
+  v_co  := _sub_billed_company('inv_reopen');
+  v_inv := _sub_invoice('inv_reopen', v_co, 2026, 1, DATE '2026-01-02', 20);
+
+  PERFORM _sub_ok('reopen: a paid invoice covers its whole month',
+    _sub_succeeded(_sub_do(v_owner, format('SELECT platform_invoice_mark_paid(%L, %s)::text', v_inv, 2000)))
+    AND (SELECT period_end FROM subscription_coverage
+          WHERE company_id = v_co AND source = 'invoice' AND source_id = v_inv)
+        = _sub_period(2026, 1, 'end'));
+  PERFORM _sub_ok('reopen: marking it unpaid is accepted',
+    _sub_succeeded(_sub_do(v_owner, format('SELECT platform_invoice_mark_unpaid(%L)::text', v_inv))));
+
+  SELECT * INTO v_row FROM subscription_coverage
+   WHERE company_id = v_co AND source = 'invoice' AND source_id = v_inv;
+
+  PERFORM _sub_ok('reopen: the row stays live and granting — the invoice is owed, not cancelled',
+    v_row.status = 'active' AND v_row.grants_access AND v_row.void_reason IS NULL);
+  PERFORM _sub_ok('reopen: …but its period shrinks from the month back to the grace window',
+    v_row.period_end = app_private.invoice_grace_end(DATE '2026-01-02')
+    AND v_row.period_end < _sub_period(2026, 1, 'end'));
+  PERFORM _sub_ok('reopen: …and the row still starts where the month does',
+    v_row.period_start = _sub_period(2026, 1, 'start'));
+END $$;
+
+-- 5e. two payments at the same instant, and the open-ended period of rule 1
+DO $$
+DECLARE
+  v_owner constant uuid := '50000000-0000-4000-8000-000000000001';
+  v_month constant integer := extract(month FROM (now() AT TIME ZONE 'Europe/Berlin'))::integer;
+  v_year  constant integer := extract(year  FROM (now() AT TIME ZONE 'Europe/Berlin'))::integer;
+  v_next_m constant integer := extract(month FROM ((now() AT TIME ZONE 'Europe/Berlin') + interval '1 month'))::integer;
+  v_next_y constant integer := extract(year  FROM ((now() AT TIME ZONE 'Europe/Berlin') + interval '1 month'))::integer;
+  v_co    uuid;
+  v_inv_a uuid;
+  v_inv_b uuid;
+BEGIN
+  -- Two invoices of one company, paid in one transaction, so both coverage rows
+  -- carry the same created_at — the deterministic stand-in for two payments
+  -- arriving together (section 6 makes the same point for manual records). The
+  -- later month is paid first, so an answer that depended on write order would
+  -- name the wrong end.
+  v_co    := _sub_billed_company('inv_race');
+  v_inv_a := _sub_invoice('inv_race_a', v_co, v_year,   v_month,
+                          make_date(v_year, v_month, 1) + 4, 20);
+  v_inv_b := _sub_invoice('inv_race_b', v_co, v_next_y, v_next_m,
+                          make_date(v_next_y, v_next_m, 1) + 4, 20);
+
+  -- The later month first, so the order is the unhelpful one.
+  PERFORM _sub_do(v_owner, format('SELECT platform_invoice_mark_paid(%L, %s)::text', v_inv_b, 2000));
+  PERFORM _sub_do(v_owner, format('SELECT platform_invoice_mark_paid(%L, %s)::text', v_inv_a, 2000));
+
+  PERFORM _sub_ok('two invoices: both periods are on record, one row each',
+    (SELECT count(*) FROM subscription_coverage
+      WHERE company_id = v_co AND source = 'invoice' AND status = 'active') = 2);
+  PERFORM _sub_ok('two invoices: …and the later end stands, whichever was paid last',
+    (SELECT subscription_expires_at FROM companies WHERE id = v_co)
+      = _sub_period(v_next_y, v_next_m, 'end'));
+
+  -- Rule 1 of U1: a company carried in as `active` with no expiry stays open.
+  -- An invoice is a bounded period, and the recompute answers open-ended
+  -- whenever any live granting row has no end — so paying must not cap it.
+  v_co    := _sub_billed_company('inv_open', 'active', NULL);
+  PERFORM _sub_ok('open-ended: the backfill carried it in with no expiry',
+    (SELECT subscription_expires_at IS NULL AND subscription_status = 'active'
+       FROM companies WHERE id = v_co)
+    AND _sub_admitted(_sub_id('user:inv_open')));
+
+  v_inv_a := _sub_invoice('inv_open', v_co, v_year, v_month,
+                          make_date(v_year, v_month, 1) + 4, 20);
+  PERFORM _sub_ok('open-ended: it can still pay an invoice',
+    _sub_succeeded(_sub_do(v_owner, format('SELECT platform_invoice_mark_paid(%L, %s)::text', v_inv_a, 2000))));
+  PERFORM _sub_ok('open-ended: …the payment is recorded as its own bounded period',
+    (SELECT period_end FROM subscription_coverage
+      WHERE company_id = v_co AND source = 'invoice' AND source_id = v_inv_a)
+      = _sub_period(v_year, v_month, 'end'));
+  PERFORM _sub_ok('open-ended: …and paying does not cap a company rule 1 left open',
+    (SELECT subscription_expires_at IS NULL FROM companies WHERE id = v_co)
+    AND _sub_admitted(_sub_id('user:inv_open')));
+END $$;
+
+-- 5f. the shape of what U2 added
+DO $$
+DECLARE
+  v_role text;
+  v_sig  text;
+BEGIN
+  FOREACH v_sig IN ARRAY ARRAY[
+      'app_private.subscription_grace_business_days()',
+      'app_private.add_business_days(date,integer)',
+      'app_private.invoice_grace_end(date)',
+      'app_private.subscription_invoice_apply(uuid)',
+      'app_private.subscription_invoices_apply_all()']
+  LOOP
+    FOREACH v_role IN ARRAY ARRAY['anon', 'authenticated', 'service_role'] LOOP
+      PERFORM _sub_ok(format('shape: %s may not call %s', v_role, v_sig),
+        NOT has_function_privilege(v_role, v_sig::regprocedure, 'EXECUTE'));
+    END LOOP;
+  END LOOP;
+
+  -- U2 added no public function, so the permission matrix has nothing new to
+  -- cover: the three RPCs it rewrote are the ones platform-rpcs.sql already
+  -- probes role by role.
+  PERFORM _sub_ok('shape: the three invoice RPCs are still the only public door to an invoice',
+    to_regprocedure('public.platform_invoice_mark_paid(uuid,bigint,timestamptz,text)') IS NOT NULL
+    AND to_regprocedure('public.platform_invoice_mark_unpaid(uuid)') IS NOT NULL
+    AND to_regprocedure('public.platform_invoice_cancel(uuid)') IS NOT NULL
+    AND to_regprocedure('public.subscription_invoice_apply(uuid)') IS NULL);
+
+  -- The sweep exists and is wired to nothing. If a later release wires it, the
+  -- count it answers is how many invoices it touched.
+  PERFORM _sub_ok('shape: the sweep exists, and it walks every invoice',
+    app_private.subscription_invoices_apply_all()
+      = (SELECT count(*) FROM subscription_invoices));
 END $$;
 
 -- ─── 6. two periods at the same instant ─────────────────────────────────────
@@ -1041,6 +1378,6 @@ BEGIN
     AND NOT has_function_privilege('authenticated', 'app_private.subscription_backfill_company(uuid)', 'EXECUTE'));
 END $$;
 
-DO $$ BEGIN RAISE NOTICE '── subscriptions (plan 3.F U1): all checks passed ──'; END $$;
+DO $$ BEGIN RAISE NOTICE '── subscriptions (plan 3.F, steps U1 and U2): all checks passed ──'; END $$;
 
 ROLLBACK;
