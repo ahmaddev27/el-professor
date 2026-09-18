@@ -15,6 +15,7 @@ import { SuperAdminProvider, useSuperAdmin, type CompanyListItem } from './Super
 
 const world = vi.hoisted(() => ({
   rpc: vi.fn(),
+  showToast: vi.fn(),
   auth: {
     user: { id: 'staff-1' } as { id: string } | null,
     isSuperAdmin: true,
@@ -25,6 +26,10 @@ const world = vi.hoisted(() => ({
 
 vi.mock('../lib/supabase', () => ({ supabase: { rpc: world.rpc } }));
 vi.mock('./AuthContext', () => ({ useAuth: () => world.auth }));
+// The provider is what says a company closed on its own — see its own comment
+// for why the bar cannot. `t` returns the key, so a test can name the sentence.
+vi.mock('./ToastContext', () => ({ useToast: () => ({ showToast: world.showToast }) }));
+vi.mock('./LanguageContext', () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
 
 /**
  * vitest runs in the node environment, so there is no DOM. These stand-ins keep
@@ -125,6 +130,7 @@ beforeEach(() => {
   vi.useFakeTimers();
   vi.setSystemTime(T0);
   world.rpc.mockReset();
+  world.showToast.mockReset();
   world.listeners.clear();
   world.auth = { user: { id: 'staff-1' }, isSuperAdmin: true, companyId: null };
 });
@@ -278,6 +284,9 @@ describe('the company comes from the server', () => {
     expect(probe.value.effectiveCompanyId).toBeNull();
     expect(probe.value.companyScope.kind).toBe('none');
     expect(probe.value.companyScope.readOnly).toBe(true);
+    // …and says so. PlatformAccountGuard unmounts the whole tenant subtree,
+    // bar included, in the same render, so this notice cannot live in a screen.
+    expect(world.showToast).toHaveBeenCalledWith('warning', 'support.bar.expiredTitle', 'support.bar.expiredBody');
   });
 });
 
@@ -355,6 +364,8 @@ describe('opening and closing a company', () => {
     let closing!: Promise<void>;
     await act(async () => { closing = probe.value.closeCompany(); });
     expect(probe.value.effectiveCompanyId).toBeNull();
+    // Ending it yourself is not news; only a company that closed on its own is.
+    expect(world.showToast).not.toHaveBeenCalled();
 
     await act(async () => {
       closeResolved({ data: { success: true }, error: null });

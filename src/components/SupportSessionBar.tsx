@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Eye, LifeBuoy, LogOut } from 'lucide-react';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
@@ -39,11 +39,12 @@ import SupportReasonModal from './SupportReasonModal';
  *
  * ## When the context ends by itself
  *
- * Nothing here has to end it: the provider's timer closes the company at the
- * expiry on its own clock, `PlatformAccountGuard` sends a company-less platform
- * account back to the panel, and this bar disappears with the company. What it
- * adds is the sentence — without it the tenant screens simply vanish and the
- * account finds itself on /admin with no explanation.
+ * Nothing here has to end it, and nothing here can report it: the provider's
+ * timer closes the company at the expiry on its own clock,
+ * `PlatformAccountGuard` turns the tenant subtree into a <Navigate> in that
+ * same render, and this bar unmounts before any effect of its own could run.
+ * The sentence that explains the empty panel is raised by the provider, which
+ * outlives the navigation.
  */
 const SupportSessionBar: React.FC = () => {
   const { platformAccess, activeCompany, openCompany, closeCompany } = useSuperAdmin();
@@ -55,9 +56,6 @@ const SupportSessionBar: React.FC = () => {
   const [now, setNow] = useState(() => Date.now());
   const [askingReason, setAskingReason] = useState(false);
   const [busy, setBusy] = useState(false);
-  /** A context this bar ended on purpose must not be reported as expired. */
-  const endingOnPurpose = useRef(false);
-  const previousMode = useRef<BarState['kind']>('none');
 
   const bar = supportSessionBar(platformAccess, now);
 
@@ -67,19 +65,6 @@ const SupportSessionBar: React.FC = () => {
     const timer = setInterval(() => setNow(Date.now()), 15_000);
     return () => clearInterval(timer);
   }, [bar.kind]);
-
-  // The session ended while the screen was open: say so, unless the person
-  // ended it themselves.
-  useEffect(() => {
-    const was = previousMode.current;
-    previousMode.current = bar.kind;
-    if (was === 'none' || bar.kind !== 'none') return;
-    if (endingOnPurpose.current) {
-      endingOnPurpose.current = false;
-      return;
-    }
-    showToast('warning', t('support.bar.expiredTitle'), t('support.bar.expiredBody'));
-  }, [bar.kind, showToast, t]);
 
   if (bar.kind === 'none') return null;
 
@@ -96,12 +81,10 @@ const SupportSessionBar: React.FC = () => {
 
   const end = async () => {
     setBusy(true);
-    endingOnPurpose.current = true;
     try {
       await closeCompany();
       goAfter(bar.kind, null);
     } catch (error) {
-      endingOnPurpose.current = false;
       showToast('error', contextRefusalMessage(error, t));
     } finally {
       setBusy(false);

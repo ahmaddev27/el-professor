@@ -1,5 +1,7 @@
 import React, { createContext, useContext, useState, useCallback, useEffect, useRef, ReactNode } from 'react';
 import { useAuth } from './AuthContext';
+import { useToast } from './ToastContext';
+import { useTranslation } from './LanguageContext';
 import { supabase } from '../lib/supabase';
 import {
   NO_PLATFORM_ACCESS,
@@ -172,6 +174,8 @@ function companyFromContext(context: PlatformCompanyContext): CompanyListItem {
 
 export const SuperAdminProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const { user, isSuperAdmin, companyId } = useAuth();
+  const { showToast } = useToast();
+  const { t } = useTranslation();
   /*
     The fuller company row, when a panel screen handed one over. It is a label,
     not a permission and not the seam: which company the screens query is
@@ -193,6 +197,10 @@ export const SuperAdminProvider: React.FC<{ children: ReactNode }> = ({ children
   const [clock, setClock] = useState(() => Date.now());
   const answeredFor = useRef<string | null>(null);
   const lastAskedAt = useRef(0);
+  /** Whether a company was open on the previous render, for the notice below. */
+  const hadCompanyContext = useRef(false);
+  /** Set by closeCompany, so the person who ended it is not told it expired. */
+  const endedOnPurpose = useRef(false);
   const userId = user?.id ?? null;
 
   const reloadPlatformAccess = useCallback(() => {
@@ -355,6 +363,7 @@ export const SuperAdminProvider: React.FC<{ children: ReactNode }> = ({ children
     company open on screen for a round trip after the person asked to leave it.
   */
   const closeCompany = useCallback(async (): Promise<void> => {
+    endedOnPurpose.current = true;
     setPlatformAccess(withoutCompanyContext);
     setEnteredCompany(null);
     try {
@@ -394,6 +403,37 @@ export const SuperAdminProvider: React.FC<{ children: ReactNode }> = ({ children
   useEffect(() => {
     setEnteredCompany(current => (current !== null && current.id === scope.companyId ? current : null));
   }, [scope.companyId]);
+
+  /*
+    Saying so when a company closes on its own.
+
+    It belongs here and not in the bar, although the bar is what shows the
+    session: when a context ends, `PlatformAccountGuard` turns the whole tenant
+    subtree into a <Navigate>, so the bar unmounts in that same render and an
+    effect of its own would never run. The provider outlives the navigation, so
+    it is the only place that can see the transition.
+
+    A close the person asked for is not news, and `closeCompany` marks it. What
+    is left is an expiry, a session closed in another tab, a staff row disabled
+    in the meantime — and a re-ask that failed, which also drops the company and
+    earns the same sentence, because from the screens' side it did close.
+
+    No dependency array: it has to compare against the previous *render*, and
+    `companyContext` is a fresh object each time, so a list naming it would run
+    the effect every render anyway. The body returns in two comparisons unless
+    the transition actually happened.
+  */
+  useEffect(() => {
+    const live = companyContext !== null;
+    const was = hadCompanyContext.current;
+    hadCompanyContext.current = live;
+    if (!was || live) return;
+    if (endedOnPurpose.current) {
+      endedOnPurpose.current = false;
+      return;
+    }
+    showToast('warning', t('support.bar.expiredTitle'), t('support.bar.expiredBody'));
+  });
 
   const isViewingAsCompany = scope.isPlatformSession;
   const activeCompanyId = activeCompany?.id ?? null;
