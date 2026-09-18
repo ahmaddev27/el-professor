@@ -239,7 +239,7 @@ export default function CarsManagement() {
           <button
             onClick={handleExport}
             className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-opacity hover:opacity-80"
-            style={{ background: 'var(--success)', color: 'white' }}
+            style={{ background: 'var(--success-solid)', color: 'white' }}
             title={t('common.exportExcelShort')}
           >
             <Download className="w-4 h-4" />

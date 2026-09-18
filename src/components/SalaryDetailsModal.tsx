@@ -903,7 +903,7 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
                     cursor: loadingWeekly ? 'not-allowed' : 'pointer',
                     opacity: loadingWeekly ? 0.7 : 1,
                   }}
-                  onMouseEnter={e => { if (!loadingWeekly) { e.currentTarget.style.background = 'var(--success)'; e.currentTarget.style.color = '#fff'; } }}
+                  onMouseEnter={e => { if (!loadingWeekly) { e.currentTarget.style.background = 'var(--success-solid)'; e.currentTarget.style.color = '#fff'; } }}
                   onMouseLeave={e => { e.currentTarget.style.background = 'var(--success-subtle)'; e.currentTarget.style.color = 'var(--success)'; }}
                   title={t('sal.weekly.buttonTitle')}
                 >

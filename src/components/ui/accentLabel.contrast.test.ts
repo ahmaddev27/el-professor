@@ -42,6 +42,21 @@ const FILLED_BACKGROUND_TOKENS = ['accent', 'accent-hover'];
 /** Foregrounds that must never sit on one of those. */
 const FORBIDDEN_LABEL_TOKENS = ['accent-text'];
 
+/**
+ * The same trap, one token pair along.
+ *
+ * `--success` and `--warning` are status TEXT colours: light on the dark theme's
+ * surfaces, dark on the light theme's. `--success-solid` and `--warning-solid`
+ * are the same statuses as a FILL under a white label, and in the dark theme
+ * they are a different value, because no single value can be both (a white
+ * label needs luminance <= 0.183, readable text on --bg-surface needs >= 0.237).
+ *
+ * So a filled status background must name the `-solid` token. Painting one with
+ * `var(--success)` puts white on #10b981 — 2.54:1 — which is what every one of
+ * these call sites did until 17.09.2026.
+ */
+const STATUS_TEXT_TOKENS = ['success', 'warning'];
+
 function sourceFiles(dir: string, acc: string[] = []): string[] {
   for (const entry of readdirSync(dir)) {
     const full = join(dir, entry);
@@ -136,6 +151,33 @@ function findBadPairs(): string[] {
   return offences.sort();
 }
 
+/** Every place a status TEXT token is used as a filled background. */
+function findStatusFills(): string[] {
+  const offences: string[] = [];
+  const imperative = new RegExp(
+    `style\\.background(?:Color)?\\s*=\\s*['"\`]\\s*var\\(\\s*--(?:${STATUS_TEXT_TOKENS.join('|')})\\s*[,)]`,
+  );
+  for (const file of sourceFiles(SRC)) {
+    const src = readFileSync(file, 'utf8');
+    const rel = file.slice(SRC.length).replace(/\\/g, '/');
+    for (const [start, end] of braceSpans(src)) {
+      const body = src.slice(start + 1, end);
+      if (body.length > 2500) continue;
+      const entries = topLevelEntries(body);
+      const backgroundKey = BACKGROUND_KEYS.find(key => entries[key]);
+      if (!backgroundKey) continue;
+      if (!usesToken(entries[backgroundKey], STATUS_TEXT_TOKENS)) continue;
+      offences.push(`${rel}:${src.slice(0, start).split('\n').length}`);
+    }
+    // A hover handler assigning the fill imperatively is the same defect, and no
+    // style object holds it — SalaryDetailsModal.tsx:906 was exactly that.
+    src.split('\n').forEach((text, i) => {
+      if (imperative.test(text)) offences.push(`${rel}:${i + 1}`);
+    });
+  }
+  return [...new Set(offences)].sort();
+}
+
 describe('accent label pairing', () => {
   it('finds the style objects it is meant to read', () => {
     // Guards the scanner itself: if the parser silently stopped matching style
@@ -149,5 +191,19 @@ describe('accent label pairing', () => {
 
   it('never paints a label with --accent-text on an --accent background', () => {
     expect(findBadPairs()).toEqual([]);
+  });
+});
+
+describe('status fill tokens', () => {
+  it('finds the style objects it is meant to read', () => {
+    // Same self-check as above: a parser that stopped matching would report no
+    // offences and the rule below would pass while checking nothing.
+    const anySolidFill = sourceFiles(SRC).some(f =>
+      /background:\s*'var\(--(success|warning)-solid\)'/.test(readFileSync(f, 'utf8')));
+    expect(anySolidFill).toBe(true);
+  });
+
+  it('fills with --success-solid / --warning-solid, never with the text token', () => {
+    expect(findStatusFills()).toEqual([]);
   });
 });

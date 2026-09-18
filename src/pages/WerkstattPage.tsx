@@ -190,7 +190,7 @@ export default function WerkstattPage() {
           <button
             onClick={handleExport}
             className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-opacity hover:opacity-80"
-            style={{ background: 'var(--success)', color: 'white' }}
+            style={{ background: 'var(--success-solid)', color: 'white' }}
             title={t('common.exportExcel')}
           >
             <Download className="w-4 h-4" />
@@ -199,7 +199,7 @@ export default function WerkstattPage() {
           <button
             onClick={() => { setSelectedCheck(null); setShowModal(true); }}
             className="flex items-center gap-2 px-4 py-2 rounded-lg"
-            style={{ background: 'var(--warning)', color: 'white' }}
+            style={{ background: 'var(--warning-solid)', color: 'white' }}
             onMouseEnter={e => { (e.currentTarget as HTMLElement).style.opacity = '0.85'; }}
             onMouseLeave={e => { (e.currentTarget as HTMLElement).style.opacity = '1'; }}
           >
@@ -285,7 +285,7 @@ export default function WerkstattPage() {
           <button
             onClick={() => { setSelectedCheck(null); setShowModal(true); }}
             className="inline-flex items-center gap-2 px-4 py-2 rounded-lg"
-            style={{ background: 'var(--warning)', color: 'white' }}
+            style={{ background: 'var(--warning-solid)', color: 'white' }}
           >
             <Plus className="w-5 h-5" />
             Ersten Check erstellen

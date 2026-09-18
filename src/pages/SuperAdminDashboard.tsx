@@ -690,7 +690,7 @@ export default function SuperAdminDashboard() {
           <Link
             to="/super-admin/companies"
             className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-opacity hover:opacity-85"
-            style={{ background: 'var(--warning)', color: 'white' }}
+            style={{ background: 'var(--warning-solid)', color: 'white' }}
           >
             <Building2 size={14} />
             {t('sa.dash.allCompanies')}
@@ -719,7 +719,7 @@ export default function SuperAdminDashboard() {
             <tab.icon size={14} />
             {tab.label}
             {tab.badge !== undefined && tab.badge > 0 && (
-              <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] rounded-full flex items-center justify-center text-[10px] font-bold text-white" style={{ background: 'var(--warning)' }}>
+              <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] rounded-full flex items-center justify-center text-[10px] font-bold text-white" style={{ background: 'var(--warning-solid)' }}>
                 {tab.badge}
               </span>
             )}
@@ -789,7 +789,7 @@ export default function SuperAdminDashboard() {
                         onClick={() => handleApprove(c)}
                         disabled={approvingId === c.id}
                         className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-opacity hover:opacity-85 disabled:opacity-50"
-                        style={{ background: 'var(--success)', color: 'white' }}
+                        style={{ background: 'var(--success-solid)', color: 'white' }}
                       >
                         {approvingId === c.id ? <RefreshCw size={11} className="animate-spin" /> : <CheckCircle size={11} />}
                         {t('sa.dash.approve')}
@@ -1033,7 +1033,7 @@ export default function SuperAdminDashboard() {
                         onClick={() => handleExtendTrial(item.company)}
                         disabled={extendingId === item.company.id}
                         className="px-2.5 py-1 rounded-lg text-xs font-semibold transition-opacity hover:opacity-80"
-                        style={{ background: 'var(--warning)', color: 'white' }}
+                        style={{ background: 'var(--warning-solid)', color: 'white' }}
                       >
                         {t('sa.dash.extendSevenDays')}
                       </button>
@@ -1105,7 +1105,7 @@ export default function SuperAdminDashboard() {
                           onClick={() => handleExtendTrial(c)}
                           disabled={extendingId === c.id}
                           className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-opacity hover:opacity-80 ${canLifecycle ? 'flex' : 'hidden'} items-center gap-1`}
-                          style={{ background: 'var(--warning)', color: 'white' }}
+                          style={{ background: 'var(--warning-solid)', color: 'white' }}
                         >
                           {extendingId === c.id ? <RefreshCw size={11} className="animate-spin" /> : <Zap size={11} />}
                           {t('sa.dash.extendSevenDays')}
@@ -1114,7 +1114,7 @@ export default function SuperAdminDashboard() {
                           hidden={!canLifecycle}
                           onClick={() => handleStatusChange(c, 'active')}
                           className="px-2.5 py-1 rounded-lg text-xs font-semibold transition-opacity hover:opacity-80"
-                          style={{ background: 'var(--success)', color: 'white' }}
+                          style={{ background: 'var(--success-solid)', color: 'white' }}
                         >
                           {t('sa.dash.activate')}
                         </button>
@@ -1447,7 +1447,7 @@ export default function SuperAdminDashboard() {
             onMouseLeave={e => { (e.currentTarget.style.borderColor = 'var(--border)'); (e.currentTarget.style.color = 'var(--text-secondary)'); }}
           >
             {pendingCompanies.length > 0 && (
-              <span className="absolute top-2 right-2 min-w-[18px] h-[18px] rounded-full flex items-center justify-center text-[10px] font-bold text-white" style={{ background: 'var(--warning)' }}>
+              <span className="absolute top-2 right-2 min-w-[18px] h-[18px] rounded-full flex items-center justify-center text-[10px] font-bold text-white" style={{ background: 'var(--warning-solid)' }}>
                 {pendingCompanies.length}
               </span>
             )}

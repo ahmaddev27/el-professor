@@ -306,7 +306,7 @@ const FixedCostsManagement: React.FC = () => {
             <button
               onClick={() => setIsAdding(true)}
               className="w-full flex items-center justify-center gap-2 px-4 py-3 text-white rounded-lg transition-colors"
-              style={{ background: 'var(--success)' }}
+              style={{ background: 'var(--success-solid)' }}
             >
               <Plus size={20} />
               {t('fleet.addFixedCost')}
@@ -347,7 +347,7 @@ const FixedCostsManagement: React.FC = () => {
                 <button
                   onClick={handleAdd}
                   className="flex-1 flex items-center justify-center gap-2 px-4 py-2 text-white rounded-lg"
-                  style={{ background: 'var(--success)' }}
+                  style={{ background: 'var(--success-solid)' }}
                 >
                   <Save size={16} />
                   {t('common.save')}

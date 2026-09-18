@@ -163,7 +163,7 @@ const BelegePage: React.FC = () => {
               setIsReceiptModalOpen(true);
             }}
             className="flex items-center justify-center rounded-lg transition-colors w-11 h-11 sm:w-auto sm:h-auto sm:px-4 sm:py-2"
-            style={{ background: 'var(--success)', color: 'white' }}
+            style={{ background: 'var(--success-solid)', color: 'white' }}
             title={t('belege.add')}
             onMouseEnter={e => { (e.currentTarget as HTMLElement).style.opacity = '0.9'; }}
             onMouseLeave={e => { (e.currentTarget as HTMLElement).style.opacity = '1'; }}
