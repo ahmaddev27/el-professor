@@ -17,7 +17,13 @@ export default defineConfig({
     // APIs, so Node runs them unchanged. Anything that touches Deno is kept out
     // of those files. tests/deploy pins the compose and Kong settings that keep
     // account creation closed, and runs deploy.sh's sign-in guards.
-    include: ['src/**/*.test.ts', 'supabase/functions/_shared/**/*.test.ts', 'tests/deploy/**/*.test.ts'],
+    // scripts/ holds the build gates' own rules (the style ratchet's counter).
+    include: [
+      'src/**/*.test.ts',
+      'supabase/functions/_shared/**/*.test.ts',
+      'tests/deploy/**/*.test.ts',
+      'scripts/**/*.test.ts',
+    ],
     environment: 'node',
   },
 });
