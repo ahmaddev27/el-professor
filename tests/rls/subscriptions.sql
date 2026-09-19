@@ -1,7 +1,8 @@
 /*
-  Plan 3.F steps U1 and U2: one subscription model — the coverage table, the
-  recompute, the backfill that filled it without changing anybody's access, and
-  the invoice and payment rules that came next.
+  Plan 3.F steps U1, U2 and U3: one subscription model — the coverage table, the
+  recompute, the backfill that filled it without changing anybody's access, the
+  invoice and payment rules that came next, and the wall that keeps every other
+  writer off the columns the model derives.
 
   Runs after the migrations and the seeds, as supabase_admin, in one transaction
   that is rolled back at the end, so the files after it see the database as the
@@ -58,6 +59,16 @@
     7. the shape       one SELECT policy, no write policy, no write grant, a
                        member reads its own company only, a coverage row cannot
                        be re-pointed at another company
+    8. the wall        U3. A request PostgREST serves — the platform owner
+                       through the companies policies, the service role past
+                       them — cannot change any of the five subscription
+                       columns, on UPDATE or INSERT; carrying a column's current
+                       value is not a change; a company's own administrator is
+                       still stopped by RLS first; the two columns only a
+                       redemption and a manual edit own still reach the row
+                       through them; and the functions that write the five are
+                       exactly the ones the migration names, found by a reader
+                       that is shown not to be blind
 
   The companies here are created inside this file rather than in seed.sql for
   the same reason tenant-state.sql creates its own: they exist to be refused,
@@ -100,6 +111,14 @@
   and the migration itself writes no coverage row. Everything else about U2 is
   section 5 below, including the one property the migration cannot assert about
   itself: that the rule produces the right period.
+
+  20260920120000 (U3) keeps the division too. Its self-check pins the shape —
+  the trigger fires BEFORE INSERT OR UPDATE for every row and column, its
+  function is not SECURITY DEFINER, every sanctioned writer is — and compares the
+  list of functions that write the five columns with the one it names. Section 8
+  restates that list here, where it is checked after every migration and every
+  earlier test file has run, and it is the only place the wall is exercised as
+  the roles it exists to refuse.
 */
 
 \set ON_ERROR_STOP on
@@ -1433,6 +1452,265 @@ BEGIN
     AND NOT has_function_privilege('authenticated', 'app_private.subscription_backfill_company(uuid)', 'EXECUTE'));
 END $$;
 
-DO $$ BEGIN RAISE NOTICE '── subscriptions (plan 3.F, steps U1 and U2): all checks passed ──'; END $$;
+-- ─── 8. the wall: nothing writes the derived columns directly (U3) ──────────
+--
+-- 20260920120000. The migrations run before any test file, so every sanctioned
+-- writer this file has already called went through the wall: the recompute in
+-- 1, update_company_subscription_manual in 3b, platform_company_set_plan in 3c,
+-- redeem_activation_code in 4, the invoice RPCs in 5. What is left is the other
+-- half: a request PostgREST serves is refused, and only for a change.
+
+/**
+  _sub_try as the service role, which is what an edge function holding the
+  service key runs as. The same always-rolled-back subtransaction, for the same
+  reason: a probe that should have been refused and was not leaves nothing.
+*/
+CREATE OR REPLACE FUNCTION _sub_try_service(p_sql text) RETURNS text
+LANGUAGE plpgsql AS $$
+DECLARE
+  v_out   text;
+  v_rows  bigint;
+  v_state text;
+  v_msg   text;
+BEGIN
+  BEGIN
+    PERFORM _sub_reset();
+    PERFORM set_config('request.jwt.claim.role', 'service_role', true);
+    EXECUTE 'SET LOCAL ROLE service_role';
+    EXECUTE p_sql;
+    GET DIAGNOSTICS v_rows = ROW_COUNT;
+    RAISE EXCEPTION USING ERRCODE = 'ZZ006', MESSAGE = 'rows ' || v_rows;
+  EXCEPTION
+    WHEN SQLSTATE 'ZZ006' THEN
+      v_out := SQLERRM;
+    WHEN OTHERS THEN
+      GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE, v_msg = MESSAGE_TEXT;
+      v_out := 'ERR ' || v_state || ' ' || v_msg;
+  END;
+  PERFORM _sub_reset();
+  RETURN v_out;
+END $$;
+
+-- 8a–8d. the roles PostgREST serves a request as
+DO $$
+DECLARE
+  v_owner constant uuid := '50000000-0000-4000-8000-000000000001';
+  v_co    uuid;
+  v_new   constant uuid := _sub_id('company:wall-new');
+  v_set   text;
+  v_out   text;
+BEGIN
+  -- A company inside the model: backfilled, so its five columns are what its
+  -- coverage says, and a refusal below is about the write and not about a row
+  -- that was already out of step.
+  v_co := _sub_company('wall', 'approved', 'active', 'active', now() - interval '1 year',
+                       now() + interval '30 days', now() - interval '1 year');
+  PERFORM app_private.subscription_backfill_company(v_co);
+
+  -- 8a. The door. companies_update admits a holder of companies.lifecycle, and
+  --     the seeded owner holds it. The control comes first, so a refusal below
+  --     cannot be RLS or a malformed statement in disguise.
+  PERFORM _sub_ok('wall: the owner reaches the row through the companies_update policy (control)',
+    _sub_try(v_owner, format('UPDATE companies SET name = name WHERE id = %L', v_co)) = 'rows 1');
+
+  -- Every value differs from the row's, and each is one the table's own CHECKs
+  -- accept, so the only thing that can refuse it is the wall.
+  FOREACH v_set IN ARRAY ARRAY[
+      $s$subscription_status = 'expired'$s$,
+      $s$subscription_expires_at = NULL$s$,
+      $s$subscription_expires_at = now() + interval '10 years'$s$,
+      $s$subscription_started_at = now() - interval '2 years'$s$,
+      $s$subscription_duration_type = '1_jahr'$s$,
+      $s$plan = 'premium'$s$]
+  LOOP
+    v_out := _sub_try(v_owner, format('UPDATE companies SET %s WHERE id = %L', v_set, v_co));
+    PERFORM _sub_ok(format('wall: the owner, through PostgREST, cannot write %s (%s)', v_set, left(v_out, 40)),
+      v_out LIKE 'ERR 42501%');
+  END LOOP;
+
+  -- A statement that carries a column's current value is not a write of it: a
+  -- screen that reads a row and sends it back whole must still save.
+  PERFORM _sub_ok('wall: restating all five current values is not a write',
+    _sub_try(v_owner, format(
+      'UPDATE companies SET plan = plan, subscription_status = subscription_status, '
+      || 'subscription_expires_at = subscription_expires_at, '
+      || 'subscription_started_at = subscription_started_at, '
+      || 'subscription_duration_type = subscription_duration_type WHERE id = %L', v_co)) = 'rows 1');
+
+  -- 8b. The service role. RLS does not apply to it, and the wall does not ask.
+  PERFORM _sub_ok('wall: the service role reaches the row (control)',
+    _sub_try_service(format('UPDATE companies SET name = name WHERE id = %L', v_co)) = 'rows 1');
+  PERFORM _sub_ok('wall: the service role cannot move the status past the recompute',
+    _sub_try_service(format($q$UPDATE companies SET subscription_status = 'expired' WHERE id = %L$q$, v_co))
+      LIKE 'ERR 42501%');
+  PERFORM _sub_ok('wall: …nor open the expiry, the one change that would grant for ever',
+    _sub_try_service(format('UPDATE companies SET subscription_expires_at = NULL WHERE id = %L', v_co))
+      LIKE 'ERR 42501%');
+  PERFORM _sub_ok('wall: …nor the tier, past platform_company_set_plan',
+    _sub_try_service(format($q$UPDATE companies SET plan = 'premium' WHERE id = %L$q$, v_co))
+      LIKE 'ERR 42501%');
+
+  -- 8c. INSERT. companies_insert still lets the owner create a company; it may
+  --     not arrive subscribed, dated or tiered.
+  PERFORM _sub_ok('wall: the owner inserts a company whose five columns are neutral (control)',
+    _sub_try(v_owner, format($q$INSERT INTO companies (id, name, slug) VALUES (%L, 'SUB wall new', 'sub-wall-new')$q$,
+                             v_new)) = 'rows 1');
+  PERFORM _sub_ok('wall: …but not one that arrives subscribed',
+    _sub_try(v_owner, format($q$INSERT INTO companies (id, name, slug, subscription_status)
+                                VALUES (%L, 'SUB wall new', 'sub-wall-new', 'active')$q$, v_new))
+      LIKE 'ERR 42501%');
+  PERFORM _sub_ok('wall: …nor with an expiry no coverage row holds',
+    _sub_try(v_owner, format($q$INSERT INTO companies (id, name, slug, subscription_expires_at)
+                                VALUES (%L, 'SUB wall new', 'sub-wall-new', now() + interval '1 year')$q$, v_new))
+      LIKE 'ERR 42501%');
+  PERFORM _sub_ok('wall: …nor with a start or a duration word',
+    _sub_try(v_owner, format($q$INSERT INTO companies (id, name, slug, subscription_started_at, subscription_duration_type)
+                                VALUES (%L, 'SUB wall new', 'sub-wall-new', now(), '1_monat')$q$, v_new))
+      LIKE 'ERR 42501%');
+  PERFORM _sub_ok('wall: …nor on a tier platform_company_set_plan did not set',
+    _sub_try(v_owner, format($q$INSERT INTO companies (id, name, slug, plan)
+                                VALUES (%L, 'SUB wall new', 'sub-wall-new', 'premium')$q$, v_new))
+      LIKE 'ERR 42501%');
+  PERFORM _sub_ok('wall: the service role is held to the same rule on INSERT',
+    _sub_try_service(format($q$INSERT INTO companies (id, name, slug, subscription_status)
+                               VALUES (%L, 'SUB wall new', 'sub-wall-new', 'active')$q$, v_new))
+      LIKE 'ERR 42501%');
+
+  -- 8d. A company's own administrator never reached the row. The wall stands
+  --     behind RLS, not in front of it, so that answer is unchanged.
+  PERFORM _sub_ok('wall: a company admin is still stopped by RLS first — no row, so no refusal',
+    _sub_try(_sub_id('user:wall'), format($q$UPDATE companies SET plan = 'premium' WHERE id = %L$q$, v_co))
+      = 'rows 0');
+END $$;
+
+-- 8e. The two guarded columns the recompute does not own reach the row through
+--     their own writers, called as the roles that call them. The write and the
+--     read of it are two statements each (5d says why).
+DO $$
+DECLARE
+  v_owner constant uuid := '50000000-0000-4000-8000-000000000001';
+  v_co    constant uuid := _sub_id('company:wall');
+  v_out   text;
+BEGIN
+  INSERT INTO activation_codes (id, code_hash, duration_type, expires_at, created_by, company_id)
+  VALUES (_sub_id('code:wall'), encode(sha256(convert_to('300444', 'UTF8')), 'hex'),
+          '3_monate', now() + interval '7 days', _sub_id('user:wall'), v_co);
+
+  v_out := _sub_do(_sub_id('user:wall'), 'SELECT redeem_activation_code(''300444'')::text');
+  PERFORM _sub_ok('wall: a company admin''s redemption still succeeds', _sub_succeeded(v_out));
+  PERFORM _sub_ok('wall: …and writes the start and the duration word it owns',
+    (SELECT subscription_duration_type = '3_monate' AND subscription_started_at IS NOT NULL
+       FROM companies WHERE id = v_co));
+
+  v_out := _sub_do(v_owner, format(
+    'SELECT update_company_subscription_manual(%L, %L, %L, %L, %L, %L)::text',
+    v_co, 'active', now() - interval '1 day', now() + interval '1 year', '1_jahr', 'sub wall'));
+  PERFORM _sub_ok('wall: a platform owner''s manual edit still succeeds', _sub_succeeded(v_out));
+  PERFORM _sub_ok('wall: …and writes the duration word it owns, beside the status the recompute derived',
+    (SELECT subscription_duration_type = '1_jahr' AND subscription_status = 'active'
+       FROM companies WHERE id = v_co));
+END $$;
+
+-- 8f. the shape: the migration's self-check restated, since that ran before
+--     any later migration could have touched it
+DO $$
+BEGIN
+  PERFORM _sub_ok('wall shape: an enabled BEFORE INSERT OR UPDATE row trigger on companies, for every column',
+    EXISTS (SELECT 1 FROM pg_trigger t
+             WHERE t.tgrelid = 'public.companies'::regclass
+               AND t.tgname = 'refuse_direct_subscription_write'
+               AND NOT t.tgisinternal
+               AND t.tgfoid = 'app_private.refuse_direct_subscription_write()'::regprocedure
+               AND t.tgenabled = 'O'
+               AND t.tgtype & 1 = 1 AND t.tgtype & 2 = 2 AND t.tgtype & 4 = 4 AND t.tgtype & 16 = 16
+               AND pg_get_triggerdef(t.oid) !~* '\mupdate\s+of\M'));
+  PERFORM _sub_ok('wall shape: its function is not SECURITY DEFINER, or current_user inside it would be its owner and it would refuse nobody',
+    NOT (SELECT p.prosecdef FROM pg_proc p
+          WHERE p.oid = 'app_private.refuse_direct_subscription_write()'::regprocedure));
+  PERFORM _sub_ok('wall shape: no API role may call either U3 function',
+    NOT has_function_privilege('anon',          'app_private.refuse_direct_subscription_write()', 'EXECUTE')
+    AND NOT has_function_privilege('authenticated', 'app_private.refuse_direct_subscription_write()', 'EXECUTE')
+    AND NOT has_function_privilege('service_role',  'app_private.refuse_direct_subscription_write()', 'EXECUTE')
+    AND NOT has_function_privilege('anon',          'app_private.subscription_column_writes()', 'EXECUTE')
+    AND NOT has_function_privilege('authenticated', 'app_private.subscription_column_writes()', 'EXECUTE')
+    AND NOT has_function_privilege('service_role',  'app_private.subscription_column_writes()', 'EXECUTE'));
+END $$;
+
+-- 8g. the catalogue. The list is restated here rather than read from the
+--     migration, as platform-authority.sql restates the capability matrix: a
+--     migration that adds a writer has to change both, in the same commit.
+DO $$
+DECLARE
+  v_missing text;
+  v_extra   text;
+BEGIN
+  WITH expected(fn, column_name, via) AS (
+    VALUES
+      ('app_private.recompute_company_subscription(uuid)'::regprocedure::oid, 'plan',                    'update'),
+      ('app_private.recompute_company_subscription(uuid)'::regprocedure::oid, 'subscription_expires_at', 'update'),
+      ('app_private.recompute_company_subscription(uuid)'::regprocedure::oid, 'subscription_status',     'update'),
+      ('public.platform_company_set_plan(uuid,text,text,integer)'::regprocedure::oid, 'plan',            'update'),
+      ('public.redeem_activation_code(text)'::regprocedure::oid, 'subscription_duration_type',           'update'),
+      ('public.redeem_activation_code(text)'::regprocedure::oid, 'subscription_started_at',              'update'),
+      ('public.update_company_subscription_manual(uuid,text,timestamptz,timestamptz,text,text)'::regprocedure::oid,
+                                                                  'subscription_duration_type',           'update'),
+      ('public.update_company_subscription_manual(uuid,text,timestamptz,timestamptz,text,text)'::regprocedure::oid,
+                                                                  'subscription_started_at',              'update'),
+      ('app_private.signup_insert_company(uuid,text,text,text,text,text,integer,uuid,text,text)'::regprocedure::oid,
+                                                                  'plan',                                 'insert'),
+      ('app_private.signup_insert_company(uuid,text,text,text,text,text,integer,uuid,text,text)'::regprocedure::oid,
+                                                                  'subscription_status',                  'insert')
+  ),
+  found AS (
+    SELECT w.routine::oid AS fn, w.column_name, w.via FROM app_private.subscription_column_writes() w
+  )
+  SELECT (SELECT string_agg(e.line, '; ' ORDER BY e.line)
+            FROM (SELECT format('%s writes %s (%s)', d.fn::regprocedure, d.column_name, d.via) AS line
+                    FROM (SELECT * FROM expected EXCEPT SELECT * FROM found) d) e),
+         (SELECT string_agg(e.line, '; ' ORDER BY e.line)
+            FROM (SELECT format('%s writes %s (%s)', d.fn::regprocedure, d.column_name, d.via) AS line
+                    FROM (SELECT * FROM found EXCEPT SELECT * FROM expected) d) e)
+    INTO v_missing, v_extra;
+
+  PERFORM _sub_ok('catalogue: no function writes a subscription column of companies but the sanctioned ones'
+                  || coalesce(' — found ' || v_extra, ''),
+    v_extra IS NULL);
+  PERFORM _sub_ok('catalogue: …and every sanctioned one still writes what it owns'
+                  || coalesce(' — missing ' || v_missing, ''),
+    v_missing IS NULL);
+END $$;
+
+/*
+  …and the reader is not blind. A check that finds nothing passes just as well
+  when it cannot see, so a writer is planted in every spelling the sanctioned
+  ones do not use (an alias, ONLY, the row form of SET, an INSERT with a column
+  list), next to two writes that only a comment describes. It lives until the
+  ROLLBACK at the end of this file.
+*/
+CREATE FUNCTION public.u3_wall_probe_writer() RETURNS void
+LANGUAGE plpgsql AS $f$
+BEGIN
+  -- UPDATE companies SET subscription_duration_type = 'described, not written';
+  /* UPDATE companies SET subscription_started_at = now(); */
+  UPDATE ONLY public.companies AS c SET subscription_status = 'active' WHERE false;
+  UPDATE companies SET (name, subscription_expires_at) = ('probe', NULL) WHERE false;
+  INSERT INTO companies (name, slug, plan) SELECT 'probe', 'probe', 'premium' WHERE false;
+END $f$;
+
+DO $$
+DECLARE
+  v_found text;
+BEGIN
+  SELECT string_agg(w.column_name || ':' || w.via, ',' ORDER BY w.column_name)
+    INTO v_found
+    FROM app_private.subscription_column_writes() w
+   WHERE w.routine::oid = 'public.u3_wall_probe_writer()'::regprocedure::oid;
+
+  PERFORM _sub_ok(format('catalogue: the reader finds a write however it is spelled, and not one a comment describes (found %s)',
+                         coalesce(v_found, 'nothing')),
+    v_found = 'plan:insert,subscription_expires_at:update,subscription_status:update');
+END $$;
+
+DO $$ BEGIN RAISE NOTICE '── subscriptions (plan 3.F, steps U1, U2 and U3): all checks passed ──'; END $$;
 
 ROLLBACK;

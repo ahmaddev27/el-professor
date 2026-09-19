@@ -65,7 +65,8 @@ A step counts once it is merged into `staging` and verified there. Production re
 - [x] **3.0** Permission matrix: seven roles × every table, view and client-callable RPC, including moving a row into another company; six more functions closed to anonymous callers — PR #12
 - [x] **3.8 U0** Subscription conflict report: a read-only SQL report of where the subscription models disagree, run once on staging — PR #21
 - [x] **3.8 U1** One subscription model, expansion and backfill: `subscription_coverage`, `recompute_company_subscription`, one suspension state, and a migration gated on nobody's access changing
-- [x] **3.8 U2** One subscription model, the invoice and payment functions: paying records the invoiced month, an unpaid invoice grants two business days past its due date, cancelling withdraws the coverage — in review
+- [x] **3.8 U2** One subscription model, the invoice and payment functions: paying records the invoiced month, an unpaid invoice grants two business days past its due date, cancelling withdraws the coverage — live on production since 19.09.2026
+- [x] **3.8 U3** One subscription model, no direct writes: a trigger refuses any change to the five subscription columns of `companies` from the roles PostgREST serves, a catalogue check fails a release that adds another writer, and a vitest fails on a direct `.from('companies')` write; the e2e setup records coverage instead of writing the columns — in review
 - [x] **1.6, database part** Google sign-in groundwork: pending Google signups, one shared company insert, and register, reconcile and purge RPCs for the service role only; nothing calls them yet — PR #22
 - [x] **Security fix:** `is_user_super_admin()` never answers NULL, and `create_user_profile_manual` is closed to anonymous callers (closed by hand on production and staging first) — PR #26
 - [x] **Security:** five guarded RPCs are no longer executable by anonymous callers (none was exploitable) — PR #28
