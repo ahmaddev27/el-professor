@@ -89,10 +89,10 @@ export const de = {
   'support.reason.required':    'Bitte einen Grund angeben.',
   'support.reason.tooLong':     'Der Grund ist zu lang.',
   'support.reason.confirm':     'Support-Sitzung starten',
-  // The bucket policies still resolve the company from the profile's
-  // membership, so a support session reaches a company's rows but not its
-  // files. The fix is a migration; this is what the screen says until then.
-  'support.storage.membershipOnly': 'Dateien dieses Unternehmens sind in einer Support-Sitzung noch nicht zugänglich. Der Zugriff auf den Dateispeicher folgt noch der Unternehmenszugehörigkeit des Kontos.',
+  // Since 20260920100000 a support session writes the opened company's files
+  // and a read-only context writes none; this is what a refused upload in the
+  // read-only context says instead of a raw storage error.
+  'support.storage.readOnly': 'Nur-Lese-Ansicht: Dateien dieses Unternehmens können nur in einer Support-Sitzung gespeichert werden.',
   'support.error.denied':           'Keine Berechtigung für diese Aktion.',
   'support.error.contextOpen':      'Es ist bereits ein Zugriff auf ein anderes Unternehmen offen. Bitte zuerst beenden.',
   'support.error.reasonRequired':   'Für eine Support-Sitzung ist ein Grund erforderlich.',

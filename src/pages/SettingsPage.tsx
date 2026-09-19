@@ -171,17 +171,15 @@ const SettingsPage: React.FC = () => {
         });
 
       /*
-        Inside a support session this is where the screen stops, and the raw
-        message does not say why. The `company-logos` policies
-        (`20260507193515`) read the membership from `user_profiles` and demand
-        `role IN ('admin','super_admin')` on that same profile — neither of
-        which a company-less platform account has — so the upload is refused
-        before the `company_settings` upsert below is ever reached. Fixing the
-        policy is SQL, and the storage half of plan 3.C; saying so is not.
+        Since 20260920100000 a support session uploads the opened company's
+        logo (it passes the administrator gate through is_company_admin()), and
+        a read-only (`view`) context is refused by the bucket policy — before
+        the `company_settings` upsert below is ever reached. That refusal is a
+        rule, so it gets the sentence that names it rather than the raw error.
       */
       if (uploadError) {
-        throw new Error(companyScope.isPlatformSession
-          ? t('support.storage.membershipOnly')
+        throw new Error(companyScope.isPlatformSession && companyScope.readOnly
+          ? t('support.storage.readOnly')
           : `Speicher-Upload fehlgeschlagen: ${uploadError.message}`);
       }
 

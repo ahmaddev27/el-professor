@@ -75,23 +75,24 @@ export interface CompanyScope {
    * closes for a `view` context is the 36 tenant tables plus `roles`,
    * `role_permissions` and `activation_code_attempts`
    * (`app_private.refuse_read_only_context_write`), and the ten role-gated
-   * tables again through `current_role_permits()`. Three paths are outside it,
-   * all of them 3.3/3.4a residue that this slice makes *reachable* for the
-   * first time rather than creating:
+   * tables again through `current_role_permits()`. Two paths are outside it,
+   * both 3.3/3.4a residue that this slice makes *reachable* for the first time
+   * rather than creating:
    *
    * - `user_profiles` — `user_profiles_update` / `_delete` carry a
    *   `company_users.manage` branch with no company term and no trigger.
    * - `company_settings` — the same shape under `companies.lifecycle`;
    *   deliberately left off the trigger's list, with the reasoning in that
    *   migration's own loop.
-   * - `storage.objects` — no trigger at all, and since `get_user_company_id()`
-   *   now answers the context, a view context reaches that company's prefixes
-   *   wherever a bucket policy asks that helper.
    *
    * Each needs a capability its holder already uses across every company with
-   * no context at all, so none of them is a new grant. They are named in
-   * HANDOFF.md as follow-ups, and 3.4c's write-audit triggers are where they
-   * belong. Do not read this flag as "the write cannot happen".
+   * no context at all, so neither is a new grant. They are named in HANDOFF.md
+   * as follow-ups, and 3.4c's write-audit triggers are where they belong. Do
+   * not read this flag as "the write cannot happen".
+   *
+   * `storage.objects` was the third until 20260920100000: its bucket policies
+   * now write only for a member or inside a support session, so a view context
+   * reads a company's files and writes none of them.
    */
   readOnly: boolean;
   /** A platform account looking at a company that is not its own. */
@@ -152,7 +153,7 @@ export function companyScope({ ownCompanyId, context }: CompanyScopeInput): Comp
  * Deliberately narrow: it covers the screens that ask `canEdit`, `canCreate`
  * and `canDelete`, not every button in the product. What the rest do inside a
  * read context is show their button and be refused by the database, in the
- * German sentence the refusal trigger raises — except on the three paths named
+ * German sentence the refusal trigger raises — except on the two paths named
  * under `readOnly` above, where the write goes through. The boundary is the
  * database either way; this is courtesy, and the bar is what explains it.
  */
