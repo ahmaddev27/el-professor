@@ -111,6 +111,33 @@ API=https://api-staging.elprofessor.eu
 
 json_string() { python3 -c 'import json,sys; print(json.dumps(sys.stdin.read().rstrip("\n")))'; }
 
+# Approved and subscribed, so a sign-in lands in the app rather than on a gate.
+#
+# The subscription is recorded as a coverage period, not written onto the
+# company. subscription_status and subscription_expires_at are derived from
+# public.subscription_coverage (plan 3.F): an UPDATE of them by hand, which is
+# what this script did until U3, holds only until the next recompute, and the
+# daily sweep would then put a company that came in through company-signup
+# with no coverage back to 'inactive' and lock the suite out. The recorder is
+# the one U1 gives every writer; it runs as supabase_admin because app_private
+# is not reachable as postgres. A company already covered for more than a year
+# gets no second row, so a re-run records nothing.
+admit_company() {
+  local user_id="$1"
+  psqlq "UPDATE public.companies c SET approval_status = 'approved'
+           FROM public.user_profiles p
+          WHERE p.user_id = '$user_id' AND c.id = p.company_id" > /dev/null
+  psqlq "SELECT app_private.subscription_coverage_record(
+                  p.company_id, 'manual', NULL, now(), now() + interval '10 years', true,
+                  NULL, NULL, 'e2e/setup-staging.sh: staging test company', false)
+           FROM public.user_profiles p
+          WHERE p.user_id = '$user_id' AND p.company_id IS NOT NULL
+            AND NOT EXISTS (SELECT 1 FROM public.subscription_coverage s
+                             WHERE s.company_id = p.company_id
+                               AND s.status = 'active' AND s.grants_access
+                               AND (s.period_end IS NULL OR s.period_end > now() + interval '1 year'))" > /dev/null
+}
+
 set_admin_password() {
   local uid="$1"
   printf '{"password":%s,"email_confirm":true}' "$(printf '%s' "$ADMIN_PW" | json_string)" > "$work/body"
@@ -194,11 +221,7 @@ else
 fi
 
 # Approved, subscribed and active, so a sign-in lands in the app.
-psqlq "UPDATE public.companies c
-          SET approval_status = 'approved', subscription_status = 'active',
-              subscription_expires_at = now() + interval '10 years'
-         FROM public.user_profiles p
-        WHERE p.user_id = '$uid' AND c.id = p.company_id" > /dev/null
+admit_company "$uid"
 psqlq "UPDATE public.user_profiles SET status = 'active', must_change_password = false WHERE user_id = '$uid'" > /dev/null
 
 [ "$(sign_in_code)" = 200 ] && echo "E2E admin sign-in: works" || { echo "E2E admin cannot sign in"; exit 1; }
@@ -249,11 +272,7 @@ PY
   [ "$rc" = 200 ] || { echo "confirming $addr answered $rc"; exit 1; }
   # Approved, subscribed and active, so the sign-in at the end of the test lands
   # in the app rather than on a gate.
-  psqlq "UPDATE public.companies c
-            SET approval_status = 'approved', subscription_status = 'active',
-                subscription_expires_at = now() + interval '10 years'
-           FROM public.user_profiles p
-          WHERE p.user_id = '$ruid' AND c.id = p.company_id" > /dev/null
+  admit_company "$ruid"
   psqlq "UPDATE public.user_profiles SET status = 'active', must_change_password = false WHERE user_id = '$ruid'" > /dev/null
 done
 echo "reset pool: $n addresses ready"
