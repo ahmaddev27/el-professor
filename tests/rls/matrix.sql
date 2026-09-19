@@ -163,7 +163,10 @@
 
     - storage.objects policies: tests/fixtures/storage-shim.sql lets a migration
       create its bucket and policies, but the fixture is a --schema=public dump
-      that carries none of the older ones, so storage is not probed
+      that carries none of the older ones, so storage is not probed here.
+      20260920100000 restates the four company buckets' policies in full and
+      tests/rls/storage.sql probes them with salary-receipts, per principal
+      and per kind of session
     - edge functions (manage-users, generate-activation-code, otp-request, …)
       and GoTrue
     - app_private: no client role has USAGE on the schema. The SECURITY DEFINER

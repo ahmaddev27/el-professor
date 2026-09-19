@@ -37,8 +37,9 @@
    14. the shape      every table with the tenant shape carries the refusal
                       trigger, whichever migration wrote it
 
-  What is deliberately not here: the storage policies (the file half of plan
-  3.C is not built), and the browser, which is slice 3.4b.
+  What is deliberately not here: the storage policies, which are
+  tests/rls/storage.sql's (20260920100000, the file half of plan 3.C), and the
+  browser, which is slice 3.4b.
 */
 
 \set ON_ERROR_STOP on
