@@ -13,7 +13,9 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:rls": "node scripts/rls-test.mjs"
+    "test:rls": "node scripts/rls-test.mjs",
+    "harness": "vite --config design-harness/vite.config.ts",
+    "harness:capture": "node design-harness/capture.mjs"
   },
   "dependencies": {
     "@fontsource/barlow": "^5.3.0",
