@@ -230,19 +230,29 @@ REVOKE ALL ON FUNCTION app_private.refuse_direct_subscription_write()
 
   - It cannot see dynamic SQL (EXECUTE of a string built at runtime) or a body
     in any language but plpgsql and sql.
-  - It errs towards reporting. An `=` comparison on one of the columns in a
-    WHERE clause counts as an assignment, and so does a semicolon cut short by
-    one inside a string literal. A false report fails loudly and is read by a
-    person; a false silence would not be.
+  - Where it can err, it errs towards reporting: an `=` comparison on one of
+    the columns in a WHERE clause counts as an assignment. A false report fails
+    loudly and is read by a person.
+  - It has two blind spots, and both make it silent rather than noisy:
+      a semicolon inside a string literal ends the statement early, so an
+      assignment after it in the same statement is not seen (the capture stops
+      at the first semicolon, see the next point);
+      two dashes inside a string literal are taken for a line comment by
+      function_code, which strips the rest of that line, so an assignment
+      later on the same line is not seen.
+    Neither occurs in any writer today. The trigger in section 1 does not
+    depend on this reader and has neither blind spot.
   - Every statement ends at its first semicolon, by a negated class and not by
     a lazy quantifier. In PostgreSQL an RE takes its greediness from its first
     quantifier (9.7.3.5), so a lazy `(.*?);` after a greedy `\s+` still runs to
     the last semicolon of the body. That is the shape of U1's
     companies_set_clauses, which is harmless for the checks that use it but not
     a pattern to copy.
-  - Functions whose name starts with an underscore are skipped. No migration
-    defines one, and the RLS kit's helpers are all named that way; some of them
-    insert companies to seed a test.
+  - Every function is read, whatever its name. The RLS kit's helpers start
+    with an underscore and one of them inserts companies to seed a test, but
+    excluding the prefix here would let a future `public._anything` write the
+    columns unseen. tests/rls/subscriptions.sql excludes its own helpers by
+    name instead.
 */
 CREATE OR REPLACE FUNCTION app_private.subscription_column_writes()
 RETURNS TABLE (routine regprocedure, column_name text, via text)
@@ -259,7 +269,6 @@ AS $$
      WHERE n.nspname IN ('public', 'app_private')
        AND l.lanname IN ('plpgsql', 'sql')
        AND p.prokind IN ('f', 'p')
-       AND p.proname NOT LIKE '\_%'
        AND NOT EXISTS (SELECT 1 FROM pg_depend d
                         WHERE d.classid = 'pg_proc'::regclass
                           AND d.objid = p.oid

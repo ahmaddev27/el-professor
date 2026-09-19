@@ -1491,6 +1491,19 @@ BEGIN
   RETURN v_out;
 END $$;
 
+/**
+  Was p_out the wall's own refusal, naming p_column? A bare `LIKE 'ERR 42501%'`
+  cannot tell it from the others that share the code: an RLS WITH CHECK that
+  fails, or a privilege the role does not hold. So the message is matched too,
+  and the column has to be the one the message names.
+*/
+CREATE OR REPLACE FUNCTION _sub_walled(p_out text, p_column text) RETURNS boolean
+LANGUAGE sql IMMUTABLE AS $$
+  SELECT coalesce(p_out LIKE 'ERR 42501 companies: % may not be written directly;%'
+                  AND strpos(split_part(p_out, ' may not be written directly;', 1), p_column) > 0,
+                  false)
+$$;
+
 -- 8a–8d. the roles PostgREST serves a request as
 DO $$
 DECLARE
@@ -1514,7 +1527,8 @@ BEGIN
     _sub_try(v_owner, format('UPDATE companies SET name = name WHERE id = %L', v_co)) = 'rows 1');
 
   -- Every value differs from the row's, and each is one the table's own CHECKs
-  -- accept, so the only thing that can refuse it is the wall.
+  -- accept. _sub_walled() then insists the refusal is the wall's own message,
+  -- naming the column the assignment starts with.
   FOREACH v_set IN ARRAY ARRAY[
       $s$subscription_status = 'expired'$s$,
       $s$subscription_expires_at = NULL$s$,
@@ -1524,8 +1538,8 @@ BEGIN
       $s$plan = 'premium'$s$]
   LOOP
     v_out := _sub_try(v_owner, format('UPDATE companies SET %s WHERE id = %L', v_set, v_co));
-    PERFORM _sub_ok(format('wall: the owner, through PostgREST, cannot write %s (%s)', v_set, left(v_out, 40)),
-      v_out LIKE 'ERR 42501%');
+    PERFORM _sub_ok(format('wall: the owner, through PostgREST, cannot write %s (%s)', v_set, left(v_out, 60)),
+      _sub_walled(v_out, split_part(v_set, ' ', 1)));
   END LOOP;
 
   -- A statement that carries a column's current value is not a write of it: a
@@ -1541,40 +1555,47 @@ BEGIN
   PERFORM _sub_ok('wall: the service role reaches the row (control)',
     _sub_try_service(format('UPDATE companies SET name = name WHERE id = %L', v_co)) = 'rows 1');
   PERFORM _sub_ok('wall: the service role cannot move the status past the recompute',
-    _sub_try_service(format($q$UPDATE companies SET subscription_status = 'expired' WHERE id = %L$q$, v_co))
-      LIKE 'ERR 42501%');
+    _sub_walled(_sub_try_service(format($q$UPDATE companies SET subscription_status = 'expired' WHERE id = %L$q$, v_co)),
+                'subscription_status'));
   PERFORM _sub_ok('wall: …nor open the expiry, the one change that would grant for ever',
-    _sub_try_service(format('UPDATE companies SET subscription_expires_at = NULL WHERE id = %L', v_co))
-      LIKE 'ERR 42501%');
+    _sub_walled(_sub_try_service(format('UPDATE companies SET subscription_expires_at = NULL WHERE id = %L', v_co)),
+                'subscription_expires_at'));
   PERFORM _sub_ok('wall: …nor the tier, past platform_company_set_plan',
-    _sub_try_service(format($q$UPDATE companies SET plan = 'premium' WHERE id = %L$q$, v_co))
-      LIKE 'ERR 42501%');
+    _sub_walled(_sub_try_service(format($q$UPDATE companies SET plan = 'premium' WHERE id = %L$q$, v_co)),
+                'plan'));
 
   -- 8c. INSERT. companies_insert still lets the owner create a company; it may
   --     not arrive subscribed, dated or tiered.
   PERFORM _sub_ok('wall: the owner inserts a company whose five columns are neutral (control)',
     _sub_try(v_owner, format($q$INSERT INTO companies (id, name, slug) VALUES (%L, 'SUB wall new', 'sub-wall-new')$q$,
                              v_new)) = 'rows 1');
+  -- …and naming the five is not what is refused: the same INSERT, with each of
+  -- them written out at its neutral value, is let through.
+  PERFORM _sub_ok('wall: …and one that names all five at their neutral values (control)',
+    _sub_try(v_owner, format($q$INSERT INTO companies (id, name, slug, subscription_status, subscription_expires_at,
+                                                       subscription_started_at, subscription_duration_type, plan)
+                                VALUES (%L, 'SUB wall new', 'sub-wall-new', 'inactive', NULL, NULL, NULL, 'basic')$q$,
+                             v_new)) = 'rows 1');
   PERFORM _sub_ok('wall: …but not one that arrives subscribed',
-    _sub_try(v_owner, format($q$INSERT INTO companies (id, name, slug, subscription_status)
-                                VALUES (%L, 'SUB wall new', 'sub-wall-new', 'active')$q$, v_new))
-      LIKE 'ERR 42501%');
+    _sub_walled(_sub_try(v_owner, format($q$INSERT INTO companies (id, name, slug, subscription_status)
+                                            VALUES (%L, 'SUB wall new', 'sub-wall-new', 'active')$q$, v_new)),
+                'subscription_status'));
   PERFORM _sub_ok('wall: …nor with an expiry no coverage row holds',
-    _sub_try(v_owner, format($q$INSERT INTO companies (id, name, slug, subscription_expires_at)
-                                VALUES (%L, 'SUB wall new', 'sub-wall-new', now() + interval '1 year')$q$, v_new))
-      LIKE 'ERR 42501%');
-  PERFORM _sub_ok('wall: …nor with a start or a duration word',
-    _sub_try(v_owner, format($q$INSERT INTO companies (id, name, slug, subscription_started_at, subscription_duration_type)
-                                VALUES (%L, 'SUB wall new', 'sub-wall-new', now(), '1_monat')$q$, v_new))
-      LIKE 'ERR 42501%');
+    _sub_walled(_sub_try(v_owner, format($q$INSERT INTO companies (id, name, slug, subscription_expires_at)
+                                            VALUES (%L, 'SUB wall new', 'sub-wall-new', now() + interval '1 year')$q$, v_new)),
+                'subscription_expires_at'));
+  v_out := _sub_try(v_owner, format($q$INSERT INTO companies (id, name, slug, subscription_started_at, subscription_duration_type)
+                                       VALUES (%L, 'SUB wall new', 'sub-wall-new', now(), '1_monat')$q$, v_new));
+  PERFORM _sub_ok(format('wall: …nor with a start or a duration word, and the refusal names both (%s)', left(v_out, 90)),
+    _sub_walled(v_out, 'subscription_started_at') AND _sub_walled(v_out, 'subscription_duration_type'));
   PERFORM _sub_ok('wall: …nor on a tier platform_company_set_plan did not set',
-    _sub_try(v_owner, format($q$INSERT INTO companies (id, name, slug, plan)
-                                VALUES (%L, 'SUB wall new', 'sub-wall-new', 'premium')$q$, v_new))
-      LIKE 'ERR 42501%');
+    _sub_walled(_sub_try(v_owner, format($q$INSERT INTO companies (id, name, slug, plan)
+                                            VALUES (%L, 'SUB wall new', 'sub-wall-new', 'premium')$q$, v_new)),
+                'plan'));
   PERFORM _sub_ok('wall: the service role is held to the same rule on INSERT',
-    _sub_try_service(format($q$INSERT INTO companies (id, name, slug, subscription_status)
-                               VALUES (%L, 'SUB wall new', 'sub-wall-new', 'active')$q$, v_new))
-      LIKE 'ERR 42501%');
+    _sub_walled(_sub_try_service(format($q$INSERT INTO companies (id, name, slug, subscription_status)
+                                           VALUES (%L, 'SUB wall new', 'sub-wall-new', 'active')$q$, v_new)),
+                'subscription_status'));
 
   -- 8d. A company's own administrator never reached the row. The wall stands
   --     behind RLS, not in front of it, so that answer is unchanged.
@@ -1586,29 +1607,51 @@ END $$;
 -- 8e. The two guarded columns the recompute does not own reach the row through
 --     their own writers, called as the roles that call them. The write and the
 --     read of it are two statements each (5d says why).
+--
+--     Every value asserted is one only the write could have produced. The
+--     `wall` company was created starting a year ago, expiring in 30 days, with
+--     no duration word; this whole file is one transaction, so now() is the same
+--     instant here as it was then.
 DO $$
 DECLARE
   v_owner constant uuid := '50000000-0000-4000-8000-000000000001';
   v_co    constant uuid := _sub_id('company:wall');
+  v_row   companies%ROWTYPE;
   v_out   text;
 BEGIN
+  SELECT * INTO v_row FROM companies WHERE id = v_co;
+  PERFORM _sub_ok('wall: before the writes, no duration word and a start a year back (so the checks below are not vacuous)',
+    v_row.subscription_duration_type IS NULL
+    AND v_row.subscription_started_at = now() - interval '1 year'
+    AND v_row.subscription_expires_at = now() + interval '30 days');
+
   INSERT INTO activation_codes (id, code_hash, duration_type, expires_at, created_by, company_id)
   VALUES (_sub_id('code:wall'), encode(sha256(convert_to('300444', 'UTF8')), 'hex'),
           '3_monate', now() + interval '7 days', _sub_id('user:wall'), v_co);
 
   v_out := _sub_do(_sub_id('user:wall'), 'SELECT redeem_activation_code(''300444'')::text');
   PERFORM _sub_ok('wall: a company admin''s redemption still succeeds', _sub_succeeded(v_out));
-  PERFORM _sub_ok('wall: …and writes the start and the duration word it owns',
-    (SELECT subscription_duration_type = '3_monate' AND subscription_started_at IS NOT NULL
-       FROM companies WHERE id = v_co));
+
+  -- A redemption on an active company starts its period at the running expiry.
+  SELECT * INTO v_row FROM companies WHERE id = v_co;
+  PERFORM _sub_ok(format('wall: …and writes the start and the duration word it owns (start %s, word %s)',
+                         v_row.subscription_started_at, v_row.subscription_duration_type),
+    v_row.subscription_started_at = now() + interval '30 days'
+    AND v_row.subscription_duration_type = '3_monate');
 
   v_out := _sub_do(v_owner, format(
     'SELECT update_company_subscription_manual(%L, %L, %L, %L, %L, %L)::text',
     v_co, 'active', now() - interval '1 day', now() + interval '1 year', '1_jahr', 'sub wall'));
   PERFORM _sub_ok('wall: a platform owner''s manual edit still succeeds', _sub_succeeded(v_out));
-  PERFORM _sub_ok('wall: …and writes the duration word it owns, beside the status the recompute derived',
-    (SELECT subscription_duration_type = '1_jahr' AND subscription_status = 'active'
-       FROM companies WHERE id = v_co));
+
+  -- The start and the word are the two values this RPC writes itself; the
+  -- expiry is the one the recompute derives from the period it recorded.
+  SELECT * INTO v_row FROM companies WHERE id = v_co;
+  PERFORM _sub_ok(format('wall: …and writes the start and the duration word it owns (start %s, word %s, expiry %s)',
+                         v_row.subscription_started_at, v_row.subscription_duration_type, v_row.subscription_expires_at),
+    v_row.subscription_started_at = now() - interval '1 day'
+    AND v_row.subscription_duration_type = '1_jahr'
+    AND v_row.subscription_expires_at = now() + interval '1 year');
 END $$;
 
 -- 8f. the shape: the migration's self-check restated, since that ran before
@@ -1661,8 +1704,14 @@ BEGIN
       ('app_private.signup_insert_company(uuid,text,text,text,text,text,integer,uuid,text,text)'::regprocedure::oid,
                                                                   'subscription_status',                  'insert')
   ),
+  -- This file's own helpers are the one exclusion, by name: _sub_company seeds
+  -- companies with every column. The reader itself reads every function,
+  -- whatever its name, so a writer called `_anything` anywhere else counts.
   found AS (
-    SELECT w.routine::oid AS fn, w.column_name, w.via FROM app_private.subscription_column_writes() w
+    SELECT w.routine::oid AS fn, w.column_name, w.via
+      FROM app_private.subscription_column_writes() w
+      JOIN pg_proc p ON p.oid = w.routine
+     WHERE p.proname NOT LIKE '\_sub\_%'
   )
   SELECT (SELECT string_agg(e.line, '; ' ORDER BY e.line)
             FROM (SELECT format('%s writes %s (%s)', d.fn::regprocedure, d.column_name, d.via) AS line
@@ -1678,16 +1727,30 @@ BEGIN
   PERFORM _sub_ok('catalogue: …and every sanctioned one still writes what it owns'
                   || coalesce(' — missing ' || v_missing, ''),
     v_missing IS NULL);
+
+  -- The exclusion above is this file's, not the reader's: the reader does see
+  -- a function whose name starts with an underscore.
+  PERFORM _sub_ok('catalogue: the reader reads a function whose name starts with an underscore (this file''s _sub_company)',
+    EXISTS (SELECT 1
+              FROM app_private.subscription_column_writes() w
+              JOIN pg_proc p ON p.oid = w.routine
+             WHERE p.proname = '_sub_company' AND w.column_name = 'plan' AND w.via = 'insert'));
 END $$;
 
 /*
   …and the reader is not blind. A check that finds nothing passes just as well
-  when it cannot see, so a writer is planted in every spelling the sanctioned
-  ones do not use (an alias, ONLY, the row form of SET, an INSERT with a column
-  list), next to two writes that only a comment describes. It lives until the
-  ROLLBACK at the end of this file.
+  when it cannot see, so a writer is planted for every branch of the reader and
+  every spelling the sanctioned writers do not use. They live until the ROLLBACK
+  at the end of this file.
+
+    spellings    an alias, ONLY, the row form of SET, an INSERT with a column
+                 list, next to two writes only a comment describes
+    no list      an INSERT naming no columns writes all five
+    upsert       ON CONFLICT … DO UPDATE assigns one
+    merge        a MERGE that mentions one
+    defaults     an INSERT of DEFAULT VALUES writes none
 */
-CREATE FUNCTION public.u3_wall_probe_writer() RETURNS void
+CREATE FUNCTION public.u3_probe_spellings() RETURNS void
 LANGUAGE plpgsql AS $f$
 BEGIN
   -- UPDATE companies SET subscription_duration_type = 'described, not written';
@@ -1697,18 +1760,56 @@ BEGIN
   INSERT INTO companies (name, slug, plan) SELECT 'probe', 'probe', 'premium' WHERE false;
 END $f$;
 
+CREATE FUNCTION public.u3_probe_no_list() RETURNS void
+LANGUAGE plpgsql AS $f$
+BEGIN
+  INSERT INTO companies SELECT * FROM companies WHERE false;
+END $f$;
+
+CREATE FUNCTION public.u3_probe_upsert() RETURNS void
+LANGUAGE plpgsql AS $f$
+BEGIN
+  INSERT INTO companies (id, name, slug) VALUES (gen_random_uuid(), 'probe', 'probe')
+    ON CONFLICT (id) DO UPDATE SET subscription_duration_type = 'probe';
+END $f$;
+
+CREATE FUNCTION public.u3_probe_merge() RETURNS void
+LANGUAGE plpgsql AS $f$
+BEGIN
+  MERGE INTO companies c USING (SELECT 1 AS one) s ON false
+    WHEN NOT MATCHED THEN INSERT (name, slug, subscription_expires_at) VALUES ('probe', 'probe', NULL);
+END $f$;
+
+CREATE FUNCTION public.u3_probe_defaults() RETURNS void
+LANGUAGE plpgsql AS $f$
+BEGIN
+  INSERT INTO companies DEFAULT VALUES;
+END $f$;
+
 DO $$
 DECLARE
+  r       record;
   v_found text;
 BEGIN
-  SELECT string_agg(w.column_name || ':' || w.via, ',' ORDER BY w.column_name)
-    INTO v_found
-    FROM app_private.subscription_column_writes() w
-   WHERE w.routine::oid = 'public.u3_wall_probe_writer()'::regprocedure::oid;
+  FOR r IN
+    SELECT * FROM (VALUES
+      ('public.u3_probe_spellings()', 'plan:insert,subscription_expires_at:update,subscription_status:update'),
+      ('public.u3_probe_no_list()',   'plan:insert,subscription_duration_type:insert,subscription_expires_at:insert,'
+                                      || 'subscription_started_at:insert,subscription_status:insert'),
+      ('public.u3_probe_upsert()',    'subscription_duration_type:insert'),
+      ('public.u3_probe_merge()',     'subscription_expires_at:merge'),
+      ('public.u3_probe_defaults()',  'nothing')) AS v(probe, want)
+  LOOP
+    -- COLLATE "C": the expected strings are in byte order, whatever the
+    -- database's own collation does with the underscores.
+    SELECT coalesce(string_agg(w.column_name || ':' || w.via, ',' ORDER BY w.column_name COLLATE "C"), 'nothing')
+      INTO v_found
+      FROM app_private.subscription_column_writes() w
+     WHERE w.routine::oid = r.probe::regprocedure::oid;
 
-  PERFORM _sub_ok(format('catalogue: the reader finds a write however it is spelled, and not one a comment describes (found %s)',
-                         coalesce(v_found, 'nothing')),
-    v_found = 'plan:insert,subscription_expires_at:update,subscription_status:update');
+    PERFORM _sub_ok(format('catalogue: the reader sees %s as %s (found %s)', r.probe, r.want, v_found),
+      v_found = r.want);
+  END LOOP;
 END $$;
 
 DO $$ BEGIN RAISE NOTICE '── subscriptions (plan 3.F, steps U1, U2 and U3): all checks passed ──'; END $$;
