@@ -1,9 +1,11 @@
 import React, { createContext, useContext, useEffect, useState, useCallback, ReactNode } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from './AuthContext';
+import { useSuperAdmin } from './SuperAdminContext';
 import { useAppConfig } from './AppConfigContext';
 import { calcPricing, PriceBreakdown, BillingCycle } from '../utils/pricing';
-import { minPlanForFeature, planHasFeature } from '../utils/planFeatures';
+import { minPlanForFeature } from '../utils/planFeatures';
+import { buildPlanState, effectivePlanOf, planAllows } from '../utils/planState';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -70,68 +72,21 @@ export const usePlan = (): PlanContextType => {
   return ctx;
 };
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-
-function daysLeft(end: Date): number {
-  const ms = end.getTime() - Date.now();
-  return ms > 0 ? Math.ceil(ms / (1000 * 60 * 60 * 24)) : 0;
-}
-
-function buildPlanState(raw: {
-  plan: string;
-  status: string;
-  trial_start: string | null;
-  trial_end: string | null;
-  subscription_car_limit: number | null;
-  billing_cycle: string | null;
-} | null): PlanState {
-  const plan: Plan = (raw?.plan as Plan) ?? 'basic';
-  const trialEnd = raw?.trial_end ? new Date(raw.trial_end) : null;
-  const trialStart = raw?.trial_start ? new Date(raw.trial_start) : null;
-  const now = new Date();
-
-  const isInTrial = !!(trialEnd && trialEnd > now);
-  const isTrialExpired = !!(trialEnd && trialEnd <= now);
-  const rawStatus = raw?.status ?? 'active';
-
-  let status: SubscriptionStatus;
-  if (rawStatus === 'trial') {
-    status = isInTrial ? 'trial' : 'trial_expired';
-  } else if (rawStatus === 'suspended') {
-    status = 'suspended';
-  } else if (rawStatus === 'inactive') {
-    status = 'inactive';
-  } else if (rawStatus === 'archived') {
-    status = 'archived';
-  } else if (rawStatus === 'deleted') {
-    status = 'deleted';
-  } else {
-    status = 'active';
-  }
-
-  const isActive = status === 'trial' || status === 'active';
-  const carLimit = raw?.subscription_car_limit ?? 3;
-  const billingCycle: BillingCycle =
-    raw?.billing_cycle === 'yearly' ? 'yearly' : 'monthly';
-
-  return {
-    plan,
-    status,
-    trialStart,
-    trialEnd,
-    trialDaysLeft: isInTrial && trialEnd ? daysLeft(trialEnd) : 0,
-    isInTrial,
-    isTrialExpired,
-    isActive,
-    carLimit,
-    billingCycle,
-  };
-}
-
 // ─── Provider ─────────────────────────────────────────────────────────────────
 
 export const PlanProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const { companyId, isSuperAdmin } = useAuth();
+  const { isSuperAdmin } = useAuth();
+  /*
+    The company the session is in (plan 3.4b). Inside a support session the
+    plan on screen must be the customer's own, or the staff member reads the
+    fabricated premium below and is told a locked screen is available — or,
+    worse, reports a plan to the customer that the customer does not hold.
+
+    What this does *not* change is the gate: `planAllows(..., isSuperAdmin)`
+    still answers true for a platform account whatever the plan says, so
+    reading the real plan cannot lock a support session out of a screen.
+  */
+  const { effectiveCompanyId: companyId } = useSuperAdmin();
   // The price book and the feature map come from app_private.platform_settings
   // through get_app_config() (plan 3.9). Until the database answers, these are
   // the values it was seeded with, so a screen never prices from nothing.
@@ -159,9 +114,19 @@ export const PlanProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       return;
     }
 
+    // The subscription columns are read here, in the same row as `status` and
+    // `trial_end`, rather than taken from AuthContext's copy: the state machine
+    // in `utils/planState.ts` needs all four to agree, and AuthContext fetches
+    // the company only *after* it has set the profile — so `companyId` arrives
+    // one round trip before the subscription does, and a plan state built from
+    // the two contexts would spend that window calling a paying customer
+    // unsubscribed. The rule itself is not copied: `subscriptionIsActive()` is
+    // the one place it is written, and AuthContext asks the same function.
     const { data } = await supabase
       .from('companies')
-      .select('plan, status, trial_start, trial_end, subscription_car_limit, billing_cycle')
+      // One literal, not a concatenation: supabase-js parses the column list at
+      // the type level, and a `+` leaves it with `GenericStringError`.
+      .select('plan, status, trial_start, trial_end, subscription_status, subscription_expires_at, subscription_car_limit, billing_cycle')
       .eq('id', companyId)
       .maybeSingle();
 
@@ -174,14 +139,10 @@ export const PlanProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     load();
   }, [load]);
 
-  const effectivePlan: Plan = planState.isInTrial ? 'premium' : planState.plan;
+  const effectivePlan: Plan = effectivePlanOf(planState);
 
-  const can = (feature: FeatureKey): boolean => {
-    if (isSuperAdmin) return true;
-    if (planState.status === 'archived' || planState.status === 'deleted') return false;
-    if (!planState.isActive && feature !== 'overview') return false;
-    return planHasFeature(planFeatures, effectivePlan, feature);
-  };
+  const can = (feature: FeatureKey): boolean =>
+    planAllows(planState, planFeatures, feature, isSuperAdmin);
 
   const minPlanFor = (feature: FeatureKey): Plan => minPlanForFeature(planFeatures, feature);
 

@@ -513,7 +513,7 @@ const DriverModal: React.FC<DriverModalProps> = ({
                             className="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
                             style={{
                               background: active ? 'var(--accent)' : 'var(--bg-subtle)',
-                              color: active ? 'white' : 'var(--text-secondary)',
+                              color: active ? 'var(--text-inverse)' : 'var(--text-secondary)',
                               border: `1px solid ${active ? 'var(--accent)' : 'var(--border)'}`,
                             }}
                           >
@@ -556,7 +556,7 @@ const DriverModal: React.FC<DriverModalProps> = ({
             </button>
             <button
               type="submit"
-              style={{ background: 'var(--accent)', color: 'var(--accent-text)', borderRadius: '0.5rem', padding: '0.5rem 1rem', border: 'none' }}
+              style={{ background: 'var(--accent)', color: 'var(--text-inverse)', borderRadius: '0.5rem', padding: '0.5rem 1rem', border: 'none' }}
               onMouseEnter={e => (e.currentTarget.style.background = 'var(--accent-hover)')}
               onMouseLeave={e => (e.currentTarget.style.background = 'var(--accent)')}
               className="flex items-center space-x-2"

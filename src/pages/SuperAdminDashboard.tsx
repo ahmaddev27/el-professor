@@ -20,13 +20,18 @@ import { de } from 'date-fns/locale';
 import { calcPricing, fmt as fmtPrice } from '../utils/pricing';
 import { useAppConfig } from '../contexts/AppConfigContext';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
+import { contextRefusalMessage } from '../lib/supportSession';
+import { TENANT_HOME } from '../lib/adminGate';
 import { useTranslation } from '../contexts/LanguageContext';
+import { subscriptionIsActive } from '../utils/planState';
+import type { CompanyStatus } from '../contexts/AuthContext';
 import type { TranslationKey } from '../i18n';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type Plan = 'basic' | 'advanced' | 'premium';
-type CompanyStatus = 'active' | 'trial' | 'suspended' | 'inactive' | 'archived' | 'deleted';
+// CompanyStatus is imported from AuthContext, which reads the column on every
+// load: the six values companies_status_check allows, declared once.
 
 interface CompanyRow {
   id: string;
@@ -228,6 +233,29 @@ function CountdownCell({ trialEnd }: { trialEnd: string | null }) {
   );
 }
 
+/**
+ * Does this company's trial clock still say anything about it?
+ *
+ * `redeem_activation_code` writes the five `subscription_*` columns and **never**
+ * `companies.status`, so a customer who has paid keeps `status = 'trial'` and a
+ * `trial_end` in the past for ever. Judging a trial by the date alone therefore
+ * turns every paying customer into an expired trial: a red tile, a critical
+ * *Testphase abgelaufen* and an extend-trial button, one more of each with every
+ * sale — against a company that reads *Aktiv* on its own overview.
+ *
+ * This is `isTrialExpired` in `utils/planState.ts`, asked about another
+ * company's row, and it goes through the same `subscriptionIsActive()`: the
+ * trial ended only if nothing replaced it. A **running** trial is still a trial
+ * whether or not a code has been redeemed, exactly as `isInTrial` ignores the
+ * subscription on the customer's screens — so this can only be false past
+ * `trial_end`, and the running-trial counts are unchanged by it.
+ */
+const readsAsTrial = (c: CompanyRow, now: Date = new Date()): boolean => {
+  if (c.status !== 'trial' || !c.trial_end) return false;
+  if (isAfter(new Date(c.trial_end), now)) return true;
+  return !subscriptionIsActive(c.subscription_status, c.subscription_expires_at, now);
+};
+
 // ─── Attention Item ───────────────────────────────────────────────────────────
 
 interface AttentionItem {
@@ -283,7 +311,7 @@ export default function SuperAdminDashboard() {
   // The prices this screen shows come from the same price book the database
   // charges from (plan 3.9), so a changed price shows here without a release.
   const { priceBook } = useAppConfig();
-  const { enterCompany, platformCan } = useSuperAdmin();
+  const { openCompany, platformCan } = useSuperAdmin();
   // What the platform role may do, from platform_whoami(). Actions a role lacks
   // are hidden; the database refuses them regardless.
   const canLifecycle = platformCan('companies.lifecycle');
@@ -294,21 +322,27 @@ export default function SuperAdminDashboard() {
   const navigate = useNavigate();
   const { t, tPlural } = useTranslation();
 
-  // Entering a company needs an open support session, not only the capability:
-  // since 20260917140000 the database answers a platform account with the
-  // context's company and nothing else, so navigating without one would render
-  // every tenant screen against rows it cannot read — and PlatformAccountGuard
-  // would bounce it straight back. Refuse and say why, rather than navigate.
+  // Entering a company opens a **read** context on it (plan 3.4b): since
+  // 20260917140000 the database answers a platform account with the context's
+  // company and nothing else, so navigating without one renders every tenant
+  // screen against rows it cannot read — and PlatformAccountGuard bounces it
+  // straight back. Writing needs the support session the bar offers inside the
+  // company; opening one here would ask for a justification before anyone knows
+  // whether one is needed.
   //
   // Declared *after* navigate and t, deliberately: a useCallback dependency
   // array is evaluated where it is written, so naming either of them above its
   // own const is a use-before-declaration. That was four errors — the exact
   // four the ratchet caught — and a render-time ReferenceError on the panel's
   // landing page, which no type error would have described.
-  const openCompany = useCallback((company: any) => {
-    if (enterCompany(company)) { navigate('/overview'); return; }
-    showToast('error', t('sa.companies.needsSupportSession'));
-  }, [enterCompany, navigate, showToast, t]);
+  const enterCompany = useCallback(async (company: any) => {
+    try {
+      await openCompany(company, 'view');
+      navigate(TENANT_HOME);
+    } catch (error) {
+      showToast('error', contextRefusalMessage(error, t));
+    }
+  }, [openCompany, navigate, showToast, t]);
 
   const [companies, setCompanies] = useState<CompanyRow[]>([]);
   const [kpis, setKpis] = useState<PlatformKPIs | null>(null);
@@ -417,14 +451,16 @@ export default function SuperAdminDashboard() {
         // The totals are sums over every company, so one company whose counts
         // were not read makes them unknown too.
         countsKnown: counts.known && enriched.every(c => c.counts_known),
-        trialCompanies: enriched.filter(c => c.status === 'trial' && c.trial_end && isAfter(new Date(c.trial_end), now)).length,
+        // Every trial figure below goes through readsAsTrial(), so the platform
+        // and the customer read one company the same way.
+        trialCompanies: enriched.filter(c => readsAsTrial(c, now) && c.trial_end && isAfter(new Date(c.trial_end), now)).length,
         activeCompanies: enriched.filter(c => c.status === 'active').length,
         suspendedCompanies: enriched.filter(c => c.status === 'suspended').length,
         inactiveCompanies: enriched.filter(c => c.status === 'inactive').length,
         archivedCompanies: enriched.filter(c => c.status === 'archived').length,
         deletedCompanies: enriched.filter(c => c.status === 'deleted').length,
-        expiredTrials: enriched.filter(c => c.status === 'trial' && c.trial_end && isBefore(new Date(c.trial_end), now)).length,
-        expiringIn7Days: enriched.filter(c => c.status === 'trial' && c.trial_end && isAfter(new Date(c.trial_end), now) && isBefore(new Date(c.trial_end), soon)).length,
+        expiredTrials: enriched.filter(c => readsAsTrial(c, now) && c.trial_end && isBefore(new Date(c.trial_end), now)).length,
+        expiringIn7Days: enriched.filter(c => readsAsTrial(c, now) && c.trial_end && isAfter(new Date(c.trial_end), now) && isBefore(new Date(c.trial_end), soon)).length,
         newThisMonth: enriched.filter(c => isAfter(new Date(c.created_at), monthStart)).length,
         basicCount: enriched.filter(c => (c.plan ?? 'basic') === 'basic').length,
         advancedCount: enriched.filter(c => c.plan === 'advanced').length,
@@ -554,6 +590,30 @@ export default function SuperAdminDashboard() {
     }
   };
 
+  /**
+   * The way back from a suspension.
+   *
+   * Since 20260919150000 `platform_company_set_approval('suspend')` writes
+   * `companies.status`, so approval is not what was taken away and re-approving
+   * would leave the company suspended behind a green badge. This is the same
+   * RPC the lifecycle menu on CompaniesPage calls, which also lifts the
+   * `suspended` state from the company's users.
+   */
+  const handleReactivate = async (company: CompanyRow) => {
+    // approvingId is what the button's `disabled` reads; without setting it the
+    // busy state is dead and a double click fires two reactivate calls.
+    setApprovingId(company.id);
+    try {
+      await callPlatformRpc('platform_company_lifecycle', { p_company_id: company.id, p_action: 'reactivate' });
+      showToast('success', t('sa.companies.toast.reactivated', { name: company.name }));
+      load(true);
+    } catch (err: any) {
+      showToast('error', err.message || t('common.error'));
+    } finally {
+      setApprovingId(null);
+    }
+  };
+
   // Compute attention items
   const attentionItems: AttentionItem[] = [];
   const pendingCompanies = companies.filter(c => c.approval_status === 'pending');
@@ -569,14 +629,19 @@ export default function SuperAdminDashboard() {
       const trialEnd = c.trial_end ? new Date(c.trial_end) : null;
       const daysLeft = trialEnd ? differenceInDays(trialEnd, now) : null;
 
-      if (c.status === 'trial' && trialEnd && isBefore(trialEnd, now)) {
+      // The whole chain, not only its first branch: gating the expired branch
+      // alone would drop a paying customer into the next one, whose daysLeft is
+      // negative and so "≤ 2" — trading one wrong critical item for another.
+      const onTrialClock = readsAsTrial(c, now);
+
+      if (onTrialClock && trialEnd && isBefore(trialEnd, now)) {
         attentionItems.push({ id: `${c.id}-expired`, companyName: c.name, reason: t('sa.dash.attention.trialExpired'), severity: 'critical', company: c });
-      } else if (c.status === 'trial' && daysLeft !== null && daysLeft <= 2) {
+      } else if (onTrialClock && daysLeft !== null && daysLeft <= 2) {
         const remaining = daysLeft <= 0
           ? t('sa.dash.attention.lessThanOneDay')
           : tPlural({ one: 'sa.dash.dayCount.one', other: 'sa.dash.dayCount.other' }, daysLeft);
         attentionItems.push({ id: `${c.id}-critical`, companyName: c.name, reason: t('sa.dash.attention.trialEndsIn', { remaining }), severity: 'critical', company: c });
-      } else if (c.status === 'trial' && daysLeft !== null && daysLeft <= 5) {
+      } else if (onTrialClock && daysLeft !== null && daysLeft <= 5) {
         const remaining = tPlural({ one: 'sa.dash.dayCount.one', other: 'sa.dash.dayCount.other' }, daysLeft);
         attentionItems.push({ id: `${c.id}-warning`, companyName: c.name, reason: t('sa.dash.attention.trialEndsIn', { remaining }), severity: 'warning', company: c });
       }
@@ -602,7 +667,7 @@ export default function SuperAdminDashboard() {
   }
 
   const expiringSoon = companies.filter(c => {
-    if (c.status !== 'trial' || !c.trial_end) return false;
+    if (!readsAsTrial(c) || !c.trial_end) return false;
     const end = new Date(c.trial_end);
     return isAfter(end, new Date()) && isBefore(end, addDays(new Date(), 7));
   });
@@ -659,7 +724,7 @@ export default function SuperAdminDashboard() {
           <Link
             to="/super-admin/companies"
             className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-opacity hover:opacity-85"
-            style={{ background: 'var(--warning)', color: 'white' }}
+            style={{ background: 'var(--warning-solid)', color: 'white' }}
           >
             <Building2 size={14} />
             {t('sa.dash.allCompanies')}
@@ -681,14 +746,14 @@ export default function SuperAdminDashboard() {
             onClick={() => setActiveSection(tab.id)}
             className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all relative"
             style={activeSection === tab.id
-              ? { background: 'var(--accent)', color: '#fff' }
+              ? { background: 'var(--accent)', color: 'var(--text-inverse)' }
               : { color: 'var(--text-secondary)' }
             }
           >
             <tab.icon size={14} />
             {tab.label}
             {tab.badge !== undefined && tab.badge > 0 && (
-              <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] rounded-full flex items-center justify-center text-[10px] font-bold text-white" style={{ background: 'var(--warning)' }}>
+              <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] rounded-full flex items-center justify-center text-[10px] font-bold text-white" style={{ background: 'var(--warning-solid)' }}>
                 {tab.badge}
               </span>
             )}
@@ -758,7 +823,7 @@ export default function SuperAdminDashboard() {
                         onClick={() => handleApprove(c)}
                         disabled={approvingId === c.id}
                         className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-opacity hover:opacity-85 disabled:opacity-50"
-                        style={{ background: 'var(--success)', color: 'white' }}
+                        style={{ background: 'var(--success-solid)', color: 'white' }}
                       >
                         {approvingId === c.id ? <RefreshCw size={11} className="animate-spin" /> : <CheckCircle size={11} />}
                         {t('sa.dash.approve')}
@@ -800,13 +865,29 @@ export default function SuperAdminDashboard() {
                 <tbody>
                   {companies.filter(c => c.status !== 'deleted').map(c => {
                     const ap = c.approval_status;
-                    const apColor = ap === 'approved' ? 'var(--success)' : ap === 'pending' ? 'var(--warning)' : 'var(--danger)';
-                    const apBg = ap === 'approved' ? 'var(--success-subtle)' : ap === 'pending' ? 'var(--warning-subtle)' : 'var(--danger-subtle)';
+                    /*
+                      Suspension is `companies.status` since 20260919150000
+                      (plan 3.F step U1), and this table has no status column —
+                      it renders one badge, from the approval status. So the
+                      badge asks the suspension first: without this a company
+                      suspended from this very table would go on reading green
+                      *Genehmigt*, keep offering *Sperren*, and lose its way
+                      back, because the reactivate button below was keyed on an
+                      `approval_status` value that no longer occurs.
+                    */
+                    const suspended = c.status === 'suspended';
+                    const apColor = suspended || ap === 'rejected' ? 'var(--danger)'
+                      : ap === 'approved' ? 'var(--success)'
+                        : ap === 'pending' ? 'var(--warning)' : 'var(--danger)';
+                    const apBg = suspended || ap === 'rejected' ? 'var(--danger-subtle)'
+                      : ap === 'approved' ? 'var(--success-subtle)'
+                        : ap === 'pending' ? 'var(--warning-subtle)' : 'var(--danger-subtle)';
                     const apLabel = t(
-                      ap === 'approved' ? 'sa.dash.approval.approved'
-                        : ap === 'pending' ? 'sa.dash.approval.pending'
-                          : ap === 'rejected' ? 'sa.dash.approval.rejected'
-                            : 'sa.dash.approval.suspended',
+                      suspended ? 'sa.dash.approval.suspended'
+                        : ap === 'approved' ? 'sa.dash.approval.approved'
+                          : ap === 'pending' ? 'sa.dash.approval.pending'
+                            : ap === 'rejected' ? 'sa.dash.approval.rejected'
+                              : 'sa.dash.approval.suspended',
                     );
                     return (
                       <tr key={c.id} style={{ borderBottom: '1px solid var(--border)' }}>
@@ -823,7 +904,7 @@ export default function SuperAdminDashboard() {
                             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold" style={{ background: apBg, color: apColor }}>
                               {apLabel}
                             </span>
-                            {canLifecycle && ap === 'approved' && (
+                            {canLifecycle && ap === 'approved' && !suspended && (
                               <button
                                 onClick={() => handleSuspendApproval(c)}
                                 className="text-[11px] px-2 py-0.5 rounded border transition-colors"
@@ -834,7 +915,23 @@ export default function SuperAdminDashboard() {
                                 {t('sa.dash.suspend')}
                               </button>
                             )}
-                            {canLifecycle && (ap === 'rejected' || ap === 'suspended') && (
+                            {/*
+                              The way back from a suspension is `reactivate`,
+                              not `approve`: approval is not what was taken
+                              away, and re-approving an already-approved company
+                              would leave it suspended with a green badge.
+                            */}
+                            {canLifecycle && suspended && (
+                              <button
+                                onClick={() => handleReactivate(c)}
+                                disabled={approvingId === c.id}
+                                className="text-[11px] px-2 py-0.5 rounded border transition-colors"
+                                style={{ borderColor: 'var(--success)', color: 'var(--success)' }}
+                              >
+                                {approvingId === c.id ? '…' : t('sa.lifecycle.reactivate.confirm')}
+                              </button>
+                            )}
+                            {canLifecycle && !suspended && ap === 'rejected' && (
                               <button
                                 onClick={() => handleApprove(c)}
                                 disabled={approvingId === c.id}
@@ -844,7 +941,7 @@ export default function SuperAdminDashboard() {
                                 {t('sa.dash.approve')}
                               </button>
                             )}
-                            {canLifecycle && ap === 'pending' && (
+                            {canLifecycle && !suspended && ap === 'pending' && (
                               <button
                                 onClick={() => handleApprove(c)}
                                 disabled={approvingId === c.id}
@@ -875,7 +972,7 @@ export default function SuperAdminDashboard() {
                         </td>
                         <td className="px-4 py-3">
                           <button
-                            hidden={!canOpenCompany} onClick={() => openCompany(c as any)}
+                            hidden={!canOpenCompany} onClick={() => { void enterCompany(c as any); }}
                             className="p-1.5 rounded-lg transition-colors"
                             style={{ color: 'var(--text-tertiary)' }}
                             onMouseEnter={e => { (e.currentTarget.style.background = 'var(--bg-muted)'); (e.currentTarget.style.color = 'var(--accent)'); }}
@@ -997,18 +1094,18 @@ export default function SuperAdminDashboard() {
                   <div className="flex items-center gap-1.5 flex-shrink-0">
                     {/* Extending a trial asks companies.lifecycle, not billing.manage:
                         plan 3.5 keeps the trial with the company's own lifecycle. */}
-                    {canLifecycle && (item.company.status === 'trial') && item.company.trial_end && (
+                    {canLifecycle && readsAsTrial(item.company) && item.company.trial_end && (
                       <button
                         onClick={() => handleExtendTrial(item.company)}
                         disabled={extendingId === item.company.id}
                         className="px-2.5 py-1 rounded-lg text-xs font-semibold transition-opacity hover:opacity-80"
-                        style={{ background: 'var(--warning)', color: 'white' }}
+                        style={{ background: 'var(--warning-solid)', color: 'white' }}
                       >
                         {t('sa.dash.extendSevenDays')}
                       </button>
                     )}
                     <button
-                      hidden={!canOpenCompany} onClick={() => openCompany(item.company as any)}
+                      hidden={!canOpenCompany} onClick={() => { void enterCompany(item.company as any); }}
                       className="p-1.5 rounded-lg transition-colors"
                       style={{ color: severityColor }}
                       title={t('sa.dash.openCompany')}
@@ -1074,7 +1171,7 @@ export default function SuperAdminDashboard() {
                           onClick={() => handleExtendTrial(c)}
                           disabled={extendingId === c.id}
                           className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-opacity hover:opacity-80 ${canLifecycle ? 'flex' : 'hidden'} items-center gap-1`}
-                          style={{ background: 'var(--warning)', color: 'white' }}
+                          style={{ background: 'var(--warning-solid)', color: 'white' }}
                         >
                           {extendingId === c.id ? <RefreshCw size={11} className="animate-spin" /> : <Zap size={11} />}
                           {t('sa.dash.extendSevenDays')}
@@ -1083,12 +1180,12 @@ export default function SuperAdminDashboard() {
                           hidden={!canLifecycle}
                           onClick={() => handleStatusChange(c, 'active')}
                           className="px-2.5 py-1 rounded-lg text-xs font-semibold transition-opacity hover:opacity-80"
-                          style={{ background: 'var(--success)', color: 'white' }}
+                          style={{ background: 'var(--success-solid)', color: 'white' }}
                         >
                           {t('sa.dash.activate')}
                         </button>
                         <button
-                          hidden={!canOpenCompany} onClick={() => openCompany(c as any)}
+                          hidden={!canOpenCompany} onClick={() => { void enterCompany(c as any); }}
                           className="p-1.5 rounded-lg transition-colors"
                           style={{ color: 'var(--text-tertiary)' }}
                           onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-muted)')}
@@ -1266,7 +1363,7 @@ export default function SuperAdminDashboard() {
 
                   {/* Trial countdown */}
                   <td className="px-4 py-3">
-                    {c.status === 'trial' && c.trial_end ? (
+                    {readsAsTrial(c) && c.trial_end ? (
                       <div>
                         <CountdownCell trialEnd={c.trial_end} />
                         <p className="text-[10px] mt-0.5" style={{ color: 'var(--text-tertiary)' }}>
@@ -1283,7 +1380,7 @@ export default function SuperAdminDashboard() {
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-1 justify-end">
-                      {c.status === 'trial' && c.trial_end && (
+                      {readsAsTrial(c) && c.trial_end && (
                         <button
                           hidden={!canBilling}
                           onClick={() => handleExtendTrial(c)}
@@ -1309,7 +1406,7 @@ export default function SuperAdminDashboard() {
                         <PencilLine size={13} />
                       </button>
                       <button
-                        hidden={!canOpenCompany} onClick={() => openCompany(c as any)}
+                        hidden={!canOpenCompany} onClick={() => { void enterCompany(c as any); }}
                         className="p-1.5 rounded-lg transition-colors"
                         style={{ color: 'var(--accent)' }}
                         title={t('sa.dash.openAsCompany')}
@@ -1360,7 +1457,7 @@ export default function SuperAdminDashboard() {
                 {format(new Date(c.created_at), 'dd. MMM', { locale: de })}
               </span>
               <button
-                hidden={!canOpenCompany} onClick={() => openCompany(c as any)}
+                hidden={!canOpenCompany} onClick={() => { void enterCompany(c as any); }}
                 className="p-1.5 rounded-lg transition-colors"
                 style={{ color: 'var(--text-tertiary)' }}
                 onMouseEnter={e => { (e.currentTarget.style.background = 'var(--bg-muted)'); (e.currentTarget.style.color = 'var(--accent)'); }}
@@ -1416,7 +1513,7 @@ export default function SuperAdminDashboard() {
             onMouseLeave={e => { (e.currentTarget.style.borderColor = 'var(--border)'); (e.currentTarget.style.color = 'var(--text-secondary)'); }}
           >
             {pendingCompanies.length > 0 && (
-              <span className="absolute top-2 right-2 min-w-[18px] h-[18px] rounded-full flex items-center justify-center text-[10px] font-bold text-white" style={{ background: 'var(--warning)' }}>
+              <span className="absolute top-2 right-2 min-w-[18px] h-[18px] rounded-full flex items-center justify-center text-[10px] font-bold text-white" style={{ background: 'var(--warning-solid)' }}>
                 {pendingCompanies.length}
               </span>
             )}
@@ -1489,7 +1586,7 @@ export default function SuperAdminDashboard() {
               onClick={handleReject}
               disabled={approvingId === rejectModal.company.id}
               className="flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold transition-opacity hover:opacity-85 disabled:opacity-50"
-              style={{ background: 'var(--danger)', color: 'white' }}
+              style={{ background: 'var(--danger-solid)', color: 'white' }}
             >
               {approvingId === rejectModal.company.id ? t('sa.dash.rejecting') : t('sa.dash.reject')}
             </button>

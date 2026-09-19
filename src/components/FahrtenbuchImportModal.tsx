@@ -1216,7 +1216,7 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
                       }}
                       disabled={importing}
                       className="flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-medium"
-                      style={{ background: 'var(--accent)', color: 'white' }}
+                      style={{ background: 'var(--accent)', color: 'var(--text-inverse)' }}
                     >
                       <Plus size={14} /> {t('imp.importAdditionally')}
                     </button>
@@ -1229,7 +1229,7 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
                         }}
                         disabled={importing || replacingImport}
                         className="flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-medium"
-                        style={{ background: 'var(--danger)', color: 'white' }}
+                        style={{ background: 'var(--danger-solid)', color: 'white' }}
                       >
                         <RefreshCw size={14} />
                         {replacingImport ? t('imp.replacing') : t('imp.replaceExisting')}
@@ -1386,7 +1386,7 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
               }}
               disabled={!canGoNext()}
               className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-opacity"
-              style={{ background: 'var(--accent)', color: 'white', opacity: canGoNext() ? 1 : 0.45 }}
+              style={{ background: 'var(--accent)', color: 'var(--text-inverse)', opacity: canGoNext() ? 1 : 0.45 }}
             >
               {t('imp.next')} <ChevronRight size={16} />
             </button>
@@ -1395,7 +1395,7 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
               onClick={handleImport}
               disabled={importing || validRows.length === 0}
               className="flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-semibold transition-opacity"
-              style={{ background: 'var(--success)', color: 'white', opacity: importing || validRows.length === 0 ? 0.5 : 1 }}
+              style={{ background: 'var(--success-solid)', color: 'white', opacity: importing || validRows.length === 0 ? 0.5 : 1 }}
             >
               {importing ? t('imp.importing') : (() => {
                 const valid    = validRows.filter(r => !r.is_canceled).length;

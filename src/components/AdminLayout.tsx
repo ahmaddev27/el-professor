@@ -2,6 +2,7 @@ import React from 'react';
 import { Outlet, Navigate } from 'react-router-dom';
 import { Sun, Moon, ShieldAlert, RefreshCw } from 'lucide-react';
 import AdminSidebar from './AdminSidebar';
+import SupportSessionBar from './SupportSessionBar';
 import { useTheme } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LanguageContext';
 import LanguageSwitcher from './LanguageSwitcher';
@@ -66,7 +67,7 @@ const AdminLayout: React.FC = () => {
               <button
                 onClick={reloadPlatformAccess}
                 className="px-4 py-2 rounded-xl text-sm font-semibold"
-                style={{ background: 'var(--accent)', color: 'white' }}
+                style={{ background: 'var(--accent)', color: 'var(--text-inverse)' }}
               >
                 {t('admin.access.retry')}
               </button>
@@ -89,6 +90,10 @@ const AdminLayout: React.FC = () => {
       <AdminSidebar />
 
       <div className="lg:pl-64">
+        {/* A session opened from the panel stays visible in the panel: the
+            sixty minutes run whether or not anyone is inside the company, and
+            "Beenden" has to be reachable from where it was started. */}
+        <SupportSessionBar />
         <header
           className="sticky top-0 z-20 border-b"
           style={{

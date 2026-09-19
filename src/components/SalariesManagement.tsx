@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { DollarSign, Download, Calendar, RefreshCw, CheckCircle, XCircle, Eye, FileText } from 'lucide-react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { DollarSign, Download, Calendar, RefreshCw, CheckCircle, XCircle, Eye, FileText, AlertTriangle, CalendarRange } from 'lucide-react';
 import { Driver, Income, Salary, SalaryCalculation } from '../types/receipt';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
@@ -8,10 +8,14 @@ import { useCompanySettings } from '../contexts/CompanySettingsContext';
 import { format, getMonth, getYear } from 'date-fns';
 import ConfirmationModal from './ConfirmationModal';
 import SalaryDetailsModal from './SalaryDetailsModal';
+import SalaryPeriodsModal from './SalaryPeriodsModal';
 import { handleDatabaseError } from '../utils/errorHandler';
 import { fetchAllPaginated } from '../utils/fetchAllPaginated';
 import { exportSalariesToExcel } from '../utils/excelExport';
 import { getBusinessMonthRange } from '../utils/weekCalculations';
+import { findOverlappingSalaryPeriods, groupSalaryPeriodsByDriver } from '../utils/salaryPeriodOverlap';
+import { formatSalaryDue, formatStoredDate, salaryRowWriteRefusal } from '../utils/salaryRowEdit';
+import { receiptScope } from '../utils/salaryCashReceiptFlow';
 import { generateDriverSalaryPdf } from '../utils/driverSalaryPdf';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { useTranslation } from '../contexts/LanguageContext';
@@ -39,10 +43,25 @@ const SalariesManagement: React.FC<SalariesManagementProps> = ({ drivers }) => {
   const [selectedDriver, setSelectedDriver] = useState('');
   const [selectedStatus, setSelectedStatus] = useState<'all' | 'paid' | 'unpaid'>('all');
 
-  const { user, isAdmin } = useAuth();
-  const { effectiveCompanyId: companyId } = useSuperAdmin();
+  const { user, isAdmin, companyId: ownCompanyId, can } = useAuth();
+  const { effectiveCompanyId: companyId, isViewingAsCompany } = useSuperAdmin();
   const { success, error: showError, warning } = useToast();
   const { settings } = useCompanySettings();
+
+  /**
+   * Why this caller may not edit or delete a salary row, or null when they may.
+   *
+   * `salaries_update` and `salaries_delete` (20260917130000) are both
+   * `company_id = get_active_company_id() AND current_role_permits('salaries', true)`,
+   * so the two terms asked here are the two the database asks. The scope term is
+   * not redundant with `can()`: `AuthContext.can` returns true for every
+   * platform account, while `get_active_company_id()` is NULL for one — so
+   * asking the role alone would draw buttons the database silently throws away.
+   */
+  const writeRefusal = salaryRowWriteRefusal(
+    receiptScope({ companyId: ownCompanyId, effectiveCompanyId: companyId, isViewingAsCompany }),
+    can('salaries', 'edit'),
+  );
 
   const [statusModal, setStatusModal] = useState<{
     isOpen: boolean;
@@ -60,6 +79,11 @@ const SalariesManagement: React.FC<SalariesManagementProps> = ({ drivers }) => {
     isOpen: boolean;
     salary: SalaryCalculation | null;
   }>({ isOpen: false, salary: null });
+
+  // The driver whose salary periods are being merged, by id: the dialog reads
+  // that driver's rows out of `salaries`, so it must not hold a copy that the
+  // reload after a write would leave stale.
+  const [periodsDriverId, setPeriodsDriverId] = useState<string | null>(null);
 
   useEffect(() => {
     loadData();
@@ -196,6 +220,42 @@ const SalariesManagement: React.FC<SalariesManagementProps> = ({ drivers }) => {
 
     setCalculations(filtered);
   };
+
+  /**
+   * Per driver, the other salary rows whose period overlaps the one on screen.
+   *
+   * `confirm_salary_cash_payment` refuses such a salary (`overlapping_salary`)
+   * until the owner has merged the rows by hand, and `unique_driver_period` is
+   * only `UNIQUE (driver_id, period_start)`, so nothing else makes the pair
+   * visible — the screen shows one period at a time. Folded out of the rows
+   * already loaded, so no query is added.
+   *
+   * A driver with no stored row for the selected period is checked too: the
+   * period is the one `ensureSalaryExists` would write the moment the payments
+   * dialog is opened, so the warning arrives before the second row exists.
+   */
+  /**
+   * The company's salary rows indexed by driver — every period, not only the
+   * one on screen. The overlap markers below and the dialog that merges the
+   * rows both read it, so neither adds a query and the two can never disagree
+   * about what a driver holds.
+   */
+  const rowsByDriver = useMemo(() => groupSalaryPeriodsByDriver(salaries), [salaries]);
+
+  const overlapsByDriver = useMemo(() => {
+    const found = new Map<string, Salary[]>();
+    for (const calc of calculations) {
+      const driverRows = rowsByDriver.get(calc.driver_id);
+      if (!driverRows || driverRows.length === 0) continue;
+      const overlapping = findOverlappingSalaryPeriods(
+        { period_start: calc.period_start, period_end: calc.period_end },
+        driverRows,
+        calc.salary_id ?? null,
+      );
+      if (overlapping.length > 0) found.set(calc.driver_id, overlapping);
+    }
+    return found;
+  }, [calculations, rowsByDriver]);
 
   const handleMonthChange = (month: string) => {
     setSelectedMonth(month);
@@ -486,7 +546,7 @@ const SalariesManagement: React.FC<SalariesManagementProps> = ({ drivers }) => {
             style={
               calculations.length === 0
                 ? { background: 'var(--bg-subtle)', color: 'var(--text-tertiary)', cursor: 'not-allowed' }
-                : { background: 'var(--accent)', color: 'white' }
+                : { background: 'var(--accent)', color: 'var(--text-inverse)' }
             }
             title={calculations.length === 0 ? t('sal.export.noDataTooltip') : t('common.exportExcelShort')}
             aria-disabled={calculations.length === 0}
@@ -543,15 +603,48 @@ const SalariesManagement: React.FC<SalariesManagementProps> = ({ drivers }) => {
                   </td>
                 </tr>
               ) : (
-                calculations.map(calc => (
+                calculations.map(calc => {
+                  const overlaps = overlapsByDriver.get(calc.driver_id);
+                  // One line per overlapping row, so the owner can go straight to
+                  // the period he has to merge instead of hunting for it.
+                  const overlapHint = overlaps
+                    ? [
+                        t('sal.overlap.tooltip'),
+                        ...overlaps.map(other =>
+                          t('sal.overlap.entry', {
+                            period: `${formatStoredDate(other.period_start)} – ${formatStoredDate(other.period_end)}`,
+                            amount: formatSalaryDue(other),
+                          }),
+                        ),
+                      ].join('\n')
+                    : '';
+                  return (
                   <tr
                     key={calc.driver_id}
                     style={{ borderBottom: '1px solid var(--border)' }}
                     onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--bg-subtle)')}
                     onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
                   >
-                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
-                      {calc.driver_name}
+                    <td className="px-6 py-4 text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
+                      <div className="flex items-center gap-2">
+                        <span className="whitespace-nowrap">{calc.driver_name}</span>
+                        {overlaps && (
+                          // The badge opens the dialog that resolves what it
+                          // reports: the overlapping row is usually outside the
+                          // selected period, so there is nowhere else to reach it.
+                          <button
+                            type="button"
+                            onClick={() => setPeriodsDriverId(calc.driver_id)}
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium whitespace-nowrap"
+                            style={{ background: 'var(--warning-subtle)', color: 'var(--warning)', cursor: 'pointer' }}
+                            title={`${overlapHint}\n\n${t('sal.periods.openHint')}`}
+                            aria-label={`${overlapHint}\n\n${t('sal.periods.openHint')}`}
+                          >
+                            <AlertTriangle size={12} aria-hidden />
+                            {t('sal.overlap.badge')}
+                          </button>
+                        )}
+                      </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-right" style={{ color: 'var(--text-primary)' }}>
                       {calc.revenue.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
@@ -629,10 +722,27 @@ const SalariesManagement: React.FC<SalariesManagementProps> = ({ drivers }) => {
                         >
                           <DollarSign size={18} />
                         </button>
+                        {/* Reachable for every driver, not only one with an
+                            overlap: correcting a period is also how an overlap
+                            is avoided before it exists. Disabled for a driver
+                            with no stored row — there is nothing to edit yet. */}
+                        <button
+                          onClick={() => setPeriodsDriverId(calc.driver_id)}
+                          disabled={!rowsByDriver.get(calc.driver_id)?.length}
+                          style={rowsByDriver.get(calc.driver_id)?.length
+                            ? { color: 'var(--text-secondary)', cursor: 'pointer' }
+                            : { color: 'var(--text-tertiary)', cursor: 'not-allowed' }}
+                          title={rowsByDriver.get(calc.driver_id)?.length
+                            ? t('sal.periods.open')
+                            : t('sal.periods.noRows')}
+                        >
+                          <CalendarRange size={18} />
+                        </button>
                       </div>
                     </td>
                   </tr>
-                ))
+                  );
+                })
               )}
             </tbody>
           </table>
@@ -802,6 +912,19 @@ const SalariesManagement: React.FC<SalariesManagementProps> = ({ drivers }) => {
           onClose={() => setSalaryDetailsModal({ isOpen: false, salary: null })}
           salary={salaryDetailsModal.salary}
           onUpdate={loadData}
+        />
+      )}
+
+      {/* Merging a driver's overlapping salary rows */}
+      {periodsDriverId && (
+        <SalaryPeriodsModal
+          isOpen
+          onClose={() => setPeriodsDriverId(null)}
+          driverName={drivers.find(driver => driver.id === periodsDriverId)?.name ?? ''}
+          rows={rowsByDriver.get(periodsDriverId) ?? []}
+          companyId={companyId}
+          writeRefusal={writeRefusal}
+          onChanged={loadData}
         />
       )}
     </div>

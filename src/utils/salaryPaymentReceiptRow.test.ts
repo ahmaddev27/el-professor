@@ -244,6 +244,8 @@ describe('receiptSheet — the stored row is what prints', () => {
     status: 'confirmed' as const,
     period_start: '2026-08-03',
     period_end: '2026-08-30',
+    business_month: 8,
+    business_year: 2026,
     payment_date: '2026-09-14',
     place: 'Berlin',
     due_amount: '2500.00',
@@ -269,6 +271,35 @@ describe('receiptSheet — the stored row is what prints', () => {
     expect(sheet.text.number).toBe('Nr. GQ-2026-0012');
     expect(sheet.text.amount.figures).toBe('1.234,56 EUR');
     expect(sheet.text.banner).toBeNull();
+    expect(sheet.text.facts).toContainEqual({ label: 'Abrechnungsmonat', value: 'August 2026', emphasis: false });
+  });
+
+  it('prints the stored Abrechnungsmonat even where the period alone would say another one', () => {
+    // A period starting Thursday 01.01.2026 belongs to the business month
+    // December 2025, and the receipt is numbered GQ-2025-…. The sheet must read
+    // that pair off the row, not recompute it, or a later change to the
+    // calendar rule would reprint an issued document under another month.
+    const sheet = receiptSheet(
+      {
+        ...storedReceipt,
+        receipt_number: 'GQ-2025-0004',
+        period_start: '2026-01-01',
+        period_end: '2026-01-25',
+        business_month: 12,
+        business_year: 2025,
+      },
+      driver,
+      company,
+    );
+
+    expect(sheet.kind).toBe('text');
+    if (sheet.kind !== 'text') return;
+    expect(sheet.text.facts).toEqual([
+      { label: 'Zeitraum', value: '01.01.2026 – 25.01.2026', emphasis: false },
+      { label: 'Abrechnungsmonat', value: 'Dezember 2025', emphasis: false },
+      { label: 'Zahlungsdatum', value: '14.09.2026', emphasis: false },
+    ]);
+    expect(sheet.text.number).toBe('Nr. GQ-2025-0004');
   });
 
   it('marks a voided receipt on the sheet itself', () => {

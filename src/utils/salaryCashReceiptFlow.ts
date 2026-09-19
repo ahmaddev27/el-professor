@@ -2,6 +2,7 @@ import type { TranslationKey } from '../i18n';
 import { MAX_AMOUNT_IN_WORDS_CENTS } from './germanAmountInWords';
 import { parseGermanAmountToCents, toCents } from './money';
 import type { ReceiptFigures } from './salaryCashReceipt';
+import { findOverlappingSalaryPeriods } from './salaryPeriodOverlap';
 
 /**
  * The browser side of a Gehaltsquittung: which request id a confirmation
@@ -231,23 +232,27 @@ export interface SalaryPeriodRow {
 
 /**
  * Another salary row of the same driver whose period overlaps this one: the
- * condition confirm_salary_cash_payment refuses as overlapping_salary. The
- * dates are YYYY-MM-DD text, so text order is date order.
+ * condition confirm_salary_cash_payment refuses as overlapping_salary.
+ *
+ * **The condition itself is not spelled here.** It lives once, in
+ * `./salaryPeriodOverlap`, and this is the single-row form of it for the two
+ * screens that have to *name* one conflicting row — the Gehaltsquittung
+ * dialog's select step and the cash payment added on the salary screen. The
+ * salaries list marks every overlapping row from the same module, so the row
+ * named in the payment form and the first row its badge lists are the same
+ * row, decided by the same comparison. Two spellings of one rule is how the
+ * two screens come to disagree about what the RPC will accept.
  *
  * Found before an amount is typed, so the refusal does not wait for the last
- * step. Which row is the salary of record is the owner's decision; this only
- * names the other row.
+ * step. Which row is the salary of record is the owner's decision — he merges
+ * the two by hand and the RPC keeps refusing until he has — so this only names
+ * the other one.
  */
 export function findOverlappingSalary<Row extends SalaryPeriodRow>(
   salary: SalaryPeriodRow,
   driverSalaries: readonly Row[],
 ): Row | null {
-  return (
-    driverSalaries.find(
-      other =>
-        other.id !== salary.id && other.period_start <= salary.period_end && other.period_end >= salary.period_start,
-    ) ?? null
-  );
+  return findOverlappingSalaryPeriods(salary, driverSalaries, salary.id)[0] ?? null;
 }
 
 // ─── Amount field ───────────────────────────────────────────────────────────
@@ -404,10 +409,53 @@ export function signedCopyPath(
 export type ReceiptScope = 'own_company' | 'other_company' | 'no_company';
 
 /**
- * Whether the screens may act on receipts. The RPCs and the SELECT policies
- * use the caller's own company (get_user_company_id()), so platform staff
- * viewing a customer and an account with no company are both outside, for
- * different reasons that get different messages.
+ * Whether the screens may act on receipts. An account with no company is
+ * outside, and so is platform staff inside a customer — for different reasons,
+ * which get different messages.
+ *
+ * **The second half is a decided product rule, permanent, and waiting on
+ * nothing** (owner's decision, 18.09.2026). It used to follow from the
+ * database: the three Gehaltsquittung RPCs resolved the caller from
+ * `user_profiles`, so a platform account was refused whatever the screens did.
+ * Since 20260917130000 they ask `get_active_company_id()` and since
+ * 20260917140000 that answers an open context, so a support session *could*
+ * issue, void and attach a signed copy — and this function is what stops it.
+ *
+ * **The reason is attestation, not traceability.** A Gehaltsquittung attests to
+ * a physical handover of cash: the company counts banknotes into a driver's
+ * hand, and the driver signs the paper for having received them. A platform
+ * support agent was not in the room. Issuing one from a support session would
+ * record a physical event nobody at the platform witnessed, and no amount of
+ * audit logging changes that — which is why the rule is permanent rather than
+ * provisional, 3.4c's write-audit triggers included.
+ *
+ * **An earlier version of this comment said the receipt "records no actor" and
+ * rested the refusal on that. It was wrong**, and the correction matters more
+ * than the claim did: `salary_cash_receipts.confirmed_by`
+ * (20260914140000:174, written at :517) and `.voided_by` (:176, written at
+ * :618), and `cash_movements.created_by` (:117, written at :535 and :629), all
+ * take `auth.uid()` — the platform employee's own id would be on every row. A
+ * reason that expires invites the first person to ship the missing triggers to
+ * reopen a rule that was never about traceability.
+ *
+ * Two facts support the rule without being the reason for it:
+ *
+ * - The actor is recorded but not legible to the person whose books it sits in.
+ *   An account inside a context has no company of its own —
+ *   `platform_context_open` refuses one that has (`account_in_company`) — so a
+ *   customer reading `user_profiles`, which answers for its own company,
+ *   resolves `confirmed_by` to no name. Nothing on these screens selects the
+ *   column at all (`RECEIPT_COLUMNS` in `src/lib/salaryCashReceipts.ts`).
+ * - The act is close to irreversible on a customer's books. The receipt
+ *   consumes a gapless number and moves cash, and the only undo is a Storno,
+ *   which stays on the record itself. One mistake leaves two permanent marks.
+ *
+ * **This refusal is the browser's alone, and that is the open half.** All three
+ * RPCs still succeed inside a support context, so the rule binds only callers
+ * who come through these screens: a staff member who can open a context can
+ * call them straight through PostgREST with their own token and the anon key
+ * that ships in the bundle. Moving it into the three functions is the follow-up
+ * recorded in HANDOFF.md.
  */
 export function receiptScope({
   companyId,
@@ -428,6 +476,21 @@ export function scopeRefusal(scope: ReceiptScope): ReceiptActionRefusal | null {
   if (scope === 'other_company') return 'company_mismatch';
   if (scope === 'no_company') return 'no_company';
   return null;
+}
+
+/**
+ * Why this caller cannot issue a Gehaltsquittung at all, before anything is
+ * typed; null when they can.
+ *
+ * `confirm_salary_cash_payment` acts on the caller's own company
+ * (get_active_company_id()) and needs edit rights on salaries
+ * (current_role_permits('salaries', true)). Both screens that can start a
+ * confirmation — the Gehaltsquittung dialog and the salary payment form — ask
+ * this one function, so a caller is refused with the same sentence in both
+ * rather than one of them handing the work to a dialog that then refuses it.
+ */
+export function confirmationBlock(scope: ReceiptScope, mayEditSalaries: boolean): ReceiptActionRefusal | null {
+  return scopeRefusal(scope) ?? (mayEditSalaries ? null : 'not_authorized');
 }
 
 /**

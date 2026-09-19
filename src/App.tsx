@@ -52,17 +52,20 @@ import AccountBlockedPage from './pages/AccountBlockedPage';
 import AdminLayout from './components/AdminLayout';
 import { useTranslation } from './contexts/LanguageContext';
 import type { TranslationKey } from './i18n';
-import PlatformLoginPage from './pages/PlatformLoginPage';
 import { isDesignPreviewPath } from './design-preview/gate';
 import { needsCompanyRegistration } from './lib/googleAccount';
 import {
   ADMIN_BASE,
   ADMIN_LOGIN_PATH,
   LEGACY_ADMIN_BASE,
+  SIGN_IN_PATH,
+  TENANT_HOME,
+  legacyAdminLoginRedirect,
   legacyAdminTarget,
+  platformAccountRoute,
   platformEntry,
   platformEntryPath,
-  platformReturnPath,
+  rememberedPanelPath,
 } from './lib/adminGate';
 
 // ─── Design preview (Phase 2 prototype) ──────────────────────────────────────
@@ -185,16 +188,80 @@ const PLATFORM_ACCOUNT_REDIRECTS: Record<string, string> = {
 
 const PlatformAccountGuard: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { isSuperAdmin } = useAuth();
-  const { effectiveCompanyId } = useSuperAdmin();
+  const { effectiveCompanyId, platformAccessStatus } = useSuperAdmin();
   const location = useLocation();
 
-  // Only a platform account that has not entered a company: a super admin who
-  // has entered one keeps using /mein-konto in that company's shell, and a
-  // company user never reaches this branch at all.
-  if (isSuperAdmin && !effectiveCompanyId) {
+  /*
+    Three answers, not two, and the third is why a reload used to throw a
+    support session out of the company it was working in: on a fresh load this
+    guard ran before `platform_whoami()` had answered, read "no company" out of
+    an unanswered question, and redirected to /admin — where the context then
+    arrived and the bar named a company that was no longer on screen.
+
+    The rule is `platformAccountRoute()`, kept pure and tested beside the other
+    two routing decisions. `wait` is a spinner and never a pass: see that
+    function for what "assume allowed" cost the last time.
+  */
+  const route = platformAccountRoute({
+    isSuperAdmin,
+    platformAccessStatus,
+    hasCompany: effectiveCompanyId !== null,
+  });
+
+  if (route === 'wait') return <AuthLoadingScreen />;
+  if (route === 'panel') {
     return <Navigate to={PLATFORM_ACCOUNT_REDIRECTS[location.pathname] ?? ADMIN_BASE} replace />;
   }
 
+  return <>{children}</>;
+};
+
+/**
+ * The tenant shell, keyed on the company the session is in (plan 3.4b).
+ *
+ * Before this slice `effectiveCompanyId` could not move while a tenant screen
+ * was mounted: it was React state, set by a click in the panel that had already
+ * navigated away from the tenant app. Now it is the database's answer, so it
+ * *can* move underneath a mounted screen — a second tab opens another company,
+ * this tab regains focus, `platform_whoami()` answers the new one.
+ *
+ * Most tenant screens load once and keep the rows in state. `useDatabase`'s four
+ * (`OverviewPage`, `BelegePage`, `FahrerPage`, `UmsaetzePage`) key their load
+ * effect on `dbLoading` alone, and there are more of the same shape behind the
+ * plan gates. Meanwhile `CompanySettingsContext` *does* follow the company, so
+ * the sidebar name, the logo and every document header would become company B
+ * while the figures on screen were still company A's — no leak, since the rows
+ * were read under A's own policy, but a payroll figure presented under the
+ * wrong customer's name, with nothing on screen to say so.
+ *
+ * A key is one line and covers every screen, including the ones nobody has
+ * thought about yet; patching four dependency arrays fixes four screens and
+ * leaves the next one to be found by a customer. The cost is a remount and a
+ * refetch when the company changes — which is exactly what should happen.
+ */
+const TenantShell: React.FC<{ isSupportAdmin: boolean }> = ({ isSupportAdmin }) => {
+  const { effectiveCompanyId } = useSuperAdmin();
+  return <AppLayout key={effectiveCompanyId ?? 'no-company'} isSupportAdmin={isSupportAdmin} />;
+};
+
+/**
+ * A route a company administrator may open — and a platform account inside a
+ * company, which is what the four screens behind it are for.
+ *
+ * `isAdmin` is `user_profiles.role === 'admin'`, and a platform account's
+ * profile carries `viewer` (that is what `platform-staff` writes for every
+ * invited member), so registering these routes on it left Benutzer, Rollen,
+ * Abonnement and Einstellungen unreachable for exactly the accounts a support
+ * session exists for. The screens themselves decide what may be *written*
+ * there: a read context is refused by `refuse_read_only_context_write` and by
+ * `current_role_permits`, and `useCompanyScope()` is how each one asks.
+ */
+const CompanyAdminRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { isAdmin } = useAuth();
+  const { companyScope } = useSuperAdmin();
+  if (!isAdmin && !companyScope.isPlatformSession) {
+    return <Navigate to={TENANT_HOME} replace />;
+  }
   return <>{children}</>;
 };
 
@@ -209,7 +276,14 @@ const AuthLoadingScreen: React.FC = () => (
 );
 
 /**
- * `/admin/login` — the platform team's own front door (plan slice 3.6a).
+ * `/login` — the one sign-in screen (the owner's decision of 17.09.2026).
+ *
+ * Platform accounts and company users type their password in the same place,
+ * and the account decides where the session goes: `/admin` for a platform
+ * account, its own app for everyone else. Nothing knows which it is before the
+ * session exists, so the screen is the company one, Google button and all —
+ * and a platform account that presses that button is refused with a sentence
+ * (AuthContext, `googleSignInRefusal`), not with an empty panel.
  *
  * Registered in both routers, because it has to answer for a browser with no
  * session and for one that has just acquired a session on this very page:
@@ -221,7 +295,7 @@ const AuthLoadingScreen: React.FC = () => (
  *
  * Who goes where is `platformEntry()`, kept pure and covered by tests.
  */
-const AdminLoginRoute: React.FC = () => {
+const SignInRoute: React.FC = () => {
   const { user, profileLoaded, loading, isSuperAdmin } = useAuth();
   const location = useLocation();
   const entry = platformEntry({
@@ -232,21 +306,35 @@ const AdminLoginRoute: React.FC = () => {
   });
 
   if (entry === 'loading') return <AuthLoadingScreen />;
-  if (entry === 'signIn') return <PlatformLoginPage />;
+  if (entry === 'signIn') return <LoginForm />;
 
   // Back to the page the visitor asked for before signing in, when there was
-  // one and it is a panel path — `platformReturnPath` is where that is decided.
-  // Only for an account the panel is actually for: a company user has no
-  // business at /admin/protokoll, so it goes to its own app whatever the
-  // browser remembers.
-  const state = location.state as { from?: unknown } | null;
-  const returnTo = entry === 'panel' ? platformReturnPath(state?.from) : null;
+  // one and it is a panel path — `rememberedPanelPath` is where that is
+  // decided, and it validates the value again rather than trusting the one
+  // `/admin/login` or PlatformSignInRedirect already checked. Only for an
+  // account the panel is actually for: a company user has no business at
+  // /admin/protokoll, so it goes to its own app whatever the browser remembers.
+  const returnTo = entry === 'panel' ? rememberedPanelPath(location.state) : null;
 
   // A company user that signs in here belongs in its own app, not in a shell
   // with nothing it may open. Refusing it a session instead would be a
   // permission notion of the browser's own invention: what any account may
   // actually do is decided in the database, on every call.
-  return <Navigate to={returnTo ?? platformEntryPath(entry) ?? ADMIN_BASE} replace />;
+  return <Navigate to={returnTo ?? platformEntryPath(entry) ?? TENANT_HOME} replace />;
+};
+
+/**
+ * `/admin/login` — the panel's own front door for one day, 16.–17.09.2026.
+ *
+ * It is not deleted, it redirects: a bookmark taken that day, and anything
+ * still linking there, land on the one sign-in screen with the remembered
+ * return path intact. Registered in both routers for the same reason
+ * `SignInRoute` is — a browser can be on it with or without a session.
+ */
+const AdminLoginRedirect: React.FC = () => {
+  const location = useLocation();
+  const { to, from } = legacyAdminLoginRedirect(location.state);
+  return <Navigate to={to} state={from ? { from } : undefined} replace />;
 };
 
 /**
@@ -265,23 +353,23 @@ const LegacyAdminRedirect: React.FC = () => {
 };
 
 /**
- * A platform path asked for without a session: the sign-in page, remembering
- * where the visitor was going.
+ * A platform path asked for without a session: the one sign-in screen,
+ * remembering where the visitor was going.
  *
- * It answers for the old entry as well as the new one, and that is the case the
- * front door exists for — signed out is exactly when a `/super-admin` bookmark
- * gets followed, and without this it lands on the marketing landing page
- * through the public catch-all.
+ * It answers for the old entry as well as the new one — signed out is exactly
+ * when a `/super-admin` bookmark gets followed, and without this it lands on the
+ * marketing landing page through the public catch-all.
  *
  * The remembered path travels in the router's own location state rather than in
  * the query string, so it never appears in the address bar. It is not trusted
- * on the way back: `platformReturnPath` validates it.
+ * on the way back: `rememberedPanelPath` validates it, here and again at the
+ * sign-in screen.
  */
 const PlatformSignInRedirect: React.FC = () => {
   const location = useLocation();
   const intended = legacyAdminTarget(location.pathname) ?? location.pathname;
-  const from = platformReturnPath(intended);
-  return <Navigate to={ADMIN_LOGIN_PATH} state={from ? { from } : undefined} replace />;
+  const from = rememberedPanelPath({ from: intended });
+  return <Navigate to={SIGN_IN_PATH} state={from ? { from } : undefined} replace />;
 };
 
 /**
@@ -325,7 +413,7 @@ const ProfileUnavailableScreen: React.FC<{ onRetry: () => void; onSignOut: () =>
 // ─── App ──────────────────────────────────────────────────────────────────────
 
 function App() {
-  const { user, profile, profileLoaded, profileLoadFailed, refreshProfile, signOut, loading: authLoading, isAdmin, isSuperAdmin, companyApprovalStatus, userBlockReason } = useAuth();
+  const { user, profile, profileLoaded, profileLoadFailed, refreshProfile, signOut, loading: authLoading, isAdmin, isSuperAdmin, companyStatus, companyApprovalStatus, userBlockReason } = useAuth();
 
   // Ahead of every gate: the preview reads no account or tenant data, and it
   // has to render for a reviewer whatever their session state is.
@@ -346,7 +434,10 @@ function App() {
       <BrowserRouter>
         <Routes>
           <Route path="/" element={<LandingPage />} />
-          <Route path="/login" element={<LoginForm />} />
+          {/* The one sign-in screen, for platform accounts and company users
+              alike (the owner's decision of 17.09.2026). Without a session it
+              renders the form; the account is routed once it has one. */}
+          <Route path={SIGN_IN_PATH} element={<SignInRoute />} />
           <Route path="/auth/forgot-password" element={<ForgotPasswordPage />} />
           <Route path="/auth/callback" element={<AuthCallbackPage />} />
           <Route path="/auth/set-password" element={<SetPasswordPage />} />
@@ -354,13 +445,14 @@ function App() {
           <Route path="/auth/verify-email" element={<VerifyEmailPage />} />
           <Route path="/einladung" element={<InviteAcceptPage />} />
           <Route path="/signup" element={<SignupPage />} />
-          {/* The platform team signs in here, not through the company login.
-              Anything else under /admin without a session lands on it: the
+          {/* The panel's own front door of 16.–17.09.2026, kept as a redirect
+              onto the sign-in screen above. Anything else under /admin without
+              a session goes there too, remembering where it was headed: the
               panel is never rendered for a browser that has no account at all.
-              The old entry answers here too — signed out is exactly when a
+              The old entry answers here as well — signed out is exactly when a
               /super-admin bookmark is followed, and the public catch-all below
               would otherwise drop it on the landing page. */}
-          <Route path={ADMIN_LOGIN_PATH} element={<AdminLoginRoute />} />
+          <Route path={ADMIN_LOGIN_PATH} element={<AdminLoginRedirect />} />
           <Route path={`${ADMIN_BASE}/*`} element={<PlatformSignInRedirect />} />
           <Route path={`${LEGACY_ADMIN_BASE}/*`} element={<PlatformSignInRedirect />} />
           <Route path="*" element={<Navigate to="/" replace />} />
@@ -409,13 +501,40 @@ function App() {
   if (!isSuperAdmin && companyApprovalStatus === 'rejected') {
     return <RejectedPage />;
   }
-  if (!isSuperAdmin && companyApprovalStatus === 'suspended') {
+  /*
+    Suspension, from the one column that records it.
+
+    `companyStatus` is the test since 20260919150000 (plan 3.F step U1), which
+    moved every suspended flag onto `companies.status` and stopped
+    `approval_status` and `subscription_status` from carrying the value at all.
+    Before that this gate read `companyApprovalStatus`, and only
+    `platform_company_set_approval('suspend')` ever set it — a suspension from
+    the lifecycle menu was visible instead through the *profile* status it also
+    writes, which gate 3 above catches. Reading the approval status alone would
+    now let a suspended company through to `/overview` and tell it, through
+    `LockedFeaturePage`, that its plan was too low.
+
+    `companyApprovalStatus` is kept in the test so that a rollback to the
+    previous release, which leaves this database as it is, still blocks a
+    company that was suspended before the migration ran and never re-read.
+  */
+  if (!isSuperAdmin && (companyStatus === 'suspended' || companyApprovalStatus === 'suspended')) {
     return <CompanySuspendedPage />;
   }
 
+  /*
+    SuperAdminProvider is outermost of the three since 3.4b.
+
+    It answers which company the session is actually in — its own for a company
+    user, the open support context's for a platform account — and both providers
+    below it now ask it that, rather than reading the membership in AuthContext,
+    which is null for a platform account and so left every screen under them
+    querying `company_id = null`. SuperAdminProvider itself reads only
+    AuthContext, so nothing is inverted by the move.
+  */
   return (
-    <CompanySettingsProvider>
-      <SuperAdminProvider>
+    <SuperAdminProvider>
+      <CompanySettingsProvider>
         <PlanProvider>
           <BrowserRouter>
             <Routes>
@@ -424,14 +543,18 @@ function App() {
               <Route path="/set-new-password" element={<SetPasswordPage />} />
               <Route path="/auth/forgot-password" element={<ForgotPasswordPage />} />
               <Route path="/einladung" element={<InviteAcceptPage />} />
-              {/* Already signed in: the sign-in page sends the account on to
-                  the panel, or to its own app when the panel is not for it. */}
-              <Route path={ADMIN_LOGIN_PATH} element={<AdminLoginRoute />} />
+              {/* Already signed in: the sign-in screen sends the account on to
+                  the panel, or to its own app when the panel is not for it —
+                  and to the panel page it was heading for before it signed in,
+                  which is what registering /login here is for. The old panel
+                  front door redirects onto it, carrying that path along. */}
+              <Route path={SIGN_IN_PATH} element={<SignInRoute />} />
+              <Route path={ADMIN_LOGIN_PATH} element={<AdminLoginRedirect />} />
               <Route path="/" element={
                 <PlatformAccountGuard>
                 <MustChangePasswordGuard>
                 <SubscriptionGuard>
-                  <AppLayout isSupportAdmin={isAdmin} />
+                  <TenantShell isSupportAdmin={isAdmin} />
                 </SubscriptionGuard>
                 </MustChangePasswordGuard>
                 </PlatformAccountGuard>
@@ -461,11 +584,15 @@ function App() {
                 <Route path="dokumente/:id/bearbeiten" element={<PlanGate feature="dokumente"><DocumentsPage /></PlanGate>} />
                 <Route path="stundennachweis" element={<PlanGate feature="dokumente"><StundennachweisPage /></PlanGate>} />
                 <Route path="company-planner" element={<PlanGate feature="dokumente"><CompanyPlannerPage /></PlanGate>} />
-                {/* Admin-only */}
-                {isAdmin && <Route path="users"    element={<PlanGate feature="rollen_nutzer"><UsersPage /></PlanGate>} />}
-                {isAdmin && <Route path="roles"    element={<PlanGate feature="rollen_nutzer"><RolesPage /></PlanGate>} />}
-                {isAdmin && <Route path="billing"  element={<CompanyBillingPage />} />}
-                {isAdmin && <Route path="settings" element={<SettingsPage />} />}
+                {/* An administrator of this company — or a platform account
+                    inside it (3.4b). Registered unconditionally and decided in
+                    CompanyAdminRoute, because the answer needs the session's
+                    company and this element tree is built above the providers
+                    that know it. */}
+                <Route path="users"    element={<CompanyAdminRoute><PlanGate feature="rollen_nutzer"><UsersPage /></PlanGate></CompanyAdminRoute>} />
+                <Route path="roles"    element={<CompanyAdminRoute><PlanGate feature="rollen_nutzer"><RolesPage /></PlanGate></CompanyAdminRoute>} />
+                <Route path="billing"  element={<CompanyAdminRoute><CompanyBillingPage /></CompanyAdminRoute>} />
+                <Route path="settings" element={<CompanyAdminRoute><SettingsPage /></CompanyAdminRoute>} />
                 <Route path="*" element={<Navigate to="/overview" replace />} />
               </Route>
 
@@ -505,8 +632,8 @@ function App() {
             </Routes>
           </BrowserRouter>
         </PlanProvider>
-      </SuperAdminProvider>
-    </CompanySettingsProvider>
+      </CompanySettingsProvider>
+    </SuperAdminProvider>
   );
 }
 

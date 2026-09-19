@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { de } from '../i18n/de';
 import { en } from '../i18n/en';
 import { computeReceiptFigures } from './salaryCashReceipt';
+import { findOverlappingSalaryPeriods, salaryPeriodsOverlap } from './salaryPeriodOverlap';
 import {
   REFUSAL_MESSAGE_KEYS,
   SIGNED_COPY_MAX_BYTES,
@@ -11,6 +12,7 @@ import {
   checkPaymentDate,
   checkSignedCopyFile,
   clearPendingAttempt,
+  confirmationBlock,
   createRequestId,
   findOverlappingSalary,
   nextAttempt,
@@ -189,6 +191,34 @@ describe('findOverlappingSalary — the overlapping_salary condition', () => {
   it('ignores the row itself and rows that only touch', () => {
     expect(findOverlappingSalary(august, [august, september])).toBeNull();
   });
+
+  /*
+    PR #71 marks an overlapping row on the salaries list and this names one in
+    the payment form. They must be the same judgement and the same row, or one
+    of the two screens is telling the user something the RPC does not agree
+    with. Since this function *is* findOverlappingSalaryPeriods, the check is
+    that nobody has quietly reintroduced a second comparison here.
+  */
+  it('is the salaries screen\'s own rule, applied to one row', () => {
+    const rows = [august, calendarAugust, september];
+    for (const subject of rows) {
+      const listed = findOverlappingSalaryPeriods(subject, rows, subject.id);
+      expect(findOverlappingSalary(subject, rows)).toBe(listed[0] ?? null);
+      // Never the row itself, whichever way it is asked.
+      expect(listed.some(row => row.id === subject.id)).toBe(false);
+    }
+  });
+
+  it('agrees with salaryPeriodsOverlap on a shared boundary day, which the RPC refuses', () => {
+    // 31.08 is calendarAugust's last day and september's first. The RPC
+    // compares with <= and >=, so that single shared day is an overlap; a
+    // business month and the month after it end and begin a day apart and are
+    // not.
+    expect(salaryPeriodsOverlap(september, calendarAugust)).toBe(true);
+    expect(findOverlappingSalary(september, [september, calendarAugust])).toBe(calendarAugust);
+    expect(salaryPeriodsOverlap(august, september)).toBe(false);
+    expect(findOverlappingSalary(august, [august, september])).toBeNull();
+  });
 });
 
 describe('readAmountField', () => {
@@ -344,6 +374,28 @@ describe('receiptScope — whose receipts the screens may act on', () => {
     expect(scopeRefusal('no_company')).toBe('no_company');
     expect(scopeRefusal('other_company')).toBe('company_mismatch');
     expect(scopeRefusal('own_company')).toBeNull();
+  });
+});
+
+/*
+  Two screens can start a confirmation now — the Gehaltsquittung dialog and the
+  cash payment added on the salary screen — and both must refuse the same caller
+  with the same sentence, before anything is typed or handed over.
+*/
+describe('confirmationBlock — who may issue a Gehaltsquittung at all', () => {
+  it('lets an editor inside their own company through', () => {
+    expect(confirmationBlock('own_company', true)).toBeNull();
+  });
+
+  it('names the scope first, because a caller outside their company cannot act at all', () => {
+    expect(confirmationBlock('other_company', true)).toBe('company_mismatch');
+    expect(confirmationBlock('no_company', true)).toBe('no_company');
+    // Even with no edit right, the scope is the more specific answer.
+    expect(confirmationBlock('other_company', false)).toBe('company_mismatch');
+  });
+
+  it('refuses a role without edit rights on salaries', () => {
+    expect(confirmationBlock('own_company', false)).toBe('not_authorized');
   });
 });
 

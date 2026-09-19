@@ -52,7 +52,7 @@ const NAV_ITEM_CLASS =
 
 const navItemStyle = ({ isActive }: { isActive: boolean }): React.CSSProperties =>
   isActive
-    ? { background: 'var(--warning)', color: 'white', boxShadow: '0 2px 10px rgba(245,158,11,0.2)' }
+    ? { background: 'var(--warning-solid)', color: 'white', boxShadow: '0 2px 10px rgba(245,158,11,0.2)' }
     : { color: 'var(--text-secondary)', background: 'transparent' };
 
 // NavLink marks the active entry with aria-current; its colours must survive hover.

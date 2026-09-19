@@ -2,6 +2,8 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
+import { useSuperAdmin } from '../contexts/SuperAdminContext';
+import { subscriptionIsActive } from '../utils/planState';
 import {
   CheckCircle, XCircle, CalendarDays, RefreshCw, KeyRound,
   Clock, ShieldCheck, History, AlertCircle,
@@ -25,6 +27,15 @@ interface CompanySubDetail {
   subscription_started_at: string | null;
   subscription_duration_type: string | null;
   last_activation_code_id: string | null;
+  /*
+    Read here as well as in AuthContext since 3.4b: inside a support session
+    AuthContext holds the *staff account's* subscription facts, which are null,
+    while this screen is about the company that was opened. Both columns are
+    derived by `recompute_company_subscription` (20260919150000) and judged by
+    `subscriptionIsActive()`, the one place the browser spells that rule.
+  */
+  subscription_status: string | null;
+  subscription_expires_at: string | null;
 }
 
 interface ActivationHistoryRow {
@@ -44,11 +55,14 @@ function fmtDate(iso: string | null | undefined) {
 
 export default function CompanyBillingPage() {
   const {
-    companyId,
-    subscriptionExpiresAt,
-    isSubscriptionActive,
-    effectiveSubscriptionStatus,
+    subscriptionExpiresAt: ownExpiresAt,
+    isSubscriptionActive: ownIsActive,
+    effectiveSubscriptionStatus: ownStatus,
   } = useAuth();
+  // The company the session is in (plan 3.4b). For a company user that is its
+  // own; inside a support session it is the company that was opened, and the
+  // three figures above are then the wrong company's — see `subActive` below.
+  const { effectiveCompanyId: companyId, companyScope } = useSuperAdmin();
   const navigate = useNavigate();
   const { t, tPlural } = useTranslation();
 
@@ -64,7 +78,7 @@ export default function CompanyBillingPage() {
       const [detailRes, histRes] = await Promise.all([
         supabase
           .from('companies')
-          .select('subscription_started_at, subscription_duration_type, last_activation_code_id')
+          .select('subscription_started_at, subscription_duration_type, last_activation_code_id, subscription_status, subscription_expires_at')
           .eq('id', companyId)
           .maybeSingle(),
         supabase
@@ -105,8 +119,27 @@ export default function CompanyBillingPage() {
 
   useEffect(() => { loadData(); }, [loadData]);
 
-  const subActive = isSubscriptionActive;
-  const subExpired = effectiveSubscriptionStatus === 'expired';
+  /*
+    Whose subscription this screen is about.
+
+    A company user's own, from AuthContext, exactly as before. Inside a support
+    session the opened company's, from the row this screen just read — the
+    account's own facts are null there, which printed "kein aktives Abo" over a
+    paying customer's own activation history. The predicate is
+    `subscriptionIsActive()` either way, the same function AuthContext and
+    PlanContext ask, so the word on the screen cannot drift from the rule that
+    decides access.
+  */
+  const inSupportSession = companyScope.isPlatformSession;
+  const subscriptionExpiresAt = inSupportSession
+    ? companyDetail?.subscription_expires_at ?? null
+    : ownExpiresAt;
+  const subActive = inSupportSession
+    ? subscriptionIsActive(companyDetail?.subscription_status, companyDetail?.subscription_expires_at)
+    : ownIsActive;
+  const subExpired = inSupportSession
+    ? companyDetail?.subscription_status === 'active' && !subActive
+    : ownStatus === 'expired';
   const subExpiry = subscriptionExpiresAt
     ? (() => { try { return format(new Date(subscriptionExpiresAt), 'dd. MMMM yyyy', { locale: de }); } catch { return null; } })()
     : null;

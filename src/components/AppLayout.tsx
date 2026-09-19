@@ -3,6 +3,7 @@ import { Outlet } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import UserMenu from './UserMenu';
 import TrialBanner from './TrialBanner';
+import SupportSessionBar from './SupportSessionBar';
 import { useTheme } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LanguageContext';
 import LanguageSwitcher from './LanguageSwitcher';
@@ -21,6 +22,10 @@ const AppLayout: React.FC<AppLayoutProps> = ({ isSupportAdmin }) => {
       <Sidebar isSupportAdmin={isSupportAdmin} />
 
       <div className="lg:pl-64">
+        {/* Above the trial banner on purpose: whose data this is comes before
+            anything about that company's own subscription. It renders nothing
+            for a company user. */}
+        <SupportSessionBar />
         <TrialBanner />
         <header
           className="sticky top-0 z-20 border-b"

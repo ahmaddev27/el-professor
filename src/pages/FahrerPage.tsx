@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import { useCompanyScope } from '../hooks/useCompanyScope';
 import { useToast } from '../contexts/ToastContext';
 import { useDatabase } from '../hooks/useDatabase';
 import { Driver } from '../types/receipt';
@@ -10,7 +11,9 @@ import { useTranslation } from '../contexts/LanguageContext';
 
 const FahrerPage: React.FC = () => {
   const { t } = useTranslation();
-  const { user, canEdit, canDelete, canCreate } = useAuth();
+  const { user } = useAuth();
+  // The rights of the company the session is in — see BelegePage.
+  const { canEdit, canDelete, canCreate } = useCompanyScope();
   const { success, error: showError } = useToast();
   const { drivers: driverActions, isLoading: dbLoading } = useDatabase();
   const [drivers, setDrivers] = useState<Driver[]>([]);

@@ -58,18 +58,9 @@ export const en: PartialDictionary = {
   'admin.role.billing':     'Billing',
   'admin.role.read_only':   'Read only',
 
-  // ── Platform sign-in (/admin/login) ────────────────────────────────────────
-  // Every refusal reads the same: the page must not answer whether an address
-  // belongs to the platform team.
-  'admin.login.title':           'Platform sign-in',
-  'admin.login.lead':            'For the platform team only.',
-  'admin.login.noGoogle':        'Sign in with an email address and a password. Platform accounts cannot sign in with Google.',
-  'admin.login.submit':          'Sign in',
-  'admin.login.failed':          'Sign-in failed. Please check the email address and the password.',
-  'admin.login.tooManyAttempts': 'Too many sign-in attempts. Please wait a few minutes and try again.',
-  'admin.login.network':         'No connection to the server. Please try again.',
-  'admin.login.companyHint':     'Do you work for a company?',
-  'admin.login.companyLink':     'Go to the company sign-in',
+  // The platform's own sign-in page at /admin/login is gone since 17.09.2026:
+  // platform accounts and company users sign in on the same screen (/login) and
+  // are routed by account afterwards. The 'admin.login.*' strings went with it.
 
   // ── Shell chrome ───────────────────────────────────────────────────────────
   'shell.systemName':       'Management system',
@@ -78,6 +69,33 @@ export const en: PartialDictionary = {
   'shell.themeToDark':      'Switch to dark mode',
   'shell.exitCompanyView':  'Exit company view',
   'shell.language':         'Language',
+
+  // ── Support sessions (plan 3.C) ────────────────────────────────────────────
+  'support.bar.supportLabel':   'Support access',
+  'support.bar.viewLabel':      'Read-only view',
+  'support.bar.minutesLeft':    '{minutes} min left',
+  'support.bar.startSupport':   'Start support session',
+  'support.bar.end':            'End',
+  'support.bar.openCompanyView': 'Open company view',
+  'support.bar.unknownCompany': 'Unknown company',
+  'support.bar.startedTitle':   'Support session started for "{company}"',
+  'support.bar.expiredTitle':   'Access ended',
+  'support.bar.expiredBody':    'Access to the company has expired. Please open it again.',
+  'support.reason.title':       'Support session for "{company}"',
+  'support.reason.body':        'A support session allows changes to this company\'s data for 60 minutes. The reason is recorded in the audit log.',
+  'support.reason.placeholder': 'Why is this access needed?',
+  'support.reason.required':    'Please give a reason.',
+  'support.reason.tooLong':     'The reason is too long.',
+  'support.reason.confirm':     'Start support session',
+  'support.storage.membershipOnly': 'This company\'s files are not reachable in a support session yet. File storage still follows the account\'s own company membership.',
+  'support.error.denied':           'You are not allowed to do this.',
+  'support.error.contextOpen':      'Another company is still open. Please end that access first.',
+  'support.error.reasonRequired':   'A support session needs a reason.',
+  'support.error.noSession':        'This sign-in is no longer valid. Please sign in again.',
+  'support.error.noContext':        'No company access is open.',
+  'support.error.accountInCompany': 'This account belongs to a company and cannot open another one.',
+  'support.error.notFound':         'Company not found.',
+  'support.error.invalid':          'The action could not be completed.',
 
   // ── Design system primitives (src/components/ui) ──────────────────────────
   'ui.kpi.trendDown':         'Decrease',
@@ -194,6 +212,12 @@ export const en: PartialDictionary = {
   'auth.google.continue':   'Continue with Google',
   'auth.google.or':         'or',
   'auth.google.starting':   'Redirecting you to Google…',
+  // Notices on the shared sign-in screen, for a session we ended ourselves.
+  // There is only one sign-in screen and it says nothing about the platform
+  // administration on its own, so without this sentence an administration
+  // account lands on the company form with no explanation.
+  'auth.notice.platformPasswordSignIn': 'Your new password is saved. Please sign in now with your email and password to open the platform administration.',
+
   'auth.google.error.cancelled':       'The Google sign-in was cancelled.',
   'auth.google.error.generic':         'Signing in with Google failed. Please try again, or sign in with your password.',
   'auth.google.error.startFailed':     'We could not send you to Google. Please try again.',
@@ -206,7 +230,9 @@ export const en: PartialDictionary = {
   'auth.google.error.accountBlocked':  'This account is no longer active. Please contact support.',
   'auth.google.error.accountConflict': 'This Google account cannot be linked to that login. Please sign in with your password.',
   'auth.google.error.emailNotAllowed': 'This Google address cannot be used here. Please sign in with your password.',
-  'auth.google.error.platformStaff':   'Platform accounts sign in with an email address and a password, not with Google.',
+  // The refusal on the shared sign-in screen; wording set by the owner on
+  // 17.09.2026.
+  'auth.google.error.platformStaff':   'Administration accounts sign in with email and password only.',
 
   // ── Plan gating ────────────────────────────────────────────────────────────
   'locked.title':           '{feature} is not included in your plan',
@@ -1883,6 +1909,9 @@ export const en: PartialDictionary = {
   'sal.noPayments':                        'No payments recorded yet',
   'sal.noTransactions':                    'No transactions',
   'sal.notSignedIn':                       'Not signed in',
+  'sal.overlap.badge':                     'Overlap',
+  'sal.overlap.entry':                     '{period} · {amount} €',
+  'sal.overlap.tooltip':                   'This period overlaps another salary record of this driver. Until it is settled which one applies, no Gehaltsquittung can be issued for either. Overlapping periods:',
   'sal.paidUnpaidCount':                   '{paid} paid / {unpaid} unpaid',
   'sal.payment.add':                       'Add payment',
   'sal.payment.added':                     'Payment added successfully',
@@ -1891,6 +1920,12 @@ export const en: PartialDictionary = {
   'sal.payment.bankTransfer':              'Bank transfer',
   'sal.payment.cash':                      'Cash',
   'sal.payment.cashBadge':                 'Cash payment',
+  'sal.payment.cashBlockedOverlap':        'This driver has a second salary record whose period overlaps this one: {period} for {amount}. While both exist, no cash payment can be recorded for this salary — every cash payment is created through a Gehaltsquittung, and that is refused for overlapping periods. Merge the two records into one on the salaries screen and record the payment afterwards. A bank transfer can still be recorded.',
+  'sal.payment.cashNeedsDokumente':        'Cash payments are booked as a Gehaltsquittung, and Gehaltsquittungen belong to the Dokumente area, which your plan does not include. Record the payment as a bank transfer, or upgrade the plan.',
+  'sal.payment.cashNeedsReceipt':          'An existing payment cannot be switched to cash: a cash payment is only created through a Gehaltsquittung. Delete this payment and enter it again as a cash payment.',
+  'sal.payment.cashReceiptContinue':       'Continue to the Gehaltsquittung',
+  'sal.payment.cashReceiptNotice':         'Cash payments are booked as a Gehaltsquittung. In the next step you check the outstanding amount and the place of payment, confirm the receipt and download the PDF; the amount is booked out of the cash box at the same time. Afterwards the payment can neither be edited nor deleted, only voided through its receipt. A note of your own is not possible on this path.',
+  'sal.payment.cashRowLocked':             'The amount and the payment method of a recorded cash payment cannot be changed: the cash box was never moved for this payment, and a change would quietly falsify the Bargeldbestand. Delete the payment and enter it again — the new cash payment creates a Gehaltsquittung and books the amount out of the cash box. The date and the description stay editable.',
   'sal.payment.date':                      'Payment date',
   'sal.payment.deleteConfirm':             'Do you really want to delete this payment? This action cannot be undone.',
   'sal.payment.deleteTitle':               'Delete payment',
@@ -1910,6 +1945,7 @@ export const en: PartialDictionary = {
   'sal.payment.receiptPreviewIntro':       'The stored Gehaltsquittung for this cash payment.',
   'sal.payment.receiptVoidedNotice':       'This receipt is voided. Its payment was removed from the salary and the cash was booked back.',
   'sal.payment.remainingLabel':            'Remaining balance:',
+  'sal.payment.rowNotFound':               'This payment was not found. Please reload the list and try again.',
   'sal.payment.type':                      'Payment method',
   'sal.payment.updated':                   'Payment updated successfully',
   'sal.paymentHistory':                    'Payment history',
@@ -1931,6 +1967,38 @@ export const en: PartialDictionary = {
   'sal.payroll.taxReviewed':               'Tax treatment reviewed with the Steuerberater',
   'sal.payroll.totalNetPayout':            'Total net payout',
   'sal.periodMissing':                     'Period is missing',
+  'sal.periods.alreadyGone':               'This salary record no longer exists — it looks as though it was already deleted elsewhere. The list has been reloaded.',
+  'sal.periods.attached.none':             'Nothing attached',
+  'sal.periods.block.gehaltsquittung.one':   'A Gehaltsquittung was issued for this record. A receipt is a ledger document with a gapless number, so this salary cannot be deleted — a voided receipt stays on file too. Delete the other record of the pair instead, the hand-entered one.',
+  'sal.periods.block.gehaltsquittung.other': '{count} Gehaltsquittungen were issued for this record. A receipt is a ledger document with a gapless number, so this salary cannot be deleted — a voided receipt stays on file too. Delete the other record of the pair instead, the hand-entered one.',
+  'sal.periods.block.payments.one':          'This record has one payment attached. Deleting it would delete that payment too. If this record really has to go: select the period {period} at the top of the page, open “Zahlungen verwalten” there and remove the payment — “Zahlungen verwalten” always shows the payments of the period selected above, not those of this record.',
+  'sal.periods.block.payments.other':        'This record has {count} payments attached. Deleting it would delete them too. If this record really has to go: select the period {period} at the top of the page, open “Zahlungen verwalten” there and remove the payments — “Zahlungen verwalten” always shows the payments of the period selected above, not those of this record.',
+  'sal.periods.checkFailed':               'Could not be checked — please reload',
+  'sal.periods.checking':                  'Checking…',
+  'sal.periods.col.actions':               'Actions',
+  'sal.periods.col.amount':                'Amount',
+  'sal.periods.col.attached':              'Payments / receipts',
+  'sal.periods.col.period':                'Period',
+  'sal.periods.confirmDelete.keeps':       'The driver’s remaining periods stay unchanged: {periods}.',
+  'sal.periods.confirmDelete.keepsNothing': 'After this the driver has no stored salary record left.',
+  'sal.periods.confirmDelete.message':     'Really delete the salary record of {name} for {period} of {amount} €?',
+  'sal.periods.confirmDelete.title':       'Delete salary record',
+  'sal.periods.delete':                    'Delete this record',
+  'sal.periods.deleted':                   'Record deleted',
+  'sal.periods.deletedMessage':            'The salary record of {name} for {period} was deleted',
+  'sal.periods.deleting':                  'Deleting…',
+  'sal.periods.error.receiptExists':       'A Gehaltsquittung has since been issued for this record, so it can no longer be deleted.',
+  'sal.periods.intro':                     'Every salary period of this driver, regardless of the period selected above. Where two periods overlap, one is the business month the application computes itself and the other was entered by hand; delete the hand-entered one.',
+  'sal.periods.mergeHint':                 'Overlapping periods are merged by deleting, not by widening: the computed business month stays, the other record goes. The periods themselves are deliberately not editable here — changing one would not carry the amounts or any Gehaltsquittung already issued with it.',
+  'sal.periods.noRows':                    'No salary record stored for this driver yet',
+  'sal.periods.none':                      'No salary record stored for this driver yet',
+  'sal.periods.open':                      'Show this driver’s salary periods',
+  'sal.periods.openHint':                  'Click to clean up',
+  'sal.periods.refusal.company_mismatch':  'You are viewing a customer’s data. Salary records can only be deleted inside your own company.',
+  'sal.periods.refusal.no_company':        'Your account is not assigned to a company.',
+  'sal.periods.refusal.not_authorized':    'Your role may not edit salaries.',
+  'sal.periods.title':                     'Salary periods — {name}',
+  'sal.periods.writeRefused':              'The database refused the deletion. The permission may be missing, or the record may belong to another company.',
   'sal.remaining':                         'Remaining balance',
   'sal.resetFilters':                      'Reset',
   'sal.revenueShare':                      'Revenue share',
@@ -2111,6 +2179,8 @@ export const en: PartialDictionary = {
   'users.resetPassword.label':             'New temporary password',
   'users.resetPassword.nextLoginHint':     'The user must change this password at the next login.',
   'users.resetPassword.success':           'Password reset. The user must change it at the next login.',
+  'users.readOnlyBody':                    'This view is read-only. Managing users needs a support session; a read-only list of the accounts is under "Directories" in the platform area.',
+  'users.readOnlyTitle':                   'Read-only view',
   'users.roleNone':                        'None',
   'users.roles.areasSelected.one':         '{count} area selected',
   'users.roles.areasSelected.other':       '{count} areas selected',
@@ -2418,6 +2488,9 @@ export const en: PartialDictionary = {
   'gq.closeUnresolved.close':              'Close anyway',
   'gq.closeUnresolved.stay':               'Back to the request',
   'gq.closeUnresolved.title':              'Close without settling the request?',
+  // The Gehaltsquittung prints "Abrechnungsmonat"; the screen's own label follows
+  // the UI language, as only the document is German in both.
+  'gq.col.businessMonth':                  'Business month',
   'gq.col.number':                         'No.',
   'gq.col.paymentDate':                    'Paid on',
   'gq.col.signedCopy':                     'Signed',

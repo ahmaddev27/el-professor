@@ -2,14 +2,16 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Lock, Eye, EyeOff, AlertCircle, CheckCircle2, ShieldCheck } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { useAuth } from '../contexts/AuthContext';
 import { useTranslation } from '../contexts/LanguageContext';
-import { ADMIN_LOGIN_PATH } from '../lib/adminGate';
+import { SIGN_IN_PATH } from '../lib/adminGate';
 import EmphasizedText from '../components/auth/EmphasizedText';
 
 const MIN_LEN = 8;
 
 const SetPasswordPage: React.FC = () => {
   const { t } = useTranslation();
+  const { setAuthNotice, clearAuthNotice } = useAuth();
   const navigate = useNavigate();
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
@@ -27,9 +29,9 @@ const SetPasswordPage: React.FC = () => {
    * established with a password, and a session minted from a one-time code
    * carries `amr: [{method: "otp"}]` (`POST /auth/v1/verify`, verify.go:279).
    * Such a session holds no role, so a platform account that has just chosen a
-   * password is signed out here and sent to `/admin/login` to use it, rather
-   * than landing on the panel's "no platform role" screen, which would say the
-   * wrong thing.
+   * password is signed out here and sent to the one sign-in screen to use it,
+   * rather than landing on the panel's "no platform role" screen, which would
+   * say the wrong thing.
    *
    * **The question is about the session, not the account.** Keying this on
    * `user_profiles.is_super_admin` — "is this account platform staff" — would
@@ -159,19 +161,30 @@ const SetPasswordPage: React.FC = () => {
 
           If the sign-out does not happen — blocked storage, a dead network —
           the address is put back and the ordinary redirect runs, because the
-          alternative is a URL saying /admin/login while the authenticated panel
-          is still on screen, with nothing to click but reload. Both failure
+          alternative is a URL saying /login while the authenticated panel is
+          still on screen, with nothing to click but reload. Both failure
           shapes are handled: supabase-js resolves with an `error` for most of
           them and rejects only for the rest.
+
+          It also leaves a sentence behind. Since 17.09.2026 there is one
+          sign-in screen, and it is the company card — it says nothing about
+          the platform, so without this the account arrives at a generic form
+          with no idea why it was signed out of a password it had just set. The
+          notice lives above App and outside clearSessionData, so it survives
+          the sign-out and the router swap; `stayPut` takes it back, because a
+          session that is still on screen must not leave a message waiting on
+          the next sign-in screen anyone opens.
         */
         const here = `${window.location.pathname}${window.location.search}${window.location.hash}`;
         const stayPut = () => {
           setSignOutPending(false);
+          clearAuthNotice();
           window.history.replaceState(window.history.state, '', here);
           navigate('/', { replace: true });
         };
         setTimeout(() => {
-          window.history.replaceState(window.history.state, '', ADMIN_LOGIN_PATH);
+          setAuthNotice('auth.notice.platformPasswordSignIn');
+          window.history.replaceState(window.history.state, '', SIGN_IN_PATH);
           supabase.auth
             .signOut({ scope: 'local' })
             .then(({ error: signOutError }) => { if (signOutError) stayPut(); })

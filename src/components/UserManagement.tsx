@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Plus, CreditCard as Edit, Trash2, User, Users, Mail, Lock, Eye, EyeOff, Save, X, CheckCircle, XCircle, Clock, MailCheck, Download, AlertTriangle, KeyRound, AlertCircle } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
+import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { supabase } from '../lib/supabase';
 import ConfirmationModal from './ConfirmationModal';
 import { exportTableToExcel } from '../utils/excelExport';
@@ -22,6 +23,15 @@ interface UserData {
   created_at: string;
   email_confirmed_at?: string;
   must_change_password?: boolean;
+  /*
+    Both are answered by `manage-users/list` and were not declared here, so the
+    screen could not tell one company's accounts from another's — which is why
+    it showed every one of them to a platform account. `is_super_admin` is the
+    profile flag: a routing hint, never a right, and the reason a platform
+    account has no business in a customer's user list.
+  */
+  company_id?: string | null;
+  is_super_admin?: boolean;
 }
 
 interface UserModalProps {
@@ -291,7 +301,7 @@ const UserModal: React.FC<UserModalProps> = ({ isOpen, onClose, onSave, user, ti
             </button>
             <button
               type="submit"
-              style={{ background: 'var(--accent)', color: 'white', borderRadius: '0.375rem', padding: '0.5rem 1rem' }}
+              style={{ background: 'var(--accent)', color: 'var(--text-inverse)', borderRadius: '0.375rem', padding: '0.5rem 1rem' }}
               className="transition-colors hover:opacity-90 flex items-center space-x-2 disabled:opacity-50"
               disabled={loading}
             >
@@ -312,6 +322,30 @@ const UserModal: React.FC<UserModalProps> = ({ isOpen, onClose, onSave, user, ti
 const UserManagement: React.FC = () => {
   const { t, tPlural } = useTranslation();
   const { isAdmin, profile, loading: authLoading } = useAuth();
+  // Inside a support session this screen is about the company that was opened,
+  // and null everywhere else — a company user's list is scoped by the function.
+  const { companyScope } = useSuperAdmin();
+  const scopeCompanyId = companyScope.isPlatformSession ? companyScope.companyId : null;
+  /*
+    Who may work this screen — asked of the **scope**, not of the profile.
+
+    `isAdmin || kind === 'support'` was wrong in both directions. A platform
+    account whose own profile happens to carry `admin` would have had a fully
+    editable screen inside a *read* context, and every button here calls
+    `manage-users`, which is a service-role function that never looks at the
+    context: those writes would go through. So the profile role decides only
+    when the scope is the account's own company, and a platform session is
+    judged by its mode and nothing else.
+
+    In a read context the screen is refused rather than shown with its buttons:
+    every one of them writes. The read-only view of a company's accounts is
+    /admin/verzeichnisse, which is paged, column-reduced and audited.
+
+    (The other direction — a platform account never reaching this screen at all
+    because its profile carries `viewer`, which is what `platform-staff` writes
+    for every invited member — was in App.tsx, and is `CompanyAdminRoute`.)
+  */
+  const canManageUsers = companyScope.kind === 'own' ? isAdmin : companyScope.kind === 'support';
   const [users, setUsers] = useState<UserData[]>([]);
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -338,9 +372,11 @@ const UserManagement: React.FC = () => {
   // The debug logging and the "connectivity test" that used to run here printed
   // session details, and handleAddUser printed the new user's password, to the
   // browser console of every administrator. Nothing read either.
+  // `scopeCompanyId` is in the list because the answer is filtered by it: a
+  // session that moves to another company must not keep the first one's rows.
   useEffect(() => {
-    if (isAdmin) loadUsers();
-  }, [isAdmin, authLoading]);
+    if (canManageUsers) loadUsers();
+  }, [canManageUsers, authLoading, scopeCompanyId]);
 
   const loadUsers = async () => {
     setLoading(true);
@@ -365,8 +401,26 @@ const UserManagement: React.FC = () => {
       }
 
       const data = await response.json();
-      
-      setUsers(data);
+
+      /*
+        Show the company that is open, and nothing else (plan 3.4b).
+
+        `manage-users/list` answers a platform caller with **every** account of
+        every company, platform staff included — that is the "Benutzer shows
+        every platform user" the owner reported, and it is where the screen's
+        own defect ends and the function's begins. Filtering here fixes what is
+        shown; it does not narrow what the function returns, and nothing about
+        this is security. Scoping that route is the server-side half of this
+        slice and is called out in HANDOFF.md.
+
+        A company admin is already scoped by the function itself
+        (`profileQuery.eq('company_id', callerCompanyId)`), so this changes
+        nothing for the tenant app: `scopeCompanyId` is only set inside a
+        platform session.
+      */
+      setUsers(scopeCompanyId === null
+        ? data
+        : (data as UserData[]).filter(u => u.company_id === scopeCompanyId && !u.is_super_admin));
     } catch (error) {
       console.error('Error loading users:', error);
       setConfirmModal({
@@ -746,15 +800,24 @@ const UserManagement: React.FC = () => {
     );
   }
 
-  if (!isAdmin) {
+  if (!canManageUsers) {
+    // A platform account in a read context is told what is missing — a support
+    // session — rather than that its role is too low, which is not the reason.
+    const readContext = companyScope.kind === 'view';
     return (
       <div className="text-center py-12">
         <div className="rounded-full p-6 w-24 h-24 mx-auto mb-4 flex items-center justify-center" style={{ background: 'var(--danger-subtle)' }}>
           <User className="h-12 w-12" style={{ color: 'var(--danger)' }} />
         </div>
-        <h3 className="text-xl font-semibold mb-2" style={{ color: 'var(--text-primary)' }}>{t('users.accessDenied')}</h3>
-        <p style={{ color: 'var(--text-secondary)' }}>{t('users.adminOnly')}</p>
-        <p className="text-xs mt-2" style={{ color: 'var(--text-tertiary)' }}>{t('users.yourRole', { role: profile?.role || t('users.roleNone') })}</p>
+        <h3 className="text-xl font-semibold mb-2" style={{ color: 'var(--text-primary)' }}>
+          {t(readContext ? 'users.readOnlyTitle' : 'users.accessDenied')}
+        </h3>
+        <p style={{ color: 'var(--text-secondary)' }}>
+          {t(readContext ? 'users.readOnlyBody' : 'users.adminOnly')}
+        </p>
+        {!readContext && (
+          <p className="text-xs mt-2" style={{ color: 'var(--text-tertiary)' }}>{t('users.yourRole', { role: profile?.role || t('users.roleNone') })}</p>
+        )}
       </div>
     );
   }
@@ -1177,7 +1240,7 @@ const UserManagement: React.FC = () => {
                   <button
                     onClick={submitResetPassword}
                     className="flex-1 py-2 px-4 rounded-lg font-medium flex items-center justify-center space-x-2"
-                    style={{ background: 'var(--warning)', color: 'white' }}
+                    style={{ background: 'var(--warning-solid)', color: 'white' }}
                     disabled={resetPasswordLoading || resetPasswordValue.length < 8}
                   >
                     {resetPasswordLoading ? (

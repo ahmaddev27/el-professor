@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { DollarSign, Plus, CreditCard as Edit2, Trash2, Save, X, Download } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
+import { useCompanyScope } from '../hooks/useCompanyScope';
 import { useToast } from '../contexts/ToastContext';
 import ConfirmationModal from './ConfirmationModal';
 import { handleDatabaseError } from '../utils/errorHandler';
@@ -28,7 +29,10 @@ const FixedCostsManagement: React.FC = () => {
   // `error` also carries raw database messages, so the migration hint is driven
   // by its own flag rather than by matching a word inside the translated text.
   const [showMigrationSteps, setShowMigrationSteps] = useState(false);
-  const { can, profile, user } = useAuth();
+  const { profile, user } = useAuth();
+  // `can` through the scope: in a read context `can(page, 'edit')` is false,
+  // which is what current_role_permits(page, true) answers there (plan 3.4b).
+  const { can } = useCompanyScope();
   // The context exposes canEdit/canDelete as FUNCTIONS. Used bare in JSX a
   // function object is always truthy, so the "Keine Berechtigung" warning never
   // rendered and Edit/Delete showed for every role — including viewer, whose
@@ -306,7 +310,7 @@ const FixedCostsManagement: React.FC = () => {
             <button
               onClick={() => setIsAdding(true)}
               className="w-full flex items-center justify-center gap-2 px-4 py-3 text-white rounded-lg transition-colors"
-              style={{ background: 'var(--success)' }}
+              style={{ background: 'var(--success-solid)' }}
             >
               <Plus size={20} />
               {t('fleet.addFixedCost')}
@@ -347,7 +351,7 @@ const FixedCostsManagement: React.FC = () => {
                 <button
                   onClick={handleAdd}
                   className="flex-1 flex items-center justify-center gap-2 px-4 py-2 text-white rounded-lg"
-                  style={{ background: 'var(--success)' }}
+                  style={{ background: 'var(--success-solid)' }}
                 >
                   <Save size={16} />
                   {t('common.save')}

@@ -17,11 +17,25 @@ const RolesManagement: React.FC = () => {
   const [selectedRole, setSelectedRole] = useState<RoleWithPermissions | undefined>();
   const [roleToDelete, setRoleToDelete] = useState<Role | null>(null);
   const { showToast } = useToast();
-  const { effectiveCompanyId: companyId } = useSuperAdmin();
+  /*
+    The company the session is in, and whether it may be written (plan 3.4b).
+
+    `roles_select` reads system roles (company_id IS NULL) plus the caller's
+    own, and `get_user_company_id()` answers the open context for a platform
+    account — so the list is already the right company's. What was missing is
+    the dependency below: this effect ran once, on mount, so entering a company
+    after the screen had rendered left the previous company's roles on it.
+
+    In a read context the write buttons are hidden, because
+    `refuse_read_only_context_write` refuses every one of them on `roles` and
+    `role_permissions`.
+  */
+  const { effectiveCompanyId: companyId, companyScope } = useSuperAdmin();
+  const readOnly = companyScope.readOnly;
 
   useEffect(() => {
     fetchRoles();
-  }, []);
+  }, [companyId]);
 
   const fetchRoles = async () => {
     try {
@@ -190,17 +204,19 @@ const RolesManagement: React.FC = () => {
             {t('users.roles.subtitle')}
           </p>
         </div>
-        <button
-          onClick={() => {
-            setSelectedRole(undefined);
-            setIsModalOpen(true);
-          }}
-          className="flex items-center space-x-2 px-4 py-2 rounded-lg transition-colors hover:opacity-90"
-          style={{ background: 'var(--accent)', color: 'white' }}
-        >
-          <Plus size={20} />
-          <span>{t('users.roles.new')}</span>
-        </button>
+        {!readOnly && (
+          <button
+            onClick={() => {
+              setSelectedRole(undefined);
+              setIsModalOpen(true);
+            }}
+            className="flex items-center space-x-2 px-4 py-2 rounded-lg transition-colors hover:opacity-90"
+            style={{ background: 'var(--accent)', color: 'var(--text-inverse)' }}
+          >
+            <Plus size={20} />
+            <span>{t('users.roles.new')}</span>
+          </button>
+        )}
       </div>
 
       <div className="rounded-lg overflow-hidden" style={{ background: 'var(--bg-surface)', boxShadow: 'var(--shadow-md)', border: '1px solid var(--border)' }}>
@@ -260,23 +276,27 @@ const RolesManagement: React.FC = () => {
                     </td>
                     <td className="px-6 py-4">
                       <div className="flex items-center justify-end space-x-2">
-                        <button
-                          onClick={() => handleEditRole(role)}
-                          className="p-2 rounded-lg transition-colors hover:opacity-80"
-                          style={{ color: 'var(--accent-text)', background: 'transparent' }}
-                          title={t('common.edit')}
-                        >
-                          <Edit2 size={18} />
-                        </button>
-                        <button
-                          onClick={() => handleDeleteClick(role)}
-                          disabled={role.is_system}
-                          className="p-2 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed hover:opacity-80"
-                          style={{ color: 'var(--danger)', background: 'transparent' }}
-                          title={role.is_system ? t('users.roles.systemCannotDelete') : t('common.delete')}
-                        >
-                          <Trash2 size={18} />
-                        </button>
+                        {!readOnly && (
+                          <>
+                            <button
+                              onClick={() => handleEditRole(role)}
+                              className="p-2 rounded-lg transition-colors hover:opacity-80"
+                              style={{ color: 'var(--accent-text)', background: 'transparent' }}
+                              title={t('common.edit')}
+                            >
+                              <Edit2 size={18} />
+                            </button>
+                            <button
+                              onClick={() => handleDeleteClick(role)}
+                              disabled={role.is_system}
+                              className="p-2 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed hover:opacity-80"
+                              style={{ color: 'var(--danger)', background: 'transparent' }}
+                              title={role.is_system ? t('users.roles.systemCannotDelete') : t('common.delete')}
+                            >
+                              <Trash2 size={18} />
+                            </button>
+                          </>
+                        )}
                       </div>
                     </td>
                   </tr>

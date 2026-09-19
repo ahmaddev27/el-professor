@@ -57,6 +57,9 @@ export interface SalaryCashReceipt extends ReceiptSnapshotRow {
   driver_id: string;
   period_start: string;
   period_end: string;
+  /** 1–12, from get_business_month(period_start); business_year is the number's GQ-YYYY. */
+  business_month: number;
+  business_year: number;
   payment_date: string;
   place: string;
   status: 'confirmed' | 'voided';
@@ -71,8 +74,11 @@ export interface SalaryCashReceiptWithDriver extends SalaryCashReceipt {
   driver: { name: string; gender: DriverGender } | null;
 }
 
+// business_month and business_year are read, not derived: the receipt prints
+// its Abrechnungsmonat and the GQ-YYYY in its number is business_year.
 const RECEIPT_COLUMNS = [
-  'id, company_id, receipt_number, salary_id, driver_id, period_start, period_end, payment_date, place',
+  'id, company_id, receipt_number, salary_id, driver_id, period_start, period_end',
+  'business_month, business_year, payment_date, place',
   'amount, is_partial, due_amount, paid_bank_before, paid_cash_manual_before, paid_cash_weekly_before',
   'paid_cash_receipts_before, remaining_before, remaining_after, status, signed_copy_path',
   'confirmed_at, voided_at, void_reason, driver:drivers(name, gender)',

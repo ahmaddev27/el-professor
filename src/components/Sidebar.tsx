@@ -76,7 +76,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isSupportAdmin }) => {
         className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-150 w-full"
         style={({ isActive }) =>
           isActive
-            ? { background: 'var(--accent)', color: 'white', boxShadow: '0 2px 10px rgba(6,182,212,0.2)' }
+            ? { background: 'var(--accent)', color: 'var(--text-inverse)', boxShadow: '0 2px 10px rgba(6,182,212,0.2)' }
             : { color: 'var(--text-secondary)', background: 'transparent' }
         }
         onMouseEnter={e => {
@@ -121,7 +121,13 @@ const Sidebar: React.FC<SidebarProps> = ({ isSupportAdmin }) => {
       <nav className="flex-1 overflow-y-auto py-3 px-2 space-y-0.5">
         {NAV_ITEMS.map(renderNavItem)}
 
-        {isSupportAdmin && (
+        {/* `isSupportAdmin` is the profile's `admin` role. A platform account
+            inside a company carries `viewer` on its profile and still belongs
+            here: these four screens are what a support session is opened for,
+            and `CompanyAdminRoute` decides the same question for the route
+            (3.4b). What may be *written* on them is the scope's business, and
+            the database's. */}
+        {(isSupportAdmin || isViewingAsCompany) && (
           <>
             <div className="pt-3 pb-1 px-3">
               <p className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>

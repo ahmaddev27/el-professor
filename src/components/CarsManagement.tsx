@@ -239,7 +239,7 @@ export default function CarsManagement() {
           <button
             onClick={handleExport}
             className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-opacity hover:opacity-80"
-            style={{ background: 'var(--success)', color: 'white' }}
+            style={{ background: 'var(--success-solid)', color: 'white' }}
             title={t('common.exportExcelShort')}
           >
             <Download className="w-4 h-4" />
@@ -250,7 +250,7 @@ export default function CarsManagement() {
             disabled={carLimitReached}
             style={{
               background: carLimitReached ? 'var(--bg-muted)' : 'var(--accent)',
-              color: carLimitReached ? 'var(--text-tertiary)' : 'var(--accent-text)',
+              color: carLimitReached ? 'var(--text-tertiary)' : 'var(--text-inverse)',
               borderRadius: '0.5rem', padding: '0.5rem 1rem', border: 'none',
               cursor: carLimitReached ? 'not-allowed' : 'pointer',
             }}
@@ -355,7 +355,7 @@ export default function CarsManagement() {
           {cars.length === 0 && (
             <button
               onClick={handleAddCar}
-              style={{ background: 'var(--accent)', color: 'var(--accent-text)', borderRadius: '0.5rem', padding: '0.5rem 1rem', border: 'none' }}
+              style={{ background: 'var(--accent)', color: 'var(--text-inverse)', borderRadius: '0.5rem', padding: '0.5rem 1rem', border: 'none' }}
               onMouseEnter={e => (e.currentTarget.style.background = 'var(--accent-hover)')}
               onMouseLeave={e => (e.currentTarget.style.background = 'var(--accent)')}
               className="inline-flex items-center gap-2"

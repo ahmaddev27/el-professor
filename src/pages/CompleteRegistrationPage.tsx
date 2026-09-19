@@ -10,6 +10,7 @@ import {
   registerFailure,
   registerOauthCompany,
 } from '../lib/oauthAccountClient';
+import { SIGN_IN_PATH } from '../lib/adminGate';
 import PlanSelection from '../components/signup/PlanSelection';
 import NoticeBox from '../components/auth/NoticeBox';
 import { authInputClass, authLabelClass, authSpinnerClass } from '../components/auth/authStyles';
@@ -75,7 +76,7 @@ const CompleteRegistrationPage: React.FC = () => {
    * rewrites it before installing a session.
    */
   const leaveToLogin = async () => {
-    window.history.replaceState(window.history.state, '', '/login');
+    window.history.replaceState(window.history.state, '', SIGN_IN_PATH);
     await signOut();
   };
 

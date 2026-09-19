@@ -1,8 +1,15 @@
 import React, { useState, useEffect } from 'react';
-import { X, Save, AlertCircle, DollarSign, Calendar, FileText } from 'lucide-react';
+import { X, Save, AlertCircle, DollarSign, Calendar, FileText, ChevronRight, Lock } from 'lucide-react';
 import { SalaryPayment } from '../types/receipt';
 import { format } from 'date-fns';
 import { useTranslation } from '../contexts/LanguageContext';
+import {
+  PAYMENT_FIELD_LOCK_KEYS,
+  PAYMENT_WRITE_REFUSAL_KEYS,
+  decidePaymentWrite,
+  paymentFieldLock,
+} from '../utils/salaryPaymentWrite';
+import { berlinToday } from '../utils/salaryCashReceiptFlow';
 
 interface SalaryPaymentModalProps {
   isOpen: boolean;
@@ -11,6 +18,15 @@ interface SalaryPaymentModalProps {
   salaryId: string;
   remainingBalance: number;
   payment?: SalaryPayment;
+  /**
+   * Why a cash payment cannot be recorded for this salary at all, ready to
+   * show; null when it can. A cash payment is now a Gehaltsquittung, so the
+   * Gehaltsquittung's own conditions decide — an overlapping salary row, a plan
+   * without Dokumente, a caller outside their own company. It is shown beside
+   * the type select while that select is still open, so the payment can be
+   * recorded as a bank transfer instead of the form closing onto a dead end.
+   */
+  cashBlockedMessage?: string | null;
 }
 
 const inputStyle: React.CSSProperties = {
@@ -31,6 +47,7 @@ const SalaryPaymentModal: React.FC<SalaryPaymentModalProps> = ({
   salaryId,
   remainingBalance,
   payment,
+  cashBlockedMessage = null,
 }) => {
   const { t } = useTranslation();
   const [formData, setFormData] = useState({
@@ -63,14 +80,52 @@ const SalaryPaymentModal: React.FC<SalaryPaymentModalProps> = ({
     }
   }, [isOpen, payment]);
 
+  const existing = payment
+    ? { payment_type: payment.payment_type, source_type: payment.source_type ?? null, amount: payment.amount }
+    : null;
+
+  // What this form's current selection will do. The same function decides the
+  // write itself in SalaryDetailsModal, so the notice below and the button's
+  // label cannot promise something the save does differently.
+  const decision = decidePaymentWrite({
+    origin: payment ? 'edit' : 'add',
+    paymentType: formData.payment_type,
+    amount: formData.amount,
+    existing,
+  });
+  const makesReceipt = decision.kind === 'gehaltsquittung';
+  const refused = decision.kind === 'refused' ? t(PAYMENT_WRITE_REFUSAL_KEYS[decision.refusal]) : null;
+
+  // A stored cash row asserts how much cash left the till, and no ledger row
+  // backs it. Those two fields are disabled rather than refused on submit: a
+  // field that takes a value and then rejects it teaches that the change is
+  // possible and merely disallowed today.
+  const fieldLock = paymentFieldLock(existing);
+  const lockMessage = fieldLock === 'none' ? null : t(PAYMENT_FIELD_LOCK_KEYS[fieldLock]);
+  const cashBlocked = makesReceipt ? cashBlockedMessage : null;
+  const today = berlinToday();
+  const blocked = refused ?? cashBlocked;
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+
+    if (blocked) {
+      setError(blocked);
+      return;
+    }
 
     const amount = parseFloat(formData.amount);
 
     if (isNaN(amount) || amount <= 0) {
       setError(t('sal.payment.invalidAmount'));
+      return;
+    }
+
+    // confirm_salary_cash_payment refuses a future payment date, and the form
+    // closes before the Gehaltsquittung step could say so.
+    if (makesReceipt && formData.payment_date > today) {
+      setError(t('gq.date.future'));
       return;
     }
 
@@ -135,14 +190,43 @@ const SalaryPaymentModal: React.FC<SalaryPaymentModalProps> = ({
             <select
               value={formData.payment_type}
               onChange={(e) => setFormData({ ...formData, payment_type: e.target.value as 'cash' | 'bank' })}
-              style={{ ...inputStyle, appearance: 'none' }}
-              disabled={loading}
+              style={{ ...inputStyle, appearance: 'none', opacity: fieldLock === 'none' ? 1 : 0.6 }}
+              disabled={loading || fieldLock !== 'none'}
               required
             >
               {/* The `value`s are the stored `salary_payments.payment_type`. */}
               <option value="cash">{t('sal.payment.cash')}</option>
               <option value="bank">{t('sal.payment.bankTransfer')}</option>
             </select>
+
+            {/* Said before the payment is committed, not after a refusal. */}
+            {makesReceipt && !cashBlocked && (
+              <div
+                style={{ background: 'var(--warning-subtle)', border: '1px solid var(--warning)', borderRadius: '0.5rem', padding: '0.75rem', marginTop: '0.75rem', display: 'flex', alignItems: 'flex-start', gap: '0.5rem' }}
+              >
+                <Lock size={16} style={{ color: 'var(--warning)', flexShrink: 0, marginTop: '0.125rem' }} />
+                <span style={{ color: 'var(--warning)', fontSize: '0.8125rem' }}>{t('sal.payment.cashReceiptNotice')}</span>
+              </div>
+            )}
+            {/* Why the amount and the type are read-only on this stored row. */}
+            {lockMessage && (
+              <div
+                style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)', borderRadius: '0.5rem', padding: '0.75rem', marginTop: '0.75rem', display: 'flex', alignItems: 'flex-start', gap: '0.5rem' }}
+              >
+                <Lock size={16} style={{ color: 'var(--text-tertiary)', flexShrink: 0, marginTop: '0.125rem' }} />
+                <span style={{ color: 'var(--text-secondary)', fontSize: '0.8125rem' }}>{lockMessage}</span>
+              </div>
+            )}
+            {/* Shown while the select is still open, so a bank transfer is one click away. */}
+            {blocked && (
+              <div
+                role="alert"
+                style={{ background: 'var(--danger-subtle)', border: '1px solid var(--danger)', borderRadius: '0.5rem', padding: '0.75rem', marginTop: '0.75rem', display: 'flex', alignItems: 'flex-start', gap: '0.5rem' }}
+              >
+                <AlertCircle size={16} style={{ color: 'var(--danger)', flexShrink: 0, marginTop: '0.125rem' }} />
+                <span style={{ color: 'var(--danger)', fontSize: '0.8125rem' }}>{blocked}</span>
+              </div>
+            )}
           </div>
 
           <div>
@@ -158,9 +242,10 @@ const SalaryPaymentModal: React.FC<SalaryPaymentModalProps> = ({
                   min="0.01"
                   value={formData.amount}
                   onChange={(e) => setFormData({ ...formData, amount: e.target.value })}
-                  style={{ ...inputStyle, paddingLeft: '2.25rem' }}
+                  style={{ ...inputStyle, paddingLeft: '2.25rem', opacity: fieldLock === 'none' ? 1 : 0.6 }}
                   placeholder="0.00"
-                  disabled={loading}
+                  disabled={loading || fieldLock !== 'none'}
+                  readOnly={fieldLock !== 'none'}
                   required
                 />
               </div>
@@ -185,8 +270,12 @@ const SalaryPaymentModal: React.FC<SalaryPaymentModalProps> = ({
             </label>
             <div className="relative">
               <Calendar style={{ color: 'var(--text-tertiary)', position: 'absolute', left: '0.75rem', top: '50%', transform: 'translateY(-50%)' }} size={18} />
+              {/* A Gehaltsquittung is refused a future payment date, and this form
+                  closes before the step that would say so. Bank transfers are
+                  unaffected and may still be dated ahead. */}
               <input
                 type="date"
+                max={makesReceipt ? today : undefined}
                 value={formData.payment_date}
                 onChange={(e) => setFormData({ ...formData, payment_date: e.target.value })}
                 style={{ ...inputStyle, paddingLeft: '2.25rem' }}
@@ -196,22 +285,26 @@ const SalaryPaymentModal: React.FC<SalaryPaymentModalProps> = ({
             </div>
           </div>
 
-          <div>
-            <label style={{ color: 'var(--text-secondary)' }} className="block text-sm font-medium mb-2">
-              {t('common.description')}
-            </label>
-            <div className="relative">
-              <FileText style={{ color: 'var(--text-tertiary)', position: 'absolute', left: '0.75rem', top: '0.75rem' }} size={18} />
-              <textarea
-                value={formData.description}
-                onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                style={{ ...inputStyle, paddingLeft: '2.25rem', resize: 'vertical' }}
-                placeholder={t('sal.payment.descriptionPlaceholder')}
-                rows={3}
-                disabled={loading}
-              />
+          {/* A Gehaltsquittung writes its own description ("Gehaltsquittung GQ-…"),
+              so the field is not offered on that path rather than silently dropped. */}
+          {!makesReceipt && (
+            <div>
+              <label style={{ color: 'var(--text-secondary)' }} className="block text-sm font-medium mb-2">
+                {t('common.description')}
+              </label>
+              <div className="relative">
+                <FileText style={{ color: 'var(--text-tertiary)', position: 'absolute', left: '0.75rem', top: '0.75rem' }} size={18} />
+                <textarea
+                  value={formData.description}
+                  onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                  style={{ ...inputStyle, paddingLeft: '2.25rem', resize: 'vertical' }}
+                  placeholder={t('sal.payment.descriptionPlaceholder')}
+                  rows={3}
+                  disabled={loading}
+                />
+              </div>
             </div>
-          </div>
+          )}
 
           <div className="flex justify-end space-x-3 pt-4">
             <button
@@ -226,14 +319,20 @@ const SalaryPaymentModal: React.FC<SalaryPaymentModalProps> = ({
             </button>
             <button
               type="submit"
-              disabled={loading}
-              style={{ background: 'var(--accent)', color: 'var(--accent-text)', borderRadius: '0.5rem', padding: '0.5rem 1rem', border: 'none' }}
-              onMouseEnter={e => { if (!loading) e.currentTarget.style.background = 'var(--accent-hover)'; }}
+              disabled={loading || blocked !== null}
+              style={{ background: 'var(--accent)', color: 'var(--text-inverse)', borderRadius: '0.5rem', padding: '0.5rem 1rem', border: 'none' }}
+              onMouseEnter={e => { if (!loading && !blocked) e.currentTarget.style.background = 'var(--accent-hover)'; }}
               onMouseLeave={e => (e.currentTarget.style.background = 'var(--accent)')}
-              className="flex items-center space-x-2 disabled:opacity-50"
+              className="flex items-center space-x-2 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              <Save size={20} />
-              <span>{loading ? t('common.saving') : t('common.save')}</span>
+              {makesReceipt ? <ChevronRight size={20} /> : <Save size={20} />}
+              <span>
+                {loading
+                  ? t('common.saving')
+                  : makesReceipt
+                    ? t('sal.payment.cashReceiptContinue')
+                    : t('common.save')}
+              </span>
             </button>
           </div>
         </form>

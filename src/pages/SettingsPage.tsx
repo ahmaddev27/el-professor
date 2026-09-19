@@ -37,7 +37,7 @@ const SettingsPage: React.FC = () => {
   const { t } = useTranslation();
   const { settings, loading, updateSettings, refreshSettings } = useCompanySettings();
   const { success, error: showError } = useToast();
-  const { effectiveCompanyId: companyId } = useSuperAdmin();
+  const { effectiveCompanyId: companyId, companyScope } = useSuperAdmin();
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [logoPreview, setLogoPreview] = useState<string | null>(null);
@@ -170,7 +170,20 @@ const SettingsPage: React.FC = () => {
           contentType: file.type,
         });
 
-      if (uploadError) throw new Error(`Speicher-Upload fehlgeschlagen: ${uploadError.message}`);
+      /*
+        Inside a support session this is where the screen stops, and the raw
+        message does not say why. The `company-logos` policies
+        (`20260507193515`) read the membership from `user_profiles` and demand
+        `role IN ('admin','super_admin')` on that same profile — neither of
+        which a company-less platform account has — so the upload is refused
+        before the `company_settings` upsert below is ever reached. Fixing the
+        policy is SQL, and the storage half of plan 3.C; saying so is not.
+      */
+      if (uploadError) {
+        throw new Error(companyScope.isPlatformSession
+          ? t('support.storage.membershipOnly')
+          : `Speicher-Upload fehlgeschlagen: ${uploadError.message}`);
+      }
 
       // Step 2: Get the public URL
       const { data: urlData } = supabase.storage
@@ -385,7 +398,7 @@ const SettingsPage: React.FC = () => {
                     />
                     <div
                       className="flex items-center justify-center space-x-2 px-4 py-2 rounded-lg transition-colors cursor-pointer disabled:opacity-50"
-                      style={{ background: 'var(--accent)', color: 'white' }}
+                      style={{ background: 'var(--accent)', color: 'var(--text-inverse)' }}
                       onMouseEnter={e => (e.currentTarget.style.background = 'var(--accent-hover)')}
                       onMouseLeave={e => (e.currentTarget.style.background = 'var(--accent)')}
                     >
@@ -952,7 +965,7 @@ const SettingsPage: React.FC = () => {
               type="submit"
               disabled={saving}
               className="px-6 py-2 rounded-lg transition-colors flex items-center space-x-2 disabled:opacity-50"
-              style={{ background: 'var(--accent)', color: 'white' }}
+              style={{ background: 'var(--accent)', color: 'var(--text-inverse)' }}
               onMouseEnter={e => (e.currentTarget.style.background = 'var(--accent-hover)')}
               onMouseLeave={e => (e.currentTarget.style.background = 'var(--accent)')}
             >

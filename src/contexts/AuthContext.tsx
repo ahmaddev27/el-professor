@@ -1,11 +1,13 @@
 import React, { createContext, useContext, useEffect, useState, useRef, useCallback } from 'react';
 import { User, Session } from '@supabase/supabase-js';
-import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import { AUTH_STORAGE_KEY, supabase, isSupabaseConfigured } from '../lib/supabase';
 import type { TranslationKey } from '../i18n';
 import { consumeGoogleSignInIntent, readGoogleSignInIntent, type GoogleSignInIntent } from '../lib/googleSignIn';
 import { googleSessionIsSettled, sessionCameFromGoogle } from '../lib/googleAccount';
 import { nextAfterReconcile, reconcileOauthAccount } from '../lib/oauthAccountClient';
+import { SIGN_IN_PATH, googleSignInRefusal } from '../lib/adminGate';
 import { attemptUntilAnswered } from '../lib/profileLoadRetry';
+import { subscriptionIsActive } from '../utils/planState';
 
 const SESSION_TIMEOUT = 20 * 60 * 1000;
 const LAST_ACTIVITY_KEY = 'lastActivity';
@@ -41,6 +43,15 @@ export type PageKey =
   | 'accounting' | 'cars' | 'cash-balance' | 'documents' | 'drivers'
   | 'fixed-costs' | 'income' | 'notes' | 'overview' | 'receipts'
   | 'roles' | 'salaries' | 'settings' | 'statistics' | 'users' | 'werkstatt';
+
+/**
+ * The six values `companies_status_check` allows (20260916130000).
+ *
+ * Since 20260919150000 this column is the **only** place a suspension is
+ * recorded: `approval_status` and `subscription_status` no longer admit
+ * `'suspended'`, and their CHECK constraints refuse it.
+ */
+export type CompanyStatus = 'active' | 'trial' | 'suspended' | 'inactive' | 'archived' | 'deleted';
 
 // Reason codes returned when login is blocked
 export type BlockReason =
@@ -123,6 +134,15 @@ interface AuthContextType {
   session: Session | null;
   loading: boolean;
   companyId: string | null;
+  /**
+   * `companies.status`, and since 20260919150000 the **one** place a suspension
+   * is recorded. Read on every load and refresh, not only at sign-in: before
+   * that migration a suspension could also sit in `approval_status` or
+   * `subscription_status`, and it was one of those two that App.tsx's gate
+   * happened to see. `checkProfileAccess()` below reads the same column but
+   * runs only on `signIn`.
+   */
+  companyStatus: CompanyStatus | null;
   companyApprovalStatus: 'pending' | 'approved' | 'rejected' | 'suspended' | null;
   rejectionReason: string | null;
   subscriptionStatus: 'inactive' | 'active' | 'expired' | 'suspended' | null;
@@ -141,10 +161,17 @@ interface AuthContextType {
   signOut: () => Promise<void>;
   /**
    * A sentence for the sign-in screen after a session was ended for a reason of
-   * our own — today only a Google sign-in that must not stand (plan 1.6).
-   * Whoever shows it clears it.
+   * our own: a Google sign-in that must not stand (plan 1.6), or a platform
+   * account sent back to sign in with the password it has just chosen
+   * (`SetPasswordPage`). Whoever shows it clears it.
+   *
+   * It is state above `App` and outside `clearSessionData` on purpose, so it
+   * outlives both the sign-out and the router swap that follows it. A caller
+   * that sets one and then does *not* end the session must clear it again, or
+   * it surfaces on the next sign-in screen anyone opens.
    */
   authNotice: TranslationKey | null;
+  setAuthNotice: (notice: TranslationKey) => void;
   clearAuthNotice: () => void;
   /** The Google button press this session came from, while it is still relevant. */
   googleSignInIntent: GoogleSignInIntent | null;
@@ -192,6 +219,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [profileLoadFailed, setProfileLoadFailed] = useState(false);
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
+  const [companyStatus, setCompanyStatus] = useState<CompanyStatus | null>(null);
   const [companyApprovalStatus, setCompanyApprovalStatus] = useState<'pending' | 'approved' | 'rejected' | 'suspended' | null>(null);
   const [rejectionReason, setRejectionReason] = useState<string | null>(null);
   const [subscriptionStatus, setSubscriptionStatus] = useState<'inactive' | 'active' | 'expired' | 'suspended' | null>(null);
@@ -233,6 +261,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setProfile(null);
     setProfileLoaded(false);
     setProfileLoadFailed(false);
+    setCompanyStatus(null);
     setCompanyApprovalStatus(null);
     setRejectionReason(null);
     setSubscriptionStatus(null);
@@ -328,16 +357,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (data?.company_id && !data.is_super_admin) {
         const { data: company } = await supabase
           .from('companies')
-          .select('approval_status, rejection_reason, subscription_status, subscription_expires_at')
+          .select('status, approval_status, rejection_reason, subscription_status, subscription_expires_at')
           .eq('id', data.company_id)
           .maybeSingle();
         if (company) {
+          setCompanyStatus(company.status as CompanyStatus);
           setCompanyApprovalStatus(company.approval_status as 'pending' | 'approved' | 'rejected' | 'suspended');
           setRejectionReason(company.rejection_reason ?? null);
           setSubscriptionStatus(company.subscription_status as 'inactive' | 'active' | 'expired' | 'suspended');
           setSubscriptionExpiresAt(company.subscription_expires_at ?? null);
         }
       } else {
+        setCompanyStatus(null);
         setCompanyApprovalStatus(null);
         setRejectionReason(null);
         setSubscriptionStatus(null);
@@ -505,7 +536,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => {
     if (loading || !user || !session || !profile) return;
     const intent = readGoogleSignInIntent();
-    if (!sessionCameFromGoogle(user, intent !== null)) return;
+    const cameFromGoogle = sessionCameFromGoogle(user, intent !== null);
+    if (!cameFromGoogle) return;
     if (settledGoogleFor.current === user.id) return;
     settledGoogleFor.current = user.id;
     // Kept in memory for the registration screen, and taken out of the store:
@@ -518,16 +550,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // Signing out swaps App's router, and the public one starts wherever the
     // address points — without this the message below would land on the
     // landing page, where nothing shows it. Same reason useOtpSessionHandoff
-    // rewrites the address before installing a session.
-    const endSession = async (message: TranslationKey) => {
-      window.history.replaceState(window.history.state, '', '/login');
+    // rewrites the address before installing a session. `SIGN_IN_PATH` is the
+    // one sign-in screen since the owner's decision of 17.09.2026, so this is
+    // also the screen a platform account is sent back to.
+    const endSession = async (message: TranslationKey, to: string = SIGN_IN_PATH) => {
+      window.history.replaceState(window.history.state, '', to);
       setAuthNotice(message);
       await signOutRef.current?.();
     };
 
     void (async () => {
-      if (profile.is_super_admin) {
-        await endSession('auth.google.error.platformStaff');
+      // Platform staff sign in with an address and a password, never with
+      // Google. The rule, and why it asks how this *session* was minted rather
+      // than whether the account has a Google identity, is in
+      // `googleSignInRefusal` — where it is also tested.
+      const refusal = googleSignInRefusal({ cameFromGoogle, isPlatformAccount: profile.is_super_admin });
+      if (refusal) {
+        await endSession(refusal.messageKey, refusal.to);
         return;
       }
       // Nothing left to settle. `reconcile` cancels a password signup or
@@ -597,11 +636,51 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return;
     }
 
+    /*
+      A sign-out that did not happen must not leave the session on screen.
+
+      supabase-js reports most failures as a **value** and only the rest by
+      throwing, so reading the exception alone left the caller signed in with
+      nothing to show that anything had gone wrong. Read from the installed
+      source (`@supabase/auth-js` 2.98.0, `GoTrueClient._signOut`): it POSTs
+      `/logout` first and returns early with `{ error }` for any failure that
+      is not 404, 401, 403 or a missing session, **before** `_removeSession()`
+      — so on a dead network the stored session survives too. `scope: 'local'`
+      is not a way around that: `GoTrueAdminApi.signOut` makes the same request
+      whatever the scope.
+
+      That is worst on the path this now matters for. A Google session refused
+      for a platform account would keep `user`, the authenticated router would
+      stay mounted, the address would say /login and nothing would render the
+      sentence — the empty panel `googleSignInRefusal` exists to prevent.
+
+      So both shapes are handled, and the local session is dropped here rather
+      than left to a call that cannot do it offline: `AUTH_STORAGE_KEY` is the
+      one place that name is written, and `clearSessionData()` is what the
+      React tree reads. The refresh token stays valid at GoTrue until it
+      expires — the cost of signing out with no network, and not an access
+      grant: every platform capability is refused in the database, and a
+      company user's rows are refused by RLS the moment the account is blocked.
+    */
+    const dropLocalSession = () => {
+      try {
+        localStorage.removeItem(AUTH_STORAGE_KEY);
+      } catch (error) {
+        // Blocked storage: the React state below is then the whole sign-out.
+        console.error('Could not remove the stored session:', error);
+      }
+      clearSessionData();
+    };
+
     try {
-      await supabase.auth.signOut();
+      const { error } = await supabase.auth.signOut();
+      if (error) {
+        console.error('Sign out failed:', error);
+        dropLocalSession();
+      }
     } catch (error) {
       console.error('Sign out exception:', error);
-      clearSessionData();
+      dropLocalSession();
     }
   };
 
@@ -644,16 +723,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const canCreate = isSuperAdmin || isAdmin ||
     Object.values(permissions).some(p => p.canEdit);
 
-  // Subscription is active when status=active AND expiry is in the future (or null = no expiry set = legacy active)
-  const isSubscriptionActive =
-    subscriptionStatus === 'active' &&
-    (subscriptionExpiresAt === null || new Date(subscriptionExpiresAt) > new Date());
+  // Subscription is active when status=active AND expiry is in the future (or
+  // null = no expiry set = legacy active). The predicate is
+  // `subscriptionIsActive()` and lives in `utils/planState.ts`, because
+  // PlanContext decides the same question about the same company and the two
+  // must not drift — from each other, or from `get_active_company_id()`.
+  const isSubscriptionActive = subscriptionIsActive(subscriptionStatus, subscriptionExpiresAt);
 
-  // Effective status: if DB says 'active' but expiry is in the past, treat as 'expired'
+  // The label for the screens: the database says `active`, but the subscription
+  // is not. It asks `isSubscriptionActive` rather than comparing the expiry a
+  // second time, so the word on the screen and the rule that decides access
+  // cannot disagree — a date that does not parse now reads `expired` here as
+  // well as failing the predicate, instead of being labelled `active`.
   const effectiveSubscriptionStatus: 'inactive' | 'active' | 'expired' | 'suspended' | null =
     subscriptionStatus === null ? null :
     subscriptionStatus === 'suspended' ? 'suspended' :
-    subscriptionStatus === 'active' && subscriptionExpiresAt !== null && new Date(subscriptionExpiresAt) <= new Date() ? 'expired' :
+    subscriptionStatus === 'active' && !isSubscriptionActive ? 'expired' :
     subscriptionStatus;
 
   const clearAuthNotice = useCallback(() => setAuthNotice(null), []);
@@ -669,10 +754,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       const { data: company } = await supabase
         .from('companies')
-        .select('subscription_status, subscription_expires_at, approval_status, rejection_reason')
+        .select('status, subscription_status, subscription_expires_at, approval_status, rejection_reason')
         .eq('id', profile.company_id)
         .maybeSingle();
       if (company) {
+        setCompanyStatus(company.status as CompanyStatus);
         setSubscriptionStatus(company.subscription_status as 'inactive' | 'active' | 'expired' | 'suspended');
         setSubscriptionExpiresAt(company.subscription_expires_at ?? null);
         setCompanyApprovalStatus(company.approval_status as 'pending' | 'approved' | 'rejected' | 'suspended');
@@ -707,6 +793,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     session,
     loading,
     companyId,
+    companyStatus,
     companyApprovalStatus,
     rejectionReason,
     subscriptionStatus,
@@ -719,6 +806,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     signIn,
     signOut,
     authNotice,
+    setAuthNotice,
     clearAuthNotice,
     googleSignInIntent,
     refreshProfile,

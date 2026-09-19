@@ -67,7 +67,7 @@ const SalariesPage: React.FC = () => {
         <button
           onClick={loadDrivers}
           className="px-6 py-2 rounded-lg transition-colors"
-          style={{ background: 'var(--accent)', color: 'white' }}
+          style={{ background: 'var(--accent)', color: 'var(--text-inverse)' }}
           onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'var(--accent-hover)'; }}
           onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'var(--accent)'; }}
         >

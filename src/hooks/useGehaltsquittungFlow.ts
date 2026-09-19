@@ -63,6 +63,21 @@ export interface BalanceInputs {
 
 export type AmountError = 'invalid' | 'too_large' | 'already_paid' | 'overpayment';
 
+/**
+ * A salary and an amount the caller already chose elsewhere — the cash payment
+ * added on the salary screen. Read once, when the dialog opens: the driver and
+ * the salary are then fixed and the flow starts at the amount step, which is
+ * also where the place of payment is, a field the salary form does not have.
+ */
+export interface GehaltsquittungPreselect {
+  driverId: string;
+  salaryId: string;
+  /** Prefilled, still editable; the balance decides whether it may be paid. */
+  amountCents?: number | null;
+  /** YYYY-MM-DD */
+  paymentDate?: string | null;
+}
+
 export interface GehaltsquittungFlowOptions {
   /** Loads and acts only while true: the dialog is open and the caller may confirm in their own company. */
   enabled: boolean;
@@ -73,6 +88,8 @@ export interface GehaltsquittungFlowOptions {
   onChanged?: () => void;
   /** Where an unanswered attempt is kept; the tab's sessionStorage by default. */
   storage?: StorageLike | null;
+  /** A driver and salary chosen before the dialog opened; null for the free flow. */
+  preselect?: GehaltsquittungPreselect | null;
 }
 
 /** Loads whenever `key` changes to a new non-null value; a response for an older key is dropped. */
@@ -113,6 +130,7 @@ export function useGehaltsquittungFlow({
   defaultPlace,
   onChanged,
   storage,
+  preselect = null,
 }: GehaltsquittungFlowOptions) {
   const [step, setStep] = useState<FlowStep>('select');
   const [driverId, setDriverId] = useState('');
@@ -130,6 +148,14 @@ export function useGehaltsquittungFlow({
   const [uploading, setUploading] = useState(false);
   const [uploadRefusal, setUploadRefusal] = useState<ReceiptActionRefusal | null>(null);
   const [uploaded, setUploaded] = useState(false);
+  /**
+   * A preselect that was handed in while an unanswered confirmation was being
+   * resumed, and so has not been applied yet.
+   *
+   * State rather than a ref, because the done step needs to know: there is a
+   * second payment waiting behind the receipt just issued.
+   */
+  const [preselectWaiting, setPreselectWaiting] = useState(false);
 
   // A ref, not state: two clicks in one frame both see state from before either.
   const sendingRef = useRef(false);
@@ -137,6 +163,10 @@ export function useGehaltsquittungFlow({
   onChangedRef.current = onChanged;
   const defaultPlaceRef = useRef(defaultPlace);
   defaultPlaceRef.current = defaultPlace;
+  // A ref, because the caller builds this object while it renders: reading it
+  // through the dependency list would restart the flow on every parent render.
+  const preselectRef = useRef(preselect);
+  preselectRef.current = preselect;
   const attemptRef = useRef<PaymentAttempt | null>(null);
   attemptRef.current = attempt;
   const store = useMemo(() => (storage === undefined ? browserSessionStorage() : storage), [storage]);
@@ -145,6 +175,31 @@ export function useGehaltsquittungFlow({
 
   /** True while a confirmation is out and the database has not answered it. */
   const unresolved = attempt?.state === 'uncertain';
+
+  /**
+   * Puts the dialog on the handed-in salary, amount and date, at the amount
+   * step, with nothing left over from whatever it was showing before.
+   *
+   * Clearing the attempt and the refusal is the point, not tidiness: what it
+   * replaces is a *settled* attempt for a different salary, and carrying that
+   * one's refusal into this one's screen is how the wrong driver gets paid.
+   */
+  const applyPreselect = useCallback((chosen: GehaltsquittungPreselect) => {
+    setDriverId(chosen.driverId);
+    setSalaryId(chosen.salaryId);
+    setAmountText(chosen.amountCents != null ? formatCentsForInput(chosen.amountCents) : '');
+    setPaymentDate(chosen.paymentDate || berlinToday());
+    setShowMissing(false);
+    setAttempt(null);
+    setPending(null);
+    setRefusal(null);
+    setReceipt(null);
+    setConfirmedPreview(null);
+    setUploadRefusal(null);
+    setUploaded(false);
+    setPreselectWaiting(false);
+    setStep('amount');
+  }, []);
 
   // Opening resumes an unanswered confirmation, from this dialog session or
   // from the tab's storage after a reload. Closing keeps it; only a settled
@@ -166,10 +221,22 @@ export function useGehaltsquittungFlow({
         setPlace(stored.input.place);
         setRefusal('no_response');
         setStep('preview');
+        // The resumed payment is not the one the caller asked for; that one is
+        // still waiting and is applied once this is settled.
+        setPreselectWaiting(preselectRef.current !== null);
         return;
       }
-      setPaymentDate(berlinToday());
+      // A preselected salary skips the first step. It is read after the stored
+      // attempt on purpose: an unanswered confirmation has to be settled first,
+      // whichever screen started it, or the same payment could be sent twice.
+      const chosen = preselectRef.current;
       setPlace(defaultPlaceRef.current);
+      setPreselectWaiting(false);
+      if (chosen) {
+        applyPreselect(chosen);
+      } else {
+        setPaymentDate(berlinToday());
+      }
       return;
     }
     if (attemptRef.current?.state === 'uncertain') return;
@@ -185,7 +252,8 @@ export function useGehaltsquittungFlow({
     setConfirmedPreview(null);
     setUploadRefusal(null);
     setUploaded(false);
-  }, [enabled, companyId]);
+    setPreselectWaiting(false);
+  }, [enabled, companyId, applyPreselect]);
 
   // Company settings can arrive after the dialog opened.
   useEffect(() => {
@@ -235,10 +303,43 @@ export function useGehaltsquittungFlow({
   const placeMissing = place.trim() === '';
   const alreadyPaid = balanceFigures !== null && balanceFigures.remainingBeforeCents === 0;
   const canContinue = salary !== null && balanceInputs !== null && overlap === null;
+  /** The driver and the salary were chosen elsewhere, so this flow has no select step. */
+  const locked = preselect !== null;
   const outcomeUnknown = unresolved && refusal !== null && outcomeIsUnknown(refusal);
   const conflict = refusal === 'request_id_conflict';
   const differsFromPreview =
     receipt !== null && confirmedPreview !== null && !sameSnapshot(snapshotFromReceiptRow(receipt), confirmedPreview);
+
+  /**
+   * A resumed confirmation has settled while another payment was waiting behind
+   * it: switch to that one.
+   *
+   * Without this the dialog stays on the resumed payment. Its retry can be
+   * refused — `overpayment`, `already_paid` — which lands back on the amount
+   * step still holding the *resumed* driver, salary and amount, while the user
+   * opened this dialog for a different salary and has every reason to believe
+   * that is what they are looking at. Confirming there pays the wrong driver.
+   *
+   * Two states are left alone. `done` means a receipt was just issued and is on
+   * screen with its number, and hiding it would lose the only place it is
+   * shown; the waiting payment is reached from its own button instead.
+   * `request_id_conflict` is a hard stop that has to be read and checked
+   * against the receipt list, not scrolled past.
+   *
+   * **`sending` is load-bearing, not tidiness.** `confirm()` settles the
+   * attempt in several `setState` calls, and they do not all land in one
+   * commit — the attempt is cleared before the receipt and the step are set, so
+   * this effect runs once on a half-settled state that still reads as "refused
+   * on the preview step" and would take over the successful confirmation that
+   * is a line away from rendering. `setSending(false)` is the last update
+   * `confirm()` makes, in its `finally`, so waiting for it is waiting for the
+   * whole outcome.
+   */
+  useEffect(() => {
+    if (!enabled || !preselectWaiting || sending || unresolved || conflict || step === 'done') return;
+    const chosen = preselectRef.current;
+    if (chosen) applyPreselect(chosen);
+  }, [enabled, preselectWaiting, sending, unresolved, conflict, step, applyPreselect]);
 
   // ── Actions ─────────────────────────────────────────────────────────────
   const selectDriver = (id: string) => {
@@ -278,7 +379,13 @@ export function useGehaltsquittungFlow({
   const goBack = () => {
     if (sending || unresolved || conflict) return;
     setRefusal(null);
-    setStep(step === 'preview' ? 'amount' : 'select');
+    if (step === 'preview') {
+      setStep('amount');
+      return;
+    }
+    // A preselected flow has no step to go back to; its dialog offers a cancel.
+    if (locked) return;
+    setStep('select');
   };
 
   const confirm = async () => {
@@ -406,6 +513,14 @@ export function useGehaltsquittungFlow({
   };
 
   const startAnother = () => {
+    // In a preselected flow this is the way on to the payment that was waiting
+    // behind the resumed one; there is no select step to return to.
+    const chosen = preselectRef.current;
+    if (locked && chosen) {
+      applyPreselect(chosen);
+      salaries.reload();
+      return;
+    }
     setStep('select');
     setSalaryId('');
     setAmountText('');
@@ -437,6 +552,8 @@ export function useGehaltsquittungFlow({
     balanceFigures,
     figures,
     alreadyPaid,
+    locked,
+    preselectWaiting,
     amountText,
     setAmountText,
     amountError,

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Plus, Download } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
+import { useCompanyScope } from '../hooks/useCompanyScope';
 import { useToast } from '../contexts/ToastContext';
 import { useDatabase } from '../hooks/useDatabase';
 import { useCompanySettings } from '../contexts/CompanySettingsContext';
@@ -24,7 +25,10 @@ interface ConfirmModalState {
 
 const BelegePage: React.FC = () => {
   const { t } = useTranslation();
-  const { user, canEdit, canDelete, canCreate } = useAuth();
+  const { user } = useAuth();
+  // The rights of the company the session is in: a read context writes nothing
+  // (plan 3.4b), and the database refuses these three the same way.
+  const { canEdit, canDelete, canCreate } = useCompanyScope();
   const { success, error: showError } = useToast();
   const { receipts: receiptActions, drivers: driverActions, isLoading: dbLoading } = useDatabase();
   const { settings } = useCompanySettings();
@@ -163,7 +167,7 @@ const BelegePage: React.FC = () => {
               setIsReceiptModalOpen(true);
             }}
             className="flex items-center justify-center rounded-lg transition-colors w-11 h-11 sm:w-auto sm:h-auto sm:px-4 sm:py-2"
-            style={{ background: 'var(--success)', color: 'white' }}
+            style={{ background: 'var(--success-solid)', color: 'white' }}
             title={t('belege.add')}
             onMouseEnter={e => { (e.currentTarget as HTMLElement).style.opacity = '0.9'; }}
             onMouseLeave={e => { (e.currentTarget as HTMLElement).style.opacity = '1'; }}
@@ -174,7 +178,7 @@ const BelegePage: React.FC = () => {
           <button
             onClick={handleExportExcel}
             className="flex items-center justify-center rounded-lg transition-colors w-11 h-11 sm:w-auto sm:h-auto sm:px-4 sm:py-2"
-            style={{ background: 'var(--accent)', color: 'white' }}
+            style={{ background: 'var(--accent)', color: 'var(--text-inverse)' }}
             title={t('common.exportExcelShort')}
             onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'var(--accent-hover)'; }}
             onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'var(--accent)'; }}

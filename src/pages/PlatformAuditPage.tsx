@@ -263,7 +263,7 @@ const PlatformAuditPage: React.FC = () => {
         )}
 
         <button type="submit" className="px-4 py-2 rounded-xl text-sm font-semibold"
-          style={{ background: 'var(--accent)', color: 'white' }}>
+          style={{ background: 'var(--accent)', color: 'var(--text-inverse)' }}>
           {t('admin.audit.apply')}
         </button>
         <button
@@ -332,7 +332,7 @@ const PlatformAuditPage: React.FC = () => {
                 onClick={() => void load(applied, cursor)}
                 disabled={loading}
                 className="px-4 py-2 rounded-xl text-sm font-semibold"
-                style={{ background: 'var(--accent)', color: 'white', opacity: loading ? 0.6 : 1 }}
+                style={{ background: 'var(--accent)', color: 'var(--text-inverse)', opacity: loading ? 0.6 : 1 }}
               >
                 {loading ? t('admin.common.loading') : t('admin.audit.loadMore')}
               </button>

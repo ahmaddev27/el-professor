@@ -56,18 +56,10 @@ export const de = {
   'admin.role.billing':     'Buchhaltung',
   'admin.role.read_only':   'Nur Lesen',
 
-  // ── Plattform-Anmeldung (/admin/login) ─────────────────────────────────────
-  // Jede Ablehnung lautet gleich: die Seite darf nicht verraten, ob eine
-  // Adresse zum Plattform-Team gehört.
-  'admin.login.title':           'Plattform-Anmeldung',
-  'admin.login.lead':            'Zugang nur für das Plattform-Team.',
-  'admin.login.noGoogle':        'Die Anmeldung erfolgt mit E-Mail-Adresse und Passwort. Für Plattform-Konten gibt es keine Anmeldung mit Google.',
-  'admin.login.submit':          'Anmelden',
-  'admin.login.failed':          'Anmeldung nicht möglich. Bitte prüfen Sie E-Mail-Adresse und Passwort.',
-  'admin.login.tooManyAttempts': 'Zu viele Anmeldeversuche. Bitte warten Sie einige Minuten und versuchen Sie es erneut.',
-  'admin.login.network':         'Keine Verbindung zum Server. Bitte versuchen Sie es erneut.',
-  'admin.login.companyHint':     'Sie arbeiten für ein Unternehmen?',
-  'admin.login.companyLink':     'Zur Unternehmens-Anmeldung',
+  // Die eigene Plattform-Anmeldung unter /admin/login gibt es seit dem
+  // 17.09.2026 nicht mehr: Plattform-Konten und Unternehmens-Konten melden sich
+  // auf derselben Seite an (/login), die Zuordnung erfolgt danach. Die Texte
+  // 'admin.login.*' sind mit der Seite entfallen.
 
   // ── Shell chrome ───────────────────────────────────────────────────────────
   'shell.systemName':       'Verwaltungssystem',
@@ -76,6 +68,39 @@ export const de = {
   'shell.themeToDark':      'Zum dunklen Modus wechseln',
   'shell.exitCompanyView':  'Unternehmensansicht beenden',
   'shell.language':         'Sprache',
+
+  // ── Support sessions (plan 3.C) ────────────────────────────────────────────
+  // The two bar sentences are the plan's own wording. "Support-Zugriff" and
+  // "Nur-Lese-Ansicht" are ordinary German, not statutory document text and not
+  // on the closed domain list in i18n/index.ts, so English gets English.
+  'support.bar.supportLabel':   'Support-Zugriff',
+  'support.bar.viewLabel':      'Nur-Lese-Ansicht',
+  'support.bar.minutesLeft':    'noch {minutes} Min',
+  'support.bar.startSupport':   'Support-Sitzung starten',
+  'support.bar.end':            'Beenden',
+  'support.bar.openCompanyView': 'Zur Unternehmensansicht',
+  'support.bar.unknownCompany': 'Unbekanntes Unternehmen',
+  'support.bar.startedTitle':   'Support-Sitzung für "{company}" gestartet',
+  'support.bar.expiredTitle':   'Zugriff beendet',
+  'support.bar.expiredBody':    'Der Zugriff auf das Unternehmen ist abgelaufen. Bitte erneut öffnen.',
+  'support.reason.title':       'Support-Sitzung für "{company}"',
+  'support.reason.body':        'Eine Support-Sitzung erlaubt Änderungen an den Daten dieses Unternehmens für 60 Minuten. Der Grund wird protokolliert.',
+  'support.reason.placeholder': 'Warum ist der Zugriff nötig?',
+  'support.reason.required':    'Bitte einen Grund angeben.',
+  'support.reason.tooLong':     'Der Grund ist zu lang.',
+  'support.reason.confirm':     'Support-Sitzung starten',
+  // The bucket policies still resolve the company from the profile's
+  // membership, so a support session reaches a company's rows but not its
+  // files. The fix is a migration; this is what the screen says until then.
+  'support.storage.membershipOnly': 'Dateien dieses Unternehmens sind in einer Support-Sitzung noch nicht zugänglich. Der Zugriff auf den Dateispeicher folgt noch der Unternehmenszugehörigkeit des Kontos.',
+  'support.error.denied':           'Keine Berechtigung für diese Aktion.',
+  'support.error.contextOpen':      'Es ist bereits ein Zugriff auf ein anderes Unternehmen offen. Bitte zuerst beenden.',
+  'support.error.reasonRequired':   'Für eine Support-Sitzung ist ein Grund erforderlich.',
+  'support.error.noSession':        'Diese Anmeldung ist nicht mehr gültig. Bitte erneut anmelden.',
+  'support.error.noContext':        'Es ist kein Unternehmenszugriff offen.',
+  'support.error.accountInCompany': 'Dieses Konto gehört zu einem Unternehmen und kann kein anderes öffnen.',
+  'support.error.notFound':         'Unternehmen nicht gefunden.',
+  'support.error.invalid':          'Die Aktion konnte nicht ausgeführt werden.',
 
   // ── Design system primitives (src/components/ui) ──────────────────────────
   'ui.kpi.trendDown':         'Rückgang',
@@ -192,6 +217,12 @@ export const de = {
   'auth.google.continue':   'Mit Google fortfahren',
   'auth.google.or':         'oder',
   'auth.google.starting':   'Weiterleitung zu Google…',
+  // Hinweise auf der gemeinsamen Anmeldeseite, wenn wir selbst eine Sitzung
+  // beendet haben. Es gibt nur eine Anmeldeseite, und sie sagt von sich aus
+  // nichts über die Plattform-Verwaltung — ohne diesen Satz landet ein
+  // Verwaltungskonto ohne Erklärung auf dem Unternehmens-Formular.
+  'auth.notice.platformPasswordSignIn': 'Ihr neues Passwort ist gespeichert. Bitte melden Sie sich jetzt mit E-Mail und Passwort an, um die Plattform-Verwaltung zu öffnen.',
+
   'auth.google.error.cancelled':       'Die Anmeldung mit Google wurde abgebrochen.',
   'auth.google.error.generic':         'Die Anmeldung mit Google ist fehlgeschlagen. Bitte versuchen Sie es erneut oder melden Sie sich mit Ihrem Passwort an.',
   'auth.google.error.startFailed':     'Die Weiterleitung zu Google ist fehlgeschlagen. Bitte versuchen Sie es erneut.',
@@ -204,7 +235,9 @@ export const de = {
   'auth.google.error.accountBlocked':  'Dieser Zugang ist nicht mehr aktiv. Bitte kontaktieren Sie den Support.',
   'auth.google.error.accountConflict': 'Dieses Google-Konto lässt sich diesem Zugang nicht zuordnen. Bitte melden Sie sich mit Ihrem Passwort an.',
   'auth.google.error.emailNotAllowed': 'Diese Google-Adresse kann hier nicht verwendet werden. Bitte melden Sie sich mit Ihrem Passwort an.',
-  'auth.google.error.platformStaff':   'Plattform-Zugänge melden sich mit E-Mail-Adresse und Passwort an, nicht mit Google.',
+  // Die Ablehnung auf der gemeinsamen Anmeldeseite, Wortlaut vom Inhaber
+  // festgelegt am 17.09.2026.
+  'auth.google.error.platformStaff':   'Verwaltungskonten melden sich nur mit E-Mail und Passwort an.',
 
   // ── Plan gating ────────────────────────────────────────────────────────────
   'locked.title':           '{feature} ist nicht in Ihrem Plan',
@@ -1886,6 +1919,9 @@ export const de = {
   'sal.noPayments':                        'Noch keine Zahlungen erfasst',
   'sal.noTransactions':                    'Keine Transaktionen',
   'sal.notSignedIn':                       'Nicht angemeldet',
+  'sal.overlap.badge':                     'Überschneidung',
+  'sal.overlap.entry':                     '{period} · {amount} €',
+  'sal.overlap.tooltip':                   'Dieser Zeitraum überschneidet sich mit einem anderen Gehaltsdatensatz dieses Fahrers. Solange nicht geklärt ist, welcher gilt, kann für keinen der beiden eine Gehaltsquittung ausgestellt werden. Überschneidende Zeiträume:',
   'sal.paidUnpaidCount':                   '{paid} bezahlt / {unpaid} unbezahlt',
   'sal.payment.add':                       'Zahlung hinzufügen',
   'sal.payment.added':                     'Zahlung erfolgreich hinzugefügt',
@@ -1894,6 +1930,12 @@ export const de = {
   'sal.payment.bankTransfer':              'Banküberweisung',
   'sal.payment.cash':                      'Bargeld',
   'sal.payment.cashBadge':                 'Barzahlung',
+  'sal.payment.cashBlockedOverlap':        'Für diesen Fahrer gibt es einen zweiten Gehaltsdatensatz, dessen Zeitraum sich mit diesem überschneidet: {period} über {amount}. Solange beide bestehen, lässt sich für dieses Gehalt keine Barzahlung erfassen — jede Barzahlung entsteht über eine Gehaltsquittung, und die wird für überschneidende Zeiträume abgelehnt. Führen Sie die beiden Datensätze auf der Gehälter-Seite zu einem zusammen und erfassen Sie die Zahlung danach. Eine Banküberweisung können Sie weiterhin erfassen.',
+  'sal.payment.cashNeedsDokumente':        'Barzahlungen werden als Gehaltsquittung gebucht, und Gehaltsquittungen gehören zum Bereich Dokumente, den Ihr Tarif nicht enthält. Erfassen Sie die Zahlung als Banküberweisung oder erweitern Sie den Tarif.',
+  'sal.payment.cashNeedsReceipt':          'Eine bereits erfasste Zahlung lässt sich nicht auf Bargeld umstellen: Barzahlungen entstehen nur über eine Gehaltsquittung. Löschen Sie diese Zahlung und erfassen Sie sie neu als Barzahlung.',
+  'sal.payment.cashReceiptContinue':       'Weiter zur Gehaltsquittung',
+  'sal.payment.cashReceiptNotice':         'Barzahlungen werden als Gehaltsquittung gebucht. Im nächsten Schritt prüfen Sie den offenen Betrag und den Ort der Zahlung, bestätigen die Quittung und laden das PDF; dabei wird der Betrag aus der Kasse ausgebucht. Danach lässt sich die Zahlung weder ändern noch löschen, sondern nur noch über die Quittung stornieren. Eine eigene Notiz ist auf diesem Weg nicht möglich.',
+  'sal.payment.cashRowLocked':             'Betrag und Zahlungsart einer bereits erfassten Barzahlung lassen sich nicht ändern: für diese Zahlung wurde die Kasse nie bewegt, und eine Änderung würde den Bargeldbestand still verfälschen. Löschen Sie die Zahlung und erfassen Sie sie neu — die neue Barzahlung erzeugt eine Gehaltsquittung und bucht den Betrag aus der Kasse aus. Datum und Beschreibung bleiben änderbar.',
   'sal.payment.date':                      'Zahlungsdatum',
   'sal.payment.deleteConfirm':             'Möchten Sie diese Zahlung wirklich löschen? Diese Aktion kann nicht rückgängig gemacht werden.',
   'sal.payment.deleteTitle':               'Zahlung löschen',
@@ -1913,6 +1955,7 @@ export const de = {
   'sal.payment.receiptPreviewIntro':       'Die gespeicherte Gehaltsquittung zu dieser Barzahlung.',
   'sal.payment.receiptVoidedNotice':       'Diese Quittung ist storniert. Die zugehörige Zahlung wurde aus dem Gehalt entfernt und das Bargeld zurückgebucht.',
   'sal.payment.remainingLabel':            'Restbetrag:',
+  'sal.payment.rowNotFound':               'Diese Zahlung wurde nicht gefunden. Bitte die Liste neu laden und noch einmal versuchen.',
   'sal.payment.type':                      'Zahlungsart',
   'sal.payment.updated':                   'Zahlung erfolgreich aktualisiert',
   'sal.paymentHistory':                    'Zahlungshistorie',
@@ -1934,6 +1977,38 @@ export const de = {
   'sal.payroll.taxReviewed':               'Steuerliche Behandlung mit Steuerberater geprüft',
   'sal.payroll.totalNetPayout':            'Gesamt Netto Auszahlung',
   'sal.periodMissing':                     'Zeitraum fehlt',
+  'sal.periods.alreadyGone':               'Dieser Gehaltsdatensatz existiert nicht mehr — offenbar wurde er anderswo schon gelöscht. Die Liste wurde neu geladen.',
+  'sal.periods.attached.none':             'Nichts hängt daran',
+  'sal.periods.block.gehaltsquittung.one':   'Für diesen Datensatz wurde eine Gehaltsquittung ausgestellt. Eine Quittung ist ein Belegdokument mit fortlaufender Nummer, deshalb lässt sich dieses Gehalt nicht löschen — auch eine stornierte Quittung bleibt bestehen. Löschen Sie stattdessen den anderen Datensatz des Paares, also den handeingetragenen.',
+  'sal.periods.block.gehaltsquittung.other': 'Für diesen Datensatz wurden {count} Gehaltsquittungen ausgestellt. Eine Quittung ist ein Belegdokument mit fortlaufender Nummer, deshalb lässt sich dieses Gehalt nicht löschen — auch eine stornierte Quittung bleibt bestehen. Löschen Sie stattdessen den anderen Datensatz des Paares, also den handeingetragenen.',
+  'sal.periods.block.payments.one':          'An diesem Datensatz hängt eine Zahlung. Sie würde beim Löschen mitgelöscht. Wenn dieser Datensatz wirklich weg soll: wählen Sie oben auf der Seite den Zeitraum {period}, öffnen Sie dort „Zahlungen verwalten“ und entfernen Sie die Zahlung — „Zahlungen verwalten“ zeigt immer die Zahlungen des oben gewählten Zeitraums, nicht die dieses Datensatzes.',
+  'sal.periods.block.payments.other':        'An diesem Datensatz hängen {count} Zahlungen. Sie würden beim Löschen mitgelöscht. Wenn dieser Datensatz wirklich weg soll: wählen Sie oben auf der Seite den Zeitraum {period}, öffnen Sie dort „Zahlungen verwalten“ und entfernen Sie die Zahlungen — „Zahlungen verwalten“ zeigt immer die Zahlungen des oben gewählten Zeitraums, nicht die dieses Datensatzes.',
+  'sal.periods.checkFailed':               'Konnte nicht geprüft werden — bitte neu laden',
+  'sal.periods.checking':                  'Wird geprüft…',
+  'sal.periods.col.actions':               'Aktionen',
+  'sal.periods.col.amount':                'Betrag',
+  'sal.periods.col.attached':              'Zahlungen / Quittungen',
+  'sal.periods.col.period':                'Zeitraum',
+  'sal.periods.confirmDelete.keeps':       'Die übrigen Zeiträume dieses Fahrers bleiben unverändert: {periods}.',
+  'sal.periods.confirmDelete.keepsNothing': 'Danach hat dieser Fahrer keinen gespeicherten Gehaltsdatensatz mehr.',
+  'sal.periods.confirmDelete.message':     'Gehaltsdatensatz von {name} für {period} über {amount} € wirklich löschen?',
+  'sal.periods.confirmDelete.title':       'Gehaltsdatensatz löschen',
+  'sal.periods.delete':                    'Diesen Datensatz löschen',
+  'sal.periods.deleted':                   'Datensatz gelöscht',
+  'sal.periods.deletedMessage':            'Der Gehaltsdatensatz von {name} für {period} wurde gelöscht',
+  'sal.periods.deleting':                  'Wird gelöscht…',
+  'sal.periods.error.receiptExists':       'Für diesen Datensatz wurde inzwischen eine Gehaltsquittung ausgestellt, deshalb lässt er sich nicht mehr löschen.',
+  'sal.periods.intro':                     'Alle Gehaltszeiträume dieses Fahrers — unabhängig vom oben gewählten Zeitraum. Bei zwei überschneidenden Zeiträumen ist der eine der Geschäftsmonat, den das Programm selbst berechnet, und der andere handeingetragen; löschen Sie den handeingetragenen.',
+  'sal.periods.mergeHint':                 'Überschneidende Zeiträume werden durch Löschen zusammengeführt, nicht durch Erweitern: der berechnete Geschäftsmonat bleibt stehen, der andere Datensatz wird gelöscht. Die Zeiträume selbst sind hier absichtlich nicht änderbar — eine Änderung würde die Beträge und bereits ausgestellte Gehaltsquittungen nicht mitziehen.',
+  'sal.periods.noRows':                    'Für diesen Fahrer ist noch kein Gehaltsdatensatz gespeichert',
+  'sal.periods.none':                      'Für diesen Fahrer ist noch kein Gehaltsdatensatz gespeichert',
+  'sal.periods.open':                      'Gehaltszeiträume dieses Fahrers anzeigen',
+  'sal.periods.openHint':                  'Zum Bereinigen anklicken',
+  'sal.periods.refusal.company_mismatch':  'Sie sehen die Daten eines Kunden. Gehaltsdatensätze lassen sich nur im eigenen Unternehmen löschen.',
+  'sal.periods.refusal.no_company':        'Ihr Konto ist keinem Unternehmen zugeordnet.',
+  'sal.periods.refusal.not_authorized':    'Ihre Rolle darf Gehälter nicht bearbeiten.',
+  'sal.periods.title':                     'Gehaltszeiträume — {name}',
+  'sal.periods.writeRefused':              'Das Löschen wurde von der Datenbank abgelehnt. Möglicherweise fehlt die Berechtigung oder der Datensatz gehört zu einem anderen Unternehmen.',
   'sal.remaining':                         'Restbetrag',
   'sal.resetFilters':                      'Zurücksetzen',
   'sal.revenueShare':                      'Umsatzanteil',
@@ -2114,6 +2189,8 @@ export const de = {
   'users.resetPassword.label':             'Neues temporäres Passwort',
   'users.resetPassword.nextLoginHint':     'Der Benutzer muss dieses Passwort beim nächsten Login ändern.',
   'users.resetPassword.success':           'Passwort zurückgesetzt. Der Benutzer muss es beim nächsten Login ändern.',
+  'users.readOnlyBody':                    'Diese Ansicht ist schreibgeschützt. Die Benutzerverwaltung ist nur in einer Support-Sitzung möglich; eine reine Übersicht der Konten steht unter "Verzeichnisse" im Plattform-Bereich.',
+  'users.readOnlyTitle':                   'Nur-Lese-Ansicht',
   'users.roleNone':                        'Keine',
   'users.roles.areasSelected.one':         '{count} Bereich ausgewählt',
   'users.roles.areasSelected.other':       '{count} Bereiche ausgewählt',
@@ -2421,6 +2498,7 @@ export const de = {
   'gq.closeUnresolved.close':              'Trotzdem schließen',
   'gq.closeUnresolved.stay':               'Zurück zum Vorgang',
   'gq.closeUnresolved.title':              'Schließen, ohne den Vorgang zu klären?',
+  'gq.col.businessMonth':                  'Abrechnungsmonat',
   'gq.col.number':                         'Nr.',
   'gq.col.paymentDate':                    'Gezahlt am',
   'gq.col.signedCopy':                     'Unterschrieben',

@@ -94,7 +94,18 @@ const isMode = (value: unknown): value is PlatformContextMode =>
  * The open context, or null. Strict on purpose: a body without a company id or
  * with a mode this build does not know is read as "no context", so the screens
  * offer nothing rather than offering something the database will refuse.
+ *
+ * Exported because `platform_context_open` answers the very same body in its
+ * `context` field (20260917140000, section 9). Reading that answer is what lets
+ * a screen open a company and go straight there: the alternative is to ask
+ * `platform_whoami()` again and navigate before it lands, into the window where
+ * the browser still holds no context and `PlatformAccountGuard` bounces the tab
+ * back to the panel. It is the database's own answer either way, not a guess.
  */
+export function parsePlatformCompanyContext(value: unknown, receivedAt: number): PlatformCompanyContext | null {
+  return parseCompanyContext(value, receivedAt);
+}
+
 function parseCompanyContext(value: unknown, receivedAt: number): PlatformCompanyContext | null {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
   const body = value as Record<string, unknown>;

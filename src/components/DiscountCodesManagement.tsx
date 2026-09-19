@@ -291,7 +291,7 @@ const DiscountCodeModal: React.FC<ModalProps> = ({ dc, companies, onClose, onSav
           <label className="flex items-center gap-3 cursor-pointer select-none">
             <div
               className="relative w-11 h-6 rounded-full transition-colors"
-              style={{ background: form.active ? 'var(--success)' : 'var(--bg-muted)' }}
+              style={{ background: form.active ? 'var(--success-solid)' : 'var(--bg-muted)' }}
               onClick={() => set('active', !form.active)}
             >
               <div className="absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform" style={{ transform: form.active ? 'translateX(20px)' : 'translateX(0)' }} />

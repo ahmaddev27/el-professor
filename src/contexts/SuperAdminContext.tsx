@@ -1,19 +1,25 @@
 import React, { createContext, useContext, useState, useCallback, useEffect, useRef, ReactNode } from 'react';
 import { useAuth } from './AuthContext';
+import { useToast } from './ToastContext';
+import { useTranslation } from './LanguageContext';
 import { supabase } from '../lib/supabase';
 import {
   NO_PLATFORM_ACCESS,
+  liveCompanyContext,
   msUntilContextEnds,
   ownCompanyDataReadable,
   parsePlatformWhoami,
   platformAccessCan,
-  platformCanEnterCompany,
   platformReadsCompany,
   samePlatformAccess,
   withoutCompanyContext,
   type PlatformAccess,
   type PlatformCapability,
+  type PlatformCompanyContext,
+  type PlatformContextMode,
 } from '../lib/platformAccess';
+import { companyScope, type CompanyScope } from '../lib/companyScope';
+import { closeCompanyContext, openCompanyContext } from '../lib/supportSessionClient';
 
 export interface CompanyListItem {
   id: string;
@@ -41,15 +47,30 @@ interface SuperAdminContextType {
   activeCompanyId: string | null;
   activeCompany: CompanyListItem | null;
   isViewingAsCompany: boolean;
-  /**
-   * Opens a company, and answers whether it opened. False when no live support
-   * session covers that company — the caller must not navigate on false, or the
-   * tenant router would render against rows the database returns nothing for.
-   * Either way it asks the database again, so a session opened in another tab
-   * is seen by the next attempt.
-   */
-  enterCompany: (company: CompanyListItem) => boolean;
   exitCompany: () => void;
+  /**
+   * Asks the database for a context on this company (plan 3.4b) — `view` reads,
+   * `support` reads and writes and records the reason given for it. Resolves
+   * once the context is in hand, so a caller may navigate straight after;
+   * rejects with the database's own refusal (`PlatformRpcError`), which is the
+   * only authority on whether it opened.
+   */
+  openCompany: (
+    company: CompanyListItem,
+    mode: PlatformContextMode,
+    reason?: string | null,
+  ) => Promise<void>;
+  /** Ends the open context, on the server and here. */
+  closeCompany: () => Promise<void>;
+  /** The open context as the database last reported it, or null once it ends. */
+  companyContext: PlatformCompanyContext | null;
+  /**
+   * Which company the screens must query and whether they may write there. The
+   * one seam: `effectiveCompanyId` is `companyScope.companyId`, and every
+   * tenant screen, hook and context reads it rather than the membership in
+   * AuthContext.
+   */
+  companyScope: CompanyScope;
   // The effective company id to use for queries (own company OR switched-to company)
   effectiveCompanyId: string | null;
   /**
@@ -93,6 +114,13 @@ const MAX_TIMER_MS = 2_147_483_647;
  */
 const WAKE_GAP_MS = 2_000;
 
+/**
+ * How often a focused tab re-asks while a company is open — the bound on how
+ * long a context ended at the server can go unnoticed. See the effect that uses
+ * it for why a minute, and why only then.
+ */
+const CONTEXT_RECHECK_MS = 60_000;
+
 interface RpcAnswer {
   data: unknown;
   failed: boolean;
@@ -109,9 +137,47 @@ async function askRpc(fn: string): Promise<RpcAnswer> {
   }
 }
 
+/**
+ * The open context as a company row, for the shell that shows a name.
+ *
+ * A context carries the company's id and name and nothing else, which is all
+ * the shell reads. The remaining columns are filled with empty values rather
+ * than invented ones, and the fuller row from the companies list replaces this
+ * whenever the panel has one — which it does for every path that goes through
+ * `openCompany`, and does not after a reload, where the context is the only
+ * thing that survived.
+ */
+function companyFromContext(context: PlatformCompanyContext): CompanyListItem {
+  return {
+    id: context.companyId,
+    name: context.companyName ?? '',
+    slug: '',
+    legal_name: null,
+    email: null,
+    phone: null,
+    address: null,
+    city: null,
+    postal_code: null,
+    country: '',
+    logo_url: null,
+    status: 'active',
+    created_at: '',
+    updated_at: '',
+  };
+}
+
 export const SuperAdminProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const { user, isSuperAdmin, companyId } = useAuth();
-  const [activeCompany, setActiveCompany] = useState<CompanyListItem | null>(null);
+  const { showToast } = useToast();
+  const { t } = useTranslation();
+  /*
+    The fuller company row, when a panel screen handed one over. It is a label,
+    not a permission and not the seam: which company the screens query is
+    `companyScope` below, and that comes from the context the database reports.
+    Before 3.4b this state *was* the answer, which is why entering a company did
+    not survive a reload.
+  */
+  const [enteredCompany, setEnteredCompany] = useState<CompanyListItem | null>(null);
   const [platformAccess, setPlatformAccess] = useState<PlatformAccess>(NO_PLATFORM_ACCESS);
   const [platformAccessStatus, setPlatformAccessStatus] = useState<PlatformAccessStatus>('idle');
   const [ownActiveCompanyId, setOwnActiveCompanyId] = useState<string | null | undefined>(undefined);
@@ -125,6 +191,10 @@ export const SuperAdminProvider: React.FC<{ children: ReactNode }> = ({ children
   const [clock, setClock] = useState(() => Date.now());
   const answeredFor = useRef<string | null>(null);
   const lastAskedAt = useRef(0);
+  /** Whether a company was open on the previous render, for the notice below. */
+  const hadCompanyContext = useRef(false);
+  /** Set by closeCompany, so the person who ended it is not told it expired. */
+  const endedOnPurpose = useRef(false);
   const userId = user?.id ?? null;
 
   const reloadPlatformAccess = useCallback(() => {
@@ -219,6 +289,38 @@ export const SuperAdminProvider: React.FC<{ children: ReactNode }> = ({ children
     return () => clearTimeout(timer);
   }, [platformAccess, clock, reloadPlatformAccess]);
 
+  /*
+    …and a slow re-ask while a company is open, because a context can also end
+    at the server without this tab being touched.
+
+    The two triggers above cover a tab that comes back and a context that runs
+    its full hour. Neither covers a session closed from another tab, a staff row
+    disabled by an owner, or a sign-out elsewhere, while this tab keeps the
+    focus. Until the next answer every screen goes on querying — and since
+    `platform_reads_company_data()` is false, the database answers each query
+    with nothing at all: empty lists and confident zeros, for up to an hour,
+    with no error anywhere. Zeros that look like data are the one failure this
+    product cannot afford.
+
+    A minute is the interval, and it is a deliberate trade. `platform_whoami()`
+    is STABLE and writes no audit row, so the cost is one request a minute per
+    open company per focused tab — nothing, next to bounding that window at 60
+    seconds. It asks only while a company is actually open (a company user and
+    an idle panel ask nothing at all) and only while the tab is visible, since a
+    hidden tab is covered by the wake-up above. `WAKE_GAP_MS` still applies, so
+    a tick that lands just after a focus does not ask twice.
+  */
+  useEffect(() => {
+    if (!userId || !isSuperAdmin) return;
+    if (platformAccess.companyContext === null) return;
+    const timer = setInterval(() => {
+      if (document.visibilityState !== 'visible') return;
+      if (Date.now() - lastAskedAt.current < WAKE_GAP_MS) return;
+      reloadPlatformAccess();
+    }, CONTEXT_RECHECK_MS);
+    return () => clearInterval(timer);
+  }, [userId, isSuperAdmin, platformAccess.companyContext, reloadPlatformAccess]);
+
   const isPlatformStaff = platformAccess.role !== null;
 
   const platformCan = useCallback(
@@ -227,48 +329,127 @@ export const SuperAdminProvider: React.FC<{ children: ReactNode }> = ({ children
   );
 
   /*
-    Opening a company needs a live support session on that company, not just
-    the capability to read business data.
+    Opening a company is one RPC, and the answer it returns is the context.
 
-    Until 20260917140000 (plan 3.4) `business.read` was the whole story: the
-    database answered a staff account with every company's rows, so entering was
-    only a question of what the screens should show. That is no longer true.
-    `get_active_company_id()` now answers with the *context's* company and
-    nothing else, so entering without one renders all nineteen tenant routes
-    against rows the database returns nothing for — every list empty, every
-    total a confident zero, and no error anywhere to say why. One gate here is
-    worth more than a guard on each of those screens, because it is also what
-    the database actually says. The rule itself is platformCanEnterCompany().
-
-    It returns whether it opened; the callers must not navigate on false. 3.4b
-    builds the screens that open a session, and reloadPlatformAccess() is how
-    they make this see one.
+    Installing that answer rather than waiting for the next platform_whoami() is
+    what lets the caller navigate in the same click: between a successful
+    platform_context_open and the whoami that would confirm it, this provider
+    would still hold no context, so `effectiveCompanyId` would be null and
+    PlatformAccountGuard would bounce the tab straight back to /admin. The
+    installed value is the database's own row, parsed by the same function the
+    whoami answer goes through, and the re-ask that follows replaces it.
   */
-  const enterCompany = useCallback((company: CompanyListItem): boolean => {
-    reloadPlatformAccess();
-    if (!platformCanEnterCompany(platformAccess, company.id, Date.now())) return false;
-    setActiveCompany(company);
-    return true;
-  }, [platformAccess, reloadPlatformAccess]);
-
-  const exitCompany = useCallback(() => {
-    setActiveCompany(null);
+  const openCompany = useCallback(async (
+    company: CompanyListItem,
+    mode: PlatformContextMode,
+    reason?: string | null,
+  ): Promise<void> => {
+    // Throws when the database refuses, and when its answer carries no context
+    // this build can read — the caller must not report a company it cannot show.
+    const context = await openCompanyContext(company.id, mode, reason);
+    const receivedAt = Date.now();
+    setEnteredCompany(company);
+    setPlatformAccess(previous => ({ ...previous, companyContext: context }));
+    setClock(receivedAt);
+    lastAskedAt.current = receivedAt;
+    setReloadKey(k => k + 1);
   }, []);
 
-  // Losing the role, the right to read business data, or a live context on this
-  // company closes it: when an answer says so, and when the context's end comes
-  // round on the clock whether or not any answer has arrived since. Dropping the
-  // company is what sends the account back to the panel — PlatformAccountGuard
-  // (App.tsx) routes a platform account with no effective company there.
-  useEffect(() => {
-    setActiveCompany(current =>
-      current !== null && platformCanEnterCompany(platformAccess, current.id, clock) ? current : null);
-  }, [platformAccess, clock]);
+  /*
+    Ending one closes it here first and on the server after.
 
-  const isViewingAsCompany = isPlatformStaff && activeCompany !== null;
+    The optimistic half only ever takes access away, so a failed request leaves
+    the browser showing less than it holds and never more; the re-ask that
+    follows settles it either way. Doing it in the other order would leave the
+    company open on screen for a round trip after the person asked to leave it.
+  */
+  const closeCompany = useCallback(async (): Promise<void> => {
+    endedOnPurpose.current = true;
+    setPlatformAccess(withoutCompanyContext);
+    setEnteredCompany(null);
+    try {
+      await closeCompanyContext();
+    } finally {
+      reloadPlatformAccess();
+    }
+  }, [reloadPlatformAccess]);
+
+  const exitCompany = useCallback(() => {
+    void closeCompany().catch(() => {
+      // The screens have already left the company; a failed close is the
+      // database's to time out, and the next answer reports whatever is true.
+    });
+  }, [closeCompany]);
+
+  /*
+    Which company the screens query, and whether they may write there.
+
+    Derived from the context the database reports — not from state a click left
+    behind — so it survives a reload, follows a session closed in another tab,
+    and ends exactly when the context does. `clock` is what makes that last part
+    true without an answer: it moves when the context's end comes round.
+  */
+  const companyContext = liveCompanyContext(platformAccess, clock);
+  const scope = companyScope({ ownCompanyId: companyId, context: companyContext });
+
+  // The label the shell shows. The fuller row when a panel screen handed one
+  // over for this very company, the context's own name otherwise — after a
+  // reload that is all there is.
+  const activeCompany = scope.isPlatformSession && companyContext !== null
+    ? (enteredCompany?.id === scope.companyId ? enteredCompany : companyFromContext(companyContext))
+    : null;
+
+  // A row for a company that is no longer open is a label with nothing behind
+  // it; drop it so a later context cannot inherit the wrong name.
+  useEffect(() => {
+    setEnteredCompany(current => (current !== null && current.id === scope.companyId ? current : null));
+  }, [scope.companyId]);
+
+  /*
+    Saying so when a company closes on its own.
+
+    It belongs here and not in the bar, although the bar is what shows the
+    session: when a context ends, `PlatformAccountGuard` turns the whole tenant
+    subtree into a <Navigate>, so the bar unmounts in that same render and an
+    effect of its own would never run. The provider outlives the navigation, so
+    it is the only place that can see the transition.
+
+    A close the person asked for is not news, and `closeCompany` marks it. What
+    is left is an expiry, a session closed in another tab, a staff row disabled
+    in the meantime — and a re-ask that failed, which also drops the company and
+    earns the same sentence, because from the screens' side it did close.
+
+    No dependency array: it has to compare against the previous *render*, and
+    `companyContext` is a fresh object each time, so a list naming it would run
+    the effect every render anyway. The body returns in two comparisons unless
+    the transition actually happened.
+  */
+  useEffect(() => {
+    const live = companyContext !== null;
+    const was = hadCompanyContext.current;
+    hadCompanyContext.current = live;
+    if (live) return;
+    /*
+      Nothing was open, so there is nothing to report — and the mark is cleared
+      here rather than only on a transition. `closeCompany` sets it before
+      `withoutCompanyContext`, which returns the *same* object when no context
+      is open, so a close of nothing left the mark standing and the next real
+      expiry would have been swallowed by it.
+    */
+    if (!was) {
+      endedOnPurpose.current = false;
+      return;
+    }
+    if (endedOnPurpose.current) {
+      endedOnPurpose.current = false;
+      return;
+    }
+    showToast('warning', t('support.bar.expiredTitle'), t('support.bar.expiredBody'));
+  });
+
+  const isViewingAsCompany = scope.isPlatformSession;
   const activeCompanyId = activeCompany?.id ?? null;
-  // Super admin viewing as another company uses that company's id; otherwise own
-  const effectiveCompanyId = isViewingAsCompany ? activeCompanyId : companyId;
+  const effectiveCompanyId = scope.companyId;
 
   const platformReadsCompanyData = platformReadsCompany(platformAccess, effectiveCompanyId, clock);
   const ownCompanyReadable = ownCompanyDataReadable({
@@ -282,8 +463,11 @@ export const SuperAdminProvider: React.FC<{ children: ReactNode }> = ({ children
       activeCompanyId,
       activeCompany,
       isViewingAsCompany,
-      enterCompany,
       exitCompany,
+      openCompany,
+      closeCompany,
+      companyContext,
+      companyScope: scope,
       effectiveCompanyId,
       platformAccess,
       platformAccessStatus,

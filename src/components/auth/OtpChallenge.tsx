@@ -197,7 +197,7 @@ const OtpChallenge: React.FC<OtpChallengeProps> = ({
 
   const appButtonStyle = (inactive: boolean): React.CSSProperties => ({
     background: inactive ? 'var(--bg-muted)' : 'var(--accent)',
-    color: inactive ? 'var(--text-tertiary)' : '#fff',
+    color: inactive ? 'var(--text-tertiary)' : 'var(--text-inverse)',
     cursor: inactive ? 'not-allowed' : 'pointer',
   });
 
@@ -213,7 +213,7 @@ const OtpChallenge: React.FC<OtpChallengeProps> = ({
   const resendStyle: React.CSSProperties | undefined = isDark
     ? undefined
     : needsNewCode
-      ? { background: 'var(--accent)', color: '#fff' }
+      ? { background: 'var(--accent)', color: 'var(--text-inverse)' }
       : { color: 'var(--accent-text)' };
 
   return (

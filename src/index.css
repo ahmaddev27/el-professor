@@ -94,6 +94,7 @@
 }
 
 /* ── Legacy theme tokens (every screen built before Phase 2) ─────────────── */
+/* @legacy-tokens light */
 :root {
   /* Light */
   --bg-base:        #f4f6fa;
@@ -111,17 +112,31 @@
   --accent-hover:   #1d4ed8;
   --accent-subtle:  #eff6ff;
   --accent-text:    #2563eb;
-  --success:        #059669;
+  /* Darkened 17.09.2026 (owner's decision) from #059669 / #d97706, which were
+     too light to carry a white label: 3.77:1 and 3.19:1. See the note above the
+     dark block for why the fill needs its own token.
+
+     --danger followed on 18.09.2026, from #dc2626. It was the last status colour
+     still failing as text on its own -subtle fill (4.41:1), and here one value
+     serves both roles: a white label needs the fill at luminance <= 0.1833, and
+     reading on --danger-subtle needs the token at <= 0.1633, which is the
+     tighter of the two. #C0262D is the Phase-2 --critical / --critical-solid,
+     already approved, so the two palettes hold one red. */
+  --success:        #0A7A45;
+  --success-solid:  #0A7A45;
   --success-subtle: #ecfdf5;
-  --warning:        #d97706;
+  --warning:        #8F5200;
+  --warning-solid:  #8F5200;
   --warning-subtle: #fffbeb;
-  --danger:         #dc2626;
+  --danger:         #C0262D;
+  --danger-solid:   #C0262D;
   --danger-subtle:  #fef2f2;
   --shadow-sm:      0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.04);
   --shadow-md:      0 4px 12px rgba(0,0,0,0.08), 0 2px 4px rgba(0,0,0,0.04);
   --shadow-lg:      0 8px 24px rgba(0,0,0,0.1), 0 4px 8px rgba(0,0,0,0.04);
 }
 
+/* @legacy-tokens dark */
 .dark {
   --bg-base:        #0b0f17;
   --bg-surface:     #111827;
@@ -138,11 +153,37 @@
   --accent-hover:   #0891b2;
   --accent-subtle:  rgba(6,182,212,0.1);
   --accent-text:    #22d3ee;
+  /* --success / --warning are TEXT here and keep their values: on a dark
+     surface a status colour has to be light, and they already reach 5.35:1 to
+     8.93:1 that way.
+
+     --success-solid / --warning-solid are the same status colour as a FILL
+     under a white label, and in the dark theme they cannot be the same value.
+     A label needs the fill at luminance <= 0.183; reading as text on
+     --bg-surface needs the token at >= 0.237. Those windows do not overlap, so
+     one token cannot do both — which is why the fill has its own name, exactly
+     as --critical-solid does in the Phase-2 block above. In the light theme
+     both roles want the same darkness and the two tokens hold one value.
+
+     --danger is the same arithmetic, with a wider gap. #ef4444 was too dark for
+     the text role — 4.21:1 on --bg-elevated and 3.87:1 on its own -subtle fill
+     over it — and too light for the fill role, 3.76:1 under white. The text
+     role needs luminance >= 0.2741 (the -subtle fill over --bg-elevated is the
+     binding surface) and the white label needs <= 0.1833, so the split is
+     forced here too. #FF8A8A and #D63A40 are the Phase-2 --critical and
+     --critical-solid.
+
+     --danger-subtle keeps rgba(239,68,68,0.1): the wash is the same hue (0°) as
+     the new text colour, it reaches 6.42:1 to 7.81:1 under it, and moving it
+     would repaint some forty badges for no contrast gain. */
   --success:        #10b981;
+  --success-solid:  #0B824A;
   --success-subtle: rgba(16,185,129,0.1);
   --warning:        #f59e0b;
+  --warning-solid:  #A85F00;
   --warning-subtle: rgba(245,158,11,0.1);
-  --danger:         #ef4444;
+  --danger:         #FF8A8A;
+  --danger-solid:   #D63A40;
   --danger-subtle:  rgba(239,68,68,0.1);
   --shadow-sm:      0 1px 3px rgba(0,0,0,0.4), 0 1px 2px rgba(0,0,0,0.3);
   --shadow-md:      0 4px 16px rgba(0,0,0,0.4), 0 2px 6px rgba(0,0,0,0.3);

@@ -3,11 +3,22 @@ import { supabase } from '../lib/supabase';
 import { Receipt, Driver } from '../types/receipt';
 import { isSupabaseConfigured } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
+import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { withTimeout } from './useTimeout';
 import { DriverPlanningFields } from '../components/DriverModal';
 
 export const useDatabase = () => {
-  const { user, profile, companyId } = useAuth();
+  const { user, profile } = useAuth();
+  /*
+    The company the session is in (plan 3.4b), not the account's membership.
+
+    This hook is the data layer of Belege and Fahrer, and of the receipt and
+    driver halves of the Overview and Umsätze. It filtered by
+    `AuthContext.companyId`, which is null for a platform account, so those
+    screens asked for `company_id = null` inside a support session: an empty
+    list with no error, which is exactly what the owner reported.
+  */
+  const { effectiveCompanyId: companyId } = useSuperAdmin();
   const [isConnected, setIsConnected] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);

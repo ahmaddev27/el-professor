@@ -5,6 +5,7 @@ import {
   CalendarCheck, ArrowLeft, Clock, ShieldCheck,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
+import { usePlan } from '../contexts/PlanContext';
 import { supabase } from '../lib/supabase';
 import { format, differenceInDays } from 'date-fns';
 import { de } from 'date-fns/locale';
@@ -59,6 +60,11 @@ const ActivationPage: React.FC = () => {
     profile, refreshSubscription, subscriptionExpiresAt,
     isSubscriptionActive, effectiveSubscriptionStatus,
   } = useAuth();
+  // `redeem_activation_code` writes the subscription this page's own plan state
+  // was built from, so the plan is re-read as well. Without it the customer
+  // lands on /billing with the row from before the code — subscription
+  // inactive — and every gated screen stays locked until the tab is reloaded.
+  const { refresh: refreshPlan } = usePlan();
   const navigate = useNavigate();
 
   const [code, setCode] = useState('');
@@ -133,7 +139,7 @@ const ActivationPage: React.FC = () => {
         return;
       }
       setNewExpiry(result.subscription_expires_at ?? null);
-      await refreshSubscription();
+      await Promise.all([refreshSubscription(), refreshPlan()]);
       setSubmitState('success');
     } catch (err: any) {
       setAttempts(a => a + 1);

@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { CompanySettings } from '../types/settings';
 import { supabase } from '../lib/supabase';
-import { useAuth } from './AuthContext';
+import { useSuperAdmin } from './SuperAdminContext';
 
 // Resolves a logo value to a displayable URL.
 // Handles both full URLs (new rows) and bare storage paths (legacy rows).
@@ -24,7 +24,25 @@ interface CompanySettingsContextType {
 const CompanySettingsContext = createContext<CompanySettingsContextType | undefined>(undefined);
 
 export const CompanySettingsProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const { companyId } = useAuth();
+  /*
+    The company the session is in, not the account's membership (plan 3.4b).
+
+    These settings are the company's name, logo and letterhead — the things the
+    shell and every document print. Read from `AuthContext.companyId` they were
+    null for a platform account, so a support session saw "El-Professor" in the
+    sidebar and an empty Einstellungen form for the company it had just opened.
+    `company_settings` is part of the account shell, whose policy term is
+    `get_user_company_id()` — which answers the open context — so the row is
+    readable exactly when this id names it.
+
+    The logo on that screen is **not** fixed by this. Its path already named
+    `effectiveCompanyId`, but `company-logos`' own policies (20260507193515)
+    resolve the company from `user_profiles` and additionally demand
+    `role IN ('admin','super_admin')` on that profile, so the upload is refused
+    for a company-less platform account before this context is reached at all.
+    SettingsPage says so in words; the policy is the storage half of plan 3.C.
+  */
+  const { effectiveCompanyId: companyId } = useSuperAdmin();
   const [settings, setSettings] = useState<CompanySettings | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);

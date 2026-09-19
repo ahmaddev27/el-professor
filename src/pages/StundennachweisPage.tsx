@@ -2280,7 +2280,7 @@ const Step1: React.FC<{
           disabled={!driverId}
           className="w-full py-3 rounded-lg font-semibold text-sm transition-all flex items-center justify-center gap-2"
           style={driverId
-            ? { background: 'var(--accent)', color: 'white' }
+            ? { background: 'var(--accent)', color: 'var(--text-inverse)' }
             : { background: 'var(--bg-muted)', color: 'var(--text-tertiary)', cursor: 'not-allowed' }}>
           {t('stn.step1.next')} <ArrowRight size={15} />
         </button>
@@ -2471,7 +2471,7 @@ const Step2: React.FC<Step2Props> = ({
     cursor: 'pointer',
     transition: 'all 0.15s',
     background:  active ? 'var(--accent)' : 'transparent',
-    color:       active ? 'white' : 'var(--text-secondary)',
+    color:       active ? 'var(--text-inverse)' : 'var(--text-secondary)',
   });
 
   return (
@@ -2647,7 +2647,7 @@ const Step2: React.FC<Step2Props> = ({
           <button
             onClick={tab === 'salary' ? goSalary : goTotals}
             className="px-6 py-3 rounded-lg font-semibold text-sm transition-all flex items-center justify-center gap-2"
-            style={{ background: 'var(--accent)', color: 'white', flex: 2 }}
+            style={{ background: 'var(--accent)', color: 'var(--text-inverse)', flex: 2 }}
             onMouseEnter={e => (e.currentTarget.style.background = 'var(--accent-hover)')}
             onMouseLeave={e => (e.currentTarget.style.background = 'var(--accent)')}>
             {t('stn.step2.generate')} <ArrowRight size={15} />
@@ -3057,7 +3057,7 @@ const NotesCarousel: React.FC<{
             fontSize: 11, fontWeight: 600,
             padding: '2px 8px', borderRadius: 20,
             background: 'var(--accent)',
-            color: 'white',
+            color: 'var(--text-inverse)',
           }}>
             {sorted.length}
           </span>
@@ -3117,7 +3117,7 @@ const NotesCarousel: React.FC<{
             <span style={{
               display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
               width: 22, height: 22, borderRadius: 6,
-              background: 'var(--accent)', color: 'white',
+              background: 'var(--accent)', color: 'var(--text-inverse)',
               fontSize: 11, fontWeight: 800,
             }}>
               {dayNum}
