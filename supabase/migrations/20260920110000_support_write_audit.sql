@@ -190,6 +190,44 @@
   tests/rls/support-write-audit.sql section 1 fails the kit when it carries the
   refusal trigger without this one.
 
+  ## Deleting a company while a support session is open is refused
+
+  Decided, not inherited. A company's hard delete (`companies.hard_delete`,
+  CompaniesPage's direct DELETE, D13) cascades into every audited table: most
+  foreign keys to `companies` are ON DELETE CASCADE, and
+  `activation_code_attempts.company_id` is ON DELETE SET NULL, so a cascaded
+  UPDATE. PostgreSQL runs those cascades with their AFTER triggers deferred to
+  the end of the outer statement, so every audit row fires after all of the
+  delete's foreign-key actions have run. Two cases follow, and both refuse:
+
+  - **The company the session is on.** `platform_company_contexts.company_id`
+    is ON DELETE CASCADE too, so by the time the audit rows fire the session
+    has been deleted with the company. There is nothing to record them against,
+    and a support write that cannot be recorded is refused.
+  - **Any other company.** Its rows are not this session's writes — their
+    company came from the delete, not from the context — so the audit refuses a
+    row of another company outright. Recording them would copy a whole
+    company's names, fares and assignments into an append-only log under the
+    wrong session, for a delete that may exist precisely to erase that data, and
+    one audit write per cascaded row (every trip of every month) would put the
+    delete at risk of the statement timeout.
+
+  The rule, stated once: **a platform account that holds an open support
+  session hard-deletes no company; it ends the session first.** Without a
+  context the delete is the capability write it always was — unaudited, the D13
+  residual matrix.sql tags for 3.13. It matches what 3.4a already does in the
+  other mode: a *view* context's statement trigger refuses the same cascade, so
+  matrix.sql's `companies D` reads TT for both staff principals. The refusal
+  needs at least one audited row to be reached; deleting a company that has
+  none goes through, because then nothing of its data is written.
+
+  No other cascade is affected. Deleting a driver, a vehicle, a salary, an
+  import, a planning run, a reconciliation, a document or a role inside a
+  support session cascades only into audited tables of the same company, and
+  none of those deletes the session, so each cascaded row is recorded like any
+  other. Only a `companies` delete, or deleting the staff account itself, takes
+  the context row away.
+
   ## Volume, and why there is no rate limit here
 
   `platform_audit_record` caps an actor at 120 rows a minute because through
@@ -235,7 +273,9 @@
   Additive: three new functions, one body restated with the same answers, 39
   new triggers. No column, policy or grant changes. The
   previous release's code writes and reads exactly as before; its support
-  sessions simply leave rows it never reads.
+  sessions simply leave rows it never reads. One thing a platform owner could
+  do before is refused now, on purpose: hard-deleting a company while holding
+  a support session (see above).
 */
 
 -- ─── 1. Which columns are never copied ──────────────────────────────────────
@@ -422,7 +462,9 @@ DECLARE
 BEGIN
   -- 1. The flag says only "armed". Whose session this is, is looked up again,
   --    and must be the caller's own support context. Anything else is a flag
-  --    nobody should have been able to set, and the write is refused rather
+  --    nobody should have been able to set — or a session that no longer
+  --    exists because this very statement deleted it with its company (section
+  --    "Deleting a company" in the header) — and the write is refused rather
   --    than recorded under a context it does not belong to, or not at all.
   IF v_flag IS NULL OR v_flag !~ c_uuid_pattern THEN
     RAISE EXCEPTION 'Support-Schreibzugriff auf % kann nicht protokolliert werden und wird abgelehnt.', TG_TABLE_NAME
@@ -436,7 +478,7 @@ BEGIN
      AND c.mode = 'support';
 
   IF NOT FOUND THEN
-    RAISE EXCEPTION 'Support-Schreibzugriff auf % kann nicht protokolliert werden und wird abgelehnt.', TG_TABLE_NAME
+    RAISE EXCEPTION 'Support-Schreibzugriff auf % kann nicht protokolliert werden, weil die Support-Sitzung nicht mehr besteht, und wird abgelehnt.', TG_TABLE_NAME
       USING ERRCODE = 'P0001', HINT = 'support_audit_unavailable';
   END IF;
 
@@ -448,6 +490,23 @@ BEGIN
     v_new := to_jsonb(NEW);
   END IF;
   v_row     := coalesce(v_new, v_old);
+
+  -- A support session writes the company it opened, and nothing else. RLS and
+  -- the planning and Gehaltsquittung RPCs already confine it there, so a row
+  -- of another company reaches this point only through a capability write
+  -- whose company did not come from the context — in practice a company's
+  -- hard delete cascading into its rows. That is not this session's write,
+  -- and recording it as one would copy another company's data into the log
+  -- under the wrong session, so it is refused. Both sides are asked, because a
+  -- cascade that sets company_id to NULL shows the company only on OLD. A row
+  -- without a company (a child table, or company_id NULL) is the context's.
+  IF EXISTS (SELECT 1
+               FROM (VALUES (v_old ->> 'company_id'), (v_new ->> 'company_id')) AS s(company)
+              WHERE s.company IS NOT NULL
+                AND s.company::uuid <> v_ctx.company_id) THEN
+    RAISE EXCEPTION 'Die offene Support-Sitzung gilt einem anderen Unternehmen: % auf % wird abgelehnt. Bitte zuerst die Sitzung beenden.', TG_OP, TG_TABLE_NAME
+      USING ERRCODE = 'P0001', HINT = 'support_session_other_company';
+  END IF;
   v_pattern := app_private.support_write_redaction_pattern(TG_TABLE_NAME::text);
 
   -- 3. Changed columns only for an UPDATE, every column otherwise; then

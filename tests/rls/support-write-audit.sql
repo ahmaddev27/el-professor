@@ -35,10 +35,13 @@
     9. one account   the flag belongs to the account that armed it; a forged one
                      makes the write fail rather than write a row in another
                      account's name
-   10. mid-call      a session that ends while its writes are still running
+   10. cascades      a delete's cascade inside the company is recorded row by
+                     row; a company's hard delete is refused while a support
+                     session is open, for that company and for any other
+   11. mid-call      a session that ends while its writes are still running
                      keeps them recorded
-   11. the door      platform_audit_record cannot forge these rows
-   12. the file      every support-write row written here names the owner, its
+   12. the door      platform_audit_record cannot forge these rows
+   13. the file      every support-write row written here names the owner, its
                      session and its context
 
   What is deliberately not here: storage.objects (no row history, and its
@@ -780,7 +783,63 @@ END $$;
 DROP TRIGGER _sw_forge ON public.drivers;
 DROP FUNCTION _sw_forge();
 
--- ─── 10. a session that ends mid-call keeps its writes recorded ─────────────
+-- ─── 10. cascades: the company's own are recorded, a company delete is refused ─
+--
+-- A delete inside a support session cascades. Within the company it stays in
+-- audited tables of that company and the session survives it, so every
+-- cascaded row is recorded. A company's hard delete is different, and refused
+-- on purpose (the migration header, "Deleting a company while a support
+-- session is open is refused"): the company the session is on takes the
+-- session with it, and any other company's rows are not the session's writes.
+
+DO $$
+DECLARE
+  co_x    constant uuid := _sw_id('company:x');
+  u_o     constant uuid := _sw_id('user:owner');
+  s_o     constant uuid := _sw_id('session:owner');
+  u_adm   constant uuid := _sw_id('user:admin-x');
+  -- seed.sql's platform owner: no sign-in session, so no context at all
+  u_super constant uuid := '50000000-0000-4000-8000-000000000001';
+  v_mark  bigint;
+BEGIN
+  -- A driver with a note and a salary, written as the database owner, so none
+  -- of it is audited.
+  INSERT INTO drivers (id, company_id, name) VALUES (_sw_id('driver:cascade'), co_x, 'SW cascade');
+  INSERT INTO driver_notes (id, created_by, driver_id, note_text, company_id)
+  VALUES (_sw_id('note:cascade'), u_adm, _sw_id('driver:cascade'), 'sw', co_x);
+  INSERT INTO salaries (id, company_id, driver_id, period_start, period_end, created_by)
+  VALUES (_sw_id('salary:cascade'), co_x, _sw_id('driver:cascade'), '2026-02-01', '2026-02-28', u_adm);
+
+  v_mark := _sw_mark();
+  PERFORM _sw_as(u_o, s_o);
+  DELETE FROM drivers WHERE id = _sw_id('driver:cascade');
+  PERFORM _sw_reset();
+
+  PERFORM _sw_ok('cascade: deleting a driver records the driver and each row the delete cascaded into',
+    _sw_rows(v_mark) = 3
+    AND _sw_rows(v_mark, 'support_write.drivers.delete') = 1
+    AND _sw_rows(v_mark, 'support_write.driver_notes.delete') = 1
+    AND _sw_rows(v_mark, 'support_write.salaries.delete') = 1);
+  PERFORM _sw_ok('cascade: …all of them in the company the session is on, under the session',
+    NOT EXISTS (SELECT 1 FROM app_private.platform_audit_log l
+                 WHERE l.id > v_mark
+                   AND (l.company_id IS DISTINCT FROM co_x
+                        OR (l.after_value ->> 'context_id') IS DISTINCT FROM _sw_owner_context()::text)));
+
+  PERFORM _sw_ok('hard delete: the company the session is on is refused — its session is deleted with it, so nothing could be recorded',
+    _sw_try(u_o, s_o, format('DELETE FROM companies WHERE id = %L', co_x))
+      LIKE 'ERR P0001 Support-Schreibzugriff auf % kann nicht protokolliert werden, weil die Support-Sitzung nicht mehr besteht%');
+  PERFORM _sw_ok('hard delete: …and so is any other company: its rows are not this session''s writes',
+    _sw_try(u_o, s_o, format('DELETE FROM companies WHERE id = %L', _sw_id('company:y')))
+      LIKE 'ERR P0001 Die offene Support-Sitzung gilt einem anderen Unternehmen:%');
+  PERFORM _sw_ok('hard delete: an owner with no context still deletes a company, as before (the D13 residual, 3.13)',
+    _sw_try(u_super, NULL, format('DELETE FROM companies WHERE id = %L', _sw_id('company:y'))) = 'rows 1');
+  PERFORM _sw_ok('hard delete: the probes rolled back — the session and both companies are still there',
+    _sw_owner_context() IS NOT NULL
+    AND (SELECT count(*) FROM companies WHERE id IN (co_x, _sw_id('company:y'))) = 2);
+END $$;
+
+-- ─── 11. a session that ends mid-call keeps its writes recorded ─────────────
 --
 -- A planning RPC resolves its company once and goes on writing after the
 -- session's sixty minutes run out mid-call. That cannot be staged inside one
@@ -835,7 +894,7 @@ END $$;
 
 DROP FUNCTION _sw_definer_write();
 
--- ─── 11. the edge functions' door ───────────────────────────────────────────
+-- ─── 12. the edge functions' door ───────────────────────────────────────────
 
 DO $$
 BEGIN
@@ -846,7 +905,7 @@ BEGIN
             'SELECT platform_audit_record(''support'', ''support_write.drivers.update'', ''ok'')::text') LIKE 'ERR 22023%');
 END $$;
 
--- ─── 12. the whole file ─────────────────────────────────────────────────────
+-- ─── 13. the whole file ─────────────────────────────────────────────────────
 
 DO $$
 DECLARE
