@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { FileText, Clock, ChevronRight, ChevronDown, Receipt, Car, MapPin, ArrowLeft, Trash2, ExternalLink, FileDown, AlertTriangle, Download, Banknote } from 'lucide-react';
+import React, { useState, useEffect, useCallback, useMemo, useRef, useId } from 'react';
+import { Clock, ChevronRight, ChevronDown, Receipt, Car, MapPin, ArrowLeft, Trash2, ExternalLink, FileDown, Download, Banknote, type LucideIcon } from 'lucide-react';
 import TrinkgeldQuittungModal from '../components/TrinkgeldQuittungModal';
 import MietwagenauftragModal from '../components/MietwagenauftragModal';
 import GehaltsquittungModal from '../components/GehaltsquittungModal';
@@ -12,6 +12,26 @@ import { exportStundennachweisAsPdf, toPdfDayRow } from '../utils/stundennachwei
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { useTranslation } from '../contexts/LanguageContext';
 import type { TranslationKey } from '../i18n';
+import {
+  Alert,
+  Badge,
+  Button,
+  Card,
+  DataTable,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  EmptyState,
+  PageHeader,
+  Skeleton,
+  Tooltip,
+  cn,
+  formatEuro,
+  type DataTableColumn,
+} from '../components/ui';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -78,11 +98,6 @@ function minsToDecimal(mins: number): number {
 
 function fmtDec(v: number): string {
   return v.toFixed(2).replace('.', ',');
-}
-
-function fmtEuro(v: number | null | undefined): string {
-  if (v == null) return '—';
-  return v.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €';
 }
 
 type SubView = 'main' | 'fahrtenbuch';
@@ -317,33 +332,31 @@ const DocumentsPage: React.FC = () => {
     loadArchive();
   };
 
-  const cardBase: React.CSSProperties = {
-    background: 'var(--bg-surface)',
-    border: '1px solid var(--border)',
-    boxShadow: 'var(--shadow-sm)',
+  // ── Presentation (phase 5) ────────────────────────────────────────────────
+  // Everything above is the screen's logic and is unchanged; everything below
+  // only draws it. It adds no arithmetic: a record's hours are the same
+  // fmtDec(minsToDecimal(totalMins(rec))) as before, a month's totals are the
+  // ones monthGroups computed, and the dates are the same toLocaleDateString
+  // calls. A euro amount is only written, through utils/money.ts.
+
+  // A gross the record does not have is "—", as before. formatEuro refuses a
+  // value that is not a finite amount; the screen shows such a value as it is
+  // rather than going down, as DataTable does for its own currency cells.
+  const grossLabel = (amount: number | null | undefined) => {
+    if (amount == null) return '—';
+    return Number.isFinite(amount) ? formatEuro(amount) : String(amount);
   };
 
   // ── Fahrtenbuch sub-view ───────────────────────────────────────────────────
   if (subView === 'fahrtenbuch') {
     return (
-      <div className="space-y-6">
-        <div className="flex items-center gap-4">
-          <button
-            onClick={() => setSubView('main')}
-            className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors"
-            style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
-            onMouseEnter={e => (e.currentTarget.style.borderColor = 'var(--accent)')}
-            onMouseLeave={e => (e.currentTarget.style.borderColor = 'var(--border)')}
-          >
-            <ArrowLeft size={16} /> {t('nav.documents')}
-          </button>
-          <div>
-            <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>{t('doc.fahrtenbuch')}</h1>
-            <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>
-              {t('doc.fahrtenbuchSubtitle')}
-            </p>
-          </div>
-        </div>
+      <div>
+        {/* No font-ui here: the trips view below is still the legacy screen. */}
+        <Button variant="ghost" size="sm" className="-ml-2 mb-2" onClick={() => setSubView('main')}>
+          <ArrowLeft aria-hidden />
+          {t('nav.documents')}
+        </Button>
+        <PageHeader title={t('doc.fahrtenbuch')} description={t('doc.fahrtenbuchSubtitle')} />
         <FahrtenbuchTripsView drivers={drivers} cars={cars} />
       </div>
     );
@@ -352,430 +365,345 @@ const DocumentsPage: React.FC = () => {
   // ── Confirmation modal for group delete ───────────────────────────────────
   const groupForDelete = deleteGroupKey ? monthGroups.find(g => g.key === deleteGroupKey) : null;
 
+  const archiveColumns: DataTableColumn<SavedRecord>[] = [
+    {
+      id: 'driver',
+      header: t('common.driver'),
+      className: 'min-w-[8.5rem] pr-2 sm:pr-4',
+      cell: rec => (
+        <span className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
+          <span className="font-medium">{rec.driver_name}</span>
+          {rec.generation_source === 'fahrtenbuch' && (
+            <Badge>{t('doc.fahrtenbuch')}</Badge>
+          )}
+          {rec.generation_source === 'monatsplanung' && (
+            <Badge>{t('doc.badgePlanning')}</Badge>
+          )}
+        </span>
+      ),
+    },
+    {
+      id: 'personalnummer',
+      header: t('doc.personalnummer'),
+      hideBelow: 'md',
+      className: 'tabular-nums text-fg-muted',
+      cell: rec => rec.personalnummer ?? '—',
+    },
+    {
+      id: 'hours',
+      header: t('doc.totalHours'),
+      kind: 'number',
+      className: 'px-2 sm:px-4',
+      cell: rec => (
+        <>
+          {fmtDec(minsToDecimal(totalMins(rec)))} {t('doc.hoursShort')}
+        </>
+      ),
+    },
+    {
+      id: 'gross',
+      header: t('doc.grossExpected'),
+      kind: 'number',
+      className: 'px-2 sm:px-4',
+      cell: rec => (
+        <span className={rec.calculated_salary != null ? undefined : 'text-fg-subtle'}>{grossLabel(rec.calculated_salary)}</span>
+      ),
+    },
+    {
+      id: 'workingDays',
+      header: t('doc.workingDays'),
+      kind: 'number',
+      hideBelow: 'sm',
+      cell: rec => rec.working_days,
+    },
+    {
+      id: 'savedAt',
+      header: t('doc.savedAt'),
+      hideBelow: 'lg',
+      className: 'whitespace-nowrap tabular-nums text-fg-muted',
+      cell: rec => (rec.saved_at ? new Date(rec.saved_at).toLocaleDateString('de-DE') : '—'),
+    },
+    {
+      id: 'updatedAt',
+      header: t('doc.updatedAt'),
+      hideBelow: 'lg',
+      className: 'whitespace-nowrap tabular-nums text-fg-muted',
+      cell: rec => (rec.updated_at ? new Date(rec.updated_at).toLocaleDateString('de-DE') : '—'),
+    },
+  ];
+
+  // Delete stays the last action of a row, so it is never the one a hurried
+  // tap lands on first.
+  const archiveRowActions = (rec: SavedRecord) => (
+    <>
+      <Tooltip content={t('doc.open')}>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          aria-label={t('doc.openRecordAria', { driver: rec.driver_name })}
+          onClick={() => handleOpen(rec)}
+        >
+          <ExternalLink aria-hidden />
+        </Button>
+      </Tooltip>
+      <Tooltip content={t('doc.exportPdf')}>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          aria-label={t('doc.pdfRecordAria', { driver: rec.driver_name })}
+          onClick={() => handlePdf(rec)}
+        >
+          <FileDown aria-hidden />
+        </Button>
+      </Tooltip>
+      <Tooltip content={t('common.delete')}>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          className="hover:text-critical"
+          aria-label={t('doc.deleteRecordAria', { driver: rec.driver_name })}
+          onClick={() => { setDeleteError(''); setDeleteConfirmId(rec.id); }}
+        >
+          <Trash2 aria-hidden />
+        </Button>
+      </Tooltip>
+    </>
+  );
+
+  const renderArchive = () => {
+    if (loadingArchive) {
+      return (
+        <Card aria-busy className="grid gap-3 p-5">
+          <p className="sr-only">{t('doc.archiveLoading')}</p>
+          <Skeleton className="h-5 w-48" />
+          <Skeleton className="h-4 w-full" />
+          <Skeleton className="h-4 w-4/5" />
+        </Card>
+      );
+    }
+    if (monthGroups.length === 0) {
+      return (
+        <Card>
+          <EmptyState icon={Clock} title={t('doc.archiveEmpty')} description={t('doc.archiveEmptyHint')} />
+        </Card>
+      );
+    }
+    return (
+      <div className="grid grid-cols-1 gap-3">
+        {monthGroups.map(group => {
+          const isExpanded = expandedGroups.has(group.key);
+          const Chevron = isExpanded ? ChevronDown : ChevronRight;
+          return (
+            <Card key={group.key} className="overflow-hidden">
+              <div className="flex flex-col gap-3 bg-sunken/60 px-4 py-3 md:flex-row md:items-center">
+                <button
+                  type="button"
+                  onClick={() => toggleGroup(group.key)}
+                  aria-expanded={isExpanded}
+                  className={cn(
+                    'flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1 rounded-control text-left',
+                    'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus',
+                  )}
+                >
+                  <Chevron aria-hidden className="size-4 shrink-0 text-fg-muted" />
+                  <span className="text-[15px] font-semibold text-fg">{group.label}</span>
+                  <Badge tone="brand">
+                    {tPlural({ one: 'doc.entryCount.one', other: 'doc.entryCount.other' }, group.records.length)}
+                  </Badge>
+                  <span className="w-full pl-6 text-[13px] tabular-nums text-fg-muted sm:w-auto sm:pl-0">
+                    {t('doc.hoursTotal', { hours: fmtDec(minsToDecimal(group.totalMins)) })}
+                    {group.totalGross != null && (
+                      <> · {grossLabel(group.totalGross)} {t('doc.gross')}</>
+                    )}
+                  </span>
+                </button>
+                <div className="flex flex-wrap items-center gap-2 pl-6 md:pl-0">
+                  <Tooltip content={t('doc.downloadAllTitle', { label: group.label })}>
+                    <Button variant="secondary" size="sm" onClick={() => handleDownloadGroup(group)}>
+                      <Download aria-hidden />
+                      {t('doc.downloadAll')}
+                      <span className="sr-only"> – {group.label}</span>
+                    </Button>
+                  </Tooltip>
+                  <Tooltip content={t('doc.deleteAllTitle', { label: group.label })}>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      className="text-critical hover:text-critical"
+                      onClick={() => { setGroupDeleteError(''); setDeleteGroupKey(group.key); }}
+                    >
+                      <Trash2 aria-hidden />
+                      {t('doc.deleteAll')}
+                      <span className="sr-only"> – {group.label}</span>
+                    </Button>
+                  </Tooltip>
+                </div>
+              </div>
+              {isExpanded && (
+                <DataTable
+                  className="rounded-none border-x-0 border-b-0 shadow-none"
+                  caption={t('doc.archiveCaption', { label: group.label })}
+                  columns={archiveColumns}
+                  rows={group.records}
+                  getRowId={rec => rec.id}
+                  rowActions={archiveRowActions}
+                  rowActionsLabel={t('doc.tableActions')}
+                />
+              )}
+            </Card>
+          );
+        })}
+      </div>
+    );
+  };
+
   // ── Main documents view ───────────────────────────────────────────────────
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="rounded-xl p-6 text-white" style={{ background: 'linear-gradient(to right, var(--accent), var(--accent-hover))', boxShadow: 'var(--shadow-md)' }}>
-        <div className="flex items-center space-x-3">
-          <div className="bg-white bg-opacity-20 rounded-lg p-2">
-            <FileText size={32} />
-          </div>
-          <div>
-            <h1 className="text-3xl font-bold">{t('nav.documents')}</h1>
-            <p className="mt-1" style={{ color: 'rgba(255,255,255,0.8)' }}>
-              {t('doc.headerSubtitle')}
-            </p>
-          </div>
-        </div>
-      </div>
+    // No font-ui on the root: the Trinkgeld and Mietwagen dialogs mounted in it
+    // are legacy screens and keep their own type. Each converted block sets it.
+    <div>
+      <PageHeader title={t('nav.documents')} description={t('doc.headerSubtitle')} />
 
-      {/* Document tools */}
-      <div>
-        <h2 className="text-sm font-semibold uppercase tracking-wider mb-3" style={{ color: 'var(--text-tertiary)' }}>
-          {t('doc.toolsHeading')}
-        </h2>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-
-          {/* Stundennachweis */}
-          <button
-            onClick={() => navigate('/stundennachweis')}
-            className="text-left rounded-xl p-5 transition-all group"
-            style={cardBase}
-            onMouseEnter={e => { e.currentTarget.style.boxShadow = 'var(--shadow-md)'; e.currentTarget.style.borderColor = 'var(--accent)'; }}
-            onMouseLeave={e => { e.currentTarget.style.boxShadow = 'var(--shadow-sm)'; e.currentTarget.style.borderColor = 'var(--border)'; }}
-          >
-            <div className="flex items-start justify-between mb-3">
-              <div className="rounded-lg p-2.5" style={{ background: 'var(--accent-subtle)' }}>
-                <Clock size={22} style={{ color: 'var(--accent-text)' }} />
-              </div>
-              <ChevronRight size={16} style={{ color: 'var(--text-tertiary)' }} className="mt-1 group-hover:translate-x-0.5 transition-transform" />
-            </div>
-            <h3 className="font-semibold text-base mb-1" style={{ color: 'var(--text-primary)' }}>{t('doc.stundennachweis')}</h3>
-            <p className="text-xs leading-relaxed" style={{ color: 'var(--text-tertiary)' }}>
-              {t('doc.stundennachweisDesc')}
-            </p>
-            <div className="mt-3 flex items-center gap-1.5">
-              <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ background: 'var(--accent-subtle)', color: 'var(--accent-text)' }}>{t('doc.badgeTemplate')}</span>
-              <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ background: 'var(--success-subtle)', color: 'var(--success)' }}>{t('doc.badgePdfExport')}</span>
-            </div>
-          </button>
-
-          {/* Trinkgeld Quittung */}
-          <button
-            onClick={() => setIsTrinkgeldModalOpen(true)}
-            className="text-left rounded-xl p-5 transition-all group"
-            style={cardBase}
-            onMouseEnter={e => { e.currentTarget.style.boxShadow = 'var(--shadow-md)'; e.currentTarget.style.borderColor = 'var(--accent)'; }}
-            onMouseLeave={e => { e.currentTarget.style.boxShadow = 'var(--shadow-sm)'; e.currentTarget.style.borderColor = 'var(--border)'; }}
-          >
-            <div className="flex items-start justify-between mb-3">
-              <div className="rounded-lg p-2.5" style={{ background: 'var(--success-subtle)' }}>
-                <Receipt size={22} style={{ color: 'var(--success)' }} />
-              </div>
-              <ChevronRight size={16} style={{ color: 'var(--text-tertiary)' }} className="mt-1 group-hover:translate-x-0.5 transition-transform" />
-            </div>
-            <h3 className="font-semibold text-base mb-1" style={{ color: 'var(--text-primary)' }}>{t('doc.trinkgeldQuittung')}</h3>
-            <p className="text-xs leading-relaxed" style={{ color: 'var(--text-tertiary)' }}>
-              {t('doc.trinkgeldQuittungDesc')}
-            </p>
-            <div className="mt-3 flex items-center gap-1.5">
-              <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ background: 'var(--accent-subtle)', color: 'var(--accent-text)' }}>{t('doc.badgeTemplate')}</span>
-              <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ background: 'var(--success-subtle)', color: 'var(--success)' }}>{t('doc.badgePdfExport')}</span>
-            </div>
-          </button>
-
-          {/* Gehaltsquittung */}
-          <button
-            onClick={() => setIsGehaltsquittungModalOpen(true)}
-            className="text-left rounded-xl p-5 transition-all group"
-            style={cardBase}
-            onMouseEnter={e => { e.currentTarget.style.boxShadow = 'var(--shadow-md)'; e.currentTarget.style.borderColor = 'var(--accent)'; }}
-            onMouseLeave={e => { e.currentTarget.style.boxShadow = 'var(--shadow-sm)'; e.currentTarget.style.borderColor = 'var(--border)'; }}
-          >
-            <div className="flex items-start justify-between mb-3">
-              <div className="rounded-lg p-2.5" style={{ background: 'var(--success-subtle)' }}>
-                <Banknote size={22} style={{ color: 'var(--success)' }} />
-              </div>
-              <ChevronRight size={16} style={{ color: 'var(--text-tertiary)' }} className="mt-1 group-hover:translate-x-0.5 transition-transform" />
-            </div>
-            <h3 className="font-semibold text-base mb-1" style={{ color: 'var(--text-primary)' }}>{t('doc.gehaltsquittung')}</h3>
-            <p className="text-xs leading-relaxed" style={{ color: 'var(--text-tertiary)' }}>
-              {t('doc.gehaltsquittungDesc')}
-            </p>
-            <div className="mt-3 flex items-center gap-1.5">
-              <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ background: 'var(--accent-subtle)', color: 'var(--accent-text)' }}>{t('doc.badgeTemplate')}</span>
-              <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ background: 'var(--success-subtle)', color: 'var(--success)' }}>{t('doc.badgePdfExport')}</span>
-            </div>
-          </button>
-
-          {/* Mietwagenauftrag */}
-          <button
-            onClick={() => setIsMietwagenModalOpen(true)}
-            className="text-left rounded-xl p-5 transition-all group"
-            style={cardBase}
-            onMouseEnter={e => { e.currentTarget.style.boxShadow = 'var(--shadow-md)'; e.currentTarget.style.borderColor = 'var(--accent)'; }}
-            onMouseLeave={e => { e.currentTarget.style.boxShadow = 'var(--shadow-sm)'; e.currentTarget.style.borderColor = 'var(--border)'; }}
-          >
-            <div className="flex items-start justify-between mb-3">
-              <div className="rounded-lg p-2.5" style={{ background: 'var(--warning-subtle)' }}>
-                <Car size={22} style={{ color: 'var(--warning)' }} />
-              </div>
-              <ChevronRight size={16} style={{ color: 'var(--text-tertiary)' }} className="mt-1 group-hover:translate-x-0.5 transition-transform" />
-            </div>
-            <h3 className="font-semibold text-base mb-1" style={{ color: 'var(--text-primary)' }}>{t('doc.mietwagenauftrag')}</h3>
-            <p className="text-xs leading-relaxed" style={{ color: 'var(--text-tertiary)' }}>
-              {t('doc.mietwagenauftragDesc')}
-            </p>
-            <div className="mt-3 flex items-center gap-1.5">
-              <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ background: 'var(--accent-subtle)', color: 'var(--accent-text)' }}>{t('doc.badgeTemplate')}</span>
-              <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ background: 'var(--success-subtle)', color: 'var(--success)' }}>{t('doc.badgePdfExport')}</span>
-            </div>
-          </button>
-
-          {/* Fahrtenbuch */}
-          <button
-            onClick={() => setSubView('fahrtenbuch')}
-            className="text-left rounded-xl p-5 transition-all group"
-            style={cardBase}
-            onMouseEnter={e => { e.currentTarget.style.boxShadow = 'var(--shadow-md)'; e.currentTarget.style.borderColor = 'var(--accent)'; }}
-            onMouseLeave={e => { e.currentTarget.style.boxShadow = 'var(--shadow-sm)'; e.currentTarget.style.borderColor = 'var(--border)'; }}
-          >
-            <div className="flex items-start justify-between mb-3">
-              <div className="rounded-lg p-2.5" style={{ background: 'rgba(16,185,129,0.12)' }}>
-                <MapPin size={22} style={{ color: '#059669' }} />
-              </div>
-              <ChevronRight size={16} style={{ color: 'var(--text-tertiary)' }} className="mt-1 group-hover:translate-x-0.5 transition-transform" />
-            </div>
-            <h3 className="font-semibold text-base mb-1" style={{ color: 'var(--text-primary)' }}>{t('doc.fahrtenbuch')}</h3>
-            <p className="text-xs leading-relaxed" style={{ color: 'var(--text-tertiary)' }}>
-              {t('doc.fahrtenbuchDesc')}
-            </p>
-            <div className="mt-3 flex items-center gap-1.5">
-              <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ background: 'rgba(16,185,129,0.12)', color: '#059669' }}>{t('doc.badgeImport')}</span>
-              <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ background: 'var(--accent-subtle)', color: 'var(--accent-text)' }}>Excel / CSV</span>
-            </div>
-          </button>
-
-        </div>
-      </div>
-
-      {/* ── Gehaltsquittungen ─────────────────────────────────────────────────── */}
-      <GehaltsquittungList
-        refreshKey={receiptsVersion}
-        focusReceiptId={focusReceiptId}
-        onCreate={() => setIsGehaltsquittungModalOpen(true)}
-      />
-
-      {/* ── Saved Stundennachweise archive ─────────────────────────────────────── */}
-      <div>
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-sm font-semibold uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>
-            {t('doc.archiveHeading')}
+      <div className="grid grid-cols-1 gap-8">
+        <section aria-labelledby="documents-tools-heading" className="grid grid-cols-1 gap-3 font-ui">
+          <h2 id="documents-tools-heading" className="text-[15px] font-semibold text-fg">
+            {t('doc.toolsHeading')}
           </h2>
-          {!loadingArchive && savedRecords.length > 0 && (
-            <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ background: 'var(--accent-subtle)', color: 'var(--accent-text)' }}>
-              {tPlural({ one: 'doc.entryCount.one', other: 'doc.entryCount.other' }, savedRecords.length)}
-            </span>
-          )}
-        </div>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+            <ToolCard
+              icon={Clock}
+              title={t('doc.stundennachweis')}
+              description={t('doc.stundennachweisDesc')}
+              badges={[t('doc.badgeTemplate'), t('doc.badgePdfExport')]}
+              onClick={() => navigate('/stundennachweis')}
+            />
+            <ToolCard
+              icon={Receipt}
+              title={t('doc.trinkgeldQuittung')}
+              description={t('doc.trinkgeldQuittungDesc')}
+              badges={[t('doc.badgeTemplate'), t('doc.badgePdfExport')]}
+              onClick={() => setIsTrinkgeldModalOpen(true)}
+            />
+            <ToolCard
+              icon={Banknote}
+              title={t('doc.gehaltsquittung')}
+              description={t('doc.gehaltsquittungDesc')}
+              badges={[t('doc.badgeTemplate'), t('doc.badgePdfExport')]}
+              onClick={() => setIsGehaltsquittungModalOpen(true)}
+            />
+            <ToolCard
+              icon={Car}
+              title={t('doc.mietwagenauftrag')}
+              description={t('doc.mietwagenauftragDesc')}
+              badges={[t('doc.badgeTemplate'), t('doc.badgePdfExport')]}
+              onClick={() => setIsMietwagenModalOpen(true)}
+            />
+            <ToolCard
+              icon={MapPin}
+              title={t('doc.fahrtenbuch')}
+              description={t('doc.fahrtenbuchDesc')}
+              badges={[t('doc.badgeImport'), 'Excel / CSV']}
+              onClick={() => setSubView('fahrtenbuch')}
+            />
+          </div>
+        </section>
 
-        {loadingArchive ? (
-          <div className="rounded-xl p-8 text-center text-sm" style={{ border: '1px solid var(--border)', background: 'var(--bg-surface)', color: 'var(--text-tertiary)' }}>
-            {t('doc.archiveLoading')}
-          </div>
-        ) : monthGroups.length === 0 ? (
-          <div className="rounded-xl p-8 text-center" style={{ border: '1px solid var(--border)', background: 'var(--bg-surface)' }}>
-            <Clock size={32} className="mx-auto mb-3" style={{ color: 'var(--text-tertiary)' }} />
-            <p className="text-sm font-medium mb-1" style={{ color: 'var(--text-primary)' }}>{t('doc.archiveEmpty')}</p>
-            <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
-              {t('doc.archiveEmptyHint')}
-            </p>
-          </div>
-        ) : (
-          <div className="space-y-3">
-            {monthGroups.map(group => {
-              const isExpanded = expandedGroups.has(group.key);
-              return (
-                <div key={group.key} className="rounded-xl overflow-hidden" style={{ border: '1px solid var(--border)', background: 'var(--bg-surface)' }}>
-                  {/* Group header */}
-                  <div
-                    className="flex items-center gap-3 px-4 py-3 cursor-pointer select-none"
-                    style={{ background: 'var(--bg-muted)', borderBottom: isExpanded ? '1px solid var(--border)' : 'none' }}
-                    onClick={() => toggleGroup(group.key)}
-                  >
-                    {/* Chevron + title */}
-                    <div className="flex items-center gap-2 flex-1 min-w-0">
-                      {isExpanded
-                        ? <ChevronDown size={16} style={{ color: 'var(--text-secondary)', flexShrink: 0 }} />
-                        : <ChevronRight size={16} style={{ color: 'var(--text-secondary)', flexShrink: 0 }} />
-                      }
-                      <span className="font-semibold text-sm" style={{ color: 'var(--text-primary)' }}>
-                        {group.label}
-                      </span>
-                      <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ background: 'var(--accent-subtle)', color: 'var(--accent-text)' }}>
-                        {tPlural({ one: 'doc.entryCount.one', other: 'doc.entryCount.other' }, group.records.length)}
-                      </span>
-                      <span className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
-                        {t('doc.hoursTotal', { hours: fmtDec(minsToDecimal(group.totalMins)) })}
-                        {group.totalGross != null && (
-                          <span className="ml-2">· {fmtEuro(group.totalGross)} {t('doc.gross')}</span>
-                        )}
-                      </span>
-                    </div>
-                    {/* Group actions — stop propagation so click doesn't toggle expand */}
-                    <div className="flex items-center gap-2 shrink-0" onClick={e => e.stopPropagation()}>
-                      <button
-                        onClick={() => handleDownloadGroup(group)}
-                        className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all"
-                        style={{ background: 'var(--success-subtle)', color: 'var(--success)', border: '1px solid transparent' }}
-                        onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--success)'; }}
-                        onMouseLeave={e => { e.currentTarget.style.borderColor = 'transparent'; }}
-                        title={t('doc.downloadAllTitle', { label: group.label })}
-                      >
-                        <Download size={12} /> {t('doc.downloadAll')}
-                      </button>
-                      <button
-                        onClick={() => { setGroupDeleteError(''); setDeleteGroupKey(group.key); }}
-                        className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all"
-                        style={{ background: 'var(--error-subtle)', color: 'var(--error)', border: '1px solid transparent' }}
-                        onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--error)'; }}
-                        onMouseLeave={e => { e.currentTarget.style.borderColor = 'transparent'; }}
-                        title={t('doc.deleteAllTitle', { label: group.label })}
-                      >
-                        <Trash2 size={12} /> {t('doc.deleteAll')}
-                      </button>
-                    </div>
-                  </div>
+        {/* ── Gehaltsquittungen ─────────────────────────────────────────────────── */}
+        <GehaltsquittungList
+          refreshKey={receiptsVersion}
+          focusReceiptId={focusReceiptId}
+          onCreate={() => setIsGehaltsquittungModalOpen(true)}
+        />
 
-                  {/* Expanded rows table */}
-                  {isExpanded && (
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-sm">
-                        <thead>
-                          <tr style={{ background: 'var(--bg-muted)', borderBottom: '1px solid var(--border)' }}>
-                            {([
-                              'common.driver', 'doc.personalnummer', 'doc.totalHours', 'doc.grossExpected',
-                              'doc.workingDays', 'doc.savedAt', 'doc.updatedAt', 'doc.tableActions',
-                            ] as TranslationKey[]).map(h => (
-                              <th key={h} className="px-4 py-2.5 text-left font-semibold text-xs uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>
-                                {t(h)}
-                              </th>
-                            ))}
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {group.records.map((rec, idx) => (
-                            <tr
-                              key={rec.id}
-                              style={{
-                                borderBottom: idx < group.records.length - 1 ? '1px solid var(--border)' : 'none',
-                                background: idx % 2 === 0 ? 'var(--bg-surface)' : 'var(--bg-muted)',
-                              }}
-                            >
-                              <td className="px-4 py-3 font-medium" style={{ color: 'var(--text-primary)' }}>
-                                {rec.driver_name}
-                                {rec.generation_source === 'fahrtenbuch' && (
-                                  <span className="ml-1.5 text-[10px] px-1.5 py-0.5 rounded font-medium" style={{ background: 'var(--accent-subtle)', color: 'var(--accent-text)' }}>{t('doc.fahrtenbuch')}</span>
-                                )}
-                                {rec.generation_source === 'monatsplanung' && (
-                                  <span className="ml-1.5 text-[10px] px-1.5 py-0.5 rounded font-medium" style={{ background: 'rgba(16,185,129,0.12)', color: '#059669' }}>{t('doc.badgePlanning')}</span>
-                                )}
-                              </td>
-                              <td className="px-4 py-3 font-mono text-xs" style={{ color: 'var(--text-secondary)' }}>
-                                {rec.personalnummer ?? '—'}
-                              </td>
-                              <td className="px-4 py-3 font-mono" style={{ color: 'var(--text-primary)' }}>
-                                {fmtDec(minsToDecimal(totalMins(rec)))} {t('doc.hoursShort')}
-                              </td>
-                              <td className="px-4 py-3 font-mono" style={{ color: rec.calculated_salary != null ? 'var(--text-primary)' : 'var(--text-tertiary)' }}>
-                                {fmtEuro(rec.calculated_salary)}
-                              </td>
-                              <td className="px-4 py-3 text-center" style={{ color: 'var(--text-primary)' }}>
-                                {rec.working_days}
-                              </td>
-                              <td className="px-4 py-3 text-xs" style={{ color: 'var(--text-tertiary)' }}>
-                                {rec.saved_at ? new Date(rec.saved_at).toLocaleDateString('de-DE') : '—'}
-                              </td>
-                              <td className="px-4 py-3 text-xs" style={{ color: 'var(--text-tertiary)' }}>
-                                {rec.updated_at ? new Date(rec.updated_at).toLocaleDateString('de-DE') : '—'}
-                              </td>
-                              <td className="px-4 py-3">
-                                <div className="flex items-center gap-1.5">
-                                  <button
-                                    onClick={() => handleOpen(rec)}
-                                    title={t('doc.open')}
-                                    className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all"
-                                    style={{ background: 'var(--accent-subtle)', color: 'var(--accent-text)', border: '1px solid transparent' }}
-                                    onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--accent)'; }}
-                                    onMouseLeave={e => { e.currentTarget.style.borderColor = 'transparent'; }}
-                                  >
-                                    <ExternalLink size={12} /> {t('doc.open')}
-                                  </button>
-                                  <button
-                                    onClick={() => handlePdf(rec)}
-                                    title={t('doc.exportPdf')}
-                                    className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all"
-                                    style={{ background: 'var(--success-subtle)', color: 'var(--success)', border: '1px solid transparent' }}
-                                    onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--success)'; }}
-                                    onMouseLeave={e => { e.currentTarget.style.borderColor = 'transparent'; }}
-                                  >
-                                    <FileDown size={12} /> PDF
-                                  </button>
-                                  <button
-                                    onClick={() => { setDeleteError(''); setDeleteConfirmId(rec.id); }}
-                                    title={t('common.delete')}
-                                    className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all"
-                                    style={{ background: 'var(--error-subtle)', color: 'var(--error)', border: '1px solid transparent' }}
-                                    onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--error)'; }}
-                                    onMouseLeave={e => { e.currentTarget.style.borderColor = 'transparent'; }}
-                                  >
-                                    <Trash2 size={12} />
-                                  </button>
-                                </div>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
+        {/* ── Saved Stundennachweise archive ─────────────────────────────────────── */}
+        <section aria-labelledby="documents-archive-heading" className="grid grid-cols-1 gap-3 font-ui">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 id="documents-archive-heading" className="text-[15px] font-semibold text-fg">
+              {t('doc.archiveHeading')}
+            </h2>
+            {!loadingArchive && savedRecords.length > 0 && (
+              <Badge tone="brand">
+                {tPlural({ one: 'doc.entryCount.one', other: 'doc.entryCount.other' }, savedRecords.length)}
+              </Badge>
+            )}
           </div>
-        )}
+          {renderArchive()}
+        </section>
       </div>
 
-      {/* Single-row delete confirmation modal */}
-      {deleteConfirmId && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.5)' }}>
-          <div className="rounded-xl p-6 max-w-sm w-full shadow-xl" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
-            <div className="flex items-center gap-3 mb-4">
-              <div className="rounded-lg p-2" style={{ background: 'var(--error-subtle)' }}>
-                <AlertTriangle size={20} style={{ color: 'var(--error)' }} />
-              </div>
-              <h3 className="font-semibold text-base" style={{ color: 'var(--text-primary)' }}>{t('doc.confirmDeleteTitle')}</h3>
-            </div>
-            <p className="text-sm mb-6" style={{ color: 'var(--text-secondary)' }}>
-              {t('doc.confirmDeleteBody')}
-            </p>
-            {deleteError && (
-              <div
-                className="rounded-lg p-3 mb-4 text-sm"
-                style={{ background: 'var(--danger-subtle)', border: '1px solid var(--danger)', color: 'var(--danger)' }}
-              >
-                {deleteError}
-              </div>
-            )}
-            <div className="flex gap-3 justify-end">
-              <button
-                onClick={() => { setDeleteConfirmId(null); setDeleteError(''); }}
-                disabled={deleting}
-                className="px-4 py-2 rounded-lg text-sm font-medium transition-colors"
-                style={{ background: 'var(--bg-muted)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
-              >
-                {t('common.cancel')}
-              </button>
-              <button
-                onClick={handleDeleteConfirm}
-                disabled={deleting}
-                className="px-4 py-2 rounded-lg text-sm font-medium transition-colors"
-                style={{ background: 'var(--error)', color: 'white' }}
-              >
-                {deleting ? t('common.deleting') : t('common.delete')}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Single-row delete confirmation. It stays open while the delete runs and
+          shows a failure inside itself, as before, so it is not ConfirmDialog
+          (which closes on confirm). Escape and a click outside mean Abbrechen,
+          and like Abbrechen they wait while a delete is running. */}
+      <Dialog
+        open={Boolean(deleteConfirmId)}
+        onOpenChange={open => {
+          if (!open && !deleting) { setDeleteConfirmId(null); setDeleteError(''); }
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>{t('doc.confirmDeleteTitle')}</DialogTitle>
+            <DialogDescription>{t('doc.confirmDeleteBody')}</DialogDescription>
+          </DialogHeader>
+          {deleteError && <Alert tone="critical">{deleteError}</Alert>}
+          <DialogFooter>
+            <Button
+              variant="secondary"
+              onClick={() => { setDeleteConfirmId(null); setDeleteError(''); }}
+              disabled={deleting}
+            >
+              {t('common.cancel')}
+            </Button>
+            <Button variant="danger" onClick={handleDeleteConfirm} disabled={deleting}>
+              <Trash2 aria-hidden />
+              {deleting ? t('common.deleting') : t('common.delete')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
-      {/* Group delete confirmation modal */}
-      {deleteGroupKey && groupForDelete && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.5)' }}>
-          <div className="rounded-xl p-6 max-w-sm w-full shadow-xl" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
-            <div className="flex items-center gap-3 mb-4">
-              <div className="rounded-lg p-2" style={{ background: 'var(--error-subtle)' }}>
-                <AlertTriangle size={20} style={{ color: 'var(--error)' }} />
-              </div>
-              <h3 className="font-semibold text-base" style={{ color: 'var(--text-primary)' }}>{t('doc.confirmDeleteGroupTitle')}</h3>
-            </div>
-            <p className="text-sm mb-2" style={{ color: 'var(--text-secondary)' }}>
-              {/* Split around the bolded label so both languages keep their word order. */}
-              {t('doc.confirmDeleteGroupBefore')}<strong>{groupForDelete.label}</strong>{t('doc.confirmDeleteGroupAfter')}
-            </p>
-            <p className="text-sm mb-6" style={{ color: 'var(--text-tertiary)' }}>
-              {tPlural(
-                { one: 'doc.confirmDeleteGroupCount.one', other: 'doc.confirmDeleteGroupCount.other' },
-                groupForDelete.records.length,
-              )}
-            </p>
-            {groupDeleteError && (
-              <p className="text-xs mb-4 px-3 py-2 rounded-lg" style={{ background: 'var(--error-subtle)', color: 'var(--error)' }}>
-                {groupDeleteError}
+      {/* Group delete confirmation, on the same terms. */}
+      <Dialog
+        open={Boolean(deleteGroupKey && groupForDelete)}
+        onOpenChange={open => {
+          if (!open && !deletingGroup) { setDeleteGroupKey(null); setGroupDeleteError(''); }
+        }}
+      >
+        <DialogContent className="max-w-md">
+          {groupForDelete ? (
+            <>
+              <DialogHeader>
+                <DialogTitle>{t('doc.confirmDeleteGroupTitle')}</DialogTitle>
+                <DialogDescription>
+                  {/* Split around the bolded label so both languages keep their word order. */}
+                  {t('doc.confirmDeleteGroupBefore')}<strong className="font-semibold text-fg">{groupForDelete.label}</strong>{t('doc.confirmDeleteGroupAfter')}
+                </DialogDescription>
+              </DialogHeader>
+              <p className="text-sm text-fg-muted">
+                {tPlural(
+                  { one: 'doc.confirmDeleteGroupCount.one', other: 'doc.confirmDeleteGroupCount.other' },
+                  groupForDelete.records.length,
+                )}
               </p>
-            )}
-            <div className="flex gap-3 justify-end">
-              <button
-                onClick={() => { setDeleteGroupKey(null); setGroupDeleteError(''); }}
-                disabled={deletingGroup}
-                className="px-4 py-2 rounded-lg text-sm font-medium transition-colors"
-                style={{ background: 'var(--bg-muted)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
-              >
-                {t('common.cancel')}
-              </button>
-              <button
-                onClick={() => void handleDeleteGroupConfirm()}
-                disabled={deletingGroup}
-                className="px-4 py-2 rounded-lg text-sm font-medium transition-colors"
-                style={{ background: 'var(--error)', color: 'white' }}
-              >
-                {deletingGroup ? t('common.deleting') : t('doc.deleteAll')}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+              {groupDeleteError && <Alert tone="critical">{groupDeleteError}</Alert>}
+              <DialogFooter>
+                <Button
+                  variant="secondary"
+                  onClick={() => { setDeleteGroupKey(null); setGroupDeleteError(''); }}
+                  disabled={deletingGroup}
+                >
+                  {t('common.cancel')}
+                </Button>
+                <Button variant="danger" onClick={() => void handleDeleteGroupConfirm()} disabled={deletingGroup}>
+                  <Trash2 aria-hidden />
+                  {deletingGroup ? t('common.deleting') : t('doc.deleteAll')}
+                </Button>
+              </DialogFooter>
+            </>
+          ) : null}
+        </DialogContent>
+      </Dialog>
 
       <TrinkgeldQuittungModal isOpen={isTrinkgeldModalOpen} onClose={() => setIsTrinkgeldModalOpen(false)} />
       <MietwagenauftragModal  isOpen={isMietwagenModalOpen} onClose={() => setIsMietwagenModalOpen(false)} />
@@ -787,5 +715,59 @@ const DocumentsPage: React.FC = () => {
     </div>
   );
 };
+
+/**
+ * One document tool: a card that is a single button. Its name is the tool's
+ * title and its description is read after it, so the card does not announce
+ * its badges as part of its name.
+ */
+function ToolCard({
+  icon: Icon,
+  title,
+  description,
+  badges,
+  onClick,
+}: {
+  icon: LucideIcon;
+  title: string;
+  description: string;
+  badges: string[];
+  onClick: () => void;
+}) {
+  const id = useId();
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-labelledby={`${id}-title`}
+      aria-describedby={`${id}-description`}
+      className={cn(
+        'group flex h-full flex-col gap-3 rounded-surface border border-line bg-raised p-5 text-left font-ui text-fg shadow-raised transition-colors',
+        'hover:border-brand/60 hover:bg-sunken/40',
+        'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus',
+      )}
+    >
+      <span className="flex items-start justify-between gap-3">
+        <span className="flex size-10 items-center justify-center rounded-control bg-brand-soft text-brand-text">
+          <Icon aria-hidden className="size-5" />
+        </span>
+        <ChevronRight aria-hidden className="mt-1 size-4 text-fg-subtle transition-transform motion-safe:group-hover:translate-x-0.5" />
+      </span>
+      <span className="grid gap-1">
+        <span id={`${id}-title`} className="text-[15px] font-semibold leading-snug text-fg">
+          {title}
+        </span>
+        <span id={`${id}-description`} className="text-[13px] leading-relaxed text-fg-muted">
+          {description}
+        </span>
+      </span>
+      <span className="mt-auto flex flex-wrap gap-1.5 pt-1">
+        {badges.map(badge => (
+          <Badge key={badge}>{badge}</Badge>
+        ))}
+      </span>
+    </button>
+  );
+}
 
 export default DocumentsPage;
