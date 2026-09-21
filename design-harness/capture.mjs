@@ -18,8 +18,10 @@
  * harness and the same browser settings. That checkout needs node_modules and
  * e2e/node_modules (a directory junction to this one's is enough).
  */
+import { createHash } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
+import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createServer } from 'vite';
@@ -38,9 +40,10 @@ const renderRoot = resolve(arg('root') ?? ownRoot);
 const e2eRequire = createRequire(join(ownRoot, 'e2e', 'package.json'));
 const set = arg('set');
 const batch = arg('batch') ?? 'batch1';
-const only = arg('only');
+// Several name parts, comma-separated, retake several shots under one server start.
+const only = arg('only')?.split(',').filter(Boolean);
 if (set !== 'before' && set !== 'after') {
-  console.error('usage: node design-harness/capture.mjs --set before|after [--batch batch1] [--only <name part>]');
+  console.error('usage: node design-harness/capture.mjs --set before|after [--batch batch1] [--only <name part>[,<name part>…]]');
   process.exit(2);
 }
 
@@ -89,8 +92,10 @@ const SHOTS = batch === 'batch1' ? BATCH1_SHOTS : (await import(`./shots-${batch
 const allVariants = WIDTHS.flatMap(width => THEMES.map(theme => ({ width, theme })));
 
 async function settle(page) {
+  // Generous: the first page of a run can be reloaded once by Vite while it
+  // optimizes dependencies, and batch 3's pages are large.
   await page.waitForFunction(() => window.__harness && window.__harness.answered > 0 && window.__harness.pending === 0, null, {
-    timeout: 15_000,
+    timeout: 180_000,
   });
   await page.evaluate(() => document.fonts.ready);
   await quiet(page);
@@ -143,6 +148,10 @@ async function toWebp(encoder, png) {
 const server = await createServer({
   configFile: join(renderRoot, 'design-harness', 'vite.config.ts'),
   logLevel: 'warn',
+  // Vite's dependency cache defaults to node_modules/.vite. Worktrees that link
+  // node_modules to one checkout would share it, and one harness run rewriting
+  // it reloads another's pages mid-shot; each checkout gets its own.
+  cacheDir: join(tmpdir(), 'el-professor-harness', createHash('sha1').update(renderRoot).digest('hex').slice(0, 12)),
   // Another harness may hold the port; take the next free one.
   server: { strictPort: false },
 });
@@ -163,7 +172,7 @@ try {
   for (const shot of SHOTS) {
     for (const { width, theme } of shot.variants ?? allVariants) {
       const file = `${width}-${theme}-${shot.name}.webp`;
-      if (only && !file.includes(only)) continue;
+      if (only && !only.some(part => file.includes(part))) continue;
 
       // A phone is a touch screen: the 375 px shots emulate one, so a coarse
       // pointer grows the controls as it does on a real phone. 768 and 1280
