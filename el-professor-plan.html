@@ -472,7 +472,7 @@
         </li>
         <li><a href="#p1"><span class="no">1</span><h3>OTP وأمان الحسابات</h3></a><ul class="chips"><li class="chip">كبير</li><li class="chip">عالستيج</li></ul></li>
         <li><a href="#p2"><span class="no">2</span><h3>نظام التصميم والنموذج</h3></a><ul class="chips"><li class="chip">متوسط</li><li class="chip">اندمج عالستيج</li></ul><p class="gate">البوابة انفتحت: وافقت على النموذج بـ 15.09</p></li>
-        <li><a href="#p3"><span class="no">3</span><h3>فصل المنصة والصلاحيات</h3></a><ul class="chips"><li class="chip">كبير جداً</li><li class="chip">3.0 و3.1 و3.3 و3.5 و3.6 و3.9 اندمجوا</li><li class="chip">3.4أ و 3.4ب اندمجوا</li><li class="chip">3.8-U2 بالمراجعة</li></ul></li>
+        <li><a href="#p3"><span class="no">3</span><h3>فصل المنصة والصلاحيات</h3></a><ul class="chips"><li class="chip">كبير جداً</li><li class="chip">3.0 و3.1 و3.3 و3.5 و3.6 و3.9 اندمجوا</li><li class="chip">3.4أ و 3.4ب اندمجوا</li><li class="chip">3.8-U2 بالمراجعة</li><li class="chip">3.12 بالمراجعة</li></ul></li>
         <li><a href="#p4"><span class="no">4</span><h3>إيصال الراتب النقدي</h3></a><ul class="chips"><li class="chip">متوسط</li><li class="chip">الأساس اندمج</li></ul></li>
         <li><a href="#p5"><span class="no">5</span><h3>تعميم التصميم</h3></a><ul class="chips"><li class="chip">كبير</li><li class="chip">ما بلّشت</li></ul></li>
       </ol>
@@ -963,6 +963,16 @@ AND (c.subscription_expires_at IS NULL OR c.subscription_expires_at &gt; now())<
           <li><strong>قرار تشغيلي ضلّ:</strong> ربط الكنس اليومي بالسيرفر. بدونه الفاتورة اللي بتنولد وما حدا بيأشّرها مدفوعة ما بتمنح إشي. التجربة الجافّة وسطرين الـ cron صاروا جاهزين للنسخ بـ HANDOFF.md، والترتيب: الستيج أول وبعدين البرودكشن.</li>
           <li><strong>U3 (هالـ PR):</strong> ما في إشي بيكتب أعمدة الاشتراك الخمسة مباشرة. trigger على جدول الشركات بيرفض أي تغيير عليها من الأدوار اللي بتوصل من المتصفح أو من الـ functions، وفحص بيقرا كل الدوال وبيفشّل الإصدار إذا ظهر كاتب جديد، واختبار بالكود بيفشل إذا ظهرت كتابة مباشرة. <strong>ولا شركة بيتغيّر وصولها</strong>، والكنس ما بيتغيّر من هالشريحة.</li>
           <li><strong>قرار جديد إلك:</strong> شركة خلصت كل فتراتها، إذا تغيّرت خطتها من اللوحة، الكنس الليلي بيرجّعها للخطة القديمة. التصليح سطر واحد، وعدد الشركات بهالحالة بيطلع من التجربة الجافّة.</li>
+        </ul>
+      </div>
+
+      <div class="step">
+        <h3><span class="step-no">3.12</span>قائمة فريق المنصة <span class="pill warn">بالمراجعة (PR #PRNUM)</span></h3>
+        <ul class="list">
+          <li>صفحة <code>/admin/team</code> صارت تقرأ جدول الفريق نفسه بدالة قراءة مسجّلة (<code>platform_staff_list</code>) بدل ما تبني القائمة من سجل التدقيق — فالقائمة ما عادت تعتمد على قدّيش السجل بيعيش، وهاد اللي كان لازم يصير قبل قرار الاحتفاظ D4.</li>
+          <li>كل عضو بإيميله، ودوره، ونشط أو معطّل، و<strong>مين أعطاه العضوية</strong>. والعضويات اللي انعملت بدون جلسة (أول مالك من الـ migration، أو باليد بقاعدة البيانات) مكتوب عندها «Nicht erfasst» مع شرح.</li>
+          <li>القائمة للمالكين بس (<code>staff.manage</code>)، لأنها إيميلات كل اللي معهم صلاحية على بيانات كل الزبائن.</li>
+          <li>الأدوار التانية (Support، Buchhaltung، Nur Lesen) <strong>لسا مش مفعّلة عن قصد</strong>: السبب التقني الأخير انحلّ بـ PR #84، والتفعيل صار قرارك إنت، وبييجي كـ PR لحاله.</li>
         </ul>
       </div>
 

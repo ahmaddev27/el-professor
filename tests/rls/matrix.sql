@@ -2159,6 +2159,13 @@ INSERT INTO _mx_rpc (label, stmt, want, hole) VALUES
     ('platform_audit_list() is allowed',
      $q$SELECT platform_audit_list() ->> 'ok'$q$,
      'PNNNNNY', NULL),
+    -- the sixth read model, 20260920140000 (plan 3.12): the platform team with
+    -- each member's address, for staff.manage, which `super` holds as an owner
+    -- and no company principal does. tests/rls/platform-readmodels.sql section
+    -- 11 takes the other three staff roles through it
+    ('platform_staff_list() is allowed',
+     $q$SELECT platform_staff_list() ->> 'ok'$q$,
+     'PNNNNNY', NULL),
     -- anon's EXECUTE revoked by 20260915120000; the platform's invoice screen
     -- calls it signed in
     ('generate_invoice_number(2026)',

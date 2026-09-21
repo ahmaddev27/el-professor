@@ -1,151 +1,132 @@
 /**
- * The platform team, reconstructed from the audit log.
+ * The platform team, as the Team page reads it (plan 3.12).
  *
- * ## Why from the log
+ * ## Where the roster comes from
  *
- * `app_private.platform_staff` lives in a schema PostgREST does not serve, and
- * no read model lists it: `platform_companies_list` and the three directories
- * are the merged read models of plan 3.6b, and `platform_users_list`
- * deliberately **excludes** every account that has a staff row — the team is
- * not part of the company user directory. A `platform_staff_list` RPC is not
- * built yet.
+ * `platform_staff_list` (migration 20260920140000) reads
+ * `app_private.platform_staff` itself, joined to each member's sign-in address.
+ * Until it existed the page folded the audit log instead, which tied the roster
+ * to how long the log is kept: with audit retention (open decision D4) a member
+ * added long ago with no later change would have dropped off the list while
+ * keeping full access. That fold is gone.
  *
- * What does exist is a complete record. `app_private.platform_staff_audit()` is
- * an AFTER INSERT/UPDATE/DELETE trigger on the table that writes
- * `platform_staff.insert` / `.update` / `.delete` with `to_jsonb(NEW)` and
- * `to_jsonb(OLD)`, whichever path made the change — a migration, a platform
- * RPC, or GoTrue deleting the account. The backfill of 20260916110000 inserts
- * its rows after that trigger is created, so the first owners are in the log
- * too. Folding those rows newest-first therefore yields the table's current
- * content exactly.
+ * The read model asks `staff.manage` — owners only — the same capability the
+ * page needs to exist at all, so the roster is whole for exactly the role that
+ * may act on it.
  *
- * Two consequences the screen states rather than hides:
+ * ## Who granted a membership
  *
- * - it needs `audit.read`, which today is the owner — the same role that holds
- *   `staff.manage`, so the page is whole for the role that may use it;
- * - the log records the staff row, never the account, so a member is identified
- *   by user id. No merged read model returns a staff account's address.
+ * `created_by` is the table's own column, which `platform_staff_add` sets to the
+ * caller. A row written outside any session — the first owners, backfilled by
+ * migration 20260916110000, or a statement run by hand in the database — has
+ * nobody to name, and the page says "not recorded" rather than guessing.
  *
- * The RPC rows (`platform_staff.add` / `.disable` / `.enable`) are ignored for
- * the roster: they carry only what the call changed, while the trigger's rows
- * carry the whole row. They are still shown as history on the Protokoll screen.
+ * Everything here is pure; the calls are `platformStaffClient.ts`.
  */
-import type { AuditRow } from './platformAuditLog';
 import type { TranslationKey } from '../i18n';
-import { PLATFORM_ROLES, type PlatformRole } from './platformAccess';
+import {
+  DIRECTORY_PAGE_SIZE,
+  directoryHasNextPage,
+  type PlatformReadResult,
+  type PlatformStaffRow,
+} from './platformReadModels';
 
-/** The three trigger actions that carry a whole `platform_staff` row. */
-export const STAFF_TABLE_ACTIONS = [
-  'platform_staff.insert',
-  'platform_staff.update',
-  'platform_staff.delete',
-] as const;
-
-/** Every action written about the staff table, for the history list. */
-export const STAFF_ACTION_PREFIX = 'platform_staff.';
-
-export interface StaffMember {
-  userId: string;
-  role: PlatformRole;
-  /** null while active. */
-  disabledAt: string | null;
-  note: string | null;
-  createdAt: string | null;
-  createdBy: string | null;
-  /** When the log last recorded a change to this row. */
-  changedAt: string;
-}
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
-
-const isRole = (value: unknown): value is PlatformRole =>
-  typeof value === 'string' && (PLATFORM_ROLES as readonly string[]).includes(value);
-
-const nullableStr = (value: unknown): string | null => (typeof value === 'string' ? value : null);
-
-export interface StaffRoster {
-  members: StaffMember[];
-  /**
-   * Trigger rows whose payload this build could not read as a staff row — an
-   * unknown role, or an `after` value that is not an object.
-   *
-   * Counted rather than ignored. The newest row for a user id is final, so an
-   * unreadable one removes that member from the list instead of showing them
-   * with stale values; on the screen that answers "who has access", silently
-   * omitting somebody is the wrong direction, and the count is what lets the
-   * page say the list may be short.
-   */
-  unreadable: number;
-}
+export type StaffRosterResult =
+  | {
+      ok: true;
+      members: PlatformStaffRow[];
+      /**
+       * False when the pages that were read do not add up to the total: the
+       * table changed during the read, or it holds more rows than the offset
+       * ceiling lets anyone page to. The screen then says the list may be
+       * incomplete, and stops drawing conclusions from it (the last owner).
+       */
+      complete: boolean;
+    }
+  | { ok: false; reason: string };
 
 /**
- * Folds audit rows into today's team.
+ * Reads every page of the roster. A realistic team is one page; the loop is
+ * there so a larger one is never silently cut off. Every page is one audited
+ * read, so this runs when the screen opens or is refreshed, never on a timer.
  *
- * `rows` arrive newest first, as `platform_audit_list` returns them, so the
- * first row seen for a user id is that row's latest state and every older one
- * is history. A `.delete` removes the member; an `.insert` or `.update` whose
- * payload is not a staff row is counted as unreadable rather than guessed at.
- *
- * Sorted for the screen: active members first, then by user id, so the order
- * does not jump around as rows are added.
+ * A refusal ends the read and is returned as it is. A transport error is
+ * thrown, for the screen to report. `fetchPage` is injected so the paging is
+ * testable without a database.
  */
-export function rosterFromAuditRows(rows: readonly AuditRow[]): StaffRoster {
-  const settled = new Set<string>();
-  const members: StaffMember[] = [];
-  let unreadable = 0;
+export async function collectStaffRoster(
+  fetchPage: (pageIndex: number) => Promise<PlatformReadResult<PlatformStaffRow>>,
+): Promise<StaffRosterResult> {
+  const members: PlatformStaffRow[] = [];
+  for (let pageIndex = 0; ; pageIndex += 1) {
+    const page = await fetchPage(pageIndex);
+    if (!page.ok) return { ok: false, reason: page.reason };
 
-  for (const row of rows) {
-    const userId = row.target_id;
-    if (!userId || settled.has(userId)) continue;
-    if (!(STAFF_TABLE_ACTIONS as readonly string[]).includes(row.action)) continue;
+    members.push(...page.items);
 
-    // Whatever the newest row says about this user id is final, deletion
-    // included — an older row cannot bring a removed member back.
-    settled.add(userId);
-    if (row.action === 'platform_staff.delete') continue;
-
-    const after = row.after_value;
-    if (!isRecord(after) || !isRole(after.role)) {
-      unreadable += 1;
-      continue;
+    if (!directoryHasNextPage(pageIndex, page.total)) {
+      const complete = (pageIndex + 1) * DIRECTORY_PAGE_SIZE >= page.total
+        && members.length === page.total;
+      return { ok: true, members, complete };
     }
-
-    members.push({
-      userId,
-      role: after.role,
-      disabledAt: nullableStr(after.disabled_at),
-      note: nullableStr(after.note),
-      createdAt: nullableStr(after.created_at),
-      createdBy: nullableStr(after.created_by),
-      changedAt: row.occurred_at,
-    });
+    // An empty page while the total promises more: the table shrank mid-read.
+    if (page.items.length === 0) return { ok: true, members, complete: false };
   }
-
-  members.sort((a, b) => {
-    const activeDiff = Number(a.disabledAt !== null) - Number(b.disabledAt !== null);
-    return activeDiff !== 0 ? activeDiff : a.userId.localeCompare(b.userId);
-  });
-
-  return { members, unreadable };
 }
 
-/** How many members are still active — what "the last active owner" counts. */
-export function activeOwnerCount(members: readonly StaffMember[]): number {
-  return members.filter(m => m.role === 'owner' && m.disabledAt === null).length;
+const isActiveOwner = (member: PlatformStaffRow): boolean =>
+  member.role === 'owner' && member.status === 'active';
+
+/** How many members are active owners — what "the last active owner" counts. */
+export function activeOwnerCount(members: readonly PlatformStaffRow[]): number {
+  return members.filter(isActiveOwner).length;
 }
 
 /**
  * Whether disabling this member would be refused as `last_owner`.
  *
  * The database decides — `platform_staff_disable` checks it under an advisory
- * lock and the table's trigger raises underneath — so this only keeps the
- * screen from offering a button whose single outcome is a refusal.
+ * lock, and the table's trigger `platform_staff_keep_owner` raises underneath
+ * whichever path tries — so this only keeps the screen from offering a button
+ * whose one possible outcome is a refusal, and lets it say why instead.
  */
-export function wouldRemoveLastOwner(members: readonly StaffMember[], userId: string): boolean {
-  const member = members.find(m => m.userId === userId);
-  if (!member || member.role !== 'owner' || member.disabledAt !== null) return false;
+export function wouldRemoveLastOwner(members: readonly PlatformStaffRow[], userId: string): boolean {
+  const member = members.find(m => m.user_id === userId);
+  if (!member || !isActiveOwner(member)) return false;
   return activeOwnerCount(members) <= 1;
+}
+
+/**
+ * Whether the database would re-enable this member. `platform_staff_enable`
+ * refuses every role but owner (`role_requires_3_3`) until the other roles are
+ * enabled by a change of their own; the screen says so instead of offering the
+ * click.
+ */
+export function mayReEnable(member: PlatformStaffRow): boolean {
+  return member.status === 'disabled' && member.role === 'owner';
+}
+
+/**
+ * Whether "resend the invitation" can succeed: `otp_issue` issues an
+ * `invite_activate` code only while the profile is still `pending_invite`, and
+ * a disabled member has no invitation to accept.
+ */
+export function offersResend(member: PlatformStaffRow): boolean {
+  return member.status === 'active' && member.invitation_pending;
+}
+
+export type GrantedBy =
+  | { kind: 'account'; email: string }
+  /** Recorded, but the account no longer exists; the id is all that is left. */
+  | { kind: 'gone'; userId: string }
+  /** Written outside a session: a migration, or a statement run in the database. */
+  | { kind: 'unrecorded' };
+
+/** Who added this member, as far as the table knows. */
+export function grantedBy(member: PlatformStaffRow): GrantedBy {
+  if (member.created_by === null) return { kind: 'unrecorded' };
+  if (member.created_by_email) return { kind: 'account', email: member.created_by_email };
+  return { kind: 'gone', userId: member.created_by };
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -156,22 +137,18 @@ export function isUserId(value: string): boolean {
 }
 
 /**
- * A sentence to add beside the refusal the database wrote, for the two reasons
- * a person cannot act on from the message alone.
+ * A sentence to add beside the refusal the database wrote, for the reasons a
+ * person cannot act on from the message alone.
  *
  * `platform_staff_add`, `_disable` and `_enable` already answer with German
  * text, and `callPlatformRpc` throws exactly that — the screen shows it. These
- * two need the reason behind the rule as well:
+ * need the reason behind the rule as well:
  *
- * - `role_requires_3_3`: `platform_staff_add` and `platform_staff_enable` refuse
- *   any role but `owner`, and the role was **not** created. The reason is named
- *   after the policy argument behind it, which no longer holds — 20260917130000
- *   moved the tenant policies onto capabilities, and its self-check raises if a
- *   policy, or a function a policy calls, still reads is_user_super_admin() — so
- *   lifting the refusal is a migration that redefines those two functions, plan
- *   step 3.12, not a policy problem.
- * - `last_owner`: the platform would be left with nobody who can administer it,
- *   so the database refuses before anything changes.
+ * - `role_requires_3_3`: every role but `owner` is refused and nothing was
+ *   created. The name is historical; the other roles are simply not enabled
+ *   yet, and enabling them is a decision of its own.
+ * - `last_owner`: the platform would be left with nobody who can administer it.
+ * - `account_in_company`: platform accounts belong to no company.
  *
  * Every other reason is shown as the server worded it, with nothing added.
  */
