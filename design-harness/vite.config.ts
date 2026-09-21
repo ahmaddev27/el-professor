@@ -1,3 +1,4 @@
+import { realpathSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { defineConfig, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
@@ -75,6 +76,10 @@ export default defineConfig({
     port: 5199,
     strictPort: false,
     open: false,
+    // A worktree may link node_modules to another checkout's (a directory
+    // junction). Vite resolves a file to its real path, so the self-hosted
+    // Barlow fonts would be refused as outside the root; allow that path too.
+    fs: { allow: [root, realpathSync(resolve(root, 'node_modules'))] },
   },
   optimizeDeps: {
     entries: ['design-harness/index.html'],

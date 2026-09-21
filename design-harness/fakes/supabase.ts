@@ -11,6 +11,7 @@
  */
 import { assignmentRows, carsRows, driversRows, fixedCostRows, type Row } from '../fixtures';
 import { batch2Drivers, batch2PrimaryTable, batch2Rpc, batch2Tables, isBatch2Screen } from '../fixtures-batch2';
+import { batch3Tables, recordBatch3Rpc, recordBatch3Write } from '../batch3/fixtures';
 import { scenario } from '../scenario';
 
 type QueryError = { message: string; code: string; details?: string; hint?: string };
@@ -40,6 +41,9 @@ function seed(): Map<string, Row[]> {
     ['drivers', drivers],
     ['fixed_costs', empty ? [] : fixedCostRows()],
     ...batch2Tables(scenario),
+    // Batch 3's tables, on its own screens only (empty on any other). Later
+    // entries win, so there its richer drivers replace the ones above.
+    ...batch3Tables(),
   ]);
 }
 
@@ -63,16 +67,25 @@ class FakeQuery implements PromiseLike<Result> {
   private op: 'select' | 'insert' | 'update' | 'delete' = 'select';
   private payload: Row | Row[] | null = null;
   private readonly filters: Array<(row: Row) => boolean> = [];
-  private orderBy: { column: string; ascending: boolean } | null = null;
+  // Every .order() applies, the first one first, as in PostgREST: the planning
+  // screens order rides by date, then start time, then id.
+  private readonly orderBy: Array<{ column: string; ascending: boolean }> = [];
   private returnRows = false;
   private singleRow = false;
   /** The lower bound of a `date` range, so a scenario can fail one month's reads. */
   private dateFrom: string | null = null;
+  // .range() pages for real: the product's `while (true)` + `.range()` loops
+  // stop on a short page, and a page that ignored its window would never be one.
+  private window: [number, number] | null = null;
+  private counted = false;
+  private headOnly = false;
 
   constructor(private readonly table: string) {}
 
-  select(): this {
+  select(_columns?: string, options?: { count?: string; head?: boolean }): this {
     if (this.op !== 'select') this.returnRows = true;
+    if (options?.count) this.counted = true;
+    if (options?.head) this.headOnly = true;
     return this;
   }
 
@@ -108,24 +121,54 @@ class FakeQuery implements PromiseLike<Result> {
     return this;
   }
 
-  // Dates are stored as `YYYY-MM-DD` text, which compares correctly as a string.
+  // Comparisons as PostgREST reads them: a NULL never satisfies one. Dates are
+  // stored as `YYYY-MM-DD` text, which compares correctly as a string.
+  gt(column: string, value: unknown): this {
+    this.filters.push(row => row[column] != null && compareForFilter(row[column], value) > 0);
+    return this;
+  }
+
   gte(column: string, value: unknown): this {
+    // Batch 2: the lower bound of a `date` range, so a scenario can fail one month's reads.
     if (column === 'date') this.dateFrom = String(value);
-    this.filters.push(row => String(row[column] ?? '') >= String(value));
+    this.filters.push(row => row[column] != null && compareForFilter(row[column], value) >= 0);
+    return this;
+  }
+
+
+  lt(column: string, value: unknown): this {
+    this.filters.push(row => row[column] != null && compareForFilter(row[column], value) < 0);
     return this;
   }
 
   lte(column: string, value: unknown): this {
-    this.filters.push(row => String(row[column] ?? '') <= String(value));
+    this.filters.push(row => row[column] != null && compareForFilter(row[column], value) <= 0);
+    return this;
+  }
+
+  is(column: string, value: unknown): this {
+    this.filters.push(row => (value === null ? row[column] == null : row[column] === value));
+    return this;
+  }
+
+  not(column: string, operator: string, value: unknown): this {
+    if (operator === 'is') this.filters.push(row => (value === null ? row[column] != null : row[column] !== value));
+    else if (operator === 'eq') this.filters.push(row => row[column] !== value);
+    return this;
+  }
+
+  /** Accepts every row: the one caller (AssignmentPreview's note query) only narrows a small table. */
+  or(): this {
     return this;
   }
 
   order(column: string, options?: { ascending?: boolean }): this {
-    this.orderBy = { column, ascending: options?.ascending ?? true };
+    this.orderBy.push({ column, ascending: options?.ascending ?? true });
     return this;
   }
 
-  range(): this {
+  range(from: number, to: number): this {
+    this.window = [from, to];
     return this;
   }
 
@@ -164,6 +207,7 @@ class FakeQuery implements PromiseLike<Result> {
   }
 
   private run(): Result {
+    if (this.op !== 'select') recordBatch3Write(this.table, this.op);
     const failure = scenarioFailure(this.table, this.dateFrom);
     if (failure) return { data: null, error: failure };
 
@@ -171,11 +215,18 @@ class FakeQuery implements PromiseLike<Result> {
     switch (this.op) {
       case 'select': {
         const selected = rows.filter(row => this.matches(row));
-        if (this.orderBy) {
-          const { column, ascending } = this.orderBy;
-          selected.sort((a, b) => String(a[column] ?? '').localeCompare(String(b[column] ?? ''), 'de') * (ascending ? 1 : -1));
+        if (this.orderBy.length > 0) {
+          selected.sort((a, b) => {
+            for (const { column, ascending } of this.orderBy) {
+              const order = compareValues(a[column], b[column]);
+              if (order !== 0) return ascending ? order : -order;
+            }
+            return 0;
+          });
         }
-        return this.shape(selected);
+        const count = selected.length;
+        const page = this.window ? selected.slice(this.window[0], this.window[1] + 1) : selected;
+        return { ...this.shape(page), count: this.counted ? count : null };
       }
       case 'insert': {
         const now = new Date().toISOString();
@@ -216,15 +267,32 @@ class FakeQuery implements PromiseLike<Result> {
 
   private shape(rows: Row[]): Result {
     if (this.op !== 'select' && !this.returnRows) return { data: null, error: null };
+    if (this.headOnly) return { data: null, error: null };
     if (this.singleRow) return { data: rows[0] ?? null, error: null };
     return { data: rows.map(row => ({ ...row })), error: null };
   }
+}
+
+/** For a filter: numbers as numbers, anything else as plain text (a `YYYY-MM-DD` date compares correctly). */
+function compareForFilter(a: unknown, b: unknown): number {
+  if (typeof a === 'number' && typeof b === 'number') return a - b;
+  const [x, y] = [String(a), String(b)];
+  return x < y ? -1 : x > y ? 1 : 0;
+}
+
+/** For an order: numbers as numbers (month 12 after month 8), everything else as German text; NULL last. */
+function compareValues(a: unknown, b: unknown): number {
+  if (a == null || b == null) return a == null ? (b == null ? 0 : 1) : -1;
+  if (typeof a === 'number' && typeof b === 'number') return a - b;
+  return String(a).localeCompare(String(b), 'de');
 }
 
 const unavailable = async () => ({ data: null, error: { message: 'Not available in the screen harness', code: 'HARNESS' } });
 
 /** An RPC a batch's fixtures answer, counted and delayed like a query; any other is unavailable. */
 function rpc(name: string, args?: Record<string, unknown>): PromiseLike<Result> {
+  // Batch 3 records every call on its screens, so its flows can prove they sent none.
+  recordBatch3Rpc(name);
   const answer = batch2Rpc(scenario, store, name, args);
   if (!answer) return unavailable();
   window.__harness.pending += 1;
