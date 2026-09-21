@@ -105,6 +105,17 @@ export function parseLegalPages(data: unknown): LegalPages | null {
   return { impressum, privacy: readPrivacy(data.privacy) };
 }
 
+/**
+ * The Impressum a seller document (or the settings form holding one) would
+ * publish: the fourteen fields, trimmed, '' where absent — the projection
+ * `get_legal_pages()` applies, so the editor's preview shows the page.
+ */
+export function impressumFromSeller(seller: Readonly<Partial<Record<string, string>>>): Impressum {
+  const impressum = {} as Record<ImpressumField, string>;
+  for (const field of IMPRESSUM_FIELDS) impressum[field] = (seller[field] ?? '').trim();
+  return impressum;
+}
+
 // ─── What the Impressum page renders ─────────────────────────────────────────
 
 export interface ImpressumLine {

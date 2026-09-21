@@ -9,6 +9,7 @@ import { describe, expect, it } from 'vitest';
 import {
   IMPRESSUM_FIELDS,
   NO_PRIVACY_TEXT,
+  impressumFromSeller,
   impressumIsPublished,
   impressumSections,
   legalPageFor,
@@ -73,6 +74,20 @@ describe('what is public', () => {
   it('the seller form knows the same nine optional fields the database accepts', () => {
     expect([...SELLER_IMPRESSUM_FIELDS].sort())
       .toEqual(constantList('app_private.platform_settings_problem_legal', 'c_impressum_fields'));
+  });
+});
+
+describe('impressumFromSeller: what the editor previews', () => {
+  it('takes the fourteen public fields, trimmed, and leaves the rest of the seller behind', () => {
+    const impressum = impressumFromSeller({
+      ...FILLED, legal_form: ' GmbH ', name: 'Rechnungsname', iban: 'DE02', tax_number: '123', bank_name: 'Bank',
+    });
+    expect(impressum).toEqual(FILLED);
+    expect(Object.keys(impressum)).toEqual([...IMPRESSUM_FIELDS]);
+  });
+
+  it('reads a field the seller does not hold as unfilled', () => {
+    expect(impressumFromSeller({ name: 'El-Professor' })).toEqual(EMPTY);
   });
 });
 
