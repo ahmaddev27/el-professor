@@ -608,6 +608,125 @@ BEGIN
   RAISE NOTICE '── state gate assertions passed ──';
 END $$;
 
+-- ─── a platform context issues, voids and signs nothing ─────────────────────
+--
+-- Owner decision of 18.09.2026, moved into the database by 20260921110010
+-- (plan 3.13a): a Gehaltsquittung attests to a physical handover of cash that
+-- no platform agent witnessed, so a platform account inside a context — support
+-- or view — issues, voids and signs none, whatever the screens do. Before it
+-- the refusal was the browser's alone (receiptScope()): inside a support
+-- session all three RPCs succeeded, because get_active_company_id() answers the
+-- context and current_role_permits('salaries', true) is true there.
+--
+-- One transaction, rolled back: the context, the sign-in session and the
+-- auth.sessions stub go with it, and nothing this block tries may survive.
+
+BEGIN;
+
+CREATE TABLE IF NOT EXISTS auth.sessions (
+  id         uuid PRIMARY KEY,
+  user_id    uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  created_at timestamptz DEFAULT now(),
+  not_after  timestamptz
+);
+
+INSERT INTO auth.sessions (id, user_id)
+VALUES ('5e550000-0000-4000-8000-000000000001', '50000000-0000-4000-8000-000000000001')
+ON CONFLICT (id) DO NOTHING;
+
+DO $$
+DECLARE
+  co_a      uuid := 'c0000000-0000-4000-8000-00000000000a';
+  admin_a   uuid := 'a0000000-0000-4000-8000-000000000001';
+  super_u   uuid := '50000000-0000-4000-8000-000000000001';   -- seed.sql's platform owner
+  s_super   uuid := '5e550000-0000-4000-8000-000000000001';
+  s2        uuid := '5a1a0000-0000-4000-8000-000000000002';
+  receipt   uuid;
+  v_open    jsonb;
+  n_rcpt    bigint;
+  n_moves   bigint;
+  n_pay     bigint;
+  n_numbers bigint;
+  n         bigint;
+  v_path    text;
+BEGIN
+  SELECT id, signed_copy_path INTO receipt, v_path
+    FROM salary_cash_receipts
+   WHERE company_id = co_a AND status = 'confirmed'
+   ORDER BY receipt_number
+   LIMIT 1;
+  IF receipt IS NULL THEN
+    RAISE EXCEPTION 'FAIL: the platform-context block needs a confirmed company A receipt to aim at';
+  END IF;
+
+  SELECT count(*) INTO n_rcpt FROM salary_cash_receipts;
+  SELECT count(*) INTO n_moves FROM cash_movements;
+  SELECT count(*) INTO n_pay FROM salary_payments;
+  SELECT coalesce(sum(dc.n), 0) INTO n_numbers FROM document_counters dc;
+
+  -- The owner's sign-in session, which a context is answered to. Set once:
+  -- _sc_as leaves it in place, and it means nothing to a company member.
+  PERFORM set_config('request.jwt.claim.session_id', s_super::text, true);
+
+  PERFORM _sc_as(super_u);
+  v_open := public.platform_context_open(co_a, 'support', 'SC Ticket 3.13a');
+  RESET ROLE;
+  PERFORM _sc_eq('the platform owner opens a support session on company A', v_open ->> 'success', 'true'::text);
+
+  -- The control that makes the refusals below mean something: inside the
+  -- session the role gate these RPCs used to stop at is open.
+  PERFORM _sc_eq('inside the support session the salaries role gate is open',
+    _sc_try(super_u, 'SELECT 1 WHERE public.current_role_permits(''salaries'', true)'), 'ok'::text);
+
+  PERFORM _sc_eq('a support session cannot confirm a cash salary payment',
+    _sc_try(super_u, _sc_confirm_sql(gen_random_uuid(), s2, 10)), 'platform_session_not_allowed'::text);
+  PERFORM _sc_eq('a support session cannot void a receipt',
+    _sc_try(super_u, format('SELECT void_salary_cash_receipt(%L, %L)', receipt, 'Support')), 'platform_session_not_allowed'::text);
+  PERFORM _sc_eq('a support session cannot attach a signed copy',
+    _sc_try(super_u, format('SELECT attach_salary_cash_receipt_signed_copy(%L, %L)',
+                            receipt, co_a::text || '/2026/support.pdf')), 'platform_session_not_allowed'::text);
+  -- Refused before its arguments are read: a request that is broken in every
+  -- other way gets the same answer, not invalid_request or invalid_amount.
+  PERFORM _sc_eq('…refused before anything else is looked at',
+    _sc_try(super_u, _sc_confirm_sql(NULL, NULL, 0)), 'platform_session_not_allowed'::text);
+
+  -- A view context: refused with the same reason, where its role gate used to
+  -- answer not_authorized. One rule, one reason.
+  PERFORM _sc_as(super_u);
+  v_open := public.platform_context_open(co_a, 'view');
+  RESET ROLE;
+  PERFORM _sc_eq('the owner steps down to a view context on the same company', v_open ->> 'success', 'true'::text);
+  PERFORM _sc_eq('a view context cannot confirm either, and is told why',
+    _sc_try(super_u, _sc_confirm_sql(gen_random_uuid(), s2, 10)), 'platform_session_not_allowed'::text);
+  PERFORM _sc_eq('…nor void',
+    _sc_try(super_u, format('SELECT void_salary_cash_receipt(%L, %L)', receipt, 'Support')), 'platform_session_not_allowed'::text);
+  PERFORM _sc_eq('…nor attach',
+    _sc_try(super_u, format('SELECT attach_salary_cash_receipt_signed_copy(%L, %L)',
+                            receipt, co_a::text || '/2026/view.pdf')), 'platform_session_not_allowed'::text);
+
+  -- Nothing was booked, numbered or voided.
+  SELECT count(*) INTO n FROM salary_cash_receipts;
+  PERFORM _sc_eq('no receipt was written from a platform context', n, n_rcpt);
+  SELECT count(*) INTO n FROM cash_movements;
+  PERFORM _sc_eq('no cash moved', n, n_moves);
+  SELECT count(*) INTO n FROM salary_payments;
+  PERFORM _sc_eq('no salary payment was written or removed', n, n_pay);
+  SELECT coalesce(sum(dc.n), 0) INTO n FROM document_counters dc;
+  PERFORM _sc_eq('no receipt number was drawn', n, n_numbers);
+  SELECT count(*) INTO n FROM salary_cash_receipts
+   WHERE id = receipt AND status = 'confirmed' AND signed_copy_path IS NOT DISTINCT FROM v_path;
+  PERFORM _sc_eq('the receipt aimed at is still confirmed, with the signed copy it had', n, 1::bigint);
+
+  -- A company's own administrator, in the same transaction, is not touched by
+  -- the new block: its refusal is still the one about the amount.
+  PERFORM _sc_eq('a company administrator still reaches the argument checks',
+    _sc_try(admin_a, _sc_confirm_sql(gen_random_uuid(), s2, 0)), 'invalid_amount'::text);
+
+  RAISE NOTICE '── platform context assertions passed ──';
+END $$;
+
+ROLLBACK;
+
 -- ─── two sessions, one balance ──────────────────────────────────────────────
 -- Session 1 confirms the whole of S8 and holds its transaction open. Session 2
 -- asks for the same 500 and must wait; once session 1 commits, session 2 finds
