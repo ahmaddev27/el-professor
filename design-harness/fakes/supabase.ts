@@ -49,7 +49,7 @@ let nextId = 1;
 /** The failure a scenario asks for, on every statement against the screen's own table. */
 function scenarioFailure(table: string): QueryError | null {
   if (table !== PRIMARY_TABLE) return null;
-  if (scenario.data === 'error') return { message: 'TypeError: Failed to fetch', code: '' };
+  if (scenario.data === 'error' || scenario.data === 'drivers-error') return { message: 'TypeError: Failed to fetch', code: '' };
   if (scenario.data === 'missing') {
     return { message: `relation "public.${table}" does not exist`, code: 'PGRST204' };
   }
