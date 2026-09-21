@@ -18,6 +18,7 @@ The redesign of El-Professor, request 4 of the requirements plan. Phase 2 define
 - **On staging, once merged:** `https://app.elprofessor.eu/design-preview`, behind the staging login, without signing in to the app. Invented sample data; nothing is saved. Production builds do not contain it.
 - **The audit of today's screens:** [`audit/`](audit/README.md), 22 findings in priority order with 80 screenshots.
 - **Gehaltsquittung (plan 4.3a):** [`gehaltsquittung/`](gehaltsquittung/), the first real screens on the design system: the receipt list on Dokumente and each step of the dialog, rendered with invented data in a German Chrome, light, dark, English and at 390 px (`390-*` shows the whole scrolled dialog).
+- **Phase 5, the rollout:** [`phase5/batch1/`](phase5/batch1/) holds Fahrzeuge and Fixkosten before and after their move onto the design system, 34 shots each, named `{width}-{theme}-{screen}[-{state}].webp`. Both sets come from `design-harness/` — the production screens inside the production frame, on invented data — so they compare like for like; the 375 px shots are taken as a touch phone.
 - **Code:** tokens in `src/index.css` and `tailwind.config.js`, components and `AppShell` in `src/components/ui`, the prototype in `src/design-preview`. CLAUDE.md, "Design system and the design preview", has the rules.
 
 ## Open questions for the owner
