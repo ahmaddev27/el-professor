@@ -1,62 +1,102 @@
-import React, { useState, useEffect } from 'react';
-import { Plus, CreditCard as Edit2, Trash2, Car as CarIcon, Users, Download, ShieldCheck, ShieldAlert, ShieldX, Shield } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Car as CarIcon, Download, Pencil, Plus, ShieldAlert, ShieldCheck, ShieldQuestion, ShieldX, Trash2, type LucideIcon } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useToast } from '../contexts/ToastContext';
 import { usePlan } from '../contexts/PlanContext';
 import CarModal from './CarModal';
-import ConfirmationModal from './ConfirmationModal';
-import type { CarWithDrivers, TuevStatus } from '../types/car';
+import type { CarWithDrivers, TuevInfo, TuevStatus } from '../types/car';
 import { getTuevStatus } from '../types/car';
 import { exportTableToExcel } from '../utils/excelExport';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { useTranslation } from '../contexts/LanguageContext';
 import type { TranslationKey } from '../i18n';
+import {
+  Alert,
+  Badge,
+  Button,
+  Card,
+  cn,
+  ConfirmDialog,
+  DataTable,
+  EmptyState,
+  PageHeader,
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+  Tooltip,
+  type DataTableColumn,
+} from './ui';
 
 type TuevFilter = 'all' | TuevStatus;
 
 // `label` and `shortLabel` hold TranslationKeys: this map is module-level and
-// t() is a hook value. Every consumer resolves them.
+// t() is a hook value. Every consumer resolves them. The Excel export reads
+// `label` too, which is why the words live here and the look lives apart, in
+// TUEV_PRESENTATION below: phase 5 changed only the look.
 const TUEV_CONFIG: Record<TuevStatus, {
   label: TranslationKey;
   shortLabel: TranslationKey;
-  bg: string;
-  border: string;
-  color: string;
-  icon: React.ReactNode;
 }> = {
   gueltig: {
     label: 'fleet.tuevStatus.valid',
     shortLabel: 'fleet.tuevStatus.valid',
-    bg: 'var(--success-subtle)',
-    border: 'rgba(5,150,105,0.3)',
-    color: 'var(--success)',
-    icon: <ShieldCheck className="w-3.5 h-3.5" />,
   },
   bald_ablaufend: {
     label: 'fleet.tuevStatus.expiringSoon',
     shortLabel: 'fleet.tuevStatus.expiringSoonShort',
-    bg: 'var(--warning-subtle)',
-    border: 'rgba(217,119,6,0.3)',
-    color: 'var(--warning)',
-    icon: <ShieldAlert className="w-3.5 h-3.5" />,
   },
   abgelaufen: {
     label: 'fleet.tuevStatus.expired',
     shortLabel: 'fleet.tuevStatus.expired',
-    bg: 'var(--danger-subtle)',
-    border: 'rgba(220,38,38,0.3)',
-    color: 'var(--danger)',
-    icon: <ShieldX className="w-3.5 h-3.5" />,
   },
   unbekannt: {
     label: 'fleet.tuevStatus.unknown',
     shortLabel: 'common.unknown',
-    bg: 'var(--bg-subtle)',
-    border: 'var(--border)',
-    color: 'var(--text-tertiary)',
-    icon: <Shield className="w-3.5 h-3.5" />,
   },
 };
+
+type Tone = 'positive' | 'caution' | 'critical' | 'neutral';
+
+const TUEV_PRESENTATION: Record<TuevStatus, { tone: Tone; icon: LucideIcon }> = {
+  gueltig: { tone: 'positive', icon: ShieldCheck },
+  bald_ablaufend: { tone: 'caution', icon: ShieldAlert },
+  abgelaufen: { tone: 'critical', icon: ShieldX },
+  unbekannt: { tone: 'neutral', icon: ShieldQuestion },
+};
+
+/** A tab's count badge takes its status's colour, and only while it counts something. */
+const FILTER_TONE: Record<TuevFilter, Tone> = {
+  all: 'neutral',
+  abgelaufen: 'critical',
+  bald_ablaufend: 'caution',
+  gueltig: 'positive',
+  unbekannt: 'neutral',
+};
+
+const LIMIT_ALERT_ID = 'fleet-car-limit';
+
+/** The status in words with an icon, and the day count when it matters. */
+function TuevStatusCell({ info }: { info: TuevInfo }) {
+  const { t, tPlural } = useTranslation();
+  const { tone, icon: Icon } = TUEV_PRESENTATION[info.status];
+  const days = info.daysLeft;
+  return (
+    <span className="flex flex-wrap items-center gap-x-2 gap-y-1 py-1">
+      <Badge tone={tone}>
+        <Icon aria-hidden />
+        {t(TUEV_CONFIG[info.status].label)}
+      </Badge>
+      {days !== null && info.status !== 'gueltig' ? (
+        <span className="whitespace-nowrap text-[13px] tabular-nums text-fg-subtle">
+          {days < 0
+            ? tPlural({ one: 'fleet.tuevCountdown.overdue.one', other: 'fleet.tuevCountdown.overdue.other' }, Math.abs(days))
+            : tPlural({ one: 'fleet.tuevCountdown.left.one', other: 'fleet.tuevCountdown.left.other' }, days)}
+        </span>
+      ) : null}
+    </span>
+  );
+}
 
 export default function CarsManagement() {
   const [cars, setCars] = useState<CarWithDrivers[]>([]);
@@ -206,16 +246,91 @@ export default function CarsManagement() {
     });
   };
 
+  // ── Presentation (phase 5) ────────────────────────────────────────────────
+  // Everything above is the screen's logic and is unchanged; everything below
+  // only draws it.
+
+  const columns: DataTableColumn<CarWithDrivers>[] = [
+    {
+      id: 'kennzeichen',
+      header: t('werkstatt.plate'),
+      value: car => car.kennzeichen,
+      sortable: true,
+      cell: car => <span className="whitespace-nowrap font-semibold tabular-nums">{car.kennzeichen}</span>,
+      // At 375 px the plate, the status and both row actions share 335 px; with
+      // the table's standard padding the delete button fell off the edge (the
+      // approved prototype has the same clipping). Tighter only on a phone.
+      className: 'pl-3 pr-1 sm:px-4',
+    },
+    {
+      id: 'drivers',
+      header: t('fleet.assignedDrivers'),
+      value: car => car.drivers.map(driver => driver.name).join(', '),
+      cell: car =>
+        car.drivers.length > 0 ? (
+          car.drivers.map(driver => driver.name).join(', ')
+        ) : (
+          <span className="text-fg-subtle">{t('fleet.noDriversAssigned')}</span>
+        ),
+      hideBelow: 'md',
+      className: 'min-w-[12rem]',
+    },
+    {
+      id: 'tuevValidUntil',
+      header: t('fleet.tuevValidUntil'),
+      kind: 'date',
+      value: car => car.tuev_gueltig_bis,
+      sortable: true,
+      hideBelow: 'sm',
+    },
+    {
+      id: 'tuevStatus',
+      header: t('fleet.tuevStatusColumn'),
+      value: car => getTuevStatus(car.tuev_gueltig_bis).daysLeft,
+      sortable: true,
+      cell: car => <TuevStatusCell info={getTuevStatus(car.tuev_gueltig_bis)} />,
+      className: 'pl-2 pr-0 sm:px-4',
+    },
+    { id: 'lastHu', header: t('fleet.lastHu'), kind: 'date', value: car => car.letzte_hu, sortable: true, hideBelow: 'lg' },
+  ];
+
+  const rowActions = (car: CarWithDrivers) => (
+    <>
+      <Tooltip content={t('common.edit')}>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          aria-label={t('fleet.editCarAria', { plate: car.kennzeichen })}
+          onClick={() => handleEditCar(car)}
+        >
+          <Pencil aria-hidden />
+        </Button>
+      </Tooltip>
+      <Tooltip content={t('common.delete')}>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          className="hover:text-critical"
+          aria-label={t('fleet.deleteCarAria', { plate: car.kennzeichen })}
+          onClick={() => handleDeleteCar(car)}
+        >
+          <Trash2 aria-hidden />
+        </Button>
+      </Tooltip>
+    </>
+  );
+
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <div style={{ color: 'var(--text-tertiary)' }}>{t('common.loading')}</div>
+      <div className="font-ui">
+        <PageHeader title={t('nav.cars')} description={t('fleet.carsSubtitle')} />
+        <DataTable caption={t('nav.cars')} columns={columns} rows={[]} getRowId={car => car.id} loading />
       </div>
     );
   }
 
-  const filterButtons: { key: TuevFilter; label: string; count?: number }[] = [
-    { key: 'all', label: `${t('common.all')} (${cars.length})` },
+  const filterTabs: { key: TuevFilter; label: string; count: number }[] = [
+    { key: 'all',            label: t('common.all'),                          count: cars.length },
     { key: 'abgelaufen',     label: t(TUEV_CONFIG.abgelaufen.shortLabel),     count: counts.abgelaufen },
     { key: 'bald_ablaufend', label: t(TUEV_CONFIG.bald_ablaufend.shortLabel), count: counts.bald_ablaufend },
     { key: 'gueltig',        label: t(TUEV_CONFIG.gueltig.shortLabel),        count: counts.gueltig },
@@ -223,279 +338,130 @@ export default function CarsManagement() {
   ];
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex justify-between items-start flex-wrap gap-3">
-        <div>
-          <h2 style={{ color: 'var(--text-primary)' }} className="text-2xl font-bold">{t('nav.cars')}</h2>
-          <p style={{ color: 'var(--text-secondary)' }} className="mt-1">
+    <div className="font-ui">
+      <PageHeader
+        title={t('nav.cars')}
+        description={
+          <>
             {t('fleet.carsSubtitle')}
-            <span className="ml-2 text-xs font-medium" style={{ color: carLimitReached ? 'var(--danger)' : 'var(--text-tertiary)' }}>
-              {t('fleet.activeCarsCount', { active: activeCars.length, limit: carLimit })}
+            <span aria-hidden className="mx-1.5 text-fg-subtle">·</span>
+            <span className={cn('whitespace-nowrap', carLimitReached && 'font-medium text-critical')}>
+              {t('fleet.activeCarsOfLimit', { active: activeCars.length, limit: carLimit })}
             </span>
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={handleExport}
-            className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-opacity hover:opacity-80"
-            style={{ background: 'var(--success-solid)', color: 'white' }}
-            title={t('common.exportExcelShort')}
-          >
-            <Download className="w-4 h-4" />
-            Excel
-          </button>
-          <button
-            onClick={handleAddCar}
-            disabled={carLimitReached}
-            style={{
-              background: carLimitReached ? 'var(--bg-muted)' : 'var(--accent)',
-              color: carLimitReached ? 'var(--text-tertiary)' : 'var(--text-inverse)',
-              borderRadius: '0.5rem', padding: '0.5rem 1rem', border: 'none',
-              cursor: carLimitReached ? 'not-allowed' : 'pointer',
-            }}
-            className="flex items-center gap-2"
-            title={carLimitReached ? t('fleet.carLimitReachedTitle', { limit: carLimit }) : t('fleet.addCarTooltip')}
-          >
-            <Plus className="w-5 h-5" />
-            {t('fleet.newCar')}
-          </button>
-        </div>
-      </div>
-
-      {/* Limit banner */}
-      {carLimitReached && (
-        <div className="flex items-center gap-3 px-4 py-3 rounded-xl" style={{ background: 'var(--danger-subtle)', border: '1px solid rgba(220,38,38,0.25)' }}>
-          <CarIcon className="w-4 h-4 flex-shrink-0" style={{ color: 'var(--danger)' }} />
-          <p className="text-sm" style={{ color: 'var(--danger)' }}>
-            <strong>{t('fleet.carLimitReachedHeading')}</strong> {t('fleet.carLimitReachedBody', { limit: carLimit })}
-          </p>
-        </div>
-      )}
-
-      {/* TÜV summary banner — only shown when there are cars with issues */}
-      {cars.length > 0 && (counts.abgelaufen > 0 || counts.bald_ablaufend > 0) && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          {counts.abgelaufen > 0 && (
-            <div
-              className="flex items-center gap-3 p-4 rounded-xl"
-              style={{ background: 'var(--danger-subtle)', border: '1px solid rgba(220,38,38,0.25)' }}
-            >
-              <ShieldX className="w-5 h-5 flex-shrink-0" style={{ color: 'var(--danger)' }} />
-              <div>
-                <p className="text-sm font-semibold" style={{ color: 'var(--danger)' }}>
-                  {tPlural({ one: 'fleet.tuevExpiredBanner.one', other: 'fleet.tuevExpiredBanner.other' }, counts.abgelaufen)}
-                </p>
-                <p className="text-xs mt-0.5" style={{ color: 'var(--text-secondary)' }}>{t('fleet.tuevExpiredHint')}</p>
-              </div>
-            </div>
-          )}
-          {counts.bald_ablaufend > 0 && (
-            <div
-              className="flex items-center gap-3 p-4 rounded-xl"
-              style={{ background: 'var(--warning-subtle)', border: '1px solid rgba(217,119,6,0.25)' }}
-            >
-              <ShieldAlert className="w-5 h-5 flex-shrink-0" style={{ color: 'var(--warning)' }} />
-              <div>
-                <p className="text-sm font-semibold" style={{ color: 'var(--warning)' }}>
-                  {tPlural({ one: 'fleet.tuevExpiringBanner.one', other: 'fleet.tuevExpiringBanner.other' }, counts.bald_ablaufend)}
-                </p>
-                <p className="text-xs mt-0.5" style={{ color: 'var(--text-secondary)' }}>{t('fleet.tuevExpiringHint')}</p>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* TÜV filter buttons */}
-      {cars.length > 0 && (
-        <div className="flex flex-wrap gap-2">
-          {filterButtons.map(btn => {
-            const isActive = tuevFilter === btn.key;
-            const cfg = btn.key !== 'all' ? TUEV_CONFIG[btn.key as TuevStatus] : null;
-            return (
-              <button
-                key={btn.key}
-                onClick={() => setTuevFilter(btn.key)}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all"
-                style={{
-                  background: isActive
-                    ? (cfg?.bg ?? 'var(--bg-elevated)')
-                    : 'var(--bg-surface)',
-                  color: isActive
-                    ? (cfg?.color ?? 'var(--text-primary)')
-                    : 'var(--text-secondary)',
-                  border: isActive
-                    ? `1px solid ${cfg?.border ?? 'var(--border)'}`
-                    : '1px solid var(--border)',
-                  fontWeight: isActive ? 600 : 400,
-                }}
-              >
-                {cfg?.icon}
-                {btn.key !== 'all' ? `${btn.label} (${btn.count})` : btn.label}
-              </button>
-            );
-          })}
-        </div>
-      )}
-
-      {/* Cars grid */}
-      {filteredCars.length === 0 ? (
-        <div
-          style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', borderRadius: '0.5rem', boxShadow: 'var(--shadow-sm)' }}
-          className="p-8 text-center"
-        >
-          <CarIcon style={{ color: 'var(--text-tertiary)' }} className="w-16 h-16 mx-auto mb-4" />
-          <h3 style={{ color: 'var(--text-primary)' }} className="text-lg font-medium mb-2">
-            {cars.length === 0 ? t('fleet.noCars') : t('fleet.noCarsForFilter')}
-          </h3>
-          <p style={{ color: 'var(--text-secondary)' }} className="mb-4">
-            {cars.length === 0 ? t('fleet.noCarsHint') : t('fleet.noCarsFilterHint')}
-          </p>
-          {cars.length === 0 && (
-            <button
+          </>
+        }
+        actions={
+          <>
+            <Button variant="secondary" onClick={handleExport}>
+              <Download aria-hidden />
+              {t('common.exportExcelShort')}
+            </Button>
+            <Button
               onClick={handleAddCar}
-              style={{ background: 'var(--accent)', color: 'var(--text-inverse)', borderRadius: '0.5rem', padding: '0.5rem 1rem', border: 'none' }}
-              onMouseEnter={e => (e.currentTarget.style.background = 'var(--accent-hover)')}
-              onMouseLeave={e => (e.currentTarget.style.background = 'var(--accent)')}
-              className="inline-flex items-center gap-2"
+              disabled={carLimitReached}
+              aria-describedby={carLimitReached ? LIMIT_ALERT_ID : undefined}
             >
-              <Plus className="w-5 h-5" />
+              <Plus aria-hidden />
               {t('fleet.addCar')}
-            </button>
-          )}
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {filteredCars.map((car) => {
-            const { status, daysLeft } = getTuevStatus(car.tuev_gueltig_bis);
-            const tuevCfg = TUEV_CONFIG[status];
+            </Button>
+          </>
+        }
+      />
 
-            return (
-              <div
-                key={car.id}
-                style={{
-                  background: 'var(--bg-surface)',
-                  border: '1px solid var(--border)',
-                  borderRadius: '0.75rem',
-                  boxShadow: 'var(--shadow-sm)',
-                }}
-                onMouseEnter={e => (e.currentTarget.style.boxShadow = 'var(--shadow-md)')}
-                onMouseLeave={e => (e.currentTarget.style.boxShadow = 'var(--shadow-sm)')}
-                className="p-5 flex flex-col gap-4"
+      {/* grid-cols-1 is minmax(0, 1fr): a bare grid sizes its column to the
+          widest child's content, and the tab row alone would push the page
+          past 375 px. */}
+      <div className="grid grid-cols-1 gap-4">
+        {carLimitReached && (
+          <Alert id={LIMIT_ALERT_ID} tone="critical" icon={CarIcon} title={t('fleet.carLimitReachedHeading')}>
+            {t('fleet.carLimitReachedBody', { limit: carLimit })}
+          </Alert>
+        )}
+
+        {cars.length > 0 && (counts.abgelaufen > 0 || counts.bald_ablaufend > 0) && (
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            {counts.abgelaufen > 0 && (
+              <Alert
+                tone="critical"
+                role="status"
+                icon={ShieldX}
+                title={tPlural({ one: 'fleet.tuevExpiredBanner.one', other: 'fleet.tuevExpiredBanner.other' }, counts.abgelaufen)}
               >
-                {/* Card header */}
-                <div className="flex items-start justify-between">
-                  <div className="flex items-center gap-3">
-                    <div style={{ background: 'var(--accent-subtle)', borderRadius: '0.5rem', padding: '0.6rem' }}>
-                      <CarIcon style={{ color: 'var(--accent)' }} className="w-5 h-5" />
-                    </div>
-                    <div>
-                      <h3 style={{ color: 'var(--text-primary)' }} className="text-lg font-bold tracking-wide">{car.kennzeichen}</h3>
-                      <p style={{ color: 'var(--text-tertiary)' }} className="text-xs">{t('werkstatt.plate')}</p>
-                    </div>
-                  </div>
-                  <div className="flex gap-1">
-                    <button
-                      onClick={() => handleEditCar(car)}
-                      style={{ color: 'var(--accent)', borderRadius: '0.5rem', padding: '0.4rem' }}
-                      onMouseEnter={e => (e.currentTarget.style.background = 'var(--accent-subtle)')}
-                      onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
-                      title={t('common.edit')}
-                    >
-                      <Edit2 className="w-4 h-4" />
-                    </button>
-                    <button
-                      onClick={() => handleDeleteCar(car)}
-                      style={{ color: 'var(--danger)', borderRadius: '0.5rem', padding: '0.4rem' }}
-                      onMouseEnter={e => (e.currentTarget.style.background = 'var(--danger-subtle)')}
-                      onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
-                      title={t('common.delete')}
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
-                </div>
+                {t('fleet.tuevExpiredHint')}
+              </Alert>
+            )}
+            {counts.bald_ablaufend > 0 && (
+              <Alert
+                tone="caution"
+                icon={ShieldAlert}
+                title={tPlural({ one: 'fleet.tuevExpiringBanner.one', other: 'fleet.tuevExpiringBanner.other' }, counts.bald_ablaufend)}
+              >
+                {t('fleet.tuevExpiringHint')}
+              </Alert>
+            )}
+          </div>
+        )}
 
-                {/* TÜV badge */}
-                <div
-                  className="rounded-xl px-3 py-2.5 flex items-center justify-between gap-2"
-                  style={{ background: tuevCfg.bg, border: `1px solid ${tuevCfg.border}` }}
-                >
-                  <div className="flex items-center gap-2">
-                    <span style={{ color: tuevCfg.color }}>{tuevCfg.icon}</span>
-                    <div>
-                      <p className="text-xs font-semibold leading-tight" style={{ color: tuevCfg.color }}>{t('fleet.tuevBadge', { status: t(tuevCfg.label) })}</p>
-                      {car.tuev_gueltig_bis && (
-                        <p className="text-xs mt-0.5" style={{ color: 'var(--text-secondary)' }}>
-                          {new Date(car.tuev_gueltig_bis).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' })}
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                  {daysLeft !== null && (
-                    <span
-                      className="text-xs font-bold px-2 py-0.5 rounded-full whitespace-nowrap"
-                      style={{ background: tuevCfg.color + '18', color: tuevCfg.color }}
-                    >
-                      {t('fleet.daysShort', { days: daysLeft >= 0 ? daysLeft : `−${Math.abs(daysLeft)}` })}
-                    </span>
-                  )}
-                </div>
-
-                {/* Letzte HU (if present) */}
-                {car.letzte_hu && (
-                  <div className="flex items-center gap-2 text-xs" style={{ color: 'var(--text-tertiary)' }}>
-                    <ShieldCheck className="w-3.5 h-3.5 flex-shrink-0" />
-                    <span>{t('fleet.lastHuLabel', { date: new Date(car.letzte_hu).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' }) })}</span>
-                  </div>
-                )}
-
-                {/* Drivers */}
-                <div style={{ borderTop: '1px solid var(--border)' }} className="pt-3">
-                  <div className="flex items-center gap-2 mb-2">
-                    <Users style={{ color: 'var(--text-tertiary)' }} className="w-3.5 h-3.5" />
-                    <span style={{ color: 'var(--text-secondary)' }} className="text-xs font-medium">
-                      {t('fleet.driversCount', { count: car.drivers.length })}
-                    </span>
-                  </div>
-                  {car.drivers.length > 0 ? (
-                    <div className="space-y-1.5">
-                      {car.drivers.map((driver) => (
-                        <div
-                          key={driver.id}
-                          style={{ background: 'var(--bg-subtle)', borderRadius: '0.4rem', padding: '0.35rem 0.6rem', color: 'var(--text-secondary)', fontSize: '0.8125rem' }}
-                        >
-                          {driver.name}
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <p style={{ color: 'var(--text-tertiary)' }} className="text-xs italic">{t('fleet.noDriversAssigned')}</p>
-                  )}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
+        {cars.length === 0 ? (
+          <Card>
+            <EmptyState
+              icon={CarIcon}
+              title={t('fleet.noCars')}
+              description={t('fleet.noCarsHint')}
+              action={
+                <Button onClick={handleAddCar}>
+                  <Plus aria-hidden />
+                  {t('fleet.addCar')}
+                </Button>
+              }
+            />
+          </Card>
+        ) : (
+          <Tabs value={tuevFilter} onValueChange={value => setTuevFilter(value as TuevFilter)}>
+            <TabsList aria-label={t('fleet.tuevStatusColumn')}>
+              {filterTabs.map(tab => (
+                <TabsTrigger key={tab.key} value={tab.key}>
+                  {tab.label}
+                  <Badge tone={tab.count > 0 ? FILTER_TONE[tab.key] : 'neutral'} className="px-1.5 tabular-nums">
+                    {tab.count}
+                  </Badge>
+                </TabsTrigger>
+              ))}
+            </TabsList>
+            {/* Only the active panel mounts, and filteredCars is that panel's list. */}
+            {filterTabs.map(tab => (
+              <TabsContent key={tab.key} value={tab.key} className="mt-4">
+                <DataTable
+                  caption={t('fleet.carsCaption', { filter: tab.label })}
+                  columns={columns}
+                  rows={filteredCars}
+                  getRowId={car => car.id}
+                  rowActions={rowActions}
+                  rowActionsLabel={t('fleet.actions')}
+                  emptyState={
+                    <EmptyState size="sm" icon={CarIcon} title={t('fleet.noCarsForFilter')} description={t('fleet.noCarsFilterHint')} />
+                  }
+                />
+              </TabsContent>
+            ))}
+          </Tabs>
+        )}
+      </div>
 
       {isModalOpen && (
         <CarModal car={editingCar} onClose={handleModalClose} onSuccess={handleModalSuccess} />
       )}
 
-      {deleteConfirmation.isOpen && (
-        <ConfirmationModal
-          isOpen={deleteConfirmation.isOpen}
-          type="confirm"
-          title={t('fleet.deleteCarTitle')}
-          message={t('fleet.deleteCarMessage', { kennzeichen: deleteConfirmation.kennzeichen })}
-          confirmText={t('common.delete')}
-          cancelText={t('common.cancel')}
-          onConfirm={confirmDelete}
-          onClose={() => setDeleteConfirmation({ isOpen: false, carId: null, kennzeichen: '' })}
-        />
-      )}
+      <ConfirmDialog
+        open={deleteConfirmation.isOpen}
+        title={t('fleet.deleteCarTitle')}
+        description={t('fleet.deleteCarMessage', { kennzeichen: deleteConfirmation.kennzeichen })}
+        confirmLabel={t('common.delete')}
+        cancelLabel={t('common.cancel')}
+        icon={Trash2}
+        onConfirm={confirmDelete}
+        onClose={() => setDeleteConfirmation({ isOpen: false, carId: null, kennzeichen: '' })}
+      />
     </div>
   );
 }

@@ -97,6 +97,34 @@ const PAIRS: Array<{ fg: string; bg: string; min: number }> = [
     { fg: 'brand', bg, min: NON_TEXT },
     { fg: 'signal', bg, min: NON_TEXT },
   ]),
+  // Phase 5, batch 1. Alert sets its title in the tone's colour (covered above)
+  // and its body in fg-muted, with the odd emphasis in fg; the car form marks a
+  // chosen driver's row brand-soft under fg text. So both text tokens sit on
+  // every soft fill.
+  ...['brand-soft', 'positive-soft', 'caution-soft', 'critical-soft'].flatMap(bg => [
+    { fg: 'fg', bg, min: TEXT },
+    { fg: 'fg-muted', bg, min: TEXT },
+  ]),
+  // A row's delete icon turns critical on the ghost button's hover fill.
+  { fg: 'critical', bg: 'sunken', min: NON_TEXT },
+];
+
+/**
+ * Phase 5 moves screens onto the design system one at a time, inside the
+ * legacy AppLayout, whose page background is the legacy `--bg-base` and not
+ * `--canvas`. Until the shell itself moves, a converted screen's page header,
+ * tab labels, notes and focus rings sit on that legacy colour: the Phase-2
+ * foreground on a legacy background, a pair neither block above measures.
+ */
+const ON_LEGACY_PAGE: Array<{ fg: string; min: number }> = [
+  { fg: 'fg', min: TEXT },
+  { fg: 'fg-muted', min: TEXT },
+  { fg: 'fg-subtle', min: TEXT },
+  // The Fahrzeuge header's active-vehicle count, once the plan's limit is reached.
+  { fg: 'critical', min: TEXT },
+  // The active tab's underline and every control's focus ring.
+  { fg: 'brand', min: NON_TEXT },
+  { fg: 'focus', min: NON_TEXT },
 ];
 
 /**
@@ -222,6 +250,23 @@ describe.each<Theme>(['light', 'dark'])('%s legacy theme tokens', theme => {
     // the pairing would still be wrong by intent, but this assertion is what
     // documents why the codebase never pairs them. See accentLabel.contrast.test.ts.
     expect(contrast(tokens['accent-text'] as Rgb, tokens['accent'] as Rgb)).toBeLessThan(TEXT);
+  });
+});
+
+describe.each<Theme>(['light', 'dark'])('%s Phase-2 tokens on the legacy page background', theme => {
+  const tokens = parseTokens(theme);
+  const page = parseLegacyTokens(theme)['bg-base'];
+
+  it('finds the legacy page background as an opaque colour', () => {
+    expect(page).toHaveLength(3);
+  });
+
+  it.each(ON_LEGACY_PAGE)('$fg on --bg-base reaches $min:1', ({ fg, min }) => {
+    const ratio = contrast(tokens[fg], page as Rgb);
+    if (process.env.PRINT_CONTRAST) {
+      console.log(`${theme}\t${fg}\tbg-base (legacy)\t${ratio.toFixed(2)}\t${min}`);
+    }
+    expect(ratio).toBeGreaterThanOrEqual(min);
   });
 });
 
