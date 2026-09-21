@@ -478,6 +478,41 @@ BEGIN
   PERFORM _amr_ok('symmetry: an amr with no subject is not a session''s amr',
     app_private.jwt_amr() IS NULL AND app_private.session_amr_permits_platform() = false);
 
+  /*
+    storage-api's shape (20260920100000): the singular subject, no singular
+    amr, and the whole payload as the document. Both come from one token, so
+    the document's amr is that session's — but only when the document names
+    the same subject. Before that migration this read as no amr at all, and
+    every platform account held no role on every storage-api request.
+  */
+  PERFORM _amr_reset();
+  PERFORM set_config('request.jwt.claim.sub', owner::text, true);
+  PERFORM set_config('request.jwt.claims',
+    format('{"sub": "%s", "role": "authenticated", "amr": %s}', owner, _amr_password()), true);
+  PERFORM _amr_ok('storage-api: the singular subject is still the source',
+    app_private.jwt_subject_source() = 'claim');
+  PERFORM _amr_ok('storage-api: …and with no singular amr, the same subject''s document amr is read',
+    app_private.session_amr_permits_platform()
+    AND app_private.platform_staff_role_of(owner) = 'owner');
+
+  PERFORM set_config('request.jwt.claims',
+    format('{"sub": "%s", "role": "authenticated", "amr": %s}', owner, _amr_oauth()), true);
+  PERFORM _amr_ok('storage-api: a Google session in that shape is still refused',
+    app_private.session_amr_permits_platform() = false
+    AND app_private.platform_staff_role_of(owner) IS NULL);
+
+  PERFORM set_config('request.jwt.claims',
+    format('{"sub": "%s", "role": "authenticated", "amr": %s}', admin_a, _amr_password()), true);
+  PERFORM _amr_ok('storage-api: a document naming another subject lends its amr to nobody',
+    app_private.jwt_amr() IS NULL
+    AND app_private.platform_staff_role_of(owner) IS NULL);
+
+  PERFORM set_config('request.jwt.claims',
+    format('{"sub": "%s", "role": "authenticated", "amr": %s}', owner, _amr_password()), true);
+  PERFORM set_config('request.jwt.claim.amr', 'not json at all', true);
+  PERFORM _amr_ok('storage-api: a singular amr that is present but broken does not fall back',
+    app_private.jwt_amr() IS NULL AND app_private.session_amr_permits_platform() = false);
+
   PERFORM _amr_reset();
 END $$;
 

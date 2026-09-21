@@ -1,9 +1,10 @@
 /**
  * The audited read models of the platform panel (plan 3.6b, section 3.D).
  *
- * `platform_companies_list`, `platform_vehicles_list`, `platform_drivers_list`
- * and `platform_users_list` are SECURITY DEFINER functions that check a
- * capability, write exactly one audit row per call, and answer
+ * `platform_companies_list`, `platform_vehicles_list`, `platform_drivers_list`,
+ * `platform_users_list` and — since plan 3.12 — `platform_staff_list` are
+ * SECURITY DEFINER functions that check a capability, write exactly one audit
+ * row per call, and answer
  *
  *   { ok: true,  total, limit, offset, items: [...] }
  *   { ok: false, reason: 'not_authorized' }
@@ -197,6 +198,28 @@ export interface PlatformUserRow {
   last_sign_in_at: string | null;
 }
 
+/**
+ * One member of the platform team, from `platform_staff_list` (migration
+ * 20260920140000, plan 3.12). The address is the point of this list — it is
+ * the platform's own roster of who holds platform rights — and nothing else of
+ * auth.users is returned: no sign-in times, no metadata, no name.
+ */
+export interface PlatformStaffRow {
+  user_id: string;
+  email: string | null;
+  role: string;
+  status: 'active' | 'disabled';
+  disabled_at: string | null;
+  note: string | null;
+  created_at: string | null;
+  /** Who added the member through platform_staff_add; null for a row written outside a session. */
+  created_by: string | null;
+  /** That account's address; null when nobody is recorded or the account is gone. */
+  created_by_email: string | null;
+  /** The profile is still `pending_invite`, the one state an invitation can be sent again in. */
+  invitation_pending: boolean;
+}
+
 /** Only what a company picker and a directory row need; no money figure. */
 export interface PlatformCompanyRow {
   id: string;
@@ -255,6 +278,32 @@ export function parseUserRow(raw: Record<string, unknown>): PlatformUserRow {
     activated_at: nullableStr(raw.activated_at),
     email_confirmed_at: nullableStr(raw.email_confirmed_at),
     last_sign_in_at: nullableStr(raw.last_sign_in_at),
+  };
+}
+
+/**
+ * Reads one team member. On the screen that answers "who holds platform
+ * rights", a row this build cannot fully read must still be shown, never
+ * dropped — so a status that is neither word reads from `disabled_at`, and a
+ * missing one reads as active: overstating access is the safe direction here,
+ * hiding it is not.
+ */
+export function parseStaffRow(raw: Record<string, unknown>): PlatformStaffRow {
+  const disabledAt = nullableStr(raw.disabled_at);
+  const status = raw.status === 'active' || raw.status === 'disabled'
+    ? raw.status
+    : (disabledAt === null ? 'active' : 'disabled');
+  return {
+    user_id: str(raw.user_id),
+    email: nullableStr(raw.email),
+    role: str(raw.role),
+    status,
+    disabled_at: disabledAt,
+    note: nullableStr(raw.note),
+    created_at: nullableStr(raw.created_at),
+    created_by: nullableStr(raw.created_by),
+    created_by_email: nullableStr(raw.created_by_email),
+    invitation_pending: raw.invitation_pending === true,
   };
 }
 
@@ -366,6 +415,10 @@ export const USER_SORTS = [
   'full_name_asc', 'last_sign_in_at_desc', 'company_name_asc',
 ] as const;
 export type UserSort = typeof USER_SORTS[number];
+
+/** Migration 20260920140000. `status_asc`: active members first, then by address. */
+export const STAFF_SORTS = ['status_asc', 'email_asc', 'created_at_asc', 'created_at_desc'] as const;
+export type StaffSort = typeof STAFF_SORTS[number];
 
 // ─── What a directory screen asks for ────────────────────────────────────────
 

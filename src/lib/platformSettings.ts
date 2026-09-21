@@ -2,7 +2,7 @@
  * Reading and writing `app_private.platform_settings` from the panel
  * (plan 3.E / 3.6c). Pure: the calls are in `platformSettingsClient.ts`.
  *
- * Five keys exist, and each has its own authority:
+ * Eleven keys exist, and each has its own authority:
  *
  * - **reading** needs `settings.read` — but billing holds that capability for
  *   the prices alone, so for a billing account every other key is `forbidden`
@@ -12,8 +12,13 @@
  *   the feature map — which decides what every customer may open, and a feature
  *   it does not name reads as premium, so one wrong write would lock every
  *   gated screen for every non-trial company below premium — and it covers the
- *   three keys of plan 3.10: the seller printed on every invoice, the length of
- *   every new company's trial, and the invoice defaults.
+ *   keys of plan 3.10: the seller printed on every invoice, the length of every
+ *   new company's trial, the invoice defaults, the sender name and the four
+ *   code-mail templates; and plan 3.11's feature flags.
+ *
+ * The invoice screen reads the seller through its own RPC
+ * (`platform_invoice_seller`, `companies.read`), because the roles that
+ * download invoices are not all roles that may read the settings.
  *
  * ## The version is the whole point
  *
@@ -40,8 +45,23 @@ import { parsePlanFeatures } from '../utils/planFeatures';
 import type { Plan } from '../contexts/PlanContext';
 import type { PlatformAccess, PlatformCapability } from './platformAccess';
 import { platformAccessCan } from './platformAccess';
+import {
+  MAIL_TEMPLATE_DEFAULTS,
+  MAIL_TEMPLATE_HAS_BUTTON,
+  mailSenderProblem,
+  mailTemplateProblem,
+  type MailSender,
+  type MailTemplateOverrides,
+  type MailTemplatePurpose,
+} from '../../supabase/functions/_shared/mail-template.ts';
 
-export const SETTING_KEYS = ['price_book', 'plan_features', 'seller', 'trial', 'invoice'] as const;
+export const SETTING_KEYS = [
+  'price_book', 'plan_features', 'seller', 'trial', 'invoice',
+  'mail.sender',
+  'mail.template.signup_verify', 'mail.template.password_reset',
+  'mail.template.invite_activate', 'mail.template.email_change',
+  'feature_flags',
+] as const;
 export type SettingKey = typeof SETTING_KEYS[number];
 
 // ─── Answers ─────────────────────────────────────────────────────────────────
@@ -148,6 +168,20 @@ export function canSaveSetting(access: PlatformAccess, key: SettingKey): boolean
 export function canReadSetting(access: PlatformAccess, key: SettingKey): boolean {
   if (!platformAccessCan(access, 'settings.read')) return false;
   return key === 'price_book' || access.role !== 'billing';
+}
+
+/**
+ * The announcements (plan 3.11) are not a settings key, but the list asks the
+ * question `platform_settings_get` asks of a key that is not a price — so
+ * owner and read_only, not billing — and a save or a delete needs
+ * `settings.manage`, owner only.
+ */
+export function canReadAnnouncements(access: PlatformAccess): boolean {
+  return platformAccessCan(access, 'settings.read') && access.role !== 'billing';
+}
+
+export function canWriteAnnouncements(access: PlatformAccess): boolean {
+  return platformAccessCan(access, 'settings.manage');
 }
 
 // ─── The price book, as a form ───────────────────────────────────────────────
@@ -322,14 +356,55 @@ export function sellerFromForm(form: SellerForm): { value: Seller } | { error: s
 }
 
 /**
- * The sender block as the invoice PDF composes it today
- * (`SubscriptionBillingPage.handleDownloadPdf` plus `generateSubscriptionPdf`),
- * so the editor's preview shows what a customer would actually read.
+ * The four sender strings `generateSubscriptionPdf` prints, from the stored
+ * seller — the composition `SubscriptionBillingPage.handleDownloadPdf` applied to
+ * the `company_settings` row it used to read, kept character for character so a
+ * seller with the same values prints the same invoice.
+ *
+ * One case is deliberately different: a seller with no address at all yields an
+ * empty address, not the "\n " the old composition built from four blank
+ * fields. That is the document both real databases hold — the migration found no
+ * row to copy — and it is exactly what the PDF printed there before, when the
+ * page had no row and fell back to 'El-Professor' with nothing under it.
+ *
+ * German in both languages: the labels are printed on a German payment record,
+ * on the closed list in `src/i18n/index.ts`.
+ */
+export interface InvoiceSellerFields {
+  sellerName: string;
+  sellerAddress: string;
+  sellerTaxInfo: string;
+  sellerBank: string;
+}
+
+export function invoiceSellerFields(seller: Seller): InvoiceSellerFields {
+  const hasAddress = [seller.street, seller.house_number, seller.postal_code, seller.city]
+    .some(part => part.trim() !== '');
+  return {
+    sellerName: seller.name,
+    sellerAddress: hasAddress
+      ? [seller.street, seller.house_number].filter(Boolean).join(' ')
+        + `\n${seller.postal_code || ''} ${seller.city || ''}`
+      : '',
+    sellerTaxInfo: [
+      seller.vat_id ? `USt-IdNr: ${seller.vat_id}` : '',
+      seller.tax_number ? `Steuernr: ${seller.tax_number}` : '',
+    ].filter(Boolean).join(' | '),
+    sellerBank: [
+      seller.bank_name,
+      seller.iban ? `IBAN: ${seller.iban}` : '',
+      seller.bic ? `BIC: ${seller.bic}` : '',
+    ].filter(Boolean).join(' | '),
+  };
+}
+
+/**
+ * The sender block as a reader of the invoice sees it, line by line, so the
+ * editor's preview shows what a customer would actually read. The invoice PDF
+ * prints the same strings through `invoiceSellerFields`.
  *
  * The two labels are German in both languages: they are printed on a German
- * payment record, which is on the closed list in `src/i18n/index.ts`. This
- * function only lays the stored strings out — the PDF is not changed here, and
- * moving it onto this setting is a later step.
+ * payment record, which is on the closed list in `src/i18n/index.ts`.
  */
 export function sellerAddressBlock(seller: Seller): string[] {
   const lines: string[] = [];
@@ -480,6 +555,95 @@ export function invoiceFromForm(form: InvoiceForm): { value: InvoiceSettings } |
  */
 export function invoiceNumberExample(invoice: InvoiceSettings, year: number): string {
   return `${invoice.number_prefix}-${year}-${'1'.padStart(invoice.number_digits, '0')}`;
+}
+
+// ─── The mail sender and the code-mail templates (plan 3.10) ─────────────────
+
+/**
+ * The display name every mail from the edge functions carries. The rules are
+ * `mail-template.ts`'s, which the functions apply before they send; the address
+ * is not a setting (it must sit on the domain the mail provider has verified).
+ */
+export interface MailSenderForm {
+  name: string;
+}
+
+export function mailSenderToForm(sender: MailSender): MailSenderForm {
+  return { name: sender.name };
+}
+
+export function mailSenderFromForm(form: MailSenderForm): { value: MailSender } | { error: string } {
+  const value = { name: form.name.trim() };
+  const problem = mailSenderProblem(value);
+  return problem ? { error: problem } : { value };
+}
+
+/**
+ * One mail's four editable fields as the editor holds them: always filled, the
+ * default wherever the stored template leaves a field out. The editor shows the
+ * text that will go out, not an empty box that means "whatever the default is".
+ */
+export interface MailTemplateForm {
+  subject: string;
+  heading: string;
+  paragraphs: string[];
+  /** '' for the one mail without a button. */
+  button: string;
+}
+
+export function mailTemplateToForm(purpose: MailTemplatePurpose, overrides: MailTemplateOverrides): MailTemplateForm {
+  const defaults = MAIL_TEMPLATE_DEFAULTS[purpose];
+  return {
+    subject: overrides.subject ?? defaults.subject,
+    heading: overrides.heading ?? defaults.heading,
+    paragraphs: [...(overrides.paragraphs ?? defaults.paragraphs)],
+    button: MAIL_TEMPLATE_HAS_BUTTON[purpose] ? overrides.button ?? defaults.button ?? '' : '',
+  };
+}
+
+const sameParagraphs = (a: readonly string[], b: readonly string[]) =>
+  a.length === b.length && a.every((text, i) => text === b[i]);
+
+/**
+ * The template a save sends: **only the fields that differ from the default**,
+ * each trimmed. A field left at its default is left out, so it keeps following
+ * the code — a later correction of a default reaches every mail nobody
+ * customised — and a form reset to the defaults saves `{}`, which is exactly
+ * the seed. Or the first field the database would refuse, by its path.
+ */
+export function mailTemplateFromForm(
+  purpose: MailTemplatePurpose,
+  form: MailTemplateForm,
+): { value: MailTemplateOverrides } | { error: string } {
+  const defaults = MAIL_TEMPLATE_DEFAULTS[purpose];
+  const value: { subject?: string; heading?: string; paragraphs?: string[]; button?: string } = {};
+
+  const subject = form.subject.trim();
+  if (subject !== defaults.subject) value.subject = subject;
+  const heading = form.heading.trim();
+  if (heading !== defaults.heading) value.heading = heading;
+  const paragraphs = form.paragraphs.map(p => p.trim());
+  if (!sameParagraphs(paragraphs, defaults.paragraphs)) value.paragraphs = paragraphs;
+  if (MAIL_TEMPLATE_HAS_BUTTON[purpose]) {
+    const button = form.button.trim();
+    if (button !== defaults.button) value.button = button;
+  }
+
+  const problem = mailTemplateProblem(purpose, value);
+  return problem ? { error: problem } : { value };
+}
+
+/** Which fields of a form still read as the default, for the editor's badges. */
+export function mailTemplateDefaultsKept(purpose: MailTemplatePurpose, form: MailTemplateForm): {
+  subject: boolean; heading: boolean; paragraphs: boolean; button: boolean;
+} {
+  const defaults = MAIL_TEMPLATE_DEFAULTS[purpose];
+  return {
+    subject: form.subject.trim() === defaults.subject,
+    heading: form.heading.trim() === defaults.heading,
+    paragraphs: sameParagraphs(form.paragraphs.map(p => p.trim()), defaults.paragraphs),
+    button: !MAIL_TEMPLATE_HAS_BUTTON[purpose] || form.button.trim() === defaults.button,
+  };
 }
 
 // ─── Reading a stored value for one key ──────────────────────────────────────

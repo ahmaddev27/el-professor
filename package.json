@@ -5,15 +5,20 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "node scripts/typecheck-ratchet.mjs && vitest run && vite build && node scripts/build-email-templates.mjs",
+    "build": "node scripts/typecheck-ratchet.mjs && node scripts/style-ratchet.mjs && vitest run && vite build && node scripts/build-email-templates.mjs",
     "build:novalidate": "vite build",
     "typecheck": "node node_modules/typescript/bin/tsc --noEmit -p tsconfig.app.json",
     "typecheck:update": "node scripts/typecheck-ratchet.mjs --update",
+    "styles": "node scripts/style-ratchet.mjs",
+    "styles:update": "node scripts/style-ratchet.mjs --update",
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:rls": "node scripts/rls-test.mjs"
+    "test:rls": "node scripts/rls-test.mjs",
+    "harness": "vite --config design-harness/vite.config.ts",
+    "harness:capture": "node design-harness/capture.mjs",
+    "harness:flows": "node design-harness/flows-batch1.mjs"
   },
   "dependencies": {
     "@fontsource/barlow": "^5.3.0",

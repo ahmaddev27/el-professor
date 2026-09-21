@@ -253,8 +253,17 @@ BEGIN
   RESET ROLE;
   PERFORM _check('super admin sees every company', n >= 2, true);
 
+  -- The row, yes; its subscription columns, no. Until 20260920120000 (plan 3.F
+  -- U3) this probe set `plan` and was allowed: companies_update admits every
+  -- column to a holder of companies.lifecycle, so a PATCH through PostgREST
+  -- went past platform_company_set_plan, its audit row and the coverage rows it
+  -- keeps in step. The row stays writable (that policy is 3.13's to narrow);
+  -- the five derived columns are refused by refuse_direct_subscription_write.
+  -- The probe also no longer leaves company A on premium for every later file.
   PERFORM _check('super admin CAN UPDATE a companies row',
-    _allowed(super_u, format('UPDATE companies SET plan = %L WHERE id = %L', 'premium', co_a)), true);
+    _allowed(super_u, format('UPDATE companies SET name = name WHERE id = %L', co_a)), true);
+  PERFORM _check('super admin cannot set companies.plan directly (plan 3.F U3: platform_company_set_plan is the way)',
+    _allowed(super_u, format('UPDATE companies SET plan = %L WHERE id = %L', 'premium', co_a)), false);
   -- Allowed until 20260917130000 (plan 3.3), and the rule it broke is the one
   -- this file exists to state: a staff role does not write a tenant's
   -- operational data because it is staff. It reads through the audited read

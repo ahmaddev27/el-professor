@@ -1,11 +1,29 @@
 import React, { useState, useEffect } from 'react';
-import { X, Car as CarIcon, Save, ShieldCheck, RefreshCw } from 'lucide-react';
+import { Save, RefreshCw } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
 import type { CarWithDrivers } from '../types/car';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { useTranslation } from '../contexts/LanguageContext';
+import {
+  Button,
+  cn,
+  Field,
+  Input,
+  Sheet,
+  SheetBody,
+  SheetContent,
+  SheetDescription,
+  SheetFooter,
+  SheetHeader,
+  SheetTitle,
+  Skeleton,
+  Tooltip,
+} from './ui';
+
+/** Ties the footer's save button, outside the scrolling body, to the form. */
+const FORM_ID = 'car-form';
 
 interface Driver {
   id: string;
@@ -132,211 +150,125 @@ export default function CarModal({ car, onClose, onSuccess }: CarModalProps) {
     setTuevGueltigBis(base.toISOString().split('T')[0]);
   };
 
+  // ── Presentation (phase 5) ────────────────────────────────────────────────
+  // Everything above is the form's logic and is unchanged. The one piece of it
+  // that sat inside the markup — which driver rows are selected and which are
+  // locked because two are already chosen — is kept below word for word.
+
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50 p-4">
-      <div
-        className="rounded-xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto"
-        style={{ background: 'var(--bg-surface)', boxShadow: 'var(--shadow-lg)' }}
+    <Sheet
+      open
+      onOpenChange={open => {
+        if (!open) onClose();
+      }}
+    >
+      <SheetContent
+        // A click beside the form must not throw away what was typed; the old
+        // modal ignored it as well. Escape and the close button still close.
+        onInteractOutside={event => event.preventDefault()}
       >
-        {/* Header */}
-        <div
-          className="sticky top-0 px-6 py-4 flex items-center justify-between z-10"
-          style={{
-            background: 'var(--bg-surface)',
-            borderBottom: '1px solid var(--border)',
-          }}
-        >
-          <div className="flex items-center gap-3">
-            <div className="rounded-lg p-2" style={{ background: 'var(--accent-subtle)' }}>
-              <CarIcon className="w-5 h-5" style={{ color: 'var(--accent-text)' }} />
-            </div>
-            <h2 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>
-              {car ? t('fleet.editCar') : t('fleet.newCar')}
-            </h2>
-          </div>
-          <button
-            onClick={onClose}
-            className="rounded-lg p-1.5 transition-colors"
-            style={{ color: 'var(--text-tertiary)' }}
-            onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-muted)')}
-            onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
-          >
-            <X className="w-5 h-5" />
-          </button>
-        </div>
+        <SheetHeader>
+          <SheetTitle>{car ? t('fleet.editCar') : t('fleet.newCar')}</SheetTitle>
+          <SheetDescription>{t('fleet.carFormDescription')}</SheetDescription>
+        </SheetHeader>
 
-        <form onSubmit={handleSubmit} className="p-6 space-y-5">
-          {/* Kennzeichen */}
-          <div>
-            <label className="block text-sm font-medium mb-1.5" style={{ color: 'var(--text-secondary)' }}>
-              {t('werkstatt.plate')} *
-            </label>
-            <input
-              type="text"
-              value={kennzeichen}
-              onChange={(e) => setKennzeichen(e.target.value.toUpperCase())}
-              className="input-base"
-              placeholder={t('fleet.kennzeichenPlaceholder')}
-              required
-              disabled={loading}
-            />
-          </div>
+        <SheetBody>
+          <form id={FORM_ID} onSubmit={handleSubmit} className="grid gap-6">
+            <Field label={t('werkstatt.plate')} required>
+              <Input
+                type="text"
+                value={kennzeichen}
+                onChange={(e) => setKennzeichen(e.target.value.toUpperCase())}
+                placeholder={t('fleet.kennzeichenPlaceholder')}
+                required
+                disabled={loading}
+              />
+            </Field>
 
-          {/* TÜV / HU section */}
-          <div
-            className="rounded-xl p-4 space-y-4"
-            style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)' }}
-          >
-            <div className="flex items-center gap-2">
-              <ShieldCheck className="w-4 h-4" style={{ color: 'var(--accent-text)' }} />
-              <span className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
-                {t('fleet.tuevSection')}
-              </span>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium mb-1.5" style={{ color: 'var(--text-secondary)' }}>
-                  {t('fleet.tuevValidUntil')}
-                </label>
+            <fieldset className="grid gap-4 rounded-surface border border-line px-4 pb-4 pt-1">
+              <legend className="px-1 text-[13px] font-semibold text-fg">{t('fleet.tuevSection')}</legend>
+              <Field label={t('fleet.tuevValidUntil')} hint={t('fleet.tuevValidUntilHint')}>
                 <div className="flex gap-2">
-                  <input
+                  <Input
                     type="date"
                     value={tuevGueltigBis}
                     onChange={(e) => setTuevGueltigBis(e.target.value)}
-                    className="input-base"
                     disabled={loading}
                   />
-                  <button
-                    type="button"
-                    onClick={handleRenewTuev}
-                    disabled={loading}
-                    title={t('fleet.renewTuevTooltip')}
-                    className="flex items-center gap-1 px-3 py-2 rounded-lg text-xs font-medium transition-colors disabled:opacity-50 whitespace-nowrap flex-shrink-0"
-                    style={{
-                      background: 'var(--accent-subtle)',
-                      color: 'var(--accent-text)',
-                      border: '1px solid var(--border)',
-                    }}
-                    onMouseEnter={e => (e.currentTarget.style.opacity = '0.75')}
-                    onMouseLeave={e => (e.currentTarget.style.opacity = '1')}
-                  >
-                    <RefreshCw className="w-3.5 h-3.5" />
-                    {t('fleet.plusOneYear')}
-                  </button>
+                  <Tooltip content={t('fleet.renewTuevTooltip')}>
+                    <Button variant="secondary" onClick={handleRenewTuev} disabled={loading}>
+                      <RefreshCw aria-hidden />
+                      {t('fleet.plusOneYear')}
+                    </Button>
+                  </Tooltip>
                 </div>
-                <p className="mt-1 text-xs" style={{ color: 'var(--text-tertiary)' }}>
-                  {t('fleet.tuevValidUntilHint')}
-                </p>
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-1.5" style={{ color: 'var(--text-secondary)' }}>
-                  {t('fleet.lastHu')}
-                </label>
-                <input
+              </Field>
+              <Field label={t('fleet.lastHu')} hint={t('fleet.lastHuHint')}>
+                <Input
                   type="date"
                   value={letzteHu}
                   onChange={(e) => setLetzteHu(e.target.value)}
-                  className="input-base"
                   disabled={loading}
                 />
-                <p className="mt-1 text-xs" style={{ color: 'var(--text-tertiary)' }}>
-                  {t('fleet.lastHuHint')}
-                </p>
-              </div>
-            </div>
-          </div>
+              </Field>
+            </fieldset>
 
-          {/* Drivers */}
-          <div>
-            <label className="block text-sm font-medium mb-1.5" style={{ color: 'var(--text-secondary)' }}>
-              {t('fleet.assignDrivers')}
-            </label>
-            {loadingDrivers ? (
-              <div className="text-sm" style={{ color: 'var(--text-tertiary)' }}>{t('common.loading')}</div>
-            ) : availableDrivers.length === 0 ? (
-              <div className="text-sm italic" style={{ color: 'var(--text-tertiary)' }}>
-                {t('fleet.noDriversAvailable')}
-              </div>
-            ) : (
-              <div
-                className="rounded-lg max-h-52 overflow-y-auto"
-                style={{ border: '1px solid var(--border)' }}
-              >
-                {availableDrivers.map((driver) => {
-                  const isSelected = selectedDriverIds.includes(driver.id);
-                  const isDisabled = loading || (!isSelected && selectedDriverIds.length >= 2);
-                  return (
-                    <div
-                      key={driver.id}
-                      className="flex items-center gap-3 px-4 py-3 cursor-pointer transition-colors"
-                      style={{
-                        borderBottom: '1px solid var(--border-subtle)',
-                        background: isSelected
-                          ? 'var(--accent-subtle)'
-                          : 'transparent',
-                        opacity: isDisabled && !isSelected ? 0.45 : 1,
-                        cursor: isDisabled && !isSelected ? 'not-allowed' : 'pointer',
-                      }}
-                      onClick={() => !isDisabled && handleDriverToggle(driver.id)}
-                      onMouseEnter={e => {
-                        if (!isDisabled || isSelected)
-                          (e.currentTarget as HTMLElement).style.background = isSelected
-                            ? 'var(--accent-subtle)'
-                            : 'var(--bg-subtle)';
-                      }}
-                      onMouseLeave={e => {
-                        (e.currentTarget as HTMLElement).style.background = isSelected
-                          ? 'var(--accent-subtle)'
-                          : 'transparent';
-                      }}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={isSelected}
-                        onChange={e => { e.stopPropagation(); if (!isDisabled) handleDriverToggle(driver.id); }}
-                        disabled={isDisabled}
-                        className="w-4 h-4 cursor-pointer rounded"
-                        style={{ accentColor: 'var(--accent)' }}
-                      />
-                      <span className="text-sm" style={{ color: 'var(--text-primary)' }}>{driver.name}</span>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-            <p className="mt-2 text-xs" style={{ color: 'var(--text-tertiary)' }}>
-              {t('fleet.driversSelected', { count: selectedDriverIds.length })}
-            </p>
-          </div>
+            <fieldset className="grid gap-2">
+              <legend className="mb-2 text-[13px] font-medium text-fg-muted">{t('fleet.assignDrivers')}</legend>
+              {loadingDrivers ? (
+                <div className="grid gap-2">
+                  <Skeleton className="h-11" />
+                  <Skeleton className="h-11" />
+                  <Skeleton className="h-11" />
+                  <span className="sr-only">{t('common.loading')}</span>
+                </div>
+              ) : availableDrivers.length === 0 ? (
+                <p className="text-sm text-fg-subtle">{t('fleet.noDriversAvailable')}</p>
+              ) : (
+                <div className="max-h-64 divide-y divide-line overflow-y-auto rounded-surface border border-line">
+                  {availableDrivers.map((driver) => {
+                    const isSelected = selectedDriverIds.includes(driver.id);
+                    const isDisabled = loading || (!isSelected && selectedDriverIds.length >= 2);
+                    return (
+                      // The whole row is the label, so the touch target is the row.
+                      <label
+                        key={driver.id}
+                        className={cn(
+                          'flex min-h-11 cursor-pointer items-center gap-3 px-4 py-2 text-sm text-fg transition-colors hover:bg-sunken',
+                          isSelected && 'bg-brand-soft hover:bg-brand-soft',
+                          isDisabled && !isSelected && 'cursor-not-allowed opacity-50 hover:bg-transparent',
+                        )}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => { if (!isDisabled) handleDriverToggle(driver.id); }}
+                          disabled={isDisabled}
+                          className="size-4 shrink-0 cursor-pointer accent-brand disabled:cursor-not-allowed"
+                        />
+                        <span>{driver.name}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              )}
+              <p className="text-xs text-fg-subtle" aria-live="polite">
+                {t('fleet.driversSelected', { count: selectedDriverIds.length })}
+              </p>
+            </fieldset>
+          </form>
+        </SheetBody>
 
-          {/* Footer buttons */}
-          <div className="flex gap-3 pt-2" style={{ borderTop: '1px solid var(--border)' }}>
-            <button
-              type="button"
-              onClick={onClose}
-              disabled={loading}
-              className="flex-1 px-4 py-2 rounded-lg text-sm font-medium transition-colors"
-              style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)', background: 'transparent' }}
-              onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-muted)')}
-              onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
-            >
-              {t('common.cancel')}
-            </button>
-            <button
-              type="submit"
-              disabled={loading}
-              className="flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-opacity disabled:opacity-50"
-              style={{ background: 'var(--accent)', color: 'var(--text-inverse)' }}
-              onMouseEnter={e => (e.currentTarget.style.background = 'var(--accent-hover)')}
-              onMouseLeave={e => (e.currentTarget.style.background = 'var(--accent)')}
-            >
-              <Save className="w-4 h-4" />
-              {loading ? t('common.saving') : t('common.save')}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
+        <SheetFooter>
+          <Button variant="secondary" onClick={onClose} disabled={loading}>
+            {t('common.cancel')}
+          </Button>
+          <Button type="submit" form={FORM_ID} loading={loading}>
+            {loading ? null : <Save aria-hidden />}
+            {loading ? t('common.saving') : t('common.save')}
+          </Button>
+        </SheetFooter>
+      </SheetContent>
+    </Sheet>
   );
 }

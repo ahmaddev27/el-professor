@@ -118,7 +118,9 @@ export function useFahrtenbuch() {
   */
   const { effectiveCompanyId: companyId, companyScope } = useSuperAdmin();
   const { t } = useTranslation();
-  const isPlatformSession = companyScope.isPlatformSession;
+  // A dependency of createImport: the mode can change under the same company
+  // (view → support), which does not remount the tenant shell.
+  const isReadOnlyPlatformSession = companyScope.isPlatformSession && companyScope.readOnly;
   const [imports, setImports] = useState<FahrtenbuchImport[]>([]);
   const [trips, setTrips] = useState<FahrtenbuchTrip[]>([]);
   const [loadingImports, setLoadingImports] = useState(false);
@@ -220,18 +222,14 @@ export function useFahrtenbuch() {
         console.error('[FahrtenbuchImportStorage] Storage upload FAILED:', uploadErr.message);
       }
       /*
-        Inside a support session this fails for a reason the raw message does
-        not describe. `20260630083858` writes the `fahrtenbuch-files` policies
-        as `SELECT company_id FROM user_profiles WHERE user_id = auth.uid()` —
-        the membership, not `get_user_company_id()` — which is NULL for a
-        company-less platform account, so the upload is refused however the
-        context reads. The row above it is fine; only the file is not. Say so,
-        rather than sending someone to check a storage configuration that is
-        doing exactly what it was written to do. Fixing the policy is SQL and
-        belongs to the storage half of plan 3.C (see HANDOFF.md).
+        Since 20260920100000 a support session uploads into the opened
+        company's folder like a member does, and a read-only (`view`) context
+        is refused — by the bucket policy, before the import row below is ever
+        attempted. That refusal is a rule, not a storage fault, so it gets the
+        sentence that names it instead of the configuration hint below.
       */
-      if (isPlatformSession) {
-        throw new Error(t('support.storage.membershipOnly'));
+      if (isReadOnlyPlatformSession) {
+        throw new Error(t('support.storage.readOnly'));
       }
       throw new Error(`Import blockiert: Original-XLSX-Datei konnte nicht gespeichert werden. Bitte Storage-Konfiguration prüfen. (${uploadErr.message})`);
     }
@@ -320,7 +318,7 @@ export function useFahrtenbuch() {
 
     await fetchImports();
     return importId;
-  }, [companyId, user, fetchImports]);
+  }, [companyId, user, fetchImports, isReadOnlyPlatformSession, t]);
 
   const deleteImport = useCallback(async (importId: string) => {
     if (!companyId) return;

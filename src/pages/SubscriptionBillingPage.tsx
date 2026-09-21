@@ -20,6 +20,8 @@ import GenerateInvoicesModal from '../components/GenerateInvoicesModal';
 import AssignSubscriptionModal from '../components/AssignSubscriptionModal';
 import InvoiceDetailModal from '../components/InvoiceDetailModal';
 import { generateSubscriptionPdf, InvoicePdfData } from '../utils/subscriptionPdf';
+import { getInvoiceSeller } from '../lib/platformSettingsClient';
+import { invoiceSellerFields } from '../lib/platformSettings';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -69,20 +71,6 @@ interface Invoice {
   company_subscriptions: { plan_id: string; subscription_plans: { name: string } | null } | null;
 }
 
-interface CompanySettings {
-  company_name: string;
-  street: string | null;
-  house_number: string | null;
-  postal_code: string | null;
-  city: string | null;
-  vat_id: string | null;
-  tax_number: string | null;
-  bank_name: string | null;
-  iban: string | null;
-  bic: string | null;
-  account_holder: string | null;
-}
-
 // Screen-only month names, for the filter dropdown and the period column. The
 // Rechnung/Quittung PDF keeps its own German copy in utils/subscriptionPdf.ts,
 // so nothing here reaches a generated document. Values are TranslationKeys
@@ -108,7 +96,7 @@ function fmtEur(v: number) {
 export default function SubscriptionBillingPage() {
   // The platform write RPCs take the acting account from the caller's own token,
   // so nothing here sends a user id any more.
-  const { isSuperAdmin, profile } = useAuth();
+  const { isSuperAdmin } = useAuth();
   // Hidden for a role without the capability; the database refuses regardless.
   const { platformCan } = useSuperAdmin();
   const canBilling = platformCan('billing.manage');
@@ -120,7 +108,6 @@ export default function SubscriptionBillingPage() {
   const [subscriptions, setSubscriptions] = useState<CompanySub[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [loading, setLoading] = useState(true);
-  const [sellerSettings, setSellerSettings] = useState<CompanySettings | null>(null);
 
   // Filters
   const now = new Date();
@@ -153,23 +140,13 @@ export default function SubscriptionBillingPage() {
       if (plansRes.data) setPlans(plansRes.data);
       if (subsRes.data) setSubscriptions(subsRes.data as any);
       if (invRes.data) setInvoices(invRes.data as any);
-
-      // Load seller settings (platform owner company settings)
-      if (isSuperAdmin && profile?.company_id) {
-        const { data: cs } = await supabase
-          .from('company_settings')
-          .select('company_name, street, house_number, postal_code, city, vat_id, tax_number, bank_name, iban, bic, account_holder')
-          .eq('company_id', profile.company_id)
-          .maybeSingle();
-        if (cs) setSellerSettings(cs);
-      }
     } catch (err) {
       console.error(err);
       showToast('error', t('sa.subs.errorLoad'));
     } finally {
       setLoading(false);
     }
-  }, [isSuperAdmin, profile?.company_id, showToast, t]);
+  }, [showToast, t]);
 
   useEffect(() => { loadData(); }, [loadData]);
 
@@ -237,14 +214,25 @@ export default function SubscriptionBillingPage() {
   // ── PDF download ──
   // Every literal below feeds generateSubscriptionPdf and is therefore German
   // in both languages: the PDF is a German payment record.
-  const handleDownloadPdf = (inv: Invoice) => {
+  //
+  // The sender is the `seller` setting (plan 3.10), read when the PDF is built
+  // through platform_invoice_seller(): one audited read per document, and one
+  // every staff role that may open this page may make. It used to be the
+  // company_settings row of whichever company the signed-in platform account
+  // sat in — none, on both real databases — which is why the invoices said
+  // 'El-Professor' and nothing else. When the sender cannot be read, no PDF is
+  // built: an invoice without its sender is not a document to hand a customer.
+  const handleDownloadPdf = async (inv: Invoice) => {
+    const seller = await getInvoiceSeller().catch(() => null);
+    if (!seller) {
+      showToast('error', t('sa.subs.sellerUnavailable'));
+      return;
+    }
+
     const planName = inv.company_subscriptions?.subscription_plans?.name || 'Abonnement';
     const co = inv.companies;
     const addr = co ? [co.street, co.house_number].filter(Boolean).join(' ') + (co.postal_code ? `\n${co.postal_code} ${co.city || ''}` : '') : null;
-    const s = sellerSettings;
-    const sellerAddr = s ? [s.street, s.house_number].filter(Boolean).join(' ') + `\n${s.postal_code || ''} ${s.city || ''}` : '';
-    const sellerTax = [s?.vat_id ? `USt-IdNr: ${s.vat_id}` : '', s?.tax_number ? `Steuernr: ${s.tax_number}` : ''].filter(Boolean).join(' | ');
-    const sellerBank = s ? [s.bank_name, s.iban ? `IBAN: ${s.iban}` : '', s.bic ? `BIC: ${s.bic}` : ''].filter(Boolean).join(' | ') : '';
+    const { sellerName, sellerAddress, sellerTaxInfo, sellerBank } = invoiceSellerFields(seller);
 
     const pdfData: InvoicePdfData = {
       invoiceNumber: inv.invoice_number,
@@ -259,9 +247,9 @@ export default function SubscriptionBillingPage() {
       companyName: co?.name || 'Unbekannt',
       companyAddress: addr,
       planName,
-      sellerName: s?.company_name || 'El-Professor',
-      sellerAddress: sellerAddr,
-      sellerTaxInfo: sellerTax,
+      sellerName,
+      sellerAddress,
+      sellerTaxInfo,
       sellerBank,
     };
 
@@ -359,7 +347,7 @@ export default function SubscriptionBillingPage() {
                 style={{ color: 'var(--text-primary)' }}
                 onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-muted)')}
                 onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
-                onClick={() => { setOpen(false); handleDownloadPdf(inv); }}
+                onClick={() => { setOpen(false); void handleDownloadPdf(inv); }}
               >
                 <Download size={14} /> {t(inv.status === 'paid' ? 'sa.subs.actionReceiptPdf' : 'sa.subs.actionInvoicePdf')}
               </button>
@@ -739,8 +727,7 @@ export default function SubscriptionBillingPage() {
         <InvoiceDetailModal
           invoice={detailInvoice}
           onClose={() => setDetailInvoice(null)}
-          onDownloadPdf={() => handleDownloadPdf(detailInvoice)}
-          sellerSettings={sellerSettings}
+          onDownloadPdf={() => void handleDownloadPdf(detailInvoice)}
         />
       )}
     </div>
