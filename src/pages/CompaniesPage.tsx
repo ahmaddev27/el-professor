@@ -12,6 +12,8 @@ import { callPlatformRpc } from '../lib/platformRpc';
 import { fetchCompanies, fetchUsers } from '../lib/platformDirectoryClient';
 import { platformReadRefusalKey } from '../lib/platformReadModels';
 import { contextRefusalMessage } from '../lib/supportSession';
+import { fetchPlatformAccess, openCompanyContext } from '../lib/supportSessionClient';
+import { withCompanyWriteSession, type CompanyWriteSessionPurpose } from '../lib/companyWriteSession';
 import { TENANT_HOME } from '../lib/adminGate';
 import { useAuth, type CompanyStatus } from '../contexts/AuthContext';
 import { useSuperAdmin, CompanyListItem } from '../contexts/SuperAdminContext';
@@ -279,6 +281,74 @@ function LifecycleConfirmModal({ action, company, onConfirm, onClose }: Lifecycl
   );
 }
 
+// ─── A support session around one account write (plan 3.13a) ─────────────────
+
+/*
+  Since 3.13a `manage-users` acts for a platform account only on the company of
+  its open support session, so the two flows here that create an account for a
+  company — the wizard's first administrator and "Benutzer hinzufügen" — open
+  an audited support session on that company themselves, with a fixed reason,
+  around the one `create` call (`withCompanyWriteSession`, which also decides
+  when to reuse a session and when to refuse).
+
+  The session is opened with the raw client rather than the provider's
+  `openCompany`, so nothing is installed: no bar appears and `effectiveCompanyId`
+  never moves. It is closed with the provider's `closeCompany`, which marks the
+  close as intended (no "session ended" notice) and re-asks `platform_whoami()`,
+  so the provider follows even if a focus re-ask saw the session meanwhile. A
+  refusal re-asks too, so the bar shows the session the operator has to end.
+
+  Resolves the write's value, or `undefined` when the flow refused — the refusal
+  is then already on screen. Throws the write's own error, or the database's
+  refusal to open the session, for the caller to show with
+  `contextRefusalMessage` (a sentence, never a reason code).
+*/
+function useCompanyWriteSession() {
+  const { closeCompany, reloadPlatformAccess } = useSuperAdmin();
+  const { showToast } = useToast();
+  const { t } = useTranslation();
+
+  return useCallback(async <T,>(
+    companyId: string,
+    purpose: CompanyWriteSessionPurpose,
+    act: () => Promise<T>,
+  ): Promise<T | undefined> => {
+    const outcome = await withCompanyWriteSession(companyId, purpose, {
+      currentAccess: fetchPlatformAccess,
+      open: async (id, reason) => { await openCompanyContext(id, 'support', reason); },
+      close: closeCompany,
+    }, act);
+
+    if (!outcome.ok) {
+      reloadPlatformAccess();
+      showToast('error', t(outcome.refusal === 'view_open'
+        ? 'sa.companies.session.viewOpen'
+        : 'sa.companies.session.otherCompanyOpen'));
+      return undefined;
+    }
+    if (outcome.closeFailed) {
+      showToast('warning', t('sa.companies.session.closeFailed'));
+    }
+    return outcome.value;
+  }, [closeCompany, reloadPlatformAccess, showToast, t]);
+}
+
+/**
+ * `manage-users/create` for one company. The function answers in German and its
+ * text is shown verbatim — `support_session_required` included, which the
+ * session around this call makes unreachable; only the fallback is translated.
+ */
+async function createCompanyAccount(body: Record<string, unknown>, fallback: string): Promise<void> {
+  const { data: { session } } = await supabase.auth.getSession();
+  const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/manage-users/create`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session?.access_token}` },
+    body: JSON.stringify(body),
+  });
+  const result = await response.json();
+  if (!response.ok) throw new Error(result.error || fallback);
+}
+
 // ─── Create Company Modal ─────────────────────────────────────────────────────
 
 interface CreateCompanyModalProps {
@@ -289,6 +359,7 @@ interface CreateCompanyModalProps {
 function CreateCompanyModal({ onClose, onCreated }: CreateCompanyModalProps) {
   const { showToast } = useToast();
   const { t } = useTranslation();
+  const inSupportSession = useCompanyWriteSession();
   const [step, setStep] = useState<1 | 2>(1);
   const [saving, setSaving] = useState(false);
   const [createdCompany, setCreatedCompany] = useState<CompanyListItem | null>(null);
@@ -341,20 +412,17 @@ function CreateCompanyModal({ onClose, onCreated }: CreateCompanyModalProps) {
     if (!createdCompany) return;
     try {
       setAdminSaving(true);
-      const { data: { session } } = await supabase.auth.getSession();
-      const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/manage-users/create`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session?.access_token}` },
-        body: JSON.stringify({ email: adminForm.email.trim(), full_name: adminForm.full_name.trim(), role: 'admin', company_id: createdCompany.id, password: adminForm.password }),
+      const created = await inSupportSession(createdCompany.id, 'firstAdmin', async () => {
+        await createCompanyAccount(
+          { email: adminForm.email.trim(), full_name: adminForm.full_name.trim(), role: 'admin', company_id: createdCompany.id, password: adminForm.password },
+          t('common.error'));
+        return true;
       });
-      const result = await response.json();
-      // The manage-users edge function already answers in German and its text
-      // is shown verbatim; only our own fallback is translated.
-      if (!response.ok) throw new Error(result.error || t('common.error'));
+      if (!created) return;
       showToast('success', t('sa.companies.toast.adminCreated'));
       onCreated(createdCompany);
     } catch (err: any) {
-      showToast('error', err.message || t('sa.companies.errorCreateAdmin'));
+      showToast('error', contextRefusalMessage(err, t) || t('sa.companies.errorCreateAdmin'));
     } finally {
       setAdminSaving(false);
     }
@@ -535,6 +603,7 @@ interface InviteAdminModalProps {
 function InviteAdminModal({ company, onClose, onInvited }: InviteAdminModalProps) {
   const { showToast } = useToast();
   const { t } = useTranslation();
+  const inSupportSession = useCompanyWriteSession();
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({ full_name: '', email: '', password: '', role: 'admin' });
 
@@ -544,20 +613,17 @@ function InviteAdminModal({ company, onClose, onInvited }: InviteAdminModalProps
     if (form.password.length < 8) { showToast('error', t('sa.companies.errorPasswordShort')); return; }
     try {
       setSaving(true);
-      const { data: { session } } = await supabase.auth.getSession();
-      const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/manage-users/create`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session?.access_token}` },
-        body: JSON.stringify({ email: form.email.trim(), full_name: form.full_name.trim(), role: form.role, company_id: company.id, password: form.password }),
+      const created = await inSupportSession(company.id, 'addUser', async () => {
+        await createCompanyAccount(
+          { email: form.email.trim(), full_name: form.full_name.trim(), role: form.role, company_id: company.id, password: form.password },
+          t('common.error'));
+        return true;
       });
-      const result = await response.json();
-      // The manage-users edge function already answers in German and its text
-      // is shown verbatim; only our own fallback is translated.
-      if (!response.ok) throw new Error(result.error || t('common.error'));
+      if (!created) return;
       showToast('success', t('sa.companies.toast.userCreated'));
       onInvited();
     } catch (err: any) {
-      showToast('error', err.message || t('common.error'));
+      showToast('error', contextRefusalMessage(err, t) || t('common.error'));
     } finally {
       setSaving(false);
     }
