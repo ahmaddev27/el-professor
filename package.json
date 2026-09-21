@@ -18,7 +18,10 @@
     "test:rls": "node scripts/rls-test.mjs",
     "harness": "vite --config design-harness/vite.config.ts",
     "harness:capture": "node design-harness/capture.mjs",
-    "harness:flows": "node design-harness/flows-batch1.mjs"
+    "harness:flows": "node design-harness/flows-batch1.mjs",
+    "harness:batch4": "vite --config design-harness/batch4/vite.config.ts",
+    "harness:batch4:capture": "node design-harness/batch4/capture.mjs",
+    "harness:batch4:flows": "node design-harness/flows-batch4.mjs"
   },
   "dependencies": {
     "@fontsource/barlow": "^5.3.0",
