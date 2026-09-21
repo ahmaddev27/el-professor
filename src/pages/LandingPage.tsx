@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { useTranslation } from '../contexts/LanguageContext';
 import type { TranslationKey } from '../i18n';
+import { LEGAL_PATHS } from '../lib/legalPages';
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 
@@ -1250,7 +1251,7 @@ const LandingPage: React.FC = () => {
             </div>
             {[
               { head: t('landing.footer.product'), links: [{ l: t('landing.nav.features'), h: '#features' }, { l: t('landing.nav.insights'), h: '#screenshots' }, { l: t('landing.nav.pricing'), h: '#pricing' }] },
-              { head: t('landing.footer.company'), links: [{ l: t('landing.nav.faq'), h: '#faq' }, { l: t('landing.footer.support'), h: '#faq' }] },
+              { head: t('landing.footer.company'), links: [{ l: t('landing.nav.faq'), h: '#faq' }, { l: t('landing.footer.support'), h: '#faq' }, { l: t('legal.link.impressum'), h: LEGAL_PATHS.impressum }, { l: t('legal.link.privacy'), h: LEGAL_PATHS.privacy }] },
               { head: t('landing.footer.access'), links: [{ l: t('auth.signIn'), h: '/login' }, { l: t('landing.nav.tryFree'), h: '/login' }] },
             ].map((col, i) => (
               <div key={i}>
