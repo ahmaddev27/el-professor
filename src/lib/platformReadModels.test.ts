@@ -11,6 +11,7 @@ import {
   directoryRpcArgs,
   parseDriverRow,
   parsePlatformReadPage,
+  parseStaffRow,
   parseUserRow,
   parseVehicleRow,
   platformReadRefusalKey,
@@ -179,6 +180,15 @@ describe('the reduced columns', () => {
     ]);
   });
 
+  it('staff carry the sign-in address and the grantor, and no name, sign-in time or company', () => {
+    // Migration 20260920140000 lists these, and tests/rls/platform-readmodels.sql
+    // section 11 pins them key by key on the database side.
+    expect(Object.keys(parseStaffRow({}))).toEqual([
+      'user_id', 'email', 'role', 'status', 'disabled_at', 'note',
+      'created_at', 'created_by', 'created_by_email', 'invitation_pending',
+    ]);
+  });
+
   it('reads a row and leaves a missing column null', () => {
     expect(parseDriverRow({ id: 'd1', name: 'Ali', company_name: 'Y&A' })).toEqual({
       id: 'd1',
@@ -189,6 +199,38 @@ describe('the reduced columns', () => {
       driver_usage_type: null,
       created_at: null,
     });
+  });
+});
+
+describe('parseStaffRow', () => {
+  it('reads a member as the database answers it', () => {
+    expect(parseStaffRow({
+      user_id: 'u1', email: 'owner@example.com', role: 'owner', status: 'active', disabled_at: null,
+      note: 'Gründer', created_at: '2026-09-16T10:00:00Z', created_by: 'u0',
+      created_by_email: 'first@example.com', invitation_pending: false,
+    })).toEqual({
+      user_id: 'u1', email: 'owner@example.com', role: 'owner', status: 'active', disabled_at: null,
+      note: 'Gründer', created_at: '2026-09-16T10:00:00Z', created_by: 'u0',
+      created_by_email: 'first@example.com', invitation_pending: false,
+    });
+  });
+
+  it('never hides a member it cannot fully read: an unclear status reads as active unless disabled_at says otherwise', () => {
+    // On the screen that answers who holds platform rights, overstating access
+    // is the safe direction; dropping the row or calling it disabled is not.
+    expect(parseStaffRow({ user_id: 'u1' }).status).toBe('active');
+    expect(parseStaffRow({ user_id: 'u1', status: 'paused' }).status).toBe('active');
+    expect(parseStaffRow({ user_id: 'u1', status: 'paused', disabled_at: '2026-09-17T08:00:00Z' }).status).toBe('disabled');
+    expect(parseStaffRow({ user_id: 'u1', status: 'disabled', disabled_at: '2026-09-17T08:00:00Z' }).status).toBe('disabled');
+  });
+
+  it('keeps a role this build does not know, rather than dropping the member', () => {
+    expect(parseStaffRow({ user_id: 'u1', role: 'auditor' }).role).toBe('auditor');
+  });
+
+  it('treats only a true invitation_pending as open', () => {
+    expect(parseStaffRow({ user_id: 'u1', invitation_pending: 'true' }).invitation_pending).toBe(false);
+    expect(parseStaffRow({ user_id: 'u1', invitation_pending: true }).invitation_pending).toBe(true);
   });
 });
 

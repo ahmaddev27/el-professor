@@ -40,6 +40,13 @@
    10. plans        EXPLAIN ANALYZE of each statement on seeded data: no scan
                     of fahrtenbuch_trips or receipts, and one scan per table
                     for the company figures rather than one per company row
+   11. the team     platform_staff_list (20260920140000, plan 3.12), the sixth
+                    read model: the same shape, staff.manage alone, the
+                    documented columns with the sign-in address, every staff
+                    row listed from the table itself — and the actor finding:
+                    a change made through the staff functions names its caller
+                    on both rows it writes and in created_by, while a row
+                    written with no session has no actor at all
 */
 
 \set ON_ERROR_STOP on
@@ -896,6 +903,434 @@ BEGIN
   PERFORM _rm_ok('users: one scan of user_profiles, and auth.users joined once',
     _rm_scans(v_plan, 'user_profiles') = 1 AND _rm_scans(v_plan, 'users') >= 1
     AND v_plan !~ 'fahrtenbuch_trips' AND v_plan !~ 'receipts');
+END $$;
+
+-- ─── 11. the team roster: platform_staff_list (20260920140000) ──────────────
+
+/*
+  Plan 3.12. The Team page used to fold the audit log into a roster; this read
+  model reads app_private.platform_staff itself, so the roster no longer
+  depends on how long the log is kept (open decision D4). Its capability is
+  staff.manage, owners only, for the reasons in the migration header.
+
+  11f is the actor finding. The NULL actors measured on staging came from rows
+  written with no session at all. A change made through platform_staff_add,
+  _disable and _enable names its caller, with its role, on the function's own
+  row and on the trigger's row, and platform_staff_add records the caller in
+  created_by, which is where the list's "granted by" comes from.
+*/
+
+-- One more account, company-less and still pending_invite: the owner adds it
+-- to the team in 11f.
+INSERT INTO auth.users (id, email, email_confirmed_at, created_at) VALUES
+  ('3b000000-0000-4000-8000-000000000008', 'rm-invitee@test.invalid', now(), now() - interval '1 day');
+
+INSERT INTO user_profiles (user_id, email, full_name, role, role_id, company_id, status, invited_at) VALUES
+  ('3b000000-0000-4000-8000-000000000008', 'rm-invitee@test.invalid', 'RM Invitee', 'viewer', NULL, NULL,
+   'pending_invite', now());
+
+/** _rm_do with the session's sign-in method given, for the one check that needs another. */
+CREATE OR REPLACE FUNCTION _rm_do_amr(p_user uuid, p_amr text, p_sql text) RETURNS text
+LANGUAGE plpgsql AS $$
+DECLARE
+  v_out   text;
+  v_state text;
+  v_msg   text;
+BEGIN
+  BEGIN
+    PERFORM _rm_become(p_user);
+    PERFORM set_config('request.jwt.claim.amr', p_amr, true);
+    EXECUTE p_sql INTO v_out;
+    v_out := coalesce(v_out, '<null>');
+  EXCEPTION WHEN OTHERS THEN
+    GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE, v_msg = MESSAGE_TEXT;
+    v_out := 'ERR ' || v_state || ' ' || v_msg;
+  END;
+  PERFORM _rm_reset();
+  RETURN v_out;
+END $$;
+
+/** Whether an item carries exactly these keys, compared as sets so no collation decides it. */
+CREATE OR REPLACE FUNCTION _rm_has_exactly(p_item jsonb, p_keys text[]) RETURNS boolean
+LANGUAGE sql AS $$
+  SELECT coalesce(_rm_keys(p_item), '{}'::text[]) @> p_keys
+     AND coalesce(_rm_keys(p_item), '{}'::text[]) <@ p_keys
+$$;
+
+/** The plan of the staff list's statement, run with the values the page sends. */
+CREATE OR REPLACE FUNCTION _rm_staff_plan() RETURNS text
+LANGUAGE plpgsql AS $$
+DECLARE
+  v_plan text := '';
+  r      record;
+BEGIN
+  FOR r IN EXECUTE 'EXPLAIN (ANALYZE, COSTS OFF, TIMING OFF, SUMMARY OFF) '
+                   || app_private.platform_staff_list_statement()
+           USING NULL::text, 'status_asc'::text, 100, 0
+  LOOP v_plan := v_plan || r."QUERY PLAN" || E'\n'; END LOOP;
+  RETURN v_plan;
+END $$;
+
+-- 11a. privileges and shape
+
+DO $$
+DECLARE
+  owner constant uuid := '3b000000-0000-4000-8000-000000000001';
+  c_fn  constant text := 'public.platform_staff_list(text,text,integer,integer)';
+  c_st  constant text := 'app_private.platform_staff_list_statement()';
+BEGIN
+  PERFORM _rm_reset();
+
+  PERFORM _rm_ok('staff list: EXECUTE for authenticated alone',
+    NOT has_function_privilege('anon', c_fn::regprocedure, 'EXECUTE')
+    AND has_function_privilege('authenticated', c_fn::regprocedure, 'EXECUTE')
+    AND NOT has_function_privilege('service_role', c_fn::regprocedure, 'EXECUTE'));
+  PERFORM _rm_ok('staff list: its statement half is reachable by nobody the API authenticates as',
+    NOT has_function_privilege('anon', c_st::regprocedure, 'EXECUTE')
+    AND NOT has_function_privilege('authenticated', c_st::regprocedure, 'EXECUTE')
+    AND NOT has_function_privilege('service_role', c_st::regprocedure, 'EXECUTE'));
+  PERFORM _rm_ok('staff list: SECURITY DEFINER, VOLATILE (so PostgREST uses POST) and a pinned search_path',
+    EXISTS (SELECT 1 FROM pg_proc p
+             WHERE p.oid = c_fn::regprocedure
+               AND p.prosecdef
+               AND p.provolatile = 'v'
+               AND EXISTS (SELECT 1 FROM unnest(coalesce(p.proconfig, '{}'::text[])) c WHERE c LIKE 'search_path=%')));
+  PERFORM _rm_ok('staff list: anon and the service role are refused for lack of EXECUTE',
+    _rm_try(NULL, 'SELECT platform_staff_list()::text') LIKE 'ERR 42501%'
+    AND _rm_try(NULL, 'SELECT platform_staff_list()::text', true) LIKE 'ERR 42501%');
+  PERFORM _rm_ok('staff list: an owner cannot run the statement half directly',
+    _rm_try(owner, 'SELECT app_private.platform_staff_list_statement()') LIKE 'ERR 42501%');
+END $$;
+
+-- 11b. staff.manage, and nothing else
+
+DO $$
+DECLARE
+  p     record;
+  v_got jsonb;
+BEGIN
+  PERFORM _rm_reset();
+
+  -- read_only, support and billing all hold a staff row and companies.read;
+  -- none of them reads who else holds platform rights.
+  FOR p IN
+    SELECT * FROM (VALUES
+      ('owner',          '3b000000-0000-4000-8000-000000000001'::uuid, true),
+      ('seeded owner',   '50000000-0000-4000-8000-000000000001'::uuid, true),
+      ('support',        '3b000000-0000-4000-8000-000000000002'::uuid, false),
+      ('billing',        '3b000000-0000-4000-8000-000000000003'::uuid, false),
+      ('read_only',      '3b000000-0000-4000-8000-000000000004'::uuid, false),
+      ('disabled',       '3b000000-0000-4000-8000-000000000005'::uuid, false),
+      ('company admin',  'a0000000-0000-4000-8000-000000000001'::uuid, false),
+      ('company viewer', 'a0000000-0000-4000-8000-000000000003'::uuid, false)
+    ) AS t(label, uid, allowed)
+  LOOP
+    v_got := _rm_json(p.uid, 'SELECT platform_staff_list()::text');
+    IF (v_got ->> 'ok')::boolean IS DISTINCT FROM p.allowed THEN
+      RAISE EXCEPTION 'FAIL: platform_staff_list for % — expected ok %, got %', p.label, p.allowed, v_got::text;
+    END IF;
+    IF NOT p.allowed AND v_got IS DISTINCT FROM '{"ok": false, "reason": "not_authorized"}'::jsonb THEN
+      RAISE EXCEPTION 'FAIL: platform_staff_list for % — a refusal is exactly not_authorized, got %', p.label, v_got::text;
+    END IF;
+  END LOOP;
+  RAISE NOTICE 'ok  staff list: the owners read it; support, billing, read_only, a disabled row and company users are refused';
+END $$;
+
+-- 11c. one audit row per call
+
+DO $$
+DECLARE
+  owner    constant uuid := '3b000000-0000-4000-8000-000000000001';
+  support  constant uuid := '3b000000-0000-4000-8000-000000000002';
+  disabled constant uuid := '3b000000-0000-4000-8000-000000000005';
+  admin_a  constant uuid := 'a0000000-0000-4000-8000-000000000001';
+  v_before bigint;
+  v_json   jsonb;
+  v_out    text;
+  r        app_private.platform_audit_log%ROWTYPE;
+BEGIN
+  PERFORM _rm_reset();
+
+  -- Each write is its own statement and each count another, so no count can be
+  -- read ahead of the write it is meant to see.
+  v_before := _rm_audit_count();
+  v_json := _rm_json(owner, $q$SELECT platform_staff_list(NULL, 'email_asc', 10, 0)::text$q$);
+  PERFORM _rm_ok('staff list: exactly one audit row per call', _rm_audit_count() - v_before = 1);
+
+  SELECT * INTO r FROM app_private.platform_audit_log ORDER BY id DESC LIMIT 1;
+  PERFORM _rm_ok('staff list: the row is a read by the caller, in its role, about the staff table',
+    r.category = 'read' AND r.action = 'platform_read.staff_list' AND r.outcome = 'ok'
+    AND r.actor_user_id = owner AND r.actor_role = 'owner'
+    AND r.target_type = 'platform_staff' AND r.target_id IS NULL AND r.company_id IS NULL
+    AND r.before_value IS NULL
+    AND r.after_value -> 'request' ->> 'sort' = 'email_asc'
+    AND (r.after_value -> 'request' ->> 'limit')::int = 10
+    AND (r.after_value ->> 'returned')::int = jsonb_array_length(v_json -> 'items')
+    AND (r.after_value ->> 'total')::int = (v_json ->> 'total')::int);
+  PERFORM _rm_ok('staff list: the row records the request and the counts, and no address',
+    _rm_has_exactly(r.after_value, ARRAY['request', 'returned', 'total'])
+    AND r.after_value::text NOT LIKE '%@test.invalid%');
+
+  -- A staff member without the capability leaves its refusal.
+  v_before := _rm_audit_count();
+  v_json := _rm_json(support, 'SELECT platform_staff_list()::text');
+  PERFORM _rm_ok('staff list: a staff refusal is one denied row', _rm_audit_count() - v_before = 1);
+  SELECT * INTO r FROM app_private.platform_audit_log ORDER BY id DESC LIMIT 1;
+  PERFORM _rm_ok('… by that member, in its role, with the request it made and nothing it read',
+    r.outcome = 'denied' AND r.category = 'read' AND r.action = 'platform_read.staff_list'
+    AND r.actor_user_id = support AND r.actor_role = 'support'
+    AND r.after_value ? 'request' AND NOT r.after_value ? 'returned');
+
+  -- Nobody without an active staff role writes a row, or any company user
+  -- could fill the append-only log.
+  v_before := _rm_audit_count();
+  v_json := _rm_json(admin_a, 'SELECT platform_staff_list()::text');
+  v_json := _rm_json(disabled, 'SELECT platform_staff_list()::text');
+  PERFORM _rm_ok('staff list: a caller without an active staff role writes no row at all',
+    _rm_audit_count() = v_before);
+
+  -- The owner's own account, in a session Google minted: since 20260919130000
+  -- such a session exercises no platform role, so it is refused like a
+  -- stranger and, like a stranger, leaves no row.
+  v_before := _rm_audit_count();
+  v_out := _rm_do_amr(owner, '[{"method": "oauth", "timestamp": 1789416052}]', 'SELECT platform_staff_list()::text');
+  PERFORM _rm_ok('staff list: an owner''s Google session is refused',
+    v_out::jsonb = '{"ok": false, "reason": "not_authorized"}'::jsonb);
+  PERFORM _rm_ok('… and writes no row', _rm_audit_count() = v_before);
+
+  -- A broken contract raises before anything is read or recorded.
+  v_before := _rm_audit_count();
+  v_out := _rm_do(owner, $q$SELECT platform_staff_list(NULL, 'status_asc', 500, 0)::text$q$);
+  PERFORM _rm_ok('staff list: a broken argument raises 22023', v_out LIKE 'ERR 22023%');
+  PERFORM _rm_ok('… and records nothing', _rm_audit_count() = v_before);
+END $$;
+
+-- 11d. the argument contract
+
+DO $$
+DECLARE
+  owner constant uuid := '3b000000-0000-4000-8000-000000000001';
+BEGIN
+  PERFORM _rm_reset();
+
+  PERFORM _rm_ok('staff list: only the four listed sorts',
+    _rm_do(owner, $q$SELECT platform_staff_list(NULL, 'email_desc')::text$q$) LIKE 'ERR 22023%'
+    AND _rm_do(owner, $q$SELECT platform_staff_list(NULL, 'kennzeichen_asc')::text$q$) LIKE 'ERR 22023%'
+    AND (_rm_json(owner, $q$SELECT platform_staff_list(NULL, 'status_asc')::text$q$) ->> 'ok')::boolean
+    AND (_rm_json(owner, $q$SELECT platform_staff_list(NULL, 'email_asc')::text$q$) ->> 'ok')::boolean
+    AND (_rm_json(owner, $q$SELECT platform_staff_list(NULL, 'created_at_asc')::text$q$) ->> 'ok')::boolean
+    AND (_rm_json(owner, $q$SELECT platform_staff_list(NULL, 'created_at_desc')::text$q$) ->> 'ok')::boolean);
+  PERFORM _rm_ok('staff list: a NULL or empty sort is status_asc',
+    (_rm_json(owner, 'SELECT platform_staff_list(NULL, NULL)::text') ->> 'ok')::boolean
+    AND (_rm_json(owner, $q$SELECT platform_staff_list(NULL, '')::text$q$) ->> 'ok')::boolean);
+  PERFORM _rm_ok('staff list: the status filter takes active, disabled or nothing',
+    _rm_do(owner, $q$SELECT platform_staff_list('paused')::text$q$) LIKE 'ERR 22023%'
+    AND _rm_do(owner, $q$SELECT platform_staff_list('Active')::text$q$) LIKE 'ERR 22023%'
+    AND (_rm_json(owner, $q$SELECT platform_staff_list('active')::text$q$) ->> 'ok')::boolean
+    AND (_rm_json(owner, $q$SELECT platform_staff_list('disabled')::text$q$) ->> 'ok')::boolean
+    AND (_rm_json(owner, $q$SELECT platform_staff_list('')::text$q$) ->> 'ok')::boolean);
+  PERFORM _rm_ok('staff list: the page maximum and the offset ceiling of the other read models',
+    _rm_do(owner, 'SELECT platform_staff_list(NULL, NULL, 0, 0)::text') LIKE 'ERR 22023%'
+    AND _rm_do(owner, 'SELECT platform_staff_list(NULL, NULL, 101, 0)::text') LIKE 'ERR 22023%'
+    AND _rm_do(owner, 'SELECT platform_staff_list(NULL, NULL, 10, -1)::text') LIKE 'ERR 22023%'
+    AND _rm_do(owner, 'SELECT platform_staff_list(NULL, NULL, 10, 10001)::text') LIKE 'ERR 22023%'
+    AND (_rm_json(owner, 'SELECT platform_staff_list(NULL, NULL, 100, 10000)::text') ->> 'ok')::boolean
+    AND (_rm_json(owner, 'SELECT platform_staff_list(NULL, NULL, NULL, NULL)::text') ->> 'limit')::int = 50);
+END $$;
+
+-- 11e. the columns, and the rows
+
+DO $$
+DECLARE
+  owner    constant uuid := '3b000000-0000-4000-8000-000000000001';
+  disabled constant uuid := '3b000000-0000-4000-8000-000000000005';
+  in_co    constant uuid := '3b000000-0000-4000-8000-000000000007';
+  c_keys   constant text[] := ARRAY['created_at', 'created_by', 'created_by_email', 'disabled_at', 'email',
+                                    'invitation_pending', 'note', 'role', 'status', 'user_id'];
+  v        jsonb;
+  p1       jsonb;
+  p2       jsonb;
+  v_all    bigint;
+BEGIN
+  PERFORM _rm_reset();
+  SELECT count(*) INTO v_all FROM app_private.platform_staff;
+
+  v := _rm_json(owner, $q$SELECT platform_staff_list(NULL, 'status_asc', 100, 0)::text$q$);
+  PERFORM _rm_ok('staff list: total is every staff row, and one page holds them all here',
+    (v ->> 'total')::bigint = v_all AND jsonb_array_length(v -> 'items') = v_all AND v_all >= 7);
+  PERFORM _rm_ok('staff list: exactly the documented columns, in every row',
+    NOT EXISTS (SELECT 1 FROM jsonb_array_elements(v -> 'items') i
+                 WHERE NOT _rm_has_exactly(i, c_keys)));
+  PERFORM _rm_ok('staff list: no password, token, metadata, phone, sign-in time, company, flag or name, in any row',
+    NOT EXISTS (SELECT 1
+                  FROM jsonb_array_elements(v -> 'items') i,
+                       unnest(ARRAY['encrypted_password', 'confirmation_token', 'recovery_token', 'phone',
+                                    'raw_user_meta_data', 'raw_app_meta_data', 'last_sign_in_at',
+                                    'company_id', 'is_super_admin', 'full_name']) AS k
+                 WHERE i ? k));
+  PERFORM _rm_ok('staff list: each address is the account''s own sign-in address, from auth.users',
+    NOT EXISTS (SELECT 1 FROM jsonb_array_elements(v -> 'items') i
+                 WHERE (i ->> 'email') IS DISTINCT FROM
+                       (SELECT u.email::text FROM auth.users u WHERE u.id = (i ->> 'user_id')::uuid)));
+  PERFORM _rm_ok('staff list: every staff row is listed — the disabled one, and the one in a company that the user directory leaves out',
+    NOT EXISTS (SELECT 1 FROM app_private.platform_staff s
+                 WHERE NOT EXISTS (SELECT 1 FROM jsonb_array_elements(v -> 'items') i
+                                    WHERE (i ->> 'user_id')::uuid = s.user_id))
+    AND EXISTS (SELECT 1 FROM jsonb_array_elements(v -> 'items') i WHERE (i ->> 'user_id')::uuid = in_co)
+    AND EXISTS (SELECT 1 FROM jsonb_array_elements(v -> 'items') i WHERE (i ->> 'user_id')::uuid = disabled));
+  PERFORM _rm_ok('staff list: status and disabled_at follow the row',
+    (SELECT i ->> 'status' = 'disabled' AND (i ->> 'disabled_at') IS NOT NULL
+       FROM jsonb_array_elements(v -> 'items') i WHERE (i ->> 'user_id')::uuid = disabled)
+    AND (SELECT i ->> 'status' = 'active' AND (i ->> 'disabled_at') IS NULL AND i ->> 'role' = 'owner'
+       FROM jsonb_array_elements(v -> 'items') i WHERE (i ->> 'user_id')::uuid = owner));
+  PERFORM _rm_ok('staff list: status_asc puts every active member before every disabled one',
+    NOT EXISTS (
+      SELECT 1
+        FROM (SELECT i ->> 'status' AS cur,
+                     lag(i ->> 'status') OVER (ORDER BY ord) AS prev
+                FROM jsonb_array_elements(v -> 'items') WITH ORDINALITY AS t(i, ord)) s
+       WHERE s.prev = 'disabled' AND s.cur = 'active'));
+
+  v := _rm_json(owner, $q$SELECT platform_staff_list('disabled', 'status_asc', 100, 0)::text$q$);
+  PERFORM _rm_ok('staff list: the disabled filter answers exactly the disabled rows',
+    (v ->> 'total')::bigint = (SELECT count(*) FROM app_private.platform_staff WHERE disabled_at IS NOT NULL)
+    AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements(v -> 'items') i WHERE i ->> 'status' <> 'disabled'));
+  v := _rm_json(owner, $q$SELECT platform_staff_list('active', 'status_asc', 100, 0)::text$q$);
+  PERFORM _rm_ok('staff list: the active filter answers exactly the active rows',
+    (v ->> 'total')::bigint = (SELECT count(*) FROM app_private.platform_staff WHERE disabled_at IS NULL)
+    AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements(v -> 'items') i WHERE i ->> 'status' <> 'active'));
+
+  p1 := _rm_json(owner, $q$SELECT platform_staff_list(NULL, 'email_asc', 2, 0)::text$q$);
+  p2 := _rm_json(owner, $q$SELECT platform_staff_list(NULL, 'email_asc', 2, 2)::text$q$);
+  PERFORM _rm_ok('staff list: two pages of one sort do not overlap, and each carries the whole total',
+    (p1 ->> 'total')::bigint = v_all AND (p2 ->> 'total')::bigint = v_all
+    AND jsonb_array_length(p1 -> 'items') = 2 AND jsonb_array_length(p2 -> 'items') = 2
+    AND (p2 ->> 'offset')::int = 2
+    AND NOT EXISTS (SELECT (i ->> 'user_id') FROM jsonb_array_elements(p1 -> 'items') i
+                    INTERSECT
+                    SELECT (i ->> 'user_id') FROM jsonb_array_elements(p2 -> 'items') i));
+  PERFORM _rm_ok('staff list: email_asc is by address',
+    (SELECT bool_and(lower(s.prev) <= lower(s.cur))
+       FROM (SELECT lag(i ->> 'email') OVER (ORDER BY ord) AS prev, i ->> 'email' AS cur
+               FROM jsonb_array_elements(p1 -> 'items') WITH ORDINALITY AS t(i, ord)) s
+      WHERE s.prev IS NOT NULL));
+END $$;
+
+-- 11f. who granted it: the actor finding
+
+DO $$
+DECLARE
+  owner    constant uuid := '3b000000-0000-4000-8000-000000000001';
+  invitee  constant uuid := '3b000000-0000-4000-8000-000000000008';
+  v_from   bigint;
+  v        jsonb;
+  v_item   jsonb;
+  r        app_private.platform_audit_log%ROWTYPE;
+BEGIN
+  PERFORM _rm_reset();
+
+  -- A row written with no session. The owner row at the top of this file was
+  -- inserted by the connecting superuser with no claims at all, which is the
+  -- shape of the 20260916110000 backfill and of a statement run by hand as
+  -- supabase_admin: nobody to name as creator, and no actor on the trigger's row.
+  PERFORM _rm_ok('no session: the row names no creator',
+    (SELECT s.created_by IS NULL FROM app_private.platform_staff s WHERE s.user_id = owner));
+  PERFORM _rm_ok('no session: the trigger''s row has no actor and no role — where the NULLs on staging came from',
+    (SELECT count(*) >= 1 AND bool_and(l.actor_user_id IS NULL AND l.actor_role IS NULL)
+       FROM app_private.platform_audit_log l
+      WHERE l.action = 'platform_staff.insert' AND l.target_id = owner::text));
+
+  -- The same change made through the function, under a password session.
+  SELECT coalesce(max(l.id), 0) INTO v_from FROM app_private.platform_audit_log l;
+  v := _rm_json(owner, format('SELECT platform_staff_add(%L, %L, %L)::text', invitee, 'owner', 'rm grant'));
+  PERFORM _rm_ok('grant: an owner adds a company-less account through platform_staff_add',
+    (v ->> 'success') = 'true');
+  PERFORM _rm_reset();
+
+  PERFORM _rm_ok('grant: the table row names the caller as its creator',
+    (SELECT s.created_by = owner AND s.role = 'owner' AND s.disabled_at IS NULL
+       FROM app_private.platform_staff s WHERE s.user_id = invitee));
+
+  SELECT * INTO r FROM app_private.platform_audit_log l
+   WHERE l.id > v_from AND l.action = 'platform_staff.insert' AND l.target_id = invitee::text
+   ORDER BY l.id;
+  PERFORM _rm_ok('grant: the trigger''s row carries the caller as actor, in its role, and the creator in the row it records',
+    r.id IS NOT NULL AND r.category = 'staff' AND r.outcome = 'ok'
+    AND r.actor_user_id = owner AND r.actor_role = 'owner'
+    AND r.after_value ->> 'created_by' = owner::text);
+
+  SELECT * INTO r FROM app_private.platform_audit_log l
+   WHERE l.id > v_from AND l.action = 'platform_staff.add' AND l.target_id = invitee::text
+   ORDER BY l.id;
+  PERFORM _rm_ok('grant: the function''s own row carries the same actor and role',
+    r.id IS NOT NULL AND r.category = 'staff' AND r.outcome = 'ok'
+    AND r.actor_user_id = owner AND r.actor_role = 'owner');
+
+  v := _rm_json(owner, $q$SELECT platform_staff_list(NULL, 'email_asc', 100, 0)::text$q$);
+  SELECT i INTO v_item FROM jsonb_array_elements(v -> 'items') i WHERE (i ->> 'user_id')::uuid = invitee;
+  PERFORM _rm_ok('grant: the list names who granted it, by address, and that the invitation is still open',
+    v_item ->> 'created_by' = owner::text
+    AND v_item ->> 'created_by_email' = 'rm-owner@test.invalid'
+    AND v_item ->> 'email' = 'rm-invitee@test.invalid'
+    AND (v_item ->> 'invitation_pending')::boolean
+    AND v_item ->> 'role' = 'owner' AND v_item ->> 'status' = 'active');
+  SELECT i INTO v_item FROM jsonb_array_elements(v -> 'items') i WHERE (i ->> 'user_id')::uuid = owner;
+  PERFORM _rm_ok('grant: a row written with no session says so — no creator, no creator address — and its invitation is not open',
+    (v_item -> 'created_by') = 'null'::jsonb
+    AND (v_item -> 'created_by_email') = 'null'::jsonb
+    AND NOT (v_item ->> 'invitation_pending')::boolean);
+
+  -- Disabling and enabling through the functions name the caller too.
+  SELECT coalesce(max(l.id), 0) INTO v_from FROM app_private.platform_audit_log l;
+  v := _rm_json(owner, format('SELECT platform_staff_disable(%L)::text', invitee));
+  PERFORM _rm_ok('disable: succeeds while other owners remain', (v ->> 'success') = 'true');
+  PERFORM _rm_reset();
+  PERFORM _rm_ok('disable: the trigger''s row carries the caller as actor, in its role',
+    (SELECT count(*) = 1 AND bool_and(l.actor_user_id = owner AND l.actor_role = 'owner'
+                                     AND (l.after_value ->> 'disabled_at') IS NOT NULL)
+       FROM app_private.platform_audit_log l
+      WHERE l.id > v_from AND l.action = 'platform_staff.update' AND l.target_id = invitee::text));
+
+  v := _rm_json(owner, $q$SELECT platform_staff_list('disabled', 'status_asc', 100, 0)::text$q$);
+  PERFORM _rm_ok('disable: the list shows the member disabled, still with its grantor',
+    EXISTS (SELECT 1 FROM jsonb_array_elements(v -> 'items') i
+             WHERE (i ->> 'user_id')::uuid = invitee
+               AND i ->> 'status' = 'disabled'
+               AND i ->> 'created_by_email' = 'rm-owner@test.invalid'));
+
+  SELECT coalesce(max(l.id), 0) INTO v_from FROM app_private.platform_audit_log l;
+  v := _rm_json(owner, format('SELECT platform_staff_enable(%L)::text', invitee));
+  PERFORM _rm_ok('enable: an owner row comes back', (v ->> 'success') = 'true');
+  PERFORM _rm_reset();
+  PERFORM _rm_ok('enable: the trigger''s row carries the caller as actor, in its role',
+    (SELECT count(*) = 1 AND bool_and(l.actor_user_id = owner AND l.actor_role = 'owner'
+                                     AND (l.after_value ->> 'disabled_at') IS NULL)
+       FROM app_private.platform_audit_log l
+      WHERE l.id > v_from AND l.action = 'platform_staff.update' AND l.target_id = invitee::text));
+END $$;
+
+-- 11g. the plan, and the namespace
+
+DO $$
+DECLARE
+  owner    constant uuid := '3b000000-0000-4000-8000-000000000001';
+  readonly constant uuid := '3b000000-0000-4000-8000-000000000004';
+  v_plan   text;
+BEGIN
+  PERFORM _rm_reset();
+
+  v_plan := _rm_staff_plan();
+  RAISE NOTICE 'staff list plan:%', E'\n' || v_plan;
+  PERFORM _rm_ok('staff list: the plan reads neither fahrtenbuch_trips nor receipts',
+    v_plan !~ 'fahrtenbuch_trips' AND v_plan !~ 'receipts');
+  PERFORM _rm_ok('staff list: platform_staff and user_profiles are each scanned once, auth.users once per join at most',
+    _rm_scans(v_plan, 'platform_staff') = 1
+    AND _rm_scans(v_plan, 'user_profiles') = 1
+    AND _rm_scans(v_plan, 'users') BETWEEN 1 AND 2);
+
+  PERFORM _rm_ok('platform_audit_record refuses platform_read.staff_list, whatever the role and outcome',
+    _rm_try(owner,    $q$SELECT platform_audit_record('read', 'platform_read.staff_list', 'ok')::text$q$) LIKE 'ERR 22023%'
+    AND _rm_try(readonly, $q$SELECT platform_audit_record('read', 'platform_read.staff_list', 'denied')::text$q$) LIKE 'ERR 22023%');
 END $$;
 
 DO $$ BEGIN RAISE NOTICE '── platform-readmodels: all checks passed ──'; END $$;

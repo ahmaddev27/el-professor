@@ -1,23 +1,24 @@
 /**
- * The platform team, read and changed (plan 3.5 / 3.6c).
+ * The platform team, read and changed (plan 3.5 / 3.12).
  *
- * Writes are the three merged RPCs, each one transaction that checks
- * `staff.manage`, applies the rule and writes its own audit row:
- * `platform_staff_add`, `platform_staff_disable`, `platform_staff_enable`.
- * They go through `callPlatformRpc`, which throws the German sentence the
- * function wrote, carrying its reason.
+ * Reading is `platform_staff_list`, the audited read model of migration
+ * 20260920140000: one POST per page, one `platform_read.staff_list` row in the
+ * audit log per call, `staff.manage` required. See `platformStaffRoster.ts`.
  *
- * **Only `owner` may be created or re-enabled.** The refusal now lives in
- * `platform_staff_add` and `platform_staff_enable` themselves, which answer with
- * reason `role_requires_3_3`; this module never offers another role in the first
- * place, so the two agree. The policy argument the reason is named after is
- * spent: 20260917130000 moved the tenant policies onto capabilities and its
- * self-check raises if any policy, or any function a policy calls, still reads
- * is_user_super_admin(). Lifting the restriction is therefore a migration that
- * redefines those two functions — plan step 3.12 — and not a policy problem.
+ * Writes are the three RPCs, each one transaction that checks `staff.manage`,
+ * applies the rule and writes its own audit row: `platform_staff_add`,
+ * `platform_staff_disable`, `platform_staff_enable`. They go through
+ * `callPlatformRpc`, which throws the German sentence the function wrote,
+ * carrying its reason.
  *
- * Reading is the audit log — see `platformStaffRoster.ts` for why there is no
- * list to read instead.
+ * **Only `owner` may be created or re-enabled.** `platform_staff_add` and
+ * `platform_staff_enable` refuse every other role with reason
+ * `role_requires_3_3`, and this module never offers one. The technical reasons
+ * are gone — 3.3 moved the tenant policies onto capabilities, and
+ * 20260920100000 stopped a read-only support session writing company files —
+ * so what keeps the refusal is a decision still to be taken: enabling the
+ * other roles decides which accounts read every customer's data, and it ships
+ * as a change of its own, not as part of this screen.
  *
  * An invitation is the `platform-staff` edge function, which creates the
  * account, writes a company-less `pending_invite` profile, adds the staff row
@@ -27,64 +28,41 @@
  */
 import { supabase } from './supabase';
 import { callPlatformRpc, type PlatformRpcResult } from './platformRpc';
-import { fetchAuditPage } from './platformAuditClient';
-import { AUDIT_PAGE_SIZE, appendAuditRows, type AuditCursor, type AuditRow } from './platformAuditLog';
 import {
-  STAFF_ACTION_PREFIX,
-  rosterFromAuditRows,
-  type StaffMember,
-} from './platformStaffRoster';
+  DIRECTORY_PAGE_SIZE,
+  directoryOffset,
+  parsePlatformReadPage,
+  parseStaffRow,
+  type PlatformReadResult,
+  type PlatformStaffRow,
+  type StaffSort,
+} from './platformReadModels';
+import { collectStaffRoster, type StaffRosterResult } from './platformStaffRoster';
 
 /**
- * The only role a staff row may carry; see the header. The name keeps the
- * database's `role_requires_3_3` reason findable — the rule itself now lives in
- * platform_staff_add and platform_staff_enable, and plan step 3.12 is what
- * lifts it.
+ * The only role a staff row may carry today; see the header. The name keeps
+ * the database's `role_requires_3_3` reason findable.
  */
 export const STAFF_ROLE_UNTIL_3_3 = 'owner';
 
-/**
- * How far back the roster reads. Each page is one audit row per change to the
- * staff table — a handful per member — so twenty pages covers any real team
- * many times over. Beyond that the screen says the roster may be incomplete
- * rather than showing a partial one as if it were whole.
- */
-const MAX_ROSTER_PAGES = 20;
+/** Active members first, then by address: the order the page shows. */
+const ROSTER_SORT: StaffSort = 'status_asc';
 
-export type StaffRosterResult =
-  | { ok: true; members: StaffMember[]; truncated: boolean; unreadable: number }
-  | { ok: false; reason: string };
+/** One page of the team. Throws on a transport error; a refusal is a value. */
+export async function fetchStaffPage(pageIndex: number): Promise<PlatformReadResult<PlatformStaffRow>> {
+  const { data, error } = await supabase.rpc('platform_staff_list', {
+    p_status: null,
+    p_sort: ROSTER_SORT,
+    p_limit: DIRECTORY_PAGE_SIZE,
+    p_offset: directoryOffset(pageIndex),
+  });
+  if (error) throw new Error(error.message);
+  return parsePlatformReadPage(data, parseStaffRow);
+}
 
-/**
- * Today's team, folded out of the log. Needs `audit.read` — the same role that
- * holds `staff.manage` today — and a refusal is returned, not thrown, so the
- * screen can name it.
- */
-export async function loadStaffRoster(): Promise<StaffRosterResult> {
-  let rows: AuditRow[] = [];
-  let cursor: AuditCursor | null = null;
-
-  for (let page = 0; page < MAX_ROSTER_PAGES; page += 1) {
-    const result = await fetchAuditPage({
-      actionPrefix: STAFF_ACTION_PREFIX,
-      // Successful rows only. The prefix also matches the RPCs' `denied` rows,
-      // which any non-owner can produce at 30 a minute by calling
-      // platform_staff_add; roughly an hour of that pushes the trigger rows the
-      // roster is built from past this window, and a real member drops off the
-      // screen that answers "who has access". The trigger rows and the RPC rows
-      // that changed anything are all `ok`, so nothing real is lost.
-      outcome: 'ok',
-      cursor,
-      limit: AUDIT_PAGE_SIZE,
-    });
-    if (!result.ok) return result;
-
-    rows = appendAuditRows(rows, result.items);
-    cursor = result.nextCursor;
-    if (!cursor) return { ok: true, ...rosterFromAuditRows(rows), truncated: false };
-  }
-
-  return { ok: true, ...rosterFromAuditRows(rows), truncated: true };
+/** Today's team, every page of it. */
+export function loadStaffRoster(): Promise<StaffRosterResult> {
+  return collectStaffRoster(fetchStaffPage);
 }
 
 /** An existing account joins the team. It must have no company of its own. */
