@@ -77,6 +77,13 @@
                        tier; and the one path the fix does not close — a period
                        revived by a payment — is recorded as today's behaviour,
                        tagged HOLE[revival], so that closing it flips a line
+   10. the kept void   20260920170000. A period a manual edit voided as
+                       `replaced` stays void through the sweep, a re-apply and a
+                       re-opened invoice, so the company the administrator set
+                       to expired (or inactive) stays refused; an explicit
+                       payment of that invoice brings it back; a period the
+                       invoice's own cancellation voided comes back when the
+                       invoice is paid again; and a second sweep changes nothing
 
   The companies here are created inside this file rather than in seed.sql for
   the same reason tenant-state.sql creates its own: they exist to be refused,
@@ -1930,6 +1937,8 @@ END $$;
   old tier off a period that has not ended, which is exactly the rule. Closing
   it is a change to U2's rule, not to the recompute, and it is the owner's
   (HANDOFF.md). When it is closed, the last assertion here flips on purpose.
+  20260920170000 (section 10) does not close it: that migration decides which
+  voided periods may come back, and this one was never voided — it ended.
 
   The due date sits before the month it invoices, so the unpaid row ends at the
   month's start (the clamp in 5c) and has ended on every day the kit can run. A
@@ -1970,6 +1979,257 @@ BEGIN
     (SELECT plan FROM companies WHERE id = v_co) = 'basic');
 END $$;
 
-DO $$ BEGIN RAISE NOTICE '── subscriptions (plan 3.F, steps U1, U2 and U3, and the tier fix): all checks passed ──'; END $$;
+-- ─── 10. a period something else replaced stays replaced (20260920170000) ──
+--
+-- The defect: app_private.subscription_invoice_apply looked an invoice's
+-- coverage row up whatever its status and set it back to active. A manual edit
+-- voids every live row of the company as `replaced`, the invoice's included, so
+-- the nightly invoice sweep would have re-admitted, every night, a company an
+-- administrator had set to expired.
+--
+-- The rule since 20260920170000: a voided invoice period comes back only when
+-- its own invoice voided it (`invoice_canceled`) and that invoice is no longer
+-- cancelled, or when that invoice is explicitly paid. A period voided as
+-- `replaced` is left exactly as it is by the sweep, by a re-apply and by
+-- re-opening the invoice.
+--
+-- Claims about access use the current calendar month, as section 5 does, so
+-- "the month has not ended" holds on every day the kit can run. Writes and the
+-- reads of them are separate statements throughout (5d says why).
+
+-- 10a. the defect: a paid invoice, a manual `expired`, the sweep
+DO $$
+DECLARE
+  v_owner constant uuid := '50000000-0000-4000-8000-000000000001';
+  v_month constant integer := extract(month FROM (now() AT TIME ZONE 'Europe/Berlin'))::integer;
+  v_year  constant integer := extract(year  FROM (now() AT TIME ZONE 'Europe/Berlin'))::integer;
+  v_co    uuid;
+  v_inv   uuid;
+  v_row   subscription_coverage%ROWTYPE;
+  v_after subscription_coverage%ROWTYPE;
+  v_out   text;
+BEGIN
+  v_co  := _sub_billed_company('void-kept');
+  v_inv := _sub_invoice('void-kept', v_co, v_year, v_month, make_date(v_year, v_month, 1) + 4, 20);
+
+  v_out := _sub_do(v_owner, format('SELECT platform_invoice_mark_paid(%L, %s)::text', v_inv, 2000));
+  PERFORM _sub_ok('replaced: the invoice for this month is paid', _sub_succeeded(v_out));
+  PERFORM _sub_ok('replaced: …so the company is admitted on it, and there is access to lose',
+    _sub_admitted(_sub_id('user:void-kept')));
+
+  -- The administrator's decision: the Abo-Status modal, `expired`, with an end
+  -- that has passed. It records that period and voids every other live one.
+  v_out := _sub_do(v_owner, format(
+    'SELECT update_company_subscription_manual(%L, %L, %L, %L, NULL, %L)::text',
+    v_co, 'expired', now() - interval '2 months', now() - interval '1 day', 'sub test: expired by hand'));
+  PERFORM _sub_ok('replaced: the manual edit to expired answers success', _sub_succeeded(v_out));
+
+  SELECT * INTO v_row FROM subscription_coverage
+   WHERE company_id = v_co AND source = 'invoice' AND source_id = v_inv;
+  PERFORM _sub_ok('replaced: …it voided the invoice''s period, as replaced',
+    v_row.status = 'void' AND v_row.void_reason = 'replaced');
+  PERFORM _sub_ok('replaced: …and the company is refused, expired',
+    NOT _sub_admitted(_sub_id('user:void-kept'))
+    AND (SELECT subscription_status FROM companies WHERE id = v_co) = 'expired');
+
+  -- The nightly sweep, both halves, in the order the cron line runs them.
+  PERFORM app_private.subscription_invoices_apply_all();
+  PERFORM app_private.recompute_all_company_subscriptions();
+
+  SELECT * INTO v_after FROM subscription_coverage WHERE id = v_row.id;
+  PERFORM _sub_ok('replaced: the sweep leaves the replaced period void, and says why (before 20260920170000 it set it active again)',
+    v_after.status = 'void' AND v_after.void_reason = 'replaced');
+  PERFORM _sub_ok('replaced: …exactly as it was recorded: dates, grant, price and note',
+    v_after.period_start = v_row.period_start
+    AND v_after.period_end = v_row.period_end
+    AND v_after.grants_access = v_row.grants_access
+    AND v_after.price_cents IS NOT DISTINCT FROM v_row.price_cents
+    AND v_after.note IS NOT DISTINCT FROM v_row.note);
+  PERFORM _sub_ok('replaced: …so the company the administrator set to expired stays refused',
+    NOT _sub_admitted(_sub_id('user:void-kept'))
+    AND (SELECT subscription_status FROM companies WHERE id = v_co) = 'expired');
+
+  -- Asked directly, the rule says why it did nothing.
+  v_out := app_private.subscription_invoice_apply(v_inv);
+  PERFORM _sub_ok(format('replaced: applied again, the rule answers superseded (answered %s)', v_out),
+    v_out = 'superseded');
+  PERFORM _sub_ok('replaced: …and still leaves the row void',
+    (SELECT status = 'void' AND void_reason = 'replaced' FROM subscription_coverage WHERE id = v_row.id));
+
+  -- Re-opening the invoice is an act on it, but one that withdraws access. It
+  -- must not turn a replaced period into a grace window.
+  v_out := _sub_do(v_owner, format('SELECT platform_invoice_mark_unpaid(%L)::text', v_inv));
+  PERFORM _sub_ok('replaced: re-opening the invoice is accepted', _sub_succeeded(v_out));
+  PERFORM _sub_ok('replaced: …and leaves the replaced period void',
+    (SELECT status = 'void' AND void_reason = 'replaced' FROM subscription_coverage WHERE id = v_row.id));
+  PERFORM _sub_ok('replaced: …so the company stays refused',
+    NOT _sub_admitted(_sub_id('user:void-kept')));
+  PERFORM _sub_ok('replaced: …and its audit row records why nothing moved',
+    (SELECT a.after_value ->> 'coverage'
+       FROM app_private.platform_audit_log a
+      WHERE a.action = 'invoice.mark_unpaid' AND a.outcome = 'ok' AND a.target_id = v_inv::text
+      ORDER BY a.id DESC
+      LIMIT 1) = 'superseded');
+
+  -- …and the sweep after it changes nothing either.
+  PERFORM app_private.subscription_invoices_apply_all();
+  PERFORM app_private.recompute_all_company_subscriptions();
+  PERFORM _sub_ok('replaced: the sweep after the re-opening still leaves it void, and the company refused',
+    (SELECT status = 'void' AND void_reason = 'replaced' FROM subscription_coverage WHERE id = v_row.id)
+    AND NOT _sub_admitted(_sub_id('user:void-kept')));
+
+  -- An explicit payment of that invoice is the one act that brings the period
+  -- back: the money arrived after the administrator's decision.
+  v_out := _sub_do(v_owner, format('SELECT platform_invoice_mark_paid(%L, %s)::text', v_inv, 2000));
+  PERFORM _sub_ok('replaced: the invoice is then paid, explicitly', _sub_succeeded(v_out));
+
+  SELECT * INTO v_after FROM subscription_coverage WHERE id = v_row.id;
+  PERFORM _sub_ok('replaced: …which brings the same row back, live and granting, for the month it names',
+    v_after.status = 'active' AND v_after.void_reason IS NULL AND v_after.grants_access
+    AND v_after.period_end = _sub_period(v_year, v_month, 'end'));
+  PERFORM _sub_ok('replaced: …still one row for the invoice',
+    (SELECT count(*) FROM subscription_coverage WHERE company_id = v_co AND source = 'invoice') = 1);
+  PERFORM _sub_ok('replaced: …and the company is admitted again',
+    _sub_admitted(_sub_id('user:void-kept')));
+END $$;
+
+-- 10b. the other writer of `replaced`: a manual `inactive` with no date voids
+--      every live row without recording one (20260919150000:1393-1398)
+DO $$
+DECLARE
+  v_owner constant uuid := '50000000-0000-4000-8000-000000000001';
+  v_month constant integer := extract(month FROM (now() AT TIME ZONE 'Europe/Berlin'))::integer;
+  v_year  constant integer := extract(year  FROM (now() AT TIME ZONE 'Europe/Berlin'))::integer;
+  v_co    uuid;
+  v_inv   uuid;
+  v_out   text;
+BEGIN
+  v_co  := _sub_billed_company('void-kept-nodate');
+  v_inv := _sub_invoice('void-kept-nodate', v_co, v_year, v_month, make_date(v_year, v_month, 1) + 4, 20);
+
+  v_out := _sub_do(v_owner, format('SELECT platform_invoice_mark_paid(%L, %s)::text', v_inv, 2000));
+  PERFORM _sub_ok('replaced, no date: the invoice for this month is paid', _sub_succeeded(v_out));
+  PERFORM _sub_ok('replaced, no date: …and admits the company',
+    _sub_admitted(_sub_id('user:void-kept-nodate')));
+
+  v_out := _sub_do(v_owner, format(
+    'SELECT update_company_subscription_manual(%L, %L, NULL, NULL, NULL, %L)::text',
+    v_co, 'inactive', 'sub test: inactive by hand'));
+  PERFORM _sub_ok('replaced, no date: the manual edit to inactive answers success', _sub_succeeded(v_out));
+  PERFORM _sub_ok('replaced, no date: …it voided the invoice''s period as replaced, and the company is refused',
+    (SELECT status = 'void' AND void_reason = 'replaced'
+       FROM subscription_coverage WHERE company_id = v_co AND source = 'invoice' AND source_id = v_inv)
+    AND NOT _sub_admitted(_sub_id('user:void-kept-nodate')));
+
+  PERFORM app_private.subscription_invoices_apply_all();
+  PERFORM app_private.recompute_all_company_subscriptions();
+
+  PERFORM _sub_ok('replaced, no date: the sweep leaves it void',
+    (SELECT status = 'void' AND void_reason = 'replaced'
+       FROM subscription_coverage WHERE company_id = v_co AND source = 'invoice' AND source_id = v_inv));
+  PERFORM _sub_ok('replaced, no date: …and the company stays refused, inactive with no date',
+    NOT _sub_admitted(_sub_id('user:void-kept-nodate'))
+    AND (SELECT subscription_status = 'inactive' AND subscription_expires_at IS NULL
+           FROM companies WHERE id = v_co));
+END $$;
+
+-- 10c. the control: a period its own invoice's cancellation voided comes back
+--      when that invoice is paid again, through the sweep
+DO $$
+DECLARE
+  v_owner constant uuid := '50000000-0000-4000-8000-000000000001';
+  v_month constant integer := extract(month FROM (now() AT TIME ZONE 'Europe/Berlin'))::integer;
+  v_year  constant integer := extract(year  FROM (now() AT TIME ZONE 'Europe/Berlin'))::integer;
+  v_co    uuid;
+  v_inv   uuid;
+  v_id    uuid;
+  v_row   subscription_coverage%ROWTYPE;
+  v_out   text;
+BEGIN
+  v_co  := _sub_billed_company('void-revive');
+  v_inv := _sub_invoice('void-revive', v_co, v_year, v_month, make_date(v_year, v_month, 1) + 4, 20);
+
+  v_out := _sub_do(v_owner, format('SELECT platform_invoice_mark_paid(%L, %s)::text', v_inv, 2000));
+  PERFORM _sub_ok('cancelled, then paid: the invoice is paid', _sub_succeeded(v_out));
+  v_out := _sub_do(v_owner, format('SELECT platform_invoice_cancel(%L)::text', v_inv));
+  PERFORM _sub_ok('cancelled, then paid: …and then cancelled', _sub_succeeded(v_out));
+
+  SELECT * INTO v_row FROM subscription_coverage
+   WHERE company_id = v_co AND source = 'invoice' AND source_id = v_inv;
+  v_id := v_row.id;
+  PERFORM _sub_ok('cancelled, then paid: the cancellation voided the period, naming itself',
+    v_row.status = 'void' AND v_row.void_reason = 'invoice_canceled');
+  PERFORM _sub_ok('cancelled, then paid: …and the company is refused',
+    NOT _sub_admitted(_sub_id('user:void-revive')));
+
+  -- No RPC takes an invoice out of `canceled` — mark_paid refuses it — but the
+  -- table's own UPDATE policy lets a holder of billing.manage do it, and so can
+  -- an operator. This is the operator, as the owner of the table.
+  UPDATE subscription_invoices SET status = 'paid' WHERE id = v_inv;
+
+  PERFORM app_private.subscription_invoices_apply_all();
+  PERFORM app_private.recompute_all_company_subscriptions();
+
+  SELECT * INTO v_row FROM subscription_coverage WHERE id = v_id;
+  PERFORM _sub_ok('cancelled, then paid: the sweep brings the same row back, live and granting, for its month',
+    v_row.status = 'active' AND v_row.void_reason IS NULL AND v_row.grants_access
+    AND v_row.period_end = _sub_period(v_year, v_month, 'end'));
+  PERFORM _sub_ok('cancelled, then paid: …still one row for the invoice (one invoice, one period)',
+    (SELECT count(*) FROM subscription_coverage WHERE company_id = v_co AND source = 'invoice') = 1);
+  PERFORM _sub_ok('cancelled, then paid: …and the company is admitted again',
+    _sub_admitted(_sub_id('user:void-revive')));
+END $$;
+
+-- 10d. the sweep run twice changes nothing the second time
+DO $$
+DECLARE
+  v_rows      bigint;
+  v_replaced  bigint;
+  v_cov_diff  bigint;
+  v_co_diff   bigint;
+BEGIN
+  PERFORM app_private.subscription_invoices_apply_all();
+  PERFORM app_private.recompute_all_company_subscriptions();
+
+  CREATE TEMP TABLE _sub_sweep_cov AS
+    SELECT id, company_id, source, source_id, period_start, period_end, grants_access,
+           plan, price_cents, status, void_reason, note
+      FROM subscription_coverage;
+  CREATE TEMP TABLE _sub_sweep_co AS
+    SELECT id, subscription_status, subscription_expires_at, plan
+      FROM companies;
+
+  SELECT count(*) INTO v_rows FROM _sub_sweep_cov WHERE source = 'invoice';
+  SELECT count(*) INTO v_replaced FROM _sub_sweep_cov
+   WHERE source = 'invoice' AND status = 'void' AND void_reason = 'replaced';
+  PERFORM _sub_ok(format('sweep twice: there are invoice periods to walk (%s), %s of them replaced, so the check below is not vacuous',
+                         v_rows, v_replaced),
+    v_rows > 0 AND v_replaced > 0);
+
+  PERFORM app_private.subscription_invoices_apply_all();
+  PERFORM app_private.recompute_all_company_subscriptions();
+
+  SELECT count(*) INTO v_cov_diff FROM (
+    (SELECT id, company_id, source, source_id, period_start, period_end, grants_access,
+            plan, price_cents, status, void_reason, note FROM subscription_coverage
+     EXCEPT SELECT * FROM _sub_sweep_cov)
+    UNION ALL
+    (SELECT * FROM _sub_sweep_cov
+     EXCEPT SELECT id, company_id, source, source_id, period_start, period_end, grants_access,
+                   plan, price_cents, status, void_reason, note FROM subscription_coverage)) d;
+  SELECT count(*) INTO v_co_diff FROM (
+    (SELECT id, subscription_status, subscription_expires_at, plan FROM companies
+     EXCEPT SELECT * FROM _sub_sweep_co)
+    UNION ALL
+    (SELECT * FROM _sub_sweep_co
+     EXCEPT SELECT id, subscription_status, subscription_expires_at, plan FROM companies)) d;
+
+  PERFORM _sub_ok(format('sweep twice: the second run changes no coverage row (%s differ)', v_cov_diff),
+    v_cov_diff = 0);
+  PERFORM _sub_ok(format('sweep twice: …and no company''s status, expiry or tier (%s differ)', v_co_diff),
+    v_co_diff = 0);
+END $$;
+
+DO $$ BEGIN RAISE NOTICE '── subscriptions (plan 3.F, steps U1, U2 and U3, the tier fix and the kept void): all checks passed ──'; END $$;
 
 ROLLBACK;
