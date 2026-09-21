@@ -123,6 +123,15 @@ describe('refusalFromRpcError', () => {
     expect(refusalFromRpcError({ code: '42501', hint: 'receipt_payment_locked' })).toBe('receipt_payment_locked');
   });
 
+  // 20260921110010 (plan 3.13a): the RPCs refuse a platform context themselves.
+  // Its own reason, not the plain not_authorized a bare 42501 would map to, and
+  // the sentence the screens already show for the same rule.
+  it("reads the database's platform-context refusal, and says it the way the screens do", () => {
+    expect(refusalFromRpcError({ code: '42501', hint: 'platform_session_not_allowed' })).toBe('platform_session_not_allowed');
+    expect(REFUSAL_MESSAGE_KEYS.platform_session_not_allowed).toBe(REFUSAL_MESSAGE_KEYS.company_mismatch);
+    expect(outcomeIsUnknown('platform_session_not_allowed')).toBe(false);
+  });
+
   it('never matches the German message', () => {
     expect(refusalFromRpcError({ code: 'P0001', hint: null, message: 'overpayment' })).toBe('unexpected');
   });

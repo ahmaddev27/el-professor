@@ -113,6 +113,10 @@ const DATABASE_REFUSALS = [
   'invalid_path',
   'receipt_voided',
   'receipt_payment_locked',
+  // 20260921110010: a platform account inside a context, in either mode. The
+  // screens refuse first (receiptScope), so this reaches one only when that
+  // check was bypassed.
+  'platform_session_not_allowed',
 ] as const;
 
 export type DatabaseRefusal = (typeof DATABASE_REFUSALS)[number];
@@ -208,6 +212,8 @@ export const REFUSAL_MESSAGE_KEYS: Record<ReceiptActionRefusal, TranslationKey> 
   invalid_path: 'gq.refusal.invalidPath',
   receipt_voided: 'gq.refusal.receiptVoided',
   receipt_payment_locked: 'gq.refusal.receiptPaymentLocked',
+  // The database's own copy of company_mismatch, so the same sentence.
+  platform_session_not_allowed: 'gq.refusal.companyMismatch',
   company_mismatch: 'gq.refusal.companyMismatch',
   no_company: 'gq.refusal.noCompany',
   stale_figures: 'gq.refusal.staleFigures',
@@ -450,12 +456,13 @@ export type ReceiptScope = 'own_company' | 'other_company' | 'no_company';
  *   consumes a gapless number and moves cash, and the only undo is a Storno,
  *   which stays on the record itself. One mistake leaves two permanent marks.
  *
- * **This refusal is the browser's alone, and that is the open half.** All three
- * RPCs still succeed inside a support context, so the rule binds only callers
- * who come through these screens: a staff member who can open a context can
- * call them straight through PostgREST with their own token and the anon key
- * that ships in the bundle. Moving it into the three functions is the follow-up
- * recorded in HANDOFF.md.
+ * **The database enforces it too, since 20260921110010 (plan 3.13a).** Until
+ * then this refusal was the browser's alone: all three RPCs succeeded inside a
+ * support context, so a staff member who could open one could call them
+ * straight through PostgREST with their own token. Each RPC now refuses a
+ * caller inside a platform context, in either mode, with 42501 and the reason
+ * `platform_session_not_allowed`, before it reads anything. This function stays
+ * the first wall, so the screens say why before a request is ever sent.
  */
 export function receiptScope({
   companyId,
