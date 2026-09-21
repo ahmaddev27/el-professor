@@ -63,7 +63,7 @@ const STATE_VARIANTS = [
   { width: 375, theme: 'dark' },
 ];
 
-const SHOTS = [
+const BATCH1_SHOTS = [
   { name: 'fahrzeuge', query: { screen: 'fahrzeuge' } },
   { name: 'fixkosten', query: { screen: 'fixkosten' } },
   { name: 'fahrzeuge-formular', query: { screen: 'fahrzeuge' }, act: openAdd, dialog: true, variants: STATE_VARIANTS },
@@ -80,6 +80,9 @@ const SHOTS = [
   { name: 'fahrzeuge-en', query: { screen: 'fahrzeuge', lang: 'en' }, variants: [{ width: 1280, theme: 'light' }] },
   { name: 'fixkosten-en', query: { screen: 'fixkosten', lang: 'en' }, variants: [{ width: 375, theme: 'light' }] },
 ];
+
+// A later batch keeps its list in its own module, design-harness/shots-<batch>.mjs.
+const SHOTS = batch === 'batch1' ? BATCH1_SHOTS : (await import(`./shots-${batch}.mjs`)).SHOTS;
 
 const allVariants = WIDTHS.flatMap(width => THEMES.map(theme => ({ width, theme })));
 
