@@ -325,7 +325,7 @@ Start here when you pick up this project. Read it together with [CLAUDE.md](CLAU
   - **The two sweeps: U3 does not change what they would do.** It touches neither the recompute nor the invoice rule, so the number of companies U3 moves through them is 0 by construction. The staging dry run of 18.09 (zero changes) was taken before U2 went live on 19.09 and before any invoice was touched through it, though, so re-measure with the dry run below before installing either line. Read its answer for two things:
     1. **Any e2e company among those losing access.** A company that `company-signup` created after U1 and that the old script admitted by hand has no coverage, so the sweep would lock it and the suite with it. Run `cd e2e && npm run setup` once (it now records their coverage), then run the dry run again.
     2. **`plan_changes`.** A company whose every granting period has ended loses a tier set through `platform_company_set_plan` at the next recompute. The recompute's plan query has no end filter, so it reads the tier off the ended row, and set_plan carries the tier only onto periods that have not ended. Its own kit comment says "the recompute never reads it", which is true only while a live period exists. A redemption or a manual edit records the new tier first and is unaffected, but the daily sweep is not. **The candidate fix is one line**: add `AND (c.period_end IS NULL OR c.period_end > v_now)` to the recompute's plan query. It is a change to what the recompute derives, so it waits for the owner with this count, and U3 does not make it. **Made since, in `20260920150000` (entry below).** Once that is live, `plan_changes` counts only companies whose tier both bodies move — in practice an invoice period revived by a payment (`HOLE[revival]`).
-  - **The dry run** (read-only in effect: it ends in ROLLBACK). Run it as `supabase_admin`, because `postgres` gets `permission denied` on `app_private` functions (measured on staging). Replace the directory with `/srv/PRO/deploy` for production.
+  - **The dry run** (read-only in effect: it ends in ROLLBACK). **Superseded, once `20260921130000` is live, by the kept-void entry's dry run below.** Run it as `supabase_admin`, because `postgres` gets `permission denied` on `app_private` functions (measured on staging). Replace the directory with `/srv/PRO/deploy` for production.
 
 ```bash
 cd /srv/PRO-staging/deploy && docker compose exec -T db psql -U supabase_admin -d postgres -X -v ON_ERROR_STOP=1 <<'SQL'
@@ -447,11 +447,102 @@ SQL
     - **An un-cancel made before a manual edit and applied after it.** This needs a PATCH through the invoices table's own UPDATE policy, and no screen makes one.
   - **At deploy: nothing moves.** No row is written and no company is recomputed. The header lists every rule of the old body and where it is now.
   - **Verified in a local throwaway `supabase/postgres:17.6.1.170` container, not on the VPS.** The full kit passed: every file, and 220 checks in `subscriptions.sql`, 38 of them in §10. The negative control ran the same kit without this migration, on U2's body, with §5f's signature line put back. It fails at §10a, "the sweep leaves the replaced period void". The real kit has not run.
-  - **The dry run before installing the sweeps, staging first.** It supersedes the U3 entry's. Run it once `20260921130000` is live on that environment, as `supabase_admin`, at a quiet moment: it holds a row lock on every company until its ROLLBACK. Replace the directory with `/srv/PRO/deploy` for production. Send the owner its four numbers, the names in query 2 and every line of query 5. **Query 3 must show no `revived (replaced)` line, and query 4's two numbers must be equal.** The cron lines are the U3 entry's, unchanged.
+  - **The dry run before installing the sweeps, staging first.** It supersedes the U3 entry's. Run it once `20260921130000` is live on that environment, as `supabase_admin`, at a quiet moment: it holds a row lock on every company until its ROLLBACK. Replace the directory with `/srv/PRO/deploy` for production. Send the owner its four numbers, the names in query 2 and every line of query 5. **Query 3 must show no `revived (replaced)` line, and query 4's two numbers must be equal.** The cron lines are the U3 entry's, unchanged. It was run once against a local throwaway database seeded with three companies, one per case, and read as intended. The replaced period stayed void and its company stayed out of query 2. The invoice nobody had applied showed in query 3 as `first row` and in query 5. The un-cancelled invoice showed as `revived (invoice_canceled)`.
 
 ```bash
 cd /srv/PRO-staging/deploy && docker compose exec -T db psql -U supabase_admin -d postgres -X -v ON_ERROR_STOP=1 <<'SQL'
-DRYRUN_PLACEHOLDER
+BEGIN;
+
+-- 0. Only with the fix live. Without it the sweep revives replaced periods, and
+--    this dry run would measure the defect rather than the sweep.
+DO $$
+BEGIN
+  IF to_regprocedure('app_private.subscription_invoice_apply(uuid,boolean)') IS NULL THEN
+    RAISE EXCEPTION '20260921130000 is not applied here: do not install the sweep';
+  END IF;
+END $$;
+
+CREATE TEMP TABLE sweep_before AS
+  SELECT id, name, subscription_status, subscription_expires_at, plan,
+         coalesce(approval_status = 'approved' AND status IN ('active', 'trial')
+                  AND subscription_status = 'active'
+                  AND (subscription_expires_at IS NULL OR subscription_expires_at > now()), false) AS admits
+    FROM public.companies;
+CREATE TEMP TABLE cov_before AS
+  SELECT id, status, void_reason, period_end
+    FROM public.subscription_coverage
+   WHERE source = 'invoice';
+
+SELECT app_private.subscription_invoices_apply_all()     AS invoices_walked;
+SELECT app_private.recompute_all_company_subscriptions() AS companies_walked;
+
+CREATE TEMP TABLE sweep_after AS
+  SELECT id, subscription_status, subscription_expires_at, plan,
+         coalesce(approval_status = 'approved' AND status IN ('active', 'trial')
+                  AND subscription_status = 'active'
+                  AND (subscription_expires_at IS NULL OR subscription_expires_at > now()), false) AS admits
+    FROM public.companies;
+
+-- 1. The four numbers.
+SELECT count(*) FILTER (WHERE b.admits AND NOT a.admits) AS lose_access,
+       count(*) FILTER (WHERE NOT b.admits AND a.admits) AS gain_access,
+       count(*) FILTER (WHERE (b.subscription_status, b.subscription_expires_at)
+                              IS DISTINCT FROM (a.subscription_status, a.subscription_expires_at)) AS stored_state_changes,
+       count(*) FILTER (WHERE b.plan IS DISTINCT FROM a.plan) AS plan_changes
+  FROM sweep_before b JOIN sweep_after a USING (id);
+
+-- 2. Every company whose admission or tier moves, by name.
+SELECT b.name, b.admits AS admitted_before, a.admits AS admitted_after, b.plan AS plan_before, a.plan AS plan_after
+  FROM sweep_before b JOIN sweep_after a USING (id)
+ WHERE b.admits IS DISTINCT FROM a.admits OR b.plan IS DISTINCT FROM a.plan
+ ORDER BY b.name;
+
+-- 3. What the invoice half did, one line per invoice period it wrote: a first
+--    row, a period its own cancellation voided coming back, or a live period
+--    moved. A replaced period coming back here is the defect, and must not
+--    appear.
+SELECT co.name, i.invoice_number, i.status AS invoice_status,
+       CASE WHEN b.id IS NULL                          THEN 'first row'
+            WHEN b.status = 'void' AND c.status = 'active' THEN 'revived (' || b.void_reason || ')'
+            WHEN c.status = 'void'                     THEN 'voided (' || c.void_reason || ')'
+            ELSE 'moved' END                          AS what,
+       b.period_end AS end_before, c.period_end AS end_after
+  FROM public.subscription_coverage c
+  JOIN public.subscription_invoices i ON i.id = c.source_id
+  JOIN public.companies co            ON co.id = c.company_id
+  LEFT JOIN cov_before b              ON b.id = c.id
+ WHERE c.source = 'invoice'
+   AND (b.id IS NULL
+        OR (b.status, b.void_reason, b.period_end) IS DISTINCT FROM (c.status, c.void_reason, c.period_end))
+ ORDER BY co.name, i.invoice_number;
+
+-- 4. The fix at work: replaced periods the sweep left void. Must equal the
+--    count before; a lower number here is the defect.
+SELECT (SELECT count(*) FROM cov_before WHERE status = 'void' AND void_reason = 'replaced') AS replaced_before,
+       (SELECT count(*) FROM public.subscription_coverage
+         WHERE source = 'invoice' AND status = 'void' AND void_reason = 'replaced')  AS replaced_after;
+
+-- 5. The gap the fix does not close: a first row, granting now, for an invoice
+--    older than the company's last manual edit. The sweep grants it whatever
+--    that edit said. Every company listed here needs a person's look before
+--    the cron line goes in.
+SELECT co.name, i.invoice_number, i.status AS invoice_status, i.created_at AS invoice_created,
+       m.created_at AS last_manual_edit, m.new_status AS manual_status, c.period_end AS grants_until
+  FROM public.subscription_coverage c
+  JOIN public.subscription_invoices i ON i.id = c.source_id
+  JOIN public.companies co            ON co.id = c.company_id
+  JOIN LATERAL (SELECT sa.created_at, sa.new_status
+                  FROM public.subscription_admin_actions sa
+                 WHERE sa.company_id = c.company_id AND sa.action_type = 'manual_edit'
+                 ORDER BY sa.created_at DESC
+                 LIMIT 1) m ON true
+ WHERE c.source = 'invoice'
+   AND NOT EXISTS (SELECT 1 FROM cov_before b WHERE b.id = c.id)
+   AND c.status = 'active' AND c.grants_access AND c.period_end > now()
+   AND m.created_at > i.created_at
+ ORDER BY co.name, i.invoice_number;
+
+ROLLBACK;
 SQL
 ```
 - **`OTP_PEPPER`**: provisioned in staging's `.env` on 15.09.2026 (64 hex characters, never printed). Production needs its own, different one before 0.6, or its deploy is refused. That waits for the owner's go. All three OTP streams follow the contract kept at `C:\Users\ahmad\.claude\plans\otp-contract-wf_ce583f7b-774.md`, outside the repo.
@@ -721,11 +812,11 @@ Secrets never enter git:
 - Rules for each subscription conflict class before step U1 (D8 to D10), counts above.
 - **Installing the audit-log purge (D4), staging first.** Nothing calls `app_private.platform_audit_purge()` yet. Once the release carrying `20260921100000` is live on staging, run the dry run in the D4 entry above (it should print zero deletions until September 2027), install the staging cron line, and add the production line after a staging run has logged. Nothing is deleted anywhere before 16.09.2027, so there is no hurry — but the job has to be in place by then.
 - **The privacy policy's retention sentence.** The D4 entry carries the German sentence the policy must hold about the log's periods, ready for the lawyer, and names the one host fact to add beside it: how long the nightly backups are kept.
-- **Wiring the two subscription sweeps (3.F), staging first.** Nothing calls them yet. Run the dry run in the U3 entry above on staging, send the owner its four numbers and the list of companies, and install the staging cron line once he says so. Production follows the same way.
+- **Wiring the two subscription sweeps (3.F), staging first.** Nothing calls them yet. **Wait for `20260921130000` (the kept-void fix) on that environment**, then run the dry run in the kept-void entry above on staging, send the owner its four numbers and the list of companies, and install the staging cron line once he says so. Production follows the same way.
 - ~~**A tier set on an expired company, reverted by the sweep (3.F).**~~ — **fixed in `20260920150000`** (the tier-fix entry above): the recompute reads a tier only from a period that has not ended. Run that entry's two read-only queries on production before the release. Re-set any tier query 2 lists **after** the release is live.
 - **Two paths the tier fix leaves open, both in U2's `app_private.subscription_invoice_apply` (3.F).** Decide both before the invoice sweep's cron line goes in.
   - **A payment revives an ended invoice period at its old tier**, which then decides the tier (`HOLE[revival]`). Candidate fix: give a row the company's current tier when it comes back from void or ended.
-  - **A later apply of an invoice re-activates a row a manual edit voided.** The company is admitted again against the administrator's `expired` or `inactive`. This one is about access.
+  - ~~**A later apply of an invoice re-activates a row a manual edit voided.** The company is admitted again against the administrator's `expired` or `inactive`. This one is about access.~~ — **fixed in `20260921130000`** (the kept-void entry above). An explicit payment still brings the period back.
 - ~~**May a support session issue a Gehaltsquittung?** (PR #80.)~~ — **answered 18.09.2026: no, permanently.** The owner delegated the decision. A Gehaltsquittung attests to a physical handover of cash that no platform agent witnessed, which is a question of attestation and not of traceability, so it does not become permissible once 3.4c's audit triggers exist. PR #80's stated reason — that the receipt records no actor — was wrong; it records three. Recorded at `receiptScope()` and in the entry above, with the server-side follow-up.
 - Questions the agents raised:
   - **OTP-DB.** If GoTrue confirmed a new owner's address but `signup_complete` then failed, may the owner finish with a new signup code? That needs a contract change; the alternative is that `otp-verify` retries completion.
