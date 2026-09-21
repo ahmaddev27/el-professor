@@ -9,6 +9,7 @@ import {
   PlatformCheckError,
   platformCan,
   platformCanManageAccount,
+  platformSupportCompanyId,
   recordPlatformAudit,
   requirePlatformAudit,
   type PlatformAuditSubject,
@@ -59,6 +60,27 @@ describe('platformCan', () => {
   it('throws when the check itself fails, rather than answering either way', async () => {
     const c = client({ data: true, error: { code: '42501', message: 'permission denied' } });
     await expect(platformCan(c, 'staff.manage')).rejects.toBeInstanceOf(PlatformCheckError);
+  });
+});
+
+describe('platformSupportCompanyId', () => {
+  const company = 'c0000000-0000-4000-8000-00000000000a';
+
+  it('asks platform_support_company_id with no arguments, through the client it is given', async () => {
+    const c = client({ data: company, error: null });
+    await expect(platformSupportCompanyId(c)).resolves.toBe(company);
+    expect(c.calls).toEqual([['platform_support_company_id', undefined]]);
+  });
+
+  it('answers null for no session, and for anything that is not a uuid', async () => {
+    for (const data of [null, undefined, '', 'not-a-uuid', 42, true, {}, [company]]) {
+      await expect(platformSupportCompanyId(client({ data, error: null }))).resolves.toBeNull();
+    }
+  });
+
+  it('throws when the check itself fails, so a broken check never reads as a session', async () => {
+    const c = client({ data: company, error: { code: '42501', message: 'permission denied' } });
+    await expect(platformSupportCompanyId(c)).rejects.toBeInstanceOf(PlatformCheckError);
   });
 });
 
@@ -260,7 +282,7 @@ describe('decideAccountTarget', () => {
       targetIsPlatformStaff,
       value: {
         isPlatformCaller: false,
-        callerCompanyId: companyA,
+        scopeCompanyId: companyA,
         targetCompanyId: companyA,
         platformCanManage,
         targetIsPlatformStaff,
@@ -287,17 +309,37 @@ describe('decideAccountTarget', () => {
       await expect(decideAccountTarget(f.value)).resolves.toBe('other_company');
       expect(f.targetIsPlatformStaff).not.toHaveBeenCalled();
     }
-    const noCompany = facts({ callerCompanyId: null, targetCompanyId: null });
+    const noCompany = facts({ scopeCompanyId: null, targetCompanyId: null });
     await expect(decideAccountTarget(noCompany.value)).resolves.toBe('other_company');
   });
 
-  it('decides a platform caller by platform_can_manage_account alone', async () => {
-    const allowed = facts({ isPlatformCaller: true, callerCompanyId: null, targetCompanyId: companyB });
+  it('decides a platform caller inside its scope by platform_can_manage_account', async () => {
+    const allowed = facts({ isPlatformCaller: true });
     await expect(decideAccountTarget(allowed.value)).resolves.toBe('allowed');
+    expect(allowed.platformCanManage).toHaveBeenCalledTimes(1);
     expect(allowed.targetIsPlatformStaff).not.toHaveBeenCalled();
 
     const refused = facts({ isPlatformCaller: true, platformCanManage: vi.fn(async () => false) });
     await expect(decideAccountTarget(refused.value)).resolves.toBe('platform_staff_account');
+  });
+
+  // 3.13a: before it, a platform caller was decided by platform_can_manage_account
+  // alone and reached any account of any company. The scope comes first now,
+  // for everyone, and a platform caller outside it is not even asked about.
+  it('refuses a platform caller on an account outside its scope, without asking anything', async () => {
+    for (const target of [companyB, null]) {
+      const f = facts({ isPlatformCaller: true, targetCompanyId: target });
+      await expect(decideAccountTarget(f.value)).resolves.toBe('other_company');
+      expect(f.platformCanManage).not.toHaveBeenCalled();
+      expect(f.targetIsPlatformStaff).not.toHaveBeenCalled();
+    }
+    const noScope = facts({ isPlatformCaller: true, scopeCompanyId: null, targetCompanyId: null });
+    await expect(decideAccountTarget(noScope.value)).resolves.toBe('other_company');
+  });
+
+  it('compares the two companies as uuids, whatever their case', async () => {
+    const f = facts({ isPlatformCaller: true, targetCompanyId: companyA.toUpperCase() });
+    await expect(decideAccountTarget(f.value)).resolves.toBe('allowed');
   });
 
   it('lets a failed staff check throw instead of allowing the change', async () => {
