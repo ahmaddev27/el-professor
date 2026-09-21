@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
   canReadAnnouncements,
@@ -5,6 +6,19 @@ import {
   canSaveSetting,
   canWriteAnnouncements,
   invoiceSellerFields,
+  isContactPhone,
+  isStorageDate,
+  parseGermanDate,
+  parsePrivacyDocument,
+  privacyFromForm,
+  privacyParagraphRefused,
+  privacyStoredBytes,
+  privacyToForm,
+  splitPrivacyParagraphs,
+  PRIVACY_MAX_BYTES,
+  PRIVACY_MAX_PARAGRAPHS,
+  PRIVACY_PARAGRAPH_MAX_LENGTH,
+  SELLER_IMPRESSUM_FIELDS,
   mailSenderFromForm,
   mailSenderToForm,
   mailTemplateDefaultsKept,
@@ -529,5 +543,203 @@ describe('the mail template form', () => {
     expect(mailTemplateDefaultsKept('password_reset', form))
       .toEqual({ subject: true, heading: true, paragraphs: true, button: true });
     expect(mailTemplateDefaultsKept('password_reset', { ...form, heading: 'Neu' }).heading).toBe(false);
+  });
+});
+
+// ─── The legal pages (20260921120000) ────────────────────────────────────────
+
+const LEGAL_MIGRATION = readFileSync(
+  new URL('../../supabase/migrations/20260921120000_legal_pages.sql', import.meta.url),
+  'utf8',
+).replace(/\r\n/g, '\n');
+
+/** One `c_name CONSTANT integer := N;` of the migration's legal validator. */
+function legalConstant(name: string): number {
+  const match = LEGAL_MIGRATION.match(new RegExp(`${name}\\s+CONSTANT integer\\s*:=\\s*(\\d+);`));
+  if (!match) throw new Error(`the migration has no ${name}`);
+  return Number(match[1]);
+}
+
+describe('the seller\'s Impressum fields', () => {
+  const ELEVEN: Seller = {
+    name: 'El-Professor GmbH',
+    street: 'Hauptstraße', house_number: '12', postal_code: '42651', city: 'Solingen',
+    vat_id: 'DE123456789', tax_number: '123/456/78901',
+    bank_name: 'Sparkasse', iban: 'DE02120300000000202051', bic: 'BYLADEM1001',
+    account_holder: 'El-Professor GmbH',
+  };
+  const IMPRESSUM = {
+    legal_name: 'Muster Mobility GmbH', legal_form: 'GmbH', represented_by: 'Erika Muster',
+    contact_email: 'info@example.com', contact_phone: '+49 (0)212 555-0101',
+    register_court: 'Amtsgericht Wuppertal', register_number: 'HRB 12345',
+    content_responsible_name: 'Erika Muster', content_responsible_address: 'Hauptstraße 12, 42651 Solingen',
+  };
+
+  it('reads a seller with all, some or none of the nine', () => {
+    expect(parseSeller(ELEVEN)).toEqual(ELEVEN);
+    expect(parseSeller({ ...ELEVEN, ...IMPRESSUM })).toEqual({ ...ELEVEN, ...IMPRESSUM });
+    expect(parseSeller({ ...ELEVEN, legal_name: 'Muster GmbH' })).toEqual({ ...ELEVEN, legal_name: 'Muster GmbH' });
+  });
+
+  it('still refuses a field nobody knows, and one of the eleven missing', () => {
+    expect(parseSeller({ ...ELEVEN, ...IMPRESSUM, country: 'Deutschland' })).toBeNull();
+    const { iban, ...withoutIban } = { ...ELEVEN, ...IMPRESSUM };
+    expect(iban).toBe('DE02120300000000202051');
+    expect(parseSeller(withoutIban)).toBeNull();
+  });
+
+  it('refuses an Impressum field that breaks the eleven\'s rules, or a contact the page could not link', () => {
+    expect(parseSeller({ ...ELEVEN, legal_name: 42 })).toBeNull();
+    expect(parseSeller({ ...ELEVEN, represented_by: 'Erika\nMuster' })).toBeNull();
+    expect(parseSeller({ ...ELEVEN, register_number: 'x'.repeat(201) })).toBeNull();
+    expect(parseSeller({ ...ELEVEN, contact_email: 'info at example.com' })).toBeNull();
+    expect(parseSeller({ ...ELEVEN, contact_phone: 'auf Anfrage' })).toBeNull();
+    // Empty is simply unfilled.
+    expect(parseSeller({ ...ELEVEN, contact_email: '', contact_phone: '' })).not.toBeNull();
+  });
+
+  it('shows the nine in the form, blank where nothing is stored', () => {
+    const form = sellerToForm(ELEVEN);
+    for (const field of SELLER_IMPRESSUM_FIELDS) expect(form[field]).toBe('');
+    expect(sellerToForm({ ...ELEVEN, ...IMPRESSUM }).legal_form).toBe('GmbH');
+  });
+
+  it('writes one of the nine only once it holds a value, so an unused form saves the eleven the old release reads', () => {
+    expect(sellerFromForm(sellerToForm(ELEVEN))).toEqual({ value: ELEVEN });
+    const filled = sellerFromForm({ ...sellerToForm(ELEVEN), legal_name: '  Muster GmbH ', contact_email: ' info@example.com' });
+    expect(filled).toEqual({ value: { ...ELEVEN, legal_name: 'Muster GmbH', contact_email: 'info@example.com' } });
+    // Emptying a field takes it out again.
+    const emptied = sellerFromForm({ ...sellerToForm({ ...ELEVEN, ...IMPRESSUM }), legal_form: '   ' });
+    expect('value' in emptied && 'legal_form' in emptied.value).toBe(false);
+  });
+
+  it('names the Impressum field the database would refuse', () => {
+    const form = sellerToForm(ELEVEN);
+    expect(sellerFromForm({ ...form, contact_email: 'info@' })).toEqual({ error: 'seller.contact_email' });
+    expect(sellerFromForm({ ...form, contact_phone: '+4' })).toEqual({ error: 'seller.contact_phone' });
+    expect(sellerFromForm({ ...form, register_court: 'x'.repeat(201) })).toEqual({ error: 'seller.register_court' });
+    // The invoice's own name is still checked first.
+    expect(sellerFromForm({ ...form, name: '', contact_email: 'info@' })).toEqual({ error: 'seller.name' });
+  });
+
+  it('accepts a phone number the way people write one, with at least three digits', () => {
+    expect(isContactPhone('+49 (0)212 555-0101')).toBe(true);
+    expect(isContactPhone('0212 / 555.01.01')).toBe(true);
+    expect(isContactPhone('12')).toBe(false);
+    expect(isContactPhone('Tel. 0212')).toBe(false);
+  });
+
+  it('prints the same invoice whatever the Impressum holds', () => {
+    expect(invoiceSellerFields({ ...ELEVEN, ...IMPRESSUM })).toEqual(invoiceSellerFields(ELEVEN));
+    expect(sellerAddressBlock({ ...ELEVEN, ...IMPRESSUM })).toEqual(sellerAddressBlock(ELEVEN));
+  });
+});
+
+describe('who may read and save the privacy text', () => {
+  it('is the owner-only settings.manage to save, and settings.read without billing to read', () => {
+    const owner = access('owner', ['settings.read', 'settings.manage', 'pricing.manage']);
+    const billing = access('billing', ['pricing.manage', 'settings.read', 'billing.manage']);
+    const readOnly = access('read_only', ['settings.read']);
+    expect(writeCapabilityFor('legal.privacy')).toBe('settings.manage');
+    expect(canSaveSetting(owner, 'legal.privacy')).toBe(true);
+    expect(canSaveSetting(billing, 'legal.privacy')).toBe(false);
+    expect(canReadSetting(readOnly, 'legal.privacy')).toBe(true);
+    expect(canReadSetting(billing, 'legal.privacy')).toBe(false);
+  });
+});
+
+describe('the privacy text', () => {
+  const DOC = { as_of: '2026-09-21', paragraphs: ['Verantwortlich:\nMuster GmbH\nHauptstraße 12', 'Zweiter Absatz.'] };
+
+  it('keeps the database\'s bounds', () => {
+    expect(PRIVACY_MAX_BYTES).toBe(legalConstant('c_privacy_max_bytes'));
+    expect(PRIVACY_MAX_PARAGRAPHS).toBe(legalConstant('c_max_paragraphs'));
+    expect(PRIVACY_PARAGRAPH_MAX_LENGTH).toBe(legalConstant('c_paragraph_max'));
+  });
+
+  it('reads the seed as nothing published, and a stored text as it is', () => {
+    expect(parsePrivacyDocument({})).toEqual({});
+    expect(parsePrivacyDocument(DOC)).toEqual(DOC);
+  });
+
+  it('refuses a stored document the database would refuse', () => {
+    expect(parsePrivacyDocument([])).toBeNull();
+    expect(parsePrivacyDocument({ paragraphs: DOC.paragraphs })).toBeNull();
+    expect(parsePrivacyDocument({ ...DOC, title: 'x' })).toBeNull();
+    expect(parsePrivacyDocument({ ...DOC, as_of: '2026-02-30' })).toBeNull();
+    expect(parsePrivacyDocument({ ...DOC, paragraphs: [] })).toBeNull();
+    expect(parsePrivacyDocument({ ...DOC, paragraphs: ['<p>x</p>'] })).toBeNull();
+  });
+
+  it('knows a real date from one that only looks like it', () => {
+    expect(isStorageDate('2026-09-21')).toBe(true);
+    expect(isStorageDate('2028-02-29')).toBe(true);
+    expect(isStorageDate('2026-02-29')).toBe(false);
+    expect(isStorageDate('2026-13-01')).toBe(false);
+    expect(isStorageDate('1999-12-31')).toBe(false);
+    expect(parseGermanDate('21.09.2026')).toBe('2026-09-21');
+    expect(parseGermanDate(' 1.9.2026 ')).toBe('2026-09-01');
+    expect(parseGermanDate('31.09.2026')).toBeNull();
+    expect(parseGermanDate('09/21/2026')).toBeNull();
+    expect(parseGermanDate('2026-09-21')).toBeNull();
+  });
+
+  it('refuses markup, a stray control character, a blank line and an overlong paragraph', () => {
+    expect(privacyParagraphRefused('Eine Zeile\nund die nächste')).toBe(false);
+    expect(privacyParagraphRefused('<b>fett</b>')).toBe(true);
+    expect(privacyParagraphRefused('a > b')).toBe(true);
+    expect(privacyParagraphRefused('Tab\there')).toBe(true);
+    expect(privacyParagraphRefused('Eins\n\nZwei')).toBe(true);
+    expect(privacyParagraphRefused('   ')).toBe(true);
+    expect(privacyParagraphRefused('x'.repeat(4001))).toBe(true);
+  });
+
+  it('splits pasted text into paragraphs at blank lines and changes nothing else', () => {
+    expect(splitPrivacyParagraphs('Erster Absatz.\r\n\r\nZweiter\r\nAbsatz.  \n \n\n\tDritter.'))
+      .toEqual(['Erster Absatz.', 'Zweiter\nAbsatz.', 'Dritter.']);
+    expect(splitPrivacyParagraphs('  \n\n ')).toEqual([]);
+  });
+
+  it('round-trips a stored text through the form', () => {
+    const form = privacyToForm(DOC);
+    expect(form).toEqual({ asOf: '21.09.2026', text: 'Verantwortlich:\nMuster GmbH\nHauptstraße 12\n\nZweiter Absatz.' });
+    expect(privacyFromForm(form)).toEqual({ value: DOC });
+    expect(privacyToForm({})).toEqual({ asOf: '', text: '' });
+  });
+
+  it('saves an emptied form as {} — the text is taken down', () => {
+    expect(privacyFromForm({ asOf: '', text: ' \n ' })).toEqual({ value: {} });
+  });
+
+  it('asks for the date with a text and for a text with a date', () => {
+    expect(privacyFromForm({ asOf: '', text: 'Text.' })).toEqual({ error: 'legal.privacy.as_of' });
+    expect(privacyFromForm({ asOf: '21.09.2026', text: '' })).toEqual({ error: 'legal.privacy.paragraphs' });
+    expect(privacyFromForm({ asOf: '2026-09-21', text: 'Text.' })).toEqual({ error: 'legal.privacy.as_of' });
+  });
+
+  it('names the paragraph the database would refuse', () => {
+    expect(privacyFromForm({ asOf: '21.09.2026', text: 'Gut.\n\n<script>x</script>' }))
+      .toEqual({ error: 'legal.privacy.paragraphs.1' });
+    expect(privacyFromForm({ asOf: '21.09.2026', text: Array.from({ length: 301 }, () => 'x').join('\n\n') }))
+      .toEqual({ error: 'legal.privacy.paragraphs' });
+  });
+
+  it('counts bytes the way PostgreSQL prints the document', () => {
+    // jsonb prints `{"as_of": "…", "paragraphs": ["a", "b"]}`: a space after
+    // each colon and comma, umlauts as two bytes, a line break as \n.
+    expect(privacyStoredBytes({})).toBe(2);
+    expect(privacyStoredBytes({ as_of: '2026-09-21', paragraphs: ['a', 'b'] }))
+      .toBe('{"as_of": "2026-09-21", "paragraphs": ["a", "b"]}'.length);
+    expect(privacyStoredBytes({ as_of: '2026-09-21', paragraphs: ['ä\n"'] }))
+      .toBe('{"as_of": "2026-09-21", "paragraphs": ["'.length + 2 + 2 + 2 + '"]}'.length);
+  });
+
+  it('refuses a text over the byte bound as a whole, and takes one just under it', () => {
+    // 15 paragraphs of 1000 umlauts: some 30 KB, more than every other key may hold.
+    const under = Array.from({ length: 15 }, () => 'ä'.repeat(1000)).join('\n\n');
+    const accepted = privacyFromForm({ asOf: '21.09.2026', text: under });
+    expect('value' in accepted && privacyStoredBytes(accepted.value)).toBeGreaterThan(16384);
+    const over = Array.from({ length: 17 }, () => 'ä'.repeat(1000)).join('\n\n');
+    expect(privacyFromForm({ asOf: '21.09.2026', text: over })).toEqual({ error: 'value_size' });
   });
 });
