@@ -472,7 +472,7 @@
         </li>
         <li><a href="#p1"><span class="no">1</span><h3>OTP وأمان الحسابات</h3></a><ul class="chips"><li class="chip">كبير</li><li class="chip">عالستيج</li></ul></li>
         <li><a href="#p2"><span class="no">2</span><h3>نظام التصميم والنموذج</h3></a><ul class="chips"><li class="chip">متوسط</li><li class="chip">اندمج عالستيج</li></ul><p class="gate">البوابة انفتحت: وافقت على النموذج بـ 15.09</p></li>
-        <li><a href="#p3"><span class="no">3</span><h3>فصل المنصة والصلاحيات</h3></a><ul class="chips"><li class="chip">كبير جداً</li><li class="chip">3.0 و3.1 و3.3 و3.5 و3.6 و3.9 اندمجوا</li><li class="chip">3.4أ و 3.4ب اندمجوا</li><li class="chip">3.8-U2 بالمراجعة</li><li class="chip">3.12 بالمراجعة</li></ul></li>
+        <li><a href="#p3"><span class="no">3</span><h3>فصل المنصة والصلاحيات</h3></a><ul class="chips"><li class="chip">كبير جداً</li><li class="chip">3.0 و3.1 و3.3 و3.5 و3.6 و3.9 اندمجوا</li><li class="chip">3.4أ و 3.4ب اندمجوا</li><li class="chip">3.8-U2 بالمراجعة</li><li class="chip">3.12 بالمراجعة</li><li class="chip">3.10 و3.11 بالمراجعة</li></ul></li>
         <li><a href="#p4"><span class="no">4</span><h3>إيصال الراتب النقدي</h3></a><ul class="chips"><li class="chip">متوسط</li><li class="chip">الأساس اندمج</li></ul></li>
         <li><a href="#p5"><span class="no">5</span><h3>تعميم التصميم</h3></a><ul class="chips"><li class="chip">كبير</li><li class="chip">ما بلّشت</li></ul></li>
       </ol>
@@ -973,6 +973,18 @@ AND (c.subscription_expires_at IS NULL OR c.subscription_expires_at &gt; now())<
           <li>كل عضو بإيميله، ودوره، ونشط أو معطّل، و<strong>مين أعطاه العضوية</strong>. والعضويات اللي انعملت بدون جلسة (أول مالك من الـ migration، أو باليد بقاعدة البيانات) مكتوب عندها «Nicht erfasst» مع شرح.</li>
           <li>القائمة للمالكين بس (<code>staff.manage</code>)، لأنها إيميلات كل اللي معهم صلاحية على بيانات كل الزبائن.</li>
           <li>الأدوار التانية (Support، Buchhaltung، Nur Lesen) <strong>لسا مش مفعّلة عن قصد</strong>: السبب التقني الأخير انحلّ بـ PR #84، والتفعيل صار قرارك إنت، وبييجي كـ PR لحاله.</li>
+        </ul>
+      </div>
+
+      <div class="step">
+        <h3><span class="step-no">3.10–3.11</span>الإعدادات: البائع، التجربة، الإيميلات، الإعلانات، والـ flags <span class="pill ok">النص الأول من 3.10 اندمج</span> <span class="pill warn">الباقي بالمراجعة</span></h3>
+        <ul class="list">
+          <li><strong>النص الأول (اندمج):</strong> بيانات البائع ومدة التجربة وإعدادات الفواتير صاروا إعدادات، والتسجيل صار ياخد مدة التجربة منها.</li>
+          <li><strong>الفاتورة صارت تطبع بيانات البائع من الإعدادات.</strong> لحد ما تعبّيها (Einstellungen → Verkäufer) الفاتورة بتطلع «El-Professor» وبس، زي دايماً. وهاد اللي كان ناطره 3.7ب.</li>
+          <li><strong>إيميلات الكود الأربعة واسم المرسل:</strong> الموضوع والعنوان والفقرات ونص الزر بيتغيّروا من الشاشة مع معاينة حقيقية. الكود ممنوع بالموضوع، والقالب الغلط بيرجع للنص الافتراضي، وكل إيميل بيضل زي اليوم بالظبط لحد ما تغيّر إشي. عنوان المرسل بيضل بالسيرفر. إيميل التجربة ما انبنى.</li>
+          <li><strong>الإعلانات:</strong> ألماني وإنجليزي، لكل الشركات أو لخطط أو لشركات محددة، وفترة ظهور بوقت ومنطقة زمنية. بتطلع فوق صفحات الشركة، والشركة ما بتشوف لمين الإعلان.</li>
+          <li><strong>الـ feature flags:</strong> الفلاغ اللي مش موجود مطفي؛ وما في شاشة بتقرأ فلاغ لسا.</li>
+          <li>كل هالإعدادات للمالك بس، وكل قراءة وكتابة بتنسجّل.</li>
         </ul>
       </div>
 

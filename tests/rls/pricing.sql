@@ -235,14 +235,15 @@ DECLARE
   v_book jsonb;
 BEGIN
   PERFORM _pr_reset();
-  -- 20260919120000 (plan 3.10, first half) seeds seller, trial and invoice;
-  -- tests/rls/settings.sql covers those three. This file still owns the two
-  -- keys 3.9 seeded.
-  PERFORM _pr_ok('the two keys of 3.9 are seeded, both at version 1, among the five that now exist',
+  -- 20260919120000 (plan 3.10, first half) seeds seller, trial and invoice,
+  -- and 20260920130000 the mail sender, the four mail templates and the feature
+  -- flags; tests/rls/settings.sql and announcements.sql cover those. This file
+  -- still owns the two keys 3.9 seeded.
+  PERFORM _pr_ok('the two keys of 3.9 are seeded, both at version 1, among the eleven that now exist',
     (SELECT count(*) = 2 AND bool_and(version = 1 AND updated_by IS NULL)
        FROM app_private.platform_settings
       WHERE key IN ('price_book', 'plan_features'))
-    AND (SELECT count(*) = 5 FROM app_private.platform_settings));
+    AND (SELECT count(*) = 11 FROM app_private.platform_settings));
 
   PERFORM _pr_ok('both seeds pass the validator they are written for',
     NOT EXISTS (SELECT 1 FROM app_private.platform_settings s
@@ -297,13 +298,13 @@ BEGIN
   -- Plan 3.A gives billing settings.read "(prices)". No capability can say
   -- that, so 3.9 narrows the key set instead: for billing a non-pricing key is
   -- refused, where a role with plain settings.read is only told it is missing.
-  -- `seller` is stored since 20260919120000 and `mail.sender` — the half of
-  -- 3.10 that is not built — is not. Billing is refused both alike, so it
-  -- cannot tell a stored key from an absent one.
+  -- `seller` is stored since 20260919120000; `a_key_nobody_seeds` never is.
+  -- Billing is refused both alike, so it cannot tell a stored key from an
+  -- absent one. (This used `mail.sender` until 20260920130000 seeded it.)
   PERFORM _pr_ok('read: billing is refused a non-pricing key, and cannot tell whether it exists',
-    _pr_get(billing, 'seller') = 'forbidden' AND _pr_get(billing, 'mail.sender') = 'forbidden');
+    _pr_get(billing, 'seller') = 'forbidden' AND _pr_get(billing, 'a_key_nobody_seeds') = 'forbidden');
   PERFORM _pr_ok('read: an owner and read_only are told an unseeded key is simply missing',
-    _pr_get(owner, 'mail.sender') = 'not_found' AND _pr_get(readonly, 'mail.sender') = 'not_found');
+    _pr_get(owner, 'a_key_nobody_seeds') = 'not_found' AND _pr_get(readonly, 'a_key_nobody_seeds') = 'not_found');
 
   PERFORM _pr_ok('read: support holds no settings.read at all',
     _pr_get(support, 'price_book') = 'forbidden' AND _pr_get(support, 'plan_features') = 'forbidden');
@@ -329,8 +330,12 @@ BEGIN
     AND v_public -> 'price_book' = app_private.platform_setting_value('price_book')
     AND (v_public ->> 'trial_days')::integer = app_private.signup_trial_days());
 
+  -- Since 20260920130010 feature_flags is the stored setting (seeded {}) and
+  -- announcements are the ones that apply to the caller's company now; no
+  -- announcement exists in this file, so both are still empty here.
+  -- tests/rls/announcements.sql fills them.
   v_app := _pr_do(admin_a, 'SELECT get_app_config()::text')::jsonb;
-  PERFORM _pr_ok('get_app_config: a signed-in company user gets prices, features, the trial and the 3.11 placeholders',
+  PERFORM _pr_ok('get_app_config: a signed-in company user gets prices, features, the trial, the flags and the announcements',
     app_private.settings_object_keys(v_app)
       = ARRAY['announcements', 'feature_flags', 'plan_features', 'price_book', 'trial_days']
     AND v_app -> 'price_book' = app_private.platform_setting_value('price_book')
@@ -362,10 +367,10 @@ BEGIN
     _pr_put(admin_a, 'price_book', v_book, 1) = 'forbidden');
   PERFORM _pr_ok('write: billing holds pricing.manage but not settings.manage',
     _pr_put(billing, 'seller', '{"name": "x"}'::jsonb, 1) = 'forbidden');
-  -- `mail.sender` is the key with no validator now that 20260919120000 has
-  -- given `seller` one.
+  -- A key with no validator. It was `mail.sender` until 20260920130000 gave
+  -- that key one.
   PERFORM _pr_ok('write: an owner passes the capability check for any key, and then meets the validator',
-    _pr_put(owner, 'mail.sender', '{"from": "x@example.com"}'::jsonb, 1) = 'unknown_key');
+    _pr_put(owner, 'a_key_nobody_seeds', '{"from": "x@example.com"}'::jsonb, 1) = 'unknown_key');
 
   -- the shape of a price book
   PERFORM _pr_ok('write: a price book missing the yearly discount is refused',

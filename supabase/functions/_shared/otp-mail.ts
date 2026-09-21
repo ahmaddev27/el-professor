@@ -2,7 +2,11 @@
  * The German copy of every one-time-code mail, rendered with the shared layout.
  *
  * All of it is German whatever language the reader uses in the app, like the
- * GoTrue templates. Three rules hold for every message:
+ * GoTrue templates. The subject, the heading, the body and the button label of
+ * four of these mails may be customised by the platform owner (plan 3.10, the
+ * `mail.template.*` settings); their defaults, and every rule about what a
+ * customised text may say, live in `mail-template.ts`. Three rules hold for
+ * every message, customised or not:
  *
  * - The subject never contains the code. Mail providers keep subjects in logs
  *   and show them on lock screens.
@@ -14,6 +18,14 @@
 import { emphasis, escapeHtml, renderEmailHtml, renderEmailText } from './email-layout.mjs';
 import type { EmailCta, EmailLink } from './email-layout.d.mts';
 import type { OtpPurpose } from './otp-core.ts';
+import {
+  isMailTemplatePurpose,
+  MAIL_TEMPLATE_DEFAULTS,
+  parseMailTemplate,
+  renderMailParagraphs,
+  safeSubject,
+  type MailTemplatePurpose,
+} from './mail-template.ts';
 
 export interface RenderedMail {
   subject: string;
@@ -70,6 +82,13 @@ export function fragmentValue(value: string): string {
   return encodeURIComponent(value).replace(/[!'()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
 }
 
+/** A default label; every purpose that carries a button or a link has one. */
+function defaultButton(purpose: MailTemplatePurpose): string {
+  const label = MAIL_TEMPLATE_DEFAULTS[purpose].button;
+  if (label === undefined) throw new Error(`otp mail: ${purpose} has no button`);
+  return label;
+}
+
 function copyFor(purpose: OtpPurpose, vars: OtpMailVars, origin: string): Copy {
   const { email } = vars;
   const fragment = `#email=${fragmentValue(email)}`;
@@ -77,41 +96,41 @@ function copyFor(purpose: OtpPurpose, vars: OtpMailVars, origin: string): Copy {
   switch (purpose) {
     case 'signup_verify':
       return {
-        subject: 'Ihr Bestätigungscode – El-Professor',
+        subject: MAIL_TEMPLATE_DEFAULTS.signup_verify.subject,
         eyebrow: 'Registrierung',
-        heading: 'Bestätigen Sie Ihre E-Mail-Adresse',
+        heading: MAIL_TEMPLATE_DEFAULTS.signup_verify.heading,
         preheader: 'Ihr Code zum Abschluss der Registrierung bei El-Professor.',
         bodyHtml: `Geben Sie diesen Code auf der Registrierungsseite ein, um Ihr El-Professor-Konto für ${emphasis(email)} zu aktivieren.`,
         bodyText: `Geben Sie diesen Code auf der Registrierungsseite ein, um Ihr El-Professor-Konto für ${email} zu aktivieren.`,
         codeCaption: VALIDITY,
-        link: { label: 'Seite geschlossen? Hier bestätigen', href: `${origin}/auth/verify-email${fragment}` },
+        link: { label: defaultButton('signup_verify'), href: `${origin}/auth/verify-email${fragment}` },
         note: `Nicht registriert? Dann können Sie diese E-Mail ignorieren. Ohne Bestätigung wird die Registrierung nach 24 Stunden gelöscht. ${NEVER_SHARE}`,
       };
 
     case 'password_reset':
       return {
-        subject: 'Code zum Zurücksetzen Ihres Passworts – El-Professor',
+        subject: MAIL_TEMPLATE_DEFAULTS.password_reset.subject,
         eyebrow: 'Passwort',
-        heading: 'Ihr Code für ein neues Passwort',
+        heading: MAIL_TEMPLATE_DEFAULTS.password_reset.heading,
         preheader: 'Ihr Code zum Festlegen eines neuen Passworts bei El-Professor.',
         bodyHtml: `Für Ihr El-Professor-Konto ${emphasis(email)} wurde ein neues Passwort angefordert. Geben Sie diesen Code ein:`,
         bodyText: `Für Ihr El-Professor-Konto ${email} wurde ein neues Passwort angefordert. Geben Sie diesen Code ein:`,
         codeCaption: VALIDITY,
-        link: { label: 'Seite geschlossen? Neuen Code anfordern', href: `${origin}/auth/forgot-password` },
+        link: { label: defaultButton('password_reset'), href: `${origin}/auth/forgot-password` },
         note: `Nicht angefordert? Dann können Sie diese E-Mail ignorieren – Ihr Passwort bleibt unverändert. ${NEVER_SHARE}`,
       };
 
     case 'invite_activate': {
       const company = vars.companyName?.trim();
       return {
-        subject: 'Ihre Einladung zu El-Professor',
+        subject: MAIL_TEMPLATE_DEFAULTS.invite_activate.subject,
         eyebrow: 'Einladung',
-        heading: 'Sie wurden zu El-Professor eingeladen',
+        heading: MAIL_TEMPLATE_DEFAULTS.invite_activate.heading,
         preheader: 'Legen Sie mit Ihrem Code ein Passwort für El-Professor fest.',
         bodyHtml: `Für Sie wurde ein Zugang${company ? ` bei ${emphasis(company)}` : ''} angelegt. Öffnen Sie die Einladungsseite und geben Sie diesen Code ein, um Ihr Passwort festzulegen.`,
         bodyText: `Für Sie wurde ein Zugang${company ? ` bei ${company}` : ''} angelegt. Öffnen Sie die Einladungsseite und geben Sie diesen Code ein, um Ihr Passwort festzulegen.`,
         codeCaption: `${VALIDITY} Abgelaufen? Auf der Einladungsseite erhalten Sie einen neuen Code.`,
-        cta: { label: 'Einladung annehmen', href: `${origin}/einladung${fragment}`, fallbackLink: true },
+        cta: { label: defaultButton('invite_activate'), href: `${origin}/einladung${fragment}`, fallbackLink: true },
         note: `Keine Einladung erwartet? Dann können Sie diese E-Mail ignorieren. ${NEVER_SHARE}`,
       };
     }
@@ -120,9 +139,9 @@ function copyFor(purpose: OtpPurpose, vars: OtpMailVars, origin: string): Copy {
       const newEmail = vars.newEmail;
       if (!newEmail) throw new Error('otp mail: email_change needs the new address');
       return {
-        subject: 'Neue E-Mail-Adresse bestätigen – El-Professor',
+        subject: MAIL_TEMPLATE_DEFAULTS.email_change.subject,
         eyebrow: 'Kontoänderung',
-        heading: 'Neue E-Mail-Adresse bestätigen',
+        heading: MAIL_TEMPLATE_DEFAULTS.email_change.heading,
         preheader: 'Ihr Code zur Bestätigung Ihrer neuen E-Mail-Adresse bei El-Professor.',
         bodyHtml: `Geben Sie diesen Code in El-Professor ein, um die Anmeldeadresse von ${emphasis(email)} auf ${emphasis(newEmail)} zu ändern.`,
         bodyText: `Geben Sie diesen Code in El-Professor ein, um die Anmeldeadresse von ${email} auf ${newEmail} zu ändern.`,
@@ -145,10 +164,45 @@ function copyFor(purpose: OtpPurpose, vars: OtpMailVars, origin: string): Copy {
   }
 }
 
-/** The mail carrying a code, for one purpose. */
-export function buildOtpMail(purpose: OtpPurpose, vars: OtpMailVars): RenderedMail {
+/**
+ * The stored template laid over the default copy, field by field. A template
+ * this build cannot read — malformed, or for a mail that takes none — is
+ * ignored whole, so the mail goes out in its default wording rather than not at
+ * all.
+ */
+function applyTemplate(purpose: OtpPurpose, copy: Copy, vars: OtpMailVars, template: unknown): Copy {
+  if (!isMailTemplatePurpose(purpose) || template === undefined || template === null) return copy;
+  const overrides = parseMailTemplate(purpose, template);
+  if (!overrides) return copy;
+
+  const result: Copy = { ...copy };
+  if (overrides.subject !== undefined) result.subject = overrides.subject;
+  if (overrides.heading !== undefined) result.heading = overrides.heading;
+  if (overrides.paragraphs !== undefined) {
+    const body = renderMailParagraphs(overrides.paragraphs, {
+      email: vars.email,
+      newEmail: vars.newEmail,
+      companyName: vars.companyName,
+    });
+    result.bodyHtml = body.html;
+    result.bodyText = body.text;
+  }
+  if (overrides.button !== undefined) {
+    if (result.cta) result.cta = { ...result.cta, label: overrides.button };
+    if (result.link) result.link = { ...result.link, label: overrides.button };
+  }
+  return result;
+}
+
+/**
+ * The mail carrying a code, for one purpose. `template` is the stored
+ * `mail.template.<purpose>` value as the database returned it, unread; absent,
+ * `{}` or unreadable, the mail is exactly the default.
+ */
+export function buildOtpMail(purpose: OtpPurpose, vars: OtpMailVars, template?: unknown): RenderedMail {
   const origin = appOrigin(vars.appUrl);
-  const copy = copyFor(purpose, vars, origin);
+  const defaults = copyFor(purpose, vars, origin);
+  const copy = applyTemplate(purpose, defaults, vars, template);
   const html = renderEmailHtml({
     logoUrl: `${origin}/email-templates/logo.png`,
     eyebrow: copy.eyebrow,
@@ -169,7 +223,7 @@ export function buildOtpMail(purpose: OtpPurpose, vars: OtpMailVars): RenderedMa
     link: copy.cta ? { label: copy.cta.label, href: copy.cta.href } : copy.link,
     noteText: copy.note,
   });
-  return { subject: copy.subject, html, text };
+  return { subject: safeSubject(copy.subject, defaults.subject, vars.code), html, text };
 }
 
 export interface EmailChangedNoticeVars {

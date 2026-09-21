@@ -1,6 +1,8 @@
 /*
-  The seller, the trial length and the invoice defaults (plan 3.10, first half,
-  migration 20260919120000).
+  Plan 3.10: the seller, the trial length and the invoice defaults (first half,
+  migration 20260919120000), and the mail sender, the four code-mail templates
+  and the invoice screen reading the seller (second half, migration
+  20260920130000).
 
   Runs after assertions.sql, the matrix, platform-authority.sql and pricing.sql,
   against the same throwaway database, as supabase_admin. Every check raises on
@@ -26,8 +28,16 @@
                  moves no trial that already exists
     5. audit     each write recorded under category `settings`, with the value
                  before and after; a refusal recorded as `denied`
-    6. scope     mail.sender — the other half of 3.10 — is still an unknown key,
-                 and neither settings RPC lost its cap or its audit row
+    6. scope     a key with no validator is still refused, and neither settings
+                 RPC lost its cap or its audit row
+    7. mail      the sender and the four templates: seeds that change nothing,
+                 who may read and write them, and the rules a template may not
+                 break — the code never in a subject above all
+    8. invoice   platform_invoice_seller(): every staff role reads the sender
+                 printed on the invoices it can read, one audited row per call,
+                 inside the settings budget
+    9. delivery  mail_delivery_settings(): the service role, and nobody else,
+                 reads the sender and a template as stored
 */
 
 \set ON_ERROR_STOP on
@@ -148,8 +158,11 @@ DECLARE
 BEGIN
   PERFORM _st_reset();
 
-  PERFORM _st_ok('five keys now: the two of 3.9 and the three of 3.10, and no others',
-    (SELECT count(*) = 5 FROM app_private.platform_settings)
+  -- 3.9's two, 3.10's first three, and 20260920130000's six (the mail sender,
+  -- four templates, the feature flags). Section 7 and announcements.sql cover
+  -- the six.
+  PERFORM _st_ok('eleven keys now, the three of 3.10''s first half among them',
+    (SELECT count(*) = 11 FROM app_private.platform_settings)
     AND (SELECT count(*) = 3 FROM app_private.platform_settings
           WHERE key IN ('seller', 'trial', 'invoice') AND version = 1 AND updated_by IS NULL));
 
@@ -452,14 +465,16 @@ DECLARE
 BEGIN
   PERFORM _st_reset();
 
-  -- The mail templates and the sender are the other half of 3.10. Their keys
-  -- have no validator yet, so platform_settings_put still refuses them — which
-  -- is what keeps a half-built setting out of the database.
-  PERFORM _st_ok('scope: mail.sender and mail.template.otp are still unknown keys',
-    _st_put(owner, 'mail.sender', '{"from": "x@example.com"}'::jsonb, 1) = 'unknown_key'
+  -- A key with no validator is refused before anything is looked up — which is
+  -- what keeps a half-built setting out of the database. mail.sender was this
+  -- file's example until 20260920130000 gave it a validator; the template of a
+  -- mail nobody receives any more (platform_login) and a made-up one are not
+  -- keys at all.
+  PERFORM _st_ok('scope: a template for platform_login, or for a mail that does not exist, is an unknown key',
+    _st_put(owner, 'mail.template.platform_login', '{"subject": "x"}'::jsonb, 1) = 'unknown_key'
     AND _st_put(owner, 'mail.template.otp', '{"subject": "x"}'::jsonb, 1) = 'unknown_key');
-  PERFORM _st_ok('scope: and an owner is simply told they are not stored',
-    _st_get(owner, 'mail.sender') = 'not_found');
+  PERFORM _st_ok('scope: and an owner is simply told it is not stored',
+    _st_get(owner, 'mail.template.platform_login') = 'not_found');
 
   /*
     This slice adds validators and keys and redefines neither settings RPC, for
@@ -494,6 +509,261 @@ BEGIN
     AND NOT has_schema_privilege('authenticated', 'app_private', 'USAGE')
     AND NOT has_schema_privilege('service_role', 'app_private', 'USAGE')
     AND NOT has_function_privilege('service_role', 'app_private.signup_trial_days()'::regprocedure, 'EXECUTE'));
+END $$;
+
+-- ─── 7. the mail sender and the four templates ──────────────────────────────
+
+/*
+  20260920130000. Every template is seeded as the empty override, so every mail
+  reads exactly as it did; the sender is the SMTP_SENDER_NAME both hosts set.
+  All five keys are settings.manage — owner only — and readable with
+  settings.read, which billing holds for the prices alone.
+*/
+DO $$
+DECLARE
+  owner    constant uuid := '3c000000-0000-4000-8000-000000000001';
+  support  constant uuid := '3c000000-0000-4000-8000-000000000002';
+  billing  constant uuid := '3c000000-0000-4000-8000-000000000003';
+  readonly constant uuid := '3c000000-0000-4000-8000-000000000004';
+  admin_a  constant uuid := 'a0000000-0000-4000-8000-000000000001';
+  v_key    text;
+  v_ok     jsonb := '{"subject": "Willkommen bei El-Professor", "heading": "Fast geschafft",
+                      "paragraphs": ["Hallo {email}, bitte bestätigen Sie Ihre Adresse.", "Danke!"],
+                      "button": "Zur Bestätigung"}'::jsonb;
+BEGIN
+  PERFORM _st_reset();
+
+  PERFORM _st_ok('mail: the sender is seeded as the name both hosts already send under',
+    app_private.platform_setting_value('mail.sender') = '{"name": "El-Professor"}'::jsonb);
+  PERFORM _st_ok('mail: the four templates are seeded as the empty override, at version 1, by nobody',
+    (SELECT count(*) = 4 AND bool_and(value = '{}'::jsonb AND version = 1 AND updated_by IS NULL)
+       FROM app_private.platform_settings
+      WHERE key IN ('mail.template.signup_verify', 'mail.template.password_reset',
+                    'mail.template.invite_activate', 'mail.template.email_change')));
+
+  FOREACH v_key IN ARRAY ARRAY['mail.sender', 'mail.template.signup_verify'] LOOP
+    PERFORM _st_ok(format('mail: an owner and read_only read %s', v_key),
+      _st_get(owner, v_key, 'ok') = 'true' AND _st_get(readonly, v_key, 'ok') = 'true');
+    PERFORM _st_ok(format('mail: billing, support and a company admin are refused %s', v_key),
+      _st_get(billing, v_key) = 'forbidden'
+      AND _st_get(support, v_key) = 'forbidden'
+      AND _st_get(admin_a, v_key) = 'forbidden');
+    PERFORM _st_ok(format('mail: only an owner may write %s', v_key),
+      _st_put(billing,  v_key, app_private.platform_setting_value(v_key), 1) = 'forbidden'
+      AND _st_put(support,  v_key, app_private.platform_setting_value(v_key), 1) = 'forbidden'
+      AND _st_put(readonly, v_key, app_private.platform_setting_value(v_key), 1) = 'forbidden'
+      AND _st_put(admin_a,  v_key, app_private.platform_setting_value(v_key), 1) = 'forbidden');
+  END LOOP;
+
+  -- The code never reaches a subject: providers log subjects and show them on
+  -- lock screens.
+  PERFORM _st_ok('mail: {code} in a subject is refused, and named as the code rule',
+    _st_put(owner, 'mail.template.signup_verify', '{"subject": "Ihr Code {code}"}'::jsonb, 1, 'problem')
+      = 'mail.template.signup_verify.subject.code'
+    AND _st_put(owner, 'mail.template.password_reset', '{"subject": "Code: { code }"}'::jsonb, 1, 'problem')
+      = 'mail.template.password_reset.subject.code');
+  PERFORM _st_ok('mail: six digits in a row in a subject are refused the same way',
+    _st_put(owner, 'mail.template.signup_verify', '{"subject": "Ihr Code 482915"}'::jsonb, 1, 'problem')
+      = 'mail.template.signup_verify.subject.code');
+  PERFORM _st_ok('mail: a subject takes no variable at all',
+    _st_put(owner, 'mail.template.signup_verify', '{"subject": "Hallo {email}"}'::jsonb, 1, 'problem')
+      = 'mail.template.signup_verify.subject');
+  PERFORM _st_ok('mail: {code} is not a variable in a paragraph either',
+    _st_put(owner, 'mail.template.signup_verify', '{"paragraphs": ["Ihr Code: {code}"]}'::jsonb, 1, 'problem')
+      = 'mail.template.signup_verify.paragraphs.0');
+  PERFORM _st_ok('mail: a paragraph uses only its own mail''s variables',
+    _st_put(owner, 'mail.template.signup_verify', '{"paragraphs": ["Bei {company}"]}'::jsonb, 1, 'problem')
+      = 'mail.template.signup_verify.paragraphs.0'
+    AND _st_put(owner, 'mail.template.email_change', '{"paragraphs": ["ok", "Bei {company}"]}'::jsonb, 1, 'problem')
+      = 'mail.template.email_change.paragraphs.1');
+  PERFORM _st_ok('mail: a stray brace is refused, so no placeholder reaches a reader unfilled',
+    _st_put(owner, 'mail.template.invite_activate', '{"paragraphs": ["Klammer { offen"]}'::jsonb, 1, 'problem')
+      = 'mail.template.invite_activate.paragraphs.0');
+  PERFORM _st_ok('mail: the address change takes no button label, having no button',
+    _st_put(owner, 'mail.template.email_change', '{"button": "Los"}'::jsonb, 1, 'problem')
+      = 'mail.template.email_change');
+  PERFORM _st_ok('mail: an unknown field, no paragraph, six paragraphs and a control character are refused',
+    _st_put(owner, 'mail.template.signup_verify', '{"preheader": "x"}'::jsonb, 1, 'problem')
+      = 'mail.template.signup_verify'
+    AND _st_put(owner, 'mail.template.signup_verify', '{"paragraphs": []}'::jsonb, 1, 'problem')
+      = 'mail.template.signup_verify.paragraphs'
+    AND _st_put(owner, 'mail.template.signup_verify',
+                '{"paragraphs": ["1", "2", "3", "4", "5", "6"]}'::jsonb, 1, 'problem')
+      = 'mail.template.signup_verify.paragraphs'
+    AND _st_put(owner, 'mail.template.signup_verify', '{"heading": "Zeile\neins"}'::jsonb, 1, 'problem')
+      = 'mail.template.signup_verify.heading');
+  PERFORM _st_ok('mail: the bounds — a 151-character subject is refused',
+    _st_put(owner, 'mail.template.signup_verify', jsonb_build_object('subject', repeat('x', 151)), 1, 'problem')
+      = 'mail.template.signup_verify.subject');
+
+  PERFORM _st_ok('mail: a display name that could pass for an address is refused',
+    _st_put(owner, 'mail.sender', '{"name": "support@bank.de"}'::jsonb, 1, 'problem') = 'mail.sender.name'
+    AND _st_put(owner, 'mail.sender', '{"name": "Bank <x@y.de>"}'::jsonb, 1, 'problem') = 'mail.sender.name'
+    AND _st_put(owner, 'mail.sender', '{"name": "El-Professor", "address": "x@y.de"}'::jsonb, 1, 'problem')
+      = 'mail.sender');
+
+  -- Accepted: the owner customises the signup mail and renames the sender.
+  PERFORM _st_ok('mail: an owner may customise a template',
+    _st_put(owner, 'mail.template.signup_verify', v_ok, 1, 'ok') = 'true');
+  PERFORM _st_ok('mail: an owner may rename the sender',
+    _st_put(owner, 'mail.sender', '{"name": "El-Professor Support"}'::jsonb, 1, 'ok') = 'true');
+  PERFORM _st_ok('mail: a stale version writes nothing and names the current one',
+    _st_put(owner, 'mail.template.signup_verify', '{}'::jsonb, 1) = 'version_conflict'
+    AND _st_put(owner, 'mail.template.signup_verify', '{}'::jsonb, 1, 'current_version') = '2');
+
+  PERFORM _st_reset();
+  PERFORM _st_ok('mail: the stored template is exactly what the owner saved, and the others did not move',
+    app_private.platform_setting_value('mail.template.signup_verify') = v_ok
+    AND (SELECT version = 2 FROM app_private.platform_settings WHERE key = 'mail.template.signup_verify')
+    AND (SELECT version = 1 FROM app_private.platform_settings WHERE key = 'mail.template.password_reset'));
+  PERFORM _st_ok('mail: the accepted template write is audited with the value before and after',
+    EXISTS (SELECT 1 FROM app_private.platform_audit_log
+             WHERE action = 'platform_settings.put' AND outcome = 'ok'
+               AND target_id = 'mail.template.signup_verify'
+               AND category = 'settings' AND actor_user_id = owner
+               AND before_value -> 'value' = '{}'::jsonb
+               AND after_value -> 'value' = v_ok));
+  PERFORM _st_ok('mail: a refused template is audited as an error naming the rule it broke',
+    EXISTS (SELECT 1 FROM app_private.platform_audit_log
+             WHERE action = 'platform_settings.put' AND outcome = 'error'
+               AND target_id = 'mail.template.signup_verify'
+               AND after_value ->> 'problem' = 'mail.template.signup_verify.subject.code'));
+END $$;
+
+-- ─── 8. the invoice screen reads the seller ─────────────────────────────────
+
+/*
+  platform_invoice_seller(). The invoice screen needs companies.read — every
+  staff role holds it — so every staff role reads the sender printed on the
+  invoices it can already read, billing and support included, although neither
+  may read the `seller` key through platform_settings_get. It returns the value
+  and the version; its audit row names the version, never the value.
+*/
+DO $$
+DECLARE
+  owner    constant uuid := '3c000000-0000-4000-8000-000000000001';
+  support  constant uuid := '3c000000-0000-4000-8000-000000000002';
+  billing  constant uuid := '3c000000-0000-4000-8000-000000000003';
+  readonly constant uuid := '3c000000-0000-4000-8000-000000000004';
+  admin_a  constant uuid := 'a0000000-0000-4000-8000-000000000001';
+  v_who    uuid;
+  v_seller jsonb;
+  v_answer jsonb;
+  v_rows   bigint;
+  v_i      integer;
+BEGIN
+  PERFORM _st_reset();
+  v_seller := app_private.platform_setting_value('seller');
+
+  FOREACH v_who IN ARRAY ARRAY[owner, support, billing, readonly] LOOP
+    v_answer := _st_do(v_who, 'SELECT platform_invoice_seller()::text')::jsonb;
+    PERFORM _st_ok(format('invoice: staff %s reads the stored seller and its version', v_who),
+      (v_answer ->> 'ok') = 'true'
+      AND v_answer -> 'value' = v_seller
+      AND (v_answer ->> 'version')::integer
+            = (SELECT version FROM app_private.platform_settings WHERE key = 'seller'));
+  END LOOP;
+
+  -- ...while platform_settings_get still refuses two of them the same key.
+  PERFORM _st_ok('invoice: platform_settings_get(seller) is still refused to billing and support',
+    _st_get(billing, 'seller') = 'forbidden' AND _st_get(support, 'seller') = 'forbidden');
+
+  PERFORM _st_ok('invoice: a company admin is refused, and anon holds no EXECUTE',
+    _st_do(admin_a, $q$SELECT platform_invoice_seller() ->> 'reason'$q$) = 'forbidden'
+    AND _st_do(NULL, 'SELECT platform_invoice_seller()::text') LIKE 'ERR 42501%');
+
+  PERFORM _st_reset();
+  PERFORM _st_ok('invoice: one ok row per staff call, category read, naming the version and never the value',
+    (SELECT count(*) = 4
+            AND bool_and(category = 'read' AND target_type = 'platform_setting' AND target_id = 'seller'
+                         AND after_value ? 'version' AND NOT (after_value ? 'value') AND before_value IS NULL)
+       FROM app_private.platform_audit_log
+      WHERE action = 'platform_settings.invoice_seller' AND outcome = 'ok'));
+  PERFORM _st_ok('invoice: the company admin''s refusal left no row',
+    NOT EXISTS (SELECT 1 FROM app_private.platform_audit_log
+                 WHERE action = 'platform_settings.invoice_seller' AND actor_user_id = admin_a));
+
+  -- A stored seller the validator would refuse is never printed on an invoice.
+  -- Written straight into the table, the only way it could get there; put back
+  -- at once.
+  UPDATE app_private.platform_settings SET value = '{"name": ""}'::jsonb WHERE key = 'seller';
+  v_answer := _st_do(owner, 'SELECT platform_invoice_seller()::text')::jsonb;
+  PERFORM _st_reset();
+  UPDATE app_private.platform_settings SET value = v_seller WHERE key = 'seller';
+  PERFORM _st_ok('invoice: an unreadable seller is not_found, not printed',
+    (v_answer ->> 'ok') = 'false' AND (v_answer ->> 'reason') = 'not_found' AND NOT (v_answer ? 'value'));
+
+  -- The settings budget covers this read too: a principal that has spent its
+  -- minute on platform_settings_get is refused here, and the refusal writes
+  -- nothing. The whole file is one transaction, so every row is in the minute.
+  PERFORM _st_become(readonly);
+  FOR v_i IN 1 .. 120 LOOP
+    PERFORM public.platform_settings_get('trial');
+  END LOOP;
+  PERFORM _st_reset();
+  SELECT count(*) INTO v_rows FROM app_private.platform_audit_log WHERE actor_user_id = readonly;
+  PERFORM _st_ok('invoice: past the minute''s budget the seller read is refused as rate_limited',
+    _st_do(readonly, $q$SELECT platform_invoice_seller() ->> 'reason'$q$) = 'rate_limited');
+  PERFORM _st_reset();
+  PERFORM _st_ok('invoice: …and that refusal wrote nothing',
+    (SELECT count(*) FROM app_private.platform_audit_log WHERE actor_user_id = readonly) = v_rows);
+END $$;
+
+-- ─── 9. what the edge functions read before they send ───────────────────────
+
+/** One SELECT as the service role, like _st_do. */
+CREATE OR REPLACE FUNCTION _st_service(p_sql text) RETURNS text
+LANGUAGE plpgsql AS $$
+DECLARE
+  v_out   text;
+  v_state text;
+  v_msg   text;
+BEGIN
+  BEGIN
+    PERFORM _st_reset();
+    PERFORM set_config('request.jwt.claim.role', 'service_role', true);
+    EXECUTE 'SET LOCAL ROLE service_role';
+    EXECUTE p_sql INTO v_out;
+    v_out := coalesce(v_out, '<null>');
+  EXCEPTION WHEN OTHERS THEN
+    GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE, v_msg = MESSAGE_TEXT;
+    v_out := 'ERR ' || v_state || ' ' || v_msg;
+  END;
+  PERFORM _st_reset();
+  RETURN v_out;
+END $$;
+
+DO $$
+DECLARE
+  owner   constant uuid := '3c000000-0000-4000-8000-000000000001';
+  admin_a constant uuid := 'a0000000-0000-4000-8000-000000000001';
+  v_rows  bigint;
+BEGIN
+  PERFORM _st_reset();
+  SELECT count(*) INTO v_rows FROM app_private.platform_audit_log;
+
+  -- Section 7 customised the signup mail and renamed the sender.
+  PERFORM _st_ok('delivery: the service role reads the sender and a mail''s template as stored',
+    _st_service($q$SELECT mail_delivery_settings('signup_verify')::text$q$)::jsonb
+      = jsonb_build_object('sender', app_private.platform_setting_value('mail.sender'),
+                           'template', app_private.platform_setting_value('mail.template.signup_verify')));
+  PERFORM _st_ok('delivery: a mail that was never customised comes back as the empty override',
+    _st_service($q$SELECT mail_delivery_settings('password_reset') -> 'template'$q$) = '{}');
+  PERFORM _st_ok('delivery: no purpose, or one with no template, answers the sender and a null template',
+    _st_service($q$SELECT mail_delivery_settings(NULL) -> 'template'$q$) = 'null'
+    AND _st_service($q$SELECT mail_delivery_settings('platform_login') -> 'template'$q$) = 'null'
+    AND _st_service($q$SELECT mail_delivery_settings(NULL) -> 'sender' ->> 'name'$q$) = 'El-Professor Support');
+  PERFORM _st_ok('delivery: a malformed purpose is a broken contract',
+    _st_service($q$SELECT mail_delivery_settings('Signup Verify')::text$q$) LIKE 'ERR 22023%');
+
+  PERFORM _st_ok('delivery: no signed-in caller may read it — not the owner, not a company admin, not anon',
+    _st_do(owner,   $q$SELECT mail_delivery_settings('signup_verify')::text$q$) LIKE 'ERR 42501%'
+    AND _st_do(admin_a, $q$SELECT mail_delivery_settings('signup_verify')::text$q$) LIKE 'ERR 42501%'
+    AND _st_do(NULL,    $q$SELECT mail_delivery_settings('signup_verify')::text$q$) LIKE 'ERR 42501%');
+
+  PERFORM _st_reset();
+  PERFORM _st_ok('delivery: reading it writes no audit row — the caller is the system sending a mail',
+    (SELECT count(*) FROM app_private.platform_audit_log) = v_rows);
 END $$;
 
 DO $$ BEGIN RAISE NOTICE '── settings: all checks passed ──'; END $$;

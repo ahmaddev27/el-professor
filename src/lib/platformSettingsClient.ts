@@ -10,7 +10,25 @@
  * newer version, which would overwrite somebody else's change unseen.
  */
 import { supabase } from './supabase';
-import { parseSettingAnswer, type SettingKey, type SettingResult } from './platformSettings';
+import { parseSeller, parseSettingAnswer, type Seller, type SettingKey, type SettingResult } from './platformSettings';
+
+/**
+ * The sender printed on an invoice, through `platform_invoice_seller()`
+ * (migration 20260920130000). It needs `companies.read` — the capability that
+ * reads an invoice — rather than `settings.read`, so billing and support, who
+ * download invoices but may not read the settings, get it too. One audited read
+ * per call, so the invoice screen asks when it builds a PDF and not on load.
+ *
+ * Null for any refusal and for a stored document this build cannot read: the
+ * caller refuses to build the PDF rather than print an invoice without its
+ * sender.
+ */
+export async function getInvoiceSeller(): Promise<Seller | null> {
+  const { data, error } = await supabase.rpc('platform_invoice_seller');
+  if (error) throw new Error(error.message);
+  if (typeof data !== 'object' || data === null || (data as { ok?: unknown }).ok !== true) return null;
+  return parseSeller((data as { value?: unknown }).value);
+}
 
 export async function getSetting(key: SettingKey): Promise<SettingResult> {
   const { data, error } = await supabase.rpc('platform_settings_get', { p_key: key });

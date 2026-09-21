@@ -56,6 +56,12 @@ export interface OutgoingMail {
   subject: string;
   html: string;
   text: string;
+  /**
+   * The display name from the `mail.sender` setting (plan 3.10), already
+   * validated by parseMailSender. Absent or empty: `SMTP_SENDER_NAME`, as
+   * before. The address is never a setting — it stays `SMTP_SENDER`.
+   */
+  fromName?: string | null;
 }
 
 const SEND_TIMEOUT_MS = 10_000;
@@ -135,7 +141,7 @@ export async function sendMail(mail: OutgoingMail): Promise<void> {
   let message: string;
   try {
     message = buildMimeMessage({
-      fromName: settings.senderName,
+      fromName: mail.fromName?.trim() || settings.senderName,
       fromAddress: settings.sender,
       to: mail.to,
       subject: mail.subject,

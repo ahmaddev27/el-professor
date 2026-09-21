@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
-  RefreshCw, ShieldAlert, Info, Save, Plus, Trash2, Tags, SlidersHorizontal,
-  Building2, Hourglass, Receipt,
+  ShieldAlert, Save, Plus, Trash2, Tags, SlidersHorizontal,
+  Building2, Hourglass, Receipt, Mail, Megaphone, ToggleRight,
 } from 'lucide-react';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { useAppConfig } from '../contexts/AppConfigContext';
@@ -9,9 +9,11 @@ import { useToast } from '../contexts/ToastContext';
 import { useTranslation } from '../contexts/LanguageContext';
 import type { TranslationKey } from '../i18n';
 import type { Plan } from '../contexts/PlanContext';
+import type { PlatformAccess } from '../lib/platformAccess';
 import { calcPricing, fmt, type PriceBook } from '../utils/pricing';
 import type { PlanFeatureMap } from '../utils/planFeatures';
 import {
+  canReadAnnouncements,
   canReadSetting,
   canSaveSetting,
   invoiceFromForm,
@@ -33,26 +35,42 @@ import {
   trialFromForm,
   trialToForm,
   SELLER_FIELDS,
+  TRIAL_MAX_DAYS,
+  TRIAL_MIN_DAYS,
   type InvoiceForm,
   type InvoiceSettings,
   type PriceBookForm,
   type Seller,
   type SellerField,
   type SellerForm,
-  type SettingKey,
-  type SettingRecord,
   type TrialForm,
   type TrialSettings,
 } from '../lib/platformSettings';
 import { getSetting, putSetting } from '../lib/platformSettingsClient';
-import { deDateTime } from '../lib/platformFormat';
+import {
+  cardStyle,
+  controlStyle,
+  EditorShell,
+  Field,
+  Note,
+  SaveRow,
+  useSettingEditor,
+  type Loaded,
+  type SettingEditorConfig,
+} from '../components/settings/settingsEditorKit';
+import MailSettingsEditor from '../components/settings/MailSettingsEditor';
+import AnnouncementsEditor from '../components/settings/AnnouncementsEditor';
+import FeatureFlagsEditor from '../components/settings/FeatureFlagsEditor';
 
 /**
- * Einstellungen — the price book and the plan feature map (plan 3.E / 3.G).
+ * Einstellungen (plan 3.E / 3.G): the price book, the plan feature map, the
+ * seller, the trial, the invoice defaults (3.9, 3.10), the mail sender and the
+ * code-mail templates (3.10), the announcements and the feature flags (3.11).
  *
- * Both live in `app_private.platform_settings`, one JSON value per key with a
- * version every write bumps, and both are read and written only through
- * `platform_settings_get` / `platform_settings_put`.
+ * Every key lives in `app_private.platform_settings`, one JSON value per key
+ * with a version every write bumps, read and written only through
+ * `platform_settings_get` / `platform_settings_put`. The announcements are rows
+ * of their own, behind three RPCs of the same shape.
  *
  * ## The version is the safety rule
  *
@@ -64,12 +82,12 @@ import { deDateTime } from '../lib/platformFormat';
  * ## Who may do what
  *
  * Reading needs `settings.read`, and billing holds that for the prices alone.
- * Saving the prices needs `pricing.manage` (owner and billing); saving the
- * feature map needs `settings.manage`, owner only — the map decides what every
- * customer may open, and a feature it fails to name reads as premium, so one
- * wrong write would lock every gated screen for every non-trial company below
- * premium. What this screen hides or disables is a courtesy; the database
- * refuses regardless.
+ * Saving the prices needs `pricing.manage` (owner and billing); saving anything
+ * else needs `settings.manage`, owner only — the feature map decides what every
+ * customer may open, the seller is printed on every invoice, the templates reach
+ * every new customer, and an announcement shows on every screen of the
+ * companies it names. What this screen hides or disables is a courtesy; the
+ * database refuses regardless.
  *
  * ## Money
  *
@@ -86,51 +104,40 @@ const PLAN_LABELS: Record<Plan, TranslationKey> = {
   premium:  'admin.settings.plan.premium',
 };
 
+type SettingsTab =
+  | 'price_book' | 'plan_features' | 'seller' | 'trial' | 'invoice'
+  | 'mail' | 'announcements' | 'feature_flags';
+
 /**
- * Every settings key, in the order the tabs appear. A role sees only the tabs
- * `canReadSetting` allows and only the save buttons `canSaveSetting` allows;
- * both are courtesies, and the database refuses regardless.
+ * Every tab, in the order they appear, and who may read it. A role sees only
+ * the tabs it may read and only the save buttons it may use; both are
+ * courtesies, and the database refuses regardless.
  */
-const SETTING_TABS: { id: SettingKey; icon: React.ElementType; labelKey: TranslationKey }[] = [
-  { id: 'price_book',    icon: Tags,              labelKey: 'admin.settings.tab.prices' },
-  { id: 'plan_features', icon: SlidersHorizontal, labelKey: 'admin.settings.tab.features' },
-  { id: 'seller',        icon: Building2,         labelKey: 'admin.settings.tab.seller' },
-  { id: 'trial',         icon: Hourglass,         labelKey: 'admin.settings.tab.trial' },
-  { id: 'invoice',       icon: Receipt,           labelKey: 'admin.settings.tab.invoice' },
+const SETTING_TABS: {
+  id: SettingsTab;
+  icon: React.ElementType;
+  labelKey: TranslationKey;
+  readable: (access: PlatformAccess) => boolean;
+}[] = [
+  { id: 'price_book',    icon: Tags,              labelKey: 'admin.settings.tab.prices',   readable: a => canReadSetting(a, 'price_book') },
+  { id: 'plan_features', icon: SlidersHorizontal, labelKey: 'admin.settings.tab.features', readable: a => canReadSetting(a, 'plan_features') },
+  { id: 'seller',        icon: Building2,         labelKey: 'admin.settings.tab.seller',   readable: a => canReadSetting(a, 'seller') },
+  { id: 'trial',         icon: Hourglass,         labelKey: 'admin.settings.tab.trial',    readable: a => canReadSetting(a, 'trial') },
+  { id: 'invoice',       icon: Receipt,           labelKey: 'admin.settings.tab.invoice',  readable: a => canReadSetting(a, 'invoice') },
+  { id: 'mail',          icon: Mail,              labelKey: 'admin.settings.tab.mail',     readable: a => canReadSetting(a, 'mail.sender') },
+  { id: 'announcements', icon: Megaphone,         labelKey: 'admin.settings.tab.announcements', readable: canReadAnnouncements },
+  { id: 'feature_flags', icon: ToggleRight,       labelKey: 'admin.settings.tab.flags',    readable: a => canReadSetting(a, 'feature_flags') },
 ];
-
-const controlStyle: React.CSSProperties = {
-  padding: '0.5rem 0.75rem',
-  borderRadius: '0.75rem',
-  fontSize: '0.875rem',
-  background: 'var(--bg-subtle)',
-  color: 'var(--text-primary)',
-  border: '1px solid var(--border)',
-};
-
-const cardStyle: React.CSSProperties = {
-  background: 'var(--bg-surface)',
-  border: '1px solid var(--border)',
-};
-
-/** What one settings key looks like once it has been read. */
-interface Loaded<T> {
-  value: T;
-  version: number;
-  updatedAt: string | null;
-  /** NULL until somebody saves: the seed writes no actor. */
-  updatedBy: string | null;
-}
 
 const PlatformSettingsPage: React.FC = () => {
   const { platformAccess } = useSuperAdmin();
   const { t } = useTranslation();
-  const [tab, setTab] = useState<SettingKey>('price_book');
+  const [tab, setTab] = useState<SettingsTab>('price_book');
 
   // Billing holds settings.read for the prices alone, so its panel is a single
   // tab; a role without settings.read at all gets none, and is told so rather
   // than shown a form that would fail on save.
-  const tabs = SETTING_TABS.filter(item => canReadSetting(platformAccess, item.id));
+  const tabs = SETTING_TABS.filter(item => item.readable(platformAccess));
 
   if (tabs.length === 0) {
     return (
@@ -142,7 +149,7 @@ const PlatformSettingsPage: React.FC = () => {
     );
   }
 
-  const active: SettingKey = tabs.some(item => item.id === tab) ? tab : tabs[0].id;
+  const active: SettingsTab = tabs.some(item => item.id === tab) ? tab : tabs[0].id;
 
   return (
     <div className="space-y-6">
@@ -151,8 +158,8 @@ const PlatformSettingsPage: React.FC = () => {
         <p className="text-sm mt-0.5" style={{ color: 'var(--text-secondary)' }}>{t('admin.settings.subtitle')}</p>
       </div>
 
-      {/* Five tabs do not fit one phone-width row, so the strip wraps onto a
-          second line rather than scrolling the page sideways. */}
+      {/* Eight tabs do not fit one row, on a phone or on a laptop, so the strip
+          wraps rather than scrolling the page sideways. */}
       <div className="flex flex-wrap gap-1 p-1 rounded-xl" style={{ background: 'var(--bg-subtle)' }}>
         {tabs.map(({ id, icon: Icon, labelKey }) => (
           <button
@@ -174,55 +181,10 @@ const PlatformSettingsPage: React.FC = () => {
        active === 'plan_features' ? <PlanFeaturesEditor /> :
        active === 'seller'        ? <SellerEditor /> :
        active === 'trial'         ? <TrialEditor /> :
-                                    <InvoiceEditor />}
-    </div>
-  );
-};
-
-// ─── Shared shell for one setting ───────────────────────────────────────────
-
-interface EditorShellProps {
-  loading: boolean;
-  problem: TranslationKey | null;
-  detail: string | null;
-  onReload: () => void;
-  version: number | null;
-  updatedAt: string | null;
-  children: React.ReactNode;
-}
-
-const EditorShell: React.FC<EditorShellProps> = ({ loading, problem, detail, onReload, version, updatedAt, children }) => {
-  const { t } = useTranslation();
-
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center py-20">
-        <RefreshCw size={24} className="animate-spin" style={{ color: 'var(--text-tertiary)' }} />
-      </div>
-    );
-  }
-
-  if (problem) {
-    return (
-      <div className="flex flex-col items-center justify-center py-16 rounded-2xl text-center px-6" style={cardStyle}>
-        <ShieldAlert size={32} className="mb-3" style={{ color: 'var(--warning)' }} />
-        <p className="font-medium" style={{ color: 'var(--text-primary)' }}>{t(problem)}</p>
-        {detail && <p className="text-xs mt-2" style={{ color: 'var(--text-tertiary)' }}>{detail}</p>}
-        <button onClick={onReload} className="mt-4 px-4 py-2 rounded-xl text-sm font-semibold"
-          style={{ background: 'var(--accent)', color: 'var(--text-inverse)' }}>
-          {t('admin.settings.reload')}
-        </button>
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between flex-wrap gap-2 text-xs" style={{ color: 'var(--text-tertiary)' }}>
-        <span>{version === null ? '' : t('admin.settings.version', { version: String(version) })}</span>
-        <span>{updatedAt ? t('admin.settings.updatedAt', { date: deDateTime(updatedAt) }) : ''}</span>
-      </div>
-      {children}
+       active === 'invoice'       ? <InvoiceEditor /> :
+       active === 'mail'          ? <MailSettingsEditor /> :
+       active === 'announcements' ? <AnnouncementsEditor /> :
+                                    <FeatureFlagsEditor />}
     </div>
   );
 };
@@ -613,149 +575,6 @@ const PlanFeaturesEditor: React.FC = () => {
   );
 };
 
-// ─── The three keys of plan 3.10 ────────────────────────────────────────────
-
-/**
- * Load, edit and save one settings key.
- *
- * The seller, the trial and the invoice defaults have the same shape — read the
- * value with its version, edit a form, send it back pinned to that version — so
- * the shape lives here once rather than three times. The price book and the
- * feature map keep their own bodies above: one carries a worked example, the
- * other a table of changed rows, and neither would read more clearly through
- * this.
- *
- * The version rule is the same one, and it is the reason this is worth sharing:
- * on `version_conflict` the editor reloads, and the unsaved entries go with the
- * old form. It is never re-sent with the version that came back, which would
- * overwrite somebody else's change unseen.
- *
- * The configuration is a module-level constant per editor, so its identity is
- * stable and the load effect runs once.
- */
-interface SettingEditorConfig<T, F> {
-  key: SettingKey;
-  read: (record: SettingRecord) => T | null;
-  toForm: (value: T) => F;
-  fromForm: (form: F) => { value: T } | { error: string };
-}
-
-function useSettingEditor<T, F>(config: SettingEditorConfig<T, F>) {
-  const { refresh } = useAppConfig();
-  const { showToast } = useToast();
-  const { t } = useTranslation();
-
-  const [loading, setLoading] = useState(true);
-  const [problem, setProblem] = useState<TranslationKey | null>(null);
-  const [detail, setDetail] = useState<string | null>(null);
-  const [loaded, setLoaded] = useState<Loaded<T> | null>(null);
-  const [form, setForm] = useState<F | null>(null);
-  const [saving, setSaving] = useState(false);
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    setProblem(null);
-    setDetail(null);
-    try {
-      const answer = await getSetting(config.key);
-      if (!answer.ok) {
-        setProblem(settingRefusalKey(answer.reason));
-        return;
-      }
-      const value = config.read(answer);
-      if (value === null) {
-        // A stored document this build cannot read is not edited blindly: a
-        // save would send back whatever the form made of it.
-        setProblem('admin.settings.refusal.invalidValue');
-        return;
-      }
-      setLoaded({ value, version: answer.version, updatedAt: answer.updatedAt, updatedBy: answer.updatedBy });
-      setForm(config.toForm(value));
-    } catch (err) {
-      setProblem('admin.settings.loadFailed');
-      setDetail(err instanceof Error ? err.message : null);
-    } finally {
-      setLoading(false);
-    }
-  }, [config]);
-
-  useEffect(() => { void load(); }, [load]);
-
-  const save = async () => {
-    if (!form || !loaded) return;
-    const parsed = config.fromForm(form);
-    if ('error' in parsed) {
-      showToast('error', t('admin.settings.invalidField', { field: parsed.error }));
-      return;
-    }
-
-    setSaving(true);
-    try {
-      const answer = await putSetting(config.key, parsed.value, loaded.version);
-      if (!answer.ok) {
-        showToast('error', t(settingRefusalKey(answer.reason)));
-        // Somebody else saved first: show what is there now, so the change is
-        // made against their version rather than over it. load() replaces the
-        // form, so the unsaved entries are gone — the message says so.
-        if (isVersionConflict(answer)) await load();
-        return;
-      }
-      showToast('success', t('admin.settings.saved'));
-      setLoaded({ value: parsed.value, version: answer.version, updatedAt: answer.updatedAt, updatedBy: answer.updatedBy });
-      // The stored document, not what was typed: trimmed as the database has it.
-      setForm(config.toForm(parsed.value));
-      // Of these three only the trial reaches AppConfigContext today, as
-      // trial_days; refreshing for all of them keeps one path.
-      await refresh();
-    } catch (err) {
-      showToast('error', err instanceof Error ? err.message : t('admin.settings.refusal.failed'));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return { loading, problem, detail, loaded, form, setForm, saving, load, save };
-}
-
-const SaveRow: React.FC<{ saving: boolean; onSave: () => void }> = ({ saving, onSave }) => {
-  const { t } = useTranslation();
-  return (
-    <div className="flex justify-end">
-      <button
-        onClick={onSave}
-        disabled={saving}
-        className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold text-white"
-        style={{ background: 'var(--accent)', opacity: saving ? 0.6 : 1 }}
-      >
-        <Save size={16} />{saving ? t('admin.common.saving') : t('admin.settings.save')}
-      </button>
-    </div>
-  );
-};
-
-const Field: React.FC<{
-  labelKey: TranslationKey;
-  value: string;
-  disabled: boolean;
-  width?: string;
-  onChange: (value: string) => void;
-}> = ({ labelKey, value, disabled, width, onChange }) => {
-  const { t } = useTranslation();
-  return (
-    <label className="block">
-      <span className="block text-xs font-semibold mb-1.5" style={{ color: 'var(--text-secondary)' }}>
-        {t(labelKey)}
-      </span>
-      <input
-        value={value}
-        disabled={disabled}
-        onChange={e => onChange(e.target.value)}
-        style={{ ...controlStyle, width: width ?? '100%', opacity: disabled ? 0.6 : 1 }}
-      />
-    </label>
-  );
-};
-
 // ─── The seller printed on invoices ─────────────────────────────────────────
 
 const SELLER_LABELS: Record<SellerField, TranslationKey> = {
@@ -794,8 +613,8 @@ const SellerEditor: React.FC = () => {
   // Still the placeholder the migration seeded, never edited: version 1, no
   // actor behind it, and no address. That is what both real databases got —
   // no platform account sits in a company, so the seed had nothing to copy —
-  // and it is distinct from `notAppliedYet`, which says the invoice page does
-  // not read the value yet. This one says the value is not worth reading.
+  // and since 20260920130000 the invoice PDF prints exactly this, so the owner
+  // is told before a customer sees a sender with no address.
   const notConfigured = !!loaded
     && loaded.version === 1
     && loaded.updatedBy === null
@@ -814,7 +633,6 @@ const SellerEditor: React.FC = () => {
       {form && (
         <>
           <Note textKey="admin.settings.seller.hint" />
-          <Note textKey="admin.settings.notAppliedYet" />
           {notConfigured && <Note textKey="admin.settings.seller.notConfigured" />}
           {!maySave && <Note textKey="admin.settings.readOnly" />}
 
@@ -880,7 +698,7 @@ const TrialEditor: React.FC = () => {
         <>
           {/* A longer trial is not retroactive and a shorter one locks nobody
               out: trial_end is written once, when a company is created. */}
-          <Note textKey="admin.settings.trial.hint" />
+          <Note textKey="admin.settings.trial.hint" vars={{ min: TRIAL_MIN_DAYS, max: TRIAL_MAX_DAYS }} />
           {!maySave && <Note textKey="admin.settings.readOnly" />}
 
           <div className="rounded-2xl p-5 space-y-4" style={cardStyle}>
@@ -973,17 +791,6 @@ const InvoiceEditor: React.FC = () => {
         </>
       )}
     </EditorShell>
-  );
-};
-
-const Note: React.FC<{ textKey: TranslationKey }> = ({ textKey }) => {
-  const { t } = useTranslation();
-  return (
-    <div className="flex items-start gap-2 rounded-xl p-3 text-xs"
-      style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)', color: 'var(--text-secondary)' }}>
-      <Info size={14} className="flex-shrink-0 mt-0.5" style={{ color: 'var(--text-tertiary)' }} />
-      <span>{t(textKey)}</span>
-    </div>
   );
 };
 

@@ -2,6 +2,7 @@ import React, { createContext, useCallback, useContext, useEffect, useRef, useSt
 import { supabase } from '../lib/supabase';
 import { useAuth } from './AuthContext';
 import { parseAppConfig, shouldRefreshAppConfig, SEED_APP_CONFIG, type AppConfig } from '../lib/appConfig';
+import { flagEnabled } from '../lib/featureFlags';
 
 /**
  * The product configuration the database holds: the price book, the plan
@@ -160,3 +161,17 @@ export const AppConfigProvider: React.FC<{ children: ReactNode }> = ({ children 
 };
 
 export const useAppConfig = (): AppConfigContextValue => useContext(AppConfigContext);
+
+/**
+ * Whether a feature flag is on (plan 3.11). Off for a flag the `feature_flags`
+ * setting does not name, off while nothing has answered yet, and off for a
+ * signed-out visitor, whose configuration carries no flags.
+ *
+ *   const newExport = useFlag('new_export');
+ *
+ * A flag is a switch for rolling something out, not a permission: the server
+ * checks every action again whatever a flag says, exactly as it does for plan
+ * gates. It lives here rather than in a file of its own because nothing reads a
+ * flag yet, and a module nothing imports is dead code by this repository's rule.
+ */
+export const useFlag = (key: string): boolean => flagEnabled(useAppConfig().featureFlags, key);
