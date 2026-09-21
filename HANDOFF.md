@@ -313,7 +313,7 @@ Start here when you pick up this project. Read it together with [CLAUDE.md](CLAU
   - **How many companies change: zero, at deploy and afterwards.** The migration writes no row. It installs a trigger, a catalogue reader and checks. The one door it closes is used by nothing in the product.
   - **The two sweeps: U3 does not change what they would do.** It touches neither the recompute nor the invoice rule, so the number of companies U3 moves through them is 0 by construction. The staging dry run of 18.09 (zero changes) was taken before U2 went live on 19.09 and before any invoice was touched through it, though, so re-measure with the dry run below before installing either line. Read its answer for two things:
     1. **Any e2e company among those losing access.** A company that `company-signup` created after U1 and that the old script admitted by hand has no coverage, so the sweep would lock it and the suite with it. Run `cd e2e && npm run setup` once (it now records their coverage), then run the dry run again.
-    2. **`plan_changes`.** A company whose every granting period has ended loses a tier set through `platform_company_set_plan` at the next recompute. The recompute's plan query has no end filter, so it reads the tier off the ended row, and set_plan carries the tier only onto periods that have not ended. Its own kit comment says "the recompute never reads it", which is true only while a live period exists. A redemption or a manual edit records the new tier first and is unaffected, but the daily sweep is not. **The candidate fix is one line**: add `AND (c.period_end IS NULL OR c.period_end > v_now)` to the recompute's plan query. It is a change to what the recompute derives, so it waits for the owner with this count, and U3 does not make it.
+    2. **`plan_changes`.** A company whose every granting period has ended loses a tier set through `platform_company_set_plan` at the next recompute. The recompute's plan query has no end filter, so it reads the tier off the ended row, and set_plan carries the tier only onto periods that have not ended. Its own kit comment says "the recompute never reads it", which is true only while a live period exists. A redemption or a manual edit records the new tier first and is unaffected, but the daily sweep is not. **The candidate fix is one line**: add `AND (c.period_end IS NULL OR c.period_end > v_now)` to the recompute's plan query. It is a change to what the recompute derives, so it waits for the owner with this count, and U3 does not make it. **Made since, in `20260920150000` (entry below).** Once that is live, `plan_changes` counts only companies whose tier both bodies move — in practice an invoice period revived by a payment (`HOLE[revival]`).
   - **The dry run** (read-only in effect: it ends in ROLLBACK). Run it as `supabase_admin`, because `postgres` gets `permission denied` on `app_private` functions (measured on staging). Replace the directory with `/srv/PRO/deploy` for production.
 
 ```bash
@@ -358,6 +358,69 @@ SQL
 
     Each run logs one line per statement: `invoices=N` and then `companies=N`, the counts walked, not the counts changed. Read them with `journalctl -t el-professor-subscriptions`. If the two sweeps ever move into `deploy/otp-housekeeping.sh` instead, the same two statements go into its `SQL` array as a third task, and the cron file then points at that script.
   - **Not verified here.** The RLS kit was not run. The files it has to execute are `supabase/migrations/20260920120000_subscription_direct_write_wall.sql`, `tests/rls/subscriptions.sql` (header and §8) and `tests/rls/assertions.sql` (one probe turned around, one added). `e2e/setup-staging.sh` passed `bash -n` and has not run against staging.
+- **The recompute keeps a tier the owner set once every period has ended (3.F fix), what to know.** `20260920150000_recompute_keeps_assigned_plan.sql`. The defect was live on production since U1.
+  - **The defect, read off the code.** U1's recompute took the tier from the live granting row with the furthest end, with no condition on whether that end had passed (`20260919150000:414-421`), and wrote it with `plan = coalesce(v_plan, plan)` (`:426`). `platform_company_set_plan` carries a new tier only onto live granting rows that have not ended (`:1495-1502`). When every granting period of a company has ended — the recompute's third branch, `('expired', that end)` at `:402-403` — set_plan carries the tier onto nothing and the recompute reads the old tier off the ended row. The next recompute wrote it back: any `subscription_coverage_record` write (a redemption, a manual edit), any invoice RPC, and the nightly sweep once wired.
+  - **The rule chosen: the recompute derives a tier only from a live granting period that has not ended** — `period_end IS NULL OR period_end > now()`, the exact predicate set_plan carries onto, and no term on `period_start`. With none, `plan` stands, as it already did for a company with no coverage. The code change is that one predicate; every other line of the body is U1's, and the PR lists each behaviour and where it is.
+  - **Why it is safe.** The tier query orders open-ended rows first and then by end, so whenever a period that has not ended exists, the old body and the new one pick the same row. They differ for exactly one population: companies whose every granting period with a tier has ended. For them the old body wrote the ended period's tier and the new one writes nothing.
+  - **Why not the other candidate.** Having set_plan record something the recompute respects means a new column and a second restated writer. Stamping the tier onto ended periods rewrites history, which U1 ruled out and section 3c pins.
+  - **The two rules that had to hold still hold.** A company with no coverage keeps its plan, and an early renewal that has not begun still carries the upgrade through the sweep: section 9 asserts both, 3c still asserts the original early-renewal case, and a fourth check shows a period that has not begun still decides the tier.
+  - **U3's wall and catalogue are unaffected.** The function stays SECURITY DEFINER and owned by the migration's role, so the trigger lets it through by `current_user`. It still writes `plan`, `subscription_status` and `subscription_expires_at` in one UPDATE, so `app_private.subscription_column_writes()` finds the same three entries and §8g's list needs no change. The migration's self-check asks the reader for exactly those three.
+  - **What changes at deploy: nothing, for anybody.** The file replaces one function body and writes no row. It recomputes no company, so no `plan`, status or expiry moves while it applies. **Afterwards**, a company in the population above keeps its `plan` at every recompute. **A company the defect has already reverted is not restored**: its column already holds the old tier and the new body leaves it there. The owner sets it again on the screen, **after** this release is live, or the next recompute reverts it again.
+  - **The blast radius, to run on production before the release.** Read-only, in a `READ ONLY` transaction that ends in ROLLBACK, and it calls no function, so `postgres` can run it as well as `supabase_admin`. Query 1 lists the companies whose tier the live body would revert at the next recompute. The fix keeps those, and they are the rows where `fixed_body_writes = plan_now`. A row where `fixed_body_writes` differs from `plan_now` is a company both bodies would move, which is the revival path below. Query 2 lists companies whose most recent owner-set tier is not the one they hold now. That is the defect having already fired, or a direct write before U3; the owner re-sets those after the release.
+
+```bash
+cd /srv/PRO/deploy && docker compose exec -T db psql -U supabase_admin -d postgres -X -v ON_ERROR_STOP=1 <<'SQL'
+BEGIN READ ONLY;
+
+-- 1. The recompute's tier choice, by the live body and by the fixed one.
+WITH tiered AS (
+  SELECT c.company_id, c.plan, c.period_end, c.created_at
+    FROM public.subscription_coverage c
+   WHERE c.status = 'active' AND c.grants_access AND c.plan IS NOT NULL
+),
+live_body AS (
+  SELECT DISTINCT ON (t.company_id) t.company_id, t.plan, t.period_end
+    FROM tiered t
+   ORDER BY t.company_id, (t.period_end IS NULL) DESC, t.period_end DESC, t.created_at DESC
+),
+fixed_body AS (
+  SELECT DISTINCT ON (t.company_id) t.company_id, t.plan
+    FROM tiered t
+   WHERE t.period_end IS NULL OR t.period_end > now()
+   ORDER BY t.company_id, (t.period_end IS NULL) DESC, t.period_end DESC, t.created_at DESC
+)
+SELECT co.name, co.id, co.status, co.subscription_status, co.subscription_expires_at,
+       co.plan                     AS plan_now,
+       l.plan                      AS live_body_writes,
+       l.period_end                AS read_off_period_ending,
+       coalesce(f.plan, co.plan)   AS fixed_body_writes
+  FROM public.companies co
+  JOIN live_body l ON l.company_id = co.id
+  LEFT JOIN fixed_body f ON f.company_id = co.id
+ WHERE l.plan IS DISTINCT FROM co.plan
+ ORDER BY co.name;
+
+-- 2. The defect having already fired: the tier the owner last set is not the
+--    one the company holds now.
+SELECT co.name, s.company_id, s.occurred_at AS last_set_at,
+       s.after_value ->> 'plan' AS tier_owner_set, co.plan AS plan_now,
+       co.subscription_status, co.subscription_expires_at
+  FROM (SELECT DISTINCT ON (a.company_id) a.company_id, a.occurred_at, a.after_value
+          FROM app_private.platform_audit_log a
+         WHERE a.action = 'billing.set_plan' AND a.outcome = 'ok' AND a.company_id IS NOT NULL
+         ORDER BY a.company_id, a.occurred_at DESC, a.id DESC) s
+  JOIN public.companies co ON co.id = s.company_id
+ WHERE (s.after_value ->> 'plan') IS DISTINCT FROM co.plan
+ ORDER BY s.occurred_at DESC;
+
+ROLLBACK;
+SQL
+```
+
+  - **What it does not close, both in U2's `app_private.subscription_invoice_apply`, found by reading and not by execution:**
+    1. **A revived period keeps its old tier (`HOLE[revival]`).** The function moves an invoice's row in place and never rewrites its tier, by design (`20260919170000:321-325`, `:412-421`). Take an unpaid invoice whose grace has passed: its row has ended at the old tier, and set_plan leaves it there. Marking the invoice paid later moves the row's end to the month's end. The row has then not ended, so it decides, and the tier goes back. It is realistic once the invoice sweep runs: an overdue invoice, an upgrade agreed with the customer, then the payment. `tests/rls/subscriptions.sql` §9b records it as today's behaviour. **Candidate fix, the owner's call because it changes U2's "tier written at creation" rule:** when `subscription_invoice_apply` moves a row that was void or ended into one that has not ended, give it the company's current tier. That is set_plan's own rule, applied at the moment the period comes back.
+    2. **A manual edit does not hold against a later apply of an invoice.** `update_company_subscription_manual` voids every live row with `p_replace` (`20260919150000:514-520`), invoice rows included. `subscription_invoice_apply` looks the invoice's row up without a status filter (`20260919170000:358-362`) and sets it back to `status = 'active'` (`:413-421`). So once the invoice sweep is wired, an administrator's manual `expired` or `inactive` on a company with a paid invoice for the current month is undone the next night, and the company is admitted again. **This one is about access, not only the tier.** Decide it before the invoice sweep's cron line goes in. Nothing tests it yet.
+  - **Not verified here.** The RLS kit was not run. The files it has to execute are `supabase/migrations/20260920150000_recompute_keeps_assigned_plan.sql` and `tests/rls/subscriptions.sql` (header, one comment in §3c, and §9). The self-check's regexes and U3's reader were checked against the function body with a Node simulation of `app_private.function_code()`. A boolean match does not depend on PostgreSQL's greediness rule, but it is not the kit.
 - **`OTP_PEPPER`**: provisioned in staging's `.env` on 15.09.2026 (64 hex characters, never printed). Production needs its own, different one before 0.6, or its deploy is refused. That waits for the owner's go. All three OTP streams follow the contract kept at `C:\Users\ahmad\.claude\plans\otp-contract-wf_ce583f7b-774.md`, outside the repo.
 - **Staging mail reaches real recipients** (owner's decision, 14.09.2026). Mailpit keeps a copy of every message and relays it through production's Resend account, except mail to `@example.com`. Live on staging since PR #8 (`45ff313`). Resend lists the relayed test mails to `delivered@resend.dev` as `delivered`.
 - **Staging mail stays as it is (owner's decision, 16.09.2026).** He asked to "use Resend for both environments", and after the trade was laid out he decided to leave staging alone, explicitly because it supports the tests. The reasoning is written down so this is not re-litigated:
@@ -535,7 +598,10 @@ Secrets never enter git:
 - Google sign-in on production (1.6): a privacy policy and an Impressum, and decisions G1 and G2. **G3 is answered:** on 17.09.2026 the owner chose one Google OAuth client for both environments, so production does not need a client of its own — staging's client takes production's redirect URI as a second authorised URI, and both `.env` files get `GOOGLE_CLIENT_SHARED=true` (see the entry above). Staging's client is in place and the provider has been on there since 16.09.2026; production stays off until the server-side password-session rule exists.
 - Rules for each subscription conflict class before step U1 (D8 to D10), counts above.
 - **Wiring the two subscription sweeps (3.F), staging first.** Nothing calls them yet. Run the dry run in the U3 entry above on staging, send the owner its four numbers and the list of companies, and install the staging cron line once he says so. Production follows the same way.
-- **A tier set on an expired company, reverted by the sweep (3.F).** When every granting period of a company has ended, `platform_company_set_plan` changes `companies.plan`, and the next recompute reads the old tier back off the ended period. Once the sweep is wired, that happens every night. The dry run's `plan_changes` counts the companies in that state today. The fix is one line in the recompute (see the U3 entry). Decide before the production sweep line goes in.
+- ~~**A tier set on an expired company, reverted by the sweep (3.F).**~~ — **fixed in `20260920150000`** (the tier-fix entry above): the recompute reads a tier only from a period that has not ended. Run that entry's two read-only queries on production before the release. Re-set any tier query 2 lists **after** the release is live.
+- **Two paths the tier fix leaves open, both in U2's `app_private.subscription_invoice_apply` (3.F).** Decide both before the invoice sweep's cron line goes in.
+  - **A payment revives an ended invoice period at its old tier**, which then decides the tier (`HOLE[revival]`). Candidate fix: give a row the company's current tier when it comes back from void or ended.
+  - **A later apply of an invoice re-activates a row a manual edit voided.** The company is admitted again against the administrator's `expired` or `inactive`. This one is about access.
 - ~~**May a support session issue a Gehaltsquittung?** (PR #80.)~~ — **answered 18.09.2026: no, permanently.** The owner delegated the decision. A Gehaltsquittung attests to a physical handover of cash that no platform agent witnessed, which is a question of attestation and not of traceability, so it does not become permissible once 3.4c's audit triggers exist. PR #80's stated reason — that the receipt records no actor — was wrong; it records three. Recorded at `receiptScope()` and in the entry above, with the server-side follow-up.
 - Questions the agents raised:
   - **OTP-DB.** If GoTrue confirmed a new owner's address but `signup_complete` then failed, may the owner finish with a new signup code? That needs a contract change; the alternative is that `otp-verify` retries completion.

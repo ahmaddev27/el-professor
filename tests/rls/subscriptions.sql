@@ -69,6 +69,14 @@
                        through them; and the functions that write the five are
                        exactly the ones the migration names, found by a reader
                        that is shown not to be blind
+    9. the tier fix    20260920150000. A tier the owner sets on a company whose
+                       every period has ended survives the next recompute and
+                       the sweep; a company with no coverage keeps a tier it was
+                       given; an early renewal that has not begun carries the
+                       upgrade; a period that has not begun still decides the
+                       tier; and the one path the fix does not close — a period
+                       revived by a payment — is recorded as today's behaviour,
+                       tagged HOLE[revival], so that closing it flips a line
 
   The companies here are created inside this file rather than in seed.sql for
   the same reason tenant-state.sql creates its own: they exist to be refused,
@@ -789,7 +797,7 @@ BEGIN
     (SELECT plan FROM companies WHERE id = v_co) = 'premium');
 
   -- A period that is already over keeps the tier it was sold at: it is history,
-  -- and the recompute never reads it.
+  -- and since 20260920150000 the recompute never reads it (section 9).
   PERFORM _sub_ok('early renewal: a period that has ended keeps the tier it was sold at',
     (SELECT count(*) FROM subscription_coverage
       WHERE company_id = v_co AND period_end IS NOT NULL AND period_end <= now()
@@ -1812,6 +1820,156 @@ BEGIN
   END LOOP;
 END $$;
 
-DO $$ BEGIN RAISE NOTICE '── subscriptions (plan 3.F, steps U1, U2 and U3): all checks passed ──'; END $$;
+-- ─── 9. a tier set after every period has ended (20260920150000) ────────────
+--
+-- The defect: the recompute read the tier off the granting period with the
+-- furthest end whether or not that end had passed, while set_plan carries a
+-- tier only onto periods that have not ended. For a company whose every
+-- granting period had ended, the next recompute wrote the old tier back over
+-- the owner's change. The fix reads a tier only from a period that has not
+-- ended, the set set_plan carries onto.
+--
+-- Every company here starts on basic and its periods are recorded at basic, so
+-- premium or advanced afterwards can only have come from the write under test.
+-- Writes and the reads of them are separate statements throughout (5d says why).
+-- This section runs after section 5 because 9b needs the subscription plan row
+-- 5a inserts.
+
+-- 9a. the defect, and the controls the rule must keep
+DO $$
+DECLARE
+  v_owner constant uuid := '50000000-0000-4000-8000-000000000001';
+  v_co    uuid;
+  v_out   text;
+BEGIN
+  -- A company paid until ten days ago, and nothing since.
+  v_co := _sub_company('tier-ended', 'approved', 'active', 'active', now() - interval '1 year',
+                       now() - interval '10 days', now() - interval '1 year');
+  PERFORM app_private.subscription_backfill_company(v_co);
+
+  -- The precondition, so the checks below are not vacuous: no period is left
+  -- for set_plan to carry a tier onto, and the one that ended is at basic.
+  PERFORM _sub_ok('tier: the company''s only period has ended at basic, so set_plan has nothing to carry a tier onto',
+    (SELECT subscription_status FROM companies WHERE id = v_co) = 'expired'
+    AND (SELECT count(*) FROM subscription_coverage
+          WHERE company_id = v_co AND status = 'active' AND grants_access
+            AND (period_end IS NULL OR period_end > now())) = 0
+    AND (SELECT count(*) FROM subscription_coverage
+          WHERE company_id = v_co AND status = 'active' AND grants_access AND plan = 'basic') = 1);
+
+  v_out := _sub_do(v_owner, format('SELECT platform_company_set_plan(%L, %L)::text', v_co, 'premium'));
+  PERFORM _sub_ok('tier: the owner sets premium on it', _sub_succeeded(v_out));
+  PERFORM _sub_ok('tier: …the company holds premium, and the ended period keeps the basic it was sold at',
+    (SELECT plan FROM companies WHERE id = v_co) = 'premium'
+    AND (SELECT plan FROM subscription_coverage WHERE company_id = v_co AND source = 'migration') = 'basic');
+
+  -- The instrument that used to undo it, one company at a time…
+  PERFORM app_private.recompute_company_subscription(v_co);
+  PERFORM _sub_ok('tier: the next recompute leaves the owner''s premium standing (before 20260920150000 it wrote basic back)',
+    (SELECT plan FROM companies WHERE id = v_co) = 'premium');
+
+  -- …and the daily sweep, which would have done it every night.
+  PERFORM app_private.recompute_all_company_subscriptions();
+  PERFORM _sub_ok('tier: …and so does the daily sweep',
+    (SELECT plan FROM companies WHERE id = v_co) = 'premium');
+  PERFORM _sub_ok('tier: …while the status half is untouched: expired, on the day the period ended',
+    (SELECT subscription_status = 'expired' AND subscription_expires_at = now() - interval '10 days'
+       FROM companies WHERE id = v_co));
+
+  -- Control: a company with no coverage at all keeps the plan it was given.
+  -- Section 1 checks this for the default tier; here it is a tier set_plan set,
+  -- so the column cannot be right merely by being the default.
+  v_co := _sub_company('tier-none', 'approved', 'active', 'inactive');
+  PERFORM app_private.subscription_backfill_company(v_co);
+  v_out := _sub_do(v_owner, format('SELECT platform_company_set_plan(%L, %L)::text', v_co, 'premium'));
+  PERFORM _sub_ok('tier, control: set_plan on a company with no coverage answers success', _sub_succeeded(v_out));
+  PERFORM app_private.recompute_company_subscription(v_co);
+  PERFORM _sub_ok('tier, control: a company with no coverage keeps the plan it was given',
+    (SELECT plan FROM companies WHERE id = v_co) = 'premium'
+    AND NOT EXISTS (SELECT 1 FROM subscription_coverage WHERE company_id = v_co));
+
+  -- Control: an early renewal survives the sweep (3c), here in the case the
+  -- fix is about — the running period has ended and the renewal has not begun.
+  v_co := _sub_company('tier-renew', 'approved', 'active', 'active', now() - interval '1 year',
+                       now() - interval '10 days', now() - interval '1 year');
+  PERFORM app_private.subscription_backfill_company(v_co);
+  PERFORM app_private.subscription_coverage_record(
+    v_co, 'activation_code', _sub_id('code:tier-renew'),
+    now() + interval '5 days', now() + interval '1 year', true, 'basic', NULL, 'renewal not yet begun', false);
+  v_out := _sub_do(v_owner, format('SELECT platform_company_set_plan(%L, %L)::text', v_co, 'premium'));
+  PERFORM _sub_ok('tier, early renewal: the upgrade answers success', _sub_succeeded(v_out));
+  PERFORM app_private.recompute_all_company_subscriptions();
+  PERFORM _sub_ok('tier, early renewal: the renewal that has not begun carries the upgrade, the ended period does not',
+    (SELECT plan FROM subscription_coverage WHERE company_id = v_co AND source = 'activation_code') = 'premium'
+    AND (SELECT plan FROM subscription_coverage WHERE company_id = v_co AND source = 'migration') = 'basic');
+  PERFORM _sub_ok('tier, early renewal: …and the sweep leaves the company on premium',
+    (SELECT plan FROM companies WHERE id = v_co) = 'premium');
+
+  -- Control: the fix reads no start date. A period that has not begun and
+  -- carries its own tier still decides, while the one that ended does not. With
+  -- a start term in the tier query this company would stay on basic.
+  v_co := _sub_company('tier-future', 'approved', 'active', 'active', now() - interval '1 year',
+                       now() - interval '10 days', now() - interval '1 year');
+  PERFORM app_private.subscription_backfill_company(v_co);
+  PERFORM app_private.subscription_coverage_record(
+    v_co, 'manual', NULL, now() + interval '5 days', now() + interval '1 year', true, 'advanced', NULL,
+    'a period recorded with its own tier', false);
+  PERFORM _sub_ok('tier, control: a period that has not begun still decides the tier, so the fix filters on no start date',
+    (SELECT plan FROM companies WHERE id = v_co) = 'advanced');
+END $$;
+
+/*
+  9b. HOLE[revival]: the path the fix does not close, recorded as today's
+      behaviour.
+
+  A period that has ended can come back after set_plan has run.
+  app_private.subscription_invoice_apply moves an invoice's row in place and
+  never rewrites its tier, so an unpaid invoice whose grace has passed keeps an
+  ended row at the old tier, set_plan leaves that row alone, and paying the
+  invoice later moves its end to the month's end. The recompute then reads the
+  old tier off a period that has not ended, which is exactly the rule. Closing
+  it is a change to U2's rule, not to the recompute, and it is the owner's
+  (HANDOFF.md). When it is closed, the last assertion here flips on purpose.
+
+  The due date sits before the month it invoices, so the unpaid row ends at the
+  month's start (the clamp in 5c) and has ended on every day the kit can run. A
+  realistic due date inside the month has passed its grace only from about the
+  fifth onwards, and the calendar would decide the test.
+*/
+DO $$
+DECLARE
+  v_owner constant uuid := '50000000-0000-4000-8000-000000000001';
+  v_month constant integer := extract(month FROM (now() AT TIME ZONE 'Europe/Berlin'))::integer;
+  v_year  constant integer := extract(year  FROM (now() AT TIME ZONE 'Europe/Berlin'))::integer;
+  v_co    uuid;
+  v_inv   uuid;
+  v_out   text;
+BEGIN
+  v_co  := _sub_billed_company('tier-revive');
+  v_inv := _sub_invoice('tier-revive', v_co, v_year, v_month, make_date(v_year, v_month, 1) - 30, 20);
+
+  -- What the nightly invoice sweep does to an invoice nobody has touched.
+  PERFORM app_private.subscription_invoice_apply(v_inv);
+  PERFORM _sub_ok('HOLE[revival] setup: the unpaid invoice''s period has ended, at the tier the company had',
+    (SELECT period_end <= now() AND plan = 'basic'
+       FROM subscription_coverage WHERE company_id = v_co AND source = 'invoice' AND source_id = v_inv));
+
+  v_out := _sub_do(v_owner, format('SELECT platform_company_set_plan(%L, %L)::text', v_co, 'premium'));
+  PERFORM _sub_ok('HOLE[revival] setup: the owner sets premium', _sub_succeeded(v_out));
+  PERFORM _sub_ok('HOLE[revival] setup: …the company holds it, and the ended invoice period stays at basic',
+    (SELECT plan FROM companies WHERE id = v_co) = 'premium'
+    AND (SELECT plan FROM subscription_coverage WHERE company_id = v_co AND source = 'invoice') = 'basic');
+
+  v_out := _sub_do(v_owner, format('SELECT platform_invoice_mark_paid(%L, %s)::text', v_inv, 2000));
+  PERFORM _sub_ok('HOLE[revival] setup: the invoice is then marked paid', _sub_succeeded(v_out));
+  PERFORM _sub_ok('HOLE[revival] setup: …which moves its period to the month''s end, still at basic',
+    (SELECT period_end > now() AND plan = 'basic'
+       FROM subscription_coverage WHERE company_id = v_co AND source = 'invoice' AND source_id = v_inv));
+
+  PERFORM _sub_ok('HOLE[revival]: the revived period decides the tier, so the owner''s premium goes back to basic — today''s behaviour, recorded; see HANDOFF.md',
+    (SELECT plan FROM companies WHERE id = v_co) = 'basic');
+END $$;
+
+DO $$ BEGIN RAISE NOTICE '── subscriptions (plan 3.F, steps U1, U2 and U3, and the tier fix): all checks passed ──'; END $$;
 
 ROLLBACK;
