@@ -17,7 +17,10 @@
  *
  * The list is closed, and it is shorter than it looks: the Stundennachweis PDF,
  * the Fahrtenbuch XLSX, the Trinkgeld-Quittung, the Gehaltsquittung (its text
- * is built in utils/salaryCashReceiptDocument.ts) and the Mietwagenauftrag. A
+ * is built in utils/salaryCashReceiptDocument.ts), the Mietwagenauftrag, and the
+ * two legal pages — the Impressum and the Datenschutzerklärung, German legal
+ * documents whose headings and labels live in lib/legalPages.ts; the English UI
+ * says in one line that they are German. A
  * `exportTableToExcel(...)` dump of vehicles, drivers, users, Fixkosten, the
  * Bargeldbestand or Werkstatt checks is **not** one of them — it is a
  * convenience export of an operational list, it satisfies no statutory form,

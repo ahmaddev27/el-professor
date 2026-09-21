@@ -53,6 +53,8 @@ import AdminLayout from './components/AdminLayout';
 import { useTranslation } from './contexts/LanguageContext';
 import type { TranslationKey } from './i18n';
 import { isDesignPreviewPath } from './design-preview/gate';
+import LegalPage from './pages/LegalPage';
+import { legalPageFor } from './lib/legalPages';
 import { needsCompanyRegistration } from './lib/googleAccount';
 import {
   ADMIN_BASE,
@@ -423,6 +425,15 @@ function App() {
         <DesignPreviewApp />
       </Suspense>
     );
+  }
+
+  // Ahead of every gate too, and in every build: the Impressum and the privacy
+  // policy read only public data, and a German commercial site owes both to
+  // everyone — signed out, blocked, pending approval or signed in. The links to
+  // them are plain page loads, so the path is read here and not by a router.
+  const legalPage = legalPageFor(window.location.pathname);
+  if (legalPage) {
+    return <LegalPage page={legalPage} />;
   }
 
   if (authLoading) {
