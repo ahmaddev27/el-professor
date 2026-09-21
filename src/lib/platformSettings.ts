@@ -759,6 +759,7 @@ export function parseGermanDate(text: string): string | null {
 }
 
 /** Control characters, except the line break a paragraph may hold (an address block). */
+// eslint-disable-next-line no-control-regex -- matching control characters is the point
 const PRIVACY_CONTROL_CHARACTERS = /[\u0000-\u0009\u000b-\u001f\u007f-\u009f]/;
 
 /** Whether the database would refuse one paragraph. */
