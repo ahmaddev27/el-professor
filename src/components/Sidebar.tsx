@@ -11,6 +11,7 @@ import { usePlan, FeatureKey } from '../contexts/PlanContext';
 import { useTranslation } from '../contexts/LanguageContext';
 import type { TranslationKey } from '../i18n';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
+import { LegalLinks } from './legal/LegalLinks';
 
 interface SidebarProps {
   isSupportAdmin: boolean;
@@ -174,6 +175,9 @@ const Sidebar: React.FC<SidebarProps> = ({ isSupportAdmin }) => {
           <LogOut size={16} className="flex-shrink-0" />
           <span>{t('common.logout')}</span>
         </button>
+        {/* Impressum and Datenschutz, owed from every page; a new tab, so
+            nothing typed on the current screen is lost. */}
+        <LegalLinks className="px-3 pb-1 pt-2" />
       </div>
     </div>
   );

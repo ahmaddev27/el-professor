@@ -14,6 +14,7 @@ import { formatOtpMessage, normalizeEmail, type OtpVerifyFailure, type OtpVerify
 import { signupFailure, signupVerificationStart, type VerificationStart } from '../lib/accountFunctionResponses';
 import EmphasizedText from '../components/auth/EmphasizedText';
 import GoogleButton from '../components/auth/GoogleButton';
+import { LegalLinks } from '../components/legal/LegalLinks';
 import NoticeBox from '../components/auth/NoticeBox';
 import OtpChallenge from '../components/auth/OtpChallenge';
 import { authPrimaryButtonClass } from '../components/auth/authStyles';
@@ -413,6 +414,8 @@ const SignupPage: React.FC = () => {
           {t('signup.alreadyRegistered')}{' '}
           <Link to="/login" className="text-cyan-300/80 hover:text-cyan-200 transition-colors">{t('auth.signIn')}</Link>
         </p>
+
+        <LegalLinks tone="onDark" className="mt-4 justify-center" />
       </div>
     </div>
   );

@@ -5,6 +5,7 @@ import { useAuth, BLOCK_MESSAGE_KEYS } from '../contexts/AuthContext';
 import { useTranslation } from '../contexts/LanguageContext';
 import LanguageSwitcher from './LanguageSwitcher';
 import GoogleButton from './auth/GoogleButton';
+import { LegalLinks } from './legal/LegalLinks';
 import type { TranslationKey } from '../i18n';
 
 /**
@@ -211,6 +212,8 @@ const LoginForm: React.FC = () => {
         <div className="text-center mt-4 text-white/20 text-xs">
           © 2025 El-Professor
         </div>
+
+        <LegalLinks tone="onDark" className="mt-2 justify-center" />
       </div>
     </div>
   );
