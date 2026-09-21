@@ -1,14 +1,31 @@
 import React, { useState, useEffect } from 'react';
-import { DollarSign, Plus, CreditCard as Edit2, Trash2, Save, X, Download } from 'lucide-react';
+import { CalendarClock, Download, Info, Pencil, Plus, Save, Trash2, X } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { useCompanyScope } from '../hooks/useCompanyScope';
 import { useToast } from '../contexts/ToastContext';
-import ConfirmationModal from './ConfirmationModal';
 import { handleDatabaseError } from '../utils/errorHandler';
 import { exportTableToExcel } from '../utils/excelExport';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { useTranslation } from '../contexts/LanguageContext';
+import {
+  Alert,
+  Button,
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  ConfirmDialog,
+  DataTable,
+  EmptyState,
+  Field,
+  formatEuro,
+  Input,
+  KpiCard,
+  PageHeader,
+  Tooltip,
+  type DataTableColumn,
+} from './ui';
 
 interface FixedCost {
   id: string;
@@ -42,7 +59,6 @@ const FixedCostsManagement: React.FC = () => {
   const { success, error: showError, warning } = useToast();
   const { t } = useTranslation();
   const [deleteConfirm, setDeleteConfirm] = useState<{ isOpen: boolean; id: string | null }>({ isOpen: false, id: null });
-  const [hoveredRow, setHoveredRow] = useState<string | null>(null);
 
   useEffect(() => {
     loadFixedCosts();
@@ -207,316 +223,274 @@ const FixedCostsManagement: React.FC = () => {
     });
   };
 
-  const inputStyle = {
-    background: 'var(--bg-subtle)',
-    border: '1px solid var(--border)',
-    borderRadius: '0.5rem',
-    color: 'var(--text-primary)',
-    fontSize: '0.875rem',
-    padding: '0.5rem 0.75rem',
-    outline: 'none'
-  };
+  // ── Presentation (phase 5) ────────────────────────────────────────────────
+  // Everything above is the screen's logic and is unchanged; everything below
+  // only draws it. The total is the float sum above, formatted through
+  // utils/money.ts; this block adds no arithmetic.
+
+  // formatEuro refuses a value that is not a finite amount. A figure shows such
+  // a value as it is rather than taking the screen down, as DataTable does for
+  // its own currency cells.
+  const euro = (amount: number) => (Number.isFinite(amount) ? formatEuro(amount) : String(amount));
+
+  // A read that failed with nothing loaded yet: "no fixed costs" and a total of
+  // 0,00 € would both be claims the screen cannot make.
+  const loadFailed = Boolean(error) && fixedCosts.length === 0;
+
+  const columns: DataTableColumn<FixedCost>[] = [
+    {
+      id: 'description',
+      header: t('common.description'),
+      value: cost => cost.description,
+      sortable: true,
+      // On a phone the description wraps and the paddings tighten, so the amount
+      // and both row actions stay on screen, also while a row is being edited.
+      className: 'pr-2 sm:pr-4 md:min-w-[12rem]',
+      cell: cost =>
+        editingId === cost.id ? (
+          <Input
+            type="text"
+            value={formData.description}
+            onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+            aria-label={t('common.description')}
+            // A field's natural width is 20 characters, which a table cell
+            // cannot shrink below; size 1 lets it take the cell's width instead,
+            // so the row's save and cancel buttons stay on a phone's screen.
+            size={1}
+          />
+        ) : (
+          <span className="font-medium">{cost.description}</span>
+        ),
+    },
+    {
+      id: 'amount',
+      header: t('common.amount'),
+      kind: 'currency',
+      className: 'pl-2 pr-3 sm:px-4',
+      value: cost => Number(cost.amount),
+      sortable: true,
+      cell: cost =>
+        editingId === cost.id ? (
+          <Input
+            type="number"
+            step="0.01"
+            value={formData.amount}
+            onChange={(e) => setFormData({ ...formData, amount: e.target.value })}
+            aria-label={t('fleet.amountEuro')}
+            className="ml-auto w-[5.5rem] text-right sm:w-32"
+          />
+        ) : (
+          euro(Number(cost.amount))
+        ),
+    },
+  ];
+
+  const rowActions = (cost: FixedCost) =>
+    editingId === cost.id ? (
+      <>
+        <Tooltip content={t('common.save')}>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label={t('fleet.saveFixedCostAria', { description: cost.description })}
+            onClick={() => handleUpdate(cost.id)}
+          >
+            <Save aria-hidden />
+          </Button>
+        </Tooltip>
+        <Tooltip content={t('common.cancel')}>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label={t('fleet.cancelFixedCostEditAria', { description: cost.description })}
+            onClick={cancelEdit}
+          >
+            <X aria-hidden />
+          </Button>
+        </Tooltip>
+      </>
+    ) : (
+      <>
+        <Tooltip content={t('common.edit')}>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label={t('fleet.editFixedCostAria', { description: cost.description })}
+            onClick={() => startEdit(cost)}
+          >
+            <Pencil aria-hidden />
+          </Button>
+        </Tooltip>
+        <Tooltip content={t('common.delete')}>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            className="hover:text-critical"
+            aria-label={t('fleet.deleteFixedCostAria', { description: cost.description })}
+            onClick={() => confirmDelete(cost.id)}
+          >
+            <Trash2 aria-hidden />
+          </Button>
+        </Tooltip>
+      </>
+    );
+
+  const header = (actions?: React.ReactNode) => (
+    <PageHeader title={t('nav.fixkosten')} description={t('fleet.fixedCostsSubtitle')} actions={actions} />
+  );
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-8">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2" style={{ borderColor: 'var(--accent)' }}></div>
+      <div className="font-ui">
+        {header()}
+        <div className="grid grid-cols-1 gap-4">
+          <KpiCard label={t('fleet.totalPerMonth')} value="" loading className="sm:max-w-xs" />
+          <DataTable caption={t('fleet.fixedCostsCaption')} columns={columns} rows={[]} getRowId={cost => cost.id} loading />
+        </div>
       </div>
     );
   }
 
+  const addButton = (size?: 'sm') => (
+    <Button size={size} onClick={() => setIsAdding(true)}>
+      <Plus aria-hidden />
+      {t('fleet.addFixedCost')}
+    </Button>
+  );
+
   return (
-    <div className="space-y-6">
-      <div className="bg-gradient-to-r from-green-600 to-green-800 rounded-xl shadow-lg p-6 text-white">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center space-x-3">
-            <div className="bg-white bg-opacity-20 rounded-lg p-2">
-              <DollarSign className="text-white" size={32} />
-            </div>
-            <div>
-              <h1 className="text-3xl font-bold">{t('nav.fixkosten')}</h1>
-              <p className="text-green-100 mt-1">{t('fleet.fixedCostsSubtitle')}</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-4">
-            <div className="text-right">
-              <p className="text-sm text-green-100">{t('fleet.totalPerMonth')}</p>
-              <p className="text-3xl font-bold">{totalFixedCosts.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €</p>
-            </div>
-            <button
-              onClick={handleExport}
-              className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium bg-white bg-opacity-20 hover:bg-opacity-30 text-white transition-all"
-              title={t('common.exportExcelShort')}
-            >
-              <Download size={15} />
-              Excel
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {error && (
-        <div
-          className="rounded-lg p-4"
-          style={{ background: 'var(--danger-subtle)', border: '1px solid var(--danger)' }}
-        >
-          <p className="text-sm" style={{ color: 'var(--danger)' }}>
-            <strong>{t('common.error')}:</strong> {error}
-          </p>
-          {showMigrationSteps && (
-            <div className="mt-2 text-sm" style={{ color: 'var(--danger)' }}>
-              <p>{t('fleet.migrationSteps')}</p>
-              <ol className="list-decimal ml-5 mt-2 space-y-1">
-                <li>{t('fleet.migrationStep1')}</li>
-                <li>{t('fleet.migrationStep2')}</li>
-                <li>{t('fleet.migrationStep3')}</li>
-                <li>{t('fleet.migrationStep4')}</li>
-              </ol>
-            </div>
-          )}
-        </div>
+    <div className="font-ui">
+      {header(
+        <>
+          <Button variant="secondary" onClick={handleExport}>
+            <Download aria-hidden />
+            {t('common.exportExcelShort')}
+          </Button>
+          {mayEdit && !isAdding ? addButton() : null}
+        </>,
       )}
 
-      {profile && (
-        <div
-          className="rounded-lg p-4"
-          style={{ background: 'var(--accent-subtle)', border: '1px solid var(--accent)' }}
-        >
-          <p className="text-sm" style={{ color: 'var(--accent-text)' }}>
-            <strong>{t('fleet.userInfo')}</strong> {user?.email} | {t('fleet.roleLabel')}: {profile?.role || t('fleet.notSet')} |
-            {' '}{t('fleet.canEditLabel')}: {mayEdit ? t('common.yes') : t('common.no')}
-          </p>
-        </div>
-      )}
+      <div className="grid grid-cols-1 gap-4">
+        {!loadFailed && (
+          <KpiCard
+            label={t('fleet.totalPerMonth')}
+            value={euro(totalFixedCosts)}
+            icon={CalendarClock}
+            className="sm:max-w-xs"
+          />
+        )}
 
-      {!mayEdit && (
-        <div
-          className="rounded-lg p-4"
-          style={{ background: 'var(--warning-subtle)', border: '1px solid var(--warning)' }}
-        >
-          <p className="text-sm" style={{ color: 'var(--warning)' }}>
-            <strong>{t('common.noPermission')}:</strong> {t('fleet.fixedCostsNeedEditorRole')}
-            {' '}{t('fleet.currentRole')} <strong>{profile?.role || t('fleet.notSet')}</strong>
-          </p>
-        </div>
-      )}
+        {error && (
+          <Alert tone="critical" title={t('common.error')}>
+            <p>{error}</p>
+            {showMigrationSteps && (
+              <div className="mt-2">
+                <p>{t('fleet.migrationSteps')}</p>
+                <ol className="ml-5 mt-2 list-decimal space-y-1">
+                  <li>{t('fleet.migrationStep1')}</li>
+                  <li>{t('fleet.migrationStep2')}</li>
+                  <li>{t('fleet.migrationStep3')}</li>
+                  <li>{t('fleet.migrationStep4')}</li>
+                </ol>
+              </div>
+            )}
+          </Alert>
+        )}
 
-      {mayEdit && (
-        <div
-          className="rounded-xl p-6"
-          style={{ background: 'var(--bg-surface)', boxShadow: 'var(--shadow-md)' }}
-        >
-          {!isAdding ? (
-            <button
-              onClick={() => setIsAdding(true)}
-              className="w-full flex items-center justify-center gap-2 px-4 py-3 text-white rounded-lg transition-colors"
-              style={{ background: 'var(--success-solid)' }}
-            >
-              <Plus size={20} />
-              {t('fleet.addFixedCost')}
-            </button>
-          ) : (
-            <div className="space-y-4">
-              <h3 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>{t('fleet.newFixedCost')}</h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>
-                    {t('common.description')}
-                  </label>
-                  <input
+        {!mayEdit && (
+          <Alert tone="caution" title={t('common.noPermission')}>
+            {t('fleet.fixedCostsNeedEditorRole')}{' '}
+            {t('fleet.currentRole')} <strong className="font-semibold text-fg">{profile?.role || t('fleet.notSet')}</strong>
+          </Alert>
+        )}
+
+        {mayEdit && isAdding && (
+          <Card>
+            <CardHeader>
+              <CardTitle as="h2">{t('fleet.newFixedCost')}</CardTitle>
+            </CardHeader>
+            <CardContent className="grid gap-4">
+              <div className="grid gap-4 md:grid-cols-2">
+                <Field label={t('common.description')}>
+                  <Input
                     type="text"
                     value={formData.description}
                     onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                    className="w-full"
-                    style={inputStyle}
                     placeholder={t('fleet.fixedCostDescriptionPlaceholder')}
+                    // The form opens from a button in the page header; focus
+                    // follows it, or a keyboard user is left at the header.
+                    autoFocus
                   />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>
-                    {t('fleet.amountEuro')}
-                  </label>
-                  <input
+                </Field>
+                <Field label={t('fleet.amountEuro')}>
+                  <Input
                     type="number"
                     step="0.01"
                     value={formData.amount}
                     onChange={(e) => setFormData({ ...formData, amount: e.target.value })}
-                    className="w-full"
-                    style={inputStyle}
-                    placeholder="0.00"
+                    placeholder={t('fleet.amountPlaceholder')}
                   />
-                </div>
+                </Field>
               </div>
-              <div className="flex gap-2">
-                <button
-                  onClick={handleAdd}
-                  className="flex-1 flex items-center justify-center gap-2 px-4 py-2 text-white rounded-lg"
-                  style={{ background: 'var(--success-solid)' }}
-                >
-                  <Save size={16} />
-                  {t('common.save')}
-                </button>
-                <button
-                  onClick={cancelEdit}
-                  className="flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-lg"
-                  style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)' }}
-                >
-                  <X size={16} />
+              <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                <Button variant="secondary" onClick={cancelEdit}>
+                  <X aria-hidden />
                   {t('common.cancel')}
-                </button>
+                </Button>
+                <Button onClick={handleAdd}>
+                  <Save aria-hidden />
+                  {t('common.save')}
+                </Button>
               </div>
-            </div>
-          )}
-        </div>
-      )}
+            </CardContent>
+          </Card>
+        )}
 
-      <div
-        className="rounded-xl overflow-hidden"
-        style={{ background: 'var(--bg-surface)', boxShadow: 'var(--shadow-md)' }}
-      >
-        <div className="overflow-x-auto">
-          <table className="min-w-full">
-            <thead style={{ background: 'var(--bg-subtle)' }}>
-              <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>
-                  {t('common.description')}
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>
-                  {t('common.amount')}
-                </th>
-                {mayEdit && (
-                  <th className="px-6 py-3 text-right text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>
-                    {t('fleet.actions')}
-                  </th>
-                )}
-              </tr>
-            </thead>
-            <tbody style={{ background: 'var(--bg-surface)' }}>
-              {fixedCosts.length === 0 ? (
-                <tr>
-                  <td colSpan={3} className="px-6 py-8 text-center" style={{ color: 'var(--text-secondary)' }}>
-                    {t('fleet.noFixedCosts')}
-                  </td>
-                </tr>
-              ) : (
-                fixedCosts.map((cost) => (
-                  <tr
-                    key={cost.id}
-                    style={{
-                      background: hoveredRow === cost.id ? 'var(--bg-subtle)' : 'transparent',
-                      borderBottom: '1px solid var(--border)',
-                      transition: 'background 0.15s'
-                    }}
-                    onMouseEnter={() => setHoveredRow(cost.id)}
-                    onMouseLeave={() => setHoveredRow(null)}
-                  >
-                    {editingId === cost.id ? (
-                      <>
-                        <td className="px-6 py-4">
-                          <input
-                            type="text"
-                            value={formData.description}
-                            onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                            className="w-full"
-                            style={inputStyle}
-                          />
-                        </td>
-                        <td className="px-6 py-4">
-                          <input
-                            type="number"
-                            step="0.01"
-                            value={formData.amount}
-                            onChange={(e) => setFormData({ ...formData, amount: e.target.value })}
-                            className="w-full"
-                            style={inputStyle}
-                          />
-                        </td>
-                        <td className="px-6 py-4 text-right">
-                          <button
-                            onClick={() => handleUpdate(cost.id)}
-                            className="mr-3"
-                            style={{ color: 'var(--success)' }}
-                            title={t('common.save')}
-                          >
-                            <Save size={18} />
-                          </button>
-                          <button
-                            onClick={cancelEdit}
-                            style={{ color: 'var(--text-secondary)' }}
-                            title={t('common.cancel')}
-                          >
-                            <X size={18} />
-                          </button>
-                        </td>
-                      </>
-                    ) : (
-                      <>
-                        <td className="px-6 py-4 text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
-                          {cost.description}
-                        </td>
-                        <td className="px-6 py-4 text-sm" style={{ color: 'var(--text-primary)' }}>
-                          {Number(cost.amount).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
-                        </td>
-                        {mayEdit && (
-                          <td className="px-6 py-4 text-right text-sm font-medium">
-                            {mayEdit && (
-                              <button
-                                onClick={() => startEdit(cost)}
-                                className="mr-3"
-                                style={{ color: 'var(--accent)' }}
-                                title={t('common.edit')}
-                              >
-                                <Edit2 size={18} />
-                              </button>
-                            )}
-                            {mayEdit && (
-                              <button
-                                onClick={() => confirmDelete(cost.id)}
-                                style={{ color: 'var(--danger)' }}
-                                title={t('common.delete')}
-                              >
-                                <Trash2 size={18} />
-                              </button>
-                            )}
-                          </td>
-                        )}
-                      </>
-                    )}
-                  </tr>
-                ))
-              )}
-            </tbody>
-            {fixedCosts.length > 0 && (
-              <tfoot style={{ background: 'var(--bg-subtle)' }}>
-                <tr>
-                  <td className="px-6 py-4 text-sm font-bold" style={{ color: 'var(--text-primary)' }}>{t('overview.common.gesamt')}</td>
-                  <td className="px-6 py-4 text-sm font-bold" style={{ color: 'var(--text-primary)' }}>
-                    {totalFixedCosts.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
-                  </td>
-                  {mayEdit && <td></td>}
-                </tr>
-              </tfoot>
-            )}
-          </table>
-        </div>
-      </div>
+        <DataTable
+          caption={t('fleet.fixedCostsCaption')}
+          columns={columns}
+          rows={fixedCosts}
+          getRowId={cost => cost.id}
+          error={loadFailed}
+          rowActions={mayEdit ? rowActions : undefined}
+          rowActionsLabel={t('fleet.actions')}
+          totals={{ description: t('overview.common.gesamt'), amount: euro(totalFixedCosts) }}
+          emptyState={
+            <EmptyState
+              size="sm"
+              icon={CalendarClock}
+              title={t('fleet.noFixedCosts')}
+              action={mayEdit && !isAdding ? addButton('sm') : undefined}
+            />
+          }
+        />
 
-      <div
-        className="rounded-lg p-4"
-        style={{ background: 'var(--accent-subtle)', border: '1px solid var(--accent)' }}
-      >
-        <p className="text-sm" style={{ color: 'var(--accent-text)' }}>
-          <strong>{t('fleet.hint')}</strong> {t('fleet.fixedCostsNote')}
+        <p className="flex items-start gap-2 text-[13px] text-fg-muted">
+          <Info aria-hidden className="mt-0.5 size-4 shrink-0 text-fg-subtle" />
+          <span>
+            <span className="font-semibold text-fg">{t('fleet.hint')}</span> {t('fleet.fixedCostsNote')}
+          </span>
         </p>
+
+        {/* Audit finding 6 calls this developer output and the design README
+            leaves removing it to the owner, so it stays, moved below the
+            list and set as small print until he decides. */}
+        {profile && (
+          <p className="text-xs text-fg-subtle">
+            <span className="font-semibold">{t('fleet.userInfo')}</span> {user?.email} | {t('fleet.roleLabel')}:{' '}
+            {profile?.role || t('fleet.notSet')} | {t('fleet.canEditLabel')}: {mayEdit ? t('common.yes') : t('common.no')}
+          </p>
+        )}
       </div>
 
-      <ConfirmationModal
-        isOpen={deleteConfirm.isOpen}
+      <ConfirmDialog
+        open={deleteConfirm.isOpen}
         onClose={() => setDeleteConfirm({ isOpen: false, id: null })}
         onConfirm={() => deleteConfirm.id && handleDelete(deleteConfirm.id)}
         title={t('fleet.deleteFixedCostTitle')}
-        message={t('fleet.deleteFixedCostMessage')}
-        type="confirm"
+        description={t('fleet.deleteFixedCostMessage')}
+        confirmLabel={t('common.delete')}
+        icon={Trash2}
       />
     </div>
   );

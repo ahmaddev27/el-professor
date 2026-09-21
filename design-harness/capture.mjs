@@ -12,6 +12,11 @@
  *
  * Every shot is a full page at 375, 768 or 1280 CSS pixels, light and dark,
  * except the dialogs, which are the viewport (a dialog is fixed to it).
+ *
+ * `--root <dir>` renders another checkout's screens with this script, e.g. a
+ * `git worktree` of the commit before a batch, so both sets come from the same
+ * harness and the same browser settings. That checkout needs node_modules and
+ * e2e/node_modules (a directory junction to this one's is enough).
  */
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -19,15 +24,16 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createServer } from 'vite';
 
-const here = dirname(fileURLToPath(import.meta.url));
-const root = resolve(here, '..');
-const e2eRequire = createRequire(join(root, 'e2e', 'package.json'));
-
 const args = process.argv.slice(2);
 const arg = name => {
   const index = args.indexOf(`--${name}`);
   return index >= 0 ? args[index + 1] : undefined;
 };
+
+const ownRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+/** The checkout whose screens are rendered; the shots always land in this one. */
+const renderRoot = resolve(arg('root') ?? ownRoot);
+const e2eRequire = createRequire(join(ownRoot, 'e2e', 'package.json'));
 const set = arg('set');
 const batch = arg('batch') ?? 'batch1';
 const only = arg('only');
@@ -40,7 +46,7 @@ if (set !== 'before' && set !== 'after') {
 const FIXED_NOW = new Date('2026-09-14T10:00:00+02:00');
 const WIDTHS = [375, 768, 1280];
 const THEMES = ['light', 'dark'];
-const outDir = join(root, 'Docs', 'design', 'phase5', batch, set);
+const outDir = join(ownRoot, 'Docs', 'design', 'phase5', batch, set);
 
 const openAdd = page => page.getByRole('button', { name: /^(Neues Fahrzeug|Fahrzeug hinzufügen)$/ }).first().click();
 const openFirstDelete = page => page.getByRole('button', { name: /löschen$/i }).first().click();
@@ -70,6 +76,9 @@ const SHOTS = [
   { name: 'fixkosten-nur-lesen', query: { screen: 'fixkosten', role: 'viewer' }, variants: STATE_VARIANTS },
   { name: 'fixkosten-leer', query: { screen: 'fixkosten', data: 'empty' }, variants: STATE_VARIANTS },
   { name: 'fixkosten-fehler', query: { screen: 'fixkosten', data: 'missing' }, variants: STATE_VARIANTS },
+  // The English UI, once per screen: labels grow, and German-only words must not leak.
+  { name: 'fahrzeuge-en', query: { screen: 'fahrzeuge', lang: 'en' }, variants: [{ width: 1280, theme: 'light' }] },
+  { name: 'fixkosten-en', query: { screen: 'fixkosten', lang: 'en' }, variants: [{ width: 375, theme: 'light' }] },
 ];
 
 const allVariants = WIDTHS.flatMap(width => THEMES.map(theme => ({ width, theme })));
@@ -97,9 +106,14 @@ async function toWebp(encoder, png) {
   return Buffer.from(dataUrl.split(',')[1], 'base64');
 }
 
-const server = await createServer({ configFile: join(here, 'vite.config.ts'), logLevel: 'warn' });
+const server = await createServer({
+  configFile: join(renderRoot, 'design-harness', 'vite.config.ts'),
+  logLevel: 'warn',
+  // Another harness may hold the port; take the next free one.
+  server: { strictPort: false },
+});
 await server.listen();
-const origin = `http://localhost:${server.config.server.port}`;
+const origin = new URL(server.resolvedUrls.local[0]).origin;
 
 const { chromium } = e2eRequire('@playwright/test');
 // A date field formats by the browser's own UI language, not the page's
@@ -117,8 +131,14 @@ try {
       const file = `${width}-${theme}-${shot.name}.webp`;
       if (only && !file.includes(only)) continue;
 
+      // A phone is a touch screen: the 375 px shots emulate one, so a coarse
+      // pointer grows the controls as it does on a real phone. 768 and 1280
+      // keep a mouse, the densest layout a tablet or laptop can show.
+      const phone = width < 768;
       const context = await browser.newContext({
-        viewport: { width, height: width < 768 ? 812 : 900 },
+        viewport: { width, height: phone ? 812 : 900 },
+        isMobile: phone,
+        hasTouch: phone,
         deviceScaleFactor: 1,
         locale: 'de-DE',
         timezoneId: 'Europe/Berlin',
@@ -134,7 +154,7 @@ try {
         if (message.type() === 'error') problems.push(`${file}: console: ${message.text()}`);
       });
 
-      const query = new URLSearchParams({ ...shot.query, theme, lang: 'de' });
+      const query = new URLSearchParams({ theme, lang: 'de', ...shot.query });
       // The first visit waits for Vite to transform the whole module graph.
       // `load` is not awaited: with the clock installed it can stall, and
       // settle() below is the real readiness test.

@@ -110,4 +110,16 @@ describe('the committed baseline', () => {
     expect(countStyleDebt(source).style).toBeGreaterThan(0);
     expect(baseline.files['src/pages/WerkstattPage.tsx']?.style).toBeGreaterThan(0);
   });
+
+  it('holds the phase 5 batch-1 screens at zero: they are on the design system', () => {
+    for (const path of [
+      'src/components/CarsManagement.tsx',
+      'src/components/CarModal.tsx',
+      'src/components/FixedCostsManagement.tsx',
+      'src/pages/CarsPage.tsx',
+      'src/pages/FixkostenPage.tsx',
+    ]) {
+      expect(baseline.files[path], path).toBeUndefined();
+    }
+  });
 });

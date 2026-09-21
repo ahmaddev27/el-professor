@@ -33,14 +33,6 @@
       "style": 18,
       "color": 0
     },
-    "src/components/CarModal.tsx": {
-      "style": 36,
-      "color": 1
-    },
-    "src/components/CarsManagement.tsx": {
-      "style": 49,
-      "color": 7
-    },
     "src/components/ConfirmationModal.tsx": {
       "style": 11,
       "color": 2
@@ -76,10 +68,6 @@
     "src/components/FinalizePlanningModal.tsx": {
       "style": 50,
       "color": 32
-    },
-    "src/components/FixedCostsManagement.tsx": {
-      "style": 38,
-      "color": 11
     },
     "src/components/GehaltsquittungDocument.tsx": {
       "style": 44,
@@ -339,10 +327,6 @@
     },
     "src/pages/FahrerPage.tsx": {
       "style": 2,
-      "color": 0
-    },
-    "src/pages/FixkostenPage.tsx": {
-      "style": 1,
       "color": 0
     },
     "src/pages/ForgotPasswordPage.tsx": {

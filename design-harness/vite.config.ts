@@ -70,8 +70,10 @@ export default defineConfig({
     __DESIGN_PREVIEW__: 'false',
   },
   server: {
+    // The next free port when 5199 is taken; capture.mjs asks the server
+    // which one it got.
     port: 5199,
-    strictPort: true,
+    strictPort: false,
     open: false,
   },
   optimizeDeps: {

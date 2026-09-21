@@ -1,10 +1,6 @@
-import React from 'react';
 import CarsManagement from '../components/CarsManagement';
 
+// AppLayout already pads the page; the screen draws its own header (phase 5).
 export default function CarsPage() {
-  return (
-    <div className="p-6">
-      <CarsManagement />
-    </div>
-  );
+  return <CarsManagement />;
 }
