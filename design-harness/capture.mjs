@@ -23,6 +23,8 @@ import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createServer } from 'vite';
+// Batch 3 waits for its chained reads with its own quiet(); this file has one for the DOM.
+import { quiet as quietBatch3 } from './batch3/shots.mjs';
 
 const args = process.argv.slice(2);
 const arg = name => {
@@ -191,12 +193,15 @@ try {
       // which on a machine short of memory has taken more than five minutes.
       // `load` is not awaited: with the clock installed it can stall, and
       // settle() below is the real readiness test.
+      // Batch 3's pages pull in the planning wizards, several megabytes of source.
       await page.goto(`${origin}/design-harness/?${query}`, { waitUntil: 'domcontentloaded', timeout: 600_000 });
       await settle(page);
       if (shot.act) {
         await shot.act(page);
         await page.waitForTimeout(500);
       }
+      // Batch 3's screens chain their reads; wait until none has been pending for a while.
+      if (batch === 'batch3') await quietBatch3(page);
 
       const png = await page.screenshot({ fullPage: !shot.dialog, animations: 'disabled' });
       writeFileSync(join(outDir, file), await toWebp(encoder, png));

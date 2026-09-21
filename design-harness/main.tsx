@@ -11,6 +11,7 @@ import SalariesPage from '../src/pages/SalariesPage';
 import BargeldbestandPage from '../src/pages/BargeldbestandPage';
 import { AbrechnungPage } from '../src/pages/AbrechnungPage';
 import '../src/index.css';
+import { BATCH3_ROUTES, batch3InitialEntry } from './batch3/routes';
 import { applyStoredPreferences, scenario } from './scenario';
 
 /**
@@ -36,7 +37,7 @@ createRoot(document.getElementById('root')!).render(
     <LanguageProvider>
       <ThemeProvider>
         <ToastProvider>
-          <MemoryRouter initialEntries={[ROUTES[scenario.screen]]}>
+          <MemoryRouter initialEntries={[batch3InitialEntry() ?? ROUTES[scenario.screen]]}>
             <Routes>
               <Route path="/" element={<AppLayout isSupportAdmin={false} />}>
                 <Route path="cars" element={<CarsPage />} />
@@ -44,6 +45,8 @@ createRoot(document.getElementById('root')!).render(
                 <Route path="salaries" element={<SalariesPage />} />
                 <Route path="abrechnung" element={<AbrechnungPage />} />
                 <Route path="bargeldbestand" element={<BargeldbestandPage />} />
+                {/* Phase 5 batch 3: Dokumente, Stundennachweis, Monatsplanung. */}
+                {BATCH3_ROUTES}
               </Route>
             </Routes>
           </MemoryRouter>
