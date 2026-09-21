@@ -2060,6 +2060,13 @@ INSERT INTO app_private.platform_staff (user_id, role, disabled_at, note) VALUES
   (_mx_id('rpc_staff_disabled', 'a'), 'owner', now(), 'mx rpc')
 ON CONFLICT (user_id) DO NOTHING;
 
+-- One announcement (20260920130010) for the delete probe to find, at version 1.
+-- Every probe is rolled back, so each principal finds it as it was.
+INSERT INTO app_private.platform_announcements
+  (id, tone, title_de, body_de, audience, starts_at)
+VALUES (_mx_id('rpc_announcement', 'a'), 'info', 'MX', 'MX probe', 'all', now() - interval '1 hour')
+ON CONFLICT (id) DO NOTHING;
+
 -- Checked in the order listed. `stmt` is filled for company A (see _mx_fill).
 --
 -- `want` carries the seven principals of the columns above. `staff` carries the
@@ -2274,6 +2281,30 @@ INSERT INTO _mx_rpc (label, stmt, want, hole) VALUES
     ('get_app_config() carries the feature map',
      $q$SELECT (get_app_config() -> 'plan_features' IS NOT NULL)::text$q$,
      'PYYYYYY', NULL),
+    -- 20260920130000 (plan 3.10): the invoice screen's sender. companies.read,
+    -- which every staff role holds, so only the platform principal gets Y; a
+    -- company user is refused as a return value and anon holds no EXECUTE
+    ('platform_invoice_seller() is ok',
+     $q$SELECT (platform_invoice_seller() ->> 'ok')::text$q$,
+     'PNNNNNY', NULL),
+    -- …and what the edge functions read before they mail a code: service role
+    -- only, so every principal a client can be is refused by privilege
+    ('mail_delivery_settings(signup_verify)',
+     $q$SELECT mail_delivery_settings('signup_verify')::text$q$,
+     'PPPPPPP', NULL),
+    -- 20260920130010 (plan 3.11): the panel's announcement RPCs. List is
+    -- settings.read, save and delete settings.manage; the platform principal
+    -- (an owner) holds both, nobody else holds either. tests/rls/announcements.sql
+    -- takes the other staff roles through them
+    ('platform_announcements_list() is ok',
+     $q$SELECT (platform_announcements_list() ->> 'ok')::text$q$,
+     'PNNNNNY', NULL),
+    ('platform_announcement_save(create) is ok',
+     $q$SELECT (platform_announcement_save(NULL, '{"tone":"info","title_de":"MX","body_de":"MX","title_en":"","body_en":"","audience":"all","plans":[],"company_ids":[],"starts_at":"2026-09-20T00:00:00Z","ends_at":null}'::jsonb, NULL) ->> 'ok')::text$q$,
+     'PNNNNNY', NULL),
+    ('platform_announcement_delete(announcement, version 1) is ok',
+     $q$SELECT (platform_announcement_delete({ref:rpc_announcement}, 1) ->> 'ok')::text$q$,
+     'PNNNNNY', NULL),
 
     -- the planning RPCs, on company A's import, trip and runs. Company B's
     -- admin makes the same calls with company A's ids. None checks the role,

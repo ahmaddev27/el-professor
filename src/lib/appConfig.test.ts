@@ -47,17 +47,44 @@ describe('parseAppConfig reads a full answer', () => {
     expect(config.trialDays).toBe(30);
   });
 
-  it('leaves feature flags and announcements empty until plan 3.11 fills them', () => {
+  it('takes the feature flags and the announcements (plan 3.11), dropping an entry it cannot read', () => {
+    const announcement = {
+      id: 'a1', version: 2, tone: 'warning', title_de: 'Wartung', body_de: 'Heute Nacht.',
+      title_en: '', body_en: '', starts_at: '2026-09-20T20:00:00+00:00', ends_at: null,
+    };
     const config = parseAppConfig({
       price_book: SEED_PRICE_BOOK,
       plan_features: SEED_PLAN_FEATURES,
       trial_days: SEED_TRIAL_DAYS,
-      feature_flags: { something: true },
-      announcements: [{ text: 'hello' }],
+      feature_flags: { something: true, other: false, 'Bad Key': true, not_boolean: 'yes' },
+      announcements: [announcement, { text: 'hello' }],
     });
 
-    expect(config.featureFlags).toEqual({});
-    expect(config.announcements).toEqual([]);
+    expect(config.featureFlags).toEqual({ something: true, other: false });
+    expect(config.announcements).toEqual([{
+      id: 'a1', version: 2, tone: 'warning', titleDe: 'Wartung', bodyDe: 'Heute Nacht.',
+      titleEn: '', bodyEn: '', startsAt: '2026-09-20T20:00:00+00:00', endsAt: null,
+    }]);
+  });
+
+  it('flags and announcements belong to the signed-in account: an answer without them has none', () => {
+    const loaded: AppConfig = {
+      ...LOADED,
+      featureFlags: { something: true },
+      announcements: [{
+        id: 'a1', version: 1, tone: 'info', titleDe: 'x', bodyDe: 'y', titleEn: '', bodyEn: '',
+        startsAt: '2026-09-20T00:00:00Z', endsAt: null,
+      }],
+    };
+    // get_public_config(), after a sign-out: nothing of the last account stays.
+    const visitor = parseAppConfig({ price_book: SEED_PRICE_BOOK, trial_days: 14 }, loaded);
+    expect(visitor.featureFlags).toEqual({});
+    expect(visitor.announcements).toEqual([]);
+
+    // Present but malformed: the last good value stays, as for every other part.
+    const broken = parseAppConfig({ feature_flags: 'on', announcements: { id: 'a1' } }, loaded);
+    expect(broken.featureFlags).toEqual(loaded.featureFlags);
+    expect(broken.announcements).toEqual(loaded.announcements);
   });
 
   it('a public answer without a feature map keeps the one already loaded', () => {

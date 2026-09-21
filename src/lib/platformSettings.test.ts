@@ -1,7 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import {
+  canReadAnnouncements,
   canReadSetting,
   canSaveSetting,
+  canWriteAnnouncements,
+  invoiceSellerFields,
+  mailSenderFromForm,
+  mailSenderToForm,
+  mailTemplateDefaultsKept,
+  mailTemplateFromForm,
+  mailTemplateToForm,
   invoiceFromForm,
   invoiceNumberExample,
   invoiceToForm,
@@ -24,6 +32,7 @@ import {
 } from './platformSettings';
 import { SEED_PLAN_FEATURES, SEED_PRICE_BOOK } from './appConfigSeed';
 import { parsePlatformWhoami } from './platformAccess';
+import { MAIL_TEMPLATE_DEFAULTS } from '../../supabase/functions/_shared/mail-template.ts';
 
 const access = (role: string, capabilities: string[]) => parsePlatformWhoami({ role, capabilities });
 
@@ -395,5 +404,130 @@ describe('the invoice defaults', () => {
     expect(invoiceNumberExample({ ...INVOICE, number_digits: 6 }, 2026)).toBe('INV-2026-000001');
     expect(invoiceNumberExample({ ...INVOICE, number_prefix: 'RG', number_digits: 1 }, 2027))
       .toBe('RG-2027-1');
+  });
+});
+
+// ─── Plan 3.10, second half, and 3.11 ────────────────────────────────────────
+
+describe('who may read and save the mail, flag and announcement settings', () => {
+  const owner = access('owner', ['settings.read', 'settings.manage', 'pricing.manage', 'companies.read']);
+  const billing = access('billing', ['pricing.manage', 'settings.read', 'billing.manage', 'companies.read']);
+  const readOnly = access('read_only', ['settings.read', 'companies.read']);
+  const support = access('support', ['companies.read', 'business.read']);
+  const keys = ['mail.sender', 'mail.template.signup_verify', 'mail.template.email_change', 'feature_flags'] as const;
+
+  it('asks the owner-only settings.manage for every one of them', () => {
+    for (const key of keys) {
+      expect(writeCapabilityFor(key)).toBe('settings.manage');
+      expect(canSaveSetting(owner, key)).toBe(true);
+      expect(canSaveSetting(billing, key)).toBe(false);
+      expect(canSaveSetting(readOnly, key)).toBe(false);
+    }
+  });
+
+  it('lets owner and read_only read them, and neither billing nor support', () => {
+    for (const key of keys) {
+      expect(canReadSetting(owner, key)).toBe(true);
+      expect(canReadSetting(readOnly, key)).toBe(true);
+      expect(canReadSetting(billing, key)).toBe(false);
+      expect(canReadSetting(support, key)).toBe(false);
+    }
+  });
+
+  it('announcements: the list for settings.read without billing, the writes for the owner alone', () => {
+    expect(canReadAnnouncements(owner)).toBe(true);
+    expect(canReadAnnouncements(readOnly)).toBe(true);
+    expect(canReadAnnouncements(billing)).toBe(false);
+    expect(canReadAnnouncements(support)).toBe(false);
+    expect(canWriteAnnouncements(owner)).toBe(true);
+    expect(canWriteAnnouncements(readOnly)).toBe(false);
+    expect(canWriteAnnouncements(billing)).toBe(false);
+  });
+});
+
+describe('invoiceSellerFields: the sender the invoice PDF prints', () => {
+  const blank: Seller = {
+    name: 'El-Professor', street: '', house_number: '', postal_code: '', city: '',
+    vat_id: '', tax_number: '', bank_name: '', iban: '', bic: '', account_holder: '',
+  };
+
+  it('the seeded placeholder prints exactly what the PDF printed before: the name and nothing else', () => {
+    // Both real databases hold this document, and before the invoice read it the
+    // page had no company_settings row and printed 'El-Professor' with '' under it.
+    expect(invoiceSellerFields(blank)).toEqual({
+      sellerName: 'El-Professor', sellerAddress: '', sellerTaxInfo: '', sellerBank: '',
+    });
+  });
+
+  it('a filled seller prints the old composition character for character', () => {
+    const seller: Seller = {
+      ...blank, name: 'Taxi Muster GmbH', street: 'Hauptstraße', house_number: '5', postal_code: '42651',
+      city: 'Solingen', vat_id: 'DE123456789', tax_number: '128/5712/0815', bank_name: 'Sparkasse',
+      iban: 'DE02120300000000202051', bic: 'BYLADEM1001',
+    };
+    // SubscriptionBillingPage's former expressions, applied to the same values.
+    const s = seller;
+    const oldAddress = [s.street, s.house_number].filter(Boolean).join(' ') + `\n${s.postal_code || ''} ${s.city || ''}`;
+    const oldTax = [s.vat_id ? `USt-IdNr: ${s.vat_id}` : '', s.tax_number ? `Steuernr: ${s.tax_number}` : ''].filter(Boolean).join(' | ');
+    const oldBank = [s.bank_name, s.iban ? `IBAN: ${s.iban}` : '', s.bic ? `BIC: ${s.bic}` : ''].filter(Boolean).join(' | ');
+    expect(invoiceSellerFields(seller)).toEqual({
+      sellerName: 'Taxi Muster GmbH', sellerAddress: oldAddress, sellerTaxInfo: oldTax, sellerBank: oldBank,
+    });
+    expect(oldAddress).toBe('Hauptstraße 5\n42651 Solingen');
+  });
+
+  it('only a city still prints the address line the old code built', () => {
+    expect(invoiceSellerFields({ ...blank, city: 'Solingen' }).sellerAddress).toBe('\n Solingen');
+  });
+});
+
+describe('the mail sender form', () => {
+  it('trims and saves a plain name', () => {
+    expect(mailSenderFromForm({ name: '  El-Professor Support ' })).toEqual({ value: { name: 'El-Professor Support' } });
+    expect(mailSenderToForm({ name: 'El-Professor' })).toEqual({ name: 'El-Professor' });
+  });
+
+  it('refuses a name that could pass for an address', () => {
+    expect(mailSenderFromForm({ name: 'support@bank.de' })).toEqual({ error: 'mail.sender.name' });
+    expect(mailSenderFromForm({ name: '' })).toEqual({ error: 'mail.sender.name' });
+  });
+});
+
+describe('the mail template form', () => {
+  it('shows the default text wherever the stored template leaves a field out', () => {
+    const form = mailTemplateToForm('signup_verify', { heading: 'Fast geschafft' });
+    expect(form.subject).toBe(MAIL_TEMPLATE_DEFAULTS.signup_verify.subject);
+    expect(form.heading).toBe('Fast geschafft');
+    expect(form.paragraphs).toEqual([...MAIL_TEMPLATE_DEFAULTS.signup_verify.paragraphs]);
+    expect(form.button).toBe(MAIL_TEMPLATE_DEFAULTS.signup_verify.button);
+    expect(mailTemplateToForm('email_change', {}).button).toBe('');
+  });
+
+  it('saves only the fields that differ from the default, so a form at the defaults saves the seed', () => {
+    const untouched = mailTemplateToForm('invite_activate', {});
+    expect(mailTemplateFromForm('invite_activate', untouched)).toEqual({ value: {} });
+
+    const changed = { ...untouched, subject: '  Willkommen im Team ', paragraphs: [...untouched.paragraphs, 'Bis bald!'] };
+    expect(mailTemplateFromForm('invite_activate', changed)).toEqual({
+      value: {
+        subject: 'Willkommen im Team',
+        paragraphs: [...MAIL_TEMPLATE_DEFAULTS.invite_activate.paragraphs, 'Bis bald!'],
+      },
+    });
+  });
+
+  it('names the field the database would refuse', () => {
+    const form = mailTemplateToForm('signup_verify', {});
+    expect(mailTemplateFromForm('signup_verify', { ...form, subject: 'Ihr Code {code}' }))
+      .toEqual({ error: 'mail.template.signup_verify.subject.code' });
+    expect(mailTemplateFromForm('signup_verify', { ...form, paragraphs: ['Bei {company}'] }))
+      .toEqual({ error: 'mail.template.signup_verify.paragraphs.0' });
+  });
+
+  it('marks which fields still read as the default', () => {
+    const form = mailTemplateToForm('password_reset', {});
+    expect(mailTemplateDefaultsKept('password_reset', form))
+      .toEqual({ subject: true, heading: true, paragraphs: true, button: true });
+    expect(mailTemplateDefaultsKept('password_reset', { ...form, heading: 'Neu' }).heading).toBe(false);
   });
 });

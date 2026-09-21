@@ -1,6 +1,8 @@
 import { parsePlanFeatures, type PlanFeatureMap } from '../utils/planFeatures';
 import { parsePriceBook, type PriceBook } from '../utils/pricing';
+import { parseAnnouncements, type Announcement } from './announcements';
 import { SEED_PLAN_FEATURES, SEED_PRICE_BOOK, SEED_TRIAL_DAYS } from './appConfigSeed';
+import { parseFeatureFlags, type FeatureFlags } from './featureFlags';
 
 /**
  * What the database says about the product, as `get_public_config()` (anyone)
@@ -13,10 +15,16 @@ export interface AppConfig {
   priceBook: PriceBook;
   planFeatures: PlanFeatureMap;
   trialDays: number;
-  /** Always empty until plan 3.11 builds feature flags. */
-  featureFlags: Readonly<Record<string, boolean>>;
-  /** Always empty until plan 3.11 builds announcements. */
-  announcements: readonly unknown[];
+  /**
+   * The `feature_flags` setting (plan 3.11). A flag it does not name is off;
+   * `useFlag(key)` is how a screen asks.
+   */
+  featureFlags: FeatureFlags;
+  /**
+   * The announcements that apply to the signed-in account's company now
+   * (plan 3.11). The database has chosen them; `AnnouncementBanner` shows them.
+   */
+  announcements: readonly Announcement[];
 }
 
 export const SEED_APP_CONFIG: AppConfig = {
@@ -58,8 +66,16 @@ export function shouldRefreshAppConfig(
 
 /**
  * Reads a `get_public_config()` or `get_app_config()` answer. Each part that is
- * absent or malformed keeps `fallback`'s value: the public answer carries no
- * feature map, and a broken price book must not price anything.
+ * malformed keeps `fallback`'s value: a broken price book must not price
+ * anything. The price book, the feature map and the trial length also keep it
+ * when they are absent — the public answer carries no feature map.
+ *
+ * The flags and the announcements are different, because only
+ * `get_app_config()` carries them and they belong to the signed-in account:
+ * **absent means none**. A visitor's answer switches every flag off and shows no
+ * announcement, so an account signed out of — or swapped for another — never
+ * leaves its announcements on the next one's screen. Present but malformed, they
+ * keep the last good value like everything else.
  *
  * Callers pass the configuration they are already showing as `fallback`, so a
  * refresh whose answer is missing a part keeps the last good one rather than
@@ -75,7 +91,11 @@ export function parseAppConfig(data: unknown, fallback: AppConfig = SEED_APP_CON
     trialDays: typeof trialDays === 'number' && Number.isInteger(trialDays) && trialDays >= 1 && trialDays <= MAX_TRIAL_DAYS
       ? trialDays
       : fallback.trialDays,
-    featureFlags: fallback.featureFlags,
-    announcements: fallback.announcements,
+    featureFlags: 'feature_flags' in body
+      ? parseFeatureFlags(body.feature_flags) ?? fallback.featureFlags
+      : SEED_APP_CONFIG.featureFlags,
+    announcements: 'announcements' in body
+      ? parseAnnouncements(body.announcements) ?? fallback.announcements
+      : SEED_APP_CONFIG.announcements,
   };
 }

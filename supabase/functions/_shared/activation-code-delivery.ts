@@ -17,6 +17,7 @@ import {
   type CompanyAdminCandidate,
 } from './activation-code-mail.ts';
 import { sendMail } from './mail.ts';
+import { loadMailDeliverySettings } from './mail-template.ts';
 import { logFailure } from './otp-core.ts';
 
 export interface GeneratedActivationCode {
@@ -72,7 +73,13 @@ export async function mailActivationCode(
       companyName,
     });
 
-    const sends = await Promise.allSettled(recipients.map((to) => sendMail({ to, ...mail })));
+    // The sender name of plan 3.10's `mail.sender`; this mail's text is not a
+    // template. A failed read keeps SMTP_SENDER_NAME and never stops the send.
+    const settings = await loadMailDeliverySettings(
+      { rpc: (fn: string, args: Record<string, unknown>) => admin.rpc(fn, args) }, null,
+      (err) => logFailure(FN, 'mail_settings', LOG_CONTEXT, err));
+    const sends = await Promise.allSettled(
+      recipients.map((to) => sendMail({ to, ...mail, fromName: settings.senderName })));
     let failures = 0;
     for (const send of sends) {
       if (send.status === 'rejected') {

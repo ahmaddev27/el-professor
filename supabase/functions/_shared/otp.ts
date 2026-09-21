@@ -19,6 +19,7 @@
 import { createClient, type SupabaseClient } from 'npm:@supabase/supabase-js@2';
 import { corsFor } from './http.ts';
 import { sendMail } from './mail.ts';
+import { loadMailDeliverySettings } from './mail-template.ts';
 import { buildEmailChangedNotice, buildOtpMail } from './otp-mail.ts';
 import {
   asIssueDbResult,
@@ -56,6 +57,11 @@ export function serviceClient(): SupabaseClient {
   });
   return client;
 }
+
+/** The service client as mail-template.ts's narrow reader of the mail settings. */
+const mailSettingsRpc = {
+  rpc: (fn: string, args: Record<string, unknown>) => serviceClient().rpc(fn, args),
+};
 
 function pepper(): string {
   const value = requireEnv('OTP_PEPPER');
@@ -150,14 +156,19 @@ export async function deliverOtp(input: DeliveryInput): Promise<'sent' | 'send_f
   if (db.status !== 'issued' || code === null) throw new Error('deliverOtp needs an issued challenge');
   const context: LogContext = { request_id: input.requestId, purpose: input.purpose, user_id: db.user_id };
   try {
+    // The owner's wording and sender name (plan 3.10). Never throws: a failed
+    // read sends the default text under SMTP_SENDER_NAME, because a code that
+    // never arrives is worse than one in the default wording.
+    const settings = await loadMailDeliverySettings(mailSettingsRpc, input.purpose,
+      (err) => logFailure('otp', 'mail_settings', context, err));
     const mail = buildOtpMail(input.purpose, {
       appUrl: requireEnv('APP_URL'),
       email: input.accountEmail,
       newEmail: input.newEmail ?? null,
       companyName: db.company_name,
       code,
-    });
-    await sendMail({ to: db.recipient_email, ...mail });
+    }, settings.template);
+    await sendMail({ to: db.recipient_email, ...mail, fromName: settings.senderName });
     return 'sent';
   } catch (err) {
     logFailure('otp', 'send_mail', context, err);
@@ -323,8 +334,11 @@ export async function verifyAuthenticatedCaller(req: Request): Promise<Authentic
 /** Best effort: tells the old address that the account's address changed. Never rejects. */
 export async function sendEmailChangedNotice(oldEmail: string, newEmail: string, context: LogContext): Promise<void> {
   try {
+    // The sender name only: this notice has no editable text.
+    const settings = await loadMailDeliverySettings(mailSettingsRpc, null,
+      (err) => logFailure('otp', 'mail_settings', context, err));
     const mail = buildEmailChangedNotice({ appUrl: requireEnv('APP_URL'), oldEmail, newEmail, changedAt: new Date() });
-    await sendMail({ to: oldEmail, ...mail });
+    await sendMail({ to: oldEmail, ...mail, fromName: settings.senderName });
   } catch (err) {
     logFailure('otp', 'email_changed_notice', context, err);
   }

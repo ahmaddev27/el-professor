@@ -33,10 +33,11 @@ interface Props {
   invoice: Invoice;
   onClose: () => void;
   onDownloadPdf: () => void;
-  sellerSettings: any;
 }
 
-export default function InvoiceDetailModal({ invoice, onClose, onDownloadPdf, sellerSettings }: Props) {
+// The seller printed on the PDF is read when the PDF is built
+// (SubscriptionBillingPage.handleDownloadPdf); this dialog never showed it.
+export default function InvoiceDetailModal({ invoice, onClose, onDownloadPdf }: Props) {
   const isPaid = invoice.status === 'paid';
   const isOverdue = invoice.status === 'open' && new Date(invoice.due_date) < new Date();
   const co = invoice.companies;

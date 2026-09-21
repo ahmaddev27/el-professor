@@ -33,6 +33,13 @@ export function deDateTime(iso: string | null | undefined): string {
   return `${deDate(iso)} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
 }
 
+/** `DD.MM.YYYY HH:MM`, for a time a person chose to the minute (an announcement's window). */
+export function deDateTimeMinute(iso: string | null | undefined): string {
+  const date = parse(iso);
+  if (!date) return EMPTY_CELL;
+  return `${deDate(iso)} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
 /** A whole number with German thousands separators: 1234 → "1.234". */
 export function deCount(value: number): string {
   if (!Number.isFinite(value)) return EMPTY_CELL;

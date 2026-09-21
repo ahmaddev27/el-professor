@@ -3,6 +3,7 @@ import { Outlet } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import UserMenu from './UserMenu';
 import TrialBanner from './TrialBanner';
+import AnnouncementBanner from './AnnouncementBanner';
 import SupportSessionBar from './SupportSessionBar';
 import { useTheme } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LanguageContext';
@@ -27,6 +28,9 @@ const AppLayout: React.FC<AppLayoutProps> = ({ isSupportAdmin }) => {
             for a company user. */}
         <SupportSessionBar />
         <TrialBanner />
+        {/* The platform's announcements for this company (plan 3.11). Below
+            the trial banner: the company's own state comes first. */}
+        <AnnouncementBanner />
         <header
           className="sticky top-0 z-20 border-b"
           style={{
