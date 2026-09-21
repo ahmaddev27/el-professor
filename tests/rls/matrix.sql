@@ -1419,15 +1419,28 @@ UPDATE _mx_expected x SET staff_view = o.sv, staff_support = o.ss
     ('activation_code_attempts', 'M', '..', '..'),
     -- user_profiles and companies carry no trigger: their platform branch is a
     -- capability with no company term, so a context neither grants nor takes
-    -- away a write there — it only decides which rows are visible. The two T
-    -- cells are the trigger firing through a cascade: deleting a profile or a
-    -- company reaches tenant tables that do carry it, and a read-only context
+    -- away a write there — it only decides which rows are visible. The T cells
+    -- are the triggers firing through a cascade: deleting a profile or a
+    -- company reaches tenant tables that do carry them, and a read-only context
     -- destroys nothing.
+    --
+    -- companies D for staff_support moved from YY to TT with 20260920110000
+    -- (3.4c), deliberately: a platform account holding a context, in either
+    -- mode, hard-deletes no company. app_private.guard_company_hard_delete, a
+    -- BEFORE DELETE trigger on companies, refuses it before any cascade runs
+    -- ("Solange ein Unternehmenszugriff offen ist, kann kein Unternehmen
+    -- gelöscht werden"), so the answer is the same for both companies and does
+    -- not depend on the order of the delete's foreign-key cascades — which it
+    -- did while the refusal came from the cascades themselves: the company A
+    -- delete removes the session, and a cascade that ran after that found
+    -- nothing to arm the audit with. staff_view's TT now comes from the same
+    -- guard. `super`, with no context, still deletes both — the residual on the
+    -- line above — and the audit lets exactly that cascade through unrecorded.
     ('user_profiles',            'S', 'Y.', 'Y.'),
     ('user_profiles',            'U', 'Y.', 'Y.'),
     ('user_profiles',            'D', 'T.', 'Y.'),
     ('user_profiles',            'M', 'T.', 'T.'),
-    ('companies',                'D', 'TT', 'YY')
+    ('companies',                'D', 'TT', 'TT')
   ) AS o(tbl, op, sv, ss)
  WHERE x.tbl = o.tbl AND x.op = o.op;
 
