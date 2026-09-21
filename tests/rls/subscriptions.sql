@@ -77,13 +77,14 @@
                        tier; and the one path the fix does not close — a period
                        revived by a payment — is recorded as today's behaviour,
                        tagged HOLE[revival], so that closing it flips a line
-   10. the kept void   20260920170000. A period a manual edit voided as
-                       `replaced` stays void through the sweep, a re-apply and a
-                       re-opened invoice, so the company the administrator set
-                       to expired (or inactive) stays refused; an explicit
-                       payment of that invoice brings it back; a period the
-                       invoice's own cancellation voided comes back when the
-                       invoice is paid again; and a second sweep changes nothing
+   10. the kept void   20260921130000. A period a manual edit voided as
+                       `replaced` stays void through the sweep, a re-apply, a
+                       re-opened invoice and a cancel-then-un-cancel, so the
+                       company the administrator set to expired (or inactive)
+                       stays refused; an explicit payment of that invoice brings
+                       it back; a period the invoice's own cancellation voided
+                       comes back when the invoice is paid again; and a second
+                       sweep changes nothing
 
   The companies here are created inside this file rather than in seed.sql for
   the same reason tenant-state.sql creates its own: they exist to be refused,
@@ -1308,7 +1309,7 @@ BEGIN
       'app_private.subscription_grace_business_days()',
       'app_private.add_business_days(date,integer)',
       'app_private.invoice_grace_end(date)',
-      -- (uuid, boolean) since 20260920170000, section 10: the second argument
+      -- (uuid, boolean) since 20260921130000, section 10: the second argument
       -- is the explicit payment's, and only platform_invoice_mark_paid passes it.
       'app_private.subscription_invoice_apply(uuid,boolean)',
       'app_private.subscription_invoices_apply_all()']
@@ -1939,7 +1940,7 @@ END $$;
   old tier off a period that has not ended, which is exactly the rule. Closing
   it is a change to U2's rule, not to the recompute, and it is the owner's
   (HANDOFF.md). When it is closed, the last assertion here flips on purpose.
-  20260920170000 (section 10) does not close it: that migration decides which
+  20260921130000 (section 10) does not close it: that migration decides which
   voided periods may come back, and this one was never voided — it ended.
 
   The due date sits before the month it invoices, so the unpaid row ends at the
@@ -1981,7 +1982,7 @@ BEGIN
     (SELECT plan FROM companies WHERE id = v_co) = 'basic');
 END $$;
 
--- ─── 10. a period something else replaced stays replaced (20260920170000) ──
+-- ─── 10. a period something else replaced stays replaced (20260921130000) ──
 --
 -- The defect: app_private.subscription_invoice_apply looked an invoice's
 -- coverage row up whatever its status and set it back to active. A manual edit
@@ -1989,7 +1990,7 @@ END $$;
 -- the nightly invoice sweep would have re-admitted, every night, a company an
 -- administrator had set to expired.
 --
--- The rule since 20260920170000: a voided invoice period comes back only when
+-- The rule since 20260921130000: a voided invoice period comes back only when
 -- its own invoice voided it (`invoice_canceled`) and that invoice is no longer
 -- cancelled, or when that invoice is explicitly paid. A period voided as
 -- `replaced` is left exactly as it is by the sweep, by a re-apply and by
@@ -2039,7 +2040,7 @@ BEGIN
   PERFORM app_private.recompute_all_company_subscriptions();
 
   SELECT * INTO v_after FROM subscription_coverage WHERE id = v_row.id;
-  PERFORM _sub_ok('replaced: the sweep leaves the replaced period void, and says why (before 20260920170000 it set it active again)',
+  PERFORM _sub_ok('replaced: the sweep leaves the replaced period void, and says why (before 20260921130000 it set it active again)',
     v_after.status = 'void' AND v_after.void_reason = 'replaced');
   PERFORM _sub_ok('replaced: …exactly as it was recorded: dates, grant, price and note',
     v_after.period_start = v_row.period_start
@@ -2096,7 +2097,9 @@ BEGIN
 END $$;
 
 -- 10b. the other writer of `replaced`: a manual `inactive` with no date voids
---      every live row without recording one (20260919150000:1393-1398)
+--      every live row without recording one (20260919150000:1393-1398); and a
+--      cancellation followed by an un-cancel does not turn that void into the
+--      invoice's own
 DO $$
 DECLARE
   v_owner constant uuid := '50000000-0000-4000-8000-000000000001';
@@ -2133,6 +2136,25 @@ BEGIN
     NOT _sub_admitted(_sub_id('user:void-kept-nodate'))
     AND (SELECT subscription_status = 'inactive' AND subscription_expires_at IS NULL
            FROM companies WHERE id = v_co));
+
+  -- The reason is what tells an administrator's void from the invoice's own,
+  -- so a cancellation must not relabel it: the cancel branch voids only a live
+  -- row. Were it to write `invoice_canceled` over `replaced`, an un-cancel would
+  -- revive what the administrator withdrew.
+  v_out := _sub_do(v_owner, format('SELECT platform_invoice_cancel(%L)::text', v_inv));
+  PERFORM _sub_ok('replaced, no date: cancelling the invoice afterwards is accepted', _sub_succeeded(v_out));
+  PERFORM _sub_ok('replaced, no date: …and the period still says replaced, not invoice_canceled',
+    (SELECT status = 'void' AND void_reason = 'replaced'
+       FROM subscription_coverage WHERE company_id = v_co AND source = 'invoice' AND source_id = v_inv));
+
+  -- The operator's un-cancel, as in 10c, and the sweep after it.
+  UPDATE subscription_invoices SET status = 'paid' WHERE id = v_inv;
+  PERFORM app_private.subscription_invoices_apply_all();
+  PERFORM app_private.recompute_all_company_subscriptions();
+  PERFORM _sub_ok('replaced, no date: un-cancelled and swept, the replaced period stays void, and the company refused',
+    (SELECT status = 'void' AND void_reason = 'replaced'
+       FROM subscription_coverage WHERE company_id = v_co AND source = 'invoice' AND source_id = v_inv)
+    AND NOT _sub_admitted(_sub_id('user:void-kept-nodate')));
 END $$;
 
 -- 10c. the control: a period its own invoice's cancellation voided comes back

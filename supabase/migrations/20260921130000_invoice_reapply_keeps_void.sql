@@ -1,10 +1,9 @@
 /*
-  # Re-applying an invoice keeps a period something else replaced
+  # Re-applying an invoice keeps a period an administrator replaced
 
-  Plan 3.F, a fix to U2 (20260919170000). Live on production since U2 was
-  promoted on 19.09.2026, and harmless there only because nothing calls the
-  invoice sweep yet. The owner has decided to install it; this is what blocked
-  that.
+  Plan 3.F, a fix to U2 (20260919170000). The defect is live on production
+  since U2 was promoted on 19.09.2026, and harmless there only because nothing
+  calls the invoice sweep yet. It is the reason the sweep is installed nowhere.
 
   ## The defect
 
@@ -23,12 +22,14 @@
                        date (:1393-1398)
 
   So: a paid invoice for the current month, then an administrator sets the
-  company to `expired` in the Abo-Status modal — the invoice's period is voided
+  company to `expired` in the Abo-Status modal. The invoice's period is voided
   as `replaced` and the company is refused. The nightly sweep,
   `app_private.subscription_invoices_apply_all()`, re-applies that invoice,
   finds the row, makes it active again, and the recompute admits the company.
-  Every night. `tests/rls/subscriptions.sql` section 10a reproduces it against
-  the old body: the sweep's first run leaves the company admitted.
+  Every night. `platform_invoice_mark_unpaid` did the same, turning the
+  replaced period into a grace window. `tests/rls/subscriptions.sql` section 10a
+  reproduces it against the old body: the sweep's first run leaves the company
+  admitted.
 
   ## The rule
 
@@ -40,78 +41,180 @@
        caller may do this, the sweep included, because the void was the
        invoice's own and the invoice has changed back.
     2. it was voided as `replaced` and the caller is an **explicit payment of
-       that invoice** — `platform_invoice_mark_paid`, the only caller that
-       passes `p_reinstate => true`. The money arrived after the replacement,
-       and paying an invoice extends access (U2, rule 1).
+       that invoice**, `platform_invoice_mark_paid`, the only caller that passes
+       `p_reinstate => true`. The money arrived after the administrator's
+       decision, and U2's rule 1 is that paying an invoice extends access. Without
+       this case a payment entered after a manual edit would mark the invoice
+       paid and grant nothing.
 
-  Every other voided period is left exactly as it is — status, reason, dates,
-  price and note — and the function answers `superseded` without writing
-  anything or recomputing. That covers the sweep, a direct re-apply,
+  Every other voided period is left exactly as it is (status, reason, dates,
+  grant, price and note), and the function answers `superseded` without
+  writing anything or recomputing. That covers the sweep, a direct re-apply,
   `platform_invoice_mark_unpaid` (an act on the invoice that withdraws access
   must never grant it) and `platform_invoice_cancel` (whose branch is unchanged
   and already leaves a void row void). A void reason this file does not name —
-  none exists today — is never revived: a new reason has to be admitted here on
-  purpose.
+  none exists today, but an operator can write one by hand — is never revived:
+  a new reason has to be admitted here on purpose.
 
-  A void's cause is recorded in `subscription_coverage.void_reason`, which U1
-  added with `CHECK ((status = 'void') = (void_reason IS NOT NULL))`
-  (20260919150000:250, :264-265), and the two writers above already fill it
-  with the two values. Nothing had to be added to the table.
+  So `expired` stands: the manual period is the only live row, the recompute
+  reads it back, and the next night's sweep finds nothing it may undo.
+
+  ## How the two kinds of void are told apart
+
+  **By the reason recorded when the row was voided, `subscription_coverage.void_reason`.**
+  U1 added the column with `CHECK ((status = 'void') = (void_reason IS NOT NULL))`
+  (20260919150000:250, :264-265), so every void row carries one, and each value
+  has exactly one kind of writer today:
+
+    invoice_canceled   written only by this function's cancel branch
+    replaced           written only by update_company_subscription_manual,
+                       directly or through subscription_coverage_record with
+                       p_replace (its only caller that passes true)
+
+  Nothing had to be added to the table, and nothing is read from a trail or an
+  audit table. Two properties of the existing writers keep the reason honest,
+  and both are carried over rather than introduced:
+
+  - A cancellation never relabels an administrator's void. The cancel branch
+    voids only a live row (`AND status <> 'void'`, 20260919170000:373, carried
+    over unchanged), so a period a manual edit replaced keeps `replaced`
+    through a later cancellation, and a later un-cancel does not make it the
+    invoice's own. Section 10b asserts exactly that sequence.
+  - A manual edit never relabels a cancellation. p_replace voids only live
+    rows (20260919150000:519), so a period the invoice's own cancellation voided
+    keeps `invoice_canceled`.
+
+  The explicit payment is told apart by an argument, `p_reinstate boolean
+  DEFAULT false`, and not by inspecting the invoice: a PATCH through the
+  table's own UPDATE policy can set `status = 'paid'` too, and that is not a
+  payment anybody entered. The signature changes from (uuid) to (uuid,
+  boolean), so the old function is dropped and the new one created —
+  `CREATE OR REPLACE` with another argument list would add a second overload,
+  and every one-argument call would then be ambiguous. The default is what
+  every caller but one gets: the sweep, mark_unpaid and cancel call it with one
+  argument and are not restated. `platform_invoice_mark_paid` is restated to
+  pass `true`, its body otherwise character for character 20260919170000:554-637.
+  The self-check fails a release where any other function passes a second
+  argument.
 
   **The company is locked before the coverage row is read.** Every writer of
   `replaced` holds the company row FOR NO KEY UPDATE first
-  (update_company_subscription_manual takes it at 20260919150000:1341, before
-  it voids anything). Without the same lock here, a sweep racing a manual edit
-  could read the row while it was still active and write it active after the
-  edit committed — the defect again, by timing. Taking it first also puts the
-  invoice RPCs and the manual edit in one lock order (company, then coverage),
-  where before this function took a coverage row lock and then, through the
-  recompute, the company's: the other order, and a deadlock the database would
-  have had to break. The recompute takes the same lock again and already holds
-  it.
+  (update_company_subscription_manual takes it at 20260919150000:1341, before it
+  voids anything). Without the same lock here, a sweep racing a manual edit
+  could read the row while it was still live and write it live after the edit
+  committed — the defect again, by timing. Taking it first also puts this
+  function and the manual edit in one lock order (company, then coverage);
+  before, this function took a coverage row lock and then, through the
+  recompute, the company's, which is the other order. The recompute takes the
+  same lock again and already holds it.
 
-  ## How the explicit payment is told apart
+  ## What it does not close
 
-  By an argument, `p_reinstate boolean DEFAULT false`. The signature changes
-  from (uuid) to (uuid, boolean), so the old function is dropped and the new
-  one created: `CREATE OR REPLACE` with another argument list would add a
-  second overload, and a one-argument call would then be ambiguous. The
-  default is what every caller but one gets — the sweep, mark_unpaid and cancel
-  call it with one argument and are not restated. `platform_invoice_mark_paid`
-  is restated to pass `true`, with its body otherwise character for character
-  20260919170000:554-637. The self-check fails a release where any other
-  function passes a second argument.
-
-  ## What it does not do
-
-  - **HOLE[revival] stays open** (section 9b). That row was never voided — it
-    had ended — and a period revived either way keeps the tier it was recorded
+  - **HOLE[revival] stays open** (tests/rls/subscriptions.sql section 9b). That
+    row was never voided — it had ended — so which voids may come back does not
+    reach it, and a period revived either way keeps the tier it was recorded
     at, exactly as before. Giving a revived period the company's current tier
     changes U2's "tier written at creation" rule and is the owner's decision
     (HANDOFF.md). This file changes which periods may come back, not what tier
     they carry.
   - **An invoice with no coverage row yet is applied as before.** An invoice
-    paid before U2 went live, or generated and never touched since, has no row;
-    the sweep's first run creates one, granting, whatever a manual edit said in
-    the meantime. That is not a revival, and nothing records which came first.
-    HANDOFF.md's dry run lists every company the sweep would admit; read it for
-    exactly this before the cron line goes in.
-  - The table's own UPDATE policy still lets a holder of billing.manage take an
-    invoice out of `canceled` directly (20260917130000:776-779). That is how
-    rule 1 above is reached without an RPC, and it is unchanged.
+    generated and never touched since U2 went live has no row; the sweep's
+    first run creates one, granting, whatever a manual edit said in the
+    meantime. That is not a revival, and nothing records which came first.
+    HANDOFF.md's dry run lists every company the sweep would admit and every
+    invoice it would give a first row; read it for exactly this before the
+    cron line goes in.
+  - **An un-cancel made before a manual edit and applied after it.** Nothing in
+    the product takes an invoice out of `canceled` — mark_paid refuses one and
+    no screen writes the column — but the table's UPDATE policy lets a holder
+    of billing.manage do it with a PATCH (20260917130000:776-779), and so can an
+    operator. If that happens, then an administrator sets the company to
+    `expired`, and only then the invoice is applied, the period comes back under
+    rule 1: the manual edit could not void it (it was not live), so it still
+    says `invoice_canceled`. Closing that needs a void timestamp or a second
+    restated writer; it is recorded in HANDOFF.md rather than built here.
+
+  ## The old body, rule by rule, and where each rule is now
+
+  From 20260919170000:327-427. "Verbatim" means the same text, character for
+  character; tests/rls/subscriptions.sql section 5 is what asserts them.
+
+    1. plpgsql, VOLATILE, SECURITY DEFINER, SET search_path = pg_catalog,
+       public, RETURNS text                          → the same; self-check 2
+    2. a NULL p_invoice_id raises 22023 with 'subscription_invoice_apply:
+       p_invoice_id is required', before anything is read
+                                                     → verbatim, first. A NULL
+                                                       p_reinstate raises 22023
+                                                       too, second
+    3. the invoice is read FOR NO KEY UPDATE, and a missing one answers
+       'not_found' before any other read or lock    → verbatim; self-check 6
+                                                       calls it that way
+    4. its coverage row is found by (company_id, source = 'invoice',
+       source_id = the invoice), whatever its status
+                                                     → the same lookup, which
+                                                       now also reads status
+                                                       and void_reason, after
+                                                       the new company lock
+    5. a cancelled invoice voids a live row as 'invoice_canceled' (a row
+       already void keeps its reason), recomputes the company when a row
+       exists, writes nothing to the invoice, and answers 'canceled'
+                                                     → verbatim, and still
+                                                       before the new gate, so
+                                                       cancelling is unchanged
+                                                       for every row
+    6. the period is the calendar month named, make_date(year, month, 1) to
+       one month later, both AT TIME ZONE 'Europe/Berlin'
+                                                     → verbatim, after the gate
+    7. the grace end is app_private.invoice_grace_end(due_date), which asks
+       subscription_grace_business_days() — two business days, Monday to Friday
+                                                     → verbatim
+    8. paid: end = greatest(month end, grace end), note 'Rechnung <nr>:
+       bezahlt, Zeitraum abgedeckt'                  → verbatim
+    9. anything else not cancelled (open, overdue): end = greatest(grace end,
+       period start), note 'Rechnung <nr>: offen, Zugang bis zum Ende der
+       Zahlungsfrist'                                → verbatim
+   10. price_cents = round(amount * 100)::bigint — the one conversion, from the
+       invoice's amount and not from what was handed over
+                                                     → verbatim
+   11. no row yet: the tier is the company's own when it is one of the three
+       and NULL otherwise, and the row is recorded through
+       subscription_coverage_record(company, 'invoice', invoice, start, end,
+       true, tier, cents, note, false) — never p_replace — which recomputes
+                                                     → verbatim
+   12. a row already there is moved in place — period_start, period_end,
+       grants_access = true, price_cents, status = 'active', void_reason =
+       NULL, note — its tier is never rewritten, and the company is recomputed
+                                                     → verbatim, reached for a
+                                                       live row and for a void
+                                                       one the gate lets back
+   13. it answers 'paid' for a paid invoice and 'grace' otherwise
+                                                     → verbatim; 'superseded'
+                                                       is the one new answer
+   14. one row per invoice: it moves, never multiplies (the partial unique
+       index on (company_id, source, source_id))
+                                                     → unchanged; the gate
+                                                       only ever writes less
+   15. REVOKE ALL FROM PUBLIC, anon, authenticated, service_role, OWNER TO
+       CURRENT_USER, and the COMMENT                 → restated for the new
+                                                       signature; self-check 3
+
+  The three RPCs keep calling the rule after their own writes and put its
+  answer in their audit row, so `coverage` in mark_unpaid's can now read
+  `superseded`. The sweep is unchanged and still answers how many invoices it
+  walked.
 
   ## What this changes, and when
 
   **At deploy: nothing, for anybody.** The file replaces two function bodies and
   writes no row, recomputes no company and applies no invoice. The only
-  execution in it is the self-check's call with an invoice that does not exist,
-  which answers `not_found` before it reads or locks anything.
+  execution in it is the self-check's call with an invoice that does not
+  exist, which answers `not_found` before it reads or locks anything.
 
   **Afterwards**, for a company whose invoice period a manual edit voided, a
-  re-apply of that invoice — the sweep once it is wired — no longer admits it.
-  An explicit payment of that invoice still does, as it did before. Nothing
-  else moves: for a live row, a row with no coverage yet and a row its own
-  cancellation voided, the new body does what the old one did.
+  re-apply of that invoice — the sweep once it is wired, a direct call, or a
+  mark_unpaid — no longer admits it. An explicit payment of that invoice still
+  does, as it did before. For a live row, a row with no coverage yet and a row
+  its own cancellation voided, the new body does what the old one did.
 
   ## The wall and the catalogue (U3, 20260920120000)
 
@@ -120,7 +223,8 @@
   does not read as a write (the recompute has had the same statement since U1).
   So the set of writers of the five subscription columns is unchanged, and
   `tests/rls/subscriptions.sql` section 8 needs no change. The self-check asks
-  the reader to confirm it for both functions.
+  the reader for its whole answer and compares it with U3's list in both
+  directions, as U3's own check 4 does.
 
   ## SCHEMA_EPOCH stays at 2
 
@@ -130,16 +234,13 @@
   database (the sweep, mark_unpaid, cancel) resolve to the new function through
   the default, and the fourth is restated here. A rollback re-activates the
   previous release's code, which reaches all of this only through the three
-  invoice RPCs, whose signatures, grants and answers are unchanged — only the
-  `coverage` value inside mark_unpaid's audit row can now read `superseded`.
+  invoice RPCs, whose signatures, grants and answer shape are unchanged.
 
   ## Rules followed
 
-  Restated from the current bodies (20260919170000:327-427 and :554-637); the
-  PR lists every behaviour of the old apply and where it is in the new one.
   Pinned `search_path`, SECURITY DEFINER, `REVOKE ALL FROM PUBLIC, anon,
   authenticated, service_role` on the helper and the RPC's own grant restated
-  (EXECUTE for authenticated alone, 20260916130000:1407-1408), `ALTER FUNCTION …
+  (EXECUTE for authenticated alone, 20260916130000:1400-1408), `ALTER FUNCTION …
   OWNER TO CURRENT_USER` on both (a CREATE OR REPLACE keeps the old owner, see
   tests/fixtures/owner-simulation.sql), and a self-check that can fail.
   Behaviour is asserted in `tests/rls/subscriptions.sql` section 10.
@@ -303,7 +404,7 @@ COMMENT ON FUNCTION app_private.subscription_invoice_apply(uuid, boolean) IS
   'invoice says — the calendar month when paid, the due date plus the grace '
   'while open, voided when cancelled — and recomputes the company. A row voided '
   'as replaced comes back only with p_reinstate (an explicit payment); any other '
-  'void but the invoice''s own cancellation is never revived (20260920170000).';
+  'void but the invoice''s own cancellation is never revived (20260921130000).';
 
 -- Nobody the API authenticates as reaches app_private, and the REVOKE is the
 -- second wall: a new function is executable by PUBLIC by default, and this one
@@ -397,7 +498,7 @@ BEGIN
   -- Plan 3.F U2, rule 1: the paid period becomes coverage and the recompute
   -- writes the company's state back. `true`: a payment entered for this
   -- invoice may bring back its period even where a manual edit replaced it
-  -- (20260920170000). Everything above this line is unchanged.
+  -- (20260921130000). Everything above this line is unchanged.
   v_applied := app_private.subscription_invoice_apply(p_invoice_id, true);
   SELECT c.period_end INTO v_cov_end
     FROM public.subscription_coverage c
@@ -416,7 +517,7 @@ $$;
 
 -- CREATE OR REPLACE keeps both the grants and the owner; they are restated so
 -- this file does not lean on an earlier one. The platform screens call it
--- signed in and nothing else does (20260916130000:1407-1408).
+-- signed in and nothing else does (20260916130000:1400-1408).
 REVOKE ALL ON FUNCTION public.platform_invoice_mark_paid(uuid, bigint, timestamptz, text)
   FROM PUBLIC, anon, authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.platform_invoice_mark_paid(uuid, bigint, timestamptz, text) TO authenticated;
@@ -428,24 +529,26 @@ ALTER FUNCTION public.platform_invoice_mark_paid(uuid, bigint, timestamptz, text
 -- tests/rls/subscriptions.sql section 10.
 DO $mig$
 DECLARE
-  c_apply  CONSTANT text := 'app_private.subscription_invoice_apply(uuid,boolean)';
-  c_old    CONSTANT text := 'app_private.subscription_invoice_apply(uuid)';
-  c_paid   CONSTANT text := 'public.platform_invoice_mark_paid(uuid,bigint,timestamptz,text)';
-  c_reader CONSTANT text := 'app_private.subscription_column_writes()';
-  v_sig    text;
-  v_role   text;
-  v_txt    text;
-  v_answer text;
-  v_lock   integer;
-  v_read   integer;
+  c_apply   CONSTANT text := 'app_private.subscription_invoice_apply(uuid,boolean)';
+  c_old     CONSTANT text := 'app_private.subscription_invoice_apply(uuid)';
+  c_paid    CONSTANT text := 'public.platform_invoice_mark_paid(uuid,bigint,timestamptz,text)';
+  c_reader  CONSTANT text := 'app_private.subscription_column_writes()';
+  v_sig     text;
+  v_role    text;
+  v_txt     text;
+  v_answer  text;
+  v_lock    integer;
+  v_read    integer;
+  v_missing text;
+  v_extra   text;
 BEGIN
   -- 1. the rule has one signature. A surviving one-argument overload would make
   --    every one-argument call ambiguous, and would keep the old rule callable.
   IF to_regprocedure(c_apply) IS NULL THEN
-    RAISE EXCEPTION '20260920170000 self-check: % is missing', c_apply;
+    RAISE EXCEPTION '20260921130000 self-check: % is missing', c_apply;
   END IF;
   IF to_regprocedure(c_old) IS NOT NULL THEN
-    RAISE EXCEPTION '20260920170000 self-check: % still exists beside %', c_old, c_apply;
+    RAISE EXCEPTION '20260921130000 self-check: % still exists beside %', c_old, c_apply;
   END IF;
 
   -- 2. both functions are SECURITY DEFINER, pin their search_path, and are
@@ -453,11 +556,11 @@ BEGIN
   --    refuses (see tests/fixtures/owner-simulation.sql, and PR #25)
   FOREACH v_sig IN ARRAY ARRAY[c_apply, c_paid] LOOP
     IF NOT (SELECT p.prosecdef FROM pg_proc p WHERE p.oid = to_regprocedure(v_sig)) THEN
-      RAISE EXCEPTION '20260920170000 self-check: % is not SECURITY DEFINER', v_sig;
+      RAISE EXCEPTION '20260921130000 self-check: % is not SECURITY DEFINER', v_sig;
     END IF;
     IF NOT EXISTS (SELECT 1 FROM pg_proc p, unnest(p.proconfig) c(setting)
                     WHERE p.oid = to_regprocedure(v_sig) AND c.setting LIKE 'search_path=%') THEN
-      RAISE EXCEPTION '20260920170000 self-check: % has no pinned search_path', v_sig;
+      RAISE EXCEPTION '20260921130000 self-check: % has no pinned search_path', v_sig;
     END IF;
     IF NOT EXISTS (SELECT 1
                      FROM pg_proc p
@@ -466,7 +569,7 @@ BEGIN
                       AND (r.rolsuper
                            OR r.oid = (SELECT nspowner FROM pg_namespace WHERE nspname = 'app_private'))
                       AND r.rolname::text <> ALL (ARRAY['anon', 'authenticated', 'service_role'])) THEN
-      RAISE EXCEPTION '20260920170000 self-check: the owner of % can reach no app_private helper, or is an API role', v_sig;
+      RAISE EXCEPTION '20260921130000 self-check: the owner of % can reach no app_private helper, or is an API role', v_sig;
     END IF;
   END LOOP;
 
@@ -474,19 +577,19 @@ BEGIN
   --    keeps exactly the grants it had
   FOREACH v_role IN ARRAY ARRAY['anon', 'authenticated', 'service_role'] LOOP
     IF has_function_privilege(v_role, c_apply::regprocedure, 'EXECUTE') THEN
-      RAISE EXCEPTION '20260920170000 self-check: % may call %', v_role, c_apply;
+      RAISE EXCEPTION '20260921130000 self-check: % may call %', v_role, c_apply;
     END IF;
   END LOOP;
   IF has_function_privilege('anon', c_paid::regprocedure, 'EXECUTE')
      OR has_function_privilege('service_role', c_paid::regprocedure, 'EXECUTE')
      OR NOT has_function_privilege('authenticated', c_paid::regprocedure, 'EXECUTE') THEN
-    RAISE EXCEPTION '20260920170000 self-check: % no longer has exactly the grant authenticated holds', c_paid;
+    RAISE EXCEPTION '20260921130000 self-check: % no longer has exactly the grant authenticated holds', c_paid;
   END IF;
 
   -- 4. the explicit payment is the one caller that brings a replaced period
   --    back
   IF app_private.function_code(c_paid) !~ 'subscription_invoice_apply\(\s*p_invoice_id\s*,\s*true\s*\)' THEN
-    RAISE EXCEPTION '20260920170000 self-check: % no longer passes p_reinstate => true', c_paid;
+    RAISE EXCEPTION '20260921130000 self-check: % no longer passes p_reinstate => true', c_paid;
   END IF;
   --    …and no other function passes a second argument: the sweep, re-opening
   --    and cancelling must never revive what a manual edit replaced. The
@@ -510,7 +613,7 @@ BEGIN
     FROM candidates c
    WHERE app_private.function_code(c.sig) ~ 'subscription_invoice_apply\s*\([^)]*,';
   IF v_txt IS NOT NULL THEN
-    RAISE EXCEPTION '20260920170000 self-check: only platform_invoice_mark_paid may pass p_reinstate, and these call the rule with two arguments: %', v_txt;
+    RAISE EXCEPTION '20260921130000 self-check: only platform_invoice_mark_paid may pass p_reinstate, and these call the rule with two arguments: %', v_txt;
   END IF;
 
   -- 5. the company is locked before the coverage row is read, or a sweep
@@ -519,7 +622,7 @@ BEGIN
   v_lock := strpos(v_txt, 'FROM public.companies WHERE id = v_inv.company_id FOR NO KEY UPDATE');
   v_read := strpos(v_txt, 'FROM public.subscription_coverage c');
   IF v_lock = 0 OR v_read = 0 OR v_lock > v_read THEN
-    RAISE EXCEPTION '20260920170000 self-check: % no longer locks the company before it reads the coverage row', c_apply;
+    RAISE EXCEPTION '20260921130000 self-check: % no longer locks the company before it reads the coverage row', c_apply;
   END IF;
 
   -- 6. a one-argument call still resolves — the form the sweep, mark_unpaid and
@@ -527,21 +630,51 @@ BEGIN
   --    reading or locking anything else. This is the only call in this file.
   v_answer := app_private.subscription_invoice_apply('00000000-0000-0000-0000-000000000000'::uuid);
   IF v_answer IS DISTINCT FROM 'not_found' THEN
-    RAISE EXCEPTION '20260920170000 self-check: a one-argument call answered % for an invoice that does not exist', v_answer;
+    RAISE EXCEPTION '20260921130000 self-check: a one-argument call answered % for an invoice that does not exist', v_answer;
   END IF;
 
-  -- 7. neither function writes a subscription column of companies, as U3's
-  --    reader sees them, so its list of sanctioned writers still holds
+  -- 7. U3's catalogue still answers exactly its list, in both directions: this
+  --    file dropped one function and created two bodies, and neither may have
+  --    become a writer of the five subscription columns. The list is
+  --    20260920120000's check 4, restated unchanged; tests/rls/subscriptions.sql
+  --    section 8g holds the same one.
   IF to_regprocedure(c_reader) IS NULL THEN
-    RAISE EXCEPTION '20260920170000 self-check: % is missing — this file needs U3 (20260920120000) applied first', c_reader;
+    RAISE EXCEPTION '20260921130000 self-check: % is missing — this file needs U3 (20260920120000) applied first', c_reader;
   END IF;
-  SELECT string_agg(w.routine::text || ' writes ' || w.column_name, ', ')
-    INTO v_txt
-    FROM app_private.subscription_column_writes() w
-   WHERE w.routine::oid IN (to_regprocedure(c_apply)::oid, to_regprocedure(c_paid)::oid);
-  IF v_txt IS NOT NULL THEN
-    RAISE EXCEPTION '20260920170000 self-check: %; the U3 list of sanctioned writers would no longer hold', v_txt;
+  WITH expected(fn, column_name, via) AS (
+    VALUES
+      (to_regprocedure('app_private.recompute_company_subscription(uuid)')::oid, 'plan',                    'update'),
+      (to_regprocedure('app_private.recompute_company_subscription(uuid)')::oid, 'subscription_expires_at', 'update'),
+      (to_regprocedure('app_private.recompute_company_subscription(uuid)')::oid, 'subscription_status',     'update'),
+      (to_regprocedure('public.platform_company_set_plan(uuid,text,text,integer)')::oid, 'plan',            'update'),
+      (to_regprocedure('public.redeem_activation_code(text)')::oid, 'subscription_duration_type',           'update'),
+      (to_regprocedure('public.redeem_activation_code(text)')::oid, 'subscription_started_at',              'update'),
+      (to_regprocedure('public.update_company_subscription_manual(uuid,text,timestamptz,timestamptz,text,text)')::oid,
+                                                                    'subscription_duration_type',           'update'),
+      (to_regprocedure('public.update_company_subscription_manual(uuid,text,timestamptz,timestamptz,text,text)')::oid,
+                                                                    'subscription_started_at',              'update'),
+      (to_regprocedure('app_private.signup_insert_company(uuid,text,text,text,text,text,integer,uuid,text,text)')::oid,
+                                                                    'plan',                                 'insert'),
+      (to_regprocedure('app_private.signup_insert_company(uuid,text,text,text,text,text,integer,uuid,text,text)')::oid,
+                                                                    'subscription_status',                  'insert')
+  ),
+  found AS (
+    SELECT w.routine::oid AS fn, w.column_name, w.via FROM app_private.subscription_column_writes() w
+  )
+  SELECT (SELECT string_agg(e.line, '; ' ORDER BY e.line)
+            FROM (SELECT format('%s writes %s (%s)', coalesce(d.fn::regprocedure::text, '<unresolved>'),
+                                d.column_name, d.via) AS line
+                    FROM (SELECT * FROM expected EXCEPT SELECT * FROM found) d) e),
+         (SELECT string_agg(e.line, '; ' ORDER BY e.line)
+            FROM (SELECT format('%s writes %s (%s)', d.fn::regprocedure::text, d.column_name, d.via) AS line
+                    FROM (SELECT * FROM found EXCEPT SELECT * FROM expected) d) e)
+    INTO v_missing, v_extra;
+  IF v_extra IS NOT NULL THEN
+    RAISE EXCEPTION '20260921130000 self-check: a function writes a subscription column of companies directly: %; the U3 list of sanctioned writers would no longer hold', v_extra;
+  END IF;
+  IF v_missing IS NOT NULL THEN
+    RAISE EXCEPTION '20260921130000 self-check: a sanctioned writer no longer writes what it owns: %', v_missing;
   END IF;
 
-  RAISE NOTICE '20260920170000 self-check: passed';
+  RAISE NOTICE '20260921130000 self-check: passed';
 END $mig$;
