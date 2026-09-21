@@ -472,7 +472,7 @@
         </li>
         <li><a href="#p1"><span class="no">1</span><h3>OTP وأمان الحسابات</h3></a><ul class="chips"><li class="chip">كبير</li><li class="chip">عالستيج</li></ul></li>
         <li><a href="#p2"><span class="no">2</span><h3>نظام التصميم والنموذج</h3></a><ul class="chips"><li class="chip">متوسط</li><li class="chip">اندمج عالستيج</li></ul><p class="gate">البوابة انفتحت: وافقت على النموذج بـ 15.09</p></li>
-        <li><a href="#p3"><span class="no">3</span><h3>فصل المنصة والصلاحيات</h3></a><ul class="chips"><li class="chip">كبير جداً</li><li class="chip">3.0 و3.1 و3.3 و3.5 و3.6 و3.9 اندمجوا</li><li class="chip">3.4أ و 3.4ب اندمجوا</li><li class="chip">3.8-U2 بالمراجعة</li><li class="chip">3.12 بالمراجعة</li><li class="chip">3.10 و3.11 بالمراجعة</li></ul></li>
+        <li><a href="#p3"><span class="no">3</span><h3>فصل المنصة والصلاحيات</h3></a><ul class="chips"><li class="chip">كبير جداً</li><li class="chip">3.0 و3.1 و3.3 و3.5 و3.6 و3.9 اندمجوا</li><li class="chip">3.4أ و 3.4ب والملفات اندمجوا</li><li class="chip">3.4ج بالمراجعة</li><li class="chip">3.8-U2 بالمراجعة</li><li class="chip">3.12 بالمراجعة</li><li class="chip">3.10 و3.11 بالمراجعة</li></ul></li>
         <li><a href="#p4"><span class="no">4</span><h3>إيصال الراتب النقدي</h3></a><ul class="chips"><li class="chip">متوسط</li><li class="chip">الأساس اندمج</li></ul></li>
         <li><a href="#p5"><span class="no">5</span><h3>تعميم التصميم</h3></a><ul class="chips"><li class="chip">كبير</li><li class="chip">الدفعة 1 بلّشت: Fahrzeuge وFixkosten بالمراجعة</li></ul></li>
       </ol>
@@ -910,10 +910,11 @@ AND (c.subscription_expires_at IS NULL OR c.subscription_expires_at &gt; now())<
       </div>
 
       <div class="step">
-        <h3><span class="step-no">3.4</span>الدخول على شركة للدعم <span class="pill ok">3.4أ اندمج (17.09.2026)</span> <span class="pill ok">3.4ب اندمج (18.09.2026)</span> <span class="pill warn">تصليح التحديث بالمراجعة (#82)</span> <span class="pill warn">الملفات بالمراجعة (#84)</span></h3>
+        <h3><span class="step-no">3.4</span>الدخول على شركة للدعم <span class="pill ok">3.4أ اندمج (17.09.2026)</span> <span class="pill ok">3.4ب اندمج (18.09.2026)</span> <span class="pill ok">تصليح التحديث اندمج (#82)</span> <span class="pill ok">الملفات اندمجت (#84)</span> <span class="pill warn">3.4ج تدقيق الكتابة بالمراجعة (#86)</span></h3>
         <ul class="list">
           <li>جلسة دعم محفوظة بالخادم: مين، على أي شركة، ليش، ومتى. بتنتهي بعد 60 دقيقة، ومسموح جلسة وحدة بس بنفس الوقت.</li>
           <li>كل دخول وخروج بينكتب بسجل المنصة.</li>
+          <li><strong>3.4ج — كل صف بتكتبه جلسة الدعم بيترك سطر بسجل المنصة</strong> (PR #86، بالمراجعة): الجدول والعملية والشركة ورقم الصف، ومين عمله وجلسة دخوله، ورقم جلسة الدعم وسببها، والقيم اللي تغيّرت قبل وبعد. الرواتب ورقم الموظف والجنس والملاحظات عن الراتب أو الغياب ما بتنسخ أبداً (بينكتب إنه العمود تغيّر بس)، وملفات JSON بينكتب حجمها بس، لأنه السجل ما بينمسح ولسا ما إله مدة احتفاظ (D4). العضو العادي بالشركة ما بينكتب إله ولا سطر وما بيدفع وقت يُذكر. <strong>وجلسة الدعم بتكتب بس بالشركة اللي فتحتها، وما بتحذف ولا شركة</strong> — لازم تسكّر الجلسة قبل حذف شركة. تطبيق خطة الشهر بجلسة دعم بيكتب سطر لكل رحلة، <strong>والوقت الزايد لازم ينقاس عالستيج بشهر حقيقي</strong>. إعدادات الشركة وملفات المستخدمين ما انغطّوا عن قصد (كتابات بالصلاحية، تبع 3.13).</li>
           <li>بدون جلسة دعم، مدير المنصة ما بيشوف بيانات أي شركة.</li>
           <li>جوّا الجلسة القراءة والتعديل شغالين، مع شريط ثابت "Support-Zugriff: {Firma} — beenden".</li>
           <li><strong>استثناء واحد ثابت:</strong> الـ Gehaltsquittung. جوّا جلسة الدعم الشاشات بترفض تطلّع أو تلغي إيصال راتب نقدي، وهاد قرارك بـ 18.09.2026 ونهائي — التفاصيل بالمرحلة 4، بند 4.3ح.</li>
