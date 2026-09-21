@@ -23,6 +23,9 @@
                                                   audit for the statement when
                                                   the caller is in a support
                                                   session (section 3)
+    app_private.guard_company_hard_delete()       BEFORE DELETE on companies: no
+                                                  hard delete while a context is
+                                                  open (section 3b)
     app_private.support_write_redaction_pattern() the one place that says which
                                                   columns are never copied
     app_private.support_write_values()            the size cap on what is copied
@@ -57,18 +60,43 @@
   exactly one place: the statement-level trigger 3.4a already runs before every
   INSERT, UPDATE and DELETE on these tables, which already asks whether the
   caller is a platform account inside a support session. So a member's
-  statement costs one `current_setting` more than it did, and a member's row
-  costs one GUC comparison.
+  statement costs one `current_setting` and one primary-key lookup on
+  `platform_staff` — cheaper than the session-gated check it replaces — and a
+  member's row costs one GUC comparison.
 
-  The flag holds the id of the context, never a yes. The audit function looks
-  the context up again and requires it to be the caller's own, in support mode;
-  a flag that says anything else makes the write fail (fail closed), so a
-  forged flag can neither record a write in another account's name nor drop
-  one. The API has no way to set it — PostgREST sets only its own `request.`
-  settings, and no function a client can call runs set_config — and the
-  statement trigger overwrites whatever it finds whenever the caller is not the
-  account the flag belongs to, so a flag left armed earlier in a transaction
-  never reaches another caller's rows.
+  **The flag names an account, and for a company-less platform account it is
+  never empty.** It holds `<context id>:<account>` while that account writes in
+  a support session, and `none:<account>` when a company-less platform account
+  writes with no support session open. A company member, the service role,
+  GoTrue and a migration leave it empty, so for them the gate stays closed. The
+  statement trigger clears a flag that names another account — by comparing the
+  account, not by looking anything up — so a flag left armed earlier in a
+  transaction never reaches another caller's rows, and a session that
+  disappears in the middle of a statement never closes the gate for its own
+  account.
+
+  So every row a company-less platform account writes in these tables reaches
+  the audit function, and that function has exactly three answers: record it
+  against the account's own support session; let it through unrecorded because
+  it is part of a company hard delete made with no context open (the D13
+  residual, marked by the `companies` trigger of section 3b); or refuse it.
+  There is no fourth outcome in which such a write is neither recorded nor
+  refused. The function looks the session up again and requires it to be the
+  caller's own, in support mode, so a forged flag can neither record a write in
+  another account's name nor drop one. The API has no way to set the flag —
+  PostgREST sets only its own `request.` settings, and no function a client can
+  call runs set_config.
+
+  The first version of this file did have that fourth outcome, and the kit
+  found it. It cleared the flag whenever the session it named no longer
+  existed, and armed it only while the session was valid. A company's hard
+  delete removes the session through `platform_company_contexts.company_id ON
+  DELETE CASCADE`, and PostgreSQL runs the delete's foreign-key cascades in an
+  order set by the constraint triggers' names, so every audited cascade that
+  ran after the session's own cleared the flag and wrote its rows unrecorded.
+  The kit's run refused the delete only because one audited cascade happened to
+  run first and queue an audit event while the flag was still armed. In a
+  database where the order differed, nothing would have been refused.
 
   **The planning path, explicitly.** `apply_monthly_planning_run` and
   `replace_monthly_planning_run` write each trip in its own single-row UPDATE
@@ -190,43 +218,51 @@
   tests/rls/support-write-audit.sql section 1 fails the kit when it carries the
   refusal trigger without this one.
 
-  ## Deleting a company while a support session is open is refused
+  ## A company is not hard-deleted while a context is open — decided up front
 
-  Decided, not inherited. A company's hard delete (`companies.hard_delete`,
-  CompaniesPage's direct DELETE, D13) cascades into every audited table: most
-  foreign keys to `companies` are ON DELETE CASCADE, and
-  `activation_code_attempts.company_id` is ON DELETE SET NULL, so a cascaded
-  UPDATE. PostgreSQL runs those cascades with their AFTER triggers deferred to
-  the end of the outer statement, so every audit row fires after all of the
-  delete's foreign-key actions have run. Two cases follow, and both refuse:
+  A company's hard delete (`companies.hard_delete`, CompaniesPage's direct
+  DELETE, D13) cascades into every audited table — most foreign keys to
+  `companies` are ON DELETE CASCADE, `activation_code_attempts.company_id` is
+  ON DELETE SET NULL — and into `platform_company_contexts`, so it deletes the
+  very session a support write would be recorded against. PostgreSQL runs
+  those cascades in the order of their constraint triggers' names, which is
+  not an order this file can rely on (see "The flag names an account" above).
 
-  - **The company the session is on.** `platform_company_contexts.company_id`
-    is ON DELETE CASCADE too, so by the time the audit rows fire the session
-    has been deleted with the company. There is nothing to record them against,
-    and a support write that cannot be recorded is refused.
-  - **Any other company.** Its rows are not this session's writes — their
-    company came from the delete, not from the context — so the audit refuses a
-    row of another company outright. Recording them would copy a whole
-    company's names, fares and assignments into an append-only log under the
-    wrong session, for a delete that may exist precisely to erase that data, and
-    one audit write per cascaded row (every trip of every month) would put the
-    delete at risk of the statement timeout.
+  So the question is answered before any cascade runs, by a BEFORE DELETE
+  trigger on `companies` (section 3b): **a company-less platform account that
+  holds an open context, in either mode, or that has written in a support
+  session earlier in the same transaction, hard-deletes no company.** It ends
+  the context first. The refusal does not depend on which tables the company
+  has rows in or on the cascades' order, and it covers the view mode too, where
+  3.4a's statement trigger refused the same delete only as long as an audited
+  cascade happened to run before the session's own.
 
-  The rule, stated once: **a platform account that holds an open support
-  session hard-deletes no company; it ends the session first.** Without a
-  context the delete is the capability write it always was — unaudited, the D13
-  residual matrix.sql tags for 3.13. It matches what 3.4a already does in the
-  other mode: a *view* context's statement trigger refuses the same cascade, so
-  matrix.sql's `companies D` reads TT for both staff principals. The refusal
-  needs at least one audited row to be reached; deleting a company that has
-  none goes through, because then nothing of its data is written.
+  - **The company the session is on:** its rows could be recorded against
+    nothing, because the session goes with them.
+  - **Any other company:** its rows are not the session's writes — their
+    company came from the delete, not from the context. Recording them would
+    copy a whole company's names, fares and assignments into an append-only log
+    under the wrong session, for a delete that may exist precisely to erase
+    that data, and one audit write per cascaded row would put the delete at
+    risk of the statement timeout. The audit function refuses a row of another
+    company too, as a second wall behind this trigger.
+
+  Without a context the delete is the capability write it always was —
+  unaudited, the D13 residual matrix.sql tags for 3.13. The `companies` trigger
+  marks it (`app_private.company_hard_delete`, the account, transaction-local),
+  and the audit function lets exactly those rows through unrecorded. Any other
+  row a company-less platform account writes with no support session open is
+  refused (`support_session_required`): a planning RPC whose session was ended
+  by another transaction between resolving its company and its first write is
+  refused rather than recorded against nothing.
 
   No other cascade is affected. Deleting a driver, a vehicle, a salary, an
   import, a planning run, a reconciliation, a document or a role inside a
   support session cascades only into audited tables of the same company, and
   none of those deletes the session, so each cascaded row is recorded like any
   other. Only a `companies` delete, or deleting the staff account itself, takes
-  the context row away.
+  the context row away, and the second never happens with that account's own
+  token.
 
   ## Volume, and why there is no rate limit here
 
@@ -249,11 +285,16 @@
   ## What is restated, and what was carried over
 
   `app_private.refuse_read_only_context_write()` is 20260917140000's body plus
-  the arming. Carried over, each deliberately:
+  the arming. Its refusals are carried over, each deliberately:
 
     1. no subject (service role, GoTrue, migrations): no refusal
-    2. no active staff role — platform_staff_role_of(), the session-gated one,
-       so a Google session is a member here as everywhere: no refusal
+    2. not a platform account: no refusal. 3.4a asked the session-gated
+       platform_staff_role_of(); this asks whether a platform_staff row exists
+       at all, a disabled one included, because a staff account disabled by
+       another transaction in the middle of a call must still reach the audit.
+       What it refuses is unchanged: a session that holds no role (Google, or a
+       disabled account) has no valid context, and a caller with no valid
+       context was never refused
     3. a staff account with a company of its own: no refusal
     4. no open context: no refusal, and RLS answers the write as before
     5. a support context: no refusal
@@ -263,19 +304,24 @@
        signature, so all 39 triggers keep pointing at it, still statement-level
     8. REVOKE from PUBLIC, anon, authenticated and service_role
 
-  The one structural change: 3.4a asked `platform_context_company(true)` and
-  then `platform_context_company(false)`, which read the context twice; this
-  reads `platform_context_row()` once and branches on its mode. The answers are
-  the same, because those two are that one row filtered by mode.
+  Two structural changes. 3.4a asked `platform_context_company(true)` and then
+  `platform_context_company(false)`, which read the context twice; this reads
+  `platform_context_row()` once and branches on its mode, with the same
+  answers. And for a company member it now costs one primary-key lookup on
+  `platform_staff` instead of platform_staff_role_of()'s two parses of the
+  token's claims and the same lookup.
 
   ## Compatibility — this does NOT bump deploy/SCHEMA_EPOCH
 
-  Additive: three new functions, one body restated with the same answers, 39
-  new triggers. No column, policy or grant changes. The
-  previous release's code writes and reads exactly as before; its support
-  sessions simply leave rows it never reads. One thing a platform owner could
-  do before is refused now, on purpose: hard-deleting a company while holding
-  a support session (see above).
+  Additive: four new functions, one body restated with the same refusals, 39
+  new triggers on the audited tables and one on `companies`. No column, policy
+  or grant changes. The previous release's code writes and reads exactly as
+  before; its support sessions simply leave rows it never reads. Two things a
+  platform owner could do before are refused now, on purpose: hard-deleting a
+  company while holding a context, and a write by a company-less platform
+  account that reaches an audited table with no support session open and is
+  not part of a company's hard delete — which, outside that delete, only a
+  session ended mid-call by another transaction can produce (see above).
 */
 
 -- ─── 1. Which columns are never copied ──────────────────────────────────────
@@ -356,19 +402,27 @@ $$;
   20260917140000's refusal, and now also the one place the audit is armed. The
   header lists what was carried over; the new part is the flag.
 
-  The flag is transaction-local (set_config(…, true)) and belongs to one
-  account. It is cleared at the top of every statement whose caller is not the
-  staff account of the context it names — a company member, the service role,
-  another staff account — so a flag armed by an earlier statement never reaches
-  anybody else's rows. It is *not* cleared when the same staff account merely
-  has no open context any more: a planning RPC resolves its company once, when
-  it is called, and goes on writing trips after the session's sixty minutes run
-  out mid-call, or after the staff row is disabled mid-call. Those trips are
-  still that session's writes and must not go unrecorded; a staff account with
-  no context reaches no tenant row any other way, so nothing else is recorded
-  by it.
+  The flag is transaction-local (set_config(…, true)) and names one account:
+  `<context id>:<account>` or `none:<account>` (the header, "The flag names an
+  account"). Three rules keep it honest, in this order:
 
-  For a company member the added cost is one current_setting per statement.
+  1. A flag that names another account is cleared. That is a comparison of
+     two strings, not a lookup, so it cannot be fooled by a session that
+     disappears in the middle of a statement: the first version of this file
+     cleared the flag when the session it named was gone, and a company's
+     hard delete, which removes the session, then closed the gate on every
+     audited cascade that ran after it.
+  2. A company member, the service role, GoTrue and a migration never arm it,
+     so for them the gate stays closed and the audit costs nothing.
+  3. A company-less platform account always arms it: with its support session
+     while one is valid, or `none:<account>` when none is — unless the flag
+     already names a session of this same account, which then stays. So a
+     planning RPC whose session ends mid-call keeps recording against it, and
+     one whose session ended before its first write is refused by the audit
+     function rather than let through.
+
+  For a company member the cost is one current_setting and one primary-key
+  lookup on platform_staff per statement.
 */
 CREATE OR REPLACE FUNCTION app_private.refuse_read_only_context_write()
 RETURNS trigger
@@ -377,30 +431,26 @@ SECURITY DEFINER
 SET search_path = pg_catalog, public
 AS $$
 DECLARE
-  c_flag         CONSTANT text := 'app_private.support_write_context';
-  c_uuid_pattern CONSTANT text := '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$';
+  c_flag  CONSTANT text := 'app_private.support_write_context';
 
   v_uid   uuid := auth.uid();
   v_armed text := nullif(current_setting(c_flag, true), '');
   v_ctx   app_private.platform_company_contexts%ROWTYPE;
 BEGIN
-  -- The flag belongs to the account whose context it names, and to nobody
-  -- else. Nested IFs, not one AND: the uuid cast must never be evaluated for a
-  -- value that is not one.
-  IF v_armed IS NOT NULL THEN
-    IF v_uid IS NULL OR v_armed !~ c_uuid_pattern THEN
-      PERFORM set_config(c_flag, '', true);
-    ELSIF NOT EXISTS (SELECT 1 FROM app_private.platform_company_contexts c
-                       WHERE c.id = v_armed::uuid
-                         AND c.staff_user_id = v_uid) THEN
-      PERFORM set_config(c_flag, '', true);
-    END IF;
+  -- 1. The flag names one account. For anybody else it is cleared.
+  IF v_armed IS NOT NULL
+     AND (v_uid IS NULL OR split_part(v_armed, ':', 2) IS DISTINCT FROM v_uid::text) THEN
+    PERFORM set_config(c_flag, '', true);
+    v_armed := NULL;
   END IF;
 
+  -- 2. Not a platform account, or one judged as a member: nothing to arm.
+  --    Any platform_staff row counts, a disabled one included, so an account
+  --    disabled by another transaction mid-call still reaches the audit.
   IF v_uid IS NULL THEN
     RETURN NULL;
   END IF;
-  IF app_private.platform_staff_role_of(v_uid) IS NULL THEN
+  IF NOT EXISTS (SELECT 1 FROM app_private.platform_staff s WHERE s.user_id = v_uid) THEN
     RETURN NULL;
   END IF;
   IF app_private.account_has_company(v_uid) THEN
@@ -409,22 +459,90 @@ BEGIN
 
   v_ctx := app_private.platform_context_row();
 
-  -- No open context: the statement goes through and RLS answers it, as before.
-  IF v_ctx.id IS NULL THEN
+  -- A view context writes nothing (3.4a).
+  IF v_ctx.id IS NOT NULL AND v_ctx.mode <> 'support' THEN
+    RAISE EXCEPTION
+      'Nur-Lese-Ansicht: % auf % ist ohne offene Support-Sitzung nicht möglich.', TG_OP, TG_TABLE_NAME
+      USING ERRCODE = 'P0001', HINT = 'support_session_required';
+  END IF;
+
+  -- 3. A support session: its writes are recorded against it.
+  IF v_ctx.id IS NOT NULL THEN
+    PERFORM set_config(c_flag, v_ctx.id::text || ':' || v_uid::text, true);
     RETURN NULL;
   END IF;
 
-  -- A support session: the write is what it is for, and it is recorded.
-  IF v_ctx.mode = 'support' THEN
-    PERFORM set_config(c_flag, v_ctx.id::text, true);
-    RETURN NULL;
+  --    No valid session. A session this account wrote in earlier in the
+  --    transaction keeps the flag; otherwise the account is marked as writing
+  --    without one, and the audit function decides. RLS still answers the
+  --    statement as it did before this trigger existed.
+  IF v_armed IS NULL THEN
+    PERFORM set_config(c_flag, 'none:' || v_uid::text, true);
   END IF;
-
-  RAISE EXCEPTION
-    'Nur-Lese-Ansicht: % auf % ist ohne offene Support-Sitzung nicht möglich.', TG_OP, TG_TABLE_NAME
-    USING ERRCODE = 'P0001', HINT = 'support_session_required';
+  RETURN NULL;
 END;
 $$;
+
+-- ─── 3b. No hard delete of a company while a context is open ────────────────
+
+/*
+  Decides the hard delete before any foreign-key cascade runs, so the answer
+  does not depend on the order in which PostgreSQL runs them (the header, "A
+  company is not hard-deleted while a context is open").
+
+  Refused for a company-less platform account that holds a valid context in
+  either mode, or whose flag names a support session of its own from earlier
+  in the transaction. Otherwise, for such an account, the delete is the D13
+  capability write it always was, and the account is written into
+  `app_private.company_hard_delete` so the audit function lets the cascade's
+  rows through unrecorded. A company member cannot delete a company at all
+  (companies_delete asks companies.hard_delete), and the service role, GoTrue
+  and a migration are not platform accounts.
+*/
+CREATE OR REPLACE FUNCTION app_private.guard_company_hard_delete()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $$
+DECLARE
+  c_flag   CONSTANT text := 'app_private.support_write_context';
+  c_marker CONSTANT text := 'app_private.company_hard_delete';
+
+  v_uid   uuid := auth.uid();
+  v_armed text := nullif(current_setting(c_flag, true), '');
+  v_ctx   app_private.platform_company_contexts%ROWTYPE;
+BEGIN
+  IF v_uid IS NULL THEN
+    RETURN OLD;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM app_private.platform_staff s WHERE s.user_id = v_uid) THEN
+    RETURN OLD;
+  END IF;
+  IF app_private.account_has_company(v_uid) THEN
+    RETURN OLD;
+  END IF;
+
+  v_ctx := app_private.platform_context_row();
+
+  IF v_ctx.id IS NOT NULL
+     OR (v_armed IS NOT NULL
+         AND split_part(v_armed, ':', 2) = v_uid::text
+         AND split_part(v_armed, ':', 1) <> 'none') THEN
+    RAISE EXCEPTION
+      'Solange ein Unternehmenszugriff offen ist, kann kein Unternehmen gelöscht werden. Bitte zuerst den Zugriff beenden.'
+      USING ERRCODE = 'P0001', HINT = 'company_delete_context_open';
+  END IF;
+
+  PERFORM set_config(c_marker, v_uid::text, true);
+  RETURN OLD;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS guard_company_hard_delete ON public.companies;
+CREATE TRIGGER guard_company_hard_delete
+  BEFORE DELETE ON public.companies
+  FOR EACH ROW EXECUTE FUNCTION app_private.guard_company_hard_delete();
 
 -- ─── 4. The audit row ───────────────────────────────────────────────────────
 
@@ -446,12 +564,15 @@ SET search_path = pg_catalog, public
 AS $$
 DECLARE
   c_flag         CONSTANT text    := 'app_private.support_write_context';
-  c_uuid_pattern CONSTANT text    := '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$';
+  c_marker       CONSTANT text    := 'app_private.company_hard_delete';
+  -- `<context id>:<account>` or `none:<account>`; see the statement trigger.
+  c_flag_pattern CONSTANT text    := '^(none|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$';
   -- A value longer than this is recorded by its size.
   c_value_bytes  CONSTANT integer := 1024;
   c_redacted     CONSTANT jsonb   := '{"redacted": true}';
 
   v_flag    text := current_setting(c_flag, true);
+  v_uid     uuid := auth.uid();
   v_ctx     app_private.platform_company_contexts%ROWTYPE;
   v_old     jsonb;
   v_new     jsonb;
@@ -460,21 +581,38 @@ DECLARE
   v_before  jsonb;
   v_after   jsonb;
 BEGIN
-  -- 1. The flag says only "armed". Whose session this is, is looked up again,
-  --    and must be the caller's own support context. Anything else is a flag
-  --    nobody should have been able to set — or a session that no longer
-  --    exists because this very statement deleted it with its company (section
-  --    "Deleting a company" in the header) — and the write is refused rather
-  --    than recorded under a context it does not belong to, or not at all.
-  IF v_flag IS NULL OR v_flag !~ c_uuid_pattern THEN
+  -- 1. Whose write this is. The flag must name the caller; one that does not,
+  --    or that is not in the flag's shape at all, is a flag nobody should have
+  --    been able to set, and the write is refused.
+  IF v_flag IS NULL OR v_flag !~ c_flag_pattern
+     OR v_uid IS NULL OR split_part(v_flag, ':', 2) <> v_uid::text THEN
     RAISE EXCEPTION 'Support-Schreibzugriff auf % kann nicht protokolliert werden und wird abgelehnt.', TG_TABLE_NAME
       USING ERRCODE = 'P0001', HINT = 'support_audit_unavailable';
   END IF;
 
+  -- 2. A company-less platform account writing with no support session open.
+  --    Exactly one such write is let through, unrecorded: a company's hard
+  --    delete made with no context open (the D13 residual), which the
+  --    companies trigger marks before its cascade runs. Anything else — in
+  --    practice a planning RPC whose session another transaction ended between
+  --    resolving the company and writing — is refused, never let through.
+  IF split_part(v_flag, ':', 1) = 'none' THEN
+    IF current_setting(c_marker, true) = v_uid::text THEN
+      RETURN NULL;
+    END IF;
+    RAISE EXCEPTION 'Schreibzugriff eines Plattform-Kontos auf % ohne offene Support-Sitzung wird abgelehnt.', TG_TABLE_NAME
+      USING ERRCODE = 'P0001', HINT = 'support_session_required';
+  END IF;
+
+  -- 3. The session the flag names, looked up again. It is not asked to be
+  --    still valid — a session that expires or is ended mid-call keeps its
+  --    writes — only to exist, to be this account's and to be a support
+  --    session. It is gone only if something deleted it; the companies trigger
+  --    refuses the one delete that could do that with this account's token.
   SELECT * INTO v_ctx
     FROM app_private.platform_company_contexts c
-   WHERE c.id = v_flag::uuid
-     AND c.staff_user_id = auth.uid()
+   WHERE c.id = split_part(v_flag, ':', 1)::uuid
+     AND c.staff_user_id = v_uid
      AND c.mode = 'support';
 
   IF NOT FOUND THEN
@@ -482,7 +620,7 @@ BEGIN
       USING ERRCODE = 'P0001', HINT = 'support_audit_unavailable';
   END IF;
 
-  -- 2. The row on both sides, as JSON.
+  -- 4. The row on both sides, as JSON.
   IF TG_OP <> 'INSERT' THEN
     v_old := to_jsonb(OLD);
   END IF;
@@ -491,15 +629,16 @@ BEGIN
   END IF;
   v_row     := coalesce(v_new, v_old);
 
-  -- A support session writes the company it opened, and nothing else. RLS and
-  -- the planning and Gehaltsquittung RPCs already confine it there, so a row
-  -- of another company reaches this point only through a capability write
-  -- whose company did not come from the context — in practice a company's
-  -- hard delete cascading into its rows. That is not this session's write,
-  -- and recording it as one would copy another company's data into the log
-  -- under the wrong session, so it is refused. Both sides are asked, because a
-  -- cascade that sets company_id to NULL shows the company only on OLD. A row
-  -- without a company (a child table, or company_id NULL) is the context's.
+  -- 5. A support session writes the company it opened, and nothing else. RLS
+  --    and the planning and Gehaltsquittung RPCs already confine it there, and
+  --    the companies trigger refuses the one capability write that would
+  --    cascade into another company's rows (a hard delete while the session is
+  --    open), so this is a second wall: a row of another company is not this
+  --    session's write, and recording it as one would copy another company's
+  --    data into the log under the wrong session. Both sides are asked,
+  --    because a cascade that sets company_id to NULL shows the company only
+  --    on OLD. A row without a company (a child table, or company_id NULL) is
+  --    the context's.
   IF EXISTS (SELECT 1
                FROM (VALUES (v_old ->> 'company_id'), (v_new ->> 'company_id')) AS s(company)
               WHERE s.company IS NOT NULL
@@ -509,7 +648,7 @@ BEGIN
   END IF;
   v_pattern := app_private.support_write_redaction_pattern(TG_TABLE_NAME::text);
 
-  -- 3. Changed columns only for an UPDATE, every column otherwise; then
+  -- 6. Changed columns only for an UPDATE, every column otherwise; then
   --    decision 3 on each value.
   WITH changed AS (
     SELECT coalesce(n.key, o.key) AS col,
@@ -550,7 +689,7 @@ BEGIN
     v_after  := coalesce(v_after,  '{}'::jsonb);
   END IF;
 
-  -- 4. One row, through the log's only writer. The company is the row's own
+  -- 7. One row, through the log's only writer. The company is the row's own
   --    when the table has the column; the five child tables and role_permissions
   --    reach theirs through a parent, which RLS confined to the context's.
   PERFORM app_private.audit_write(
@@ -622,9 +761,10 @@ END $mig$;
 
 -- ─── 6. Ownership and privileges ────────────────────────────────────────────
 
--- The two SECURITY DEFINER functions reach app_private, so they must belong to
--- the role that owns it; CREATE OR REPLACE keeps whatever owner a function had.
+-- The three SECURITY DEFINER functions reach app_private, so they must belong
+-- to the role that owns it; CREATE OR REPLACE keeps whatever owner a function had.
 ALTER FUNCTION app_private.refuse_read_only_context_write()      OWNER TO CURRENT_USER;
+ALTER FUNCTION app_private.guard_company_hard_delete()           OWNER TO CURRENT_USER;
 ALTER FUNCTION app_private.record_support_write()                OWNER TO CURRENT_USER;
 ALTER FUNCTION app_private.support_write_redaction_pattern(text) OWNER TO CURRENT_USER;
 ALTER FUNCTION app_private.support_write_values(jsonb)           OWNER TO CURRENT_USER;
@@ -633,6 +773,7 @@ ALTER FUNCTION app_private.support_write_values(jsonb)           OWNER TO CURREN
 -- check EXECUTE; the REVOKE is the second wall behind the missing USAGE on
 -- app_private.
 REVOKE ALL ON FUNCTION app_private.refuse_read_only_context_write()      FROM PUBLIC, anon, authenticated, service_role;
+REVOKE ALL ON FUNCTION app_private.guard_company_hard_delete()           FROM PUBLIC, anon, authenticated, service_role;
 REVOKE ALL ON FUNCTION app_private.record_support_write()                FROM PUBLIC, anon, authenticated, service_role;
 REVOKE ALL ON FUNCTION app_private.support_write_redaction_pattern(text) FROM PUBLIC, anon, authenticated, service_role;
 REVOKE ALL ON FUNCTION app_private.support_write_values(jsonb)           FROM PUBLIC, anon, authenticated, service_role;
@@ -671,6 +812,7 @@ BEGIN
              END AS problem
         FROM (VALUES
           ('app_private.refuse_read_only_context_write()',      true),
+          ('app_private.guard_company_hard_delete()',           true),
           ('app_private.record_support_write()',                true),
           ('app_private.support_write_redaction_pattern(text)', false),
           ('app_private.support_write_values(jsonb)',           false)
@@ -788,11 +930,26 @@ BEGIN
     RAISE EXCEPTION '3.4c self-check: % redaction case(s) answer the wrong way', v_n;
   END IF;
 
+  -- 5b. The hard delete is decided before any cascade: companies carries the
+  --     guard as an enabled BEFORE DELETE row trigger and nothing else of its
+  --     kind (tgtype 11 = ROW 1 + BEFORE 2 + DELETE 8). Without it a company's
+  --     delete would again be refused or let through depending on the order of
+  --     its foreign-key cascades.
+  IF NOT EXISTS (SELECT 1 FROM pg_trigger g
+                  WHERE g.tgrelid = 'public.companies'::regclass
+                    AND g.tgname = 'guard_company_hard_delete'
+                    AND NOT g.tgisinternal
+                    AND g.tgtype = 11
+                    AND g.tgenabled = 'O'
+                    AND g.tgfoid = 'app_private.guard_company_hard_delete()'::regprocedure) THEN
+    RAISE EXCEPTION '3.4c self-check: companies carries no enabled BEFORE DELETE row trigger calling guard_company_hard_delete()';
+  END IF;
+
   -- 6. A statement disarms a flag it finds that is not its caller's. The
   --    migration has no subject, so it is the case of the service role and
   --    GoTrue. WHERE false: statement triggers fire for a statement that
   --    touches no row, and this one must touch none on a live database.
-  PERFORM set_config(c_flag, gen_random_uuid()::text, true);
+  PERFORM set_config(c_flag, gen_random_uuid()::text || ':' || gen_random_uuid()::text, true);
   UPDATE public.role_permissions SET page_key = page_key WHERE false;
   IF current_setting(c_flag, true) IS DISTINCT FROM '' THEN
     RAISE EXCEPTION '3.4c self-check: a statement by a caller without a subject left the audit armed';

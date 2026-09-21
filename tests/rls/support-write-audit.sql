@@ -36,8 +36,11 @@
                      makes the write fail rather than write a row in another
                      account's name
    10. cascades      a delete's cascade inside the company is recorded row by
-                     row; a company's hard delete is refused while a support
-                     session is open, for that company and for any other
+                     row; a write after the session vanished, or after it
+                     ended before the transaction's first write, is refused,
+                     never let through; a company's hard delete is refused
+                     before any cascade while a context is open, and an owner
+                     with no context still deletes it, recording nothing
    11. mid-call      a session that ends while its writes are still running
                      keeps them recorded
    12. the door      platform_audit_record cannot forge these rows
@@ -330,8 +333,18 @@ BEGIN
       NOT has_function_privilege(v_role, 'app_private.record_support_write()', 'EXECUTE')
       AND NOT has_function_privilege(v_role, 'app_private.refuse_read_only_context_write()', 'EXECUTE')
       AND NOT has_function_privilege(v_role, 'app_private.support_write_redaction_pattern(text)', 'EXECUTE')
-      AND NOT has_function_privilege(v_role, 'app_private.support_write_values(jsonb)', 'EXECUTE'));
+      AND NOT has_function_privilege(v_role, 'app_private.support_write_values(jsonb)', 'EXECUTE')
+      AND NOT has_function_privilege(v_role, 'app_private.guard_company_hard_delete()', 'EXECUTE'));
   END LOOP;
+
+  -- tgtype 11: ROW 1 + BEFORE 2 + DELETE 8.
+  PERFORM _sw_ok('shape: companies decides a hard delete before its cascades, with an enabled BEFORE DELETE row trigger',
+    EXISTS (SELECT 1 FROM pg_trigger g
+             WHERE g.tgrelid = 'public.companies'::regclass
+               AND g.tgname = 'guard_company_hard_delete'
+               AND NOT g.tgisinternal
+               AND g.tgtype = 11
+               AND g.tgenabled = 'O'));
 END $$;
 
 -- ─── 2. an ordinary member writes, and nothing is recorded ──────────────────
@@ -347,7 +360,7 @@ BEGIN
 
   -- A flag found set — as if armed by someone earlier in the transaction —
   -- must not reach this member's rows.
-  PERFORM set_config('app_private.support_write_context', gen_random_uuid()::text, true);
+  PERFORM set_config('app_private.support_write_context', gen_random_uuid()::text || ':' || gen_random_uuid()::text, true);
 
   PERFORM _sw_as(u_adm, s_adm);
   INSERT INTO drivers (id, company_id, name) VALUES (_sw_id('driver:member'), co_x, 'SW member');
@@ -730,8 +743,8 @@ BEGIN
   PERFORM _sw_as(u_o, s_o);
   UPDATE drivers SET name = name WHERE id = _sw_id('driver:x1');
   PERFORM _sw_reset();
-  PERFORM _sw_ok('one account: the owner''s write left the audit armed with its own context',
-    current_setting('app_private.support_write_context', true) = _sw_owner_context()::text);
+  PERFORM _sw_ok('one account: the owner''s write left the audit armed with its own session and its own name',
+    current_setting('app_private.support_write_context', true) = _sw_owner_context()::text || ':' || u_o::text);
 
   v_mark := _sw_mark();
   PERFORM _sw_as(u_adm, s_adm);
@@ -747,9 +760,9 @@ END $$;
   A flag set after the statement trigger has run — which no API caller can do,
   since no function a client can reach calls set_config — is the only way past
   the check above. A BEFORE ROW trigger that sets it stands in for such a
-  forger. The audit function looks the context up again, finds that it is not
-  the caller's, and refuses the write: a forged flag can neither record a write
-  in the owner's name nor let one through unrecorded.
+  forger. The audit function reads the account the flag names and looks the
+  session up again, so a forged flag can neither record a write in the owner's
+  name nor let one through unrecorded.
 */
 CREATE FUNCTION _sw_forge() RETURNS trigger
 LANGUAGE plpgsql AS $$
@@ -767,13 +780,17 @@ DECLARE
   s_adm constant uuid := _sw_id('session:admin-x');
   v_sql text := format('UPDATE drivers SET name = name WHERE id = %L', _sw_id('driver:x1'));
 BEGIN
-  PERFORM set_config('sw.forge', _sw_owner_context()::text, true);
-  PERFORM _sw_ok('forgery: a member carrying the owner''s context in the flag cannot write a row in the owner''s name — the write fails',
-    _sw_try(u_adm, s_adm, v_sql) LIKE 'ERR P0001 Support-Schreibzugriff auf drivers kann nicht protokolliert werden%');
+  PERFORM set_config('sw.forge', _sw_owner_context()::text || ':' || _sw_id('user:owner')::text, true);
+  PERFORM _sw_ok('forgery: a member carrying the owner''s own flag cannot write a row in the owner''s name — the write fails',
+    _sw_try(u_adm, s_adm, v_sql) LIKE 'ERR P0001 Support-Schreibzugriff auf drivers kann nicht protokolliert werden und wird abgelehnt.');
+
+  PERFORM set_config('sw.forge', _sw_owner_context()::text || ':' || u_adm::text, true);
+  PERFORM _sw_ok('forgery: …nor by naming itself beside the owner''s session, which is not its own',
+    _sw_try(u_adm, s_adm, v_sql) LIKE 'ERR P0001 Support-Schreibzugriff auf drivers kann nicht protokolliert werden, weil die Support-Sitzung nicht mehr besteht%');
 
   PERFORM set_config('sw.forge', 'not-a-uuid', true);
   PERFORM _sw_ok('forgery: a malformed flag fails the write too',
-    _sw_try(u_adm, s_adm, v_sql) LIKE 'ERR P0001 Support-Schreibzugriff%');
+    _sw_try(u_adm, s_adm, v_sql) LIKE 'ERR P0001 Support-Schreibzugriff auf drivers kann nicht protokolliert werden und wird abgelehnt.');
 
   PERFORM set_config('sw.forge', '', true);
   PERFORM _sw_ok('forgery: with nothing forged, the member''s write goes through as before',
@@ -783,14 +800,34 @@ END $$;
 DROP TRIGGER _sw_forge ON public.drivers;
 DROP FUNCTION _sw_forge();
 
+/*
+  A SECURITY DEFINER function writing a row past RLS as the calling account —
+  which is what the planning RPCs are. Sections 10 and 11 use it to stand for a
+  call whose session changes under it, which cannot be staged inside one real
+  call here.
+*/
+CREATE FUNCTION _sw_definer_write() RETURNS void
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_catalog AS $$
+BEGIN
+  UPDATE drivers SET name = 'SW after expiry' WHERE id = _sw_id('driver:x1');
+END $$;
+
 -- ─── 10. cascades: the company's own are recorded, a company delete is refused ─
 --
 -- A delete inside a support session cascades. Within the company it stays in
 -- audited tables of that company and the session survives it, so every
--- cascaded row is recorded. A company's hard delete is different, and refused
--- on purpose (the migration header, "Deleting a company while a support
--- session is open is refused"): the company the session is on takes the
--- session with it, and any other company's rows are not the session's writes.
+-- cascaded row is recorded. A company's hard delete is refused before any
+-- cascade runs (the migration header, "A company is not hard-deleted while a
+-- context is open").
+--
+-- The two probes in the middle pin what the first version of this migration
+-- got wrong. It cleared the flag when the session it named was gone and armed
+-- it only while the session was valid, so a company's hard delete — which
+-- deletes the session through its foreign key — closed the gate on every
+-- audited cascade that ran after the session's own: those rows were written
+-- with nothing recorded and nothing refused, and whether any cascade ran before
+-- it depended on the order PostgreSQL chose. Each probe takes the session away
+-- directly and shows the write is refused, not let through.
 
 DO $$
 DECLARE
@@ -800,7 +837,11 @@ DECLARE
   u_adm   constant uuid := _sw_id('user:admin-x');
   -- seed.sql's platform owner: no sign-in session, so no context at all
   u_super constant uuid := '50000000-0000-4000-8000-000000000001';
+  v_ctx   constant uuid := _sw_owner_context();
   v_mark  bigint;
+  v_out   text;
+  v_rows  bigint;
+  v_n     bigint;
 BEGIN
   -- A driver with a note and a salary, written as the database owner, so none
   -- of it is audited.
@@ -824,18 +865,80 @@ BEGIN
     NOT EXISTS (SELECT 1 FROM app_private.platform_audit_log l
                  WHERE l.id > v_mark
                    AND (l.company_id IS DISTINCT FROM co_x
-                        OR (l.after_value ->> 'context_id') IS DISTINCT FROM _sw_owner_context()::text)));
+                        OR (l.after_value ->> 'context_id') IS DISTINCT FROM v_ctx::text)));
 
-  PERFORM _sw_ok('hard delete: the company the session is on is refused — its session is deleted with it, so nothing could be recorded',
+  -- The session disappears under a flag this account armed — what a company's
+  -- hard delete does to it through the foreign key. The gate must stay open
+  -- for this account, so the write is refused rather than let through. Taken
+  -- apart inside a subtransaction that is rolled back, session included.
+  BEGIN
+    PERFORM _sw_as(u_o, s_o);
+    UPDATE drivers SET name = name WHERE id = _sw_id('driver:x1');
+    PERFORM _sw_reset();
+    DELETE FROM app_private.platform_company_contexts WHERE id = v_ctx;
+    PERFORM _sw_as(u_o, s_o);
+    PERFORM _sw_definer_write();
+    v_out := 'written, with nothing refused';
+    RAISE EXCEPTION USING ERRCODE = 'ZZ010';
+  EXCEPTION
+    WHEN SQLSTATE 'ZZ010' THEN NULL;
+    WHEN OTHERS THEN v_out := SQLSTATE || ' ' || SQLERRM;
+  END;
+  PERFORM _sw_reset();
+  PERFORM _sw_ok(format('vanished session: a write after the session was deleted mid-transaction is refused, not let through (%s)', v_out),
+    v_out LIKE 'P0001 Support-Schreibzugriff auf drivers kann nicht protokolliert werden, weil die Support-Sitzung nicht mehr besteht%');
+
+  -- The session ends before the first write of a transaction, as when another
+  -- transaction closes it between a planning RPC resolving its company and
+  -- writing. Nothing is armed yet; the account still reaches the audit, as
+  -- `none:`, and is refused.
+  BEGIN
+    PERFORM set_config('app_private.support_write_context', '', true);
+    UPDATE app_private.platform_company_contexts
+       SET closed_at = now(), closed_reason = 'manual'
+     WHERE id = v_ctx;
+    PERFORM _sw_as(u_o, s_o);
+    PERFORM _sw_definer_write();
+    v_out := 'written, with nothing refused';
+    RAISE EXCEPTION USING ERRCODE = 'ZZ010';
+  EXCEPTION
+    WHEN SQLSTATE 'ZZ010' THEN NULL;
+    WHEN OTHERS THEN v_out := SQLSTATE || ' ' || SQLERRM;
+  END;
+  PERFORM _sw_reset();
+  PERFORM _sw_ok(format('ended session: a platform account''s write with no support session open is refused, not let through (%s)', v_out),
+    v_out LIKE 'P0001 Schreibzugriff eines Plattform-Kontos auf drivers ohne offene Support-Sitzung wird abgelehnt.');
+  PERFORM _sw_ok('ended session: …and both probes rolled back, the session included',
+    _sw_owner_context() = v_ctx);
+
+  -- A company's hard delete is decided before any of its cascades runs, by the
+  -- guard on companies, so the answer no longer depends on their order.
+  PERFORM _sw_ok('hard delete: the company the session is on is refused, before any cascade',
     _sw_try(u_o, s_o, format('DELETE FROM companies WHERE id = %L', co_x))
-      LIKE 'ERR P0001 Support-Schreibzugriff auf % kann nicht protokolliert werden, weil die Support-Sitzung nicht mehr besteht%');
-  PERFORM _sw_ok('hard delete: …and so is any other company: its rows are not this session''s writes',
+      = 'ERR P0001 Solange ein Unternehmenszugriff offen ist, kann kein Unternehmen gelöscht werden. Bitte zuerst den Zugriff beenden.');
+  PERFORM _sw_ok('hard delete: …and so is any other company',
     _sw_try(u_o, s_o, format('DELETE FROM companies WHERE id = %L', _sw_id('company:y')))
-      LIKE 'ERR P0001 Die offene Support-Sitzung gilt einem anderen Unternehmen:%');
-  PERFORM _sw_ok('hard delete: an owner with no context still deletes a company, as before (the D13 residual, 3.13)',
-    _sw_try(u_super, NULL, format('DELETE FROM companies WHERE id = %L', _sw_id('company:y'))) = 'rows 1');
+      = 'ERR P0001 Solange ein Unternehmenszugriff offen ist, kann kein Unternehmen gelöscht werden. Bitte zuerst den Zugriff beenden.');
+
+  -- An owner with no context: the D13 residual, deleted and recorded nowhere.
+  BEGIN
+    v_mark := _sw_mark();
+    PERFORM _sw_as(u_super, NULL);
+    DELETE FROM companies WHERE id = _sw_id('company:y');
+    GET DIAGNOSTICS v_rows = ROW_COUNT;
+    PERFORM _sw_reset();
+    v_n := _sw_rows(v_mark);
+    v_out := 'ok';
+    RAISE EXCEPTION USING ERRCODE = 'ZZ010';
+  EXCEPTION
+    WHEN SQLSTATE 'ZZ010' THEN NULL;
+    WHEN OTHERS THEN v_out := SQLSTATE || ' ' || SQLERRM;
+  END;
+  PERFORM _sw_reset();
+  PERFORM _sw_ok(format('hard delete: an owner with no context still deletes a company, and nothing is recorded as a support write (%s, rows %s, audit %s)', v_out, v_rows, v_n),
+    v_out = 'ok' AND v_rows = 1 AND v_n = 0);
   PERFORM _sw_ok('hard delete: the probes rolled back — the session and both companies are still there',
-    _sw_owner_context() IS NOT NULL
+    _sw_owner_context() = v_ctx
     AND (SELECT count(*) FROM companies WHERE id IN (co_x, _sw_id('company:y'))) = 2);
 END $$;
 
@@ -844,14 +947,8 @@ END $$;
 -- A planning RPC resolves its company once and goes on writing after the
 -- session's sixty minutes run out mid-call. That cannot be staged inside one
 -- call here, so it is taken apart: the owner arms the flag, the context
--- expires, and a SECURITY DEFINER function — which is what the planning RPCs
--- are — writes a row past RLS as the same owner.
-
-CREATE FUNCTION _sw_definer_write() RETURNS void
-LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_catalog AS $$
-BEGIN
-  UPDATE drivers SET name = 'SW after expiry' WHERE id = _sw_id('driver:x1');
-END $$;
+-- expires, and _sw_definer_write() — standing for a planning RPC — writes a
+-- row past RLS as the same owner.
 
 DO $$
 DECLARE
@@ -877,7 +974,7 @@ BEGIN
   PERFORM _sw_ok('mid-call: after the expiry a direct write reaches nothing — RLS no longer answers the company',
     v_rows = 0);
   PERFORM _sw_ok('mid-call: …and the same account''s statement left its flag in place',
-    current_setting('app_private.support_write_context', true) = v_ctx::text);
+    current_setting('app_private.support_write_context', true) = v_ctx::text || ':' || u_o::text);
 
   v_mark := _sw_mark();
   PERFORM _sw_as(u_o, s_o);

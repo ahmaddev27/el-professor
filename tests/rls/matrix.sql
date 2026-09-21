@@ -1425,15 +1425,17 @@ UPDATE _mx_expected x SET staff_view = o.sv, staff_support = o.ss
     -- destroys nothing.
     --
     -- companies D for staff_support moved from YY to TT with 20260920110000
-    -- (3.4c), deliberately: a platform account holding a support session
-    -- hard-deletes no company. Company A's cascade deletes the session with the
-    -- company, so the audit trigger has nothing to record its rows against
-    -- ("…kann nicht protokolliert werden, weil die Support-Sitzung nicht mehr
-    -- besteht"); company B's rows are not the session's writes and are refused
-    -- as another company's ("Die offene Support-Sitzung gilt einem anderen
-    -- Unternehmen"). The same answer as staff_view's, for the same reason: the
-    -- cascade is not a context write. `super`, with no context, still deletes
-    -- both — the residual on the line above.
+    -- (3.4c), deliberately: a platform account holding a context, in either
+    -- mode, hard-deletes no company. app_private.guard_company_hard_delete, a
+    -- BEFORE DELETE trigger on companies, refuses it before any cascade runs
+    -- ("Solange ein Unternehmenszugriff offen ist, kann kein Unternehmen
+    -- gelöscht werden"), so the answer is the same for both companies and does
+    -- not depend on the order of the delete's foreign-key cascades — which it
+    -- did while the refusal came from the cascades themselves: the company A
+    -- delete removes the session, and a cascade that ran after that found
+    -- nothing to arm the audit with. staff_view's TT now comes from the same
+    -- guard. `super`, with no context, still deletes both — the residual on the
+    -- line above — and the audit lets exactly that cascade through unrecorded.
     ('user_profiles',            'S', 'Y.', 'Y.'),
     ('user_profiles',            'U', 'Y.', 'Y.'),
     ('user_profiles',            'D', 'T.', 'Y.'),
