@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   ShieldAlert, Save, Plus, Trash2, Tags, SlidersHorizontal,
-  Building2, Hourglass, Receipt, Mail, Megaphone, ToggleRight,
+  Building2, Hourglass, Receipt, Mail, Megaphone, ToggleRight, Scale,
 } from 'lucide-react';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { useAppConfig } from '../contexts/AppConfigContext';
@@ -61,11 +61,15 @@ import {
 import MailSettingsEditor from '../components/settings/MailSettingsEditor';
 import AnnouncementsEditor from '../components/settings/AnnouncementsEditor';
 import FeatureFlagsEditor from '../components/settings/FeatureFlagsEditor';
+import { ImpressumSellerFields } from '../components/settings/ImpressumSellerFields';
+import PrivacyTextEditor from '../components/settings/PrivacyTextEditor';
 
 /**
  * Einstellungen (plan 3.E / 3.G): the price book, the plan feature map, the
  * seller, the trial, the invoice defaults (3.9, 3.10), the mail sender and the
- * code-mail templates (3.10), the announcements and the feature flags (3.11).
+ * code-mail templates (3.10), the announcements and the feature flags (3.11),
+ * and the legal pages: the seller's Impressum fields and the privacy policy
+ * (20260921120000).
  *
  * Every key lives in `app_private.platform_settings`, one JSON value per key
  * with a version every write bumps, read and written only through
@@ -106,7 +110,7 @@ const PLAN_LABELS: Record<Plan, TranslationKey> = {
 
 type SettingsTab =
   | 'price_book' | 'plan_features' | 'seller' | 'trial' | 'invoice'
-  | 'mail' | 'announcements' | 'feature_flags';
+  | 'mail' | 'announcements' | 'feature_flags' | 'privacy';
 
 /**
  * Every tab, in the order they appear, and who may read it. A role sees only
@@ -127,6 +131,7 @@ const SETTING_TABS: {
   { id: 'mail',          icon: Mail,              labelKey: 'admin.settings.tab.mail',     readable: a => canReadSetting(a, 'mail.sender') },
   { id: 'announcements', icon: Megaphone,         labelKey: 'admin.settings.tab.announcements', readable: canReadAnnouncements },
   { id: 'feature_flags', icon: ToggleRight,       labelKey: 'admin.settings.tab.flags',    readable: a => canReadSetting(a, 'feature_flags') },
+  { id: 'privacy',       icon: Scale,             labelKey: 'admin.settings.tab.privacy',  readable: a => canReadSetting(a, 'legal.privacy') },
 ];
 
 const PlatformSettingsPage: React.FC = () => {
@@ -158,7 +163,7 @@ const PlatformSettingsPage: React.FC = () => {
         <p className="text-sm mt-0.5" style={{ color: 'var(--text-secondary)' }}>{t('admin.settings.subtitle')}</p>
       </div>
 
-      {/* Eight tabs do not fit one row, on a phone or on a laptop, so the strip
+      {/* Nine tabs do not fit one row, on a phone or on a laptop, so the strip
           wraps rather than scrolling the page sideways. */}
       <div className="flex flex-wrap gap-1 p-1 rounded-xl" style={{ background: 'var(--bg-subtle)' }}>
         {tabs.map(({ id, icon: Icon, labelKey }) => (
@@ -184,6 +189,7 @@ const PlatformSettingsPage: React.FC = () => {
        active === 'invoice'       ? <InvoiceEditor /> :
        active === 'mail'          ? <MailSettingsEditor /> :
        active === 'announcements' ? <AnnouncementsEditor /> :
+       active === 'privacy'       ? <PrivacyTextEditor /> :
                                     <FeatureFlagsEditor />}
     </div>
   );
@@ -661,6 +667,14 @@ const SellerEditor: React.FC = () => {
               <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>{t('admin.settings.exampleUnavailable')}</p>
             )}
           </div>
+
+          {/* The Impressum's own fields (20260921120000), saved with the seller
+              by the button below, against the same version. */}
+          <ImpressumSellerFields
+            form={form}
+            disabled={!maySave}
+            onChange={(field, value) => setForm({ ...form, [field]: value })}
+          />
 
           {maySave && <SaveRow saving={saving} onSave={() => void save()} />}
         </>

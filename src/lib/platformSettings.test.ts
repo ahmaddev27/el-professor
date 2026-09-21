@@ -12,6 +12,7 @@ import {
   parsePrivacyDocument,
   privacyFromForm,
   privacyParagraphRefused,
+  privacyProblemMessage,
   privacyStoredBytes,
   privacyToForm,
   splitPrivacyParagraphs,
@@ -722,6 +723,14 @@ describe('the privacy text', () => {
       .toEqual({ error: 'legal.privacy.paragraphs.1' });
     expect(privacyFromForm({ asOf: '21.09.2026', text: Array.from({ length: 301 }, () => 'x').join('\n\n') }))
       .toEqual({ error: 'legal.privacy.paragraphs' });
+  });
+
+  it('tells the owner which paragraph, counting from one', () => {
+    expect(privacyProblemMessage('legal.privacy.paragraphs.2'))
+      .toEqual({ key: 'admin.settings.privacy.problem.paragraph', vars: { number: 3, max: 4000 } });
+    expect(privacyProblemMessage('legal.privacy.as_of').key).toBe('admin.settings.privacy.problem.asOf');
+    expect(privacyProblemMessage('value_size')).toEqual({ key: 'admin.settings.privacy.problem.size', vars: { max: 32000 } });
+    expect(privacyProblemMessage('legal.privacy.paragraphs').key).toBe('admin.settings.privacy.problem.paragraphs');
   });
 
   it('counts bytes the way PostgreSQL prints the document', () => {

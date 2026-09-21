@@ -853,6 +853,23 @@ export function privacyFromForm(form: PrivacyForm): { value: PrivacyDocument } |
   return { value };
 }
 
+/**
+ * A refusal path of `privacyFromForm` as the sentence the editor shows beside
+ * the text, counting paragraphs from 1 the way a reader does.
+ */
+export function privacyProblemMessage(path: string): { key: TranslationKey; vars: Record<string, number> } {
+  const paragraph = /^legal\.privacy\.paragraphs\.(\d+)$/.exec(path);
+  if (paragraph) {
+    return {
+      key: 'admin.settings.privacy.problem.paragraph',
+      vars: { number: Number(paragraph[1]) + 1, max: PRIVACY_PARAGRAPH_MAX_LENGTH },
+    };
+  }
+  if (path === 'legal.privacy.as_of') return { key: 'admin.settings.privacy.problem.asOf', vars: {} };
+  if (path === 'value_size') return { key: 'admin.settings.privacy.problem.size', vars: { max: PRIVACY_MAX_BYTES } };
+  return { key: 'admin.settings.privacy.problem.paragraphs', vars: { max: PRIVACY_MAX_PARAGRAPHS } };
+}
+
 // ─── Reading a stored value for one key ──────────────────────────────────────
 
 /** The value a settings answer carries, read as a price book. */
