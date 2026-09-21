@@ -549,12 +549,17 @@ BEGIN
     AND _ts_try(owner_u, format('INSERT INTO salaries (driver_id, period_start, period_end, created_by, company_id) VALUES (%L, %L, %L, %L, %L)',
                                 drv_ok, '2026-05-01', '2026-05-31', owner_u, co_ok)) LIKE 'ERR 42501%');
   -- company_settings is the account shell, not business data: it carries the
-  -- company's legal details, and changing them is a lifecycle act an owner
-  -- performs today. That branch asks companies.lifecycle, so support, billing
-  -- and read_only do not have it.
-  PERFORM _ts_ok('shell: an owner still writes a company''s settings (companies.lifecycle), support does not',
-    _ts_try(owner_u, format('UPDATE company_settings SET company_name = %L WHERE company_id = %L', 'TS', co_ok)) = 'rows 1'
-    AND _ts_try(support, format('UPDATE company_settings SET company_name = %L WHERE company_id = %L', 'TS', co_ok)) = 'rows 0');
+  -- company's legal details. Until 20260921110000 (3.13a) an owner changed
+  -- them for any company with no context at all, through companies.lifecycle,
+  -- and this line asserted `rows 1` for it. Now a platform account writes them
+  -- only inside a support session on that company — none of these principals
+  -- has one open — while still reading them through companies.read.
+  PERFORM _ts_ok('shell: with no support session open, no platform account writes a company''s settings — an owner included (3.13a)',
+    _ts_try(owner_u, format('UPDATE company_settings SET company_name = %L WHERE company_id = %L', 'TS', co_ok)) = 'rows 0'
+    AND _ts_try(support, format('UPDATE company_settings SET company_name = %L WHERE company_id = %L', 'TS', co_ok)) = 'rows 0'
+    AND _ts_try(owner_u, format('DELETE FROM company_settings WHERE company_id = %L', co_ok)) = 'rows 0');
+  PERFORM _ts_ok('shell: …although an owner still reads them',
+    _ts_try(owner_u, format('SELECT count(*)::text FROM company_settings WHERE company_id = %L', co_ok)) = '1');
 
   -- The capability half: the platform tables now ask what the act is, not
   -- whether the caller is staff at all.
