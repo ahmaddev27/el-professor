@@ -60,6 +60,13 @@ function harnessFakes(): Plugin {
       // A fake imports its real module to re-export it; that one import must
       // reach the real file.
       if (!importer || normalize(importer).startsWith(fakesDir)) return null;
+      // So must the browser's request for it. A URL is resolved with Vite's
+      // default importer, the root index.html, and the only URL that names a
+      // real faked module is the one a fake's re-export was rewritten to —
+      // every other importer was already sent to the fake's own URL. Redirected
+      // here, the fake would re-export itself and lose every other export
+      // (BLOCK_MESSAGE_KEYS first), depending on which request came first.
+      if (normalize(importer).endsWith('/index.html')) return null;
       const resolved = await this.resolve(source, importer, { ...options, skipSelf: true });
       if (!resolved) return null;
       return redirects.get(normalize(resolved.id)) ?? null;
@@ -101,6 +108,9 @@ export default defineConfig({
   },
   optimizeDeps: {
     entries: ['design-harness/batch4/index.html'],
-    exclude: ['lucide-react'],
+    // Pre-bundled here, unlike in the app's own config: unbundled, lucide's
+    // ESM entry is some 1,500 modules, and every cold page load of this
+    // harness waited over a minute for them. Bundling changes no icon.
+    include: ['lucide-react'],
   },
 });
