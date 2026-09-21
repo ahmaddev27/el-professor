@@ -7,6 +7,9 @@ import { ToastProvider } from '../src/contexts/ToastContext';
 import AppLayout from '../src/components/AppLayout';
 import CarsPage from '../src/pages/CarsPage';
 import FixkostenPage from '../src/pages/FixkostenPage';
+import SalariesPage from '../src/pages/SalariesPage';
+import BargeldbestandPage from '../src/pages/BargeldbestandPage';
+import { AbrechnungPage } from '../src/pages/AbrechnungPage';
 import '../src/index.css';
 import { applyStoredPreferences, scenario } from './scenario';
 
@@ -19,7 +22,14 @@ import { applyStoredPreferences, scenario } from './scenario';
 
 applyStoredPreferences();
 
-const ROUTES = { fahrzeuge: '/cars', fixkosten: '/fixkosten' } as const;
+const ROUTES = {
+  fahrzeuge: '/cars',
+  fixkosten: '/fixkosten',
+  // Phase 5 batch 2.
+  gehaelter: '/salaries',
+  abrechnung: '/abrechnung',
+  bargeld: '/bargeldbestand',
+} as const;
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
@@ -31,6 +41,9 @@ createRoot(document.getElementById('root')!).render(
               <Route path="/" element={<AppLayout isSupportAdmin={false} />}>
                 <Route path="cars" element={<CarsPage />} />
                 <Route path="fixkosten" element={<FixkostenPage />} />
+                <Route path="salaries" element={<SalariesPage />} />
+                <Route path="abrechnung" element={<AbrechnungPage />} />
+                <Route path="bargeldbestand" element={<BargeldbestandPage />} />
               </Route>
             </Routes>
           </MemoryRouter>

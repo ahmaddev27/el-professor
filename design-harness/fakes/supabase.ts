@@ -10,6 +10,7 @@
  * waits for it to reach zero before it takes a screenshot.
  */
 import { assignmentRows, carsRows, driversRows, fixedCostRows, type Row } from '../fixtures';
+import { batch2Drivers, batch2PrimaryTable, batch2Rpc, batch2Tables, isBatch2Screen } from '../fixtures-batch2';
 import { scenario } from '../scenario';
 
 type QueryError = { message: string; code: string; details?: string; hint?: string };
@@ -24,15 +25,21 @@ declare global {
 }
 window.__harness = { pending: 0, answered: 0 };
 
-const PRIMARY_TABLE = scenario.screen === 'fixkosten' ? 'fixed_costs' : 'cars';
+const PRIMARY_TABLE = batch2PrimaryTable(scenario) ?? (scenario.screen === 'fixkosten' ? 'fixed_costs' : 'cars');
 
 function seed(): Map<string, Row[]> {
   const empty = scenario.data === 'empty';
+  // Batch 2: the drivers carry a salary ratio, and an empty Gehälter screen is
+  // one with no drivers, since a driver without income still gets a row.
+  const drivers = !isBatch2Screen(scenario)
+    ? driversRows()
+    : scenario.screen === 'gehaelter' && empty ? [] : batch2Drivers(driversRows());
   return new Map<string, Row[]>([
     ['cars', empty ? [] : carsRows()],
     ['car_driver_assignments', empty ? [] : assignmentRows()],
-    ['drivers', driversRows()],
+    ['drivers', drivers],
     ['fixed_costs', empty ? [] : fixedCostRows()],
+    ...batch2Tables(scenario),
   ]);
 }
 
@@ -93,6 +100,17 @@ class FakeQuery implements PromiseLike<Result> {
 
   in(column: string, values: unknown[]): this {
     this.filters.push(row => values.includes(row[column]));
+    return this;
+  }
+
+  // Dates are stored as `YYYY-MM-DD` text, which compares correctly as a string.
+  gte(column: string, value: unknown): this {
+    this.filters.push(row => String(row[column] ?? '') >= String(value));
+    return this;
+  }
+
+  lte(column: string, value: unknown): this {
+    this.filters.push(row => String(row[column] ?? '') <= String(value));
     return this;
   }
 
@@ -199,9 +217,25 @@ class FakeQuery implements PromiseLike<Result> {
 
 const unavailable = async () => ({ data: null, error: { message: 'Not available in the screen harness', code: 'HARNESS' } });
 
+/** An RPC a batch's fixtures answer, counted and delayed like a query; any other is unavailable. */
+function rpc(name: string, args?: Record<string, unknown>): PromiseLike<Result> {
+  const answer = batch2Rpc(scenario, store, name, args);
+  if (!answer) return unavailable();
+  window.__harness.pending += 1;
+  const neverAnswers = scenario.data === 'loading' && name === PRIMARY_TABLE;
+  return new Promise<Result>(resolve => {
+    if (neverAnswers) return;
+    setTimeout(() => {
+      window.__harness.pending -= 1;
+      window.__harness.answered += 1;
+      resolve(answer);
+    }, ANSWER_DELAY_MS);
+  });
+}
+
 export const supabase = {
   from: (table: string) => new FakeQuery(table),
-  rpc: unavailable,
+  rpc,
   auth: {
     getSession: async () => ({ data: { session: null }, error: null }),
     getUser: async () => ({ data: { user: null }, error: null }),
