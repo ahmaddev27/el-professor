@@ -1308,7 +1308,9 @@ BEGIN
       'app_private.subscription_grace_business_days()',
       'app_private.add_business_days(date,integer)',
       'app_private.invoice_grace_end(date)',
-      'app_private.subscription_invoice_apply(uuid)',
+      -- (uuid, boolean) since 20260920170000, section 10: the second argument
+      -- is the explicit payment's, and only platform_invoice_mark_paid passes it.
+      'app_private.subscription_invoice_apply(uuid,boolean)',
       'app_private.subscription_invoices_apply_all()']
   LOOP
     FOREACH v_role IN ARRAY ARRAY['anon', 'authenticated', 'service_role'] LOOP
