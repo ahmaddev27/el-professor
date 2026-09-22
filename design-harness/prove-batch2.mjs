@@ -51,9 +51,144 @@ const FILES = [
       'onClick={resetFilters}',
     ],
   },
+  {
+    path: 'src/pages/SalariesPage.tsx',
+    blocks: [{ from: 'const SalariesPage: React.FC = () => {', oldTo: '  if (loading) {', newTo: PRESENTATION }],
+    added: [],
+    removed: [],
+    carried: ['onClick={loadDrivers}', 'return <SalariesManagement drivers={drivers} />;'],
+  },
+  {
+    path: 'src/components/SalariesManagement.tsx',
+    blocks: [
+      {
+        from: 'const SalariesManagement: React.FC<SalariesManagementProps> = ({ drivers }) => {',
+        oldTo: '  const inputStyle = {',
+        newTo: PRESENTATION,
+      },
+    ],
+    added: [
+      '  const [loadFailed, setLoadFailed] = useState(false);',
+      '      setLoadFailed(false);',
+      '      setLoadFailed(true);',
+    ],
+    removed: [],
+    carried: [
+      // The overlap hint the old table built inside its row map.
+      [
+        'const overlaps = overlapsByDriver.get(calc.driver_id);',
+        '// One line per overlapping row, so the owner can go straight to',
+        '// the period he has to merge instead of hunting for it.',
+        'const overlapHint = overlaps',
+        '? [',
+        "t('sal.overlap.tooltip'),",
+        '...overlaps.map(other =>',
+        "t('sal.overlap.entry', {",
+        'period: `${formatStoredDate(other.period_start)} – ${formatStoredDate(other.period_end)}`,',
+        'amount: formatSalaryDue(other),',
+        '}),',
+        '),',
+        "].join('\\n')",
+        ": '';",
+      ].join('\n'),
+      'onClick={() => setPeriodsDriverId(calc.driver_id)}',
+      "title={`${overlapHint}\\n\\n${t('sal.periods.openHint')}`}",
+      "aria-label={`${overlapHint}\\n\\n${t('sal.periods.openHint')}`}",
+      "calc.payment_status === 'paid' ? (",
+      "calc.payment_status === 'partially_paid' ? (",
+      'calc.netto_salary || calc.amount_due',
+      '{calc.netto_salary && calc.netto_salary !== calc.amount_due && (',
+      'calc.total_paid ? (',
+      'calc.remaining_balance > 0 ?',
+      'onClick={() => showDriverDetails(calc.driver_name)}',
+      'onClick={() => generateDriverSalaryPdf({ salary: calc, settings, showNote: false })}',
+      'onClick={() => setSalaryDetailsModal({ isOpen: true, salary: calc })}',
+      'disabled={!isAdmin}',
+      "isAdmin ? t('sal.action.managePayments') : t('sal.adminOnlyShort')",
+      'disabled={!rowsByDriver.get(calc.driver_id)?.length}',
+      "? t('sal.periods.open')\n: t('sal.periods.noRows')",
+      'onChange={e => handleMonthChange(e.target.value)}',
+      'onChange={e => setPeriodStart(e.target.value)}',
+      'onChange={e => setPeriodEnd(e.target.value)}',
+      "drivers.filter(driver => driver.status !== 'inactive').map(driver => (",
+      "as 'all' | 'paid' | 'unpaid'",
+      'onClick={resetFilters}',
+      'onClick={handleExport}',
+      "calculations.length === 0 ? t('sal.export.noDataTooltip') : t('common.exportExcelShort')",
+      "t('sal.paidUnpaidCount', { paid: paidCount, unpaid: unpaidCount })",
+      // The unreachable status dialog, left as it was.
+      [
+        '<ConfirmationModal',
+        'isOpen={statusModal.isOpen}',
+        "onClose={() => setStatusModal({ isOpen: false, salary: null, newStatus: 'unpaid' })}",
+        'onConfirm={handleStatusChange}',
+        "title={statusModal.newStatus === 'paid' ? t('sal.confirm.markPaidTitle') : t('sal.confirm.markUnpaidTitle')}",
+        'message={',
+        'statusModal.salary',
+        '? t(',
+        "statusModal.newStatus === 'paid' ? 'sal.confirm.markPaidMessage' : 'sal.confirm.markUnpaidMessage',",
+        '{ name: statusModal.salary.driver_name, amount: statusModal.salary.amount_due.toFixed(2) },',
+        ')',
+        ": ''",
+        '}',
+        "type={statusModal.newStatus === 'paid' ? 'success' : 'warning'}",
+        '/>',
+      ].join('\n'),
+      // The transaction dialog's sums, computed where the old dialog computed them.
+      [
+        '{detailsModal.isOpen && (() => {',
+        'const transactions = detailsModal.transactions;',
+        "const umsatzTotal = transactions.filter(tx => tx.type === 'umsatz').reduce((sum, tx) => sum + Number(tx.amount), 0);",
+        "const aktionenTotal = transactions.filter(tx => tx.type === 'aktionen').reduce((sum, tx) => sum + Number(tx.amount), 0);",
+        "const trinkgeldTotal = transactions.filter(tx => tx.type === 'trinkgeld').reduce((sum, tx) => sum + Number(tx.amount), 0);",
+        "const bargeldTotal = transactions.filter(tx => tx.type === 'bargeld').reduce((sum, tx) => sum + Number(tx.amount), 0);",
+        'const totalIncome = umsatzTotal + aktionenTotal + trinkgeldTotal + bargeldTotal;',
+      ].join('\n'),
+      [
+        '// `type` is the stored income type; only the returned label is translated.',
+        'const getTypeLabel = (type: string) => {',
+        'switch (type) {',
+        "case 'umsatz': return t('sal.type.umsatz');",
+        "case 'aktionen': return t('sal.type.aktionen');",
+        "case 'trinkgeld': return t('sal.type.trinkgeld');",
+        "case 'bargeld': return t('sal.type.bargeld');",
+        'default: return type;',
+        '}',
+        '};',
+      ].join('\n'),
+      '{aktionenTotal > 0 && ',
+      "setDetailsModal({ isOpen: false, driverName: '', transactions: [] })",
+      "transaction.type === 'bargeld' ?",
+      [
+        '{salaryDetailsModal.isOpen && salaryDetailsModal.salary && (',
+        '<SalaryDetailsModal',
+        'isOpen={salaryDetailsModal.isOpen}',
+        'onClose={() => setSalaryDetailsModal({ isOpen: false, salary: null })}',
+        'salary={salaryDetailsModal.salary}',
+        'onUpdate={loadData}',
+        '/>',
+        ')}',
+      ].join('\n'),
+      [
+        '{periodsDriverId && (',
+        '<SalaryPeriodsModal',
+        'isOpen',
+        'onClose={() => setPeriodsDriverId(null)}',
+        "driverName={drivers.find(driver => driver.id === periodsDriverId)?.name ?? ''}",
+        'rows={rowsByDriver.get(periodsDriverId) ?? []}',
+        'companyId={companyId}',
+        'writeRefusal={writeRefusal}',
+        'onChanged={loadData}',
+        '/>',
+        ')}',
+      ].join('\n'),
+    ],
+  },
 ];
 
 const lines = text => text.replace(/\r\n/g, '\n').split('\n');
+/** Leading indentation removed from every line: a carried block may sit deeper or shallower. */
+const dedent = text => lines(text).map(line => line.trimStart()).join('\n');
 
 function block(all, from, to, label) {
   const start = all.indexOf(from);
@@ -79,8 +214,8 @@ for (const file of FILES) {
   const newText = readFileSync(join(root, file.path), 'utf8');
   const oldLines = lines(oldText);
   const newLines = lines(newText);
-  const oldNorm = oldText.replace(/\r\n/g, '\n');
-  const newNorm = newText.replace(/\r\n/g, '\n');
+  const oldNorm = dedent(oldText);
+  const newNorm = dedent(newText);
 
   try {
     let oldCount = 0;
@@ -103,7 +238,8 @@ for (const file of FILES) {
         throw new Error(`${file.path}: logic differs at kept line ${i + 1}\n  base: ${oldKept[i]}\n  new:  ${newKept[i]}`);
       }
     }
-    for (const snippet of file.carried) {
+    for (const carried of file.carried) {
+      const snippet = dedent(carried);
       if (!oldNorm.includes(snippet)) throw new Error(`${file.path}: carried snippet not in the base file: ${snippet}`);
       if (!newNorm.includes(snippet)) throw new Error(`${file.path}: carried snippet not in the new file: ${snippet}`);
     }
