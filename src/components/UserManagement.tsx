@@ -1,13 +1,42 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, CreditCard as Edit, Trash2, User, Users, Mail, Lock, Eye, EyeOff, Save, X, CheckCircle, XCircle, Clock, MailCheck, Download, AlertTriangle, KeyRound, AlertCircle } from 'lucide-react';
+import { Plus, CreditCard as Edit, Trash2, User, Users, Mail, Lock, Eye, EyeOff, Save, CheckCircle, XCircle, Clock, MailCheck, Download, KeyRound, ShieldAlert, UserCheck, UserCog, UserX } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { supabase } from '../lib/supabase';
-import ConfirmationModal from './ConfirmationModal';
 import { exportTableToExcel } from '../utils/excelExport';
 import { useTranslation } from '../contexts/LanguageContext';
 import { formatOtpMessage } from '../lib/otpClient';
 import { inviteCreateFailure, resendInviteOutcome } from '../lib/accountFunctionResponses';
+import {
+  Alert,
+  Badge,
+  Button,
+  ConfirmDialog,
+  DataTable,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  EmptyState,
+  Field,
+  Input,
+  KpiCard,
+  MessageDialog,
+  Sheet,
+  SheetBody,
+  SheetContent,
+  SheetDescription,
+  SheetFooter,
+  SheetHeader,
+  SheetTitle,
+  Skeleton,
+  Tooltip,
+  cn,
+  type DataTableColumn,
+} from './ui';
+import { controlFrameClass } from './ui/Input';
 
 interface UserData {
   id: string;
@@ -123,201 +152,186 @@ const UserModal: React.FC<UserModalProps> = ({ isOpen, onClose, onSave, user, ti
 
   if (!isOpen) return null;
 
-  const inputStyle: React.CSSProperties = {
-    background: 'var(--bg-subtle)',
-    border: '1px solid var(--border)',
-    borderRadius: '0.375rem',
-    color: 'var(--text-primary)',
-    fontSize: '0.875rem',
-    padding: '0.5rem 0.75rem',
-    outline: 'none',
-    width: '100%',
-  };
+  // ── Presentation (phase 5) ────────────────────────────────────────────────
+  // Everything above is the form's behaviour and is unchanged: the role list,
+  // the reset on open, and what handleSubmit sends — the password only with a
+  // temporary one. Below it is a sheet on the design system. Escape and the
+  // close button close it, as the × did; a click beside it does not, so a
+  // stray click cannot throw away a typed form.
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-      <div style={{ background: 'var(--bg-surface)', boxShadow: 'var(--shadow-lg)', border: '1px solid var(--border)', borderRadius: '0.5rem' }} className="w-full max-w-md">
-        <div className="flex items-center justify-between p-6" style={{ borderBottom: '1px solid var(--border)' }}>
-          <h2 className="text-xl font-semibold flex items-center space-x-2" style={{ color: 'var(--text-primary)' }}>
-            <User size={20} />
-            <span>{title}</span>
-          </h2>
-          <button
-            onClick={onClose}
-            style={{ color: 'var(--text-tertiary)' }}
-            className="transition-colors hover:opacity-70"
-          >
-            <X size={24} />
-          </button>
-        </div>
+    <Sheet open onOpenChange={next => { if (!next) onClose(); }}>
+      <SheetContent onInteractOutside={event => event.preventDefault()}>
+        <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col">
+          <SheetHeader>
+            <SheetTitle className="flex items-center gap-2">
+              <User aria-hidden className="size-5 text-fg-subtle" />
+              <span>{title}</span>
+            </SheetTitle>
+            <SheetDescription>{t('users.subtitle')}</SheetDescription>
+          </SheetHeader>
 
-        <form onSubmit={handleSubmit} className="p-6 space-y-4">
-          <div>
-            <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>
-              {t('users.form.fullName')}
-            </label>
-            <input
-              type="text"
-              value={formData.full_name}
-              onChange={(e) => setFormData({ ...formData, full_name: e.target.value })}
-              style={inputStyle}
-              placeholder={t('users.form.fullNamePlaceholder')}
-              required
-              disabled={loading}
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>
-              {t('users.form.email')}
-            </label>
-            <div className="relative">
-              <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2" style={{ color: 'var(--text-tertiary)' }} size={16} />
-              <input
-                type="email"
-                value={formData.email}
-                onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                style={{ ...inputStyle, paddingLeft: '2.25rem' }}
-                placeholder={t('users.form.emailPlaceholder')}
+          <SheetBody className="grid content-start gap-5">
+            <Field label={t('users.form.fullName')}>
+              <Input
+                type="text"
+                value={formData.full_name}
+                onChange={(e) => setFormData({ ...formData, full_name: e.target.value })}
+                placeholder={t('users.form.fullNamePlaceholder')}
                 required
                 disabled={loading}
               />
-            </div>
-          </div>
+            </Field>
 
-          {!user && (
-            <div className="space-y-3">
-              <div className="flex items-center space-x-2">
-                <input
-                  type="radio"
-                  id="mode-email"
-                  name="creation-mode"
-                  value="email"
-                  checked={!formData.use_temp_password}
-                  onChange={() => setFormData({ ...formData, use_temp_password: false, password: '' })}
+            <Field label={t('users.form.email')}>
+              <div className="relative">
+                <Mail aria-hidden className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-fg-subtle" />
+                <Input
+                  type="email"
+                  value={formData.email}
+                  onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                  className="pl-9"
+                  placeholder={t('users.form.emailPlaceholder')}
+                  required
                   disabled={loading}
-                  className="h-4 w-4"
                 />
-                <label htmlFor="mode-email" className="text-sm font-medium flex items-center space-x-1" style={{ color: 'var(--text-primary)' }}>
-                  <MailCheck size={16} style={{ color: 'var(--accent-text)' }} />
-                  <span>{t('users.invite.byEmail')}</span>
-                </label>
               </div>
-              <div className="flex items-center space-x-2">
-                <input
-                  type="radio"
-                  id="mode-temp"
-                  name="creation-mode"
-                  value="temp"
-                  checked={formData.use_temp_password}
-                  onChange={() => setFormData({ ...formData, use_temp_password: true })}
-                  disabled={loading}
-                  className="h-4 w-4"
-                />
-                <label htmlFor="mode-temp" className="text-sm font-medium flex items-center space-x-1" style={{ color: 'var(--text-primary)' }}>
-                  <Lock size={16} style={{ color: 'var(--warning)' }} />
-                  <span>{t('users.invite.tempPassword')}</span>
-                </label>
-              </div>
+            </Field>
 
-              {!formData.use_temp_password ? (
-                <div style={{ background: 'var(--accent-subtle)', border: '1px solid var(--accent)', borderRadius: '0.375rem', padding: '1rem' }}>
-                  <div className="flex items-start space-x-2">
-                    <MailCheck style={{ color: 'var(--accent-text)' }} className="mt-0.5 flex-shrink-0" size={18} />
-                    <div>
-                      <p className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>{t('users.invite.byEmail')}</p>
-                      <p className="text-xs mt-1" style={{ color: 'var(--text-secondary)' }}>
-                        {t('users.invite.byEmailHint')}
-                      </p>
-                    </div>
-                  </div>
+            {!user && (
+              <div className="grid gap-3">
+                <div className="flex min-h-9 items-center gap-2.5 [@media(pointer:coarse)]:min-h-11">
+                  <input
+                    type="radio"
+                    id="mode-email"
+                    name="creation-mode"
+                    value="email"
+                    checked={!formData.use_temp_password}
+                    onChange={() => setFormData({ ...formData, use_temp_password: false, password: '' })}
+                    disabled={loading}
+                    className="size-4 shrink-0 accent-brand [@media(pointer:coarse)]:size-5"
+                  />
+                  <label htmlFor="mode-email" className="flex items-center gap-1.5 text-sm font-medium text-fg">
+                    <MailCheck aria-hidden className="size-4 text-brand-text" />
+                    <span>{t('users.invite.byEmail')}</span>
+                  </label>
                 </div>
-              ) : (
-                <div className="space-y-2">
-                  <div>
-                    <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>
-                      {t('users.invite.tempPassword')}
-                    </label>
-                    <div className="relative">
-                      <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2" style={{ color: 'var(--text-tertiary)' }} size={16} />
-                      <input
-                        type={showPassword ? 'text' : 'password'}
-                        value={formData.password}
-                        onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                        style={{ ...inputStyle, paddingLeft: '2.25rem', paddingRight: '2.25rem' }}
-                        placeholder={t('users.invite.tempPasswordPlaceholder')}
-                        required={formData.use_temp_password}
-                        minLength={8}
-                        disabled={loading}
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowPassword(!showPassword)}
-                        className="absolute right-3 top-1/2 transform -translate-y-1/2"
-                        style={{ color: 'var(--text-tertiary)' }}
-                      >
-                        {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-                      </button>
-                    </div>
-                  </div>
-                  <div className="flex items-start space-x-2" style={{ background: 'var(--warning-subtle)', border: '1px solid var(--warning)', borderRadius: '0.375rem', padding: '0.75rem' }}>
-                    <AlertTriangle style={{ color: 'var(--warning)' }} className="mt-0.5 flex-shrink-0" size={16} />
-                    <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>
+                <div className="flex min-h-9 items-center gap-2.5 [@media(pointer:coarse)]:min-h-11">
+                  <input
+                    type="radio"
+                    id="mode-temp"
+                    name="creation-mode"
+                    value="temp"
+                    checked={formData.use_temp_password}
+                    onChange={() => setFormData({ ...formData, use_temp_password: true })}
+                    disabled={loading}
+                    className="size-4 shrink-0 accent-brand [@media(pointer:coarse)]:size-5"
+                  />
+                  <label htmlFor="mode-temp" className="flex items-center gap-1.5 text-sm font-medium text-fg">
+                    <Lock aria-hidden className="size-4 text-caution" />
+                    <span>{t('users.invite.tempPassword')}</span>
+                  </label>
+                </div>
+
+                {!formData.use_temp_password ? (
+                  <Alert tone="brand" role="note" icon={MailCheck} title={t('users.invite.byEmail')}>
+                    {t('users.invite.byEmailHint')}
+                  </Alert>
+                ) : (
+                  <div className="grid gap-3">
+                    <Field label={t('users.invite.tempPassword')}>
+                      <div className="relative">
+                        <Lock aria-hidden className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-fg-subtle" />
+                        <Input
+                          type={showPassword ? 'text' : 'password'}
+                          value={formData.password}
+                          onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                          className="pl-9 pr-11"
+                          placeholder={t('users.invite.tempPasswordPlaceholder')}
+                          required={formData.use_temp_password}
+                          minLength={8}
+                          disabled={loading}
+                        />
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon-sm"
+                          onClick={() => setShowPassword(!showPassword)}
+                          aria-label={showPassword ? t('auth.hidePassword') : t('auth.showPassword')}
+                          className="absolute right-0.5 top-1/2 -translate-y-1/2"
+                        >
+                          {showPassword ? <EyeOff aria-hidden /> : <Eye aria-hidden />}
+                        </Button>
+                      </div>
+                    </Field>
+                    <Alert tone="caution" role="note">
                       {t('users.invite.firstLoginChangeHint')}
-                    </p>
+                    </Alert>
                   </div>
-                </div>
-              )}
-            </div>
-          )}
+                )}
+              </div>
+            )}
 
-          <div>
-            <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>
-              {t('users.form.role')}
-            </label>
-            <select
-              value={formData.role}
-              onChange={(e) => setFormData({ ...formData, role: e.target.value })}
-              style={inputStyle}
-              disabled={loading}
-            >
-              {roles.map((role) => (
-                <option key={role.id} value={role.name}>
-                  {role.name} {role.description && `- ${role.description}`}
-                </option>
-              ))}
-            </select>
-          </div>
+            <Field label={t('users.form.role')}>
+              <select
+                value={formData.role}
+                onChange={(e) => setFormData({ ...formData, role: e.target.value })}
+                className={controlFrameClass}
+                disabled={loading}
+              >
+                {roles.map((role) => (
+                  <option key={role.id} value={role.name}>
+                    {role.name} {role.description && `- ${role.description}`}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          </SheetBody>
 
-          <div className="flex justify-end space-x-3 pt-4">
-            <button
+          <SheetFooter>
+            <Button
               type="button"
+              variant="secondary"
               onClick={onClose}
-              style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)', borderRadius: '0.375rem', padding: '0.5rem 1rem' }}
-              className="transition-colors hover:opacity-80 disabled:opacity-50"
               disabled={loading}
             >
               {t('common.cancel')}
-            </button>
-            <button
+            </Button>
+            <Button
               type="submit"
-              style={{ background: 'var(--accent)', color: 'var(--text-inverse)', borderRadius: '0.375rem', padding: '0.5rem 1rem' }}
-              className="transition-colors hover:opacity-90 flex items-center space-x-2 disabled:opacity-50"
               disabled={loading}
+              loading={loading}
             >
-              {loading ? (
-                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-              ) : (
-                <Save size={16} />
-              )}
+              {!loading && <Save aria-hidden />}
               <span>{loading ? t('common.saving') : t('common.save')}</span>
-            </button>
-          </div>
+            </Button>
+          </SheetFooter>
         </form>
-      </div>
-    </div>
+      </SheetContent>
+    </Sheet>
   );
 };
+
+/** A row action: an icon button named for the row, with its short name on hover (phase 5). */
+const IconAction: React.FC<{
+  label: string;
+  tooltip: string;
+  onClick: () => void;
+  critical?: boolean;
+  children: React.ReactNode;
+}> = ({ label, tooltip, onClick, critical = false, children }) => (
+  <Tooltip content={tooltip}>
+    <Button
+      variant="ghost"
+      size="icon-sm"
+      aria-label={label}
+      onClick={onClick}
+      className={cn(critical && 'hover:text-critical')}
+    >
+      {children}
+    </Button>
+  </Tooltip>
+);
 
 const UserManagement: React.FC = () => {
   const { t, tPlural } = useTranslation();
@@ -739,92 +753,6 @@ const UserManagement: React.FC = () => {
     }
   };
 
-  const getStatusBadge = (status?: string, mustChangePassword?: boolean) => {
-    if (mustChangePassword) {
-      return (
-        <span className="px-2 py-1 text-xs font-medium rounded-full flex items-center space-x-1" style={{ background: 'var(--warning-subtle)', color: 'var(--warning)' }}>
-          <KeyRound size={12} />
-          <span>{t('users.badge.passwordChangeRequired')}</span>
-        </span>
-      );
-    }
-    if (status === 'inactive') {
-      return (
-        <span className="px-2 py-1 text-xs font-medium rounded-full flex items-center space-x-1" style={{ background: 'var(--bg-muted)', color: 'var(--text-secondary)' }}>
-          <XCircle size={12} />
-          <span>{t('users.badge.inactive')}</span>
-        </span>
-      );
-    }
-    if (status === 'pending_invite') {
-      return (
-        <span className="px-2 py-1 text-xs font-medium rounded-full flex items-center space-x-1" style={{ background: 'var(--warning-subtle)', color: 'var(--warning)' }}>
-          <Clock size={12} />
-          <span>{t('users.badge.pendingInvite')}</span>
-        </span>
-      );
-    }
-    return (
-      <span className="px-2 py-1 text-xs font-medium rounded-full flex items-center space-x-1" style={{ background: 'var(--success-subtle)', color: 'var(--success)' }}>
-        <CheckCircle size={12} />
-        <span>{t('users.badge.active')}</span>
-      </span>
-    );
-  };
-
-  const getRoleBadge = (user: UserData) => {
-    // The keys below are the stored `user_profiles.role` values that RLS policies
-    // match on, not labels — and the badge shows the role verbatim because a custom
-    // role's name is free text from the `roles` table. Nothing here is translatable.
-    const roleStyles: Record<string, React.CSSProperties> = {
-      admin: { background: 'var(--danger-subtle)', color: 'var(--danger)' },
-      supervisor: { background: 'var(--warning-subtle)', color: 'var(--warning)' },
-      editor: { background: 'var(--accent-subtle)', color: 'var(--accent-text)' },
-      viewer: { background: 'var(--bg-muted)', color: 'var(--text-secondary)' },
-    };
-
-    const roleName = user.role_name || user.role || 'viewer';
-    const roleKey = (user.role || 'viewer').toLowerCase();
-    const roleStyle = roleStyles[roleKey as keyof typeof roleStyles] || { background: 'var(--success-subtle)', color: 'var(--success)' };
-
-    return (
-      <span className="px-2 py-1 text-xs font-medium rounded-full" style={roleStyle}>
-        {roleName}
-      </span>
-    );
-  };
-
-  if (authLoading) {
-    return (
-      <div className="text-center py-12">
-        <div className="animate-spin rounded-full h-12 w-12 mx-auto mb-4" style={{ borderBottom: '2px solid var(--accent)', border: '2px solid var(--border)', borderBottomColor: 'var(--accent)' }}></div>
-        <p style={{ color: 'var(--text-secondary)' }}>{t('users.checkingPermissions')}</p>
-      </div>
-    );
-  }
-
-  if (!canManageUsers) {
-    // A platform account in a read context is told what is missing — a support
-    // session — rather than that its role is too low, which is not the reason.
-    const readContext = companyScope.kind === 'view';
-    return (
-      <div className="text-center py-12">
-        <div className="rounded-full p-6 w-24 h-24 mx-auto mb-4 flex items-center justify-center" style={{ background: 'var(--danger-subtle)' }}>
-          <User className="h-12 w-12" style={{ color: 'var(--danger)' }} />
-        </div>
-        <h3 className="text-xl font-semibold mb-2" style={{ color: 'var(--text-primary)' }}>
-          {t(readContext ? 'users.readOnlyTitle' : 'users.accessDenied')}
-        </h3>
-        <p style={{ color: 'var(--text-secondary)' }}>
-          {t(readContext ? 'users.readOnlyBody' : 'users.adminOnly')}
-        </p>
-        {!readContext && (
-          <p className="text-xs mt-2" style={{ color: 'var(--text-tertiary)' }}>{t('users.yourRole', { role: profile?.role || t('users.roleNone') })}</p>
-        )}
-      </div>
-    );
-  }
-
   const handleExport = () => {
     // A user list is not one of the four statutory artefacts, so its headers
     // follow the UI language — see the closed list in i18n/index.ts. The German
@@ -851,306 +779,260 @@ const UserManagement: React.FC = () => {
     });
   };
 
-  if (loading) {
+  // ── Presentation (phase 5) ────────────────────────────────────────────────
+  // Everything above is the screen's logic and is unchanged: who may work it
+  // (the scope, not the profile), every manage-users call and its body, the
+  // dialogs each outcome opens, and the Excel export, which only moved up
+  // here, word for word, from between two of the early returns below.
+  //
+  // What each width offers is kept as it was. The desktop table has never
+  // offered "Passwort zurücksetzen" or the "Passwortänderung erforderlich"
+  // badge, and the phone cards always have; adding either to the table adds a
+  // function to a screen, which is the owner's to approve (HANDOFF.md), not
+  // this change's.
+
+  type BadgeTone = 'neutral' | 'brand' | 'positive' | 'caution' | 'critical';
+
+  const statusBadge = (status?: string, mustChangePassword?: boolean) => {
+    if (mustChangePassword) {
+      return <Badge tone="caution"><KeyRound aria-hidden />{t('users.badge.passwordChangeRequired')}</Badge>;
+    }
+    if (status === 'inactive') {
+      return <Badge tone="neutral"><XCircle aria-hidden />{t('users.badge.inactive')}</Badge>;
+    }
+    if (status === 'pending_invite') {
+      return <Badge tone="caution"><Clock aria-hidden />{t('users.badge.pendingInvite')}</Badge>;
+    }
+    return <Badge tone="positive"><CheckCircle aria-hidden />{t('users.badge.active')}</Badge>;
+  };
+
+  const roleBadge = (user: UserData) => {
+    // The keys below are the stored `user_profiles.role` values that RLS policies
+    // match on, not labels — and the badge shows the role verbatim because a custom
+    // role's name is free text from the `roles` table. Nothing here is translatable.
+    const roleTones: Record<string, BadgeTone> = {
+      admin: 'critical',
+      supervisor: 'caution',
+      editor: 'brand',
+      viewer: 'neutral',
+    };
+
+    const roleName = user.role_name || user.role || 'viewer';
+    const roleKey = (user.role || 'viewer').toLowerCase();
+    const roleTone = roleTones[roleKey as keyof typeof roleTones] || 'positive';
+
+    return <Badge tone={roleTone}>{roleName}</Badge>;
+  };
+
+  const displayName = (user: UserData) => user.full_name || t('common.unknown');
+
+  const avatar = (
+    <span aria-hidden className="flex size-9 shrink-0 items-center justify-center rounded-full bg-brand-soft text-brand-text">
+      <User className="size-4" />
+    </span>
+  );
+
+  /**
+   * The row's actions, in the old order. `phone` is the card list: the one
+   * place that has always offered a password reset.
+   */
+  const actions = (user: UserData, place: 'table' | 'phone') => (
+    <>
+      {user.status === 'pending_invite' && (
+        <IconAction
+          label={t('users.action.resendInviteNamed', { name: displayName(user) })}
+          tooltip={t('users.action.resendInvite')}
+          onClick={() => handleResendInvite(user.id)}
+        >
+          <MailCheck aria-hidden />
+        </IconAction>
+      )}
+      {user.status === 'active' && user.email !== 'support@yamobility.de' && (
+        <IconAction
+          label={t('users.action.deactivateNamed', { name: displayName(user) })}
+          tooltip={t('users.action.deactivate')}
+          onClick={() => handleActivateDeactivate(user.id, 'inactive')}
+        >
+          <UserX aria-hidden />
+        </IconAction>
+      )}
+      {user.status === 'inactive' && (
+        <IconAction
+          label={t('users.action.activateNamed', { name: displayName(user) })}
+          tooltip={t('users.action.activate')}
+          onClick={() => handleActivateDeactivate(user.id, 'active')}
+        >
+          <UserCheck aria-hidden />
+        </IconAction>
+      )}
+      <IconAction
+        label={t('users.action.editNamed', { name: displayName(user) })}
+        tooltip={t('common.edit')}
+        onClick={() => {
+          setEditingUser(user);
+          setIsModalOpen(true);
+        }}
+      >
+        <Edit aria-hidden />
+      </IconAction>
+      {place === 'phone' && user.email !== 'support@yamobility.de' && (
+        <IconAction
+          label={t('users.action.resetPasswordNamed', { name: displayName(user) })}
+          tooltip={t('users.action.resetPassword')}
+          onClick={() => handleResetPassword(user)}
+        >
+          <KeyRound aria-hidden />
+        </IconAction>
+      )}
+      {user.email !== 'support@yamobility.de' && (
+        <IconAction
+          label={t('users.action.deleteNamed', { name: displayName(user) })}
+          tooltip={t('common.delete')}
+          onClick={() => handleDeleteUser(user)}
+          critical
+        >
+          <Trash2 aria-hidden />
+        </IconAction>
+      )}
+    </>
+  );
+
+  const waiting = (message: string) => (
+    <div role="status" className="grid justify-items-center gap-3 py-12 text-center font-ui">
+      <div aria-hidden className="size-10 rounded-full border-2 border-line border-b-brand motion-safe:animate-spin" />
+      <p className="text-sm text-fg-muted">{message}</p>
+    </div>
+  );
+
+  if (authLoading) {
+    return waiting(t('users.checkingPermissions'));
+  }
+
+  if (!canManageUsers) {
+    // A platform account in a read context is told what is missing — a support
+    // session — rather than that its role is too low, which is not the reason.
+    const readContext = companyScope.kind === 'view';
     return (
-      <div className="text-center py-12">
-        <div className="animate-spin rounded-full h-12 w-12 mx-auto mb-4" style={{ border: '2px solid var(--border)', borderBottomColor: 'var(--accent)' }}></div>
-        <p style={{ color: 'var(--text-secondary)' }}>{t('users.loadingUsers')}</p>
+      <div className="rounded-surface border border-line bg-raised font-ui shadow-raised">
+        <EmptyState
+          icon={readContext ? ShieldAlert : UserX}
+          title={t(readContext ? 'users.readOnlyTitle' : 'users.accessDenied')}
+          description={
+            <>
+              {t(readContext ? 'users.readOnlyBody' : 'users.adminOnly')}
+              {!readContext && (
+                <span className="mt-2 block text-xs text-fg-subtle">{t('users.yourRole', { role: profile?.role || t('users.roleNone') })}</span>
+              )}
+            </>
+          }
+        />
       </div>
     );
   }
 
+  if (loading) {
+    return (
+      <div className="grid grid-cols-1 gap-6 font-ui" aria-busy="true">
+        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+          {[0, 1, 2, 3].map(index => <KpiCard key={index} label="" value="" loading />)}
+        </div>
+        <div className="grid gap-3 rounded-surface border border-line bg-raised p-5">
+          {[0, 1, 2, 3].map(index => <Skeleton key={index} className="h-9 w-full" />)}
+        </div>
+        <p role="status" className="sr-only">{t('users.loadingUsers')}</p>
+      </div>
+    );
+  }
+
+  const columns: DataTableColumn<UserData>[] = [
+    {
+      id: 'user',
+      header: t('users.table.user'),
+      value: user => user.full_name ?? '',
+      cell: user => (
+        <div className="flex items-center gap-3 py-2">
+          {avatar}
+          <div className="min-w-0">
+            <div className="font-semibold text-fg">{displayName(user)}</div>
+            <div className="text-xs tabular-nums text-fg-subtle">ID: {user.id.slice(0, 8)}...</div>
+          </div>
+        </div>
+      ),
+    },
+    { id: 'email', header: t('users.table.email'), value: user => user.email, className: 'break-all' },
+    { id: 'role', header: t('users.form.role'), cell: user => roleBadge(user) },
+    { id: 'status', header: t('common.status'), cell: user => statusBadge(user.status) },
+  ];
+
   return (
-    <div className="space-y-8">
-      {/* Header */}
-      <div className="bg-gradient-to-r from-blue-600 to-blue-800 rounded-xl shadow-lg p-6 text-white">
-        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center space-y-4 sm:space-y-0">
-          <div>
-            <div className="flex items-center space-x-3 mb-2">
-              <div className="bg-white bg-opacity-20 rounded-lg p-2">
-                <Users className="text-white" size={32} />
-              </div>
-              <div>
-                <h1 className="text-3xl font-bold">{t('users.title')}</h1>
-                <p className="text-blue-100 mt-1">{t('users.subtitle')}</p>
-              </div>
-            </div>
-          </div>
-          
-          <div className="flex items-center gap-2">
-            <button
-              onClick={handleExport}
-              className="flex items-center gap-2 px-4 py-3 rounded-lg text-sm font-medium bg-white bg-opacity-20 hover:bg-opacity-30 text-white transition-all"
-              title={t('common.exportExcelShort')}
-            >
-              <Download size={16} />
-              <span>Excel</span>
-            </button>
-            <button
-              onClick={() => setIsModalOpen(true)}
-              className="px-6 py-3 bg-white text-blue-600 rounded-lg hover:bg-blue-50 transition-all duration-200 flex items-center space-x-2 shadow-md font-semibold hover:shadow-lg transform hover:-translate-y-0.5"
-            >
-              <Plus size={18} />
-              <span>{t('users.newUser')}</span>
-            </button>
-          </div>
+    <div className="grid grid-cols-1 gap-6 font-ui">
+      {/* The page's own header, the heading and the tabs, is UsersPage's. */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <p className="text-sm text-fg-muted">{t('users.subtitle')}</p>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="secondary" onClick={handleExport}>
+            <Download aria-hidden />
+            {t('common.exportExcelShort')}
+          </Button>
+          <Button onClick={() => setIsModalOpen(true)}>
+            <Plus aria-hidden />
+            <span>{t('users.newUser')}</span>
+          </Button>
         </div>
       </div>
 
       {/* Statistics */}
-      <div className="rounded-xl p-6" style={{ background: 'var(--bg-surface)', boxShadow: 'var(--shadow-md)', border: '1px solid var(--border)' }}>
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-          <div className="text-center">
-            <div className="rounded-full p-4 w-16 h-16 mx-auto mb-3 flex items-center justify-center" style={{ background: 'var(--accent-subtle)' }}>
-              <Users style={{ color: 'var(--accent-text)' }} size={24} />
-            </div>
-            <p className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>{users.length}</p>
-            <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>{t('users.stats.total')}</p>
-          </div>
-          <div className="text-center">
-            <div className="rounded-full p-4 w-16 h-16 mx-auto mb-3 flex items-center justify-center" style={{ background: 'var(--success-subtle)' }}>
-              <User style={{ color: 'var(--success)' }} size={24} />
-            </div>
-            <p className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>{users.filter(u => u.email_confirmed_at).length}</p>
-            <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>{t('users.stats.confirmed')}</p>
-          </div>
-          <div className="text-center">
-            <div className="rounded-full p-4 w-16 h-16 mx-auto mb-3 flex items-center justify-center" style={{ background: 'var(--danger-subtle)' }}>
-              <User style={{ color: 'var(--danger)' }} size={24} />
-            </div>
-            <p className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>{users.filter(u => u.role === 'admin').length}</p>
-            <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>{t('users.stats.admins')}</p>
-          </div>
-          <div className="text-center">
-            <div className="rounded-full p-4 w-16 h-16 mx-auto mb-3 flex items-center justify-center" style={{ background: 'var(--warning-subtle)' }}>
-              <User style={{ color: 'var(--warning)' }} size={24} />
-            </div>
-            <p className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>{users.filter(u => u.role === 'viewer').length}</p>
-            <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>{t('users.stats.viewers')}</p>
-          </div>
-        </div>
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <KpiCard icon={Users} label={t('users.stats.total')} value={<span className="tabular-nums">{users.length}</span>} />
+        <KpiCard icon={UserCheck} label={t('users.stats.confirmed')} value={<span className="tabular-nums">{users.filter(u => u.email_confirmed_at).length}</span>} />
+        <KpiCard icon={UserCog} label={t('users.stats.admins')} value={<span className="tabular-nums">{users.filter(u => u.role === 'admin').length}</span>} />
+        <KpiCard icon={User} label={t('users.stats.viewers')} value={<span className="tabular-nums">{users.filter(u => u.role === 'viewer').length}</span>} />
       </div>
 
       {/* Users List */}
-      <div className="rounded-xl overflow-hidden" style={{ background: 'var(--bg-surface)', boxShadow: 'var(--shadow-lg)', border: '1px solid var(--border)' }}>
-        {users.length === 0 ? (
-          <div className="text-center py-16">
-            <div className="rounded-full p-6 w-24 h-24 mx-auto mb-4 flex items-center justify-center" style={{ background: 'var(--bg-muted)' }}>
-              <Users className="h-12 w-12" style={{ color: 'var(--text-tertiary)' }} />
-            </div>
-            <h3 className="text-xl font-semibold mb-2" style={{ color: 'var(--text-primary)' }}>{t('users.empty.title')}</h3>
-            <p className="mb-6 max-w-md mx-auto" style={{ color: 'var(--text-secondary)' }}>
-              {t('users.empty.hint')}
-            </p>
+      {users.length === 0 ? (
+        <div className="rounded-surface border border-line bg-raised shadow-raised">
+          <EmptyState icon={Users} title={t('users.empty.title')} description={t('users.empty.hint')} />
+        </div>
+      ) : (
+        <>
+          {/* Desktop Table */}
+          <div className="hidden md:block">
+            <DataTable
+              caption={t('users.table.caption')}
+              columns={columns}
+              rows={users}
+              getRowId={user => user.id}
+              rowActions={user => actions(user, 'table')}
+              rowActionsLabel={t('users.table.actions')}
+            />
           </div>
-        ) : (
-          <>
-            {/* Desktop Table */}
-            <div className="hidden md:block">
-              <table className="w-full">
-                <thead style={{ background: 'var(--bg-subtle)' }}>
-                  <tr>
-                    <th className="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>
-                      {t('users.table.user')}
-                    </th>
-                    <th className="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>
-                      {t('users.table.email')}
-                    </th>
-                    <th className="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>
-                      {t('users.form.role')}
-                    </th>
-                    <th className="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>
-                      {t('common.status')}
-                    </th>
-                    <th className="px-6 py-4 text-right text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>
-                      {t('users.table.actions')}
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {users.map((user) => (
-                    <tr key={user.id} className="transition-all duration-200" style={{ borderTop: '1px solid var(--border)' }}>
-                      <td className="px-6 py-5 whitespace-nowrap">
-                        <div className="flex items-center">
-                          <div className="flex-shrink-0 h-10 w-10">
-                            <div className="h-10 w-10 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 flex items-center justify-center shadow-md">
-                              <User className="h-5 w-5 text-white" />
-                            </div>
-                          </div>
-                          <div className="ml-4">
-                            <div className="text-base font-semibold" style={{ color: 'var(--text-primary)' }}>
-                              {user.full_name || t('common.unknown')}
-                            </div>
-                            <div className="text-sm" style={{ color: 'var(--text-tertiary)' }}>
-                              ID: {user.id.slice(0, 8)}...
-                            </div>
-                          </div>
-                        </div>
-                      </td>
-                      <td className="px-6 py-5 whitespace-nowrap">
-                        <div className="text-sm" style={{ color: 'var(--text-primary)' }}>{user.email}</div>
-                      </td>
-                      <td className="px-6 py-5 whitespace-nowrap">
-                        {getRoleBadge(user)}
-                      </td>
-                      <td className="px-6 py-5 whitespace-nowrap">
-                        {getStatusBadge(user.status)}
-                      </td>
-                      <td className="px-6 py-5 whitespace-nowrap text-right text-sm font-medium">
-                        <div className="flex justify-end space-x-2">
-                          {user.status === 'pending_invite' && (
-                            <button
-                              onClick={() => handleResendInvite(user.id)}
-                              className="p-2 rounded-lg transition-all duration-200 hover:opacity-80"
-                              style={{ color: 'var(--accent-text)', background: 'transparent' }}
-                              title={t('users.action.resendInvite')}
-                            >
-                              <MailCheck size={18} />
-                            </button>
-                          )}
-                          {user.status === 'active' && user.email !== 'support@yamobility.de' && (
-                            <button
-                              onClick={() => handleActivateDeactivate(user.id, 'inactive')}
-                              className="p-2 rounded-lg transition-all duration-200 hover:opacity-80"
-                              style={{ color: 'var(--warning)', background: 'transparent' }}
-                              title={t('users.action.deactivate')}
-                            >
-                              <XCircle size={18} />
-                            </button>
-                          )}
-                          {user.status === 'inactive' && (
-                            <button
-                              onClick={() => handleActivateDeactivate(user.id, 'active')}
-                              className="p-2 rounded-lg transition-all duration-200 hover:opacity-80"
-                              style={{ color: 'var(--success)', background: 'transparent' }}
-                              title={t('users.action.activate')}
-                            >
-                              <CheckCircle size={18} />
-                            </button>
-                          )}
-                          <button
-                            onClick={() => {
-                              setEditingUser(user);
-                              setIsModalOpen(true);
-                            }}
-                            className="p-2 rounded-lg transition-all duration-200 hover:opacity-80"
-                            style={{ color: 'var(--accent-text)', background: 'transparent' }}
-                            title={t('common.edit')}
-                          >
-                            <Edit size={18} />
-                          </button>
-                          {user.email !== 'support@yamobility.de' && (
-                            <button
-                              onClick={() => handleDeleteUser(user)}
-                              className="p-2 rounded-lg transition-all duration-200 hover:opacity-80"
-                              style={{ color: 'var(--danger)', background: 'transparent' }}
-                              title={t('common.delete')}
-                            >
-                              <Trash2 size={18} />
-                            </button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
 
-            {/* Mobile Cards */}
-            <div className="md:hidden">
-              {users.map((user) => (
-                <div key={user.id} className="p-6 transition-all duration-200" style={{ borderTop: '1px solid var(--border)' }}>
-                  <div className="flex items-center justify-between mb-3">
-                    <div className="flex items-center space-x-3">
-                      <div className="flex-shrink-0 h-12 w-12">
-                        <div className="h-12 w-12 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 flex items-center justify-center shadow-md">
-                          <User className="h-6 w-6 text-white" />
-                        </div>
-                      </div>
-                      <div>
-                        <div className="text-base font-semibold" style={{ color: 'var(--text-primary)' }}>
-                          {user.full_name || t('common.unknown')}
-                        </div>
-                        <div className="text-sm" style={{ color: 'var(--text-secondary)' }}>{user.email}</div>
-                      </div>
-                    </div>
-                    <div className="flex space-x-2">
-                      {user.status === 'pending_invite' && (
-                        <button
-                          onClick={() => handleResendInvite(user.id)}
-                          className="p-2 rounded-lg transition-all duration-200 hover:opacity-80"
-                          style={{ color: 'var(--accent-text)', background: 'transparent' }}
-                          title={t('users.action.resendInvite')}
-                        >
-                          <MailCheck size={18} />
-                        </button>
-                      )}
-                      {user.status === 'active' && user.email !== 'support@yamobility.de' && (
-                        <button
-                          onClick={() => handleActivateDeactivate(user.id, 'inactive')}
-                          className="p-2 rounded-lg transition-all duration-200 hover:opacity-80"
-                          style={{ color: 'var(--warning)', background: 'transparent' }}
-                          title={t('users.action.deactivate')}
-                        >
-                          <XCircle size={18} />
-                        </button>
-                      )}
-                      {user.status === 'inactive' && (
-                        <button
-                          onClick={() => handleActivateDeactivate(user.id, 'active')}
-                          className="p-2 rounded-lg transition-all duration-200 hover:opacity-80"
-                          style={{ color: 'var(--success)', background: 'transparent' }}
-                          title={t('users.action.activate')}
-                        >
-                          <CheckCircle size={18} />
-                        </button>
-                      )}
-                      <button
-                        onClick={() => {
-                          setEditingUser(user);
-                          setIsModalOpen(true);
-                        }}
-                        className="p-2 rounded-lg transition-all duration-200 hover:opacity-80"
-                        style={{ color: 'var(--accent-text)', background: 'transparent' }}
-                      >
-                        <Edit size={18} />
-                      </button>
-                      {user.email !== 'support@yamobility.de' && (
-                        <button
-                          onClick={() => handleResetPassword(user)}
-                          className="p-2 rounded-lg transition-all duration-200 hover:opacity-80"
-                          style={{ color: 'var(--warning)', background: 'transparent' }}
-                          title={t('users.action.resetPassword')}
-                        >
-                          <KeyRound size={18} />
-                        </button>
-                      )}
-                      {user.email !== 'support@yamobility.de' && (
-                        <button
-                          onClick={() => handleDeleteUser(user)}
-                          className="p-2 rounded-lg transition-all duration-200 hover:opacity-80"
-                          style={{ color: 'var(--danger)', background: 'transparent' }}
-                        >
-                          <Trash2 size={18} />
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                  <div className="flex items-center justify-between mt-3">
-                    <div className="flex items-center space-x-2">
-                      {getRoleBadge(user)}
-                      {getStatusBadge(user.status, user.must_change_password)}
-                    </div>
+          {/* Mobile Cards */}
+          <ul className="grid grid-cols-1 gap-3 md:hidden" aria-label={t('users.table.caption')}>
+            {users.map((user) => (
+              <li key={user.id} className="rounded-surface border border-line bg-raised p-4 shadow-raised">
+                <div className="flex min-w-0 items-center gap-3">
+                  {avatar}
+                  <div className="min-w-0">
+                    <div className="font-semibold text-fg">{displayName(user)}</div>
+                    <div className="break-all text-sm text-fg-muted">{user.email}</div>
                   </div>
                 </div>
-              ))}
-            </div>
-          </>
-        )}
-      </div>
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  {roleBadge(user)}
+                  {statusBadge(user.status, user.must_change_password)}
+                </div>
+                <div className="mt-3 flex flex-wrap justify-end gap-1 border-t border-line pt-2">
+                  {actions(user, 'phone')}
+                </div>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
 
-      {/* User Modal */}
+      {/* User Modal: mounted only while open, as before (it returns null otherwise). */}
       <UserModal
         isOpen={isModalOpen}
         onClose={() => {
@@ -1162,105 +1044,88 @@ const UserManagement: React.FC = () => {
         title={editingUser ? t('users.editUser') : t('users.newUser')}
       />
 
-      {/* Confirmation Modal */}
-      <ConfirmationModal
-        isOpen={confirmModal.isOpen}
+      {/* The legacy modal's four types, by the same `type`: a question, or a result to acknowledge. */}
+      <ConfirmDialog
+        open={confirmModal.isOpen && confirmModal.type === 'confirm'}
         onClose={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}
         onConfirm={confirmModal.onConfirm}
         title={confirmModal.title}
-        message={confirmModal.message}
-        type={confirmModal.type}
+        description={confirmModal.message}
+        confirmLabel={t('common.confirm')}
+      />
+      <MessageDialog
+        open={confirmModal.isOpen && confirmModal.type !== 'confirm'}
+        onClose={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}
+        onConfirm={confirmModal.onConfirm}
+        title={confirmModal.title}
+        description={confirmModal.message}
+        tone={confirmModal.type === 'success' ? 'positive' : confirmModal.type === 'error' ? 'critical' : 'brand'}
       />
 
       {/* Reset Password Modal */}
-      {resetPasswordUser && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.5)' }} onClick={closeResetPasswordModal}>
-          <div className="w-full max-w-md rounded-2xl p-6" style={{ background: 'var(--surface)' }} onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>{t('users.action.resetPassword')}</h3>
-              <button onClick={closeResetPasswordModal} className="p-1 rounded-lg" style={{ color: 'var(--text-tertiary)' }}>
-                <X size={20} />
-              </button>
-            </div>
-            <p className="text-sm mb-4" style={{ color: 'var(--text-secondary)' }}>
-              {t('users.resetPassword.forUser')}{' '}
-              <span className="font-medium" style={{ color: 'var(--text-primary)' }}>{resetPasswordUser.email}</span>
-            </p>
+      <Dialog open={resetPasswordUser !== null} onOpenChange={next => { if (!next) closeResetPasswordModal(); }}>
+        {resetPasswordUser && (
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>{t('users.action.resetPassword')}</DialogTitle>
+              <DialogDescription>
+                {t('users.resetPassword.forUser')}{' '}
+                <span className="font-medium text-fg">{resetPasswordUser.email}</span>
+              </DialogDescription>
+            </DialogHeader>
+
             {resetPasswordSuccess ? (
-              <div className="flex items-center space-x-2 p-3 rounded-lg" style={{ background: 'var(--success-subtle)', color: 'var(--success)' }}>
-                <CheckCircle size={18} />
-                <span className="text-sm">{t('users.resetPassword.success')}</span>
-              </div>
+              <Alert tone="positive" title={t('users.resetPassword.success')} />
             ) : (
-              <div className="space-y-3">
-                <div>
-                  <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>
-                    {t('users.resetPassword.label')}
-                  </label>
+              <div className="grid gap-4">
+                <Field label={t('users.resetPassword.label')}>
                   <div className="relative">
-                    <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2" style={{ color: 'var(--text-tertiary)' }} size={16} />
-                    <input
+                    <Lock aria-hidden className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-fg-subtle" />
+                    <Input
                       type={showResetPassword ? 'text' : 'password'}
                       value={resetPasswordValue}
                       onChange={(e) => setResetPasswordValue(e.target.value)}
-                      className="w-full pl-10 pr-10 py-2 rounded-lg"
-                      style={{ background: 'var(--surface-hover)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
+                      className="pl-9 pr-11"
                       placeholder={t('users.password.minLengthPlaceholder')}
                       minLength={8}
                       disabled={resetPasswordLoading}
                     />
-                    <button
+                    <Button
                       type="button"
+                      variant="ghost"
+                      size="icon-sm"
                       onClick={() => setShowResetPassword(!showResetPassword)}
-                      className="absolute right-3 top-1/2 transform -translate-y-1/2"
-                      style={{ color: 'var(--text-tertiary)' }}
+                      aria-label={showResetPassword ? t('auth.hidePassword') : t('auth.showPassword')}
+                      className="absolute right-0.5 top-1/2 -translate-y-1/2"
                     >
-                      {showResetPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-                    </button>
+                      {showResetPassword ? <EyeOff aria-hidden /> : <Eye aria-hidden />}
+                    </Button>
                   </div>
-                </div>
-                <div className="flex items-start space-x-2" style={{ background: 'var(--warning-subtle)', border: '1px solid var(--warning)', borderRadius: '0.375rem', padding: '0.75rem' }}>
-                  <AlertTriangle style={{ color: 'var(--warning)' }} className="mt-0.5 flex-shrink-0" size={16} />
-                  <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>
-                    {t('users.resetPassword.nextLoginHint')}
-                  </p>
-                </div>
-                {resetPasswordError && (
-                  <div className="flex items-center space-x-2 p-3 rounded-lg" style={{ background: 'var(--danger-subtle)', color: 'var(--danger)' }}>
-                    <AlertCircle size={16} />
-                    <span className="text-sm">{resetPasswordError}</span>
-                  </div>
-                )}
-                <div className="flex space-x-2">
-                  <button
+                </Field>
+                <Alert tone="caution" role="note">{t('users.resetPassword.nextLoginHint')}</Alert>
+                {resetPasswordError && <Alert tone="critical" title={resetPasswordError} />}
+                <DialogFooter>
+                  <Button
+                    variant="secondary"
                     onClick={closeResetPasswordModal}
-                    className="flex-1 py-2 px-4 rounded-lg font-medium"
-                    style={{ background: 'var(--surface-hover)', color: 'var(--text-secondary)' }}
                     disabled={resetPasswordLoading}
                   >
                     {t('common.cancel')}
-                  </button>
-                  <button
+                  </Button>
+                  <Button
                     onClick={submitResetPassword}
-                    className="flex-1 py-2 px-4 rounded-lg font-medium flex items-center justify-center space-x-2"
-                    style={{ background: 'var(--warning-solid)', color: 'white' }}
                     disabled={resetPasswordLoading || resetPasswordValue.length < 8}
+                    loading={resetPasswordLoading}
                   >
-                    {resetPasswordLoading ? (
-                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
-                    ) : (
-                      <>
-                        <KeyRound size={16} />
-                        <span>{t('users.action.resetPassword')}</span>
-                      </>
-                    )}
-                  </button>
-                </div>
+                    {!resetPasswordLoading && <KeyRound aria-hidden />}
+                    <span>{t('users.action.resetPassword')}</span>
+                  </Button>
+                </DialogFooter>
               </div>
             )}
-          </div>
-        </div>
-      )}
+          </DialogContent>
+        )}
+      </Dialog>
     </div>
   );
 };

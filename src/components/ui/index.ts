@@ -46,6 +46,7 @@ export { Field, useFieldControlProps, type FieldProps } from './Field';
 export { formatDate, formatEuro, formatEuroCents, formatNumber, formatPercent } from './format';
 export { Input, type InputProps } from './Input';
 export { KpiCard, type KpiCardProps, type KpiTrend } from './KpiCard';
+export { MessageDialog, type MessageDialogProps, type MessageDialogTone } from './MessageDialog';
 export { NativeSelect, type NativeSelectProps } from './NativeSelect';
 export { PageHeader, type PageHeaderProps } from './PageHeader';
 export { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from './Select';
