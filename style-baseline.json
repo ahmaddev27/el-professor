@@ -129,10 +129,6 @@
       "style": 331,
       "color": 346
     },
-    "src/components/MonatsplanungDriverPool.tsx": {
-      "style": 16,
-      "color": 11
-    },
     "src/components/MonatsplanungStundennachweisPreview.tsx": {
       "style": 207,
       "color": 139
