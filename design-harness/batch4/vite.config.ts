@@ -1,3 +1,4 @@
+import { realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { defineConfig, type Plugin } from 'vite';
@@ -105,6 +106,11 @@ export default defineConfig({
     port: 5199,
     strictPort: false,
     open: false,
+    // A checkout whose node_modules is a link to another checkout's (a git
+    // worktree, as the capture script's --root expects) resolves the Barlow
+    // files outside this root, and Vite would refuse them: the converted
+    // screens would render in the fallback font.
+    fs: { allow: [root, realpathSync(resolve(root, 'node_modules'))] },
   },
   optimizeDeps: {
     entries: ['design-harness/batch4/index.html'],

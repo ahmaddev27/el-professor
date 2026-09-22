@@ -266,7 +266,9 @@ const ActivationPage: React.FC = () => {
               disabled={submitState === 'loading' || isBlocked}
               placeholder={t('activation.codePlaceholder')}
               autoFocus
-              className="h-16 text-center font-mono text-2xl tracking-[0.5em] [@media(pointer:coarse)]:h-16 [@media(pointer:coarse)]:text-2xl"
+              // The digits are spaced out; the placeholder is a phrase and is not,
+              // or "6-stelliger Code" runs off a phone's width.
+              className="h-16 text-center font-mono text-2xl tracking-[0.5em] placeholder:font-ui placeholder:text-base placeholder:tracking-normal [@media(pointer:coarse)]:h-16 [@media(pointer:coarse)]:text-2xl"
             />
           </Field>
 

@@ -160,4 +160,49 @@ describe('the committed baseline', () => {
       expect(baseline.files[path], path).toBeUndefined();
     }
   });
+
+  it('holds the phase 5 batch-4 screens at zero, and their three exceptions where they are', () => {
+    for (const path of [
+      // Sign-in, codes, registration and the takeovers.
+      'src/components/LoginForm.tsx',
+      'src/components/auth/AuthShell.tsx',
+      'src/components/auth/AccountStatusPage.tsx',
+      'src/components/auth/BrandMark.tsx',
+      'src/components/auth/NoticeBox.tsx',
+      'src/components/auth/OtpChallenge.tsx',
+      'src/components/auth/OtpCodeInput.tsx',
+      'src/components/auth/authStyles.ts',
+      'src/components/signup/PlanSelection.tsx',
+      'src/components/signup/plans.ts',
+      'src/pages/ForgotPasswordPage.tsx',
+      'src/pages/VerifyEmailPage.tsx',
+      'src/pages/SetPasswordPage.tsx',
+      'src/pages/InviteAcceptPage.tsx',
+      'src/pages/SignupPage.tsx',
+      'src/pages/CompleteRegistrationPage.tsx',
+      'src/pages/AuthCallbackPage.tsx',
+      'src/pages/AccountBlockedPage.tsx',
+      'src/pages/PendingApprovalPage.tsx',
+      'src/pages/RejectedPage.tsx',
+      'src/pages/CompanySuspendedPage.tsx',
+      // Benutzer, Rollen, Abonnement.
+      'src/components/UserManagement.tsx',
+      'src/components/BackupManagement.tsx',
+      'src/components/RolesManagement.tsx',
+      'src/pages/UsersPage.tsx',
+      'src/pages/RolesPage.tsx',
+      'src/pages/ActivationPage.tsx',
+      'src/pages/CompanyBillingPage.tsx',
+      'src/components/ui/MessageDialog.tsx',
+    ]) {
+      expect(baseline.files[path], path).toBeUndefined();
+    }
+    // What is left is not styling to convert: Google's own button and mark
+    // colours, which its branding guidelines fix; RoleModal's scroll lock and
+    // SettingsPage's logo fallback, both kept verbatim as logic; and the
+    // company's default brand colours in SettingsPage's form data.
+    expect(baseline.files['src/components/auth/GoogleButton.tsx']).toEqual({ style: 0, color: 10 });
+    expect(baseline.files['src/components/RoleModal.tsx']).toEqual({ style: 2, color: 0 });
+    expect(baseline.files['src/pages/SettingsPage.tsx']).toEqual({ style: 2, color: 6 });
+  });
 });
