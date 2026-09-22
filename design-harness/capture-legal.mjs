@@ -11,7 +11,7 @@
  * on a laptop in light and on a touch phone in dark, which between them show
  * the widest and the narrowest layout and both themes.
  */
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, realpathSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -53,7 +53,13 @@ async function toWebp(encoder, png) {
 const server = await createServer({
   configFile: join(root, 'design-harness', 'vite.config.ts'),
   logLevel: 'warn',
-  server: { strictPort: false },
+  server: {
+    strictPort: false,
+    // A worktree's node_modules may be a junction to another checkout's; Vite
+    // then sees the font files outside its root and refuses them, and every
+    // shot falls back to a system font. Allow the linked directory explicitly.
+    fs: { allow: [root, realpathSync(join(root, 'node_modules'))] },
+  },
 });
 await server.listen();
 const origin = new URL(server.resolvedUrls.local[0]).origin;
