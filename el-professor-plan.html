@@ -474,7 +474,7 @@
         <li><a href="#p2"><span class="no">2</span><h3>نظام التصميم والنموذج</h3></a><ul class="chips"><li class="chip">متوسط</li><li class="chip">اندمج عالستيج</li></ul><p class="gate">البوابة انفتحت: وافقت على النموذج بـ 15.09</p></li>
         <li><a href="#p3"><span class="no">3</span><h3>فصل المنصة والصلاحيات</h3></a><ul class="chips"><li class="chip">كبير جداً</li><li class="chip">3.0 و3.1 و3.3 و3.5 و3.6 و3.9 اندمجوا</li><li class="chip">3.4أ و 3.4ب والملفات اندمجوا</li><li class="chip">3.4ج بالمراجعة</li><li class="chip">3.8-U2 بالمراجعة</li><li class="chip">3.12 بالمراجعة</li><li class="chip">3.10 و3.11 بالمراجعة</li><li class="chip">3.13أ بالمراجعة</li></ul></li>
         <li><a href="#p4"><span class="no">4</span><h3>إيصال الراتب النقدي</h3></a><ul class="chips"><li class="chip">متوسط</li><li class="chip">الأساس اندمج</li></ul></li>
-        <li><a href="#p5"><span class="no">5</span><h3>تعميم التصميم</h3></a><ul class="chips"><li class="chip">كبير</li><li class="chip">الدفعة 1 اندمجت جزئياً، والدفعة 2 بالمراجعة</li></ul></li>
+        <li><a href="#p5"><span class="no">5</span><h3>تعميم التصميم</h3></a><ul class="chips"><li class="chip">كبير</li><li class="chip">الدفعة 1 اندمجت جزئياً، والدفعة 2 بالمراجعة</li><li class="chip">الدفعة 3 بالمراجعة</li></ul></li>
       </ol>
     </section>
 
@@ -1136,7 +1136,7 @@ AND (c.subscription_expires_at IS NULL OR c.subscription_expires_at &gt; now())<
             <tbody>
               <tr><td class="num">1</td><td>Belege، Fahrer، Fahrzeuge، Umsätze، Fixkosten <span class="pill ok">Fahrzeuge وFixkosten اندمجوا (PR #90)</span> <span class="pill">الباقي بعدهم</span></td></tr>
               <tr><td class="num">2</td><td>Gehälter، Abrechnung، Bargeldbestand <span class="pill info">بالمراجعة (PR #98)</span></td></tr>
-              <tr><td class="num">3</td><td>Dokumente، Monatsplanung، Stundennachweis (العرض بس)</td></tr>
+              <tr><td class="num">3</td><td>Dokumente، Monatsplanung، Stundennachweis (العرض بس) <span class="pill info">بالمراجعة (PR #__PR__)</span></td></tr>
               <tr><td class="num">4</td><td>Benutzer، Rollen، Einstellungen، Abonnement، وصفحات الدخول</td></tr>
               <tr><td class="num">5</td><td>لوحة المنصة</td></tr>
             </tbody>
@@ -1176,6 +1176,15 @@ AND (c.subscription_expires_at IS NULL OR c.subscription_expires_at &gt; now())<
           <li><strong>ضلّوا عالشكل القديم:</strong> صورة Abrechnung اللي بتنبعت للسائق (هي وثيقة)، وملخّص السائق (كمان صورة)، ونوافذ الدفعات — هدول إلهم خطوة لحالهم.</li>
           <li><strong>عالموبايل:</strong> Abrechnung كانت أعرض من الشاشة بـ <span class="num">134</span> بكسل، وهلأ ولا شاشة بتطلع برّا.</li>
           <li><strong>لقطات قبل وبعد:</strong> <span class="num">47</span> لكل وحدة بـ <code>Docs/design/phase5/batch2/</code>، منها شهر فيه إيصال راتب انلغى بالشهر اللي بعده، وحساب billing ما بيقدر يقرا الصندوق كامل.</li>
+      <div class="step">
+        <h3><span class="step-no">5.3</span>الدفعة 3: Dokumente وMonatsplanung وStundennachweis (العرض بس) <span class="pill info">بالمراجعة · PR #__PR__</span></h3>
+        <ul class="list">
+          <li><strong>القاعدة الأشد:</strong> هالشاشات بتطلّع أوراق رسمية للمحاسب، فولا ملف بيبني مستند انفتح، ولا منطق تخطيط ولا Lohnart ولا Finalisierung اتغيّر.</li>
+          <li><strong>شو انتقل:</strong> Dokumente كلها وعرض الـ Fahrtenbuch، اختيار السائقين، وإطار الـ Monatsplanung والـ Stundennachweis (العناوين والأزرار والخطوات والنوافذ).</li>
+          <li><strong>شو ضل قديم:</strong> ورقة الـ Stundennachweis وملخّصها، شاشات المرحلة 3 و4 والتطبيق، المعاينة، الـ Finalisierung، تصدير الـ Fahrtenbuch، والمعالجين التاريخيين — لأنها بتحسب وهي بترسم.</li>
+          <li><strong>مفحوص كنص:</strong> سكربت بيقارن كل ملف بالقديم: 5645 سطر حرفياً، 668 تعبير، 440 سطر حساس، وكل شي انشال مكتوب سببه. ووقف كل مرة جرّبنا نخرّب فيها عن قصد.</li>
+          <li><strong>لقطات وفحوصات:</strong> 51 لقطة قبل و51 بعد بـ <code>Docs/design/phase5/batch3/</code>، و20 فحص ما بيحفظوا ولا بيطبّقوا شي.</li>
+          <li><strong>المبالغ:</strong> صارت كلها ألمانية. التواريخ ما انلمست.</li>
         </ul>
       </div>
     </section>
