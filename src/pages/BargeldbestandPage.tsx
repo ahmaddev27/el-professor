@@ -354,7 +354,7 @@ export default function BargeldbestandPage() {
   const balancePositive = totals.balanceCents >= 0;
 
   const columns: DataTableColumn<CashLedgerEntry>[] = [
-    { id: 'date', header: t('common.date'), kind: 'date', value: entry => entry.date, sortable: true },
+    { id: 'date', header: t('common.date'), kind: 'date', value: entry => entry.date, sortable: true, className: 'pl-3 pr-2 sm:px-4' },
     {
       id: 'type',
       header: t('fleet.typeColumn'),
@@ -373,8 +373,21 @@ export default function BargeldbestandPage() {
           </Badge>
         ),
     },
-    { id: 'driver', header: t('common.driver'), value: entry => entry.driverName, sortable: true, className: 'pr-2 sm:pr-4' },
-    { id: 'description', header: t('common.description'), value: entry => entry.description, className: 'min-w-[9rem] px-2 sm:px-4' },
+    // On a phone the driver is the description's second line: four columns
+    // side by side were 74 px wider than a 375 px screen.
+    { id: 'driver', header: t('common.driver'), value: entry => entry.driverName, sortable: true, hideBelow: 'sm' },
+    {
+      id: 'description',
+      header: t('common.description'),
+      value: entry => entry.description,
+      className: 'px-2 sm:min-w-[9rem] sm:px-4',
+      cell: entry => (
+        <span className="block py-1">
+          {entry.description}
+          {entry.driverName ? <span className="block text-xs text-fg-muted sm:hidden">{entry.driverName}</span> : null}
+        </span>
+      ),
+    },
     {
       id: 'amount',
       header: t('common.amount'),

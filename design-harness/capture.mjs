@@ -91,7 +91,36 @@ async function settle(page) {
     timeout: 15_000,
   });
   await page.evaluate(() => document.fonts.ready);
-  await page.waitForTimeout(350);
+  await quiet(page);
+}
+
+/**
+ * Until the page has not changed for half a second (at most ten seconds).
+ * The answered queries are not the last render: the Gehälter screen commits
+ * one frame with the new salary rows and the previous calculations before its
+ * effect recomputes them — every stored driver briefly flagged as overlapping,
+ * every figure 0,00 € — and on a machine short of memory a fixed pause caught
+ * that frame.
+ */
+async function quiet(page) {
+  await page.evaluate(
+    () =>
+      new Promise(resolve => {
+        let timer = setTimeout(done, 500);
+        const cap = setTimeout(done, 10_000);
+        const observer = new MutationObserver(() => {
+          clearTimeout(timer);
+          timer = setTimeout(done, 500);
+        });
+        observer.observe(document.body, { subtree: true, childList: true, characterData: true, attributes: true });
+        function done() {
+          observer.disconnect();
+          clearTimeout(timer);
+          clearTimeout(cap);
+          resolve();
+        }
+      }),
+  );
 }
 
 /** PNG bytes to WebP, encoded by the same Chrome that took them. */
