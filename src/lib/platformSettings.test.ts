@@ -6,9 +6,13 @@ import {
   canSaveSetting,
   canWriteAnnouncements,
   invoiceSellerFields,
+  impressumFormWithSeller,
+  impressumFromForm,
+  impressumToForm,
   isContactPhone,
   isStorageDate,
   parseGermanDate,
+  parseImpressumDocument,
   parsePrivacyDocument,
   privacyFromForm,
   privacyParagraphRefused,
@@ -19,7 +23,6 @@ import {
   PRIVACY_MAX_BYTES,
   PRIVACY_MAX_PARAGRAPHS,
   PRIVACY_PARAGRAPH_MAX_LENGTH,
-  SELLER_IMPRESSUM_FIELDS,
   mailSenderFromForm,
   mailSenderToForm,
   mailTemplateDefaultsKept,
@@ -561,8 +564,8 @@ function legalConstant(name: string): number {
   return Number(match[1]);
 }
 
-describe('the seller\'s Impressum fields', () => {
-  const ELEVEN: Seller = {
+describe('the Impressum (legal.impressum)', () => {
+  const SELLER: Seller = {
     name: 'El-Professor GmbH',
     street: 'Hauptstraße', house_number: '12', postal_code: '42651', city: 'Solingen',
     vat_id: 'DE123456789', tax_number: '123/456/78901',
@@ -570,57 +573,48 @@ describe('the seller\'s Impressum fields', () => {
     account_holder: 'El-Professor GmbH',
   };
   const IMPRESSUM = {
-    legal_name: 'Muster Mobility GmbH', legal_form: 'GmbH', represented_by: 'Erika Muster',
+    legal_name: 'Muster Mobility GmbH', legal_form: 'GmbH',
+    street: 'Hauptstraße', house_number: '12', postal_code: '42651', city: 'Solingen',
+    represented_by: 'Erika Muster',
     contact_email: 'info@example.com', contact_phone: '+49 (0)212 555-0101',
     register_court: 'Amtsgericht Wuppertal', register_number: 'HRB 12345',
+    vat_id: 'DE123456789',
     content_responsible_name: 'Erika Muster', content_responsible_address: 'Hauptstraße 12, 42651 Solingen',
   };
 
-  it('reads a seller with all, some or none of the nine', () => {
-    expect(parseSeller(ELEVEN)).toEqual(ELEVEN);
-    expect(parseSeller({ ...ELEVEN, ...IMPRESSUM })).toEqual({ ...ELEVEN, ...IMPRESSUM });
-    expect(parseSeller({ ...ELEVEN, legal_name: 'Muster GmbH' })).toEqual({ ...ELEVEN, legal_name: 'Muster GmbH' });
+  it('reads the seed as nothing published, and any of the fourteen fields as stored', () => {
+    expect(parseImpressumDocument({})).toEqual({});
+    expect(parseImpressumDocument(IMPRESSUM)).toEqual(IMPRESSUM);
+    expect(parseImpressumDocument({ legal_name: 'Muster GmbH' })).toEqual({ legal_name: 'Muster GmbH' });
   });
 
-  it('still refuses a field nobody knows, and one of the eleven missing', () => {
-    expect(parseSeller({ ...ELEVEN, ...IMPRESSUM, country: 'Deutschland' })).toBeNull();
-    const { iban, ...withoutIban } = { ...ELEVEN, ...IMPRESSUM };
-    expect(iban).toBe('DE02120300000000202051');
-    expect(parseSeller(withoutIban)).toBeNull();
-  });
-
-  it('refuses an Impressum field that breaks the eleven\'s rules, or a contact the page could not link', () => {
-    expect(parseSeller({ ...ELEVEN, legal_name: 42 })).toBeNull();
-    expect(parseSeller({ ...ELEVEN, represented_by: 'Erika\nMuster' })).toBeNull();
-    expect(parseSeller({ ...ELEVEN, register_number: 'x'.repeat(201) })).toBeNull();
-    expect(parseSeller({ ...ELEVEN, contact_email: 'info at example.com' })).toBeNull();
-    expect(parseSeller({ ...ELEVEN, contact_phone: 'auf Anfrage' })).toBeNull();
+  it('refuses a field it does not know — a bank detail above all — and a field the database would refuse', () => {
+    expect(parseImpressumDocument([])).toBeNull();
+    expect(parseImpressumDocument({ ...IMPRESSUM, iban: 'DE02120300000000202051' })).toBeNull();
+    expect(parseImpressumDocument({ ...IMPRESSUM, name: 'El-Professor' })).toBeNull();
+    expect(parseImpressumDocument({ legal_name: 42 })).toBeNull();
+    expect(parseImpressumDocument({ represented_by: 'Erika\nMuster' })).toBeNull();
+    expect(parseImpressumDocument({ register_number: 'x'.repeat(201) })).toBeNull();
+    expect(parseImpressumDocument({ contact_email: 'info at example.com' })).toBeNull();
+    expect(parseImpressumDocument({ contact_phone: 'auf Anfrage' })).toBeNull();
     // Empty is simply unfilled.
-    expect(parseSeller({ ...ELEVEN, contact_email: '', contact_phone: '' })).not.toBeNull();
+    expect(parseImpressumDocument({ contact_email: '', contact_phone: '' })).not.toBeNull();
   });
 
-  it('shows the nine in the form, blank where nothing is stored', () => {
-    const form = sellerToForm(ELEVEN);
-    for (const field of SELLER_IMPRESSUM_FIELDS) expect(form[field]).toBe('');
-    expect(sellerToForm({ ...ELEVEN, ...IMPRESSUM }).legal_form).toBe('GmbH');
+  it('shows all fourteen in the form, blank where nothing is stored, and saves only what holds a value', () => {
+    const form = impressumToForm({});
+    expect(Object.values(form).every(value => value === '')).toBe(true);
+    expect(impressumFromForm(form)).toEqual({ value: {} });
+    expect(impressumFromForm(impressumToForm(IMPRESSUM))).toEqual({ value: IMPRESSUM });
+    expect(impressumFromForm({ ...form, legal_name: '  Muster GmbH ', city: ' ' }))
+      .toEqual({ value: { legal_name: 'Muster GmbH' } });
   });
 
-  it('writes one of the nine only once it holds a value, so an unused form saves the eleven the old release reads', () => {
-    expect(sellerFromForm(sellerToForm(ELEVEN))).toEqual({ value: ELEVEN });
-    const filled = sellerFromForm({ ...sellerToForm(ELEVEN), legal_name: '  Muster GmbH ', contact_email: ' info@example.com' });
-    expect(filled).toEqual({ value: { ...ELEVEN, legal_name: 'Muster GmbH', contact_email: 'info@example.com' } });
-    // Emptying a field takes it out again.
-    const emptied = sellerFromForm({ ...sellerToForm({ ...ELEVEN, ...IMPRESSUM }), legal_form: '   ' });
-    expect('value' in emptied && 'legal_form' in emptied.value).toBe(false);
-  });
-
-  it('names the Impressum field the database would refuse', () => {
-    const form = sellerToForm(ELEVEN);
-    expect(sellerFromForm({ ...form, contact_email: 'info@' })).toEqual({ error: 'seller.contact_email' });
-    expect(sellerFromForm({ ...form, contact_phone: '+4' })).toEqual({ error: 'seller.contact_phone' });
-    expect(sellerFromForm({ ...form, register_court: 'x'.repeat(201) })).toEqual({ error: 'seller.register_court' });
-    // The invoice's own name is still checked first.
-    expect(sellerFromForm({ ...form, name: '', contact_email: 'info@' })).toEqual({ error: 'seller.name' });
+  it('names the field the database would refuse', () => {
+    const form = impressumToForm(IMPRESSUM);
+    expect(impressumFromForm({ ...form, contact_email: 'info@' })).toEqual({ error: 'legal.impressum.contact_email' });
+    expect(impressumFromForm({ ...form, contact_phone: '+4' })).toEqual({ error: 'legal.impressum.contact_phone' });
+    expect(impressumFromForm({ ...form, register_court: 'x'.repeat(201) })).toEqual({ error: 'legal.impressum.register_court' });
   });
 
   it('accepts a phone number the way people write one, with at least three digits', () => {
@@ -630,22 +624,32 @@ describe('the seller\'s Impressum fields', () => {
     expect(isContactPhone('Tel. 0212')).toBe(false);
   });
 
-  it('prints the same invoice whatever the Impressum holds', () => {
-    expect(invoiceSellerFields({ ...ELEVEN, ...IMPRESSUM })).toEqual(invoiceSellerFields(ELEVEN));
-    expect(sellerAddressBlock({ ...ELEVEN, ...IMPRESSUM })).toEqual(sellerAddressBlock(ELEVEN));
+  it('copies the invoice\'s name, address and VAT id only into empty fields, and never a bank detail', () => {
+    const typed = { ...impressumToForm({}), legal_name: 'Muster Mobility GmbH', city: '  ' };
+    const next = impressumFormWithSeller(typed, SELLER);
+    expect(next.legal_name).toBe('Muster Mobility GmbH');
+    expect(next).toMatchObject({
+      street: 'Hauptstraße', house_number: '12', postal_code: '42651', city: 'Solingen', vat_id: 'DE123456789',
+      represented_by: '', contact_email: '', register_number: '',
+    });
+    expect(Object.values(next)).not.toContain(SELLER.iban);
+    expect(Object.values(next)).not.toContain(SELLER.tax_number);
+    // The form it was given is not changed: nothing is saved by pressing the button.
+    expect(typed.street).toBe('');
   });
-});
 
-describe('who may read and save the privacy text', () => {
-  it('is the owner-only settings.manage to save, and settings.read without billing to read', () => {
+  it('asks the owner-only settings.manage to save, and settings.read without billing to read', () => {
     const owner = access('owner', ['settings.read', 'settings.manage', 'pricing.manage']);
     const billing = access('billing', ['pricing.manage', 'settings.read', 'billing.manage']);
     const readOnly = access('read_only', ['settings.read']);
-    expect(writeCapabilityFor('legal.privacy')).toBe('settings.manage');
-    expect(canSaveSetting(owner, 'legal.privacy')).toBe(true);
-    expect(canSaveSetting(billing, 'legal.privacy')).toBe(false);
-    expect(canReadSetting(readOnly, 'legal.privacy')).toBe(true);
-    expect(canReadSetting(billing, 'legal.privacy')).toBe(false);
+    for (const key of ['legal.impressum', 'legal.privacy'] as const) {
+      expect(writeCapabilityFor(key)).toBe('settings.manage');
+      expect(canSaveSetting(owner, key)).toBe(true);
+      expect(canSaveSetting(billing, key)).toBe(false);
+      expect(canSaveSetting(readOnly, key)).toBe(false);
+      expect(canReadSetting(readOnly, key)).toBe(true);
+      expect(canReadSetting(billing, key)).toBe(false);
+    }
   });
 });
 

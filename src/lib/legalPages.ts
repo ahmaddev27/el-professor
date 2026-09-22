@@ -6,12 +6,12 @@
  * ## Nothing here is invented
  *
  * Every fact on either page is one the owner entered under /admin →
- * Einstellungen, read through `get_legal_pages()`. A field nobody filled is not
- * rendered, and an Impressum without the provider's name is not an Impressum:
- * the page then says it is not provided yet, rather than print an address with
- * no one it belongs to. The invoice's sender name is deliberately never read —
- * it was seeded with the product name as a fallback — so a placeholder can never
- * reach the page.
+ * Einstellungen, in the two keys `legal.impressum` and `legal.privacy`, read
+ * through `get_legal_pages()`. A field nobody filled is not rendered, and an
+ * Impressum without the provider's name is not an Impressum: the page then says
+ * it is not provided yet, rather than print an address with no one it belongs
+ * to. The invoice's sender (`seller`) is never read — its name was seeded with
+ * the product name as a fallback — so a placeholder can never reach the page.
  *
  * ## German in both languages
  *
@@ -44,7 +44,8 @@ export function legalPageFor(pathname: string): LegalPageKind | null {
 // ─── The answer ──────────────────────────────────────────────────────────────
 
 /**
- * The fields `get_legal_pages()` publishes, in the order an Impressum reads.
+ * The fields `legal.impressum` may hold and `get_legal_pages()` publishes, in
+ * the order an Impressum reads — and the order the editor asks for them.
  * `src/lib/legalPages.test.ts` compares this list with the migration's, and
  * `tests/rls/legal-pages.sql` pins the database's answer key by key: which
  * fields go public is a data protection decision, not a convenience.
@@ -106,13 +107,13 @@ export function parseLegalPages(data: unknown): LegalPages | null {
 }
 
 /**
- * The Impressum a seller document (or the settings form holding one) would
- * publish: the fourteen fields, trimmed, '' where absent — the projection
+ * The Impressum a stored `legal.impressum` document (or the editor's form)
+ * would publish: the fourteen fields, trimmed, '' where absent — the projection
  * `get_legal_pages()` applies, so the editor's preview shows the page.
  */
-export function impressumFromSeller(seller: Readonly<Partial<Record<string, string>>>): Impressum {
+export function impressumFromDocument(doc: Readonly<Partial<Record<ImpressumField, string>>>): Impressum {
   const impressum = {} as Record<ImpressumField, string>;
-  for (const field of IMPRESSUM_FIELDS) impressum[field] = (seller[field] ?? '').trim();
+  for (const field of IMPRESSUM_FIELDS) impressum[field] = (doc[field] ?? '').trim();
   return impressum;
 }
 

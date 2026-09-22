@@ -9,7 +9,7 @@ import { describe, expect, it } from 'vitest';
 import {
   IMPRESSUM_FIELDS,
   NO_PRIVACY_TEXT,
-  impressumFromSeller,
+  impressumFromDocument,
   impressumIsPublished,
   impressumSections,
   legalPageFor,
@@ -19,7 +19,6 @@ import {
   telephoneHref,
   type Impressum,
 } from './legalPages';
-import { SELLER_FIELDS, SELLER_IMPRESSUM_FIELDS } from './platformSettings';
 
 const MIGRATION = readFileSync(
   new URL('../../supabase/migrations/20260921120000_legal_pages.sql', import.meta.url),
@@ -66,28 +65,29 @@ describe('what is public', () => {
     }
   });
 
-  it('is drawn from the seller document and nothing else', () => {
-    const seller = new Set<string>([...SELLER_FIELDS, ...SELLER_IMPRESSUM_FIELDS]);
-    for (const field of IMPRESSUM_FIELDS) expect(seller.has(field)).toBe(true);
+  it('is exactly what legal.impressum may hold — the validator knows the same fourteen fields', () => {
+    expect([...IMPRESSUM_FIELDS].sort())
+      .toEqual(constantList('app_private.platform_settings_problem_legal', 'c_impressum_fields'));
   });
 
-  it('the seller form knows the same nine optional fields the database accepts', () => {
-    expect([...SELLER_IMPRESSUM_FIELDS].sort())
-      .toEqual(constantList('app_private.platform_settings_problem_legal', 'c_impressum_fields'));
+  it('is read from legal.impressum alone: the public read never names the seller or the invoice', () => {
+    const start = MIGRATION.indexOf('CREATE OR REPLACE FUNCTION public.get_legal_pages(');
+    const body = MIGRATION.slice(start, MIGRATION.indexOf('$$;', start));
+    expect(body).toMatch(/platform_setting_value\('legal\.impressum'\)/);
+    expect(body).not.toMatch(/seller|invoice/i);
   });
 });
 
-describe('impressumFromSeller: what the editor previews', () => {
-  it('takes the fourteen public fields, trimmed, and leaves the rest of the seller behind', () => {
-    const impressum = impressumFromSeller({
-      ...FILLED, legal_form: ' GmbH ', name: 'Rechnungsname', iban: 'DE02', tax_number: '123', bank_name: 'Bank',
-    });
+describe('impressumFromDocument: what the editor previews', () => {
+  it('takes the fourteen fields, trimmed, as get_legal_pages() publishes them', () => {
+    const impressum = impressumFromDocument({ ...FILLED, legal_form: ' GmbH ' });
     expect(impressum).toEqual(FILLED);
     expect(Object.keys(impressum)).toEqual([...IMPRESSUM_FIELDS]);
   });
 
-  it('reads a field the seller does not hold as unfilled', () => {
-    expect(impressumFromSeller({ name: 'El-Professor' })).toEqual(EMPTY);
+  it('reads a field the document does not hold as unfilled', () => {
+    expect(impressumFromDocument({})).toEqual(EMPTY);
+    expect(impressumFromDocument({ city: 'Solingen' })).toEqual({ ...EMPTY, city: 'Solingen' });
   });
 });
 
@@ -156,7 +156,7 @@ describe('parseLegalPages', () => {
 });
 
 describe('the Impressum as rendered', () => {
-  it('renders nothing while the provider is not named — not even an address filled for the invoices', () => {
+  it('renders nothing while the provider is not named — not even an address', () => {
     const withAddress = { ...EMPTY, street: 'Hauptstraße', house_number: '12', postal_code: '42651', city: 'Solingen' };
     expect(impressumIsPublished(withAddress)).toBe(false);
     expect(impressumSections(withAddress)).toEqual([]);

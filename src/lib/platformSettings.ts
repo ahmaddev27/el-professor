@@ -2,7 +2,7 @@
  * Reading and writing `app_private.platform_settings` from the panel
  * (plan 3.E / 3.6c). Pure: the calls are in `platformSettingsClient.ts`.
  *
- * Twelve keys exist, and each has its own authority:
+ * Thirteen keys exist, and each has its own authority:
  *
  * - **reading** needs `settings.read` — but billing holds that capability for
  *   the prices alone, so for a billing account every other key is `forbidden`
@@ -14,8 +14,9 @@
  *   gated screen for every non-trial company below premium — and it covers the
  *   keys of plan 3.10: the seller printed on every invoice, the length of every
  *   new company's trial, the invoice defaults, the sender name and the four
- *   code-mail templates; plan 3.11's feature flags; and the privacy policy
- *   published at /datenschutz (`legal.privacy`, migration 20260921120000).
+ *   code-mail templates; plan 3.11's feature flags; and the two legal pages,
+ *   the Impressum at /impressum (`legal.impressum`) and the privacy policy at
+ *   /datenschutz (`legal.privacy`), migration 20260921120000.
  *
  * The invoice screen reads the seller through its own RPC
  * (`platform_invoice_seller`, `companies.read`), because the roles that
@@ -46,6 +47,7 @@ import { parsePlanFeatures } from '../utils/planFeatures';
 import type { Plan } from '../contexts/PlanContext';
 import type { PlatformAccess, PlatformCapability } from './platformAccess';
 import { platformAccessCan } from './platformAccess';
+import { IMPRESSUM_FIELDS, type ImpressumField } from './legalPages';
 import {
   MAIL_TEMPLATE_DEFAULTS,
   MAIL_TEMPLATE_HAS_BUTTON,
@@ -62,7 +64,7 @@ export const SETTING_KEYS = [
   'mail.template.signup_verify', 'mail.template.password_reset',
   'mail.template.invite_activate', 'mail.template.email_change',
   'feature_flags',
-  'legal.privacy',
+  'legal.impressum', 'legal.privacy',
 ] as const;
 export type SettingKey = typeof SETTING_KEYS[number];
 
@@ -298,48 +300,10 @@ export const SELLER_FIELDS = [
   'vat_id', 'tax_number', 'bank_name', 'iban', 'bic', 'account_holder',
 ] as const;
 export type SellerField = typeof SELLER_FIELDS[number];
+export type Seller = Readonly<Record<SellerField, string>>;
 
-/**
- * The nine fields an Impressum needs that the invoice does not (§ 5 DDG,
- * § 18 Abs. 2 MStV; migration 20260921120000), in the order the form shows
- * them. `/impressum` publishes them, with the invoice's address and VAT id.
- *
- * **Optional means may be absent.** The document every database held before is
- * still a seller, and a save writes one of these only once it holds a value, so
- * the stored document stays readable by the release before this one — whose
- * `parseSeller` accepts exactly the eleven — until the owner actually fills one.
- *
- * `legal_name` is deliberately not `name`. `name` was seeded with the fallback
- * 'El-Professor' wherever no row could be copied, which is a product name and
- * not a fact about who operates the site, so the Impressum never prints it.
- */
-export const SELLER_IMPRESSUM_FIELDS = [
-  'legal_name', 'legal_form', 'represented_by',
-  'contact_email', 'contact_phone',
-  'register_court', 'register_number',
-  'content_responsible_name', 'content_responsible_address',
-] as const;
-export type SellerImpressumField = typeof SELLER_IMPRESSUM_FIELDS[number];
-
-export type Seller =
-  Readonly<Record<SellerField, string>> & Readonly<Partial<Record<SellerImpressumField, string>>>;
-
-/** `app_private.platform_settings_problem_3_10`, c_max_field — every seller field's bound. */
+/** `app_private.platform_settings_problem_3_10`, c_max_field. */
 export const SELLER_MAX_FIELD_LENGTH = 200;
-
-/**
- * `platform_settings_problem_legal`'s checks on the two contact fields the page
- * links. `\s` is wider than the database's `[:space:]`, so the screen refuses
- * at least what the database refuses.
- */
-export const SELLER_CONTACT_EMAIL = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
-const SELLER_CONTACT_PHONE = /^\+?[0-9 ()/.-]+$/;
-const SELLER_MIN_PHONE_DIGITS = 3;
-
-/** Digits, spaces and `+ ( ) / . -`, with at least three digits. */
-export function isContactPhone(text: string): boolean {
-  return SELLER_CONTACT_PHONE.test(text) && text.replace(/[^0-9]/g, '').length >= SELLER_MIN_PHONE_DIGITS;
-}
 
 /**
  * The database refuses `[[:cntrl:]]` in a seller field: these strings are drawn
@@ -349,35 +313,18 @@ export function isContactPhone(text: string): boolean {
  */
 const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f-\u009f]/;
 
-const KNOWN_SELLER_FIELDS: ReadonlySet<string> = new Set([...SELLER_FIELDS, ...SELLER_IMPRESSUM_FIELDS]);
-
-const hasOwn = (value: Record<string, unknown>, key: string) => Object.prototype.hasOwnProperty.call(value, key);
-
-/** The path the database names a field's text by, or null when it would accept it. */
-function sellerFieldProblem(field: SellerField | SellerImpressumField, text: string): string | null {
-  if (text.length > SELLER_MAX_FIELD_LENGTH || CONTROL_CHARACTERS.test(text)) return `seller.${field}`;
-  const trimmed = text.trim();
-  if (field === 'contact_email' && trimmed !== '' && !SELLER_CONTACT_EMAIL.test(trimmed)) return `seller.${field}`;
-  if (field === 'contact_phone' && trimmed !== '' && !isContactPhone(trimmed)) return `seller.${field}`;
-  return null;
-}
-
 export function parseSeller(value: unknown): Seller | null {
   if (!isRecord(value)) return null;
-  // All eleven, any of the nine, and nothing else: the database compares the
-  // eleven exactly and refuses a field it does not know.
-  if (Object.keys(value).some(key => !KNOWN_SELLER_FIELDS.has(key))) return null;
+  if (Object.keys(value).length !== SELLER_FIELDS.length) return null;
 
-  const seller: Partial<Record<SellerField | SellerImpressumField, string>> = {};
+  const seller: Partial<Record<SellerField, string>> = {};
   for (const field of SELLER_FIELDS) {
     const text = value[field];
-    if (typeof text !== 'string' || sellerFieldProblem(field, text)) return null;
-    seller[field] = text;
-  }
-  for (const field of SELLER_IMPRESSUM_FIELDS) {
-    if (!hasOwn(value, field)) continue;
-    const text = value[field];
-    if (typeof text !== 'string' || sellerFieldProblem(field, text)) return null;
+    if (typeof text !== 'string'
+        || text.length > SELLER_MAX_FIELD_LENGTH
+        || CONTROL_CHARACTERS.test(text)) {
+      return null;
+    }
     seller[field] = text;
   }
   // Every other field may be blank — not every seller has a VAT id — but a
@@ -386,12 +333,11 @@ export function parseSeller(value: unknown): Seller | null {
   return seller as Seller;
 }
 
-export type SellerForm = Record<SellerField | SellerImpressumField, string>;
+export type SellerForm = Record<SellerField, string>;
 
 export function sellerToForm(seller: Seller): SellerForm {
   const form = {} as SellerForm;
   for (const field of SELLER_FIELDS) form[field] = seller[field];
-  for (const field of SELLER_IMPRESSUM_FIELDS) form[field] = seller[field] ?? '';
   return form;
 }
 
@@ -399,27 +345,17 @@ export function sellerToForm(seller: Seller): SellerForm {
  * A typed form back into a seller, or the first field the database would
  * refuse. Each value is trimmed on the way out, as the migration's seed trimmed
  * the row it copied, so a stray space never becomes part of an address.
- *
- * An Impressum field is written only when it holds a value (see
- * `SELLER_IMPRESSUM_FIELDS`), so emptying all nine gives back the eleven-field
- * document the release before reads.
  */
 export function sellerFromForm(form: SellerForm): { value: Seller } | { error: string } {
-  const seller: Partial<Record<SellerField | SellerImpressumField, string>> = {};
+  const seller: Partial<Record<SellerField, string>> = {};
   for (const field of SELLER_FIELDS) {
     const text = form[field].trim();
-    const problem = sellerFieldProblem(field, text);
-    if (problem) return { error: problem };
+    if (text.length > SELLER_MAX_FIELD_LENGTH || CONTROL_CHARACTERS.test(text)) {
+      return { error: `seller.${field}` };
+    }
     seller[field] = text;
   }
   if (seller.name === '') return { error: 'seller.name' };
-
-  for (const field of SELLER_IMPRESSUM_FIELDS) {
-    const text = form[field].trim();
-    const problem = sellerFieldProblem(field, text);
-    if (problem) return { error: problem };
-    if (text !== '') seller[field] = text;
-  }
   return { value: seller as Seller };
 }
 
@@ -712,6 +648,105 @@ export function mailTemplateDefaultsKept(purpose: MailTemplatePurpose, form: Mai
     paragraphs: sameParagraphs(form.paragraphs.map(p => p.trim()), defaults.paragraphs),
     button: !MAIL_TEMPLATE_HAS_BUTTON[purpose] || form.button.trim() === defaults.button,
   };
+}
+
+// ─── The Impressum (legal.impressum, 20260921120000) ─────────────────────────
+
+/**
+ * The facts `/impressum` publishes, as the owner enters them for it: any of the
+ * fourteen `IMPRESSUM_FIELDS` and nothing else. `{}` means nothing is published.
+ *
+ * **A key of its own, never part of `seller`.** The release before this one
+ * reads a seller only when it names exactly its eleven fields, so storing more
+ * there would break its invoice PDF on a rollback. The invoice's name, address
+ * and VAT id reach this form only when the owner presses the button that copies
+ * them (`impressumFormWithSeller`), for him to read and save — never otherwise.
+ */
+export type ImpressumDocument = Readonly<Partial<Record<ImpressumField, string>>>;
+export type ImpressumForm = Record<ImpressumField, string>;
+
+/** `platform_settings_problem_legal`'s bound: the one every seller field has. */
+export const IMPRESSUM_MAX_FIELD_LENGTH = 200;
+
+/**
+ * The checks on the two contact fields the page links. `\s` is wider than the
+ * database's `[:space:]`, so the screen refuses at least what the database does.
+ */
+export const IMPRESSUM_CONTACT_EMAIL = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+const IMPRESSUM_CONTACT_PHONE = /^\+?[0-9 ()/.-]+$/;
+const IMPRESSUM_MIN_PHONE_DIGITS = 3;
+
+/** Digits, spaces and `+ ( ) / . -`, with at least three digits. */
+export function isContactPhone(text: string): boolean {
+  return IMPRESSUM_CONTACT_PHONE.test(text) && text.replace(/[^0-9]/g, '').length >= IMPRESSUM_MIN_PHONE_DIGITS;
+}
+
+const KNOWN_IMPRESSUM_FIELDS: ReadonlySet<string> = new Set(IMPRESSUM_FIELDS);
+
+/** The path the database names a field by, or null when it would accept the text. */
+function impressumFieldProblem(field: ImpressumField, text: string): string | null {
+  const path = `legal.impressum.${field}`;
+  if (text.length > IMPRESSUM_MAX_FIELD_LENGTH || CONTROL_CHARACTERS.test(text)) return path;
+  const trimmed = text.trim();
+  if (field === 'contact_email' && trimmed !== '' && !IMPRESSUM_CONTACT_EMAIL.test(trimmed)) return path;
+  if (field === 'contact_phone' && trimmed !== '' && !isContactPhone(trimmed)) return path;
+  return null;
+}
+
+export function parseImpressumDocument(value: unknown): ImpressumDocument | null {
+  if (!isRecord(value)) return null;
+  const doc: Partial<Record<ImpressumField, string>> = {};
+  for (const [key, text] of Object.entries(value)) {
+    if (!KNOWN_IMPRESSUM_FIELDS.has(key)) return null;
+    const field = key as ImpressumField;
+    if (typeof text !== 'string' || impressumFieldProblem(field, text)) return null;
+    doc[field] = text;
+  }
+  return doc;
+}
+
+export function impressumToForm(doc: ImpressumDocument): ImpressumForm {
+  const form = {} as ImpressumForm;
+  for (const field of IMPRESSUM_FIELDS) form[field] = doc[field] ?? '';
+  return form;
+}
+
+/**
+ * The form back into the document a save sends, or the first field the
+ * database would refuse. Each value is trimmed, and a field left empty is left
+ * out, so an emptied form saves `{}` — the Impressum is taken down.
+ */
+export function impressumFromForm(form: ImpressumForm): { value: ImpressumDocument } | { error: string } {
+  const doc: Partial<Record<ImpressumField, string>> = {};
+  for (const field of IMPRESSUM_FIELDS) {
+    const text = form[field].trim();
+    const problem = impressumFieldProblem(field, text);
+    if (problem) return { error: problem };
+    if (text !== '') doc[field] = text;
+  }
+  return { value: doc };
+}
+
+/**
+ * The editor's "copy from the invoice" button: the seller's name, address and
+ * VAT id, put into the fields the form has left empty. Nothing the owner typed
+ * is overwritten, nothing is saved — he reads the result and saves it himself.
+ */
+export function impressumFormWithSeller(form: ImpressumForm, seller: Seller): ImpressumForm {
+  const fromSeller: Partial<Record<ImpressumField, string>> = {
+    legal_name: seller.name,
+    street: seller.street,
+    house_number: seller.house_number,
+    postal_code: seller.postal_code,
+    city: seller.city,
+    vat_id: seller.vat_id,
+  };
+  const next = { ...form };
+  for (const field of IMPRESSUM_FIELDS) {
+    const value = fromSeller[field]?.trim() ?? '';
+    if (next[field].trim() === '' && value !== '') next[field] = value;
+  }
+  return next;
 }
 
 // ─── The privacy policy (legal.privacy, 20260921120000) ──────────────────────
