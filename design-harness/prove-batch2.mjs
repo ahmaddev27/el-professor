@@ -3,7 +3,7 @@
  * Phase 5 batch 2, proven as text: every converted file's logic is the base's
  * logic, byte for byte, except for lines this list names.
  *
- *   node design-harness/prove-batch2.mjs [base commit, default 85d17b9]
+ *   node design-harness/prove-batch2.mjs [base commit, default: where HEAD left origin/staging]
  *
  * For each file it takes one or more blocks — from a line that starts the
  * logic to a line that ends it, in the base and in the working tree — and
@@ -27,7 +27,11 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const base = process.argv[2] ?? '85d17b9';
+// The branch point by default: the commit the before shots were rendered from
+// has the same four files, and so does every later staging commit this was
+// rebased onto unless it touched them.
+const base =
+  process.argv[2] ?? execFileSync('git', ['merge-base', 'HEAD', 'origin/staging'], { cwd: root, encoding: 'utf8' }).trim();
 const PRESENTATION = '  // ── Presentation (phase 5) ────────────────────────────────────────────────';
 
 const FILES = [
@@ -328,7 +332,7 @@ for (const file of FILES) {
       if (!newNorm.includes(snippet)) throw new Error(`${file.path}: carried snippet not in the new file: ${snippet}`);
     }
     console.log(
-      `ok   ${file.path}: logic ${oldCount} lines at ${base}, ${newCount} now; identical after removing ` +
+      `ok   ${file.path}: logic ${oldCount} lines at ${base.slice(0, 7)}, ${newCount} now; identical after removing ` +
         `${file.added.length} added and ${file.removed.length} removed lines; ${file.carried.length} carried snippets verbatim` +
         (verbatimLines ? `; ${verbatimLines} lines kept byte for byte` : ""),
     );
