@@ -88,7 +88,9 @@ export function classifyTrip(trip: AnalysisTrip, position: number): ClassifiedTr
       exclusions.push('missing_end');
       quality.push('missing_end');
     }
-    if (hasStart && hasEnd && (trip.end_ms as number) < (trip.start_ms as number)) {
+    // An ambiguous local time can put the end before the start by itself (02:50
+    // then 02:10 on the October Sunday); that row is judged ambiguous, not wrong.
+    if (hasStart && hasEnd && !trip.time_ambiguity && (trip.end_ms as number) < (trip.start_ms as number)) {
       exclusions.push('end_before_start');
       quality.push('end_before_start');
     }
