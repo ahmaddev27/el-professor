@@ -101,6 +101,7 @@ Agents build in parallel git worktrees. Each branch ends in a reviewed PR into `
 
 | Stream | Branch | State |
 |---|---|---|
+| Two edit defects found by phase 5: an Inhaber saved as an employee on the Fahrer screen, and every user edit without a new password failing on Benutzer | `fix/driver-edit-keeps-inhaber` | **in review** |
 | Support sessions and the company workspace (3.4) | — | **approved on 16.09.2026 as the next slice**, ahead of 3.6a, 3.12, 3.7, 3.8 and 3.10–3.13. 3.3 shipped with a temporary concession the owner approved the same day: any staff role holding `business.read` reads every company's Fahrtenbuch, planning, historical and ledger data directly, with no audit row and no session. **3.4 is what closes it**, so the longer it waits the longer that concession stands. 3.6c's workspace tab waits for it too |
 | Support sessions, the database and the functions (3.4a) | `phase3/support-sessions-db` | **PR #56, open and in rework — not merged** |
 | The seller, the trial length and the invoice defaults (3.10, first half) | `phase3/settings-seller-trial` | PR #58, open |

@@ -501,7 +501,8 @@ const UserManagement: React.FC = () => {
     }
   };
 
-  const handleEditUser = async (userData: { email: string; password: string; full_name: string; role: string }) => {
+  // `password` is absent on an edit that sets no new one: UserModal strips it.
+  const handleEditUser = async (userData: { email: string; password?: string; full_name: string; role: string }) => {
     if (!editingUser) return;
 
     try {
@@ -520,7 +521,7 @@ const UserManagement: React.FC = () => {
         body: JSON.stringify({
           user_id: editingUser.id,
           email: userData.email !== editingUser.email ? userData.email : undefined,
-          password: userData.password.trim() ? userData.password : undefined,
+          password: userData.password?.trim() ? userData.password : undefined,
           full_name: userData.full_name,
           role: userData.role
         }),
