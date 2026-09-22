@@ -333,19 +333,24 @@ await check('a new user with a temporary password: the password is sent, and a s
   await settle(page);
   expect((await lastWrite(page, 'manage-users/create')).payload).toMatchObject({ password: 'Sicher-und-lang-1', use_temp_password: true });
 });
-// A defect older than this batch, kept as it is (look only; HANDOFF.md has
-// it): the form sends `password: undefined` when editing, handleEditUser calls
-// `userData.password.trim()` on it, and the catch shows "unexpected error". So
-// saving an edit never reaches manage-users/update. This check pins that it
-// still behaves exactly so.
-await check('edit, as it always has: the unexpected-error dialog and no update call (a recorded defect)', { screen: 'users' }, async page => {
+// Editing used to fail for everyone: the form sends `password: undefined`, and
+// handleEditUser called `.trim()` on it, so the catch showed "Ein unerwarteter
+// Fehler" and no update was ever sent. This batch found it and #102 fixed it
+// (`userData.password?.trim()`), so the check now pins the fixed behaviour: an
+// edit with no new password saves, and sends neither a password nor the
+// address it did not change.
+await check('edit saves (since #102): manage-users/update with the new name, no password, no address', { screen: 'users' }, async page => {
   await page.getByRole('button', { name: 'Svenja Krüger bearbeiten' }).click();
   await settle(page);
   await expect(page.getByLabel(/Name/).first()).toHaveValue('Svenja Krüger');
+  await page.getByLabel(/Name/).first().fill('Svenja Krüger-Hoff');
   await page.getByRole('button', { name: 'Speichern' }).click();
   await settle(page);
-  expect(await lastWrite(page, 'manage-users/update')).toBeUndefined();
-  await expect(page.getByRole('alertdialog')).toContainText('Ein unerwarteter Fehler ist aufgetreten.');
+  const body = (await lastWrite(page, 'manage-users/update')).payload;
+  expect(body).toMatchObject({ full_name: 'Svenja Krüger-Hoff', role: 'supervisor' });
+  expect('password' in body).toBe(false);
+  expect('email' in body).toBe(false);
+  await expect(page.getByRole('dialog')).toContainText('Svenja Krüger-Hoff');
 });
 await check('delete asks, then sends manage-users/delete, then says so', { screen: 'users' }, async page => {
   await page.getByRole('button', { name: 'Svenja Krüger löschen' }).click();
