@@ -20,7 +20,7 @@ import { CompanySettingsFormData } from '../types/settings';
 import { supabase } from '../lib/supabase';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { useTranslation } from '../contexts/LanguageContext';
-import { Alert, Button, Card, CardContent, CardHeader, CardTitle, Field, Input, PageHeader, buttonVariants, cn } from '../components/ui';
+import { Alert, Button, Card, CardContent, CardHeader, CardTitle, Field, Input, NativeSelect, PageHeader, buttonVariants, cn } from '../components/ui';
 import { controlFrameClass } from '../components/ui/Input';
 
 const SettingsPage: React.FC = () => {
@@ -564,17 +564,16 @@ const SettingsPage: React.FC = () => {
               {section(Users, t('settings.operations'), (
                 <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                   <Field label={t('settings.field.driversPerCar')} hint={t('settings.field.driversPerCarHint', { n: driversPerCar })} id="settings-drivers-per-car">
-                    <select
+                    <NativeSelect
                       id="settings-drivers-per-car"
                       aria-describedby="settings-drivers-per-car-hint"
                       value={driversPerCar}
                       onChange={(e) => setDriversPerCar(Number(e.target.value))}
-                      className={controlFrameClass}
                     >
                       {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(n => (
                         <option key={n} value={n}>{n}</option>
                       ))}
-                    </select>
+                    </NativeSelect>
                   </Field>
                 </div>
               ))}
