@@ -414,15 +414,41 @@ const BEHAVIOUR_ATTRIBUTES = [
   'onToggleEdit', 'disabled', 'value', 'checked', 'type', 'minLength', 'maxLength', 'pattern', 'inputMode',
   'autoComplete', 'accept', 'to', 'href', 'id', 'name', 'min', 'max', 'step', 'purpose', 'email', 'from',
   'selection', 'labelKey', 'hintKey', 'initialCooldownSeconds', 'initialNotice', 'hint', 'reason',
+  // #97's LegalLinks: `tone` decides which theme's colours its two links take,
+  // so the rebase's one change to it has to be declared like any other.
+  'tone',
 ];
 const BARE_BOOLEANS = ['required', 'autoFocus', 'noValidate', 'replace', 'divider'];
+
+/**
+ * Elements the base renders that the new file must render too. An attribute
+ * listed as moved is allowed to be absent, so a whole element whose only
+ * checked attribute moved would otherwise be free to disappear: that is
+ * exactly #97's LegalLinks, whose `tone` this batch changes.
+ */
+const KEPT_ELEMENTS = {
+  'src/components/LoginForm.tsx': ['<LegalLinks'],
+  'src/pages/SignupPage.tsx': ['<LegalLinks'],
+};
 
 /** Attribute texts in the base that the new file may lack, with the reason. */
 const SUPPORT_LINK_MOVED = {
   'href="mailto:support@el-professor.de"':
     'drawn by components/auth/AccountStatusPage.tsx, the four takeovers\' shared frame, with the same address',
 };
+/**
+ * #97 gave the sign-in and signup screens their Impressum and Datenschutz
+ * links with `tone="onDark"`, because those screens painted their own dark
+ * background whatever the theme said. Batch 4's answer from the owner is that
+ * they follow the theme, so the links take LegalLinks' default `theme` tone;
+ * on a light page `onDark` would paint dark-theme text on it.
+ */
+const LEGAL_LINKS_TONE_MOVED = {
+  'tone="onDark"': 'the screen follows the theme now, so its LegalLinks takes the default `theme` tone',
+};
 const MOVED_ATTRIBUTES = {
+  'src/components/LoginForm.tsx': LEGAL_LINKS_TONE_MOVED,
+  'src/pages/SignupPage.tsx': LEGAL_LINKS_TONE_MOVED,
   'src/components/UserManagement.tsx': {
     'type={confirmModal.type}':
       'the legacy modal\'s type now picks the dialog by the same value: ConfirmDialog for "confirm", MessageDialog for the rest',
@@ -619,8 +645,11 @@ for (const [path, blocks] of Object.entries(BLOCKS)) {
     fail(`${path}: \`${name}\` appears ${bareCount(before, name)}× in the base, ${bareCount(after, name)}× in the new file`);
   }
 
+  const lostElements = (KEPT_ELEMENTS[path] ?? []).filter(text => !after.includes(text));
+  for (const text of lostElements) fail(`${path}: the base renders ${text}… and the new file does not`);
+
   const coveredCount = covered.filter(Boolean).length;
-  const ok = !blockFailures && !missing.length && !lostAttributes.length && !lostBooleans.length;
+  const ok = !blockFailures && !missing.length && !lostAttributes.length && !lostBooleans.length && !lostElements.length;
   console.log(
     `  ${ok ? 'ok  ' : 'FAIL'} ${path}: ${blocks.length} blocks, ${coveredCount} of ${lines.length} base lines verbatim; ` +
       `${calls - missing.length}/${calls} calls; ${attributes.length - lostAttributes.length}/${attributes.length} attributes`,

@@ -24,6 +24,7 @@ import {
   Input,
   KpiCard,
   MessageDialog,
+  NativeSelect,
   Sheet,
   SheetBody,
   SheetContent,
@@ -36,7 +37,6 @@ import {
   cn,
   type DataTableColumn,
 } from './ui';
-import { controlFrameClass } from './ui/Input';
 
 interface UserData {
   id: string;
@@ -273,11 +273,10 @@ const UserModal: React.FC<UserModalProps> = ({ isOpen, onClose, onSave, user, ti
             )}
 
             <Field label={t('users.form.role')} id="user-role">
-              <select
+              <NativeSelect
                 id="user-role"
                 value={formData.role}
                 onChange={(e) => setFormData({ ...formData, role: e.target.value })}
-                className={controlFrameClass}
                 disabled={loading}
               >
                 {roles.map((role) => (
@@ -285,7 +284,7 @@ const UserModal: React.FC<UserModalProps> = ({ isOpen, onClose, onSave, user, ti
                     {role.name} {role.description && `- ${role.description}`}
                   </option>
                 ))}
-              </select>
+              </NativeSelect>
             </Field>
           </SheetBody>
 
