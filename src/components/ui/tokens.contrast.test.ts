@@ -117,6 +117,14 @@ const PAIRS: Array<{ fg: string; bg: string; min: number }> = [
   // Its other two words on sunken — "Alle löschen" / "Plan endgültig löschen"
   // in critical, a reassigned driver in brand-text — are batch 2's pairs above.
   { fg: 'caution', bg: 'sunken', min: TEXT },
+  // Phase 5, batch 1b renders batch 2's three sunken pairs too: the Beleg
+  // form's OCR candidates (the chosen value positive, a rejected one critical)
+  // and its idle drop zone (brand-text). New here: a field the OCR read with low
+  // confidence is framed caution beside a "Bitte prüfen" badge, and an Umsätze
+  // amount that will be saved is framed positive — a border that carries a
+  // state, on the field's own fill.
+  { fg: 'caution', bg: 'field', min: NON_TEXT },
+  { fg: 'positive', bg: 'field', min: NON_TEXT },
 ];
 
 /**
