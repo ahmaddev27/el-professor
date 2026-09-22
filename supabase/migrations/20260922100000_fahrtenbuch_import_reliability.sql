@@ -52,7 +52,10 @@
                                               change — twice (October) or never
                                               (March) — so no single instant
     trip_status         completed | cancelled | unknown, from an explicit map:
-                        'abgeschlossen' and 'storniert', anything else unknown.
+                        'abgeschlossen' completed; 'storno', 'storniert',
+                        'cancelled', 'canceled', 'abgebrochen' cancelled (the
+                        words the old importer read as cancelled); anything
+                        else unknown.
                         `source_status` keeps the text. A check ties it to
                         `is_canceled`, so unknown is never a completed ride and
                         never a cancelled one.
@@ -92,7 +95,8 @@
     browser function adds 24 hours).
   - trip_status is 'cancelled' where `is_canceled`, 'completed' where the
     stored status reads 'abgeschlossen', and 'unknown' otherwise — a file
-    without a status column included.
+    without a status column included, and a cancel word on a row the old
+    importer stored as a ride (which it never did: its list held all five).
   - review_reasons: missing_start / missing_end for a ride that is not
     cancelled and has no time; end_before_start; missing_driver for an empty
     name, `\N`, or the placeholder "Unbekannt" the old importer wrote on a
@@ -556,10 +560,46 @@ END;
 $$;
 
 /*
+  What a status word means — mapTripStatus in the parser, with the same two
+  lists (src/utils/fahrtenbuchImportParser.test.ts fails when they part),
+  compared after the same normalisation. The cancelled list keeps the words
+  the importer before this migration read as cancelled (owner's decision,
+  22.09.2026). An empty cell, `\N` and every other word are 'unknown'.
+*/
+CREATE FUNCTION app_private.fahrtenbuch_map_status(p_text text)
+RETURNS text
+LANGUAGE plpgsql
+IMMUTABLE
+SET search_path = pg_catalog, public
+AS $$
+DECLARE
+  -- COMPLETED_STATUS_WORDS
+  c_completed_words CONSTANT text[] := ARRAY['abgeschlossen'];
+  -- CANCELLED_STATUS_WORDS
+  c_cancelled_words CONSTANT text[] := ARRAY['storno', 'storniert', 'cancelled', 'canceled', 'abgebrochen'];
+  v_norm text := app_private.fahrtenbuch_norm(p_text);
+BEGIN
+  IF v_norm = '' THEN
+    RETURN 'unknown';
+  END IF;
+  IF EXISTS (SELECT 1 FROM unnest(c_completed_words) w WHERE app_private.fahrtenbuch_norm(w) = v_norm) THEN
+    RETURN 'completed';
+  END IF;
+  IF EXISTS (SELECT 1 FROM unnest(c_cancelled_words) w WHERE app_private.fahrtenbuch_norm(w) = v_norm) THEN
+    RETURN 'cancelled';
+  END IF;
+  RETURN 'unknown';
+END;
+$$;
+
+/*
   trip_status for a row that was stored before this migration. is_canceled is
-  what the old importer decided and cannot change, so it wins; otherwise only
-  'abgeschlossen' is a completed ride. The browser maps new rows by the same
-  two words (mapTripStatus).
+  what the old importer decided and cannot change, so it wins — it also read a
+  few words beyond the map, and a status-less file whose time cell said
+  "storniert". Otherwise the map decides, and a word it reads as cancelled on a
+  row the old importer stored as a ride is 'unknown': the check ties
+  'cancelled' to is_canceled, and the contradiction is exactly what review is
+  for.
 */
 CREATE FUNCTION app_private.fahrtenbuch_trip_status_of(p_is_canceled boolean, p_source_status text)
 RETURNS text
@@ -571,7 +611,7 @@ BEGIN
   IF p_is_canceled THEN
     RETURN 'cancelled';
   END IF;
-  IF app_private.fahrtenbuch_norm(p_source_status) = 'abgeschlossen' THEN
+  IF app_private.fahrtenbuch_map_status(p_source_status) = 'completed' THEN
     RETURN 'completed';
   END IF;
   RETURN 'unknown';
@@ -715,6 +755,7 @@ REVOKE ALL ON FUNCTION app_private.fahrtenbuch_wall_to_instant(timestamp, text) 
 REVOKE ALL ON FUNCTION app_private.fahrtenbuch_times_from_cells(jsonb, jsonb, date, time, time)
                                                                                          FROM PUBLIC, anon, authenticated, service_role;
 REVOKE ALL ON FUNCTION app_private.fahrtenbuch_trip_times(jsonb, date, time, time)       FROM PUBLIC, anon, authenticated, service_role;
+REVOKE ALL ON FUNCTION app_private.fahrtenbuch_map_status(text)                          FROM PUBLIC, anon, authenticated, service_role;
 REVOKE ALL ON FUNCTION app_private.fahrtenbuch_trip_status_of(boolean, text)             FROM PUBLIC, anon, authenticated, service_role;
 REVOKE ALL ON FUNCTION app_private.fahrtenbuch_backfill_review_reasons(boolean, time, time, text, text, text, timestamptz, timestamptz)
                                                                                          FROM PUBLIC, anon, authenticated, service_role;
