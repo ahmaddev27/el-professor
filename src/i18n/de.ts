@@ -740,6 +740,30 @@ export const de = {
   'abr.belegCount':          'Anzahl Belege',
   'abr.shareAsImage':        'Als Bild teilen',
   'abr.copyImage':           'Bild kopieren',
+  // Phase 5 batch 2. "Bar zurück" and "Tankenquote" are the settlement's own
+  // words and stay German in both dictionaries, as gq.balance.paidCashWeekly does.
+  'abr.belegeCount':         '{count} Belege',
+  'abr.col.barZurueck':      'Bar Zurück',
+  'abr.col.cash':            'Bargeld',
+  'abr.col.spentCash':       'Ausgegebene Bargeld',
+  'abr.details':             'Details anzeigen',
+  'abr.detailsFor':          'Details: {name}',
+  'abr.detailTitle':         'Detaillierte Abrechnung',
+  'abr.difference':          'Differenz (Bargeld – Belege)',
+  'abr.differenceHint':      'Der Betrag den Sie abgeben müssen',
+  // A failed read shows no figure, and none of the month shown before it.
+  'abr.loadFailedBody':      'Solange die Abrechnung nicht geladen ist, zeigt diese Seite keine Beträge an – auch nicht die des zuvor gewählten Monats.',
+  'abr.monthCaption':        'Abrechnung je Fahrer, {period}',
+  'abr.monthly':             'Monatlich',
+  'abr.noDataFor':           'Keine Daten für {period}',
+  'abr.noMatches':           'Keine Einträge für diese Auswahl',
+  'abr.subtitle':            'Wöchentliche und monatliche Abrechnungen verwalten',
+  'abr.tankenquote':         'Tankenquote',
+  'abr.totalCash':           'Gesamt Bargeld ({period})',
+  'abr.viewMode':            'Ansicht',
+  'abr.weekCaption':         'Abrechnung je Fahrer, {period}',
+  'abr.weekly':              'Wöchentlich',
+  'abr.year':                'Jahr',
 
   // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
   'bill.assign.pickCompany':               'Firma auswählen...',
