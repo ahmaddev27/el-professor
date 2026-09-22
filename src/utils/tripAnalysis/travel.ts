@@ -19,7 +19,8 @@
  * not hide the long one's end. Pairs that overlap are the overlap check's
  * finding and get no travel check.
  */
-import { analysedByDriver, classifyTrip, lowestConfidence, type ClassifiedTrip } from './classify';
+import { analysedByDriver, assertValidInput, classifyTrip, lowestConfidence, type ClassifiedTrip } from './classify';
+import { compareIds } from './intervals';
 import { msAsMinutesText, minutesText } from './text';
 import type {
   Confidence,
@@ -80,10 +81,11 @@ function requestOf(pair: TravelPair): TravelEstimateRequest | null {
  * a synchronous lookup over the answers.
  */
 export function listTravelRequests(input: TripAnalysisInput): TravelEstimateRequest[] {
+  assertValidInput(input);
   const classified = input.trips.map((trip, position) => classifyTrip(trip, position));
   const groups = analysedByDriver(classified);
   const requests: TravelEstimateRequest[] = [];
-  for (const driverId of [...groups.keys()].sort()) {
+  for (const driverId of [...groups.keys()].sort(compareIds)) {
     for (const pair of travelPairs(groups.get(driverId) ?? [])) {
       const request = requestOf(pair);
       if (request) requests.push(request);
