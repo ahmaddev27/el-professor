@@ -10,6 +10,7 @@ import {
   type CodeEdit,
 } from '../../lib/otpUi';
 import type { AuthSurface } from './authStyles';
+import { cn } from '../ui';
 
 export interface OtpCodeInputProps {
   /** Up to six digits, contiguous from the first box. */
@@ -162,30 +163,19 @@ const OtpCodeInput: React.FC<OtpCodeInputProps> = ({
     event.target.select();
   };
 
-  const isDark = surface === 'dark';
-  const boxClass = isDark
-    ? `flex-1 min-w-0 h-12 sm:h-14 text-center text-xl font-mono font-semibold rounded-xl bg-white/5 border text-white transition-all focus:outline-none focus:ring-2 focus:ring-cyan-500/50 disabled:opacity-40 disabled:cursor-not-allowed ${
-        invalid ? 'border-red-500/60' : 'border-white/10 focus:border-cyan-500/40'
-      }`
-    : 'flex-1 min-w-0 h-12 text-center text-xl font-mono font-semibold rounded-lg outline-none transition-all focus:ring-2 disabled:opacity-40 disabled:cursor-not-allowed';
-  const boxStyle: React.CSSProperties | undefined = isDark
-    ? undefined
-    : {
-        background: 'var(--bg-muted)',
-        border: `1px solid ${invalid ? 'var(--danger)' : 'var(--border)'}`,
-        color: 'var(--text-primary)',
-      };
+  // ── Presentation (phase 5) ────────────────────────────────────────────────
+  // Everything above is the boxes' behaviour and is unchanged. Below they are
+  // drawn with the design tokens, in both themes: 20 px digits (iOS zooms into
+  // anything under 16 px), a taller box on a touch screen, the invalid state on
+  // the border. Inside Mein Konto (`surface="app"`) the six boxes keep a phone's
+  // width instead of stretching across the page.
 
   return (
-    <div>
-      <span
-        id={labelId}
-        className={isDark ? 'block text-xs font-semibold text-white/40 uppercase tracking-wider mb-2' : 'block text-xs uppercase tracking-wide mb-2'}
-        style={isDark ? undefined : { color: 'var(--text-tertiary)' }}
-      >
+    <div className="font-ui">
+      <span id={labelId} className="mb-1.5 block text-[13px] font-medium text-fg-muted">
         {t('otp.code.label')}
       </span>
-      <div role="group" aria-labelledby={labelId} className="flex gap-2">
+      <div role="group" aria-labelledby={labelId} className={cn('flex gap-2', surface === 'app' && 'max-w-sm')}>
         {BOXES.map(index => (
           <input
             key={index}
@@ -204,8 +194,12 @@ const OtpCodeInput: React.FC<OtpCodeInputProps> = ({
             onKeyDown={event => handleKeyDown(index, event)}
             onPaste={handlePaste}
             onFocus={event => handleFocus(index, event)}
-            className={boxClass}
-            style={boxStyle}
+            className={cn(
+              'h-12 w-full min-w-0 flex-1 rounded-control border bg-field text-center font-mono text-xl font-semibold text-fg tabular-nums transition-colors sm:h-14 [@media(pointer:coarse)]:h-14',
+              'focus-visible:border-transparent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-focus',
+              'disabled:cursor-not-allowed disabled:opacity-50',
+              invalid ? 'border-critical' : 'border-line-strong',
+            )}
           />
         ))}
       </div>

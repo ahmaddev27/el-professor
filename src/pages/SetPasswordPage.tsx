@@ -6,6 +6,9 @@ import { useAuth } from '../contexts/AuthContext';
 import { useTranslation } from '../contexts/LanguageContext';
 import { SIGN_IN_PATH } from '../lib/adminGate';
 import EmphasizedText from '../components/auth/EmphasizedText';
+import AuthShell from '../components/auth/AuthShell';
+import { authFieldIconClass, authFieldWithIconClass } from '../components/auth/authStyles';
+import { Alert, Button, Field, Input, cn } from '../components/ui';
 
 const MIN_LEN = 8;
 
@@ -201,144 +204,117 @@ const SetPasswordPage: React.FC = () => {
     }
   };
 
+  // ── Presentation (phase 5) ────────────────────────────────────────────────
+  // Everything above is unchanged. The three states are the ones the page drew
+  // before — checking the session, no session, the form (then its success) —
+  // on the design system. The two password fields stay in that order, new
+  // password first, which is how the e2e suite fills them.
+
   if (checkingSession) {
     return (
-      <div className="min-h-screen bg-[#060a0f] flex items-center justify-center">
-        <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-cyan-400" />
-      </div>
+      <main className="flex min-h-[calc(100dvh-var(--env-banner-height,0px))] items-center justify-center bg-canvas font-ui">
+        <div aria-hidden className="size-10 rounded-full border-2 border-line border-b-brand motion-safe:animate-spin" />
+      </main>
     );
   }
 
   if (!hasSession) {
     return (
-      <div className="min-h-screen bg-[#060a0f] flex items-center justify-center p-4">
-        <div className="w-full max-w-sm bg-white/4 backdrop-blur-xl border border-white/10 rounded-2xl p-7 text-center">
-          <div className="w-12 h-12 rounded-full bg-red-500/15 border border-red-500/30 flex items-center justify-center mx-auto mb-4">
-            <AlertCircle className="text-red-400" size={22} />
+      <AuthShell title={t('setpw.sessionExpired')}>
+        <div className="grid gap-5">
+          <div className="flex items-start gap-3 text-sm leading-relaxed text-fg-muted">
+            <AlertCircle aria-hidden className="mt-0.5 size-5 shrink-0 text-critical" />
+            <p>{t('setpw.noSessionBody')}</p>
           </div>
-          <h2 className="text-white font-semibold mb-2">{t('setpw.sessionExpired')}</h2>
-          <p className="text-white/60 text-sm mb-6">
-            {t('setpw.noSessionBody')}
-          </p>
-          <button
-            onClick={() => navigate('/auth/forgot-password', { replace: true })}
-            className="w-full bg-gradient-to-r from-cyan-500 to-blue-600 text-white py-3 px-4 rounded-xl font-semibold text-sm"
-          >
+          <Button size="lg" className="w-full" onClick={() => navigate('/auth/forgot-password', { replace: true })}>
             {t('setpw.requestNewCode')}
-          </button>
+          </Button>
         </div>
-      </div>
+      </AuthShell>
     );
   }
 
   return (
-    <div className="min-h-screen bg-[#060a0f] flex items-center justify-center p-4 relative overflow-hidden">
-      <div className="absolute inset-0 bg-[linear-gradient(rgba(6,182,212,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(6,182,212,0.03)_1px,transparent_1px)] bg-[size:48px_48px]" />
-      <div className="absolute top-1/4 left-1/2 -translate-x-1/2 w-[600px] h-[400px] bg-cyan-600/5 rounded-full blur-[120px] pointer-events-none" />
-
-      <div className="relative w-full max-w-sm">
-        <div className="text-center mb-8">
-          <div className="w-16 h-16 mx-auto mb-4 flex items-center justify-center">
-            <img src="/professor_logo_white.svg" alt="El-Professor" className="w-16 h-16 object-contain drop-shadow-[0_0_16px_rgba(6,182,212,0.5)]" />
-          </div>
-          <h1 className="text-2xl font-bold text-white mb-1">{title}</h1>
-          <p className="text-white/40 text-sm">{subtitle}</p>
+    <AuthShell
+      title={title}
+      subtitle={
+        <>
+          {subtitle}
           {email && (
-            <p className="text-white/60 text-xs mt-3 break-words">
-              <EmphasizedText template={t('setpw.forEmail')} placeholder="email" value={email} className="text-cyan-300" />
-            </p>
+            <span className="mt-2 block break-words text-xs">
+              <EmphasizedText template={t('setpw.forEmail')} placeholder="email" value={email} className="font-medium text-fg" />
+            </span>
           )}
+        </>
+      }
+    >
+      {success ? (
+        <div className="text-center" role="status">
+          <div className="mx-auto mb-4 flex size-12 items-center justify-center rounded-full bg-positive-soft text-positive">
+            <CheckCircle2 aria-hidden className="size-6" />
+          </div>
+          <h2 className="mb-2 font-semibold">{t('setpw.saved')}</h2>
+          <p className="text-sm text-fg-muted">
+            {signOutPending ? t('setpw.platformSignInAgain') : t('setpw.redirecting')}
+          </p>
         </div>
+      ) : (
+        <>
+          {error && <Alert tone="critical" className="mb-5" title={error} />}
 
-        <div className="bg-white/4 backdrop-blur-xl border border-white/10 rounded-2xl p-7 shadow-[0_24px_64px_rgba(0,0,0,0.5)]">
-          {success ? (
-            <div className="text-center" role="status">
-              <div className="w-12 h-12 rounded-full bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center mx-auto mb-4">
-                <CheckCircle2 className="text-emerald-400" size={22} />
-              </div>
-              <h2 className="text-white font-semibold mb-2">{t('setpw.saved')}</h2>
-              <p className="text-white/60 text-sm">
-                {signOutPending ? t('setpw.platformSignInAgain') : t('setpw.redirecting')}
-              </p>
-            </div>
-          ) : (
-            <>
-              {error && (
-                <div role="alert" className="mb-5 p-3.5 bg-red-500/10 border border-red-500/20 rounded-xl flex items-center gap-2.5">
-                  <AlertCircle className="text-red-400 flex-shrink-0" size={16} />
-                  <span className="text-red-300 text-sm">{error}</span>
-                </div>
-              )}
-
-              <form onSubmit={handleSubmit} className="space-y-4">
-                <div>
-                  <label htmlFor="set-password-new" className="block text-xs font-semibold text-white/40 uppercase tracking-wider mb-2">
-                    {t('setpw.newPasswordLabel')}
-                  </label>
-                  <div className="relative">
-                    <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 text-white/25" size={16} />
-                    <input
-                      id="set-password-new"
-                      type={show ? 'text' : 'password'}
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      className="w-full pl-10 pr-12 py-3 bg-white/5 border border-white/10 text-white placeholder-white/20 rounded-xl focus:outline-none focus:ring-2 focus:ring-cyan-500/50 focus:border-cyan-500/40 transition-all text-sm"
-                      placeholder={t('setpw.minChars')}
-                      autoComplete="new-password"
-                      required
-                      minLength={MIN_LEN}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShow(!show)}
-                      aria-label={show ? t('auth.hidePassword') : t('auth.showPassword')}
-                      className="absolute right-3.5 top-1/2 -translate-y-1/2 text-white/25 hover:text-white/60"
-                    >
-                      {show ? <EyeOff size={16} /> : <Eye size={16} />}
-                    </button>
-                  </div>
-                </div>
-
-                <div>
-                  <label htmlFor="set-password-confirm" className="block text-xs font-semibold text-white/40 uppercase tracking-wider mb-2">
-                    {t('setpw.confirmLabel')}
-                  </label>
-                  <div className="relative">
-                    <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 text-white/25" size={16} />
-                    <input
-                      id="set-password-confirm"
-                      type={show ? 'text' : 'password'}
-                      value={confirm}
-                      onChange={(e) => setConfirm(e.target.value)}
-                      className="w-full pl-10 pr-4 py-3 bg-white/5 border border-white/10 text-white placeholder-white/20 rounded-xl focus:outline-none focus:ring-2 focus:ring-cyan-500/50 focus:border-cyan-500/40 transition-all text-sm"
-                      placeholder={t('setpw.repeat')}
-                      autoComplete="new-password"
-                      required
-                      minLength={MIN_LEN}
-                    />
-                  </div>
-                </div>
-
-                <button
-                  type="submit"
-                  disabled={loading || !password || !confirm}
-                  className="w-full bg-gradient-to-r from-cyan-500 to-blue-600 text-white py-3 px-4 rounded-xl font-semibold text-sm hover:shadow-[0_4px_24px_rgba(6,182,212,0.4)] hover:-translate-y-0.5 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:translate-y-0 flex items-center justify-center gap-2 mt-2"
+          <form onSubmit={handleSubmit} className="grid gap-4">
+            <Field label={t('setpw.newPasswordLabel')} id="set-password-new">
+              <div className="relative">
+                <Lock aria-hidden className={authFieldIconClass} />
+                <Input
+                  id="set-password-new"
+                  type={show ? 'text' : 'password'}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className={cn(authFieldWithIconClass, 'pr-11')}
+                  placeholder={t('setpw.minChars')}
+                  autoComplete="new-password"
+                  required
+                  minLength={MIN_LEN}
+                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  onClick={() => setShow(!show)}
+                  aria-label={show ? t('auth.hidePassword') : t('auth.showPassword')}
+                  className="absolute right-0.5 top-1/2 -translate-y-1/2"
                 >
-                  {loading ? (
-                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
-                  ) : (
-                    <>
-                      <ShieldCheck size={15} />
-                      <span>{isInvite ? t('setpw.activate') : t('setpw.save')}</span>
-                    </>
-                  )}
-                </button>
-              </form>
-            </>
-          )}
-        </div>
-      </div>
-    </div>
+                  {show ? <EyeOff aria-hidden /> : <Eye aria-hidden />}
+                </Button>
+              </div>
+            </Field>
+
+            <Field label={t('setpw.confirmLabel')} id="set-password-confirm">
+              <div className="relative">
+                <Lock aria-hidden className={authFieldIconClass} />
+                <Input
+                  id="set-password-confirm"
+                  type={show ? 'text' : 'password'}
+                  value={confirm}
+                  onChange={(e) => setConfirm(e.target.value)}
+                  className={authFieldWithIconClass}
+                  placeholder={t('setpw.repeat')}
+                  autoComplete="new-password"
+                  required
+                  minLength={MIN_LEN}
+                />
+              </div>
+            </Field>
+
+            <Button type="submit" size="lg" disabled={loading || !password || !confirm} loading={loading} className="mt-1 w-full">
+              {!loading && <ShieldCheck aria-hidden />}
+              <span>{isInvite ? t('setpw.activate') : t('setpw.save')}</span>
+            </Button>
+          </form>
+        </>
+      )}
+    </AuthShell>
   );
 };
 
