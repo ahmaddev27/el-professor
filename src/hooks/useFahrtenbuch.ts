@@ -136,6 +136,40 @@ async function fetchAllRows<T>(
   return all;
 }
 
+// ── Duplicate refusal (20260922100000) ───────────────────────────────────────
+
+/** The unique constraint that refuses the same file twice in one company. */
+const FILE_HASH_CONSTRAINT = 'fahrtenbuch_imports_company_file_sha256_key';
+/** The unique index that refuses the same ride twice in one company. */
+const ROW_KEY_INDEX = 'fahrtenbuch_trips_company_source_row_key';
+/**
+ * Keys per lookup. A key is 64 characters, so 100 keep the request line near
+ * 7 KB, well inside what Kong and PostgREST accept; each key names at most one
+ * stored row, so an answer stays far below the 1000-row cap.
+ */
+const KEY_LOOKUP_CHUNK = 100;
+
+/** The company already imported this exact file. `existing` is that import. */
+export class DuplicateImportFileError extends Error {
+  constructor(message: string, readonly existing: FahrtenbuchImport | null) {
+    super(message);
+    this.name = 'DuplicateImportFileError';
+  }
+}
+
+function isUniqueViolation(err: unknown, name: string): boolean {
+  const e = err as { code?: string; message?: string; details?: string } | null;
+  return e?.code === '23505' && `${e.message ?? ''} ${e.details ?? ''}`.includes(name);
+}
+
+export interface CreateImportResult {
+  importId: string;
+  /** Trips written. */
+  inserted: number;
+  /** Trips left out because the company already stores them. */
+  duplicatesRefused: number;
+}
+
 // ── Hook ──────────────────────────────────────────────────────────────────────
 
 export function useFahrtenbuch() {
@@ -211,21 +245,88 @@ export function useFahrtenbuch() {
     }
   }, [companyId]);
 
+  /** The company's import of exactly this file, if it has one. */
+  const findImportByFileHash = useCallback(async (fileSha256: string): Promise<FahrtenbuchImport | null> => {
+    if (!companyId) return null;
+    const { data, error } = await supabase
+      .from('fahrtenbuch_imports')
+      .select('*')
+      .eq('company_id', companyId)
+      .eq('file_sha256', fileSha256)
+      .maybeSingle();
+    if (error) throw error;
+    return (data as FahrtenbuchImport | null) ?? null;
+  }, [companyId]);
+
+  /**
+   * Which of these ride keys the company already stores — optionally leaving
+   * out one import's rides, for the preview of an import that will replace it.
+   */
+  const findStoredSourceRowKeys = useCallback(async (
+    keys: readonly string[],
+    excludeImportId: string | null = null,
+  ): Promise<Set<string>> => {
+    const stored = new Set<string>();
+    if (!companyId) return stored;
+    const unique = [...new Set(keys)];
+    const chunks: string[][] = [];
+    for (let i = 0; i < unique.length; i += KEY_LOOKUP_CHUNK) {
+      chunks.push(unique.slice(i, i + KEY_LOOKUP_CHUNK));
+    }
+    const answers = await Promise.all(chunks.map(chunk => {
+      let q = supabase
+        .from('fahrtenbuch_trips')
+        .select('source_row_key')
+        .eq('company_id', companyId)
+        .in('source_row_key', chunk);
+      if (excludeImportId) q = q.neq('import_id', excludeImportId);
+      return q;
+    }));
+    for (const { data, error } of answers) {
+      if (error) throw error;
+      for (const row of (data ?? []) as { source_row_key: string | null }[]) {
+        if (row.source_row_key) stored.add(row.source_row_key);
+      }
+    }
+    return stored;
+  }, [companyId]);
+
   const createImport = useCallback(async (params: {
     month: number;
     year: number;
     fileName: string;
     trips: TripInsertRow[];
+    /** SHA-256 of the uploaded bytes (sha256HexOfBytes). */
+    fileSha256: string;
     notes?: string;
     sourceSheetName?: string;
     sourceColumns?: string[];
     xlsxBytes?: Uint8Array | null;
-  }): Promise<string> => {
+  }): Promise<CreateImportResult> => {
     if (!companyId || !user) throw new Error('Not authenticated');
 
     // XLSX bytes are mandatory — no import without the original file in storage
     if (!params.xlsxBytes || params.xlsxBytes.length === 0) {
       throw new Error('Import blockiert: Original-XLSX-Datei konnte nicht gelesen werden.');
+    }
+
+    // The same file once per company. Asked before the upload so a refused file
+    // leaves nothing behind; the unique constraint is the wall for a race.
+    const existing = await findImportByFileHash(params.fileSha256);
+    if (existing) {
+      throw new DuplicateImportFileError(t('imp.duplicateFile.title'), existing);
+    }
+
+    // The same ride once per company: drop the rows another import already
+    // holds. Asked again here, after a replaced import was deleted, so the
+    // preview's count is not trusted blindly; the unique index is the wall.
+    const storedKeys = await findStoredSourceRowKeys(
+      params.trips.flatMap(r => (r.source_row_key ? [r.source_row_key] : [])),
+    );
+    const trips = params.trips.filter(r => !r.source_row_key || !storedKeys.has(r.source_row_key));
+    const duplicatesRefused = params.trips.length - trips.length;
+    if (trips.length === 0) {
+      throw new Error(t('imp.error.allDuplicates'));
     }
 
     const ext = params.fileName.toLowerCase().endsWith('.xlsx') ? '' : '.xlsx';
@@ -277,11 +378,12 @@ export function useFahrtenbuch() {
         file_name: params.fileName,
         imported_by: user.id,
         status: 'confirmed',
-        row_count: params.trips.length,
+        row_count: trips.length,
         notes: params.notes || null,
         source_sheet_name: params.sourceSheetName || null,
         source_columns_json: params.sourceColumns || null,
         storage_path: storagePath,
+        file_sha256: params.fileSha256,
       })
       .select('id, storage_path, imported_at')
       .single();
@@ -289,6 +391,13 @@ export function useFahrtenbuch() {
     if (importErr) {
       // Best-effort cleanup of uploaded file
       await supabase.storage.from('fahrtenbuch-files').remove([storagePath]);
+      if (isUniqueViolation(importErr, FILE_HASH_CONSTRAINT)) {
+        // Another tab or colleague imported the same file since the check above.
+        throw new DuplicateImportFileError(
+          t('imp.duplicateFile.title'),
+          await findImportByFileHash(params.fileSha256).catch(() => null),
+        );
+      }
       throw importErr;
     }
 
@@ -308,7 +417,7 @@ export function useFahrtenbuch() {
     }
 
     // Trips go in batches because PostgREST caps a request, but the import row
-    // already claims row_count = params.trips.length. A batch failing partway
+    // already claims row_count = trips.length. A batch failing partway
     // therefore used to leave a 'confirmed' import whose row_count lied about
     // how many trips exist — and planning would then run against a silently
     // truncated month.
@@ -319,8 +428,8 @@ export function useFahrtenbuch() {
     const batchSize = 200;
     let insertedBatches = 0;
     try {
-      for (let i = 0; i < params.trips.length; i += batchSize) {
-        const batch = params.trips.slice(i, i + batchSize).map(t => ({
+      for (let i = 0; i < trips.length; i += batchSize) {
+        const batch = trips.slice(i, i + batchSize).map(t => ({
           ...t,
           import_id: importId,
           company_id: companyId,
@@ -339,16 +448,20 @@ export function useFahrtenbuch() {
       await supabase.from('fahrtenbuch_imports').delete().eq('id', importId);
       await supabase.storage.from('fahrtenbuch-files').remove([storagePath]);
       await fetchImports();
+      if (isUniqueViolation(tripErr, ROW_KEY_INDEX)) {
+        throw new Error(t('imp.error.rowRace'));
+      }
+      const cause = (tripErr as { message?: string } | null)?.message ?? 'Unbekannter Fehler';
       throw new Error(
-        `Import fehlgeschlagen nach ${written} von ${params.trips.length} Fahrten. ` +
+        `Import fehlgeschlagen nach ${written} von ${trips.length} Fahrten. ` +
         'Der unvollständige Import wurde vollständig zurückgenommen. ' +
-        `Ursache: ${tripErr instanceof Error ? tripErr.message : 'Unbekannter Fehler'}`,
+        `Ursache: ${cause}`,
       );
     }
 
     await fetchImports();
-    return importId;
-  }, [companyId, user, fetchImports, isReadOnlyPlatformSession, t]);
+    return { importId, inserted: trips.length, duplicatesRefused };
+  }, [companyId, user, fetchImports, findImportByFileHash, findStoredSourceRowKeys, isReadOnlyPlatformSession, t]);
 
   const deleteImport = useCallback(async (importId: string) => {
     if (!companyId) return;
@@ -391,6 +504,8 @@ export function useFahrtenbuch() {
     loadingTrips,
     fetchImports,
     fetchTrips,
+    findImportByFileHash,
+    findStoredSourceRowKeys,
     createImport,
     deleteImport,
   };

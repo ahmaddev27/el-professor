@@ -1,11 +1,35 @@
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import * as XLSX from 'xlsx';
-import { Upload, X, ChevronRight, ChevronLeft, Check, AlertTriangle, User, Car as CarIcon, FileSpreadsheet, Eye, RefreshCw, Plus, Trash2 } from 'lucide-react';
-import { useFahrtenbuch, TripInsertRow, FahrtenbuchImport } from '../hooks/useFahrtenbuch';
+import { Upload, X, ChevronRight, ChevronLeft, Check, AlertTriangle, User, Car as CarIcon, FileSpreadsheet, Eye, RefreshCw, Plus, Info, ExternalLink } from 'lucide-react';
+import { useFahrtenbuch, TripInsertRow, FahrtenbuchImport, DuplicateImportFileError } from '../hooks/useFahrtenbuch';
 import { useToast } from '../contexts/ToastContext';
 import { format } from 'date-fns';
 import { useTranslation } from '../contexts/LanguageContext';
 import type { TranslationKey } from '../i18n';
+import {
+  REVIEW_REASONS,
+  SOURCE_TIME_ZONE,
+  applySourceRowKeys,
+  buildTripRows as buildTripRowsFrom,
+  findOrderTransmissionColumn,
+  isMissingCell,
+  isValidKennzeichen,
+  normalise,
+  parseDate,
+  parseTime,
+  sha256HexOfBytes,
+  summariseRows,
+  wallAt,
+  withoutStoredKeys,
+  type BuildStats,
+  type CellValue,
+  type ColMap,
+  type ImportSummary,
+  type RawRow,
+  type ReviewReason,
+  type TripStatus,
+} from '../utils/fahrtenbuchImportParser';
+import { formatEuro } from './ui/format';
 
 // ── Driver / Car types passed in from parent ──────────────────────────────────
 export interface DriverOption { id: string; name: string; }
@@ -15,30 +39,12 @@ interface Props {
   isOpen: boolean;
   onClose: () => void;
   onImported: (importId: string) => void;
+  /** Shows an import that already exists — offered when the same file comes again. */
+  onOpenExistingImport?: (importId: string) => void;
   drivers: DriverOption[];
   cars: CarOption[];
   existingImports?: FahrtenbuchImport[];
   onDeleteImport?: (importId: string) => Promise<void>;
-}
-
-// ── Parsed row from Excel/CSV ─────────────────────────────────────────────────
-// Values may be string | number | boolean | null from raw XLSX read
-type CellValue = string | number | boolean | null | undefined;
-type RawRow = Record<string, CellValue>;
-
-// ── Column mapping state ───────────────────────────────────────────────────────
-interface ColMap {
-  trip_date: string;
-  start_time: string;
-  end_time: string;
-  driver_name: string;
-  car_identifier: string;
-  price_amount: string;
-  tip_amount: string;
-  payment_method: string;
-  route_start: string;
-  route_end: string;
-  description: string;
 }
 
 const REQUIRED_COLS: (keyof ColMap)[] = ['trip_date', 'start_time', 'end_time', 'driver_name'];
@@ -92,23 +98,12 @@ const HEADER_KEYWORDS = [
   'start','ende','beginn','fahrt','trip','driver','date','time','price','status','storniert',
 ];
 
-// Normalized status values that mean "canceled" in the source file
-const CANCELED_STATUSES = new Set([
-  'storniert','storniertfahrt','storno','stornierung',
-  'cancelled','canceled','abgebrochen','nichtdurchgefuhrt','nichtdurchgeführt',
-]);
-
-// Auto-match for the optional status column (not part of ColMap — detected separately)
+// Auto-match for the optional status column (not part of ColMap — detected
+// separately). What its words mean is mapTripStatus's, in the parser.
 const STATUS_COL_CANDIDATES = [
   'fahrtstatus','fahrt status','status der fahrt','trip status',
   '=status','auftragsstatus','buchungsstatus',
 ];
-
-function isCanceledStatus(raw: CellValue): boolean {
-  if (raw === null || raw === undefined) return false;
-  const n = normalise(String(raw));
-  return CANCELED_STATUSES.has(n);
-}
 
 // ── Driver matching state ─────────────────────────────────────────────────────
 interface DriverMatch {
@@ -125,29 +120,68 @@ interface CarMatch {
   confirmed: boolean;
 }
 
-// ── Parse rejection tracking ──────────────────────────────────────────────────
-interface ParseStats {
-  total: number;
-  valid: number;
-  canceled: number;
-  badDate: number;
-  badStartTime: number;
-  badEndTime: number;
-  missingDriver: number;
-  other: number;
-  // Sample raw values for diagnosis
-  sampleBadStartTime: CellValue[];
-  sampleBadDate: CellValue[];
-  startTimeColName: string;
-  dateColName: string;
-  statusColName: string;
+// ── The preview: the rows that will be written, and what was left out ─────────
+interface ImportPreview {
+  rows: TripInsertRow[];
+  build: BuildStats;
+  summary: ImportSummary;
+  /** Rows whose ride an earlier row of the same file already is. */
+  inFileDuplicates: number;
+  /** Rows whose ride the company already stores. */
+  storedDuplicates: number;
+  /** Rides that are not cancelled and got no instant (missing, unparsed, DST). */
+  withoutInstant: number;
 }
+
+const STATUS_LABEL_KEYS: Record<TripStatus, TranslationKey> = {
+  completed: 'imp.status.completed',
+  cancelled: 'imp.status.cancelled',
+  unknown:   'imp.status.unknown',
+};
+
+const REASON_LABEL_KEYS: Record<ReviewReason, TranslationKey> = {
+  missing_trip_date: 'imp.reason.missingTripDate',
+  missing_start:     'imp.reason.missingStart',
+  unreadable_start:  'imp.reason.unreadableStart',
+  missing_end:       'imp.reason.missingEnd',
+  unreadable_end:    'imp.reason.unreadableEnd',
+  end_before_start:  'imp.reason.endBeforeStart',
+  missing_driver:    'imp.reason.missingDriver',
+  unknown_status:    'imp.reason.unknownStatus',
+};
+
+/** DD.MM.YYYY HH:MM:SS of an instant, on the clock the file was written in. */
+function formatSourceWall(iso: string | null): string {
+  if (!iso) return '—';
+  const w = wallAt(Date.parse(iso), SOURCE_TIME_ZONE);
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${p(w.day)}.${p(w.month)}.${w.year} ${p(w.hour)}:${p(w.minute)}:${p(w.second)}`;
+}
+
+/** DD.MM.YYYY of a stored YYYY-MM-DD. */
+function formatIsoDate(iso: string): string {
+  const [y, m, d] = iso.split('-');
+  return `${d}.${m}.${y}`;
+}
+
+// Notices in the legacy palette, drawn with classes rather than inline styles.
+type NoticeTone = 'warning' | 'danger' | 'info';
+const NOTICE_TONE: Record<NoticeTone, string> = {
+  warning: 'border-[color:var(--warning)] bg-[color:var(--warning-subtle)] text-[color:var(--warning)]',
+  danger:  'border-[color:var(--danger)] bg-[color:var(--danger-subtle)] text-[color:var(--danger)]',
+  info:    'border-[color:var(--border)] bg-[color:var(--bg-subtle)] text-[color:var(--text-secondary)]',
+};
+
+const Notice: React.FC<{ tone: NoticeTone; children: React.ReactNode }> = ({ tone, children }) => (
+  <div className={`flex items-start gap-2 p-3 rounded-lg border ${NOTICE_TONE[tone]}`}>
+    {tone === 'info'
+      ? <Info size={14} className="shrink-0 mt-0.5" />
+      : <AlertTriangle size={14} className="shrink-0 mt-0.5" />}
+    <div className="text-sm space-y-1 min-w-0">{children}</div>
+  </div>
+);
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-
-function normalise(s: string) {
-  return s.toLowerCase().replace(/[^a-z0-9]/g, '');
-}
 
 // First-match wins; longer/more-specific candidates appear first in lists.
 // Candidates prefixed with '=' are matched exactly only (never as substring).
@@ -197,155 +231,8 @@ function autoMatchRideTimeCol(headers: string[], candidates: string[]): string {
   return autoMatchCol(safeHeaders, candidates);
 }
 
-// ── Date parsing ──────────────────────────────────────────────────────────────
-// Accepts: Excel serial number (number), DD.MM.YYYY string, YYYY-MM-DD string,
-// d.M.yyyy, ISO datetime, JS Date-like string, or already-formatted string.
-function parseDate(raw: CellValue): string | null {
-  if (raw === null || raw === undefined || raw === '' || raw === '\\N') return null;
-
-  // Numeric — could be Excel date serial (integers 30000–60000) or fractional (time)
-  if (typeof raw === 'number') {
-    // Excel date serial: integers roughly between 30000 (1982) and 60000 (2064)
-    if (Number.isInteger(raw) && raw > 1000) {
-      try {
-        const d = XLSX.SSF.parse_date_code(raw);
-        if (d && d.y > 1980 && d.y < 2100) {
-          return `${d.y}-${String(d.m).padStart(2,'0')}-${String(d.d).padStart(2,'0')}`;
-        }
-      } catch { /* fall through */ }
-    }
-    // Float that might encode a combined date+time (e.g. 45678.625)
-    if (raw > 1000) {
-      try {
-        const d = XLSX.SSF.parse_date_code(Math.floor(raw));
-        if (d && d.y > 1980 && d.y < 2100) {
-          return `${d.y}-${String(d.m).padStart(2,'0')}-${String(d.d).padStart(2,'0')}`;
-        }
-      } catch { /* fall through */ }
-    }
-    return null;
-  }
-
-  const s = String(raw).trim();
-  if (!s || s === '\\N') return null;
-
-  // DD.MM.YYYY or D.M.YYYY or DD.MM.YY
-  const m1 = s.match(/^(\d{1,2})\.(\d{1,2})\.(\d{2,4})$/);
-  if (m1) {
-    let y = Number(m1[3]);
-    if (y < 100) y += y < 50 ? 2000 : 1900;
-    return `${y}-${m1[2].padStart(2,'0')}-${m1[1].padStart(2,'0')}`;
-  }
-
-  // YYYY-MM-DD (possibly with time suffix)
-  const m2 = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
-  if (m2) return `${m2[1]}-${m2[2]}-${m2[3]}`;
-
-  // DD/MM/YYYY or MM/DD/YYYY — try both, prefer DD/MM for German files
-  const m3 = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-  if (m3) {
-    const a = Number(m3[1]), b = Number(m3[2]);
-    // If first number > 12, it must be the day
-    if (a > 12) return `${m3[3]}-${m3[2].padStart(2,'0')}-${m3[1].padStart(2,'0')}`;
-    // Otherwise assume MM/DD/YYYY (US) for safety
-    return `${m3[3]}-${m3[1].padStart(2,'0')}-${m3[2].padStart(2,'0')}`;
-  }
-
-  // Excel serial number as string (e.g. "45678")
-  if (/^\d{5}$/.test(s)) {
-    try {
-      const d = XLSX.SSF.parse_date_code(Number(s));
-      if (d && d.y > 1980) return `${d.y}-${String(d.m).padStart(2,'0')}-${String(d.d).padStart(2,'0')}`;
-    } catch { /* fall through */ }
-  }
-
-  return null;
-}
-
-// ── Time parsing ──────────────────────────────────────────────────────────────
-// Accepts: Excel time fraction (0–1), "HH:MM", "HH:MM:SS", "H:MM", numeric-as-string.
-function parseTime(raw: CellValue): string | null {
-  if (raw === null || raw === undefined || raw === '' || raw === '\\N') return null;
-
-  // Numeric fraction from Excel (0.0 = 00:00, 0.5 = 12:00, 1.0 = 24:00)
-  if (typeof raw === 'number') {
-    // Pure fraction in range [0, 1)
-    let frac = raw;
-    if (frac >= 1) frac = frac - Math.floor(frac); // strip date part from combined datetime
-    if (frac < 0) return null;
-    const totalMinutes = Math.round(frac * 24 * 60);
-    const h = Math.floor(totalMinutes / 60) % 24;
-    const m = totalMinutes % 60;
-    return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
-  }
-
-  const s = String(raw).trim();
-  if (!s || s === '\\N') return null;
-
-  // Datetime string — extract time part with a single regex.
-  // Handles: "2025-10-01 10:05:22.000", "2025-10-01T04:31:28", "01.10.2025 10:05", etc.
-  // The pattern finds HH:MM anywhere in the string (after a date prefix).
-  const dtm = s.match(/(?:[T\s])(\d{1,2}):(\d{2})(?::\d{2})?(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?$/);
-  if (dtm) return `${dtm[1].padStart(2,'0')}:${dtm[2]}`;
-
-  // Pure time strings: HH:MM or H:MM (with optional seconds / milliseconds)
-  const m1 = s.match(/^(\d{1,2}):(\d{2})(?::\d{2})?(?:\.\d+)?$/);
-  if (m1) return `${m1[1].padStart(2,'0')}:${m1[2]}`;
-
-  // HH.MM or H.MM
-  const m2 = s.match(/^(\d{1,2})\.(\d{2})$/);
-  if (m2) return `${m2[1].padStart(2,'0')}:${m2[2]}`;
-
-  // HHhMM
-  const m3 = s.match(/^(\d{1,2})h(\d{2})$/i);
-  if (m3) return `${m3[1].padStart(2,'0')}:${m3[2]}`;
-
-  // Numeric string — pure fraction "0.625" or combined datetime "45931.625"
-  if (/^\d+\.\d+$/.test(s)) {
-    const n = parseFloat(s);
-    let frac = n >= 1 ? n - Math.floor(n) : n;
-    const totalMinutes = Math.round(frac * 24 * 60);
-    const h = Math.floor(totalMinutes / 60) % 24;
-    const m = totalMinutes % 60;
-    return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
-  }
-
-  return null;
-}
-
-// ── Money parsing ─────────────────────────────────────────────────────────────
-function parseMoney(raw: CellValue): number {
-  if (raw === null || raw === undefined) return 0;
-  if (typeof raw === 'number') return Math.round(raw * 100) / 100;
-  const s = String(raw).trim();
-  if (!s || s === '\\N') return 0;
-  // Handle German decimal comma: "41,93" → "41.93"
-  const cleaned = s.replace(/[^\d,.-]/g, '').replace(/,(\d{2})$/, '.$1');
-  const n = parseFloat(cleaned);
-  return isNaN(n) ? 0 : Math.round(n * 100) / 100;
-}
-
-function durationMinutes(start: string, end: string): number {
-  try {
-    const [sh, sm] = start.split(':').map(Number);
-    const [eh, em] = end.split(':').map(Number);
-    let diff = (eh * 60 + em) - (sh * 60 + sm);
-    if (diff < 0) diff += 24 * 60;
-    return diff;
-  } catch { return 0; }
-}
-
-// Rejects GPS coords, \N, empty, pure numbers — real plates must contain a letter.
-function isValidKennzeichen(raw: CellValue): boolean {
-  if (raw === null || raw === undefined) return false;
-  const v = String(raw).trim();
-  if (!v || v === '\\N' || v.toLowerCase() === 'null' || v.toLowerCase() === 'undefined') return false;
-  if (/^-?\d{1,3}\.\d+\s+-?\d{1,3}\.\d+$/.test(v)) return false; // GPS pair
-  if (/^-?\d{2,3}\.\d{5,}$/.test(v)) return false;               // single lat/lon
-  if (/^\d{7,}$/.test(v)) return false;                           // too-long number
-  if (!/[a-zA-ZÄÖÜäöü]/.test(v)) return false;                   // no letter = not a plate
-  return true;
-}
+// Parsing a cell (dates, times, money, plates) is the parser's:
+// utils/fahrtenbuchImportParser.ts.
 
 // ── Header row detection ──────────────────────────────────────────────────────
 // Some files have metadata rows before the actual header row.
@@ -378,9 +265,9 @@ const MONTH_KEYS: readonly TranslationKey[] = [
 ];
 
 const FahrtenbuchImportModal: React.FC<Props> = ({
-  isOpen, onClose, onImported, drivers, cars, existingImports, onDeleteImport,
+  isOpen, onClose, onImported, onOpenExistingImport, drivers, cars, existingImports, onDeleteImport,
 }) => {
-  const { createImport } = useFahrtenbuch();
+  const { createImport, findImportByFileHash, findStoredSourceRowKeys } = useFahrtenbuch();
   const { success, error: showError } = useToast();
   const { t } = useTranslation();
 
@@ -403,8 +290,9 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
 
   const [driverMatches, setDriverMatches] = useState<DriverMatch[]>([]);
   const [carMatches, setCarMatches] = useState<CarMatch[]>([]);
-  const [parseStats, setParseStats] = useState<ParseStats | null>(null);
   const [statusColName, setStatusColName] = useState('');
+  // Column B of the Uber export; the ride key's basis when the file has it.
+  const [orderTransmissionCol, setOrderTransmissionCol] = useState('');
 
   const [sourceSheetName, setSourceSheetName] = useState('Sheet1');
 
@@ -416,6 +304,16 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
   // Raw XLSX bytes preserved for storage upload on confirm
   const [rawXlsxBytes, setRawXlsxBytes] = useState<Uint8Array | null>(null);
 
+  // The file's fingerprint, and the import that already holds the same file.
+  const [fileSha256, setFileSha256] = useState('');
+  const [hashChecking, setHashChecking] = useState(false);
+  const [existingForFile, setExistingForFile] = useState<FahrtenbuchImport | null>(null);
+  // Only the answer for the file chosen last may land.
+  const latestHash = useRef('');
+
+  const [preview, setPreview] = useState<ImportPreview | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+
   const reset = () => {
     setStep(0); setFileName(''); setRawRows([]); setHeaders([]); setParseError('');
     setColMap({
@@ -423,15 +321,41 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
       car_identifier:'', price_amount:'', tip_amount:'',
       payment_method:'', route_start:'', route_end:'', description:'',
     });
-    setStatusColName(''); setSourceSheetName('Sheet1');
-    setDriverMatches([]); setCarMatches([]); setImporting(false); setParseStats(null);
+    setStatusColName(''); setOrderTransmissionCol(''); setSourceSheetName('Sheet1');
+    setDriverMatches([]); setCarMatches([]); setImporting(false);
     setShowDuplicateWarning(false); setReplaceImportId(null); setReplacingImport(false);
     setRawXlsxBytes(null);
+    setFileSha256(''); setHashChecking(false); setExistingForFile(null); latestHash.current = '';
+    setPreview(null); setPreviewLoading(false);
   };
 
   const handleClose = () => { reset(); onClose(); };
 
   // ── File parsing ─────────────────────────────────────────────────────────────
+  /*
+    The same file is imported once per company. The fingerprint is taken from
+    the bytes as read, before anything is uploaded, and the company's imports
+    are asked for it; the unique constraint behind createImport is the wall
+    for two uploads racing.
+  */
+  const checkFileFingerprint = useCallback(async (data: Uint8Array) => {
+    setFileSha256('');
+    setExistingForFile(null);
+    setHashChecking(true);
+    try {
+      const hash = await sha256HexOfBytes(data);
+      latestHash.current = hash;
+      const existing = await findImportByFileHash(hash);
+      if (latestHash.current !== hash) return;
+      setFileSha256(hash);
+      setExistingForFile(existing);
+    } catch (err) {
+      setParseError(t('imp.error.hashFailed', { message: err instanceof Error ? err.message : String(err) }));
+    } finally {
+      setHashChecking(false);
+    }
+  }, [findImportByFileHash, t]);
+
   const handleFile = useCallback((file: File) => {
     setParseError('');
     setFileName(file.name);
@@ -440,6 +364,7 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
       try {
         const data = new Uint8Array(e.target!.result as ArrayBuffer);
         setRawXlsxBytes(data);
+        void checkFileFingerprint(data);
         // raw: true → keep numeric values (dates as serials, times as fractions)
         const wb = XLSX.read(data, { type: 'array', raw: true, cellDates: false });
 
@@ -488,13 +413,14 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
         console.log('[Fahrtenbuch] Auto-mapped columns:', auto, '| status col:', detectedStatusCol);
         setColMap(auto);
         setStatusColName(detectedStatusCol);
+        setOrderTransmissionCol(findOrderTransmissionColumn(hdrs));
       } catch (err: any) {
         console.error('[Fahrtenbuch] Parse error:', err);
         setParseError(t('imp.error.readFile', { message: err.message || String(err) }));
       }
     };
     reader.readAsArrayBuffer(file);
-  }, [t]);
+  }, [t, checkFileFingerprint]);
 
   const onDrop = (e: React.DragEvent) => {
     e.preventDefault();
@@ -504,7 +430,8 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
 
   // ── Step navigation ───────────────────────────────────────────────────────────
   const canGoNext = () => {
-    if (step === 0) return rawRows.length > 0 && !parseError;
+    // A file the company already imported goes no further.
+    if (step === 0) return rawRows.length > 0 && !parseError && fileSha256 !== '' && !hashChecking && !existingForFile;
     if (step === 1) return REQUIRED_COLS.every(k => colMap[k] !== '');
     if (step === 2) return driverMatches.every(d => d.confirmed);
     return true; // step 3 (cars) is always optional
@@ -517,10 +444,11 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
   };
 
   const buildDriverMatches = () => {
+    // An empty cell or `\N` names no driver: the row is stored without one and flagged.
     const names = [...new Set(
       rawRows
-        .map(r => String(r[colMap.driver_name] ?? '').trim())
-        .filter(Boolean)
+        .filter(r => !isMissingCell(r[colMap.driver_name]))
+        .map(r => String(r[colMap.driver_name]).trim())
     )];
     const matches: DriverMatch[] = names.map(name => {
       const norm = normalise(name);
@@ -551,180 +479,65 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
     setCarMatches(matches);
   };
 
-  // ── Build trip rows ───────────────────────────────────────────────────────────
-  const buildTripRows = (): { rows: TripInsertRow[]; stats: ParseStats } => {
-    const driverMap = new Map(driverMatches.map(d => [d.importedName, d]));
-    const carMap    = new Map(carMatches.map(c => [c.importedPlate, c]));
-
-    const stats: ParseStats = {
-      total: rawRows.length, valid: 0, canceled: 0,
-      badDate: 0, badStartTime: 0, badEndTime: 0,
-      missingDriver: 0, other: 0,
-      sampleBadStartTime: [], sampleBadDate: [],
-      startTimeColName: colMap.start_time,
-      dateColName: colMap.trip_date,
-      statusColName,
-    };
-
-    const rows: TripInsertRow[] = [];
-
-    for (let rowIdx = 0; rowIdx < rawRows.length; rowIdx++) {
-      const row = rawRows[rowIdx];
-      const rawDate      = colMap.trip_date  ? row[colMap.trip_date]  : null;
-      const rawStart     = colMap.start_time ? row[colMap.start_time] : null;
-      const rawEnd       = colMap.end_time   ? row[colMap.end_time]   : null;
-      const rawDriver    = String(colMap.driver_name ? (row[colMap.driver_name] ?? '') : '').trim();
-      const rawSrcStatus = statusColName ? String(row[statusColName] ?? '').trim() : '';
-      const canceled     = isCanceledStatus(rawSrcStatus || rawStart || rawEnd);
-
-      const tripDate  = parseDate(rawDate);
-      const startTime = parseTime(rawStart);
-      const endTime   = parseTime(rawEnd);
-
-      // ── Canceled row path ──────────────────────────────────────────────────
-      if (canceled) {
-        // Need at least a trip date to anchor the canceled row; if missing use
-        // a best-effort fallback of today so the row is still preservable.
-        const effectiveDate = tripDate ?? new Date().toISOString().slice(0, 10);
-        // Stored in fahrtenbuch_trips.original_driver_name — a persisted value,
-        // not a label, so it stays German regardless of the UI language.
-        const effectiveDriver = rawDriver || 'Unbekannt';
-        const driverMatch = driverMap.get(rawDriver);
-
-        const rawPlate  = colMap.car_identifier ? row[colMap.car_identifier] : null;
-        const rawPrice  = colMap.price_amount   ? row[colMap.price_amount]   : null;
-        const rawTip    = colMap.tip_amount     ? row[colMap.tip_amount]     : null;
-        const rawStart2 = colMap.route_start    ? String(row[colMap.route_start] ?? '') : '';
-        const rawEnd2   = colMap.route_end      ? String(row[colMap.route_end]   ?? '') : '';
-        const rawDesc   = colMap.description    ? String(row[colMap.description]  ?? '') : '';
-        const validPlate = rawPlate && isValidKennzeichen(rawPlate) ? String(rawPlate).trim() : null;
-        const carMatch   = validPlate ? carMap.get(validPlate) : undefined;
-
-        rows.push({
-          company_id: '',
-          import_id: '',
-          trip_date:        effectiveDate,
-          start_time:       null,
-          end_time:         null,
-          duration_minutes: null,
-          original_driver_id:   driverMatch?.matchedDriverId ?? null,
-          original_driver_name: effectiveDriver,
-          assigned_driver_id:   driverMatch?.matchedDriverId ?? null,
-          assigned_driver_name: driverMatch?.matchedDriverName ?? effectiveDriver,
-          car_id:               carMatch?.matchedCarId ?? null,
-          car_identifier:       validPlate,
-          route_start:          rawStart2 || null,
-          route_end:            rawEnd2   || null,
-          description:          rawDesc   || null,
-          price_amount:         parseMoney(rawPrice),
-          cash_amount:          0,
-          online_amount:        0,
-          tip_amount:           parseMoney(rawTip),
-          action_amount:        0,
-          raw_data_json:        Object.fromEntries(
-            Object.entries(row).map(([k, v]) => [k, v ?? null])
-          ),
-          plausibility_status: 'canceled',
-          is_canceled:          true,
-          source_status:        rawSrcStatus || null,
-          source_row_index:     rowIdx + 1,
-        });
-        stats.canceled++;
-        continue;
-      }
-
-      // ── Valid completed trip path ───────────────────────────────────────────
-      if (!tripDate) {
-        stats.badDate++;
-        if (stats.sampleBadDate.length < 5) stats.sampleBadDate.push(rawDate);
-        console.log('[Fahrtenbuch] Discard: bad date', rawDate, row);
-        continue;
-      }
-      if (!startTime) {
-        stats.badStartTime++;
-        if (stats.sampleBadStartTime.length < 5) stats.sampleBadStartTime.push(rawStart);
-        console.log('[Fahrtenbuch] Discard: bad start_time', rawStart, row);
-        continue;
-      }
-      if (!endTime)   { stats.badEndTime++;    console.log('[Fahrtenbuch] Discard: bad end_time', rawEnd, row); continue; }
-      if (!rawDriver) { stats.missingDriver++; console.log('[Fahrtenbuch] Discard: missing driver', row); continue; }
-
-      const rawPlate  = colMap.car_identifier ? row[colMap.car_identifier] : null;
-      const rawPrice  = colMap.price_amount   ? row[colMap.price_amount]   : null;
-      const rawTip    = colMap.tip_amount     ? row[colMap.tip_amount]     : null;
-      const rawPay    = colMap.payment_method ? String(row[colMap.payment_method] ?? '').toLowerCase() : '';
-      const rawStart2 = colMap.route_start    ? String(row[colMap.route_start] ?? '') : '';
-      const rawEnd2   = colMap.route_end      ? String(row[colMap.route_end]   ?? '') : '';
-      const rawDesc   = colMap.description    ? String(row[colMap.description]  ?? '') : '';
-
-      const priceAmt  = parseMoney(rawPrice);
-      const tipAmt    = parseMoney(rawTip);
-      const isBar     = rawPay.includes('bar') || rawPay.includes('cash') || rawPay === 'b';
-      const cashAmt   = isBar ? priceAmt : 0;
-      const onlineAmt = isBar ? 0 : priceAmt;
-
-      const driverMatch = driverMap.get(rawDriver);
-      const validPlate  = rawPlate && isValidKennzeichen(rawPlate) ? String(rawPlate).trim() : null;
-      const carMatch    = validPlate ? carMap.get(validPlate) : undefined;
-
-      rows.push({
-        company_id: '',
-        import_id: '',
-        trip_date:        tripDate,
-        start_time:       startTime,
-        end_time:         endTime,
-        duration_minutes: durationMinutes(startTime, endTime),
-        original_driver_id:   driverMatch?.matchedDriverId   ?? null,
-        original_driver_name: rawDriver,
-        assigned_driver_id:   driverMatch?.matchedDriverId   ?? null,
-        assigned_driver_name: driverMatch?.matchedDriverName ?? rawDriver,
-        car_id:               carMatch?.matchedCarId ?? null,
-        car_identifier:       validPlate,
-        route_start:          rawStart2 || null,
-        route_end:            rawEnd2   || null,
-        description:          rawDesc   || null,
-        price_amount:         priceAmt,
-        cash_amount:          cashAmt,
-        online_amount:        onlineAmt,
-        tip_amount:           tipAmt,
-        action_amount:        0,
-        raw_data_json:        Object.fromEntries(
-          Object.entries(row).map(([k, v]) => [k, v ?? null])
-        ),
-        plausibility_status: 'pending',
-        is_canceled:          false,
-        source_status:        rawSrcStatus || null,
-        source_row_index:     rowIdx + 1,
+  // ── Build the preview ─────────────────────────────────────────────────────────
+  /*
+    Every uploaded row becomes a trip row (utils/fahrtenbuchImportParser.ts),
+    except one no date can be given to. Then the second copy of a ride inside
+    the file is dropped, and the rides the company already stores are left
+    out — leaving out the import the user chose to replace, which is deleted
+    before the new one is written. createImport asks the database again at
+    write time, so a count here that went stale is corrected there.
+  */
+  const buildPreview = useCallback(async (excludeImportId: string | null) => {
+    setPreview(null);
+    setPreviewLoading(true);
+    try {
+      const { built, stats } = buildTripRowsFrom({
+        rows: rawRows,
+        colMap,
+        statusCol: statusColName,
+        orderTransmissionCol,
+        driverMatches: new Map(driverMatches.map(d => [d.importedName, d])),
+        carMatches: new Map(carMatches.map(c => [c.importedPlate, c])),
       });
-      stats.valid++;
+      const keyed = await applySourceRowKeys(built);
+      const stored = await findStoredSourceRowKeys(
+        keyed.rows.flatMap(r => (r.source_row_key ? [r.source_row_key] : [])),
+        excludeImportId,
+      );
+      const { rows, refused } = withoutStoredKeys(keyed.rows, stored);
+      setPreview({
+        rows,
+        build: stats,
+        summary: summariseRows(rows),
+        inFileDuplicates: keyed.inFileDuplicates,
+        storedDuplicates: refused,
+        withoutInstant: rows.filter(r => !r.is_canceled && r.start_at === null).length,
+      });
+    } catch (err) {
+      setPreview(null);
+      showError(t('common.error'), t('imp.error.previewFailed', {
+        message: err instanceof Error ? err.message : String(err),
+      }));
+    } finally {
+      setPreviewLoading(false);
     }
+  }, [rawRows, colMap, statusColName, orderTransmissionCol, driverMatches, carMatches,
+      findStoredSourceRowKeys, showError, t]);
 
-    console.log('[Fahrtenbuch] Build result:', stats);
-    return { rows, stats };
-  };
-
-  // Memoised result for step 4 rendering (avoids rebuilding on every render)
-  const [builtResult, setBuiltResult] = useState<{ rows: TripInsertRow[]; stats: ParseStats } | null>(null);
-
-  // Rebuild when entering step 4
-  const goNextWithBuild = () => {
-    if (step === 2) buildCarMatches();
-    const nextStep = step + 1;
-    if (nextStep === 4) {
-      const result = buildTripRows();
-      setBuiltResult(result);
-      setParseStats(result.stats);
-    }
-    setStep(nextStep);
-  };
+  // Choosing an import to replace changes which stored rides count as
+  // duplicates: that import's rides are about to be deleted.
+  useEffect(() => {
+    if (step === 4) void buildPreview(replaceImportId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [replaceImportId]);
 
   const conflictingImports = existingImports?.filter(
     imp => imp.month === month && imp.year === year,
   ) ?? [];
 
   const handleImport = async () => {
-    const result = builtResult ?? buildTripRows();
-    if (result.rows.length === 0) {
+    if (!preview || preview.rows.length === 0) {
       showError(t('common.error'), t('imp.error.noValidTrips'));
       return;
     }
@@ -733,7 +546,7 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
       setShowDuplicateWarning(true);
       return;
     }
-    await doImport(result.rows, replaceImportId);
+    await doImport(preview.rows, replaceImportId);
   };
 
   const doImport = async (rows: TripInsertRow[], deleteFirstId: string | null) => {
@@ -757,15 +570,30 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
         }
         setReplacingImport(false);
       }
-      const importId = await createImport({ month, year, fileName, trips: rows, sourceSheetName, sourceColumns: headers, xlsxBytes: rawXlsxBytes ?? undefined });
-      success(t('imp.toast.successTitle'), t('imp.toast.successBody', { count: rows.length }));
+      const result = await createImport({
+        month, year, fileName, trips: rows, fileSha256, sourceSheetName,
+        sourceColumns: headers, xlsxBytes: rawXlsxBytes ?? undefined,
+      });
+      success(t('imp.toast.successTitle'), t('imp.toast.successDetail', {
+        count: result.inserted, duplicates: result.duplicatesRefused,
+      }));
       reset();
-      onImported(importId);
+      onImported(result.importId);
     } catch (err: any) {
+      if (err instanceof DuplicateImportFileError) {
+        setExistingForFile(err.existing);
+        setStep(0);
+      }
       showError(t('imp.toast.failedTitle'), err.message || String(err));
     } finally {
       setImporting(false);
     }
+  };
+
+  const openExistingImport = (importId: string) => {
+    reset();
+    if (onOpenExistingImport) onOpenExistingImport(importId);
+    else onClose();
   };
 
   const previewRows = rawRows.slice(0, 5);
@@ -779,8 +607,7 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
   };
   const selectSt: React.CSSProperties = { ...inputSt, cursor: 'pointer' };
 
-  const validRows  = builtResult?.rows ?? [];
-  const stats      = builtResult?.stats ?? null;
+  const validRows  = preview?.rows ?? [];
   const unmatchedDrivers = driverMatches.filter(d => !d.matchedDriverId).length;
   const unmatchedCars    = carMatches.filter(c => !c.matchedCarId).length;
 
@@ -881,6 +708,33 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
                   <AlertTriangle size={16} style={{ color: 'var(--danger)' }} />
                   <span className="text-sm" style={{ color: 'var(--danger)' }}>{parseError}</span>
                 </div>
+              )}
+
+              {hashChecking && (
+                <p className="text-sm text-[color:var(--text-tertiary)]">{t('imp.hashChecking')}</p>
+              )}
+
+              {existingForFile && (
+                <Notice tone="danger">
+                  <p className="font-medium">{t('imp.duplicateFile.title')}</p>
+                  <p>
+                    {t('imp.duplicateFile.body', {
+                      fileName: existingForFile.file_name,
+                      month: t(MONTH_KEYS[existingForFile.month - 1]),
+                      year: existingForFile.year,
+                      date: format(new Date(existingForFile.imported_at), 'dd.MM.yyyy HH:mm'),
+                      count: existingForFile.row_count,
+                    })}
+                  </p>
+                  <p>{t('imp.duplicateFile.hint')}</p>
+                  <button
+                    type="button"
+                    onClick={() => openExistingImport(existingForFile.id)}
+                    className="mt-1 inline-flex items-center gap-1.5 rounded-lg border border-[color:var(--danger)] px-3 py-1.5 text-xs font-medium [@media(pointer:coarse)]:min-h-[40px]"
+                  >
+                    <ExternalLink size={13} /> {t('imp.duplicateFile.open')}
+                  </button>
+                </Notice>
               )}
 
               {rawRows.length > 0 && (
@@ -1127,22 +981,28 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
           {/* ── Step 4: Vorschau & Import ────────────────────────────────── */}
           {step === 4 && (
             <div className="space-y-4">
-              {/* Summary cards */}
-              {(() => {
-                const canceledCount = stats?.canceled ?? 0;
-                const skipped = stats ? (stats.total - stats.valid - canceledCount) : 0;
+              {previewLoading && (
+                <p className="text-sm text-[color:var(--text-tertiary)]">{t('imp.previewLoading')}</p>
+              )}
+
+              {/* Summary cards — the rows that will be written, by status */}
+              {preview && (() => {
+                const { summary } = preview;
+                const duplicates = preview.inFileDuplicates + preview.storedDuplicates;
+                const cards: { labelKey: TranslationKey; value: string | number; tone: string }[] = [
+                  { labelKey: 'imp.card.completed',     value: summary.completed,   tone: 'text-[color:var(--accent)]' },
+                  { labelKey: 'imp.card.canceledTrips', value: summary.cancelled,   tone: summary.cancelled > 0 ? 'text-[color:var(--warning)]' : 'text-[color:var(--text-tertiary)]' },
+                  { labelKey: 'imp.card.unknownStatus', value: summary.unknown,     tone: summary.unknown > 0 ? 'text-[color:var(--danger)]' : 'text-[color:var(--text-tertiary)]' },
+                  { labelKey: 'imp.card.needsReview',   value: summary.needsReview, tone: summary.needsReview > 0 ? 'text-[color:var(--warning)]' : 'text-[color:var(--success)]' },
+                  { labelKey: 'imp.card.duplicates',    value: duplicates,          tone: duplicates > 0 ? 'text-[color:var(--warning)]' : 'text-[color:var(--text-tertiary)]' },
+                  { labelKey: 'imp.card.monthYear',     value: `${month}/${year}`,  tone: 'text-[color:var(--text-primary)]' },
+                ];
                 return (
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                    {([
-                      { labelKey: 'imp.card.validTrips' as TranslationKey, value: stats?.valid ?? validRows.filter(r => !r.is_canceled).length, color: 'var(--accent)' },
-                      { labelKey: 'imp.card.canceledTrips' as TranslationKey, value: canceledCount, color: canceledCount > 0 ? 'var(--warning)' : 'var(--text-tertiary)' },
-                      { labelKey: 'imp.card.skippedRows' as TranslationKey, value: skipped, color: skipped > 0 ? 'var(--danger)' : 'var(--success)' },
-                      { labelKey: 'imp.card.monthYear' as TranslationKey, value: `${month}/${year}`, color: 'var(--text-primary)' },
-                    ]).map(card => (
-                      <div key={card.labelKey} className="rounded-lg p-3"
-                        style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)' }}>
-                        <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>{t(card.labelKey)}</p>
-                        <p className="text-xl font-bold mt-1" style={{ color: card.color }}>{card.value}</p>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                    {cards.map(card => (
+                      <div key={card.labelKey} className="rounded-lg p-3 border border-[color:var(--border)] bg-[color:var(--bg-subtle)]">
+                        <p className="text-xs text-[color:var(--text-tertiary)]">{t(card.labelKey)}</p>
+                        <p className={`text-xl font-bold mt-1 tabular-nums ${card.tone}`}>{card.value}</p>
                       </div>
                     ))}
                   </div>
@@ -1211,10 +1071,10 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
                       onClick={() => {
                         setShowDuplicateWarning(false);
                         setReplaceImportId(null);
-                        const result = builtResult ?? buildTripRows();
-                        doImport(result.rows, null);
+                        // createImport leaves out the rides the kept import holds.
+                        if (preview) void doImport(preview.rows, null);
                       }}
-                      disabled={importing}
+                      disabled={importing || !preview}
                       className="flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-medium"
                       style={{ background: 'var(--accent)', color: 'var(--text-inverse)' }}
                     >
@@ -1224,10 +1084,9 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
                       <button
                         onClick={() => {
                           setShowDuplicateWarning(false);
-                          const result = builtResult ?? buildTripRows();
-                          doImport(result.rows, replaceImportId);
+                          if (preview) void doImport(preview.rows, replaceImportId);
                         }}
-                        disabled={importing || replacingImport}
+                        disabled={importing || replacingImport || previewLoading || !preview}
                         className="flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-medium"
                         style={{ background: 'var(--danger-solid)', color: 'white' }}
                       >
@@ -1239,55 +1098,78 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
                 </div>
               )}
 
-              {/* Canceled trip notice */}
-              {stats && stats.canceled > 0 && (
-                <div className="flex items-start gap-2 p-3 rounded-lg"
-                  style={{ background: 'var(--warning-subtle)', border: '1px solid var(--warning)' }}>
-                  <AlertTriangle size={14} style={{ color: 'var(--warning)', flexShrink: 0, marginTop: 2 }} />
-                  <p className="text-sm" style={{ color: 'var(--warning)' }}>
-                    {t('imp.canceledNotice', { count: stats.canceled })}
-                    {stats.statusColName ? ` (${t('imp.columnNamed', { column: stats.statusColName })})` : ''}
-                  </p>
-                </div>
-              )}
+              {preview && (() => {
+                const { summary, build } = preview;
+                const duplicates = preview.inFileDuplicates + preview.storedDuplicates;
+                const reasons = REVIEW_REASONS.filter(r => summary.reasons[r] > 0);
+                return (
+                  <>
+                    {/* Rows no date can be given to: trip_date is NOT NULL, and none is invented. */}
+                    {build.heldBackNoDate > 0 && (
+                      <Notice tone="danger">
+                        {t('imp.notice.heldBack', {
+                          count: build.heldBackNoDate,
+                          rows: build.heldBackRows.join(', ') + (build.heldBackNoDate > build.heldBackRows.length ? ', …' : ''),
+                        })}
+                      </Notice>
+                    )}
 
-              {/* Rejection breakdown — only truly skipped rows */}
-              {stats && (stats.badDate + stats.badStartTime + stats.badEndTime + stats.missingDriver + stats.other) > 0 && (
-                <div className="p-3 rounded-lg space-y-2"
-                  style={{ background: 'var(--warning-subtle)', border: '1px solid var(--warning)' }}>
-                  <p className="text-sm font-medium" style={{ color: 'var(--warning)' }}>
-                    {t('imp.skippedRows', { count: stats.total - stats.valid - stats.canceled })}
-                  </p>
-                  <div className="text-xs space-y-1" style={{ color: 'var(--text-secondary)' }}>
-                    {stats.badDate > 0 && (
-                      <div>
-                        <p>{t('imp.reject.badDate', { count: stats.badDate })} — {t('imp.column')}: <b>"{stats.dateColName}"</b></p>
-                        {stats.sampleBadDate.length > 0 && (
-                          <p className="font-mono pl-2" style={{ color: 'var(--danger)' }}>
-                            {t('imp.examples')}: {stats.sampleBadDate.map(v => `"${v}"`).join(', ')}
+                    {summary.unknown > 0 && (
+                      <Notice tone="danger">
+                        {t('imp.notice.unknownStatus', { count: summary.unknown })}
+                        {statusColName ? ` (${t('imp.columnNamed', { column: statusColName })})` : ` ${t('imp.notice.noStatusColumn')}`}
+                      </Notice>
+                    )}
+
+                    {summary.cancelled > 0 && (
+                      <Notice tone="warning">
+                        {t('imp.canceledNotice', { count: summary.cancelled })}
+                        {statusColName ? ` (${t('imp.columnNamed', { column: statusColName })})` : ''}
+                      </Notice>
+                    )}
+
+                    {summary.needsReview > 0 && (
+                      <Notice tone="warning">
+                        <p>{t('imp.notice.needsReview', { count: summary.needsReview })}</p>
+                        <ul className="list-disc pl-5 text-xs text-[color:var(--text-secondary)]">
+                          {reasons.map(reason => (
+                            <li key={reason}>
+                              {t('imp.reasonCount', { label: t(REASON_LABEL_KEYS[reason]), count: summary.reasons[reason] })}
+                            </li>
+                          ))}
+                        </ul>
+                        {build.sampleUnreadableStart.length > 0 && (
+                          <p className="text-xs text-[color:var(--text-secondary)]">
+                            {t('imp.column')}: <b>"{colMap.start_time}"</b> — {t('imp.examples')}:{' '}
+                            <span className="font-mono">{build.sampleUnreadableStart.map(v => `"${String(v)}"`).join(', ')}</span>
                           </p>
                         )}
-                      </div>
+                      </Notice>
                     )}
-                    {stats.badStartTime > 0 && (
-                      <div>
-                        <p>{t('imp.reject.badStartTime', { count: stats.badStartTime })} — {t('imp.column')}: <b>"{stats.startTimeColName}"</b></p>
-                        {stats.sampleBadStartTime.length > 0 && (
-                          <p className="font-mono pl-2" style={{ color: 'var(--danger)' }}>
-                            {t('imp.examples')}: {stats.sampleBadStartTime.map(v => `"${v}"`).join(', ')}
-                          </p>
-                        )}
-                        <p className="pl-2" style={{ color: 'var(--text-tertiary)' }}>
-                          {t('imp.reject.checkColumnHint')}
-                        </p>
-                      </div>
+
+                    {duplicates > 0 && (
+                      <Notice tone="warning">{t('imp.notice.duplicates', { count: duplicates })}</Notice>
                     )}
-                    {stats.badEndTime    > 0 && <p>{t('imp.reject.badEndTime')}: {stats.badEndTime}</p>}
-                    {stats.missingDriver > 0 && <p>{t('imp.reject.missingDriver')}: {stats.missingDriver}</p>}
-                    {stats.other         > 0 && <p>{t('imp.reject.other')}: {stats.other}</p>}
-                  </div>
-                </div>
-              )}
+
+                    {build.startDateDiffers > 0 && (
+                      <Notice tone="info">{t('imp.notice.startDateDiffers', { count: build.startDateDiffers })}</Notice>
+                    )}
+
+                    {preview.withoutInstant > 0 && (
+                      <Notice tone="info">{t('imp.notice.withoutInstant', { count: preview.withoutInstant })}</Notice>
+                    )}
+
+                    <Notice tone="info">
+                      <p>
+                        {orderTransmissionCol
+                          ? t('imp.notice.keyBasisOrder', { column: orderTransmissionCol })
+                          : t('imp.notice.keyBasisStart')}
+                      </p>
+                      <p>{t('imp.notice.currencyAssumed')}</p>
+                    </Notice>
+                  </>
+                );
+              })()}
 
               {unmatchedDrivers > 0 && (
                 <div className="flex items-start gap-2 p-3 rounded-lg"
@@ -1299,7 +1181,7 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
                 </div>
               )}
 
-              {validRows.length === 0 && (
+              {preview && validRows.length === 0 && (
                 <div className="flex items-start gap-2 p-4 rounded-lg"
                   style={{ background: 'var(--danger-subtle)', border: '1px solid var(--danger)' }}>
                   <AlertTriangle size={16} style={{ color: 'var(--danger)', flexShrink: 0, marginTop: 2 }} />
@@ -1314,35 +1196,40 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
                 </div>
               )}
 
-              {/* Preview table */}
+              {/* Preview table: the start as the file's clock read it, seconds kept */}
               {validRows.length > 0 && (
                 <div>
-                  <p className="text-xs font-medium mb-2" style={{ color: 'var(--text-tertiary)' }}>
+                  <p className="text-xs font-medium mb-2 text-[color:var(--text-tertiary)]">
                     {t('imp.previewTrips')}
                   </p>
-                  <div className="overflow-x-auto rounded-lg" style={{ border: '1px solid var(--border)' }}>
+                  <div className="overflow-x-auto rounded-lg border border-[color:var(--border)]">
                     <table className="w-full text-xs">
-                      <thead style={{ background: 'var(--bg-subtle)' }}>
+                      <thead className="bg-[color:var(--bg-subtle)]">
                         <tr>
                           {([
-                            'common.date', 'imp.th.start', 'imp.th.end', 'imp.th.originalDriver',
-                            'imp.th.plate', 'imp.th.price', 'imp.th.tip',
+                            'common.date', 'imp.th.startAt', 'imp.th.endAt', 'imp.th.originalDriver',
+                            'imp.th.plate', 'imp.th.price', 'imp.th.status',
                           ] as TranslationKey[]).map(headerKey => (
-                            <th key={headerKey} className="px-2 py-2 text-left font-medium whitespace-nowrap"
-                              style={{ color: 'var(--text-tertiary)' }}>{t(headerKey)}</th>
+                            <th key={headerKey}
+                              className="px-2 py-2 text-left font-medium whitespace-nowrap text-[color:var(--text-tertiary)]">
+                              {t(headerKey)}
+                            </th>
                           ))}
                         </tr>
                       </thead>
                       <tbody>
                         {validRows.slice(0, 10).map((r, i) => (
-                          <tr key={i} style={{ borderTop: '1px solid var(--border)' }}>
-                            <td className="px-2 py-1.5 whitespace-nowrap" style={{ color: 'var(--text-primary)' }}>{r.trip_date}</td>
-                            <td className="px-2 py-1.5 whitespace-nowrap" style={{ color: 'var(--text-primary)' }}>{r.start_time}</td>
-                            <td className="px-2 py-1.5 whitespace-nowrap" style={{ color: 'var(--text-primary)' }}>{r.end_time}</td>
-                            <td className="px-2 py-1.5 whitespace-nowrap" style={{ color: 'var(--text-primary)' }}>{r.original_driver_name}</td>
-                            <td className="px-2 py-1.5 whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{r.car_identifier || '-'}</td>
-                            <td className="px-2 py-1.5 whitespace-nowrap" style={{ color: 'var(--accent-text)' }}>{r.price_amount.toFixed(2)} €</td>
-                            <td className="px-2 py-1.5 whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{r.tip_amount.toFixed(2)} €</td>
+                          <tr key={i} className="border-t border-[color:var(--border)] text-[color:var(--text-primary)]">
+                            <td className="px-2 py-1.5 whitespace-nowrap tabular-nums">{formatIsoDate(r.trip_date)}</td>
+                            <td className="px-2 py-1.5 whitespace-nowrap tabular-nums">{r.start_at ? formatSourceWall(r.start_at) : (r.start_time ?? '—')}</td>
+                            <td className="px-2 py-1.5 whitespace-nowrap tabular-nums">{r.end_at ? formatSourceWall(r.end_at) : (r.end_time ?? '—')}</td>
+                            <td className="px-2 py-1.5 whitespace-nowrap">{r.original_driver_name || '—'}</td>
+                            <td className="px-2 py-1.5 whitespace-nowrap text-[color:var(--text-secondary)]">{r.car_identifier || '-'}</td>
+                            <td className="px-2 py-1.5 whitespace-nowrap tabular-nums text-[color:var(--accent-text)]">{formatEuro(r.price_amount)}</td>
+                            <td className="px-2 py-1.5 whitespace-nowrap">
+                              {t(STATUS_LABEL_KEYS[r.trip_status])}
+                              {r.needs_review && <span className="ml-1 text-[color:var(--warning)]">· {t('imp.th.review')}</span>}
+                            </td>
                           </tr>
                         ))}
                       </tbody>
@@ -1377,11 +1264,7 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
                 if (step === 1) buildDriverMatches();
                 if (step === 2) buildCarMatches();
                 const next = step + 1;
-                if (next === 4) {
-                  const result = buildTripRows();
-                  setBuiltResult(result);
-                  setParseStats(result.stats);
-                }
+                if (next === 4) void buildPreview(replaceImportId);
                 setStep(next);
               }}
               disabled={!canGoNext()}
@@ -1393,16 +1276,11 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
           ) : (
             <button
               onClick={handleImport}
-              disabled={importing || validRows.length === 0}
+              disabled={importing || previewLoading || validRows.length === 0}
               className="flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-semibold transition-opacity"
-              style={{ background: 'var(--success-solid)', color: 'white', opacity: importing || validRows.length === 0 ? 0.5 : 1 }}
+              style={{ background: 'var(--success-solid)', color: 'white', opacity: importing || previewLoading || validRows.length === 0 ? 0.5 : 1 }}
             >
-              {importing ? t('imp.importing') : (() => {
-                const valid    = validRows.filter(r => !r.is_canceled).length;
-                const canceled = validRows.filter(r =>  r.is_canceled).length;
-                if (canceled > 0) return t('imp.importWithCanceled', { valid, canceled });
-                return t('imp.importTrips', { count: valid });
-              })()}
+              {importing ? t('imp.importing') : t('imp.importTrips', { count: validRows.length })}
             </button>
           )}
         </div>

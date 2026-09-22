@@ -132,6 +132,14 @@ const FahrtenbuchTripsView: React.FC<Props> = ({ drivers, cars }) => {
   const uniquePlates = useMemo(() =>
     [...new Set(trips.map(trip => trip.car_identifier).filter(Boolean))].sort() as string[], [trips]);
 
+  // The same file uploaded again: the importer refuses it and offers this.
+  const handleOpenExistingImport = (importId: string) => {
+    setShowImportModal(false);
+    const imp = imports.find(i => i.id === importId);
+    if (imp) handleAnzeigen(imp);
+    else setSelectedImportId(importId);
+  };
+
   const handleImported = (importId: string) => {
     setShowImportModal(false);
     setSelectedImportId(importId);
@@ -607,6 +615,7 @@ const FahrtenbuchTripsView: React.FC<Props> = ({ drivers, cars }) => {
         isOpen={showImportModal}
         onClose={() => setShowImportModal(false)}
         onImported={handleImported}
+        onOpenExistingImport={handleOpenExistingImport}
         drivers={drivers}
         cars={cars}
         existingImports={imports}
