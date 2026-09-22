@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { exportStundennachweisAsPdf } from '../utils/stundennachweisPdfExport';
-import { ChevronLeft, ChevronRight, Download, RefreshCw, ArrowRight, User, Euro, Clock, StickyNote, Moon, Sun, Star, Save, FileSpreadsheet, AlertTriangle, CalendarRange, ChevronDown } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Download, RefreshCw, ArrowRight, Clock, StickyNote, Moon, Sun, Star, Save, FileSpreadsheet, AlertTriangle, CalendarRange, ChevronDown, Loader2 } from 'lucide-react';
 import { categorizeWarnings, formatDateDE, groupByDate, type WarningGroup } from '../utils/warningCategories';
 import { supabase } from '../lib/supabase';
 import { useCompanySettings } from '../contexts/CompanySettingsContext';
@@ -10,6 +10,26 @@ import { exportFahreruebersichtToExcel, SavedStundennachweis, DriverSummary } fr
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { useTranslation } from '../contexts/LanguageContext';
 import type { TranslationKey } from '../i18n';
+import {
+  Alert,
+  Badge,
+  Button,
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+  Field,
+  Input,
+  NativeSelect,
+  PageHeader,
+  Skeleton,
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+  cn,
+} from '../components/ui';
 
 // ─── Constants ─────────────────────────────────────────────────────────────
 
@@ -2137,19 +2157,6 @@ function exportPDF(data: PdfData, filename: string): void {
   );
 }
 
-// ─── Shared input style ─────────────────────────────────────────────────────
-
-const IS: React.CSSProperties = {
-  background: 'var(--bg-subtle)',
-  border: '1px solid var(--border)',
-  borderRadius: '0.5rem',
-  color: 'var(--text-primary)',
-  fontSize: '0.875rem',
-  padding: '0.625rem 0.875rem',
-  outline: 'none',
-  width: '100%',
-};
-
 // ─── 24-hour time input ─────────────────────────────────────────────────────
 //
 // Browser's <input type="time"> can display 12h format depending on locale.
@@ -2220,6 +2227,25 @@ const TimeInput: React.FC<{
   );
 };
 
+// ─── Step heading (phase 5) ─────────────────────────────────────────────────
+//
+// The numbered title of each step card. The number is decoration: the page's
+// subtitle already says "Schritt 1 von 2".
+
+function StepHeading({ number, title, subtitle }: { number: number; title: string; subtitle: React.ReactNode }) {
+  return (
+    <CardHeader className="flex-nowrap items-center justify-start gap-3 border-b border-line pb-4">
+      <span aria-hidden className="flex size-8 shrink-0 items-center justify-center rounded-full bg-brand text-sm font-semibold text-brand-fg">
+        {number}
+      </span>
+      <div className="min-w-0">
+        <CardTitle>{title}</CardTitle>
+        <CardDescription>{subtitle}</CardDescription>
+      </div>
+    </CardHeader>
+  );
+}
+
 // ─── Step 1 ─────────────────────────────────────────────────────────────────
 
 const Step1: React.FC<{
@@ -2232,60 +2258,44 @@ const Step1: React.FC<{
   const [year,  setYear]        = useState(new Date().getFullYear());
   const years = Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - 2 + i);
 
+  // Presentation (phase 5): the state above is unchanged; this only draws it.
   return (
-    <div className="max-w-lg mx-auto">
-      <div className="rounded-xl p-8 space-y-6"
-        style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-md)' }}>
-        <div className="flex items-center gap-3 pb-3" style={{ borderBottom: '1px solid var(--border)' }}>
-          <div className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold text-white"
-            style={{ background: 'var(--accent)' }}>1</div>
-          <div>
-            <h2 className="font-bold" style={{ color: 'var(--text-primary)' }}>{t('stn.step1.title')}</h2>
-            <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>{t('stn.step1.subtitle')}</p>
-          </div>
+    <Card className="mx-auto max-w-lg font-ui">
+      <StepHeading number={1} title={t('stn.step1.title')} subtitle={t('stn.step1.subtitle')} />
+      <CardContent className="grid gap-5">
+        <Field label={t('stn.step1.driverLabel')}>
+          <NativeSelect value={driverId} onChange={e => setDriverId(e.target.value)}>
+            <option value="">{t('stn.step1.driverPlaceholder')}</option>
+            {drivers.map(d => (
+              <option key={d.id} value={d.id}>
+                {d.name}{d.personalnummer ? ` — ${t('stn.step1.personnelNoShort', { value: d.personalnummer })}` : ''}
+              </option>
+            ))}
+          </NativeSelect>
+        </Field>
+        <div className="grid grid-cols-2 gap-4">
+          <Field label={t('stn.step1.monthLabel')}>
+            <NativeSelect value={month} onChange={e => setMonth(Number(e.target.value))}>
+              {MONTH_NAME_KEYS.map((key, i) => <option key={i+1} value={i+1}>{t(key)}</option>)}
+            </NativeSelect>
+          </Field>
+          <Field label={t('stn.step1.yearLabel')}>
+            <NativeSelect value={year} onChange={e => setYear(Number(e.target.value))}>
+              {years.map(y => <option key={y} value={y}>{y}</option>)}
+            </NativeSelect>
+          </Field>
         </div>
 
-        <div className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium mb-1.5" style={{ color: 'var(--text-secondary)' }}>
-              <User size={13} className="inline mr-1" />{t('stn.step1.driverLabel')}
-            </label>
-            <select value={driverId} onChange={e => setDriverId(e.target.value)} style={IS}>
-              <option value="">{t('stn.step1.driverPlaceholder')}</option>
-              {drivers.map(d => (
-                <option key={d.id} value={d.id}>
-                  {d.name}{d.personalnummer ? ` — ${t('stn.step1.personnelNoShort', { value: d.personalnummer })}` : ''}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium mb-1.5" style={{ color: 'var(--text-secondary)' }}>{t('stn.step1.monthLabel')}</label>
-              <select value={month} onChange={e => setMonth(Number(e.target.value))} style={IS}>
-                {MONTH_NAME_KEYS.map((key, i) => <option key={i+1} value={i+1}>{t(key)}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-1.5" style={{ color: 'var(--text-secondary)' }}>{t('stn.step1.yearLabel')}</label>
-              <select value={year} onChange={e => setYear(Number(e.target.value))} style={IS}>
-                {years.map(y => <option key={y} value={y}>{y}</option>)}
-              </select>
-            </div>
-          </div>
-        </div>
-
-        <button
+        <Button
+          size="lg"
+          className="w-full"
           onClick={() => driverId && onNext(driverId, month, year)}
           disabled={!driverId}
-          className="w-full py-3 rounded-lg font-semibold text-sm transition-all flex items-center justify-center gap-2"
-          style={driverId
-            ? { background: 'var(--accent)', color: 'var(--text-inverse)' }
-            : { background: 'var(--bg-muted)', color: 'var(--text-tertiary)', cursor: 'not-allowed' }}>
-          {t('stn.step1.next')} <ArrowRight size={15} />
-        </button>
-      </div>
-    </div>
+        >
+          {t('stn.step1.next')} <ArrowRight aria-hidden />
+        </Button>
+      </CardContent>
+    </Card>
   );
 };
 
@@ -2460,201 +2470,119 @@ const Step2: React.FC<Step2Props> = ({
     }, buildWorkWindow());
   };
 
-  // Shared tab button style
-  const tabBtn = (active: boolean): React.CSSProperties => ({
-    flex: 1,
-    padding: '0.5rem 0',
-    fontSize: '0.8125rem',
-    fontWeight: active ? 600 : 400,
-    borderRadius: '0.5rem',
-    border: 'none',
-    cursor: 'pointer',
-    transition: 'all 0.15s',
-    background:  active ? 'var(--accent)' : 'transparent',
-    color:       active ? 'var(--text-inverse)' : 'var(--text-secondary)',
-  });
-
+  // ── Presentation (phase 5) ────────────────────────────────────────────────
+  // The state, setters and both validators above are unchanged; this only
+  // draws them. The two tab buttons keep their onClick (switch the tab, clear
+  // the error) and every field its value and onChange. The tabs are Radix only
+  // for their look and keyboard focus: `activationMode="manual"` and no
+  // onValueChange, so the value changes through those same onClicks alone.
   return (
-    <div className="max-w-lg mx-auto">
-      <div className="rounded-xl p-8 space-y-5"
-        style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-md)' }}>
+    <Card className="mx-auto max-w-lg font-ui">
+      <StepHeading
+        number={2}
+        title={t('stn.step2.title')}
+        subtitle={<>{driver.name} — {t(MONTH_NAME_KEYS[month - 1])} {year}</>}
+      />
+      <CardContent className="grid gap-5">
+        <Tabs value={tab} activationMode="manual">
+          <TabsList variant="segmented" className="flex w-full">
+            <TabsTrigger value="salary" className="flex-1" onClick={() => { setTab('salary'); setErr(''); }}>
+              {t('stn.step2.tabSalary')}
+            </TabsTrigger>
+            <TabsTrigger value="totals" className="flex-1" onClick={() => { setTab('totals'); setErr(''); }}>
+              {t('stn.step2.tabTotals')}
+            </TabsTrigger>
+          </TabsList>
 
-        {/* ── Step header ── */}
-        <div className="flex items-center gap-3 pb-3" style={{ borderBottom: '1px solid var(--border)' }}>
-          <div className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold text-white"
-            style={{ background: 'var(--accent)' }}>2</div>
-          <div>
-            <h2 className="font-bold" style={{ color: 'var(--text-primary)' }}>{t('stn.step2.title')}</h2>
-            <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
-              {driver.name} — {t(MONTH_NAME_KEYS[month - 1])} {year}
-            </p>
-          </div>
-        </div>
+          {/* ── Tab 1: salary-based ── */}
+          {tab === 'salary' && (
+            <TabsContent value="salary" className="mt-5 grid gap-4">
+              <Alert tone="neutral" role="note">
+                <p>{t('stn.step2.salaryIntro')}</p>
+                <p className="mt-1 text-xs text-fg-subtle">{t('stn.step2.premiumHint')}</p>
+              </Alert>
+              <Field label={t('stn.step2.targetAmountLabel')}>
+                <Input type="text" inputMode="decimal" placeholder={t('stn.step2.targetAmountPlaceholder')}
+                  value={salary} onChange={e => setSalary(e.target.value)} />
+              </Field>
+              <Field label={t('stn.step2.hourlyRateLabel')} hint={t('stn.step2.hourlyRateHint')}>
+                <Input type="text" inputMode="decimal" placeholder={t('stn.step2.hourlyRatePlaceholder')}
+                  value={rate} onChange={e => setRate(e.target.value)} />
+              </Field>
+              <Field label={t('stn.step2.baseWageShareLabel')} hint={t('stn.step2.baseWageShareHint')}>
+                <Input type="text" inputMode="numeric" placeholder="85"
+                  value={glRatio} onChange={e => setGlRatio(e.target.value)} />
+              </Field>
+            </TabsContent>
+          )}
 
-        {/* ── Tab switcher ── */}
-        <div className="flex gap-1 p-1 rounded-lg" style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)' }}>
-          <button style={tabBtn(tab === 'salary')} onClick={() => { setTab('salary'); setErr(''); }}>
-            {t('stn.step2.tabSalary')}
-          </button>
-          <button style={tabBtn(tab === 'totals')} onClick={() => { setTab('totals'); setErr(''); }}>
-            {t('stn.step2.tabTotals')}
-          </button>
-        </div>
-
-        {/* ── Tab 1: salary-based ── */}
-        {tab === 'salary' && (
-          <div className="space-y-4">
-            <div className="rounded-lg p-3.5 text-sm space-y-1.5"
-              style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)' }}>
-              <p style={{ color: 'var(--text-secondary)' }}>
-                {t('stn.step2.salaryIntro')}
-              </p>
-              <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
-                {t('stn.step2.premiumHint')}
-              </p>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium mb-1.5" style={{ color: 'var(--text-secondary)' }}>
-                <Euro size={13} className="inline mr-1" />{t('stn.step2.targetAmountLabel')}
-              </label>
-              <input type="text" inputMode="decimal" placeholder={t('stn.step2.targetAmountPlaceholder')}
-                value={salary} onChange={e => setSalary(e.target.value)} style={IS} />
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-1.5" style={{ color: 'var(--text-secondary)' }}>
-                <Clock size={13} className="inline mr-1" />{t('stn.step2.hourlyRateLabel')}
-              </label>
-              <input type="text" inputMode="decimal" placeholder={t('stn.step2.hourlyRatePlaceholder')}
-                value={rate} onChange={e => setRate(e.target.value)} style={IS} />
-              <p className="text-xs mt-1" style={{ color: 'var(--text-tertiary)' }}>{t('stn.step2.hourlyRateHint')}</p>
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-1.5" style={{ color: 'var(--text-secondary)' }}>
-                {t('stn.step2.baseWageShareLabel')}
-              </label>
-              <input type="text" inputMode="numeric" placeholder="85"
-                value={glRatio} onChange={e => setGlRatio(e.target.value)} style={IS} />
-              <p className="text-xs mt-1" style={{ color: 'var(--text-tertiary)' }}>
-                {t('stn.step2.baseWageShareHint')}
-              </p>
-            </div>
-          </div>
-        )}
-
-        {/* ── Tab 2: totals-based ── */}
-        {tab === 'totals' && (
-          <div className="space-y-4">
-            <div className="rounded-lg p-3.5 text-sm"
-              style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)' }}>
-              <p style={{ color: 'var(--text-secondary)' }}>
-                {t('stn.step2.totalsIntro')}
-              </p>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-sm font-medium mb-1.5" style={{ color: 'var(--text-secondary)' }}>
-                  {t('stn.step2.baseWageHoursLabel')}
-                </label>
-                <input type="text" inputMode="decimal" placeholder={t('stn.step2.hoursPlaceholder143')}
-                  value={tGrundlohn} onChange={e => setTGrundlohn(e.target.value)} style={IS} />
+          {/* ── Tab 2: totals-based ── */}
+          {tab === 'totals' && (
+            <TabsContent value="totals" className="mt-5 grid gap-4">
+              <Alert tone="neutral" role="note">{t('stn.step2.totalsIntro')}</Alert>
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <Field label={t('stn.step2.baseWageHoursLabel')}>
+                  <Input type="text" inputMode="decimal" placeholder={t('stn.step2.hoursPlaceholder143')}
+                    value={tGrundlohn} onChange={e => setTGrundlohn(e.target.value)} />
+                </Field>
+                <Field label={t('stn.step2.nightHoursLabel')} hint={t('stn.step2.nightWindowHint')}>
+                  <Input type="text" inputMode="decimal" placeholder={t('stn.step2.hoursPlaceholder4')}
+                    value={tNacht} onChange={e => setTNacht(e.target.value)} />
+                </Field>
+                <Field label={t('stn.step2.night04HoursLabel')}>
+                  <Input type="text" inputMode="decimal" placeholder={t('stn.step2.hoursPlaceholder2')}
+                    value={tNacht04} onChange={e => setTNacht04(e.target.value)} />
+                </Field>
+                <Field label={t('stn.step2.sundayHoursLabel')}>
+                  <Input type="text" inputMode="decimal" placeholder={t('stn.step2.hoursPlaceholder1')}
+                    value={tSonntag} onChange={e => setTSonntag(e.target.value)} />
+                </Field>
+                <Field label={t('stn.step2.holidayHoursLabel')}>
+                  <Input type="text" inputMode="decimal" placeholder={t('stn.step2.hoursPlaceholder1')}
+                    value={tFeiertag} onChange={e => setTFeiertag(e.target.value)} />
+                </Field>
               </div>
-              <div>
-                <label className="block text-sm font-medium mb-1.5" style={{ color: 'var(--text-secondary)' }}>
-                  {t('stn.step2.nightHoursLabel')}
-                </label>
-                <input type="text" inputMode="decimal" placeholder={t('stn.step2.hoursPlaceholder4')}
-                  value={tNacht} onChange={e => setTNacht(e.target.value)} style={IS} />
-                <p className="text-xs mt-1" style={{ color: 'var(--text-tertiary)' }}>{t('stn.step2.nightWindowHint')}</p>
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-1.5" style={{ color: 'var(--text-secondary)' }}>
-                  {t('stn.step2.night04HoursLabel')}
-                </label>
-                <input type="text" inputMode="decimal" placeholder={t('stn.step2.hoursPlaceholder2')}
-                  value={tNacht04} onChange={e => setTNacht04(e.target.value)} style={IS} />
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-1.5" style={{ color: 'var(--text-secondary)' }}>
-                  {t('stn.step2.sundayHoursLabel')}
-                </label>
-                <input type="text" inputMode="decimal" placeholder={t('stn.step2.hoursPlaceholder1')}
-                  value={tSonntag} onChange={e => setTSonntag(e.target.value)} style={IS} />
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-1.5" style={{ color: 'var(--text-secondary)' }}>
-                  {t('stn.step2.holidayHoursLabel')}
-                </label>
-                <input type="text" inputMode="decimal" placeholder={t('stn.step2.hoursPlaceholder1')}
-                  value={tFeiertag} onChange={e => setTFeiertag(e.target.value)} style={IS} />
-              </div>
-            </div>
-          </div>
-        )}
+            </TabsContent>
+          )}
+        </Tabs>
 
         {/* ── Arbeitszeitfenster (read-only, aus Fahrerprofil) ── */}
-        <div className="rounded-xl p-4 space-y-3 pt-4" style={{ borderTop: '1px solid var(--border)' }}>
-          <div className="flex items-center gap-2">
-            <Clock size={14} style={{ color: 'var(--accent-text)' }} />
-            <span className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
-              {t('stn.step2.workWindowTitle')}
-            </span>
-          </div>
+        <div className="grid gap-3 border-t border-line pt-5">
+          <h3 className="flex items-center gap-2 text-sm font-semibold text-fg">
+            <Clock aria-hidden className="size-4 text-brand-text" />
+            {t('stn.step2.workWindowTitle')}
+          </h3>
 
           {hasProfileWindow ? (
-            <div className="rounded-lg px-3 py-2.5 text-sm" style={{
-              background: 'var(--bg-subtle)',
-              border: '1px solid var(--border)',
-              color: 'var(--text-primary)',
-            }}>
-              <div className="font-medium">
+            <div className="rounded-control border border-line bg-sunken px-3 py-2.5 text-sm">
+              <p className="font-medium tabular-nums text-fg">
                 {formatProfileWeekdays(allowedDows, t)}
                 {profileStart && profileEnd && ` · ${profileStart}–${profileEnd}`}
-              </div>
-              <p className="text-xs mt-1" style={{ color: 'var(--text-tertiary)' }}>
+              </p>
+              <p className="mt-1 text-xs text-fg-muted">
                 {t('stn.step2.workWindowHint')}
               </p>
             </div>
           ) : (
-            <div className="rounded-lg px-3 py-2.5 text-sm" style={{
-              background: 'var(--warning-subtle, #fff7e6)',
-              border: '1px solid var(--warning)',
-              color: 'var(--warning)',
-            }}>
-              <div className="font-semibold">{t('stn.step2.noWorkWindowTitle')}</div>
-              <p className="text-xs mt-1" style={{ color: 'var(--text-secondary)' }}>
-                {t('stn.step2.noWorkWindowHint')}
-              </p>
-            </div>
+            <Alert tone="caution" title={t('stn.step2.noWorkWindowTitle')}>
+              {t('stn.step2.noWorkWindowHint')}
+            </Alert>
           )}
         </div>
 
-        {err && (
-          <p className="text-sm px-3 py-2 rounded-lg" style={{ color: 'var(--danger)', background: 'var(--danger-subtle)' }}>
-            {err}
-          </p>
-        )}
+        {err && <Alert tone="critical">{err}</Alert>}
 
         {/* ── Action buttons ── */}
-        <div className="flex gap-3">
-          <button onClick={onBack} className="flex-1 py-3 rounded-lg font-medium text-sm transition-all"
-            style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)', background: 'transparent' }}
-            onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-subtle)')}
-            onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
+        <div className="flex flex-col-reverse gap-3 sm:flex-row">
+          <Button variant="secondary" size="lg" className="sm:flex-1" onClick={onBack}>
             {t('common.back')}
-          </button>
-          <button
-            onClick={tab === 'salary' ? goSalary : goTotals}
-            className="px-6 py-3 rounded-lg font-semibold text-sm transition-all flex items-center justify-center gap-2"
-            style={{ background: 'var(--accent)', color: 'var(--text-inverse)', flex: 2 }}
-            onMouseEnter={e => (e.currentTarget.style.background = 'var(--accent-hover)')}
-            onMouseLeave={e => (e.currentTarget.style.background = 'var(--accent)')}>
-            {t('stn.step2.generate')} <ArrowRight size={15} />
-          </button>
+          </Button>
+          <Button size="lg" className="sm:flex-[2]" onClick={tab === 'salary' ? goSalary : goTotals}>
+            {t('stn.step2.generate')} <ArrowRight aria-hidden />
+          </Button>
         </div>
-      </div>
-    </div>
+      </CardContent>
+    </Card>
   );
 };
 
@@ -3734,9 +3662,19 @@ const StundennachweisPage: React.FC = () => {
     navigate('/dokumente');
   };
 
+  // ── Presentation (phase 5) ────────────────────────────────────────────────
+  // The header, the progress bar, both steps and the waiting states are drawn
+  // on the design system. The sheet below them — the summary bar, the notes,
+  // the duration limits, the warnings and the Timesheet document — is the
+  // legacy markup, unchanged: it computes as it draws (the salary range check,
+  // the working-day count, each violation's date label), and a look-only change
+  // does not move computation. The header's actions keep their handlers and
+  // their guards: save and export stay refused while a limit is exceeded.
   if (loadingD) return (
-    <div className="flex items-center justify-center h-64">
-      <div className="animate-spin rounded-full h-10 w-10 border-b-2" style={{ borderColor: 'var(--accent)' }} />
+    <div className="grid gap-6 font-ui" aria-busy>
+      <p className="sr-only">{t('common.loading')}</p>
+      <Skeleton className="h-9 w-64" />
+      <Skeleton className="mx-auto h-80 w-full max-w-lg rounded-surface" />
     </div>
   );
 
@@ -3744,81 +3682,68 @@ const StundennachweisPage: React.FC = () => {
     <div className="space-y-6">
 
       {/* ── Header ── */}
-      <div className="rounded-xl p-5 text-white"
-        style={{ background: 'linear-gradient(to right, var(--accent), var(--accent-hover))', boxShadow: 'var(--shadow-md)' }}>
-        <div className="flex items-center justify-between flex-wrap gap-3">
-          <div className="flex items-center gap-3">
-            <button onClick={goBack} className="p-2 rounded-lg transition-all hover:bg-white/20">
-              <ChevronLeft size={20} />
-            </button>
-            <div>
-              <div className="flex items-center gap-2 flex-wrap">
-                {/* "Stundennachweis" is domain vocabulary and stays German. */}
-                <h1 className="text-2xl font-bold">Stundennachweis</h1>
-                {step === 'sheet' && isFromArchive && (
-                  <span className="px-2 py-0.5 rounded-full text-xs font-semibold"
-                    style={{ background: 'rgba(255,255,255,0.2)', color: 'white', border: '1px solid rgba(255,255,255,0.35)' }}>
-                    {t('stn.header.savedVersion')}
-                  </span>
-                )}
-                {step === 'sheet' && generationSource === 'fahrtenbuch' && (
-                  <span className="px-2 py-0.5 rounded-full text-xs font-semibold"
-                    style={{ background: 'rgba(255,255,255,0.15)', color: 'rgba(255,255,255,0.9)', border: '1px solid rgba(255,255,255,0.25)' }}>
-                    {t('stn.header.sourceFahrtenbuch')}
-                  </span>
-                )}
-              </div>
-              <p className="text-sm mt-0.5" style={{ color: 'rgba(255,255,255,0.8)' }}>
-                {step === 'step1' && t('stn.header.step1')}
-                {step === 'step2' && t('stn.header.step2')}
-                {step === 'sheet' && selDriver && (
-                  <>
-                    {`${selDriver.name} — ${t(MONTH_NAME_KEYS[selMonth-1])} ${selYear}`}
-                    {isFromArchive && savedAt && (
-                      <span className="ml-2" style={{ color: 'rgba(255,255,255,0.65)' }}>
-                        {t('stn.header.lastSaved', {
-                          timestamp: new Date(savedAt).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }),
-                        })}
-                      </span>
-                    )}
-                  </>
-                )}
-              </p>
-            </div>
-          </div>
-          {step === 'sheet' && (
-            <div className="flex items-center gap-2 flex-wrap">
-              <button onClick={handleSave} disabled={saving || hasDurationViolations}
-                title={hasDurationViolations ? t('stn.action.saveBlocked') : undefined}
-                className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all hover:bg-white/20 disabled:opacity-50 disabled:cursor-not-allowed"
-                style={{ border: '1px solid rgba(255,255,255,0.4)', color: 'white' }}>
-                <Save size={14} />
+      <div className="font-ui">
+        <Button variant="ghost" size="sm" className="-ml-2 mb-2" onClick={goBack}>
+          <ChevronLeft aria-hidden />
+          {t('common.back')}
+        </Button>
+        <PageHeader
+          className="pb-0"
+          // "Stundennachweis" is domain vocabulary and stays German.
+          title="Stundennachweis"
+          description={
+            <>
+              {step === 'step1' && t('stn.header.step1')}
+              {step === 'step2' && t('stn.header.step2')}
+              {step === 'sheet' && selDriver && (
+                <>
+                  {`${selDriver.name} — ${t(MONTH_NAME_KEYS[selMonth-1])} ${selYear}`}
+                  {isFromArchive && savedAt && (
+                    <span className="ml-2 text-fg-subtle">
+                      {t('stn.header.lastSaved', {
+                        timestamp: new Date(savedAt).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }),
+                      })}
+                    </span>
+                  )}
+                </>
+              )}
+            </>
+          }
+          actions={step === 'sheet' ? (
+            <>
+              <Button variant="secondary" onClick={handleSave} disabled={saving || hasDurationViolations}
+                title={hasDurationViolations ? t('stn.action.saveBlocked') : undefined}>
+                <Save aria-hidden />
                 {saving ? t('stn.action.saving') : saveSuccess ? t('stn.action.saved') : isFromArchive ? t('common.update') : t('common.save')}
-              </button>
-              <button onClick={handleRegenerate} disabled={generating}
-                className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all hover:bg-white/20"
-                style={{ border: '1px solid rgba(255,255,255,0.4)', color: 'white' }}>
-                <RefreshCw size={14} className={generating ? 'animate-spin' : ''} />
+              </Button>
+              <Button variant="secondary" onClick={handleRegenerate} disabled={generating}>
+                <RefreshCw aria-hidden className={generating ? 'animate-spin' : ''} />
                 {generating ? t('stn.action.generating') : t('stn.action.regenerate')}
-              </button>
-              <button onClick={handleExport} disabled={exporting || hasDurationViolations}
-                title={hasDurationViolations ? t('stn.action.exportBlocked') : undefined}
-                className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
-                style={{ background: 'white', color: 'var(--accent)' }}>
-                <Download size={14} />
+              </Button>
+              <Button onClick={handleExport} disabled={exporting || hasDurationViolations}
+                title={hasDurationViolations ? t('stn.action.exportBlocked') : undefined}>
+                <Download aria-hidden />
                 {exporting ? t('stn.action.exporting') : t('stn.action.exportPdf')}
-              </button>
-            </div>
-          )}
-        </div>
+              </Button>
+            </>
+          ) : undefined}
+        >
+          <div className="flex flex-wrap gap-2 empty:hidden">
+            {step === 'sheet' && isFromArchive && (
+              <Badge tone="brand">{t('stn.header.savedVersion')}</Badge>
+            )}
+            {step === 'sheet' && generationSource === 'fahrtenbuch' && (
+              <Badge>{t('stn.header.sourceFahrtenbuch')}</Badge>
+            )}
+          </div>
+        </PageHeader>
       </div>
 
       {/* ── Progress bar ── */}
       {(step === 'step1' || step === 'step2') && (
-        <div className="max-w-lg mx-auto flex items-center gap-2">
-          <div className="flex-1 h-1.5 rounded-full" style={{ background: 'var(--accent)' }} />
-          <div className="flex-1 h-1.5 rounded-full"
-            style={{ background: step === 'step2' ? 'var(--accent)' : 'var(--bg-muted)' }} />
+        <div aria-hidden className="mx-auto flex max-w-lg items-center gap-2">
+          <div className="h-1.5 flex-1 rounded-full bg-brand" />
+          <div className={cn('h-1.5 flex-1 rounded-full', step === 'step2' ? 'bg-brand' : 'bg-sunken')} />
         </div>
       )}
 
@@ -3835,8 +3760,9 @@ const StundennachweisPage: React.FC = () => {
       )}
 
       {step === 'sheet' && generating && (
-        <div className="flex items-center justify-center h-32">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2" style={{ borderColor: 'var(--accent)' }} />
+        <div role="status" className="flex h-32 items-center justify-center font-ui">
+          <Loader2 aria-hidden className="size-8 text-brand-text motion-safe:animate-spin" />
+          <span className="sr-only">{t('stn.action.generating')}</span>
         </div>
       )}
 
