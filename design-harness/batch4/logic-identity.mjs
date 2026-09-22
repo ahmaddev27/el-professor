@@ -65,9 +65,156 @@ const UNTOUCHED = [
 ];
 
 // ─── 2. Verbatim blocks, per file ────────────────────────────────────────────
-// [first line, last line] as they read in the base file (trailing space ignored).
+// Each block is named by its first and last line as they read in the base file
+// (trailing space ignored). `last` is the first such line at or after `first` —
+// or, with `after`, the first one after the line `after`, for a closing `  };`
+// that would otherwise match an earlier handler's.
 
-const BLOCKS = {};
+const block = (first, last, after) => ({ first, last, after });
+/** One line on its own: a block that is its own first and last line. */
+const line = text => block(text, text);
+/**
+ * A condition that decides what is shown, found in the base and in the new
+ * file with its indentation and line breaks ignored — markup around it moves,
+ * the test itself must not change.
+ */
+const expression = text => ({ expression: text });
+
+const BLOCKS = {
+  'src/components/LoginForm.tsx': [
+    // Imports that stayed; the rest were markup's (the icons, LanguageSwitcher).
+    line("import { useAuth, BLOCK_MESSAGE_KEYS } from '../contexts/AuthContext';"),
+    line("import { useTranslation } from '../contexts/LanguageContext';"),
+    line("import GoogleButton from './auth/GoogleButton';"),
+    // toErrorKey, isUnconfirmedEmail, the state, the notice effect, handleSubmit.
+    block('/**', '  };', '  const handleSubmit = async (e: React.FormEvent) => {'),
+  ],
+  'src/components/auth/GoogleButton.tsx': [
+    // Imports, GoogleMark, the settings read and the press: everything but the markup.
+    block("import React, { useEffect, useState } from 'react';", '  };', '  const press = async () => {'),
+  ],
+  'src/components/auth/OtpCodeInput.tsx': [
+    block("import React, { useEffect, useId, useRef } from 'react';", "import type { AuthSurface } from './authStyles';"),
+    block('export interface OtpCodeInputProps {', '  };', '  const handleFocus = (index: number, event: React.FocusEvent<HTMLInputElement>) => {'),
+  ],
+  'src/components/auth/OtpChallenge.tsx': [
+    block("import React, { useEffect, useId, useRef, useState } from 'react';", "import OtpCodeInput from './OtpCodeInput';"),
+    // Props, verify, resend, and the derived recipient / verifyDisabled / resendDisabled / describedBy.
+    block('export interface OtpChallengeProps {', "  const describedBy = hint === null ? alertId : `${hintId} ${alertId}`;"),
+  ],
+  'src/components/auth/NoticeBox.tsx': [
+    block("  const Icon = tone === 'error' ? AlertCircle : CheckCircle2;", "  const role = announce ? (tone === 'error' ? 'alert' : 'status') : undefined;"),
+  ],
+  'src/components/LanguageSwitcher.tsx': [
+    block('  const { language, setLanguage, t } = useTranslation();', '  }, [isOpen]);'),
+    line('  const active = LANGUAGES.find(l => l.code === language);'),
+    line('                onClick={() => { setLanguage(option.code); setIsOpen(false); }}'),
+  ],
+  'src/pages/ForgotPasswordPage.tsx': [
+    block("import React, { useState } from 'react';", "import OtpChallenge from '../components/auth/OtpChallenge';"),
+    block('type Challenge = { email: string; cooldownSeconds: number; notice: OtpNotice };', '  };', '  const handleVerified = async (result: OtpVerifySuccess): Promise<OtpVerifyFailure | void> => {'),
+  ],
+  'src/pages/VerifyEmailPage.tsx': [
+    block("import React, { useState } from 'react';", "import OtpChallenge from '../components/auth/OtpChallenge';"),
+    block('type Challenge = { email: string; cooldownSeconds: number; notice: OtpNotice | null };', '  };', '  const handleFailure = (result: OtpVerifyFailure): boolean => {'),
+  ],
+  'src/pages/SetPasswordPage.tsx': [
+    block("import React, { useEffect, useState } from 'react';", "import EmphasizedText from '../components/auth/EmphasizedText';"),
+    // MIN_LEN, the session and profile read, the platform-role question, handleSubmit.
+    block('const MIN_LEN = 8;', '  };', "      setTimeout(() => navigate('/', { replace: true }), 1200);"),
+  ],
+  'src/pages/InviteAcceptPage.tsx': [
+    block("import React, { useState } from 'react';", "import OtpChallenge from '../components/auth/OtpChallenge';"),
+    block('/**', '  };', '  const handleVerified = async (result: OtpVerifySuccess): Promise<OtpVerifyFailure | void> => {'),
+  ],
+  // The takeovers: their logic is the hooks they read; what each says and
+  // what its button does is checked by the call and attribute checks.
+  'src/pages/AccountBlockedPage.tsx': [
+    block("import { useAuth, BLOCK_MESSAGE_KEYS, BlockReason } from '../contexts/AuthContext';", "import { useTranslation } from '../contexts/LanguageContext';"),
+    block('/**', '  const { t } = useTranslation();'),
+  ],
+  'src/pages/PendingApprovalPage.tsx': [
+    block("import { useAuth } from '../contexts/AuthContext';", "import { useTranslation } from '../contexts/LanguageContext';"),
+    block('interface PendingApprovalPageProps {', '  const { t } = useTranslation();'),
+  ],
+  'src/pages/RejectedPage.tsx': [
+    block("import { useAuth } from '../contexts/AuthContext';", "import { useTranslation } from '../contexts/LanguageContext';"),
+    block('const RejectedPage: React.FC = () => {', '  const { t } = useTranslation();'),
+    expression('{rejectionReason && ('),
+  ],
+  'src/pages/CompanySuspendedPage.tsx': [
+    block("import { useAuth } from '../contexts/AuthContext';", "import { useTranslation } from '../contexts/LanguageContext';"),
+    block('const CompanySuspendedPage: React.FC = () => {', '  const { t } = useTranslation();'),
+  ],
+};
+
+// ─── 4. Attributes that behave ───────────────────────────────────────────────
+// A field's `required`, a button's `disabled={…}`, a form's `onSubmit={…}`: the
+// behaviour that lives in markup. Every one in the base must be in the new file
+// with the same text. `type="button"` is exempt — the design-system Button
+// defaults to it — and so are the per-file moves listed in MOVED_ATTRIBUTES.
+
+const BEHAVIOUR_ATTRIBUTES = [
+  'onClick', 'onSubmit', 'onChange', 'onKeyDown', 'onPaste', 'onFocus', 'onBack', 'onVerified', 'onFailure',
+  'onResendFailure', 'onError', 'onSave', 'onClose', 'onConfirm', 'onComplete', 'onApplied', 'onRemoved',
+  'onPlanChange', 'onCarLimitChange', 'onBillingCycleChange', 'onDiscountChange', 'onSignOut', 'onToggleView',
+  'onToggleEdit', 'disabled', 'value', 'checked', 'type', 'minLength', 'maxLength', 'pattern', 'inputMode',
+  'autoComplete', 'accept', 'to', 'href', 'id', 'name', 'min', 'max', 'step', 'purpose', 'email', 'from',
+  'selection', 'labelKey', 'hintKey', 'initialCooldownSeconds', 'initialNotice', 'hint', 'reason',
+];
+const BARE_BOOLEANS = ['required', 'autoFocus', 'noValidate', 'replace', 'divider'];
+
+/** Attribute texts in the base that the new file may lack, with the reason. */
+const SUPPORT_LINK_MOVED = {
+  'href="mailto:support@el-professor.de"':
+    'drawn by components/auth/AccountStatusPage.tsx, the four takeovers\' shared frame, with the same address',
+};
+const MOVED_ATTRIBUTES = {
+  'src/pages/AccountBlockedPage.tsx': SUPPORT_LINK_MOVED,
+  'src/pages/PendingApprovalPage.tsx': SUPPORT_LINK_MOVED,
+  'src/pages/RejectedPage.tsx': SUPPORT_LINK_MOVED,
+  'src/pages/CompanySuspendedPage.tsx': SUPPORT_LINK_MOVED,
+};
+
+function attributeTexts(text) {
+  const found = [];
+  const pattern = new RegExp(`\\s(${BEHAVIOUR_ATTRIBUTES.join('|')})=`, 'g');
+  for (const match of text.matchAll(pattern)) {
+    const start = match.index + 1;
+    const valueStart = start + match[1].length + 1;
+    const opener = text[valueStart];
+    let end = valueStart;
+    if (opener === '"' || opener === "'") {
+      end = text.indexOf(opener, valueStart + 1) + 1;
+    } else if (opener === '{') {
+      let depth = 0;
+      let quote = '';
+      for (let i = valueStart; i < text.length; i += 1) {
+        const char = text[i];
+        if (quote) {
+          if (char === '\\') i += 1;
+          else if (char === quote) quote = '';
+          continue;
+        }
+        if (char === '"' || char === "'" || char === '`') quote = char;
+        else if (char === '{') depth += 1;
+        else if (char === '}') {
+          depth -= 1;
+          if (depth === 0) {
+            end = i + 1;
+            break;
+          }
+        }
+      }
+    } else {
+      continue;
+    }
+    found.push(text.slice(start, end));
+  }
+  return found;
+}
+
+const bareCount = (text, name) => [...text.matchAll(new RegExp(`\\s${name}(?=[\\s/>])(?!\\s*=)`, 'g'))].length;
 
 // ─── 3. Call sites ───────────────────────────────────────────────────────────
 
@@ -136,17 +283,30 @@ for (const [path, blocks] of Object.entries(BLOCKS)) {
   const covered = new Array(lines.length).fill(false);
   let blockFailures = 0;
 
-  for (const [first, last] of blocks) {
+  let expressions = 0;
+  for (const { first, last, after: afterLine, expression: condition } of blocks) {
+    if (condition !== undefined) {
+      expressions += 1;
+      if (!squash(before).includes(squash(condition))) {
+        fail(`${path}: condition "${condition}" not found in the base`);
+        blockFailures += 1;
+      } else if (!squash(after).includes(squash(condition))) {
+        fail(`${path}: condition "${condition}" is not in the new file`);
+        blockFailures += 1;
+      }
+      continue;
+    }
     const from = lines.indexOf(first);
-    const to = from < 0 ? -1 : lines.findIndex((line, index) => index >= from && line === last);
+    const afterIndex = afterLine === undefined ? from : lines.findIndex((text, index) => index >= from && text === afterLine);
+    const to = from < 0 || afterIndex < 0 ? -1 : lines.findIndex((text, index) => index >= afterIndex && text === last);
     if (from < 0 || to < 0) {
       fail(`${path}: block "${first.trim()}" … "${last.trim()}" not found in the base`);
       blockFailures += 1;
       continue;
     }
-    const block = before.split('\n').slice(from, to + 1).join('\n');
+    const verbatim = before.split('\n').slice(from, to + 1).join('\n');
     for (let i = from; i <= to; i += 1) covered[i] = true;
-    if (!after.includes(block)) {
+    if (!after.includes(verbatim)) {
       fail(`${path}: lines ${from + 1}–${to + 1} ("${first.trim()}") are not verbatim in the new file`);
       blockFailures += 1;
     }
@@ -165,9 +325,22 @@ for (const [path, blocks] of Object.entries(BLOCKS)) {
   }
   for (const text of missing) fail(`${path}: call not found in the new file: ${text}`);
 
+  // Attributes: every behaving attribute in the base, text and all, is in the new file.
+  const moved = MOVED_ATTRIBUTES[path] ?? {};
+  const attributes = attributeTexts(before).filter(text => text !== 'type="button"');
+  const lostAttributes = attributes.filter(text => !afterSquashed.includes(squash(text)) && !(text in moved));
+  for (const text of lostAttributes) fail(`${path}: attribute not found in the new file: ${text.split('\n')[0]}`);
+  for (const [text, reason] of Object.entries(moved)) console.log(`       moved ${text} — ${reason}`);
+  const lostBooleans = BARE_BOOLEANS.filter(name => bareCount(after, name) < bareCount(before, name) && !(name in moved));
+  for (const name of lostBooleans) {
+    fail(`${path}: \`${name}\` appears ${bareCount(before, name)}× in the base, ${bareCount(after, name)}× in the new file`);
+  }
+
   const coveredCount = covered.filter(Boolean).length;
+  const ok = !blockFailures && !missing.length && !lostAttributes.length && !lostBooleans.length;
   console.log(
-    `  ${blockFailures || missing.length ? 'FAIL' : 'ok  '} ${path}: ${blocks.length} blocks, ${coveredCount} of ${lines.length} base lines verbatim; ${calls} calls, ${calls - missing.length} found`,
+    `  ${ok ? 'ok  ' : 'FAIL'} ${path}: ${blocks.length} blocks, ${coveredCount} of ${lines.length} base lines verbatim; ` +
+      `${calls - missing.length}/${calls} calls; ${attributes.length - lostAttributes.length}/${attributes.length} attributes`,
   );
   if (verbose) {
     let start = -1;

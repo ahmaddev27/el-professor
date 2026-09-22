@@ -17,12 +17,8 @@ import EmphasizedText from '../components/auth/EmphasizedText';
 import GoogleButton from '../components/auth/GoogleButton';
 import NoticeBox from '../components/auth/NoticeBox';
 import OtpChallenge from '../components/auth/OtpChallenge';
-import {
-  authInputClass,
-  authLabelClass,
-  authPrimaryButtonClass,
-  authSpinnerClass,
-} from '../components/auth/authStyles';
+import { authFieldIconClass, authFieldWithIconClass } from '../components/auth/authStyles';
+import { Button, Field, Input } from '../components/ui';
 
 /**
  * `/einladung`: an invited employee enters the code from the invitation mail,
@@ -75,27 +71,34 @@ const InviteAcceptPage: React.FC = () => {
     if (!signedIn) return { ok: false, reason: 'session_failed' };
   };
 
+  // ── Presentation (phase 5) ────────────────────────────────────────────────
+  // Everything above is unchanged. The three states are drawn in the order the
+  // old renderBody checked them: another account signed in, the code, the
+  // address.
+
   const renderBody = () => {
     if (user) {
       return (
-        <div className="space-y-5">
-          <p className="text-white/70 text-sm leading-relaxed break-words">
+        <div className="grid gap-5">
+          <p className="break-words text-sm leading-relaxed text-fg-muted">
             <EmphasizedText
               template={t('invite.accept.signedInAs')}
               placeholder="email"
               value={user.email ?? ''}
-              className="text-cyan-300"
+              className="font-medium text-fg"
             />
           </p>
-          <button
+          <Button
             type="button"
+            size="lg"
             onClick={() => { void signOutAndContinue(); }}
             disabled={signingOut}
-            className={authPrimaryButtonClass}
+            loading={signingOut}
+            className="w-full"
           >
-            {signingOut ? <span className={authSpinnerClass} aria-hidden="true" /> : <LogOut size={15} aria-hidden="true" />}
+            {!signingOut && <LogOut aria-hidden />}
             <span>{t('invite.accept.signOutContinue')}</span>
-          </button>
+          </Button>
         </div>
       );
     }
@@ -113,29 +116,28 @@ const InviteAcceptPage: React.FC = () => {
     }
 
     return (
-      <form onSubmit={confirmEmail} className="space-y-4" noValidate>
+      <form onSubmit={confirmEmail} className="grid gap-4" noValidate>
         {draftInvalid && <NoticeBox tone="error" announce>{t('account.error.emailInvalid')}</NoticeBox>}
-        <div>
-          <label htmlFor="invite-email" className={authLabelClass}>{t('invite.accept.emailLabel')}</label>
+        <Field label={t('invite.accept.emailLabel')} id="invite-email">
           <div className="relative">
-            <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 text-white/25" size={16} aria-hidden="true" />
-            <input
+            <Mail aria-hidden className={authFieldIconClass} />
+            <Input
               id="invite-email"
               type="email"
               autoComplete="email"
               value={draft}
               onChange={event => setDraft(event.target.value)}
-              className={authInputClass}
+              className={authFieldWithIconClass}
               placeholder={t('auth.emailPlaceholder')}
               required
               autoFocus
             />
           </div>
-        </div>
-        <button type="submit" disabled={!draft.trim()} className={`${authPrimaryButtonClass} mt-2`}>
+        </Field>
+        <Button type="submit" size="lg" disabled={!draft.trim()} className="mt-1 w-full">
           <span>{t('common.confirm')}</span>
-          <ArrowRight size={15} aria-hidden="true" />
-        </button>
+          <ArrowRight aria-hidden />
+        </Button>
       </form>
     );
   };

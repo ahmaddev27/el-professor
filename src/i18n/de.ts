@@ -183,6 +183,7 @@ export const de = {
   'common.confirm':         'Bestätigen',
   'common.yes':             'Ja',
   'common.no':              'Nein',
+  'common.ok':              'OK',
   'common.logout':          'Abmelden',
   'common.settings':        'Einstellungen',
   'common.error':           'Fehler',
