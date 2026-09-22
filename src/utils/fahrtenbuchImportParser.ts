@@ -67,6 +67,7 @@ export interface ColMap {
 }
 
 export type TripStatus = 'completed' | 'cancelled' | 'unknown';
+export const TRIP_STATUSES: readonly TripStatus[] = ['completed', 'cancelled', 'unknown'];
 
 export type TimeSource =
   | 'source_start_end'
@@ -74,6 +75,9 @@ export type TimeSource =
   | 'missing'
   | 'unparsed'
   | 'ambiguous';
+export const TIME_SOURCES: readonly TimeSource[] = [
+  'source_start_end', 'fallback_trip_date', 'missing', 'unparsed', 'ambiguous',
+];
 
 export type ReviewReason =
   | 'missing_trip_date'
@@ -137,8 +141,22 @@ const pad2 = (n: number) => String(n).padStart(2, '0');
 /**
  * Accepts: Excel serial number, DD.MM.YYYY, YYYY-MM-DD (optionally with a time
  * suffix), DD/MM/YYYY or MM/DD/YYYY, or a serial as text. Returns YYYY-MM-DD.
+ *
+ * A day the calendar does not have (31.02.2026, 45.13.2026) is not a date. It
+ * used to be passed through and made the database refuse the whole import.
  */
 export function parseDate(raw: CellValue): string | null {
+  const iso = parseDateUnchecked(raw);
+  if (iso === null) return null;
+  const m = iso.match(/^([0-9]{4})-([0-9]{2})-([0-9]{2})$/);
+  if (!m) return null;
+  const [year, month, day] = [Number(m[1]), Number(m[2]), Number(m[3])];
+  if (year < 1900 || year > 2999 || month < 1 || month > 12) return null;
+  if (day < 1 || day > daysInMonth(year, month)) return null;
+  return iso;
+}
+
+function parseDateUnchecked(raw: CellValue): string | null {
   if (raw === null || raw === undefined || raw === '' || raw === '\\N') return null;
 
   if (typeof raw === 'number') {
@@ -319,8 +337,13 @@ export type TimestampCell =
 // "2026-08-01 00:05:31.000" — the zone-less shape the exporter writes. A value
 // with Z or an offset is not accepted: it is not what the files contain, and
 // reading it would need a rule nobody has decided.
-const DATETIME_RE = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2})(?:\.\d{1,9})?)?$/;
-const TIME_RE = /^\d{1,2}:\d{2}(?::\d{2}(?:\.\d{1,9})?)?$/;
+// Written with [0-9] to match the migration's twin character for character;
+// the test compares the two.
+export const DATETIME_RE = /^([0-9]{4})-([0-9]{2})-([0-9]{2})[ T]([0-9]{2}):([0-9]{2})(?::([0-9]{2})(?:\.[0-9]{1,9})?)?$/;
+// "01.08.2026 10:05[:31]" — the German spelling other exports use. Day first,
+// always: that is what the dots mean in this country.
+export const GERMAN_DATETIME_RE = /^([0-9]{1,2})\.([0-9]{1,2})\.([0-9]{4}) ([0-9]{1,2}):([0-9]{2})(?::([0-9]{2}))?$/;
+export const TIME_RE = /^[0-9]{1,2}:[0-9]{2}(?::[0-9]{2}(?:\.[0-9]{1,9})?)?$/;
 
 const EXCEL_EPOCH_MS = Date.UTC(1899, 11, 30);
 const SECONDS_PER_DAY = 86400;
@@ -338,8 +361,9 @@ function validWall(w: WallTime): WallTime | null {
 }
 
 /**
- * What a start or end cell holds. The fractional seconds of a text value are
- * dropped (the files write `.000`). A number between 0 and 1 is an Excel time
+ * What a start or end cell holds: ISO or German date and time, with no zone.
+ * The fractional seconds of a text value are dropped (the files write `.000`).
+ * A number between 0 and 1 is an Excel time
  * of day; a number with a whole part and a fraction is an Excel date and time,
  * rounded to the second. A whole number is a date with no time, which is not
  * a timestamp.
@@ -362,11 +386,19 @@ export function classifyTimestampCell(value: CellValue): TimestampCell {
   if (typeof value !== 'string') return { kind: 'other' };
 
   const s = trimCell(value);
-  const m = s.match(DATETIME_RE);
-  if (m) {
+  const iso = s.match(DATETIME_RE);
+  if (iso) {
     const wall = validWall({
-      year: Number(m[1]), month: Number(m[2]), day: Number(m[3]),
-      hour: Number(m[4]), minute: Number(m[5]), second: m[6] === undefined ? 0 : Number(m[6]),
+      year: Number(iso[1]), month: Number(iso[2]), day: Number(iso[3]),
+      hour: Number(iso[4]), minute: Number(iso[5]), second: iso[6] === undefined ? 0 : Number(iso[6]),
+    });
+    return wall ? { kind: 'datetime', wall } : { kind: 'other' };
+  }
+  const german = s.match(GERMAN_DATETIME_RE);
+  if (german) {
+    const wall = validWall({
+      year: Number(german[3]), month: Number(german[2]), day: Number(german[1]),
+      hour: Number(german[4]), minute: Number(german[5]), second: german[6] === undefined ? 0 : Number(german[6]),
     });
     return wall ? { kind: 'datetime', wall } : { kind: 'other' };
   }
@@ -599,7 +631,8 @@ function toHex(buffer: ArrayBuffer): string {
 
 /** SHA-256 of bytes, lowercase hex. The file hash that refuses a second upload. */
 export async function sha256HexOfBytes(bytes: Uint8Array): Promise<string> {
-  return toHex(await crypto.subtle.digest('SHA-256', bytes));
+  // A copy on its own ArrayBuffer: digest() takes no view of a shared buffer.
+  return toHex(await crypto.subtle.digest('SHA-256', new Uint8Array(bytes)));
 }
 
 export async function sha256HexOfText(text: string): Promise<string> {
@@ -810,9 +843,7 @@ export interface ImportSummary {
 /** The preview's counts, over the rows that will be written. */
 export function summariseRows(rows: readonly TripInsertRow[]): ImportSummary {
   const reasons = Object.fromEntries(REVIEW_REASONS.map(r => [r, 0])) as Record<ReviewReason, number>;
-  const timeSources: Record<TimeSource, number> = {
-    source_start_end: 0, fallback_trip_date: 0, missing: 0, unparsed: 0, ambiguous: 0,
-  };
+  const timeSources = Object.fromEntries(TIME_SOURCES.map(s => [s, 0])) as Record<TimeSource, number>;
   const summary: ImportSummary = { completed: 0, cancelled: 0, unknown: 0, needsReview: 0, reasons, timeSources };
   for (const r of rows) {
     if (r.trip_status === 'completed') summary.completed++;
