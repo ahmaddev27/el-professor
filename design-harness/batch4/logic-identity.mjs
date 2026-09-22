@@ -198,6 +198,63 @@ const BLOCKS = {
     expression('{!fromGoogle && ('),
     expression("{fromGoogle ? t('auth.signIn') : t('signup.callback.title')}"),
   ],
+  'src/components/UserManagement.tsx': [
+    block("import { useAuth } from '../contexts/AuthContext';", "import { supabase } from '../lib/supabase';"),
+    block("import { exportTableToExcel } from '../utils/excelExport';", "import { inviteCreateFailure, resendInviteOutcome } from '../lib/accountFunctionResponses';"),
+    // UserData, the form's props, the form's roles read, reset, submit and its closed state.
+    block('interface UserData {', '  if (!isOpen) return null;'),
+    expression('{!user && ('),
+    expression('{!formData.use_temp_password ? ('),
+    expression('{role.name} {role.description && `- ${role.description}`}'),
+    expression("{loading ? t('common.saving') : t('common.save')}"),
+    // Who may work the screen, the state, and every manage-users call with its body.
+    block('const UserManagement: React.FC = () => {', '  };', '  const handleResendInvite = async (userId: string) => {'),
+    block('  const handleExport = () => {', '  };'),
+    // The badges' order and the role's stored value; the early returns.
+    expression('if (mustChangePassword) {'),
+    expression("if (status === 'inactive') {"),
+    expression("if (status === 'pending_invite') {"),
+    expression("const roleName = user.role_name || user.role || 'viewer';"),
+    expression("const roleKey = (user.role || 'viewer').toLowerCase();"),
+    expression('if (authLoading) {'),
+    expression('if (!canManageUsers) {'),
+    expression("const readContext = companyScope.kind === 'view';"),
+    expression("t(readContext ? 'users.readOnlyTitle' : 'users.accessDenied')"),
+    expression("t(readContext ? 'users.readOnlyBody' : 'users.adminOnly')"),
+    expression('{!readContext && ('),
+    expression("t('users.yourRole', { role: profile?.role || t('users.roleNone') })"),
+    expression('if (loading) {'),
+    // The figures and which row offers what, at each width.
+    expression('users.filter(u => u.email_confirmed_at).length'),
+    expression("users.filter(u => u.role === 'admin').length"),
+    expression("users.filter(u => u.role === 'viewer').length"),
+    expression('{users.length === 0 ? ('),
+    expression("{user.status === 'pending_invite' && ("),
+    expression("{user.status === 'active' && user.email !== 'support@yamobility.de' && ("),
+    expression("{user.status === 'inactive' && ("),
+    expression("{user.email !== 'support@yamobility.de' && ("),
+    expression("user.full_name || t('common.unknown')"),
+    expression('ID: {user.id.slice(0, 8)}...'),
+    expression('Badge(user.status, user.must_change_password)'),
+    expression('Badge(user.status)'),
+    expression("editingUser ? t('users.editUser') : t('users.newUser')"),
+    expression('{resetPasswordUser && ('),
+    expression('{resetPasswordSuccess ? ('),
+    expression('{resetPasswordError &&'),
+    expression("showResetPassword ? 'text' : 'password'"),
+  ],
+  'src/pages/UsersPage.tsx': [
+    line("  const [activeTab, setActiveTab] = useState<'users' | 'backups'>('users');"),
+    expression("{activeTab === 'users' && <UserManagement />}"),
+    expression("{activeTab === 'backups' && <BackupManagement />}"),
+  ],
+  'src/components/BackupManagement.tsx': [
+    // The table list, the state, and the backup of the session's company.
+    block("import { useState } from 'react';", "import type { TranslationKey } from '../i18n';"),
+    block('// Holds TranslationKeys: this list is module-level and t() is a hook value.', '  };'),
+    expression("{lastBackupTime ? lastBackupTime : t('bill.backup.never')}"),
+    expression('{isLoading ? ('),
+  ],
   // The takeovers: their logic is the hooks they read; what each says and
   // what its button does is checked by the call and attribute checks.
   'src/pages/AccountBlockedPage.tsx': [
@@ -241,6 +298,12 @@ const SUPPORT_LINK_MOVED = {
     'drawn by components/auth/AccountStatusPage.tsx, the four takeovers\' shared frame, with the same address',
 };
 const MOVED_ATTRIBUTES = {
+  'src/components/UserManagement.tsx': {
+    'type={confirmModal.type}':
+      'the legacy modal\'s type now picks the dialog by the same value: ConfirmDialog for "confirm", MessageDialog for the rest',
+    'onClick={(e) => e.stopPropagation()}':
+      'the reset dialog\'s panel kept a click from reaching its backdrop; the Radix Dialog does that itself',
+  },
   'src/pages/AccountBlockedPage.tsx': SUPPORT_LINK_MOVED,
   'src/pages/PendingApprovalPage.tsx': SUPPORT_LINK_MOVED,
   'src/pages/RejectedPage.tsx': SUPPORT_LINK_MOVED,
