@@ -243,11 +243,12 @@ export function batch2Rpc(
   args: Record<string, unknown> | undefined,
 ): RpcAnswer | null {
   if (name !== 'get_weekly_abrechnung' && name !== 'get_monthly_abrechnung') return null;
-  if (scenario.screen === 'abrechnung' && (scenario.data === 'error' || scenario.data === 'missing')) {
-    return { data: null, error: { message: 'TypeError: Failed to fetch', code: '' } };
-  }
   const year = Number(args?.p_year);
   const month = Number(args?.p_month);
+  const fails =
+    scenario.screen === 'abrechnung' &&
+    (scenario.data === 'error' || scenario.data === 'missing' || (scenario.data === 'next-month-fails' && year === 2026 && month === 10));
+  if (fails) return { data: null, error: { message: 'TypeError: Failed to fetch', code: '' } };
   const data = name === 'get_weekly_abrechnung' ? weeklyAbrechnung(tables, year, month) : monthlyAbrechnung(tables, year, month);
   return { data, error: null };
 }

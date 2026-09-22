@@ -8,7 +8,9 @@
  *           missing: the first read fails as if the table did not exist (PGRST204)
  *           loading: the first read never answers
  *           drivers-error: Gehälter only, the driver list itself fails to load
- *   role    admin | viewer | view | billing                (viewer may read, not edit)
+ *           next-month-fails: Abrechnung and Bargeldbestand, September loads and
+ *                    every read of October fails — the month after a good one
+ *   role   admin | viewer | view | billing                (viewer may read, not edit)
  *           view:    a platform account inside a read-only view context
  *           billing: a platform billing account inside a view context; it
  *                    holds no business.read, so the cash ledger is out of scope
@@ -17,7 +19,7 @@
  */
 
 export type HarnessScreen = 'fahrzeuge' | 'fixkosten' | 'gehaelter' | 'abrechnung' | 'bargeld';
-export type HarnessData = 'default' | 'empty' | 'limit' | 'error' | 'missing' | 'loading' | 'drivers-error';
+export type HarnessData = 'default' | 'empty' | 'limit' | 'error' | 'missing' | 'loading' | 'drivers-error' | 'next-month-fails';
 export type HarnessRole = 'admin' | 'viewer' | 'view' | 'billing';
 
 export interface HarnessScenario {
@@ -35,7 +37,7 @@ function pick<T extends string>(name: string, allowed: readonly T[], fallback: T
 
 export const scenario: HarnessScenario = {
   screen: pick('screen', ['fahrzeuge', 'fixkosten', 'gehaelter', 'abrechnung', 'bargeld'] as const, 'fahrzeuge'),
-  data: pick('data', ['default', 'empty', 'limit', 'error', 'missing', 'loading', 'drivers-error'] as const, 'default'),
+  data: pick('data', ['default', 'empty', 'limit', 'error', 'missing', 'loading', 'drivers-error', 'next-month-fails'] as const, 'default'),
   role: pick('role', ['admin', 'viewer', 'view', 'billing'] as const, 'admin'),
 };
 
