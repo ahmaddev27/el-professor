@@ -305,7 +305,9 @@ const PlanSelection: React.FC<PlanSelectionProps> = ({
             )}
             <p className="mb-0.5 text-sm font-semibold text-fg">{entry.name}</p>
             <p className="mb-2 text-xs tabular-nums text-brand-text">
-              {fmtPricePerCar(priceBook.price_per_car_cents[entry.id])} €<span className="text-fg-subtle"> {t('landing.pricing.perVehiclePerMonth')}</span>
+              {/* fg-muted, not fg-subtle: on the chosen card's brand-soft that
+                  was 4.38:1 in dark (tokens.contrast.test.ts). */}
+              {fmtPricePerCar(priceBook.price_per_car_cents[entry.id])} €<span className="text-fg-muted"> {t('landing.pricing.perVehiclePerMonth')}</span>
             </p>
             <ul className="grid gap-1">
               {entry.features.map(featureKey => (

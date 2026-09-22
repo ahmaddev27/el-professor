@@ -761,8 +761,8 @@ const SettingsPage: React.FC = () => {
             </div>
           </div>
 
-          {/* Action Buttons: in view as the form scrolls, so saving is not a trip to the bottom. */}
-          <div className="sticky bottom-4 z-10 flex justify-end gap-3 rounded-surface border border-line bg-raised p-4 shadow-overlay">
+          {/* Action Buttons */}
+          <div className="flex justify-end gap-3 rounded-surface border border-line bg-raised p-4 shadow-raised">
             <Button
               type="button"
               variant="secondary"

@@ -29,10 +29,6 @@
       "style": 22,
       "color": 3
     },
-    "src/components/BackupManagement.tsx": {
-      "style": 18,
-      "color": 0
-    },
     "src/components/ConfirmationModal.tsx": {
       "style": 11,
       "color": 2
@@ -83,15 +79,11 @@
     },
     "src/components/LanguageSwitcher.tsx": {
       "style": 5,
-      "color": 7
+      "color": 0
     },
     "src/components/LockedFeaturePage.tsx": {
       "style": 15,
       "color": 3
-    },
-    "src/components/LoginForm.tsx": {
-      "style": 0,
-      "color": 45
     },
     "src/components/ManualSubscriptionModal.tsx": {
       "style": 22,
@@ -126,11 +118,7 @@
       "color": 11
     },
     "src/components/RoleModal.tsx": {
-      "style": 59,
-      "color": 69
-    },
-    "src/components/RolesManagement.tsx": {
-      "style": 25,
+      "style": 2,
       "color": 0
     },
     "src/components/SalaryDetailsModal.tsx": {
@@ -165,10 +153,6 @@
       "style": 87,
       "color": 37
     },
-    "src/components/UserManagement.tsx": {
-      "style": 105,
-      "color": 22
-    },
     "src/components/UserMenu.tsx": {
       "style": 21,
       "color": 0
@@ -177,33 +161,13 @@
       "style": 46,
       "color": 2
     },
-    "src/components/auth/AuthShell.tsx": {
-      "style": 0,
-      "color": 8
-    },
     "src/components/auth/EmphasizedText.tsx": {
       "style": 1,
       "color": 0
     },
     "src/components/auth/GoogleButton.tsx": {
       "style": 0,
-      "color": 12
-    },
-    "src/components/auth/NoticeBox.tsx": {
-      "style": 1,
-      "color": 8
-    },
-    "src/components/auth/OtpChallenge.tsx": {
-      "style": 5,
-      "color": 8
-    },
-    "src/components/auth/OtpCodeInput.tsx": {
-      "style": 2,
-      "color": 7
-    },
-    "src/components/auth/authStyles.ts": {
-      "style": 0,
-      "color": 12
+      "color": 10
     },
     "src/components/settings/AnnouncementsEditor.tsx": {
       "style": 38,
@@ -221,14 +185,6 @@
       "style": 12,
       "color": 0
     },
-    "src/components/signup/PlanSelection.tsx": {
-      "style": 20,
-      "color": 47
-    },
-    "src/components/signup/plans.ts": {
-      "style": 0,
-      "color": 3
-    },
     "src/components/ui/Dialog.tsx": {
       "style": 0,
       "color": 1
@@ -245,49 +201,17 @@
       "style": 48,
       "color": 121
     },
-    "src/pages/AccountBlockedPage.tsx": {
-      "style": 0,
-      "color": 22
-    },
     "src/pages/AccountPage.tsx": {
       "style": 33,
       "color": 0
-    },
-    "src/pages/ActivationPage.tsx": {
-      "style": 45,
-      "color": 9
-    },
-    "src/pages/AuthCallbackPage.tsx": {
-      "style": 0,
-      "color": 18
     },
     "src/pages/CompaniesPage.tsx": {
       "style": 264,
       "color": 21
     },
-    "src/pages/CompanyBillingPage.tsx": {
-      "style": 66,
-      "color": 24
-    },
     "src/pages/CompanyPlannerPage.tsx": {
       "style": 29,
       "color": 15
-    },
-    "src/pages/CompanySuspendedPage.tsx": {
-      "style": 0,
-      "color": 21
-    },
-    "src/pages/CompleteRegistrationPage.tsx": {
-      "style": 0,
-      "color": 38
-    },
-    "src/pages/ForgotPasswordPage.tsx": {
-      "style": 0,
-      "color": 1
-    },
-    "src/pages/InviteAcceptPage.tsx": {
-      "style": 0,
-      "color": 3
     },
     "src/pages/LandingPage.tsx": {
       "style": 327,
@@ -305,10 +229,6 @@
       "style": 188,
       "color": 111
     },
-    "src/pages/PendingApprovalPage.tsx": {
-      "style": 0,
-      "color": 22
-    },
     "src/pages/PlatformAuditPage.tsx": {
       "style": 49,
       "color": 0
@@ -325,21 +245,9 @@
       "style": 67,
       "color": 1
     },
-    "src/pages/RejectedPage.tsx": {
-      "style": 0,
-      "color": 25
-    },
-    "src/pages/SetPasswordPage.tsx": {
-      "style": 0,
-      "color": 54
-    },
     "src/pages/SettingsPage.tsx": {
-      "style": 124,
-      "color": 10
-    },
-    "src/pages/SignupPage.tsx": {
-      "style": 0,
-      "color": 66
+      "style": 2,
+      "color": 6
     },
     "src/pages/StundennachweisPage.tsx": {
       "style": 154,
@@ -352,14 +260,6 @@
     "src/pages/SuperAdminDashboard.tsx": {
       "style": 197,
       "color": 28
-    },
-    "src/pages/UsersPage.tsx": {
-      "style": 8,
-      "color": 0
-    },
-    "src/pages/VerifyEmailPage.tsx": {
-      "style": 0,
-      "color": 1
     },
     "src/pages/WerkstattPage.tsx": {
       "style": 54,
