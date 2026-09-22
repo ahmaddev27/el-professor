@@ -8,28 +8,36 @@
  *
  * `window.__harness.pending` counts unanswered queries; the capture script
  * waits for it to reach zero before it takes a screenshot.
+ *
+ * `window.__harness.writes` records every insert, update and delete a screen
+ * sends — table, payload and equality filters — so a flow can check what a
+ * click wrote, not only what the screen shows afterwards (flows-batch1b.mjs).
  */
 import { assignmentRows, carsRows, driversRows, fixedCostRows, type Row } from '../fixtures';
 import { batch2Drivers, batch2PrimaryTable, batch2Rpc, batch2Tables, isBatch2Screen } from '../fixtures-batch2';
 import { batch3Tables, recordBatch3Rpc, recordBatch3Write } from '../batch3/fixtures';
+import { batch1bFailsEveryTable, batch1bPrimaryTable, batch1bTables } from '../fixtures-batch1b';
 import { scenario } from '../scenario';
 
 type QueryError = { message: string; code: string; details?: string; hint?: string };
 type Result = { data: unknown; error: QueryError | null; count?: number | null };
+type Write = { table: string; op: 'insert' | 'update' | 'delete'; payload: unknown; filters: Array<[string, string, unknown]> };
 
 const ANSWER_DELAY_MS = 120;
 
 declare global {
   interface Window {
-    __harness: { pending: number; answered: number };
+    __harness: { pending: number; answered: number; writes: Write[] };
   }
 }
-window.__harness = { pending: 0, answered: 0 };
+window.__harness = { pending: 0, answered: 0, writes: [] };
 
-const PRIMARY_TABLE = batch2PrimaryTable(scenario) ?? (scenario.screen === 'fixkosten' ? 'fixed_costs' : 'cars');
+const PRIMARY_TABLE =
+  batch2PrimaryTable(scenario) ?? batch1bPrimaryTable(scenario) ?? (scenario.screen === 'fixkosten' ? 'fixed_costs' : 'cars');
 
 function seed(): Map<string, Row[]> {
-  const empty = scenario.data === 'empty';
+  // Batch 1b's `empty` empties only its screen's own table (fixtures-batch1b.ts).
+  const empty = scenario.data === 'empty' && batch1bPrimaryTable(scenario) === null;
   // Batch 2: the drivers carry a salary ratio, and an empty Gehälter screen is
   // one with no drivers, since a driver without income still gets a row.
   const drivers = !isBatch2Screen(scenario)
@@ -41,6 +49,9 @@ function seed(): Map<string, Row[]> {
     ['drivers', drivers],
     ['fixed_costs', empty ? [] : fixedCostRows()],
     ...batch2Tables(scenario),
+    // Batch 1b's tables, on its own screens only; later entries win, so its
+    // drivers, with the payroll columns the Fahrer form reads, replace the ones above.
+    ...batch1bTables(scenario),
     // Batch 3's tables, on its own screens only (empty on any other). Later
     // entries win, so there its richer drivers replace the ones above.
     ...batch3Tables(),
@@ -52,6 +63,7 @@ let nextId = 1;
 
 /** The failure a scenario asks for, on every statement against the screen's own table. */
 function scenarioFailure(table: string, dateFrom: string | null): QueryError | null {
+  if (batch1bFailsEveryTable(scenario)) return { message: 'TypeError: Failed to fetch', code: '' };
   if (table !== PRIMARY_TABLE) return null;
   if (scenario.data === 'next-month-fails') {
     return dateFrom?.startsWith('2026-10') ? { message: 'TypeError: Failed to fetch', code: '' } : null;
@@ -67,6 +79,8 @@ class FakeQuery implements PromiseLike<Result> {
   private op: 'select' | 'insert' | 'update' | 'delete' = 'select';
   private payload: Row | Row[] | null = null;
   private readonly filters: Array<(row: Row) => boolean> = [];
+  /** The equality filters as written, for the write log. */
+  private readonly filterLog: Array<[string, string, unknown]> = [];
   // Every .order() applies, the first one first, as in PostgREST: the planning
   // screens order rides by date, then start time, then id.
   private readonly orderBy: Array<{ column: string; ascending: boolean }> = [];
@@ -108,16 +122,19 @@ class FakeQuery implements PromiseLike<Result> {
 
   eq(column: string, value: unknown): this {
     this.filters.push(row => row[column] === value);
+    this.filterLog.push(['eq', column, value]);
     return this;
   }
 
   neq(column: string, value: unknown): this {
     this.filters.push(row => row[column] !== value);
+    this.filterLog.push(['neq', column, value]);
     return this;
   }
 
   in(column: string, values: unknown[]): this {
     this.filters.push(row => values.includes(row[column]));
+    this.filterLog.push(['in', column, values]);
     return this;
   }
 
@@ -207,7 +224,15 @@ class FakeQuery implements PromiseLike<Result> {
   }
 
   private run(): Result {
-    if (this.op !== 'select') recordBatch3Write(this.table, this.op);
+    if (this.op !== 'select') {
+      recordBatch3Write(this.table, this.op);
+      window.__harness.writes.push({
+        table: this.table,
+        op: this.op,
+        payload: JSON.parse(JSON.stringify(this.payload ?? null)),
+        filters: this.filterLog.map(([kind, column, value]) => [kind, column, value]),
+      });
+    }
     const failure = scenarioFailure(this.table, this.dateFrom);
     if (failure) return { data: null, error: failure };
 

@@ -2,15 +2,26 @@
  * Stands in for PlanContext's hook: a paying premium company, so no trial
  * banner competes with the screen, and every gated navigation item shows.
  *
- * The car limit is the prototype's, except in the `limit` scenario, where it
- * equals the invented fleet so the Fahrzeuge screen shows its limit state.
+ * The car limit is the prototype's, except in the `limit` scenario:
+ *   - Fahrzeuge: it equals the invented fleet, so the screen shows its limit.
+ *   - Fahrer: the driver limit is the car limit times the company's drivers
+ *     per car, 4 when company_settings names none (DriversManagement's own
+ *     default), so the car limit is set to make it equal the active drivers.
  */
 import { PREVIEW_CAR_LIMIT, PREVIEW_VEHICLES } from '../../src/design-preview/sampleData';
+import { ACTIVE_DRIVER_COUNT } from '../fixtures-batch1b';
 import { scenario } from '../scenario';
 
 export * from '../../src/contexts/PlanContext';
 
-const carLimit = scenario.data === 'limit' ? PREVIEW_VEHICLES.length : PREVIEW_CAR_LIMIT;
+const DRIVERS_PER_CAR_DEFAULT = 4;
+
+const carLimit =
+  scenario.data !== 'limit'
+    ? PREVIEW_CAR_LIMIT
+    : scenario.screen === 'fahrer'
+      ? ACTIVE_DRIVER_COUNT / DRIVERS_PER_CAR_DEFAULT
+      : PREVIEW_VEHICLES.length;
 
 const value = {
   planState: {
