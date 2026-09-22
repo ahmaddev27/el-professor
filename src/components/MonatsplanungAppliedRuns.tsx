@@ -28,6 +28,19 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { useTranslation } from '../contexts/LanguageContext';
 import type { TranslationKey } from '../i18n';
+import {
+  Alert,
+  Badge,
+  Button,
+  Card,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  cn,
+} from './ui';
 
 /** A class component cannot call the hook, so the resolver arrives as a prop. */
 type Translate = (key: TranslationKey, vars?: Record<string, string | number>) => string;
@@ -274,35 +287,37 @@ export default function MonatsplanungAppliedRuns({ companyId, reloadToken, stale
     }
   };
 
+  // ── Presentation (phase 5) ────────────────────────────────────────────────
+  // Everything above is unchanged: the reads, validation, the export, and the
+  // delete that only ever goes through delete_or_archive_monthly_planning_run.
+  // The list, its messages and the delete dialog are drawn on the design
+  // system. The run's export dialog (RunDetailModal), the Stundennachweis
+  // preview with its error boundary and the finalization are mounted exactly
+  // as before and stay legacy screens, so the Card carries no font-ui and
+  // each converted block sets it.
   return (
-    <div className="rounded-xl p-5" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
-      <div className="flex items-start justify-between gap-4 mb-4">
-        <div>
-          <h2 className="text-base font-semibold flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
-            <Archive size={16} /> {t('mp.runs.title')}
-          </h2>
-          <p className="text-xs mt-1" style={{ color: 'var(--text-tertiary)' }}>
-            {t('mp.runs.subtitle')}
-          </p>
-        </div>
+    <Card className="p-5">
+      <div className="mb-4 font-ui">
+        <h2 className="flex items-center gap-2 text-[15px] font-semibold text-fg">
+          <Archive aria-hidden className="size-4 text-fg-muted" /> {t('mp.runs.title')}
+        </h2>
+        <p className="mt-1 text-[13px] text-fg-muted">
+          {t('mp.runs.subtitle')}
+        </p>
       </div>
 
       {deleteSuccess && (
-        <div className="px-3 py-2 rounded-lg text-sm mb-3 flex items-center gap-2" style={{ background: '#ecfdf5', color: '#065f46', border: '1px solid #a7f3d0' }}>
-          <CheckCircle2 size={14} /> {deleteSuccess}
-        </div>
+        <Alert tone="positive" className="mb-3">{deleteSuccess}</Alert>
       )}
 
       {error && (
-        <div className="px-3 py-2 rounded-lg text-sm mb-3" style={{ background: '#fef2f2', color: '#991b1b', border: '1px solid #fecaca' }}>
-          {error}
-        </div>
+        <Alert tone="critical" className="mb-3">{error}</Alert>
       )}
 
       {!loading && runs.length === 0 && !error && (
-        <div className="px-3 py-6 text-center text-sm rounded-lg" style={{ background: 'var(--bg-subtle)', color: 'var(--text-tertiary)' }}>
+        <p className="rounded-control bg-sunken px-3 py-6 text-center font-ui text-sm text-fg-muted">
           {t('mp.runs.none')}
-        </div>
+        </p>
       )}
 
       {runs.length > 0 && (
@@ -386,62 +401,52 @@ export default function MonatsplanungAppliedRuns({ companyId, reloadToken, stale
         />
       )}
 
-      {deleteTarget && (
-        <div
-          className="fixed inset-0 z-[60] flex items-center justify-center p-4"
-          style={{ background: 'rgba(15, 23, 42, 0.7)' }}
-          onClick={() => { if (!deleting) setDeleteTarget(null); }}
-        >
-          <div
-            className="rounded-xl shadow-2xl w-full max-w-md"
-            style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}
-            onClick={e => e.stopPropagation()}
-          >
-            <div className="flex items-start justify-between px-5 py-4 border-b" style={{ borderColor: 'var(--border)' }}>
-              <h3 className="text-base font-semibold flex items-center gap-2" style={{ color: '#991b1b' }}>
-                <Trash2 size={16} /> {t('mp.runs.deleteTitle')}
-              </h3>
-              <button onClick={() => { if (!deleting) setDeleteTarget(null); }} className="p-1 rounded" style={{ color: 'var(--text-tertiary)' }}>
-                <X size={16} />
-              </button>
-            </div>
-            <div className="px-5 py-4 space-y-3">
-              <p className="text-sm" style={{ color: 'var(--text-primary)' }}>
-                {t('mp.runs.deleteBody')}
-              </p>
-              <div className="text-xs px-3 py-2 rounded-lg" style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}>
-                <span className="font-semibold">{t(MONTH_KEYS[deleteTarget.month - 1])} {deleteTarget.year}</span>
+      {/* The delete dialog stays open while the RPC runs and shows a failure
+          inside itself, as before. Closing it — Abbrechen, the close button,
+          Escape or a click outside — is refused while it runs, as the old
+          backdrop and close button refused it. */}
+      <Dialog
+        open={Boolean(deleteTarget)}
+        onOpenChange={open => { if (!open && !deleting) setDeleteTarget(null); }}
+      >
+        <DialogContent className="max-w-md">
+          {deleteTarget ? (
+            <>
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2 text-critical">
+                  <Trash2 aria-hidden className="size-4" /> {t('mp.runs.deleteTitle')}
+                </DialogTitle>
+                <DialogDescription>
+                  {t('mp.runs.deleteBody')}
+                </DialogDescription>
+              </DialogHeader>
+              <p className="rounded-control border border-line bg-sunken px-3 py-2 text-[13px] text-fg-muted">
+                <span className="font-semibold text-fg">{t(MONTH_KEYS[deleteTarget.month - 1])} {deleteTarget.year}</span>
                 {deleteTarget.file_name ? ` · ${deleteTarget.file_name}` : ''}
-              </div>
-              {deleteError && (
-                <div className="text-xs px-3 py-2 rounded-lg" style={{ background: '#fef2f2', color: '#991b1b', border: '1px solid #fecaca' }}>
-                  {deleteError}
-                </div>
-              )}
-            </div>
-            <div className="flex items-center justify-end gap-2 px-5 py-3 border-t" style={{ borderColor: 'var(--border)' }}>
-              <button
-                onClick={() => { if (!deleting) setDeleteTarget(null); }}
-                disabled={deleting}
-                className="px-3 py-2 rounded-lg text-sm font-semibold disabled:opacity-50"
-                style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
-              >
-                {t('common.cancel')}
-              </button>
-              <button
-                onClick={() => void handleDeleteRun()}
-                disabled={deleting}
-                className="inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
-                style={{ background: '#b91c1c', color: '#fff' }}
-              >
-                {deleting ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
-                {deleting ? t('common.deleting') : t('mp.runs.deleteConfirm')}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
+              </p>
+              {deleteError && <Alert tone="critical">{deleteError}</Alert>}
+              <DialogFooter>
+                <Button
+                  variant="secondary"
+                  onClick={() => { if (!deleting) setDeleteTarget(null); }}
+                  disabled={deleting}
+                >
+                  {t('common.cancel')}
+                </Button>
+                <Button
+                  variant="danger"
+                  onClick={() => void handleDeleteRun()}
+                  disabled={deleting}
+                >
+                  {deleting ? <Loader2 aria-hidden className="motion-safe:animate-spin" /> : <Trash2 aria-hidden />}
+                  {deleting ? t('common.deleting') : t('mp.runs.deleteConfirm')}
+                </Button>
+              </DialogFooter>
+            </>
+          ) : null}
+        </DialogContent>
+      </Dialog>
+    </Card>
   );
 }
 
@@ -468,17 +473,14 @@ function RunGroups({ runs, finalizations, onOpen, onStundennachweis, onFinalize,
   }, [runs]);
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-5 font-ui">
       {grouped.map(group => {
         const { month, year } = group[0];
         return (
           <div key={`${year}-${month}`}>
-            <div
-              className="text-xs font-semibold uppercase tracking-widest mb-2 pb-1.5 border-b"
-              style={{ color: 'var(--text-tertiary)', borderColor: 'var(--border)' }}
-            >
+            <h3 className="mb-2 border-b border-line pb-1.5 text-[13px] font-semibold text-fg-muted">
               {t(MONTH_KEYS[month - 1])} {year}
-            </div>
+            </h3>
             <div className="space-y-2">
               {group.map(run => (
                 <RunRow
@@ -520,53 +522,51 @@ function RunRow({ run, finalization, onOpen, onStundennachweis, onFinalize, onDe
 
   const hasExceptions = (dienst ?? 0) > 0 || (tag ?? 0) > 0;
 
+  // The whole row opens the run, as before; the actions stop their click from
+  // reaching it. A run still to finalize, or finalized before a later change,
+  // gets the primary button: that is the step it is waiting for.
   return (
     <div
-      className="w-full text-left rounded-lg transition-all hover:shadow-sm cursor-pointer"
-      style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)' }}
+      className={cn(
+        'w-full cursor-pointer rounded-control border border-line bg-raised text-left transition-colors hover:bg-sunken/50',
+        'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus',
+      )}
       onClick={onOpen}
       role="button"
       tabIndex={0}
       onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen(); } }}
     >
       {/* Main row */}
-      <div className="flex items-center gap-3 px-4 py-3">
+      <div className="flex flex-col gap-3 px-4 py-3 lg:flex-row lg:items-center">
         {/* Left: file info */}
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
-              <FileSpreadsheet size={13} className="inline mr-1.5 opacity-60" />
-              {run.file_name || '—'}
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="flex min-w-0 items-center gap-1.5 text-sm font-semibold text-fg">
+              <FileSpreadsheet aria-hidden className="size-3.5 shrink-0 text-fg-subtle" />
+              <span className="truncate">{run.file_name || '—'}</span>
             </span>
             {!isReplaced && !isArchived && (
-              <span
-                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold"
-                style={{ background: 'rgba(34,197,94,0.08)', color: '#15803d' }}
-              >
-                <CheckCircle2 size={9} /> {t('mp.runs.statusActive')}
-              </span>
+              <Badge tone="positive">
+                <CheckCircle2 aria-hidden /> {t('mp.runs.statusActive')}
+              </Badge>
             )}
             {finalization && (
-              <span
-                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold"
-                style={finalization.is_stale
-                  ? { background: 'rgba(234,179,8,0.12)', color: '#92400e', border: '1px solid rgba(234,179,8,0.35)' }
-                  : { background: 'rgba(34,197,94,0.1)', color: '#15803d', border: '1px solid rgba(34,197,94,0.3)' }
-                }
+              <Badge
+                tone={finalization.is_stale ? 'caution' : 'positive'}
                 title={finalization.is_stale ? (finalization.stale_reason ?? t('mp.runs.outdated')) : t('mp.runs.finalized')}
               >
-                {finalization.is_stale ? <AlertCircle size={9} /> : <CheckCircle2 size={9} />}
+                {finalization.is_stale ? <AlertCircle aria-hidden /> : <CheckCircle2 aria-hidden />}
                 {finalization.is_stale ? t('mp.runs.notCurrent') : t('mp.runs.finalized')}
-              </span>
+              </Badge>
             )}
           </div>
-          <div className="flex items-center gap-4 mt-1 text-[11px]" style={{ color: 'var(--text-secondary)' }}>
-            <span><Clock size={10} className="inline mr-1" />{fmtDateTime(run.applied_at)}</span>
-            {updated != null && <span>{t('mp.trips')}: <strong>{updated}</strong></span>}
-            {assignedBlocks != null && <span>{t('mp.blocks')}: <strong>{assignedBlocks}</strong></span>}
+          <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs tabular-nums text-fg-muted">
+            <span className="inline-flex items-center gap-1"><Clock aria-hidden className="size-3" />{fmtDateTime(run.applied_at)}</span>
+            {updated != null && <span>{t('mp.trips')}: <strong className="font-semibold text-fg">{updated}</strong></span>}
+            {assignedBlocks != null && <span>{t('mp.blocks')}: <strong className="font-semibold text-fg">{assignedBlocks}</strong></span>}
             {hasExceptions && (
-              <span style={{ color: '#d97706' }}>
-                <AlertTriangle size={10} className="inline mr-1" />
+              <span className="inline-flex items-center gap-1 text-caution">
+                <AlertTriangle aria-hidden className="size-3" />
                 {dienst! > 0 ? `${dienst} ${t('mp.workingTime')}` : ''}{dienst! > 0 && tag! > 0 ? ' · ' : ''}{tag! > 0 ? `${tag} ${t('mp.dailyLimit')}` : ''}
               </span>
             )}
@@ -574,51 +574,39 @@ function RunRow({ run, finalization, onOpen, onStundennachweis, onFinalize, onDe
         </div>
 
         {/* Right: action buttons */}
-        <div className="flex items-center gap-1.5 shrink-0" onClick={e => e.stopPropagation()}>
+        <div className="flex flex-wrap items-center gap-1.5 lg:shrink-0" onClick={e => e.stopPropagation()}>
           {run.status === 'applied' && (
-            <button
-              onClick={onStundennachweis}
-              className="inline-flex items-center gap-1 px-2 py-1.5 rounded text-[11px] font-semibold transition-colors hover:brightness-110"
-              style={{ background: 'rgba(59,130,246,0.12)', color: '#2563eb', border: '1px solid rgba(59,130,246,0.35)' }}
-              title={t('mp.runs.previewTooltip')}
-            >
-              <CalendarClock size={12} /> {t('common.preview')}
-            </button>
+            <Button variant="secondary" size="sm" onClick={onStundennachweis} title={t('mp.runs.previewTooltip')}>
+              <CalendarClock aria-hidden /> {t('common.preview')}
+            </Button>
           )}
           {run.status === 'applied' && (
-            <button
+            <Button
+              variant={finalization && !finalization.is_stale ? 'secondary' : 'primary'}
+              size="sm"
               onClick={onFinalize}
-              className="inline-flex items-center gap-1 px-2 py-1.5 rounded text-[11px] font-semibold transition-colors hover:brightness-110"
-              style={finalization?.is_stale
-                ? { background: 'rgba(234,179,8,0.15)', color: '#b45309', border: '1px solid rgba(245,158,11,0.4)' }
-                : finalization
-                  ? { background: 'var(--bg-surface)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }
-                  : { background: 'rgba(245,158,11,0.12)', color: '#b45309', border: '1px solid rgba(245,158,11,0.4)' }
-              }
               title={t('mp.runs.createFinalDocs')}
             >
-              <Sparkles size={12} />
+              <Sparkles aria-hidden />
               {finalization?.is_stale ? t('mp.runs.refinalize') : finalization ? t('mp.runs.finalizeAgain') : t('mp.runs.finalize')}
-            </button>
+            </Button>
           )}
-          <button
+          <Button
+            variant="ghost"
+            size="sm"
+            className="text-critical hover:text-critical"
             onClick={onDelete}
-            className="inline-flex items-center gap-1 px-2 py-1.5 rounded text-[11px] font-semibold transition-colors hover:brightness-110"
-            style={{ background: 'rgba(185,28,28,0.07)', color: '#991b1b', border: '1px solid rgba(185,28,28,0.22)' }}
             title={t('mp.runs.deletePlan')}
           >
-            <Trash2 size={12} /> {t('mp.runs.deletePlan')}
-          </button>
+            <Trash2 aria-hidden /> {t('mp.runs.deletePlan')}
+          </Button>
         </div>
       </div>
 
       {/* Stale warning strip */}
       {finalization?.is_stale && (
-        <div
-          className="px-4 py-2 rounded-b-lg text-[11px] flex items-center gap-1.5"
-          style={{ background: 'rgba(234,179,8,0.08)', borderTop: '1px solid rgba(234,179,8,0.25)', color: '#92400e' }}
-        >
-          <AlertCircle size={11} />
+        <div className="flex items-center gap-1.5 rounded-b-control border-t border-caution/30 bg-caution-soft px-4 py-2 text-xs text-caution">
+          <AlertCircle aria-hidden className="size-3 shrink-0" />
           {t('mp.runs.staleStrip', { reason: finalization.stale_reason ?? t('mp.runs.staleDefaultReason') })}
         </div>
       )}
