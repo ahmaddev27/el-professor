@@ -272,8 +272,9 @@ const UserModal: React.FC<UserModalProps> = ({ isOpen, onClose, onSave, user, ti
               </div>
             )}
 
-            <Field label={t('users.form.role')}>
+            <Field label={t('users.form.role')} id="user-role">
               <select
+                id="user-role"
                 value={formData.role}
                 onChange={(e) => setFormData({ ...formData, role: e.target.value })}
                 className={controlFrameClass}

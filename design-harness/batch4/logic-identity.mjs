@@ -291,6 +291,95 @@ const BLOCKS = {
   'src/pages/RolesPage.tsx': [
     line("import RolesManagement from '../components/RolesManagement';"),
   ],
+  'src/pages/SettingsPage.tsx': [
+    block("import { useCompanySettings, resolveLogoUrl } from '../contexts/CompanySettingsContext';", "import { useTranslation } from '../contexts/LanguageContext';"),
+    // The form state, the save, the logo upload and removal, Zurücksetzen.
+    block('const SettingsPage: React.FC = () => {', '  };', '  const handleReset = () => {'),
+    expression('if (loading) {'),
+    // The logo's fallback when it cannot be loaded: the same handler, word for word.
+    expression("console.warn(t('settings.logoLoadFailed'), logoPreview);"),
+    expression("(e.currentTarget as HTMLImageElement).style.display = 'none';"),
+    expression('const placeholder = e.currentTarget.nextElementSibling as HTMLElement;'),
+    expression("if (placeholder) placeholder.style.display = 'flex';"),
+    expression('{logoPreview && ('),
+    expression("{uploading ? t('settings.uploading') : t('settings.uploadLogo')}"),
+    expression('{[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(n => ('),
+    // The preview column's conditions.
+    expression('{formData.slogan && ('),
+    expression('{(formData.street || formData.city) && ('),
+    expression('{formData.street} {formData.house_number}'),
+    expression('{formData.street && <br />}'),
+    expression('{formData.postal_code} {formData.city}'),
+    expression('{(formData.email || formData.phone) && ('),
+    expression('{formData.iban && ('),
+    expression('{(formData.vat_id || formData.tax_number) && ('),
+    expression('{formData.vat_id && ('),
+    expression('{formData.tax_number && ('),
+  ],
+  'src/pages/ActivationPage.tsx': [
+    block("import { useAuth } from '../contexts/AuthContext';", "import type { TranslationKey } from '../i18n';"),
+    // The countdown's state and ticking (its colour and its expired word moved to tokens).
+    block("type SubmitState = 'idle' | 'loading' | 'success' | 'error';", '  }, [seconds]);'),
+    block('  const mins = Math.floor(remaining / 60);', '  const secs = remaining % 60;'),
+    expression('if (remaining <= 0) {'),
+    expression('remaining < 30 ?'),
+    expression('remaining < 60 ?'),
+    // The preview, the attempts block, redeem_activation_code, both refreshes, the redirect.
+    block('const ActivationPage: React.FC = () => {', '  const subInactive = !isSubscriptionActive;'),
+    // The status word: the same three answers in the same order; the two that
+    // were German literals ('Aktiv', 'Inaktiv') now come from the dictionary.
+    expression('const subStatusLabel = isSubscriptionActive ?'),
+    expression("(effectiveSubscriptionStatus === 'expired' ? t('activation.expiredShort') :"),
+    expression("if (submitState === 'success') {"),
+    expression('{expiryDisplay && ('),
+    expression("format(new Date(expiryDisplay), 'dd.MM.yyyy', { locale: de })"),
+    expression('{displayName && ('),
+    expression("{submitState === 'error' && errorMsg && ("),
+    expression('{isBlocked && ('),
+    expression('{code.length === 6 && ('),
+    expression('{previewLoading ? ('),
+    expression(') : preview ? ('),
+    expression('<CodeCountdown seconds={preview.seconds_remaining} />'),
+    expression('{DURATION_LABELS[preview.duration_type] ? t(DURATION_LABELS[preview.duration_type]) : preview.duration_type}'),
+    expression("{submitState === 'loading' ? ("),
+  ],
+  'src/pages/CompanyBillingPage.tsx': [
+    block("import React, { useState, useEffect, useCallback } from 'react';", "import { subscriptionIsActive } from '../utils/planState';"),
+    block("import { format, differenceInDays } from 'date-fns';", "import type { TranslationKey } from '../i18n';"),
+    // DURATION_LABELS, both row types, fmtDate, the reads, whose subscription, every figure.
+    block('// Map keys are the stored `subscription_duration_type` values and must not be', '    : null;', "    ? (() => { try { return format(new Date(subscriptionExpiresAt), 'dd. MMMM yyyy', { locale: de }); } catch { return null; } })()"),
+    block('  const aboStatusLabel =', '  const hasHistory = history.length > 0;'),
+    // The tone is the old colour pick's order.
+    expression('subActive ? '),
+    expression('subExpired ? '),
+    expression('if (loading) {'),
+    expression('{subActive && subExpiry && ('),
+    expression('{daysRemaining !== null && ('),
+    expression('daysRemaining <= 7 ?'),
+    expression('{subExpired && subExpiry && ('),
+    expression('{!subActive &&'),
+    expression('{subActive && ('),
+    expression('{subStarted &&'),
+    expression('{subExpiry &&'),
+    expression('{durLabel &&'),
+    expression('{lastCodeLast4 &&'),
+    expression('••{lastCodeLast4}'),
+    expression('{!subActive && subExpired && ('),
+    expression('{!subActive && !subExpired && !hasHistory && ('),
+    expression('{!subActive && !subExpired && hasHistory && ('),
+    expression('{history.length === 0 ? ('),
+    // Each history row's state, as the old table body worked it out.
+    expression("const isCurrentActive = subActive && idx === 0 && companyDetail?.last_activation_code_id === row.id;"),
+    expression('const appliedExpiry = row.applied_subscription_expires_at;'),
+    expression('const isPastPeriod = appliedExpiry ? new Date(appliedExpiry) <= new Date() : false;'),
+    expression("? (() => { try { return format(new Date(row.used_at), 'dd.MM.yyyy HH:mm', { locale: de }); } catch { return '-'; } })()"),
+    expression('? (DURATION_LABELS[row.duration_type] ? t(DURATION_LABELS[row.duration_type]) : row.duration_type)'),
+    expression('{fmtDate(row.applied_subscription_started_at)}'),
+    expression('{fmtDate(row.applied_subscription_expires_at)}'),
+    expression("{row.code_last4 ? `••${row.code_last4}` : '••••'}"),
+    expression('if (isCurrentActive) {'),
+    expression('} else if (isPastPeriod) {'),
+  ],
   // The takeovers: their logic is the hooks they read; what each says and
   // what its button does is checked by the call and attribute checks.
   'src/pages/AccountBlockedPage.tsx': [
@@ -348,6 +437,10 @@ const MOVED_ATTRIBUTES = {
       'the panel kept a click from reaching its backdrop; the Radix Dialog does that itself',
     "onFocus={e => { e.currentTarget.style.borderColor = 'rgba(6,182,212,0.5)'; }}":
       'a focus colour painted by hand on the two fields (with its onBlur twin); the fields show the design system\'s focus outline instead',
+  },
+  'src/pages/ActivationPage.tsx': {
+    "onFocus={e => (e.currentTarget.style.borderColor = 'var(--accent)')}":
+      'a focus colour painted by hand on the code field (with its onBlur twin); the field shows the design system\'s focus outline instead',
   },
   'src/pages/AccountBlockedPage.tsx': SUPPORT_LINK_MOVED,
   'src/pages/PendingApprovalPage.tsx': SUPPORT_LINK_MOVED,

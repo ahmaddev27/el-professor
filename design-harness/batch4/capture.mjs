@@ -106,11 +106,14 @@ const toVerifyStep = async page => {
 };
 
 const openNewUser = page => page.getByRole('button', { name: 'Neuer Benutzer' }).first().click();
-const openResetPassword = page => page.getByRole('button', { name: /Passwort zurücksetzen/ }).first().click();
+// "Passwort zurücksetzen" before, "Passwort für … zurücksetzen" after; the phone cards only, then and now.
+const openResetPassword = page => page.getByRole('button', { name: /Passwort.*zurücksetzen/ }).first().click();
 const openFirstDelete = page => page.getByRole('button', { name: /löschen$/i }).first().click();
 const openBackups = page => page.getByRole('tab', { name: 'Datensicherung' }).or(page.getByRole('button', { name: 'Datensicherung' })).first().click();
 const openRoleEdit = page => page.getByRole('button', { name: /bearbeiten$/i }).nth(4).click();
-const openRoleDelete = page => page.getByRole('button', { name: /löschen$/i }).last().click();
+// The one custom role: a system role's delete is disabled (and was named
+// "…nicht gelöscht werden" before, so the old screen matched it by name alone).
+const openRoleDelete = page => page.getByRole('button', { name: /löschen$/i }).and(page.locator(':enabled')).last().click();
 
 const typeActivationCode = code => async page => {
   await page.locator('input[inputmode="numeric"]').fill(code);
