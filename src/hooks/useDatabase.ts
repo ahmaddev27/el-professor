@@ -6,6 +6,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { withTimeout } from './useTimeout';
 import { DriverPlanningFields } from '../components/DriverModal';
+import { mapDriverRow } from '../lib/driverRow';
 
 export const useDatabase = () => {
   const { user, profile } = useAuth();
@@ -119,32 +120,7 @@ export const useDatabase = () => {
         return [];
       }
       
-      const mappedDrivers = data.map(d => ({
-        id: d.id,
-        name: d.name,
-        salary_ratio: d.salary_ratio,
-        salaryRatio: d.salary_ratio,
-        createdBy: d.created_by || undefined,
-        status: (d.status || 'active') as 'active' | 'inactive',
-        personalnummer: d.personalnummer || undefined,
-        gender: (d.gender ?? null) as 'male' | 'female' | null,
-        // Planning fields
-        driver_usage_type:      (d.driver_usage_type ?? 'regular') as 'regular' | 'coverage_only',
-        target_monthly_hours:   d.target_monthly_hours ?? null,
-        max_monthly_hours:      d.max_monthly_hours ?? null,
-        planning_target_salary: d.planning_target_salary ?? null,
-        planning_min_salary:    d.planning_min_salary ?? null,
-        planning_max_salary:    d.planning_max_salary ?? null,
-        planning_hourly_rate:   d.planning_hourly_rate ?? null,
-        planning_priority:      d.planning_priority ?? 100,
-        planning_enabled:       d.planning_enabled ?? true,
-        can_cover_other_drivers: d.can_cover_other_drivers ?? true,
-        allowed_weekdays:       d.allowed_weekdays ?? null,
-        work_window_start:      d.work_window_start ?? null,
-        work_window_end:        d.work_window_end ?? null,
-        allow_outside_shift_exceptions: d.allow_outside_shift_exceptions ?? false,
-        is_full_day_available:  d.is_full_day_available ?? false,
-      }));
+      const mappedDrivers = data.map(mapDriverRow);
       
       addDebugInfo(`✅ Mapped drivers: ${mappedDrivers.length} drivers`);
       return mappedDrivers;
