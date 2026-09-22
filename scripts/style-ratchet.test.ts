@@ -132,4 +132,17 @@ describe('the committed baseline', () => {
     // picture's own look, left as it was on purpose.
     expect(baseline.files['src/pages/AbrechnungPage.tsx']).toEqual({ style: 48, color: 121 });
   });
+
+  it('holds the phase 5 batch-3 screens that moved whole at zero', () => {
+    // CompanyPlannerPage, StundennachweisPage and MonatsplanungAppliedRuns
+    // moved their frames only; what they keep is listed in HANDOFF.md.
+    for (const path of [
+      'src/pages/DocumentsPage.tsx',
+      'src/components/MonatsplanungDriverPool.tsx',
+      'src/components/FahrtenbuchTripsView.tsx',
+      'src/components/ui/NativeSelect.tsx',
+    ]) {
+      expect(baseline.files[path], path).toBeUndefined();
+    }
+  });
 });

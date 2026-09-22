@@ -274,15 +274,27 @@ try {
     await context.close();
   });
 
-  await check('Stundennachweis: a driver without a working window is warned, and refused on generate', async () => {
+  await check('Stundennachweis: a profile with days but no hours shows its days alone', async () => {
     const { page, context, errors } = await open({ screen: 'stundennachweis' });
     await page.getByLabel(/^Fahrer/).selectOption({ label: 'Thomas Wendt — Pers.-Nr. 1007' });
     await click(page, button(page, /^Weiter/));
-    await expect(page.getByText('Kein Arbeitszeitfenster im Fahrerprofil hinterlegt.').first()).toBeVisible();
-    await page.getByLabel(/^Grundlohn Zielbetrag/).fill('1700');
+    await expect(page.getByText('Mo–Fr', { exact: true })).toBeVisible();
+    await expect(page.getByText('Kein Arbeitszeitfenster im Fahrerprofil hinterlegt.')).toHaveCount(0);
+    await nothingSent(page, errors);
+    await context.close();
+  });
+
+  await check('Stundennachweis: "Plan generieren" computes the sheet in memory and saves nothing', async () => {
+    const { page, context, errors } = await open({ screen: 'stundennachweis' });
+    await page.getByLabel(/^Fahrer/).selectOption({ label: 'Ahmad Haddad — Pers.-Nr. 1005' });
+    await click(page, button(page, /^Weiter/));
+    await page.getByLabel(/^Grundlohn Zielbetrag/).fill('2150');
     await page.getByLabel(/^Stundensatz Fahrer/).fill('13,90');
     await click(page, button(page, /^Plan generieren/));
-    await expect(page.getByText('Kein Arbeitszeitfenster im Fahrerprofil hinterlegt. Bitte im Fahrerprofil ergänzen.')).toBeVisible();
+    await expect(page.getByText(/^Ahmad Haddad — September 2026/)).toBeVisible();
+    // Not from the archive, so the save button offers to save, not to update.
+    await expect(button(page, 'Speichern')).toBeVisible();
+    await expect(page.getByText('Gespeicherte Version')).toHaveCount(0);
     await nothingSent(page, errors);
     await context.close();
   });
