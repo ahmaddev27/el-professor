@@ -24,8 +24,8 @@
  *   The Uber export dates a ride that starts between 00:00 and 00:30 on the
  *   day before ("Datum der Fahrt" is the order's day). `trip_date` keeps that
  *   value; `start_at` carries the day the ride actually began.
- * - **trip_status**: `abgeschlossen` → completed; `storniert`, `storno`,
- *   `cancelled`, `canceled`, `abgebrochen` → cancelled; anything else →
+ * - **trip_status**: `abgeschlossen` → completed; the words the importer
+ *   before this release read as cancelled → cancelled; anything else →
  *   unknown. `source_status` keeps the text as it was.
  *   `is_canceled` is exactly `trip_status = 'cancelled'`, so an unknown status
  *   is never read as a completed ride and never as a cancelled one.
@@ -312,8 +312,13 @@ export function isValidKennzeichen(raw: CellValue): boolean {
  * app_private.fahrtenbuch_map_status, and the test fails when the two part.
  */
 export const COMPLETED_STATUS_WORDS: readonly string[] = ['abgeschlossen'];
+// All nine of the old importer's CANCELED_STATUSES but one: 'nichtdurchgeführt'
+// is dropped because it could never match — normalise drops the ü from every
+// input, so no cell could ever equal it. 'nichtdurchgefuhrt' is the spelling
+// that did match and is kept.
 export const CANCELLED_STATUS_WORDS: readonly string[] = [
-  'storno', 'storniert', 'cancelled', 'canceled', 'abgebrochen',
+  'storno', 'storniert', 'storniertfahrt', 'stornierung',
+  'cancelled', 'canceled', 'abgebrochen', 'nichtdurchgefuhrt',
 ];
 
 const STATUS_MAP: ReadonlyMap<string, TripStatus> = new Map<string, TripStatus>([

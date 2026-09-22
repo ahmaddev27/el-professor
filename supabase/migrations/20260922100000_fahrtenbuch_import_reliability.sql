@@ -52,10 +52,11 @@
                                               change — twice (October) or never
                                               (March) — so no single instant
     trip_status         completed | cancelled | unknown, from an explicit map:
-                        'abgeschlossen' completed; 'storno', 'storniert',
-                        'cancelled', 'canceled', 'abgebrochen' cancelled (the
-                        words the old importer read as cancelled); anything
-                        else unknown.
+                        'abgeschlossen' completed; the eight words the old
+                        importer read as cancelled ('storno', 'storniert',
+                        'storniertfahrt', 'stornierung', 'cancelled',
+                        'canceled', 'abgebrochen', 'nichtdurchgefuhrt')
+                        cancelled; anything else unknown.
                         `source_status` keeps the text. A check ties it to
                         `is_canceled`, so unknown is never a completed ride and
                         never a cancelled one.
@@ -575,8 +576,12 @@ AS $$
 DECLARE
   -- COMPLETED_STATUS_WORDS
   c_completed_words CONSTANT text[] := ARRAY['abgeschlossen'];
-  -- CANCELLED_STATUS_WORDS
-  c_cancelled_words CONSTANT text[] := ARRAY['storno', 'storniert', 'cancelled', 'canceled', 'abgebrochen'];
+  -- CANCELLED_STATUS_WORDS: all nine of the old importer's CANCELED_STATUSES
+  -- but one — 'nichtdurchgeführt' could never match, because the
+  -- normalisation drops the ü from every input, so no cell could equal it.
+  c_cancelled_words CONSTANT text[] := ARRAY[
+    'storno', 'storniert', 'storniertfahrt', 'stornierung',
+    'cancelled', 'canceled', 'abgebrochen', 'nichtdurchgefuhrt'];
   v_norm text := app_private.fahrtenbuch_norm(p_text);
 BEGIN
   IF v_norm = '' THEN
