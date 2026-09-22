@@ -5,6 +5,8 @@ import { supabase, authRedirect } from '../lib/supabase';
 import { useTranslation } from '../contexts/LanguageContext';
 import { consumeGoogleSignInIntent, readGoogleSignInIntent } from '../lib/googleSignIn';
 import { callbackFailureView } from '../lib/oauthErrors';
+import AuthShell from '../components/auth/AuthShell';
+import { Button } from '../components/ui';
 
 type CallbackType = 'recovery' | 'invite' | 'signup' | 'magiclink' | 'email_change' | string;
 
@@ -100,47 +102,48 @@ const AuthCallbackPage: React.FC = () => {
     return () => { cancelled = true; };
   }, [navigate, t]);
 
+  // ── Presentation (phase 5) ────────────────────────────────────────────────
+  // Everything above is unchanged. A failure is drawn in the signed-out frame
+  // with the same two ways on: a new link only when the link came by mail, and
+  // the sign-in screen, which is the main way on after a Google attempt.
+
+  if (error) {
+    return (
+      <AuthShell title={fromGoogle ? t('auth.signIn') : t('signup.callback.title')}>
+        <div className="grid gap-5">
+          <div className="flex items-start gap-3 text-sm leading-relaxed text-fg-muted">
+            <AlertCircle aria-hidden className="mt-0.5 size-5 shrink-0 text-critical" />
+            <p role="alert">{error}</p>
+          </div>
+          <div className="grid gap-2">
+            {/* A Google sign-in is restarted from the sign-in screen; there is
+                no link to request again. */}
+            {!fromGoogle && (
+              <Button size="lg" className="w-full" onClick={() => navigate('/auth/forgot-password', { replace: true })}>
+                {t('signup.callback.requestNewLink')}
+              </Button>
+            )}
+            <Button
+              size={fromGoogle ? 'lg' : 'md'}
+              variant={fromGoogle ? 'primary' : 'ghost'}
+              className="w-full"
+              onClick={() => navigate('/login', { replace: true })}
+            >
+              {t('signup.callback.backToLogin')}
+            </Button>
+          </div>
+        </div>
+      </AuthShell>
+    );
+  }
+
   return (
-    <div className="min-h-screen bg-[#060a0f] flex items-center justify-center p-4">
-      <div className="relative w-full max-w-sm text-center">
-        {error ? (
-          <div className="bg-white/4 backdrop-blur-xl border border-white/10 rounded-2xl p-7">
-            <div className="w-12 h-12 rounded-full bg-red-500/15 border border-red-500/30 flex items-center justify-center mx-auto mb-4">
-              <AlertCircle className="text-red-400" size={22} />
-            </div>
-            <h2 className="text-white font-semibold mb-2">
-              {fromGoogle ? t('auth.signIn') : t('signup.callback.title')}
-            </h2>
-            <p className="text-white/60 text-sm leading-relaxed mb-6">{error}</p>
-            <div className="flex flex-col gap-2">
-              {/* A Google sign-in is restarted from the sign-in screen; there is
-                  no link to request again. */}
-              {!fromGoogle && (
-                <button
-                  onClick={() => navigate('/auth/forgot-password', { replace: true })}
-                  className="w-full bg-gradient-to-r from-cyan-500 to-blue-600 text-white py-3 px-4 rounded-xl font-semibold text-sm"
-                >
-                  {t('signup.callback.requestNewLink')}
-                </button>
-              )}
-              <button
-                onClick={() => navigate('/login', { replace: true })}
-                className={fromGoogle
-                  ? 'w-full bg-gradient-to-r from-cyan-500 to-blue-600 text-white py-3 px-4 rounded-xl font-semibold text-sm'
-                  : 'w-full text-white/50 hover:text-white/80 text-sm py-2 transition-colors'}
-              >
-                {t('signup.callback.backToLogin')}
-              </button>
-            </div>
-          </div>
-        ) : (
-          <div>
-            <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-cyan-400 mx-auto mb-4" />
-            <p className="text-white/50 text-sm">{t('signup.callback.checking')}</p>
-          </div>
-        )}
+    <main className="flex min-h-[calc(100dvh-var(--env-banner-height,0px))] items-center justify-center bg-canvas px-4 font-ui">
+      <div role="status" className="grid justify-items-center gap-4 text-center">
+        <div aria-hidden className="size-10 rounded-full border-2 border-line border-b-brand motion-safe:animate-spin" />
+        <p className="text-sm text-fg-muted">{t('signup.callback.checking')}</p>
       </div>
-    </div>
+    </main>
   );
 };
 

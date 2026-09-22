@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { AlertCircle, ArrowRight, Building2, Gift, LogOut, Trash2, User } from 'lucide-react';
+import { ArrowRight, Building2, LogOut, Trash2, User } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useTranslation } from '../contexts/LanguageContext';
 import { Plan } from '../contexts/PlanContext';
@@ -13,7 +13,9 @@ import {
 import { SIGN_IN_PATH } from '../lib/adminGate';
 import PlanSelection from '../components/signup/PlanSelection';
 import NoticeBox from '../components/auth/NoticeBox';
-import { authInputClass, authLabelClass, authSpinnerClass } from '../components/auth/authStyles';
+import AuthShell from '../components/auth/AuthShell';
+import { authFieldIconClass, authFieldWithIconClass } from '../components/auth/authStyles';
+import { Button, Field, Input } from '../components/ui';
 import PendingApprovalPage from './PendingApprovalPage';
 
 /**
@@ -162,174 +164,162 @@ const CompleteRegistrationPage: React.FC = () => {
     );
   }
 
+  // ── Presentation (phase 5) ────────────────────────────────────────────────
+  // Everything above is unchanged: the registration, the discard, the
+  // sign-out that rewrites the address first, and the waiting page once the
+  // company exists. Below, the form and the two ways out are drawn with the
+  // design system; which of them shows (`dead`, `confirmDiscard`) is decided
+  // exactly as before.
+
   return (
-    <div className="min-h-screen bg-[#060a0f] flex items-center justify-center p-4 relative overflow-hidden">
-      <div className="absolute inset-0 bg-[linear-gradient(rgba(6,182,212,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(6,182,212,0.03)_1px,transparent_1px)] bg-[size:48px_48px]" />
-      <div className="absolute top-1/4 left-1/2 -translate-x-1/2 w-[600px] h-[400px] bg-cyan-600/5 rounded-full blur-[120px] pointer-events-none" />
-
-      <div className="relative w-full max-w-2xl py-8">
-        <div className="text-center mb-6">
-          <div className="w-14 h-14 mx-auto mb-3 flex items-center justify-center">
-            <img src="/professor_logo_white.svg" alt="El-Professor" className="w-14 h-14 object-contain drop-shadow-[0_0_16px_rgba(6,182,212,0.5)]" />
-          </div>
-          <h1 className="text-2xl font-bold text-white mb-1">{t('gsignup.title')}</h1>
-          <p className="text-white/40 text-sm break-words">
-            {t('gsignup.subtitle', { email: user?.email ?? '' })}
-          </p>
-        </div>
-
-        <div className="bg-white/4 backdrop-blur-xl border border-white/10 rounded-2xl p-6 shadow-[0_24px_64px_rgba(0,0,0,0.5)] space-y-5">
-          {googleSignInIntent?.from === 'invite' && (
-            <NoticeBox tone="error" announce>{t('gsignup.inviteMismatch')}</NoticeBox>
-          )}
-
-          {error && <NoticeBox tone="error" announce>{error}</NoticeBox>}
-
-          {dead ? (
-            <button type="button" onClick={() => { void leaveToLogin(); }} className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl border border-white/10 text-white/60 hover:text-white hover:border-white/20 transition-all text-sm">
-              <LogOut size={14} aria-hidden="true" />
-              {t('common.logout')}
-            </button>
-          ) : (
-            <form onSubmit={submit} className="space-y-5">
-              <div>
-                <h2 className="text-base font-semibold text-white mb-1">{t('gsignup.heading')}</h2>
-                <p className="text-xs text-white/40">{t('gsignup.intro')}</p>
-              </div>
-
-              <div>
-                <label htmlFor="gsignup-name" className={authLabelClass}>{t('signup.account.fullName')}</label>
-                <div className="relative">
-                  <User className="absolute left-3.5 top-1/2 -translate-y-1/2 text-white/25" size={16} aria-hidden="true" />
-                  <input
-                    id="gsignup-name"
-                    type="text"
-                    value={fullName}
-                    onChange={event => setFullName(event.target.value)}
-                    className={authInputClass}
-                    placeholder={t('signup.account.fullNamePlaceholder')}
-                    required
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label htmlFor="gsignup-company" className={authLabelClass}>{t('signup.company.nameLabel')}</label>
-                <div className="relative">
-                  <Building2 className="absolute left-3.5 top-1/2 -translate-y-1/2 text-white/25" size={16} aria-hidden="true" />
-                  <input
-                    id="gsignup-company"
-                    type="text"
-                    value={companyName}
-                    onChange={event => setCompanyName(event.target.value)}
-                    className={authInputClass}
-                    placeholder={t('signup.company.namePlaceholder')}
-                    required
-                    autoFocus
-                  />
-                </div>
-              </div>
-
-              <PlanSelection
-                plan={plan}
-                carLimit={carLimit}
-                billingCycle={billingCycle}
-                discount={discount}
-                onPlanChange={setPlan}
-                onCarLimitChange={setCarLimit}
-                onBillingCycleChange={setBillingCycle}
-                onDiscountChange={setDiscount}
-              />
-
-              <div>
-                <label htmlFor="gsignup-referral" className={authLabelClass}>
-                  <Gift size={11} className="inline mr-1" aria-hidden="true" />
-                  {t('signup.account.referralCode')}{' '}
-                  <span className="text-white/20 normal-case tracking-normal font-normal">{t('signup.optional')}</span>
-                </label>
-                <div className="relative">
-                  <Gift className="absolute left-3.5 top-1/2 -translate-y-1/2 text-white/25" size={16} aria-hidden="true" />
-                  <input
-                    id="gsignup-referral"
-                    type="text"
-                    value={referralCode}
-                    onChange={event => { setReferralCode(event.target.value.toUpperCase()); setReferralError(null); }}
-                    className={`${authInputClass} font-mono`}
-                    placeholder={t('signup.account.referralPlaceholder')}
-                  />
-                </div>
-                {referralError && (
-                  <p className="mt-1.5 text-xs flex items-center gap-1.5 text-red-400">
-                    <AlertCircle size={11} aria-hidden="true" />
-                    {referralError}
-                  </p>
-                )}
-              </div>
-
-              <button
-                type="submit"
-                disabled={submitting || !fullName.trim() || !companyName.trim()}
-                className="w-full bg-gradient-to-r from-cyan-500 to-blue-600 text-white py-3 px-4 rounded-xl font-semibold text-sm hover:shadow-[0_4px_24px_rgba(6,182,212,0.4)] hover:-translate-y-0.5 transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:translate-y-0 flex items-center justify-center gap-2"
-              >
-                {submitting
-                  ? <span className={authSpinnerClass} aria-hidden="true" />
-                  : <>{t('gsignup.submit')}<ArrowRight size={15} aria-hidden="true" /></>}
-              </button>
-            </form>
-          )}
-        </div>
-
-        <div className="mt-5 space-y-3 text-center">
+    <AuthShell
+      width="wide"
+      title={t('gsignup.title')}
+      subtitle={t('gsignup.subtitle', { email: user?.email ?? '' })}
+      footer={
+        <>
           {!dead && (
             confirmDiscard ? (
-              <div className="bg-white/4 border border-white/10 rounded-2xl p-4 space-y-3 text-left">
-                <p className="text-sm text-white/70 leading-relaxed">{t('gsignup.discardConfirm')}</p>
-                <div className="flex gap-2">
-                  <button
+              <div className="grid w-full gap-3 rounded-surface border border-line bg-raised p-4 text-left">
+                <p className="text-sm leading-relaxed text-fg-muted">{t('gsignup.discardConfirm')}</p>
+                <div className="grid grid-cols-2 gap-2">
+                  <Button
                     type="button"
+                    variant="danger"
                     onClick={() => { void discard(); }}
                     disabled={discarding}
-                    className="flex-1 flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl border border-red-500/30 bg-red-500/10 text-red-300 hover:bg-red-500/20 transition-colors text-sm font-semibold disabled:opacity-50"
+                    loading={discarding}
                   >
-                    {discarding ? <span className={authSpinnerClass} aria-hidden="true" /> : <Trash2 size={14} aria-hidden="true" />}
+                    {!discarding && <Trash2 aria-hidden />}
                     {t('common.yes')}
-                  </button>
-                  <button
+                  </Button>
+                  <Button
                     type="button"
+                    variant="secondary"
                     onClick={() => setConfirmDiscard(false)}
-                    className="flex-1 py-2.5 px-4 rounded-xl border border-white/10 text-white/60 hover:text-white hover:border-white/20 transition-all text-sm"
                   >
                     {t('common.no')}
-                  </button>
+                  </Button>
                 </div>
               </div>
             ) : (
-              <div className="space-y-1">
-                <button
+              <div className="grid justify-items-center gap-1">
+                <Button
                   type="button"
+                  variant="link"
                   onClick={() => setConfirmDiscard(true)}
-                  className="text-xs text-white/35 hover:text-red-300 transition-colors"
+                  className="text-xs font-medium text-fg-muted hover:text-critical"
                 >
                   {t('gsignup.discard')}
-                </button>
-                <p className="text-[11px] text-white/20">{t('gsignup.discardHint')}</p>
+                </Button>
+                <p className="text-xs text-fg-subtle">{t('gsignup.discardHint')}</p>
               </div>
             )
           )}
 
           {!dead && (
-            <button
+            <Button
               type="button"
+              variant="ghost"
+              size="sm"
               onClick={() => { void leaveToLogin(); }}
-              className="inline-flex items-center gap-1.5 text-white/40 hover:text-white/70 text-sm transition-colors"
             >
-              <LogOut size={14} aria-hidden="true" />
+              <LogOut aria-hidden />
               {t('common.logout')}
-            </button>
+            </Button>
           )}
-        </div>
+        </>
+      }
+    >
+      <div className="grid gap-5">
+        {googleSignInIntent?.from === 'invite' && (
+          <NoticeBox tone="error" announce>{t('gsignup.inviteMismatch')}</NoticeBox>
+        )}
+
+        {error && <NoticeBox tone="error" announce>{error}</NoticeBox>}
+
+        {dead ? (
+          <Button type="button" variant="secondary" className="w-full" onClick={() => { void leaveToLogin(); }}>
+            <LogOut aria-hidden />
+            {t('common.logout')}
+          </Button>
+        ) : (
+          <form onSubmit={submit} className="grid gap-5">
+            <div>
+              <h2 className="mb-1 text-base font-semibold text-fg">{t('gsignup.heading')}</h2>
+              <p className="text-[13px] text-fg-muted">{t('gsignup.intro')}</p>
+            </div>
+
+            <Field label={t('signup.account.fullName')} id="gsignup-name">
+              <div className="relative">
+                <User aria-hidden className={authFieldIconClass} />
+                <Input
+                  id="gsignup-name"
+                  type="text"
+                  value={fullName}
+                  onChange={event => setFullName(event.target.value)}
+                  className={authFieldWithIconClass}
+                  placeholder={t('signup.account.fullNamePlaceholder')}
+                  required
+                />
+              </div>
+            </Field>
+
+            <Field label={t('signup.company.nameLabel')} id="gsignup-company">
+              <div className="relative">
+                <Building2 aria-hidden className={authFieldIconClass} />
+                <Input
+                  id="gsignup-company"
+                  type="text"
+                  value={companyName}
+                  onChange={event => setCompanyName(event.target.value)}
+                  className={authFieldWithIconClass}
+                  placeholder={t('signup.company.namePlaceholder')}
+                  required
+                  autoFocus
+                />
+              </div>
+            </Field>
+
+            <PlanSelection
+              plan={plan}
+              carLimit={carLimit}
+              billingCycle={billingCycle}
+              discount={discount}
+              onPlanChange={setPlan}
+              onCarLimitChange={setCarLimit}
+              onBillingCycleChange={setBillingCycle}
+              onDiscountChange={setDiscount}
+            />
+
+            <Field
+              label={<>{t('signup.account.referralCode')} <span className="font-normal text-fg-subtle">{t('signup.optional')}</span></>}
+              id="gsignup-referral"
+              error={referralError || undefined}
+            >
+              <Input
+                id="gsignup-referral"
+                type="text"
+                value={referralCode}
+                onChange={event => { setReferralCode(event.target.value.toUpperCase()); setReferralError(null); }}
+                className="font-mono"
+                placeholder={t('signup.account.referralPlaceholder')}
+              />
+            </Field>
+
+            <Button
+              type="submit"
+              size="lg"
+              disabled={submitting || !fullName.trim() || !companyName.trim()}
+              loading={submitting}
+              className="w-full"
+            >
+              {!submitting && <>{t('gsignup.submit')}<ArrowRight aria-hidden /></>}
+            </Button>
+          </form>
+        )}
       </div>
-    </div>
+    </AuthShell>
   );
 };
 
