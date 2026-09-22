@@ -1,12 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, CreditCard as Edit2, Trash2, Shield, AlertCircle } from 'lucide-react';
+import { Plus, CreditCard as Edit2, Trash2, Shield, Info } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { Role, RolePermission, RoleWithPermissions } from '../types/role';
 import RoleModal from './RoleModal';
-import ConfirmationModal from './ConfirmationModal';
 import { useToast } from '../contexts/ToastContext';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { useTranslation } from '../contexts/LanguageContext';
+import { Alert, Badge, Button, ConfirmDialog, DataTable, EmptyState, PageHeader, Skeleton, Tooltip, type DataTableColumn } from './ui';
 
 const RolesManagement: React.FC = () => {
   const { t } = useTranslation();
@@ -187,142 +187,134 @@ const RolesManagement: React.FC = () => {
     return t('users.roles.permissionsSummary', { view: viewCount, edit: editCount });
   };
 
+  // ── Presentation (phase 5) ────────────────────────────────────────────────
+  // Everything above is unchanged: the roles and their permissions as the
+  // database answers them for the session's company, the save that replaces a
+  // role's permissions, the refusal to delete a system role, and the delete.
+  // In a read context (`readOnly`) no write control is offered, as before.
+
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <div style={{ color: 'var(--text-secondary)' }}>{t('users.roles.loading')}</div>
+      <div className="grid grid-cols-1 gap-6 font-ui" aria-busy="true">
+        <PageHeader title={t('users.roles.title')} description={t('users.roles.subtitle')} />
+        <div className="grid gap-3 rounded-surface border border-line bg-raised p-5">
+          {[0, 1, 2, 3].map(index => <Skeleton key={index} className="h-9 w-full" />)}
+        </div>
+        <p role="status" className="sr-only">{t('users.roles.loading')}</p>
       </div>
     );
   }
 
+  const columns: DataTableColumn<RoleWithPermissions>[] = [
+    {
+      id: 'name',
+      header: t('users.form.role'),
+      value: role => role.name,
+      cell: role => (
+        <span className="flex items-center gap-2 font-medium">
+          <Shield aria-hidden className="size-4 shrink-0 text-brand-text" />
+          {role.name}
+        </span>
+      ),
+    },
+    {
+      id: 'description',
+      header: t('common.description'),
+      value: role => role.description,
+      cell: role => <span className="text-fg-muted">{role.description || '-'}</span>,
+      hideBelow: 'md',
+    },
+    {
+      id: 'permissions',
+      header: t('users.roles.permissions'),
+      cell: role => <span className="text-fg-muted">{getPermissionsSummary(role.permissions)}</span>,
+      hideBelow: 'sm',
+    },
+    {
+      id: 'type',
+      header: t('users.roles.type'),
+      cell: role => (
+        role.is_system ? (
+          <Badge tone="neutral">{t('users.roles.typeSystem')}</Badge>
+        ) : (
+          <Badge tone="positive">{t('users.roles.typeCustom')}</Badge>
+        )
+      ),
+      hideBelow: 'sm',
+    },
+  ];
+
+  const rowActions = (role: RoleWithPermissions) => (
+    <>
+      <Tooltip content={t('common.edit')}>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          aria-label={t('users.roles.editNamed', { name: role.name })}
+          onClick={() => handleEditRole(role)}
+        >
+          <Edit2 aria-hidden />
+        </Button>
+      </Tooltip>
+      <Tooltip content={role.is_system ? t('users.roles.systemCannotDelete') : t('common.delete')}>
+        {/* A disabled button takes no pointer events, so the tooltip that says
+            why sits on a wrapper that does. */}
+        <span className="inline-flex" tabIndex={role.is_system ? 0 : undefined}>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label={t('users.roles.deleteNamed', { name: role.name })}
+            onClick={() => handleDeleteClick(role)}
+            disabled={role.is_system}
+            className="hover:text-critical"
+          >
+            <Trash2 aria-hidden />
+          </Button>
+        </span>
+      </Tooltip>
+    </>
+  );
+
   return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <div>
-          <h2 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>{t('users.roles.title')}</h2>
-          <p className="mt-1" style={{ color: 'var(--text-secondary)' }}>
-            {t('users.roles.subtitle')}
-          </p>
-        </div>
-        {!readOnly && (
-          <button
+    <div className="grid grid-cols-1 gap-6 font-ui">
+      <PageHeader
+        title={t('users.roles.title')}
+        description={t('users.roles.subtitle')}
+        actions={!readOnly && (
+          <Button
             onClick={() => {
               setSelectedRole(undefined);
               setIsModalOpen(true);
             }}
-            className="flex items-center space-x-2 px-4 py-2 rounded-lg transition-colors hover:opacity-90"
-            style={{ background: 'var(--accent)', color: 'var(--text-inverse)' }}
           >
-            <Plus size={20} />
+            <Plus aria-hidden />
             <span>{t('users.roles.new')}</span>
-          </button>
+          </Button>
         )}
-      </div>
+        className="pb-0"
+      />
 
-      <div className="rounded-lg overflow-hidden" style={{ background: 'var(--bg-surface)', boxShadow: 'var(--shadow-md)', border: '1px solid var(--border)' }}>
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead style={{ background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)' }}>
-              <tr>
-                <th className="px-6 py-3 text-left text-sm font-semibold" style={{ color: 'var(--text-tertiary)' }}>
-                  {t('users.form.role')}
-                </th>
-                <th className="px-6 py-3 text-left text-sm font-semibold" style={{ color: 'var(--text-tertiary)' }}>
-                  {t('common.description')}
-                </th>
-                <th className="px-6 py-3 text-left text-sm font-semibold" style={{ color: 'var(--text-tertiary)' }}>
-                  {t('users.roles.permissions')}
-                </th>
-                <th className="px-6 py-3 text-left text-sm font-semibold" style={{ color: 'var(--text-tertiary)' }}>
-                  {t('users.roles.type')}
-                </th>
-                <th className="px-6 py-3 text-right text-sm font-semibold" style={{ color: 'var(--text-tertiary)' }}>
-                  {t('users.table.actions')}
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {roles.length === 0 ? (
-                <tr>
-                  <td colSpan={5} className="px-6 py-8 text-center" style={{ color: 'var(--text-secondary)' }}>
-                    {t('users.roles.empty')}
-                  </td>
-                </tr>
-              ) : (
-                roles.map((role) => (
-                  <tr key={role.id} className="transition-colors" style={{ borderTop: '1px solid var(--border)' }}>
-                    <td className="px-6 py-4">
-                      <div className="flex items-center space-x-2">
-                        <Shield style={{ color: 'var(--accent-text)' }} size={20} />
-                        <span className="font-medium" style={{ color: 'var(--text-primary)' }}>{role.name}</span>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4" style={{ color: 'var(--text-secondary)' }}>
-                      {role.description || '-'}
-                    </td>
-                    <td className="px-6 py-4" style={{ color: 'var(--text-secondary)' }}>
-                      {getPermissionsSummary(role.permissions)}
-                    </td>
-                    <td className="px-6 py-4">
-                      {role.is_system ? (
-                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium" style={{ background: 'var(--bg-muted)', color: 'var(--text-secondary)' }}>
-                          {t('users.roles.typeSystem')}
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium" style={{ background: 'var(--success-subtle)', color: 'var(--success)' }}>
-                          {t('users.roles.typeCustom')}
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-6 py-4">
-                      <div className="flex items-center justify-end space-x-2">
-                        {!readOnly && (
-                          <>
-                            <button
-                              onClick={() => handleEditRole(role)}
-                              className="p-2 rounded-lg transition-colors hover:opacity-80"
-                              style={{ color: 'var(--accent-text)', background: 'transparent' }}
-                              title={t('common.edit')}
-                            >
-                              <Edit2 size={18} />
-                            </button>
-                            <button
-                              onClick={() => handleDeleteClick(role)}
-                              disabled={role.is_system}
-                              className="p-2 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed hover:opacity-80"
-                              style={{ color: 'var(--danger)', background: 'transparent' }}
-                              title={role.is_system ? t('users.roles.systemCannotDelete') : t('common.delete')}
-                            >
-                              <Trash2 size={18} />
-                            </button>
-                          </>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
+      <DataTable
+        caption={t('users.roles.title')}
+        columns={columns}
+        rows={roles}
+        getRowId={role => role.id}
+        rowActions={!readOnly ? rowActions : undefined}
+        rowActionsLabel={t('users.table.actions')}
+        emptyState={<EmptyState size="sm" icon={Shield} title={t('users.roles.empty')} />}
+        className="[&_td]:px-2 sm:[&_td]:px-4 [&_th]:px-2 sm:[&_th]:px-4"
+      />
 
       {roles.length > 0 && (
-        <div className="rounded-lg p-4" style={{ background: 'var(--accent-subtle)', border: '1px solid var(--accent)' }}>
-          <div className="flex items-start space-x-2">
-            <AlertCircle style={{ color: 'var(--accent-text)' }} className="flex-shrink-0 mt-0.5" size={20} />
-            <div className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-              <p className="font-medium mb-1" style={{ color: 'var(--text-primary)' }}>{t('users.roles.noteTitle')}</p>
-              <ul className="list-disc list-inside space-y-1">
-                {/* `admin`, `supervisor` and `editor` inside this sentence are the stored
-                    role values, so both dictionaries name them verbatim. */}
-                <li>{t('users.roles.note.systemUndeletable')}</li>
-                <li>{t('users.roles.note.editImpliesView')}</li>
-                <li>{t('users.roles.note.immediateEffect')}</li>
-              </ul>
-            </div>
-          </div>
-        </div>
+        <Alert tone="brand" role="note" icon={Info} title={t('users.roles.noteTitle')}>
+          <ul className="list-inside list-disc space-y-1">
+            {/* `admin`, `supervisor` and `editor` inside this sentence are the stored
+                role values, so both dictionaries name them verbatim. */}
+            <li>{t('users.roles.note.systemUndeletable')}</li>
+            <li>{t('users.roles.note.editImpliesView')}</li>
+            <li>{t('users.roles.note.immediateEffect')}</li>
+          </ul>
+        </Alert>
       )}
 
       <RoleModal
@@ -336,17 +328,16 @@ const RolesManagement: React.FC = () => {
         existingPermissions={selectedRole?.permissions}
       />
 
-      <ConfirmationModal
-        isOpen={isDeleteModalOpen}
+      <ConfirmDialog
+        open={isDeleteModalOpen}
         onClose={() => {
           setIsDeleteModalOpen(false);
           setRoleToDelete(null);
         }}
         onConfirm={handleDeleteConfirm}
-        type="confirm"
         title={t('users.roles.deleteTitle')}
-        message={t('users.roles.deleteConfirm', { name: roleToDelete?.name ?? '' })}
-        confirmText={t('common.delete')}
+        description={t('users.roles.deleteConfirm', { name: roleToDelete?.name ?? '' })}
+        confirmLabel={t('common.delete')}
       />
     </div>
   );

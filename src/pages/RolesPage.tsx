@@ -1,12 +1,9 @@
 import React from 'react';
 import RolesManagement from '../components/RolesManagement';
 
+// AppLayout already pads the page; the screen draws its own header (phase 5).
 const RolesPage: React.FC = () => {
-  return (
-    <div className="p-6">
-      <RolesManagement />
-    </div>
-  );
+  return <RolesManagement />;
 };
 
 export default RolesPage;
