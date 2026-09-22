@@ -3,6 +3,9 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { useTranslation } from '../contexts/LanguageContext';
+import type {
+  ReviewReason, SourceRowKeyBasis, TimeSource, TripStatus,
+} from '../utils/fahrtenbuchImportParser';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -20,9 +23,36 @@ export interface FahrtenbuchImport {
   source_columns_json: string[] | null;
   source_sheet_name: string | null;
   storage_path: string | null;
+  /** SHA-256 of the uploaded file; NULL for imports older than 20260922100000. */
+  file_sha256: string | null;
 }
 
-export interface FahrtenbuchTrip {
+/**
+ * The columns 20260922100000 adds to a trip, all written once at import and
+ * refused by protect_fahrtenbuch_immutable_fields afterwards. Rows older than
+ * that migration carry the backfilled values, and a NULL source_row_key.
+ * utils/fahrtenbuchImportParser.ts says what each one means.
+ */
+export interface TripImportFacts {
+  start_at: string | null;
+  end_at: string | null;
+  time_zone: string | null;
+  time_source: TimeSource;
+  trip_status: TripStatus;
+  needs_review: boolean;
+  review_reasons: ReviewReason[];
+  currency: string;
+  currency_source: 'assumed' | 'source';
+  source_row_key: string | null;
+  source_row_key_basis: SourceRowKeyBasis | null;
+}
+
+// The database allows NULL in these two for a row written without them (a
+// release rolled back past this one inserts no trip_status); every import of
+// this release and the backfill set both.
+export interface FahrtenbuchTrip extends Omit<TripImportFacts, 'time_source' | 'trip_status'> {
+  time_source: TimeSource | null;
+  trip_status: TripStatus | null;
   id: string;
   company_id: string;
   import_id: string;
@@ -57,7 +87,7 @@ export interface FahrtenbuchTrip {
   updated_at: string;
 }
 
-export interface TripInsertRow {
+export interface TripInsertRow extends TripImportFacts {
   company_id: string;
   import_id: string;
   trip_date: string;
