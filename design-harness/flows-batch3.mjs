@@ -75,7 +75,8 @@ async function nothingSent(page, errors) {
   if (errors.length) throw new Error(`page errors: ${errors.join('; ')}`);
 }
 
-const button = (page, name) => page.getByRole('button', { name });
+// A string is an exact name: a run's row is a button whose name holds every label in it.
+const button = (page, name) => page.getByRole('button', typeof name === 'string' ? { name, exact: true } : { name });
 const click = async (page, locator) => {
   await locator.click();
   await quiet(page);
@@ -223,7 +224,8 @@ try {
   await check('Monatsplanung: a run\'s delete dialog opens and closes without calling the archive RPC', async () => {
     const { page, context, errors } = await open({ screen: 'monatsplanung' });
     await click(page, button(page, 'Neue Planung starten'));
-    await click(page, button(page, 'Plan endgültig löschen').first());
+    // Exact: the run's row is itself a button whose name contains every label in it.
+    await click(page, page.getByRole('button', { name: 'Plan endgültig löschen', exact: true }).first());
     await expect(page.getByText(/August 2026 · Fahrtenbuch_August_2026\.xlsx/)).toBeVisible();
     await click(page, button(page, 'Abbrechen'));
     await expect(page.getByText(/August 2026 · Fahrtenbuch_August_2026\.xlsx/)).toHaveCount(0);
