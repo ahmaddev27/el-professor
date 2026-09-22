@@ -178,6 +178,7 @@ export const en: PartialDictionary = {
   'common.confirm':         'Confirm',
   'common.yes':             'Yes',
   'common.no':              'No',
+  'common.ok':              'OK',
   'common.logout':          'Sign out',
   'common.settings':        'Settings',
   'common.error':           'Error',
