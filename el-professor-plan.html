@@ -429,7 +429,7 @@
     <p class="lede">الطلبات الخمسة من ملف المتطلبات، مقسومة على 6 مراحل. كل مرحلة بتنبني وبتنفحص على الستيج، وبعدين بتنشر على البرودكشن بزر منك، ومعها زر رجوع إذا صار إشي.</p>
     <div class="meta">
       <span class="pill info">قيد التنفيذ · المراحل 0–5</span>
-      <span>آخر تحديث: <span class="num">21.09.2026</span></span>
+      <span>آخر تحديث: <span class="num">22.09.2026</span></span>
       <span>المصدر: <code>elprofessor_requirements_ar.pdf</code></span>
     </div>
   </header>
@@ -474,7 +474,7 @@
         <li><a href="#p2"><span class="no">2</span><h3>نظام التصميم والنموذج</h3></a><ul class="chips"><li class="chip">متوسط</li><li class="chip">اندمج عالستيج</li></ul><p class="gate">البوابة انفتحت: وافقت على النموذج بـ 15.09</p></li>
         <li><a href="#p3"><span class="no">3</span><h3>فصل المنصة والصلاحيات</h3></a><ul class="chips"><li class="chip">كبير جداً</li><li class="chip">3.0 و3.1 و3.3 و3.5 و3.6 و3.9 اندمجوا</li><li class="chip">3.4أ و 3.4ب والملفات اندمجوا</li><li class="chip">3.4ج بالمراجعة</li><li class="chip">3.8-U2 بالمراجعة</li><li class="chip">3.12 بالمراجعة</li><li class="chip">3.10 و3.11 بالمراجعة</li><li class="chip">3.13أ بالمراجعة</li></ul></li>
         <li><a href="#p4"><span class="no">4</span><h3>إيصال الراتب النقدي</h3></a><ul class="chips"><li class="chip">متوسط</li><li class="chip">الأساس اندمج</li></ul></li>
-        <li><a href="#p5"><span class="no">5</span><h3>تعميم التصميم</h3></a><ul class="chips"><li class="chip">كبير</li><li class="chip">الدفعة 1 بلّشت: Fahrzeuge وFixkosten بالمراجعة</li></ul></li>
+        <li><a href="#p5"><span class="no">5</span><h3>تعميم التصميم</h3></a><ul class="chips"><li class="chip">كبير</li><li class="chip">الدفعة 1 اندمجت جزئياً، والدفعة 2 بالمراجعة</li></ul></li>
       </ol>
     </section>
 
@@ -1134,8 +1134,8 @@ AND (c.subscription_expires_at IS NULL OR c.subscription_expires_at &gt; now())<
           <table>
             <thead><tr><th>الدفعة</th><th>الصفحات</th></tr></thead>
             <tbody>
-              <tr><td class="num">1</td><td>Belege، Fahrer، Fahrzeuge، Umsätze، Fixkosten <span class="pill info">Fahrzeuge وFixkosten بالمراجعة (PR #90)، الباقي بعدهم</span></td></tr>
-              <tr><td class="num">2</td><td>Gehälter، Abrechnung، Bargeldbestand</td></tr>
+              <tr><td class="num">1</td><td>Belege، Fahrer، Fahrzeuge، Umsätze، Fixkosten <span class="pill ok">Fahrzeuge وFixkosten اندمجوا (PR #90)</span> <span class="pill">الباقي بعدهم</span></td></tr>
+              <tr><td class="num">2</td><td>Gehälter، Abrechnung، Bargeldbestand <span class="pill info">بالمراجعة (PR #__PR__)</span></td></tr>
               <tr><td class="num">3</td><td>Dokumente، Monatsplanung، Stundennachweis (العرض بس)</td></tr>
               <tr><td class="num">4</td><td>Benutzer، Rollen، Einstellungen، Abonnement، وصفحات الدخول</td></tr>
               <tr><td class="num">5</td><td>لوحة المنصة</td></tr>
@@ -1155,7 +1155,7 @@ AND (c.subscription_expires_at IS NULL OR c.subscription_expires_at &gt; now())<
       </div>
 
       <div class="step">
-        <h3><span class="step-no">5.1</span>الدفعة 1، أول شاشتين: Fahrzeuge وFixkosten <span class="pill info">بالمراجعة · PR #90</span></h3>
+        <h3><span class="step-no">5.1</span>الدفعة 1، أول شاشتين: Fahrzeuge وFixkosten <span class="pill ok">اندمجت · PR #90</span></h3>
         <ul class="list">
           <li><strong>ليش شاشتين بس:</strong> هدول أقل شاشات الدفعة فيهم منطق رواتب، فالطريقة بتنحكم عليها بمكان الغلطة فيه أرخص. Belege وFahrer وUmsätze بييجوا بعد المراجعة، وبيمشوا على نفس الطريقة.</li>
           <li><strong>شو تغيّر:</strong> الشكل بس. شو الشاشة بتقرا وبتحسب وبتكتب وبتتحقق منه ضل نفس النص حرفياً، وهاد مفحوص حرف بحرف. عنوان واحد لكل صفحة، جدول واحد بدل البطاقات، والتبويبات لحالة الـ TÜV، والمبالغ بالطريقة الألمانية بأرقام متساوية العرض.</li>
@@ -1164,6 +1164,18 @@ AND (c.subscription_expires_at IS NULL OR c.subscription_expires_at &gt; now())<
           <li><strong>فحص تلقائي جديد:</strong> بيعدّ التنسيقات المكتوبة يدوياً والألوان الثابتة بكل ملف، وبيوقف البناء إذا زادت. الشاشتين صاروا صفر.</li>
           <li><strong>لقطات قبل وبعد:</strong> 34 لقطة لكل وحدة، 375 و768 و1280، فاتح وغامق، بـ <code>Docs/design/phase5/batch1/</code>، على بيانات مخترعة بنفس الإطار الحقيقي للبرنامج.</li>
           <li><strong>بيستنى قرارك:</strong> سطر «Benutzerinfo» اللي بيطلع إيميل المستخدم ودوره على Fixkosten ضل، بس صار صغير تحت الجدول. شيله قرارك.</li>
+        </ul>
+      </div>
+
+      <div class="step">
+        <h3><span class="step-no">5.2</span>الدفعة 2: Gehälter وAbrechnung وBargeldbestand <span class="pill info">بالمراجعة · PR #__PR__</span></h3>
+        <ul class="list">
+          <li><strong>شو تغيّر:</strong> الشكل بس، على أربع ملفات. المبالغ صارت بالطريقة الألمانية بكل مكان (كانت بعض الشاشات تكتب <span class="num">1234.56</span> بنقطة)، والجداول صارت جدول واحد مرتب لكل أسبوع أو شهر.</li>
+          <li><strong>مفحوص نصّياً:</strong> أداة بتقارن منطق كل ملف بالنسخة القديمة سطر بسطر، وبتتأكد إن كل حساب كان مكتوب جوّا الشاشة لسا موجود حرفياً. وملفات Excel نزّلناها من النسختين وقارنّا كل خلية: متطابقة.</li>
+          <li><strong>التغيير الوحيد بالسلوك، عن قصد:</strong> لما التحميل يفشل، الشاشة ما عادت تعرض <span class="num">0,00 €</span> ولا أرقام الشهر اللي قبل تحت اسم الشهر الجديد. بتطلع رسالة خطأ مع «إعادة المحاولة».</li>
+          <li><strong>ضلّوا عالشكل القديم:</strong> صورة Abrechnung اللي بتنبعت للسائق (هي وثيقة)، وملخّص السائق (كمان صورة)، ونوافذ الدفعات — هدول إلهم خطوة لحالهم.</li>
+          <li><strong>عالموبايل:</strong> Abrechnung كانت أعرض من الشاشة بـ <span class="num">134</span> بكسل، وهلأ ولا شاشة بتطلع برّا.</li>
+          <li><strong>لقطات قبل وبعد:</strong> <span class="num">47</span> لكل وحدة بـ <code>Docs/design/phase5/batch2/</code>، منها شهر فيه إيصال راتب انلغى بالشهر اللي بعده، وحساب billing ما بيقدر يقرا الصندوق كامل.</li>
         </ul>
       </div>
     </section>
@@ -1179,7 +1191,7 @@ AND (c.subscription_expires_at IS NULL OR c.subscription_expires_at &gt; now())<
             <tr><td class="num">2</td><td>التصميم والنموذج</td><td>متوسط</td><td>0، وموافقتك</td><td><span class="pill ok">اندمج</span></td></tr>
             <tr><td class="num">3</td><td>المنصة والصلاحيات</td><td>كبير جداً</td><td>1، و2 للواجهة</td><td><span class="pill info">قيد البناء</span></td></tr>
             <tr><td class="num">4</td><td>إيصال الراتب</td><td>متوسط</td><td>2 للواجهة، وقرار صفوف الرواتب المكررة</td><td><span class="pill ok">اندمج عالستيج</span></td></tr>
-            <tr><td class="num">5</td><td>تعميم التصميم</td><td>كبير</td><td>2</td><td><span class="pill">ما بلّشت</span></td></tr>
+            <tr><td class="num">5</td><td>تعميم التصميم</td><td>كبير</td><td>2</td><td><span class="pill info">قيد التنفيذ</span></td></tr>
           </tbody>
         </table>
       </div>
