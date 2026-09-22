@@ -1,5 +1,14 @@
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { ACTUAL_END_TOKENS, ACTUAL_START_TOKENS } from './planningQualityChecks';
 import {
+  DATETIME_RE,
+  GERMAN_DATETIME_RE,
+  REVIEW_REASONS,
+  TIME_RE,
+  TIME_SOURCES,
+  TRIP_STATUSES,
   applySourceRowKeys,
   buildTripRows,
   classifyTimestampCell,
@@ -9,6 +18,7 @@ import {
   mapTripStatus,
   normaliseDriverName,
   normalisePlate,
+  parseDate,
   parseTime,
   sha256HexOfBytes,
   sha256HexOfText,
@@ -226,6 +236,13 @@ describe('absolute times', () => {
     const overnight = deriveTripTimes({ startCell: '23:50', endCell: '00:10', tripDate: '2026-08-03', startTime: '23:50', endTime: '00:10' });
     expect(overnight).toMatchObject({ startAt: '2026-08-03T21:50:00.000Z', endAt: '2026-08-03T22:10:00.000Z', timeSource: 'fallback_trip_date' });
 
+    // Across midnight into the October change: the end moves to the next
+    // calendar day on the wall clock and is then read in that day's offset —
+    // 23:50 CEST to 03:10 CET is 4 h 20 min, not a fixed 24 hours added to an
+    // instant (resolveActualRideWindow's rule, which is wrong on these nights).
+    const dstNight = deriveTripTimes({ startCell: '23:50', endCell: '03:10', tripDate: '2026-10-24', startTime: '23:50', endTime: '03:10' });
+    expect(dstNight).toMatchObject({ startAt: '2026-10-24T21:50:00.000Z', endAt: '2026-10-25T02:10:00.000Z', timeSource: 'fallback_trip_date' });
+
     // An end equal to the start is a ride under a minute, not one of 24 hours.
     const instant = deriveTripTimes({ startCell: '10:05', endCell: '10:05', tripDate: '2026-08-03', startTime: '10:05', endTime: '10:05' });
     expect(instant.endAt).toBe(instant.startAt);
@@ -243,6 +260,13 @@ describe('absolute times', () => {
     expect(classifyTimestampCell('2026-08-01T10:00:00Z')).toEqual({ kind: 'other' });
     expect(classifyTimestampCell('2026-08-01 24:00:00')).toEqual({ kind: 'other' });
     expect(classifyTimestampCell(true)).toEqual({ kind: 'other' });
+  });
+
+  it('reads the German spelling, day first', () => {
+    expect(classifyTimestampCell('01.08.2026 10:05')).toEqual({ kind: 'datetime', wall: { year: 2026, month: 8, day: 1, hour: 10, minute: 5, second: 0 } });
+    expect(classifyTimestampCell('1.8.2026 10:19:02')).toEqual({ kind: 'datetime', wall: { year: 2026, month: 8, day: 1, hour: 10, minute: 19, second: 2 } });
+    expect(classifyTimestampCell('31.02.2026 10:05')).toEqual({ kind: 'other' });
+    expect(classifyTimestampCell('08/01/2026 10:05')).toEqual({ kind: 'other' });
   });
 
   it('reads an Excel date-and-time serial, and nothing else as one', () => {
@@ -418,6 +442,62 @@ describe('the file hash and the row key', () => {
     expect(inFileDuplicates).toBe(0);
     expect(rows.map(r => r.source_row_key)).toEqual([null, null]);
     expect(rows.map(r => r.source_row_key_basis)).toEqual([null, null]);
+  });
+});
+
+describe('dates', () => {
+  it('refuses a day the calendar does not have instead of passing it to the database', () => {
+    expect(parseDate('2026-08-01')).toBe('2026-08-01');
+    expect(parseDate('01.08.2026')).toBe('2026-08-01');
+    expect(parseDate('31.02.2026')).toBeNull();
+    expect(parseDate('45.13.2026')).toBeNull();
+    expect(parseDate('2026-02-29')).toBeNull();
+    expect(parseDate('2028-02-29')).toBe('2028-02-29');
+    expect(parseDate('\\N')).toBeNull();
+  });
+});
+
+/*
+  The migration's backfill applies these rules to the trips stored before it
+  (tests/rls/fahrtenbuch-import.sql runs the same cases in SQL). These read the
+  migration's text, so the day one side changes and the other does not, the
+  build fails here rather than in a month's payroll.
+*/
+describe('the migration derives what the browser derives', () => {
+  const read = (relative: string) => readFileSync(fileURLToPath(new URL(relative, import.meta.url)), 'utf8');
+  const migration = read('../../supabase/migrations/20260922100000_fahrtenbuch_import_reliability.sql');
+  const quoted = (list: string) => [...list.matchAll(/'([^']*)'/g)].map(m => m[1]);
+  const sqlConstant = (name: string) => {
+    const m = migration.match(new RegExp(`${name} CONSTANT text\\[\\] := ARRAY\\[([^\\]]*)\\]`));
+    if (!m) throw new Error(`${name} not found in the migration`);
+    return quoted(m[1]);
+  };
+
+  it('finds the start and end cells with the tokens resolveActualRideWindow uses', () => {
+    expect(sqlConstant('c_start_tokens')).toEqual(ACTUAL_START_TOKENS);
+    expect(sqlConstant('c_end_tokens')).toEqual(ACTUAL_END_TOKENS);
+  });
+
+  it('never reads a column planningQualityChecks refuses', () => {
+    const source = read('./planningQualityChecks.ts');
+    const m = source.match(/const REJECT_COL_FRAGMENTS = \[([^\]]*)\]/);
+    expect(m).not.toBeNull();
+    expect(sqlConstant('c_reject_fragments')).toEqual(quoted((m as RegExpMatchArray)[1]));
+  });
+
+  it('reads timestamps with the same three patterns', () => {
+    expect(migration).toContain(`'${DATETIME_RE.source}'`);
+    expect(migration).toContain(`'${GERMAN_DATETIME_RE.source}'`);
+    expect(migration).toContain(`'${TIME_RE.source}'`);
+  });
+
+  it('allows exactly the review reasons, time sources and statuses the parser writes', () => {
+    const reasons = migration.match(/review_reasons <@ ARRAY\[([^\]]*)\]/);
+    expect(quoted((reasons as RegExpMatchArray)[1])).toEqual([...REVIEW_REASONS]);
+    const sources = migration.match(/CHECK \(time_source IN \(([^)]*)\)\)/);
+    expect(quoted((sources as RegExpMatchArray)[1])).toEqual([...TIME_SOURCES]);
+    const statuses = migration.match(/trip_status IN \(([^)]*)\)/);
+    expect(quoted((statuses as RegExpMatchArray)[1])).toEqual([...TRIP_STATUSES]);
   });
 });
 
