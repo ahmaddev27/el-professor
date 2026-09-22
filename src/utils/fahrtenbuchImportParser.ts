@@ -24,8 +24,9 @@
  *   The Uber export dates a ride that starts between 00:00 and 00:30 on the
  *   day before ("Datum der Fahrt" is the order's day). `trip_date` keeps that
  *   value; `start_at` carries the day the ride actually began.
- * - **trip_status**: `abgeschlossen` → completed, `storniert` → cancelled,
- *   anything else → unknown. `source_status` keeps the text as it was.
+ * - **trip_status**: `abgeschlossen` → completed; `storniert`, `storno`,
+ *   `cancelled`, `canceled`, `abgebrochen` → cancelled; anything else →
+ *   unknown. `source_status` keeps the text as it was.
  *   `is_canceled` is exactly `trip_status = 'cancelled'`, so an unknown status
  *   is never read as a completed ride and never as a cancelled one.
  * - **needs_review / review_reasons**: a row the file left incomplete is kept
@@ -300,15 +301,24 @@ export function isValidKennzeichen(raw: CellValue): boolean {
 // ── Status ────────────────────────────────────────────────────────────────────
 
 /**
- * The only two words the exporter is known to write. Anything else — a
- * synonym, a typo, an empty cell, a file without a status column — is
- * 'unknown': stored, flagged for review, and never counted as completed.
- * Widening this map is a decision about what a word in a customer's file
- * means, so it is made here and nowhere else.
+ * The words a status cell may hold, compared after `normalise` (case and
+ * everything but letters and digits dropped). The cancelled list keeps the
+ * words the importer before 20260922100000 read as cancelled, so no file that
+ * imported as cancelled then reads differently now (owner's decision,
+ * 22.09.2026). Anything else — a typo, an empty cell, a file without a status
+ * column — is 'unknown': stored, flagged for review, never counted as
+ * completed and never as cancelled. Widening a list is a decision about what
+ * a word in a customer's file means, so it is made here and in the migration's
+ * app_private.fahrtenbuch_map_status, and the test fails when the two part.
  */
+export const COMPLETED_STATUS_WORDS: readonly string[] = ['abgeschlossen'];
+export const CANCELLED_STATUS_WORDS: readonly string[] = [
+  'storno', 'storniert', 'cancelled', 'canceled', 'abgebrochen',
+];
+
 const STATUS_MAP: ReadonlyMap<string, TripStatus> = new Map<string, TripStatus>([
-  ['abgeschlossen', 'completed'],
-  ['storniert', 'cancelled'],
+  ...COMPLETED_STATUS_WORDS.map(w => [normalise(w), 'completed'] as const),
+  ...CANCELLED_STATUS_WORDS.map(w => [normalise(w), 'cancelled'] as const),
 ]);
 
 export function mapTripStatus(raw: CellValue): TripStatus {

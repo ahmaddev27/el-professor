@@ -3,6 +3,8 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { ACTUAL_END_TOKENS, ACTUAL_START_TOKENS } from './planningQualityChecks';
 import {
+  CANCELLED_STATUS_WORDS,
+  COMPLETED_STATUS_WORDS,
   DATETIME_RE,
   GERMAN_DATETIME_RE,
   REVIEW_REASONS,
@@ -279,13 +281,22 @@ describe('absolute times', () => {
 });
 
 describe('statuses', () => {
-  it('maps exactly two words and nothing else', () => {
+  it('maps the completed word and the old importer\'s cancel words, and nothing else', () => {
     expect(mapTripStatus('abgeschlossen')).toBe('completed');
     expect(mapTripStatus(' Abgeschlossen ')).toBe('completed');
-    expect(mapTripStatus('storniert')).toBe('cancelled');
-    expect(mapTripStatus('STORNIERT')).toBe('cancelled');
-    for (const other of ['storno', 'cancelled', 'unterwegs', '', 'constructor', 'toString']) {
+    for (const cancelled of ['storniert', 'STORNIERT', ' Storno ', 'cancelled', 'Canceled', 'abgebrochen', 'ABGEBROCHEN']) {
+      expect(mapTripStatus(cancelled)).toBe('cancelled');
+    }
+    for (const other of ['unterwegs', 'offen', 'storn', '', '\\N', 'constructor', 'toString']) {
       expect(mapTripStatus(other)).toBe('unknown');
+    }
+  });
+
+  it('keeps every cancel word as cancelled through the whole row', () => {
+    for (const word of CANCELLED_STATUS_WORDS) {
+      const { row } = buildOne({ status: word, start: '\\N', end: '\\N' });
+      expect(row).toMatchObject({ trip_status: 'cancelled', is_canceled: true, source_status: word, plausibility_status: 'canceled' });
+      expect(row.review_reasons).toEqual([]);
     }
   });
 
@@ -483,6 +494,12 @@ describe('the migration derives what the browser derives', () => {
     const m = source.match(/const REJECT_COL_FRAGMENTS = \[([^\]]*)\]/);
     expect(m).not.toBeNull();
     expect(sqlConstant('c_reject_fragments')).toEqual(quoted((m as RegExpMatchArray)[1]));
+  });
+
+  it('reads a status word by the same two lists', () => {
+    expect(sqlConstant('c_completed_words')).toEqual([...COMPLETED_STATUS_WORDS]);
+    expect(sqlConstant('c_cancelled_words')).toEqual([...CANCELLED_STATUS_WORDS]);
+    expect(CANCELLED_STATUS_WORDS).toEqual(['storno', 'storniert', 'cancelled', 'canceled', 'abgebrochen']);
   });
 
   it('reads timestamps with the same three patterns', () => {
