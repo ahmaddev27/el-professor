@@ -18,13 +18,8 @@ import type { OtpNotice } from '../lib/otpUi';
 import AuthShell from '../components/auth/AuthShell';
 import NoticeBox from '../components/auth/NoticeBox';
 import OtpChallenge from '../components/auth/OtpChallenge';
-import {
-  authInputClass,
-  authLabelClass,
-  authPrimaryButtonClass,
-  authQuietLinkClass,
-  authSpinnerClass,
-} from '../components/auth/authStyles';
+import { authFieldIconClass, authFieldWithIconClass, authQuietLinkClass } from '../components/auth/authStyles';
+import { Button, Field, Input } from '../components/ui';
 
 type Challenge = { email: string; cooldownSeconds: number; notice: OtpNotice | null };
 
@@ -89,15 +84,22 @@ const VerifyEmailPage: React.FC = () => {
     return true;
   };
 
+  // ── Presentation (phase 5) ────────────────────────────────────────────────
+  // Everything above is unchanged. The three states below are the ones the old
+  // renderBody drew, in the same order: confirmed but not signed in, the code,
+  // then the address.
+
   const renderBody = () => {
     if (verifiedWithoutSession) {
       return (
-        <div className="space-y-5">
+        <div className="grid gap-5">
           <NoticeBox tone="success" announce>{t('signup.verify.verifiedLogin')}</NoticeBox>
-          <Link to="/login" replace className={authPrimaryButtonClass}>
-            <LogIn size={15} aria-hidden="true" />
-            <span>{t('auth.signIn')}</span>
-          </Link>
+          <Button asChild size="lg" className="w-full">
+            <Link to="/login" replace>
+              <LogIn aria-hidden />
+              <span>{t('auth.signIn')}</span>
+            </Link>
+          </Button>
         </div>
       );
     }
@@ -118,35 +120,28 @@ const VerifyEmailPage: React.FC = () => {
     }
 
     return (
-      <form onSubmit={sendCode} className="space-y-4" noValidate>
+      <form onSubmit={sendCode} className="grid gap-4" noValidate>
         {error && <NoticeBox tone="error" announce>{formatOtpMessage(error, t, tPlural)}</NoticeBox>}
-        <div>
-          <label htmlFor="verify-email" className={authLabelClass}>{t('auth.email')}</label>
+        <Field label={t('auth.email')} id="verify-email">
           <div className="relative">
-            <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 text-white/25" size={16} aria-hidden="true" />
-            <input
+            <Mail aria-hidden className={authFieldIconClass} />
+            <Input
               id="verify-email"
               type="email"
               autoComplete="email"
               value={email}
               onChange={event => setEmail(event.target.value)}
-              className={authInputClass}
+              className={authFieldWithIconClass}
               placeholder={t('auth.emailPlaceholder')}
               required
               autoFocus
             />
           </div>
-        </div>
-        <button type="submit" disabled={sending || !email.trim()} className={`${authPrimaryButtonClass} mt-2`}>
-          {sending ? (
-            <span className={authSpinnerClass} aria-hidden="true" />
-          ) : (
-            <>
-              <Send size={15} aria-hidden="true" />
-              <span>{t('signup.verify.sendCode')}</span>
-            </>
-          )}
-        </button>
+        </Field>
+        <Button type="submit" size="lg" disabled={sending || !email.trim()} loading={sending} className="mt-1 w-full">
+          {!sending && <Send aria-hidden />}
+          <span>{t('signup.verify.sendCode')}</span>
+        </Button>
       </form>
     );
   };

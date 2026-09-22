@@ -1,43 +1,47 @@
 import React from 'react';
 import LanguageSwitcher from '../LanguageSwitcher';
+import { Card, cn } from '../ui';
+import BrandMark from './BrandMark';
 
 interface AuthShellProps {
   title: string;
   subtitle?: React.ReactNode;
   children: React.ReactNode;
   footer?: React.ReactNode;
+  /** `wide` holds the registration forms, whose plan cards sit three abreast. */
+  width?: 'narrow' | 'wide';
+  /** A row between the heading and the card, such as the signup steps. */
+  above?: React.ReactNode;
 }
 
-/** The frame of the signed-out screens: dark grid backdrop, logo, heading, one card. */
-const AuthShell: React.FC<AuthShellProps> = ({ title, subtitle, children, footer }) => (
-  <div className="min-h-screen bg-[#060a0f] flex items-center justify-center p-4 relative overflow-hidden">
-    <div className="absolute inset-0 bg-[linear-gradient(rgba(6,182,212,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(6,182,212,0.03)_1px,transparent_1px)] bg-[size:48px_48px]" />
-    <div className="absolute top-1/4 left-1/2 -translate-x-1/2 w-[600px] h-[400px] bg-cyan-600/5 rounded-full blur-[120px] pointer-events-none" />
-
-    <div className="absolute top-4 right-4 z-10">
-      <LanguageSwitcher variant="dark" />
+/**
+ * The frame of the signed-out screens: the brand, one heading, one card.
+ *
+ * On the design system since phase 5 batch 4, so it follows the theme. It is
+ * the page's `main` landmark and its only `h1` (audit findings 21 and 17), and
+ * it fills the viewport below the staging banner rather than the whole
+ * viewport, so on staging the page does not scroll by the banner's height.
+ */
+const AuthShell: React.FC<AuthShellProps> = ({ title, subtitle, children, footer, width = 'narrow', above }) => (
+  <main className="relative flex min-h-[calc(100dvh-var(--env-banner-height,0px))] flex-col items-center justify-center bg-canvas px-4 pb-10 pt-16 font-ui text-fg">
+    <div className="absolute right-4 top-4">
+      <LanguageSwitcher variant="ui" />
     </div>
 
-    <div className="relative w-full max-w-sm">
-      <div className="text-center mb-8">
-        <div className="w-16 h-16 mx-auto mb-4 flex items-center justify-center">
-          <img
-            src="/professor_logo_white.svg"
-            alt="El-Professor"
-            className="w-16 h-16 object-contain drop-shadow-[0_0_16px_rgba(6,182,212,0.5)]"
-          />
-        </div>
-        <h1 className="text-2xl font-bold text-white mb-1">{title}</h1>
-        {subtitle && <p className="text-white/40 text-sm break-words">{subtitle}</p>}
-      </div>
+    <div className={cn('w-full', width === 'wide' ? 'max-w-2xl' : 'max-w-sm')}>
+      <header className="mb-6 flex flex-col items-center text-center">
+        <BrandMark />
+        <h1 className="mt-6 text-2xl font-semibold tracking-tight">{title}</h1>
+        {subtitle && <p className="mt-1 max-w-full break-words text-sm text-fg-muted">{subtitle}</p>}
+      </header>
 
-      <div className="bg-white/4 backdrop-blur-xl border border-white/10 rounded-2xl p-7 shadow-[0_24px_64px_rgba(0,0,0,0.5)]">
-        {children}
-      </div>
+      {above}
 
-      {footer && <div className="mt-6 text-center">{footer}</div>}
+      <Card className="p-5 sm:p-7">{children}</Card>
+
+      {footer && <div className="mt-6 grid justify-items-center gap-3 text-center">{footer}</div>}
     </div>
-  </div>
+  </main>
 );
 
 export default AuthShell;
