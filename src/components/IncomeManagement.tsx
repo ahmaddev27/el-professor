@@ -1,18 +1,38 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { TrendingUp, Plus, CreditCard as Edit2, Trash2, Save, X, DollarSign, Download, Calendar, RefreshCw, Check, ChevronLeft, ChevronRight } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Check, Download, Info, Pencil, Plus, RefreshCw, Save, Trash2, TrendingUp, Users, X } from 'lucide-react';
 import { Income, IncomeFormData, Driver, INCOME_TYPES } from '../types/receipt';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { useCompanyScope } from '../hooks/useCompanyScope';
 import { useToast } from '../contexts/ToastContext';
 import { format, startOfWeek, endOfWeek, startOfMonth, endOfMonth, startOfYear, endOfYear, subMonths, getMonth, getYear } from 'date-fns';
-import ConfirmationModal from './ConfirmationModal';
 import { handleDatabaseError } from '../utils/errorHandler';
 import { exportIncomeToExcel } from '../utils/excelExport';
 import { getWeeksOfMonth, getWeekNumberForDate, WeekOfMonth, getBusinessMonthRange, getBusinessWeekRange } from '../utils/weekCalculations';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { useTranslation } from '../contexts/LanguageContext';
 import type { TranslationKey } from '../i18n';
+import {
+  Badge,
+  Button,
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  cn,
+  ConfirmDialog,
+  DataTable,
+  EmptyState,
+  formatDate,
+  Field,
+  formatEuro,
+  Input,
+  KpiCard,
+  NativeSelect,
+  PageHeader,
+  Tooltip,
+  type DataTableColumn,
+} from './ui';
 
 interface IncomeManagementProps {
   drivers: Driver[];
@@ -51,6 +71,7 @@ const IncomeManagement: React.FC<IncomeManagementProps> = ({ drivers }) => {
   const [incomes, setIncomes] = useState<Income[]>([]);
   const [filteredIncomes, setFilteredIncomes] = useState<Income[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [isAdding, setIsAdding] = useState(false);
 
@@ -90,7 +111,6 @@ const IncomeManagement: React.FC<IncomeManagementProps> = ({ drivers }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedDriver, setSelectedDriver] = useState('');
   const [selectedType, setSelectedType] = useState<string>('');
-  const [hoveredRow, setHoveredRow] = useState<string | null>(null);
 
   const { user, profile } = useAuth();
   // The rights of the company the session is in — see BelegePage.
@@ -126,6 +146,7 @@ const IncomeManagement: React.FC<IncomeManagementProps> = ({ drivers }) => {
   const loadIncomes = async () => {
     try {
       setLoading(true);
+      setLoadFailed(false);
       const { data, error } = await supabase
         .from('income')
         .select('*')
@@ -137,6 +158,7 @@ const IncomeManagement: React.FC<IncomeManagementProps> = ({ drivers }) => {
     } catch (err: any) {
       console.error('Error loading incomes:', err);
       showError(t('common.errorLoad'), handleDatabaseError(err));
+      setLoadFailed(true);
     } finally {
       setLoading(false);
     }
@@ -494,466 +516,557 @@ const IncomeManagement: React.FC<IncomeManagementProps> = ({ drivers }) => {
     return { bargeld, nettoFahrpreis, trinkgeld, aktionen, summe };
   };
 
-  const carouselRef = useRef<HTMLDivElement>(null);
-  const isDragging = useRef(false);
-  const dragStartX = useRef(0);
-  const scrollStartX = useRef(0);
-
-  const scrollCarousel = (direction: 'left' | 'right') => {
-    if (!carouselRef.current) return;
-    const cardWidth = carouselRef.current.querySelector('[data-card]')?.clientWidth ?? 280;
-    const gap = 16;
-    carouselRef.current.scrollBy({ left: direction === 'left' ? -(cardWidth + gap) : (cardWidth + gap), behavior: 'smooth' });
-  };
-
-  const onMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (!carouselRef.current) return;
-    isDragging.current = true;
-    dragStartX.current = e.pageX;
-    scrollStartX.current = carouselRef.current.scrollLeft;
-    carouselRef.current.style.cursor = 'grabbing';
-    carouselRef.current.style.userSelect = 'none';
-  };
-
-  const onMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (!isDragging.current || !carouselRef.current) return;
-    const delta = e.pageX - dragStartX.current;
-    carouselRef.current.scrollLeft = scrollStartX.current - delta;
-  };
-
-  const onMouseUp = () => {
-    isDragging.current = false;
-    if (carouselRef.current) {
-      carouselRef.current.style.cursor = 'grab';
-      carouselRef.current.style.userSelect = '';
-    }
-  };
-
   const activeDrivers = drivers.filter(driver => driver.status !== 'inactive');
 
-  const inputStyle = {
-    background: 'var(--bg-subtle)',
-    border: '1px solid var(--border)',
-    borderRadius: '0.5rem',
-    color: 'var(--text-primary)',
-    fontSize: '0.875rem',
-    padding: '0.5rem 0.75rem',
-    outline: 'none'
+  // ── Presentation (phase 5) ────────────────────────────────────────────────
+  // Everything above is the screen's logic and is unchanged, less three pieces
+  // that only drew: the hover-row state, the inline input style object, and the
+  // driver carousel's drag-to-scroll refs and handlers (they wrote the
+  // carousel's cursor and scroll position, nothing else). The carousel is a
+  // table now, and each of its rows is getWeeklyDataByDriver()'s answer for one
+  // active driver, as each card was. Every amount on screen goes through
+  // utils/money.ts; this block adds no arithmetic. Everything below only draws.
+  //
+  // One addition to the logic, and only the lines the rule allows (CLAUDE.md,
+  // "A figure whose load failed is not shown"): a `loadFailed` state, cleared
+  // where loadIncomes starts and set in its existing catch. A failed read of the
+  // entries — the database reachable, so the page's isConnected check passes —
+  // otherwise left 0,00 € and "no entries" on screen, or after a write the list
+  // as it was before the write; now the total, the per-driver figures and the
+  // export are withheld and the table says it could not load.
+
+  // formatEuro refuses a value that is not a finite amount; a figure shows it as
+  // it is rather than taking the screen down, as DataTable does for its cells.
+  const euro = (amount: number) => (Number.isFinite(amount) ? formatEuro(amount) : String(amount));
+
+  const INCOME_TYPE_TONE: Record<IncomeType, 'positive' | 'brand' | 'caution' | 'neutral'> = {
+    bargeld: 'positive',
+    umsatz: 'brand',
+    aktionen: 'caution',
+    trinkgeld: 'neutral',
   };
+
+  const typeBadge = (income: Income) => (
+    <Badge tone={INCOME_TYPE_TONE[income.type as IncomeType] ?? 'neutral'}>
+      {t(INCOME_TYPE_LABELS[income.type] ?? INCOME_TYPE_LABELS.trinkgeld)}
+    </Badge>
+  );
+
+  const weekText = (income: Income) => (income.week ? t('inc.weekLabel', { week: income.week }) : '-');
+
+  // ── The row being edited. Each field is written once and placed twice: in its
+  // own column from md up, stacked under the driver below it, so a phone edits
+  // every field the old table offered.
+  const editDate = () => (
+    <Input
+      type="date"
+      value={formData.date}
+      onChange={(e) => setFormData({ ...formData, date: e.target.value })}
+      aria-label={t('common.date')}
+      size={1}
+    />
+  );
+  const editWeek = () => (
+    <NativeSelect
+      value={formData.week || ''}
+      onChange={(e) => setFormData({ ...formData, week: parseInt(e.target.value) })}
+      aria-label={t('common.week')}
+      // In its own column the table would squeeze it to its chevron.
+      containerClassName="md:min-w-[5.5rem]"
+    >
+      <option value="">-</option>
+      {availableWeeks.map(week => (
+        <option key={week.weekNumber} value={week.weekNumber}>
+          W{week.weekNumber}
+        </option>
+      ))}
+    </NativeSelect>
+  );
+  const editDriver = () => (
+    <NativeSelect
+      value={formData.driver_name}
+      onChange={(e) => setFormData({ ...formData, driver_name: e.target.value })}
+      aria-label={t('common.driver')}
+    >
+      {drivers.filter(driver => driver.status !== 'inactive').map(driver => (
+        <option key={driver.id} value={driver.name}>{driver.name}</option>
+      ))}
+    </NativeSelect>
+  );
+  const editType = () => (
+    <NativeSelect
+      value={formData.type}
+      onChange={(e) => setFormData({ ...formData, type: e.target.value as IncomeType })}
+      aria-label={t('inc.type')}
+      containerClassName="md:min-w-[8.5rem]"
+    >
+      {/* The option value is the persisted `income.type`. */}
+      {INCOME_TYPE_ORDER.map(type => (
+        <option key={type} value={type}>{t(INCOME_TYPE_LABELS[type])}</option>
+      ))}
+    </NativeSelect>
+  );
+  const editDescription = () => (
+    <Input
+      type="text"
+      value={formData.description}
+      onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+      aria-label={t('common.description')}
+      size={1}
+    />
+  );
+  const editAmount = () => (
+    <Input
+      type="number"
+      step="0.01"
+      value={formData.amount}
+      onChange={(e) => setFormData({ ...formData, amount: e.target.value })}
+      aria-label={t('common.amount')}
+      className="ml-auto w-[6.5rem] text-right sm:w-32"
+    />
+  );
+
+  const columns: DataTableColumn<Income>[] = [
+    {
+      id: 'date',
+      header: t('common.date'),
+      kind: 'date',
+      value: income => income.date,
+      sortable: true,
+      cell: income => (editingId === income.id ? editDate() : <span className="whitespace-nowrap tabular-nums">{formatDate(income.date)}</span>),
+      hideBelow: 'md',
+    },
+    {
+      id: 'week',
+      header: t('common.week'),
+      value: income => income.week ?? null,
+      cell: income => (editingId === income.id ? editWeek() : <span className="whitespace-nowrap">{weekText(income)}</span>),
+      hideBelow: 'md',
+    },
+    {
+      id: 'driver',
+      header: t('common.driver'),
+      value: income => income.driver_name,
+      sortable: true,
+      cell: income =>
+        editingId === income.id ? (
+          <span className="grid gap-2 py-2 md:min-w-[11rem]">
+            {editDriver()}
+            {/* On a phone the amount comes along too: beside the stack it left
+                no room for the save and cancel buttons. */}
+            <span className="grid gap-2 md:hidden">
+              {editDate()}
+              {editWeek()}
+              {editType()}
+              {editDescription()}
+              {editAmount()}
+            </span>
+          </span>
+        ) : (
+          <span className="grid min-w-0 gap-0.5 py-2">
+            <span className="font-medium text-fg">{income.driver_name}</span>
+            {/* A phone hides the date, week, type and description columns; their values move here. */}
+            <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[13px] text-fg-muted md:hidden">
+              <span className="tabular-nums">{formatDate(income.date)}</span>
+              {typeBadge(income)}
+            </span>
+            {income.description ? <span className="text-[13px] text-fg-subtle md:hidden">{income.description}</span> : null}
+          </span>
+        ),
+      // At 375 px the driver, the amount and both row actions share the width.
+      className: 'pl-3 pr-1 sm:px-4',
+    },
+    {
+      id: 'type',
+      header: t('inc.type'),
+      value: income => income.type,
+      sortable: true,
+      cell: income => (editingId === income.id ? editType() : typeBadge(income)),
+      hideBelow: 'md',
+    },
+    {
+      id: 'description',
+      header: t('common.description'),
+      value: income => income.description,
+      cell: income => (editingId === income.id ? editDescription() : income.description),
+      hideBelow: 'md',
+      className: 'min-w-[10rem]',
+    },
+    {
+      id: 'amount',
+      header: t('common.amount'),
+      kind: 'currency',
+      value: income => Number(income.amount),
+      sortable: true,
+      cell: income =>
+        editingId === income.id ? (
+          <span className="hidden md:block">{editAmount()}</span>
+        ) : (
+          <>
+            {euro(Number(income.amount))}
+            {/* Unreachable: 'nettofahrt' is not in IncomeType
+                ('bargeld' | 'umsatz' | 'trinkgeld' | 'aktionen'),
+                so this suffix has never rendered. Left disabled
+                rather than repointed — trip_count is populated on
+                all four types in production, so the data does not
+                say which one was meant, and guessing would switch
+                on a suffix across 266 rows of a money screen.
+                TS2367 marks it until someone decides. */}
+            {income.type === 'nettofahrt' && income.trip_count != null && (
+              <span className="ml-2 text-xs font-normal text-fg-subtle">
+                {t('inc.tripsSuffix', { count: income.trip_count })}
+              </span>
+            )}
+          </>
+        ),
+      className: 'pl-1 pr-2 sm:px-4',
+    },
+  ];
+
+  // A read context, or a role without the right, writes nothing (plan 3.4b):
+  // the actions it may not use are not offered at all.
+  const anyRowWritable = filteredIncomes.some(income => canEdit(income.created_by) || canDelete(income.created_by));
+
+  const rowActions = (income: Income) =>
+    editingId === income.id ? (
+      <>
+        <Tooltip content={t('common.save')}>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            className="hover:text-positive"
+            aria-label={t('inc.saveEntryAria', { driver: income.driver_name })}
+            onClick={() => handleUpdate(income.id)}
+          >
+            <Check aria-hidden />
+          </Button>
+        </Tooltip>
+        <Tooltip content={t('common.cancel')}>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label={t('inc.cancelEditAria', { driver: income.driver_name })}
+            onClick={cancelEdit}
+          >
+            <X aria-hidden />
+          </Button>
+        </Tooltip>
+      </>
+    ) : (
+      <>
+        {canEdit(income.created_by) && (
+          <Tooltip content={t('common.edit')}>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label={t('inc.editEntryAria', { driver: income.driver_name, date: formatDate(income.date) })}
+              onClick={() => startEdit(income)}
+            >
+              <Pencil aria-hidden />
+            </Button>
+          </Tooltip>
+        )}
+        {canDelete(income.created_by) && (
+          <Tooltip content={t('common.delete')}>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              className="hover:text-critical"
+              aria-label={t('inc.deleteEntryAria', { driver: income.driver_name, date: formatDate(income.date) })}
+              onClick={() => confirmDelete(income.id)}
+            >
+              <Trash2 aria-hidden />
+            </Button>
+          </Tooltip>
+        )}
+      </>
+    );
+
+  // One row per active driver: getWeeklyDataByDriver() above, as each card was.
+  const driverSummaries = activeDrivers.map(driver => ({ driver, ...getWeeklyDataByDriver(driver.name) }));
+  type DriverSummary = (typeof driverSummaries)[number];
+
+  const summaryColumns: DataTableColumn<DriverSummary>[] = [
+    {
+      id: 'driver',
+      header: t('common.driver'),
+      value: row => row.driver.name,
+      sortable: true,
+      cell: row => <span className="font-medium text-fg">{row.driver.name}</span>,
+      className: 'pl-3 pr-1 sm:px-4',
+    },
+    { id: 'netto', header: t('inc.nettoFahrpreis'), kind: 'currency', value: row => row.nettoFahrpreis, sortable: true, className: 'px-2 sm:px-4' },
+    { id: 'aktionen', header: t('inc.typeAktionen'), kind: 'currency', value: row => row.aktionen, sortable: true, hideBelow: 'md' },
+    { id: 'trinkgeld', header: t('inc.typeTrinkgeld'), kind: 'currency', value: row => row.trinkgeld, sortable: true, hideBelow: 'md' },
+    { id: 'bargeld', header: t('inc.typeBargeld'), kind: 'currency', value: row => row.bargeld, sortable: true, hideBelow: 'sm' },
+    {
+      id: 'summe',
+      header: t('inc.sum'),
+      kind: 'currency',
+      value: row => row.summe,
+      sortable: true,
+      cell: row => <span className="font-semibold">{euro(row.summe)}</span>,
+      className: 'pl-2 pr-3 sm:px-4',
+    },
+  ];
+
+  const header = (actions?: React.ReactNode) => (
+    <PageHeader title={t('nav.umsaetze')} description={t('inc.subtitle')} actions={actions} />
+  );
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-8">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2" style={{ borderColor: 'var(--success)' }}></div>
+      <div className="font-ui">
+        {header()}
+        <div className="grid grid-cols-1 gap-4">
+          <KpiCard label={t('inc.totalFiltered')} value="" loading className="sm:max-w-sm" />
+          <DataTable caption={t('inc.tableCaption')} columns={columns} rows={[]} getRowId={income => income.id} loading />
+        </div>
       </div>
     );
   }
 
+  const addButton = (size?: 'sm') =>
+    canCreate && !isAdding ? (
+      <Button size={size} onClick={() => setIsAdding(true)}>
+        <Plus aria-hidden />
+        {t('inc.addNew')}
+      </Button>
+    ) : undefined;
+
+  const presetGroupLabelId = 'income-preset-label';
+
   return (
-    <div className="space-y-6">
-      <div className="bg-gradient-to-r from-green-600 to-green-800 rounded-xl shadow-lg p-6 text-white">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center space-x-3">
-            <div className="bg-white bg-opacity-20 rounded-lg p-2">
-              <TrendingUp className="text-white" size={32} />
-            </div>
-            <div>
-              <h1 className="text-3xl font-bold">{t('inc.title')}</h1>
-              <p className="text-green-100 mt-1">{t('inc.subtitle')}</p>
-            </div>
-          </div>
-          <div className="text-right">
-            <p className="text-sm text-green-100">{t('inc.totalFiltered')}</p>
-            <p className="text-3xl font-bold">{totalIncome.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €</p>
-            <p className="text-xs text-green-200 mt-1">{t('inc.entriesOf', { shown: filteredIncomes.length, total: incomes.length })}</p>
-          </div>
-        </div>
-      </div>
+    <div className="font-ui">
+      {header(
+        <>
+          <Button
+            variant="secondary"
+            onClick={handleExport}
+            disabled={filteredIncomes.length === 0 || loadFailed}
+            title={filteredIncomes.length === 0 ? t('inc.nothingToExport') : t('common.exportExcelShort')}
+            aria-disabled={filteredIncomes.length === 0 || loadFailed}
+          >
+            <Download aria-hidden />
+            {t('common.exportExcelShort')}
+          </Button>
+          {addButton()}
+        </>,
+      )}
 
-      {/* Date Range Filter Controls */}
-      <div
-        className="rounded-xl p-4"
-        style={{ background: 'var(--bg-surface)', boxShadow: 'var(--shadow-md)' }}
-      >
-        <div className="space-y-4">
-          {/* Preset Buttons */}
-          <div className="flex flex-wrap gap-2">
-            {(Object.keys(DATE_PRESET_LABELS) as DatePreset[]).map((preset) => {
-              return (
-                <button
-                  key={preset}
-                  onClick={() => handlePresetChange(preset)}
-                  className="px-3 py-2 rounded-lg text-sm font-medium transition-colors"
-                  style={
-                    datePreset === preset
-                      ? { background: 'var(--success-solid)', color: 'white' }
-                      : { background: 'var(--bg-subtle)', color: 'var(--text-secondary)' }
-                  }
-                >
-                  {t(DATE_PRESET_LABELS[preset])}
-                </button>
-              );
-            })}
-          </div>
+      {/* grid-cols-1 is minmax(0, 1fr): a bare grid sizes its column to the
+          widest child's content, and the tables alone would push the page past
+          375 px. */}
+      <div className="grid grid-cols-1 gap-4">
+        {!loadFailed && (
+          <KpiCard
+            label={t('inc.totalFiltered')}
+            value={euro(totalIncome)}
+            icon={TrendingUp}
+            caption={t('inc.entriesOf', { shown: filteredIncomes.length, total: incomes.length })}
+            className="sm:max-w-sm"
+          />
+        )}
 
-          {/* Date Range Inputs and Filters */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
-            <div>
-              <label htmlFor="from-date" className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>
-                {t('common.dateFrom')}
-              </label>
-              <div className="relative">
-                <Calendar className="absolute left-3 top-1/2 transform -translate-y-1/2" style={{ color: 'var(--text-tertiary)' }} size={16} />
-                <input
-                  id="from-date"
+        {/* Date range and filters */}
+        <Card>
+          <CardContent className="grid gap-4 pt-5">
+            <div role="group" aria-labelledby={presetGroupLabelId} className="grid gap-2">
+              <p id={presetGroupLabelId} className="text-[13px] font-medium text-fg-muted">{t('inc.period')}</p>
+              <div className="flex flex-wrap gap-1 rounded-control bg-sunken p-0.5">
+                {(Object.keys(DATE_PRESET_LABELS) as DatePreset[]).map((preset) => {
+                  return (
+                    <button
+                      key={preset}
+                      type="button"
+                      onClick={() => handlePresetChange(preset)}
+                      aria-pressed={datePreset === preset}
+                      className={cn(
+                        'h-8 whitespace-nowrap rounded-[calc(var(--radius-control)-2px)] px-3 text-sm font-medium transition-colors [@media(pointer:coarse)]:h-10',
+                        'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-focus',
+                        datePreset === preset ? 'bg-raised text-fg shadow-raised' : 'text-fg-muted hover:text-fg',
+                      )}
+                    >
+                      {t(DATE_PRESET_LABELS[preset])}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-[repeat(4,minmax(0,1fr))_auto] lg:items-end">
+              <Field label={t('common.dateFrom')}>
+                <Input
                   type="date"
                   value={fromDate}
                   onChange={(e) => {
                     setFromDate(e.target.value);
                     setDatePreset('custom');
                   }}
-                  className="w-full pl-10 pr-3"
-                  style={{ ...inputStyle, padding: '0.5rem 0.75rem 0.5rem 2.25rem' }}
-                  aria-label={t('common.dateFrom')}
                 />
-              </div>
-            </div>
-
-            <div>
-              <label htmlFor="to-date" className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>
-                {t('common.dateTo')}
-              </label>
-              <div className="relative">
-                <Calendar className="absolute left-3 top-1/2 transform -translate-y-1/2" style={{ color: 'var(--text-tertiary)' }} size={16} />
-                <input
-                  id="to-date"
+              </Field>
+              <Field label={t('common.dateTo')}>
+                <Input
                   type="date"
                   value={toDate}
                   onChange={(e) => {
                     setToDate(e.target.value);
                     setDatePreset('custom');
                   }}
-                  className="w-full pl-10 pr-3"
-                  style={{ ...inputStyle, padding: '0.5rem 0.75rem 0.5rem 2.25rem' }}
-                  aria-label={t('common.dateTo')}
                 />
-              </div>
-            </div>
-
-            <div>
-              <label htmlFor="driver-filter" className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>
-                {t('common.driver')}
-              </label>
-              <select
-                id="driver-filter"
-                value={selectedDriver}
-                onChange={(e) => setSelectedDriver(e.target.value)}
-                className="w-full"
-                style={inputStyle}
-              >
-                <option value="">{t('common.allDrivers')}</option>
-                {drivers.filter(driver => driver.status !== 'inactive').map(driver => (
-                  <option key={driver.id} value={driver.name}>{driver.name}</option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label htmlFor="type-filter" className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>
-                {t('inc.type')}
-              </label>
-              <select
-                id="type-filter"
-                value={selectedType}
-                onChange={(e) => setSelectedType(e.target.value)}
-                className="w-full"
-                style={inputStyle}
-              >
-                {/* The option value is the persisted `income.type`; only the label translates. */}
-                <option value="">{t('inc.allTypes')}</option>
-                {INCOME_TYPE_ORDER.map(type => (
-                  <option key={type} value={type}>{t(INCOME_TYPE_LABELS[type])}</option>
-                ))}
-              </select>
-            </div>
-
-            <div className="flex items-end gap-2">
-              <button
-                onClick={resetFilters}
-                className="flex-1 px-4 py-2 rounded-lg transition-colors flex items-center justify-center gap-2"
-                style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)' }}
-                title={t('inc.resetFilters')}
-              >
-                <RefreshCw size={16} />
-                <span className="hidden sm:inline">{t('inc.reset')}</span>
-              </button>
-              <button
-                onClick={handleExport}
-                disabled={filteredIncomes.length === 0}
-                className="flex-1 px-4 py-2 rounded-lg transition-colors flex items-center justify-center gap-2"
-                style={
-                  filteredIncomes.length === 0
-                    ? { background: 'var(--bg-subtle)', color: 'var(--text-tertiary)', cursor: 'not-allowed' }
-                    : { background: 'var(--success-solid)', color: 'white' }
-                }
-                title={filteredIncomes.length === 0 ? t('inc.nothingToExport') : t('common.exportExcelShort')}
-                aria-disabled={filteredIncomes.length === 0}
-              >
-                <Download size={16} />
-                <span className="hidden sm:inline">Excel</span>
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Weekly Summary by Driver — Carousel */}
-      {activeDrivers.length > 0 && (
-        <div className="relative">
-          {activeDrivers.length > 1 && (
-            <>
-              <button
-                onClick={() => scrollCarousel('left')}
-                className="absolute left-0 top-1/2 -translate-y-1/2 -translate-x-3 z-10 rounded-full p-1.5 transition-all"
-                style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-md)' }}
-                aria-label={t('inc.scrollLeft')}
-              >
-                <ChevronLeft size={18} style={{ color: 'var(--text-secondary)' }} />
-              </button>
-              <button
-                onClick={() => scrollCarousel('right')}
-                className="absolute right-0 top-1/2 -translate-y-1/2 translate-x-3 z-10 rounded-full p-1.5 transition-all"
-                style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-md)' }}
-                aria-label={t('inc.scrollRight')}
-              >
-                <ChevronRight size={18} style={{ color: 'var(--text-secondary)' }} />
-              </button>
-            </>
-          )}
-          <div
-            ref={carouselRef}
-            className="flex gap-4 overflow-x-auto scroll-smooth pb-2 cursor-grab select-none"
-            style={{ scrollbarWidth: 'none', msOverflowStyle: 'none', WebkitOverflowScrolling: 'touch' } as React.CSSProperties}
-            onMouseDown={onMouseDown}
-            onMouseMove={onMouseMove}
-            onMouseUp={onMouseUp}
-            onMouseLeave={onMouseUp}
-          >
-            {activeDrivers.map(driver => {
-              const { nettoFahrpreis, aktionen, trinkgeld, bargeld, summe } = getWeeklyDataByDriver(driver.name);
-              return (
-                <div
-                  key={driver.id}
-                  data-card
-                  className="rounded-lg p-4 flex-shrink-0 w-64 sm:w-72"
-                  style={{ background: 'var(--bg-surface)', boxShadow: 'var(--shadow-md)' }}
+              </Field>
+              <Field label={t('common.driver')}>
+                <NativeSelect
+                  value={selectedDriver}
+                  onChange={(e) => setSelectedDriver(e.target.value)}
                 >
-                  <div className="mb-3">
-                    <p className="text-sm font-medium" style={{ color: 'var(--text-secondary)' }}>{t('inc.filteredPeriod')}</p>
-                    <p className="text-lg font-bold truncate" style={{ color: 'var(--text-primary)' }}>{driver.name}</p>
-                  </div>
-                  <div className="space-y-2">
-                    <div className="flex justify-between items-center">
-                      <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>{t('inc.nettoFahrpreis')}:</span>
-                      <span className="font-semibold" style={{ color: 'var(--accent-text)' }}>{nettoFahrpreis.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €</span>
-                    </div>
-                    <div className="flex justify-between items-center">
-                      <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>{t('inc.typeAktionen')}:</span>
-                      <span className="font-semibold" style={{ color: 'var(--warning)' }}>{aktionen.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €</span>
-                    </div>
-                    <div className="flex justify-between items-center">
-                      <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>{t('inc.typeTrinkgeld')}:</span>
-                      <span className="font-semibold" style={{ color: 'var(--text-primary)' }}>{trinkgeld.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €</span>
-                    </div>
-                    <div className="flex justify-between items-center">
-                      <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>{t('inc.typeBargeld')}:</span>
-                      <span className="font-semibold" style={{ color: 'var(--success)' }}>{bargeld.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €</span>
-                    </div>
-                    <div className="flex justify-between items-center pt-2" style={{ borderTop: '1px solid var(--border)' }}>
-                      <span className="text-sm font-medium" style={{ color: 'var(--text-secondary)' }}>{t('inc.sum')}:</span>
-                      <span className="font-bold" style={{ color: 'var(--text-primary)' }}>{summe.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €</span>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
+                  <option value="">{t('common.allDrivers')}</option>
+                  {drivers.filter(driver => driver.status !== 'inactive').map(driver => (
+                    <option key={driver.id} value={driver.name}>{driver.name}</option>
+                  ))}
+                </NativeSelect>
+              </Field>
+              <Field label={t('inc.type')}>
+                <NativeSelect
+                  value={selectedType}
+                  onChange={(e) => setSelectedType(e.target.value)}
+                >
+                  {/* The option value is the persisted `income.type`; only the label translates. */}
+                  <option value="">{t('inc.allTypes')}</option>
+                  {INCOME_TYPE_ORDER.map(type => (
+                    <option key={type} value={type}>{t(INCOME_TYPE_LABELS[type])}</option>
+                  ))}
+                </NativeSelect>
+              </Field>
+              <Button variant="secondary" onClick={resetFilters} title={t('inc.resetFilters')}>
+                <RefreshCw aria-hidden />
+                {t('inc.reset')}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
 
-      {canCreate && (
-        <div
-          className="rounded-xl p-6"
-          style={{ background: 'var(--bg-surface)', boxShadow: 'var(--shadow-md)' }}
-        >
-          {!isAdding ? (
-            <button
-              onClick={() => setIsAdding(true)}
-              className="w-full flex items-center justify-center gap-2 px-4 py-3 text-white rounded-lg transition-colors"
-              style={{ background: 'var(--success-solid)' }}
-            >
-              <Plus size={20} />
-              {t('inc.addNew')}
-            </button>
-          ) : (
-            <div className="space-y-5">
-              {/* Form header */}
-              <div className="flex items-center justify-between">
-                <h3 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>{t('inc.newEntry')}</h3>
-                <button onClick={cancelAdd} style={{ color: 'var(--text-tertiary)' }} title={t('common.close')}>
-                  <X size={20} />
-                </button>
-              </div>
-
+        {canCreate && isAdding && (
+          <Card>
+            <CardHeader>
+              <CardTitle as="h2">{t('inc.newEntry')}</CardTitle>
+              <Button variant="ghost" size="icon-sm" onClick={cancelAdd} aria-label={t('common.close')}>
+                <X aria-hidden />
+              </Button>
+            </CardHeader>
+            <CardContent className="grid gap-5">
               {/* Shared fields: Fahrer, Datum, Woche, Beschreibung */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>{t('common.driver')} *</label>
-                  <select
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                <Field label={t('common.driver')} required>
+                  <NativeSelect
                     value={batchForm.driver_name}
                     onChange={(e) => setBatchForm(prev => ({ ...prev, driver_name: e.target.value }))}
-                    className="w-full"
-                    style={inputStyle}
                   >
                     <option value="">{t('inc.selectDriver')}</option>
                     {drivers.filter(d => d.status !== 'inactive').map(d => (
                       <option key={d.id} value={d.name}>{d.name}</option>
                     ))}
-                  </select>
-                </div>
+                  </NativeSelect>
+                </Field>
 
-                <div>
-                  <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>{t('common.date')} *</label>
-                  <input
+                <Field label={t('common.date')} required>
+                  <Input
                     type="date"
                     value={batchForm.date}
                     onChange={(e) => setBatchForm(prev => ({ ...prev, date: e.target.value }))}
-                    className="w-full"
-                    style={inputStyle}
                   />
-                </div>
+                </Field>
 
-                <div>
-                  <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>{t('common.week')}</label>
-                  <select
+                <Field label={t('common.week')}>
+                  <NativeSelect
                     value={batchForm.week ?? ''}
                     onChange={(e) => setBatchForm(prev => ({ ...prev, week: e.target.value ? parseInt(e.target.value) : undefined }))}
-                    className="w-full"
-                    style={inputStyle}
                   >
                     <option value="">{t('inc.selectWeek')}</option>
                     {availableWeeks.map(w => (
                       <option key={w.weekNumber} value={w.weekNumber}>{w.label}</option>
                     ))}
-                  </select>
-                </div>
+                  </NativeSelect>
+                </Field>
 
-                <div>
-                  <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>
-                    {t('common.description')} <span className="text-xs" style={{ color: 'var(--text-tertiary)' }}>{t('inc.optional')}</span>
-                  </label>
-                  <input
+                <Field label={<>{t('common.description')} <span className="font-normal text-fg-subtle">{t('inc.optional')}</span></>}>
+                  <Input
                     type="text"
                     value={batchForm.description}
                     onChange={(e) => setBatchForm(prev => ({ ...prev, description: e.target.value }))}
-                    className="w-full"
-                    style={inputStyle}
                     placeholder={t('inc.descriptionPlaceholder')}
                   />
-                </div>
+                </Field>
               </div>
 
-              {/* Divider */}
-              <div style={{ borderTop: '1px solid var(--border)' }} />
-
               {/* Amount fields */}
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-widest mb-3" style={{ color: 'var(--text-tertiary)' }}>
-                  {t('inc.amountsHint')}
-                </p>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              <fieldset className="grid gap-3 border-t border-line pt-4">
+                <legend className="float-left w-full text-[13px] font-medium text-fg-muted">{t('inc.amountsHint')}</legend>
+                <div className="clear-both grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
                   {/* Netto-Fahrpreis → type umsatz */}
-                  <div>
-                    <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>
-                      {t('inc.nettoFahrpreisEuro')}
-                    </label>
-                    <input
+                  <Field label={t('inc.nettoFahrpreisEuro')}>
+                    <Input
                       type="text"
                       inputMode="decimal"
                       value={batchForm.nettoFahrpreis}
                       onChange={(e) => setBatchForm(prev => ({ ...prev, nettoFahrpreis: e.target.value }))}
-                      className="w-full"
-                      style={{ ...inputStyle, borderColor: batchForm.nettoFahrpreis && parseBatchAmount(batchForm.nettoFahrpreis) ? 'var(--success)' : undefined }}
+                      className={cn('tabular-nums', batchForm.nettoFahrpreis && parseBatchAmount(batchForm.nettoFahrpreis) && 'border-positive')}
                       placeholder="0,00"
                     />
-                  </div>
+                  </Field>
 
                   {/* Aktionen → type aktionen */}
-                  <div>
-                    <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>
-                      {t('inc.aktionenEuro')}
-                    </label>
-                    <input
+                  <Field label={t('inc.aktionenEuro')}>
+                    <Input
                       type="text"
                       inputMode="decimal"
                       value={batchForm.aktionen}
                       onChange={(e) => setBatchForm(prev => ({ ...prev, aktionen: e.target.value }))}
-                      className="w-full"
-                      style={{ ...inputStyle, borderColor: batchForm.aktionen && parseBatchAmount(batchForm.aktionen) ? 'var(--success)' : undefined }}
+                      className={cn('tabular-nums', batchForm.aktionen && parseBatchAmount(batchForm.aktionen) && 'border-positive')}
                       placeholder="0,00"
                     />
-                  </div>
+                  </Field>
 
                   {/* Trinkgeld → type trinkgeld */}
-                  <div>
-                    <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>
-                      {t('inc.trinkgeldEuro')}
-                    </label>
-                    <input
+                  <Field label={t('inc.trinkgeldEuro')}>
+                    <Input
                       type="text"
                       inputMode="decimal"
                       value={batchForm.trinkgeld}
                       onChange={(e) => setBatchForm(prev => ({ ...prev, trinkgeld: e.target.value }))}
-                      className="w-full"
-                      style={{ ...inputStyle, borderColor: batchForm.trinkgeld && parseBatchAmount(batchForm.trinkgeld) ? 'var(--success)' : undefined }}
+                      className={cn('tabular-nums', batchForm.trinkgeld && parseBatchAmount(batchForm.trinkgeld) && 'border-positive')}
                       placeholder="0,00"
                     />
-                  </div>
+                  </Field>
 
                   {/* Bargeld → type bargeld */}
-                  <div>
-                    <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>
-                      {t('inc.bargeldEuro')}
-                    </label>
-                    <input
+                  <Field label={t('inc.bargeldEuro')}>
+                    <Input
                       type="text"
                       inputMode="decimal"
                       value={batchForm.bargeld}
                       onChange={(e) => setBatchForm(prev => ({ ...prev, bargeld: e.target.value }))}
-                      className="w-full"
-                      style={{ ...inputStyle, borderColor: batchForm.bargeld && parseBatchAmount(batchForm.bargeld) ? 'var(--success)' : undefined }}
+                      className={cn('tabular-nums', batchForm.bargeld && parseBatchAmount(batchForm.bargeld) && 'border-positive')}
                       placeholder="0,00"
                     />
-                  </div>
+                  </Field>
                 </div>
-              </div>
+              </fieldset>
 
               {/* Anzahl Fahrten */}
-              <div className="max-w-xs">
-                <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>
-                  {t('inc.tripCount')} <span className="text-xs" style={{ color: 'var(--text-tertiary)' }}>{t('inc.optional')}</span>
-                </label>
-                <input
+              <Field
+                label={<>{t('inc.tripCount')} <span className="font-normal text-fg-subtle">{t('inc.optional')}</span></>}
+                className="max-w-xs"
+              >
+                <Input
                   type="number"
                   min={0}
                   step={1}
                   value={batchForm.tripCount}
                   onChange={(e) => setBatchForm(prev => ({ ...prev, tripCount: e.target.value }))}
-                  className="w-full"
-                  style={inputStyle}
                   placeholder={t('inc.tripCountPlaceholder')}
                 />
-              </div>
+              </Field>
 
               {/* Summary + actions */}
               {(() => {
@@ -964,265 +1077,74 @@ const IncomeManagement: React.FC<IncomeManagementProps> = ({ drivers }) => {
                   batchForm.bargeld,
                 ].filter(v => parseBatchAmount(v) !== null).length;
                 return (
-                  <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pt-1">
-                    <div
-                      className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm"
-                      style={{
-                        background: willCreate > 0 ? 'var(--success-subtle)' : 'var(--bg-muted)',
-                        color: willCreate > 0 ? 'var(--success)' : 'var(--text-tertiary)',
-                        border: `1px solid ${willCreate > 0 ? 'rgba(5,150,105,0.25)' : 'var(--border)'}`,
-                      }}
-                    >
-                      <DollarSign size={14} />
+                  <div className="flex flex-col gap-3 border-t border-line pt-4 sm:flex-row sm:items-center sm:justify-between">
+                    <p role="status" className={cn('text-sm', willCreate > 0 ? 'font-medium text-positive' : 'text-fg-subtle')}>
                       {willCreate > 0
                         ? tPlural({ one: 'inc.willCreate.one', other: 'inc.willCreate.other' }, willCreate)
                         : t('inc.noAmounts')}
-                    </div>
-                    <div className="flex gap-2">
-                      <button
-                        onClick={cancelAdd}
-                        className="px-4 py-2 rounded-lg text-sm transition-colors"
-                        style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)' }}
-                      >
+                    </p>
+                    <div className="flex flex-col-reverse gap-2 sm:flex-row">
+                      <Button variant="secondary" onClick={cancelAdd}>
                         {t('common.cancel')}
-                      </button>
-                      <button
-                        onClick={handleBatchAdd}
-                        disabled={willCreate === 0}
-                        className="flex items-center gap-2 px-5 py-2 text-white rounded-lg text-sm font-semibold transition-opacity"
-                        style={{ background: 'var(--success-solid)', opacity: willCreate === 0 ? 0.5 : 1, cursor: willCreate === 0 ? 'not-allowed' : 'pointer' }}
-                      >
-                        <Save size={15} />
+                      </Button>
+                      <Button onClick={handleBatchAdd} disabled={willCreate === 0}>
+                        <Save aria-hidden />
                         {t('common.save')}
-                      </button>
+                      </Button>
                     </div>
                   </div>
                 );
               })()}
-            </div>
-          )}
-        </div>
-      )}
+            </CardContent>
+          </Card>
+        )}
 
-      {/* Income Table */}
-      <div
-        className="rounded-xl overflow-hidden"
-        style={{ background: 'var(--bg-surface)', boxShadow: 'var(--shadow-md)' }}
-      >
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead style={{ background: 'var(--bg-subtle)' }}>
-              <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>{t('common.date')}</th>
-                <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>{t('common.week')}</th>
-                <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>{t('common.driver')}</th>
-                <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>{t('inc.type')}</th>
-                <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>{t('common.description')}</th>
-                <th className="px-6 py-3 text-right text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>{t('common.amount')}</th>
-                {/* Column header = "Actions". Not the `aktionen` income type, which
-                    keeps its German name — see INCOME_TYPE_LABELS. */}
-                <th className="px-6 py-3 text-right text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>{t('inc.tableActions')}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredIncomes.length === 0 ? (
-                <tr>
-                  <td colSpan={7} className="px-6 py-8 text-center" style={{ color: 'var(--text-secondary)' }}>
-                    {t('inc.noEntries')}
-                  </td>
-                </tr>
-              ) : (
-                filteredIncomes.map((income) => (
-                  <tr
-                    key={income.id}
-                    style={{
-                      background: hoveredRow === income.id ? 'var(--bg-subtle)' : 'transparent',
-                      borderBottom: '1px solid var(--border)',
-                      transition: 'background 0.15s'
-                    }}
-                    onMouseEnter={() => setHoveredRow(income.id)}
-                    onMouseLeave={() => setHoveredRow(null)}
-                  >
-                    {editingId === income.id ? (
-                      <>
-                        <td className="px-6 py-4">
-                          <input
-                            type="date"
-                            value={formData.date}
-                            onChange={(e) => setFormData({ ...formData, date: e.target.value })}
-                            className="w-full px-2 py-1"
-                            style={{ ...inputStyle, padding: '0.25rem 0.5rem' }}
-                          />
-                        </td>
-                        <td className="px-6 py-4">
-                          <select
-                            value={formData.week || ''}
-                            onChange={(e) => setFormData({ ...formData, week: parseInt(e.target.value) })}
-                            className="w-full px-2 py-1"
-                            style={{ ...inputStyle, padding: '0.25rem 0.5rem' }}
-                          >
-                            <option value="">-</option>
-                            {availableWeeks.map(week => (
-                              <option key={week.weekNumber} value={week.weekNumber}>
-                                W{week.weekNumber}
-                              </option>
-                            ))}
-                          </select>
-                        </td>
-                        <td className="px-6 py-4">
-                          <select
-                            value={formData.driver_name}
-                            onChange={(e) => setFormData({ ...formData, driver_name: e.target.value })}
-                            className="w-full px-2 py-1"
-                            style={{ ...inputStyle, padding: '0.25rem 0.5rem' }}
-                          >
-                            {drivers.filter(driver => driver.status !== 'inactive').map(driver => (
-                              <option key={driver.id} value={driver.name}>{driver.name}</option>
-                            ))}
-                          </select>
-                        </td>
-                        <td className="px-6 py-4">
-                          <select
-                            value={formData.type}
-                            onChange={(e) => setFormData({ ...formData, type: e.target.value as IncomeType })}
-                            className="w-full px-2 py-1"
-                            style={{ ...inputStyle, padding: '0.25rem 0.5rem' }}
-                          >
-                            {/* The option value is the persisted `income.type`. */}
-                            {INCOME_TYPE_ORDER.map(type => (
-                              <option key={type} value={type}>{t(INCOME_TYPE_LABELS[type])}</option>
-                            ))}
-                          </select>
-                        </td>
-                        <td className="px-6 py-4">
-                          <input
-                            type="text"
-                            value={formData.description}
-                            onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                            className="w-full px-2 py-1"
-                            style={{ ...inputStyle, padding: '0.25rem 0.5rem' }}
-                          />
-                        </td>
-                        <td className="px-6 py-4">
-                          <input
-                            type="number"
-                            step="0.01"
-                            value={formData.amount}
-                            onChange={(e) => setFormData({ ...formData, amount: e.target.value })}
-                            className="w-full px-2 py-1 text-right"
-                            style={{ ...inputStyle, padding: '0.25rem 0.5rem', textAlign: 'right' }}
-                          />
-                        </td>
-                        <td className="px-6 py-4 text-right">
-                          <div className="flex justify-end gap-2">
-                            <button
-                              onClick={() => handleUpdate(income.id)}
-                              style={{ color: 'var(--success)' }}
-                              title={t('common.save')}
-                            >
-                              <Check size={18} />
-                            </button>
-                            <button
-                              onClick={cancelEdit}
-                              style={{ color: 'var(--text-secondary)' }}
-                              title={t('common.cancel')}
-                            >
-                              <X size={18} />
-                            </button>
-                          </div>
-                        </td>
-                      </>
-                    ) : (
-                      <>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm" style={{ color: 'var(--text-primary)' }}>
-                          {format(new Date(income.date), 'dd.MM.yyyy')}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm" style={{ color: 'var(--text-primary)' }}>
-                          {income.week ? t('inc.weekLabel', { week: income.week }) : '-'}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm" style={{ color: 'var(--text-primary)' }}>
-                          {income.driver_name}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm">
-                          <span
-                            className="px-2 py-1 rounded-full text-xs font-medium"
-                            style={
-                              income.type === 'bargeld' ? { background: 'var(--success-subtle)', color: 'var(--success)' } :
-                              income.type === 'umsatz' ? { background: 'var(--accent-subtle)', color: 'var(--accent-text)' } :
-                              income.type === 'aktionen' ? { background: 'var(--warning-subtle)', color: 'var(--warning)' } :
-                              { background: 'var(--bg-muted)', color: 'var(--text-secondary)' }
-                            }
-                          >
-                            {t(INCOME_TYPE_LABELS[income.type] ?? INCOME_TYPE_LABELS.trinkgeld)}
-                          </span>
-                        </td>
-                        <td className="px-6 py-4 text-sm" style={{ color: 'var(--text-primary)' }}>
-                          {income.description}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-right font-semibold" style={{ color: 'var(--success)' }}>
-                          {Number(income.amount).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
-                          {/* Unreachable: 'nettofahrt' is not in IncomeType
-                              ('bargeld' | 'umsatz' | 'trinkgeld' | 'aktionen'),
-                              so this suffix has never rendered. Left disabled
-                              rather than repointed — trip_count is populated on
-                              all four types in production, so the data does not
-                              say which one was meant, and guessing would switch
-                              on a suffix across 266 rows of a money screen.
-                              TS2367 marks it until someone decides. */}
-                          {income.type === 'nettofahrt' && income.trip_count != null && (
-                            <span className="ml-2 text-xs font-normal" style={{ color: 'var(--text-tertiary)' }}>
-                              {t('inc.tripsSuffix', { count: income.trip_count })}
-                            </span>
-                          )}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-right text-sm">
-                          <div className="flex justify-end gap-2">
-                            {canEdit(income.created_by) && (
-                              <button
-                                onClick={() => startEdit(income)}
-                                style={{ color: 'var(--accent)' }}
-                                title={t('common.edit')}
-                              >
-                                <Edit2 size={18} />
-                              </button>
-                            )}
-                            {canDelete(income.created_by) && (
-                              <button
-                                onClick={() => confirmDelete(income.id)}
-                                style={{ color: 'var(--danger)' }}
-                                title={t('common.delete')}
-                              >
-                                <Trash2 size={18} />
-                              </button>
-                            )}
-                          </div>
-                        </td>
-                      </>
-                    )}
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
+        {/* The period's figures per driver: Summe is Netto-Fahrpreis plus Aktionen. */}
+        {activeDrivers.length > 0 && !loadFailed && (
+          <section aria-labelledby="income-per-driver" className="grid gap-2">
+            <h2 id="income-per-driver" className="text-[15px] font-semibold text-fg">
+              {t('inc.perDriverTitle')}
+              <span className="ml-2 text-[13px] font-normal text-fg-subtle">{t('inc.perDriverHint')}</span>
+            </h2>
+            <DataTable
+              caption={t('inc.perDriverTitle')}
+              columns={summaryColumns}
+              rows={driverSummaries}
+              getRowId={row => row.driver.id}
+              density="compact"
+            />
+          </section>
+        )}
 
-      <div
-        className="rounded-lg p-4"
-        style={{ background: 'var(--accent-subtle)', border: '1px solid var(--accent)' }}
-      >
-        <p className="text-sm" style={{ color: 'var(--accent-text)' }}>
-          <strong>{t('inc.noteLabel')}</strong> {t('inc.noteBody')}
+        <DataTable
+          caption={t('inc.tableCaption')}
+          columns={columns}
+          rows={filteredIncomes}
+          getRowId={income => income.id}
+          error={loadFailed}
+          rowActions={anyRowWritable || editingId ? rowActions : undefined}
+          rowActionsLabel={t('inc.tableActions')}
+          emptyState={
+            <EmptyState size="sm" icon={Users} title={t('inc.noEntries')} action={addButton('sm')} />
+          }
+        />
+
+        <p className="flex items-start gap-2 text-[13px] text-fg-muted">
+          <Info aria-hidden className="mt-0.5 size-4 shrink-0 text-fg-subtle" />
+          <span>
+            <span className="font-semibold text-fg">{t('inc.noteLabel')}</span> {t('inc.noteBody')}
+          </span>
         </p>
       </div>
 
-      <ConfirmationModal
-        isOpen={deleteConfirm.isOpen}
+      <ConfirmDialog
+        open={deleteConfirm.isOpen}
         onClose={() => setDeleteConfirm({ isOpen: false, id: null })}
         onConfirm={() => deleteConfirm.id && handleDelete(deleteConfirm.id)}
         title={t('inc.deleteTitle')}
-        message={t('inc.deleteMessage')}
-        type="confirm"
+        description={t('inc.deleteMessage')}
+        confirmLabel={t('common.delete')}
+        icon={Trash2}
       />
     </div>
   );

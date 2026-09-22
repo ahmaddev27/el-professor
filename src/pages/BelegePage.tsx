@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Plus, Download } from 'lucide-react';
+import React, { useState, useEffect, type ReactNode } from 'react';
+import { Download, Plus, RotateCw, Trash2 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useCompanyScope } from '../hooks/useCompanyScope';
 import { useToast } from '../contexts/ToastContext';
@@ -8,7 +8,7 @@ import { useCompanySettings } from '../contexts/CompanySettingsContext';
 import { Receipt, Driver } from '../types/receipt';
 import ReceiptList, { PdfFilterInfo } from '../components/ReceiptList';
 import ReceiptModal from '../components/ReceiptModal';
-import ConfirmationModal from '../components/ConfirmationModal';
+import { Alert, Button, ConfirmDialog, DataTable, KpiCard, PageHeader } from '../components/ui';
 import { exportToExcel } from '../utils/excelExport';
 import { handleDatabaseError } from '../utils/errorHandler';
 import { generateReceiptPdf } from '../utils/receiptPdf';
@@ -30,7 +30,7 @@ const BelegePage: React.FC = () => {
   // (plan 3.4b), and the database refuses these three the same way.
   const { canEdit, canDelete, canCreate } = useCompanyScope();
   const { success, error: showError } = useToast();
-  const { receipts: receiptActions, drivers: driverActions, isLoading: dbLoading } = useDatabase();
+  const { receipts: receiptActions, drivers: driverActions, isLoading: dbLoading, isConnected: dbConnected } = useDatabase();
   const { settings } = useCompanySettings();
   const [receipts, setReceipts] = useState<Receipt[]>([]);
   const [drivers, setDrivers] = useState<Driver[]>([]);
@@ -148,46 +148,86 @@ const BelegePage: React.FC = () => {
     });
   };
 
+  // ── Presentation (phase 5) ────────────────────────────────────────────────
+  // Everything above is the screen's logic and is unchanged, but for one line:
+  // useDatabase() is also asked for `isConnected`, which it has always computed.
+  // When its connection test fails, the hook serves the lists from local
+  // storage, which nothing writes, so the screen showed "Keine Belege
+  // vorhanden" and 0,00 € for a database it never reached. It now says so and
+  // shows no figure (a read that fails after a successful connection test is
+  // still swallowed inside useDatabase; see HANDOFF.md). Everything below only
+  // draws.
+
+  const header = (actions?: ReactNode) => <PageHeader title={t('nav.belege')} actions={actions} />;
+
   if (loading || dbLoading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2" style={{ borderColor: 'var(--accent)' }}></div>
+      <div className="font-ui">
+        {header()}
+        <div className="grid grid-cols-1 gap-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <KpiCard label={t('rec.totalExpenses')} value="" loading />
+            <KpiCard label={t('rec.sumVat19')} value="" loading />
+          </div>
+          <DataTable
+            caption={t('rec.tableCaption')}
+            columns={[
+              { id: 'date', header: t('common.date'), hideBelow: 'sm' },
+              { id: 'description', header: t('rec.bookingText') },
+              { id: 'expense', header: t('common.expenses'), kind: 'currency' },
+            ]}
+            rows={[]}
+            getRowId={() => ''}
+            loading
+          />
+        </div>
+      </div>
+    );
+  }
+
+  if (!dbConnected) {
+    return (
+      <div className="font-ui">
+        {header()}
+        <Alert
+          tone="critical"
+          title={t('belege.loadFailedTitle')}
+          action={
+            <Button variant="secondary" size="sm" onClick={() => window.location.reload()}>
+              <RotateCw aria-hidden />
+              {t('belege.reload')}
+            </Button>
+          }
+        >
+          {t('belege.loadFailedBody')}
+        </Alert>
       </div>
     );
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <h2 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>{t('nav.belege')}</h2>
-        <div className="flex gap-2 sm:gap-4">
-          <button
-            onClick={() => {
-              setEditingReceipt(null);
-              setIsReceiptModalOpen(true);
-            }}
-            className="flex items-center justify-center rounded-lg transition-colors w-11 h-11 sm:w-auto sm:h-auto sm:px-4 sm:py-2"
-            style={{ background: 'var(--success-solid)', color: 'white' }}
-            title={t('belege.add')}
-            onMouseEnter={e => { (e.currentTarget as HTMLElement).style.opacity = '0.9'; }}
-            onMouseLeave={e => { (e.currentTarget as HTMLElement).style.opacity = '1'; }}
-          >
-            <Plus className="w-5 h-5 sm:mr-2" />
-            <span className="hidden sm:inline">{t('belege.add')}</span>
-          </button>
-          <button
-            onClick={handleExportExcel}
-            className="flex items-center justify-center rounded-lg transition-colors w-11 h-11 sm:w-auto sm:h-auto sm:px-4 sm:py-2"
-            style={{ background: 'var(--accent)', color: 'var(--text-inverse)' }}
-            title={t('common.exportExcelShort')}
-            onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'var(--accent-hover)'; }}
-            onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'var(--accent)'; }}
-          >
-            <Download className="w-5 h-5 sm:mr-2" />
-            <span className="hidden sm:inline">{t('common.exportExcelShort')}</span>
-          </button>
-        </div>
-      </div>
+    <div className="font-ui">
+      {header(
+        <>
+          <Button variant="secondary" onClick={handleExportExcel}>
+            <Download aria-hidden />
+            {t('common.exportExcelShort')}
+          </Button>
+          {/* A read context, or a role without the right, adds nothing (plan
+              3.4b); handleAddReceipt refuses it as well. */}
+          {canCreate ? (
+            <Button
+              onClick={() => {
+                setEditingReceipt(null);
+                setIsReceiptModalOpen(true);
+              }}
+            >
+              <Plus aria-hidden />
+              {t('belege.add')}
+            </Button>
+          ) : null}
+        </>,
+      )}
 
       <ReceiptList
         receipts={receipts}
@@ -219,13 +259,16 @@ const BelegePage: React.FC = () => {
         />
       )}
 
-      <ConfirmationModal
-        isOpen={confirmModal.isOpen}
+      {/* The legacy ConfirmationModal's contract: confirm calls onConfirm and
+          then onClose, unawaited. The message is built above, in German. */}
+      <ConfirmDialog
+        open={confirmModal.isOpen}
         onClose={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}
         onConfirm={confirmModal.onConfirm}
         title={confirmModal.title}
-        message={confirmModal.message}
-        type={confirmModal.type}
+        description={confirmModal.message}
+        confirmLabel={t('common.delete')}
+        icon={Trash2}
       />
     </div>
   );

@@ -1,11 +1,26 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { X, Save, DollarSign, Receipt as ReceiptIcon, User, MapPin, CreditCard, Upload, Camera, Loader2, CheckCircle, AlertCircle } from 'lucide-react';
+import { AlertCircle, Camera, CheckCircle, ChevronRight, Loader2, Receipt as ReceiptIcon, Save, Upload, X } from 'lucide-react';
 import { Receipt, ReceiptFormData, Driver } from '../types/receipt';
 import { getCityFromPostalCode, isValidGermanPostalCode } from '../utils/germanPostalCodes';
 import { useToast } from '../contexts/ToastContext';
 import { extractReceiptData, OcrResult, formatAmountDE } from '../utils/receiptOcr';
 import { useTranslation } from '../contexts/LanguageContext';
 import type { TranslationKey } from '../i18n';
+import {
+  Badge,
+  Button,
+  cn,
+  Field,
+  Input,
+  NativeSelect,
+  Sheet,
+  SheetBody,
+  SheetContent,
+  SheetDescription,
+  SheetFooter,
+  SheetHeader,
+  SheetTitle,
+} from './ui';
 
 interface ReceiptModalProps {
   isOpen: boolean;
@@ -41,18 +56,6 @@ const RECEIPT_CATEGORY_LABELS: Record<ReceiptCategory, TranslationKey> = {
 };
 
 type ScanState = 'idle' | 'scanning' | 'success' | 'error';
-
-const inputStyle: React.CSSProperties = {
-  background: 'var(--bg-subtle)',
-  border: '1px solid var(--border)',
-  borderRadius: '0.5rem',
-  color: 'var(--text-primary)',
-  fontSize: '0.875rem',
-  padding: '0.5rem 0.75rem',
-  outline: 'none',
-  width: '100%',
-};
-
 
 const ReceiptModal: React.FC<ReceiptModalProps> = ({
   isOpen,
@@ -381,312 +384,256 @@ const ReceiptModal: React.FC<ReceiptModalProps> = ({
 
   if (!isOpen) return null;
 
-  // ── Scan zone styles ───────────────────────────────────────────────────────
-  const scanZoneBorder =
-    isDragOver
-      ? '2px dashed var(--accent)'
-      : scanState === 'success'
-      ? '2px dashed #16a34a'
-      : scanState === 'error'
-      ? '2px dashed var(--danger)'
-      : '2px dashed var(--border)';
+  // ── Presentation (phase 5) ────────────────────────────────────────────────
+  // Everything above is the form's logic and is unchanged, except the
+  // module-level inline input style object, which only drew. The Belegnummer is
+  // generateUniqueReceiptNumber()'s (BEL-{timestamp}-{random}, checked against
+  // every existing number); applyExtracted() never writes it, whatever the OCR
+  // reads. The field below binds the same value with the same handler as
+  // before. Everything below only draws; the scan zone's border and fill, which
+  // used to be computed here as inline styles, are a class map now.
 
-  const scanZoneBg =
-    isDragOver
-      ? 'rgba(var(--accent-rgb,37,99,235),0.06)'
-      : scanState === 'success'
-      ? 'rgba(22,163,74,0.05)'
-      : scanState === 'error'
-      ? 'rgba(var(--danger-rgb,220,38,38),0.05)'
-      : 'var(--bg-subtle)';
+  const formId = 'receipt-form';
+
+  // 'Unsicher' is the marker receiptOcr.ts writes into its reason strings, not
+  // display text (see processImageFile).
+  const dateUncertain = ocrResult?.dateReason?.startsWith('Unsicher');
+  const amountUncertain = ocrResult?.amountReason?.startsWith('Unsicher');
+  const uncertainField = 'border-caution ring-1 ring-caution';
+
+  // The same order of precedence as the old inline styles.
+  const scanZoneTone = isDragOver
+    ? 'border-brand bg-brand-soft'
+    : scanState === 'success'
+    ? 'border-positive/60 bg-positive-soft'
+    : scanState === 'error'
+    ? 'border-critical/60 bg-critical-soft'
+    : 'border-line-strong bg-sunken';
+
+  const candidateTone = (rejected: boolean | undefined, index: number) =>
+    rejected ? 'text-critical' : index === 0 ? 'text-positive' : 'text-fg-subtle';
+
+  const labelWithCheck = (label: string, uncertain: boolean | undefined) => (
+    <span className="inline-flex flex-wrap items-center gap-2">
+      {label}
+      {uncertain && <Badge tone="caution">{t('rec.pleaseCheck')}</Badge>}
+    </span>
+  );
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-      <div
-        style={{ background: 'var(--bg-surface)', borderRadius: '0.5rem', boxShadow: 'var(--shadow-lg)', maxHeight: '92vh', overflowY: 'auto' }}
-        className="w-full max-w-md"
+    <Sheet
+      open
+      onOpenChange={open => {
+        if (!open) onClose();
+      }}
+    >
+      <SheetContent
+        // A click beside the form must not throw away what was typed; the old
+        // modal ignored it as well. Escape and the close button still close.
+        onInteractOutside={event => event.preventDefault()}
       >
-        {/* Header */}
-        <div style={{ borderBottom: '1px solid var(--border)' }} className="flex items-center justify-between p-6 sticky top-0 z-10" style2={{ background: 'var(--bg-surface)' }}>
-          <h2 style={{ color: 'var(--text-primary)' }} className="text-xl font-semibold flex items-center space-x-2">
-            <ReceiptIcon size={20} />
-            <span>{title}</span>
-          </h2>
-          <button
-            onClick={onClose}
-            style={{ color: 'var(--text-tertiary)' }}
-            onMouseEnter={e => (e.currentTarget.style.color = 'var(--text-secondary)')}
-            onMouseLeave={e => (e.currentTarget.style.color = 'var(--text-tertiary)')}
-          >
-            <X size={24} />
-          </button>
-        </div>
+        <SheetHeader>
+          <SheetTitle className="flex items-center gap-2">
+            <ReceiptIcon aria-hidden className="size-5 text-fg-subtle" />
+            {title}
+          </SheetTitle>
+          <SheetDescription>{t('rec.formDescription')}</SheetDescription>
+        </SheetHeader>
 
-        <div className="p-6 space-y-4">
+        <SheetBody>
+          <div className="grid gap-6">
+            {/* ── Image scan zone (only in create mode) ── */}
+            {!receipt && (
+              <section aria-label={t('rec.scanLabel')} className="grid gap-2 border-b border-line pb-6">
+                <p className="flex items-center gap-1.5 text-[13px] font-medium text-fg-muted">
+                  <Camera aria-hidden className="size-3.5" />
+                  {t('rec.scanLabel')}
+                </p>
 
-          {/* ── Image scan zone (only in create mode) ── */}
-          {!receipt && (
-            <div>
-              <label style={{ color: 'var(--text-secondary)' }} className="block text-sm font-medium mb-2 flex items-center gap-1.5">
-                <Camera size={14} />
-                {t('rec.scanLabel')}
-              </label>
-
-              {/* Drop zone */}
-              <div
-                ref={dropZoneRef}
-                onDragOver={handleDragOver}
-                onDragLeave={handleDragLeave}
-                onDrop={handleDrop}
-                onClick={() => { if (!previewUrl) fileInputRef.current?.click(); }}
-                style={{
-                  border: scanZoneBorder,
-                  borderRadius: '0.625rem',
-                  background: scanZoneBg,
-                  transition: 'all 0.15s',
-                  cursor: previewUrl ? 'default' : 'pointer',
-                  minHeight: previewUrl ? 'auto' : '88px',
-                  position: 'relative',
-                  overflow: 'hidden',
-                }}
-              >
-                {/* Preview image */}
-                {previewUrl && (
-                  <div style={{ position: 'relative' }}>
-                    <img
-                      src={previewUrl}
-                      alt={t('rec.previewAlt')}
-                      style={{
-                        width: '100%',
-                        maxHeight: '180px',
-                        objectFit: 'contain',
-                        display: 'block',
-                        background: '#000',
-                        borderRadius: '0.5rem 0.5rem 0 0',
-                      }}
-                    />
-                    <button
-                      type="button"
-                      onClick={e => { e.stopPropagation(); clearImage(); }}
-                      style={{
-                        position: 'absolute', top: 6, right: 6,
-                        background: 'rgba(0,0,0,0.6)', color: '#fff',
-                        borderRadius: '50%', width: 24, height: 24,
-                        border: 'none', cursor: 'pointer',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      }}
-                      title={t('rec.removeImage')}
-                    >
-                      <X size={13} />
-                    </button>
-                  </div>
-                )}
-
-                {/* Empty state prompt */}
-                {!previewUrl && (
-                  <div className="flex flex-col items-center justify-center gap-2 py-5 px-4">
-                    <div style={{ color: isDragOver ? 'var(--accent)' : 'var(--text-tertiary)' }}>
-                      <Upload size={22} />
+                {/* The drop zone takes a drop, a paste anywhere in the form, or a
+                    click; the button under it is the keyboard's way in. */}
+                <div
+                  ref={dropZoneRef}
+                  onDragOver={handleDragOver}
+                  onDragLeave={handleDragLeave}
+                  onDrop={handleDrop}
+                  onClick={() => { if (!previewUrl) fileInputRef.current?.click(); }}
+                  className={cn(
+                    'relative overflow-hidden rounded-surface border-2 border-dashed transition-colors',
+                    scanZoneTone,
+                    previewUrl ? 'cursor-default' : 'min-h-[88px] cursor-pointer',
+                  )}
+                >
+                  {previewUrl && (
+                    <div className="relative">
+                      <img src={previewUrl} alt={t('rec.previewAlt')} className="block max-h-[180px] w-full bg-sunken object-contain" />
+                      <Button
+                        variant="secondary"
+                        size="icon-sm"
+                        className="absolute right-1.5 top-1.5 rounded-full"
+                        onClick={e => { e.stopPropagation(); clearImage(); }}
+                        aria-label={t('rec.removeImage')}
+                      >
+                        <X aria-hidden />
+                      </Button>
                     </div>
-                    <p style={{ color: 'var(--text-tertiary)', fontSize: '0.8125rem', textAlign: 'center', margin: 0 }}>
-                      {t('rec.dropHint')}{' '}
-                      <span style={{ color: 'var(--accent)', fontWeight: 600 }}>{t('rec.dropShortcut')}</span>
-                      {' '}{t('rec.dropOr')}{' '}
-                      <span style={{ color: 'var(--accent)', fontWeight: 600, textDecoration: 'underline' }}>
-                        {t('rec.chooseFile')}
-                      </span>
-                    </p>
-                    <p style={{ color: 'var(--text-tertiary)', fontSize: '0.6875rem', margin: 0 }}>
-                      JPEG · PNG · WebP
-                    </p>
-                  </div>
-                )}
+                  )}
 
-                {/* Status bar below image */}
-                {previewUrl && (
-                  <div
-                    style={{
-                      padding: '8px 12px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 8,
-                      borderTop: '1px solid var(--border)',
-                    }}
-                  >
-                    {scanState === 'scanning' && (
-                      <>
-                        <Loader2 size={14} style={{ color: 'var(--accent)', animation: 'spin 1s linear infinite' }} />
-                        <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>{scanMessage}</span>
-                      </>
-                    )}
-                    {scanState === 'success' && (
-                      <>
-                        <CheckCircle size={14} style={{ color: '#16a34a', flexShrink: 0 }} />
-                        <span style={{ fontSize: '0.75rem', color: '#16a34a' }}>{scanMessage}</span>
-                      </>
-                    )}
-                    {scanState === 'error' && (
-                      <>
-                        <AlertCircle size={14} style={{ color: 'var(--danger)', flexShrink: 0 }} />
-                        <span style={{ fontSize: '0.75rem', color: 'var(--danger)' }}>{scanMessage}</span>
-                      </>
-                    )}
-                  </div>
-                )}
-              </div>
+                  {!previewUrl && (
+                    <div className="flex flex-col items-center justify-center gap-2 px-4 py-5 text-center">
+                      <Upload aria-hidden className={cn('size-5', isDragOver ? 'text-brand-text' : 'text-fg-subtle')} />
+                      <p className="text-[13px] text-fg-muted">
+                        {t('rec.dropHint')}{' '}
+                        <span className="font-semibold text-brand-text">{t('rec.dropShortcut')}</span>
+                        {' '}{t('rec.dropOr')}{' '}
+                        <span className="font-semibold text-brand-text underline">{t('rec.chooseFile')}</span>
+                      </p>
+                      <p className="text-[11px] text-fg-subtle">JPEG · PNG · WebP</p>
+                    </div>
+                  )}
 
-              {/* Hidden file input */}
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/jpeg,image/png,image/webp,image/gif"
-                style={{ display: 'none' }}
-                onChange={handleFileInputChange}
-              />
-
-              {/* Upload button (always visible as secondary action) */}
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                style={{
-                  marginTop: 6,
-                  width: '100%',
-                  padding: '0.375rem 0.75rem',
-                  borderRadius: '0.5rem',
-                  border: '1px solid var(--border)',
-                  background: 'var(--bg-subtle)',
-                  color: 'var(--text-secondary)',
-                  fontSize: '0.8125rem',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: 6,
-                  transition: 'background 0.15s',
-                }}
-                onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-muted)')}
-                onMouseLeave={e => (e.currentTarget.style.background = 'var(--bg-subtle)')}
-              >
-                <Upload size={13} />
-                {t('rec.uploadPhoto')}
-              </button>
-
-              {/* OCR debug panel */}
-              {ocrResult && scanState === 'success' && (
-                <div style={{ marginTop: 8 }}>
-                  <button
-                    type="button"
-                    onClick={() => setShowOcrDebug(v => !v)}
-                    style={{ fontSize: '0.7rem', color: 'var(--text-tertiary)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
-                  >
-                    {showOcrDebug ? '▾' : '▸'} {t('rec.ocr.showCandidates')}
-                  </button>
-                  {showOcrDebug && (
-                    <div style={{ fontSize: '0.68rem', marginTop: 4, padding: '8px', borderRadius: '0.375rem', background: 'var(--bg-subtle)', color: 'var(--text-tertiary)', lineHeight: 1.5 }}>
-                      {ocrResult.amountCandidates && ocrResult.amountCandidates.length > 0 && (
-                        <div style={{ marginBottom: 6 }}>
-                          <strong style={{ color: 'var(--text-secondary)' }}>{t('rec.ocr.amountCandidates')}</strong>
-                          {ocrResult.amountCandidates.map((c, i) => (
-                            <div key={i} style={{ paddingLeft: 8, color: c.rejected ? '#f87171' : i === 0 ? '#86efac' : 'var(--text-tertiary)' }}>
-                              {c.rejected ? '✗ ' : i === 0 ? '✓ ' : '  '}
-                              {c.value}
-                              {/* c.rejectedReason / c.reason come from receiptOcr.ts and stay German. */}
-                              {c.rejected
-                                ? t('rec.ocr.rejectedReason', { reason: c.rejectedReason ?? '' })
-                                : t('rec.ocr.scoredReason', { score: c.score, reason: c.reason })}
-                              <span style={{ opacity: 0.6 }}> [{c.sourceLine.slice(0, 40)}]</span>
-                            </div>
-                          ))}
-                        </div>
+                  {previewUrl && (
+                    <div role="status" className="flex items-center gap-2 border-t border-line px-3 py-2 text-xs">
+                      {scanState === 'scanning' && (
+                        <>
+                          <Loader2 aria-hidden className="size-3.5 shrink-0 text-brand-text motion-safe:animate-spin" />
+                          <span className="text-fg-muted">{scanMessage}</span>
+                        </>
                       )}
-                      {ocrResult.dateCandidates && ocrResult.dateCandidates.length > 0 && (
-                        <div style={{ marginBottom: 6 }}>
-                          <strong style={{ color: 'var(--text-secondary)' }}>{t('rec.ocr.dateCandidates')}</strong>
-                          {ocrResult.dateCandidates.map((c, i) => (
-                            <div key={i} style={{ paddingLeft: 8, color: c.rejected ? '#f87171' : i === 0 ? '#86efac' : 'var(--text-tertiary)' }}>
-                              {c.rejected ? '✗ ' : i === 0 ? '✓ ' : '  '}
-                              {c.value}{t('rec.ocr.scoredReason', { score: c.score, reason: c.reason })}
-                              <span style={{ opacity: 0.6 }}> [{c.sourceLine.slice(0, 40)}]</span>
-                            </div>
-                          ))}
-                        </div>
+                      {scanState === 'success' && (
+                        <>
+                          <CheckCircle aria-hidden className="size-3.5 shrink-0 text-positive" />
+                          <span className="text-positive">{scanMessage}</span>
+                        </>
                       )}
-                      <div>
-                        <strong style={{ color: 'var(--text-secondary)' }}>{t('rec.ocr.plzCandidates')}</strong>
-                        {(!ocrResult.plzCandidates || ocrResult.plzCandidates.length === 0) ? (
-                          <div style={{ paddingLeft: 8, color: '#f87171' }}>{t('rec.ocr.noPlzCandidates')}</div>
-                        ) : (
-                          ocrResult.plzCandidates.map((c, i) => (
-                            <div key={i} style={{ paddingLeft: 8, color: c.rejected ? '#f87171' : i === 0 ? '#86efac' : 'var(--text-tertiary)' }}>
-                              {c.rejected ? '✗ ' : i === 0 ? '✓ ' : '  '}
-                              {c.postalCode} {c.city}
-                              {c.rejected
-                                ? t('rec.ocr.rejectedReason', { reason: c.rejectedReason ?? '' })
-                                : t('rec.ocr.scoredReason', { score: c.score, reason: c.reason })}
-                            </div>
-                          ))
-                        )}
-                      </div>
+                      {scanState === 'error' && (
+                        <>
+                          <AlertCircle aria-hidden className="size-3.5 shrink-0 text-critical" />
+                          <span className="text-critical">{scanMessage}</span>
+                        </>
+                      )}
                     </div>
                   )}
                 </div>
-              )}
 
-              <div style={{ borderTop: '1px solid var(--border)', marginTop: '1rem' }} />
-            </div>
-          )}
-
-          {/* ── Main form ── */}
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div>
-              <label style={{ color: 'var(--text-secondary)' }} className="block text-sm font-medium mb-1">
-                {t('rec.receiptNumber')}
-              </label>
-              <div className="relative">
-                <ReceiptIcon style={{ color: 'var(--text-tertiary)' }} className="absolute left-3 top-1/2 transform -translate-y-1/2" size={16} />
                 <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp,image/gif"
+                  className="hidden"
+                  onChange={handleFileInputChange}
+                />
+
+                <Button variant="secondary" size="sm" className="w-full" onClick={() => fileInputRef.current?.click()}>
+                  <Upload aria-hidden />
+                  {t('rec.uploadPhoto')}
+                </Button>
+
+                {/* OCR diagnostics: the candidates and reasons come from
+                    receiptOcr.ts and stay German. */}
+                {ocrResult && scanState === 'success' && (
+                  <div>
+                    <button
+                      type="button"
+                      onClick={() => setShowOcrDebug(v => !v)}
+                      aria-expanded={showOcrDebug}
+                      className="inline-flex items-center gap-1 rounded-sm text-xs text-fg-subtle transition-colors hover:text-fg-muted focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+                    >
+                      <ChevronRight aria-hidden className={cn('size-3.5 transition-transform', showOcrDebug && 'rotate-90')} />
+                      {t('rec.ocr.showCandidates')}
+                    </button>
+                    {showOcrDebug && (
+                      <div className="mt-1 grid gap-1.5 rounded-control bg-sunken p-2 text-[11px] leading-relaxed text-fg-muted">
+                        {ocrResult.amountCandidates && ocrResult.amountCandidates.length > 0 && (
+                          <div>
+                            <strong className="text-fg">{t('rec.ocr.amountCandidates')}</strong>
+                            {ocrResult.amountCandidates.map((c, i) => (
+                              <div key={i} className={cn('pl-2', candidateTone(c.rejected, i))}>
+                                {c.rejected ? '✗ ' : i === 0 ? '✓ ' : '  '}
+                                {c.value}
+                                {c.rejected
+                                  ? t('rec.ocr.rejectedReason', { reason: c.rejectedReason ?? '' })
+                                  : t('rec.ocr.scoredReason', { score: c.score, reason: c.reason })}
+                                <span className="opacity-70"> [{c.sourceLine.slice(0, 40)}]</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        {ocrResult.dateCandidates && ocrResult.dateCandidates.length > 0 && (
+                          <div>
+                            <strong className="text-fg">{t('rec.ocr.dateCandidates')}</strong>
+                            {ocrResult.dateCandidates.map((c, i) => (
+                              <div key={i} className={cn('pl-2', candidateTone(c.rejected, i))}>
+                                {c.rejected ? '✗ ' : i === 0 ? '✓ ' : '  '}
+                                {c.value}{t('rec.ocr.scoredReason', { score: c.score, reason: c.reason })}
+                                <span className="opacity-70"> [{c.sourceLine.slice(0, 40)}]</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        <div>
+                          <strong className="text-fg">{t('rec.ocr.plzCandidates')}</strong>
+                          {(!ocrResult.plzCandidates || ocrResult.plzCandidates.length === 0) ? (
+                            <div className="pl-2 text-critical">{t('rec.ocr.noPlzCandidates')}</div>
+                          ) : (
+                            ocrResult.plzCandidates.map((c, i) => (
+                              <div key={i} className={cn('pl-2', candidateTone(c.rejected, i))}>
+                                {c.rejected ? '✗ ' : i === 0 ? '✓ ' : '  '}
+                                {c.postalCode} {c.city}
+                                {c.rejected
+                                  ? t('rec.ocr.rejectedReason', { reason: c.rejectedReason ?? '' })
+                                  : t('rec.ocr.scoredReason', { score: c.score, reason: c.reason })}
+                              </div>
+                            ))
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </section>
+            )}
+
+            {/* ── Main form ── */}
+            <form id={formId} onSubmit={handleSubmit} className="grid gap-5">
+              <Field label={t('rec.receiptNumber')} required>
+                <Input
                   type="text"
                   value={formData.receiptNumber}
                   onChange={e => setFormData(prev => ({ ...prev, receiptNumber: e.target.value }))}
-                  style={{ ...inputStyle, paddingLeft: '2.25rem' }}
+                  className="tabular-nums"
                   placeholder={t('rec.autoGenerated')}
                   required
                 />
-              </div>
-            </div>
+              </Field>
 
-            <div>
-              <label style={{ color: 'var(--text-secondary)' }} className="block text-sm font-medium mb-1 flex items-center gap-2">
-                {t('common.date')}
-                {ocrResult?.dateReason?.startsWith('Unsicher') && (
-                  <span style={{ fontSize: '0.7rem', color: '#f59e0b', fontWeight: 600 }}>{t('rec.pleaseCheck')}</span>
-                )}
-              </label>
-              {/* The date mask stays German (TT/MM/JJJJ): displayToIso parses
-                  DD.MM.YYYY / DD/MM/YYYY only, and the figure matches the Beleg. */}
-              <input
-                ref={dateInputRef}
-                type="text"
-                inputMode="numeric"
-                placeholder="TT/MM/JJJJ"
-                value={displayDate}
-                onChange={e => {
-                  const raw = e.target.value;
-                  setDisplayDate(raw);
-                  const iso = displayToIso(raw);
-                  if (iso) setFormData(prev => ({ ...prev, date: iso }));
-                }}
-                onBlur={e => {
-                  // On blur, re-format if valid so partial entries become clean
-                  const iso = displayToIso(e.target.value);
-                  if (iso) setDisplayDate(isoToDisplay(iso));
-                }}
-                style={{
-                  ...inputStyle,
-                  borderColor: ocrResult?.dateReason?.startsWith('Unsicher') ? '#f59e0b' : undefined,
-                  boxShadow: ocrResult?.dateReason?.startsWith('Unsicher') ? '0 0 0 1px #f59e0b' : undefined,
-                }}
-              />
+              <Field
+                label={labelWithCheck(t('common.date'), dateUncertain)}
+                // dateReason is OCR diagnostics produced in German by receiptOcr.ts.
+                hint={ocrResult?.dateReason ? <>OCR: {ocrResult.dateReason}</> : undefined}
+              >
+                {/* The date mask stays German (TT/MM/JJJJ): displayToIso parses
+                    DD.MM.YYYY / DD/MM/YYYY only, and the figure matches the Beleg. */}
+                <Input
+                  ref={dateInputRef}
+                  type="text"
+                  inputMode="numeric"
+                  placeholder="TT/MM/JJJJ"
+                  value={displayDate}
+                  onChange={e => {
+                    const raw = e.target.value;
+                    setDisplayDate(raw);
+                    const iso = displayToIso(raw);
+                    if (iso) setFormData(prev => ({ ...prev, date: iso }));
+                  }}
+                  onBlur={e => {
+                    // On blur, re-format if valid so partial entries become clean
+                    const iso = displayToIso(e.target.value);
+                    if (iso) setDisplayDate(isoToDisplay(iso));
+                  }}
+                  className={cn(dateUncertain && uncertainField)}
+                />
+              </Field>
               {/* Hidden native date for form validation — keeps formData.date in sync */}
               <input
                 type="hidden"
@@ -694,108 +641,73 @@ const ReceiptModal: React.FC<ReceiptModalProps> = ({
                 value={formData.date}
                 required
               />
-              {ocrResult?.dateReason && (
-                <p style={{ fontSize: '0.7rem', color: 'var(--text-tertiary)', marginTop: 3 }}>
-                  {/* dateReason is OCR diagnostics produced in German by receiptOcr.ts. */}
-                  OCR: {ocrResult.dateReason}
-                </p>
-              )}
-            </div>
 
-            <div>
-              <label style={{ color: 'var(--text-secondary)' }} className="block text-sm font-medium mb-1">
-                {t('common.driver')}
-              </label>
-              <div className="relative">
-                <User style={{ color: 'var(--text-tertiary)' }} className="absolute left-3 top-1/2 transform -translate-y-1/2" size={16} />
-                <select
+              <Field label={t('common.driver')} required>
+                <NativeSelect
                   value={formData.driverName}
                   onChange={e => setFormData({ ...formData, driverName: e.target.value })}
-                  style={{ ...inputStyle, paddingLeft: '2.25rem', appearance: 'none' }}
                   required
                 >
                   <option value="">{t('rec.selectDriver')}</option>
                   {drivers.filter(d => d.status !== 'inactive').map(d => (
                     <option key={d.id} value={d.name}>{d.name}</option>
                   ))}
-                </select>
-              </div>
-            </div>
+                </NativeSelect>
+              </Field>
 
-            <div>
-              <label style={{ color: 'var(--text-secondary)' }} className="block text-sm font-medium mb-1">
-                {t('rec.category')}
-              </label>
-              <select
-                value={selectedCategory}
-                onChange={e => handleCategoryChange(e.target.value as ReceiptCategory)}
-                style={{ ...inputStyle, appearance: 'none' }}
-                required
-              >
-                {/* The option value is the persisted category; only the label translates. */}
-                {RECEIPT_CATEGORIES.map(cat => (
-                  <option key={cat} value={cat}>{t(RECEIPT_CATEGORY_LABELS[cat])}</option>
-                ))}
-              </select>
-            </div>
-
-            {selectedCategory === 'Other' && (
-              <div>
-                <label style={{ color: 'var(--text-secondary)' }} className="block text-sm font-medium mb-1">
-                  {t('common.description')}
-                </label>
-                <input
-                  type="text"
-                  value={customDescription}
-                  onChange={e => handleCustomDescriptionChange(e.target.value)}
-                  style={inputStyle}
-                  placeholder={t('rec.descriptionPlaceholder')}
+              <Field label={t('rec.category')} required>
+                <NativeSelect
+                  value={selectedCategory}
+                  onChange={e => handleCategoryChange(e.target.value as ReceiptCategory)}
                   required
-                />
-              </div>
-            )}
+                >
+                  {/* The option value is the persisted category; only the label translates. */}
+                  {RECEIPT_CATEGORIES.map(cat => (
+                    <option key={cat} value={cat}>{t(RECEIPT_CATEGORY_LABELS[cat])}</option>
+                  ))}
+                </NativeSelect>
+              </Field>
 
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label style={{ color: 'var(--text-secondary)' }} className="block text-sm font-medium mb-1">
-                  {t('rec.postalCode')}
-                </label>
-                <div className="relative">
-                  <MapPin style={{ color: 'var(--text-tertiary)' }} className="absolute left-3 top-1/2 transform -translate-y-1/2" size={16} />
-                  <input
+              {selectedCategory === 'Other' && (
+                <Field label={t('common.description')} required>
+                  <Input
                     type="text"
+                    value={customDescription}
+                    onChange={e => handleCustomDescriptionChange(e.target.value)}
+                    placeholder={t('rec.descriptionPlaceholder')}
+                    required
+                  />
+                </Field>
+              )}
+
+              <div className="grid grid-cols-2 gap-4">
+                <Field label={t('rec.postalCode')}>
+                  <Input
+                    type="text"
+                    inputMode="numeric"
                     value={formData.postalCode || ''}
                     onChange={e => handlePostalCodeChange(e.target.value)}
-                    style={{ ...inputStyle, paddingLeft: '2.25rem' }}
                     placeholder={t('rec.postalCodePlaceholder')}
                     maxLength={5}
                   />
-                </div>
+                </Field>
+                <Field label={t('rec.city')}>
+                  <Input
+                    type="text"
+                    value={formData.city || ''}
+                    readOnly
+                    className="bg-sunken"
+                    placeholder={t('rec.autoDetected')}
+                  />
+                </Field>
               </div>
-              <div>
-                <label style={{ color: 'var(--text-secondary)' }} className="block text-sm font-medium mb-1">
-                  {t('rec.city')}
-                </label>
-                <input
-                  type="text"
-                  value={formData.city || ''}
-                  readOnly
-                  style={{ ...inputStyle, opacity: 0.7 }}
-                  placeholder={t('rec.autoDetected')}
-                />
-              </div>
-            </div>
 
-            <div>
-              <label style={{ color: 'var(--danger)' }} className="block text-sm font-medium mb-1 flex items-center gap-2">
-                {t('rec.expensesEuro')}
-                {ocrResult?.amountReason?.startsWith('Unsicher') && (
-                  <span style={{ fontSize: '0.7rem', color: '#f59e0b', fontWeight: 600 }}>{t('rec.pleaseCheck')}</span>
-                )}
-              </label>
-              <div className="relative">
-                <DollarSign style={{ color: 'var(--danger)' }} className="absolute left-3 top-1/2 transform -translate-y-1/2" size={16} />
-                <input
+              <Field
+                label={labelWithCheck(t('rec.expensesEuro'), amountUncertain)}
+                // amountReason is OCR diagnostics produced in German by receiptOcr.ts.
+                hint={ocrResult?.amountReason ? <>OCR: {ocrResult.amountReason}</> : undefined}
+              >
+                <Input
                   type="text"
                   inputMode="decimal"
                   value={displayAmount}
@@ -812,33 +724,15 @@ const ReceiptModal: React.FC<ReceiptModalProps> = ({
                       setFormData(prev => ({ ...prev, expense: n }));
                     }
                   }}
-                  style={{
-                    ...inputStyle,
-                    paddingLeft: '2.25rem',
-                    borderColor: ocrResult?.amountReason?.startsWith('Unsicher') ? '#f59e0b' : undefined,
-                    boxShadow: ocrResult?.amountReason?.startsWith('Unsicher') ? '0 0 0 1px #f59e0b' : undefined,
-                  }}
+                  className={cn('tabular-nums', amountUncertain && uncertainField)}
                   placeholder="0,00"
                 />
-              </div>
-              {ocrResult?.amountReason && (
-                <p style={{ fontSize: '0.7rem', color: 'var(--text-tertiary)', marginTop: 3 }}>
-                  {/* amountReason is OCR diagnostics produced in German by receiptOcr.ts. */}
-                  OCR: {ocrResult.amountReason}
-                </p>
-              )}
-            </div>
+              </Field>
 
-            <div>
-              <label style={{ color: 'var(--text-secondary)' }} className="block text-sm font-medium mb-1">
-                {t('rec.paymentMethod')}
-              </label>
-              <div className="relative">
-                <CreditCard style={{ color: 'var(--text-tertiary)' }} className="absolute left-3 top-1/2 transform -translate-y-1/2" size={16} />
-                <select
+              <Field label={t('rec.paymentMethod')} required>
+                <NativeSelect
                   value={formData.paymentMethod || 'bar'}
                   onChange={e => setFormData({ ...formData, paymentMethod: e.target.value as 'bar' | 'uberweisung' })}
-                  style={{ ...inputStyle, paddingLeft: '2.25rem', appearance: 'none' }}
                   required
                 >
                   {/* PAYMENT_METHODS is a shared constant in types/receipt.ts that
@@ -846,43 +740,23 @@ const ReceiptModal: React.FC<ReceiptModalProps> = ({
                       place; the on-screen option label is resolved here instead. */}
                   <option value="bar">{t('rec.payment.bar')}</option>
                   <option value="uberweisung">{t('rec.payment.uberweisung')}</option>
-                </select>
-              </div>
-            </div>
+                </NativeSelect>
+              </Field>
+            </form>
+          </div>
+        </SheetBody>
 
-            <div className="flex justify-end space-x-3 pt-4">
-              <button
-                type="button"
-                onClick={onClose}
-                style={{ color: 'var(--text-secondary)', background: 'var(--bg-subtle)', border: '1px solid var(--border)', borderRadius: '0.5rem', padding: '0.5rem 1rem' }}
-                onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-muted)')}
-                onMouseLeave={e => (e.currentTarget.style.background = 'var(--bg-subtle)')}
-              >
-                {t('common.cancel')}
-              </button>
-              <button
-                type="submit"
-                disabled={scanState === 'scanning'}
-                style={{
-                  background: scanState === 'scanning' ? 'var(--bg-muted)' : 'var(--accent)',
-                  color: scanState === 'scanning' ? 'var(--text-tertiary)' : 'var(--text-inverse)',
-                  borderRadius: '0.5rem',
-                  padding: '0.5rem 1rem',
-                  border: 'none',
-                  cursor: scanState === 'scanning' ? 'not-allowed' : 'pointer',
-                }}
-                className="flex items-center space-x-2"
-                onMouseEnter={e => { if (scanState !== 'scanning') e.currentTarget.style.background = 'var(--accent-hover)'; }}
-                onMouseLeave={e => { if (scanState !== 'scanning') e.currentTarget.style.background = 'var(--accent)'; }}
-              >
-                {scanState === 'scanning' ? <Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} /> : <Save size={16} />}
-                <span>{scanState === 'scanning' ? t('rec.scanning') : t('common.save')}</span>
-              </button>
-            </div>
-          </form>
-        </div>
-      </div>
-    </div>
+        <SheetFooter>
+          <Button variant="secondary" onClick={onClose}>
+            {t('common.cancel')}
+          </Button>
+          <Button type="submit" form={formId} disabled={scanState === 'scanning'}>
+            {scanState === 'scanning' ? <Loader2 aria-hidden className="motion-safe:animate-spin" /> : <Save aria-hidden />}
+            {scanState === 'scanning' ? t('rec.scanning') : t('common.save')}
+          </Button>
+        </SheetFooter>
+      </SheetContent>
+    </Sheet>
   );
 };
 

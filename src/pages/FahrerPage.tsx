@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { RotateCw } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useCompanyScope } from '../hooks/useCompanyScope';
 import { useToast } from '../contexts/ToastContext';
@@ -8,6 +9,7 @@ import DriversManagement from '../components/DriversManagement';
 import { DriverPlanningFields } from '../components/DriverModal';
 import { handleDatabaseError } from '../utils/errorHandler';
 import { useTranslation } from '../contexts/LanguageContext';
+import { Alert, Button, DataTable, KpiCard, PageHeader } from '../components/ui';
 
 const FahrerPage: React.FC = () => {
   const { t } = useTranslation();
@@ -15,7 +17,7 @@ const FahrerPage: React.FC = () => {
   // The rights of the company the session is in — see BelegePage.
   const { canEdit, canDelete, canCreate } = useCompanyScope();
   const { success, error: showError } = useToast();
-  const { drivers: driverActions, isLoading: dbLoading } = useDatabase();
+  const { drivers: driverActions, isLoading: dbLoading, isConnected: dbConnected } = useDatabase();
   const [drivers, setDrivers] = useState<Driver[]>([]);
   const [loading, setLoading] = useState(false);
 
@@ -83,26 +85,67 @@ const FahrerPage: React.FC = () => {
     }
   };
 
+  // ── Presentation (phase 5) ────────────────────────────────────────────────
+  // Everything above is the screen's logic and is unchanged, but for one line:
+  // useDatabase() is also asked for `isConnected`, as on Belege, so a database
+  // the hook never reached no longer shows as "Keine Fahrer vorhanden" and three
+  // zeros. The page's own heading is gone: DriversManagement carries the one
+  // title, as Fahrzeuge and Fixkosten do. Everything below only draws.
+
   if (loading || dbLoading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2" style={{ borderColor: 'var(--accent)' }}></div>
+      <div className="font-ui">
+        <PageHeader title={t('nav.fahrer')} />
+        <div className="grid grid-cols-1 gap-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+            <KpiCard label={t('fleet.activeDrivers')} value="" loading />
+            <KpiCard label={t('fleet.inactiveDrivers')} value="" loading />
+            <KpiCard label={t('overview.common.gesamt')} value="" loading />
+          </div>
+          <DataTable
+            caption={t('nav.fahrer')}
+            columns={[
+              { id: 'name', header: t('fleet.driverName') },
+              { id: 'status', header: t('common.status') },
+            ]}
+            rows={[]}
+            getRowId={() => ''}
+            loading
+          />
+        </div>
+      </div>
+    );
+  }
+
+  if (!dbConnected) {
+    return (
+      <div className="font-ui">
+        <PageHeader title={t('nav.fahrer')} />
+        <Alert
+          tone="critical"
+          title={t('fahrer.loadFailedTitle')}
+          action={
+            <Button variant="secondary" size="sm" onClick={() => window.location.reload()}>
+              <RotateCw aria-hidden />
+              {t('belege.reload')}
+            </Button>
+          }
+        >
+          {t('fahrer.loadFailedBody')}
+        </Alert>
       </div>
     );
   }
 
   return (
-    <div className="space-y-6">
-      <h2 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>{t('nav.fahrer')}</h2>
-      <DriversManagement
-        drivers={drivers}
-        onAddDriver={handleAddDriver}
-        onEditDriver={handleUpdateDriver}
-        onDeleteDriver={handleDeleteDriver}
-        canEdit={canEditDriver}
-        canDelete={canDeleteDriver}
-      />
-    </div>
+    <DriversManagement
+      drivers={drivers}
+      onAddDriver={handleAddDriver}
+      onEditDriver={handleUpdateDriver}
+      onDeleteDriver={handleDeleteDriver}
+      canEdit={canEditDriver}
+      canDelete={canDeleteDriver}
+    />
   );
 };
 
