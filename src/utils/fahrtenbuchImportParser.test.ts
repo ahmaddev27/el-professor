@@ -284,7 +284,10 @@ describe('statuses', () => {
   it('maps the completed word and the old importer\'s cancel words, and nothing else', () => {
     expect(mapTripStatus('abgeschlossen')).toBe('completed');
     expect(mapTripStatus(' Abgeschlossen ')).toBe('completed');
-    for (const cancelled of ['storniert', 'STORNIERT', ' Storno ', 'cancelled', 'Canceled', 'abgebrochen', 'ABGEBROCHEN']) {
+    for (const cancelled of [
+      'storniert', 'STORNIERT', ' Storno ', 'Storniert Fahrt', 'Stornierung',
+      'cancelled', 'Canceled', 'abgebrochen', 'ABGEBROCHEN', 'nicht durchgefuhrt',
+    ]) {
       expect(mapTripStatus(cancelled)).toBe('cancelled');
     }
     for (const other of ['unterwegs', 'offen', 'storn', '', '\\N', 'constructor', 'toString']) {
@@ -499,7 +502,12 @@ describe('the migration derives what the browser derives', () => {
   it('reads a status word by the same two lists', () => {
     expect(sqlConstant('c_completed_words')).toEqual([...COMPLETED_STATUS_WORDS]);
     expect(sqlConstant('c_cancelled_words')).toEqual([...CANCELLED_STATUS_WORDS]);
-    expect(CANCELLED_STATUS_WORDS).toEqual(['storno', 'storniert', 'cancelled', 'canceled', 'abgebrochen']);
+    // The old importer's CANCELED_STATUSES, minus the one normalisation made
+    // unreachable ('nichtdurchgeführt').
+    expect(CANCELLED_STATUS_WORDS).toEqual([
+      'storno', 'storniert', 'storniertfahrt', 'stornierung',
+      'cancelled', 'canceled', 'abgebrochen', 'nichtdurchgefuhrt',
+    ]);
   });
 
   it('reads timestamps with the same three patterns', () => {

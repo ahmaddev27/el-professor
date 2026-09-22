@@ -639,10 +639,11 @@ BEGIN
       = 'ambiguous|-|-|-');
   PERFORM set_config('TimeZone', v_zone, true);
 
-  PERFORM _fi_ok('derive: the status map — abgeschlossen completed; the old importer''s five cancel words cancelled, any case; the rest unknown',
+  PERFORM _fi_ok('derive: the status map — abgeschlossen completed; the old importer''s eight cancel words cancelled, any case or spacing; the rest unknown',
     app_private.fahrtenbuch_map_status(' Abgeschlossen ') = 'completed'
     AND (SELECT bool_and(app_private.fahrtenbuch_map_status(w) = 'cancelled')
-           FROM unnest(ARRAY['storno', 'STORNIERT', ' Storniert ', 'cancelled', 'Canceled', 'abgebrochen']) w)
+           FROM unnest(ARRAY['storno', 'STORNIERT', ' Storniert ', 'Storniert Fahrt', 'Stornierung',
+                             'cancelled', 'Canceled', 'abgebrochen', 'nicht durchgefuhrt']) w)
     AND (SELECT bool_and(app_private.fahrtenbuch_map_status(w) = 'unknown')
            FROM unnest(ARRAY['unterwegs', 'storn', '', E'\\N']) w)
     AND app_private.fahrtenbuch_map_status(NULL) = 'unknown');
