@@ -158,10 +158,11 @@ try {
       });
 
       const query = new URLSearchParams({ theme, lang: 'de', ...shot.query });
-      // The first visit waits for Vite to transform the whole module graph.
+      // The first visit waits for Vite to transform the whole module graph,
+      // which on a machine short of memory has taken more than five minutes.
       // `load` is not awaited: with the clock installed it can stall, and
       // settle() below is the real readiness test.
-      await page.goto(`${origin}/design-harness/?${query}`, { waitUntil: 'domcontentloaded', timeout: 90_000 });
+      await page.goto(`${origin}/design-harness/?${query}`, { waitUntil: 'domcontentloaded', timeout: 600_000 });
       await settle(page);
       if (shot.act) {
         await shot.act(page);
