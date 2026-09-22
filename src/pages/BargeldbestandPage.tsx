@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Wallet, Receipt as ReceiptIcon, Filter, TrendingUp, TrendingDown, Calendar, Download, Banknote } from 'lucide-react';
+import { AlertTriangle, Banknote, Download, Filter, Receipt as ReceiptIcon, RotateCcw, TrendingDown, TrendingUp, Wallet } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
@@ -9,7 +9,6 @@ import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { useTranslation } from '../contexts/LanguageContext';
 import { cashLedgerInScope } from '../utils/salaryCashReceiptFlow';
 import { fetchAllPaginated } from '../utils/fetchAllPaginated';
-import { formatCentsDe } from '../utils/money';
 import {
   bargeldIncomeEntries,
   belegEntries,
@@ -25,6 +24,26 @@ import {
   type CashLedgerTotals,
   type CashMovementRow,
 } from '../utils/cashLedger';
+import {
+  Alert,
+  Badge,
+  Button,
+  Card,
+  cn,
+  DataTable,
+  EmptyState,
+  Field,
+  formatEuroCents,
+  Input,
+  KpiCard,
+  PageHeader,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+  type DataTableColumn,
+} from '../components/ui';
 
 /**
  * Bargeldbestand reads one ledger.
@@ -91,6 +110,7 @@ export default function BargeldbestandPage() {
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [drivers, setDrivers] = useState<string[]>([]);
+  const [loadFailed, setLoadFailed] = useState(false);
   const { user, loading: authLoading, companyId: ownCompanyId } = useAuth();
   const {
     effectiveCompanyId: companyId, isViewingAsCompany, platformReadsCompanyData, ownCompanyReadable,
@@ -191,6 +211,7 @@ export default function BargeldbestandPage() {
 
     try {
       setIsLoading(true);
+      setLoadFailed(false);
 
       const monthStart = format(startOfMonth(new Date(selectedMonth)), 'yyyy-MM-dd');
       const monthEnd = format(endOfMonth(new Date(selectedMonth)), 'yyyy-MM-dd');
@@ -249,6 +270,7 @@ export default function BargeldbestandPage() {
     } catch (error: any) {
       console.error('Error loading cash data:', error);
       showToast('error', t('bargeld.loadFailed'));
+      setLoadFailed(true);
     } finally {
       setIsLoading(false);
     }
@@ -321,238 +343,194 @@ export default function BargeldbestandPage() {
     });
   }
 
-  const inputStyle: React.CSSProperties = {
-    background: 'var(--bg-subtle)',
-    border: '1px solid var(--border)',
-    borderRadius: '0.5rem',
-    color: 'var(--text-primary)',
-    fontSize: '0.875rem',
-    padding: '0.5rem 0.75rem',
-    outline: 'none',
-    width: '100%',
-  };
+  // ── Presentation (phase 5) ────────────────────────────────────────────────
+  // Everything above is the screen's logic and is unchanged, but for the three
+  // `loadFailed` lines; everything below only draws it. The cards and the table
+  // show the integer cents summarizeCashLedger and the ledger entries carry,
+  // formatted once through utils/money.ts (formatEuroCents): no arithmetic here.
+  // euro() above still writes the Excel export exactly as it always did.
 
-  if (isLoading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2" style={{ borderColor: 'var(--accent)' }}></div>
-      </div>
-    );
-  }
-
+  const filtersActive = selectedDriver !== 'all' || selectedType !== 'all' || startDate || endDate;
   const balancePositive = totals.balanceCents >= 0;
 
-  return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center flex-wrap gap-3">
-        <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>{t('nav.bargeldbestand')}</h1>
-        <div className="flex items-center gap-3 flex-wrap">
-          <Calendar className="w-5 h-5" style={{ color: 'var(--text-secondary)' }} />
-          <input
-            type="month"
-            value={selectedMonth}
-            onChange={(e) => setSelectedMonth(e.target.value)}
-            style={{ ...inputStyle, width: 'auto' }}
-          />
-          <button
-            onClick={handleExport}
-            className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-opacity hover:opacity-80"
-            style={{ background: 'var(--success-solid)', color: 'white' }}
-            title={t('common.exportExcel')}
-          >
-            <Download className="w-4 h-4" />
-            Excel
-          </button>
-        </div>
-      </div>
+  const columns: DataTableColumn<CashLedgerEntry>[] = [
+    { id: 'date', header: t('common.date'), kind: 'date', value: entry => entry.date, sortable: true },
+    {
+      id: 'type',
+      header: t('fleet.typeColumn'),
+      // On a phone the sign in front of the amount carries the direction.
+      hideBelow: 'sm',
+      cell: entry =>
+        entry.direction === 'in' ? (
+          <Badge tone="positive">
+            <TrendingUp aria-hidden />
+            {t('bargeld.incomeCol')}
+          </Badge>
+        ) : (
+          <Badge tone="critical">
+            <TrendingDown aria-hidden />
+            {t('bargeld.expenseCol')}
+          </Badge>
+        ),
+    },
+    { id: 'driver', header: t('common.driver'), value: entry => entry.driverName, sortable: true, className: 'pr-2 sm:pr-4' },
+    { id: 'description', header: t('common.description'), value: entry => entry.description, className: 'min-w-[9rem] px-2 sm:px-4' },
+    {
+      id: 'amount',
+      header: t('common.amount'),
+      kind: 'currency',
+      className: 'pl-2 pr-3 sm:px-4',
+      cell: entry => (
+        <span className={cn('font-semibold', entry.direction === 'in' ? 'text-positive' : 'text-critical')}>
+          {entry.direction === 'in' ? '+' : '-'}
+          {formatEuroCents(entry.amountCents)}
+        </span>
+      ),
+    },
+  ];
 
-      {!ledgerInScope && (
-        <div
-          className="rounded-xl px-4 py-3 text-sm"
-          style={{ background: 'var(--warning-subtle)', border: '1px solid rgba(217,119,6,0.25)', color: 'var(--warning)' }}
-        >
-          {t('bargeld.ledgerUnavailable')}
-        </div>
+  const kpiGrid = cn('grid grid-cols-1 gap-4 sm:grid-cols-2', ledgerInScope ? 'xl:grid-cols-4' : 'xl:grid-cols-3');
+
+  const cards = isLoading ? (
+    <div className={kpiGrid}>
+      {Array.from({ length: ledgerInScope ? 4 : 3 }, (_, index) => (
+        <KpiCard key={index} label="" value="" loading />
+      ))}
+    </div>
+  ) : loadFailed ? (
+    // A failed read has no month to describe. The zeros and the previous
+    // month's figures the state still holds would both be claims.
+    <Alert tone="critical" title={t('bargeld.loadFailed')}>
+      {t('bargeld.loadFailedBody')}
+    </Alert>
+  ) : (
+    <div className={kpiGrid}>
+      <KpiCard
+        label={t('bargeld.cashIncome')}
+        value={formatEuroCents(totals.bargeldIncomeCents)}
+        icon={Wallet}
+        caption={t('bargeld.totalCash')}
+      />
+      <KpiCard
+        label={t('bargeld.belegExpenses')}
+        value={formatEuroCents(totals.belegExpenseCents)}
+        icon={ReceiptIcon}
+        caption={t('bargeld.totalBelege')}
+      />
+      {ledgerInScope && (
+        <KpiCard
+          label={t('bargeld.salaryPayouts')}
+          value={formatEuroCents(totals.salaryPayoutCents)}
+          icon={Banknote}
+          caption={t('bargeld.salaryPayoutsHint')}
+        />
       )}
+      <KpiCard
+        label={t('bargeld.currentBalance')}
+        value={
+          <span className={balancePositive ? undefined : 'text-caution'}>{formatEuroCents(totals.balanceCents)}</span>
+        }
+        icon={balancePositive ? Wallet : AlertTriangle}
+        caption={ledgerInScope ? t('bargeld.balanceFormula') : t('bargeld.balanceFormulaNoLedger')}
+      />
+    </div>
+  );
 
-      <div className={`grid grid-cols-1 md:grid-cols-2 gap-6 ${ledgerInScope ? 'xl:grid-cols-4' : 'xl:grid-cols-3'}`}>
-        <div className="rounded-xl p-6" style={{ background: 'var(--success-subtle)', border: '1px solid rgba(5,150,105,0.25)' }}>
-          <div className="flex items-center gap-3 mb-2">
-            <div className="p-2 rounded-lg" style={{ background: 'rgba(5,150,105,0.15)' }}>
-              <Wallet className="w-6 h-6" style={{ color: 'var(--success)' }} />
-            </div>
-            <h3 className="text-sm font-medium" style={{ color: 'var(--success)' }}>{t('bargeld.cashIncome')}</h3>
-          </div>
-          <p className="text-3xl font-bold" style={{ color: 'var(--success)' }}>
-            {euro(totals.bargeldIncomeCents)} €
-          </p>
-          <p className="text-xs mt-2" style={{ color: 'var(--success)', opacity: 0.75 }}>{t('bargeld.totalCash')}</p>
-        </div>
+  return (
+    <div className="font-ui">
+      <PageHeader
+        title={t('nav.bargeldbestand')}
+        actions={
+          <>
+            <Input
+              type="month"
+              value={selectedMonth}
+              onChange={(e) => setSelectedMonth(e.target.value)}
+              aria-label={t('common.month')}
+              className="w-44"
+            />
+            <Button
+              variant="secondary"
+              onClick={handleExport}
+              disabled={isLoading || loadFailed}
+              title={t('common.exportExcel')}
+            >
+              <Download aria-hidden />
+              {t('common.exportExcelShort')}
+            </Button>
+          </>
+        }
+      />
 
-        <div className="rounded-xl p-6" style={{ background: 'var(--danger-subtle)', border: '1px solid rgba(220,38,38,0.25)' }}>
-          <div className="flex items-center gap-3 mb-2">
-            <div className="p-2 rounded-lg" style={{ background: 'rgba(220,38,38,0.15)' }}>
-              <ReceiptIcon className="w-6 h-6" style={{ color: 'var(--danger)' }} />
-            </div>
-            <h3 className="text-sm font-medium" style={{ color: 'var(--danger)' }}>{t('bargeld.belegExpenses')}</h3>
-          </div>
-          <p className="text-3xl font-bold" style={{ color: 'var(--danger)' }}>
-            {euro(totals.belegExpenseCents)} €
-          </p>
-          <p className="text-xs mt-2" style={{ color: 'var(--danger)', opacity: 0.75 }}>{t('bargeld.totalBelege')}</p>
-        </div>
+      <div className="grid grid-cols-1 gap-4">
+        {!ledgerInScope && <Alert tone="caution">{t('bargeld.ledgerUnavailable')}</Alert>}
 
-        {ledgerInScope && (
-          <div className="rounded-xl p-6" style={{ background: 'var(--danger-subtle)', border: '1px solid rgba(220,38,38,0.25)' }}>
-            <div className="flex items-center gap-3 mb-2">
-              <div className="p-2 rounded-lg" style={{ background: 'rgba(220,38,38,0.15)' }}>
-                <Banknote className="w-6 h-6" style={{ color: 'var(--danger)' }} />
+        {cards}
+
+        <section aria-labelledby="bargeld-transactions" className="grid grid-cols-1 gap-3 pt-2">
+          <h2 id="bargeld-transactions" className="text-[15px] font-semibold text-fg">
+            {t('bargeld.transactions')}
+          </h2>
+
+          {!loadFailed && (
+            <Card className="grid grid-cols-1 gap-4 p-4">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                <Field label={t('common.driver')}>
+                  <Select value={selectedDriver} onValueChange={setSelectedDriver}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">{t('common.allDrivers')}</SelectItem>
+                      {drivers.map(driver => (
+                        <SelectItem key={driver} value={driver}>
+                          {driver}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </Field>
+                <Field label={t('fleet.typeColumn')}>
+                  <Select value={selectedType} onValueChange={setSelectedType}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">{t('common.all')}</SelectItem>
+                      <SelectItem value="income">{t('common.income')}</SelectItem>
+                      <SelectItem value="expense">{t('common.expenses')}</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </Field>
+                <Field label={t('common.dateFrom')}>
+                  <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+                </Field>
+                <Field label={t('common.dateTo')}>
+                  <Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+                </Field>
               </div>
-              <h3 className="text-sm font-medium" style={{ color: 'var(--danger)' }}>{t('bargeld.salaryPayouts')}</h3>
-            </div>
-            <p className="text-3xl font-bold" style={{ color: 'var(--danger)' }}>
-              {formatCentsDe(totals.salaryPayoutCents)} €
-            </p>
-            <p className="text-xs mt-2" style={{ color: 'var(--danger)', opacity: 0.75 }}>{t('bargeld.salaryPayoutsHint')}</p>
-          </div>
-        )}
-
-        <div
-          className="rounded-xl p-6"
-          style={{
-            background: balancePositive ? 'var(--accent-subtle)' : 'var(--warning-subtle)',
-            border: `1px solid ${balancePositive ? 'rgba(37,99,235,0.25)' : 'rgba(217,119,6,0.25)'}`,
-          }}
-        >
-          <div className="flex items-center gap-3 mb-2">
-            <div className="p-2 rounded-lg" style={{ background: balancePositive ? 'rgba(37,99,235,0.15)' : 'rgba(217,119,6,0.15)' }}>
-              <Wallet className="w-6 h-6" style={{ color: balancePositive ? 'var(--accent-text)' : 'var(--warning)' }} />
-            </div>
-            <h3 className="text-sm font-medium" style={{ color: balancePositive ? 'var(--accent-text)' : 'var(--warning)' }}>
-              {t('bargeld.currentBalance')}
-            </h3>
-          </div>
-          <p className="text-3xl font-bold" style={{ color: balancePositive ? 'var(--accent-text)' : 'var(--warning)' }}>
-            {formatCentsDe(totals.balanceCents)} €
-          </p>
-          <p className="text-xs mt-2" style={{ color: balancePositive ? 'var(--accent-text)' : 'var(--warning)', opacity: 0.75 }}>
-            {ledgerInScope ? t('bargeld.balanceFormula') : t('bargeld.balanceFormulaNoLedger')}
-          </p>
-        </div>
-      </div>
-
-      <div className="rounded-xl overflow-hidden" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-sm)' }}>
-        <div className="px-6 py-4 border-b" style={{ borderColor: 'var(--border)' }}>
-          <div className="flex items-center justify-between">
-            <h2 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>{t('bargeld.transactions')}</h2>
-            <Filter className="w-5 h-5" style={{ color: 'var(--text-tertiary)' }} />
-          </div>
-        </div>
-
-        <div className="p-6 border-b" style={{ borderColor: 'var(--border)', background: 'var(--bg-subtle)' }}>
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <div>
-              <label className="block text-sm font-medium mb-2" style={{ color: 'var(--text-secondary)' }}>{t('common.driver')}</label>
-              <select value={selectedDriver} onChange={(e) => setSelectedDriver(e.target.value)} style={inputStyle}>
-                <option value="all">{t('common.allDrivers')}</option>
-                {drivers.map(driver => <option key={driver} value={driver}>{driver}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-2" style={{ color: 'var(--text-secondary)' }}>Typ</label>
-              <select value={selectedType} onChange={(e) => setSelectedType(e.target.value)} style={inputStyle}>
-                <option value="all">{t('common.all')}</option>
-                <option value="income">{t('common.income')}</option>
-                <option value="expense">{t('common.expenses')}</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-2" style={{ color: 'var(--text-secondary)' }}>{t('common.dateFrom')}</label>
-              <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} style={inputStyle} />
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-2" style={{ color: 'var(--text-secondary)' }}>{t('common.dateTo')}</label>
-              <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} style={inputStyle} />
-            </div>
-          </div>
-          {(selectedDriver !== 'all' || selectedType !== 'all' || startDate || endDate) && (
-            <div className="mt-4 flex justify-end">
-              <button
-                onClick={resetFilters}
-                className="text-sm"
-                style={{ color: 'var(--accent-text)' }}
-                onMouseEnter={e => { (e.currentTarget as HTMLElement).style.opacity = '0.7'; }}
-                onMouseLeave={e => { (e.currentTarget as HTMLElement).style.opacity = '1'; }}
-              >
-                Filter zurücksetzen
-              </button>
-            </div>
-          )}
-        </div>
-
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead>
-              <tr style={{ background: 'var(--bg-subtle)' }}>
-                <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>{t('common.date')}</th>
-                <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>Typ</th>
-                <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>{t('common.driver')}</th>
-                <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>{t('common.description')}</th>
-                <th className="px-6 py-3 text-right text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>{t('common.amount')}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredEntries.length === 0 ? (
-                <tr>
-                  <td colSpan={5} className="px-6 py-8 text-center text-sm" style={{ color: 'var(--text-tertiary)' }}>
-                    Keine Transaktionen gefunden
-                  </td>
-                </tr>
-              ) : (
-                filteredEntries.map((entry) => {
-                  const isIncome = entry.direction === 'in';
-                  return (
-                    <tr
-                      key={entry.id}
-                      className="border-t"
-                      style={{ borderColor: 'var(--border)' }}
-                      onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'var(--bg-subtle)'; }}
-                      onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'transparent'; }}
-                    >
-                      <td className="px-6 py-4 whitespace-nowrap text-sm" style={{ color: 'var(--text-primary)' }}>
-                        {format(new Date(entry.date), 'dd.MM.yyyy')}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span
-                          className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium"
-                          style={{
-                            background: isIncome ? 'var(--success-subtle)' : 'var(--danger-subtle)',
-                            color: isIncome ? 'var(--success)' : 'var(--danger)',
-                          }}
-                        >
-                          {isIncome ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
-                          {isIncome ? t('bargeld.incomeCol') : t('bargeld.expenseCol')}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 text-sm" style={{ color: 'var(--text-primary)' }}>
-                        {entry.driverName || '-'}
-                      </td>
-                      <td className="px-6 py-4 text-sm" style={{ color: 'var(--text-primary)' }}>
-                        {entry.description}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-right font-medium">
-                        <span style={{ color: isIncome ? 'var(--success)' : 'var(--danger)' }}>
-                          {isIncome ? '+' : '-'}
-                          {euro(entry.amountCents)} €
-                        </span>
-                      </td>
-                    </tr>
-                  );
-                })
+              {filtersActive && (
+                <div className="flex justify-end">
+                  <Button variant="secondary" size="sm" onClick={resetFilters}>
+                    <RotateCcw aria-hidden />
+                    {t('bargeld.resetFilters')}
+                  </Button>
+                </div>
               )}
-            </tbody>
-          </table>
-        </div>
+            </Card>
+          )}
+
+          <DataTable
+            caption={t('bargeld.transactions')}
+            columns={columns}
+            rows={filteredEntries}
+            getRowId={entry => entry.id}
+            loading={isLoading}
+            error={loadFailed}
+            onRetry={() => loadCashData()}
+            emptyState={<EmptyState size="sm" icon={Filter} title={t('bargeld.noTransactions')} />}
+          />
+        </section>
       </div>
     </div>
   );

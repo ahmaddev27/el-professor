@@ -478,6 +478,11 @@ export const de = {
   // scope the balance keeps its older label and says what is missing from it.
   'bargeld.balanceFormulaNoLedger': 'Bargeld − Belege',
   'bargeld.ledgerUnavailable': 'Gehaltsquittungen sind in dieser Ansicht nicht lesbar. Dieser Bestand enthält nur Bargeld und Belege.',
+  // A failed read shows no figure at all: a zero, or the month shown before,
+  // would read as this month's till.
+  'bargeld.loadFailedBody':  'Solange die Daten nicht geladen sind, zeigt diese Seite keine Beträge an.',
+  'bargeld.noTransactions':  'Keine Transaktionen gefunden',
+  'bargeld.resetFilters':    'Filter zurücksetzen',
   'werkstatt.loadFailed':    'Fehler beim Laden der Checks:',
   'werkstatt.deleted':       'Check erfolgreich gelöscht',
   'werkstatt.deleteFailed':  'Fehler beim Löschen:',
