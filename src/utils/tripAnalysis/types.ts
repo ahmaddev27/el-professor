@@ -21,6 +21,7 @@
  * Entry points (import from 'src/utils/tripAnalysis'):
  *   analyzeTrips(input: TripAnalysisInput): TripAnalysisResult
  *   computeBudget(input: BudgetInput): BudgetResult
+ *   splitMinutes(4316): { hours: 71, minutes: 56 }
  *   analysisTripFromRow(row: TripRowForAnalysis): AnalysisTrip
  *   noRoutingEstimator: TravelTimeEstimator          (the default)
  *   listTravelRequests(input: TripAnalysisInput): TravelEstimateRequest[]
