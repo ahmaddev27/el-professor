@@ -44,7 +44,10 @@
                           missing             a source cell is empty (a
                                               cancelled ride has neither)
                           unparsed            a cell holds something that is not
-                                              a zone-less timestamp
+                                              a zone-less timestamp (ISO
+                                              'YYYY-MM-DD HH:MM[:SS]', German
+                                              'D.M.YYYY H:MM[:SS]', or an Excel
+                                              date-and-time number)
                           ambiguous           the wall time falls in a DST
                                               change — twice (October) or never
                                               (March) — so no single instant
@@ -105,7 +108,19 @@
   so the backfill's own UPDATE proves it touches none of them. That UPDATE
   also sets `updated_at`, as the trigger does for every update. It reports its
   counts with RAISE NOTICE — the numbers a production-sized copy is measured
-  by.
+  by (HANDOFF.md has the procedure: restore the newest pg_dump snapshot into a
+  throwaway supabase/postgres container, apply this file inside BEGIN …
+  ROLLBACK, read the NOTICE).
+
+  ## Cost
+
+  ADD COLUMN takes an ACCESS EXCLUSIVE lock on fahrtenbuch_trips, and the
+  transaction holds it through the backfill, so the Fahrtenbuch screens and
+  the planning RPCs wait until the release commits. Measured in a throwaway
+  supabase/postgres:17.6.1.170 limited to one CPU under Docker Desktop:
+  100 000 synthetic Uber-shaped trips backfilled in 1 min 55 s, and the checks
+  and indexes after it in seconds. The column rule runs once per set of keys,
+  the rest once per trip.
 
   ## The trigger
 
@@ -594,6 +609,12 @@ $$;
   Returns and the migration prints the counts. After the trigger below is
   restated it can change nothing — setting a protected column from NULL is a
   change — so it runs once, here, or in the kit under the previous trigger body.
+
+  Two statements, not one. The derivation is written to a keyed scratch table
+  first, and the UPDATE joins it by id: a single statement left the join order
+  to the planner's row estimates, and with a stale estimate for the trips it
+  chose to rescan the derivation once per trip — 16 minutes for 100 000 trips
+  on one CPU where the two statements take about one.
 */
 CREATE FUNCTION app_private.fahrtenbuch_trips_backfill_import_facts()
 RETURNS jsonb
@@ -602,11 +623,14 @@ VOLATILE
 SET search_path = pg_catalog, public
 AS $$
 DECLARE
-  v_counts jsonb;
+  v_counts  jsonb;
+  v_updated bigint;
 BEGIN
-  -- Every step MATERIALIZED: a CTE the planner inlines into the UPDATE's join
-  -- can be rescanned per row, running the derivation over and over — a first
-  -- version took 16 minutes for 100 000 trips that way.
+  IF to_regclass('pg_temp.fahrtenbuch_backfill') IS NOT NULL THEN
+    DROP TABLE pg_temp.fahrtenbuch_backfill;
+  END IF;
+
+  CREATE TEMP TABLE fahrtenbuch_backfill ON COMMIT DROP AS
   WITH tokens AS MATERIALIZED (
     SELECT * FROM app_private.fahrtenbuch_ride_tokens()
   ), pending AS MATERIALIZED (
@@ -634,39 +658,50 @@ BEGIN
      CROSS JOIN LATERAL app_private.fahrtenbuch_times_from_cells(
                   p.raw_data_json -> ks.start_key, p.raw_data_json -> ks.end_key,
                   p.trip_date, p.start_time, p.end_time) AS tt
-  ), reasoned AS MATERIALIZED (
-    SELECT d.*,
-           app_private.fahrtenbuch_backfill_review_reasons(
-             d.is_canceled, d.start_time, d.end_time, d.original_driver_name,
-             d.trip_status, d.time_source, d.start_at, d.end_at) AS review_reasons
-      FROM derived d
-  ), updated AS (
-    UPDATE public.fahrtenbuch_trips t
-       SET start_at       = r.start_at,
-           end_at         = r.end_at,
-           time_zone      = r.time_zone,
-           time_source    = r.time_source,
-           trip_status    = r.trip_status,
-           review_reasons = r.review_reasons,
-           needs_review   = cardinality(r.review_reasons) > 0
-      FROM reasoned r
-     WHERE t.id = r.id
-    RETURNING t.time_source, t.trip_status, t.needs_review
   )
-  SELECT jsonb_build_object(
-           'rows',               count(*),
-           'source_start_end',   count(*) FILTER (WHERE u.time_source = 'source_start_end'),
-           'fallback_trip_date', count(*) FILTER (WHERE u.time_source = 'fallback_trip_date'),
-           'missing',            count(*) FILTER (WHERE u.time_source = 'missing'),
-           'unparsed',           count(*) FILTER (WHERE u.time_source = 'unparsed'),
-           'ambiguous',          count(*) FILTER (WHERE u.time_source = 'ambiguous'),
-           'completed',          count(*) FILTER (WHERE u.trip_status = 'completed'),
-           'cancelled',          count(*) FILTER (WHERE u.trip_status = 'cancelled'),
-           'unknown',            count(*) FILTER (WHERE u.trip_status = 'unknown'),
-           'needs_review',       count(*) FILTER (WHERE u.needs_review))
-    INTO v_counts
-    FROM updated u;
+  SELECT d.id, d.start_at, d.end_at, d.time_zone, d.time_source, d.trip_status,
+         app_private.fahrtenbuch_backfill_review_reasons(
+           d.is_canceled, d.start_time, d.end_time, d.original_driver_name,
+           d.trip_status, d.time_source, d.start_at, d.end_at) AS review_reasons
+    FROM derived d;
 
+  -- Keyed and analysed, so the join below is a hash join or a lookup by id
+  -- whatever the planner believes about fahrtenbuch_trips.
+  ALTER TABLE pg_temp.fahrtenbuch_backfill ADD PRIMARY KEY (id);
+  ANALYZE pg_temp.fahrtenbuch_backfill;
+
+  UPDATE public.fahrtenbuch_trips t
+     SET start_at       = b.start_at,
+         end_at         = b.end_at,
+         time_zone      = b.time_zone,
+         time_source    = b.time_source,
+         trip_status    = b.trip_status,
+         review_reasons = b.review_reasons,
+         needs_review   = cardinality(b.review_reasons) > 0
+    FROM pg_temp.fahrtenbuch_backfill b
+   WHERE t.id = b.id;
+  GET DIAGNOSTICS v_updated = ROW_COUNT;
+
+  SELECT jsonb_build_object(
+           'rows',               v_updated,
+           'source_start_end',   count(*) FILTER (WHERE b.time_source = 'source_start_end'),
+           'fallback_trip_date', count(*) FILTER (WHERE b.time_source = 'fallback_trip_date'),
+           'missing',            count(*) FILTER (WHERE b.time_source = 'missing'),
+           'unparsed',           count(*) FILTER (WHERE b.time_source = 'unparsed'),
+           'ambiguous',          count(*) FILTER (WHERE b.time_source = 'ambiguous'),
+           'completed',          count(*) FILTER (WHERE b.trip_status = 'completed'),
+           'cancelled',          count(*) FILTER (WHERE b.trip_status = 'cancelled'),
+           'unknown',            count(*) FILTER (WHERE b.trip_status = 'unknown'),
+           'needs_review',       count(*) FILTER (WHERE cardinality(b.review_reasons) > 0))
+    INTO v_counts
+    FROM pg_temp.fahrtenbuch_backfill b;
+
+  IF v_updated <> (SELECT count(*) FROM pg_temp.fahrtenbuch_backfill) THEN
+    RAISE EXCEPTION 'fahrtenbuch backfill: derived % trips but updated %',
+      (SELECT count(*) FROM pg_temp.fahrtenbuch_backfill), v_updated;
+  END IF;
+
+  DROP TABLE pg_temp.fahrtenbuch_backfill;
   RETURN v_counts;
 END;
 $$;
