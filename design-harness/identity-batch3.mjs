@@ -299,5 +299,34 @@ function CONFIG() {
       insertedAfter: [12, 2222],
       dropped: [],
     },
+    {
+      path: 'src/components/MonatsplanungDriverPool.tsx',
+      // 247–398: the pool's markup. 400–496: ChipBtn, Stat, Tag and Field, its
+      // drawing helpers, rewritten whole (their call sites keep their props).
+      // The design system's import follows line 5.
+      redrawn: [[247, 398], [400, 496, 'code']],
+      insertedAfter: [5],
+      dropped: [
+        ["d.planning_min_salary != null ? `${d.planning_min_salary.toFixed(2)} €` : '—'",
+          'a salary range bound, now `d.planning_min_salary != null ? euro(d.planning_min_salary) : \'—\'`, written through utils/money.ts: "2.100,00 €" where toFixed wrote "2100.00 €"'],
+        ["d.planning_max_salary != null ? `${d.planning_max_salary.toFixed(2)} €` : '—'",
+          'the upper bound, the same way'],
+        ['d.planning_min_salary.toFixed(2)', 'the template part of the same expression'],
+        ['d.planning_max_salary.toFixed(2)', 'the template part of the same expression'],
+      ],
+    },
+    {
+      path: 'src/components/MonatsplanungAppliedRuns.tsx',
+      // 277–317: the list's card, messages and empty state. 389–444: the
+      // delete dialog and the card's end. 470–499: RunGroups' markup.
+      // 523–626: RunRow's markup. Between them, RunDetailModal, the
+      // Stundennachweis preview with its error boundary and fallback, and
+      // FinalizePlanningModal are mounted verbatim (318–388), and the export
+      // dialog itself (629 on) is untouched. The design system's import
+      // follows line 30.
+      redrawn: [[277, 317], [389, 444], [470, 499], [523, 626]],
+      insertedAfter: [30],
+      dropped: [],
+    },
   ];
 }

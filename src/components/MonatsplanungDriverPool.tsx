@@ -3,6 +3,7 @@ import { Users, UserCheck, AlertTriangle, Clock, CalendarDays, Target, Wallet, S
 import { supabase } from '../lib/supabase';
 import { useTranslation } from '../contexts/LanguageContext';
 import type { TranslationKey } from '../i18n';
+import { Alert, Badge, Button, Card, cn, formatEuro } from './ui';
 
 export interface PlanningDriver {
   id: string;
@@ -244,63 +245,66 @@ export default function MonatsplanungDriverPool({
   const missingWindow = drivers.filter(d => selectedIds.has(d.id) && !d.is_full_day_available && (!d.work_window_start || !d.work_window_end)).length;
   const missingDays = drivers.filter(d => selectedIds.has(d.id) && (!d.allowed_weekdays || d.allowed_weekdays.length === 0)).length;
 
+  // ── Presentation (phase 5) ────────────────────────────────────────────────
+  // Everything above is the pool's logic and is unchanged: which drivers load,
+  // which are matched to the Fahrtenbuch, the default selection, the quick
+  // selections and every count. Below only draws them. The one change in what
+  // a figure says: a salary range is written through utils/money.ts
+  // ("2.100,00 €"), where toFixed(2) wrote it with a US decimal point.
+  const euro = (amount: number) => (Number.isFinite(amount) ? formatEuro(amount) : String(amount));
+
   return (
     <div className="space-y-6">
-      <div className="rounded-xl p-5" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
-        <div className="flex items-start justify-between gap-4 mb-4">
-          <div>
-            <h2 className="text-base font-semibold flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
-              <Users size={16} /> {t('mp.pool.title')}
-            </h2>
-            <p className="text-xs mt-1" style={{ color: 'var(--text-tertiary)' }}>
-              {t('mp.pool.subtitle')}
-            </p>
-          </div>
+      <Card className="p-5 font-ui">
+        <div className="mb-4">
+          <h2 className="flex items-center gap-2 text-[15px] font-semibold text-fg">
+            <Users aria-hidden className="size-4 text-fg-muted" /> {t('mp.pool.title')}
+          </h2>
+          <p className="mt-1 text-[13px] text-fg-muted">
+            {t('mp.pool.subtitle')}
+          </p>
         </div>
 
         {/* Quick actions */}
-        <div className="flex flex-wrap items-center gap-2 mb-4">
+        <div className="mb-4 flex flex-wrap items-center gap-2">
           <ChipBtn onClick={selectAll}>{t('mp.pool.selectAll')}</ChipBtn>
           <ChipBtn onClick={selectNone}>{t('mp.pool.selectNone')}</ChipBtn>
-          <ChipBtn onClick={selectFahrtenbuchOnly} icon={<Filter size={12} />}>
+          <ChipBtn onClick={selectFahrtenbuchOnly} icon={<Filter aria-hidden />}>
             {t('mp.pool.onlyWithTrips', { count: matchedDriverIds.size })}
           </ChipBtn>
-          <ChipBtn onClick={selectRegularOnly} icon={<Filter size={12} />}>
+          <ChipBtn onClick={selectRegularOnly} icon={<Filter aria-hidden />}>
             {t('mp.pool.onlyRegular')}
           </ChipBtn>
         </div>
 
-        {/* Summary */}
-        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4 mb-4">
-          <Stat label={t('mp.pool.statTotal')} value={total} />
-          <Stat label={t('mp.pool.statSelected')} value={selectedCount} tone="primary" />
-          <Stat label={t('mp.pool.statNotSelected')} value={notSelected} />
-          <Stat label={t('mp.pool.inFahrtenbuch')} value={inFahrtenbuch} />
-          <Stat label={t('mp.pool.statSelectedRegular')} value={selectedRegular} />
-          <Stat label={t('mp.pool.statNoWorkTime')} value={missingWindow} tone={missingWindow > 0 ? 'warning' : undefined} />
-          <Stat label={t('mp.pool.statNoWorkDays')} value={missingDays} tone={missingDays > 0 ? 'warning' : undefined} />
-        </div>
+        {/* Summary. A read that failed counts nothing, so it shows no counts. */}
+        {!error && (
+          <dl className="mb-4 grid grid-cols-2 gap-x-4 gap-y-3 border-y border-line py-4 sm:grid-cols-4 lg:grid-cols-7">
+            <Stat label={t('mp.pool.statTotal')} value={total} />
+            <Stat label={t('mp.pool.statSelected')} value={selectedCount} tone="primary" />
+            <Stat label={t('mp.pool.statNotSelected')} value={notSelected} />
+            <Stat label={t('mp.pool.inFahrtenbuch')} value={inFahrtenbuch} />
+            <Stat label={t('mp.pool.statSelectedRegular')} value={selectedRegular} />
+            <Stat label={t('mp.pool.statNoWorkTime')} value={missingWindow} tone={missingWindow > 0 ? 'warning' : undefined} />
+            <Stat label={t('mp.pool.statNoWorkDays')} value={missingDays} tone={missingDays > 0 ? 'warning' : undefined} />
+          </dl>
+        )}
 
         {loading && (
-          <div className="text-sm" style={{ color: 'var(--text-secondary)' }}>{t('mp.pool.loading')}</div>
+          <p className="text-sm text-fg-muted">{t('mp.pool.loading')}</p>
         )}
         {error && (
-          <div
-            className="px-3 py-2 rounded-lg text-sm flex items-center gap-2"
-            style={{ background: 'var(--bg-danger-subtle, #fef2f2)', color: 'var(--danger, #b91c1c)' }}
-          >
-            <AlertTriangle size={15} /> {t('mp.pool.loadError', { error })}
-          </div>
+          <Alert tone="critical">{t('mp.pool.loadError', { error })}</Alert>
         )}
 
         {!loading && !error && drivers.length === 0 && (
-          <div className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+          <p className="text-sm text-fg-muted">
             {t('mp.pool.noDrivers')}
-          </div>
+          </p>
         )}
 
         {drivers.length > 0 && (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
             {drivers.map(d => {
               const selected = selectedIds.has(d.id);
               const matched = matchedDriverIds.has(d.id);
@@ -308,22 +312,21 @@ export default function MonatsplanungDriverPool({
               return (
                 <div
                   key={d.id}
-                  className="rounded-lg p-3 transition-colors"
-                  style={{
-                    border: `1px solid ${selected ? 'var(--primary)' : 'var(--border)'}`,
-                    background: selected ? 'var(--bg-primary-subtle, rgba(59,130,246,0.06))' : 'var(--bg-subtle)',
-                  }}
+                  className={cn(
+                    'rounded-control border p-3 transition-colors',
+                    selected ? 'border-brand/60 bg-brand-soft' : 'border-line bg-raised',
+                  )}
                 >
-                  <label className="flex items-start gap-3 cursor-pointer">
+                  <label className="flex cursor-pointer items-start gap-3">
                     <input
                       type="checkbox"
                       checked={selected}
                       onChange={() => toggle(d.id)}
-                      className="mt-1"
+                      className="mt-0.5 size-4 shrink-0 accent-brand [@media(pointer:coarse)]:size-5"
                     />
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="font-semibold text-sm" style={{ color: 'var(--text-primary)' }}>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="mr-0.5 text-sm font-semibold text-fg">
                           {d.name}
                         </span>
                         {d.driver_usage_type && (
@@ -336,37 +339,37 @@ export default function MonatsplanungDriverPool({
                         )}
                         {matched && (
                           <Tag tone="primary">
-                            <UserCheck size={10} /> {t('mp.pool.inFahrtenbuch')}
+                            <UserCheck aria-hidden /> {t('mp.pool.inFahrtenbuch')}
                           </Tag>
                         )}
                         {d.planning_enabled === false && <Tag tone="warning">{t('mp.pool.planningDisabled')}</Tag>}
                       </div>
 
-                      <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-x-3 gap-y-1 text-xs" style={{ color: 'var(--text-secondary)' }}>
-                        <Field icon={<Clock size={11} />} label={t('mp.pool.fieldWorkTime')}>
+                      <div className="mt-2 grid grid-cols-1 gap-x-3 gap-y-1 text-xs sm:grid-cols-2">
+                        <Field icon={<Clock aria-hidden />} label={t('mp.pool.fieldWorkTime')}>
                           {d.is_full_day_available
                             ? t('mp.pool.allDay')
                             : `${formatTime(d.work_window_start)}–${formatTime(d.work_window_end)}`}
                         </Field>
-                        <Field icon={<CalendarDays size={11} />} label={t('mp.pool.fieldDays')}>
+                        <Field icon={<CalendarDays aria-hidden />} label={t('mp.pool.fieldDays')}>
                           {formatWeekdays(d.allowed_weekdays, t)}
                         </Field>
-                        <Field icon={<Target size={11} />} label={t('mp.pool.fieldMaxPerDay')}>
+                        <Field icon={<Target aria-hidden />} label={t('mp.pool.fieldMaxPerDay')}>
                           {d.max_daily_hours != null ? `${d.max_daily_hours}h` : '—'}
                         </Field>
-                        <Field icon={<Target size={11} />} label={t('mp.pool.fieldMonthlyTarget')}>
+                        <Field icon={<Target aria-hidden />} label={t('mp.pool.fieldMonthlyTarget')}>
                           {d.target_monthly_hours != null ? `${d.target_monthly_hours}h` : '—'}
                           {d.max_monthly_hours != null && ` ${t('mp.pool.maxSuffix', { hours: d.max_monthly_hours })}`}
                         </Field>
                         {(d.planning_min_salary != null || d.planning_max_salary != null) && (
-                          <Field icon={<Wallet size={11} />} label={t('mp.pool.fieldSalaryRange')}>
-                            {d.planning_min_salary != null ? `${d.planning_min_salary.toFixed(2)} €` : '—'}
+                          <Field icon={<Wallet aria-hidden />} label={t('mp.pool.fieldSalaryRange')}>
+                            {d.planning_min_salary != null ? euro(d.planning_min_salary) : '—'}
                             {' – '}
-                            {d.planning_max_salary != null ? `${d.planning_max_salary.toFixed(2)} €` : '—'}
+                            {d.planning_max_salary != null ? euro(d.planning_max_salary) : '—'}
                           </Field>
                         )}
                         {d.notes && d.notes.trim() && (
-                          <Field icon={<StickyNote size={11} />} label={t('common.notes')} full>
+                          <Field icon={<StickyNote aria-hidden />} label={t('common.notes')} full>
                             {d.notes}
                           </Field>
                         )}
@@ -375,13 +378,9 @@ export default function MonatsplanungDriverPool({
                       {missing.length > 0 && (
                         <div className="mt-2 flex flex-wrap gap-1">
                           {missing.map(m => (
-                            <span
-                              key={m}
-                              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold"
-                              style={{ background: 'rgba(234,179,8,0.12)', color: '#a16207' }}
-                            >
-                              <AlertTriangle size={10} /> {t(m)}
-                            </span>
+                            <Badge key={m} tone="caution">
+                              <AlertTriangle aria-hidden /> {t(m)}
+                            </Badge>
                           ))}
                         </div>
                       )}
@@ -392,7 +391,7 @@ export default function MonatsplanungDriverPool({
             })}
           </div>
         )}
-      </div>
+      </Card>
     </div>
   );
 }
@@ -407,21 +406,15 @@ function ChipBtn({
   icon?: React.ReactNode;
 }) {
   return (
-    <button
-      onClick={onClick}
-      type="button"
-      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-colors"
-      style={{
-        background: 'var(--bg-subtle)',
-        color: 'var(--text-primary)',
-        border: '1px solid var(--border)',
-      }}
-    >
+    <Button variant="secondary" size="sm" onClick={onClick}>
       {icon}
       {children}
-    </button>
+    </Button>
   );
 }
+
+// Tones keep their old names, so each call site above reads as before.
+const STAT_TONE = { primary: 'text-brand-text', warning: 'text-caution' } as const;
 
 function Stat({
   label,
@@ -432,19 +425,18 @@ function Stat({
   value: number;
   tone?: 'primary' | 'warning';
 }) {
-  const color =
-    tone === 'primary' ? 'var(--primary)' :
-    tone === 'warning' ? '#a16207' :
-    'var(--text-primary)';
   return (
-    <div>
-      <div className="text-[10px] uppercase tracking-wider font-semibold mb-1" style={{ color: 'var(--text-tertiary)' }}>
+    <div className="min-w-0">
+      <dt className="text-xs font-medium text-fg-muted">
         {label}
-      </div>
-      <div className="text-xl font-bold" style={{ color }}>{value}</div>
+      </dt>
+      <dd className={cn('mt-0.5 text-xl font-semibold tabular-nums', tone ? STAT_TONE[tone] : 'text-fg')}>{value}</dd>
     </div>
   );
 }
+
+// Green is kept for a status; the owner is a role, so the tag stays neutral.
+const TAG_TONE = { primary: 'brand', warning: 'caution', owner: 'neutral' } as const;
 
 function Tag({
   children,
@@ -453,24 +445,7 @@ function Tag({
   children: React.ReactNode;
   tone?: 'primary' | 'warning' | 'owner';
 }) {
-  const bg =
-    tone === 'primary' ? 'rgba(59,130,246,0.12)' :
-    tone === 'warning' ? 'rgba(234,179,8,0.15)' :
-    tone === 'owner' ? 'rgba(16,185,129,0.12)' :
-    'var(--bg-muted)';
-  const color =
-    tone === 'primary' ? 'var(--primary)' :
-    tone === 'warning' ? '#a16207' :
-    tone === 'owner' ? '#047857' :
-    'var(--text-tertiary)';
-  return (
-    <span
-      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold"
-      style={{ background: bg, color }}
-    >
-      {children}
-    </span>
-  );
+  return <Badge tone={tone ? TAG_TONE[tone] : 'neutral'}>{children}</Badge>;
 }
 
 function Field({
@@ -486,11 +461,11 @@ function Field({
 }) {
   return (
     <div className={full ? 'sm:col-span-2' : ''}>
-      <span className="inline-flex items-center gap-1 mr-1" style={{ color: 'var(--text-tertiary)' }}>
+      <span className="mr-1 inline-flex items-center gap-1 text-fg-muted [&_svg]:size-3 [&_svg]:shrink-0">
         {icon}
         {label}:
       </span>
-      <span style={{ color: 'var(--text-primary)' }}>{children}</span>
+      <span className="tabular-nums text-fg">{children}</span>
     </div>
   );
 }
