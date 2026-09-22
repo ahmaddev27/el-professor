@@ -9,11 +9,19 @@ import {
   auditedPlatformWrite,
   platformCan,
   platformCanManageAccount,
+  platformSupportCompanyId,
   recordPlatformAudit,
+  UUID_SHAPE,
   type PlatformAuditDetails,
   type PlatformAuditSubject,
 } from '../_shared/platform-access.ts'
-import { decideAccountTarget, resolveManageUsersRoute } from '../_shared/manage-users-routes.ts'
+import {
+  decideAccountTarget,
+  decideCreateCompany,
+  MANAGE_USERS_SCOPE_MESSAGES,
+  resolveManageUsersRoute,
+  resolveManageUsersScope,
+} from '../_shared/manage-users-routes.ts'
 
 interface CreateUserRequest {
   email: string
@@ -46,7 +54,7 @@ interface ResetPasswordRequest {
   password: string
 }
 
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+const OTHER_COMPANY_MESSAGE = 'Keine Berechtigung: Dieser Benutzer gehört zu einem anderen Unternehmen.'
 
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') {
@@ -94,8 +102,9 @@ Deno.serve(async (req: Request) => {
     const route = resolveManageUsersRoute(req.method, url.pathname)
 
     // Platform rights come from platform_staff, through the database, never from
-    // the profile. A platform account holding the route's capability acts across
-    // companies; everyone else is a company admin or nobody.
+    // the profile. A platform account holding the route's capability acts on one
+    // company — the one its support session is open on (below); everyone else is
+    // a company admin or nobody.
     const isPlatformCaller = await platformCan(supabaseUser, route?.capability ?? 'company_users.manage')
 
     // What the audit rows name about the target, filled in as a handler learns it.
@@ -108,28 +117,32 @@ Deno.serve(async (req: Request) => {
 
     // A refusal changes nothing, so its row may be best-effort. The database
     // writes one only for platform staff; for anyone else this records nothing.
-    const refusal = async (message: string): Promise<UserError> => {
+    const refusal = async (message: string, reason?: string): Promise<UserError> => {
       recordPlatformFailure = null
       await recordPlatformAudit(supabaseUser, { ...subject(), outcome: 'denied' })
-      return new UserError(message, 403)
-    }
-
-    if (!isPlatformCaller && callerProfile?.role !== 'admin') {
-      throw await refusal('Keine Berechtigung: Nur Administratoren dürfen Benutzer verwalten.')
-    }
-
-    const callerCompanyId: string | null = callerProfile?.company_id ?? null
-
-    // A company admin with no company has no tenant to administer. This state
-    // once fell through every tenant check as "no restriction" and turned a
-    // company-less 'admin' profile into a de-facto platform account. Deny it.
-    if (!isPlatformCaller && !callerCompanyId) {
-      throw await refusal('Keine Berechtigung: Dieses Administratorkonto ist keinem Unternehmen zugeordnet.')
+      return new UserError(message, 403, reason)
     }
 
     if (isPlatformCaller) {
       recordPlatformFailure = () => recordPlatformAudit(supabaseUser, { ...subject(), outcome: 'error' })
     }
+
+    // The one company whose accounts this caller reaches, on every route (plan
+    // 3.13a): a company admin's own company, or — for a platform account with
+    // no company — the company of its open support session, asked with its own
+    // token. No session, a view context, an expired one: no company at all.
+    // This function acts with the service role, so the database's confinement
+    // of a platform account never reaches it; this is where it is applied.
+    const scope = await resolveManageUsersScope({
+      isPlatformCaller,
+      callerRole: callerProfile?.role ?? null,
+      membershipCompanyId: callerProfile?.company_id ?? null,
+      supportSessionCompanyId: () => platformSupportCompanyId(supabaseUser),
+    })
+    if (!scope.ok) {
+      throw await refusal(MANAGE_USERS_SCOPE_MESSAGES[scope.refusal], scope.refusal)
+    }
+    const scopeCompanyId: string = scope.companyId
 
     /**
      * A change. For platform staff it runs only after its attempt row is
@@ -149,14 +162,14 @@ Deno.serve(async (req: Request) => {
     }
 
     // The account a route acts on, checked before anything changes (see
-    // decideAccountTarget): a company admin reaches only its own company's users
-    // and never an account with a staff row; platform staff reach an account with
-    // a staff row only with staff.manage. Every route below acts with the service
-    // role, so without this a new address or password would let the caller sign
-    // in as a platform owner. Returns the target's company, which a platform
-    // action records.
+    // decideAccountTarget): every caller reaches only the accounts of its scope's
+    // company; a company admin never an account with a staff row, and platform
+    // staff one with a staff row only with staff.manage. Every route below acts
+    // with the service role, so without this a new address or password would let
+    // the caller sign in as a platform owner. Returns the target's company, which
+    // a platform action records.
     const authorizeAccount = async (targetUserId: unknown): Promise<string | null> => {
-      if (typeof targetUserId !== 'string' || !UUID_PATTERN.test(targetUserId)) {
+      if (typeof targetUserId !== 'string' || !UUID_SHAPE.test(targetUserId)) {
         throw new UserError('Ungültige Anfrage: user_id fehlt oder ist ungültig.', 400)
       }
 
@@ -174,19 +187,37 @@ Deno.serve(async (req: Request) => {
 
       const decision = await decideAccountTarget({
         isPlatformCaller,
-        callerCompanyId,
+        scopeCompanyId,
         targetCompanyId: targetCompany,
         platformCanManage: () => platformCanManageAccount(supabaseUser, targetUserId),
         targetIsPlatformStaff: () => accountIsPlatformStaff(supabaseAdmin, targetUserId),
       })
 
       if (decision === 'other_company') {
-        throw new UserError('Keine Berechtigung: Dieser Benutzer gehört zu einem anderen Unternehmen.', 403)
+        throw await refusal(OTHER_COMPANY_MESSAGE, 'other_company')
       }
       if (decision === 'platform_staff_account') {
         throw await refusal('Keine Berechtigung: Konten des Plattform-Teams dürfen nur Inhaber der Plattform verwalten.')
       }
       return targetCompany
+    }
+
+    // The role of that name for this company: the company's own role first, a
+    // system role (company_id IS NULL) otherwise — the order current_role_permits()
+    // resolves a text role in. `company_id.desc` alone would sort the NULL first
+    // in PostgreSQL, so nullsFirst: false is what makes "own role first" true.
+    // `companyId` is always the caller's scope, never text from the request, so
+    // nothing a caller sends reaches the filter string.
+    const roleIdFor = async (companyId: string, roleName: string | undefined): Promise<string | null> => {
+      const { data: roleData } = await supabaseAdmin
+        .from('roles')
+        .select('id')
+        .eq('name', roleName)
+        .or(`company_id.eq.${companyId},company_id.is.null`)
+        .order('company_id', { ascending: false, nullsFirst: false })
+        .limit(1)
+        .maybeSingle()
+      return roleData?.id ?? null
     }
 
     // =========================================================================
@@ -199,23 +230,21 @@ Deno.serve(async (req: Request) => {
 
         const userIds = users.users.map(u => u.id)
 
-        let profileQuery = supabaseAdmin
+        // Every caller sees the accounts of its scope's company and no other:
+        // a company admin its own company's, a platform account those of the
+        // company its support session is open on. Before 3.13a a platform
+        // account was answered with every account of every company.
+        const { data: profiles } = await supabaseAdmin
           .from('user_profiles')
           .select('*, roles:role_id(id, name, description)')
           .in('user_id', userIds)
-
-        // A platform account sees all users; a company admin only its company
-        if (!isPlatformCaller) {
-          profileQuery = profileQuery.eq('company_id', callerCompanyId)
-        }
-
-        const { data: profiles } = await profileQuery
+          .eq('company_id', scopeCompanyId)
 
         // Filter auth users to match the profiles visible to this caller
         const visibleUserIds = new Set(profiles?.map(p => p.user_id) ?? [])
 
         return users.users
-          .filter(u => isPlatformCaller || visibleUserIds.has(u.id))
+          .filter(u => visibleUserIds.has(u.id))
           .map(authUser => {
             const profile = profiles?.find(p => p.user_id === authUser.id)
             return {
@@ -248,32 +277,24 @@ Deno.serve(async (req: Request) => {
     if (route?.name === 'create') {
       const body: CreateUserRequest = await req.json()
 
-      // Determine which company to assign this user to.
-      // A platform account can pass a company_id; company admins always use their own.
-      const targetCompanyId = isPlatformCaller && body.company_id
-        ? body.company_id
-        : callerCompanyId
-
-      auditTarget.companyId = targetCompanyId
+      // The new account goes into the caller's scope's company. A company_id in
+      // the request may only repeat it: before 3.13a a platform account's was
+      // taken as it came, for any company, and a company admin's was ignored.
+      const target = decideCreateCompany(scopeCompanyId, body.company_id)
       auditTarget.targetType = 'user'
-
-      if (!targetCompanyId) {
-        throw new UserError('Benutzer kann nicht angelegt werden: kein Unternehmen ausgewählt.', 400)
+      if (!target.ok) {
+        if (target.refusal === 'invalid_company') {
+          throw new UserError('Ungültige Anfrage: company_id ist ungültig.', 400)
+        }
+        auditTarget.companyId = typeof body.company_id === 'string' ? body.company_id : null
+        throw await refusal('Keine Berechtigung: Benutzer können nur im Unternehmen der eigenen Sitzung angelegt werden.', 'other_company')
       }
+      const targetCompanyId = target.companyId
+      auditTarget.companyId = targetCompanyId
 
       // Resolve role_id before creating the auth user so we can include it in
-      // the upsert. Search by name in the company's own roles first, then
-      // fall back to system roles (company_id IS NULL).
-      const { data: roleData } = await supabaseAdmin
-        .from('roles')
-        .select('id, name')
-        .eq('name', body.role)
-        .or(`company_id.eq.${targetCompanyId},company_id.is.null`)
-        .order('company_id', { ascending: false }) // prefer company-scoped over null
-        .limit(1)
-        .maybeSingle()
-
-      const roleId = roleData?.id ?? null
+      // the upsert.
+      const roleId = await roleIdFor(targetCompanyId, body.role)
 
       const useTempPassword = body.use_temp_password === true
       const password = useTempPassword
@@ -394,7 +415,7 @@ Deno.serve(async (req: Request) => {
     if (route?.name === 'update') {
       const body: UpdateUserRequest = await req.json()
 
-      await authorizeAccount(body.user_id)
+      const targetCompany = await authorizeAccount(body.user_id)
       auditTarget.after = {
         role: body.role ?? null,
         full_name_changed: body.full_name !== undefined,
@@ -411,16 +432,16 @@ Deno.serve(async (req: Request) => {
           if (updateError) throw updateError
         }
 
-        const { data: roleData } = await supabaseAdmin
-          .from('roles')
-          .select('id')
-          .eq('name', body.role)
-          .maybeSingle()
+        // The target's company is the caller's scope (authorizeAccount), so the
+        // role comes from that company or the system roles — never from another
+        // company that happens to have a role of the same name, which the
+        // unscoped lookup before 3.13a could hand back.
+        const roleId = await roleIdFor(targetCompany ?? scopeCompanyId, body.role)
 
         const updateProfileData: Record<string, unknown> = {
           full_name: body.full_name,
           role: body.role,
-          role_id: roleData?.id || null,
+          role_id: roleId,
         }
         if (body.email) updateProfileData.email = body.email
 

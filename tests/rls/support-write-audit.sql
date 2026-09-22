@@ -27,6 +27,12 @@
                      no support row
     6. elsewhere     a support session's write outside its company is refused
                      by RLS and leaves no row
+   6b. the shell     company_settings and user_profiles (20260921110000, 3.13a):
+                     no context and a view context write neither; a support
+                     session writes its company's rows and each is recorded;
+                     its own profile row, another company's settings and an
+                     audited RPC's write elsewhere are not recorded; a member's
+                     statement clears the binding
     7. planning      apply_monthly_planning_run and replace_monthly_planning_run:
                      T + E + 2 and D + T + E + 3 rows, the trips' rows carrying
                      the assignment columns only
@@ -48,10 +54,10 @@
                      session and its context
 
   What is deliberately not here: storage.objects (no row history, and its
-  policies belong to another slice), company_settings and user_profiles (their
-  platform writes take no company from the context; see the migration header),
-  and timing — the kit measures nothing, and the cost of the planning path has
-  to be measured on staging.
+  policies belong to another slice), and timing — the kit measures nothing, and
+  the cost of the planning path has to be measured on staging. company_settings
+  and user_profiles were excluded until 20260921110000 gave their platform
+  writes a company from the support session; section 6b covers them.
 */
 
 \set ON_ERROR_STOP on
@@ -193,9 +199,12 @@ VALUES
   (_sw_id('company:y'), 'SW Y', 'sw-y', 'approved', 'active', 'basic', 'active')
 ON CONFLICT (id) DO NOTHING;
 
+-- owner-view is a second owner, for section 6b: every capability `owner`
+-- holds, and a *view* context instead of a support session. member-x is a
+-- plain member of company X whose profile section 6b writes.
 INSERT INTO auth.users (id, email, email_confirmed_at)
 SELECT _sw_id('user:' || v.who), 'sw-' || v.who || '@test.invalid', now()
-FROM (VALUES ('admin-x'), ('owner'), ('readonly')) AS v(who)
+FROM (VALUES ('admin-x'), ('owner'), ('readonly'), ('owner-view'), ('member-x')) AS v(who)
 ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO user_profiles (user_id, email, full_name, role, role_id, company_id, status)
@@ -203,21 +212,30 @@ SELECT _sw_id('user:' || v.who), 'sw-' || v.who || '@test.invalid', 'SW ' || v.w
        (SELECT r.id FROM roles r WHERE r.name = v.role AND r.company_id IS NULL),
        v.company_id, 'active'
 FROM (VALUES
-  ('admin-x',  'admin',  _sw_id('company:x')),
-  ('owner',    'viewer', NULL::uuid),
-  ('readonly', 'viewer', NULL::uuid)
+  ('admin-x',    'admin',  _sw_id('company:x')),
+  ('owner',      'viewer', NULL::uuid),
+  ('readonly',   'viewer', NULL::uuid),
+  ('owner-view', 'viewer', NULL::uuid),
+  ('member-x',   'viewer', _sw_id('company:x'))
 ) AS v(who, role, company_id)
 ON CONFLICT (user_id) DO NOTHING;
 
 INSERT INTO app_private.platform_staff (user_id, role, note)
-VALUES (_sw_id('user:owner'),    'owner',     'sw'),
-       (_sw_id('user:readonly'), 'read_only', 'sw')
+VALUES (_sw_id('user:owner'),      'owner',     'sw'),
+       (_sw_id('user:readonly'),   'read_only', 'sw'),
+       (_sw_id('user:owner-view'), 'owner',     'sw')
 ON CONFLICT (user_id) DO NOTHING;
 
 INSERT INTO auth.sessions (id, user_id)
 SELECT _sw_id('session:' || v.who), _sw_id('user:' || v.who)
-FROM (VALUES ('admin-x'), ('owner'), ('readonly')) AS v(who)
+FROM (VALUES ('admin-x'), ('owner'), ('readonly'), ('owner-view')) AS v(who)
 ON CONFLICT (id) DO NOTHING;
+
+-- One settings row per company, as every company has; section 6b writes them.
+INSERT INTO company_settings (company_id, company_name, iban) VALUES
+  (_sw_id('company:x'), 'SW X', 'DE00000000000000000001'),
+  (_sw_id('company:y'), 'SW Y', 'DE00000000000000000002')
+ON CONFLICT (company_id) DO NOTHING;
 
 INSERT INTO drivers (id, company_id, name) VALUES
   (_sw_id('driver:x1'), _sw_id('company:x'), 'SW Driver X1'),
@@ -322,16 +340,45 @@ BEGIN
                  || coalesce(' — not ' || v_bad, ''),
     v_bad IS NULL);
 
-  PERFORM _sw_ok('shape: company_settings and user_profiles are deliberately not audited here — their platform writes take no company from the context',
+  -- company_settings and user_profiles are recorded since 20260921110000
+  -- (3.13a), but armed by a trigger of their own and not by the refusal
+  -- trigger, which would refuse a platform account's own profile row and the
+  -- audited RPCs that write those tables. So they carry neither of the two
+  -- names paired above; section 6b shows what they do carry.
+  PERFORM _sw_ok('shape: company_settings and user_profiles carry neither the refusal trigger nor the paired audit trigger',
     NOT EXISTS (SELECT 1 FROM pg_trigger a
                  WHERE a.tgrelid IN (to_regclass('public.company_settings'), to_regclass('public.user_profiles'))
-                   AND a.tgname = 'record_support_write'
+                   AND a.tgname IN ('record_support_write', 'refuse_read_only_context_write')
                    AND NOT a.tgisinternal));
+  -- …but each carries the statement trigger that binds a support session's
+  -- company and the three row triggers gated on it: 30 is BEFORE + INSERT +
+  -- DELETE + UPDATE per statement, 5, 17 and 9 are AFTER ROW on INSERT,
+  -- UPDATE and DELETE.
+  PERFORM _sw_ok('shape: …and each carries the shell arming trigger and three gated row triggers calling the audit function',
+    (SELECT count(*) FROM pg_trigger g
+      WHERE g.tgrelid IN (to_regclass('public.company_settings'), to_regclass('public.user_profiles'))
+        AND NOT g.tgisinternal
+        AND g.tgenabled = 'O'
+        AND ((g.tgname = 'arm_support_shell_write' AND g.tgtype = 30
+              AND g.tgfoid = 'app_private.arm_support_shell_write()'::regprocedure)
+          OR (g.tgname IN ('record_support_shell_write_insert', 'record_support_shell_write_update',
+                           'record_support_shell_write_delete')
+              AND g.tgtype IN (5, 17, 9)
+              AND g.tgfoid = 'app_private.record_support_write()'::regprocedure
+              AND g.tgqual IS NOT NULL
+              AND pg_get_triggerdef(g.oid) ~ 'app_private\.support_shell_company'))) = 8);
+  PERFORM _sw_ok('shape: …and no other trigger anywhere calls the audit function',
+    NOT EXISTS (SELECT 1 FROM pg_trigger g
+                 WHERE g.tgfoid = 'app_private.record_support_write()'::regprocedure
+                   AND NOT g.tgisinternal
+                   AND g.tgname NOT IN ('record_support_write', 'record_support_shell_write_insert',
+                                        'record_support_shell_write_update', 'record_support_shell_write_delete')));
 
   FOREACH v_role IN ARRAY ARRAY['anon', 'authenticated', 'service_role'] LOOP
     PERFORM _sw_ok(format('privileges: %s can execute none of the audit functions', v_role),
       NOT has_function_privilege(v_role, 'app_private.record_support_write()', 'EXECUTE')
       AND NOT has_function_privilege(v_role, 'app_private.refuse_read_only_context_write()', 'EXECUTE')
+      AND NOT has_function_privilege(v_role, 'app_private.arm_support_shell_write()', 'EXECUTE')
       AND NOT has_function_privilege(v_role, 'app_private.support_write_redaction_pattern(text)', 'EXECUTE')
       AND NOT has_function_privilege(v_role, 'app_private.support_write_values(jsonb)', 'EXECUTE')
       AND NOT has_function_privilege(v_role, 'app_private.guard_company_hard_delete()', 'EXECUTE'));
@@ -586,6 +633,209 @@ BEGIN
     _sw_try(u_o, s_o, format('INSERT INTO drivers (company_id, name) VALUES (%L, %L)', co_y, 'SW other'))
       LIKE 'ERR 42501%row-level security%');
 END $$;
+
+-- ─── 6b. the account shell: only inside the session, and recorded (3.13a) ───
+--
+-- 20260921110000: company_settings and user_profiles are written by a platform
+-- account only inside a support session on the row's company, and those writes
+-- are recorded by the same audit function, armed by a statement trigger of
+-- their own that binds the session's company. Before it, `super` edited any
+-- company's settings with no context, and a view context changed the profiles
+-- of the company it read — both with no audit row.
+--
+-- Every write whose audit row is the subject is made outside _sw_try, which
+-- rolls its own writes back, audit rows included; and each count is read in a
+-- statement of its own, after the write it counts.
+
+CREATE FUNCTION _sw_definer_settings_write(p_company uuid) RETURNS bigint
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_catalog AS $$
+DECLARE v_rows bigint;
+BEGIN
+  -- Stands for platform_subscription_assign: an audited platform RPC that
+  -- writes company_settings for the company in its argument, past RLS.
+  UPDATE company_settings SET drivers_per_car_limit = drivers_per_car_limit WHERE company_id = p_company;
+  GET DIAGNOSTICS v_rows = ROW_COUNT;
+  RETURN v_rows;
+END $$;
+
+DO $$
+DECLARE
+  co_x    constant uuid  := _sw_id('company:x');
+  co_y    constant uuid  := _sw_id('company:y');
+  u_o     constant uuid  := _sw_id('user:owner');
+  s_o     constant uuid  := _sw_id('session:owner');
+  u_ov    constant uuid  := _sw_id('user:owner-view');
+  s_ov    constant uuid  := _sw_id('session:owner-view');
+  u_adm   constant uuid  := _sw_id('user:admin-x');
+  s_adm   constant uuid  := _sw_id('session:admin-x');
+  u_mem   constant uuid  := _sw_id('user:member-x');
+  -- seed.sql's platform owner: no sign-in session, so no context at all
+  u_super constant uuid  := '50000000-0000-4000-8000-000000000001';
+  c_red   constant jsonb := '{"redacted": true}';
+  v_ctx   constant uuid  := _sw_owner_context();
+  v_open  jsonb;
+  v_mark  bigint;
+  v_rows  bigint;
+  v_n     bigint;
+  r       app_private.platform_audit_log%ROWTYPE;
+BEGIN
+  -- No context: an owner holding every capability writes neither table.
+  PERFORM _sw_ok('shell, no context: an owner edits no company''s settings, although it reads them',
+    _sw_try(u_super, NULL, format('UPDATE company_settings SET company_name = %L WHERE company_id = %L', 'SW no', co_x)) = 'rows 0'
+    AND _sw_try(u_super, NULL, format('SELECT count(*)::text FROM company_settings WHERE company_id = %L', co_x)) = '1');
+  PERFORM _sw_ok('shell, no context: …deletes none and inserts none',
+    _sw_try(u_super, NULL, format('DELETE FROM company_settings WHERE company_id = %L', co_y)) = 'rows 0'
+    AND _sw_try(u_super, NULL, format('INSERT INTO company_settings (company_id, company_name) VALUES (%L, %L)', co_y, 'SW no'))
+          LIKE 'ERR 42501%row-level security%');
+  PERFORM _sw_ok('shell, no context: …and reaches no company''s profile',
+    _sw_try(u_super, NULL, format('UPDATE user_profiles SET full_name = %L WHERE user_id = %L', 'SW no', u_mem)) = 'rows 0');
+
+  -- A view context: the same owner rights, and still nothing.
+  PERFORM _sw_as(u_ov, s_ov);
+  v_open := public.platform_context_open(co_x, 'view');
+  PERFORM _sw_reset();
+  PERFORM _sw_ok('shell, view: a second owner opens a view context on company X', (v_open ->> 'success') = 'true');
+
+  PERFORM _sw_ok('shell, view: it reads company X''s settings and member',
+    _sw_try(u_ov, s_ov, format('SELECT count(*)::text FROM company_settings WHERE company_id = %L', co_x)) = '1'
+    AND _sw_try(u_ov, s_ov, format('SELECT count(*)::text FROM user_profiles WHERE user_id = %L', u_mem)) = '1');
+  PERFORM _sw_ok('shell, view: …and writes neither — no settings update, no insert, no profile update or delete',
+    _sw_try(u_ov, s_ov, format('UPDATE company_settings SET company_name = %L WHERE company_id = %L', 'SW view', co_x)) = 'rows 0'
+    AND _sw_try(u_ov, s_ov, format('INSERT INTO company_settings (company_id, company_name) VALUES (%L, %L)', co_x, 'SW view'))
+          LIKE 'ERR 42501%row-level security%'
+    AND _sw_try(u_ov, s_ov, format('UPDATE user_profiles SET full_name = %L WHERE user_id = %L', 'SW view', u_mem)) = 'rows 0'
+    AND _sw_try(u_ov, s_ov, format('DELETE FROM user_profiles WHERE user_id = %L', u_mem)) = 'rows 0');
+
+  v_mark := _sw_mark();
+  PERFORM _sw_as(u_ov, s_ov);
+  UPDATE user_profiles SET full_name = 'SW owner-view renamed' WHERE user_id = u_ov;
+  GET DIAGNOSTICS v_rows = ROW_COUNT;
+  PERFORM _sw_reset();
+  PERFORM _sw_ok('shell, view: its own profile row is still its own to write', v_rows = 1);
+  PERFORM _sw_ok('shell, view: …and that write is not recorded as a company''s', _sw_rows(v_mark) = 0);
+
+  -- The support session (section 3's, on company X): the company's settings.
+  v_mark := _sw_mark();
+  PERFORM _sw_as(u_o, s_o);
+  UPDATE company_settings SET company_name = 'SW X renamed', iban = 'DE00000000000000000099' WHERE company_id = co_x;
+  GET DIAGNOSTICS v_rows = ROW_COUNT;
+  PERFORM _sw_reset();
+  PERFORM _sw_ok('shell, support: the session updates the settings of the company it opened', v_rows = 1);
+  PERFORM _sw_ok('shell, support: …and the update is recorded, once',
+    _sw_rows(v_mark) = 1 AND _sw_rows(v_mark, 'support_write.company_settings.update') = 1);
+  SELECT * INTO r FROM app_private.platform_audit_log l WHERE l.id > v_mark;
+  PERFORM _sw_ok('shell, support: the row names the company, the table, the row, the actor, its session and the context',
+    r.category = 'support'
+    AND r.company_id = co_x
+    AND r.target_type = 'company_settings'
+    AND r.target_id = (SELECT s.id::text FROM company_settings s WHERE s.company_id = co_x)
+    AND r.actor_user_id = u_o AND r.actor_role = 'owner' AND r.session_id = s_o
+    AND (r.after_value ->> 'context_id') = v_ctx::text
+    AND (r.after_value ->> 'reason') = 'Ticket 3.4c');
+  PERFORM _sw_ok('shell, support: the changed columns are there, the IBAN as a marker on both sides, an untouched column is not',
+    (r.before_value -> 'values' ->> 'company_name') = 'SW X'
+    AND (r.after_value -> 'values' ->> 'company_name') = 'SW X renamed'
+    AND (r.before_value -> 'values' -> 'iban') = c_red
+    AND (r.after_value -> 'values' -> 'iban') = c_red
+    AND position('DE000000000000000000' IN r.after_value::text) = 0
+    AND NOT ((r.after_value -> 'values') ? 'city'));
+
+  -- Delete and insert again: the session holds companies.hard_delete, and the
+  -- row comes back through the insert policy's support branch.
+  v_mark := _sw_mark();
+  PERFORM _sw_as(u_o, s_o);
+  DELETE FROM company_settings WHERE company_id = co_x;
+  INSERT INTO company_settings (company_id, company_name) VALUES (co_x, 'SW X again');
+  PERFORM _sw_reset();
+  PERFORM _sw_ok('shell, support: a delete and an insert of the company''s settings are one row each',
+    _sw_rows(v_mark) = 2
+    AND _sw_rows(v_mark, 'support_write.company_settings.delete') = 1
+    AND _sw_rows(v_mark, 'support_write.company_settings.insert') = 1);
+
+  -- Another company's settings: readable, not writable, not recorded.
+  v_mark := _sw_mark();
+  PERFORM _sw_as(u_o, s_o);
+  UPDATE company_settings SET company_name = 'SW Y renamed' WHERE company_id = co_y;
+  GET DIAGNOSTICS v_rows = ROW_COUNT;
+  PERFORM _sw_reset();
+  PERFORM _sw_ok('shell, support: company Y''s settings are not written from a session on company X',
+    v_rows = 0);
+  PERFORM _sw_ok('shell, support: …and nothing is recorded for them', _sw_rows(v_mark) = 0);
+
+  -- An audited platform RPC writing the settings of the company in its
+  -- argument, with a session open on another company: written, not refused,
+  -- and not recorded as the session's — the RPC records itself. The same
+  -- write on the session's own company is the session's, and is recorded.
+  v_mark := _sw_mark();
+  PERFORM _sw_as(u_o, s_o);
+  v_rows := _sw_definer_settings_write(co_y);
+  PERFORM _sw_reset();
+  PERFORM _sw_ok('shell, rpc: a definer write to another company''s settings goes through during the session',
+    v_rows = 1);
+  PERFORM _sw_ok('shell, rpc: …and is neither refused nor recorded against the session', _sw_rows(v_mark) = 0);
+
+  v_mark := _sw_mark();
+  PERFORM _sw_as(u_o, s_o);
+  v_rows := _sw_definer_settings_write(co_x);
+  PERFORM _sw_reset();
+  PERFORM _sw_ok('shell, rpc: the same write on the session''s own company is recorded',
+    v_rows = 1 AND _sw_rows(v_mark, 'support_write.company_settings.update') = 1);
+
+  -- The company's accounts.
+  v_mark := _sw_mark();
+  PERFORM _sw_as(u_o, s_o);
+  UPDATE user_profiles SET full_name = 'SW member renamed' WHERE user_id = u_mem;
+  GET DIAGNOSTICS v_rows = ROW_COUNT;
+  PERFORM _sw_reset();
+  PERFORM _sw_ok('shell, support: the session updates a member of the company it opened', v_rows = 1);
+  SELECT * INTO r FROM app_private.platform_audit_log l
+   WHERE l.id > v_mark AND l.action = 'support_write.user_profiles.update';
+  PERFORM _sw_ok('shell, support: …recorded against the company, the profile and the context, with the name before and after',
+    _sw_rows(v_mark) = 1
+    AND r.company_id = co_x
+    AND r.target_type = 'user_profiles'
+    AND r.target_id = (SELECT p.id::text FROM user_profiles p WHERE p.user_id = u_mem)
+    AND (r.after_value ->> 'context_id') = v_ctx::text
+    AND (r.before_value -> 'values' ->> 'full_name') = 'SW member-x'
+    AND (r.after_value -> 'values' ->> 'full_name') = 'SW member renamed');
+
+  v_mark := _sw_mark();
+  PERFORM _sw_as(u_o, s_o);
+  UPDATE user_profiles SET full_name = 'SW owner renamed' WHERE user_id = u_o;
+  GET DIAGNOSTICS v_rows = ROW_COUNT;
+  PERFORM _sw_reset();
+  PERFORM _sw_ok('shell, support: the session''s own profile row is written', v_rows = 1);
+  PERFORM _sw_ok('shell, support: …and not recorded — it belongs to no company', _sw_rows(v_mark) = 0);
+
+  v_mark := _sw_mark();
+  PERFORM _sw_as(u_o, s_o);
+  DELETE FROM user_profiles WHERE user_id = u_mem;
+  GET DIAGNOSTICS v_rows = ROW_COUNT;
+  PERFORM _sw_reset();
+  PERFORM _sw_ok('shell, support: deleting a member''s profile is recorded, once',
+    v_rows = 1 AND _sw_rows(v_mark, 'support_write.user_profiles.delete') = 1);
+
+  -- A company member: its own administrator writes the settings as before, and
+  -- nothing is recorded — also when the binding was left set by the session.
+  PERFORM _sw_as(u_o, s_o);
+  UPDATE company_settings SET company_name = company_name WHERE company_id = co_x;
+  PERFORM _sw_reset();
+  PERFORM _sw_ok('shell, member: the session''s statement left its company bound',
+    current_setting('app_private.support_shell_company', true) = co_x::text);
+
+  v_mark := _sw_mark();
+  PERFORM _sw_as(u_adm, s_adm);
+  UPDATE company_settings SET company_name = 'SW X by its admin' WHERE company_id = co_x;
+  GET DIAGNOSTICS v_rows = ROW_COUNT;
+  PERFORM _sw_reset();
+  PERFORM _sw_ok('shell, member: the company''s administrator still writes its settings', v_rows = 1);
+  v_n := (SELECT count(*) FROM app_private.platform_audit_log l WHERE l.id > v_mark);
+  PERFORM _sw_ok('shell, member: …with no audit row at all', v_n = 0);
+  PERFORM _sw_ok('shell, member: …because its statement cleared the binding first',
+    current_setting('app_private.support_shell_company', true) = '');
+END $$;
+
+DROP FUNCTION _sw_definer_settings_write(uuid);
 
 -- ─── 7. the planning RPCs ───────────────────────────────────────────────────
 --

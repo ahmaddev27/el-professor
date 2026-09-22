@@ -1650,6 +1650,11 @@ export const de = {
   'sa.companies.errorNameSlugRequired':    'Name und Slug sind Pflichtfelder',
   'sa.companies.errorPasswordShort':       'Passwort min. 8 Zeichen',
   'sa.companies.errorSlugTaken':           'Slug bereits vergeben',
+  // 3.13a: creating an account opens a support session on the company itself,
+  // and will not close or override one the operator already has open.
+  'sa.companies.session.viewOpen':         'Für dieses Unternehmen ist gerade eine Nur-Lese-Ansicht offen. Bitte beenden Sie sie zuerst (Leiste oben) und legen Sie den Benutzer dann erneut an.',
+  'sa.companies.session.otherCompanyOpen': 'Es ist noch ein Zugriff auf ein anderes Unternehmen offen. Bitte beenden Sie ihn zuerst (Leiste oben) und legen Sie den Benutzer dann erneut an.',
+  'sa.companies.session.closeFailed':      'Der Benutzer wurde angelegt, aber die dafür geöffnete Support-Sitzung konnte nicht beendet werden. Bitte beenden Sie sie über die Leiste oben; sonst endet sie nach spätestens 60 Minuten von selbst.',
   'sa.companies.field.city':               'Stadt',
   'sa.companies.field.email':              'E-Mail',
   'sa.companies.field.emailRequired':      'E-Mail *',

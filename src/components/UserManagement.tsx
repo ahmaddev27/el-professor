@@ -332,10 +332,12 @@ const UserManagement: React.FC = () => {
     `isAdmin || kind === 'support'` was wrong in both directions. A platform
     account whose own profile happens to carry `admin` would have had a fully
     editable screen inside a *read* context, and every button here calls
-    `manage-users`, which is a service-role function that never looks at the
-    context: those writes would go through. So the profile role decides only
-    when the scope is the account's own company, and a platform session is
-    judged by its mode and nothing else.
+    `manage-users`, a service-role function that — until plan 3.13a — never
+    looked at the context, so those writes went through. The function now
+    refuses a platform account outside a support session on the target's
+    company; this screen still judges a platform session by its mode, so it
+    offers only what the function will do. The profile role decides only when
+    the scope is the account's own company.
 
     In a read context the screen is refused rather than shown with its buttons:
     every one of them writes. The read-only view of a company's accounts is
@@ -405,18 +407,18 @@ const UserManagement: React.FC = () => {
       /*
         Show the company that is open, and nothing else (plan 3.4b).
 
-        `manage-users/list` answers a platform caller with **every** account of
-        every company, platform staff included — that is the "Benutzer shows
-        every platform user" the owner reported, and it is where the screen's
-        own defect ends and the function's begins. Filtering here fixes what is
-        shown; it does not narrow what the function returns, and nothing about
-        this is security. Scoping that route is the server-side half of this
-        slice and is called out in HANDOFF.md.
+        Since plan 3.13a the function scopes this itself: `manage-users/list`
+        answers every caller with the accounts of one company — a company
+        admin's own, a platform account's support-session company — and a
+        platform account with no support session open with a refusal. Before it
+        a platform caller got every account of every company, which is the
+        "Benutzer shows every platform user" the owner reported. This filter
+        stays as the screen's own statement of what it shows (and keeps a
+        platform account that sits in the company off the list); it is not what
+        confines the answer any more.
 
-        A company admin is already scoped by the function itself
-        (`profileQuery.eq('company_id', callerCompanyId)`), so this changes
-        nothing for the tenant app: `scopeCompanyId` is only set inside a
-        platform session.
+        `scopeCompanyId` is only set inside a platform session, so this changes
+        nothing for the tenant app.
       */
       setUsers(scopeCompanyId === null
         ? data

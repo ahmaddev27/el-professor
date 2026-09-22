@@ -115,6 +115,27 @@ export function platformCan(client: RpcClient, capability: PlatformCapability): 
   return askBoolean(client, 'platform_can', { p_capability: capability });
 }
 
+/** A uuid in its canonical text form, either case. */
+export const UUID_SHAPE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * The company the caller has open in a support session, or null: no context,
+ * a view context, one that expired, one bound to another sign-in session, or a
+ * caller that is not platform staff (plan 3.13a).
+ *
+ * `platform_support_company_id()` is 3.4a's one answer to that question, and it
+ * reads the session from the token — so it must be asked through a client that
+ * carries the caller's Authorization header, never the service role. Only a
+ * uuid counts; an RPC error throws, so a failed check never reads as a session.
+ */
+export async function platformSupportCompanyId(client: RpcClient): Promise<string | null> {
+  const { data, error } = await client.rpc('platform_support_company_id');
+  if (error) {
+    throw new PlatformCheckError(`platform_support_company_id failed: ${describeRpcError(error)}`);
+  }
+  return typeof data === 'string' && UUID_SHAPE.test(data) ? data : null;
+}
+
 /**
  * May the caller, as platform staff, act on this account? Asked before any
  * platform change to an existing account: without it a `company_users.manage`

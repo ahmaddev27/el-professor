@@ -457,29 +457,42 @@ BEGIN
   PERFORM _pc_ok('view: cannot grant a permission to a role that exists',
     _pc_try(u_o, s_o, format('INSERT INTO role_permissions (role_id, page_key, can_view, can_edit) VALUES (%L, ''salaries'', true, true)', _pc_id('role:x')))
       LIKE 'ERR P0001%');
-  -- company_settings is deliberately *not* behind the trigger. Its UPDATE names
-  -- no company at all (companies.lifecycle), so an owner edits any tenant's
-  -- settings with or without a context and refusing only the INSERT would be
-  -- incoherent — and a trigger there refuses platform_subscription_assign,
-  -- which names its own company, checks billing.manage and writes its own audit
-  -- row that the RAISE would roll back. Recorded as residual, like the matrix
-  -- tag, rather than asserted away.
-  PERFORM _pc_ok('view: …but companies.lifecycle still edits the company''s settings — residual, tagged for 3.4c/3.13',
+  -- company_settings is deliberately *not* behind the trigger: one there would
+  -- refuse platform_subscription_assign, which names its own company, checks
+  -- billing.manage and writes its own audit row that the RAISE would roll
+  -- back. Until 20260921110000 (3.13a) that left it writable here, because its
+  -- UPDATE named no company at all (companies.lifecycle) — this line asserted
+  -- `rows 1`, tagged residual for 3.4c/3.13. Now the platform branch is the
+  -- support session's company, so a view context's UPDATE finds no row it may
+  -- change, and its INSERT fails the WITH CHECK.
+  PERFORM _pc_ok('view: …and it edits no company''s settings either, although it can read them (3.13a)',
     _pc_try(u_o, s_o, format('UPDATE company_settings SET company_name = ''PC view'' WHERE company_id = %L', co_x))
-      = 'rows 1');
+      = 'rows 0'
+    AND _pc_try(u_o, s_o, format('SELECT count(*)::text FROM company_settings WHERE company_id = %L', co_x)) = '1');
+  -- The row exists, but RLS checks the new row before the unique index is
+  -- consulted, so the refusal below is the policy's and not the constraint's.
+  PERFORM _pc_ok('view: …nor inserts a settings row for the company it is reading',
+    _pc_try(u_o, s_o, format('INSERT INTO company_settings (company_id, company_name) VALUES (%L, ''PC view'')', co_x))
+      LIKE 'ERR 42501%row-level security%');
   PERFORM _pc_ok('view: cannot record an activation-code attempt in the company''s name',
     _pc_try(u_o, s_o, format('INSERT INTO activation_code_attempts (company_id, user_id, input_last4, success, reason, kind) VALUES (%L, %L, NULL, false, ''pc'', ''preview'')', co_x, u_o))
       LIKE 'ERR P0001%');
 
-  -- Recorded, not asserted away: company_users.manage carries no company term
-  -- at all (20260917130000's deliberate design), so a staff account may still
-  -- point a profile at a role that already exists — with a context and, for a
-  -- row it can see, without one. What this section closes is the escalation:
-  -- the role and the permissions behind it can no longer be made. Confining the
-  -- capability itself is 3.4c's and 3.13's, and matrix.sql tags it.
-  PERFORM _pc_ok('view: …but company_users.manage still re-points a profile — residual, tagged for 3.4c/3.13',
+  -- Until 20260921110000 (3.13a) this asserted `rows 1`, tagged residual for
+  -- 3.4c/3.13: company_users.manage carried no company term, so a view context
+  -- could point a company's profile at a role that already existed — the
+  -- context made the row visible and the capability made it writable. The
+  -- platform branch is now the support session's company, so the row stays
+  -- visible and nothing lets the view context write it.
+  PERFORM _pc_ok('view: re-points no profile of the company it is reading (3.13a)',
     _pc_try(u_o, s_o, format('UPDATE user_profiles SET role_id = %L WHERE user_id = %L',
-                             _pc_id('role:x'), _pc_id('user:admin-x'))) = 'rows 1');
+                             _pc_id('role:x'), _pc_id('user:admin-x'))) = 'rows 0'
+    AND _pc_try(u_o, s_o, format('SELECT count(*)::text FROM user_profiles WHERE user_id = %L',
+                                 _pc_id('user:admin-x'))) = '1');
+  PERFORM _pc_ok('view: …deletes none of them',
+    _pc_try(u_o, s_o, format('DELETE FROM user_profiles WHERE user_id = %L', _pc_id('user:admin-x'))) = 'rows 0');
+  PERFORM _pc_ok('view: …and still writes its own profile row, which belongs to no company',
+    _pc_try(u_o, s_o, format('UPDATE user_profiles SET full_name = full_name WHERE user_id = %L', u_o)) = 'rows 1');
 END $$;
 
 -- ─── 6. a support session writes, inside its own company ────────────────────
@@ -527,10 +540,10 @@ BEGIN
       = 'rows 0');
 
   -- The shell tables of section 5b, from the other side: what a view context is
-  -- refused, a support session carries out — in its own company. company_settings
-  -- is here for completeness rather than as a contrast: it carries no refusal
-  -- trigger, so a support session writes it for the same reason an owner does
-  -- without one.
+  -- refused, a support session carries out — in its own company. Since
+  -- 20260921110000 (3.13a) that holds for company_settings and user_profiles
+  -- too: their platform write branch is the support session's company, so the
+  -- session writes company X's rows and no one else's.
   PERFORM _pc_ok('support: a role and its permissions can be written for the company being supported',
     _pc_try(u_o, s_o, format('INSERT INTO roles (name, description, company_id, is_system) VALUES (''PC support role'', ''pc'', %L, false)', co_x))
       = 'rows 1'
@@ -541,6 +554,13 @@ BEGIN
       = 'rows 1'
     AND _pc_try(u_o, s_o, format('INSERT INTO roles (name, description, company_id, is_system) VALUES (''PC no'', ''pc'', %L, false)', co_y))
       LIKE 'ERR 42501%row-level security%');
+  PERFORM _pc_ok('support: …and not the other company''s settings, which it can read but not write (3.13a)',
+    _pc_try(u_o, s_o, format('UPDATE company_settings SET company_name = ''PC support'' WHERE company_id = %L', co_y))
+      = 'rows 0'
+    AND _pc_try(u_o, s_o, format('SELECT count(*)::text FROM company_settings WHERE company_id = %L', co_y)) = '1');
+  PERFORM _pc_ok('support: a profile of the company being supported can be written',
+    _pc_try(u_o, s_o, format('UPDATE user_profiles SET role_id = %L WHERE user_id = %L',
+                             _pc_id('role:x'), _pc_id('user:admin-x'))) = 'rows 1');
 
   -- Everything it wrote is still the company's own data, and the company's
   -- people still see it: the session is a way in, not a second tenant. This is

@@ -13,9 +13,29 @@
  * the same `company_context` and writes nothing, which is what
  * `SuperAdminContext` polls.
  */
+import { supabase } from './supabase';
 import { callPlatformRpc, PlatformRpcError } from './platformRpc';
-import { parsePlatformCompanyContext, type PlatformCompanyContext, type PlatformContextMode } from './platformAccess';
+import {
+  parsePlatformCompanyContext,
+  parsePlatformWhoami,
+  type PlatformAccess,
+  type PlatformCompanyContext,
+  type PlatformContextMode,
+} from './platformAccess';
 import { normalizeSupportReason } from './supportSession';
+
+/**
+ * The account's platform access as the database reports it **now**, context
+ * included (plan 3.13a). `platform_whoami()` is STABLE and writes no audit row,
+ * so asking it before a flow decides whether to open a session costs one
+ * request and nothing in the log. Throws when the question itself failed: a
+ * flow must not decide what is open from an answer it did not get.
+ */
+export async function fetchPlatformAccess(): Promise<PlatformAccess> {
+  const { data, error } = await supabase.rpc('platform_whoami');
+  if (error) throw new Error(error.message);
+  return parsePlatformWhoami(data, Date.now());
+}
 
 /**
  * Opens a context on one company and answers with the row the database wrote.
