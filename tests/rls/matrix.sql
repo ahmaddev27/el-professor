@@ -876,7 +876,19 @@ INSERT INTO _mx_spec VALUES
 (55, 'subscription_coverage', $q$id = {id}$q$,
   $q$INSERT INTO subscription_coverage (id, company_id, source, period_start, period_end) VALUES ({id}, {co}, 'manual', '2026-01-01', '2026-02-01')$q$, NULL,
   $q$INSERT INTO subscription_coverage (company_id, source, period_start, period_end) VALUES ({co}, 'manual', '2026-02-01', '2026-03-01')$q$,
-  $q$note = note$q$);
+  $q$note = note$q$),
+-- The Fahrtenanalyse inputs (20260922110000): the business shape with an
+-- administrator gate on every write, and no privilege at all for anon. One
+-- settings row per company, so the INSERT probe clears the side's own first.
+(56, 'trip_analysis_settings', $q$id = {id}$q$,
+  $q$INSERT INTO trip_analysis_settings (id, company_id, block_gap_minutes) VALUES ({id}, {co}, 30)$q$,
+  $q$DELETE FROM trip_analysis_settings WHERE company_id = {co}$q$,
+  $q$INSERT INTO trip_analysis_settings (company_id, block_gap_minutes) VALUES ({co}, 45)$q$,
+  $q$block_gap_minutes = block_gap_minutes$q$),
+(57, 'driver_month_budget', $q$id = {id}$q$,
+  $q$INSERT INTO driver_month_budget (id, company_id, driver_id, year, month) VALUES ({id}, {co}, {ref:drivers}, 2026, 1)$q$, NULL,
+  $q$INSERT INTO driver_month_budget (company_id, driver_id, year, month) VALUES ({co}, {ref:drivers}, 2026, 2)$q$,
+  $q$reserved_hours = reserved_hours$q$);
 
 -- ─── how each row is moved to the other tenant ──────────────────────────────
 -- The M probe takes the row through `key` and sets `mov` on it (`_mx_move_try`),
@@ -958,7 +970,13 @@ INSERT INTO _mx_move VALUES
 ('cash_movements',                       $q$company_id = {other_co}$q$, NULL, 'Y', NULL),
 ('salary_cash_receipts',                 $q$company_id = {other_co}$q$,
                                          $q$DELETE FROM salary_cash_receipts WHERE id = {ref_other:salary_cash_receipts}$q$, 'Y', 'one receipt number per company'),
-('subscription_coverage',                $q$company_id = {other_co}$q$, NULL, 'T', 'pin_billing_company_id refuses it even for the owner');
+('subscription_coverage',                $q$company_id = {other_co}$q$, NULL, 'T', 'pin_billing_company_id refuses it even for the owner'),
+('trip_analysis_settings',               $q$company_id = {other_co}$q$,
+                                         $q$DELETE FROM trip_analysis_settings WHERE company_id = {other_co}$q$, 'Y', 'one settings row per company'),
+-- A budget carries one driver's pay snapshot, so it never leaves its driver,
+-- company or month: driver_month_budget_guard refuses the move for every
+-- writer, before the WITH CHECK is asked.
+('driver_month_budget',                  $q$company_id = {other_co}$q$, NULL, 'T', 'driver_month_budget_guard refuses it even for the owner');
 
 -- Fixtures go in once; the file can be re-run against a kept container.
 DO $$
@@ -1136,6 +1154,13 @@ INSERT INTO _mx_expected (tbl, op, anon, viewer, editor, supervisor, admin, othe
 ('driver_notes',                      'U', '..', '..', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
 ('driver_notes',                      'D', '..', '..', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
 ('driver_notes',                      'M', '..', '..', 'R.', 'R.', 'R.', '.R', '..', NULL),
+-- 20260922110000. anon holds no privilege (PP); every member reads, only the
+-- administrator writes, and the move is the guard's (T), not the WITH CHECK's.
+('driver_month_budget',                'S', 'PP', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('driver_month_budget',                'I', 'PP', 'RR', 'RR', 'RR', 'YR', 'RY', 'RR', NULL),
+('driver_month_budget',                'U', 'PP', '..', '..', '..', 'Y.', '.Y', '..', NULL),
+('driver_month_budget',                'D', 'PP', '..', '..', '..', 'Y.', '.Y', '..', NULL),
+('driver_month_budget',                'M', 'PP', '..', '..', '..', 'T.', '.T', '..', NULL),
 ('drivers',                            'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
 ('drivers',                            'I', 'RR', 'RR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
 ('drivers',                           'U', '..', '..', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
@@ -1318,6 +1343,13 @@ INSERT INTO _mx_expected (tbl, op, anon, viewer, editor, supervisor, admin, othe
 ('subscription_plans',                 'U', '..', '..', '..', '..', '..', '..', 'YY', NULL),
 ('subscription_plans',                 'D', '..', '..', '..', '..', '..', '..', 'YY', NULL),
 ('subscription_plans',                 'M', '--', '--', '--', '--', '--', '--', '--', NULL),
+-- 20260922110000, the same shape as driver_month_budget; a move is refused by
+-- the WITH CHECK here, since nothing pins the settings row to its company.
+('trip_analysis_settings',             'S', 'PP', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('trip_analysis_settings',             'I', 'PP', 'RR', 'RR', 'RR', 'YR', 'RY', 'RR', NULL),
+('trip_analysis_settings',             'U', 'PP', '..', '..', '..', 'Y.', '.Y', '..', NULL),
+('trip_analysis_settings',             'D', 'PP', '..', '..', '..', 'Y.', '.Y', '..', NULL),
+('trip_analysis_settings',             'M', 'PP', '..', '..', '..', 'R.', '.R', '..', NULL),
 ('user_profiles',                      'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
 -- anon and super: since 20260916110010 the profile guard refuses a JWT putting a
 -- profile into a company before RLS is asked; both were RR
@@ -1400,7 +1432,9 @@ UPDATE _mx_expected x
      'fahrtenbuch_assignment_audit', 'notification_settings', 'cash_movements',
      'salary_cash_receipts', 'document_blocks', 'document_variables',
      'historical_reconciliation_drivers', 'historical_reconciliation_results',
-     'historical_reconciliation_wh_drivers');
+     'historical_reconciliation_wh_drivers',
+     -- 20260922110000: the same shape and the same two triggers
+     'trip_analysis_settings', 'driver_month_budget');
 
 -- The account shell, where the rule above does not apply and the column
 -- copied from `super` is wrong: these predicates read get_user_company_id(),
