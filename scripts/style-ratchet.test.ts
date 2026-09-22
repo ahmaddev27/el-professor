@@ -122,4 +122,14 @@ describe('the committed baseline', () => {
       expect(baseline.files[path], path).toBeUndefined();
     }
   });
+
+  it('holds the phase 5 batch-2 screens at zero, and Abrechnung at its share image', () => {
+    for (const path of ['src/components/SalariesManagement.tsx', 'src/pages/BargeldbestandPage.tsx', 'src/pages/SalariesPage.tsx']) {
+      expect(baseline.files[path], path).toBeUndefined();
+    }
+    // What Abrechnung keeps is the off-screen card html2canvas renders into the
+    // shared PNG, renderTankenquoteCard inside it and the canvas background: the
+    // picture's own look, left as it was on purpose.
+    expect(baseline.files['src/pages/AbrechnungPage.tsx']).toEqual({ style: 48, color: 121 });
+  });
 });

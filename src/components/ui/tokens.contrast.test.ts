@@ -107,6 +107,12 @@ const PAIRS: Array<{ fg: string; bg: string; min: number }> = [
   ]),
   // A row's delete icon turns critical on the ghost button's hover fill.
   { fg: 'critical', bg: 'sunken', min: NON_TEXT },
+  // Phase 5, batch 2. An amount keeps its sign's colour — paid, Bar zurück,
+  // a Beleg — in a table row whose hover fill and totals row are sunken, and
+  // the Gehälter screen marks a manually adjusted salary in brand-text there.
+  // (Measured on full sunken: the hover is sunken at half strength over
+  // raised, so it lies between two measured pairs.)
+  ...['positive', 'critical', 'brand-text'].map(fg => ({ fg, bg: 'sunken', min: TEXT })),
 ];
 
 /**

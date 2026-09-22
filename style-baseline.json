@@ -161,10 +161,6 @@
       "style": 25,
       "color": 0
     },
-    "src/components/SalariesManagement.tsx": {
-      "style": 95,
-      "color": 9
-    },
     "src/components/SalaryDetailsModal.tsx": {
       "style": 104,
       "color": 2
@@ -274,8 +270,8 @@
       "color": 111
     },
     "src/pages/AbrechnungPage.tsx": {
-      "style": 235,
-      "color": 356
+      "style": 48,
+      "color": 121
     },
     "src/pages/AccountBlockedPage.tsx": {
       "style": 0,
@@ -292,10 +288,6 @@
     "src/pages/AuthCallbackPage.tsx": {
       "style": 0,
       "color": 18
-    },
-    "src/pages/BargeldbestandPage.tsx": {
-      "style": 61,
-      "color": 12
     },
     "src/pages/BelegePage.tsx": {
       "style": 8,
@@ -376,10 +368,6 @@
     "src/pages/RejectedPage.tsx": {
       "style": 0,
       "color": 25
-    },
-    "src/pages/SalariesPage.tsx": {
-      "style": 7,
-      "color": 0
     },
     "src/pages/SetPasswordPage.tsx": {
       "style": 0,
