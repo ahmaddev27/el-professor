@@ -495,7 +495,17 @@ const SalariesManagement: React.FC<SalariesManagementProps> = ({ drivers }) => {
                 {t('sal.overlap.badge')}
               </button>
             )}
-            {/* On a phone the status column is hidden, and the badge moves here. */}
+            {/* On a phone the total and status columns are hidden, and both move
+                here: the name, the four actions and the salary do not fit a
+                375 px screen side by side. */}
+            <span className="inline-flex items-center gap-1 font-semibold tabular-nums sm:hidden">
+              {euro(calc.netto_salary || calc.amount_due)}
+              {calc.netto_salary && calc.netto_salary !== calc.amount_due && (
+                <span className="text-brand-text" title={t('sal.manuallyAdjusted')}>
+                  *<span className="sr-only"> {t('sal.manuallyAdjusted')}</span>
+                </span>
+              )}
+            </span>
             <span className="sm:hidden">{statusBadge(calc)}</span>
           </div>
         );
@@ -516,7 +526,7 @@ const SalariesManagement: React.FC<SalariesManagementProps> = ({ drivers }) => {
       id: 'total',
       header: t('sal.col.totalSalary'),
       kind: 'currency',
-      className: 'px-2 sm:px-4',
+      hideBelow: 'sm',
       value: calc => calc.netto_salary || calc.amount_due,
       sortable: true,
       cell: calc => (
@@ -561,8 +571,12 @@ const SalariesManagement: React.FC<SalariesManagementProps> = ({ drivers }) => {
 
   // A disabled button takes no pointer events, so the hint that says why it is
   // disabled sits on a wrapper; its accessible name says so too.
+  // Four 40 px touch targets in one row pushed a phone's table 134 px past its
+  // screen; below `sm` they stand two by two, and in one row from `sm` up.
   const rowActions = (calc: SalaryCalculation) => (
-    <>
+    // Tracks sized to their buttons: Tailwind's grid-cols-2 is minmax(0, 1fr),
+    // whose min-content is zero, so the table let the buttons spill out of it.
+    <div className="grid grid-cols-[auto_auto] gap-0.5 sm:flex sm:items-center">
       <Tooltip content={t('sal.action.viewRevenueDetails')}>
         <Button
           variant="ghost"
@@ -619,7 +633,7 @@ const SalariesManagement: React.FC<SalariesManagementProps> = ({ drivers }) => {
           </Button>
         </span>
       </Tooltip>
-    </>
+    </div>
   );
 
   const header = (actions?: React.ReactNode) => (

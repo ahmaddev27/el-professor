@@ -23,7 +23,11 @@ const ORIGIN = new URL(server.resolvedUrls.local[0]).origin;
 const { chromium, expect } = createRequire(join(root, 'e2e', 'package.json'))('@playwright/test');
 const browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--lang=de-DE'] });
 const results = [];
+// `--only <part of a check's name>` runs just the matching checks.
+const onlyIndex = process.argv.indexOf('--only');
+const only = onlyIndex >= 0 ? process.argv[onlyIndex + 1] : undefined;
 const check = async (name, fn) => {
+  if (only && !name.includes(only)) return;
   try { await fn(); results.push(`ok   ${name}`); } catch (e) { results.push(`FAIL ${name}: ${e.message.split('\n').filter(Boolean).slice(0, 8).join(' | ')}`); }
   console.log(results[results.length - 1]);
 };
