@@ -400,6 +400,9 @@ export interface TimelineSegment {
   /** Share of the day, 0 to 1. A DST day is 23 or 25 hours long, and the share is of that. */
   from: number;
   to: number;
+  /** The part of the item on this day, as instants. */
+  startMs: number;
+  endMs: number;
   /** The trip, shift, block or issue it stands for. */
   refId: string;
   /** For an issue: its status, which picks the marker. */
@@ -492,6 +495,8 @@ export function driverTimeline(
         lane: span.lane,
         from: (cursor - bounds.startMs) / length,
         to: (segmentEnd - bounds.startMs) / length,
+        startMs: cursor,
+        endMs: segmentEnd,
         refId: span.refId,
         status: span.status,
         clippedStart: cursor > span.startMs,
