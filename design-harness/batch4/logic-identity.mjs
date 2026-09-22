@@ -255,6 +255,42 @@ const BLOCKS = {
     expression("{lastBackupTime ? lastBackupTime : t('bill.backup.never')}"),
     expression('{isLoading ? ('),
   ],
+  'src/components/RolesManagement.tsx': [
+    line("import { supabase } from '../lib/supabase';"),
+    line("import { Role, RolePermission, RoleWithPermissions } from '../types/role';"),
+    line("import RoleModal from './RoleModal';"),
+    line("import { useToast } from '../contexts/ToastContext';"),
+    line("import { useSuperAdmin } from '../contexts/SuperAdminContext';"),
+    line("import { useTranslation } from '../contexts/LanguageContext';"),
+    // The scope, the roles read, save, edit, the system-role refusal, delete, the summary.
+    block('const RolesManagement: React.FC = () => {', '  };', '  const getPermissionsSummary = (permissions: RolePermission[]) => {'),
+    expression('if (loading) {'),
+    expression('{!readOnly && ('),
+    expression("{role.description || '-'}"),
+    expression('{getPermissionsSummary(role.permissions)}'),
+    expression('role.is_system ? ('),
+    expression('{roles.length > 0 && ('),
+    expression("t('users.roles.deleteConfirm', { name: roleToDelete?.name ?? '' })"),
+    expression('existingPermissions={selectedRole?.permissions}'),
+  ],
+  'src/components/RoleModal.tsx': [
+    line("import { Role, RolePermission, PAGE_DEFINITIONS } from '../types/role';"),
+    line("import { useTranslation } from '../contexts/LanguageContext';"),
+    // The props, the one-time initialisation, the scroll lock, both toggle rules,
+    // the submit, handleClose and the permission count.
+    block('interface RoleModalProps {', '  const enabledCount = Object.values(permissionMap).filter(p => p.can_view || p.can_edit).length;'),
+    expression("{role ? t('users.roles.edit') : t('users.roles.createNew')}"),
+    expression("tPlural({ one: 'users.roles.areasSelected.one', other: 'users.roles.areasSelected.other' }, enabledCount)"),
+    expression('{validationError &&'),
+    expression('{role?.is_system && ('),
+    expression('const canView = permissionMap[page.key]?.can_view || false;'),
+    expression('const canEdit = permissionMap[page.key]?.can_edit || false;'),
+    expression('const isLast = idx === PAGE_DEFINITIONS.length - 1;'),
+    expression("{isSubmitting ? t('common.saving') : t('common.save')}"),
+  ],
+  'src/pages/RolesPage.tsx': [
+    line("import RolesManagement from '../components/RolesManagement';"),
+  ],
   // The takeovers: their logic is the hooks they read; what each says and
   // what its button does is checked by the call and attribute checks.
   'src/pages/AccountBlockedPage.tsx': [
@@ -303,6 +339,15 @@ const MOVED_ATTRIBUTES = {
       'the legacy modal\'s type now picks the dialog by the same value: ConfirmDialog for "confirm", MessageDialog for the rest',
     'onClick={(e) => e.stopPropagation()}':
       'the reset dialog\'s panel kept a click from reaching its backdrop; the Radix Dialog does that itself',
+  },
+  'src/components/RolesManagement.tsx': {
+    'type="confirm"': 'the legacy modal\'s confirm type is the ConfirmDialog it became, with the same onConfirm, onClose and labels',
+  },
+  'src/components/RoleModal.tsx': {
+    'onClick={(e) => e.stopPropagation()}':
+      'the panel kept a click from reaching its backdrop; the Radix Dialog does that itself',
+    "onFocus={e => { e.currentTarget.style.borderColor = 'rgba(6,182,212,0.5)'; }}":
+      'a focus colour painted by hand on the two fields (with its onBlur twin); the fields show the design system\'s focus outline instead',
   },
   'src/pages/AccountBlockedPage.tsx': SUPPORT_LINK_MOVED,
   'src/pages/PendingApprovalPage.tsx': SUPPORT_LINK_MOVED,

@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { createPortal } from 'react-dom';
-import { X, Save, AlertCircle, ShieldCheck } from 'lucide-react';
+import { Save, ShieldCheck } from 'lucide-react';
 import { Role, RolePermission, PAGE_DEFINITIONS } from '../types/role';
 import { useTranslation } from '../contexts/LanguageContext';
+import { Alert, Button, Dialog, DialogContent, DialogDescription, DialogTitle, Field, Input, cn } from './ui';
+import { controlFrameClass } from './ui/Input';
 
 interface RoleModalProps {
   isOpen: boolean;
@@ -129,126 +130,54 @@ const RoleModal: React.FC<RoleModalProps> = ({
 
   const enabledCount = Object.values(permissionMap).filter(p => p.can_view || p.can_edit).length;
 
-  return createPortal(
-    <div
-      style={{
-        position: 'fixed', inset: 0, zIndex: 99999,
-        background: 'rgba(0,0,0,0.7)',
-        backdropFilter: 'blur(4px)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        padding: '1rem',
-      }}
-      onMouseDown={(e) => { if (e.target === e.currentTarget) handleClose(); }}
-    >
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="role-modal-title"
-        onClick={(e) => e.stopPropagation()}
-        style={{
-          background: '#111827',
-          border: '1px solid rgba(255,255,255,0.08)',
-          borderRadius: '1rem',
-          boxShadow: '0 24px 64px rgba(0,0,0,0.6)',
-          width: '100%',
-          maxWidth: '720px',
-          maxHeight: '90vh',
-          display: 'flex',
-          flexDirection: 'column',
-          overflow: 'hidden',
-        }}
-      >
+  // ── Presentation (phase 5) ────────────────────────────────────────────────
+  // Everything above is unchanged, the scroll lock included (the dialog below
+  // locks the page as well; the two agree). The form was an always-dark panel
+  // drawn in inline styles; it is the design system's Dialog now, in both
+  // themes. Closing asks handleClose, as the backdrop and × did, so nothing
+  // closes the form while it saves. The permission boxes are real, visible
+  // checkboxes: the old ones were hidden inputs under painted squares, which a
+  // keyboard could not reach.
+
+  const viewLabel = t('users.roles.col.view');
+  const editLabel = t('users.roles.col.edit');
+
+  return (
+    <Dialog open onOpenChange={next => { if (!next) handleClose(); }}>
+      <DialogContent aria-labelledby="role-modal-title" className="max-w-[720px] gap-0 p-0">
         {/* HEADER */}
-        <div style={{
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          padding: '1.25rem 1.5rem',
-          borderBottom: '1px solid rgba(255,255,255,0.07)',
-          flexShrink: 0,
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-            <div style={{
-              width: 36, height: 36, borderRadius: '0.5rem',
-              background: 'rgba(6,182,212,0.12)',
-              border: '1px solid rgba(6,182,212,0.2)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-            }}>
-              <ShieldCheck size={18} color="#06b6d4" />
-            </div>
-            <div>
-              <h2 id="role-modal-title" style={{ fontSize: '1rem', fontWeight: 700, color: '#f1f5f9', margin: 0, lineHeight: 1.3 }}>
-                {role ? t('users.roles.edit') : t('users.roles.createNew')}
-              </h2>
-              <p style={{ fontSize: '0.75rem', color: '#64748b', margin: 0, marginTop: 2 }}>
-                {enabledCount > 0
-                  ? tPlural({ one: 'users.roles.areasSelected.one', other: 'users.roles.areasSelected.other' }, enabledCount)
-                  : t('users.roles.noPermissionsSet')}
-              </p>
-            </div>
+        <div className="flex items-center gap-3 border-b border-line px-5 py-4 pr-14 sm:px-6">
+          <span aria-hidden className="flex size-9 shrink-0 items-center justify-center rounded-control bg-brand-soft text-brand-text">
+            <ShieldCheck className="size-[18px]" />
+          </span>
+          <div className="min-w-0">
+            <DialogTitle id="role-modal-title" className="text-base">
+              {role ? t('users.roles.edit') : t('users.roles.createNew')}
+            </DialogTitle>
+            <DialogDescription className="text-xs">
+              {enabledCount > 0
+                ? tPlural({ one: 'users.roles.areasSelected.one', other: 'users.roles.areasSelected.other' }, enabledCount)
+                : t('users.roles.noPermissionsSet')}
+            </DialogDescription>
           </div>
-          <button
-            type="button"
-            onClick={handleClose}
-            disabled={isSubmitting}
-            style={{
-              background: 'transparent',
-              border: 'none',
-              color: '#64748b',
-              cursor: 'pointer',
-              padding: '0.375rem',
-              borderRadius: '0.375rem',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              transition: 'color 0.15s, background 0.15s',
-            }}
-            onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.color = '#f1f5f9'; (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.07)'; }}
-            onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.color = '#64748b'; (e.currentTarget as HTMLButtonElement).style.background = 'transparent'; }}
-            aria-label={t('common.close')}
-          >
-            <X size={20} />
-          </button>
         </div>
 
         {/* FORM */}
-        <form onSubmit={handleFormSubmit} style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
-          <div style={{ flex: 1, overflowY: 'auto', padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+        <form onSubmit={handleFormSubmit} className="flex min-h-0 flex-col">
+          <div className="grid gap-6 px-5 py-5 sm:px-6">
 
             {/* ERROR */}
-            {validationError && (
-              <div style={{
-                display: 'flex', alignItems: 'center', gap: '0.625rem',
-                padding: '0.75rem 1rem',
-                background: 'rgba(239,68,68,0.1)',
-                border: '1px solid rgba(239,68,68,0.25)',
-                borderRadius: '0.5rem',
-              }}>
-                <AlertCircle size={16} color="#ef4444" style={{ flexShrink: 0 }} />
-                <span style={{ fontSize: '0.875rem', color: '#fca5a5' }}>{validationError}</span>
-              </div>
-            )}
+            {validationError && <Alert tone="critical" title={validationError} />}
 
             {/* SYSTEM ROLE NOTE */}
             {role?.is_system && (
-              <div style={{
-                padding: '0.75rem 1rem',
-                background: 'rgba(6,182,212,0.08)',
-                border: '1px solid rgba(6,182,212,0.18)',
-                borderRadius: '0.5rem',
-              }}>
-                <p style={{ fontSize: '0.875rem', color: '#67e8f9', margin: 0 }}>
-                  {t('users.roles.systemRoleNote')}
-                </p>
-              </div>
+              <Alert tone="brand" role="note">{t('users.roles.systemRoleNote')}</Alert>
             )}
 
             {/* ROLE NAME + DESCRIPTION */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-              <div>
-                <label
-                  htmlFor="role-name"
-                  style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 600, color: '#94a3b8', marginBottom: '0.5rem', letterSpacing: '0.02em' }}
-                >
-                  {t('users.roles.nameLabel')} <span style={{ color: '#ef4444' }}>*</span>
-                </label>
-                <input
+            <div className="grid gap-4">
+              <Field label={t('users.roles.nameLabel')} id="role-name" required>
+                <Input
                   id="role-name"
                   type="text"
                   value={roleName}
@@ -256,31 +185,9 @@ const RoleModal: React.FC<RoleModalProps> = ({
                   disabled={role?.is_system || isSubmitting}
                   placeholder={t('users.roles.namePlaceholder')}
                   autoComplete="off"
-                  style={{
-                    width: '100%', boxSizing: 'border-box',
-                    height: '2.625rem',
-                    padding: '0 0.875rem',
-                    background: '#141d2e',
-                    border: '1px solid rgba(255,255,255,0.08)',
-                    borderRadius: '0.5rem',
-                    color: '#f1f5f9',
-                    fontSize: '0.9375rem',
-                    outline: 'none',
-                    transition: 'border-color 0.15s',
-                    opacity: (role?.is_system || isSubmitting) ? 0.5 : 1,
-                    cursor: (role?.is_system || isSubmitting) ? 'not-allowed' : 'text',
-                  }}
-                  onFocus={e => { e.currentTarget.style.borderColor = 'rgba(6,182,212,0.5)'; }}
-                  onBlur={e => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.08)'; }}
                 />
-              </div>
-              <div>
-                <label
-                  htmlFor="role-description"
-                  style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 600, color: '#94a3b8', marginBottom: '0.5rem', letterSpacing: '0.02em' }}
-                >
-                  {t('common.description')}
-                </label>
+              </Field>
+              <Field label={t('common.description')} id="role-description">
                 <textarea
                   id="role-description"
                   value={roleDescription}
@@ -289,51 +196,26 @@ const RoleModal: React.FC<RoleModalProps> = ({
                   placeholder={t('users.roles.descriptionPlaceholder')}
                   rows={2}
                   autoComplete="off"
-                  style={{
-                    width: '100%', boxSizing: 'border-box',
-                    padding: '0.625rem 0.875rem',
-                    background: '#141d2e',
-                    border: '1px solid rgba(255,255,255,0.08)',
-                    borderRadius: '0.5rem',
-                    color: '#f1f5f9',
-                    fontSize: '0.9375rem',
-                    outline: 'none',
-                    resize: 'vertical',
-                    lineHeight: 1.6,
-                    transition: 'border-color 0.15s',
-                    opacity: isSubmitting ? 0.5 : 1,
-                  }}
-                  onFocus={e => { e.currentTarget.style.borderColor = 'rgba(6,182,212,0.5)'; }}
-                  onBlur={e => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.08)'; }}
+                  className={cn(controlFrameClass, 'h-auto resize-y py-2 leading-relaxed [@media(pointer:coarse)]:h-auto')}
                 />
-              </div>
+              </Field>
             </div>
 
             {/* PERMISSIONS */}
             <div>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.875rem' }}>
-                <h3 style={{ fontSize: '0.9375rem', fontWeight: 700, color: '#f1f5f9', margin: 0 }}>{t('users.roles.permissions')}</h3>
-                <span style={{ fontSize: '0.75rem', color: '#64748b' }}>
+              <div className="mb-3 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+                <h3 className="text-[15px] font-semibold text-fg">{t('users.roles.permissions')}</h3>
+                <span className="text-xs text-fg-subtle">
                   {t('users.roles.editRequiresView')}
                 </span>
               </div>
 
-              <div style={{
-                border: '1px solid rgba(255,255,255,0.07)',
-                borderRadius: '0.625rem',
-                overflow: 'hidden',
-              }}>
+              <div className="overflow-hidden rounded-surface border border-line">
                 {/* Table header */}
-                <div style={{
-                  display: 'grid',
-                  gridTemplateColumns: '1fr 100px 110px',
-                  background: '#1a2235',
-                  padding: '0.625rem 1rem',
-                  borderBottom: '1px solid rgba(255,255,255,0.07)',
-                }}>
-                  <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#64748b', letterSpacing: '0.05em', textTransform: 'uppercase' }}>{t('users.roles.col.area')}</span>
-                  <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#64748b', letterSpacing: '0.05em', textTransform: 'uppercase', textAlign: 'center' }}>{t('users.roles.col.view')}</span>
-                  <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#64748b', letterSpacing: '0.05em', textTransform: 'uppercase', textAlign: 'center' }}>{t('users.roles.col.edit')}</span>
+                <div aria-hidden className="grid grid-cols-[1fr_4.5rem_4.5rem] items-center border-b border-line bg-sunken px-3 py-2 sm:grid-cols-[1fr_6.5rem_7rem] sm:px-4">
+                  <span className="text-xs font-semibold text-fg-muted">{t('users.roles.col.area')}</span>
+                  <span className="text-center text-xs font-semibold text-fg-muted">{viewLabel}</span>
+                  <span className="text-center text-xs font-semibold text-fg-muted">{editLabel}</span>
                 </div>
 
                 {/* Rows */}
@@ -354,6 +236,8 @@ const RoleModal: React.FC<RoleModalProps> = ({
                       isSubmitting={isSubmitting}
                       onToggleView={toggleView}
                       onToggleEdit={toggleEdit}
+                      viewLabel={viewLabel}
+                      editLabel={editLabel}
                     />
                   );
                 })}
@@ -362,62 +246,26 @@ const RoleModal: React.FC<RoleModalProps> = ({
           </div>
 
           {/* FOOTER */}
-          <div style={{
-            display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '0.75rem',
-            padding: '1rem 1.5rem',
-            borderTop: '1px solid rgba(255,255,255,0.07)',
-            background: '#0f1623',
-            flexShrink: 0,
-          }}>
-            <button
+          <div className="flex flex-col-reverse gap-2 border-t border-line px-5 py-4 sm:flex-row sm:justify-end sm:px-6">
+            <Button
               type="button"
+              variant="secondary"
               onClick={handleClose}
               disabled={isSubmitting}
-              style={{
-                height: '2.375rem',
-                padding: '0 1.125rem',
-                background: 'transparent',
-                border: '1px solid rgba(255,255,255,0.12)',
-                borderRadius: '0.5rem',
-                color: '#94a3b8',
-                fontSize: '0.875rem',
-                fontWeight: 500,
-                cursor: isSubmitting ? 'not-allowed' : 'pointer',
-                opacity: isSubmitting ? 0.5 : 1,
-                transition: 'border-color 0.15s, color 0.15s, background 0.15s',
-              }}
-              onMouseEnter={e => { if (!isSubmitting) { (e.currentTarget as HTMLButtonElement).style.borderColor = 'rgba(255,255,255,0.22)'; (e.currentTarget as HTMLButtonElement).style.color = '#f1f5f9'; } }}
-              onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.borderColor = 'rgba(255,255,255,0.12)'; (e.currentTarget as HTMLButtonElement).style.color = '#94a3b8'; }}
             >
               {t('common.cancel')}
-            </button>
-            <button
+            </Button>
+            <Button
               type="submit"
               disabled={isSubmitting}
-              style={{
-                height: '2.375rem',
-                padding: '0 1.25rem',
-                background: isSubmitting ? 'rgba(6,182,212,0.5)' : '#06b6d4',
-                border: 'none',
-                borderRadius: '0.5rem',
-                color: '#fff',
-                fontSize: '0.875rem',
-                fontWeight: 600,
-                cursor: isSubmitting ? 'not-allowed' : 'pointer',
-                display: 'flex', alignItems: 'center', gap: '0.5rem',
-                transition: 'background 0.15s',
-              }}
-              onMouseEnter={e => { if (!isSubmitting) (e.currentTarget as HTMLButtonElement).style.background = '#0891b2'; }}
-              onMouseLeave={e => { if (!isSubmitting) (e.currentTarget as HTMLButtonElement).style.background = '#06b6d4'; }}
             >
-              <Save size={15} />
+              <Save aria-hidden />
               {isSubmitting ? t('common.saving') : t('common.save')}
-            </button>
+            </Button>
           </div>
         </form>
-      </div>
-    </div>,
-    document.body
+      </DialogContent>
+    </Dialog>
   );
 };
 
@@ -431,91 +279,59 @@ interface PermissionRowProps {
   isSubmitting: boolean;
   onToggleView: (key: string) => void;
   onToggleEdit: (key: string) => void;
+  /** The two column names, for each box's accessible name. */
+  viewLabel: string;
+  editLabel: string;
 }
 
+/**
+ * One area and its two boxes. The boxes toggle through the form's own
+ * toggleView / toggleEdit, which keep "edit implies view" and "no view, no
+ * edit"; the row only draws. Each box is a 44 px target on a touch screen.
+ */
 const PermissionRow: React.FC<PermissionRowProps> = ({
-  pageKey, label, description, canView, canEdit, isLast, isSubmitting, onToggleView, onToggleEdit,
+  pageKey, label, description, canView, canEdit, isLast, isSubmitting, onToggleView, onToggleEdit, viewLabel, editLabel,
 }) => {
-  const [hovered, setHovered] = React.useState(false);
+  const box = 'size-4 cursor-pointer accent-brand disabled:cursor-not-allowed [@media(pointer:coarse)]:size-5';
+  const target = 'flex size-9 items-center justify-center justify-self-center rounded-control [@media(pointer:coarse)]:size-11';
 
   return (
     <div
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-      style={{
-        display: 'grid',
-        gridTemplateColumns: '1fr 100px 110px',
-        alignItems: 'center',
-        padding: '0.75rem 1rem',
-        borderBottom: isLast ? 'none' : '1px solid rgba(255,255,255,0.05)',
-        background: hovered ? 'rgba(255,255,255,0.025)' : 'transparent',
-        transition: 'background 0.15s',
-      }}
+      className={cn(
+        'grid grid-cols-[1fr_4.5rem_4.5rem] items-center px-3 py-2 transition-colors hover:bg-sunken/50 sm:grid-cols-[1fr_6.5rem_7rem] sm:px-4',
+        !isLast && 'border-b border-line',
+      )}
     >
-      <div>
-        <div style={{ fontSize: '0.875rem', fontWeight: 600, color: '#e2e8f0', lineHeight: 1.3 }}>{label}</div>
+      <div className="min-w-0 py-1">
+        <div className="text-sm font-semibold leading-snug text-fg">{label}</div>
         {description && (
-          <div style={{ fontSize: '0.75rem', color: '#475569', marginTop: 2, lineHeight: 1.4 }}>{description}</div>
+          <div className="mt-0.5 text-xs leading-snug text-fg-subtle">{description}</div>
         )}
       </div>
 
       {/* View checkbox */}
-      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
-        <label style={{ cursor: isSubmitting ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <input
-            type="checkbox"
-            checked={canView}
-            onChange={() => onToggleView(pageKey)}
-            disabled={isSubmitting}
-            style={{ display: 'none' }}
-          />
-          <span style={{
-            width: 18, height: 18,
-            borderRadius: 4,
-            border: canView ? 'none' : '1.5px solid rgba(255,255,255,0.2)',
-            background: canView ? '#06b6d4' : 'rgba(255,255,255,0.04)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            transition: 'background 0.15s, border 0.15s, box-shadow 0.15s',
-            boxShadow: canView ? '0 0 8px rgba(6,182,212,0.35)' : 'none',
-            opacity: isSubmitting ? 0.5 : 1,
-          }}>
-            {canView && (
-              <svg width="10" height="8" viewBox="0 0 10 8" fill="none">
-                <path d="M1 4L3.5 6.5L9 1" stroke="#fff" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-            )}
-          </span>
-        </label>
-      </div>
+      <label className={target}>
+        <input
+          type="checkbox"
+          checked={canView}
+          onChange={() => onToggleView(pageKey)}
+          disabled={isSubmitting}
+          aria-label={`${label}: ${viewLabel}`}
+          className={box}
+        />
+      </label>
 
       {/* Edit checkbox */}
-      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
-        <label style={{ cursor: isSubmitting ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <input
-            type="checkbox"
-            checked={canEdit}
-            onChange={() => onToggleEdit(pageKey)}
-            disabled={isSubmitting}
-            style={{ display: 'none' }}
-          />
-          <span style={{
-            width: 18, height: 18,
-            borderRadius: 4,
-            border: canEdit ? 'none' : '1.5px solid rgba(255,255,255,0.2)',
-            background: canEdit ? '#10b981' : 'rgba(255,255,255,0.04)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            transition: 'background 0.15s, border 0.15s, box-shadow 0.15s',
-            boxShadow: canEdit ? '0 0 8px rgba(16,185,129,0.35)' : 'none',
-            opacity: isSubmitting ? 0.5 : 1,
-          }}>
-            {canEdit && (
-              <svg width="10" height="8" viewBox="0 0 10 8" fill="none">
-                <path d="M1 4L3.5 6.5L9 1" stroke="#fff" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-            )}
-          </span>
-        </label>
-      </div>
+      <label className={target}>
+        <input
+          type="checkbox"
+          checked={canEdit}
+          onChange={() => onToggleEdit(pageKey)}
+          disabled={isSubmitting}
+          aria-label={`${label}: ${editLabel}`}
+          className={box}
+        />
+      </label>
     </div>
   );
 };
