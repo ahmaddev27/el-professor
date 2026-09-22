@@ -192,6 +192,10 @@ function checkFile(config) {
     if (!SENSITIVE.test(line)) return;
     const key = bare(line);
     if (!key || newSquashed.includes(key)) { sensitive += 1; return; }
+    // An opening tag whose element was swapped (<button> for <Button>) passes
+    // when its attributes are all still there, in the same order.
+    const attributes = key.replace(/^<[A-Za-z.]+/, '');
+    if (key.startsWith('<') && attributes && newSquashed.includes(attributes)) { sensitive += 1; return; }
     if (dropped.has(key)) { excuse(key, `line ${index + 1}: ${line.trim()}`); return; }
     problems.push(`sensitive line ${index + 1} changed or lost: ${line.trim().slice(0, 160)}`);
   });
@@ -279,6 +283,20 @@ function CONFIG() {
       // panels. 683–702: BlockStatusBanner's drawing (its test above stays).
       // ModeCard is appended at the end.
       redrawn: [[2, 2, 'code'], [229, 625], [683, 702]],
+      dropped: [],
+    },
+    {
+      path: 'src/pages/StundennachweisPage.tsx',
+      // 4: the icon import (the design system's import follows line 12).
+      // 2139–2152: IS, the steps' shared input style. 2235–2290: Step 1's
+      // markup. 2463–2476: tabBtn, Step 2's tab style; 2477–2659: its markup.
+      // 3737–3842: the loading state, header, progress bar, step switch and
+      // the generating state. StepHeading is inserted after 2222. Everything
+      // else — the engine, both generators, exportPDF, TimeInput, the page's
+      // reads, save, and the whole sheet (summary, notes, limits, warnings,
+      // Timesheet) — must be verbatim.
+      redrawn: [[4, 4, 'code'], [2139, 2152, 'code'], [2235, 2290], [2463, 2476, 'code'], [2477, 2659], [3737, 3842]],
+      insertedAfter: [12, 2222],
       dropped: [],
     },
   ];

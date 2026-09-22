@@ -302,8 +302,8 @@
       "color": 24
     },
     "src/pages/CompanyPlannerPage.tsx": {
-      "style": 96,
-      "color": 48
+      "style": 29,
+      "color": 15
     },
     "src/pages/CompanySuspendedPage.tsx": {
       "style": 0,
@@ -378,8 +378,8 @@
       "color": 66
     },
     "src/pages/StundennachweisPage.tsx": {
-      "style": 224,
-      "color": 91
+      "style": 154,
+      "color": 71
     },
     "src/pages/SubscriptionBillingPage.tsx": {
       "style": 81,
