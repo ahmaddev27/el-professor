@@ -369,7 +369,9 @@ const DocumentsPage: React.FC = () => {
     {
       id: 'driver',
       header: t('common.driver'),
-      className: 'min-w-[8.5rem] pr-2 sm:pr-4',
+      // On a phone the name wraps and the paddings tighten, so a row's three
+      // actions stay on screen; the month's gross is in its header there.
+      className: 'pl-3 pr-2 sm:min-w-[8.5rem] sm:px-4',
       cell: rec => (
         <span className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
           <span className="font-medium">{rec.driver_name}</span>
@@ -404,6 +406,7 @@ const DocumentsPage: React.FC = () => {
       id: 'gross',
       header: t('doc.grossExpected'),
       kind: 'number',
+      hideBelow: 'sm',
       className: 'px-2 sm:px-4',
       cell: rec => (
         <span className={rec.calculated_salary != null ? undefined : 'text-fg-subtle'}>{grossLabel(rec.calculated_salary)}</span>
