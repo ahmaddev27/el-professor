@@ -145,4 +145,19 @@ describe('the committed baseline', () => {
       expect(baseline.files[path], path).toBeUndefined();
     }
   });
+
+  it('holds the phase 5 batch-1b screens at zero: Belege, Fahrer and Umsätze are on the design system', () => {
+    for (const path of [
+      'src/components/ReceiptList.tsx',
+      'src/components/ReceiptModal.tsx',
+      'src/components/DriversManagement.tsx',
+      'src/components/DriverModal.tsx',
+      'src/components/IncomeManagement.tsx',
+      'src/pages/BelegePage.tsx',
+      'src/pages/FahrerPage.tsx',
+      'src/pages/UmsaetzePage.tsx',
+    ]) {
+      expect(baseline.files[path], path).toBeUndefined();
+    }
+  });
 });

@@ -41,17 +41,9 @@
       "style": 77,
       "color": 14
     },
-    "src/components/DriverModal.tsx": {
-      "style": 64,
-      "color": 2
-    },
     "src/components/DriverSalarySummaryCard.tsx": {
       "style": 35,
       "color": 74
-    },
-    "src/components/DriversManagement.tsx": {
-      "style": 45,
-      "color": 32
     },
     "src/components/EnvironmentBanner.tsx": {
       "style": 6,
@@ -84,10 +76,6 @@
     "src/components/HistoricalWorkingHoursWizard.tsx": {
       "style": 1154,
       "color": 834
-    },
-    "src/components/IncomeManagement.tsx": {
-      "style": 97,
-      "color": 13
     },
     "src/components/InvoiceDetailModal.tsx": {
       "style": 17,
@@ -132,14 +120,6 @@
     "src/components/PlanManagementModal.tsx": {
       "style": 24,
       "color": 3
-    },
-    "src/components/ReceiptList.tsx": {
-      "style": 75,
-      "color": 3
-    },
-    "src/components/ReceiptModal.tsx": {
-      "style": 76,
-      "color": 21
     },
     "src/components/ReferralCodesManagement.tsx": {
       "style": 42,
@@ -281,10 +261,6 @@
       "style": 0,
       "color": 18
     },
-    "src/pages/BelegePage.tsx": {
-      "style": 8,
-      "color": 1
-    },
     "src/pages/CompaniesPage.tsx": {
       "style": 264,
       "color": 21
@@ -304,10 +280,6 @@
     "src/pages/CompleteRegistrationPage.tsx": {
       "style": 0,
       "color": 38
-    },
-    "src/pages/FahrerPage.tsx": {
-      "style": 2,
-      "color": 0
     },
     "src/pages/ForgotPasswordPage.tsx": {
       "style": 0,
@@ -380,10 +352,6 @@
     "src/pages/SuperAdminDashboard.tsx": {
       "style": 197,
       "color": 28
-    },
-    "src/pages/UmsaetzePage.tsx": {
-      "style": 2,
-      "color": 0
     },
     "src/pages/UsersPage.tsx": {
       "style": 8,
