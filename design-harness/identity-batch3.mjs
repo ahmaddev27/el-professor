@@ -58,7 +58,12 @@ const SENSITIVE =
   /supabase|\.from\(|\.rpc\(|\.range\(|\.eq\(|\.in\(|\.not\(|\.order\(|\.upsert\(|\.insert\(|\.update\(|\.delete\(|new Date|Date\.|getTime|getMonth|getFullYear|getDate\(|getDay\(|Math\.|parseInt|parseFloat|toFixed|toLocale|navigate\(|while \(true\)|\bcan\(|isAdmin|isSuperAdmin|companyId|mayEdit|disabled=/;
 const PRESENTATION_ATTRS = new Set(['className', 'style', 'size', 'key', 'onMouseEnter', 'onMouseLeave', 'strokeWidth']);
 
-/** The inner text of every balanced {…} group in a region, with the attribute it belongs to, if any. */
+/**
+ * The balanced {…} groups of a region, with the attribute each belongs to.
+ * A presentation attribute (className, style, the legacy hover handlers) is
+ * skipped whole, braces inside it included; every other group is kept and
+ * also searched, so a handler inside a conditional block is found too.
+ */
 function braceGroups(text) {
   const groups = [];
   for (let start = 0; start < text.length; start += 1) {
@@ -82,30 +87,43 @@ function braceGroups(text) {
     }
     if (end < 0) continue;
     const attribute = /([A-Za-z-]+)=$/.exec(text.slice(Math.max(0, start - 40), start))?.[1] ?? null;
+    if (attribute && PRESENTATION_ATTRS.has(attribute)) {
+      start = end;
+      continue;
+    }
     groups.push({ attribute, inner: text.slice(start + 1, end) });
   }
   return groups;
 }
 
-/** What of a group must survive: the whole expression, or only the condition in front of a JSX block. */
-function logicOf({ attribute, inner }) {
+/**
+ * What of a group must survive. An expression without markup survives whole.
+ * One that renders markup must keep what decides the markup: the condition in
+ * front of it, the collection a list is drawn from, and each `: cond ?` of an
+ * else-if chain. The markup itself is what was redrawn.
+ */
+function logicOf({ inner }) {
   const trimmed = inner.trim();
-  if (!trimmed || trimmed.startsWith('/*')) return null;
-  if (attribute && PRESENTATION_ATTRS.has(attribute)) return null;
-  if (/^(['"`]).*\1$/s.test(trimmed) && !trimmed.includes('${')) return null; // a plain string
-  if (/^-?\d+(\.\d+)?$/.test(trimmed)) return null; // a plain number
-  if (/^\{[\s\S]*\}$/.test(trimmed) && attribute === 'style') return null;
-  const jsx = /<[A-Za-z]/.exec(trimmed);
-  if (jsx) {
-    const condition = /^([\s\S]*?)\s*(?:&&|\?)\s*\(?\s*<[A-Za-z]/.exec(trimmed)?.[1];
-    return condition && condition.length > 0 ? condition : null;
-  }
-  return trimmed;
+  if (!trimmed || trimmed.startsWith('/*')) return [];
+  if (/^(['"`])[^'"`]*\1$/.test(trimmed)) return []; // a plain string
+  if (/^-?\d+(\.\d+)?$/.test(trimmed)) return []; // a plain number
+  const jsx = /(^|[^\w$.)\]])<[A-Za-z]/.exec(trimmed);
+  if (!jsx) return [trimmed];
+  const logic = [];
+  let head = trimmed.slice(0, jsx.index + jsx[1].length).trim().replace(/\(\s*$/, '').trim();
+  const mapped = /^([\s\S]*?)\.map\(\s*\(?[^)]*\)?\s*=>$/.exec(head);
+  if (mapped) head = mapped[1];
+  head = head.replace(/(&&|\?)$/, '').trim();
+  if (head) logic.push(head);
+  for (const match of trimmed.matchAll(/\)\s*:\s*([^<>{}()]+?)\s*\?\s*\(?\s*</g)) logic.push(match[1].trim());
+  return logic;
 }
 
-function withinRanges(line, ranges) {
-  return ranges.some(([from, to]) => line >= from && line <= to);
-}
+/** A redrawn range is `[from, to]` of markup, or `[from, to, 'code']` for code with no markup (imports, a removed helper). */
+const within = (line, ranges) => ranges.some(([from, to]) => line >= from && line <= to);
+
+/** A JSX container `{expr}` or a parenthesised `(expr)` compares as `expr`. */
+const bare = line => squash(line).replace(/^\{(.*)\}$/, '$1').replace(/^\((.*)\),?$/, '$1');
 
 function checkFile(config) {
   const oldText = git('show', `${base}:${config.path}`).replace(/\r\n/g, '\n');
@@ -113,18 +131,30 @@ function checkFile(config) {
   const oldLines = oldText.split('\n');
   const newSquashed = squash(newText);
   const dropped = new Map((config.dropped ?? []).map(([fragment, reason]) => [squash(fragment), reason]));
+  const used = new Set();
+  const insertedAfter = new Set(config.insertedAfter ?? []);
   const problems = [];
   const excused = [];
+  const excuse = (key, label) => {
+    used.add(key);
+    excused.push(`${label.replace(/\s+/g, ' ').slice(0, 100)} — ${dropped.get(key)}`);
+  };
 
-  // 1. Verbatim chunks, in order.
+  // 1. Verbatim chunks, in order. A chunk ends at a redrawn range and after
+  //    each line the config says new lines were inserted after.
   const chunks = [];
   let current = [];
   oldLines.forEach((line, index) => {
-    if (withinRanges(index + 1, config.redrawn)) {
+    const number = index + 1;
+    if (within(number, config.redrawn)) {
       if (current.length) chunks.push(current);
       current = [];
-    } else {
-      current.push({ line, number: index + 1 });
+      return;
+    }
+    current.push({ line, number });
+    if (insertedAfter.has(number)) {
+      chunks.push(current);
+      current = [];
     }
   });
   if (current.length) chunks.push(current);
@@ -141,29 +171,35 @@ function checkFile(config) {
     }
   }
 
-  // 2. Logic carried out of the redrawn ranges.
+  // 2. Logic carried out of the redrawn markup.
   let carried = 0;
-  for (const [from, to] of config.redrawn) {
+  for (const [from, to, kind] of config.redrawn) {
+    if (kind === 'code') continue;
     const region = oldLines.slice(from - 1, to).join('\n');
     for (const group of braceGroups(region)) {
-      const logic = logicOf(group);
-      if (!logic) continue;
-      const key = squash(logic);
-      if (newSquashed.includes(key)) { carried += 1; continue; }
-      if (dropped.has(key)) { excused.push(`${logic.replace(/\s+/g, ' ').slice(0, 90)} — ${dropped.get(key)}`); continue; }
-      problems.push(`lost from lines ${from}–${to}: ${logic.replace(/\s+/g, ' ').slice(0, 140)}`);
+      for (const logic of logicOf(group)) {
+        const key = squash(logic);
+        if (newSquashed.includes(key)) { carried += 1; continue; }
+        if (dropped.has(key)) { excuse(key, logic); continue; }
+        problems.push(`lost from lines ${from}–${to}: ${logic.replace(/\s+/g, ' ').slice(0, 160)}`);
+      }
     }
   }
 
-  // 3. Sensitive lines anywhere.
+  // 3. Sensitive lines anywhere in the old file.
   let sensitive = 0;
   oldLines.forEach((line, index) => {
     if (!SENSITIVE.test(line)) return;
-    const key = squash(line);
+    const key = bare(line);
     if (!key || newSquashed.includes(key)) { sensitive += 1; return; }
-    if (dropped.has(key)) { excused.push(`line ${index + 1}: ${line.trim().slice(0, 90)} — ${dropped.get(key)}`); return; }
-    problems.push(`sensitive line ${index + 1} changed or lost: ${line.trim().slice(0, 140)}`);
+    if (dropped.has(key)) { excuse(key, `line ${index + 1}: ${line.trim()}`); return; }
+    problems.push(`sensitive line ${index + 1} changed or lost: ${line.trim().slice(0, 160)}`);
   });
+
+  // An excuse nothing needed is a stale claim; it fails like a loss.
+  for (const [key, reason] of dropped) {
+    if (!used.has(key)) problems.push(`listed as dropped but not missing: ${key.slice(0, 80)} (${reason.slice(0, 40)}…)`);
+  }
 
   return { config, verbatimLines, oldLineCount: oldLines.length, carried, sensitive, excused, problems };
 }
@@ -211,5 +247,39 @@ if (outside.length) {
 process.exit(failed ? 1 : 0);
 
 function CONFIG() {
-  return [];
+  return [
+    {
+      path: 'src/pages/DocumentsPage.tsx',
+      // 1–2: the React and icon imports. 83–87: fmtEuro, the old euro display
+      // helper. 320–791: from `cardBase` to the end, the markup. The design
+      // system's import is the one insertion, after line 14.
+      redrawn: [[1, 2, 'code'], [83, 87, 'code'], [320, 791]],
+      insertedAfter: [14],
+      dropped: [
+        ["return v.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €';",
+          'fmtEuro, a display helper; euro amounts are written by formatEuro (utils/money.ts), "—" for none as before'],
+        ['fmtEuro(group.totalGross)', "the month's gross, now grossLabel(group.totalGross): the same figure, written through utils/money.ts"],
+        ['fmtEuro(rec.calculated_salary)', "a record's gross, now grossLabel(rec.calculated_salary): the same figure, written through utils/money.ts"],
+        ['e => e.stopPropagation()', 'the group header is no longer one clickable row; its toggle is a button of its own, so its actions need not stop the click'],
+        ['t(h)', 'the eight column headers were one loop over their keys; the columns now name the same keys one by one'],
+        [`([
+                              'common.driver', 'doc.personalnummer', 'doc.totalHours', 'doc.grossExpected',
+                              'doc.workingDays', 'doc.savedAt', 'doc.updatedAt', 'doc.tableActions',
+                            ] as TranslationKey[])`, 'the same header keys, now one per column'],
+        [`background: 'var(--bg-surface)',
+    border: '1px solid var(--border)',
+    boxShadow: 'var(--shadow-sm)',`, 'cardBase, the tool cards\' legacy style object'],
+      ],
+    },
+    {
+      path: 'src/pages/CompanyPlannerPage.tsx',
+      // 2: the icon import. 229–625: the page's markup down to Phase 1's
+      // parameter card; the planning components below it (626–671) are kept
+      // verbatim, as are ResultPanels, StatCard, Th and Td, the ?debug=1
+      // panels. 683–702: BlockStatusBanner's drawing (its test above stays).
+      // ModeCard is appended at the end.
+      redrawn: [[2, 2, 'code'], [229, 625], [683, 702]],
+      dropped: [],
+    },
+  ];
 }
