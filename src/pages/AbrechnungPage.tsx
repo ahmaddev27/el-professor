@@ -1,5 +1,21 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { Calendar, FileText, TrendingUp, TrendingDown, DollarSign, X, User, Receipt as ReceiptIcon, Share2, Download, Copy } from 'lucide-react';
+import { useState, useEffect, useRef, type ReactNode } from 'react';
+import {
+  Calendar,
+  CalendarRange,
+  Copy,
+  DollarSign,
+  Download,
+  FileText,
+  Filter,
+  Fuel,
+  Receipt as ReceiptIcon,
+  RotateCw,
+  Share2,
+  TrendingDown,
+  TrendingUp,
+  User,
+  type LucideIcon,
+} from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useToast } from '../contexts/ToastContext';
 import { useTheme } from '../contexts/ThemeContext';
@@ -7,6 +23,35 @@ import { format } from 'date-fns';
 import { getWeeksOfMonth, getBusinessMonthRange, getBusinessWeeksForMonth } from '../utils/weekCalculations';
 import html2canvas from 'html2canvas';
 import { useTranslation } from '../contexts/LanguageContext';
+import {
+  Alert,
+  Button,
+  Card,
+  cn,
+  DataTable,
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  EmptyState,
+  Field,
+  formatEuro,
+  formatNumber,
+  PageHeader,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+  Tabs,
+  TabsList,
+  TabsTrigger,
+  Tooltip,
+  type DataTableColumn,
+} from '../components/ui';
 
 interface WeeklyAbrechnung {
   year: number;
@@ -53,22 +98,13 @@ const MONTH_NAMES = [
   'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember'
 ];
 
-const inputStyle: React.CSSProperties = {
-  background: 'var(--bg-subtle)',
-  border: '1px solid var(--border)',
-  borderRadius: '0.5rem',
-  color: 'var(--text-primary)',
-  fontSize: '0.875rem',
-  padding: '0.5rem 0.75rem',
-  outline: 'none',
-};
-
 export function AbrechnungPage() {
   const { t } = useTranslation();
   const [viewMode, setViewMode] = useState<ViewMode>('weekly');
   const [weeklyData, setWeeklyData] = useState<WeeklyAbrechnung[]>([]);
   const [monthlyData, setMonthlyData] = useState<MonthlyAbrechnung[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1);
   const [selectedDriver, setSelectedDriver] = useState<string>('all');
@@ -92,6 +128,7 @@ export function AbrechnungPage() {
   const loadWeeklyData = async () => {
     try {
       setLoading(true);
+      setLoadFailed(false);
       const { data, error } = await supabase.rpc('get_weekly_abrechnung', {
         p_year: selectedYear,
         p_month: selectedMonth
@@ -107,6 +144,7 @@ export function AbrechnungPage() {
       setAvailableWeeks((uniqueWeeks as number[]).sort((a, b) => a - b));
     } catch (error: any) {
       showToast('error', t('abr.loadFailed'), error.message);
+      setLoadFailed(true);
     } finally {
       setLoading(false);
     }
@@ -115,6 +153,7 @@ export function AbrechnungPage() {
   const loadMonthlyData = async () => {
     try {
       setLoading(true);
+      setLoadFailed(false);
       const { data, error } = await supabase.rpc('get_monthly_abrechnung', {
         p_year: selectedYear,
         p_month: selectedMonth
@@ -127,6 +166,7 @@ export function AbrechnungPage() {
       setDrivers(uniqueDrivers as string[]);
     } catch (error: any) {
       showToast('error', t('abr.loadFailed'), error.message);
+      setLoadFailed(true);
     } finally {
       setLoading(false);
     }
@@ -482,128 +522,6 @@ export function AbrechnungPage() {
     }
   };
 
-  const renderWeeklyView = () => {
-    if (loading) {
-      return (
-        <div className="text-center py-12">
-          <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2" style={{ borderColor: 'var(--accent)' }}></div>
-          <p className="mt-2" style={{ color: 'var(--text-tertiary)' }}>{t('werkstatt.loading')}</p>
-        </div>
-      );
-    }
-
-    if (weeklyData.length === 0) {
-      return (
-        <div className="text-center py-12">
-          <FileText className="w-12 h-12 mx-auto mb-4" style={{ color: 'var(--text-tertiary)' }} />
-          <p style={{ color: 'var(--text-tertiary)' }}>Keine Daten für {MONTH_NAMES[selectedMonth - 1]} {selectedYear}</p>
-        </div>
-      );
-    }
-
-    const groupedData = groupByWeek();
-    const weekNumbers = Object.keys(groupedData).map(Number).sort((a, b) => b - a);
-
-    return (
-      <div className="space-y-6">
-        {weekNumbers.map(weekNumber => {
-          const weekData = groupedData[weekNumber];
-          const totals = calculateWeekTotals(weekData);
-
-          return (
-            <div key={weekNumber} className="rounded-lg overflow-hidden" style={{ background: 'var(--bg-surface)', boxShadow: 'var(--shadow-sm)', border: '1px solid var(--border)' }}>
-              <div className="px-6 py-4" style={{ background: 'linear-gradient(to right, var(--accent), var(--accent-hover))' }}>
-                <h3 className="text-lg font-semibold text-white flex items-center gap-2">
-                  <Calendar className="w-5 h-5" />
-                  {getWeekLabel(weekNumber)} - {MONTH_NAMES[selectedMonth - 1]} {selectedYear}
-                </h3>
-              </div>
-
-              <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead style={{ background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)' }}>
-                    <tr>
-                      <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-secondary)' }}>{t('common.driver')}</th>
-                      <th className="px-6 py-3 text-right text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-secondary)' }}>{t('abr.belegCount')}</th>
-                      <th className="px-6 py-3 text-right text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-secondary)' }}>
-                        Ausgegebene Bargeld
-                      </th>
-                      <th className="px-6 py-3 text-right text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-secondary)' }}>
-                        Bargeld
-                      </th>
-                      <th className="px-6 py-3 text-right text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-secondary)' }}>
-                        Bar Zurück
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody style={{ borderTop: '1px solid var(--border)' }}>
-                    {weekData.map((item, idx) => (
-                      <tr
-                        key={idx}
-                        onClick={() => handleRowClick(item)}
-                        className="transition-colors cursor-pointer"
-                        style={{ borderBottom: '1px solid var(--border)' }}
-                        onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-subtle)')}
-                        onMouseLeave={e => (e.currentTarget.style.background = '')}
-                      >
-                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
-                          {item.driver_name}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-right" style={{ color: 'var(--text-secondary)' }}>
-                          {item.anzahl_belege}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-right" style={{ color: 'var(--text-secondary)' }}>
-                          {formatCurrency(Number(item.ausgegebene_bargeld))}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-right" style={{ color: 'var(--text-secondary)' }}>
-                          {formatCurrency(Number(item.bargeld))}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-right">
-                          <span className="inline-flex items-center gap-1 font-medium" style={{ color: Number(item.bar_zuruck) >= 0 ? 'var(--success)' : 'var(--danger)' }}>
-                            {Number(item.bar_zuruck) >= 0 ? (
-                              <TrendingUp className="w-4 h-4" />
-                            ) : (
-                              <TrendingDown className="w-4 h-4" />
-                            )}
-                            {formatCurrency(Number(item.bar_zuruck))}
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
-                    <tr className="font-semibold" style={{ background: 'var(--accent-subtle)' }}>
-                      <td className="px-6 py-4 text-sm" style={{ color: 'var(--text-primary)' }}>
-                        Gesamt
-                      </td>
-                      <td className="px-6 py-4 text-sm text-right" style={{ color: 'var(--text-primary)' }}>
-                        {totals.anzahl_belege}
-                      </td>
-                      <td className="px-6 py-4 text-sm text-right" style={{ color: 'var(--text-primary)' }}>
-                        {formatCurrency(totals.ausgegebene_bargeld)}
-                      </td>
-                      <td className="px-6 py-4 text-sm text-right" style={{ color: 'var(--text-primary)' }}>
-                        {formatCurrency(totals.bargeld)}
-                      </td>
-                      <td className="px-6 py-4 text-sm text-right">
-                        <span className="inline-flex items-center gap-1" style={{ color: totals.bar_zuruck >= 0 ? 'var(--success)' : 'var(--danger)' }}>
-                          {totals.bar_zuruck >= 0 ? (
-                            <TrendingUp className="w-4 h-4" />
-                          ) : (
-                            <TrendingDown className="w-4 h-4" />
-                          )}
-                          {formatCurrency(totals.bar_zuruck)}
-                        </span>
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    );
-  };
-
   const getFilteredMonthlyData = () => {
     let filtered = [...monthlyData];
 
@@ -623,215 +541,315 @@ export function AbrechnungPage() {
     }), { anzahl_belege: 0, ausgegebene_bargeld: 0, bargeld: 0, bar_zuruck: 0 });
   };
 
-  const renderMonthlyView = () => {
-    if (loading) {
-      return (
-        <div className="text-center py-12">
-          <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2" style={{ borderColor: 'var(--accent)' }}></div>
-          <p className="mt-2" style={{ color: 'var(--text-tertiary)' }}>{t('werkstatt.loading')}</p>
-        </div>
-      );
-    }
+  // ── Presentation (phase 5) ────────────────────────────────────────────────
+  // Everything above is the screen's logic and is unchanged, but for the five
+  // `loadFailed` lines; everything below only draws it. The tables show the
+  // RPC's rows and the sums calculateWeekTotals and calculateMonthlyTotals
+  // return, formatted through utils/money.ts (formatEuro): this block adds no
+  // arithmetic. Bar zurück is the RPC's bar_zuruck, cash collected minus cash
+  // spent; positive means the driver owes the company.
+  //
+  // What stays as it was: the off-screen card below, which html2canvas turns
+  // into the image a driver is sent. Its look is that picture, so it keeps its
+  // own colours and renderTankenquoteCard above.
 
-    if (monthlyData.length === 0) {
-      return (
-        <div className="text-center py-12">
-          <FileText className="w-12 h-12 mx-auto mb-4" style={{ color: 'var(--text-tertiary)' }} />
-          <p style={{ color: 'var(--text-tertiary)' }}>Keine Daten für {MONTH_NAMES[selectedMonth - 1]} {selectedYear}</p>
-        </div>
-      );
-    }
+  // formatEuro refuses a value that is not a finite amount. A figure shows such
+  // a value as it is rather than taking the screen down, as DataTable does.
+  const euro = (amount: number) => (Number.isFinite(amount) ? formatEuro(amount) : String(amount));
 
+  const barZurueck = (amount: number) => (
+    <span className={cn('inline-flex items-center justify-end gap-1 font-semibold', amount >= 0 ? 'text-positive' : 'text-critical')}>
+      {amount >= 0 ? <TrendingUp aria-hidden className="size-4" /> : <TrendingDown aria-hidden className="size-4" />}
+      {euro(amount)}
+    </span>
+  );
+
+  type AbrechnungTotals = { anzahl_belege: number; ausgegebene_bargeld: number; bargeld: number; bar_zuruck: number };
+
+  function abrechnungColumns<Row extends WeeklyAbrechnung | MonthlyAbrechnung>(): DataTableColumn<Row>[] {
+    return [
+      {
+        id: 'driver',
+        header: t('common.driver'),
+        value: item => item.driver_name,
+        sortable: true,
+        className: 'pr-2 sm:pr-4',
+        cell: row => {
+          // Widened to the union, where `in` narrows; a type parameter does not.
+          const item: WeeklyAbrechnung | MonthlyAbrechnung = row;
+          return 'week_count' in item ? (
+            <span className="font-medium">
+              {item.driver_name}
+              <span className="ml-2 whitespace-nowrap text-xs font-normal text-fg-subtle">
+                ({item.week_count} {item.week_count === 1 ? t('common.week') : t('common.weeks')})
+              </span>
+            </span>
+          ) : (
+            <span className="font-medium">{item.driver_name}</span>
+          );
+        },
+      },
+      { id: 'belege', header: t('abr.belegCount'), kind: 'number', value: item => item.anzahl_belege, hideBelow: 'md' },
+      { id: 'spent', header: t('abr.col.spentCash'), kind: 'currency', value: item => Number(item.ausgegebene_bargeld), hideBelow: 'sm' },
+      { id: 'cash', header: t('abr.col.cash'), kind: 'currency', value: item => Number(item.bargeld), hideBelow: 'sm' },
+      {
+        id: 'barZurueck',
+        header: t('abr.col.barZurueck'),
+        kind: 'currency',
+        className: 'pl-2 pr-3 sm:px-4',
+        value: item => Number(item.bar_zuruck),
+        sortable: true,
+        cell: item => barZurueck(Number(item.bar_zuruck)),
+      },
+    ];
+  }
+
+  const totalsRow = (totals: AbrechnungTotals) => ({
+    driver: t('overview.common.gesamt'),
+    belege: formatNumber(totals.anzahl_belege),
+    spent: euro(totals.ausgegebene_bargeld),
+    cash: euro(totals.bargeld),
+    barZurueck: barZurueck(totals.bar_zuruck),
+  });
+
+  const detailsButton = (driverName: string, open: () => void) => (
+    <Tooltip content={t('abr.details')}>
+      <Button variant="ghost" size="icon-sm" aria-label={t('abr.detailsFor', { name: driverName })} onClick={open}>
+        <FileText aria-hidden />
+      </Button>
+    </Tooltip>
+  );
+
+  const noMatches = <EmptyState size="sm" icon={Filter} title={t('abr.noMatches')} />;
+
+  const renderWeeklyTables = () => {
+    const groupedData = groupByWeek();
+    const weekNumbers = Object.keys(groupedData).map(Number).sort((a, b) => b - a);
+
+    if (weekNumbers.length === 0) return <Card>{noMatches}</Card>;
+
+    return (
+      <div className="grid grid-cols-1 gap-6">
+        {weekNumbers.map(weekNumber => {
+          const weekData = groupedData[weekNumber];
+          const totals = calculateWeekTotals(weekData);
+
+          return (
+            <section key={weekNumber} aria-labelledby={`abr-week-${weekNumber}`} className="grid grid-cols-1 gap-2">
+              <h2 id={`abr-week-${weekNumber}`} className="flex items-center gap-2 text-[15px] font-semibold text-fg">
+                <Calendar aria-hidden className="size-4 text-fg-subtle" />
+                {getWeekLabel(weekNumber)} - {MONTH_NAMES[selectedMonth - 1]} {selectedYear}
+              </h2>
+              <DataTable
+                caption={t('abr.weekCaption', { period: `${getWeekLabel(weekNumber)}, ${MONTH_NAMES[selectedMonth - 1]} ${selectedYear}` })}
+                columns={abrechnungColumns<WeeklyAbrechnung>()}
+                rows={weekData}
+                getRowId={item => `${item.week_number}-${item.driver_name}`}
+                rowActions={item => detailsButton(item.driver_name, () => handleRowClick(item))}
+                rowActionsLabel={t('abr.details')}
+                totals={totalsRow(totals)}
+              />
+            </section>
+          );
+        })}
+      </div>
+    );
+  };
+
+  const renderMonthlyTable = () => {
     const filteredData = getFilteredMonthlyData();
     const totals = calculateMonthlyTotals(filteredData);
 
     return (
-      <div className="rounded-lg overflow-hidden" style={{ background: 'var(--bg-surface)', boxShadow: 'var(--shadow-sm)', border: '1px solid var(--border)' }}>
-        <div className="px-6 py-4" style={{ background: 'linear-gradient(to right, var(--accent), var(--accent-hover))' }}>
-          <h3 className="text-lg font-semibold text-white flex items-center gap-2">
-            <Calendar className="w-5 h-5" />
-            {MONTH_NAMES[selectedMonth - 1]} {selectedYear}
-          </h3>
-        </div>
+      <section aria-labelledby="abr-month" className="grid grid-cols-1 gap-2">
+        <h2 id="abr-month" className="flex items-center gap-2 text-[15px] font-semibold text-fg">
+          <Calendar aria-hidden className="size-4 text-fg-subtle" />
+          {MONTH_NAMES[selectedMonth - 1]} {selectedYear}
+        </h2>
+        <DataTable
+          caption={t('abr.monthCaption', { period: `${MONTH_NAMES[selectedMonth - 1]} ${selectedYear}` })}
+          columns={abrechnungColumns<MonthlyAbrechnung>()}
+          rows={filteredData}
+          getRowId={item => item.driver_name}
+          rowActions={item => detailsButton(item.driver_name, () => handleMonthlyRowClick(item))}
+          rowActionsLabel={t('abr.details')}
+          totals={totalsRow(totals)}
+          emptyState={noMatches}
+        />
+      </section>
+    );
+  };
 
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead style={{ background: 'var(--bg-subtle)', borderBottom: '1px solid var(--border)' }}>
-              <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-secondary)' }}>{t('common.driver')}</th>
-                <th className="px-6 py-3 text-right text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-secondary)' }}>{t('abr.belegCount')}</th>
-                <th className="px-6 py-3 text-right text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-secondary)' }}>
-                  Ausgegebene Bargeld
-                </th>
-                <th className="px-6 py-3 text-right text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-secondary)' }}>
-                  Bargeld
-                </th>
-                <th className="px-6 py-3 text-right text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-secondary)' }}>
-                  Bar Zurück
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredData.map((item, idx) => (
-                <tr
-                  key={idx}
-                  onClick={() => handleMonthlyRowClick(item)}
-                  className="transition-colors cursor-pointer"
-                  style={{ borderBottom: '1px solid var(--border)' }}
-                  onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-subtle)')}
-                  onMouseLeave={e => (e.currentTarget.style.background = '')}
-                >
-                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
-                    <div>
-                      {item.driver_name}
-                      <span className="ml-2 text-xs" style={{ color: 'var(--text-tertiary)' }}>
-                        ({item.week_count} {item.week_count === 1 ? t('common.week') : t('common.weeks')})
-                      </span>
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-right" style={{ color: 'var(--text-secondary)' }}>
-                    {item.anzahl_belege}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-right" style={{ color: 'var(--text-secondary)' }}>
-                    {formatCurrency(Number(item.ausgegebene_bargeld))}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-right" style={{ color: 'var(--text-secondary)' }}>
-                    {formatCurrency(Number(item.bargeld))}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-right">
-                    <span className="inline-flex items-center gap-1 font-medium" style={{ color: Number(item.bar_zuruck) >= 0 ? 'var(--success)' : 'var(--danger)' }}>
-                      {Number(item.bar_zuruck) >= 0 ? (
-                        <TrendingUp className="w-4 h-4" />
-                      ) : (
-                        <TrendingDown className="w-4 h-4" />
-                      )}
-                      {formatCurrency(Number(item.bar_zuruck))}
-                    </span>
-                  </td>
-                </tr>
-              ))}
-              <tr className="font-semibold" style={{ background: 'var(--accent-subtle)' }}>
-                <td className="px-6 py-4 text-sm" style={{ color: 'var(--text-primary)' }}>
-                  Gesamt
-                </td>
-                <td className="px-6 py-4 text-sm text-right" style={{ color: 'var(--text-primary)' }}>
-                  {totals.anzahl_belege}
-                </td>
-                <td className="px-6 py-4 text-sm text-right" style={{ color: 'var(--text-primary)' }}>
-                  {formatCurrency(totals.ausgegebene_bargeld)}
-                </td>
-                <td className="px-6 py-4 text-sm text-right" style={{ color: 'var(--text-primary)' }}>
-                  {formatCurrency(totals.bargeld)}
-                </td>
-                <td className="px-6 py-4 text-sm text-right">
-                  <span className="inline-flex items-center gap-1" style={{ color: totals.bar_zuruck >= 0 ? 'var(--success)' : 'var(--danger)' }}>
-                    {totals.bar_zuruck >= 0 ? (
-                      <TrendingUp className="w-4 h-4" />
-                    ) : (
-                      <TrendingDown className="w-4 h-4" />
-                    )}
-                    {formatCurrency(totals.bar_zuruck)}
-                  </span>
-                </td>
-              </tr>
-            </tbody>
-          </table>
+  const noData = (
+    <Card>
+      <EmptyState icon={FileText} title={t('abr.noDataFor', { period: `${MONTH_NAMES[selectedMonth - 1]} ${selectedYear}` })} />
+    </Card>
+  );
+
+  const content = loading ? (
+    <DataTable
+      caption={t('abr.weekCaption', { period: `${MONTH_NAMES[selectedMonth - 1]} ${selectedYear}` })}
+      columns={abrechnungColumns<WeeklyAbrechnung>()}
+      rows={[]}
+      getRowId={item => `${item.week_number}-${item.driver_name}`}
+      loading
+    />
+  ) : loadFailed ? (
+    // A failed load leaves the previous month's rows in state; showing them
+    // under the month now selected would be a claim about that month.
+    <Alert
+      tone="critical"
+      title={t('abr.loadFailed')}
+      action={
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={() => (viewMode === 'weekly' ? loadWeeklyData() : loadMonthlyData())}
+        >
+          <RotateCw aria-hidden />
+          {t('ui.table.retry')}
+        </Button>
+      }
+    >
+      {t('abr.loadFailedBody')}
+    </Alert>
+  ) : viewMode === 'weekly' ? (
+    weeklyData.length === 0 ? noData : renderWeeklyTables()
+  ) : monthlyData.length === 0 ? (
+    noData
+  ) : (
+    renderMonthlyTable()
+  );
+
+  /** One row of the detail's financial overview, in the tone the old card had. */
+  const financeRow = (
+    tone: 'positive' | 'critical' | 'brand' | 'caution' | 'neutral',
+    icon: LucideIcon,
+    label: ReactNode,
+    hint: ReactNode,
+    amount: ReactNode,
+  ) => {
+    const Icon = icon;
+    const fill = {
+      positive: 'border-positive/30 bg-positive-soft',
+      critical: 'border-critical/30 bg-critical-soft',
+      brand: 'border-brand/30 bg-brand-soft',
+      caution: 'border-caution/30 bg-caution-soft',
+      neutral: 'border-line bg-sunken',
+    }[tone];
+    const text = {
+      positive: 'text-positive',
+      critical: 'text-critical',
+      brand: 'text-brand-text',
+      caution: 'text-caution',
+      neutral: 'text-fg',
+    }[tone];
+    return (
+      <div className={cn('flex items-center justify-between gap-3 rounded-surface border px-4 py-3', fill)}>
+        <div className="flex min-w-0 items-center gap-3">
+          <Icon aria-hidden className={cn('size-5 shrink-0', text)} />
+          <div className="min-w-0">
+            <p className={cn('text-sm font-semibold', text)}>{label}</p>
+            {hint ? <p className="text-xs text-fg-muted">{hint}</p> : null}
+          </div>
         </div>
+        <p className={cn('shrink-0 text-xl font-semibold tabular-nums', text)}>{amount}</p>
       </div>
     );
   };
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>Abrechnung</h1>
-          <p className="text-sm mt-1" style={{ color: 'var(--text-tertiary)' }}>
-            Wöchentliche und monatliche Abrechnungen verwalten
-          </p>
-        </div>
-      </div>
+    <div className="font-ui">
+      <PageHeader title={t('nav.abrechnung')} description={t('abr.subtitle')} />
 
-      <div className="rounded-lg p-6" style={{ background: 'var(--bg-surface)', boxShadow: 'var(--shadow-sm)', border: '1px solid var(--border)' }}>
-        <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
-          <div className="flex gap-2">
-            <button
-              onClick={() => setViewMode('weekly')}
-              className="px-4 py-2 rounded-lg font-medium transition-colors"
-              style={viewMode === 'weekly'
-                ? { background: 'var(--accent)', color: 'var(--text-inverse)' }
-                : { background: 'var(--bg-muted)', color: 'var(--text-secondary)' }
-              }
-            >
-              Wöchentlich
-            </button>
-            <button
-              onClick={() => setViewMode('monthly')}
-              className="px-4 py-2 rounded-lg font-medium transition-colors"
-              style={viewMode === 'monthly'
-                ? { background: 'var(--accent)', color: 'var(--text-inverse)' }
-                : { background: 'var(--bg-muted)', color: 'var(--text-secondary)' }
-              }
-            >
-              Monatlich
-            </button>
-          </div>
+      <div className="grid grid-cols-1 gap-6">
+        <Card className="flex flex-col gap-4 p-4 lg:flex-row lg:items-end lg:justify-between">
+          <Tabs value={viewMode} onValueChange={value => setViewMode(value as ViewMode)}>
+            <TabsList variant="segmented" aria-label={t('abr.viewMode')}>
+              <TabsTrigger value="weekly">{t('abr.weekly')}</TabsTrigger>
+              <TabsTrigger value="monthly">{t('abr.monthly')}</TabsTrigger>
+            </TabsList>
+          </Tabs>
 
-          <div className="flex gap-3">
-            <select
-              value={selectedDriver}
-              onChange={(e) => setSelectedDriver(e.target.value)}
-              style={inputStyle}
-            >
-              <option value="all">{t('common.allDrivers')}</option>
-              {drivers.map(driver => (
-                <option key={driver} value={driver}>
-                  {driver}
-                </option>
-              ))}
-            </select>
-            {viewMode === 'weekly' && (
-              <select
-                value={selectedWeek}
-                onChange={(e) => setSelectedWeek(e.target.value === 'all' ? 'all' : Number(e.target.value))}
-                style={inputStyle}
-              >
-                <option value="all">{t('abr.allWeeks')}</option>
-                {availableWeeks.map(week => (
-                  <option key={week} value={week}>
-                    Woche {week}
-                  </option>
-                ))}
-              </select>
+          <div className="grid grid-cols-2 gap-3 sm:flex sm:flex-wrap sm:items-end">
+            {/* After a failed load, the driver and week choices are still the
+                previous month's: they would offer that month's people and
+                weeks under this month's name. */}
+            {!loadFailed && (
+              <Field label={t('common.driver')} className="col-span-2 sm:w-52">
+                <Select value={selectedDriver} onValueChange={setSelectedDriver}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">{t('common.allDrivers')}</SelectItem>
+                    {drivers.map(driver => (
+                      <SelectItem key={driver} value={driver}>
+                        {driver}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Field>
             )}
-            <select
-              value={selectedMonth}
-              onChange={(e) => setSelectedMonth(Number(e.target.value))}
-              style={inputStyle}
-            >
-              {MONTH_NAMES.map((month, idx) => (
-                <option key={idx} value={idx + 1}>
-                  {month}
-                </option>
-              ))}
-            </select>
-            <select
-              value={selectedYear}
-              onChange={(e) => setSelectedYear(Number(e.target.value))}
-              style={inputStyle}
-            >
-              {[2024, 2025, 2026, 2027].map(year => (
-                <option key={year} value={year}>
-                  {year}
-                </option>
-              ))}
-            </select>
+            {viewMode === 'weekly' && !loadFailed && (
+              <Field label={t('common.week')} className="col-span-2 sm:w-40">
+                <Select
+                  value={String(selectedWeek)}
+                  onValueChange={value => setSelectedWeek(value === 'all' ? 'all' : Number(value))}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">{t('abr.allWeeks')}</SelectItem>
+                    {availableWeeks.map(week => (
+                      <SelectItem key={week} value={String(week)}>
+                        Woche {week}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Field>
+            )}
+            <Field label={t('common.month')} className="sm:w-40">
+              <Select value={String(selectedMonth)} onValueChange={value => setSelectedMonth(Number(value))}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {MONTH_NAMES.map((month, idx) => (
+                    <SelectItem key={idx} value={String(idx + 1)}>
+                      {month}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
+            <Field label={t('abr.year')} className="sm:w-28">
+              <Select value={String(selectedYear)} onValueChange={value => setSelectedYear(Number(value))}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {[2024, 2025, 2026, 2027].map(year => (
+                    <SelectItem key={year} value={String(year)}>
+                      {year}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
           </div>
-        </div>
+        </Card>
+
+        {content}
       </div>
 
-      {viewMode === 'weekly' ? renderWeeklyView() : renderMonthlyView()}
-
+      {/* The off-screen card below is the legacy markup, kept byte for byte:
+          html2canvas renders it into the PNG that is shared, copied or
+          downloaded, so its look is the document a driver receives. The dialog
+          after it is the screen's view of the same figures. */}
       {/* ── Off-screen shareable card — mirrors the visible modal, fully theme-aware ── */}
       {detailModalData && (
         <div
@@ -1028,452 +1046,110 @@ export function AbrechnungPage() {
         </div>
       )}
 
-      {detailModalData && (
-        <div style={{
-          position: 'fixed', inset: 0, zIndex: 50,
-          background: isDark ? 'rgba(0,0,0,0.72)' : 'rgba(15,23,42,0.45)',
-          backdropFilter: 'blur(6px)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          padding: '16px',
-        }}>
-          <div style={{
-            background: isDark ? '#0d1117' : '#ffffff',
-            border: isDark ? '1px solid rgba(255,255,255,0.08)' : '1px solid #e2e8f0',
-            borderRadius: '18px',
-            boxShadow: isDark
-              ? '0 32px 80px rgba(0,0,0,0.8), 0 0 0 1px rgba(6,182,212,0.07)'
-              : '0 12px 48px rgba(15,23,42,0.12), 0 2px 8px rgba(15,23,42,0.06)',
-            maxWidth: '640px',
-            width: '100%',
-            maxHeight: '90vh',
-            overflowY: 'auto',
-            display: 'flex',
-            flexDirection: 'column',
-          }}>
+      <Dialog open={detailModalData !== null} onOpenChange={next => { if (!next) setDetailModalData(null); }}>
+        {detailModalData && (
+          <DialogContent className="max-w-xl">
+            <DialogHeader>
+              <DialogTitle>{t('abr.detailTitle')}</DialogTitle>
+              <DialogDescription>
+                {detailModalData.driverName} · {detailModalData.weekNumber === 0
+                  ? `${MONTH_NAMES[selectedMonth - 1]} ${selectedYear}`
+                  : `Woche ${detailModalData.weekNumber}`}
+              </DialogDescription>
+            </DialogHeader>
 
-            {/* ── Header ── */}
-            <div style={{
-              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-              padding: '18px 22px',
-              borderBottom: isDark ? '1px solid rgba(255,255,255,0.06)' : '1px solid #e4e8f0',
-              background: isDark
-                ? 'linear-gradient(135deg, #0f1a2e 0%, #0a1220 100%)'
-                : '#f8f9fc',
-              borderRadius: '18px 18px 0 0',
-              flexShrink: 0,
-            }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                <div style={{
-                  width: 36, height: 36, borderRadius: 10,
-                  background: isDark ? 'rgba(6,182,212,0.12)' : '#eff6ff',
-                  border: isDark ? '1px solid rgba(6,182,212,0.22)' : '1px solid #bfdbfe',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                }}>
-                  <FileText style={{ width: 17, height: 17, color: isDark ? '#06b6d4' : '#2563eb' }} />
-                </div>
-                <div>
-                  <h2 style={{ fontSize: 15, fontWeight: 700, color: isDark ? '#f1f5f9' : '#111827', lineHeight: 1.2 }}>
-                    Detaillierte Abrechnung
-                  </h2>
-                  <p style={{ fontSize: 11, color: isDark ? 'rgba(255,255,255,0.32)' : '#6b7280', marginTop: 1 }}>
-                    {detailModalData.driverName} · {detailModalData.weekNumber === 0
-                      ? `${MONTH_NAMES[selectedMonth - 1]} ${selectedYear}`
-                      : `Woche ${detailModalData.weekNumber}`}
-                  </p>
-                </div>
+            <dl className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div className="rounded-surface border border-line bg-sunken px-4 py-3">
+                <dt className="flex items-center gap-2 text-xs font-medium text-fg-muted">
+                  <User aria-hidden className="size-4" />
+                  {t('common.driver')}
+                </dt>
+                <dd className="mt-1 font-semibold text-fg">{detailModalData.driverName}</dd>
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                {[
-                  { icon: <Share2 style={{ width: 15, height: 15 }} />, onClick: handleShareToWhatsApp, title: t('abr.shareAsImage') },
-                  { icon: <Copy style={{ width: 15, height: 15 }} />, onClick: handleCopyImage, title: t('abr.copyImage') },
-                  { icon: <Download style={{ width: 15, height: 15 }} />, onClick: handleDownloadImage, title: t('common.download') },
-                ].map((btn, i) => (
-                  <button
-                    key={i}
-                    onClick={btn.onClick}
-                    disabled={isSharing}
-                    title={btn.title}
-                    style={{
-                      background: isDark ? 'rgba(255,255,255,0.05)' : '#ffffff',
-                      border: isDark ? '1px solid rgba(255,255,255,0.08)' : '1px solid #e4e8f0',
-                      borderRadius: 8,
-                      padding: '7px 8px',
-                      color: isDark ? 'rgba(255,255,255,0.55)' : '#6b7280',
-                      cursor: isSharing ? 'not-allowed' : 'pointer',
-                      opacity: isSharing ? 0.4 : 1,
-                      transition: 'all 0.18s',
-                      display: 'flex', alignItems: 'center',
-                    }}
-                    onMouseEnter={e => {
-                      if (!isSharing) {
-                        if (isDark) {
-                          (e.currentTarget as HTMLElement).style.background = 'rgba(6,182,212,0.12)';
-                          (e.currentTarget as HTMLElement).style.borderColor = 'rgba(6,182,212,0.25)';
-                          (e.currentTarget as HTMLElement).style.color = '#06b6d4';
-                        } else {
-                          (e.currentTarget as HTMLElement).style.background = '#eff6ff';
-                          (e.currentTarget as HTMLElement).style.borderColor = '#bfdbfe';
-                          (e.currentTarget as HTMLElement).style.color = '#2563eb';
-                        }
-                      }
-                    }}
-                    onMouseLeave={e => {
-                      if (isDark) {
-                        (e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.05)';
-                        (e.currentTarget as HTMLElement).style.borderColor = 'rgba(255,255,255,0.08)';
-                        (e.currentTarget as HTMLElement).style.color = 'rgba(255,255,255,0.55)';
-                      } else {
-                        (e.currentTarget as HTMLElement).style.background = '#ffffff';
-                        (e.currentTarget as HTMLElement).style.borderColor = '#e4e8f0';
-                        (e.currentTarget as HTMLElement).style.color = '#6b7280';
-                      }
-                    }}
-                  >
-                    {btn.icon}
-                  </button>
-                ))}
-                <button
-                  onClick={() => setDetailModalData(null)}
-                  style={{
-                    background: isDark ? 'rgba(255,255,255,0.04)' : '#ffffff',
-                    border: isDark ? '1px solid rgba(255,255,255,0.07)' : '1px solid #e4e8f0',
-                    borderRadius: 8,
-                    padding: '7px 8px',
-                    color: isDark ? 'rgba(255,255,255,0.4)' : '#9ca3af',
-                    cursor: 'pointer',
-                    marginLeft: 4,
-                    transition: 'all 0.18s',
-                    display: 'flex', alignItems: 'center',
-                  }}
-                  onMouseEnter={e => {
-                    if (isDark) {
-                      (e.currentTarget as HTMLElement).style.background = 'rgba(239,68,68,0.1)';
-                      (e.currentTarget as HTMLElement).style.borderColor = 'rgba(239,68,68,0.2)';
-                      (e.currentTarget as HTMLElement).style.color = '#f87171';
-                    } else {
-                      (e.currentTarget as HTMLElement).style.background = '#fef2f2';
-                      (e.currentTarget as HTMLElement).style.borderColor = '#fecaca';
-                      (e.currentTarget as HTMLElement).style.color = '#dc2626';
-                    }
-                  }}
-                  onMouseLeave={e => {
-                    if (isDark) {
-                      (e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.04)';
-                      (e.currentTarget as HTMLElement).style.borderColor = 'rgba(255,255,255,0.07)';
-                      (e.currentTarget as HTMLElement).style.color = 'rgba(255,255,255,0.4)';
-                    } else {
-                      (e.currentTarget as HTMLElement).style.background = '#ffffff';
-                      (e.currentTarget as HTMLElement).style.borderColor = '#e4e8f0';
-                      (e.currentTarget as HTMLElement).style.color = '#9ca3af';
-                    }
-                  }}
-                >
-                  <X style={{ width: 15, height: 15 }} />
-                </button>
+              <div className="rounded-surface border border-line bg-sunken px-4 py-3">
+                <dt className="flex items-center gap-2 text-xs font-medium text-fg-muted">
+                  <Calendar aria-hidden className="size-4" />
+                  {detailModalData.weekNumber === 0 ? t('common.month') : t('common.week')}
+                </dt>
+                <dd className="mt-1 font-semibold text-fg">
+                  {detailModalData.weekNumber === 0
+                    ? `${MONTH_NAMES[selectedMonth - 1]} ${selectedYear}`
+                    : `Woche ${detailModalData.weekNumber}`}
+                </dd>
               </div>
-            </div>
-
-            {/* ── Themed visible content ── */}
-            <div style={{ background: isDark ? '#0d1117' : '#ffffff', flex: 1 }}>
-              <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: 16 }}>
-
-                {/* Info cards row */}
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                  {/* Fahrer card */}
-                  <div style={{
-                    background: isDark ? 'rgba(37,99,235,0.08)' : '#f0f7ff',
-                    border: isDark ? '1px solid rgba(37,99,235,0.22)' : '1px solid #bfdbfe',
-                    borderRadius: 12, padding: '14px 16px',
-                  }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                      <div style={{
-                        width: 28, height: 28, borderRadius: 7,
-                        background: isDark ? 'rgba(37,99,235,0.15)' : '#dbeafe',
-                        border: isDark ? '1px solid rgba(59,130,246,0.3)' : '1px solid #93c5fd',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      }}>
-                        <User style={{ width: 14, height: 14, color: isDark ? '#60a5fa' : '#2563eb' }} />
-                      </div>
-                      <p style={{ fontSize: 11, fontWeight: 600, color: isDark ? '#93c5fd' : '#1e40af', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{t('common.driver')}</p>
-                    </div>
-                    <p style={{ fontSize: 17, fontWeight: 800, color: isDark ? '#f1f5f9' : '#0f172a' }}>{detailModalData.driverName}</p>
-                  </div>
-
-                  {/* Woche / Monat card */}
-                  <div style={{
-                    background: isDark ? 'rgba(37,99,235,0.08)' : '#f0f7ff',
-                    border: isDark ? '1px solid rgba(37,99,235,0.22)' : '1px solid #bfdbfe',
-                    borderRadius: 12, padding: '14px 16px',
-                  }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                      <div style={{
-                        width: 28, height: 28, borderRadius: 7,
-                        background: isDark ? 'rgba(37,99,235,0.15)' : '#dbeafe',
-                        border: isDark ? '1px solid rgba(59,130,246,0.3)' : '1px solid #93c5fd',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      }}>
-                        <Calendar style={{ width: 14, height: 14, color: isDark ? '#60a5fa' : '#2563eb' }} />
-                      </div>
-                      <p style={{ fontSize: 11, fontWeight: 600, color: isDark ? '#93c5fd' : '#1e40af', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-                        {detailModalData.weekNumber === 0 ? t('common.month') : t('common.week')}
-                      </p>
-                    </div>
-                    <p style={{ fontSize: 17, fontWeight: 800, color: isDark ? '#f1f5f9' : '#0f172a' }}>
-                      {detailModalData.weekNumber === 0
-                        ? `${MONTH_NAMES[selectedMonth - 1]} ${selectedYear}`
-                        : `Woche ${detailModalData.weekNumber}`}
-                    </p>
-                  </div>
-                </div>
-
-                {/* Zeitraum card */}
-                <div style={{
-                  background: isDark ? 'rgba(255,255,255,0.03)' : '#f8fafc',
-                  border: isDark ? '1px solid rgba(255,255,255,0.07)' : '1px solid #e2e8f0',
-                  borderRadius: 12, padding: '14px 16px',
-                  display: 'flex', alignItems: 'center', gap: 12,
-                }}>
-                  <div style={{
-                    width: 28, height: 28, borderRadius: 7,
-                    background: isDark ? 'rgba(234,88,12,0.12)' : '#fef9f0',
-                    border: isDark ? '1px solid rgba(234,88,12,0.25)' : '1px solid #fed7aa',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
-                  }}>
-                    <Calendar style={{ width: 14, height: 14, color: isDark ? '#fb923c' : '#ea580c' }} />
-                  </div>
-                  <div>
-                    <p style={{ fontSize: 11, fontWeight: 600, color: isDark ? '#64748b' : '#64748b', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 3 }}>{t('common.period')}</p>
-                    <p style={{ fontSize: 15, fontWeight: 700, color: isDark ? '#e2e8f0' : '#0f172a' }}>
-                      {detailModalData.weekStartDate} – {detailModalData.weekEndDate}
-                    </p>
-                  </div>
-                </div>
-
-                {/* Divider + Finanzübersicht */}
-                <div style={{ borderTop: isDark ? '1px solid rgba(255,255,255,0.07)' : '1px solid #e2e8f0', paddingTop: 16 }}>
-                  <p style={{ fontSize: 11, fontWeight: 700, color: isDark ? '#475569' : '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 14 }}>{t('abr.financialOverview')}</p>
-
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-
-                    {/* Bargeld */}
-                    <div style={{
-                      background: isDark ? 'rgba(22,163,74,0.08)' : '#f0fdf4',
-                      border: isDark ? '1px solid rgba(22,163,74,0.25)' : '1px solid #bbf7d0',
-                      borderRadius: 12, padding: '14px 16px',
-                      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                    }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                        <div style={{
-                          width: 36, height: 36, borderRadius: 9,
-                          background: isDark ? 'rgba(22,163,74,0.14)' : '#dcfce7',
-                          border: isDark ? '1px solid rgba(74,222,128,0.25)' : '1px solid #86efac',
-                          display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        }}>
-                          <DollarSign style={{ width: 18, height: 18, color: isDark ? '#4ade80' : '#16a34a' }} />
-                        </div>
-                        <div>
-                          <p style={{ fontSize: 13, fontWeight: 600, color: isDark ? '#4ade80' : '#15803d' }}>
-                            Gesamt Bargeld ({detailModalData.weekNumber === 0 ? t('common.month') : t('abr.thisWeek')})
-                          </p>
-                          <p style={{ fontSize: 11, color: isDark ? '#166534' : '#86efac', marginTop: 1 }}>{t('bargeld.cashIncome')}</p>
-                        </div>
-                      </div>
-                      <p style={{ fontSize: 22, fontWeight: 900, color: isDark ? '#4ade80' : '#15803d', letterSpacing: '-0.02em' }}>
-                        {formatCurrency(detailModalData.totalCash)}
-                      </p>
-                    </div>
-
-                    {/* Belege */}
-                    <div style={{
-                      background: isDark ? 'rgba(220,38,38,0.07)' : '#fff7f7',
-                      border: isDark ? '1px solid rgba(220,38,38,0.25)' : '1px solid #fecaca',
-                      borderRadius: 12, padding: '14px 16px',
-                      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                    }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                        <div style={{
-                          width: 36, height: 36, borderRadius: 9,
-                          background: isDark ? 'rgba(220,38,38,0.13)' : '#fee2e2',
-                          border: isDark ? '1px solid rgba(248,113,113,0.25)' : '1px solid #fca5a5',
-                          display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        }}>
-                          <ReceiptIcon style={{ width: 18, height: 18, color: isDark ? '#f87171' : '#dc2626' }} />
-                        </div>
-                        <div>
-                          <p style={{ fontSize: 13, fontWeight: 600, color: isDark ? '#f87171' : '#b91c1c' }}>{t('abr.belegCount')}</p>
-                          <p style={{ fontSize: 11, color: isDark ? '#991b1b' : '#f87171', marginTop: 1 }}>{detailModalData.anzahlBelege} Belege</p>
-                        </div>
-                      </div>
-                      <p style={{ fontSize: 22, fontWeight: 900, color: isDark ? '#f87171' : '#b91c1c', letterSpacing: '-0.02em' }}>
-                        {formatCurrency(detailModalData.sumBelege)}
-                      </p>
-                    </div>
-
-                    {/* Differenz */}
-                    {(() => {
-                      const pos = detailModalData.difference >= 0;
-                      return (
-                        <div style={{
-                          background: isDark
-                            ? pos ? 'rgba(2,132,199,0.08)' : 'rgba(217,119,6,0.08)'
-                            : pos ? '#f0f9ff' : '#fffbeb',
-                          border: isDark
-                            ? `1px solid ${pos ? 'rgba(2,132,199,0.28)' : 'rgba(217,119,6,0.28)'}`
-                            : `1px solid ${pos ? '#bae6fd' : '#fde68a'}`,
-                          borderRadius: 12, padding: '14px 16px',
-                          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                        }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                            <div style={{
-                              width: 36, height: 36, borderRadius: 9,
-                              background: isDark
-                                ? pos ? 'rgba(2,132,199,0.15)' : 'rgba(217,119,6,0.15)'
-                                : pos ? '#e0f2fe' : '#fef3c7',
-                              border: isDark
-                                ? `1px solid ${pos ? 'rgba(56,189,248,0.3)' : 'rgba(251,191,36,0.3)'}`
-                                : `1px solid ${pos ? '#7dd3fc' : '#fcd34d'}`,
-                              display: 'flex', alignItems: 'center', justifyContent: 'center',
-                            }}>
-                              {pos
-                                ? <TrendingUp style={{ width: 18, height: 18, color: isDark ? '#38bdf8' : '#0284c7' }} />
-                                : <TrendingDown style={{ width: 18, height: 18, color: isDark ? '#fbbf24' : '#d97706' }} />
-                              }
-                            </div>
-                            <div>
-                              <p style={{ fontSize: 13, fontWeight: 600, color: isDark ? (pos ? '#38bdf8' : '#fbbf24') : (pos ? '#0369a1' : '#b45309') }}>
-                                Differenz (Bargeld – Belege)
-                              </p>
-                              <p style={{ fontSize: 11, color: isDark ? (pos ? '#0c4a6e' : '#78350f') : (pos ? '#38bdf8' : '#fbbf24'), marginTop: 1 }}>
-                                Der Betrag den Sie abgeben müssen
-                              </p>
-                            </div>
-                          </div>
-                          <p style={{ fontSize: 22, fontWeight: 900, letterSpacing: '-0.02em', color: isDark ? (pos ? '#38bdf8' : '#fbbf24') : (pos ? '#0369a1' : '#b45309') }}>
-                            {formatCurrency(detailModalData.difference)}
-                          </p>
-                        </div>
-                      );
-                    })()}
-
-                    {renderTankenquoteCard(detailModalData)}
-
-                  </div>
-                </div>
-
+              <div className="rounded-surface border border-line bg-sunken px-4 py-3 sm:col-span-2">
+                <dt className="flex items-center gap-2 text-xs font-medium text-fg-muted">
+                  <CalendarRange aria-hidden className="size-4" />
+                  {t('common.period')}
+                </dt>
+                <dd className="mt-1 font-semibold tabular-nums text-fg">
+                  {detailModalData.weekStartDate} – {detailModalData.weekEndDate}
+                </dd>
               </div>
-            </div>
+            </dl>
 
-            {/* ── Footer actions ── */}
-            <div style={{
-              display: 'flex', alignItems: 'center', gap: 8,
-              padding: '16px 22px',
-              borderTop: isDark ? '1px solid rgba(255,255,255,0.06)' : '1px solid #e4e8f0',
-              background: isDark ? '#0a0f1a' : '#f8f9fc',
-              borderRadius: '0 0 18px 18px',
-              flexShrink: 0,
-            }}>
-              <button
-                onClick={handleShareToWhatsApp}
-                disabled={isSharing}
-                style={{
-                  flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7,
-                  padding: '10px 14px', borderRadius: 10, fontSize: 13, fontWeight: 600,
-                  background: isDark ? 'rgba(16,185,129,0.12)' : '#f0fdf4',
-                  border: isDark ? '1px solid rgba(16,185,129,0.22)' : '1px solid #bbf7d0',
-                  color: isDark ? '#34d399' : '#15803d',
-                  cursor: isSharing ? 'not-allowed' : 'pointer',
-                  opacity: isSharing ? 0.5 : 1, transition: 'all 0.18s',
-                }}
-                onMouseEnter={e => {
-                  if (!isSharing) {
-                    if (isDark) { (e.currentTarget as HTMLElement).style.background = 'rgba(16,185,129,0.2)'; (e.currentTarget as HTMLElement).style.borderColor = 'rgba(52,211,153,0.4)'; }
-                    else { (e.currentTarget as HTMLElement).style.background = '#dcfce7'; (e.currentTarget as HTMLElement).style.borderColor = '#86efac'; }
-                  }
-                }}
-                onMouseLeave={e => {
-                  if (isDark) { (e.currentTarget as HTMLElement).style.background = 'rgba(16,185,129,0.12)'; (e.currentTarget as HTMLElement).style.borderColor = 'rgba(16,185,129,0.22)'; }
-                  else { (e.currentTarget as HTMLElement).style.background = '#f0fdf4'; (e.currentTarget as HTMLElement).style.borderColor = '#bbf7d0'; }
-                }}
-              >
-                <Share2 style={{ width: 15, height: 15 }} />
-                {isSharing ? t('abr.creatingImage') : t('common.share')}
-              </button>
-              <button
-                onClick={handleCopyImage}
-                disabled={isSharing}
-                style={{
-                  flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7,
-                  padding: '10px 14px', borderRadius: 10, fontSize: 13, fontWeight: 600,
-                  background: isDark ? 'rgba(6,182,212,0.1)' : '#eff6ff',
-                  border: isDark ? '1px solid rgba(6,182,212,0.2)' : '1px solid #bfdbfe',
-                  color: isDark ? '#22d3ee' : '#1d4ed8',
-                  cursor: isSharing ? 'not-allowed' : 'pointer',
-                  opacity: isSharing ? 0.5 : 1, transition: 'all 0.18s',
-                }}
-                onMouseEnter={e => {
-                  if (!isSharing) {
-                    if (isDark) { (e.currentTarget as HTMLElement).style.background = 'rgba(6,182,212,0.18)'; (e.currentTarget as HTMLElement).style.borderColor = 'rgba(6,182,212,0.35)'; }
-                    else { (e.currentTarget as HTMLElement).style.background = '#dbeafe'; (e.currentTarget as HTMLElement).style.borderColor = '#93c5fd'; }
-                  }
-                }}
-                onMouseLeave={e => {
-                  if (isDark) { (e.currentTarget as HTMLElement).style.background = 'rgba(6,182,212,0.1)'; (e.currentTarget as HTMLElement).style.borderColor = 'rgba(6,182,212,0.2)'; }
-                  else { (e.currentTarget as HTMLElement).style.background = '#eff6ff'; (e.currentTarget as HTMLElement).style.borderColor = '#bfdbfe'; }
-                }}
-              >
-                <Copy style={{ width: 15, height: 15 }} />
-                {isSharing ? t('abr.creatingImage') : t('common.copy')}
-              </button>
-              <button
-                onClick={handleDownloadImage}
-                disabled={isSharing}
-                style={{
-                  flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7,
-                  padding: '10px 14px', borderRadius: 10, fontSize: 13, fontWeight: 600,
-                  background: isDark ? 'rgba(6,182,212,0.1)' : '#eff6ff',
-                  border: isDark ? '1px solid rgba(6,182,212,0.2)' : '1px solid #bfdbfe',
-                  color: isDark ? '#22d3ee' : '#1d4ed8',
-                  cursor: isSharing ? 'not-allowed' : 'pointer',
-                  opacity: isSharing ? 0.5 : 1, transition: 'all 0.18s',
-                }}
-                onMouseEnter={e => {
-                  if (!isSharing) {
-                    if (isDark) { (e.currentTarget as HTMLElement).style.background = 'rgba(6,182,212,0.18)'; (e.currentTarget as HTMLElement).style.borderColor = 'rgba(6,182,212,0.35)'; }
-                    else { (e.currentTarget as HTMLElement).style.background = '#dbeafe'; (e.currentTarget as HTMLElement).style.borderColor = '#93c5fd'; }
-                  }
-                }}
-                onMouseLeave={e => {
-                  if (isDark) { (e.currentTarget as HTMLElement).style.background = 'rgba(6,182,212,0.1)'; (e.currentTarget as HTMLElement).style.borderColor = 'rgba(6,182,212,0.2)'; }
-                  else { (e.currentTarget as HTMLElement).style.background = '#eff6ff'; (e.currentTarget as HTMLElement).style.borderColor = '#bfdbfe'; }
-                }}
-              >
-                <Download style={{ width: 15, height: 15 }} />
-                {isSharing ? t('abr.creatingImage') : t('common.download')}
-              </button>
-              <button
-                onClick={() => setDetailModalData(null)}
-                style={{
-                  padding: '10px 16px', borderRadius: 10, fontSize: 13, fontWeight: 600,
-                  background: isDark ? 'rgba(255,255,255,0.05)' : '#ffffff',
-                  border: isDark ? '1px solid rgba(255,255,255,0.08)' : '1px solid #e4e8f0',
-                  color: isDark ? 'rgba(255,255,255,0.45)' : '#6b7280',
-                  cursor: 'pointer', transition: 'all 0.18s',
-                }}
-                onMouseEnter={e => {
-                  if (isDark) { (e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.09)'; (e.currentTarget as HTMLElement).style.color = 'rgba(255,255,255,0.75)'; }
-                  else { (e.currentTarget as HTMLElement).style.background = '#eef1f7'; (e.currentTarget as HTMLElement).style.color = '#111827'; }
-                }}
-                onMouseLeave={e => {
-                  if (isDark) { (e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.05)'; (e.currentTarget as HTMLElement).style.color = 'rgba(255,255,255,0.45)'; }
-                  else { (e.currentTarget as HTMLElement).style.background = '#ffffff'; (e.currentTarget as HTMLElement).style.color = '#6b7280'; }
-                }}
-              >
-                Schließen
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+            <section aria-labelledby="abr-finance" className="grid grid-cols-1 gap-2">
+              <h3 id="abr-finance" className="text-xs font-semibold uppercase tracking-wide text-fg-muted">
+                {t('abr.financialOverview')}
+              </h3>
+              {financeRow(
+                'positive',
+                DollarSign,
+                t('abr.totalCash', { period: detailModalData.weekNumber === 0 ? t('common.month') : t('abr.thisWeek') }),
+                t('bargeld.cashIncome'),
+                euro(detailModalData.totalCash),
+              )}
+              {financeRow(
+                'critical',
+                ReceiptIcon,
+                t('abr.belegCount'),
+                t('abr.belegeCount', { count: detailModalData.anzahlBelege }),
+                euro(detailModalData.sumBelege),
+              )}
+              {(() => {
+                const pos = detailModalData.difference >= 0;
+                return financeRow(
+                  pos ? 'brand' : 'caution',
+                  pos ? TrendingUp : TrendingDown,
+                  t('abr.difference'),
+                  t('abr.differenceHint'),
+                  euro(detailModalData.difference),
+                );
+              })()}
+              {(() => {
+                const quote = calcTankenquote(detailModalData.tankenBrutto, detailModalData.umsatzNetto);
+                return financeRow(
+                  'neutral',
+                  Fuel,
+                  t('abr.tankenquote'),
+                  null,
+                  quote !== null ? formatPercent(quote) : '—',
+                );
+              })()}
+            </section>
+
+            <DialogFooter className="sm:justify-between">
+              <div className="grid grid-cols-1 gap-2 sm:flex">
+                <Button variant="secondary" onClick={handleShareToWhatsApp} disabled={isSharing}>
+                  <Share2 aria-hidden />
+                  {isSharing ? t('abr.creatingImage') : t('common.share')}
+                </Button>
+                <Button variant="secondary" onClick={handleCopyImage} disabled={isSharing}>
+                  <Copy aria-hidden />
+                  {isSharing ? t('abr.creatingImage') : t('common.copy')}
+                </Button>
+                <Button variant="secondary" onClick={handleDownloadImage} disabled={isSharing}>
+                  <Download aria-hidden />
+                  {isSharing ? t('abr.creatingImage') : t('common.download')}
+                </Button>
+              </div>
+              <DialogClose asChild>
+                <Button variant="ghost">{t('common.close')}</Button>
+              </DialogClose>
+            </DialogFooter>
+          </DialogContent>
+        )}
+      </Dialog>
     </div>
   );
 }

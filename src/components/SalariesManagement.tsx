@@ -552,7 +552,7 @@ const SalariesManagement: React.FC<SalariesManagementProps> = ({ drivers }) => {
       sortable: true,
       cell: calc => (
         <span className={cn('font-semibold', calc.remaining_balance > 0 ? 'text-critical' : 'text-fg-subtle')}>
-          {euro(calc.remaining_balance)}
+          {euro(Number(calc.remaining_balance))}
         </span>
       ),
     },

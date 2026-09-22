@@ -12,7 +12,11 @@
  * must occur in the old block). Presentation that had to reach into the logic
  * — an `onChange` handler, a sum the old markup computed inline — is listed as
  * `carried`: each snippet must appear verbatim in the base file and in the new
- * one, so a handler moved into new markup is still the old handler.
+ * one, so a handler moved into new markup is still the old handler. Leading
+ * indentation is ignored there and only there, because a carried block may
+ * sit at another depth; every character after it must match. A `verbatim`
+ * block — the Abrechnung share card html2canvas turns into an image — must
+ * reappear exactly, indentation included.
  *
  * It prints the block sizes and exits non-zero on the first difference, with
  * the first differing line of each side.
@@ -184,6 +188,75 @@ const FILES = [
       ].join('\n'),
     ],
   },
+  {
+    path: 'src/pages/AbrechnungPage.tsx',
+    blocks: [
+      // The row types and MONTH_NAMES; the module-level inputStyle after them is presentation.
+      { from: 'interface WeeklyAbrechnung {', oldTo: 'const inputStyle: React.CSSProperties = {', newTo: 'export function AbrechnungPage() {' },
+      // The component through handleDownloadImage.
+      { from: 'export function AbrechnungPage() {', oldTo: '  const renderWeeklyView = () => {', newTo: '  const getFilteredMonthlyData = () => {' },
+      // The monthly filter and totals, which sat between the two render functions.
+      { from: '  const getFilteredMonthlyData = () => {', oldTo: '  const renderMonthlyView = () => {', newTo: PRESENTATION },
+    ],
+    added: [
+      '  const [loadFailed, setLoadFailed] = useState(false);',
+      '      setLoadFailed(false);',
+      '      setLoadFailed(true);',
+      '      setLoadFailed(false);',
+      '      setLoadFailed(true);',
+    ],
+    removed: [],
+    // The off-screen card html2canvas renders into the shared image: exact, indentation included.
+    verbatim: [
+      {
+        from: '      {/* ── Off-screen shareable card — mirrors the visible modal, fully theme-aware ── */}',
+        to: '      )}',
+      },
+    ],
+    carried: [
+      'const groupedData = groupByWeek();',
+      'const weekNumbers = Object.keys(groupedData).map(Number).sort((a, b) => b - a);',
+      'const weekData = groupedData[weekNumber];',
+      'const totals = calculateWeekTotals(weekData);',
+      '{getWeekLabel(weekNumber)} - {MONTH_NAMES[selectedMonth - 1]} {selectedYear}',
+      '() => handleRowClick(item)',
+      'const filteredData = getFilteredMonthlyData();',
+      'const totals = calculateMonthlyTotals(filteredData);',
+      '() => handleMonthlyRowClick(item)',
+      "({item.week_count} {item.week_count === 1 ? t('common.week') : t('common.weeks')})",
+      'Number(item.ausgegebene_bargeld)',
+      'Number(item.bargeld)',
+      'Number(item.bar_zuruck)',
+      'weeklyData.length === 0',
+      'monthlyData.length === 0',
+      "viewMode === 'weekly' ?",
+      '{MONTH_NAMES[selectedMonth - 1]} {selectedYear}',
+      "=== 'all' ? 'all' : Number(",
+      'drivers.map(driver => (',
+      'availableWeeks.map(week => (',
+      'MONTH_NAMES.map((month, idx) => (',
+      'idx + 1',
+      '[2024, 2025, 2026, 2027].map(year => (',
+      [
+        '{detailModalData.driverName} · {detailModalData.weekNumber === 0',
+        '? `${MONTH_NAMES[selectedMonth - 1]} ${selectedYear}`',
+        ': `Woche ${detailModalData.weekNumber}`}',
+      ].join('\n'),
+      "{detailModalData.weekNumber === 0 ? t('common.month') : t('common.week')}",
+      "detailModalData.weekNumber === 0 ? t('common.month') : t('abr.thisWeek')",
+      '{detailModalData.weekStartDate} – {detailModalData.weekEndDate}',
+      'const pos = detailModalData.difference >= 0;',
+      "quote !== null ? formatPercent(quote) : '—'",
+      'onClick={handleShareToWhatsApp}',
+      'onClick={handleCopyImage}',
+      'onClick={handleDownloadImage}',
+      'disabled={isSharing}',
+      "{isSharing ? t('abr.creatingImage') : t('common.share')}",
+      "{isSharing ? t('abr.creatingImage') : t('common.copy')}",
+      "{isSharing ? t('abr.creatingImage') : t('common.download')}",
+      'setDetailModalData(null)',
+    ],
+  },
 ];
 
 const lines = text => text.replace(/\r\n/g, '\n').split('\n');
@@ -217,6 +290,7 @@ for (const file of FILES) {
   const oldNorm = dedent(oldText);
   const newNorm = dedent(newText);
 
+  let verbatimLines = 0;
   try {
     let oldCount = 0;
     let newCount = 0;
@@ -238,6 +312,16 @@ for (const file of FILES) {
         throw new Error(`${file.path}: logic differs at kept line ${i + 1}\n  base: ${oldKept[i]}\n  new:  ${newKept[i]}`);
       }
     }
+    for (const { from, to } of file.verbatim ?? []) {
+      const start = oldLines.indexOf(from);
+      if (start < 0) throw new Error(`${file.path} (base): verbatim block not found: ${from}`);
+      const end = oldLines.indexOf(to, start + 1);
+      const text = oldLines.slice(start, end + 1).join('\n');
+      if (!lines(newText).join('\n').includes(text)) {
+        throw new Error(`${file.path}: the ${end + 1 - start}-line block from "${from.trim()}" is not in the new file byte for byte`);
+      }
+      verbatimLines += end + 1 - start;
+    }
     for (const carried of file.carried) {
       const snippet = dedent(carried);
       if (!oldNorm.includes(snippet)) throw new Error(`${file.path}: carried snippet not in the base file: ${snippet}`);
@@ -245,7 +329,8 @@ for (const file of FILES) {
     }
     console.log(
       `ok   ${file.path}: logic ${oldCount} lines at ${base}, ${newCount} now; identical after removing ` +
-        `${file.added.length} added and ${file.removed.length} removed lines; ${file.carried.length} carried snippets verbatim`,
+        `${file.added.length} added and ${file.removed.length} removed lines; ${file.carried.length} carried snippets verbatim` +
+        (verbatimLines ? `; ${verbatimLines} lines kept byte for byte` : ""),
     );
   } catch (error) {
     failed = true;
