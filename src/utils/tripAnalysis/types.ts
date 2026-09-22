@@ -195,32 +195,37 @@ export type IssueSeverity = 'error' | 'warning' | 'info';
  * (minutes are exact, not rounded; ms values are epoch milliseconds).
  *
  * Overlaps (half-open intervals, all pairs, across blocks and vehicles):
- *  - driver_overlap    one driver in two trips at once.
+ *  - driver_overlap    one driver in two trips at once (tripA starts first).
  *                      values: overlapMinutes, overlapStartMs, overlapEndMs,
- *                      vehicleA, vehicleB, identicalInterval
- *  - vehicle_overlap   one vehicle driven by two drivers at once. Pairs of the
- *                      same driver are driver_overlap, never repeated here; a
- *                      pair with an unknown driver is 'unverifiable'.
- *                      values: overlapMinutes, overlapStartMs, overlapEndMs, driverA, driverB
+ *                      tripA, tripB, vehicleA, vehicleB, identicalInterval
+ *  - vehicle_overlap   one vehicle driven by two different drivers at once.
+ *                      Pairs of one driver are driver_overlap, never repeated
+ *                      here. Only analysed rows take part, so both drivers are known.
+ *                      values: overlapMinutes, overlapStartMs, overlapEndMs,
+ *                      tripA, tripB, driverA, driverB
  * Travel (consecutive trips of one driver; "previous" is the trip that reached
  * the running maximum end, the same end the block gap is measured from):
- *  - travel_gap        values: availableMinutes, marginMinutes, estimateMinutes,
- *                      requiredMinutes, shortByMinutes, estimateSource,
- *                      estimateConfidence, estimateComputedAt, reason,
- *                      belowMargin, vehicleChange
+ *  - travel_gap        values: fromTripId, toTripId, availableMinutes,
+ *                      marginMinutes, estimateMinutes, requiredMinutes,
+ *                      shortByMinutes, estimateSource, estimateConfidence,
+ *                      estimateComputedAt, reason, belowMargin, vehicleChange
  * Shifts:
  *  - activity_outside_shift  the part of a trip no recorded shift covers.
  *                      values: outsideMinutes, tripMinutes
- *  - shift_without_activity  a shift no analysed trip touches.
- *                      values: shiftMinutes, source
- *  - shift_overlap     two shift records of one driver overlap. values: overlapMinutes
- *  - shift_invalid     a shift whose end is not after its start. values: startMs, endMs
- *  - no_shift_records  a driver with trips but no shift at all. values: tripCount
- * Row quality (review list; the row is always kept):
+ *  - shift_without_activity  a shift no analysed trip touches; 'unverifiable'
+ *                      when the driver has rows the analysis could not measure.
+ *                      values: shiftMinutes, startMs, endMs, source, openRows
+ *  - shift_overlap     two shift records of one driver overlap.
+ *                      values: overlapMinutes, overlapStartMs, overlapEndMs
+ *  - shift_invalid     a shift without a driver, or whose end is not after its
+ *                      start. values: startMs, endMs, reason, source
+ *  - no_shift_records  a driver with analysed trips but no valid shift. values: tripCount
+ * Row quality (review list; the row is always kept; values: sourceRow):
  *  - missing_driver, missing_vehicle, missing_start, missing_end,
- *    end_before_start (values: startMs, endMs), status_unknown,
- *    ambiguous_local_time (values: ambiguity)
- *  - driver_name_mismatch  one driver id under several names. values: names
+ *    end_before_start (+ startMs, endMs), status_unknown,
+ *    ambiguous_local_time (+ ambiguity)
+ *  - driver_name_mismatch  one driver id under several names; the evidence is
+ *                      the rows off the most frequent spelling. values: names, majorityName
  * Budget (per driver; nothing is ever moved or cut):
  *  - activity_over_budget  values: activityMinutes, maxMinutes, overByMinutes
  *  - shifts_over_budget    values: shiftMinutes, maxMinutes, overByMinutes
@@ -452,9 +457,8 @@ export interface CheckTally {
  * How complete each check is, for the dashboard's completion figure. Units:
  *  - driverOverlap   non-cancelled rows with a driver: analysed rows pass or
  *                    conflict, rows missing a usable interval are unverifiable
- *  - vehicleOverlap  analysed rows: rows with a vehicle pass or conflict (a
- *                    pair with an unknown driver is unverifiable), rows without
- *                    a vehicle are unverifiable
+ *  - vehicleOverlap  analysed rows: rows with a vehicle pass or conflict, rows
+ *                    without a vehicle are unverifiable
  *  - travelGap       consecutive pairs of analysed trips of one driver
  *  - shiftCoverage   analysed rows: fully covered pass, partly outside conflict,
  *                    driver without shift records unverifiable
