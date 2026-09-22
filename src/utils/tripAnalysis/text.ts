@@ -1,7 +1,8 @@
 /**
  * The German wording of findings. German is the product's source language;
  * a screen may render its own text from an issue's type and values instead.
- * Figures follow German formatting (decimal comma, DD.MM.YYYY).
+ * Figures follow German formatting (decimal comma, DD.MM.YYYY) through the
+ * design system's formatNumber.
  */
 import { formatNumber } from '../../components/ui/format';
 import { fmtAbsDate, fmtRideRange } from '../planningQualityChecks';
@@ -12,7 +13,7 @@ const MINUTE_MS = 60_000;
 /** Minutes as German text: whole minutes without a decimal, otherwise one. */
 export function minutesText(minutes: number): string {
   const rounded = Math.round(minutes * 10) / 10;
-  return Number.isInteger(rounded) ? formatNumber(rounded, 0) : formatNumber(rounded, 1);
+  return formatNumber(rounded, Number.isInteger(rounded) ? 0 : 1);
 }
 
 export function msAsMinutesText(ms: number): string {
@@ -25,8 +26,8 @@ export function hoursText(hours: number): string {
 
 /** "01.08.2026 07:00–07:15", or with both dates when the interval crosses midnight. */
 export function intervalText(startMs: number, endMs: number): string {
-  if (fmtAbsDate(startMs) === fmtAbsDate(endMs)) return `${fmtAbsDate(startMs)} ${fmtRideRange(startMs, endMs)}`;
-  return fmtRideRange(startMs, endMs);
+  const range = fmtRideRange(startMs, endMs);
+  return fmtAbsDate(startMs) === fmtAbsDate(endMs) ? `${fmtAbsDate(startMs)} ${range}` : range;
 }
 
 const BUDGET_PROBLEM_TEXT: Readonly<Record<BudgetProblem, string>> = {
