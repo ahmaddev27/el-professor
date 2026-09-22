@@ -7,6 +7,7 @@ import type { BillingCycle, DiscountResult } from '../../utils/pricing';
 import { useAppConfig } from '../../contexts/AppConfigContext';
 import { useTranslation } from '../../contexts/LanguageContext';
 import { PLANS, planDef } from './plans';
+import { Badge, Button, Input, cn } from '../ui';
 
 /**
  * Tier, fleet size, billing cycle, discount code and the resulting price — the
@@ -21,8 +22,6 @@ import { PLANS, planDef } from './plans';
  * code: the code was checked against the price that has just changed.
  */
 
-const labelClass = 'block text-xs font-semibold text-white/40 uppercase tracking-wider mb-2';
-
 // ─── PricePreview ─────────────────────────────────────────────────────────────
 
 const PricePreview: React.FC<{
@@ -36,32 +35,34 @@ const PricePreview: React.FC<{
   const { priceBook } = useAppConfig();
   const bp = calcPricing(priceBook, plan, carLimit, billingCycle);
   const fleetPct = fleetDiscountPercent(priceBook, carLimit);
-  const planColor = planDef(plan).color;
 
   // current_price that was passed to edge fn = bp.finalTotal
   const finalPrice = discount ? discount.final_price : bp.finalTotal;
 
+  // ── Presentation (phase 5) ────────────────────────────────────────────────
+  // The figures are the ones above and the expressions below, unchanged; only
+  // how they are drawn moved to the design system. Every discount reads as a
+  // gain in the one positive colour, and the tier's name, which used to be
+  // told by the box's colour, is written in its heading.
+
   return (
-    <div className="rounded-xl p-4 border" style={{
-      background: `${planColor}0d`,
-      borderColor: `${planColor}30`,
-    }}>
-      <p className="text-xs font-semibold uppercase tracking-wider mb-3" style={{ color: planColor }}>
-        {t('signup.price.heading')}
+    <div className="rounded-surface border border-line bg-sunken p-4 font-ui">
+      <p className="mb-3 text-[13px] font-semibold text-fg">
+        {t('signup.price.heading')} · {planDef(plan).name}
       </p>
-      <div className="space-y-1.5 text-xs">
-        <div className="flex justify-between text-white/50">
+      <div className="grid gap-1.5 text-xs tabular-nums">
+        <div className="flex justify-between gap-3 text-fg-muted">
           <span>{t('signup.price.base')} ({carLimit} × {fmtPricePerCar(priceBook.price_per_car_cents[plan])} €)</span>
           <span>{fmtPrice(bp.baseMonthly)} €</span>
         </div>
         {fleetPct > 0 && (
-          <div className="flex justify-between" style={{ color: '#34d399' }}>
+          <div className="flex justify-between gap-3 text-positive">
             <span>{t('landing.pricing.fleetDiscount')} -{fleetPct}%</span>
             <span>-{fmtPrice(bp.baseMonthly - bp.monthlyAfterFleet)} €</span>
           </div>
         )}
         {billingCycle === 'yearly' && (
-          <div className="flex justify-between" style={{ color: '#fbbf24' }}>
+          <div className="flex justify-between gap-3 text-positive">
             <span>{t('landing.pricing.yearlyDiscount')} -{priceBook.yearly_discount_percent}%</span>
             <span>
               -{fmtPrice(billingCycle === 'yearly' ? bp.monthlyAfterFleet * 12 - bp.yearlyTotal : 0)} €
@@ -69,12 +70,12 @@ const PricePreview: React.FC<{
           </div>
         )}
         {discount && (
-          <div className="flex justify-between" style={{ color: '#34d399' }}>
+          <div className="flex justify-between gap-3 text-positive">
             <span>{t('signup.discount.label')} ({discount.code})</span>
             <span>-{fmtPrice(discount.discount_amount)} €</span>
           </div>
         )}
-        <div className="pt-2 border-t border-white/10 flex justify-between font-bold" style={{ color: planColor }}>
+        <div className="mt-1 flex justify-between gap-3 border-t border-line pt-2 text-sm font-semibold text-fg">
           {billingCycle === 'yearly' ? (
             <>
               <span>{t('signup.price.finalYearly')}</span>
@@ -88,13 +89,13 @@ const PricePreview: React.FC<{
           )}
         </div>
         {billingCycle === 'yearly' && (
-          <div className="flex justify-between text-white/35 text-[11px]">
+          <div className="flex justify-between gap-3 text-fg-subtle">
             <span>{t('signup.price.monthlyEquivalent')}</span>
             <span>{fmtPrice(finalPrice / 12)} € {t('signup.price.perMonth')}</span>
           </div>
         )}
       </div>
-      <p className="text-[10px] text-white/25 mt-3">
+      <p className="mt-3 text-xs text-fg-subtle">
         {t('signup.price.driverLimitNote', { count: carLimit * 4 })}
       </p>
     </div>
@@ -160,47 +161,67 @@ const DiscountCodeInput: React.FC<{
     }
   };
 
+  // ── Presentation (phase 5) ────────────────────────────────────────────────
+  // The check above is unchanged, and so is when it runs: the button, and
+  // Enter in the field. The server's own sentence is shown as it arrives.
+  //
+  // The two buttons are `type="submit"` on purpose: the legacy ones named no
+  // type, and a button without one submits the form it sits in. On the Google
+  // registration screen this block sits inside that screen's form, so
+  // "Anwenden" and removing a code have always submitted the registration as
+  // well — a defect, recorded in HANDOFF.md for the owner, and not this
+  // look-only change's to fix. The design-system Button defaults to "button",
+  // so the old behaviour has to be asked for.
+
   if (applied) {
     return (
-      <div className="flex items-center justify-between px-3 py-2.5 rounded-xl border" style={{ background: 'rgba(52,211,153,0.07)', borderColor: 'rgba(52,211,153,0.25)' }}>
-        <div className="flex items-center gap-2">
-          <Tag size={14} style={{ color: '#34d399' }} />
-          <span className="text-xs font-bold" style={{ color: '#34d399' }}>{applied.code}</span>
-          <span className="text-xs text-white/40">{t('signup.discount.applied')}</span>
+      <div className="flex items-center justify-between gap-3 rounded-control border border-positive/30 bg-positive-soft px-3 py-2 font-ui">
+        <div className="flex min-w-0 items-center gap-2 text-xs">
+          <Tag aria-hidden className="size-3.5 shrink-0 text-positive" />
+          <span className="font-semibold text-positive">{applied.code}</span>
+          <span className="text-fg-muted">{t('signup.discount.applied')}</span>
         </div>
-        <button onClick={() => { onRemoved(); setMessage(null); }} className="p-1 rounded hover:opacity-70 transition-opacity" style={{ color: '#34d399' }}>
-          <X size={14} />
-        </button>
+        <Button
+          type="submit"
+          variant="ghost"
+          size="icon-sm"
+          onClick={() => { onRemoved(); setMessage(null); }}
+          aria-label={t('common.remove')}
+          className="text-positive hover:text-positive"
+        >
+          <X aria-hidden />
+        </Button>
       </div>
     );
   }
 
   return (
-    <div className="space-y-2">
+    <div className="grid gap-2 font-ui">
       <div className="flex gap-2">
-        <div className="relative flex-1">
-          <Tag className="absolute left-3 top-1/2 -translate-y-1/2 text-white/25" size={14} />
-          <input
+        <div className="relative min-w-0 flex-1">
+          <Tag aria-hidden className="pointer-events-none absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-fg-subtle" />
+          <Input
             type="text"
             value={code}
             onChange={e => setCode(e.target.value.toUpperCase())}
             onKeyDown={e => e.key === 'Enter' && handleApply()}
             placeholder={t('signup.discount.label')}
-            className="w-full pl-9 pr-3 py-2.5 bg-white/5 border border-white/10 text-white placeholder-white/20 rounded-xl focus:outline-none focus:ring-2 focus:ring-cyan-500/30 text-sm font-mono"
+            aria-label={t('signup.discount.label')}
+            className="pl-8 font-mono"
           />
         </div>
-        <button
+        <Button
+          type="submit"
+          variant="secondary"
           onClick={handleApply}
           disabled={loading || !code.trim()}
-          className="px-4 py-2.5 rounded-xl text-sm font-semibold text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed"
-          style={{ background: 'rgba(6,182,212,0.2)', border: '1px solid rgba(6,182,212,0.3)' }}
         >
           {loading ? '…' : t('signup.discount.apply')}
-        </button>
+        </Button>
       </div>
       {message && (
-        <p className="text-xs flex items-center gap-1.5" style={{ color: message.ok ? '#34d399' : '#f87171' }}>
-          {message.ok ? <Check size={11} /> : <AlertCircle size={11} />}
+        <p role="status" className={cn('flex items-center gap-1.5 text-xs', message.ok ? 'text-positive' : 'text-critical')}>
+          {message.ok ? <Check aria-hidden className="size-3.5 shrink-0" /> : <AlertCircle aria-hidden className="size-3.5 shrink-0" />}
           {message.text}
         </p>
       )}
@@ -241,7 +262,6 @@ const PlanSelection: React.FC<PlanSelectionProps> = ({
   // Prices and the trial length come from the database (plan 3.9), so the
   // screen quotes what the database will charge and what a signup will grant.
   const { priceBook, trialDays } = useAppConfig();
-  const selectedPlanDef = planDef(plan);
 
   const trialEndDate = new Date();
   trialEndDate.setDate(trialEndDate.getDate() + trialDays);
@@ -251,43 +271,46 @@ const PlanSelection: React.FC<PlanSelectionProps> = ({
 
   const breakdown = calcPricing(priceBook, plan, carLimit, billingCycle);
 
+  // ── Presentation (phase 5) ────────────────────────────────────────────────
+  // Everything above is unchanged except `selectedPlanDef`, which only looked
+  // up the chosen tier's colour for the slider and the cycle buttons; with one
+  // brand colour for every tier there is nothing left to look up. Each choice
+  // below still drops an applied discount code, as before.
+
   return (
     <>
       {/* Plan cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 gap-3 font-ui sm:grid-cols-3">
         {PLANS.map(entry => (
           <button
             key={entry.id}
             type="button"
             onClick={() => { onPlanChange(entry.id); onDiscountChange(null); }}
-            className="relative text-left p-4 rounded-xl border transition-all"
-            style={{
-              background: plan === entry.id ? `${entry.color}18` : 'rgba(255,255,255,0.03)',
-              borderColor: plan === entry.id ? entry.color : 'rgba(255,255,255,0.1)',
-              boxShadow: plan === entry.id ? `0 0 24px ${entry.color}25` : 'none',
-            }}
+            aria-pressed={plan === entry.id}
+            className={cn(
+              'relative rounded-surface border p-4 text-left transition-colors',
+              'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus',
+              plan === entry.id ? 'border-brand bg-brand-soft' : 'border-line bg-raised hover:bg-sunken',
+            )}
           >
             {entry.highlight && (
-              <div
-                className="absolute -top-2.5 left-1/2 -translate-x-1/2 px-2 py-0.5 rounded-full text-[10px] font-bold"
-                style={{ background: entry.color, color: '#000' }}
-              >
+              <Badge tone="brand" className="absolute -top-2.5 left-1/2 -translate-x-1/2 border border-brand/30 bg-raised">
                 {t('signup.plan.badgePopular')}
-              </div>
+              </Badge>
             )}
             {plan === entry.id && (
-              <div className="absolute top-2.5 right-2.5 w-5 h-5 rounded-full flex items-center justify-center" style={{ background: entry.color }}>
-                <Check size={11} color="#fff" />
-              </div>
+              <span className="absolute right-2.5 top-2.5 flex size-5 items-center justify-center rounded-full bg-brand text-brand-fg">
+                <Check aria-hidden className="size-3" />
+              </span>
             )}
-            <p className="font-bold text-white text-sm mb-0.5">{entry.name}</p>
-            <p className="text-xs mb-1" style={{ color: entry.color }}>
-              {fmtPricePerCar(priceBook.price_per_car_cents[entry.id])} €<span className="text-white/30"> {t('landing.pricing.perVehiclePerMonth')}</span>
+            <p className="mb-0.5 text-sm font-semibold text-fg">{entry.name}</p>
+            <p className="mb-2 text-xs tabular-nums text-brand-text">
+              {fmtPricePerCar(priceBook.price_per_car_cents[entry.id])} €<span className="text-fg-subtle"> {t('landing.pricing.perVehiclePerMonth')}</span>
             </p>
-            <ul className="space-y-1">
+            <ul className="grid gap-1">
               {entry.features.map(featureKey => (
-                <li key={featureKey} className="flex items-center gap-1.5 text-xs text-white/50">
-                  <span className="w-1 h-1 rounded-full flex-shrink-0" style={{ background: entry.color }} />
+                <li key={featureKey} className="flex items-center gap-1.5 text-xs text-fg-muted">
+                  <span aria-hidden className="size-1 shrink-0 rounded-full bg-fg-subtle" />
                   {t(featureKey)}
                 </li>
               ))}
@@ -297,24 +320,24 @@ const PlanSelection: React.FC<PlanSelectionProps> = ({
       </div>
 
       {/* Car count */}
-      <div>
-        <label className={labelClass}>
-          <Car size={11} className="inline mr-1" />
+      <div className="font-ui">
+        <label htmlFor="signup-car-limit" className="mb-1.5 flex items-center gap-1.5 text-[13px] font-medium text-fg-muted">
+          <Car aria-hidden className="size-3.5" />
           {t('signup.cars.label')}
         </label>
         <div className="flex items-center gap-4">
           <input
+            id="signup-car-limit"
             type="range" min={1} max={20} value={carLimit}
             onChange={e => { onCarLimitChange(Number(e.target.value)); onDiscountChange(null); }}
-            className="flex-1"
-            style={{ accentColor: selectedPlanDef.color }}
+            className="h-11 flex-1 accent-brand"
           />
-          <span className="text-white font-bold text-lg w-8 text-center">{carLimit}</span>
+          <span className="w-8 text-center text-lg font-semibold tabular-nums text-fg">{carLimit}</span>
         </div>
-        <p className="text-[11px] text-white/30 mt-1">
+        <p className="mt-1 text-xs text-fg-subtle">
           {t('signup.cars.driverLimit', { count: carLimit * 4 })}
           {fleetDiscountPercent(priceBook, carLimit) > 0 && (
-            <span className="ml-2 text-emerald-400 font-semibold">
+            <span className="ml-2 font-semibold text-positive">
               -{fleetDiscountPercent(priceBook, carLimit)}% {t('landing.pricing.fleetDiscount')}
             </span>
           )}
@@ -322,26 +345,26 @@ const PlanSelection: React.FC<PlanSelectionProps> = ({
       </div>
 
       {/* Billing cycle */}
-      <div>
-        <label className={labelClass}>{t('signup.billing.label')}</label>
-        <div className="flex gap-2">
+      <div className="font-ui">
+        <p className="mb-1.5 text-[13px] font-medium text-fg-muted">{t('signup.billing.label')}</p>
+        <div role="group" aria-label={t('signup.billing.label')} className="grid grid-cols-2 gap-2">
           {(['monthly', 'yearly'] as BillingCycle[]).map(bc => (
             <button
               key={bc}
               type="button"
               onClick={() => { onBillingCycleChange(bc); onDiscountChange(null); }}
-              className="flex-1 py-2.5 px-3 rounded-xl border text-xs font-semibold transition-all flex items-center justify-center gap-2"
-              style={{
-                background: billingCycle === bc ? `${selectedPlanDef.color}18` : 'rgba(255,255,255,0.03)',
-                borderColor: billingCycle === bc ? selectedPlanDef.color : 'rgba(255,255,255,0.1)',
-                color: billingCycle === bc ? '#fff' : 'rgba(255,255,255,0.4)',
-              }}
+              aria-pressed={billingCycle === bc}
+              className={cn(
+                'flex h-10 items-center justify-center gap-2 rounded-control border px-3 text-sm font-semibold transition-colors [@media(pointer:coarse)]:h-11',
+                'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus',
+                billingCycle === bc ? 'border-brand bg-brand-soft text-fg' : 'border-line bg-raised text-fg-muted hover:bg-sunken hover:text-fg',
+              )}
             >
               {bc === 'monthly' ? t('landing.pricing.monthly') : (
                 <><span>{t('landing.pricing.yearly')}</span>
-                  <span className="px-1.5 py-0.5 rounded-full text-[10px]" style={{ background: 'rgba(251,191,36,0.15)', color: '#fbbf24' }}>
+                  <Badge tone="positive">
                     -{priceBook.yearly_discount_percent}%
-                  </span>
+                  </Badge>
                 </>
               )}
             </button>
@@ -366,12 +389,12 @@ const PlanSelection: React.FC<PlanSelectionProps> = ({
 
       {/* Trial callout */}
       {showTrialCallout && (
-        <div className="p-3.5 rounded-xl border border-cyan-500/20 bg-cyan-500/5 flex items-start gap-2.5">
-          <Zap size={14} className="text-cyan-400 flex-shrink-0 mt-0.5" />
-          <p className="text-xs text-white/50">
-            <span className="text-cyan-300 font-semibold">{t('signup.trial.badge', { days: trialDays })}</span>{' '}
+        <div className="flex items-start gap-2.5 rounded-surface border border-brand/30 bg-brand-soft p-3.5 font-ui text-xs text-fg-muted">
+          <Zap aria-hidden className="mt-0.5 size-3.5 shrink-0 text-brand-text" />
+          <p>
+            <span className="font-semibold text-brand-text">{t('signup.trial.badge', { days: trialDays })}</span>{' '}
             {t('signup.trial.bodyLead', { date: trialEndFormatted })}{' '}
-            <span className="text-white/70">Premium</span>{t('signup.trial.bodyTail')}
+            <span className="font-medium text-fg">Premium</span>{t('signup.trial.bodyTail')}
           </p>
         </div>
       )}

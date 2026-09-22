@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   Building2, User, Mail, Lock, Eye, EyeOff,
-  AlertCircle, CheckCircle2, ArrowLeft, ArrowRight, Check, Gift, LogIn,
+  CheckCircle2, ArrowLeft, ArrowRight, Check, LogIn,
 } from 'lucide-react';
 import { Plan } from '../contexts/PlanContext';
 import type { BillingCycle, DiscountResult } from '../utils/pricing';
@@ -17,17 +17,15 @@ import GoogleButton from '../components/auth/GoogleButton';
 import { LegalLinks } from '../components/legal/LegalLinks';
 import NoticeBox from '../components/auth/NoticeBox';
 import OtpChallenge from '../components/auth/OtpChallenge';
-import { authPrimaryButtonClass } from '../components/auth/authStyles';
+import AuthShell from '../components/auth/AuthShell';
+import { authFieldIconClass, authFieldWithIconClass, authLinkClass } from '../components/auth/authStyles';
+import { Alert, Button, Field, Input, cn } from '../components/ui';
 import PlanSelection from '../components/signup/PlanSelection';
 import { planDef } from '../components/signup/plans';
 
 // 'verify' follows a successful company-signup: the account exists and waits
 // for the code, so there is no way back to the earlier steps from there.
 type Step = 'plan' | 'company' | 'account' | 'verify';
-
-const inputClass =
-  'w-full px-4 py-3 bg-white/5 border border-white/10 text-white placeholder-white/20 rounded-xl focus:outline-none focus:ring-2 focus:ring-cyan-500/50 focus:border-cyan-500/40 transition-all text-sm';
-const labelClass = 'block text-xs font-semibold text-white/40 uppercase tracking-wider mb-2';
 
 const STEPS: Step[] = ['plan', 'company', 'account', 'verify'];
 
@@ -144,69 +142,88 @@ const SignupPage: React.FC = () => {
 
   const selectedPlanDef = planDef(selectedPlan);
 
+  // ── Presentation (phase 5) ────────────────────────────────────────────────
+  // Everything above is unchanged: the steps, company-signup and its body,
+  // the hand-off after the code, and the confirmed-but-not-signed-in path. What
+  // lived in the markup is kept as it was — the company step's submit (no empty
+  // name), the two back buttons, "continue with", the submit button's rule.
+
+  const stepIndicator = (
+    <ol className="mb-6 flex items-center justify-center gap-2 font-ui">
+      {STEPS.map((s, i) => (
+        <React.Fragment key={s}>
+          <li className="flex items-center gap-1.5" aria-current={step === s ? 'step' : undefined}>
+            <span className={cn(
+              'flex size-6 items-center justify-center rounded-full text-xs font-semibold tabular-nums',
+              step === s
+                ? 'bg-brand text-brand-fg'
+                : i < stepIndex
+                  ? 'bg-positive-soft text-positive'
+                  : 'bg-sunken text-fg-subtle',
+            )}>
+              {i < stepIndex ? <Check size={12} aria-hidden="true" /> : i + 1}
+            </span>
+            <span className={cn('hidden text-xs font-medium sm:inline', step === s ? 'text-fg' : 'text-fg-subtle')}>
+              {t(STEP_LABEL_KEYS[s])}
+            </span>
+          </li>
+          {i < STEPS.length - 1 && <li aria-hidden className={cn('h-px w-6', i < stepIndex ? 'bg-positive' : 'bg-line')} />}
+        </React.Fragment>
+      ))}
+    </ol>
+  );
+
+  const heading = (title: string, sub: React.ReactNode) => (
+    <div>
+      <h2 className="mb-1 text-base font-semibold text-fg">{title}</h2>
+      <p className="text-[13px] text-fg-muted">{sub}</p>
+    </div>
+  );
+
   return (
-    <div className="min-h-screen bg-[#060a0f] flex items-center justify-center p-4 relative overflow-hidden">
-      <div className="absolute inset-0 bg-[linear-gradient(rgba(6,182,212,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(6,182,212,0.03)_1px,transparent_1px)] bg-[size:48px_48px]" />
-      <div className="absolute top-1/4 left-1/2 -translate-x-1/2 w-[600px] h-[400px] bg-cyan-600/5 rounded-full blur-[120px] pointer-events-none" />
-
-      <div className="relative w-full max-w-2xl">
-        {/* Logo */}
-        <div className="text-center mb-6">
-          <div className="w-14 h-14 mx-auto mb-3 flex items-center justify-center">
-            <img src="/professor_logo_white.svg" alt="El-Professor" className="w-14 h-14 object-contain drop-shadow-[0_0_16px_rgba(6,182,212,0.5)]" />
-          </div>
-          <h1 className="text-2xl font-bold text-white mb-1">{t('signup.cta')}</h1>
-          <p className="text-white/40 text-sm">{t('signup.subtitle', { days: trialDays })}</p>
-        </div>
-
-        {/* Step indicators */}
-        <div className="flex items-center justify-center gap-2 mb-6">
-          {STEPS.map((s, i) => (
-            <React.Fragment key={s}>
-              <div className="flex items-center gap-1.5" aria-current={step === s ? 'step' : undefined}>
-                <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold transition-all ${
-                  step === s
-                    ? 'bg-cyan-500 text-white'
-                    : i < stepIndex
-                      ? 'bg-emerald-500 text-white'
-                      : 'bg-white/10 text-white/30'
-                }`}>
-                  {i < stepIndex ? <Check size={12} aria-hidden="true" /> : i + 1}
-                </div>
-                <span className={`text-xs font-medium hidden sm:inline ${step === s ? 'text-white' : 'text-white/30'}`}>
-                  {t(STEP_LABEL_KEYS[s])}
-                </span>
-              </div>
-              {i < STEPS.length - 1 && <div className={`w-6 h-px ${i < stepIndex ? 'bg-emerald-500/50' : 'bg-white/10'}`} />}
-            </React.Fragment>
-          ))}
-        </div>
-
-        <div className="bg-white/4 backdrop-blur-xl border border-white/10 rounded-2xl p-6 shadow-[0_24px_64px_rgba(0,0,0,0.5)]">
+    <AuthShell
+      width="wide"
+      title={t('signup.cta')}
+      subtitle={t('signup.subtitle', { days: trialDays })}
+      above={stepIndicator}
+      footer={
+        <>
+          <p className="text-sm text-fg-muted">
+            {t('signup.alreadyRegistered')}{' '}
+            <Link to="/login" className={authLinkClass}>{t('auth.signIn')}</Link>
+          </p>
+          {/* #97's Impressum and Datenschutz links. The page follows the theme
+              now, so they take the theme's tone rather than `onDark`. */}
+          <LegalLinks className="justify-center" />
+        </>
+      }
+    >
 
           {/* ── Step 4: Confirm the email address ── */}
           {step === 'verify' && (
-            <div className="space-y-5">
-              <div>
-                <h2 className="text-base font-semibold text-white mb-1">{t('signup.verify.heading')}</h2>
-                <p className="text-xs text-white/40 break-words">
+            <div className="grid gap-5">
+              {heading(
+                t('signup.verify.heading'),
+                <span className="break-words">
                   <EmphasizedText
                     template={t('signup.verify.subheading')}
                     placeholder="email"
                     value={normalizeEmail(email)}
-                    className="text-cyan-300"
+                    className="font-medium text-fg"
                   />
-                </p>
-              </div>
+                </span>,
+              )}
 
-              <div className="w-full max-w-sm mx-auto">
+              <div className="mx-auto w-full max-w-sm">
                 {verifiedWithoutSession ? (
-                  <div className="space-y-4">
+                  <div className="grid gap-4">
                     <NoticeBox tone="success" announce>{t('signup.verify.verifiedLogin')}</NoticeBox>
-                    <Link to="/login" replace className={authPrimaryButtonClass}>
-                      <LogIn size={15} aria-hidden="true" />
-                      <span>{t('auth.signIn')}</span>
-                    </Link>
+                    <Button asChild size="lg" className="w-full">
+                      <Link to="/login" replace>
+                        <LogIn size={15} aria-hidden="true" />
+                        <span>{t('auth.signIn')}</span>
+                      </Link>
+                    </Button>
                   </div>
                 ) : (
                   // No "code sent to" hint: when the send failed, that sentence
@@ -228,11 +245,8 @@ const SignupPage: React.FC = () => {
 
           {/* ── Step 1: Plan + Car Count + Billing Cycle ── */}
           {step === 'plan' && (
-            <div className="space-y-5">
-              <div>
-                <h2 className="text-base font-semibold text-white mb-1">{t('signup.plan.heading')}</h2>
-                <p className="text-xs text-white/40">{t('signup.plan.subheading', { days: trialDays })}</p>
-              </div>
+            <div className="grid gap-5">
+              {heading(t('signup.plan.heading'), t('signup.plan.subheading', { days: trialDays }))}
 
               {/* The same block the Google registration screen shows, so both
                   paths sell the same tiers at the same prices. */}
@@ -247,145 +261,124 @@ const SignupPage: React.FC = () => {
                 onDiscountChange={setAppliedDiscount}
               />
 
-              <button
-                onClick={() => setStep('company')}
-                className="w-full bg-gradient-to-r from-cyan-500 to-blue-600 text-white py-3 px-4 rounded-xl font-semibold text-sm hover:shadow-[0_4px_24px_rgba(6,182,212,0.4)] hover:-translate-y-0.5 transition-all duration-200 flex items-center justify-center gap-2"
-              >
+              <Button size="lg" className="w-full" onClick={() => setStep('company')}>
                 {t('signup.continueWith', { plan: selectedPlanDef.name })}
-                <ArrowRight size={15} />
-              </button>
+                <ArrowRight aria-hidden />
+              </Button>
             </div>
           )}
 
           {/* ── Step 2: Company ── */}
           {step === 'company' && (
-            <form onSubmit={e => { e.preventDefault(); if (companyName.trim()) setStep('account'); }} className="space-y-5">
-              <div>
-                <button type="button" onClick={() => setStep('plan')} className="flex items-center gap-1.5 text-white/40 hover:text-white/70 text-xs mb-4 transition-colors">
-                  <ArrowLeft size={13} />
+            <form onSubmit={e => { e.preventDefault(); if (companyName.trim()) setStep('account'); }} className="grid gap-5">
+              <div className="grid gap-4">
+                <Button type="button" variant="ghost" size="sm" onClick={() => setStep('plan')} className="-ml-2 justify-self-start">
+                  <ArrowLeft aria-hidden />
                   {selectedPlanDef.name} · {carLimit} {t('signup.vehiclesUnit')}
-                </button>
-                <h2 className="text-base font-semibold text-white mb-1">{t('signup.company.heading')}</h2>
-                <p className="text-xs text-white/40 mb-4">{t('signup.company.subheading')}</p>
+                </Button>
+                {heading(t('signup.company.heading'), t('signup.company.subheading'))}
               </div>
-              <div>
-                <label className={labelClass}>{t('signup.company.nameLabel')}</label>
+              <Field label={t('signup.company.nameLabel')}>
                 <div className="relative">
-                  <Building2 className="absolute left-3.5 top-1/2 -translate-y-1/2 text-white/25" size={16} />
-                  <input
+                  <Building2 aria-hidden className={authFieldIconClass} />
+                  <Input
                     type="text"
                     value={companyName}
                     onChange={e => setCompanyName(e.target.value)}
-                    className={`${inputClass} pl-10`}
+                    className={authFieldWithIconClass}
                     placeholder={t('signup.company.namePlaceholder')}
                     required
                     autoFocus
                   />
                 </div>
-              </div>
-              <button
-                type="submit"
-                disabled={!companyName.trim()}
-                className="w-full bg-gradient-to-r from-cyan-500 to-blue-600 text-white py-3 px-4 rounded-xl font-semibold text-sm hover:shadow-[0_4px_24px_rgba(6,182,212,0.4)] hover:-translate-y-0.5 transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:translate-y-0 flex items-center justify-center gap-2"
-              >
+              </Field>
+              <Button type="submit" size="lg" disabled={!companyName.trim()} className="w-full">
                 {t('signup.next')}
-                <ArrowRight size={15} />
-              </button>
+                <ArrowRight aria-hidden />
+              </Button>
             </form>
           )}
 
           {/* ── Step 3: Account ── */}
           {step === 'account' && (
             <>
-              <form onSubmit={handleSubmit} className="space-y-4">
-                <div>
-                  <button type="button" onClick={() => { setStep('company'); setError(''); }} className="flex items-center gap-1.5 text-white/40 hover:text-white/70 text-xs mb-4 transition-colors">
-                    <ArrowLeft size={13} />
-                    {companyName}
-                  </button>
-                  <h2 className="text-base font-semibold text-white mb-1">{t('signup.account.heading')}</h2>
-                  <p className="text-xs text-white/40 mb-4">{t('signup.account.subheading')}</p>
+              <form onSubmit={handleSubmit} className="grid gap-4">
+                <div className="grid gap-4">
+                  <Button type="button" variant="ghost" size="sm" onClick={() => { setStep('company'); setError(''); }} className="-ml-2 max-w-full justify-self-start">
+                    <ArrowLeft aria-hidden />
+                    <span className="truncate">{companyName}</span>
+                  </Button>
+                  {heading(t('signup.account.heading'), t('signup.account.subheading'))}
                 </div>
 
-                {error && (
-                  <div className="p-3.5 bg-red-500/10 border border-red-500/20 rounded-xl flex items-start gap-2.5">
-                    <AlertCircle className="text-red-400 flex-shrink-0 mt-0.5" size={15} />
-                    <span className="text-red-300 text-sm">{error}</span>
-                  </div>
-                )}
+                {error && <Alert tone="critical" title={error} />}
 
-                <div>
-                  <label className={labelClass}>{t('signup.account.fullName')}</label>
+                <Field label={t('signup.account.fullName')}>
                   <div className="relative">
-                    <User className="absolute left-3.5 top-1/2 -translate-y-1/2 text-white/25" size={16} />
-                    <input type="text" value={fullName} onChange={e => setFullName(e.target.value)} className={`${inputClass} pl-10`} placeholder={t('signup.account.fullNamePlaceholder')} required />
+                    <User aria-hidden className={authFieldIconClass} />
+                    <Input type="text" value={fullName} onChange={e => setFullName(e.target.value)} className={authFieldWithIconClass} placeholder={t('signup.account.fullNamePlaceholder')} required />
                   </div>
-                </div>
+                </Field>
 
-                <div>
-                  <label className={labelClass}>{t('auth.email')}</label>
+                <Field label={t('auth.email')}>
                   <div className="relative">
-                    <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 text-white/25" size={16} />
-                    <input type="email" value={email} onChange={e => setEmail(e.target.value)} className={`${inputClass} pl-10`} placeholder={t('signup.account.emailPlaceholder')} required />
+                    <Mail aria-hidden className={authFieldIconClass} />
+                    <Input type="email" value={email} onChange={e => setEmail(e.target.value)} className={authFieldWithIconClass} placeholder={t('signup.account.emailPlaceholder')} required />
                   </div>
-                </div>
+                </Field>
 
-                <div>
-                  <label className={labelClass}>{t('auth.password')}</label>
+                <Field label={t('auth.password')}>
                   <div className="relative">
-                    <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 text-white/25" size={16} />
-                    <input
+                    <Lock aria-hidden className={authFieldIconClass} />
+                    <Input
                       type={showPassword ? 'text' : 'password'}
                       value={password}
                       onChange={e => setPassword(e.target.value)}
-                      className={`${inputClass} pl-10 pr-12`}
+                      className={cn(authFieldWithIconClass, 'pr-11')}
                       placeholder={t('signup.account.passwordPlaceholder')}
                       required
                       minLength={8}
                     />
-                    <button type="button" onClick={() => setShowPassword(v => !v)} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-white/25 hover:text-white/60 transition-colors">
-                      {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-                    </button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-sm"
+                      onClick={() => setShowPassword(v => !v)}
+                      aria-label={showPassword ? t('auth.hidePassword') : t('auth.showPassword')}
+                      className="absolute right-0.5 top-1/2 -translate-y-1/2"
+                    >
+                      {showPassword ? <EyeOff aria-hidden /> : <Eye aria-hidden />}
+                    </Button>
                   </div>
-                </div>
+                </Field>
 
-                <div>
-                  <label className={labelClass}>
-                    <Gift size={11} className="inline mr-1" />
-                    {t('signup.account.referralCode')} <span className="text-white/20 normal-case tracking-normal font-normal">{t('signup.optional')}</span>
-                  </label>
-                  <div className="relative">
-                    <Gift className="absolute left-3.5 top-1/2 -translate-y-1/2 text-white/25" size={16} />
-                    <input
-                      type="text"
-                      value={referralCode}
-                      onChange={e => { setReferralCode(e.target.value.toUpperCase()); setReferralError(''); }}
-                      className={`${inputClass} pl-10 font-mono`}
-                      placeholder={t('signup.account.referralPlaceholder')}
-                    />
-                  </div>
-                  {referralError && (
-                    <p className="mt-1.5 text-xs flex items-center gap-1.5 text-red-400">
-                      <AlertCircle size={11} />
-                      {referralError}
-                    </p>
-                  )}
-                </div>
-
-                <button
-                  type="submit"
-                  disabled={loading || !fullName.trim() || !email.trim() || password.length < 8}
-                  className="w-full bg-gradient-to-r from-cyan-500 to-blue-600 text-white py-3 px-4 rounded-xl font-semibold text-sm hover:shadow-[0_4px_24px_rgba(6,182,212,0.4)] hover:-translate-y-0.5 transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:translate-y-0 flex items-center justify-center gap-2 mt-2"
+                <Field
+                  label={<>{t('signup.account.referralCode')} <span className="font-normal text-fg-subtle">{t('signup.optional')}</span></>}
+                  error={referralError || undefined}
                 >
-                  {loading
-                    ? <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
-                    : <><CheckCircle2 size={15} />{t('signup.cta')}</>
-                  }
-                </button>
+                  <Input
+                    type="text"
+                    value={referralCode}
+                    onChange={e => { setReferralCode(e.target.value.toUpperCase()); setReferralError(''); }}
+                    className="font-mono"
+                    placeholder={t('signup.account.referralPlaceholder')}
+                  />
+                </Field>
 
-                <p className="text-center text-white/25 text-xs pt-1">
+                <Button
+                  type="submit"
+                  size="lg"
+                  disabled={loading || !fullName.trim() || !email.trim() || password.length < 8}
+                  loading={loading}
+                  className="mt-1 w-full"
+                >
+                  {!loading && <CheckCircle2 aria-hidden />}
+                  {t('signup.cta')}
+                </Button>
+
+                <p className="pt-1 text-center text-xs text-fg-subtle">
                   {t('signup.summaryLead', { days: trialDays })}
-                  <strong className="text-white/40">{selectedPlanDef.name}</strong>
+                  <strong className="font-semibold text-fg-muted">{selectedPlanDef.name}</strong>
                   {t('signup.summaryTail', {
                     cars: carLimit,
                     cycle: billingCycle === 'yearly' ? t('signup.billing.yearlyAdj') : t('signup.billing.monthlyAdj'),
@@ -408,16 +401,7 @@ const SignupPage: React.FC = () => {
               />
             </>
           )}
-        </div>
-
-        <p className="text-center mt-5 text-white/30 text-sm">
-          {t('signup.alreadyRegistered')}{' '}
-          <Link to="/login" className="text-cyan-300/80 hover:text-cyan-200 transition-colors">{t('auth.signIn')}</Link>
-        </p>
-
-        <LegalLinks tone="onDark" className="mt-4 justify-center" />
-      </div>
-    </div>
+    </AuthShell>
   );
 };
 

@@ -127,6 +127,77 @@ const BLOCKS = {
     block("import React, { useState } from 'react';", "import OtpChallenge from '../components/auth/OtpChallenge';"),
     block('/**', '  };', '  const handleVerified = async (result: OtpVerifySuccess): Promise<OtpVerifyFailure | void> => {'),
   ],
+  'src/components/signup/plans.ts': [
+    // Every field but the per-tier colour, which only the old cards read.
+    block('export interface PlanDef {', '  highlight: boolean;'),
+    line('  features: TranslationKey[];'),
+    ...['basic', 'advanced', 'premium'].map(id => line(`    id: '${id}',`)),
+    line("    features: ['nav.overview', 'nav.belege', 'nav.fahrer', 'nav.cars', 'nav.umsaetze', 'nav.fixkosten', 'nav.bargeldbestand'],"),
+    line("    features: ['signup.plan.everythingInBasic', 'nav.werkstatt', 'nav.abrechnung', 'nav.notes', 'locked.feature.rollenNutzer'],"),
+    line("    features: ['signup.plan.everythingInAdvanced', 'nav.salaries', 'nav.documents', 'locked.feature.stundennachweis'],"),
+    line("export const planDef = (plan: Plan): PlanDef => PLANS.find(entry => entry.id === plan) ?? PLANS[0];"),
+  ],
+  'src/components/signup/PlanSelection.tsx': [
+    block("import React, { useState } from 'react';", "import { PLANS, planDef } from './plans';"),
+    // PricePreview's figures (not the tier colour, the one line dropped).
+    block('const PricePreview: React.FC<{', '  const fleetPct = fleetDiscountPercent(priceBook, carLimit);'),
+    block('  // current_price that was passed to edge fn = bp.finalTotal', '  const finalPrice = discount ? discount.final_price : bp.finalTotal;'),
+    // The figures the price box prints, each an expression in the markup.
+    expression('{fmtPrice(bp.baseMonthly)}'),
+    expression('{fleetPct > 0 && ('),
+    expression('-{fmtPrice(bp.baseMonthly - bp.monthlyAfterFleet)} €'),
+    expression("-{fmtPrice(billingCycle === 'yearly' ? bp.monthlyAfterFleet * 12 - bp.yearlyTotal : 0)} €"),
+    expression('-{fmtPrice(discount.discount_amount)} €'),
+    expression('{fmtPrice(finalPrice)} €'),
+    expression('{fmtPrice(finalPrice / 12)} €'),
+    expression("{t('signup.price.driverLimitNote', { count: carLimit * 4 })}"),
+    // The discount check: its state and the call to validate-discount-code.
+    block('const DiscountCodeInput: React.FC<{', '  };', '  const handleApply = async () => {'),
+    expression('if (applied) {'),
+    expression("{loading ? '…' : t('signup.discount.apply')}"),
+    // PlanSelection's props, hooks, trial date and breakdown (not selectedPlanDef).
+    block('interface PlanSelectionProps {', '  const { priceBook, trialDays } = useAppConfig();'),
+    block('  const trialEndDate = new Date();', '  const breakdown = calcPricing(priceBook, plan, carLimit, billingCycle);'),
+    expression("{t('signup.cars.driverLimit', { count: carLimit * 4 })}"),
+    expression('{fleetDiscountPercent(priceBook, carLimit) > 0 && ('),
+    expression('-{priceBook.yearly_discount_percent}%'),
+    expression('{showTrialCallout && ('),
+  ],
+  'src/pages/SignupPage.tsx': [
+    block("import { Plan } from '../contexts/PlanContext';", "import OtpChallenge from '../components/auth/OtpChallenge';"),
+    block("import PlanSelection from '../components/signup/PlanSelection';", "type Step = 'plan' | 'company' | 'account' | 'verify';"),
+    // Steps, state, company-signup, the hand-off, the failure branch, the tier.
+    block("const STEPS: Step[] = ['plan', 'company', 'account', 'verify'];", '  const selectedPlanDef = planDef(selectedPlan);'),
+    expression("{step === 'verify' && ("),
+    expression("{step === 'plan' && ("),
+    expression("{step === 'company' && ("),
+    expression("{step === 'account' && ("),
+    expression('{verifiedWithoutSession ? ('),
+    expression("aria-current={step === s ? 'step' : undefined}"),
+    expression('{i < stepIndex ? <Check size={12} aria-hidden="true" /> : i + 1}'),
+    expression('{i < STEPS.length - 1 &&'),
+    expression("{t('signup.continueWith', { plan: selectedPlanDef.name })}"),
+    expression("{t('signup.summaryLead', { days: trialDays })}"),
+    expression("cycle: billingCycle === 'yearly' ? t('signup.billing.yearlyAdj') : t('signup.billing.monthlyAdj'),"),
+  ],
+  'src/pages/CompleteRegistrationPage.tsx': [
+    block("import { useAuth } from '../contexts/AuthContext';", "import NoticeBox from '../components/auth/NoticeBox';"),
+    // The doc, the component, register, discard, leaveToLogin and the waiting page.
+    block("import PendingApprovalPage from './PendingApprovalPage';", '        <PendingApprovalPage onSignOut={leaveToLogin} />'),
+    expression("{googleSignInIntent?.from === 'invite' && ("),
+    expression('{error && <NoticeBox tone="error" announce>{error}</NoticeBox>}'),
+    expression('{dead ? ('),
+    expression('{!dead && ( confirmDiscard ? ('),
+    expression('{!dead && ('),
+    expression("t('gsignup.subtitle', { email: user?.email ?? '' })"),
+  ],
+  'src/pages/AuthCallbackPage.tsx': [
+    block("import React, { useEffect, useState } from 'react';", "import { callbackFailureView } from '../lib/oauthErrors';"),
+    // The fragment error, the Google marker, the session poll and both redirects.
+    block("type CallbackType = 'recovery' | 'invite' | 'signup' | 'magiclink' | 'email_change' | string;", '  }, [navigate, t]);'),
+    expression('{!fromGoogle && ('),
+    expression("{fromGoogle ? t('auth.signIn') : t('signup.callback.title')}"),
+  ],
   // The takeovers: their logic is the hooks they read; what each says and
   // what its button does is checked by the call and attribute checks.
   'src/pages/AccountBlockedPage.tsx': [
@@ -242,6 +313,17 @@ function callText(text, start) {
     if (quote) {
       if (char === '\\') i += 1;
       else if (char === quote) quote = '';
+      continue;
+    }
+    // A comment inside the arguments may hold an apostrophe ("validation's").
+    if (char === '/' && text[i + 1] === '/') {
+      i = text.indexOf('\n', i);
+      if (i < 0) break;
+      continue;
+    }
+    if (char === '/' && text[i + 1] === '*') {
+      i = text.indexOf('*/', i + 2) + 1;
+      if (i <= 0) break;
       continue;
     }
     if (char === '"' || char === "'" || char === '`') quote = char;
