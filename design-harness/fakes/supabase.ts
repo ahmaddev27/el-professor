@@ -47,8 +47,11 @@ const store = seed();
 let nextId = 1;
 
 /** The failure a scenario asks for, on every statement against the screen's own table. */
-function scenarioFailure(table: string): QueryError | null {
+function scenarioFailure(table: string, dateFrom: string | null): QueryError | null {
   if (table !== PRIMARY_TABLE) return null;
+  if (scenario.data === 'next-month-fails') {
+    return dateFrom?.startsWith('2026-10') ? { message: 'TypeError: Failed to fetch', code: '' } : null;
+  }
   if (scenario.data === 'error' || scenario.data === 'drivers-error') return { message: 'TypeError: Failed to fetch', code: '' };
   if (scenario.data === 'missing') {
     return { message: `relation "public.${table}" does not exist`, code: 'PGRST204' };
@@ -63,6 +66,8 @@ class FakeQuery implements PromiseLike<Result> {
   private orderBy: { column: string; ascending: boolean } | null = null;
   private returnRows = false;
   private singleRow = false;
+  /** The lower bound of a `date` range, so a scenario can fail one month's reads. */
+  private dateFrom: string | null = null;
 
   constructor(private readonly table: string) {}
 
@@ -105,6 +110,7 @@ class FakeQuery implements PromiseLike<Result> {
 
   // Dates are stored as `YYYY-MM-DD` text, which compares correctly as a string.
   gte(column: string, value: unknown): this {
+    if (column === 'date') this.dateFrom = String(value);
     this.filters.push(row => String(row[column] ?? '') >= String(value));
     return this;
   }
@@ -158,7 +164,7 @@ class FakeQuery implements PromiseLike<Result> {
   }
 
   private run(): Result {
-    const failure = scenarioFailure(this.table);
+    const failure = scenarioFailure(this.table, this.dateFrom);
     if (failure) return { data: null, error: failure };
 
     const rows = store.get(this.table) ?? [];
