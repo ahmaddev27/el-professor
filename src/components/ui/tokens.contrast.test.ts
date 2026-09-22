@@ -113,6 +113,10 @@ const PAIRS: Array<{ fg: string; bg: string; min: number }> = [
   // (Measured on full sunken: the hover is sunken at half strength over
   // raised, so it lies between two measured pairs.)
   ...['positive', 'critical', 'brand-text'].map(fg => ({ fg, bg: 'sunken', min: TEXT })),
+  // Phase 5, batch 3. The same fill under a run's exception note on a row's hover.
+  // Its other two words on sunken — "Alle löschen" / "Plan endgültig löschen"
+  // in critical, a reassigned driver in brand-text — are batch 2's pairs above.
+  { fg: 'caution', bg: 'sunken', min: TEXT },
 ];
 
 /**

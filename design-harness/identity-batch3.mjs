@@ -130,7 +130,15 @@ function checkFile(config) {
   const newText = readFileSync(join(root, config.path), 'utf8').replace(/\r\n/g, '\n');
   const oldLines = oldText.split('\n');
   const newSquashed = squash(newText);
+  // A dropped fragment ending in "…" names a long expression by its start.
   const dropped = new Map((config.dropped ?? []).map(([fragment, reason]) => [squash(fragment), reason]));
+  const droppedKey = key => {
+    if (dropped.has(key)) return key;
+    for (const candidate of dropped.keys()) {
+      if (candidate.endsWith('…') && key.startsWith(candidate.slice(0, -1))) return candidate;
+    }
+    return null;
+  };
   const used = new Set();
   const insertedAfter = new Set(config.insertedAfter ?? []);
   const problems = [];
@@ -139,6 +147,14 @@ function checkFile(config) {
     used.add(key);
     excused.push(`${label.replace(/\s+/g, ' ').slice(0, 100)} — ${dropped.get(key)}`);
   };
+
+  // 0. What a drop moved elsewhere must be there: each expression is looked
+  //    for in the new file, whitespace aside.
+  let required = 0;
+  for (const fragment of config.mustContain ?? []) {
+    if (newSquashed.includes(squash(fragment))) required += 1;
+    else problems.push(`must still contain, and does not: ${fragment.slice(0, 140)}`);
+  }
 
   // 1. Verbatim chunks, in order. A chunk ends at a redrawn range and after
   //    each line the config says new lines were inserted after.
@@ -180,7 +196,8 @@ function checkFile(config) {
       for (const logic of logicOf(group)) {
         const key = squash(logic);
         if (newSquashed.includes(key)) { carried += 1; continue; }
-        if (dropped.has(key)) { excuse(key, logic); continue; }
+        const excusedBy = droppedKey(key);
+        if (excusedBy) { excuse(excusedBy, logic); continue; }
         problems.push(`lost from lines ${from}–${to}: ${logic.replace(/\s+/g, ' ').slice(0, 160)}`);
       }
     }
@@ -196,7 +213,8 @@ function checkFile(config) {
     // when its attributes are all still there, in the same order.
     const attributes = key.replace(/^<[A-Za-z.]+/, '');
     if (key.startsWith('<') && attributes && newSquashed.includes(attributes)) { sensitive += 1; return; }
-    if (dropped.has(key)) { excuse(key, `line ${index + 1}: ${line.trim()}`); return; }
+    const excusedBy = droppedKey(key);
+    if (excusedBy) { excuse(excusedBy, `line ${index + 1}: ${line.trim()}`); return; }
     problems.push(`sensitive line ${index + 1} changed or lost: ${line.trim().slice(0, 160)}`);
   });
 
@@ -205,7 +223,7 @@ function checkFile(config) {
     if (!used.has(key)) problems.push(`listed as dropped but not missing: ${key.slice(0, 80)} (${reason.slice(0, 40)}…)`);
   }
 
-  return { config, verbatimLines, oldLineCount: oldLines.length, carried, sensitive, excused, problems };
+  return { config, verbatimLines, oldLineCount: oldLines.length, carried, sensitive, required, excused, problems };
 }
 
 // ── The branch as a whole ────────────────────────────────────────────────────
@@ -236,6 +254,7 @@ for (const config of FILES) {
   console.log(`  verbatim   ${result.verbatimLines} of ${result.oldLineCount} old lines, in order`);
   console.log(`  carried    ${result.carried} expressions out of the redrawn markup`);
   console.log(`  sensitive  ${result.sensitive} data, clock, maths, format and permission lines present`);
+  if (result.config.mustContain) console.log(`  required   ${result.required} of ${result.config.mustContain.length} moved expressions found`);
   for (const line of result.excused) console.log(`  dropped    ${line}`);
   for (const line of result.problems) console.log(`  FAIL       ${line}`);
   if (result.problems.length) failed = true;
@@ -327,6 +346,54 @@ function CONFIG() {
       redrawn: [[277, 317], [389, 444], [470, 499], [523, 626]],
       insertedAfter: [30],
       dropped: [],
+    },
+    {
+      path: 'src/components/FahrtenbuchTripsView.tsx',
+      // 2: the icon import (the design system's import follows line 11).
+      // 34–40: STATUS_COLORS, the status colours, replaced by STATUS_TONE;
+      // STATUS_LABEL_KEYS, the words, stays. 152–157: inputSt, the fields'
+      // style object. 158–553: the markup. Everything from the hook call to
+      // statusLabel — the filters, totals and paging — is verbatim.
+      redrawn: [[2, 2, 'code'], [34, 40, 'code'], [152, 157, 'code'], [158, 553]],
+      insertedAfter: [11],
+      dropped: [
+        ["([ { labelKey: 'imp.trips.cardTotal'…", 'the four summary cards were one list; each is a KpiCard now, with its figure listed under mustContain'],
+        ["labelKey: 'imp.trips.cardTotal' as TranslationKey…", 'the first card, now a KpiCard: see mustContain'],
+        ["labelKey: 'imp.trips.cardTotalPrice' as TranslationKey…", 'the fare total, now euro(totalPrice) through utils/money.ts: toLocaleString with only a minimum of two digits printed a float sum with three'],
+        ["labelKey: 'imp.trips.cardTotalTip' as TranslationKey…", 'the tip total, now euro(totalTip), the same way'],
+        ["labelKey: 'imp.trips.cardPage' as TranslationKey…", 'the page card, now a KpiCard: see mustContain'],
+        ["{ labelKey: 'imp.trips.cardTotalPrice' as TranslationKey…", 'the fare total card line, as above'],
+        ["{ labelKey: 'imp.trips.cardTotalTip' as TranslationKey…", 'the tip total card line, as above'],
+        ['t(c.labelKey)', 'the card list\'s label, value and caption lookups, now each KpiCard\'s own props'],
+        ['c.value', 'as above'],
+        ['c.sub', 'as above'],
+        ['minimumFractionDigits: 2', 'toLocaleString\'s options for the amounts that now go through formatEuro'],
+        ["([ 'common.date'…", 'the eleven header keys, now named one per DataTable column'],
+        ['t(headerKey)', 'as above'],
+        ['pageTrips.map((trip, i) => {…', 'the desktop rows, now DataTable columns; their cells are carried one by one'],
+        ['const st = STATUS_COLORS[trip.plausibility_status] || STATUS_COLORS.pending;…', 'the status colours, now STATUS_TONE[…] ?? \'neutral\', the same fallback to the pending look'],
+        ['pageTrips.map(trip => {…', 'the phone cards\' list, drawn again from pageTrips (see mustContain)'],
+        ["trip.price_amount.toLocaleString('de-DE', { minimumFractionDigits: 2 })…", 'a fare, now euro(trip.price_amount) through utils/money.ts'],
+        ["{trip.price_amount.toLocaleString('de-DE', { minimumFractionDigits: 2 })} €", 'the same fare, as its table line'],
+        ["trip.tip_amount > 0 ? trip.tip_amount.toLocaleString(…", "a tip, now trip.tip_amount > 0 ? euro(trip.tip_amount) : '—' (see mustContain)"],
+        ['trip.price_amount.toFixed(2)', 'a phone card\'s fare, now euro(trip.price_amount): a German amount where toFixed wrote a US decimal point'],
+        ["<div><span style={{ color: 'var(--text-tertiary)' }}>{t('imp.trips.price')}…", 'the phone card\'s fare line, as above'],
+      ],
+      mustContain: [
+        'String(filteredTrips.length)',
+        "canceledCount > 0 ? t('imp.trips.activeAndCanceled', { active: activeCount, canceled: canceledCount }) : undefined",
+        'euro(totalPrice)',
+        'euro(totalTip)',
+        '`${showFrom}\\u2013${showTo}`',
+        "t('imp.trips.ofTotal', { count: filteredTrips.length })",
+        "trip.tip_amount > 0 ? euro(trip.tip_amount) : '—'",
+        'euro(trip.price_amount)',
+        "STATUS_TONE[trip.plausibility_status] ?? 'neutral'",
+        'const sameDriver = trip.original_driver_name === trip.assigned_driver_name;',
+        "sameDriver ? '—' : trip.assigned_driver_name",
+        '{pageTrips.map(trip => {',
+        'rows={pageTrips}',
+      ],
     },
   ];
 }

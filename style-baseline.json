@@ -61,10 +61,6 @@
       "style": 118,
       "color": 4
     },
-    "src/components/FahrtenbuchTripsView.tsx": {
-      "style": 77,
-      "color": 2
-    },
     "src/components/FinalizePlanningModal.tsx": {
       "style": 50,
       "color": 32

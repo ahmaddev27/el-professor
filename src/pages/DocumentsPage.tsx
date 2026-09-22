@@ -501,7 +501,7 @@ const DocumentsPage: React.FC = () => {
                   onClick={() => toggleGroup(group.key)}
                   aria-expanded={isExpanded}
                   className={cn(
-                    'flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1 rounded-control text-left',
+                    'flex min-h-8 min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1 rounded-control text-left [@media(pointer:coarse)]:min-h-11',
                     'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus',
                   )}
                 >
