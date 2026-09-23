@@ -577,10 +577,25 @@ BEGIN
   v := _rm_json(owner, $q$SELECT platform_companies_list(NULL,NULL,NULL,NULL,NULL,NULL,false,'name_asc',100,0)::text$q$);
   PERFORM _rm_ok('companies: exactly the documented columns',
     _rm_keys(v -> 'items' -> 0) = ARRAY[
+      -- drivers_per_car_limit since 20260923100000 (plan 3.13b): the panel read
+      -- it out of company_settings across every company, and that table is now
+      -- readable only inside a context. It is the ONE column of company_settings
+      -- this model carries — the table holds the company's IBAN, BIC, account
+      -- holder, VAT and tax number, so a second one is a data protection
+      -- decision, not a convenience.
       'active_driver_count','active_vehicle_count','approval_status','archived_at','billing_cycle','created_at',
-      'deleted_at','id','last_payment_at','name','open_invoice_count','overdue_invoice_count','plan','slug',
-      'status','subscription_car_limit','subscription_duration_type','subscription_expires_at',
-      'subscription_started_at','subscription_status','trial_end','trial_start','trial_state','user_count']);
+      'deleted_at','drivers_per_car_limit','id','last_payment_at','name','open_invoice_count',
+      'overdue_invoice_count','plan','slug','status','subscription_car_limit','subscription_duration_type',
+      'subscription_expires_at','subscription_started_at','subscription_status','trial_end','trial_start',
+      'trial_state','user_count']);
+  PERFORM _rm_ok('companies: no other column of company_settings rides along',
+    NOT EXISTS (
+      SELECT 1 FROM jsonb_array_elements(v -> 'items') i,
+                    unnest(ARRAY['iban','bic','account_holder','vat_id','tax_number','legal_company_name',
+                                 'commercial_register','court_of_registration','bank_name','manager_name',
+                                 'owner_name','authorized_representative','street','house_number',
+                                 'postal_code','phone','logo_url']) AS forbidden(col)
+       WHERE i ? forbidden.col));
 
   v := _rm_json(owner, $q$SELECT platform_vehicles_list('c0000000-0000-4000-8000-00000000000a')::text$q$);
   PERFORM _rm_ok('vehicles: exactly the documented columns, and never created_by',

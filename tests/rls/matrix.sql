@@ -143,6 +143,20 @@
   caller inside a platform context in either mode, so a support session no
   longer issues, voids or signs one (the rpc overrides below).
 
+  3.13b (20260923100000) closed the last of the shell that is the *company's*
+  own data rather than the platform's record of it: `company_settings` SELECT
+  dropped its `companies.read` branch, so `super` reads neither row and the two
+  context principals read the company they opened. What stays — `companies`,
+  `company_subscriptions`, `subscription_invoices`,
+  `subscription_payment_audit` and `subscription_coverage`, all on
+  `companies.read`, plus the `codes.manage` reads — is the platform's own
+  record of a customer, kept there by plan 3.A. Closing it means moving
+  CompaniesPage, SuperAdminDashboard, SubscriptionBillingPage and five smaller
+  company pickers onto paged, audited read models, and a company list that can
+  only be read inside a context is self-defeating, since that list is how a
+  company is chosen to open one on. That is open decision D14 in HANDOFF.md,
+  and the cells stay untagged — they are a decision, not a hole.
+
   ## Recorded without a plan step
 
   Current behaviour that no step of the plan names. Untagged, so a change to it
@@ -1040,13 +1054,24 @@ INSERT INTO _mx_expected (tbl, op, anon, viewer, editor, supervisor, admin, othe
 ('company_planning_runs',              'U', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
 ('company_planning_runs',              'D', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
 ('company_planning_runs',              'M', '..', 'R.', 'R.', 'R.', 'R.', '.R', '..', NULL),
--- company_settings is the account shell. Its SELECT keeps a capability
--- (companies.read), so `super` still reads every company's row. Its writes
--- lost theirs with 20260921110000 (3.13a): the platform branch is the support
--- session's company, and `super` has none open — U, D and M were YY, tagged
--- "the shell still takes a capability-only cross-tenant write" (3.4c/3.13),
--- and are '..' now: the row is visible and no write policy admits it.
-('company_settings',                   'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'YY', NULL),
+-- company_settings is the account shell, and since 20260923100000 (3.13b) it
+-- is the one shell table with no platform branch at all. Its writes lost theirs
+-- with 20260921110000 (3.13a): the platform branch is the support session's
+-- company, and `super` has none open — U, D and M were YY, tagged "the shell
+-- still takes a capability-only cross-tenant write" (3.4c/3.13), and are '..'
+-- now: the row is visible and no write policy admits it.
+--
+-- S moved here. It was YY on companies.read, which all four staff roles hold,
+-- so a read_only platform account read every customer's legal name, managing
+-- director, VAT and tax number, commercial register, bank name, IBAN, BIC and
+-- account holder with no context and no audit row — wider than
+-- platform_drivers_list allows for a driver's name. The predicate is now the
+-- tenant term alone, which for a company-less staff account is the open
+-- context's company, so `super` reads neither row and the two context
+-- principals read company A's (the override below). The panel's one
+-- cross-company use of this table, drivers_per_car_limit, is a key of
+-- platform_companies_list now.
+('company_settings',                   'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
 ('company_settings',                   'I', 'RR', 'RR', 'RR', 'RR', 'YR', 'RY', 'RR', NULL),
 ('company_settings',                   'U', '..', '..', '..', '..', 'Y.', '.Y', '..', NULL),
 ('company_settings',                   'D', '..', '..', '..', '..', '..', '..', '..', NULL),
@@ -1419,14 +1444,22 @@ UPDATE _mx_expected x SET staff_view = o.sv, staff_support = o.ss
     ('role_permissions',         'U', 'TT', 'Y.'),
     ('role_permissions',         'D', 'TT', 'Y.'),
     ('role_permissions',         'M', 'T.', 'T.'),
-    -- The company's legal details (20260921110000, 3.13a). Before it the view
-    -- column inserted company A's row (YR) — the context completed the company
-    -- term and companies.lifecycle the rest — and both columns copied super's
-    -- YY for U, D and M. Now the view context writes nothing (its SELECT still
-    -- shows both rows, through companies.read), and the support session writes
-    -- company A's row as that company's administrator does, plus D, which it
-    -- holds as companies.hard_delete inside the session and an administrator
-    -- does not hold at all. Its move is refused by the WITH CHECK.
+    -- The company's legal details (20260921110000, 3.13a; 20260923100000,
+    -- 3.13b). Before 3.13a the view column inserted company A's row (YR) — the
+    -- context completed the company term and companies.lifecycle the rest —
+    -- and both columns copied super's YY for U, D and M. The view context
+    -- writes nothing now, and the support session writes company A's row as
+    -- that company's administrator does, plus D, which it holds as
+    -- companies.hard_delete inside the session and an administrator does not
+    -- hold at all. Its move is refused by the WITH CHECK.
+    --
+    -- S is listed since 3.13b. Both columns used to copy super's YY, so both
+    -- read company B as well — through companies.read, which the context had
+    -- nothing to do with. The capability is gone, so the context is the whole
+    -- answer: company A's row, and not company B's, in either mode. This is
+    -- the one line that says a *view* context reads the legal details at all;
+    -- reading them is what a view context is for.
+    ('company_settings',         'S', 'Y.', 'Y.'),
     ('company_settings',         'I', 'RR', 'YR'),
     ('company_settings',         'U', '..', 'Y.'),
     ('company_settings',         'D', '..', 'Y.'),
