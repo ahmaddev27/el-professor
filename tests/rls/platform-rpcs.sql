@@ -469,7 +469,8 @@ DECLARE
                                    '3b000000-0000-4000-8000-000000000008',
                                    '3b000000-0000-4000-8000-000000000009',
                                    '3b000000-0000-4000-8000-00000000000a'];
-  roles   constant text[] := ARRAY['owner', 'support', 'billing', 'read_only'];
+  -- Named staff_roles, not roles: `roles` is also a table in this database.
+  staff_roles constant text[] := ARRAY['owner', 'support', 'billing', 'read_only'];
   v_from  bigint;
   v_row   app_private.platform_audit_log%ROWTYPE;
   v_role  text;
@@ -487,7 +488,7 @@ BEGIN
   -- Each of the other three roles: added, recorded with its own role, disabled
   -- and re-enabled. `owner` is index 1 and was added above.
   FOR i IN 2..4 LOOP
-    v_role := roles[i];
+    v_role := staff_roles[i];
     v_user := cand[i];
 
     SELECT coalesce(max(id), 0) INTO v_from FROM app_private.platform_audit_log;
@@ -571,10 +572,14 @@ BEGIN
   -- Disabling a non-owner never touches the owner count.
   PERFORM _pr_ok('disabling the seeded support row succeeds',
     (_pr_do(owner, format('SELECT platform_staff_disable(%L)::text', support))::jsonb ->> 'success') = 'true');
-  PERFORM _pr_ok('…and re-enabling it restores support, not owner',
-    (_pr_do(owner, format('SELECT platform_staff_enable(%L)::text', support))::jsonb ->> 'success') = 'true'
-    AND app_private.platform_staff_role_of(support) = 'support');
+  -- Two statements, not one AND: SQL does not promise to evaluate the operands
+  -- left to right, so reading the row in the same expression that re-enables it
+  -- could read it first and fail for no reason.
+  PERFORM _pr_ok('re-enabling it succeeds',
+    (_pr_do(owner, format('SELECT platform_staff_enable(%L)::text', support))::jsonb ->> 'success') = 'true');
   PERFORM _pr_reset();
+  PERFORM _pr_ok('…and it holds support again, not owner',
+    app_private.platform_staff_role_of(support) = 'support');
   PERFORM _pr_ok('disabling it again succeeds',
     (_pr_do(owner, format('SELECT platform_staff_disable(%L)::text', support))::jsonb ->> 'success') = 'true');
   PERFORM _pr_ok('disabling it twice answers already_disabled',
