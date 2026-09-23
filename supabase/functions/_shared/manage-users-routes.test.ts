@@ -2,7 +2,9 @@ import { describe, expect, it, vi } from 'vitest';
 import { PlatformCheckError } from './platform-access.ts';
 import {
   decideCreateCompany,
+  GOTRUE_PAGE_SIZE,
   MANAGE_USERS_SCOPE_MESSAGES,
+  resolveAuthAccounts,
   resolveManageUsersScope,
   sameCompany,
   type ManageUsersScopeFacts,
@@ -121,5 +123,118 @@ describe('sameCompany', () => {
     expect(sameCompany(undefined, undefined)).toBe(false);
     expect(sameCompany('', '')).toBe(false);
     expect(sameCompany(companyA, null)).toBe(false);
+  });
+});
+
+/*
+  Slice 3.13b. The `list` route called `auth.admin.listUsers()` with no
+  arguments — GoTrue's first page of 50 accounts of the *whole project* — and
+  applied the company filter to that page, so above 50 accounts on the
+  installation a company's own users could be missing from its Benutzer screen,
+  with a 200, a short array and the truncated count in the audit row.
+
+  The fix drives from the company's own profiles and resolves them against
+  GoTrue's paged list. What is tested here is the resolver: it must page, stop
+  early, not read one page per account, and report an id it could not resolve
+  instead of dropping it.
+*/
+describe('resolveAuthAccounts', () => {
+  /** A GoTrue admin list holding `total` accounts, served perPage at a time. */
+  const gotrue = (total: number) =>
+    vi.fn(async (page: number, perPage: number) => {
+      const offset = (page - 1) * perPage;
+      return Array.from({ length: Math.max(0, Math.min(perPage, total - offset)) },
+        (_, i) => ({ id: `u${offset + i}`, email: `u${offset + i}@test.invalid` }));
+    });
+
+  it('finds an account that the old first-page-of-50 read would have missed', async () => {
+    // u120 is on GoTrue's third page of 50. Before this it was invisible.
+    const listPage = gotrue(500);
+    const out = await resolveAuthAccounts(['u120'], listPage, { perPage: 50 });
+    expect(out.found).toEqual([{ id: 'u120', email: 'u120@test.invalid' }]);
+    expect(out.complete).toBe(true);
+    expect(out.pagesRead).toBe(3);
+  });
+
+  it('reads one page when the company fits in one, which is the ordinary case', async () => {
+    const listPage = gotrue(40);
+    const out = await resolveAuthAccounts(['u0', 'u7', 'u39'], listPage, { perPage: 200 });
+    expect(out.found.map(u => u.id)).toEqual(['u0', 'u7', 'u39']);
+    expect(listPage).toHaveBeenCalledTimes(1);
+    expect(listPage).toHaveBeenCalledWith(1, 200);
+  });
+
+  it('stops as soon as every id is resolved, rather than reading the whole project', async () => {
+    const listPage = gotrue(10_000);
+    const out = await resolveAuthAccounts(['u0', 'u1'], listPage, { perPage: 200 });
+    expect(out.complete).toBe(true);
+    expect(out.pagesRead).toBe(1);
+  });
+
+  it('never asks one page per account: the count follows the pages, not the ids', async () => {
+    const listPage = gotrue(400);
+    const ids = Array.from({ length: 300 }, (_, i) => `u${i}`);
+    const out = await resolveAuthAccounts(ids, listPage, { perPage: 200 });
+    expect(out.found).toHaveLength(300);
+    expect(out.pagesRead).toBe(2);
+  });
+
+  it('asks nothing at all for a company with no profiles', async () => {
+    const listPage = gotrue(10_000);
+    const out = await resolveAuthAccounts([], listPage);
+    expect(listPage).not.toHaveBeenCalled();
+    expect(out).toEqual({ found: [], missing: [], complete: true, pagesRead: 0 });
+  });
+
+  it('reports a profile with no auth account instead of dropping it', async () => {
+    // The old code drove from the auth list, so such a profile simply vanished.
+    const listPage = gotrue(10);
+    const out = await resolveAuthAccounts(['u1', 'ghost', 'u2'], listPage, { perPage: 200 });
+    expect(out.found.map(u => u.id)).toEqual(['u1', 'u2']);
+    expect(out.missing).toEqual(['ghost']);
+    expect(out.complete).toBe(false);
+  });
+
+  it("answers in the order the ids were given, not in GoTrue's", async () => {
+    const listPage = gotrue(50);
+    const out = await resolveAuthAccounts(['u9', 'u0', 'u4'], listPage, { perPage: 200 });
+    expect(out.found.map(u => u.id)).toEqual(['u9', 'u0', 'u4']);
+  });
+
+  it('emits a repeated id once', async () => {
+    const listPage = gotrue(10);
+    const out = await resolveAuthAccounts(['u1', 'u1', 'u2'], listPage, { perPage: 200 });
+    expect(out.found.map(u => u.id)).toEqual(['u1', 'u2']);
+  });
+
+  it('stops at the page ceiling and says the answer is incomplete', async () => {
+    // A server that keeps answering a full page is an infinite loop inside an
+    // edge function; the ceiling is what makes it a bounded, reported failure.
+    const listPage = vi.fn(async (_page: number, perPage: number) =>
+      Array.from({ length: perPage }, (_, i) => ({ id: `filler${i}` })));
+    const out = await resolveAuthAccounts(['nowhere'], listPage, { perPage: 10, maxPages: 5 });
+    expect(listPage).toHaveBeenCalledTimes(5);
+    expect(out.complete).toBe(false);
+    expect(out.missing).toEqual(['nowhere']);
+  });
+
+  it('ends on a short page: past the end GoTrue answers an empty one', async () => {
+    const listPage = gotrue(25);
+    const out = await resolveAuthAccounts(['missing'], listPage, { perPage: 10, maxPages: 200 });
+    // pages of 10, 10, 5 — the third is short, so there is no fourth request.
+    expect(listPage).toHaveBeenCalledTimes(3);
+    expect(out.complete).toBe(false);
+  });
+
+  it('lets a transport failure through rather than answering a short list', async () => {
+    const listPage = vi.fn(async () => { throw new Error('Failed to fetch'); });
+    await expect(resolveAuthAccounts(['u1'], listPage)).rejects.toThrow('Failed to fetch');
+  });
+
+  it("defaults to a page far larger than GoTrue's own 50", async () => {
+    const listPage = gotrue(0);
+    await resolveAuthAccounts(['u1'], listPage);
+    expect(listPage).toHaveBeenCalledWith(1, GOTRUE_PAGE_SIZE);
+    expect(GOTRUE_PAGE_SIZE).toBeGreaterThan(50);
   });
 });
