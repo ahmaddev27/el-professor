@@ -273,6 +273,18 @@ export interface Issue {
   readonly values: Readonly<Record<string, IssueValue>>;
   /** German, the product's source language; a screen may render its own text from type + values. */
   readonly explanation: string;
+  /**
+   * Dictionary key for `explanation`, and the values for its slots. The
+   * engine names the key and never resolves it, so the analysis stays pure;
+   * a screen renders `engineText(t, issue.explanation, issue.explanationKey,
+   * issue.explanationVars)`. See src/i18n/engineMessage.ts.
+   *
+   * Spelled out rather than imported as `EngineMessageKey` / `EngineMessageVars`:
+   * boundary.test.ts allows this folder exactly three modules outside it, and
+   * a key is a plain string anyway.
+   */
+  readonly explanationKey?: string;
+  readonly explanationVars?: Readonly<Record<string, string | number>>;
   readonly confidence: Confidence;
 }
 

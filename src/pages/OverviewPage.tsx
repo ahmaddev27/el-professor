@@ -36,6 +36,7 @@ import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { ADMIN_BASE } from '../lib/adminGate';
 import { useTranslation } from '../contexts/LanguageContext';
 import type { TranslationKey } from '../i18n';
+import { engineText } from '../i18n/engineMessage';
 
 const fmt = (n: number) =>
   n.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -435,7 +436,10 @@ const OverviewPage: React.FC = () => {
   const trendData         = buildTrendData(selectedMonth, incomes, salaries, receipts, fixedCosts);
   const topExpenses       = getTopExpenses(receipts, fixedCosts, monthStart, monthEnd, 5);
   const insights          = generateInsights(currentMetrics, prevMetrics, driverPerformance, salaryAlerts, werkstattChecks);
-  const revenueComposition = buildRevenueComposition(currentMetrics);
+  // overviewHelpers writes German and names a key beside it; translating here
+  // covers the legend and the chart tooltip, which reads `name` off the datum.
+  const revenueComposition = buildRevenueComposition(currentMetrics)
+    .map(d => ({ ...d, name: engineText(t, d.name, d.nameKey) }));
 
   const recentReceipts = [...receipts]
     .filter(r => isWithinInterval(new Date(r.date), { start: monthStart, end: monthEnd }))
@@ -558,7 +562,12 @@ const OverviewPage: React.FC = () => {
       {insights.length > 0 && (
         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
           {insights.map((ins, i) => (
-            <AlertRow key={i} type={ins.type} title={ins.title} body={ins.body} />
+            <AlertRow
+              key={i}
+              type={ins.type}
+              title={engineText(t, ins.title, ins.titleKey, ins.titleVars)}
+              body={engineText(t, ins.body, ins.bodyKey, ins.bodyVars)}
+            />
           ))}
         </div>
       )}

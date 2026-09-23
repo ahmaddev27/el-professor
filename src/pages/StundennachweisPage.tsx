@@ -10,6 +10,7 @@ import { exportFahreruebersichtToExcel, SavedStundennachweis, DriverSummary } fr
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { useTranslation } from '../contexts/LanguageContext';
 import type { TranslationKey } from '../i18n';
+import { engineText } from '../i18n/engineMessage';
 import {
   Alert,
   Badge,
@@ -3176,6 +3177,7 @@ function DateGroupRow({ dateKey, items, color }: {
 }
 
 function WarningGroupCard({ group }: { group: WarningGroup }) {
+  const { t } = useTranslation();
   const [open, setOpen] = React.useState(group.category === 'critical');
   const dateGroups = groupByDate(group.items);
   const showInline = group.category === 'critical' || group.category === 'note';
@@ -3202,9 +3204,11 @@ function WarningGroupCard({ group }: { group: WarningGroup }) {
         }}
       >
         <AlertTriangle size={14} style={{ color: group.color, flexShrink: 0 }} />
-        {/* group.label and the warning texts are produced by utils/warningCategories.ts */}
+        {/* The warning texts stay German: utils/warningCategories.ts classifies
+            them by matching German fragments, and the same strings are printed
+            on the Stundennachweis PDF. Only the group label has a key. */}
         <span style={{ fontSize: 12, fontWeight: 700, color: group.color, flex: 1 }}>
-          {group.label}
+          {engineText(t, group.label, group.labelKey)}
         </span>
         <span style={{
           fontSize: 11,
@@ -3289,7 +3293,7 @@ function StructuredWarnings({ warnings }: { warnings: string[] }) {
             padding: '2px 9px', borderRadius: 20,
             background: g.borderColor, color: g.color,
           }}>
-            {g.label}: {g.items.length}
+            {engineText(t, g.label, g.labelKey)}: {g.items.length}
           </span>
         ))}
       </div>

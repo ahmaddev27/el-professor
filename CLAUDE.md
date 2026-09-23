@@ -26,6 +26,14 @@ Three things stay German in both languages, and the reasoning is in the header o
 - **Domain vocabulary** — `Stundennachweis`, `Fahrtenbuch`, `Abrechnung`, `Beleg`, `Werkstatt`, `Monatsplanung`, `Lohnart`, `Bundesland`, `Gehaltsquittung` — so the screen and the paperwork agree.
 - **Money and date formatting**, because on-screen figures map one-to-one onto German documents.
 
+**The engines carry a key beside their text, they never call `t(...)`.** The pure modules under `src/utils/` — Phase 1/3/4, the repair pass, the clean engine, the trip analysis — are golden-mastered, feed exports and audit rows, and must not depend on the UI language. So a message keeps its German text and gains a `messageKey` (and `messageVars`) beside it, or `<field>Key` / `<field>Vars` where an object carries several messages; the screen renders `engineText(t, text, key, vars)` from `src/i18n/engineMessage.ts`, which falls back to that German whenever the key is missing from the dictionaries. Three rules:
+
+- **A German dictionary entry must render exactly the text the engine already produced**, or turning a key on silently rewords the German UI. That is why `engine.phase3.repair.noValidMove*` is English in `de.ts`: that is what the planner writes today.
+- **A var whose value is itself a key is translated first** (`engineText` does it), which is how a closed vocabulary — a note type, a conflict kind — travels inside a sentence without the engine reaching the dictionaries. A joined list cannot: `budget_not_computable` passes the German list and `budgetProblemKey()` exists for a screen that wants to rebuild it.
+- **A German string that is a discriminator stays untouched** and gets no key: `warningCategories.classify()` sorts warnings by matching German fragments, `evaluateManualCandidate`'s `blockingChecks` are matched by `BLOCKING_CHECK_LABEL`, and `manual_exception.reason` / `assignment_reason` are persisted to `monthly_planning_manual_exceptions` — audit data, untranslated like `COMPANY_WRITE_SESSION_REASONS`.
+
+Keys live under `engine.` in both dictionaries; `src/i18n/engineMessages.test.ts` reads the engines' source and fails the build when one is missing from either, including the families an engine builds from a code (`engine.noteType.${type}`).
+
 ## Commands
 
 ```bash

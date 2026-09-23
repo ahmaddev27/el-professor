@@ -1059,6 +1059,37 @@ export interface ExportColumn {
   format?: (value: unknown) => string;
 }
 
+/**
+ * The chrome `exportTableToExcel` writes around the caller's own columns.
+ *
+ * This dump satisfies no statutory form — it is a convenience export of an
+ * operational list — so its wording follows the UI language, unlike the
+ * Fahrtenbuch XLSX and the Stundennachweis PDF, whose German is prescribed.
+ * The module stays pure: a screen passes its own translated labels, and the
+ * German defaults below keep every existing caller byte-identical.
+ */
+export interface ExportChromeLabels {
+  /** Printed in the first cell when there are no rows. */
+  emptyState: string;
+  /** Prefix of the filter line; the summary follows it. */
+  activeFilters: string;
+  /** Label of the totals row; `{count}` is the number of rows. */
+  totalsRow: string;
+  /** Footer line; `{count}` is the number of rows. */
+  footer: string;
+}
+
+export const DEFAULT_EXPORT_CHROME: ExportChromeLabels = {
+  emptyState:    'Keine Daten vorhanden',
+  activeFilters: 'Aktive Filter:',
+  totalsRow:     'Gesamt  ({count} Einträge)',
+  footer:        'El-Professor Verwaltungssystem  —  {count} Datensätze exportiert',
+};
+
+function chromeText(template: string, count: number): string {
+  return template.replace('{count}', String(count));
+}
+
 export interface ExportOptions {
   filename: string;
   sheetTitle: string;
@@ -1067,6 +1098,8 @@ export interface ExportOptions {
   rows: Record<string, unknown>[];
   filterSummary?: string[];
   totals?: Record<string, string>;
+  /** Defaults to the German wording this export has always had. */
+  labels?: Partial<ExportChromeLabels>;
 }
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
@@ -1136,6 +1169,7 @@ function blank(ws: XLSX.WorkSheet, r: number, numCols: number, bg = 'FFFFFF') {
 
 export function exportTableToExcel(opts: ExportOptions): void {
   const { filename, sheetTitle, moduleName, columns, rows, filterSummary = [], totals } = opts;
+  const labels: ExportChromeLabels = { ...DEFAULT_EXPORT_CHROME, ...(opts.labels ?? {}) };
   const N = columns.length;
   const exportedAt  = new Date().toLocaleString('de-DE');
   const exportedDate = new Date().toLocaleDateString('de-DE');
@@ -1213,7 +1247,7 @@ export function exportTableToExcel(opts: ExportOptions): void {
   let filterRow = -1;
   if (filterSummary.length > 0) {
     filterRow = R;
-    const filterText = `Aktive Filter:  ${filterSummary.join('   |   ')}`;
+    const filterText = `${labels.activeFilters}  ${filterSummary.join('   |   ')}`;
     for (let c = 0; c < N; c++) {
       cell(ws, R, c, c === 0 ? filterText : '', {
         font:      { sz: 9, color: { rgb: T.FILTER_FG }, italic: true, name: 'Calibri' },
@@ -1297,7 +1331,7 @@ export function exportTableToExcel(opts: ExportOptions): void {
 
   // Empty-state placeholder
   if (rows.length === 0) {
-    const msg = 'Keine Daten vorhanden';
+    const msg = labels.emptyState;
     for (let c = 0; c < N; c++) {
       cell(ws, R, c, c === 0 ? msg : '', {
         font:      { sz: 10, italic: true, color: { rgb: '94A3B8' }, name: 'Calibri' },
@@ -1332,7 +1366,7 @@ export function exportTableToExcel(opts: ExportOptions): void {
 
     columns.forEach((col, c) => {
       const isLabel = c === 0;
-      const val     = isLabel ? `Gesamt  (${rows.length} Einträge)` : (totals[col.key] ?? '');
+      const val     = isLabel ? chromeText(labels.totalsRow, rows.length) : (totals[col.key] ?? '');
       cell(ws, R, c, val, {
         font: {
           bold:  true,
@@ -1380,7 +1414,7 @@ export function exportTableToExcel(opts: ExportOptions): void {
     const isFirst = c === 0;
     const isLast  = c === N - 1;
     const val = isFirst
-      ? `El-Professor Verwaltungssystem  —  ${rows.length} Datensätze exportiert`
+      ? chromeText(labels.footer, rows.length)
       : isLast
         ? exportedAt
         : '';

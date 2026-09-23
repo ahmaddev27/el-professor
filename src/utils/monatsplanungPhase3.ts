@@ -4,7 +4,10 @@
 
 import type { Phase1VehicleBlock } from './monatsplanungPhase1';
 import type { PlanningDriver } from '../components/MonatsplanungDriverPool';
-import { buildRideIntervalsFromBlocks, validateDriverNotesForPlanStep, type NoteViolation } from './driverNoteValidation';
+import { buildRideIntervalsFromBlocks, validateDriverNotesForPlanStep, NOTE_TYPE_LABELS, type NoteViolation } from './driverNoteValidation';
+// Type-only: the engine names a dictionary key beside its German text and never
+// resolves one. See src/i18n/engineMessage.ts.
+import type { EngineMessageKey, EngineMessageVars } from '../i18n/engineMessageTypes';
 export type { NoteViolation };
 
 export const DEFAULT_MAX_DAILY_HOURS = 8;
@@ -86,7 +89,11 @@ export interface RejectedCandidate {
   driver_id: string;
   driver_name: string;
   reason: RejectReason;
+  /** German, as the engine has always written it. The screens' fallback. */
   detail: string;
+  /** Dictionary key for `detail`; the screens render this when they know it. */
+  messageKey?: EngineMessageKey;
+  messageVars?: EngineMessageVars;
 }
 
 export interface AssignedBlock extends Phase1VehicleBlock {
@@ -124,6 +131,9 @@ export interface UnassignedBlock extends Phase1VehicleBlock {
   rejected: RejectedCandidate[];
   repair_attempted: boolean;
   repair_reason: string;
+  /** Dictionary key for `repair_reason`. */
+  repair_reason_key?: EngineMessageKey;
+  repair_reason_vars?: EngineMessageVars;
   repair_attempts: RepairAttemptLog[];
   intentionally_open?: boolean;
   /** Why the Inhaber (company_owner) could not take this block, if present in the pool. */
@@ -169,7 +179,13 @@ export interface Phase3Result {
     vehicles: string[];
     block_ids: string[];
   }>;
-  noteWarnings: Array<{ driver_id: string; driver_name: string; note: string; reason: string }>;
+  noteWarnings: Array<{
+    driver_id: string;
+    driver_name: string;
+    note: string;
+    reason: string;
+    reasonKey?: EngineMessageKey;
+  }>;
   /**
    * Hard Dienstzeit violations for regular (non-Inhaber) drivers with no accepted exception.
    * Each entry can be resolved via manual re-assignment or a block-specific Dienstzeit exception.
@@ -185,6 +201,8 @@ export interface Phase3Result {
     work_window_start: string | null;
     work_window_end: string | null;
     detail: string;
+    detailKey?: EngineMessageKey;
+    detailVars?: EngineMessageVars;
   }>;
   /**
    * Non-blocking informational warnings for Inhaber (company_owner) working-time violations.
@@ -195,6 +213,8 @@ export interface Phase3Result {
     driver_name: string;
     kind: 'dienstzeit' | 'tageslimit' | 'monatslimit';
     detail: string;
+    detailKey?: EngineMessageKey;
+    detailVars?: EngineMessageVars;
   }>;
   repair_summary: {
     attempted: number;
@@ -337,6 +357,8 @@ function checkWindow(driver: PlanningDriver, block: Phase1VehicleBlock): Rejecte
         driver_name: driver.name,
         reason: 'wrong_weekday',
         detail: `Arbeitstag nicht erlaubt (${names[iso] ?? '?'})`,
+        messageKey: 'engine.phase3.reject.wrongWeekday',
+        messageVars: { weekday: names[iso] ?? '?' },
       };
     }
   }
@@ -360,6 +382,13 @@ function checkWindow(driver: PlanningDriver, block: Phase1VehicleBlock): Rejecte
           driver_name: driver.name,
           reason: 'outside_working_time_window',
           detail: `Block ${fmtMinAsTime(bStart)}–${fmtMinAsTime(bEnd)} liegt außerhalb Dienstzeit ${driver.work_window_start}–${driver.work_window_end}`,
+          messageKey: 'engine.phase3.reject.outsideWindow',
+          messageVars: {
+            blockStart: fmtMinAsTime(bStart),
+            blockEnd: fmtMinAsTime(bEnd),
+            windowStart: driver.work_window_start,
+            windowEnd: driver.work_window_end,
+          },
         };
       }
     }
@@ -379,6 +408,14 @@ function checkDaily(state: DriverPlanState, block: Phase1VehicleBlock): Rejected
       detail: `Tageslimit ${state.effective_max_daily_hours}h überschritten (${fmtHours(used + block.duration_minutes)})${
         state.used_default_max_daily ? ' [Fallback 8h]' : ''
       }`,
+      messageKey: state.used_default_max_daily
+        ? 'engine.phase3.reject.dailyMaxFallback'
+        : 'engine.phase3.reject.dailyMax',
+      messageVars: {
+        maxHours: state.effective_max_daily_hours,
+        usedHours: fmtHours(used + block.duration_minutes),
+        fallbackHours: DEFAULT_MAX_DAILY_HOURS,
+      },
     };
   }
   return null;
@@ -395,6 +432,8 @@ function checkMonthly(state: DriverPlanState, block: Phase1VehicleBlock): Reject
       driver_name: state.driver_name,
       reason: 'monthly_max_exceeded',
       detail: `Monatslimit ${driver.max_monthly_hours}h überschritten`,
+      messageKey: 'engine.phase3.reject.monthlyMax',
+      messageVars: { maxHours: driver.max_monthly_hours },
     };
   }
   return null;
@@ -412,6 +451,13 @@ function checkOverlap(state: DriverPlanState, block: Phase1VehicleBlock): Reject
         driver_name: state.driver_name,
         reason: 'driver_overlap',
         detail: `Überlappung mit ${a.vehicle_identifier} ${a.block_start_datetime.slice(11, 16)}–${a.block_end_datetime.slice(11, 16)} am ${a.service_date}`,
+        messageKey: 'engine.phase3.reject.driverOverlap',
+        messageVars: {
+          vehicle: a.vehicle_identifier,
+          start: a.block_start_datetime.slice(11, 16),
+          end: a.block_end_datetime.slice(11, 16),
+          date: a.service_date,
+        },
       };
     }
   }
@@ -436,6 +482,13 @@ function checkVehicleSwitch(state: DriverPlanState, block: Phase1VehicleBlock, b
       driver_name: state.driver_name,
       reason: 'vehicle_switch_buffer_violation',
       detail: `Fahrzeugwechsel ${a.vehicle_identifier} → ${block.vehicle_identifier}, Puffer ${Math.round(gap)} Min. < ${bufferMinutes} Min.`,
+      messageKey: 'engine.phase3.reject.vehicleSwitch',
+      messageVars: {
+        from: a.vehicle_identifier,
+        to: block.vehicle_identifier,
+        gapMinutes: Math.round(gap),
+        bufferMinutes,
+      },
     };
   }
   return null;
@@ -451,6 +504,8 @@ function checkOneVehiclePerDay(state: DriverPlanState, block: Phase1VehicleBlock
       driver_name: state.driver_name,
       reason: 'one_vehicle_per_day',
       detail: `Fahrer nutzt bereits Fahrzeug ${a.vehicle_identifier} an ${dayKey}`,
+      messageKey: 'engine.phase3.reject.oneVehiclePerDay',
+      messageVars: { vehicle: a.vehicle_identifier, date: dayKey },
     };
   }
   return null;
@@ -464,13 +519,13 @@ function checkNote(driver: PlanningDriver, block: Phase1VehicleBlock): RejectedC
   const { end: bEnd } = blockTimeOfDayMinutes(block);
   // Legacy fallback: night threshold aligned with project definition (Nachtarbeit starts 23:00)
   if (HARD_NOTE_TOKENS[0].token.test(lower) && bEnd > 23 * 60) {
-    return { driver_id: driver.id, driver_name: driver.name, reason: 'note_constraint', detail: 'Legacy-Fahrer-Notiz: keine Nachtschicht' };
+    return { driver_id: driver.id, driver_name: driver.name, reason: 'note_constraint', detail: 'Legacy-Fahrer-Notiz: keine Nachtschicht', messageKey: 'engine.phase3.reject.legacyNote.noNightShift' };
   }
   if (HARD_NOTE_TOKENS[1].token.test(lower) && bEnd > 12 * 60) {
-    return { driver_id: driver.id, driver_name: driver.name, reason: 'note_constraint', detail: 'Legacy-Fahrer-Notiz: nur morgens' };
+    return { driver_id: driver.id, driver_name: driver.name, reason: 'note_constraint', detail: 'Legacy-Fahrer-Notiz: nur morgens', messageKey: 'engine.phase3.reject.legacyNote.morningsOnly' };
   }
   if (HARD_NOTE_TOKENS[2].token.test(lower) && iso < 6) {
-    return { driver_id: driver.id, driver_name: driver.name, reason: 'note_constraint', detail: 'Legacy-Fahrer-Notiz: nur Wochenende' };
+    return { driver_id: driver.id, driver_name: driver.name, reason: 'note_constraint', detail: 'Legacy-Fahrer-Notiz: nur Wochenende', messageKey: 'engine.phase3.reject.legacyNote.weekendOnly' };
   }
   const map: Record<number, RegExp> = {
     1: HARD_NOTE_TOKENS[3].token, 2: HARD_NOTE_TOKENS[4].token, 3: HARD_NOTE_TOKENS[5].token,
@@ -480,7 +535,15 @@ function checkNote(driver: PlanningDriver, block: Phase1VehicleBlock): RejectedC
   const rx = map[iso];
   if (rx && rx.test(lower)) {
     const names = ['', 'Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag', 'Sonntag'];
-    return { driver_id: driver.id, driver_name: driver.name, reason: 'note_constraint', detail: `Legacy-Fahrer-Notiz: nicht ${names[iso]}s` };
+    return {
+      driver_id: driver.id,
+      driver_name: driver.name,
+      reason: 'note_constraint',
+      detail: `Legacy-Fahrer-Notiz: nicht ${names[iso]}s`,
+      // One key per weekday rather than a `{weekday}` slot: the German reads
+      // "nicht Montags", and no English sentence can take that word as-is.
+      messageKey: `engine.phase3.reject.legacyNote.notWeekday.${iso}`,
+    };
   }
   return null;
 }
@@ -493,19 +556,15 @@ function parseDateMs(d: string): number {
 
 /** Humanise a structured note type/text for rejection detail messages. */
 function structuredNoteLabel(note: StructuredNote): string {
-  const typeLabels: Record<string, string> = {
-    sick: 'Krank',
-    vacation: 'Urlaub',
-    off: 'Nicht verfügbar',
-    blitzer: 'Blitzer',
-    accident: 'Unfall',
-    kontrolle: 'Kontrolle',
-    breakdown: 'Panne',
-    wait: 'Wartezeit',
-    other: 'Sonstiges',
-    general: 'Allgemeine Notiz',
-  };
-  return typeLabels[note.note_type] ?? note.note_text ?? note.note_type;
+  return NOTE_TYPE_LABELS[note.note_type] ?? note.note_text ?? note.note_type;
+}
+
+/**
+ * The dictionary key for the same label, or undefined when the label is the
+ * note's own free text — which no dictionary can hold.
+ */
+function structuredNoteLabelKey(note: StructuredNote): EngineMessageKey | undefined {
+  return NOTE_TYPE_LABELS[note.note_type] ? `engine.noteType.${note.note_type}` : undefined;
 }
 
 /** Format a date YYYY-MM-DD → DD.MM.YYYY for display. */
@@ -577,14 +636,25 @@ function checkStructuredNote(
         const datePart = noteStartDate === noteEndDate
           ? fmtDateDe(noteStartDate)
           : `${fmtDateDe(noteStartDate)}–${fmtDateDe(noteEndDate!)}`;
-        const timePart = (!note.is_full_day && note.start_time && note.end_time)
-          ? ` ${note.start_time}–${note.end_time}`
-          : ' ganztägig';
+        const timed = !note.is_full_day && note.start_time && note.end_time;
+        const timePart = timed ? ` ${note.start_time}–${note.end_time}` : ' ganztägig';
         return {
           driver_id: driver.id,
           driver_name: driver.name,
           reason: 'note_constraint',
           detail: `Notiz-Einschränkung: ${label} (${datePart}${timePart})`,
+          // `label` is a note type's own key when the type is known, and the
+          // note's free text otherwise — engineText() translates a var that is
+          // itself a key. The dates and times stay German-formatted.
+          messageKey: timed
+            ? 'engine.phase3.reject.structuredNote.timed'
+            : 'engine.phase3.reject.structuredNote.allDay',
+          messageVars: {
+            label: structuredNoteLabelKey(note) ?? label,
+            dates: datePart,
+            from: note.start_time ?? '',
+            to: note.end_time ?? '',
+          },
         };
       }
 
@@ -824,6 +894,7 @@ function describeBlock(b: Phase1VehicleBlock | AssignedBlock): string {
 interface RepairOutcome {
   resolved: boolean;
   reason: string;
+  reasonKey?: EngineMessageKey;
   movedCount: number;
   rejected_attempts: RepairAttemptLog[];
 }
@@ -1075,6 +1146,9 @@ function attemptRepair(
   return {
     resolved: false,
     reason: rejections.length > 0 ? 'no valid move/swap found (all candidates rejected by full validation)' : 'no valid move/swap found',
+    reasonKey: rejections.length > 0
+      ? 'engine.phase3.repair.noValidMoveAllRejected'
+      : 'engine.phase3.repair.noValidMove',
     movedCount: 0,
     rejected_attempts: rejections,
   };
@@ -1115,6 +1189,8 @@ function purgeFinalConflicts(
 
         let toUnassign: AssignedBlock | null = null;
         let detail = '';
+        let detailKey: EngineMessageKey | undefined;
+        let detailVars: EngineMessageVars | undefined;
         let conflictReason: RejectReason = 'driver_overlap';
 
         if (bs < ae) {
@@ -1126,6 +1202,17 @@ function purgeFinalConflicts(
             `${a.vehicle_identifier} ${fmtMsDateTime(blockStartMs(a))}–${fmtMsDateTime(ae)} ↔ ` +
             `${b.vehicle_identifier} ${fmtMsDateTime(bs)}–${fmtMsDateTime(blockEndMs(b))}, ` +
             `${overlapMin} Min Überschneidung).`;
+          detailKey = 'engine.phase3.purge.driverOverlap';
+          detailVars = {
+            driver: state.driver_name,
+            vehicleA: a.vehicle_identifier,
+            startA: fmtMsDateTime(blockStartMs(a)),
+            endA: fmtMsDateTime(ae),
+            vehicleB: b.vehicle_identifier,
+            startB: fmtMsDateTime(bs),
+            endB: fmtMsDateTime(blockEndMs(b)),
+            overlapMinutes: overlapMin,
+          };
         } else if (a.vehicle_id !== b.vehicle_id) {
           const gapMin = (bs - ae) / 60000;
           if (gapMin < opts.vehicleSwitchBufferMinutes) {
@@ -1136,6 +1223,15 @@ function purgeFinalConflicts(
               `${a.vehicle_identifier} → ${b.vehicle_identifier}, ` +
               `Abstand ${gapMin.toFixed(1).replace('.', ',')} Min, ` +
               `erforderlich: ${opts.vehicleSwitchBufferMinutes} Min).`;
+            detailKey = 'engine.phase3.purge.vehicleSwitch';
+            detailVars = {
+              driver: state.driver_name,
+              from: a.vehicle_identifier,
+              to: b.vehicle_identifier,
+              // German decimal comma, as everywhere else in the product.
+              gapMinutes: gapMin.toFixed(1).replace('.', ','),
+              bufferMinutes: opts.vehicleSwitchBufferMinutes,
+            };
           }
         }
 
@@ -1159,9 +1255,13 @@ function purgeFinalConflicts(
                 driver_name,
                 reason: conflictReason,
                 detail,
+                messageKey: detailKey,
+                messageVars: detailVars,
               }],
               repair_attempted: true,
               repair_reason: detail,
+              repair_reason_key: detailKey,
+              repair_reason_vars: detailVars,
               repair_attempts: [],
             });
             foundConflict = true;
@@ -1210,6 +1310,7 @@ export function assignBlocksPhase3(
         driver_name: d.name,
         note: d.notes,
         reason: 'Notiz konnte nicht automatisch interpretiert werden, bitte manuell prüfen.',
+        reasonKey: 'engine.phase3.noteWarning.uninterpretable',
       });
     }
   }
@@ -1321,6 +1422,7 @@ export function assignBlocksPhase3(
         ...u,
         repair_attempted: true,
         repair_reason: outcome.reason,
+        repair_reason_key: outcome.reasonKey,
         repair_attempts: outcome.rejected_attempts,
       });
     }
@@ -1362,6 +1464,8 @@ export function assignBlocksPhase3(
                 driver_name: driver.name,
                 reason: 'wrong_weekday' as RejectReason,
                 detail: `Arbeitstag nicht erlaubt (${names[iso] ?? '?'})`,
+                messageKey: 'engine.phase3.reject.wrongWeekday',
+                messageVars: { weekday: names[iso] ?? '?' },
               };
             }
           }
@@ -1390,6 +1494,10 @@ export function assignBlocksPhase3(
         ...u,
         rejected: [...u.rejected, ...relaxedRejected],
         repair_reason: u.repair_reason + ' · Kein gültiger Kandidat (Dienstzeit-Entspannung versucht)',
+        repair_reason_key: 'engine.phase3.repair.noCandidateAfterRelax',
+        // `previous` is the earlier reason's own key when it has one, so
+        // engineText() translates both halves of the sentence.
+        repair_reason_vars: { previous: u.repair_reason_key ?? u.repair_reason },
       });
       continue;
     }
@@ -1612,6 +1720,8 @@ export function assignBlocksPhase3(
             driver_name: state.driver_name,
             kind: 'dienstzeit',
             detail: wrong.detail,
+            detailKey: wrong.messageKey,
+            detailVars: wrong.messageVars,
           });
         } else {
           windowViolations++;
@@ -1825,16 +1935,21 @@ export interface ManualAssignOptions {
   allowMonthly?: boolean;
 }
 
+/**
+ * `blockingChecks` holds the German strings the screens have always matched on
+ * — they are the discriminator, not the message, and they must not change.
+ * `reasonKey` covers only the two refusals that produce no blocking check.
+ */
 export function evaluateManualCandidate(
   result: Phase3Result,
   blockId: string,
   driverId: string,
   options: ManualAssignOptions,
-): { feasible: boolean; reason: string; blockingChecks: string[] } {
+): { feasible: boolean; reason: string; reasonKey?: EngineMessageKey; blockingChecks: string[] } {
   const u = result.unassigned.find(b => b.block_id === blockId);
-  if (!u) return { feasible: false, reason: 'Block nicht in Liste der offenen Blöcke', blockingChecks: [] };
+  if (!u) return { feasible: false, reason: 'Block nicht in Liste der offenen Blöcke', reasonKey: 'engine.phase3.manual.blockNotOpen', blockingChecks: [] };
   const state = result.driverStates.find(s => s.driver_id === driverId);
-  if (!state) return { feasible: false, reason: 'Fahrer nicht in Auswahl', blockingChecks: ['non_selected'] };
+  if (!state) return { feasible: false, reason: 'Fahrer nicht in Auswahl', reasonKey: 'engine.phase3.manual.driverNotInPool', blockingChecks: ['non_selected'] };
 
   const blocking: string[] = [];
   const driver = state.driver;
@@ -1900,6 +2015,8 @@ function computeWindowViolationDetails(driverStates: DriverPlanState[]): Phase3R
           work_window_start: state.driver.work_window_start ?? null,
           work_window_end: state.driver.work_window_end ?? null,
           detail: wrong.detail,
+          detailKey: wrong.messageKey,
+          detailVars: wrong.messageVars,
         });
       }
     }
@@ -1947,7 +2064,7 @@ function recomputeValidation(result: Phase3Result, selectedDrivers: PlanningDriv
         const wrong = checkWindow(state.driver, a);
         if (wrong) {
           if (isOwner) {
-            inhaberTimeWarnings.push({ driver_id: state.driver_id, driver_name: state.driver_name, kind: 'dienstzeit', detail: wrong.detail });
+            inhaberTimeWarnings.push({ driver_id: state.driver_id, driver_name: state.driver_name, kind: 'dienstzeit', detail: wrong.detail, detailKey: wrong.messageKey, detailVars: wrong.messageVars });
           } else {
             windowViolations++;
           }
@@ -2075,10 +2192,10 @@ export function applyManualAssignment(
   blockId: string,
   driverId: string,
   options: ManualAssignOptions,
-): { ok: boolean; reason: string; result: Phase3Result } {
+): { ok: boolean; reason: string; reasonKey?: EngineMessageKey; blockingChecks?: string[]; result: Phase3Result } {
   const feas = evaluateManualCandidate(current, blockId, driverId, options);
   if (!feas.feasible) {
-    return { ok: false, reason: feas.reason, result: current };
+    return { ok: false, reason: feas.reason, reasonKey: feas.reasonKey, blockingChecks: feas.blockingChecks, result: current };
   }
   const block = current.unassigned.find(b => b.block_id === blockId)!;
   const state = current.driverStates.find(s => s.driver_id === driverId)!;

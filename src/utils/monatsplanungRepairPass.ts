@@ -4,6 +4,8 @@
 // free slots. Regular driver blocks are never moved automatically.
 
 import type { AssignedBlock } from './monatsplanungPhase3';
+// Type-only: the pass names a dictionary key beside its German text.
+import type { EngineMessageKey, EngineMessageVars } from '../i18n/engineMessageTypes';
 
 const LOG_PREFIX = '[FinalOverlapRepair]';
 
@@ -38,7 +40,9 @@ export interface RepairMove {
   oldEndMs: number;
   newStartMs: number;
   newEndMs: number;
+  /** German, as the pass has always written it. The screen's fallback. */
   reason: string;
+  reasonKey?: EngineMessageKey;
   bufferUsedMin: number;
 }
 
@@ -47,11 +51,16 @@ export interface UnrepairableBlock {
   driverName: string;
   vehicle: string;
   durationMs: number;
+  /** Either a ConflictPair kind ('driver' | 'vehicle' | 'inhaber') or German text. */
   conflictKind: string;
+  conflictKindKey?: EngineMessageKey;
   freeDriverWindowsChecked: number;
   freeVehicleWindowsChecked: number;
   sharedWindowsChecked: number;
+  /** German, as the pass has always written it. The screen's fallback. */
   reason: string;
+  reasonKey?: EngineMessageKey;
+  reasonVars?: EngineMessageVars;
 }
 
 export interface RepairPassResult {
@@ -302,10 +311,18 @@ export function repairFinalOverlaps(
             vehicle: conflict.blockA.vehicle,
             durationMs: conflict.blockA.durationMs,
             conflictKind: 'Regulärer Fahrer-Konflikt aus Ausgangsplanung',
+            conflictKindKey: 'engine.repair.conflictKind.regularDriver',
             freeDriverWindowsChecked: 0,
             freeVehicleWindowsChecked: 0,
             sharedWindowsChecked: 0,
             reason: `Regulärer Fahrer-Konflikt aus Ausgangsplanung: ${conflict.blockA.driverName} · ${conflict.blockA.vehicle} und ${conflict.blockB.vehicle} überlappen um ${Math.round(conflict.overlapMs / 60000)} Min.`,
+            reasonKey: 'engine.repair.unrepairable.regularDriverConflict',
+            reasonVars: {
+              driver: conflict.blockA.driverName,
+              vehicleA: conflict.blockA.vehicle,
+              vehicleB: conflict.blockB.vehicle,
+              overlapMinutes: Math.round(conflict.overlapMs / 60000),
+            },
           });
           console.warn(LOG_PREFIX, 'unrepairable regular driver conflict', existingKey);
         }
@@ -432,6 +449,7 @@ export function repairFinalOverlaps(
             newEndMs: tryEnd,
             reason: conflict.kind === 'driver' ? 'Fahrerüberschneidung' :
                     conflict.kind === 'vehicle' ? 'Fahrzeugüberschneidung' : 'Inhaberüberschneidung',
+            reasonKey: `engine.repair.conflictKind.${conflict.kind}`,
             bufferUsedMin: vehicleSwitchBufferMinutes,
           });
 
@@ -452,8 +470,9 @@ export function repairFinalOverlaps(
       if (!placed) {
         const alreadyUnrep = unrepairable.some(u => u.blockId === candidate.blockId);
         if (!alreadyUnrep) {
+          const noSharedWindow = sharedFree.length === 0;
           const reason =
-            sharedFree.length === 0
+            noSharedWindow
               ? 'Kein freies Zeitfenster gefunden, das für Fahrer und Fahrzeug gleichzeitig frei ist'
               : `${sharedWindowsChecked} gemeinsame Zeitfenster geprüft – keines war groß genug oder hatte ausreichend Puffer`;
           unrepairable.push({
@@ -462,10 +481,15 @@ export function repairFinalOverlaps(
             vehicle: candidate.vehicle,
             durationMs,
             conflictKind: conflict.kind,
+            conflictKindKey: `engine.repair.conflictKind.${conflict.kind}`,
             freeDriverWindowsChecked,
             freeVehicleWindowsChecked,
             sharedWindowsChecked,
             reason,
+            reasonKey: noSharedWindow
+              ? 'engine.repair.unrepairable.noSharedWindow'
+              : 'engine.repair.unrepairable.noWindowBigEnough',
+            reasonVars: { windows: sharedWindowsChecked },
           });
           console.warn(LOG_PREFIX, 'unrepairable', candidate.blockId, reason);
         }

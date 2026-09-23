@@ -35,7 +35,9 @@ import {
   formatBlockDatetime,
   formatBlockHours,
   blockStatusLabel,
+  blockStatusLabelKey,
   blockWarningLabels,
+  blockWarningLabelKeys,
   blockSourceRowRange,
   type VehicleBlock,
   type BuildVehicleBlocksResult,
@@ -74,6 +76,7 @@ import { type StructuredNote } from '../utils/monatsplanungPhase3';
 import { fetchAllPaginated } from '../utils/fetchAllPaginated';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { useTranslation } from '../contexts/LanguageContext';
+import { engineText } from '../i18n/engineMessage';
 import type { TranslationKey, TranslationVars } from '../i18n';
 
 /** Signature of the `t` from useTranslation(), for helpers that take it. */
@@ -953,8 +956,8 @@ function VehicleBlocksView({ result, month, year, onRecompute, onAssign }: Vehic
             </div>
 
             {/* Detail rows */}
-            {/* blockStatusLabel / blockWarningLabels come from the clean engine and
-                return German; translating them belongs with that module. */}
+            {/* The clean engine returns German and names a key beside it; the
+                status and warning codes stay its own discriminators. */}
             <div className="rounded-xl overflow-hidden" style={{ border: '1px solid var(--border)' }}>
               {[
                 [t('hwh.colVehicle'),  modalBlock.vehicle],
@@ -963,8 +966,10 @@ function VehicleBlocksView({ result, month, year, onRecompute, onAssign }: Vehic
                 [t('hwh.colDuration'), formatBlockDuration(modalBlock.blockDurationSec)],
                 [t('hwh.colRides'),    String(modalBlock.rides?.length ?? 0)],
                 [t('hwh.colRows'),     blockSourceRowRange(modalBlock)],
-                [t('common.status'),   blockStatusLabel(modalBlock)],
-                [t('hwh.colWarnings'), blockWarningLabels(modalBlock).join(', ') || '—'],
+                [t('common.status'),   engineText(t, blockStatusLabel(modalBlock), blockStatusLabelKey(modalBlock))],
+                [t('hwh.colWarnings'), blockWarningLabels(modalBlock)
+                  .map((label, i) => engineText(t, label, blockWarningLabelKeys(modalBlock)[i]))
+                  .join(', ') || '—'],
               ].map(([k, v], i) => (
                 <div
                   key={k}
@@ -1114,8 +1119,8 @@ function RegularDriverAssignmentView({
 
   /** Just the reason, without the "not assigned" prefix. */
   function unassignedReason(block: VehicleBlock): string {
-    // blockStatusLabel is the clean engine's German status text.
-    if (block.status !== 'valid') return blockStatusLabel(block);
+    // The clean engine's German status text, rendered through its key.
+    if (block.status !== 'valid') return engineText(t, blockStatusLabel(block), blockStatusLabelKey(block));
     const reasons = rejectionMap.get(block.blockId);
     if (!reasons?.length) return t('hwh.rejectNoSuitableDriver');
     const r = reasons[0];
@@ -1793,8 +1798,10 @@ function RegularDriverAssignmentView({
                   [t('hwh.colDuration'),    formatBlockDuration(modalBlock.blockDurationSec)],
                   [t('hwh.colRides'),       String(modalBlock.rides?.length ?? 0)],
                   [t('hwh.colRows'),        blockSourceRowRange(modalBlock)],
-                  [t('hwh.colBlockStatus'), blockStatusLabel(modalBlock)],
-                  [t('hwh.colWarnings'),    blockWarningLabels(modalBlock).join(', ') || '—'],
+                  [t('hwh.colBlockStatus'), engineText(t, blockStatusLabel(modalBlock), blockStatusLabelKey(modalBlock))],
+                  [t('hwh.colWarnings'),    blockWarningLabels(modalBlock)
+                    .map((label, i) => engineText(t, label, blockWarningLabelKeys(modalBlock)[i]))
+                    .join(', ') || '—'],
                   ['1000',                  lk ? secToHShort(lk.baseSec) : '—'],
                   ['1500 N25%',             lk ? secToHShort(lk.night25Sec) : '—'],
                   ['1501 N40%',             lk ? secToHShort(lk.night40Sec) : '—'],

@@ -36,6 +36,7 @@ import FinalizePlanningModal from './FinalizePlanningModal';
 import { useAuth } from '../contexts/AuthContext';
 import { useTranslation } from '../contexts/LanguageContext';
 import type { TranslationKey } from '../i18n';
+import { engineText } from '../i18n/engineMessage';
 import {
   validateDriverNotesForPlanStep,
   buildRideIntervalsFromBlocks,
@@ -141,6 +142,10 @@ export default function MonatsplanungAssignmentPreview({
 }: Props) {
   const { user } = useAuth();
   const { t, tPlural } = useTranslation();
+  // Phase 3 and Phase 4 write their messages in German and name a dictionary
+  // key beside each one; `eng` renders the key and falls back to that German.
+  const eng = (text: string | null | undefined, key?: string, vars?: Record<string, string | number>) =>
+    engineText(t, text, key, vars);
   const [result, setResult] = useState<Phase3Result | null>(null);
   const [running, setRunning] = useState(false);
   const [runError, setRunError] = useState<string>('');
@@ -977,7 +982,9 @@ export default function MonatsplanungAssignmentPreview({
           const pad = (n: number) => String(n).padStart(2, '0');
           return `${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
         };
-        const reason = u.repair_reason || u.rejected.map(r => r.detail || r.reason).join('; ') || '—';
+        const reason = eng(u.repair_reason, u.repair_reason_key, u.repair_reason_vars)
+          || u.rejected.map(r => eng(r.detail, r.messageKey, r.messageVars) || r.reason).join('; ')
+          || '—';
         const affectedDriver = u.rejected.length > 0 ? u.rejected.map(r => r.driver_name).filter(Boolean).join(', ') : '—';
         nzbRows.push([
           u.block_id,
@@ -1090,7 +1097,14 @@ export default function MonatsplanungAssignmentPreview({
       allowMonthly: resolverMonthly,
     });
     if (!r.ok) {
-      setResolverError(r.reason);
+      // The blocking checks are the engine's discriminators; BLOCKING_CHECK_LABEL
+      // turns each into a key. The two refusals that produce none carry a key.
+      const blocking = (r.blockingChecks ?? []).filter(c => BLOCKING_CHECK_LABEL[c]);
+      setResolverError(
+        blocking.length > 0
+          ? blocking.map(c => t(BLOCKING_CHECK_LABEL[c])).join(', ')
+          : eng(r.reason, r.reasonKey),
+      );
       return;
     }
     const v = r.result.validation;
@@ -1515,7 +1529,7 @@ export default function MonatsplanungAssignmentPreview({
                       <div key={i} className="text-xs flex items-center gap-2" style={{ color: '#78350f' }}>
                         <span className="font-medium">{w.driver_name}:</span>
                         <span>{t('mp.owner.nonBlockingSuffix', { label: kindLabel })}</span>
-                        {w.detail && <span className="opacity-60">({w.detail})</span>}
+                        {w.detail && <span className="opacity-60">({eng(w.detail, w.detailKey, w.detailVars)})</span>}
                       </div>
                     );
                   })}
@@ -1545,7 +1559,7 @@ export default function MonatsplanungAssignmentPreview({
                             </span>
                           </div>
                           <div className="text-xs" style={{ color: '#991b1b' }}>
-                            {v.detail}
+                            {eng(v.detail, v.detailKey, v.detailVars)}
                             {v.work_window_start && v.work_window_end && (
                               <span className="ml-1 opacity-70">({t('mp.workingTime')} {v.work_window_start}–{v.work_window_end})</span>
                             )}
@@ -1585,7 +1599,7 @@ export default function MonatsplanungAssignmentPreview({
                 </summary>
                 <ul className="mt-2 space-y-1 text-xs" style={{ color: 'var(--text-secondary)' }}>
                   {result.noteWarnings.map((w, i) => (
-                    <li key={i}>• <strong>{w.driver_name}</strong>: "{w.note}" – {w.reason}</li>
+                    <li key={i}>• <strong>{w.driver_name}</strong>: "{w.note}" – {eng(w.reason, w.reasonKey)}</li>
                   ))}
                 </ul>
               </details>
@@ -1821,7 +1835,7 @@ export default function MonatsplanungAssignmentPreview({
                               <ArrowRight size={10} />
                               <span className="opacity-70">{t('mp.repair.new')}:</span> {fmtRepairMs(m.newStartMs)}–{fmtRepairMs(m.newEndMs)}
                             </span>
-                            <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold" style={{ background: '#dbeafe', color: '#1e40af' }}>{m.reason}</span>
+                            <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold" style={{ background: '#dbeafe', color: '#1e40af' }}>{eng(m.reason, m.reasonKey)}</span>
                             <span className="opacity-60">{t('mp.repair.bufferUsed', { minutes: m.bufferUsedMin })}</span>
                           </div>
                         ))}
@@ -1857,7 +1871,7 @@ export default function MonatsplanungAssignmentPreview({
                                 <Td align="right">{u.freeDriverWindowsChecked}</Td>
                                 <Td align="right">{u.freeVehicleWindowsChecked}</Td>
                                 <Td align="right">{u.sharedWindowsChecked}</Td>
-                                <Td><span style={{ color: '#c2410c' }}>{u.reason}</span></Td>
+                                <Td><span style={{ color: '#c2410c' }}>{eng(u.reason, u.reasonKey, u.reasonVars)}</span></Td>
                               </tr>
                             ))}
                           </tbody>
@@ -1982,7 +1996,7 @@ export default function MonatsplanungAssignmentPreview({
                             )}
                             {b.rejected.slice(0, 4).map((r, i) => (
                               <div key={i} className="text-[11px]">
-                                <span className="font-semibold">{r.driver_name}</span>: <span style={{ color: 'var(--text-tertiary)' }}>{t(REASON_LABEL[r.reason])}</span> – {r.detail}
+                                <span className="font-semibold">{r.driver_name}</span>: <span style={{ color: 'var(--text-tertiary)' }}>{t(REASON_LABEL[r.reason])}</span> – {eng(r.detail, r.messageKey, r.messageVars)}
                               </div>
                             ))}
                             {b.rejected.length > 4 && (
@@ -1991,7 +2005,7 @@ export default function MonatsplanungAssignmentPreview({
                             {b.repair_attempted && (
                               <div className="mt-1 space-y-0.5">
                                 <div className="text-[11px] inline-flex items-center gap-1" style={{ color: '#a16207' }}>
-                                  <Wrench size={11} /> {t('mp.repairAttempted', { reason: b.repair_reason ?? '' })}
+                                  <Wrench size={11} /> {t('mp.repairAttempted', { reason: eng(b.repair_reason, b.repair_reason_key, b.repair_reason_vars) })}
                                 </div>
                                 {b.repair_attempts.slice(0, 5).map((ra, k) => (
                                   <div key={k} className="text-[10px] pl-4" style={{ color: 'var(--text-tertiary)' }}>
@@ -2007,7 +2021,7 @@ export default function MonatsplanungAssignmentPreview({
                             )}
                             {b.inhaber_rejection && (
                               <div className="mt-1 text-[11px] inline-flex items-center gap-1 px-1.5 py-0.5 rounded" style={{ background: '#fff7ed', color: '#c2410c' }}>
-                                {t('mp.owner.attempted')}: {t(REASON_LABEL[b.inhaber_rejection.reason])} – {b.inhaber_rejection.detail}
+                                {t('mp.owner.attempted')}: {t(REASON_LABEL[b.inhaber_rejection.reason])} – {eng(b.inhaber_rejection.detail, b.inhaber_rejection.messageKey, b.inhaber_rejection.messageVars)}
                               </div>
                             )}
                             {b.repair_reason?.includes('Deckungspass') && (
@@ -2465,7 +2479,7 @@ export default function MonatsplanungAssignmentPreview({
                     </summary>
                     <ul className="px-4 pb-3 space-y-1 text-xs" style={{ color: '#991b1b' }}>
                       {phase4.consistencyIssues.slice(0, 50).map((c, i) => (
-                        <li key={i}>• [{c.type}] {c.detail}</li>
+                        <li key={i}>• [{c.type}] {eng(c.detail, c.messageKey, c.messageVars)}</li>
                       ))}
                       {phase4.consistencyIssues.length > 50 && (
                         <li>{t('mp.andMore', { count: phase4.consistencyIssues.length - 50 })}</li>
