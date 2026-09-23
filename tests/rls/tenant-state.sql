@@ -397,14 +397,26 @@ DECLARE
   u   record;
   got text;
 BEGIN
+  -- Since 20260923130000 (slice C) the function asks a second question after
+  -- the state one: current_role_permits('documents', true), the page its
+  -- tables carry. The `invited` principal is an **editor**, and the editor role
+  -- has held can_edit = false on the Dokumente page since 20260302065621 — so
+  -- it is now refused, and the refusal it gets is what this section is really
+  -- about: 42501 not_authorized means the state gate let it through and the
+  -- role gate stopped it, which is exactly the claim (a pending_invite account
+  -- is not blocked for *state*). An administrator is unaffected: admin holds
+  -- can_edit on every page.
   FOR u IN SELECT * FROM _ts_user ORDER BY who LOOP
     got := _ts_try(_ts_id('user:' || u.who),
                    format('SELECT reassign_fahrtenbuch_trip(%L, %L, %L)::text',
                           _ts_id('trip:' || u.company_slug), _ts_id('driver:' || u.company_slug), 'TS'));
     PERFORM _ts_ok(format('reassign_fahrtenbuch_trip: %s %s', u.label,
-                          CASE WHEN u.allowed THEN 'reassigns its own trip' ELSE 'is refused' END),
-      CASE WHEN u.allowed THEN got NOT LIKE 'ERR %'
-           ELSE got LIKE 'ERR P0001%caller has no company%' END);
+                          CASE WHEN NOT u.allowed THEN 'is refused for state'
+                               WHEN u.role = 'admin' THEN 'reassigns its own trip'
+                               ELSE 'passes the state gate and is refused by the Dokumente page' END),
+      CASE WHEN NOT u.allowed THEN got LIKE 'ERR P0001%caller has no company%'
+           WHEN u.role = 'admin' THEN got NOT LIKE 'ERR %'
+           ELSE got LIKE 'ERR 42501%' AND got NOT LIKE '%caller has no company%' END);
   END LOOP;
 
   PERFORM _ts_ok('apply_monthly_planning_run: a suspended company''s admin is refused',

@@ -472,7 +472,7 @@
         </li>
         <li><a href="#p1"><span class="no">1</span><h3>OTP وأمان الحسابات</h3></a><ul class="chips"><li class="chip">كبير</li><li class="chip">عالستيج</li></ul></li>
         <li><a href="#p2"><span class="no">2</span><h3>نظام التصميم والنموذج</h3></a><ul class="chips"><li class="chip">متوسط</li><li class="chip">اندمج عالستيج</li></ul><p class="gate">البوابة انفتحت: وافقت على النموذج بـ 15.09</p></li>
-        <li><a href="#p3"><span class="no">3</span><h3>فصل المنصة والصلاحيات</h3></a><ul class="chips"><li class="chip">كبير جداً</li><li class="chip">12 من 13 اندمجوا وعالبرودكشن</li><li class="chip">3.13ب بالمراجعة: إعدادات الشركة بجلسة، وروابط <code>/super-admin</code> انشالت</li><li class="chip">وتفعيل الأدوار التلاتة بالمراجعة</li></ul></li>
+        <li><a href="#p3"><span class="no">3</span><h3>فصل المنصة والصلاحيات</h3></a><ul class="chips"><li class="chip">كبير جداً</li><li class="chip">12 من 13 اندمجوا وعالبرودكشن</li><li class="chip">شريحة C: صلاحيات الشركة وصلت لكل الجداول (PR #110، بالمراجعة)</li><li class="chip">3.13ب بالمراجعة: إعدادات الشركة بجلسة، وروابط <code>/super-admin</code> انشالت</li><li class="chip">وتفعيل الأدوار التلاتة بالمراجعة</li></ul></li>
         <li><a href="#p4"><span class="no">4</span><h3>إيصال الراتب النقدي</h3></a><ul class="chips"><li class="chip">متوسط</li><li class="chip">الأساس اندمج</li></ul></li>
         <li><a href="#p5"><span class="no">5</span><h3>تعميم التصميم</h3></a><ul class="chips"><li class="chip">كبير</li><li class="chip">كل الدفعات اندمجت وعالبرودكشن</li><li class="chip">ضايل الإطار AppLayout بالآخر</li></ul></li>
         <li><a href="#progress"><span class="no">FA</span><h3>تحليل دفتر الرحلات</h3></a><ul class="chips"><li class="chip">الإصدار الأول</li><li class="chip">A الاستيراد وB المحرك اندمجوا</li><li class="chip">C وD الإعدادات والشاشة بالمراجعة</li></ul><p class="gate">بيقرأ وبيبلّغ بس: ولا رحلة بتتغيّر سائقها أو وقتها أو سعرها</p></li>
@@ -871,6 +871,13 @@
         </div>
       </header>
       <p>أخطر مرحلة، لأنها بتعيد كتابة قواعد الحماية بقاعدة البيانات. شغل الخادم (3.0–3.5) ممكن يمشي بالتوازي مع انتظار موافقة التصميم.</p>
+
+      <div class="step">
+        <h3><span class="step-no">C</span>نظام صلاحيات الشركة وصل للجداول اللي ما كان واصلها <span class="pill info">PR #110 — جاهز للمراجعة</span></h3>
+        <p>قبلها كان في 11 كائن بس عليهم بوابة أدوار. باقي جداول الشركة كان بيكتبها أي عضو مهما كان دوره — يعني <code>viewer</code>، الدور اللي ما إله صلاحية تعديل على ولا صفحة، كان بيستورد دفتر رحلات وبيطبّق تخطيط الشهر وبينهيه وبيعيد إسناد رحلة.</p>
+        <p>صار 23 جدول بياخدوا مفتاح الصفحة تبع الشاشة اللي بتكتبهم: <strong>Dokumente</strong> لدفتر الرحلات والتخطيط والتاريخي وStundennachweis والقوالب، و<strong>Bargeldbestand</strong> للحركات النقدية، و<strong>Fahrzeuge</strong> لربط السيارة بالسائق. والخمس دوال التخطيط — اللي بتمرق فوق قواعد الحماية — صارت تسأل نفس الصفحة.</p>
+        <p class="gate">ولا مفتاح صفحة جديد ولا صف صلاحيات انكتب، عشان شاشة الأدوار لما بتحفظ دور بتمسح كل صفوفه وبترجّع تكتبهم من قائمتها هي. <strong>بانتظارك:</strong> استعلام قراءة بس بوصف الـ PR بيطلّع، على نسخة من البرودكشن، مين بالظبط بيتأثر. فاضي = ما تغيّر وصول ولا حدا.</p>
+      </div>
 
       <div class="step">
         <h3><span class="step-no">3.0</span>خط أساس قبل أي تغيير <span class="pill ok">اندمج عالستيج</span></h3>
