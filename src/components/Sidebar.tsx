@@ -12,6 +12,7 @@ import { useTranslation } from '../contexts/LanguageContext';
 import type { TranslationKey } from '../i18n';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { LegalLinks } from './legal/LegalLinks';
+import { ADMIN_BASE } from '../lib/adminGate';
 
 interface SidebarProps {
   isSupportAdmin: boolean;
@@ -139,9 +140,10 @@ const Sidebar: React.FC<SidebarProps> = ({ isSupportAdmin }) => {
           </>
         )}
 
-        {/* Platform administration lives in its own shell at /super-admin and is
+        {/* Platform administration lives in its own shell at /admin and is
             deliberately absent from this sidebar. While a super admin is viewing a
-            company, this is the way back. */}
+            company, this is the way back. (It said /super-admin until slice
+            3.13b; that path is now only a redirect for old bookmarks.) */}
         {isSuperAdmin && isViewingAsCompany && (
           <>
             <div className="pt-3 pb-1 px-3">
@@ -150,7 +152,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isSupportAdmin }) => {
               </p>
             </div>
             <button
-              onClick={() => { exitCompany(); setIsMobileMenuOpen(false); navigate('/super-admin'); }}
+              onClick={() => { exitCompany(); setIsMobileMenuOpen(false); navigate(ADMIN_BASE); }}
               className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-150 w-full"
               style={{ color: 'var(--warning)', background: 'transparent' }}
               onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'var(--warning-subtle)'; }}

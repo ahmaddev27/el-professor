@@ -4,6 +4,7 @@ import { LogOut, Settings, ChevronDown, Building2, X as XIcon } from 'lucide-rea
 import { useAuth } from '../contexts/AuthContext';
 import { useTranslation } from '../contexts/LanguageContext';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
+import { ADMIN_BASE } from '../lib/adminGate';
 
 const UserMenu: React.FC = () => {
   const [isOpen, setIsOpen] = useState(false);
@@ -14,9 +15,12 @@ const UserMenu: React.FC = () => {
 
   // Leaving the company view returns to the administration shell — a super
   // admin who is not inspecting a tenant has no business in the company UI.
+  // ADMIN_BASE, not the literal '/super-admin' it said until slice 3.13b: the
+  // legacy path still redirects here, but sending the operator through a
+  // redirect on every exit is a round trip and a history entry for nothing.
   const handleExitCompany = () => {
     exitCompany();
-    navigate('/super-admin');
+    navigate(ADMIN_BASE);
   };
 
   const handleSignOut = async () => {

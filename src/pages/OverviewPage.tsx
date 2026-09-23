@@ -33,6 +33,7 @@ import {
 } from '../utils/overviewHelpers';
 import { getTuevStatus } from '../types/car';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
+import { ADMIN_BASE } from '../lib/adminGate';
 import { useTranslation } from '../contexts/LanguageContext';
 import type { TranslationKey } from '../i18n';
 
@@ -494,7 +495,7 @@ const OverviewPage: React.FC = () => {
       {/* ── Super Admin Banner ── */}
       {isSuperAdmin && (
         <Link
-          to="/super-admin"
+          to={ADMIN_BASE}
           className="flex items-center justify-between p-4 rounded-2xl transition-all group"
           style={{
             background: 'linear-gradient(135deg, rgba(245,158,11,0.15) 0%, rgba(245,158,11,0.05) 100%)',
