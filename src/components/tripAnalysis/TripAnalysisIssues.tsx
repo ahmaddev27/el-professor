@@ -47,7 +47,10 @@ export function issueDetail(t: Translate, issue: Issue): string | null {
     case 'travel_gap': {
       const available = minutes(num(v.availableMinutes));
       const margin = minutes(num(v.marginMinutes));
-      return available && margin ? t('ta.detail.travel', { available, margin }) : null;
+      if (!available || !margin) return null;
+      // The finding covers every consecutive pair, so most gaps are long ones
+      // the engine simply could not check. Only the short ones are named short.
+      return t(v.belowMargin === true ? 'ta.detail.travelShort' : 'ta.detail.travel', { available, margin });
     }
     case 'activity_outside_shift': {
       const m = minutes(num(v.outsideMinutes));
@@ -209,11 +212,26 @@ export function TripAnalysisIssues({ issues, driverNames, onShowTrips, singleDri
         </div>
       </Card>
 
+      {/* Every finding stays in the list — the travel check reports one per
+          consecutive pair, so a month of a hundred rides has a hundred of
+          them — but the list scrolls inside a pinned header rather than
+          making the page ten screens long.
+
+          `contain:paint` is not decoration. Measured in Chrome 141: with the
+          max-height alone, `document.body.scrollHeight` was the correct 1237
+          while `document.documentElement.scrollHeight` was 8592 and the page
+          really scrolled that far, so the reader got seven screens of empty
+          background under a table that was already clipped — the sticky
+          header's layout overflow escaping the scroll container. Containment
+          makes the container a containing block and the root measures 1237,
+          with the sticky header still pinned. The same would happen on any
+          DataTable given `scrollClassName` and enough rows. */}
       <DataTable
         caption={t('ta.issues.title')}
         columns={columns}
         rows={rows}
         getRowId={issue => issue.id}
+        scrollClassName="max-h-[32rem] [contain:paint]"
         emptyState={<EmptyState size="sm" icon={Filter} title={t('ta.issues.empty')} />}
       />
     </section>

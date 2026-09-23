@@ -101,21 +101,25 @@ export function TripAnalysisOverview({ result, driverRows, unlinked, fares, onSh
       ),
     },
     {
+      // Salary and rate in one column: the hours below are their quotient, and
+      // twelve columns did not fit a laptop.
       id: 'salary',
-      header: t('ta.col.salary'),
+      header: t('ta.col.salaryAndRate'),
       hideBelow: 'lg',
       cell: row => {
         const min = formatStoredEuro(row.salaryMin);
         const max = formatStoredEuro(row.salaryMax);
-        return min || max ? <span className="whitespace-nowrap tabular-nums">{min ?? '—'} – {max ?? '—'}</span> : dash;
+        const rate = formatStoredEuro(row.hourlyRate);
+        if (!min && !max && !rate) return dash;
+        return (
+          <span className="block py-1">
+            <span className="block whitespace-nowrap tabular-nums">{min ?? '—'} – {max ?? '—'}</span>
+            <span className="block whitespace-nowrap text-xs tabular-nums text-fg-muted">
+              {rate ? t('ta.perHour', { value: rate }) : dash}
+            </span>
+          </span>
+        );
       },
-    },
-    {
-      id: 'rate',
-      header: t('ta.col.hourlyRate'),
-      hideBelow: 'lg',
-      kind: 'number',
-      cell: row => formatStoredEuro(row.hourlyRate) ?? dash,
     },
     {
       id: 'range',
@@ -138,7 +142,7 @@ export function TripAnalysisOverview({ result, driverRows, unlinked, fares, onSh
       kind: 'number',
       value: row => row.shiftHours,
       sortable: true,
-      cell: row => hours(row.shiftHours, t('ta.kpi.noShifts')),
+      cell: row => hours(row.shiftHours, t('ta.kpi.noShiftsShort')),
     },
     {
       id: 'activity',
@@ -157,6 +161,9 @@ export function TripAnalysisOverview({ result, driverRows, unlinked, fares, onSh
       ),
     },
     {
+      // Over budget and what is left of it are one figure with two signs, so
+      // they share a cell: the badge is what is over, the line under it what
+      // remains. Never a bare 0,00 h, which reads as "nothing left".
       id: 'over',
       header: t('ta.col.overBudget'),
       kind: 'number',
@@ -172,15 +179,10 @@ export function TripAnalysisOverview({ result, driverRows, unlinked, fares, onSh
             {formatMinutesAsHours(row.overByMinutes)}
           </Badge>
         ) : (
-          <span className="tabular-nums text-fg-muted">{formatMinutesAsHours(0)}</span>
+          <span className="block whitespace-nowrap py-1 text-xs tabular-nums text-fg-muted">
+            {t('ta.remainingShort', { value: formatMinutesAsHours(row.remainingMinutes ?? 0) })}
+          </span>
         ),
-    },
-    {
-      id: 'remaining',
-      header: t('ta.col.remaining'),
-      hideBelow: 'lg',
-      kind: 'number',
-      cell: row => (row.remainingMinutes === null ? dash : <span className="tabular-nums">{formatMinutesAsHours(row.remainingMinutes)}</span>),
     },
     {
       id: 'fares',

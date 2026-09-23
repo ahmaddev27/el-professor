@@ -32,6 +32,7 @@ import UsersPage from './pages/UsersPage';
 import RolesPage from './pages/RolesPage';
 import DocumentsPage from './pages/DocumentsPage';
 import StundennachweisPage from './pages/StundennachweisPage';
+import TripAnalysisPage from './pages/TripAnalysisPage';
 import SettingsPage from './pages/SettingsPage';
 import CompaniesPage from './pages/CompaniesPage';
 import SuperAdminDashboard from './pages/SuperAdminDashboard';
@@ -601,6 +602,12 @@ function App() {
                 <Route path="dokumente/:id/bearbeiten" element={<PlanGate feature="dokumente"><DocumentsPage /></PlanGate>} />
                 <Route path="stundennachweis" element={<PlanGate feature="dokumente"><StundennachweisPage /></PlanGate>} />
                 <Route path="company-planner" element={<PlanGate feature="dokumente"><CompanyPlannerPage /></PlanGate>} />
+                {/* Fahrtenanalyse reads the Fahrtenbuch a company imported under
+                    Dokumente, so it is gated on the same feature rather than on
+                    a key of its own: a new FeatureKey would need a migration
+                    seeding `plan_features`, and a feature the stored map does
+                    not name reads as premium for every plan. */}
+                <Route path="fahrtenanalyse" element={<PlanGate feature="dokumente"><TripAnalysisPage /></PlanGate>} />
                 {/* An administrator of this company — or a platform account
                     inside it (3.4b). Registered unconditionally and decided in
                     CompanyAdminRoute, because the answer needs the session's
