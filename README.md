@@ -37,7 +37,7 @@ A React SPA on a self-hosted Supabase stack (PostgreSQL, Auth, Storage, Edge Fun
 | **3** | Platform panel and permissions | `▰▰▰▰▰▰▰▰▰▰▰▰▱` 12/13 | 3.13b open as a PR: the company’s own settings are read inside a context, nothing links to `/super-admin` any more, and the Benutzer list no longer stops at GoTrue’s first 50 accounts. The `support`, `billing` and `read_only` staff roles are enabled in review (owner’s decision, 23.09.2026) |
 | **4** | Cash salary receipt | `▰▰▰` 3/3 | live |
 | **5** | Design rollout | `▰▰▰▰` 4/4 | every screen batch merged; `AppLayout` itself moves last |
-| **FA** | Fahrtenbuch analysis | `▰▰▱` 2/3 | import reliability and the analysis engine are live; the settings and the Fahrtenanalyse screen are being built |
+| **FA** | Fahrtenbuch analysis | `▰▰▱` 2/3 | import reliability and the analysis engine are live; the settings tables and the Fahrtenanalyse screen are open as a PR — it shows and explains a month of imported rides and changes no trip |
 
 **Production serves `9f5e833`** (23.09.2026): phase 5 complete, the legal pages, the invoice-coverage fix, Fahrtenbuch import reliability, and two defects that had been live — an Inhaber saved as an employee when edited, and every user edit without a new password failing.
 

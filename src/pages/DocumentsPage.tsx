@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef, useId } from 'react';
-import { Clock, ChevronRight, ChevronDown, Receipt, Car, MapPin, ArrowLeft, Trash2, ExternalLink, FileDown, Download, Banknote, type LucideIcon } from 'lucide-react';
+import { Clock, ChevronRight, ChevronDown, Receipt, Car, MapPin, ArrowLeft, Trash2, ExternalLink, FileDown, FileSearch, Download, Banknote, type LucideIcon } from 'lucide-react';
 import TrinkgeldQuittungModal from '../components/TrinkgeldQuittungModal';
 import MietwagenauftragModal from '../components/MietwagenauftragModal';
 import GehaltsquittungModal from '../components/GehaltsquittungModal';
@@ -356,7 +356,16 @@ const DocumentsPage: React.FC = () => {
           <ArrowLeft aria-hidden />
           {t('nav.documents')}
         </Button>
-        <PageHeader title={t('doc.fahrtenbuch')} description={t('doc.fahrtenbuchSubtitle')} />
+        <PageHeader
+          title={t('doc.fahrtenbuch')}
+          description={t('doc.fahrtenbuchSubtitle')}
+          actions={
+            <Button variant="secondary" onClick={() => navigate('/fahrtenanalyse')}>
+              <FileSearch aria-hidden />
+              {t('ta.link.open')}
+            </Button>
+          }
+        />
         <FahrtenbuchTripsView drivers={drivers} cars={cars} />
       </div>
     );
@@ -607,6 +616,15 @@ const DocumentsPage: React.FC = () => {
               description={t('doc.fahrtenbuchDesc')}
               badges={[t('doc.badgeImport'), 'Excel / CSV']}
               onClick={() => setSubView('fahrtenbuch')}
+            />
+            {/* The Fahrtenanalyse explains an imported Fahrtenbuch; it writes no
+                trip, which is why it is a separate screen and not a tab here. */}
+            <ToolCard
+              icon={FileSearch}
+              title={t('ta.title')}
+              description={t('ta.description')}
+              badges={[t('ta.badgeAnalysis'), t('ta.badgeExcel')]}
+              onClick={() => navigate('/fahrtenanalyse')}
             />
           </div>
         </section>
