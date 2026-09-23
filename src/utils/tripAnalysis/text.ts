@@ -50,3 +50,18 @@ const BUDGET_PROBLEM_TEXT: Readonly<Record<BudgetProblem, string>> = {
 export function budgetProblemsText(problems: readonly BudgetProblem[]): string {
   return problems.map(p => BUDGET_PROBLEM_TEXT[p]).join(', ');
 }
+
+/**
+ * The dictionary key of one budget problem. The codes are the
+ * discriminators and never change.
+ *
+ * A joined list cannot travel through a single `{slot}` — the engine would
+ * have to translate to join it, which is exactly what it must not do. So a
+ * finding's `budget_not_computable` explanation carries the German list as
+ * its `problems` slot, and a screen that wants the list in the reader's
+ * language maps `issue.values.problems` (the comma-separated codes) through
+ * this function instead.
+ */
+export function budgetProblemKey(problem: BudgetProblem): string {
+  return `engine.budgetProblem.${problem}`;
+}

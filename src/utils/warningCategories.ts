@@ -1,3 +1,6 @@
+// Type-only: this module names a dictionary key beside its German label.
+import type { EngineMessageKey } from '../i18n/engineMessageTypes';
+
 export type WarningCategory =
   | 'critical'
   | 'transfer'
@@ -13,7 +16,9 @@ export interface CategorizedWarning {
 
 export interface WarningGroup {
   category: WarningCategory;
+  /** German, as this module has always written it. The screen's fallback. */
   label: string;
+  labelKey: EngineMessageKey;
   color: string;
   bgColor: string;
   borderColor: string;
@@ -27,6 +32,11 @@ function extractDate(text: string): string | null {
   return m ? m[1] : null;
 }
 
+/**
+ * The German fragments below are DISCRIMINATORS, not messages: they match the
+ * text the engines produced, so they must stay exactly as they are. Translating
+ * one would silently move every warning it matched into `critical`.
+ */
 function classify(text: string): WarningCategory {
   if (
     text.includes('Ueberlappende Fahrten') ||
@@ -70,33 +80,38 @@ function classify(text: string): WarningCategory {
   return 'critical';
 }
 
-const GROUP_META: Record<WarningCategory, { label: string; color: string; bgColor: string; borderColor: string }> = {
+const GROUP_META: Record<WarningCategory, { label: string; labelKey: EngineMessageKey; color: string; bgColor: string; borderColor: string }> = {
   critical: {
     label: 'Kritische Konflikte',
+    labelKey: 'engine.warningGroup.critical',
     color: '#dc2626',
     bgColor: 'rgba(220,38,38,0.06)',
     borderColor: 'rgba(220,38,38,0.3)',
   },
   transfer: {
     label: 'Anschlussfahrt-Warnungen',
+    labelKey: 'engine.warningGroup.transfer',
     color: '#d97706',
     bgColor: 'rgba(217,119,6,0.06)',
     borderColor: 'rgba(217,119,6,0.3)',
   },
   shift: {
     label: 'Schicht-Warnungen',
+    labelKey: 'engine.warningGroup.shift',
     color: '#2563eb',
     bgColor: 'rgba(37,99,235,0.06)',
     borderColor: 'rgba(37,99,235,0.3)',
   },
   target: {
     label: 'Ziel / Gehalt',
+    labelKey: 'engine.warningGroup.target',
     color: '#7c3aed',
     bgColor: 'rgba(124,58,237,0.06)',
     borderColor: 'rgba(124,58,237,0.3)',
   },
   note: {
     label: 'Notizen & Hinweise',
+    labelKey: 'engine.warningGroup.note',
     color: '#059669',
     bgColor: 'rgba(5,150,105,0.06)',
     borderColor: 'rgba(5,150,105,0.3)',

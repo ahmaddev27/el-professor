@@ -101,6 +101,16 @@ function missingAddressText(pair: TravelPair): string {
   return fromMissing ? 'Zielort der vorherigen Fahrt fehlt' : 'Abholort der nächsten Fahrt fehlt';
 }
 
+/** The dictionary key for the same sentence. */
+function missingAddressKey(pair: TravelPair): string {
+  const fromMissing = !(pair.from.trip.dropoff_address?.trim());
+  const toMissing = !(pair.to.trip.pickup_address?.trim());
+  if (fromMissing && toMissing) return 'engine.analysis.travel.addressBothMissing';
+  return fromMissing
+    ? 'engine.analysis.travel.addressFromMissing'
+    : 'engine.analysis.travel.addressToMissing';
+}
+
 function usableEstimate(estimate: TravelEstimate): estimate is Extract<TravelEstimate, { kind: 'estimated' }> {
   return estimate.kind === 'estimated' && Number.isFinite(estimate.minutes) && estimate.minutes >= 0;
 }
@@ -134,6 +144,9 @@ export function travelFinding(pair: TravelPair, estimator: TravelTimeEstimator, 
   if (!usableEstimate(estimate)) {
     const reason = estimate.kind === 'unavailable' ? estimate.reason : 'invalid_estimate';
     const cause = request ? `keine Routenberechnung verfügbar (${reason})` : missingAddressText(pair);
+    // `cause` is a key when the address is missing; engineText() resolves it.
+    // With a request there is no address problem, so the slot goes unused.
+    const causeVar = request ? cause : missingAddressKey(pair);
     const weakSignal = belowMargin
       ? ` Die verfügbare Zeit von ${minutesText(availableMinutes)} Min. liegt unter dem Puffer von ${minutesText(marginMinutes)} Min. – schwacher Hinweis.`
       : '';
@@ -152,6 +165,22 @@ export function travelFinding(pair: TravelPair, estimator: TravelTimeEstimator, 
         reason,
       },
       explanation: `Wechsel nicht prüfbar: ${cause}.${weakSignal}`,
+      // Four keys rather than one sentence with a `{cause}` slot: the routing
+      // cause carries a machine reason of its own, and a key cannot hold
+      // another key's slots.
+      explanationKey: request
+        ? (belowMargin
+            ? 'engine.analysis.travel.unverifiable.noRouting.belowMargin'
+            : 'engine.analysis.travel.unverifiable.noRouting')
+        : (belowMargin
+            ? 'engine.analysis.travel.unverifiable.address.belowMargin'
+            : 'engine.analysis.travel.unverifiable.address'),
+      explanationVars: {
+        cause: causeVar,
+        reason,
+        availableMinutes: minutesText(availableMinutes),
+        marginMinutes: minutesText(marginMinutes),
+      },
       confidence: 'low',
     };
   }
@@ -165,6 +194,17 @@ export function travelFinding(pair: TravelPair, estimator: TravelTimeEstimator, 
     status === 'conflict'
       ? `Verfügbar ${msAsMinutesText(pair.gapMs)} Min., geschätzt ${minutesText(estimate.minutes)} Min.${marginText}, es fehlen ${minutesText(shortByMinutes)} Min. (Quelle: ${estimate.source}).`
       : `Verfügbar ${msAsMinutesText(pair.gapMs)} Min., benötigt ${minutesText(requiredMinutes)} Min. (geschätzt ${minutesText(estimate.minutes)} Min.${marginText}, Quelle: ${estimate.source}).`;
+  const explanationKey = status === 'conflict'
+    ? (marginMinutes > 0 ? 'engine.analysis.travel.shortWithMargin' : 'engine.analysis.travel.short')
+    : (marginMinutes > 0 ? 'engine.analysis.travel.okWithMargin' : 'engine.analysis.travel.ok');
+  const explanationVars = {
+    availableMinutes: msAsMinutesText(pair.gapMs),
+    estimateMinutes: minutesText(estimate.minutes),
+    requiredMinutes: minutesText(requiredMinutes),
+    shortByMinutes: minutesText(shortByMinutes),
+    marginMinutes: minutesText(marginMinutes),
+    source: estimate.source,
+  };
   const confidence: Confidence = lowestConfidence(estimate.confidence, timeConfidence);
 
   return {
@@ -182,6 +222,8 @@ export function travelFinding(pair: TravelPair, estimator: TravelTimeEstimator, 
       reason: null,
     },
     explanation,
+    explanationKey,
+    explanationVars,
     confidence,
   };
 }

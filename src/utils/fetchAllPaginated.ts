@@ -1,3 +1,18 @@
+// Type-only: this module names a dictionary key beside its German text.
+import type { EngineMessageKey, EngineMessageVars } from '../i18n/engineMessageTypes';
+
+export interface PaginatedFetchError extends Error {
+  messageKey?: EngineMessageKey;
+  messageVars?: EngineMessageVars;
+}
+
+function fetchError(text: string, messageKey: EngineMessageKey, messageVars: EngineMessageVars): PaginatedFetchError {
+  const error = new Error(text) as PaginatedFetchError;
+  error.messageKey = messageKey;
+  error.messageVars = messageVars;
+  return error;
+}
+
 /**
  * Page through a PostgREST query until it is exhausted.
  *
@@ -13,6 +28,12 @@
  * minute, and PostgreSQL is free to break that tie differently per request,
  * duplicating or dropping rows across page boundaries.
  *
+ * `label` names what is being loaded and is already translated by the caller.
+ * The sentence around it is this module's, so the thrown Error carries the
+ * dictionary key for it: a screen renders `engineText(t, e.message,
+ * (e as PaginatedFetchError).messageKey, …)` and every other catch block still
+ * shows `e.message`, unchanged.
+ *
  * @throws if any page errors, or if `maxRows` is exceeded — a runaway is a bug
  *         worth surfacing rather than an out-of-memory crash.
  */
@@ -23,6 +44,7 @@ export async function fetchAllPaginated<T>(
   const batchSize = options.batchSize ?? 1000;
   const maxRows = options.maxRows ?? 200_000;
   const label = options.label ?? 'Datensätze';
+  const labelIsDefault = options.label == null;
 
   const all: T[] = [];
   let offset = 0;
@@ -30,7 +52,13 @@ export async function fetchAllPaginated<T>(
   for (;;) {
     const { data, error } = await page(offset, offset + batchSize - 1);
     if (error) {
-      throw new Error(`Fehler beim Laden (${label}): ${error.message}`);
+      throw fetchError(
+        `Fehler beim Laden (${label}): ${error.message}`,
+        'engine.fetch.loadFailed',
+        // The default label is ours, so it travels as a key; a caller's label
+        // arrives already translated.
+        { label: labelIsDefault ? 'engine.fetch.defaultLabel' : label, cause: error.message },
+      );
     }
 
     const rows = data ?? [];
@@ -42,9 +70,11 @@ export async function fetchAllPaginated<T>(
     offset += batchSize;
 
     if (all.length > maxRows) {
-      throw new Error(
+      throw fetchError(
         `Abbruch beim Laden (${label}): mehr als ${maxRows} Zeilen. ` +
         'Das deutet auf einen Fehler in der Abfrage hin.',
+        'engine.fetch.tooManyRows',
+        { label: labelIsDefault ? 'engine.fetch.defaultLabel' : label, maxRows },
       );
     }
   }

@@ -78,6 +78,15 @@ export function driverOverlapIssue(a: ClassifiedTrip, b: ClassifiedTrip): Issue 
       `${driverLabel(a)} ist gleichzeitig in zwei Fahrten: ${tripInterval(a)} und ${tripInterval(b)} ` +
       `überschneiden sich um ${minutesText(values.overlapMinutes)} Min.` +
       (identicalInterval ? ' Identische Zeiten – mögliches Duplikat.' : ''),
+    explanationKey: identicalInterval
+      ? 'engine.analysis.driverOverlap.identical'
+      : 'engine.analysis.driverOverlap',
+    explanationVars: {
+      driver: driverLabel(a),
+      intervalA: tripInterval(a),
+      intervalB: tripInterval(b),
+      minutes: minutesText(values.overlapMinutes),
+    },
     confidence: lowestConfidence(a.confidence, b.confidence),
   };
 }
@@ -97,6 +106,15 @@ export function vehicleOverlapIssue(a: ClassifiedTrip, b: ClassifiedTrip): Issue
     explanation:
       `Fahrzeug ${a.vehicleKey} ist gleichzeitig zwei Fahrern zugeordnet (${driverLabel(a)}, ${driverLabel(b)}): ` +
       `${tripInterval(a)} und ${tripInterval(b)} überschneiden sich um ${minutesText(values.overlapMinutes)} Min.`,
+    explanationKey: 'engine.analysis.vehicleOverlap',
+    explanationVars: {
+      vehicle: a.vehicleKey ?? '',
+      driverA: driverLabel(a),
+      driverB: driverLabel(b),
+      intervalA: tripInterval(a),
+      intervalB: tripInterval(b),
+      minutes: minutesText(values.overlapMinutes),
+    },
     confidence: lowestConfidence(a.confidence, b.confidence),
   };
 }
@@ -131,6 +149,7 @@ export function rowQualityIssue(c: ClassifiedTrip, type: RowQualityType): Issue 
     tripIds: [c.trip.id],
     values,
     explanation: ROW_QUALITY_TEXT[type],
+    explanationKey: `engine.analysis.rowQuality.${type}`,
     confidence: 'high',
   };
 }
@@ -163,6 +182,8 @@ export function driverNameMismatchIssue(driverId: string, rows: readonly Classif
     tripIds: evidence,
     values: { names: spellings.join(' | '), majorityName: majority.spelling },
     explanation: `Eine Fahrer-ID mit mehreren Namen: ${spellings.join(', ')}.`,
+    explanationKey: 'engine.analysis.driverNameMismatch',
+    explanationVars: { names: spellings.join(', ') },
     confidence: 'high',
   };
 }
@@ -198,6 +219,9 @@ export function shiftInvalidIssue(shift: AnalysisShift): Issue {
     explanation: missingDriver
       ? 'Arbeitszeit-Eintrag ohne Fahrer – keinem Fahrer zuzuordnen.'
       : 'Arbeitszeit-Eintrag ohne gültigen Zeitraum (Ende nicht nach Beginn).',
+    explanationKey: missingDriver
+      ? 'engine.analysis.shiftInvalid.missingDriver'
+      : 'engine.analysis.shiftInvalid.invalidInterval',
     confidence: 'high',
   };
 }
@@ -217,6 +241,8 @@ export function shiftOverlapIssue(a: AnalysisShift, b: AnalysisShift): Issue {
     shiftIds: [first, second],
     values: { overlapMinutes, overlapStartMs, overlapEndMs },
     explanation: `Zwei Arbeitszeit-Einträge überschneiden sich um ${minutesText(overlapMinutes)} Min. (${intervalText(overlapStartMs, overlapEndMs)}).`,
+    explanationKey: 'engine.analysis.shiftOverlap',
+    explanationVars: { minutes: minutesText(overlapMinutes), interval: intervalText(overlapStartMs, overlapEndMs) },
     confidence: 'high',
   };
 }
@@ -232,6 +258,8 @@ export function outsideShiftIssue(c: ClassifiedTrip, outsideMs: number): Issue {
     tripIds: [c.trip.id],
     values: { outsideMinutes: outsideMs / MINUTE_MS, tripMinutes: (c.end - c.start) / MINUTE_MS },
     explanation: `${msAsMinutesText(outsideMs)} Min. der Fahrt ${tripInterval(c)} liegen außerhalb der erfassten Arbeitszeit.`,
+    explanationKey: 'engine.analysis.activityOutsideShift',
+    explanationVars: { minutes: msAsMinutesText(outsideMs), interval: tripInterval(c) },
     confidence: c.confidence,
   };
 }
@@ -254,6 +282,10 @@ export function shiftWithoutActivityIssue(shift: AnalysisShift, openRows: number
     explanation:
       `Erfasste Arbeitszeit ${intervalText(shift.start_ms, shift.end_ms)} ohne Fahrt.` +
       (openRows > 0 ? ` Nicht abschließend: ${openRows} Fahrten des Fahrers sind nicht auswertbar.` : ''),
+    explanationKey: openRows > 0
+      ? 'engine.analysis.shiftWithoutActivity.open'
+      : 'engine.analysis.shiftWithoutActivity',
+    explanationVars: { interval: intervalText(shift.start_ms, shift.end_ms), openRows },
     confidence: 'high',
   };
 }
@@ -268,6 +300,7 @@ export function noShiftRecordsIssue(driverId: string, tripCount: number): Issue 
     tripIds: [],
     values: { tripCount },
     explanation: 'Keine Arbeitszeit erfasst – Fahrten außerhalb der Arbeitszeit sind nicht prüfbar.',
+    explanationKey: 'engine.analysis.noShiftRecords',
     confidence: 'high',
   };
 }
@@ -291,6 +324,10 @@ export function budgetIssues(
       tripIds: [],
       values: { problems: budget.problems.join(','), rangeComputable: budget.rangeStatus === 'ok' },
       explanation: `Budget nicht vollständig berechenbar: ${budgetProblemsText(budget.problems)}. Die Auswertung der Fahrten läuft trotzdem.`,
+      explanationKey: 'engine.analysis.budgetNotComputable',
+      // A joined list cannot be translated through one slot; see
+      // budgetProblemKey() in ./text.ts for the per-problem keys.
+      explanationVars: { problems: budgetProblemsText(budget.problems) },
       confidence: 'high',
     });
   }
@@ -306,6 +343,8 @@ export function budgetIssues(
       explanation:
         `Nach Abzug der Reserve liegt die Planungsgrenze (${hoursText(budget.capHours)} Std.) unter dem Mindestrahmen ` +
         `(${hoursText(budget.hoursMin)} Std.) – der Mindestrahmen hängt dann von weiterer geplanter Tätigkeit ab.`,
+      explanationKey: 'engine.analysis.capBelowHoursMin',
+      explanationVars: { capHours: hoursText(budget.capHours), minHours: hoursText(budget.hoursMin) },
       confidence: 'high',
     });
   }
@@ -314,6 +353,13 @@ export function budgetIssues(
   const overText = (label: string, minutes: number) =>
     `${label} ${hoursText(minutes / 60)} Std. liegt ${hoursText((minutes - comparison.maxMinutes) / 60)} Std. über dem ` +
     `Höchstrahmen von ${hoursText(comparison.maxMinutes / 60)} Std. – Hinweis zur Prüfung; keine Fahrt wird verschoben, gekürzt oder umverteilt.`;
+  // `label` is itself a key, which engineText() resolves before it substitutes.
+  const overVars = (labelKey: string, minutes: number) => ({
+    label: labelKey,
+    hours: hoursText(minutes / 60),
+    overHours: hoursText((minutes - comparison.maxMinutes) / 60),
+    maxHours: hoursText(comparison.maxMinutes / 60),
+  });
 
   if (comparison.activityVsMaxMinutes > 0) {
     issues.push({
@@ -329,6 +375,8 @@ export function budgetIssues(
         overByMinutes: comparison.activityVsMaxMinutes,
       },
       explanation: overText('Fahrzeit ohne Doppelzählung', comparison.activityMinutes),
+      explanationKey: 'engine.analysis.overBudget',
+      explanationVars: overVars('engine.analysis.overBudget.activity', comparison.activityMinutes),
       confidence,
     });
   }
@@ -346,6 +394,8 @@ export function budgetIssues(
         overByMinutes: comparison.shiftVsMaxMinutes,
       },
       explanation: overText('Erfasste Arbeitszeit', comparison.shiftMinutes),
+      explanationKey: 'engine.analysis.overBudget',
+      explanationVars: overVars('engine.analysis.overBudget.shifts', comparison.shiftMinutes),
       confidence: 'high',
     });
   }

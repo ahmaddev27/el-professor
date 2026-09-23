@@ -13,6 +13,9 @@
  */
 
 import type { FahrtenbuchTrip } from '../hooks/useFahrtenbuch';
+// Type-only: the engine names a dictionary key beside its German text and
+// never resolves one. See src/i18n/engineMessage.ts.
+import type { EngineMessageKey, EngineMessageVars } from '../i18n/engineMessageTypes';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -752,6 +755,11 @@ export function blockStatusLabel(block: VehicleBlock): string {
   }
 }
 
+/** The dictionary key for `blockStatusLabel`. The status itself is the discriminator. */
+export function blockStatusLabelKey(block: VehicleBlock): EngineMessageKey {
+  return `engine.hwh.blockStatus.${block.status}`;
+}
+
 export function blockWarningLabels(block: VehicleBlock): string[] {
   return block.warnings.map(w => {
     switch (w) {
@@ -764,6 +772,14 @@ export function blockWarningLabels(block: VehicleBlock): string[] {
       case 'long_block':               return 'Langer Block (>6h)';
     }
   });
+}
+
+/**
+ * The dictionary keys for `blockWarningLabels`, in the same order. The warning
+ * codes are the discriminators and stay exactly as the engine writes them.
+ */
+export function blockWarningLabelKeys(block: VehicleBlock): EngineMessageKey[] {
+  return block.warnings.map(w => `engine.hwh.blockWarning.${w}`);
 }
 
 /**
@@ -2228,7 +2244,11 @@ export function buildFinalBlockAssignmentSnapshot(
 export interface HistoricalWorkingHoursExportValidationIssue {
   code: string;
   severity: 'error' | 'warning' | 'info';
+  /** German, as the engine has always written it. The screens' fallback. */
   message: string;
+  /** Dictionary key for `message`; the screens render this when they know it. */
+  messageKey?: EngineMessageKey;
+  messageVars?: EngineMessageVars;
   row?: number | null;
   blockId?: string | null;
   driverName?: string | null;
@@ -2454,33 +2474,33 @@ export function validateHistoricalWorkingHoursExportReadiness(
 
   const snapshotComplete = v.snapshotRows === v.totalConsideredRides;
   if (!snapshotComplete) {
-    issues.push({ code: 'SNAPSHOT_ROW_COUNT_MISMATCH', severity: 'error', message: `Snapshot-Zeilen (${v.snapshotRows}) stimmen nicht mit berücksichtigten Fahrten (${v.totalConsideredRides}) überein.` });
+    issues.push({ code: 'SNAPSHOT_ROW_COUNT_MISMATCH', severity: 'error', message: `Snapshot-Zeilen (${v.snapshotRows}) stimmen nicht mit berücksichtigten Fahrten (${v.totalConsideredRides}) überein.`, messageKey: 'engine.hwh.export.snapshotRowCountMismatch', messageVars: { snapshotRows: v.snapshotRows, consideredRides: v.totalConsideredRides } });
   }
 
   const noDuplicateTrips = v.duplicateTripCount === 0;
   if (!noDuplicateTrips) {
     for (const tid of snapshotResult.duplicateTripIds.slice(0, 20)) {
-      issues.push({ code: 'DUPLICATE_TRIP', severity: 'error', message: `Doppelte Fahrt im Snapshot: ${tid}`, details: tid });
+      issues.push({ code: 'DUPLICATE_TRIP', severity: 'error', message: `Doppelte Fahrt im Snapshot: ${tid}`, details: tid, messageKey: 'engine.hwh.export.duplicateTrip', messageVars: { tripId: tid } });
     }
   }
 
   const noMissingTrips = v.missingTripCount === 0;
   if (!noMissingTrips) {
     for (const tid of snapshotResult.missingTripIds.slice(0, 20)) {
-      issues.push({ code: 'MISSING_TRIP', severity: 'error', message: `Fehlende Fahrt im Snapshot: ${tid}`, details: tid });
+      issues.push({ code: 'MISSING_TRIP', severity: 'error', message: `Fehlende Fahrt im Snapshot: ${tid}`, details: tid, messageKey: 'engine.hwh.export.missingTrip', messageVars: { tripId: tid } });
     }
   }
 
   const noUnassignedRows = v.unassignedRowCount === 0;
   for (const r of snapshotResult.unassignedRows.slice(0, 20)) {
-    issues.push({ code: 'UNASSIGNED_ROW', severity: 'error', message: 'Nicht zugeordnete Fahrt im Snapshot', row: r.sourceRowIndex, blockId: r.blockId, vehicle: r.vehicle });
+    issues.push({ code: 'UNASSIGNED_ROW', severity: 'error', message: 'Nicht zugeordnete Fahrt im Snapshot', row: r.sourceRowIndex, blockId: r.blockId, vehicle: r.vehicle, messageKey: 'engine.hwh.export.unassignedRow' });
   }
 
   // ── 2. Non-exportable rows ────────────────────────────────────────────────
 
   const nonExportable = rows.filter(r => !r.isExportable && r.assignmentType !== 'unassigned');
   for (const r of nonExportable.slice(0, 20)) {
-    issues.push({ code: 'NOT_EXPORTABLE', severity: 'error', message: `Zeile nicht exportierbar: ${r.validationReason ?? 'Unbekannter Grund'}`, row: r.sourceRowIndex, blockId: r.blockId, vehicle: r.vehicle });
+    issues.push({ code: 'NOT_EXPORTABLE', severity: 'error', message: `Zeile nicht exportierbar: ${r.validationReason ?? 'Unbekannter Grund'}`, row: r.sourceRowIndex, blockId: r.blockId, vehicle: r.vehicle, messageKey: 'engine.hwh.export.notExportable', messageVars: { reason: r.validationReason ?? 'engine.hwh.export.unknownReason' } });
   }
 
   // ── 3. Duration preservation ──────────────────────────────────────────────
@@ -2489,7 +2509,7 @@ export function validateHistoricalWorkingHoursExportReadiness(
   if (!noDurationChanges) {
     const changed = rows.filter(r => r.durationChanged);
     for (const r of changed.slice(0, 20)) {
-      issues.push({ code: 'DURATION_CHANGED', severity: 'error', message: `Fahrtdauer verändert: ${r.durationSecOriginal}s → ${r.durationSecFinal}s`, row: r.sourceRowIndex, blockId: r.blockId, driverName: r.finalDriverName, vehicle: r.vehicle });
+      issues.push({ code: 'DURATION_CHANGED', severity: 'error', message: `Fahrtdauer verändert: ${r.durationSecOriginal}s → ${r.durationSecFinal}s`, row: r.sourceRowIndex, blockId: r.blockId, driverName: r.finalDriverName, vehicle: r.vehicle, messageKey: 'engine.hwh.export.durationChanged', messageVars: { fromSeconds: r.durationSecOriginal, toSeconds: r.durationSecFinal } });
     }
   }
 
@@ -2499,17 +2519,17 @@ export function validateHistoricalWorkingHoursExportReadiness(
   if (!noAppCreatedOutsideMonthRows) {
     const bad = rows.filter(r => r.timeChanged && (r.finalStartMs < 0 || r.finalEndMs < 0));
     for (const r of bad.slice(0, 20)) {
-      issues.push({ code: 'APP_CREATED_OUTSIDE_MONTH', severity: 'error', message: 'Verschobene Fahrt außerhalb des Monats', row: r.sourceRowIndex, blockId: r.blockId, driverName: r.finalDriverName, vehicle: r.vehicle });
+      issues.push({ code: 'APP_CREATED_OUTSIDE_MONTH', severity: 'error', message: 'Verschobene Fahrt außerhalb des Monats', row: r.sourceRowIndex, blockId: r.blockId, driverName: r.finalDriverName, vehicle: r.vehicle, messageKey: 'engine.hwh.export.shiftedTripOutsideMonth' });
     }
     // Also scan directly
     const badDirect = rows.filter(r => r.timeChanged && r.finalStartMs > 0 && v.appCreatedOutsideMonthRowCount > 0);
     if (badDirect.length === 0 && v.appCreatedOutsideMonthRowCount > 0) {
-      issues.push({ code: 'APP_CREATED_OUTSIDE_MONTH', severity: 'error', message: `${v.appCreatedOutsideMonthRowCount} verschobene Fahrt(en) außerhalb des Monats` });
+      issues.push({ code: 'APP_CREATED_OUTSIDE_MONTH', severity: 'error', message: `${v.appCreatedOutsideMonthRowCount} verschobene Fahrt(en) außerhalb des Monats`, messageKey: 'engine.hwh.export.shiftedTripsOutsideMonth', messageVars: { count: v.appCreatedOutsideMonthRowCount } });
     }
   }
   // Original cross-month = info only
   if (v.originalCrossMonthRowCount > 0) {
-    issues.push({ code: 'ORIGINAL_CROSS_MONTH', severity: 'info', message: `${v.originalCrossMonthRowCount} Originalzeile(n) überschreiten die Monatsgrenze (nicht verschoben, nur Hinweis).` });
+    issues.push({ code: 'ORIGINAL_CROSS_MONTH', severity: 'info', message: `${v.originalCrossMonthRowCount} Originalzeile(n) überschreiten die Monatsgrenze (nicht verschoben, nur Hinweis).`, messageKey: 'engine.hwh.export.originalCrossMonth', messageVars: { count: v.originalCrossMonthRowCount } });
   }
 
   // ── 5. Missing final driver ───────────────────────────────────────────────
@@ -2518,7 +2538,7 @@ export function validateHistoricalWorkingHoursExportReadiness(
   if (!noMissingFinalDrivers) {
     const noDriver = rows.filter(r => r.isExportable && !r.finalDriverId);
     for (const r of noDriver.slice(0, 20)) {
-      issues.push({ code: 'MISSING_FINAL_DRIVER', severity: 'error', message: 'Exportierbarer Eintrag ohne finalen Fahrer', row: r.sourceRowIndex, blockId: r.blockId, vehicle: r.vehicle });
+      issues.push({ code: 'MISSING_FINAL_DRIVER', severity: 'error', message: 'Exportierbarer Eintrag ohne finalen Fahrer', row: r.sourceRowIndex, blockId: r.blockId, vehicle: r.vehicle, messageKey: 'engine.hwh.export.missingFinalDriver' });
     }
   }
 
@@ -2532,7 +2552,7 @@ export function validateHistoricalWorkingHoursExportReadiness(
   const noInvalidDatetimes = invalidDtRows.length === 0;
   const fullDatetimeOutput = noInvalidDatetimes;
   for (const r of invalidDtRows.slice(0, 20)) {
-    issues.push({ code: 'INVALID_DATETIME_FORMAT', severity: 'error', message: `Ungültiges Datumsformat: "${r.finalStartDatetime}" / "${r.finalEndDatetime}"`, row: r.sourceRowIndex, blockId: r.blockId, vehicle: r.vehicle });
+    issues.push({ code: 'INVALID_DATETIME_FORMAT', severity: 'error', message: `Ungültiges Datumsformat: "${r.finalStartDatetime}" / "${r.finalEndDatetime}"`, row: r.sourceRowIndex, blockId: r.blockId, vehicle: r.vehicle, messageKey: 'engine.hwh.export.invalidDatetime', messageVars: { start: r.finalStartDatetime, end: r.finalEndDatetime } });
   }
 
   // ── 7. Allowed drivers ────────────────────────────────────────────────────
@@ -2547,7 +2567,7 @@ export function validateHistoricalWorkingHoursExportReadiness(
         const key = r.finalDriverId ?? 'unknown';
         if (!seen.has(key)) {
           seen.add(key);
-          issues.push({ code: 'DRIVER_NOT_ALLOWED', severity: 'error', message: `Fahrer nicht in Auswahl: ${r.finalDriverName ?? r.finalDriverId}`, driverName: r.finalDriverName, vehicle: r.vehicle });
+          issues.push({ code: 'DRIVER_NOT_ALLOWED', severity: 'error', message: `Fahrer nicht in Auswahl: ${r.finalDriverName ?? r.finalDriverId}`, driverName: r.finalDriverName, vehicle: r.vehicle, messageKey: 'engine.hwh.export.driverNotAllowed', messageVars: { driver: r.finalDriverName ?? r.finalDriverId ?? '' } });
         }
       }
     }
@@ -2562,12 +2582,12 @@ export function validateHistoricalWorkingHoursExportReadiness(
     // Regular and inhaber-original must NOT have time changed
     if ((type === 'regular_block_assignment' || type === 'owner_surplus_assignment') && r.timeChanged) {
       onlyAllowedFieldsChanged = false;
-      issues.push({ code: 'UNEXPECTED_TIME_CHANGE', severity: 'error', message: `Reguläre/Originalzeit-Zeile hat unerwartete Zeitänderung`, row: r.sourceRowIndex, blockId: r.blockId, driverName: r.finalDriverName, vehicle: r.vehicle });
+      issues.push({ code: 'UNEXPECTED_TIME_CHANGE', severity: 'error', message: `Reguläre/Originalzeit-Zeile hat unerwartete Zeitänderung`, row: r.sourceRowIndex, blockId: r.blockId, driverName: r.finalDriverName, vehicle: r.vehicle, messageKey: 'engine.hwh.export.unexpectedTimeChange' });
     }
     // Shifted must have time changed
     if (type === 'owner_overflow_time_shift' && !r.timeChanged) {
       onlyAllowedFieldsChanged = false;
-      issues.push({ code: 'MISSING_TIME_CHANGE_ON_SHIFT', severity: 'error', message: `Verschobene Zeile hat keine Zeitänderung (offsetSec=0?)`, row: r.sourceRowIndex, blockId: r.blockId, driverName: r.finalDriverName, vehicle: r.vehicle });
+      issues.push({ code: 'MISSING_TIME_CHANGE_ON_SHIFT', severity: 'error', message: `Verschobene Zeile hat keine Zeitänderung (offsetSec=0?)`, row: r.sourceRowIndex, blockId: r.blockId, driverName: r.finalDriverName, vehicle: r.vehicle, messageKey: 'engine.hwh.export.missingTimeChange' });
     }
     // Duration must never change
     if (r.durationChanged) {
@@ -2577,7 +2597,7 @@ export function validateHistoricalWorkingHoursExportReadiness(
     // Vehicle must be present
     if (!r.vehicle) {
       onlyAllowedFieldsChanged = false;
-      issues.push({ code: 'MISSING_VEHICLE', severity: 'error', message: 'Fehlendes Fahrzeug', row: r.sourceRowIndex, blockId: r.blockId });
+      issues.push({ code: 'MISSING_VEHICLE', severity: 'error', message: 'Fehlendes Fahrzeug', row: r.sourceRowIndex, blockId: r.blockId, messageKey: 'engine.hwh.export.missingVehicle' });
     }
   }
 
@@ -2607,10 +2627,10 @@ export function validateHistoricalWorkingHoursExportReadiness(
           a.originalDriverName === b.originalDriverName &&
           overlapHalfOpenExport(a.originalStartMs, a.originalEndMs, b.originalStartMs, b.originalEndMs);
         if (origOverlap) {
-          driverOverlapIssues.push({ code: 'ORIGINAL_DRIVER_OVERLAP', severity: 'warning', message: `Originaldaten-Warnung Fahrer: ${a.finalDriverName ?? driverId}`, row: a.sourceRowIndex, blockId: a.blockId, driverName: a.finalDriverName, vehicle: a.vehicle, details: `Zeilen ${a.sourceRowIndex ?? '?'} & ${b.sourceRowIndex ?? '?'}` });
+          driverOverlapIssues.push({ code: 'ORIGINAL_DRIVER_OVERLAP', severity: 'warning', message: `Originaldaten-Warnung Fahrer: ${a.finalDriverName ?? driverId}`, row: a.sourceRowIndex, blockId: a.blockId, driverName: a.finalDriverName, vehicle: a.vehicle, details: `Zeilen ${a.sourceRowIndex ?? '?'} & ${b.sourceRowIndex ?? '?'}`, messageKey: 'engine.hwh.export.originalDriverOverlap', messageVars: { driver: a.finalDriverName ?? driverId } });
         } else {
           noAppCreatedDriverOverlaps = false;
-          driverOverlapIssues.push({ code: 'APP_DRIVER_OVERLAP', severity: 'error', message: `App-erzeugte Fahrerüberschneidung: ${a.finalDriverName ?? driverId}`, row: a.sourceRowIndex, blockId: a.blockId, driverName: a.finalDriverName, vehicle: a.vehicle, details: `Zeilen ${a.sourceRowIndex ?? '?'} & ${b.sourceRowIndex ?? '?'}` });
+          driverOverlapIssues.push({ code: 'APP_DRIVER_OVERLAP', severity: 'error', message: `App-erzeugte Fahrerüberschneidung: ${a.finalDriverName ?? driverId}`, row: a.sourceRowIndex, blockId: a.blockId, driverName: a.finalDriverName, vehicle: a.vehicle, details: `Zeilen ${a.sourceRowIndex ?? '?'} & ${b.sourceRowIndex ?? '?'}`, messageKey: 'engine.hwh.export.appDriverOverlap', messageVars: { driver: a.finalDriverName ?? driverId } });
         }
       }
     }
@@ -2637,10 +2657,10 @@ export function validateHistoricalWorkingHoursExportReadiness(
         // Pre-existing if same vehicle AND original timestamps also overlapped
         const origOverlap = overlapHalfOpenExport(a.originalStartMs, a.originalEndMs, b.originalStartMs, b.originalEndMs);
         if (origOverlap) {
-          vehicleOverlapIssues.push({ code: 'ORIGINAL_VEHICLE_OVERLAP', severity: 'warning', message: `Originaldaten-Warnung Fahrzeug: ${vehicle}`, row: a.sourceRowIndex, blockId: a.blockId, vehicle, details: `Zeilen ${a.sourceRowIndex ?? '?'} & ${b.sourceRowIndex ?? '?'}` });
+          vehicleOverlapIssues.push({ code: 'ORIGINAL_VEHICLE_OVERLAP', severity: 'warning', message: `Originaldaten-Warnung Fahrzeug: ${vehicle}`, row: a.sourceRowIndex, blockId: a.blockId, vehicle, details: `Zeilen ${a.sourceRowIndex ?? '?'} & ${b.sourceRowIndex ?? '?'}`, messageKey: 'engine.hwh.export.originalVehicleOverlap', messageVars: { vehicle } });
         } else {
           noAppCreatedVehicleOverlaps = false;
-          vehicleOverlapIssues.push({ code: 'APP_VEHICLE_OVERLAP', severity: 'error', message: `App-erzeugte Fahrzeugüberschneidung: ${vehicle}`, row: a.sourceRowIndex, blockId: a.blockId, vehicle, details: `Zeilen ${a.sourceRowIndex ?? '?'} & ${b.sourceRowIndex ?? '?'}` });
+          vehicleOverlapIssues.push({ code: 'APP_VEHICLE_OVERLAP', severity: 'error', message: `App-erzeugte Fahrzeugüberschneidung: ${vehicle}`, row: a.sourceRowIndex, blockId: a.blockId, vehicle, details: `Zeilen ${a.sourceRowIndex ?? '?'} & ${b.sourceRowIndex ?? '?'}`, messageKey: 'engine.hwh.export.appVehicleOverlap', messageVars: { vehicle } });
         }
       }
     }
@@ -2659,6 +2679,8 @@ export function validateHistoricalWorkingHoursExportReadiness(
           code: 'UNSHIFTED_TIME_MISMATCH',
           severity: 'error',
           message: `Unveränderte Zeile hat abweichende finalDatetime: original="${row.originalStartDatetime}" final="${row.finalStartDatetime}"`,
+          messageKey: 'engine.hwh.export.unshiftedTimeMismatch',
+          messageVars: { original: row.originalStartDatetime, final: row.finalStartDatetime },
           row: row.sourceRowIndex,
           blockId: row.blockId,
           driverName: row.finalDriverName,
@@ -2687,6 +2709,15 @@ export function validateHistoricalWorkingHoursExportReadiness(
             code: 'LOHNART_BUCKET_EXCEEDED',
             severity: 'error',
             message: `Fahrer ${ds.driverName}: ${label} überschritten (Ziel: ${Math.round(target / 3600 * 100) / 100} h, Zugewiesen: ${Math.round(assigned / 3600 * 100) / 100} h)`,
+            // `label` is a Lohnart number and its German short name, which the
+            // Stundennachweis prints the same way in both languages.
+            messageKey: 'engine.hwh.export.lohnartBucketExceeded',
+            messageVars: {
+              driver: ds.driverName,
+              label,
+              targetHours: Math.round(target / 3600 * 100) / 100,
+              assignedHours: Math.round(assigned / 3600 * 100) / 100,
+            },
             driverName: ds.driverName,
           });
         }
@@ -2704,6 +2735,8 @@ export function validateHistoricalWorkingHoursExportReadiness(
         code: 'REGULAR_DRIVER_TIME_CHANGED',
         severity: 'error',
         message: `Regulärer Fahrer ${row.finalDriverName ?? '?'} hat zeitgeänderte Zeile (Zeile ${row.sourceRowIndex ?? '?'})`,
+        messageKey: 'engine.hwh.export.regularDriverTimeChanged',
+        messageVars: { driver: row.finalDriverName ?? '?', row: row.sourceRowIndex ?? '?' },
         row: row.sourceRowIndex,
         blockId: row.blockId,
         driverName: row.finalDriverName,
@@ -2725,6 +2758,8 @@ export function validateHistoricalWorkingHoursExportReadiness(
       code: 'FINAL_EXPORT_DRIVER_OVERLAP',
       severity: 'error',
       message: `Export blockiert: Fahrerüberschneidungen im exportierten Fahrtenbuch gefunden. (${finalExportOverlaps.driverOverlapCount} Überschneidung(en))`,
+      messageKey: 'engine.hwh.export.finalDriverOverlaps',
+      messageVars: { count: finalExportOverlaps.driverOverlapCount },
     });
   }
   if (!noFinalExportedVehicleOverlaps) {
@@ -2732,6 +2767,8 @@ export function validateHistoricalWorkingHoursExportReadiness(
       code: 'FINAL_EXPORT_VEHICLE_OVERLAP',
       severity: 'error',
       message: `Export blockiert: Fahrzeugüberschneidungen im exportierten Fahrtenbuch gefunden. (${finalExportOverlaps.vehicleOverlapCount} Überschneidung(en))`,
+      messageKey: 'engine.hwh.export.finalVehicleOverlaps',
+      messageVars: { count: finalExportOverlaps.vehicleOverlapCount },
     });
   }
 

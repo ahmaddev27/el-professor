@@ -10,6 +10,9 @@ import {
   type CashMovementRow,
 } from './cashLedger';
 
+// Type-only: this module names a dictionary key beside its German text.
+import type { EngineMessageKey, EngineMessageVars } from '../i18n/engineMessageTypes';
+
 export type { CashMovementRow };
 
 /**
@@ -421,8 +424,13 @@ export function getTopExpenses(
 
 export interface SmartInsight {
   type: 'success' | 'warning' | 'info' | 'danger';
+  /** German, as this module has always written it. The screen's fallback. */
   title: string;
+  titleKey?: EngineMessageKey;
+  titleVars?: EngineMessageVars;
   body: string;
+  bodyKey?: EngineMessageKey;
+  bodyVars?: EngineMessageVars;
 }
 
 export function generateInsights(
@@ -441,13 +449,19 @@ export function generateInsights(
       insights.push({
         type: 'success',
         title: 'Umsatz gestiegen',
+        titleKey: 'engine.insight.revenueUp.title',
         body: `+${umsatzDelta.toFixed(1)}% im Vergleich zum Vormonat`,
+        bodyKey: 'engine.insight.revenueUp.body',
+        bodyVars: { pct: umsatzDelta.toFixed(1) },
       });
     } else if (umsatzDelta <= -5) {
       insights.push({
         type: 'warning',
         title: 'Umsatz gesunken',
+        titleKey: 'engine.insight.revenueDown.title',
         body: `${umsatzDelta.toFixed(1)}% im Vergleich zum Vormonat`,
+        bodyKey: 'engine.insight.revenueDown.body',
+        bodyVars: { pct: umsatzDelta.toFixed(1) },
       });
     }
   }
@@ -457,13 +471,19 @@ export function generateInsights(
     insights.push({
       type: 'danger',
       title: 'Verlust im aktuellen Monat',
+      titleKey: 'engine.insight.loss.title',
       body: `Firmengewinn: ${current.profit.toLocaleString('de-DE', { minimumFractionDigits: 2 })} €`,
+      bodyKey: 'engine.insight.loss.body',
+      bodyVars: { amount: current.profit.toLocaleString('de-DE', { minimumFractionDigits: 2 }) },
     });
   } else if (current.profitMargin > 30) {
     insights.push({
       type: 'success',
       title: 'Starke Gewinnmarge',
+      titleKey: 'engine.insight.strongMargin.title',
       body: `${current.profitMargin.toFixed(1)}% Rentabilität diesen Monat`,
+      bodyKey: 'engine.insight.strongMargin.body',
+      bodyVars: { pct: current.profitMargin.toFixed(1) },
     });
   }
 
@@ -473,7 +493,11 @@ export function generateInsights(
     insights.push({
       type: 'info',
       title: `Top-Fahrer: ${topDriver.name}`,
+      titleKey: 'engine.insight.topDriver.title',
+      titleVars: { driver: topDriver.name },
       body: `Nettoertrag: +${topDriver.netContribution.toLocaleString('de-DE', { minimumFractionDigits: 2 })} €`,
+      bodyKey: 'engine.insight.netContributionPositive',
+      bodyVars: { amount: topDriver.netContribution.toLocaleString('de-DE', { minimumFractionDigits: 2 }) },
     });
   }
 
@@ -483,7 +507,11 @@ export function generateInsights(
     insights.push({
       type: 'warning',
       title: `Negativer Ertrag: ${worst.name}`,
+      titleKey: 'engine.insight.worstDriver.title',
+      titleVars: { driver: worst.name },
       body: `Nettoertrag: ${worst.netContribution.toLocaleString('de-DE', { minimumFractionDigits: 2 })} €`,
+      bodyKey: 'engine.insight.netContribution',
+      bodyVars: { amount: worst.netContribution.toLocaleString('de-DE', { minimumFractionDigits: 2 }) },
     });
   }
 
@@ -495,13 +523,21 @@ export function generateInsights(
     insights.push({
       type: 'warning',
       title: `${unpaidCount} unbezahlte Gehälter`,
+      titleKey: 'engine.insight.unpaidSalaries.title',
+      titleVars: { count: unpaidCount },
       body: `Offen: ${unpaidTotal.toLocaleString('de-DE', { minimumFractionDigits: 2 })} €`,
+      bodyKey: 'engine.insight.unpaidSalaries.body',
+      bodyVars: { amount: unpaidTotal.toLocaleString('de-DE', { minimumFractionDigits: 2 }) },
     });
   } else if (partialCount > 0) {
     insights.push({
       type: 'info',
       title: `${partialCount} teilweise bezahlte Gehälter`,
+      titleKey: 'engine.insight.partialSalaries.title',
+      titleVars: { count: partialCount },
       body: `Restbetrag: ${unpaidTotal.toLocaleString('de-DE', { minimumFractionDigits: 2 })} €`,
+      bodyKey: 'engine.insight.partialSalaries.body',
+      bodyVars: { amount: unpaidTotal.toLocaleString('de-DE', { minimumFractionDigits: 2 }) },
     });
   }
 
@@ -511,7 +547,14 @@ export function generateInsights(
     insights.push({
       type: 'danger',
       title: `${negativeChecks} Fahrzeug${negativeChecks > 1 ? 'e' : ''} mit Problemen`,
+      // One key per number: German and English inflect the noun itself, not a
+      // suffix the engine could splice on.
+      titleKey: negativeChecks > 1
+        ? 'engine.insight.fleetIssues.title.other'
+        : 'engine.insight.fleetIssues.title.one',
+      titleVars: { count: negativeChecks },
       body: 'Werkstatt-Checks zeigen negative Befunde',
+      bodyKey: 'engine.insight.fleetIssues.body',
     });
   }
 
@@ -521,16 +564,18 @@ export function generateInsights(
 // ── Revenue composition ───────────────────────────────────────────────────────
 
 export interface RevenueCompositionItem {
+  /** German, as this module has always written it. The chart's fallback. */
   name: string;
+  nameKey: EngineMessageKey;
   value: number;
   color: string;
 }
 
 export function buildRevenueComposition(metrics: PeriodMetrics): RevenueCompositionItem[] {
   return [
-    { name: 'Netto-Fahrpreis', value: metrics.nettoFahrpreis, color: '#3b82f6' },
-    { name: 'Aktionen', value: metrics.aktionen, color: '#f59e0b' },
-    { name: 'Trinkgeld', value: metrics.trinkgeld, color: '#8b5cf6' },
-    { name: 'Bargeld', value: metrics.bargeld, color: '#10b981' },
+    { name: 'Netto-Fahrpreis', nameKey: 'engine.revenue.nettoFahrpreis', value: metrics.nettoFahrpreis, color: '#3b82f6' },
+    { name: 'Aktionen', nameKey: 'engine.revenue.aktionen', value: metrics.aktionen, color: '#f59e0b' },
+    { name: 'Trinkgeld', nameKey: 'engine.revenue.trinkgeld', value: metrics.trinkgeld, color: '#8b5cf6' },
+    { name: 'Bargeld', nameKey: 'engine.revenue.bargeld', value: metrics.bargeld, color: '#10b981' },
   ].filter(i => i.value > 0);
 }

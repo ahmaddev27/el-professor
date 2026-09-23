@@ -2,6 +2,9 @@
 // Read-only vehicle-block preview built from a Fahrtenbuch import.
 // No driver logic. No persistence. No assignment.
 
+// Type-only: the engine names a dictionary key beside its German text.
+import type { EngineMessageKey, EngineMessageVars } from '../i18n/engineMessageTypes';
+
 export const VEHICLE_BLOCK_GAP_MINUTES = 60;
 export const DEFAULT_MAX_VEHICLE_BLOCK_DURATION_MINUTES = 270; // 4.5h
 export const MAX_VEHICLE_BLOCK_DURATION_MINUTES = DEFAULT_MAX_VEHICLE_BLOCK_DURATION_MINUTES; // deprecated alias
@@ -82,7 +85,10 @@ export interface Phase1VehicleBlock {
 
 export interface Phase1CoverageIssue {
   type: 'duplicate_trip' | 'missing_trip' | 'canceled_in_block' | 'block_too_long' | 'block_gap_too_large' | 'unsorted_blocks';
+  /** German, as the engine has always written it. The screen's fallback. */
   detail: string;
+  messageKey?: EngineMessageKey;
+  messageVars?: EngineMessageVars;
 }
 
 export interface Phase1Result {
@@ -487,18 +493,27 @@ export function buildPhase1VehicleBlocks(trips: Phase1Trip[], options: Phase1Opt
       coverageIssues.push({
         type: 'block_too_long',
         detail: `Block ${b.block_id} hat Dauer ${b.duration_minutes} Min. (> ${maxBlockMinutes})`,
+        messageKey: 'engine.phase1.issue.blockTooLong',
+        messageVars: { blockId: b.block_id, minutes: b.duration_minutes, maxMinutes: maxBlockMinutes },
       });
     }
     if (b.longest_internal_gap_minutes > gapMinutes) {
       coverageIssues.push({
         type: 'block_gap_too_large',
         detail: `Block ${b.block_id} hat internen Gap ${b.longest_internal_gap_minutes} Min. (> ${gapMinutes})`,
+        messageKey: 'engine.phase1.issue.blockGapTooLarge',
+        messageVars: { blockId: b.block_id, minutes: b.longest_internal_gap_minutes, maxMinutes: gapMinutes },
       });
     }
   }
   for (const [tid, count] of seen) {
     if (count > 1) {
-      coverageIssues.push({ type: 'duplicate_trip', detail: `Trip ${tid} ist in ${count} Blöcken enthalten` });
+      coverageIssues.push({
+        type: 'duplicate_trip',
+        detail: `Trip ${tid} ist in ${count} Blöcken enthalten`,
+        messageKey: 'engine.phase1.issue.duplicateTrip',
+        messageVars: { tripId: tid, count },
+      });
     }
   }
   for (const t of trips) {
@@ -506,7 +521,12 @@ export function buildPhase1VehicleBlocks(trips: Phase1Trip[], options: Phase1Opt
     if (!t.start_time || !t.end_time) continue;
     if (!(t.car_id ?? t.car_identifier)) continue;
     if (!seen.has(t.id)) {
-      coverageIssues.push({ type: 'missing_trip', detail: `Trip ${t.id} wurde keinem Block zugeordnet` });
+      coverageIssues.push({
+        type: 'missing_trip',
+        detail: `Trip ${t.id} wurde keinem Block zugeordnet`,
+        messageKey: 'engine.phase1.issue.missingTrip',
+        messageVars: { tripId: t.id },
+      });
     }
   }
 
