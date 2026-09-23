@@ -17,11 +17,12 @@ import { assignmentRows, carsRows, driversRows, fixedCostRows, type Row } from '
 import { batch2Drivers, batch2PrimaryTable, batch2Rpc, batch2Tables, isBatch2Screen } from '../fixtures-batch2';
 import { batch3Tables, recordBatch3Rpc, recordBatch3Write } from '../batch3/fixtures';
 import { batch1bFailsEveryTable, batch1bPrimaryTable, batch1bTables } from '../fixtures-batch1b';
+import { analysisFailure, analysisTables } from '../analysis/fixtures';
 import { scenario } from '../scenario';
 
 type QueryError = { message: string; code: string; details?: string; hint?: string };
 type Result = { data: unknown; error: QueryError | null; count?: number | null };
-type Write = { table: string; op: 'insert' | 'update' | 'delete'; payload: unknown; filters: Array<[string, string, unknown]> };
+type Write = { table: string; op: 'insert' | 'upsert' | 'update' | 'delete'; payload: unknown; filters: Array<[string, string, unknown]> };
 
 const ANSWER_DELAY_MS = 120;
 
@@ -55,6 +56,8 @@ function seed(): Map<string, Row[]> {
     // Batch 3's tables, on its own screens only (empty on any other). Later
     // entries win, so there its richer drivers replace the ones above.
     ...batch3Tables(),
+    // The Fahrtenanalyse's tables, on its own screen only (analysis/fixtures.ts).
+    ...analysisTables(),
   ]);
 }
 
@@ -63,6 +66,8 @@ let nextId = 1;
 
 /** The failure a scenario asks for, on every statement against the screen's own table. */
 function scenarioFailure(table: string, dateFrom: string | null): QueryError | null {
+  const analysis = analysisFailure(table);
+  if (analysis) return analysis;
   if (batch1bFailsEveryTable(scenario)) return { message: 'TypeError: Failed to fetch', code: '' };
   if (table !== PRIMARY_TABLE) return null;
   if (scenario.data === 'next-month-fails') {
@@ -76,7 +81,9 @@ function scenarioFailure(table: string, dateFrom: string | null): QueryError | n
 }
 
 class FakeQuery implements PromiseLike<Result> {
-  private op: 'select' | 'insert' | 'update' | 'delete' = 'select';
+  private op: 'select' | 'insert' | 'upsert' | 'update' | 'delete' = 'select';
+  /** The conflict target of an upsert, as PostgREST's `onConflict` names it. */
+  private conflictColumns: string[] = ['id'];
   private payload: Row | Row[] | null = null;
   private readonly filters: Array<(row: Row) => boolean> = [];
   /** The equality filters as written, for the write log. */
@@ -106,6 +113,18 @@ class FakeQuery implements PromiseLike<Result> {
   insert(rows: Row | Row[]): this {
     this.op = 'insert';
     this.payload = rows;
+    return this;
+  }
+
+  /**
+   * PostgREST's upsert: a row whose conflict target already exists is updated
+   * in place, any other is inserted. The Fahrtenanalyse writes its settings
+   * (one row per company) and a driver's month budget this way.
+   */
+  upsert(rows: Row | Row[], options?: { onConflict?: string }): this {
+    this.op = 'upsert';
+    this.payload = rows;
+    this.conflictColumns = (options?.onConflict ?? 'id').split(',').map(column => column.trim());
     return this;
   }
 
@@ -264,6 +283,24 @@ class FakeQuery implements PromiseLike<Result> {
         }));
         store.set(this.table, [...rows, ...inserted]);
         return this.shape(inserted);
+      }
+      case 'upsert': {
+        const now = new Date().toISOString();
+        const next = [...rows];
+        const written: Row[] = [];
+        for (const row of Array.isArray(this.payload) ? this.payload : [this.payload ?? {}]) {
+          const index = next.findIndex(existing => this.conflictColumns.every(column => existing[column] === row[column]));
+          if (index >= 0) {
+            next[index] = { ...next[index], ...row, updated_at: now };
+            written.push(next[index]);
+          } else {
+            const inserted = { id: `new-${nextId++}`, created_at: now, updated_at: now, ...row };
+            next.push(inserted);
+            written.push(inserted);
+          }
+        }
+        store.set(this.table, next);
+        return this.shape(written);
       }
       case 'update': {
         const changed: Row[] = [];
