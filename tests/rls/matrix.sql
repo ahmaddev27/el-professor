@@ -2027,9 +2027,35 @@ BEGIN
         || left(_mx_try(r.who, NULL, format('DELETE FROM drivers WHERE id = %L', r.drv)), 1);
     PERFORM _mx_expect('state', r.label || ': drivers S I U D', got,
       CASE WHEN r.allowed THEN 'YYYY' ELSE '.R..' END);
-    PERFORM _mx_expect('state', r.label || ': reassign_fahrtenbuch_trip on its own trip',
-      _mx_call(r.who, format('SELECT reassign_fahrtenbuch_trip(%L, %L, %L)::text', r.trip, r.drv, 'MX state probe')),
-      CASE WHEN r.allowed THEN 'Y' ELSE 'T' END);
+
+    -- 20260923130000 (slice C): the RPC asks current_role_permits('documents',
+    -- true) after its own company branch. The two allowed principals are the
+    -- trial company's **administrator** (every `admin-…` row) and the invited
+    -- **editor**, and the editor has held can_edit = false on the Dokumente
+    -- page since 20260302065621 — so its cell moves Y → T. The claim this line
+    -- makes does not weaken: `Y` used to say "the state gate admitted a
+    -- pending_invite account", and the 42501 below says the same thing more
+    -- strongly, because only a caller the state gate let past ever reaches the
+    -- page check.
+    got := _mx_call(r.who, format('SELECT reassign_fahrtenbuch_trip(%L, %L, %L)::text', r.trip, r.drv, 'MX state probe'));
+    PERFORM _mx_expect('state', r.label || ': reassign_fahrtenbuch_trip on its own trip', got,
+      CASE WHEN NOT r.allowed THEN 'T'
+           WHEN r.who LIKE 'admin-%' THEN 'Y'
+           ELSE 'T' END);
+
+    -- T is the letter for both refusals, so it can no longer tell them apart.
+    -- These two lines are what keeps the scenario's meaning: the invited editor
+    -- is refused by the page and not for state, and every blocked principal is
+    -- still refused for state and never reaches the page.
+    IF r.allowed AND r.who NOT LIKE 'admin-%' THEN
+      PERFORM _mx_expect('state', r.label || ': …and the refusal is the Dokumente page, not the state',
+        CASE WHEN got LIKE 'T|42501|%' AND got NOT LIKE '%caller has no company%' THEN 'page' ELSE got END,
+        'page');
+    ELSIF NOT r.allowed THEN
+      PERFORM _mx_expect('state', r.label || ': …and the refusal is the state, ahead of the page',
+        CASE WHEN got LIKE '%caller has no company%' THEN 'state' ELSE got END,
+        'state');
+    END IF;
   END LOOP;
 END $$;
 

@@ -45,7 +45,6 @@ Detail lives elsewhere, one place each: [PROGRESS.md](PROGRESS.md) per step with
 
 ## Waiting on the owner
 
-- **Slice C (permission coverage, [PR #110](https://github.com/ahmaddev27/el-professor/pull/110)): run the read-only query in it against a copy of production before merging.** It lists every active account whose effective rights change — one row per account, company, role and capability lost. An empty result is the proof that nobody's access changed in fact; a non-empty one names exactly whom to decide about. The database's own self-check proves no role definition was edited, but only this query can say who is using which role.
 - **The Impressum and the privacy text**, filled once in `/admin` → settings. Google sign-in on production is then one switch and one Deploy.
 - **Rotate the secrets that were exposed in chat.**
 - **D14 — whether the panel's company list and its money move behind audited read models.** Slice 3.13b closed the last *company-owned* table a platform account read by capability; `companies` and the three subscription tables stay on `companies.read` by plan 3.A's design. Closing them is a UI change to four screens, not a policy edit. [HANDOFF.md](HANDOFF.md) has the lift.
