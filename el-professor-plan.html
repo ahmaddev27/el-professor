@@ -472,7 +472,7 @@
         </li>
         <li><a href="#p1"><span class="no">1</span><h3>OTP وأمان الحسابات</h3></a><ul class="chips"><li class="chip">كبير</li><li class="chip">عالستيج</li></ul></li>
         <li><a href="#p2"><span class="no">2</span><h3>نظام التصميم والنموذج</h3></a><ul class="chips"><li class="chip">متوسط</li><li class="chip">اندمج عالستيج</li></ul><p class="gate">البوابة انفتحت: وافقت على النموذج بـ 15.09</p></li>
-        <li><a href="#p3"><span class="no">3</span><h3>فصل المنصة والصلاحيات</h3></a><ul class="chips"><li class="chip">كبير جداً</li><li class="chip">12 من 13 اندمجوا وعالبرودكشن</li><li class="chip">3.13ب بالمراجعة: إعدادات الشركة بجلسة، وروابط <code>/super-admin</code> انشالت</li></ul></li>
+        <li><a href="#p3"><span class="no">3</span><h3>فصل المنصة والصلاحيات</h3></a><ul class="chips"><li class="chip">كبير جداً</li><li class="chip">12 من 13 اندمجوا وعالبرودكشن</li><li class="chip">3.13ب بالمراجعة: إعدادات الشركة بجلسة، وروابط <code>/super-admin</code> انشالت</li><li class="chip">وتفعيل الأدوار التلاتة بالمراجعة</li></ul></li>
         <li><a href="#p4"><span class="no">4</span><h3>إيصال الراتب النقدي</h3></a><ul class="chips"><li class="chip">متوسط</li><li class="chip">الأساس اندمج</li></ul></li>
         <li><a href="#p5"><span class="no">5</span><h3>تعميم التصميم</h3></a><ul class="chips"><li class="chip">كبير</li><li class="chip">كل الدفعات اندمجت وعالبرودكشن</li><li class="chip">ضايل الإطار AppLayout بالآخر</li></ul></li>
         <li><a href="#progress"><span class="no">FA</span><h3>تحليل دفتر الرحلات</h3></a><ul class="chips"><li class="chip">الإصدار الأول</li><li class="chip">A الاستيراد وB المحرك اندمجوا</li><li class="chip">C وD الإعدادات والشاشة قيد البناء</li></ul><p class="gate">بيقرأ وبيبلّغ بس: ولا رحلة بتتغيّر سائقها أو وقتها أو سعرها</p></li>
@@ -979,7 +979,18 @@ AND (c.subscription_expires_at IS NULL OR c.subscription_expires_at &gt; now())<
           <li>صفحة <code>/admin/team</code> صارت تقرأ جدول الفريق نفسه بدالة قراءة مسجّلة (<code>platform_staff_list</code>) بدل ما تبني القائمة من سجل التدقيق — فالقائمة ما عادت تعتمد على قدّيش السجل بيعيش، وهاد اللي كان لازم يصير قبل قرار الاحتفاظ D4.</li>
           <li>كل عضو بإيميله، ودوره، ونشط أو معطّل، و<strong>مين أعطاه العضوية</strong>. والعضويات اللي انعملت بدون جلسة (أول مالك من الـ migration، أو باليد بقاعدة البيانات) مكتوب عندها «Nicht erfasst» مع شرح.</li>
           <li>القائمة للمالكين بس (<code>staff.manage</code>)، لأنها إيميلات كل اللي معهم صلاحية على بيانات كل الزبائن.</li>
-          <li>الأدوار التانية (Support، Buchhaltung، Nur Lesen) <strong>لسا مش مفعّلة عن قصد</strong>: السبب التقني الأخير انحلّ بـ PR #84، والتفعيل صار قرارك إنت، وبييجي كـ PR لحاله.</li>
+          <li>الأدوار التانية (Support، Buchhaltung، Nur Lesen) <strong>انفعّلوا بـ 23.09.2026 بعد موافقتك</strong> — بشريحة لحالها تحت.</li>
+        </ul>
+      </div>
+
+      <div class="step">
+        <h3><span class="step-no">3.12ب</span>تفعيل أدوار المنصة التلاتة <span class="pill warn">بالمراجعة</span></h3>
+        <ul class="list">
+          <li><strong>قرارك (23.09.2026):</strong> صار فيك تعطي حساب المنصة دور Support أو Buchhaltung أو Nur Lesen، مش بس Inhaber. الأدوار وصلاحياتها مكتوبة من زمان و<strong>ما تغيّرت بهالشريحة ولا واحدة</strong>.</li>
+          <li><strong>مين بيشوف شو:</strong> Support بيقرأ قوائم كل الزبائن (السيارات والسائقين والمستخدمين بإيميلاتهم)، وبيقدر يفتح جلسة دعم على شركة واحدة ويقرأ ويعدّل جوّاها — وكل صف بيكتبه بينسجّل. Nur Lesen زيّه بالقراية بس <strong>ما بيكتب ولا إشي ولا بمكان</strong> وما بيشوف السجل. Buchhaltung <strong>ما بيشوف بيانات الزبائن أبداً</strong> وما بيقدر يفتح جلسة — فواتير وأسعار وأكواد بس. و<strong>إدارة الفريق وفتح وسكر الشركات والإعدادات والسجل بيضلوا للمالكين بس</strong>.</li>
+          <li>بصفحة Team صار في <strong>اختيار دور</strong> بدل القفل، وتحت كل خيار سطر بيقول شو بيقرأ هالدور بالظبط. <strong>الدور ما بينعدّل بعدين</strong>: مين بده دور تاني بينعطّل وبينضاف من جديد.</li>
+          <li><strong>آخر مالك نشط محمي زي ما هو</strong>، وما في خيار بالصفحة بيخلّي المنصة بدون مالك: الإضافة ما بتشيل حدا، وما في أصلاً شي بيغيّر دور عضو موجود.</li>
+          <li><strong>وطلع عيب وقت القياس، وانصلّح بنفس الـ PR:</strong> جدولي الأدوار داخل الشركات (<code>roles</code>) كان فيهم شرط كتابة بيسأل عن الصلاحية <em>بدون ما يسأل عن الشركة</em> — فحساب Support بدون جلسة كان رح يقدر يمسح أدوار كل الزبائن بجملة وحدة. انسكّر بنفس شكل 3.13أ (الكتابة بتطلب جلسة دعم على نفس الشركة)، وبـ commit لحاله مشان ينقرأ لحاله.</li>
         </ul>
       </div>
 

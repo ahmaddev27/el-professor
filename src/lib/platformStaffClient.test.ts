@@ -17,6 +17,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PlatformRpcError } from './platformRpc';
 import { PLATFORM_ROLES, type PlatformRole } from './platformAccess';
 
+/**
+ * A value the type system forbids, for the paths that must still report a
+ * refusal rather than a success. `as unknown as` on purpose: a direct cast from
+ * a literal outside the union does not compile, and widening PlatformRole to
+ * make it would defeat the type that keeps the picker honest.
+ */
+const NOT_A_ROLE = 'admin' as unknown as PlatformRole;
+
 const rpc = vi.fn();
 const getSession = vi.fn();
 
@@ -39,8 +47,12 @@ const {
 const API = 'https://api.example.test';
 const USER = '11111111-1111-4111-8111-111111111111';
 
-/** What supabase.rpc was called with, as { fn, args }. */
-const lastRpc = () => ({ fn: rpc.mock.calls.at(-1)![0], args: rpc.mock.calls.at(-1)![1] });
+/** What supabase.rpc was called with, as { fn, args }. Indexed, not `.at(-1)`:
+ *  tsconfig.app.json's lib is below ES2022 and the typecheck ratchet counts. */
+const lastRpc = () => {
+  const call = rpc.mock.calls[rpc.mock.calls.length - 1];
+  return { fn: call[0], args: call[1] };
+};
 
 type RecordedFetch = { url: string; init: RequestInit };
 
@@ -102,7 +114,7 @@ describe('addStaffMember', () => {
 
   it('reports a role the database refuses as invalid, not as a success', async () => {
     rpc.mockResolvedValue({ data: { success: false, reason: 'invalid', error: 'Ungültige Eingabe.' }, error: null });
-    await expect(addStaffMember(USER, 'admin' as PlatformRole, null)).rejects.toBeInstanceOf(PlatformRpcError);
+    await expect(addStaffMember(USER, NOT_A_ROLE, null)).rejects.toBeInstanceOf(PlatformRpcError);
   });
 });
 
@@ -154,7 +166,7 @@ describe('inviteStaffMember', () => {
       error: 'Unbekannte Plattform-Rolle. Erlaubt sind: owner, support, billing, read_only.',
       reason: 'invalid_role',
     });
-    await expect(inviteStaffMember('neu@example.test', 'Neu', 'admin' as PlatformRole, null))
+    await expect(inviteStaffMember('neu@example.test', 'Neu', NOT_A_ROLE, null))
       .rejects.toThrow('Unbekannte Plattform-Rolle');
   });
 
