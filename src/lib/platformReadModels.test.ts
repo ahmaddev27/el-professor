@@ -9,6 +9,7 @@ import {
   directoryPageCount,
   directoryReachablePageCount,
   directoryRpcArgs,
+  parseCompanyRow,
   parseDriverRow,
   parsePlatformReadPage,
   parseStaffRow,
@@ -234,6 +235,27 @@ describe('parseStaffRow', () => {
   });
 });
 
+describe('parseCompanyRow', () => {
+  /*
+    20260923100000 (plan 3.13b) added drivers_per_car_limit, so the dashboard
+    stops reading company_settings across every company. It is the one column
+    of that table this model carries, and it is nullable: a company with no
+    settings row has no limit, which is not the same as a limit of nothing.
+  */
+  it('reads the driver allowance as a number, and anything else as unknown', () => {
+    expect(parseCompanyRow({ id: 'c1', drivers_per_car_limit: 6 }).drivers_per_car_limit).toBe(6);
+    expect(parseCompanyRow({ id: 'c1', drivers_per_car_limit: 0 }).drivers_per_car_limit).toBe(0);
+    for (const value of [null, undefined, '6', Number.NaN, {}]) {
+      expect(parseCompanyRow({ id: 'c1', drivers_per_car_limit: value }).drivers_per_car_limit).toBeNull();
+    }
+  });
+
+  it('still reads the counts as numbers, with zero for a missing one', () => {
+    const row = parseCompanyRow({ id: 'c1', name: 'C', user_count: 3 });
+    expect(row).toMatchObject({ id: 'c1', name: 'C', user_count: 3, active_driver_count: 0, active_vehicle_count: 0 });
+  });
+});
+
 /*
   collectCompanyCounts pages platform_companies_list, and every page it asks for
   is one row in an append-only audit log. So the number of calls is itself an
@@ -241,10 +263,11 @@ describe('parseStaffRow', () => {
 */
 describe('collectCompanyCounts', () => {
   /** A company row with only what the counts read. */
-  const row = (id: string, users: number) => ({
+  const row = (id: string, users: number, driversPerCar: number | null = users + 3) => ({
     id, name: id, slug: null, status: null, approval_status: null, plan: null, trial_state: null,
     subscription_status: null, subscription_expires_at: null, open_invoice_count: 0, overdue_invoice_count: 0,
     user_count: users, active_driver_count: users + 1, active_vehicle_count: users + 2,
+    drivers_per_car_limit: driversPerCar,
   });
 
   /** A fake read model holding `total` companies, served DIRECTORY_PAGE_SIZE at a time. */
@@ -269,6 +292,28 @@ describe('collectCompanyCounts', () => {
     expect(counts.users.c249).toBe(4);
     expect(counts.drivers.c249).toBe(5);
     expect(counts.vehicles.c249).toBe(6);
+    expect(counts.driversPerCar.c249).toBe(7);
+  });
+
+  /*
+    Plan 3.13b: since 20260923100000 a platform account reads company_settings
+    only inside an open context, so this is the dashboard's only source for the
+    driver allowance. A company without a settings row must stay *absent* from
+    the map — the screen then applies its own default. Writing a 0 would show
+    an allowance of zero drivers for a company that simply has no row.
+  */
+  it('carries the driver allowance, and leaves a company without one out of the map', async () => {
+    const fetchPage = vi.fn(async () => ({
+      ok: true as const, total: 2, limit: DIRECTORY_PAGE_SIZE, offset: 0,
+      items: [row('with', 1, 6), row('without', 1, null)],
+    }));
+    const counts = await collectCompanyCounts(fetchPage);
+    expect(counts.driversPerCar).toEqual({ with: 6 });
+    expect(Object.prototype.hasOwnProperty.call(counts.driversPerCar, 'without')).toBe(false);
+    // The counts themselves are unaffected: a missing settings row is not a
+    // missing company.
+    expect(counts.known).toBe(true);
+    expect(counts.users.without).toBe(1);
   });
 
   it('knows a platform with no companies at all after one call', async () => {

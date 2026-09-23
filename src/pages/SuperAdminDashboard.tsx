@@ -405,19 +405,29 @@ export default function SuperAdminDashboard() {
       const dcMap = counts.drivers;
       const ccMap = counts.vehicles;
 
-      // 4. drivers_per_car_limit from company_settings
-      const { data: settingsData } = await supabase
-        .from('company_settings')
-        .select('company_id, drivers_per_car_limit');
+      /*
+        4. drivers_per_car_limit, from the same audited read model.
 
-      // 5. The platform-wide receipt total is gone rather than wrong: a
-      //    platform account reads no company's receipts since 20260917140000,
-      //    so this query could only ever return 0 now, and no read model
-      //    reports the figure. It is unknown here, and the card says so.
+        This was a `company_settings` select across every company. Since
+        20260923100000 (plan 3.13b) a platform account reads that table only
+        inside an open context — it carries the company's legal name, managing
+        director, VAT and tax number, commercial register, bank name, IBAN, BIC
+        and account holder, and `companies.read` is held by every staff role,
+        so the panel read all of it for every customer with no context and no
+        audit row. The one column the panel actually used is now a key of
+        platform_companies_list, so the figure arrives with the counts and is
+        recorded like them.
 
-      // Build maps
-      const dpcMap: Record<string, number> = {};
-      (settingsData ?? []).forEach((s: { company_id: string; drivers_per_car_limit: number }) => { if (s.company_id) dpcMap[s.company_id] = s.drivers_per_car_limit; });
+        Left unread here, the select returned an empty set in silence and every
+        company's allowance fell back to 4 — the same failure shape as the
+        counts before this page moved to the read model.
+
+        5. The platform-wide receipt total is gone rather than wrong: a
+           platform account reads no company's receipts since 20260917140000,
+           so this query could only ever return 0 now, and no read model
+           reports the figure. It is unknown here, and the card says so.
+      */
+      const dpcMap = counts.driversPerCar;
 
       const enriched: CompanyRow[] = raw.map(c => ({
         ...c,
