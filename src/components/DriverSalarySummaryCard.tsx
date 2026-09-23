@@ -18,6 +18,7 @@ import {
   ArrowRightLeft,
 } from 'lucide-react';
 import html2canvas from 'html2canvas';
+import { useTranslation } from '../contexts/LanguageContext';
 
 export interface DriverSalarySummaryProps {
   driverName: string;
@@ -182,6 +183,7 @@ const DriverSalarySummaryCard: React.FC<DriverSalarySummaryProps> = ({
   cashSalary,
   companyName,
 }) => {
+  const { t } = useTranslation();
   const cardRef = useRef<HTMLDivElement>(null);
   const [copying, setCopying] = useState(false);
   const [downloading, setDownloading] = useState(false);
@@ -271,7 +273,7 @@ const DriverSalarySummaryCard: React.FC<DriverSalarySummaryProps> = ({
           onMouseLeave={e => (e.currentTarget.style.background = 'var(--bg-subtle)')}
         >
           {copying ? <Loader2 size={14} className="animate-spin" /> : <Copy size={14} />}
-          Als Bild kopieren
+          {t('sal.summary.copyImage')}
         </button>
         <button
           onClick={handleDownload}
@@ -288,7 +290,7 @@ const DriverSalarySummaryCard: React.FC<DriverSalarySummaryProps> = ({
           onMouseLeave={e => (e.currentTarget.style.background = 'var(--accent)')}
         >
           {downloading ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
-          Als Bild herunterladen
+          {t('sal.summary.downloadImage')}
         </button>
       </div>
 
@@ -340,7 +342,7 @@ const DriverSalarySummaryCard: React.FC<DriverSalarySummaryProps> = ({
             }}
           >
             <div style={{ color: 'rgba(147,197,253,0.65)', fontSize: '0.625rem', fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: '0.3125rem' }}>
-              Fahrer
+              {t('common.driver')}
             </div>
             <div style={{ color: '#fff', fontWeight: 700, fontSize: '0.9375rem', lineHeight: 1.25, wordBreak: 'break-word' }}>
               {driverName}
@@ -356,7 +358,7 @@ const DriverSalarySummaryCard: React.FC<DriverSalarySummaryProps> = ({
             }}
           >
             <div style={{ color: 'rgba(196,181,253,0.65)', fontSize: '0.625rem', fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: '0.3125rem' }}>
-              Monat
+              {t('common.month')}
             </div>
             <div style={{ color: '#fff', fontWeight: 700, fontSize: '0.9375rem', lineHeight: 1.25 }}>
               {monatLabel}
@@ -379,7 +381,7 @@ const DriverSalarySummaryCard: React.FC<DriverSalarySummaryProps> = ({
         >
           <Calendar size={13} color="rgba(255,255,255,0.3)" style={{ flexShrink: 0 }} />
           <span style={{ color: 'rgba(255,255,255,0.38)', fontSize: '0.625rem', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', flexShrink: 0 }}>
-            Zeitraum
+            {t('common.period')}
           </span>
           <span style={{ color: 'rgba(255,255,255,0.75)', fontSize: '0.8125rem', fontWeight: 500, marginLeft: 'auto', whiteSpace: 'nowrap' }}>
             {dateRange}
@@ -390,7 +392,7 @@ const DriverSalarySummaryCard: React.FC<DriverSalarySummaryProps> = ({
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.625rem', marginBottom: '1rem' }}>
           <div style={{ height: '1px', flex: 1, background: 'rgba(255,255,255,0.05)' }} />
           <span style={{ color: 'rgba(255,255,255,0.22)', fontSize: '0.625rem', fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase' }}>
-            Gehaltsübersicht
+            {t('sal.summary.title')}
           </span>
           <div style={{ height: '1px', flex: 1, background: 'rgba(255,255,255,0.05)' }} />
         </div>
@@ -401,8 +403,8 @@ const DriverSalarySummaryCard: React.FC<DriverSalarySummaryProps> = ({
           {/* 1. Gesamtumsatz */}
           <SummaryRow
             icon={<TrendingUp size={16} color="#60a5fa" />}
-            title="Gesamtumsatz"
-            subtitle="Umsatz des Fahrers in diesem Monat"
+            title={t('sal.summary.totalRevenue')}
+            subtitle={t('sal.summary.totalRevenueSub')}
             value={fmtEur(totalRevenue)}
             valueColor="#93c5fd"
             rowBackground="rgba(59,130,246,0.07)"
@@ -412,8 +414,8 @@ const DriverSalarySummaryCard: React.FC<DriverSalarySummaryProps> = ({
           {/* 2. Fahreranteil */}
           <SummaryRow
             icon={<Briefcase size={16} color="#34d399" />}
-            title="Fahreranteil"
-            subtitle={`${(salaryRatio * 100).toFixed(0)} % Anteil vom Umsatz`}
+            title={t('sal.summary.driverShare')}
+            subtitle={t('sal.summary.driverShareSub', { percent: (salaryRatio * 100).toFixed(0) })}
             value={fmtEur(driverPartAmount)}
             valueColor="#6ee7b7"
             rowBackground="rgba(52,211,153,0.06)"
@@ -422,8 +424,8 @@ const DriverSalarySummaryCard: React.FC<DriverSalarySummaryProps> = ({
           {/* 3. Trinkgeld */}
           <SummaryRow
             icon={<Coffee size={16} color="#f472b6" />}
-            title="Trinkgeld"
-            subtitle="Gesamtes Trinkgeld in diesem Monat"
+            title={t('sal.tips')}
+            subtitle={t('sal.summary.tipsSub')}
             value={fmtEur(tips)}
             valueColor="#f9a8d4"
             rowBackground="rgba(244,114,182,0.06)"
@@ -435,8 +437,8 @@ const DriverSalarySummaryCard: React.FC<DriverSalarySummaryProps> = ({
           {/* 4. Brutto in Lohnabrechnung */}
           <SummaryRow
             icon={<Wallet size={16} color="#fb923c" />}
-            title="Brutto in Lohnabrechnung"
-            subtitle={hasPayroll ? 'Bruttobetrag laut Lohnabrechnung' : 'Noch nicht eingetragen'}
+            title={t('sal.summary.gross')}
+            subtitle={hasPayroll ? t('sal.summary.grossSub') : t('sal.summary.grossNotEntered')}
             value={hasPayroll ? fmtEur(bruttoVal) : '–'}
             valueColor={hasPayroll ? '#fdba74' : 'rgba(255,255,255,0.3)'}
             rowBackground="rgba(251,146,60,0.07)"
@@ -445,8 +447,8 @@ const DriverSalarySummaryCard: React.FC<DriverSalarySummaryProps> = ({
           {/* 5. Netto / Bankgehalt */}
           <SummaryRow
             icon={<Building2 size={16} color="#22d3ee" />}
-            title="Netto / Bankgehalt"
-            subtitle="Nettoauszahlung per Bank"
+            title={t('sal.summary.netBank')}
+            subtitle={t('sal.summary.netBankSub')}
             value={nettoBank != null ? fmtEur(nettoBankVal) : '–'}
             valueColor={nettoBank != null ? '#67e8f9' : 'rgba(255,255,255,0.3)'}
             rowBackground="rgba(34,211,238,0.06)"
@@ -455,19 +457,19 @@ const DriverSalarySummaryCard: React.FC<DriverSalarySummaryProps> = ({
           {/* 6. Bargehalt */}
           <SummaryRow
             icon={<Banknote size={16} color={cashIsNeg ? '#f87171' : '#22d3ee'} />}
-            title="Bargehalt"
-            subtitle="Bar ausgezahlter Gehaltsanteil"
+            title={t('sal.summary.cashSalary')}
+            subtitle={t('sal.summary.cashSalarySub')}
             value={cashSalary != null ? fmtEur(cashVal) : '–'}
             valueColor={cashSalary == null ? 'rgba(255,255,255,0.3)' : cashIsNeg ? '#fca5a5' : '#67e8f9'}
             rowBackground={cashIsNeg ? 'rgba(248,113,113,0.08)' : 'rgba(34,211,238,0.06)'}
-            warningNote={cashIsNeg ? 'Bargehalt negativ — Brutto übersteigt berechnetes Gehalt' : undefined}
+            warningNote={cashIsNeg ? t('sal.summary.cashSalaryNegative') : undefined}
           />
 
           {/* 7. Gesamt Netto Auszahlung */}
           <SummaryRow
             icon={<ArrowRightLeft size={16} color={cashIsNeg ? '#fbbf24' : '#34d399'} />}
-            title="Gesamt Netto Auszahlung"
-            subtitle="Bankgehalt + Bargehalt"
+            title={t('sal.summary.totalNet')}
+            subtitle={t('sal.summary.totalNetSub')}
             value={hasPayroll ? fmtEur(totalNetPayout) : '–'}
             valueColor={hasPayroll ? (cashIsNeg ? '#fde68a' : '#6ee7b7') : 'rgba(255,255,255,0.3)'}
             rowBackground={cashIsNeg ? 'rgba(251,191,36,0.07)' : 'rgba(52,211,153,0.07)'}
@@ -480,8 +482,8 @@ const DriverSalarySummaryCard: React.FC<DriverSalarySummaryProps> = ({
           {/* 8. Bereits gezahltes Gehalt */}
           <SummaryRow
             icon={<CheckCircle size={16} color="#34d399" />}
-            title="Bereits gezahltes Gehalt"
-            subtitle="Schon ausgezahlter Betrag"
+            title={t('sal.summary.alreadyPaid')}
+            subtitle={t('sal.summary.alreadyPaidSub')}
             value={fmtEur(alreadyPaidSalary)}
             valueColor="#6ee7b7"
             rowBackground="rgba(52,211,153,0.06)"
@@ -490,8 +492,8 @@ const DriverSalarySummaryCard: React.FC<DriverSalarySummaryProps> = ({
           {/* 9. Restgehalt */}
           <SummaryRow
             icon={<Clock size={16} color={restgehalt > 0.01 ? '#fb923c' : '#34d399'} />}
-            title="Restgehalt"
-            subtitle="Noch auszuzahlender Betrag"
+            title={t('sal.summary.remaining')}
+            subtitle={t('sal.summary.remainingSub')}
             value={fmtEur(restgehalt)}
             valueColor={restgehalt > 0.01 ? '#fdba74' : '#6ee7b7'}
             rowBackground={restgehalt > 0.01 ? 'rgba(251,146,60,0.07)' : 'rgba(52,211,153,0.06)'}
@@ -512,7 +514,7 @@ const DriverSalarySummaryCard: React.FC<DriverSalarySummaryProps> = ({
             letterSpacing: '0.01em',
           }}
         >
-          Diese Übersicht dient nur zur internen Prüfung · Kein offizieller Lohnzettel
+          {t('sal.summary.disclaimer')}
         </div>
       </div>
     </div>

@@ -12,8 +12,12 @@ import {
 
 // Type-only: this module names a dictionary key beside its German text.
 import type { EngineMessageKey, EngineMessageVars } from '../i18n/engineMessageTypes';
+import type { TranslationKey, TranslationVars } from '../i18n';
 
 export type { CashMovementRow };
+
+/** Signature of the `t` from useTranslation(), for helpers that take it. */
+type Translate = (key: TranslationKey, vars?: TranslationVars) => string;
 
 /**
  * calcCashSummary totals and never renders an entry, so these fallbacks reach
@@ -350,20 +354,36 @@ export function calcCashSummary(
 
 // ── 6-month trend data ────────────────────────────────────────────────────────
 
+/**
+ * A series key is also the label Recharts prints in its legend and tooltip, so
+ * the key on the datum and the `dataKey` on the <Area> have to be the same
+ * string. The chart already passed translated `dataKey`s while these were
+ * hard-coded German, so in the English UI every series resolved to a key no
+ * datum had and the chart drew nothing. Both sides read TREND_SERIES now.
+ *
+ * Unlike the engine messages beside it, this string has no second life outside
+ * the chart — nothing matches, classifies or audits it — so it is a plain
+ * `t(...)` rather than a German text carrying a key.
+ */
 export interface TrendDataPoint {
   monat: string;
-  Umsatz: number;
-  Kosten: number;
-  Gewinn: number;
-  Gehälter: number;
+  [series: string]: string | number;
 }
+
+export const TREND_SERIES = {
+  umsatz:    'overview.kpi.umsatz',
+  kosten:    'overview.chart.kosten',
+  gewinn:    'overview.chart.gewinn',
+  gehaelter: 'overview.load.gehaelter',
+} as const satisfies Record<string, TranslationKey>;
 
 export function buildTrendData(
   selectedMonth: string,
   incomes: Income[],
   salaries: SalaryRecord[],
   receipts: Receipt[],
-  fixedCosts: FixedCostItem[]
+  fixedCosts: FixedCostItem[],
+  t: Translate,
 ): TrendDataPoint[] {
   return Array.from({ length: 6 }, (_, i) => {
     const d = subMonths(parseISO(selectedMonth + '-01'), 5 - i);
@@ -372,10 +392,10 @@ export function buildTrendData(
     const metrics = calcPeriodMetrics(incomes, salaries, receipts, fixedCosts, mStart, mEnd);
     return {
       monat: format(d, 'MMM', { locale: de }),
-      Umsatz: metrics.umsatz,
-      Kosten: metrics.totalCosts,
-      Gewinn: metrics.profit,
-      Gehälter: metrics.salaries,
+      [t(TREND_SERIES.umsatz)]:    metrics.umsatz,
+      [t(TREND_SERIES.kosten)]:    metrics.totalCosts,
+      [t(TREND_SERIES.gewinn)]:    metrics.profit,
+      [t(TREND_SERIES.gehaelter)]: metrics.salaries,
     };
   });
 }

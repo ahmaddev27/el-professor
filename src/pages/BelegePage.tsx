@@ -115,7 +115,7 @@ const BelegePage: React.FC = () => {
     setConfirmModal({
       isOpen: true,
       title: t('belege.deleteTitle'),
-      message: `Sind Sie sicher, dass Sie den Beleg #${receipt.receiptNumber} löschen möchten?`,
+      message: t('belege.deleteMessage', { number: receipt.receiptNumber }),
       onConfirm: async () => {
         try {
           await receiptActions.delete(id);

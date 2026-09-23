@@ -4,12 +4,14 @@ import { Receipt, Driver } from '../types/receipt';
 import { isSupabaseConfigured } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
+import { useTranslation } from '../contexts/LanguageContext';
 import { withTimeout } from './useTimeout';
 import { DriverPlanningFields } from '../components/DriverModal';
 import { mapDriverRow } from '../lib/driverRow';
 
 export const useDatabase = () => {
   const { user, profile } = useAuth();
+  const { t } = useTranslation();
   /*
     The company the session is in (plan 3.4b), not the account's membership.
 
@@ -45,7 +47,7 @@ export const useDatabase = () => {
         addDebugInfo('❌ Supabase environment variables not found');
         addDebugInfo(`VITE_SUPABASE_URL: ${import.meta.env.VITE_SUPABASE_URL ? 'SET' : 'NOT SET'}`);
         addDebugInfo(`VITE_SUPABASE_ANON_KEY: ${import.meta.env.VITE_SUPABASE_ANON_KEY ? 'SET' : 'NOT SET'}`);
-        setError('Supabase ist nicht konfiguriert. Bitte überprüfen Sie die Umgebungsvariablen.');
+        setError(t('db.notConfigured'));
         setIsConnected(false); // Force localStorage mode
         setIsLoading(false);
         return;

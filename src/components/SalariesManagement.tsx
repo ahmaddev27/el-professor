@@ -150,8 +150,8 @@ const SalariesManagement: React.FC<SalariesManagementProps> = ({ drivers }) => {
       // Both tables are paginated: PostgREST caps a response at 1000 rows without
       // reporting it, and a truncated income set understates a driver's revenue —
       // a figure this screen then writes into the salaries table.
-      // The `label` values below are interpolated into fetchAllPaginated's own German
-      // error template, so they stay German.
+      // The `label` values below are interpolated into fetchAllPaginated's error
+      // template, which follows the UI language once `t` is handed to it.
       const dataPromises = Promise.all([
         fetchAllPaginated<any>(
           (from, to) => supabase
@@ -161,7 +161,7 @@ const SalariesManagement: React.FC<SalariesManagementProps> = ({ drivers }) => {
             .order('period_start', { ascending: false })
             .order('id', { ascending: true })
             .range(from, to),
-          { label: 'Gehälter' },
+          { label: t('overview.load.gehaelter'), t },
         ),
         fetchAllPaginated<any>(
           (from, to) => supabase
@@ -171,7 +171,7 @@ const SalariesManagement: React.FC<SalariesManagementProps> = ({ drivers }) => {
             .order('date', { ascending: false })
             .order('id', { ascending: true })
             .range(from, to),
-          { label: 'Umsätze' },
+          { label: t('overview.load.umsaetze'), t },
         ),
       ]);
 

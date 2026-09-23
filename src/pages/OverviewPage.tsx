@@ -198,7 +198,7 @@ const STATUS_LABEL: Record<string, TranslationKey> = {
 };
 
 const PlanStatusCard: React.FC<{ planState: PlanState; effectivePlan: Plan }> = ({ planState, effectivePlan }) => {
-  const { t } = useTranslation();
+  const { t, tPlural } = useTranslation();
   const color = planState.isInTrial ? 'var(--accent)' : PLAN_COLOR[planState.plan];
   const trialEndStr = planState.trialEnd
     ? planState.trialEnd.toLocaleDateString('de-DE', { day: '2-digit', month: 'long', year: 'numeric' })
@@ -223,8 +223,8 @@ const PlanStatusCard: React.FC<{ planState: PlanState; effectivePlan: Plan }> = 
           <div className="flex items-center gap-2 flex-wrap">
             <span className="font-bold text-sm" style={{ color: 'var(--text-primary)' }}>
               {planState.isInTrial
-                ? `Testphase — ${PLAN_LABEL[effectivePlan]}-Features freigeschaltet`
-                : `Plan: ${PLAN_LABEL[planState.plan]}`
+                ? t('overview.plan.trialUnlocked', { plan: PLAN_LABEL[effectivePlan] })
+                : t('overview.plan.named', { plan: PLAN_LABEL[planState.plan] })
               }
             </span>
             <span
@@ -236,9 +236,13 @@ const PlanStatusCard: React.FC<{ planState: PlanState; effectivePlan: Plan }> = 
           </div>
           <p className="text-xs mt-0.5" style={{ color: 'var(--text-secondary)' }}>
             {planState.isInTrial && trialEndStr
-              ? `${planState.trialDaysLeft} Tag${planState.trialDaysLeft === 1 ? '' : 'e'} verbleiben · Testphase endet am ${trialEndStr}`
+              ? tPlural(
+                  { one: 'overview.plan.trialLeft.one', other: 'overview.plan.trialLeft.other' },
+                  planState.trialDaysLeft,
+                  { date: trialEndStr },
+                )
               : planState.isTrialExpired && trialEndStr
-                ? `Testphase endete am ${trialEndStr} · Nur Basic-Features verfügbar`
+                ? t('overview.plan.trialEnded', { date: trialEndStr })
                 : t('overview.plan.activeSub')
             }
           </p>
@@ -252,7 +256,7 @@ const PlanStatusCard: React.FC<{ planState: PlanState; effectivePlan: Plan }> = 
           style={{ background: color, color: 'white' }}
         >
           <Zap size={12} />
-          Plan wählen
+          {t('trial.choosePlan')}
         </a>
       )}
     </div>
@@ -261,7 +265,7 @@ const PlanStatusCard: React.FC<{ planState: PlanState; effectivePlan: Plan }> = 
 
 // ── Main component ────────────────────────────────────────────────────────────
 const OverviewPage: React.FC = () => {
-  const { t } = useTranslation();
+  const { t, tPlural } = useTranslation();
   const { isSuperAdmin, companyId: ownCompanyId } = useAuth();
   const {
     effectiveCompanyId: companyId, isViewingAsCompany, platformReadsCompanyData, ownCompanyReadable,
@@ -433,7 +437,7 @@ const OverviewPage: React.FC = () => {
   const driverPerformance = calcDriverPerformance(driverRecords, incomes, salaries, receipts, monthStart, monthEnd);
   const salaryAlerts      = calcSalaryAlerts(salaries, driverRecords);
   const cashSummary       = calcCashSummary(incomes, receipts, monthStart, monthEnd, cashMovements);
-  const trendData         = buildTrendData(selectedMonth, incomes, salaries, receipts, fixedCosts);
+  const trendData         = buildTrendData(selectedMonth, incomes, salaries, receipts, fixedCosts, t);
   const topExpenses       = getTopExpenses(receipts, fixedCosts, monthStart, monthEnd, 5);
   const insights          = generateInsights(currentMetrics, prevMetrics, driverPerformance, salaryAlerts, werkstattChecks);
   // overviewHelpers writes German and names a key beside it; translating here
@@ -491,8 +495,8 @@ const OverviewPage: React.FC = () => {
           className="p-4 rounded-2xl text-sm"
           style={{ background: 'var(--danger-subtle)', border: '1px solid var(--danger)', color: 'var(--danger)' }}
         >
-          <strong>{t('overview.error.partial')}</strong> Die angezeigten Zahlen sind
-          möglicherweise unvollständig. ({loadError})
+          <strong>{t('overview.error.partial')}</strong>{' '}
+          {t('overview.error.partialBody', { reason: loadError })}
         </div>
       )}
 
@@ -514,7 +518,7 @@ const OverviewPage: React.FC = () => {
             <div>
               <p className="font-bold text-sm" style={{ color: '#f59e0b' }}>{t('overview.superAdmin.title')}</p>
               <p className="text-xs mt-0.5" style={{ color: 'var(--text-secondary)' }}>
-                KPIs, Trials, Plan-Verteilung und Handlungsbedarf auf einen Blick
+                {t('overview.superAdmin.sub')}
               </p>
             </div>
           </div>
@@ -531,11 +535,11 @@ const OverviewPage: React.FC = () => {
       <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>
-            Firmenübersicht
+            {t('overview.title')}
           </h1>
           <p className="text-sm mt-0.5" style={{ color: 'var(--text-secondary)' }}>
             {format(parseISO(selectedMonth + '-01'), 'MMMM yyyy', { locale: de })}
-            {' · '}Vergleich mit{' '}
+            {' · '}{t('overview.comparedWith')}{' '}
             {format(parseISO(prevMonthStr + '-01'), 'MMMM yyyy', { locale: de })}
           </p>
         </div>
@@ -612,12 +616,14 @@ const OverviewPage: React.FC = () => {
                 <div className="flex items-center gap-2.5">
                   <AlertCircle size={16} style={{ color: 'var(--danger)' }} className="flex-shrink-0" />
                   <div>
-                    <p className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>{unpaidCount} unbezahlte Gehälter</p>
-                    <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>Gesamt offen: {fmt(totalOpenSalary)} €</p>
+                    <p className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
+                      {tPlural({ one: 'overview.alerts.unpaidSalaries.one', other: 'overview.alerts.unpaidSalaries.other' }, unpaidCount)}
+                    </p>
+                    <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>{t('overview.alerts.totalOpen', { amount: `${fmt(totalOpenSalary)} €` })}</p>
                   </div>
                 </div>
                 <Link to="/gehaelter" className="text-xs font-semibold flex items-center gap-1" style={{ color: 'var(--danger)' }}>
-                  Verwalten <ChevronRight size={12} />
+                  {t('overview.alerts.manage')} <ChevronRight size={12} />
                 </Link>
               </div>
             )}
@@ -629,14 +635,16 @@ const OverviewPage: React.FC = () => {
                 <div className="flex items-center gap-2.5">
                   <AlertTriangle size={16} style={{ color: 'var(--warning)' }} className="flex-shrink-0" />
                   <div>
-                    <p className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>{partialCount} teilweise bezahlte Gehälter</p>
+                    <p className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
+                      {tPlural({ one: 'overview.alerts.partialSalaries.one', other: 'overview.alerts.partialSalaries.other' }, partialCount)}
+                    </p>
                     <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>
-                      Restbetrag: {fmt(salaryAlerts.filter(a => a.status === 'partially_paid').reduce((s, a) => s + a.remaining, 0))} €
+                      {t('overview.alerts.remaining', { amount: `${fmt(salaryAlerts.filter(a => a.status === 'partially_paid').reduce((s, a) => s + a.remaining, 0))} €` })}
                     </p>
                   </div>
                 </div>
                 <Link to="/gehaelter" className="text-xs font-semibold flex items-center gap-1" style={{ color: 'var(--warning)' }}>
-                  Verwalten <ChevronRight size={12} />
+                  {t('overview.alerts.manage')} <ChevronRight size={12} />
                 </Link>
               </div>
             )}
@@ -648,12 +656,14 @@ const OverviewPage: React.FC = () => {
                 <div className="flex items-center gap-2.5">
                   <Wrench size={16} style={{ color: 'var(--danger)' }} className="flex-shrink-0" />
                   <div>
-                    <p className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>{fleetIssues} Fahrzeug{fleetIssues > 1 ? 'e' : ''} mit negativem Check</p>
+                    <p className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
+                      {tPlural({ one: 'overview.alerts.negativeCheck.one', other: 'overview.alerts.negativeCheck.other' }, fleetIssues)}
+                    </p>
                     <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>{t('overview.alerts.checkWerkstatt')}</p>
                   </div>
                 </div>
                 <Link to="/werkstatt" className="text-xs font-semibold flex items-center gap-1" style={{ color: 'var(--danger)' }}>
-                  Werkstatt <ChevronRight size={12} />
+                  {t('nav.werkstatt')} <ChevronRight size={12} />
                 </Link>
               </div>
             )}
@@ -666,7 +676,7 @@ const OverviewPage: React.FC = () => {
                   <ShieldX size={16} style={{ color: 'var(--danger)' }} className="flex-shrink-0" />
                   <div>
                     <p className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
-                      {tuevAbgelaufen.length} Fahrzeug{tuevAbgelaufen.length > 1 ? 'e' : ''} — TÜV abgelaufen
+                      {tPlural({ one: 'overview.alerts.tuevExpired.one', other: 'overview.alerts.tuevExpired.other' }, tuevAbgelaufen.length)}
                     </p>
                     <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>
                       {tuevAbgelaufen.map(c => c.kennzeichen).join(', ')}
@@ -674,7 +684,7 @@ const OverviewPage: React.FC = () => {
                   </div>
                 </div>
                 <Link to="/cars" className="text-xs font-semibold flex items-center gap-1" style={{ color: 'var(--danger)' }}>
-                  Fahrzeuge <ChevronRight size={12} />
+                  {t('nav.cars')} <ChevronRight size={12} />
                 </Link>
               </div>
             )}
@@ -687,7 +697,7 @@ const OverviewPage: React.FC = () => {
                   <ShieldAlert size={16} style={{ color: 'var(--warning)' }} className="flex-shrink-0" />
                   <div>
                     <p className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
-                      {tuevBaldAblaufend.length} Fahrzeug{tuevBaldAblaufend.length > 1 ? 'e' : ''} — TÜV läuft bald ab
+                      {tPlural({ one: 'overview.alerts.tuevSoon.one', other: 'overview.alerts.tuevSoon.other' }, tuevBaldAblaufend.length)}
                     </p>
                     <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>
                       {tuevBaldAblaufend.map(c => c.kennzeichen).join(', ')}
@@ -695,7 +705,7 @@ const OverviewPage: React.FC = () => {
                   </div>
                 </div>
                 <Link to="/cars" className="text-xs font-semibold flex items-center gap-1" style={{ color: 'var(--warning)' }}>
-                  Fahrzeuge <ChevronRight size={12} />
+                  {t('nav.cars')} <ChevronRight size={12} />
                 </Link>
               </div>
             )}
@@ -707,12 +717,14 @@ const OverviewPage: React.FC = () => {
                 <div className="flex items-center gap-2.5">
                   <Info size={16} style={{ color: 'var(--accent-text)' }} className="flex-shrink-0" />
                   <div>
-                    <p className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>{pendingInvites} ausstehende Einladung{pendingInvites > 1 ? 'en' : ''}</p>
+                    <p className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
+                      {tPlural({ one: 'overview.alerts.pendingInvites.one', other: 'overview.alerts.pendingInvites.other' }, pendingInvites)}
+                    </p>
                     <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>{t('overview.alerts.notAccepted')}</p>
                   </div>
                 </div>
                 <Link to="/benutzer" className="text-xs font-semibold flex items-center gap-1" style={{ color: 'var(--accent-text)' }}>
-                  Benutzer <ChevronRight size={12} />
+                  {t('nav.users')} <ChevronRight size={12} />
                 </Link>
               </div>
             )}
@@ -723,7 +735,7 @@ const OverviewPage: React.FC = () => {
       {/* ── Charts row 1: trend + revenue mix ── */}
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-5">
         <Panel className="xl:col-span-2">
-          <SectionHeader title="6-Monats-Trend" sub={t('overview.trend.sub')} icon={<BarChart3 size={16} />} />
+          <SectionHeader title={t('overview.trend.title')} sub={t('overview.trend.sub')} icon={<BarChart3 size={16} />} />
           <ResponsiveContainer width="100%" height={220}>
             <AreaChart data={trendData} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
               <defs>
@@ -796,7 +808,7 @@ const OverviewPage: React.FC = () => {
             </>
           ) : (
             <div className="flex items-center justify-center h-40 text-sm" style={{ color: 'var(--text-tertiary)' }}>
-              Keine Einnahmen
+              {t('overview.mix.none')}
             </div>
           )}
         </Panel>
@@ -844,11 +856,11 @@ const OverviewPage: React.FC = () => {
                 <p className="text-lg font-bold text-white">
                   {currentMetrics.profit >= 0 ? '+' : ''}{fmt(currentMetrics.profit)} €
                 </p>
-                <p className="text-xs text-white/80">{currentMetrics.profitMargin.toFixed(1)}% Marge</p>
+                <p className="text-xs text-white/80">{t('overview.profit.margin', { value: currentMetrics.profitMargin.toFixed(1) })}</p>
               </div>
             </div>
             <div className="flex items-center justify-between text-xs px-1 pt-1" style={{ color: 'var(--text-tertiary)' }}>
-              <span>Vormonat: {fmt(prevMetrics.profit)} €</span>
+              <span>{t('overview.profit.prevMonth', { amount: `${fmt(prevMetrics.profit)} €` })}</span>
               <DeltaBadge delta={profitDelta} higherIsBetter />
             </div>
           </div>
@@ -885,7 +897,7 @@ const OverviewPage: React.FC = () => {
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-wide mb-1"
                     style={{ color: cashSummary.cashRisk === 'ok' ? '#3b82f6' : cashSummary.cashRisk === 'warning' ? '#f59e0b' : '#ef4444' }}>
-                    Bargeldbestand (netto)
+                    {t('overview.cash.balanceNet')}
                   </p>
                   <p className="text-2xl font-bold"
                     style={{ color: cashSummary.cashBalance >= 0 ? '#3b82f6' : '#ef4444' }}>
@@ -927,7 +939,7 @@ const OverviewPage: React.FC = () => {
               <span style={{ color: 'var(--text-secondary)' }}>{t('overview.cash.ratio')}</span>
               <span className="font-semibold" style={{ color: 'var(--text-primary)' }}>
                 {cashSummary.cashIncome > 0
-                  ? `${((cashSummary.cashOut / cashSummary.cashIncome) * 100).toFixed(0)}% ausgegeben`
+                  ? t('overview.cash.spentPct', { value: ((cashSummary.cashOut / cashSummary.cashIncome) * 100).toFixed(0) })
                   : '—'}
               </span>
             </div>
@@ -953,8 +965,14 @@ const OverviewPage: React.FC = () => {
           {driverPerformance.filter(d => d.umsatz > 0).length > 0 ? (
             <ResponsiveContainer width="100%" height={Math.max(180, driverPerformance.filter(d => d.umsatz > 0).length * 40)}>
               <BarChart
+                /* The series key is the <Bar> dataKey, so both come from the same
+                   t(...) call: hard-coded German keys left every bar empty in the
+                   English UI. */
                 data={driverPerformance.filter(d => d.umsatz > 0).slice(0, 8).map(d => ({
-                  name: d.name, Umsatz: d.umsatz, Gehalt: d.salary, Ausgaben: d.expenses,
+                  name: d.name,
+                  [t('overview.kpi.umsatz')]:       d.umsatz,
+                  [t('overview.drivers.gehalt')]:   d.salary,
+                  [t('overview.drivers.ausgaben')]: d.expenses,
                 }))}
                 layout="vertical"
                 margin={{ top: 0, right: 10, left: 0, bottom: 0 }}
@@ -971,7 +989,7 @@ const OverviewPage: React.FC = () => {
             </ResponsiveContainer>
           ) : (
             <div className="flex items-center justify-center h-40 text-sm" style={{ color: 'var(--text-tertiary)' }}>
-              Keine Fahrerdaten für diesen Monat
+              {t('overview.drivers.noneMonth')}
             </div>
           )}
         </Panel>
@@ -1019,12 +1037,12 @@ const OverviewPage: React.FC = () => {
                         </div>
                         {driver.profitMargin !== null && (
                           <p className="text-xs mt-1" style={{ color: 'var(--text-tertiary)' }}>
-                            Marge: <strong style={{ color: 'var(--text-secondary)' }}>{driver.profitMargin.toFixed(0)}%</strong>
-                            {' · '}{fmt(driver.umsatz)} € Umsatz
+                            {t('overview.drivers.marginLabel')} <strong style={{ color: 'var(--text-secondary)' }}>{driver.profitMargin.toFixed(0)}%</strong>
+                            {' · '}{t('overview.drivers.revenueSuffix', { amount: fmt(driver.umsatz) })}
                           </p>
                         )}
                       </div>
-                      {isTop && <span className="text-xs font-semibold px-1.5 py-0.5 rounded-md flex-shrink-0" style={{ background: 'rgba(16,185,129,0.15)', color: '#10b981' }}>Top</span>}
+                      {isTop && <span className="text-xs font-semibold px-1.5 py-0.5 rounded-md flex-shrink-0" style={{ background: 'rgba(16,185,129,0.15)', color: '#10b981' }}>{t('overview.drivers.top')}</span>}
                       {isWorst && driver.netContribution < 0 && <span className="text-xs font-semibold px-1.5 py-0.5 rounded-md flex-shrink-0" style={{ background: 'var(--danger-subtle)', color: 'var(--danger)' }}>{t('overview.drivers.attention')}</span>}
                     </div>
                   </div>
@@ -1061,7 +1079,7 @@ const OverviewPage: React.FC = () => {
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium truncate" style={{ color: 'var(--text-primary)' }}>{item.description}</p>
                     <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
-                      {item.type === 'fixed' ? t('overview.load.fixkosten') : item.driverName || 'Beleg'}
+                      {item.type === 'fixed' ? t('overview.load.fixkosten') : item.driverName || t('bargeld.beleg')}
                       {item.type === 'receipt' && ` · ${format(new Date(item.date), 'dd.MM.yyyy')}`}
                     </p>
                   </div>
@@ -1083,7 +1101,7 @@ const OverviewPage: React.FC = () => {
             title={t('overview.fleet.title')} sub={t('overview.fleet.sub')} icon={<Wrench size={16} />}
             action={
               <Link to="/werkstatt" className="text-xs font-medium flex items-center gap-1" style={{ color: 'var(--accent-text)' }}>
-                Alle <ChevronRight size={12} />
+                {t('common.all')} <ChevronRight size={12} />
               </Link>
             }
           />
@@ -1121,13 +1139,13 @@ const OverviewPage: React.FC = () => {
                   style={{ background: 'rgba(16,185,129,0.08)', color: '#10b981' }}
                 >
                   <CheckCircle size={14} />
-                  Keine negativen Checks diesen Monat
+                  {t('overview.fleet.noNegative')}
                 </div>
               )}
             </div>
           ) : (
             <div className="flex items-center justify-center h-20 text-sm" style={{ color: 'var(--text-tertiary)' }}>
-              Keine Checks diesen Monat
+              {t('overview.fleet.noChecks')}
             </div>
           )}
         </Panel>
@@ -1140,7 +1158,7 @@ const OverviewPage: React.FC = () => {
             title={t('overview.salaries.title')} sub={t('overview.salaries.sub')} icon={<CreditCard size={16} />}
             action={
               <Link to="/gehaelter" className="text-xs font-medium flex items-center gap-1" style={{ color: 'var(--accent-text)' }}>
-                Verwalten <ChevronRight size={12} />
+                {t('overview.alerts.manage')} <ChevronRight size={12} />
               </Link>
             }
           />
@@ -1211,7 +1229,7 @@ const OverviewPage: React.FC = () => {
             title={t('overview.receipts.title')} sub={t('overview.receipts.sub')} icon={<ReceiptIcon size={16} />}
             action={
               <Link to="/belege" className="text-xs font-medium flex items-center gap-1" style={{ color: 'var(--accent-text)' }}>
-                Alle <ChevronRight size={12} />
+                {t('common.all')} <ChevronRight size={12} />
               </Link>
             }
           />

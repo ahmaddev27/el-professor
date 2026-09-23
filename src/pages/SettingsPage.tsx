@@ -140,7 +140,7 @@ const SettingsPage: React.FC = () => {
     }
 
     if (!companyId) {
-      showError('Fehler', t('settings.noCompanyId'));
+      showError(t('common.error'), t('settings.noCompanyId'));
       return;
     }
 
@@ -170,7 +170,7 @@ const SettingsPage: React.FC = () => {
       if (uploadError) {
         throw new Error(companyScope.isPlatformSession && companyScope.readOnly
           ? t('support.storage.readOnly')
-          : `Speicher-Upload fehlgeschlagen: ${uploadError.message}`);
+          : t('settings.uploadFailedWith', { message: uploadError.message }));
       }
 
       // Step 2: Get the public URL
@@ -196,7 +196,7 @@ const SettingsPage: React.FC = () => {
         const reason = dbError.code === '42501'
           ? t('settings.noWritePermission')
           : dbError.message;
-        throw new Error(`Datenbank-Fehler: ${reason}`);
+        throw new Error(t('settings.dbErrorWith', { message: reason }));
       }
       if (!savedRow) {
         throw new Error(t('settings.logoUrlSaveFailed'));
@@ -250,7 +250,7 @@ const SettingsPage: React.FC = () => {
           { onConflict: 'company_id', ignoreDuplicates: false }
         );
 
-      if (dbError) throw new Error(`Datenbank-Fehler: ${dbError.message}`);
+      if (dbError) throw new Error(t('settings.dbErrorWith', { message: dbError.message }));
 
       await refreshSettings();
       setLogoPreview(null);

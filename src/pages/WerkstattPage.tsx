@@ -127,18 +127,18 @@ export default function WerkstattPage() {
     const monthLabel = selectedMonth.toLocaleDateString('de-DE', { month: 'long', year: 'numeric' });
     const weekInfo = weeks.find(w => w.weekNumber === selectedWeek);
     const filters: string[] = [
-      `Monat: ${monthLabel}`,
-      `Zeitraum: ${weekInfo?.label ?? `KW ${selectedWeek}`}`,
+      t('werkstatt.filterMonth', { value: monthLabel }),
+      t('werkstatt.filterPeriod', { value: weekInfo?.label ?? t('werkstatt.calendarWeek', { number: selectedWeek }) }),
     ];
     if (statusFilter !== 'all') {
       const labels: Record<string, string> = { positive: t('werkstatt.positive'), negative: t('werkstatt.negative'), repaired: t('werkstatt.repaired') };
-      filters.push(`Status: ${labels[statusFilter] ?? statusFilter}`);
+      filters.push(t('werkstatt.filterStatus', { value: labels[statusFilter] ?? statusFilter }));
     }
 
     exportTableToExcel({
       filename: `werkstatt_${format(selectedMonth, 'yyyy-MM')}_KW${selectedWeek}`,
       sheetTitle: t('werkstatt.checksTitle'),
-      moduleName: 'Werkstatt',
+      moduleName: t('nav.werkstatt'),
       filterSummary: filters,
       columns: [
         { key: 'check_date',  label: t('common.date'),         width: 14, format: v => new Date(v as string).toLocaleDateString('de-DE') },
@@ -204,7 +204,7 @@ export default function WerkstattPage() {
             onMouseLeave={e => { (e.currentTarget as HTMLElement).style.opacity = '1'; }}
           >
             <Plus className="w-5 h-5" />
-            Neuer Check
+            {t('werkstatt.newCheck')}
           </button>
         </div>
       </div>
@@ -280,7 +280,7 @@ export default function WerkstattPage() {
           <p className="mb-4 text-sm" style={{ color: 'var(--text-secondary)' }}>
             {statusFilter === 'all'
               ? t('werkstatt.noneWeek')
-              : `Keine Checks mit Status "${getStatusConfig(statusFilter).label}".`}
+              : t('werkstatt.noneWithStatus', { status: getStatusConfig(statusFilter).label })}
           </p>
           <button
             onClick={() => { setSelectedCheck(null); setShowModal(true); }}
@@ -288,7 +288,7 @@ export default function WerkstattPage() {
             style={{ background: 'var(--warning-solid)', color: 'white' }}
           >
             <Plus className="w-5 h-5" />
-            Ersten Check erstellen
+            {t('werkstatt.firstCheck')}
           </button>
         </div>
       ) : (
@@ -377,7 +377,7 @@ export default function WerkstattPage() {
           isOpen={!!checkToDelete}
           type="confirm"
           title={t('werkstatt.deleteTitle')}
-          message={`Möchten Sie den Check für ${checkToDelete.car?.kennzeichen} wirklich löschen?`}
+          message={t('werkstatt.deleteMessage', { plate: checkToDelete.car?.kennzeichen ?? '' })}
           confirmText={t('common.delete')}
           onConfirm={handleDelete}
           onClose={() => setCheckToDelete(null)}
