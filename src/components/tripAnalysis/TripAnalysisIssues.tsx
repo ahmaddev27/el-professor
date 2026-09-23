@@ -18,6 +18,7 @@ import {
   type DataTableColumn,
 } from '../ui';
 import { useTranslation } from '../../contexts/LanguageContext';
+import { engineText } from '../../i18n/engineMessage';
 import type { TranslationKey, TranslationVars } from '../../i18n';
 import type { Issue, IssueSeverity, IssueStatus, IssueType } from '../../utils/tripAnalysis/types';
 import { filterIssues, issueStatusCounts, issueTypesPresent } from '../../lib/tripAnalysisView';
@@ -32,7 +33,8 @@ const num = (value: unknown): number | null => (typeof value === 'number' && Num
 
 /**
  * One line of words from a finding's type and its values, in the UI language.
- * The engine's own explanation is German; the German screen shows it too.
+ * It sits above the engine's own explanation, which now follows the UI language
+ * too through the key the engine names beside it.
  */
 export function issueDetail(t: Translate, issue: Issue): string | null {
   const minutes = (value: number | null) => (value === null ? null : t('ta.minutes', { value: formatMinutes(value) }));
@@ -82,7 +84,7 @@ const STATUS_ORDER: Array<IssueStatus | 'all'> = ['all', 'conflict', 'unverifiab
 const SEVERITIES: IssueSeverity[] = ['error', 'warning', 'info'];
 
 export function TripAnalysisIssues({ issues, driverNames, onShowTrips, singleDriver = false }: Props) {
-  const { t, tPlural, language } = useTranslation();
+  const { t, tPlural } = useTranslation();
   const [type, setType] = useState<IssueType | 'all'>('all');
   const [severity, setSeverity] = useState<IssueSeverity | 'all'>('all');
   const [status, setStatus] = useState<IssueStatus | 'all'>('all');
@@ -104,8 +106,13 @@ export function TripAnalysisIssues({ issues, driverNames, onShowTrips, singleDri
           <span className="block min-w-[12rem] py-1.5">
             <span className="block font-semibold text-fg">{t(ISSUE_TYPE_KEYS[issue.type])}</span>
             {detail ? <span className="block text-xs text-fg-muted">{detail}</span> : null}
-            {language === 'de' && issue.explanation ? (
-              <span className="block text-xs text-fg-muted">{issue.explanation}</span>
+            {/* The engine writes German and names a dictionary key beside it;
+                engineText renders the key and falls back to that German, so the
+                sentence no longer has to be hidden outside German. */}
+            {issue.explanation ? (
+              <span className="block text-xs text-fg-muted">
+                {engineText(t, issue.explanation, issue.explanationKey, issue.explanationVars)}
+              </span>
             ) : null}
             <span className="mt-1 flex flex-wrap gap-1 sm:hidden">
               <IssueStatusBadge status={issue.status} />

@@ -27,9 +27,6 @@
  *   listTravelRequests(input: TripAnalysisInput): TravelEstimateRequest[]
  */
 
-// Type-only: findings name a dictionary key beside their German text.
-import type { EngineMessageKey, EngineMessageVars } from '../../i18n/engineMessageTypes';
-
 /** Stored with every result; bump it whenever a rule below changes meaning. */
 export const TRIP_ANALYSIS_ALGORITHM_VERSION = 'trip-analysis/1.0.0';
 
@@ -281,9 +278,13 @@ export interface Issue {
    * engine names the key and never resolves it, so the analysis stays pure;
    * a screen renders `engineText(t, issue.explanation, issue.explanationKey,
    * issue.explanationVars)`. See src/i18n/engineMessage.ts.
+   *
+   * Spelled out rather than imported as `EngineMessageKey` / `EngineMessageVars`:
+   * boundary.test.ts allows this folder exactly three modules outside it, and
+   * a key is a plain string anyway.
    */
-  readonly explanationKey?: EngineMessageKey;
-  readonly explanationVars?: EngineMessageVars;
+  readonly explanationKey?: string;
+  readonly explanationVars?: Readonly<Record<string, string | number>>;
   readonly confidence: Confidence;
 }
 

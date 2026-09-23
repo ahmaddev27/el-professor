@@ -29,6 +29,7 @@ import {
   TRIP_STATUS_KEYS,
 } from '../lib/tripAnalysisLabels';
 import type { TranslationKey, TranslationVars } from '../i18n';
+import { engineText } from '../i18n/engineMessage';
 import type { AnalyzedTrip, Issue, TripAnalysisResult } from './tripAnalysis/types';
 import {
   formatBerlinDateTime,
@@ -178,7 +179,9 @@ export function buildTripAnalysisReport(input: TripAnalysisReportInput): XLSX.Wo
       t(ISSUE_STATUS_KEYS[issue.status]),
       issue.driverId ?? null,
       issue.vehicle ?? null,
-      issue.explanation,
+      // The engine's sentence, rendered through the key it names beside it —
+      // this report's headers already follow the UI language.
+      engineText(t, issue.explanation, issue.explanationKey, issue.explanationVars),
       issue.confidence,
       issue.tripIds.length,
       issue.tripIds.join(', '),
