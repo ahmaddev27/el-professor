@@ -157,14 +157,33 @@
   company is chosen to open one on. That is open decision D14 in HANDOFF.md,
   and the cells stay untagged — they are a decision, not a hole.
 
+  Slice C (20260923130000) closed the last thing 3.3 wrote down and left alone:
+  its own table list says "no role gate today, and none added: a viewer writes
+  these exactly as it does now. Narrowing them is a decision about roles, not
+  about tenancy." Twenty-three tables now carry the `page_key` of the screen
+  that writes them — `documents` for the Fahrtenbuch, the planning tables, the
+  historical tables, the saved Stundennachweise, the templates and the document
+  blocks and variables; `cash-balance` for cash_transactions; `cars` for
+  car_driver_assignments — and the five planning RPCs, which are SECURITY
+  DEFINER and ran past RLS, ask the same page. No page key was created and no
+  `role_permissions` row was written, so the cells that move are exactly the
+  ones the seeded roles already implied: `viewer` holds can_edit nowhere and
+  `editor` holds none on `documents`. Three tables on the same list are
+  deliberately unchanged and their cells stay: notification_settings (its
+  writes ask for an administrator, which is stricter), cash_movements and
+  salary_cash_receipts (SELECT is the only privilege a client role holds), and
+  document_counters (PP in every cell — no grant at all).
+
   ## Recorded without a plan step
 
   Current behaviour that no step of the plan names. Untagged, so a change to it
   is still a mismatch to explain, not an expected move.
 
-    - the planning RPCs (apply, replace, delete_or_archive, purge, reassign)
-      check the caller's company but not its role: a viewer can apply a monthly
-      plan, as it can already write the planning tables directly
+    - **closed by 20260923130000 (slice C).** The planning RPCs (apply, replace,
+      delete_or_archive, purge, reassign) checked the caller's company but not
+      its role: a viewer could apply a monthly plan, as it could already write
+      the planning tables directly. All five now ask
+      current_role_permits('documents', true), and the tables ask it too
     - apply_monthly_planning_run accepts another company's import id: it opens a
       run in the caller's own company and changes none of the other company's
       trips
@@ -1027,10 +1046,11 @@ INSERT INTO _mx_expected (tbl, op, anon, viewer, editor, supervisor, admin, othe
 ('activation_codes',                   'D', '..', '..', '..', '..', '..', '..', 'YY', NULL),
 ('activation_codes',                   'M', '..', '..', '..', '..', '..', '..', 'YY', NULL),
 ('car_driver_assignments',             'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('car_driver_assignments',             'I', 'RR', 'YR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
-('car_driver_assignments',            'U', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('car_driver_assignments',            'D', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('car_driver_assignments',            'M', '..', 'R.', 'R.', 'R.', 'R.', '.R', '..', NULL),
+-- 20260923130000 (slice C): page 'cars', the screen that writes it. Only the viewer loses; the editor holds can_edit on that page.
+('car_driver_assignments',             'I', 'RR', 'RR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
+('car_driver_assignments',            'U', '..', '..', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('car_driver_assignments',            'D', '..', '..', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('car_driver_assignments',            'M', '..', '..', 'R.', 'R.', 'R.', '.R', '..', NULL),
 ('cars',                               'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
 ('cars',                               'I', 'RR', 'RR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
 ('cars',                              'U', '..', '..', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
@@ -1042,10 +1062,11 @@ INSERT INTO _mx_expected (tbl, op, anon, viewer, editor, supervisor, admin, othe
 ('cash_movements',                     'D', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', NULL),
 ('cash_movements',                     'M', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', NULL),
 ('cash_transactions',                  'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('cash_transactions',                  'I', 'RR', 'YR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
-('cash_transactions',                 'U', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('cash_transactions',                 'D', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('cash_transactions',                 'M', '..', 'R.', 'R.', 'R.', 'R.', '.R', '..', NULL),
+-- 20260923130000 (slice C): page 'cash-balance', the Bargeldbestand screen. Only the viewer loses.
+('cash_transactions',                  'I', 'RR', 'RR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
+('cash_transactions',                 'U', '..', '..', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('cash_transactions',                 'D', '..', '..', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('cash_transactions',                 'M', '..', '..', 'R.', 'R.', 'R.', '.R', '..', NULL),
 -- A member still reads its own company row. What it can no longer read there is
 -- an approval note: 20260916130020 retired the column, and the platform's record
 -- of a decision is the audit row platform_company_set_approval writes. The
@@ -1063,15 +1084,17 @@ INSERT INTO _mx_expected (tbl, op, anon, viewer, editor, supervisor, admin, othe
 ('companies',                          'D', '..', '..', '..', '..', '..', '..', 'YY', 'the shell still takes a capability-only cross-tenant write: no context, no reason, no audit row (3.4c/3.13)'),
 ('companies',                          'M', '--', '--', '--', '--', '--', '--', '--', NULL),
 ('company_planning_run_blocks',       'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('company_planning_run_blocks',        'I', 'RR', 'YR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
-('company_planning_run_blocks',        'U', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('company_planning_run_blocks',        'D', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('company_planning_run_blocks',        'M', '..', 'R.', 'R.', 'R.', 'R.', '.R', '..', NULL),
+-- slice C: page 'documents' — viewer and editor hold no can_edit there, so the writes are refused.
+('company_planning_run_blocks',        'I', 'RR', 'RR', 'RR', 'YR', 'YR', 'RY', 'RR', NULL),
+('company_planning_run_blocks',        'U', '..', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('company_planning_run_blocks',        'D', '..', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('company_planning_run_blocks',        'M', '..', '..', '..', 'R.', 'R.', '.R', '..', NULL),
 ('company_planning_runs',             'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('company_planning_runs',              'I', 'RR', 'YR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
-('company_planning_runs',              'U', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('company_planning_runs',              'D', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('company_planning_runs',              'M', '..', 'R.', 'R.', 'R.', 'R.', '.R', '..', NULL),
+-- slice C: page 'documents' — viewer and editor hold no can_edit there, so the writes are refused.
+('company_planning_runs',              'I', 'RR', 'RR', 'RR', 'YR', 'YR', 'RY', 'RR', NULL),
+('company_planning_runs',              'U', '..', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('company_planning_runs',              'D', '..', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('company_planning_runs',              'M', '..', '..', '..', 'R.', 'R.', '.R', '..', NULL),
 -- company_settings is the account shell, and since 20260923100000 (3.13b) it
 -- is the one shell table with no platform branch at all. Its writes lost theirs
 -- with 20260921110000 (3.13a): the platform branch is the support session's
@@ -1120,10 +1143,11 @@ INSERT INTO _mx_expected (tbl, op, anon, viewer, editor, supervisor, admin, othe
 ('discount_codes',                     'D', '..', '..', '..', '..', '..', '..', 'YY', NULL),
 ('discount_codes',                     'M', '..', '..', '..', '..', '..', '..', 'YY', NULL),
 ('document_blocks',                    'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('document_blocks',                    'I', 'RR', 'YR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
-('document_blocks',                   'U', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('document_blocks',                   'D', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('document_blocks',                   'M', '..', 'R.', 'R.', 'R.', 'R.', '.R', '..', NULL),
+-- slice C: page 'documents' — viewer and editor hold no can_edit there, so the writes are refused.
+('document_blocks',                    'I', 'RR', 'RR', 'RR', 'YR', 'YR', 'RY', 'RR', NULL),
+('document_blocks',                   'U', '..', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('document_blocks',                   'D', '..', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('document_blocks',                   'M', '..', '..', '..', 'R.', 'R.', '.R', '..', NULL),
 ('document_categories',                'S', '..', 'YY', 'YY', 'YY', 'YY', 'YY', 'YY', NULL),
 ('document_categories',                'I', 'RR', 'RR', 'RR', 'RR', 'RR', 'RR', 'YY', NULL),
 ('document_categories',                'U', '..', '..', '..', '..', '..', '..', 'YY', NULL),
@@ -1135,15 +1159,17 @@ INSERT INTO _mx_expected (tbl, op, anon, viewer, editor, supervisor, admin, othe
 ('document_counters',                  'D', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', NULL),
 ('document_counters',                  'M', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', NULL),
 ('document_templates',                 'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('document_templates',                 'I', 'RR', 'YR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
-('document_templates',                'U', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('document_templates',                'D', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('document_templates',                'M', '..', 'R.', 'R.', 'R.', 'R.', '.R', '..', NULL),
+-- slice C: page 'documents' — viewer and editor hold no can_edit there, so the writes are refused.
+('document_templates',                 'I', 'RR', 'RR', 'RR', 'YR', 'YR', 'RY', 'RR', NULL),
+('document_templates',                'U', '..', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('document_templates',                'D', '..', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('document_templates',                'M', '..', '..', '..', 'R.', 'R.', '.R', '..', NULL),
 ('document_variables',                 'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('document_variables',                 'I', 'RR', 'YR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
-('document_variables',                'U', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('document_variables',                'D', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('document_variables',                'M', '..', 'R.', 'R.', 'R.', 'R.', '.R', '..', NULL),
+-- slice C: page 'documents' — viewer and editor hold no can_edit there, so the writes are refused.
+('document_variables',                 'I', 'RR', 'RR', 'RR', 'YR', 'YR', 'RY', 'RR', NULL),
+('document_variables',                'U', '..', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('document_variables',                'D', '..', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('document_variables',                'M', '..', '..', '..', 'R.', 'R.', '.R', '..', NULL),
 ('documents',                          'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
 ('documents',                          'I', 'RR', 'RR', 'RR', 'YR', 'YR', 'RY', 'RR', NULL),
 ('documents',                         'U', '..', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
@@ -1167,17 +1193,24 @@ INSERT INTO _mx_expected (tbl, op, anon, viewer, editor, supervisor, admin, othe
 ('drivers',                           'D', '..', '..', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
 ('drivers',                           'M', '..', '..', 'R.', 'R.', 'R.', '.R', '..', NULL),
 ('fahrtenbuch_assignment_audit',      'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('fahrtenbuch_assignment_audit',       'I', 'RR', 'YR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
+-- slice C: page 'documents' — viewer and editor hold no can_edit there, so the writes are refused.
+('fahrtenbuch_assignment_audit',       'I', 'RR', 'RR', 'RR', 'YR', 'YR', 'RY', 'RR', NULL),
 ('fahrtenbuch_assignment_audit',       'U', '..', '..', '..', '..', '..', '..', '..', NULL),
 ('fahrtenbuch_assignment_audit',       'D', '..', '..', '..', '..', '..', '..', '..', NULL),
 ('fahrtenbuch_assignment_audit',       'M', '..', '..', '..', '..', '..', '..', '..', NULL),
 ('fahrtenbuch_imports',               'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('fahrtenbuch_imports',                'I', 'RR', 'YR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
-('fahrtenbuch_imports',                'U', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+-- slice C: page 'documents' — viewer and editor hold no can_edit there, so the
+-- writes are refused. DELETE is untouched: it stays the administrator's alone,
+-- because deleting an import takes a finalized month's trips with it, and the
+-- page gate would have widened it to the supervisor.
+('fahrtenbuch_imports',                'I', 'RR', 'RR', 'RR', 'YR', 'YR', 'RY', 'RR', NULL),
+('fahrtenbuch_imports',                'U', '..', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
 ('fahrtenbuch_imports',                'D', '..', '..', '..', '..', 'Y.', '.Y', '..', NULL),
-('fahrtenbuch_imports',                'M', '..', 'R.', 'R.', 'R.', 'R.', '.R', '..', NULL),
+('fahrtenbuch_imports',                'M', '..', '..', '..', 'R.', 'R.', '.R', '..', NULL),
 ('fahrtenbuch_trips',                 'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('fahrtenbuch_trips',                  'I', 'RR', 'YR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
+-- slice C: page 'documents' — viewer and editor hold no can_edit there. There is
+-- still no UPDATE policy at all, and DELETE stays the administrator's.
+('fahrtenbuch_trips',                  'I', 'RR', 'RR', 'RR', 'YR', 'YR', 'RY', 'RR', NULL),
 ('fahrtenbuch_trips',                  'U', '..', '..', '..', '..', '..', '..', '..', NULL),
 ('fahrtenbuch_trips',                  'D', '..', '..', '..', '..', 'Y.', '.Y', '..', NULL),
 ('fahrtenbuch_trips',                  'M', '..', '..', '..', '..', '..', '..', '..', NULL),
@@ -1187,75 +1220,87 @@ INSERT INTO _mx_expected (tbl, op, anon, viewer, editor, supervisor, admin, othe
 ('fixed_costs',                       'D', '..', '..', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
 ('fixed_costs',                       'M', '..', '..', 'R.', 'R.', 'R.', '.R', '..', NULL),
 ('historical_block_adjustments',      'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('historical_block_adjustments',       'I', 'RR', 'YR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
-('historical_block_adjustments',       'U', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('historical_block_adjustments',       'D', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('historical_block_adjustments',       'M', '..', 'R.', 'R.', 'R.', 'R.', '.R', '..', NULL),
+-- slice C: page 'documents' — viewer and editor hold no can_edit there, so the writes are refused.
+('historical_block_adjustments',       'I', 'RR', 'RR', 'RR', 'YR', 'YR', 'RY', 'RR', NULL),
+('historical_block_adjustments',       'U', '..', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('historical_block_adjustments',       'D', '..', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('historical_block_adjustments',       'M', '..', '..', '..', 'R.', 'R.', '.R', '..', NULL),
 ('historical_driver_hour_targets',    'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('historical_driver_hour_targets',     'I', 'RR', 'YR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
-('historical_driver_hour_targets',     'U', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('historical_driver_hour_targets',     'D', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('historical_driver_hour_targets',     'M', '..', 'R.', 'R.', 'R.', 'R.', '.R', '..', NULL),
+-- slice C: page 'documents' — viewer and editor hold no can_edit there, so the writes are refused.
+('historical_driver_hour_targets',     'I', 'RR', 'RR', 'RR', 'YR', 'YR', 'RY', 'RR', NULL),
+('historical_driver_hour_targets',     'U', '..', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('historical_driver_hour_targets',     'D', '..', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('historical_driver_hour_targets',     'M', '..', '..', '..', 'R.', 'R.', '.R', '..', NULL),
 ('historical_payroll_targets',        'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('historical_payroll_targets',         'I', 'RR', 'YR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
-('historical_payroll_targets',         'U', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('historical_payroll_targets',         'D', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('historical_payroll_targets',         'M', '..', 'R.', 'R.', 'R.', 'R.', '.R', '..', NULL),
+-- slice C: page 'documents' — viewer and editor hold no can_edit there, so the writes are refused.
+('historical_payroll_targets',         'I', 'RR', 'RR', 'RR', 'YR', 'YR', 'RY', 'RR', NULL),
+('historical_payroll_targets',         'U', '..', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('historical_payroll_targets',         'D', '..', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('historical_payroll_targets',         'M', '..', '..', '..', 'R.', 'R.', '.R', '..', NULL),
 ('historical_reconciliation_drivers', 'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('historical_reconciliation_drivers',  'I', 'RR', 'YR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
-('historical_reconciliation_drivers',  'U', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('historical_reconciliation_drivers',  'D', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('historical_reconciliation_drivers',  'M', '..', 'R.', 'R.', 'R.', 'R.', '.R', '..', NULL),
+-- slice C: page 'documents' — viewer and editor hold no can_edit there, so the writes are refused.
+('historical_reconciliation_drivers',  'I', 'RR', 'RR', 'RR', 'YR', 'YR', 'RY', 'RR', NULL),
+('historical_reconciliation_drivers',  'U', '..', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('historical_reconciliation_drivers',  'D', '..', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('historical_reconciliation_drivers',  'M', '..', '..', '..', 'R.', 'R.', '.R', '..', NULL),
 ('historical_reconciliation_results', 'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('historical_reconciliation_results',  'I', 'RR', 'YR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
-('historical_reconciliation_results',  'U', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('historical_reconciliation_results',  'D', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('historical_reconciliation_results',  'M', '..', 'R.', 'R.', 'R.', 'R.', '.R', '..', NULL),
+-- slice C: page 'documents' — viewer and editor hold no can_edit there, so the writes are refused.
+('historical_reconciliation_results',  'I', 'RR', 'RR', 'RR', 'YR', 'YR', 'RY', 'RR', NULL),
+('historical_reconciliation_results',  'U', '..', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('historical_reconciliation_results',  'D', '..', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('historical_reconciliation_results',  'M', '..', '..', '..', 'R.', 'R.', '.R', '..', NULL),
 ('historical_reconciliation_wh_drivers','S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('historical_reconciliation_wh_drivers','I', 'RR', 'YR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
-('historical_reconciliation_wh_drivers','U', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('historical_reconciliation_wh_drivers','D', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('historical_reconciliation_wh_drivers','M', '..', 'R.', 'R.', 'R.', 'R.', '.R', '..', NULL),
+-- slice C: page 'documents' — viewer and editor hold no can_edit there, so the writes are refused.
+('historical_reconciliation_wh_drivers','I', 'RR', 'RR', 'RR', 'YR', 'YR', 'RY', 'RR', NULL),
+('historical_reconciliation_wh_drivers','U', '..', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('historical_reconciliation_wh_drivers','D', '..', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('historical_reconciliation_wh_drivers','M', '..', '..', '..', 'R.', 'R.', '.R', '..', NULL),
 ('historical_reconciliations',        'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('historical_reconciliations',         'I', 'RR', 'YR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
-('historical_reconciliations',         'U', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('historical_reconciliations',         'D', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('historical_reconciliations',         'M', '..', 'R.', 'R.', 'R.', 'R.', '.R', '..', NULL),
+-- slice C: page 'documents' — viewer and editor hold no can_edit there, so the writes are refused.
+('historical_reconciliations',         'I', 'RR', 'RR', 'RR', 'YR', 'YR', 'RY', 'RR', NULL),
+('historical_reconciliations',         'U', '..', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('historical_reconciliations',         'D', '..', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('historical_reconciliations',         'M', '..', '..', '..', 'R.', 'R.', '.R', '..', NULL),
 ('historical_time_adjustments',       'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('historical_time_adjustments',        'I', 'RR', 'YR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
-('historical_time_adjustments',        'U', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('historical_time_adjustments',        'D', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('historical_time_adjustments',        'M', '..', 'R.', 'R.', 'R.', 'R.', '.R', '..', NULL),
+-- slice C: page 'documents' — viewer and editor hold no can_edit there, so the writes are refused.
+('historical_time_adjustments',        'I', 'RR', 'RR', 'RR', 'YR', 'YR', 'RY', 'RR', NULL),
+('historical_time_adjustments',        'U', '..', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('historical_time_adjustments',        'D', '..', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('historical_time_adjustments',        'M', '..', '..', '..', 'R.', 'R.', '.R', '..', NULL),
 ('historical_wh_saved_plans',         'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('historical_wh_saved_plans',          'I', 'RR', 'YR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
-('historical_wh_saved_plans',          'U', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('historical_wh_saved_plans',          'D', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('historical_wh_saved_plans',          'M', '..', 'R.', 'R.', 'R.', 'R.', '.R', '..', NULL),
+-- slice C: page 'documents' — viewer and editor hold no can_edit there, so the writes are refused.
+('historical_wh_saved_plans',          'I', 'RR', 'RR', 'RR', 'YR', 'YR', 'RY', 'RR', NULL),
+('historical_wh_saved_plans',          'U', '..', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('historical_wh_saved_plans',          'D', '..', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('historical_wh_saved_plans',          'M', '..', '..', '..', 'R.', 'R.', '.R', '..', NULL),
 ('income',                             'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
 ('income',                             'I', 'RR', 'RR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
 ('income',                            'U', '..', '..', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
 ('income',                            'D', '..', '..', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
 ('income',                            'M', '..', '..', 'R.', 'R.', 'R.', '.R', '..', NULL),
 ('monthly_planning_manual_exceptions','S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('monthly_planning_manual_exceptions', 'I', 'RR', 'YR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
-('monthly_planning_manual_exceptions', 'U', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('monthly_planning_manual_exceptions', 'D', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('monthly_planning_manual_exceptions', 'M', '..', 'R.', 'R.', 'R.', 'R.', '.R', '..', NULL),
+-- slice C: page 'documents' — viewer and editor hold no can_edit there, so the writes are refused.
+('monthly_planning_manual_exceptions', 'I', 'RR', 'RR', 'RR', 'YR', 'YR', 'RY', 'RR', NULL),
+('monthly_planning_manual_exceptions', 'U', '..', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('monthly_planning_manual_exceptions', 'D', '..', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('monthly_planning_manual_exceptions', 'M', '..', '..', '..', 'R.', 'R.', '.R', '..', NULL),
 ('notification_settings',             'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
 ('notification_settings',              'I', 'RR', 'RR', 'RR', 'RR', 'YR', 'RY', 'RR', NULL),
 ('notification_settings',              'U', '..', '..', '..', '..', 'Y.', '.Y', '..', NULL),
 ('notification_settings',              'D', '..', '..', '..', '..', '..', '..', '..', NULL),
 ('notification_settings',              'M', '..', '..', '..', '..', 'R.', '.R', '..', NULL),
 ('planning_finalizations',             'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('planning_finalizations',             'I', 'RR', 'YR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
-('planning_finalizations',            'U', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('planning_finalizations',            'D', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('planning_finalizations',            'M', '..', 'R.', 'R.', 'R.', 'R.', '.R', '..', NULL),
+-- slice C: page 'documents' — viewer and editor hold no can_edit there, so the writes are refused.
+('planning_finalizations',             'I', 'RR', 'RR', 'RR', 'YR', 'YR', 'RY', 'RR', NULL),
+('planning_finalizations',            'U', '..', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('planning_finalizations',            'D', '..', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('planning_finalizations',            'M', '..', '..', '..', 'R.', 'R.', '.R', '..', NULL),
 ('planning_run_adjustments',           'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('planning_run_adjustments',          'I', 'RR', 'YR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
-('planning_run_adjustments',          'U', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('planning_run_adjustments',          'D', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('planning_run_adjustments',          'M', '..', 'R.', 'R.', 'R.', 'R.', '.R', '..', NULL),
+-- slice C: page 'documents' — viewer and editor hold no can_edit there, so the writes are refused.
+('planning_run_adjustments',          'I', 'RR', 'RR', 'RR', 'YR', 'YR', 'RY', 'RR', NULL),
+('planning_run_adjustments',          'U', '..', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('planning_run_adjustments',          'D', '..', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('planning_run_adjustments',          'M', '..', '..', '..', 'R.', 'R.', '.R', '..', NULL),
 ('receipts',                           'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
 ('receipts',                           'I', 'RR', 'RR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
 ('receipts',                          'U', '..', '..', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
@@ -1306,10 +1351,11 @@ INSERT INTO _mx_expected (tbl, op, anon, viewer, editor, supervisor, admin, othe
 ('salary_payments',                   'D', '..', '..', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
 ('salary_payments',                   'M', '..', '..', 'R.', 'R.', 'R.', '.R', '..', NULL),
 ('saved_stundennachweise',             'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('saved_stundennachweise',            'I', 'RR', 'YR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
-('saved_stundennachweise',            'U', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('saved_stundennachweise',            'D', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('saved_stundennachweise',            'M', '..', 'R.', 'R.', 'R.', 'R.', '.R', '..', NULL),
+-- slice C: page 'documents' — viewer and editor hold no can_edit there, so the writes are refused.
+('saved_stundennachweise',            'I', 'RR', 'RR', 'RR', 'YR', 'YR', 'RY', 'RR', NULL),
+('saved_stundennachweise',            'U', '..', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('saved_stundennachweise',            'D', '..', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('saved_stundennachweise',            'M', '..', '..', '..', 'R.', 'R.', '.R', '..', NULL),
 -- 20260919150000 (plan 3.F step U1). Its SELECT predicate is the account shell
 -- plus companies.read, exactly like company_subscriptions above, so a member
 -- reads its own company's periods whatever state that company is in — which is
@@ -1403,10 +1449,13 @@ INSERT INTO _mx_expected (tbl, op, anon, viewer, editor, supervisor, admin, othe
 --                  answer is the silent one, not T. The caller whose gates
 --                  answer the same way inside its own company is the viewer, so
 --                  the viewer's own move cell is what says which it is —
---                  '..' where the row cannot be held (the ten role-gated
---                  tables, notification_settings, and fahrtenbuch_trips and
---                  fahrtenbuch_assignment_audit, which have no UPDATE policy at
---                  all), 'T.' where it can.
+--                  '..' where the row cannot be held, 'T.' where it can.
+--                  Since 20260923130000 (slice C) it is '..' on every one of
+--                  the 36: the tables that had no role gate now have one, and
+--                  the rest either gate the viewer already, ask for an
+--                  administrator, or carry no UPDATE policy at all. So no 'T.'
+--                  move cell is left here, and a table that grows one again is
+--                  a table that lost its gate.
 --
 -- Tables whose cell is PP are skipped: no GRANT means the statement never
 -- reaches a policy or a trigger.
@@ -2444,36 +2493,45 @@ INSERT INTO _mx_rpc (label, stmt, want, hole) VALUES
      'PNNNNNY', NULL),
 
     -- the planning RPCs, on company A's import, trip and runs. Company B's
-    -- admin makes the same calls with company A's ids. None checks the role,
-    -- only the company (see "Recorded without a plan step"). anon's EXECUTE on
+    -- admin makes the same calls with company A's ids. anon's EXECUTE on
     -- the first four was revoked by 20260915120000; each raised for anon before.
+    --
+    -- 20260923130000 (slice C): all five now ask
+    -- current_role_permits('documents', true) — the page their tables carry —
+    -- right after their own "caller has no company" branch, and raise 42501
+    -- with HINT not_authorized. So the viewer and editor cells move Y → T on
+    -- every one of them: these functions are SECURITY DEFINER and ran past RLS,
+    -- which is why gating the tables alone would have left the window open.
+    -- The supervisor and admin cells do not move, and neither does `other`
+    -- (company B's admin, which still opens a run in its own company and
+    -- changes none of A's trips) or `super` (no context: refused for state).
     ('apply_monthly_planning_run(import and trip of A)',
      $q$SELECT ((apply_monthly_planning_run(jsonb_build_object(
           'import_id', {ref:fahrtenbuch_imports}, 'month', 3, 'year', 2026,
           'change_rows', jsonb_build_array(jsonb_build_object(
             'trip_id', {ref:fahrtenbuch_trips}, 'driver_id', {ref:drivers}, 'driver_name', 'MX'))))
         ->> 'updated_trips')::int > 0)::text$q$,
-     'PYYYYNT', NULL),
+     'PTTYYNT', NULL),
     ('replace_monthly_planning_run(applied run of A)',
      $q$SELECT ((replace_monthly_planning_run(jsonb_build_object(
           'import_id', {ref:fahrtenbuch_imports}, 'month', 4, 'year', 2026,
           'change_rows', jsonb_build_array(jsonb_build_object(
             'trip_id', {ref:fahrtenbuch_trips}, 'driver_id', {ref:drivers}, 'driver_name', 'MX'))),
         {ref:rpc_applied_run}) ->> 'updated_trips')::int > 0)::text$q$,
-     'PYYYYTT', NULL),
+     'PTTYYTT', NULL),
     ('delete_or_archive_monthly_planning_run(run of A)',
      $q$SELECT delete_or_archive_monthly_planning_run({ref:rpc_run})::text$q$,
-     'PYYYYTT', NULL),
+     'PTTYYTT', NULL),
     ('purge_old_monthly_planning_runs(month of A''s archived run)',
      $q$SELECT ((purge_old_monthly_planning_runs(5, 2026) ->> 'deleted_count') IS NOT NULL)::text$q$,
-     'PYYYYNT', NULL),
+     'PTTYYNT', NULL),
     -- anon's EXECUTE revoked by 20260607124839, before the fixture, yet still
     -- held on staging on 15.09.2026, and revoked again by 20260915140000,
     -- which the kit applies, so the anon cell is probed. It moved from - (not
     -- probed) to P: -YYYYTT became PYYYYTT
     ('reassign_fahrtenbuch_trip(trip of A)',
      $q$SELECT reassign_fahrtenbuch_trip({ref:fahrtenbuch_trips}, {ref:drivers}, 'MX', 'pending', 'mx', 'mx')::text$q$,
-     'PYYYYTT', NULL),
+     'PTTYYTT', NULL),
 
     -- the Abrechnung and cash RPCs: security invoker, so they return what the
     -- income, receipts and cash_transactions policies let the caller read.
