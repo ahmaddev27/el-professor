@@ -404,13 +404,17 @@ DECLARE
   u_o  constant uuid := _pc_id('user:owner');
   s_o  constant uuid := _pc_id('session:owner');
 BEGIN
-  PERFORM _pc_ok('view: the role gates are false, so the ten role-gated tables refuse it',
+  PERFORM _pc_ok('view: the role gates are false, so every role-gated table refuses it',
     _pc_try(u_o, s_o, 'SELECT current_role_permits(''drivers'', true)::text') = 'false'
     AND _pc_try(u_o, s_o, 'SELECT current_role_permits(''salaries'', true)::text') = 'false'
     AND _pc_try(u_o, s_o, 'SELECT is_company_admin()::text') = 'false');
 
-  -- drivers is role-gated; car_driver_assignments is one of the twenty-two
-  -- tables with no role gate at all, where the trigger is the only refusal.
+  -- drivers is role-gated on its own page; car_driver_assignments was one of
+  -- the twenty-two tables with no role gate at all, where the trigger was the
+  -- only refusal. Since 20260923130000 (slice C) it carries the `cars` page, so
+  -- both refusals now apply — and the statement trigger is still the one that
+  -- speaks, because it runs before any row is checked. That is what keeps this
+  -- assertion reading P0001 rather than 42501.
   PERFORM _pc_ok('view: inserting a driver is refused',
     _pc_try(u_o, s_o, format('INSERT INTO drivers (company_id, name) VALUES (%L, ''PC view'')', co_x))
       LIKE 'ERR P0001%');
