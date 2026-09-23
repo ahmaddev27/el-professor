@@ -37,10 +37,9 @@ import {
   type PlatformAuditSubject,
 } from '../_shared/platform-access.ts'
 import {
+  parseStaffRole,
   resolvePlatformStaffRoute,
   STAFF_ROLE_REFUSAL_DE,
-  STAFF_ROLE_UNTIL_3_3,
-  staffRoleIsAllowed,
 } from '../_shared/platform-staff-routes.ts'
 import { matchPlatformEmailChangeRoute } from '../_shared/platform-email-change.ts'
 import { changeOwnPlatformEmail } from './email-change.ts'
@@ -48,7 +47,7 @@ import { changeOwnPlatformEmail } from './email-change.ts'
 interface InviteRequest {
   email: string
   full_name: string
-  /** Only 'owner' until plan step 3.3; anything else is refused. */
+  /** One of the four platform roles; missing means `owner`. Anything else is refused. */
   role?: string
   note?: string
 }
@@ -149,15 +148,19 @@ Deno.serve(async (req: Request) => {
       if (!EMAIL_PATTERN.test(email) || fullName.length === 0) {
         throw new UserError('Ungültige Anfrage: E-Mail-Adresse und Name werden benötigt.', 400)
       }
-      // Rule of plan step 3.3, applied before anything is created.
-      if (!staffRoleIsAllowed(body.role)) {
-        throw new UserError(STAFF_ROLE_REFUSAL_DE, 400, 'role_requires_3_3')
+      // The same four roles the database knows, resolved before anything is
+      // created: a bad role must not leave an account behind to delete, and it
+      // must never fall back to one — `parseStaffRole` answers `owner` only for
+      // a request that named no role at all.
+      const role = parseStaffRole(body.role)
+      if (role === null) {
+        throw new UserError(STAFF_ROLE_REFUSAL_DE, 400, 'invalid_role')
       }
 
       auditTarget.targetType = 'platform_staff'
       // Never the address: the audit log is read by people, and an invitation
       // that was refused should not leave one behind.
-      auditTarget.after = { role: STAFF_ROLE_UNTIL_3_3, invite: 'code' }
+      auditTarget.after = { role, invite: 'code' }
 
       const created = await platformWrite(async () => {
         const { data: newUser, error: createError } = await supabaseAdmin.auth.admin.createUser({
@@ -220,7 +223,7 @@ Deno.serve(async (req: Request) => {
         // account holds an active staff row.
         const { data: addData, error: addError } = await supabaseUser.rpc('platform_staff_add', {
           p_user_id: userId,
-          p_role: STAFF_ROLE_UNTIL_3_3,
+          p_role: role,
           p_note: typeof body.note === 'string' && body.note.trim() ? body.note.trim() : null,
         })
         if (addError) {
@@ -271,7 +274,7 @@ Deno.serve(async (req: Request) => {
           user_id: created.id,
           email: created.email,
           full_name: fullName,
-          role: STAFF_ROLE_UNTIL_3_3,
+          role,
           status: 'pending_invite',
         },
         invite: { status: 'sent' },

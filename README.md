@@ -34,7 +34,7 @@ A React SPA on a self-hosted Supabase stack (PostgreSQL, Auth, Storage, Edge Fun
 | **0** | Releases, rollback, staging protection | `▰▰▰▰▰▰` 6/6 | live on both |
 | **1** | OTP and account security | `▰▰▰▰▰▰▱` 6/7 | Google sign-in is on for staging; production waits only for the owner's Impressum and privacy text |
 | **2** | Design system and prototype | `▰▰▰` 3/3 | live |
-| **3** | Platform panel and permissions | `▰▰▰▰▰▰▰▰▰▰▰▰▱` 12/13 | 3.13b open as a PR: the company's own settings are read inside a context, nothing links to `/super-admin` any more, and the Benutzer list no longer stops at GoTrue's first 50 accounts |
+| **3** | Platform panel and permissions | `▰▰▰▰▰▰▰▰▰▰▰▰▱` 12/13 | 3.13b open as a PR: the company’s own settings are read inside a context, nothing links to `/super-admin` any more, and the Benutzer list no longer stops at GoTrue’s first 50 accounts. The `support`, `billing` and `read_only` staff roles are enabled in review (owner’s decision, 23.09.2026) |
 | **4** | Cash salary receipt | `▰▰▰` 3/3 | live |
 | **5** | Design rollout | `▰▰▰▰` 4/4 | every screen batch merged; `AppLayout` itself moves last |
 | **FA** | Fahrtenbuch analysis | `▰▰▱` 2/3 | import reliability and the analysis engine are live; the settings and the Fahrtenanalyse screen are being built |

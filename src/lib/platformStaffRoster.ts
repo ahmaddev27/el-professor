@@ -24,6 +24,7 @@
  * Everything here is pure; the calls are `platformStaffClient.ts`.
  */
 import type { TranslationKey } from '../i18n';
+import { PLATFORM_ROLES, type PlatformRole } from './platformAccess';
 import {
   DIRECTORY_PAGE_SIZE,
   directoryHasNextPage,
@@ -97,13 +98,38 @@ export function wouldRemoveLastOwner(members: readonly PlatformStaffRow[], userI
 }
 
 /**
- * Whether the database would re-enable this member. `platform_staff_enable`
- * refuses every role but owner (`role_requires_3_3`) until the other roles are
- * enabled by a change of their own; the screen says so instead of offering the
- * click.
+ * Whether the database would re-enable this member.
+ *
+ * Since migration 20260923110000 `platform_staff_enable` accepts every role:
+ * re-enabling restores the role the row already carries, it never chooses one,
+ * and it can never remove an owner. So a disabled member is re-enabled, whole
+ * stop — the owner-only test this used to carry is gone with the
+ * `role_requires_3_3` guard.
  */
 export function mayReEnable(member: PlatformStaffRow): boolean {
-  return member.status === 'disabled' && member.role === 'owner';
+  return member.status === 'disabled';
+}
+
+/**
+ * The roles the forms may offer, in the order the picker shows them:
+ * `owner` first because it is the default and what every existing member holds.
+ *
+ * `PLATFORM_ROLES` is the one list, shared with `platform_whoami()`'s answer and
+ * with the table's own CHECK constraint. **No option here can leave the platform
+ * without an active owner:** these two forms only ever *add* a row, and there is
+ * no RPC that changes an existing member's role — `platform_staff_keep_owner`
+ * refuses a demotion underneath in any case. What can remove the last owner is
+ * disabling it, which `wouldRemoveLastOwner` above keeps off the screen and
+ * `platform_staff_disable` refuses with `last_owner`.
+ */
+export const STAFF_ROLE_OPTIONS: readonly PlatformRole[] = PLATFORM_ROLES;
+
+/** What a form starts on, and what the RPC assumes when it is sent no role. */
+export const DEFAULT_STAFF_ROLE: PlatformRole = 'owner';
+
+/** Whether a value picked in a form is one of the four; the database asks again. */
+export function isStaffRole(value: unknown): value is PlatformRole {
+  return typeof value === 'string' && (PLATFORM_ROLES as readonly string[]).includes(value);
 }
 
 /**
@@ -144,17 +170,18 @@ export function isUserId(value: string): boolean {
  * text, and `callPlatformRpc` throws exactly that — the screen shows it. These
  * need the reason behind the rule as well:
  *
- * - `role_requires_3_3`: every role but `owner` is refused and nothing was
- *   created. The name is historical; the other roles are simply not enabled
- *   yet, and enabling them is a decision of its own.
  * - `last_owner`: the platform would be left with nobody who can administer it.
  * - `account_in_company`: platform accounts belong to no company.
+ *
+ * `role_requires_3_3` is deliberately not here any more: since migration
+ * 20260923110000 no function answers it, and a hint for a refusal that cannot
+ * happen is a sentence nobody can act on. A role outside the four is `invalid`,
+ * which the server words in full.
  *
  * Every other reason is shown as the server worded it, with nothing added.
  */
 export function staffRefusalHintKey(reason: string): TranslationKey | null {
   switch (reason) {
-    case 'role_requires_3_3': return 'admin.team.hint.roleRequires33';
     case 'last_owner':        return 'admin.team.hint.lastOwner';
     case 'account_in_company': return 'admin.team.hint.accountInCompany';
     default: return null;
