@@ -666,13 +666,16 @@ BEGIN
     END LOOP;
   END LOOP;
   -- the eleventh: the salary-receipts bucket (20260917130000 section 7,
-  -- restated by 20260920100000).
-  SELECT count(*) INTO v_n
-    FROM pg_policies
-   WHERE schemaname = 'storage' AND tablename = 'objects'
-     AND coalesce(qual, '') || ' ' || coalesce(with_check, '') ~ 'current_role_permits\(''salaries''';
-  IF v_n = 0 THEN
-    v_missing := v_missing || 'storage.objects(salary-receipts)';
+  -- restated by 20260920100000). Skipped where storage is absent, exactly as
+  -- section 7 of that migration skips writing them.
+  IF to_regclass('storage.objects') IS NOT NULL THEN
+    SELECT count(*) INTO v_n
+      FROM pg_policies
+     WHERE schemaname = 'storage' AND tablename = 'objects'
+       AND coalesce(qual, '') || ' ' || coalesce(with_check, '') ~ 'current_role_permits\(''salaries''';
+    IF v_n = 0 THEN
+      v_missing := v_missing || 'storage.objects(salary-receipts)';
+    END IF;
   END IF;
   IF array_length(v_missing, 1) IS NOT NULL THEN
     RAISE EXCEPTION 'slice C self-check 7: an object that was already role-gated lost its gate: %',

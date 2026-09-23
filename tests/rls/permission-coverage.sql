@@ -555,7 +555,8 @@ BEGIN
   SELECT count(*) INTO v_n FROM pg_policies
    WHERE schemaname = 'storage' AND tablename = 'objects'
      AND (coalesce(qual, '') || ' ' || coalesce(with_check, '')) ~ 'current_role_permits\(''salaries''';
-  PERFORM _pk_ok('shape: the salary-receipts bucket still asks the salaries page', v_n > 0);
+  PERFORM _pk_ok(format('shape: the salary-receipts bucket still asks the salaries page [%s policies]', v_n),
+    v_n > 0);
 
   -- The four the slice deliberately did not gate, each for its own reason.
   SELECT count(*) INTO v_n FROM pg_policies
