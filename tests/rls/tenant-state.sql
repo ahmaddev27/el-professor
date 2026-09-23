@@ -553,13 +553,27 @@ BEGIN
   -- them for any company with no context at all, through companies.lifecycle,
   -- and this line asserted `rows 1` for it. Now a platform account writes them
   -- only inside a support session on that company — none of these principals
-  -- has one open — while still reading them through companies.read.
+  -- has one open.
   PERFORM _ts_ok('shell: with no support session open, no platform account writes a company''s settings — an owner included (3.13a)',
     _ts_try(owner_u, format('UPDATE company_settings SET company_name = %L WHERE company_id = %L', 'TS', co_ok)) = 'rows 0'
     AND _ts_try(support, format('UPDATE company_settings SET company_name = %L WHERE company_id = %L', 'TS', co_ok)) = 'rows 0'
     AND _ts_try(owner_u, format('DELETE FROM company_settings WHERE company_id = %L', co_ok)) = 'rows 0');
-  PERFORM _ts_ok('shell: …although an owner still reads them',
-    _ts_try(owner_u, format('SELECT count(*)::text FROM company_settings WHERE company_id = %L', co_ok)) = '1');
+  -- …and since 20260923100000 (3.13b) it does not read them either. This line
+  -- asserted `1`: the SELECT carried `OR platform_can('companies.read')`, held
+  -- by all four staff roles, so the legal name, managing director, VAT and tax
+  -- number, bank name, IBAN, BIC and account holder of every customer were
+  -- readable with no context and no audit row. The predicate is the tenant
+  -- term alone now, which for a company-less staff account is the open
+  -- context's company — and none of these principals has one.
+  PERFORM _ts_ok('shell: …and with no context open it does not read them either (3.13b)',
+    _ts_try(owner_u, format('SELECT count(*)::text FROM company_settings WHERE company_id = %L', co_ok)) = '0'
+    AND _ts_try(support,  format('SELECT count(*)::text FROM company_settings WHERE company_id = %L', co_ok)) = '0'
+    AND _ts_try(readonly, format('SELECT count(*)::text FROM company_settings WHERE company_id = %L', co_ok)) = '0'
+    AND _ts_try(billing,  format('SELECT count(*)::text FROM company_settings WHERE company_id = %L', co_ok)) = '0');
+  -- The company's own administrator is untouched: the term that answers it is
+  -- the one that was always there.
+  PERFORM _ts_ok('shell: …while the company''s own administrator still reads its settings',
+    _ts_try(_ts_id('user:admin-ok'), format('SELECT count(*)::text FROM company_settings WHERE company_id = %L', co_ok)) = '1');
 
   -- The capability half: the platform tables now ask what the act is, not
   -- whether the caller is staff at all.

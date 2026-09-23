@@ -469,7 +469,12 @@ BEGIN
   -- `rows 1`, tagged residual for 3.4c/3.13. Now the platform branch is the
   -- support session's company, so a view context's UPDATE finds no row it may
   -- change, and its INSERT fails the WITH CHECK.
-  PERFORM _pc_ok('view: …and it edits no company''s settings either, although it can read them (3.13a)',
+  --
+  -- The read half still answers 1, and since 20260923100000 (3.13b) for a
+  -- different reason: it is the context's company, not `companies.read`. That
+  -- is the shape a view context is supposed to have — it reads the company it
+  -- opened and writes nothing — and section 15 states it as a rule.
+  PERFORM _pc_ok('view: …and it edits no company''s settings either, although its context lets it read them',
     _pc_try(u_o, s_o, format('UPDATE company_settings SET company_name = ''PC view'' WHERE company_id = %L', co_x))
       = 'rows 0'
     AND _pc_try(u_o, s_o, format('SELECT count(*)::text FROM company_settings WHERE company_id = %L', co_x)) = '1');
@@ -558,10 +563,26 @@ BEGIN
       = 'rows 1'
     AND _pc_try(u_o, s_o, format('INSERT INTO roles (name, description, company_id, is_system) VALUES (''PC no'', ''pc'', %L, false)', co_y))
       LIKE 'ERR 42501%row-level security%');
-  PERFORM _pc_ok('support: …and not the other company''s settings, which it can read but not write (3.13a)',
+  /*
+    …and nothing of the other company's settings, which it can no longer even
+    read.
+
+    The read half moved with 20260923100000 (3.13b) and this line records it.
+    Under 3.13a the write matched no row while the SELECT still showed it —
+    `companies.read` answered the read, and the assertion said so: "which it
+    can read but not write". That capability is gone from company_settings_select,
+    so company Y's row is now invisible to a session open on company X, and
+    both halves of the answer are the same zero.
+
+    The distinction the old line drew still exists on the tables that kept a
+    capability — companies, the three subscription tables and
+    subscription_coverage (open decision D14) — and section 15 covers the new
+    rule across all four staff roles and every context state.
+  */
+  PERFORM _pc_ok('support: …and nothing of the other company''s settings, which it no longer reads either (3.13b)',
     _pc_try(u_o, s_o, format('UPDATE company_settings SET company_name = ''PC support'' WHERE company_id = %L', co_y))
       = 'rows 0'
-    AND _pc_try(u_o, s_o, format('SELECT count(*)::text FROM company_settings WHERE company_id = %L', co_y)) = '1');
+    AND _pc_try(u_o, s_o, format('SELECT count(*)::text FROM company_settings WHERE company_id = %L', co_y)) = '0');
   PERFORM _pc_ok('support: a profile of the company being supported can be written',
     _pc_try(u_o, s_o, format('UPDATE user_profiles SET role_id = %L WHERE user_id = %L',
                              _pc_id('role:x'), _pc_id('user:admin-x'))) = 'rows 1');
@@ -953,6 +974,37 @@ DECLARE
   v      record;
   v_qual text;
 BEGIN
+  /*
+    The grid needs its own starting state, and says so rather than assuming
+    the file's:
+
+    - Whatever the sections above left open is closed. The "no context" column
+      has to mean no context, and section 13 leaves the owner inside a support
+      session.
+    - The four staff rows are put back at one role each. Section 9 ends with
+      `user:support` demoted to `read_only` on purpose — that is its subject —
+      so without this the "support session" column would be asked of an account
+      that cannot open one, and the failure would look like the rule rather
+      than like the fixture.
+  */
+  FOR v IN SELECT * FROM (VALUES ('owner'), ('support'), ('readonly'), ('billing')) AS r(who) LOOP
+    PERFORM _pc_as(_pc_id('user:' || v.who), _pc_id('session:' || v.who));
+    PERFORM public.platform_context_close();
+  END LOOP;
+  PERFORM _pc_reset();
+  PERFORM _pc_ok('settings: nothing is open before the no-context column is read',
+    (SELECT count(*) FROM app_private.platform_company_contexts WHERE closed_at IS NULL) = 0);
+
+  UPDATE app_private.platform_staff s SET disabled_at = NULL, role = r.role
+    FROM (VALUES ('owner', 'owner'), ('support', 'support'),
+                 ('readonly', 'read_only'), ('billing', 'billing')) AS r(who, role)
+   WHERE s.user_id = _pc_id('user:' || r.who);
+  PERFORM _pc_ok('settings: one active staff row per role to ask the grid of',
+    (SELECT count(DISTINCT s.role) FROM app_private.platform_staff s
+      WHERE s.disabled_at IS NULL
+        AND s.user_id IN (_pc_id('user:owner'), _pc_id('user:support'),
+                          _pc_id('user:readonly'), _pc_id('user:billing'))) = 4);
+
   -- 15a. The predicate itself: no capability, no seam, the tenant term alone.
   SELECT coalesce(p.qual, '') INTO v_qual
     FROM pg_policies p
