@@ -6,6 +6,7 @@ import {
   grantedBy,
   isStaffRole,
   isUserId,
+  mayChangeRole,
   mayReEnable,
   offersResend,
   staffRefusalHintKey,
@@ -153,6 +154,28 @@ describe('what the page offers each member', () => {
       expect(mayReEnable(disabled(SUPPORT, { role })), role).toBe(true);
       expect(mayReEnable(staff(SUPPORT, { role })), role).toBe(false);
     }
+  });
+
+  /*
+    Migration 20260923140000. The database refuses both of these itself —
+    `member_disabled` and `last_owner` — so this only keeps the screen from
+    offering a control whose one possible outcome is a refusal.
+  */
+  it('offers a role change to an active member in any of the four roles', () => {
+    for (const role of PLATFORM_ROLES) {
+      expect(mayChangeRole(staff(SUPPORT, { role }), false), role).toBe(true);
+    }
+  });
+
+  it('offers none to a disabled member: enable it first, the role comes back as it was', () => {
+    for (const role of PLATFORM_ROLES) {
+      expect(mayChangeRole(disabled(SUPPORT, { role }), false), role).toBe(false);
+    }
+  });
+
+  it('offers none to the last active owner, whose every change is a demotion', () => {
+    expect(mayChangeRole(staff(OWNER_A), true)).toBe(false);
+    expect(mayChangeRole(staff(OWNER_A), false)).toBe(true);
   });
 
   it('offers a new invitation only while one is open and the member is active', () => {

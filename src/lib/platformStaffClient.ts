@@ -5,11 +5,11 @@
  * 20260920140000: one POST per page, one `platform_read.staff_list` row in the
  * audit log per call, `staff.manage` required. See `platformStaffRoster.ts`.
  *
- * Writes are the three RPCs, each one transaction that checks `staff.manage`,
+ * Writes are the four RPCs, each one transaction that checks `staff.manage`,
  * applies the rule and writes its own audit row: `platform_staff_add`,
- * `platform_staff_disable`, `platform_staff_enable`. They go through
- * `callPlatformRpc`, which throws the German sentence the function wrote,
- * carrying its reason.
+ * `platform_staff_disable`, `platform_staff_enable` and, since migration
+ * 20260923140000, `platform_staff_set_role`. They go through `callPlatformRpc`,
+ * which throws the German sentence the function wrote, carrying its reason.
  *
  * **All four roles may be granted since migration 20260923110000** (owner's
  * decision, 23.09.2026). `platform_staff_add` refused every role but `owner`
@@ -82,6 +82,31 @@ export function disableStaffMember(userId: string): Promise<PlatformRpcResult> {
 
 export function enableStaffMember(userId: string): Promise<PlatformRpcResult> {
   return callPlatformRpc('platform_staff_enable', { p_user_id: userId });
+}
+
+/**
+ * An existing member moves to another role, keeping `created_by`, `created_at`
+ * and the note (migration 20260923140000).
+ *
+ * Before it, the only way was to disable the row and add it again, which lost
+ * all three and wrote a removal and a fresh grant into the audit log for what
+ * was one change.
+ *
+ * `role` is always sent, like `addStaffMember`'s: the RPC's own default is
+ * `owner`, and a call that let the role go missing would promote the member
+ * rather than fail. A note that is not given leaves the one on the row alone —
+ * the RPC treats NULL as "unchanged", so this never clears what somebody wrote.
+ */
+export function setStaffRole(
+  userId: string,
+  role: PlatformRole,
+  note: string | null,
+): Promise<PlatformRpcResult> {
+  return callPlatformRpc('platform_staff_set_role', {
+    p_user_id: userId,
+    p_role: role,
+    p_note: note?.trim() ? note.trim() : null,
+  });
 }
 
 // ─── Invitations ─────────────────────────────────────────────────────────────

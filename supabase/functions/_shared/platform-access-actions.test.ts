@@ -12,7 +12,7 @@
  * The migration text is the source: the function is written down once, in SQL,
  * and nothing duplicates it in TypeScript.
  */
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -21,16 +21,33 @@ import { MANAGE_USERS_ROUTES } from './manage-users-routes.ts';
 import {
   DEFAULT_STAFF_ROLE,
   parseStaffRole,
+  parseStaffRoleChange,
   PLATFORM_STAFF_ROLES,
   PLATFORM_STAFF_ROUTES,
   resolvePlatformStaffRoute,
   staffRoleIsAllowed,
 } from './platform-staff-routes.ts';
 
-const MIGRATION = path.join(
-  path.dirname(fileURLToPath(import.meta.url)),
-  '../../migrations/20260916130000_platform_write_rpcs.sql',
-);
+const MIGRATIONS_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '../../migrations');
+const DEFINITION = 'FUNCTION app_private.platform_edge_audit_actions()';
+
+/**
+ * The migration that defines the list **last**.
+ *
+ * It was 20260916130000 alone until 20260923140000 restated the function to add
+ * the set-role route's action. Migrations run in filename order and the live
+ * definition is the newest one, so naming a file here would pin the test to a
+ * definition the database has already replaced — which is exactly the drift
+ * this file exists to catch.
+ */
+const MIGRATION = (() => {
+  const named = readdirSync(MIGRATIONS_DIR)
+    .filter(name => name.endsWith('.sql'))
+    .sort()
+    .filter(name => readFileSync(path.join(MIGRATIONS_DIR, name), 'utf8').includes(DEFINITION));
+  if (named.length === 0) throw new Error('no migration defines platform_edge_audit_actions()');
+  return path.join(MIGRATIONS_DIR, named[named.length - 1]);
+})();
 
 interface EdgeAction {
   action: string;
@@ -112,6 +129,21 @@ describe('platform-staff routes', () => {
     expect(resolvePlatformStaffRoute('POST', '/platform-staff/other')).toBeNull();
   });
 
+  it('resolves the role change added by 20260923140000', () => {
+    const route = resolvePlatformStaffRoute('POST', '/platform-staff/set-role');
+    expect(route?.name).toBe('set-role');
+    expect(route?.action).toBe('platform_staff_role.set');
+    expect(route?.capability).toBe('staff.manage');
+    expect(resolvePlatformStaffRoute('GET', '/platform-staff/set-role')).toBeNull();
+  });
+
+  it('keeps the role change out of the namespace the database writes itself', () => {
+    // platform_audit_record refuses `platform_staff.`, so an action there could
+    // never be recorded and the route would fail closed at runtime.
+    const route = PLATFORM_STAFF_ROUTES.find(r => r.name === 'set-role')!;
+    expect(route.action.startsWith('platform_staff.')).toBe(false);
+  });
+
   it('needs staff.manage for every route', () => {
     for (const route of PLATFORM_STAFF_ROUTES) {
       expect(route.capability).toBe('staff.manage');
@@ -164,6 +196,23 @@ describe('platform-staff routes', () => {
     // A role the door does not know is refused, never promoted to the default.
     for (const role of ['admin', 'viewer', 'Owner', '', ' owner', 0, true, {}, ['owner']]) {
       expect(parseStaffRole(role), `${JSON.stringify(role)} must not resolve`).toBeNull();
+    }
+  });
+
+  /*
+    A *change* has no default. `parseStaffRole`'s `owner` for a missing role is
+    right where a row is created — it is the RPC's own default, and what the
+    release before the four roles sent — and wrong where one already exists: a
+    body that forgot its `role` would read as "make this member an owner".
+  */
+  it('refuses a role change that names no role', () => {
+    expect(parseStaffRoleChange(undefined)).toBeNull();
+    expect(parseStaffRoleChange(null)).toBeNull();
+    for (const role of PLATFORM_STAFF_ROLES) {
+      expect(parseStaffRoleChange(role)).toBe(role);
+    }
+    for (const role of ['admin', 'viewer', 'Owner', 'OWNER', '', ' owner', 0, 1, true, {}, [], ['owner']]) {
+      expect(parseStaffRoleChange(role), `${JSON.stringify(role)} must not resolve`).toBeNull();
     }
   });
 });
