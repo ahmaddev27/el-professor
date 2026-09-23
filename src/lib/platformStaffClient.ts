@@ -11,14 +11,17 @@
  * `callPlatformRpc`, which throws the German sentence the function wrote,
  * carrying its reason.
  *
- * **Only `owner` may be created or re-enabled.** `platform_staff_add` and
- * `platform_staff_enable` refuse every other role with reason
- * `role_requires_3_3`, and this module never offers one. The technical reasons
- * are gone — 3.3 moved the tenant policies onto capabilities, and
- * 20260920100000 stopped a read-only support session writing company files —
- * so what keeps the refusal is a decision still to be taken: enabling the
- * other roles decides which accounts read every customer's data, and it ships
- * as a change of its own, not as part of this screen.
+ * **All four roles may be granted since migration 20260923110000** (owner's
+ * decision, 23.09.2026). `platform_staff_add` refused every role but `owner`
+ * with reason `role_requires_3_3` until then; the technical reasons had already
+ * gone — 3.3 moved the tenant policies onto capabilities, and 20260920100000
+ * stopped a read-only support session writing company files — and what remained
+ * was the decision itself, because enabling the other roles decides which
+ * accounts read every customer's data.
+ *
+ * The role is passed on every call rather than assumed: the RPC's own default
+ * is `owner`, and defaulting silently in two places is how a picker ends up
+ * granting something nobody chose.
  *
  * An invitation is the `platform-staff` edge function, which creates the
  * account, writes a company-less `pending_invite` profile, adds the staff row
@@ -28,6 +31,7 @@
  */
 import { supabase } from './supabase';
 import { callPlatformRpc, type PlatformRpcResult } from './platformRpc';
+import type { PlatformRole } from './platformAccess';
 import {
   DIRECTORY_PAGE_SIZE,
   directoryOffset,
@@ -38,12 +42,6 @@ import {
   type StaffSort,
 } from './platformReadModels';
 import { collectStaffRoster, type StaffRosterResult } from './platformStaffRoster';
-
-/**
- * The only role a staff row may carry today; see the header. The name keeps
- * the database's `role_requires_3_3` reason findable.
- */
-export const STAFF_ROLE_UNTIL_3_3 = 'owner';
 
 /** Active members first, then by address: the order the page shows. */
 const ROSTER_SORT: StaffSort = 'status_asc';
@@ -66,10 +64,14 @@ export function loadStaffRoster(): Promise<StaffRosterResult> {
 }
 
 /** An existing account joins the team. It must have no company of its own. */
-export function addStaffMember(userId: string, note: string | null): Promise<PlatformRpcResult> {
+export function addStaffMember(
+  userId: string,
+  role: PlatformRole,
+  note: string | null,
+): Promise<PlatformRpcResult> {
   return callPlatformRpc('platform_staff_add', {
     p_user_id: userId.trim(),
-    p_role: STAFF_ROLE_UNTIL_3_3,
+    p_role: role,
     p_note: note?.trim() ? note.trim() : null,
   });
 }
@@ -122,11 +124,16 @@ async function callPlatformStaffFunction(segment: string, body: unknown): Promis
 }
 
 /** Creates the account, adds the staff row and mails the activation code. */
-export function inviteStaffMember(email: string, fullName: string, note: string | null): Promise<Record<string, unknown>> {
+export function inviteStaffMember(
+  email: string,
+  fullName: string,
+  role: PlatformRole,
+  note: string | null,
+): Promise<Record<string, unknown>> {
   return callPlatformStaffFunction('/invite', {
     email: email.trim(),
     full_name: fullName.trim(),
-    role: STAFF_ROLE_UNTIL_3_3,
+    role,
     note: note?.trim() ? note.trim() : null,
   });
 }

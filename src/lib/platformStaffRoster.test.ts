@@ -2,13 +2,17 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   activeOwnerCount,
   collectStaffRoster,
+  DEFAULT_STAFF_ROLE,
   grantedBy,
+  isStaffRole,
   isUserId,
   mayReEnable,
   offersResend,
   staffRefusalHintKey,
+  STAFF_ROLE_OPTIONS,
   wouldRemoveLastOwner,
 } from './platformStaffRoster';
+import { PLATFORM_ROLES } from './platformAccess';
 import {
   DIRECTORY_MAX_OFFSET,
   DIRECTORY_PAGE_SIZE,
@@ -138,10 +142,17 @@ describe('the last active owner', () => {
 });
 
 describe('what the page offers each member', () => {
-  it('offers re-enabling only to a disabled owner, the one role platform_staff_enable accepts', () => {
+  /*
+    Migration 20260923110000 lifted the owner-only guard: platform_staff_enable
+    restores the role the row already carries, whatever it is. A disabled member
+    is offered the button; an active one is not.
+  */
+  it('offers re-enabling to every disabled member, whatever its role', () => {
     expect(mayReEnable(disabled(OWNER_B))).toBe(true);
-    expect(mayReEnable(disabled(SUPPORT, { role: 'support' }))).toBe(false);
-    expect(mayReEnable(staff(OWNER_A))).toBe(false);
+    for (const role of PLATFORM_ROLES) {
+      expect(mayReEnable(disabled(SUPPORT, { role })), role).toBe(true);
+      expect(mayReEnable(staff(SUPPORT, { role })), role).toBe(false);
+    }
   });
 
   it('offers a new invitation only while one is open and the member is active', () => {
@@ -178,9 +189,40 @@ describe('isUserId', () => {
   });
 });
 
+/*
+  The picker offers the four roles the database knows, and none of its options
+  can leave the platform without an active owner: both forms only ever add a
+  row, and no RPC changes an existing member's role.
+*/
+describe('the role picker', () => {
+  it('offers exactly the four roles platform_staff_add accepts', () => {
+    expect(STAFF_ROLE_OPTIONS).toEqual(['owner', 'support', 'billing', 'read_only']);
+    expect(DEFAULT_STAFF_ROLE).toBe('owner');
+  });
+
+  it('accepts only those four as a role', () => {
+    for (const role of STAFF_ROLE_OPTIONS) expect(isStaffRole(role)).toBe(true);
+    for (const value of ['admin', 'viewer', 'Owner', '', ' owner', null, undefined, 0, {}]) {
+      expect(isStaffRole(value), `${JSON.stringify(value)}`).toBe(false);
+    }
+  });
+
+  it('leaves the owner count untouched whichever role is picked', () => {
+    // Adding a member never removes one, so no choice can trip the last-owner
+    // guard; only disabling can, which wouldRemoveLastOwner above keeps off the
+    // screen. Stated as a test so a future "change the role" control cannot be
+    // added here without this failing.
+    const roster = [staff(OWNER_A)];
+    for (const role of STAFF_ROLE_OPTIONS) {
+      const after = [...roster, staff(SUPPORT, { role })];
+      expect(activeOwnerCount(after)).toBeGreaterThanOrEqual(activeOwnerCount(roster));
+      expect(wouldRemoveLastOwner(after, SUPPORT)).toBe(false);
+    }
+  });
+});
+
 describe('staffRefusalHintKey', () => {
   it('explains the rules a person cannot act on from the message alone', () => {
-    expect(staffRefusalHintKey('role_requires_3_3')).toBe('admin.team.hint.roleRequires33');
     expect(staffRefusalHintKey('last_owner')).toBe('admin.team.hint.lastOwner');
     expect(staffRefusalHintKey('account_in_company')).toBe('admin.team.hint.accountInCompany');
   });
@@ -189,5 +231,9 @@ describe('staffRefusalHintKey', () => {
     for (const reason of ['denied', 'already_staff', 'not_found', 'already_disabled', 'invalid']) {
       expect(staffRefusalHintKey(reason)).toBeNull();
     }
+  });
+
+  it('no longer hints at role_requires_3_3, which no function answers', () => {
+    expect(staffRefusalHintKey('role_requires_3_3')).toBeNull();
   });
 });

@@ -17,8 +17,9 @@
                    the company it touched, and the values before and after
     4. refusals    a refused call is audited too, for a company admin as well
                    (actor recorded, role NULL), and the denied rows are capped
-    5. staff       the last active owner is protected, and no role other than
-                   owner can be created or re-enabled before plan step 3.3
+    5. staff       all four roles can be added, disabled and re-enabled, each
+                   with its own audit row; the last active owner is protected;
+                   and a role outside the four is refused
     6. edge door   platform_audit_record accepts only the listed actions, lets a
                    role without the capability record nothing but its refusal,
                    and refuses a namespace the database writes itself
@@ -163,6 +164,9 @@ END $$;
     3b..05 pr-readonly   read_only
     3b..06 pr-target     no staff row, no company: what staff.manage acts on
     3b..07 pr-in-company a company member, so "already in a company" is covered
+    3b..08 pr-cand-sup   ) three more free accounts, so section 5 can add one
+    3b..09 pr-cand-bil   ) staff row per role and watch each of the four
+    3b..0a pr-cand-ro    ) through add, disable and re-enable
 */
 INSERT INTO auth.users (id, email, email_confirmed_at, created_at) VALUES
   ('3b000000-0000-4000-8000-000000000001', 'pr-owner@test.invalid',      now(), now() - interval '90 days'),
@@ -171,7 +175,10 @@ INSERT INTO auth.users (id, email, email_confirmed_at, created_at) VALUES
   ('3b000000-0000-4000-8000-000000000004', 'pr-billing@test.invalid',    now(), now() - interval '90 days'),
   ('3b000000-0000-4000-8000-000000000005', 'pr-readonly@test.invalid',   now(), now() - interval '90 days'),
   ('3b000000-0000-4000-8000-000000000006', 'pr-target@test.invalid',     now(), now() - interval '90 days'),
-  ('3b000000-0000-4000-8000-000000000007', 'pr-in-company@test.invalid', now(), now() - interval '90 days');
+  ('3b000000-0000-4000-8000-000000000007', 'pr-in-company@test.invalid', now(), now() - interval '90 days'),
+  ('3b000000-0000-4000-8000-000000000008', 'pr-cand-sup@test.invalid',   now(), now() - interval '90 days'),
+  ('3b000000-0000-4000-8000-000000000009', 'pr-cand-bil@test.invalid',   now(), now() - interval '90 days'),
+  ('3b000000-0000-4000-8000-00000000000a', 'pr-cand-ro@test.invalid',    now(), now() - interval '90 days');
 
 -- Platform profiles carry no company and the least role the product has:
 -- platform rights come from platform_staff, never from the profile.
@@ -183,7 +190,10 @@ INSERT INTO user_profiles (user_id, email, full_name, role, company_id, is_super
   ('3b000000-0000-4000-8000-000000000005', 'pr-readonly@test.invalid',   'PR Read',      'viewer', NULL, false, 'active'),
   ('3b000000-0000-4000-8000-000000000006', 'pr-target@test.invalid',     'PR Target',    'viewer', NULL, false, 'active'),
   ('3b000000-0000-4000-8000-000000000007', 'pr-in-company@test.invalid', 'PR In Co',     'viewer',
-     'c0000000-0000-4000-8000-00000000000a', false, 'active');
+     'c0000000-0000-4000-8000-00000000000a', false, 'active'),
+  ('3b000000-0000-4000-8000-000000000008', 'pr-cand-sup@test.invalid',   'PR Cand Sup',  'viewer', NULL, false, 'active'),
+  ('3b000000-0000-4000-8000-000000000009', 'pr-cand-bil@test.invalid',   'PR Cand Bil',  'viewer', NULL, false, 'active'),
+  ('3b000000-0000-4000-8000-00000000000a', 'pr-cand-ro@test.invalid',    'PR Cand RO',   'viewer', NULL, false, 'active');
 
 INSERT INTO app_private.platform_staff (user_id, role, note) VALUES
   ('3b000000-0000-4000-8000-000000000001', 'owner',     'pr'),
@@ -437,8 +447,15 @@ BEGIN
   PERFORM _pr_ok(format('45 refused calls wrote at most 30 rows, got %s', v_rows), v_rows <= 30);
 END $$;
 
--- ─── 5. staff: the last owner, and no other role before 3.3 ─────────────────
+-- ─── 5. staff: all four roles, and the last owner ───────────────────────────
 
+/*
+  20260923110000 lifted the `role_requires_3_3` guard (owner's decision,
+  23.09.2026), so `platform_staff_add` writes any of the four roles and
+  `platform_staff_enable` restores any of them. What did **not** move is the
+  last-active-owner guard, the argument contract, the audit row per call, and
+  the capability the caller needs.
+*/
 DO $$
 DECLARE
   owner   constant uuid := '3b000000-0000-4000-8000-000000000001';
@@ -446,8 +463,18 @@ DECLARE
   in_co   constant uuid := '3b000000-0000-4000-8000-000000000007';
   support constant uuid := '3b000000-0000-4000-8000-000000000003';
   seeded  constant uuid := '50000000-0000-4000-8000-000000000001';
+  -- One free account per role this section grants, so each of the four walks
+  -- add → disable → re-enable on a row of its own.
+  cand    constant uuid[] := ARRAY['3b000000-0000-4000-8000-000000000006',
+                                   '3b000000-0000-4000-8000-000000000008',
+                                   '3b000000-0000-4000-8000-000000000009',
+                                   '3b000000-0000-4000-8000-00000000000a'];
+  roles   constant text[] := ARRAY['owner', 'support', 'billing', 'read_only'];
   v_from  bigint;
   v_row   app_private.platform_audit_log%ROWTYPE;
+  v_role  text;
+  v_user  uuid;
+  i       integer;
 BEGIN
   PERFORM _pr_ok('adding an existing account as owner succeeds',
     (_pr_do(owner, format('SELECT platform_staff_add(%L, %L, %L)::text', target, 'owner', 'pr'))::jsonb ->> 'success') = 'true');
@@ -457,30 +484,99 @@ BEGIN
   PERFORM _pr_ok('adding it twice answers already_staff',
     _pr_reason(_pr_do(owner, format('SELECT platform_staff_add(%L)::text', target))) = 'already_staff');
 
-  -- Rule 8 of plan 3.5: every active staff role still holds an owner's writes
-  -- through the older policies, so nothing may create another role yet.
+  -- Each of the other three roles: added, recorded with its own role, disabled
+  -- and re-enabled. `owner` is index 1 and was added above.
+  FOR i IN 2..4 LOOP
+    v_role := roles[i];
+    v_user := cand[i];
+
+    SELECT coalesce(max(id), 0) INTO v_from FROM app_private.platform_audit_log;
+    PERFORM _pr_ok(format('adding a %s row succeeds', v_role),
+      (_pr_do(owner, format('SELECT platform_staff_add(%L, %L, %L)::text', v_user, v_role, 'pr'))::jsonb ->> 'success') = 'true');
+    PERFORM _pr_reset();
+    PERFORM _pr_ok(format('…and the account holds an active %s row', v_role),
+      app_private.platform_staff_role_of(v_user) = v_role);
+    PERFORM _pr_ok(format('…with the caller recorded as who granted it (%s)', v_role),
+      EXISTS (SELECT 1 FROM app_private.platform_staff s WHERE s.user_id = v_user AND s.created_by = owner));
+
+    -- The function's own row, and the table trigger's, both name the role.
+    PERFORM _pr_ok(format('…and platform_staff.add is audited ok, naming the %s role', v_role),
+      EXISTS (SELECT 1 FROM app_private.platform_audit_log l
+               WHERE l.id > v_from AND l.category = 'staff' AND l.action = 'platform_staff.add'
+                 AND l.outcome = 'ok' AND l.actor_user_id = owner AND l.actor_role = 'owner'
+                 AND l.target_type = 'platform_staff' AND l.target_id = v_user::text
+                 AND l.after_value ->> 'role' = v_role));
+
+    PERFORM _pr_ok(format('disabling a %s row succeeds', v_role),
+      (_pr_do(owner, format('SELECT platform_staff_disable(%L)::text', v_user))::jsonb ->> 'success') = 'true');
+    PERFORM _pr_reset();
+    PERFORM _pr_ok(format('…and the %s row no longer answers a role', v_role),
+      app_private.platform_staff_role_of(v_user) IS NULL);
+    PERFORM _pr_ok(format('disabling the %s row twice answers already_disabled', v_role),
+      _pr_reason(_pr_do(owner, format('SELECT platform_staff_disable(%L)::text', v_user))) = 'already_disabled');
+
+    SELECT coalesce(max(id), 0) INTO v_from FROM app_private.platform_audit_log;
+    PERFORM _pr_ok(format('re-enabling a %s row succeeds since 20260923110000', v_role),
+      (_pr_do(owner, format('SELECT platform_staff_enable(%L)::text', v_user))::jsonb ->> 'success') = 'true');
+    PERFORM _pr_reset();
+    PERFORM _pr_ok(format('…and it holds the %s role again, not owner', v_role),
+      app_private.platform_staff_role_of(v_user) = v_role);
+    PERFORM _pr_ok(format('…and platform_staff.enable is audited ok for the %s row', v_role),
+      EXISTS (SELECT 1 FROM app_private.platform_audit_log l
+               WHERE l.id > v_from AND l.category = 'staff' AND l.action = 'platform_staff.enable'
+                 AND l.outcome = 'ok' AND l.actor_user_id = owner
+                 AND l.target_id = v_user::text
+                 AND l.after_value ->> 'role' = v_role
+                 AND l.after_value ->> 'disabled_at' IS NULL));
+    PERFORM _pr_ok(format('re-enabling the %s row twice answers already_enabled', v_role),
+      _pr_reason(_pr_do(owner, format('SELECT platform_staff_enable(%L)::text', v_user))) = 'already_enabled');
+  END LOOP;
+
+  -- The guard is gone as a reason, not merely unreachable from the browser.
+  PERFORM _pr_ok('no staff call answers role_requires_3_3 any more',
+    NOT EXISTS (SELECT 1 FROM app_private.platform_audit_log l
+                 WHERE l.action LIKE 'platform_staff.%'
+                   AND l.after_value ->> 'reason' = 'role_requires_3_3'));
+
+  -- What replaced it: the argument contract, which never admitted anything but
+  -- the four the table's CHECK constraint knows.
   SELECT coalesce(max(id), 0) INTO v_from FROM app_private.platform_audit_log;
-  PERFORM _pr_ok('adding a support row is refused until plan step 3.3',
-    _pr_reason(_pr_do(owner, format('SELECT platform_staff_add(%L, %L)::text',
-      '3b000000-0000-4000-8000-000000000007', 'support'))) = 'role_requires_3_3');
+  PERFORM _pr_ok('a role outside the four is refused as invalid',
+    _pr_reason(_pr_do(owner, format('SELECT platform_staff_add(%L, %L)::text', in_co, 'admin'))) = 'invalid');
   SELECT * INTO v_row FROM app_private.platform_audit_log WHERE id > v_from;
-  PERFORM _pr_ok('…and that refusal is audited as denied, in the staff category',
-    v_row.category = 'staff' AND v_row.action = 'platform_staff.add' AND v_row.outcome = 'denied');
+  PERFORM _pr_ok('…and that refusal is audited as an error, in the staff category',
+    v_row.category = 'staff' AND v_row.action = 'platform_staff.add' AND v_row.outcome = 'error'
+    AND v_row.after_value ->> 'reason' = 'invalid');
   PERFORM _pr_reset();
   PERFORM _pr_ok('…and no staff row was written for it',
     NOT EXISTS (SELECT 1 FROM app_private.platform_staff s WHERE s.user_id = in_co));
+  PERFORM _pr_ok('an empty role is refused as invalid too',
+    _pr_reason(_pr_do(owner, format('SELECT platform_staff_add(%L, %L)::text', in_co, ''))) = 'invalid');
+  PERFORM _pr_ok('a NULL role is refused as invalid',
+    _pr_reason(_pr_do(owner, format('SELECT platform_staff_add(%L, NULL)::text', in_co))) = 'invalid');
 
   PERFORM _pr_ok('an account that belongs to a company is refused',
     _pr_reason(_pr_do(owner, format('SELECT platform_staff_add(%L)::text', in_co))) = 'account_in_company');
   PERFORM _pr_ok('an account that does not exist is refused',
     _pr_reason(_pr_do(owner, 'SELECT platform_staff_add(''3b000000-0000-4000-8000-0000000000ff'')::text')) = 'account_not_found');
 
-  -- Disabling a non-owner only takes power away, so it stays allowed; enabling
-  -- one would give it an owner's writes again, so it does not.
-  PERFORM _pr_ok('disabling a support row succeeds',
+  -- A role the caller does not hold is still refused, whatever the target role:
+  -- staff.manage is the owner's alone, and the three new roles do not get it.
+  PERFORM _pr_ok('a support account cannot add a staff row of any role',
+    _pr_reason(_pr_do(support, format('SELECT platform_staff_add(%L, %L)::text',
+      '3b000000-0000-4000-8000-0000000000fe', 'read_only'))) = 'denied');
+  PERFORM _pr_ok('a support account cannot re-enable one either',
+    _pr_reason(_pr_do(support, format('SELECT platform_staff_enable(%L)::text', target))) = 'denied');
+
+  -- Disabling a non-owner never touches the owner count.
+  PERFORM _pr_ok('disabling the seeded support row succeeds',
     (_pr_do(owner, format('SELECT platform_staff_disable(%L)::text', support))::jsonb ->> 'success') = 'true');
-  PERFORM _pr_ok('re-enabling it is refused until plan step 3.3',
-    _pr_reason(_pr_do(owner, format('SELECT platform_staff_enable(%L)::text', support))) = 'role_requires_3_3');
+  PERFORM _pr_ok('…and re-enabling it restores support, not owner',
+    (_pr_do(owner, format('SELECT platform_staff_enable(%L)::text', support))::jsonb ->> 'success') = 'true'
+    AND app_private.platform_staff_role_of(support) = 'support');
+  PERFORM _pr_reset();
+  PERFORM _pr_ok('disabling it again succeeds',
+    (_pr_do(owner, format('SELECT platform_staff_disable(%L)::text', support))::jsonb ->> 'success') = 'true');
   PERFORM _pr_ok('disabling it twice answers already_disabled',
     _pr_reason(_pr_do(owner, format('SELECT platform_staff_disable(%L)::text', support))) = 'already_disabled');
 
