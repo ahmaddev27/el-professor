@@ -107,14 +107,14 @@ function noteDisplayLabel(note: Note, t: (k: TranslationKey) => string): string 
   return nt ? t(nt.label) : t('notes.one');
 }
 
-function noteDateLabel(note: Note): string {
+function noteDateLabel(note: Note, t: (k: TranslationKey, vars?: Record<string, string | number>) => string): string {
   const sd = note.start_date;
   const ed = note.end_date;
   if (sd && ed && sd !== ed) {
     return `${format(new Date(sd), 'dd.MM.yyyy')} – ${format(new Date(ed), 'dd.MM.yyyy')}`;
   }
   const base = sd ? format(new Date(sd), 'dd.MM.yyyy') : format(new Date(note.note_date), 'dd.MM.yyyy');
-  if (note.is_full_day) return `${base} (Ganzer Tag)`;
+  if (note.is_full_day) return t('notes.fullDaySuffix', { date: base });
   if (note.start_time) return `${base} · ${note.start_time}${note.end_time ? '–'+note.end_time : ''}`;
   return base;
 }
@@ -328,7 +328,7 @@ export function NotesPage() {
         if (!d) return '';
         try { return format(new Date(d), 'dd.MM.yyyy HH:mm'); } catch { return d; }
       };
-      const yesNo = (v?: boolean | null) => v ? 'Ja' : 'Nein';
+      const yesNo = (v?: boolean | null) => v ? t('common.yes') : t('common.no');
 
       // Sheet 1: Notizen
       const notizRows = toExport.map(note => ({
@@ -384,7 +384,7 @@ export function NotesPage() {
         });
 
       const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(notizRows), 'Notizen');
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(notizRows), t('notes.title'));
       XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(summaryRows), t('common.summary'));
       if (planRows.length > 0) {
         XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(planRows), t('notes.planningRelevant'));
@@ -428,9 +428,9 @@ export function NotesPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>Notizen</h1>
+          <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>{t('notes.title')}</h1>
           <p className="text-sm mt-1" style={{ color: 'var(--text-tertiary)' }}>
-            Fahrer-Notizen verwalten und durchsuchen
+            {t('notes.subtitle')}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -451,7 +451,7 @@ export function NotesPage() {
             )}
             {!exportError && filteredNotes.length > 0 && (
               <span className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
-                Exportiert die aktuell gefilterten Notizen.
+                {t('notes.exportHint')}
               </span>
             )}
           </div>
@@ -581,7 +581,7 @@ export function NotesPage() {
                       </span>
                     )}
                   </div>
-                  <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>{noteDateLabel(note)}</p>
+                  <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>{noteDateLabel(note, t)}</p>
                   {note.note_planning_behavior && note.note_planning_behavior !== 'neutral' && (
                     <span className="inline-block mt-1 px-2 py-0.5 rounded-full text-xs font-medium"
                       style={note.note_planning_behavior === 'exclude_from_plan'
@@ -638,7 +638,7 @@ export function NotesPage() {
               {/* Driver */}
               <div>
                 <label className="block text-sm font-medium mb-2" style={{ color: 'var(--text-secondary)' }}>
-                  Fahrer *
+                  {t('notes.driverRequired')}
                 </label>
                 <select value={formData.driver_id}
                   onChange={e => setFormData(p => ({ ...p, driver_id: e.target.value }))}
@@ -652,7 +652,7 @@ export function NotesPage() {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-sm font-medium mb-2" style={{ color: 'var(--text-secondary)' }}>
-                    Notiztyp
+                    {t('notes.noteTypeLabel')}
                   </label>
                   <select value={formData.note_type} onChange={e => handleNoteTypeChange(e.target.value)}
                     className="w-full" style={inputStyle}>
@@ -677,7 +677,7 @@ export function NotesPage() {
                   <input type="checkbox" checked={formData.use_date_range}
                     onChange={e => setFormData(p => ({ ...p, use_date_range: e.target.checked }))}
                     className="w-4 h-4" />
-                  Zeitraum (mehrere Tage)
+                  {t('notes.dateRange')}
                 </label>
 
                 {formData.use_date_range ? (
@@ -713,18 +713,18 @@ export function NotesPage() {
                     <input type="checkbox" checked={formData.is_full_day}
                       onChange={e => setFormData(p => ({ ...p, is_full_day: e.target.checked, start_time: '', end_time: '' }))}
                       className="w-4 h-4" />
-                    Ganzer Tag
+                    {t('notes.fullDay')}
                   </label>
                   {!formData.is_full_day && (
                     <div className="flex items-center gap-2 flex-1">
                       <div className="flex-1">
-                        <label className="block text-xs mb-1" style={{ color: 'var(--text-tertiary)' }}>Von</label>
+                        <label className="block text-xs mb-1" style={{ color: 'var(--text-tertiary)' }}>{t('notes.from')}</label>
                         <input type="time" value={formData.start_time}
                           onChange={e => setFormData(p => ({ ...p, start_time: e.target.value }))}
                           style={inputStyle} className="w-full" />
                       </div>
                       <div className="flex-1">
-                        <label className="block text-xs mb-1" style={{ color: 'var(--text-tertiary)' }}>Bis</label>
+                        <label className="block text-xs mb-1" style={{ color: 'var(--text-tertiary)' }}>{t('notes.to')}</label>
                         <input type="time" value={formData.end_time}
                           onChange={e => setFormData(p => ({ ...p, end_time: e.target.value }))}
                           style={inputStyle} className="w-full" />
@@ -741,7 +741,7 @@ export function NotesPage() {
                     <input type="checkbox" checked={formData.is_full_day}
                       onChange={e => setFormData(p => ({ ...p, is_full_day: e.target.checked }))}
                       className="w-4 h-4" />
-                    Ganzer Tag (gilt für jeden Tag im Zeitraum)
+                    {t('notes.fullDayEachDay')}
                   </label>
                 </div>
               )}
@@ -749,7 +749,7 @@ export function NotesPage() {
               {/* Description — optional */}
               <div>
                 <label className="block text-sm font-medium mb-2" style={{ color: 'var(--text-secondary)' }}>
-                  Beschreibung <span style={{ color: 'var(--text-tertiary)', fontWeight: 400 }}>(optional)</span>
+                  {t('common.description')} <span style={{ color: 'var(--text-tertiary)', fontWeight: 400 }}>{t('notes.descriptionOptional')}</span>
                 </label>
                 <textarea
                   value={formData.note_text}

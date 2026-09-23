@@ -2,7 +2,10 @@ import React from 'react';
 import { X, Download, CheckCircle, Clock, AlertTriangle, XCircle, Banknote } from 'lucide-react';
 import { format } from 'date-fns';
 import { de } from 'date-fns/locale';
+import { useTranslation } from '../contexts/LanguageContext';
 
+// Month names are date formatting, which stays German in both UI languages
+// (see the header of src/i18n/index.ts).
 const MONTHS_DE = [
   'Januar', 'Februar', 'März', 'April', 'Mai', 'Juni',
   'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember',
@@ -38,10 +41,12 @@ interface Props {
 // The seller printed on the PDF is read when the PDF is built
 // (SubscriptionBillingPage.handleDownloadPdf); this dialog never showed it.
 export default function InvoiceDetailModal({ invoice, onClose, onDownloadPdf }: Props) {
+  const { t } = useTranslation();
   const isPaid = invoice.status === 'paid';
   const isOverdue = invoice.status === 'open' && new Date(invoice.due_date) < new Date();
   const co = invoice.companies;
-  const planName = invoice.company_subscriptions?.subscription_plans?.name || 'Abonnement';
+  const planName = invoice.company_subscriptions?.subscription_plans?.name || t('bill.invoice.subscriptionFallback');
+  const kind = isPaid ? t('bill.invoice.receipt') : t('bill.invoice.invoice');
 
   const row = (label: string, value: string | React.ReactNode) => (
     <div className="flex justify-between py-2.5" style={{ borderBottom: '1px solid var(--border)' }}>
@@ -56,9 +61,9 @@ export default function InvoiceDetailModal({ invoice, onClose, onDownloadPdf }: 
         <div className="flex items-center justify-between p-5 border-b" style={{ borderColor: 'var(--border)' }}>
           <div>
             <h2 className="font-bold text-lg" style={{ color: 'var(--text-primary)' }}>
-              {isPaid ? 'Quittung' : 'Rechnung'} {invoice.invoice_number}
+              {t('bill.invoice.titled', { kind, number: invoice.invoice_number })}
             </h2>
-            <p className="text-xs mt-0.5" style={{ color: 'var(--text-tertiary)' }}>{co?.name || 'Unbekannt'}</p>
+            <p className="text-xs mt-0.5" style={{ color: 'var(--text-tertiary)' }}>{co?.name || t('common.unknown')}</p>
           </div>
           <button onClick={onClose} style={{ color: 'var(--text-tertiary)' }}><X size={20} /></button>
         </div>
@@ -71,36 +76,36 @@ export default function InvoiceDetailModal({ invoice, onClose, onDownloadPdf }: 
           }}>
             {isPaid ? <CheckCircle size={20} style={{ color: 'var(--success)' }} /> : isOverdue ? <AlertTriangle size={20} style={{ color: 'var(--danger)' }} /> : <Clock size={20} style={{ color: 'var(--accent)' }} />}
             <span className="font-semibold text-sm" style={{ color: isPaid ? 'var(--success)' : isOverdue ? 'var(--danger)' : 'var(--accent)' }}>
-              {isPaid ? 'Bezahlt' : isOverdue ? 'Überfällig' : invoice.status === 'canceled' ? 'Storniert' : 'Offen'}
+              {isPaid ? t('bill.invoice.paid') : isOverdue ? t('bill.invoice.overdue') : invoice.status === 'canceled' ? t('bill.invoice.canceled') : t('bill.invoice.open')}
             </span>
           </div>
 
           {/* Details */}
           <div>
-            {row('Firma', co?.name || '-')}
-            {co?.street && row('Adresse', `${co.street} ${co.house_number || ''}, ${co.postal_code || ''} ${co.city || ''}`)}
-            {row('Plan', planName)}
-            {row('Zeitraum', `${MONTHS_DE[invoice.invoice_month - 1]} ${invoice.invoice_year}`)}
-            {row('Rechnungsnummer', invoice.invoice_number)}
-            {row('Betrag', <span className="text-base font-bold" style={{ color: 'var(--accent)' }}>{fmtEur(invoice.amount)}</span>)}
-            {row('Zahlungsart', 'Barzahlung')}
-            {row('Fällig am', (() => { try { return format(new Date(invoice.due_date), 'dd.MM.yyyy'); } catch { return invoice.due_date; } })())}
-            {isPaid && invoice.paid_at && row('Bezahlt am', (() => { try { return format(new Date(invoice.paid_at), 'dd.MM.yyyy, HH:mm', { locale: de }); } catch { return invoice.paid_at; } })())}
-            {isPaid && invoice.cash_received_amount != null && row('Erhalten', fmtEur(invoice.cash_received_amount))}
-            {invoice.receipt_note && row('Anmerkung', invoice.receipt_note)}
+            {row(t('bill.invoice.company'), co?.name || '-')}
+            {co?.street && row(t('common.address'), `${co.street} ${co.house_number || ''}, ${co.postal_code || ''} ${co.city || ''}`)}
+            {row(t('bill.invoice.plan'), planName)}
+            {row(t('bill.invoice.period'), `${MONTHS_DE[invoice.invoice_month - 1]} ${invoice.invoice_year}`)}
+            {row(t('bill.invoice.number'), invoice.invoice_number)}
+            {row(t('common.amount'), <span className="text-base font-bold" style={{ color: 'var(--accent)' }}>{fmtEur(invoice.amount)}</span>)}
+            {row(t('bill.invoice.paymentMethod'), t('bill.invoice.cashPayment'))}
+            {row(t('bill.invoice.dueOn'), (() => { try { return format(new Date(invoice.due_date), 'dd.MM.yyyy'); } catch { return invoice.due_date; } })())}
+            {isPaid && invoice.paid_at && row(t('bill.invoice.paidOn'), (() => { try { return format(new Date(invoice.paid_at), 'dd.MM.yyyy, HH:mm', { locale: de }); } catch { return invoice.paid_at; } })())}
+            {isPaid && invoice.cash_received_amount != null && row(t('bill.invoice.received'), fmtEur(invoice.cash_received_amount))}
+            {invoice.receipt_note && row(t('bill.invoice.note'), invoice.receipt_note)}
           </div>
         </div>
 
         <div className="flex justify-end gap-2 p-5 border-t" style={{ borderColor: 'var(--border)' }}>
           <button onClick={onClose} className="px-4 py-2.5 rounded-xl text-sm font-medium" style={{ color: 'var(--text-primary)', border: '1px solid var(--border)' }}>
-            Schließen
+            {t('common.close')}
           </button>
           <button
             onClick={onDownloadPdf}
             className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold text-white"
             style={{ background: 'var(--accent)' }}
           >
-            <Download size={16} /> {isPaid ? 'Quittung' : 'Rechnung'} PDF
+            <Download size={16} /> {t('bill.invoice.pdfButton', { kind })}
           </button>
         </div>
       </div>

@@ -307,11 +307,11 @@ export default function BargeldbestandPage() {
   }
 
   function handleExport() {
-    const filters: string[] = [`Monat: ${selectedMonth}`];
-    if (selectedDriver !== 'all') filters.push(`Fahrer: ${selectedDriver}`);
-    if (selectedType !== 'all') filters.push(`Typ: ${selectedType === 'income' ? t('common.income') : t('common.expenses')}`);
-    if (startDate) filters.push(`Von: ${new Date(startDate).toLocaleDateString('de-DE')}`);
-    if (endDate) filters.push(`Bis: ${new Date(endDate).toLocaleDateString('de-DE')}`);
+    const filters: string[] = [t('bargeld.filterMonth', { value: selectedMonth })];
+    if (selectedDriver !== 'all') filters.push(t('bargeld.filterDriver', { value: selectedDriver }));
+    if (selectedType !== 'all') filters.push(t('bargeld.filterType', { value: selectedType === 'income' ? t('common.income') : t('common.expenses') }));
+    if (startDate) filters.push(t('bargeld.filterFrom', { value: new Date(startDate).toLocaleDateString('de-DE') }));
+    if (endDate) filters.push(t('bargeld.filterTo', { value: new Date(endDate).toLocaleDateString('de-DE') }));
     // The dump carries the screen's caveat, so a file saved from a platform
     // view cannot later be read as a complete till.
     if (!ledgerInScope) filters.push(t('bargeld.ledgerUnavailable'));
@@ -320,8 +320,8 @@ export default function BargeldbestandPage() {
 
     exportTableToExcel({
       filename: `bargeldbestand_${selectedMonth}`,
-      sheetTitle: 'Bargeldbestand',
-      moduleName: 'Bargeldbestand',
+      sheetTitle: t('nav.bargeldbestand'),
+      moduleName: t('nav.bargeldbestand'),
       filterSummary: filters,
       columns: [
         { key: 'date',        label: t('common.date'),        width: 14, format: v => new Date(v as string).toLocaleDateString('de-DE') },

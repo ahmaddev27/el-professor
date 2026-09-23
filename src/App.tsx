@@ -269,14 +269,17 @@ const CompanyAdminRoute: React.FC<{ children: React.ReactNode }> = ({ children }
 };
 
 /** The full-page spinner shown while the session, or its profile, is still being read. */
-const AuthLoadingScreen: React.FC = () => (
-  <div className="min-h-screen bg-[#060a0f] flex items-center justify-center">
-    <div className="text-center">
-      <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-cyan-400 mx-auto mb-4" />
-      <p className="text-white/40 text-sm">Wird geladen...</p>
+const AuthLoadingScreen: React.FC = () => {
+  const { t } = useTranslation();
+  return (
+    <div className="min-h-screen bg-[#060a0f] flex items-center justify-center">
+      <div className="text-center">
+        <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-cyan-400 mx-auto mb-4" />
+        <p className="text-white/40 text-sm">{t('app.loading')}</p>
+      </div>
     </div>
-  </div>
-);
+  );
+};
 
 /**
  * `/login` — the one sign-in screen (the owner's decision of 17.09.2026).

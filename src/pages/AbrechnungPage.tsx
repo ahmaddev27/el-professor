@@ -230,7 +230,7 @@ export function AbrechnungPage() {
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
       }}>
         <span style={{ fontSize: 13, fontWeight: 600, color: isDark ? '#fb923c' : '#c2410c' }}>
-          Tankenquote
+          {t('abr.tankenquote')}
         </span>
         <span style={{ fontSize: 18, fontWeight: 900, color: isDark ? '#fb923c' : '#c2410c', letterSpacing: '-0.01em' }}>
           {quote !== null ? formatPercent(quote) : '—'}
@@ -240,7 +240,7 @@ export function AbrechnungPage() {
   };
 
   const getWeekLabel = (weekNumber: number) => {
-    return `Woche ${weekNumber}`;
+    return t('common.weekNumber', { number: weekNumber });
   };
 
   const handleRowClick = async (item: WeeklyAbrechnung) => {
@@ -341,12 +341,12 @@ export function AbrechnungPage() {
   // Reusable function to generate settlement image blob
   const generateSettlementImageBlob = async (): Promise<{ blob: Blob; fileName: string } | null> => {
     if (!detailModalData) {
-      showToast('error', 'Fehler', t('abr.noData'));
+      showToast('error', t('common.error'), t('abr.noData'));
       return null;
     }
 
     if (!shareableCardRef.current) {
-      showToast('error', 'Fehler', t('abr.noContentArea'));
+      showToast('error', t('common.error'), t('abr.noContentArea'));
       return null;
     }
 
@@ -359,7 +359,7 @@ export function AbrechnungPage() {
 
       // Defensive check before accessing properties
       if (!element) {
-        showToast('error', 'Fehler', t('abr.elementUnavailable'));
+        showToast('error', t('common.error'), t('abr.elementUnavailable'));
         return null;
       }
 
@@ -472,7 +472,7 @@ export function AbrechnungPage() {
         window.open(whatsappUrl, '_blank');
       } catch (openError) {
         console.error('Failed to open WhatsApp:', openError);
-        showToast('error', 'Fehler', t('abr.whatsappFailed'));
+        showToast('error', t('common.error'), t('abr.whatsappFailed'));
         return;
       }
 
@@ -805,7 +805,7 @@ export function AbrechnungPage() {
                     <SelectItem value="all">{t('abr.allWeeks')}</SelectItem>
                     {availableWeeks.map(week => (
                       <SelectItem key={week} value={String(week)}>
-                        Woche {week}
+                        {getWeekLabel(week)}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -905,7 +905,7 @@ export function AbrechnungPage() {
                   </p>
                 </div>
                 <p style={{ fontSize: 17, fontWeight: 800, color: isDark ? '#f1f5f9' : '#0f172a' }}>
-                  {detailModalData.weekNumber === 0 ? `${MONTH_NAMES[selectedMonth - 1]} ${selectedYear}` : `Woche ${detailModalData.weekNumber}`}
+                  {detailModalData.weekNumber === 0 ? `${MONTH_NAMES[selectedMonth - 1]} ${selectedYear}` : getWeekLabel(detailModalData.weekNumber)}
                 </p>
               </div>
             </div>
@@ -956,7 +956,7 @@ export function AbrechnungPage() {
                     </div>
                     <div>
                       <p style={{ fontSize: 13, fontWeight: 600, color: isDark ? '#4ade80' : '#15803d' }}>
-                        Gesamt Bargeld ({detailModalData.weekNumber === 0 ? t('common.month') : t('abr.thisWeek')})
+                        {t('abr.totalCashLabel', { period: detailModalData.weekNumber === 0 ? t('common.month') : t('abr.thisWeek') })}
                       </p>
                       <p style={{ fontSize: 11, color: isDark ? '#166534' : '#86efac', marginTop: 1 }}>{t('bargeld.cashIncome')}</p>
                     </div>
@@ -984,7 +984,7 @@ export function AbrechnungPage() {
                     </div>
                     <div>
                       <p style={{ fontSize: 13, fontWeight: 600, color: isDark ? '#f87171' : '#b91c1c' }}>{t('abr.belegCount')}</p>
-                      <p style={{ fontSize: 11, color: isDark ? '#991b1b' : '#f87171', marginTop: 1 }}>{detailModalData.anzahlBelege} Belege</p>
+                      <p style={{ fontSize: 11, color: isDark ? '#991b1b' : '#f87171', marginTop: 1 }}>{t('abr.belegeCount', { count: detailModalData.anzahlBelege })}</p>
                     </div>
                   </div>
                   <p style={{ fontSize: 22, fontWeight: 900, color: isDark ? '#f87171' : '#b91c1c', letterSpacing: '-0.02em' }}>
@@ -1024,10 +1024,10 @@ export function AbrechnungPage() {
                         </div>
                         <div>
                           <p style={{ fontSize: 13, fontWeight: 600, color: isDark ? (pos ? '#38bdf8' : '#fbbf24') : (pos ? '#0369a1' : '#b45309') }}>
-                            Differenz (Bargeld – Belege)
+                            {t('abr.difference')}
                           </p>
                           <p style={{ fontSize: 11, color: isDark ? (pos ? '#0c4a6e' : '#78350f') : (pos ? '#38bdf8' : '#fbbf24'), marginTop: 1 }}>
-                            Der Betrag den Sie abgeben müssen
+                            {t('abr.differenceHint')}
                           </p>
                         </div>
                       </div>
@@ -1054,7 +1054,7 @@ export function AbrechnungPage() {
               <DialogDescription>
                 {detailModalData.driverName} · {detailModalData.weekNumber === 0
                   ? `${MONTH_NAMES[selectedMonth - 1]} ${selectedYear}`
-                  : `Woche ${detailModalData.weekNumber}`}
+                  : getWeekLabel(detailModalData.weekNumber)}
               </DialogDescription>
             </DialogHeader>
 
@@ -1074,7 +1074,7 @@ export function AbrechnungPage() {
                 <dd className="mt-1 font-semibold text-fg">
                   {detailModalData.weekNumber === 0
                     ? `${MONTH_NAMES[selectedMonth - 1]} ${selectedYear}`
-                    : `Woche ${detailModalData.weekNumber}`}
+                    : getWeekLabel(detailModalData.weekNumber)}
                 </dd>
               </div>
               <div className="rounded-surface border border-line bg-sunken px-4 py-3 sm:col-span-2">

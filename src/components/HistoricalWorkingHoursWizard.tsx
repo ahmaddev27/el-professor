@@ -10090,8 +10090,9 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
         .eq('is_canceled', false)
         .order('id', { ascending: true })
         .range(from, to),
-      // Interpolated into fetchAllPaginated's own German error text.
-      { label: 'Fahrer' },
+      // Interpolated into fetchAllPaginated's error text. A caller's label
+      // arrives already translated; the sentence around it carries its own key.
+      { label: t('common.driver') },
     )
       .then((data) => {
         const seen = new Map<string, string>();
@@ -10288,8 +10289,9 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
           .order('source_row_index', { ascending: true, nullsFirst: false })
           .order('id', { ascending: true })
           .range(from, to),
-        // Interpolated into fetchAllPaginated's own German error text.
-        { label: 'Fahrten' },
+        // Interpolated into fetchAllPaginated's error text. A caller's label
+        // arrives already translated; the sentence around it carries its own key.
+        { label: t('hwh.colRides') },
       );
 
       // Resolve owner driver name from saved driver_configs_json
@@ -10565,7 +10567,7 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
       setPhase1Result(result);
       setStep(3);
     } catch (e) {
-      setComputeError(e instanceof Error ? e.message : 'Berechnungsfehler');
+      setComputeError(e instanceof Error ? e.message : t('hwh.computeError'));
     } finally {
       setComputing(false);
       setComputePhase('');
@@ -10660,7 +10662,7 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
       setAssignmentResult(result);
       setStep(4);
     } catch (e) {
-      setAssignError(e instanceof Error ? e.message : 'Zuweisungsfehler');
+      setAssignError(e instanceof Error ? e.message : t('hwh.assignError'));
     } finally {
       setAssigning(false);
     }

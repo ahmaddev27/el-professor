@@ -92,7 +92,7 @@ const TrialBanner: React.FC = () => {
           style={{ background: 'var(--danger-solid)', color: 'white' }}
         >
           <Zap size={10} />
-          Plan wählen
+          {t('trial.choosePlan')}
         </a>
       </div>
     );

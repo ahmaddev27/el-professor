@@ -307,7 +307,7 @@ export function useFahrtenbuch() {
 
     // XLSX bytes are mandatory — no import without the original file in storage
     if (!params.xlsxBytes || params.xlsxBytes.length === 0) {
-      throw new Error('Import blockiert: Original-XLSX-Datei konnte nicht gelesen werden.');
+      throw new Error(t('imp.blockedFileUnreadable'));
     }
 
     // The same file once per company. Asked before the upload so a refused file
@@ -362,7 +362,7 @@ export function useFahrtenbuch() {
       if (isReadOnlyPlatformSession) {
         throw new Error(t('support.storage.readOnly'));
       }
-      throw new Error(`Import blockiert: Original-XLSX-Datei konnte nicht gespeichert werden. Bitte Storage-Konfiguration prüfen. (${uploadErr.message})`);
+      throw new Error(t('imp.blockedFileNotStored', { message: uploadErr.message }));
     }
 
     if (import.meta.env.DEV) {
@@ -407,7 +407,7 @@ export function useFahrtenbuch() {
     if (!importRow.storage_path) {
       await supabase.storage.from('fahrtenbuch-files').remove([storagePath]);
       await supabase.from('fahrtenbuch_imports').delete().eq('id', importId);
-      throw new Error('Import blockiert: Originaldatei wurde nicht mit dem Import gespeichert.');
+      throw new Error(t('imp.blockedFileMissing'));
     }
 
     if (import.meta.env.DEV) {
@@ -451,11 +451,9 @@ export function useFahrtenbuch() {
       if (isUniqueViolation(tripErr, ROW_KEY_INDEX)) {
         throw new Error(t('imp.error.rowRace'));
       }
-      const cause = (tripErr as { message?: string } | null)?.message ?? 'Unbekannter Fehler';
+      const cause = (tripErr as { message?: string } | null)?.message ?? t('imp.error.unknown');
       throw new Error(
-        `Import fehlgeschlagen nach ${written} von ${trips.length} Fahrten. ` +
-        'Der unvollständige Import wurde vollständig zurückgenommen. ' +
-        `Ursache: ${cause}`,
+        t('imp.rolledBack', { written, total: trips.length, cause }),
       );
     }
 
