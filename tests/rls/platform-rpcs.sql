@@ -727,7 +727,82 @@ BEGIN
   PERFORM _pr_ok('an unknown decision is refused as invalid',
     _pr_reason(_pr_do(owner, format('SELECT platform_company_set_approval(%L, %L)::text', co_b, 'maybe'))) = 'invalid');
   PERFORM _pr_ok('a company that does not exist is not_found',
-    _pr_reason(_pr_do(owner, 'SELECT platform_company_set_approval(''c0000000-0000-4000-8000-0000000000ff'', ''approve'')::text')) = 'not_found');
+    _pr_reason(_pr_do(owner, format('SELECT platform_company_set_approval(%L, %L)::text',
+      'c0000000-0000-4000-8000-0000000000ff', 'approve'))) = 'not_found');
+END $$;
+
+-- ─── 9. the write that reads no column (20260923110010) ─────────────────────
+
+/*
+  `roles_delete` and `role_permissions_delete` carried a platform branch naming
+  `company_users.manage` with no company term. `matrix.sql` reads `..` for those
+  cells and explains it by the row not being *visible* — which is true of every
+  probe it makes, because every one of them carries a WHERE, and a WHERE that
+  reads a column brings the SELECT policy with it.
+
+  **A statement that reads no column does not.** `DELETE FROM public.roles;`
+  consults `roles_delete`'s USING clause and nothing else, so before
+  20260923110010 a staff account holding that capability with no context open
+  deleted every custom role of every company in one statement.
+
+  This is the probe the matrix cannot make. It is here rather than there because
+  it must not carry a WHERE — which is the whole point — and because an
+  unfiltered DELETE is not a shape the matrix's grid can express.
+
+  Each probe runs as a caller and is rolled back by _pr_try.
+*/
+DO $$
+DECLARE
+  owner    constant uuid := '3b000000-0000-4000-8000-000000000001';
+  co_a     constant uuid := 'c0000000-0000-4000-8000-00000000000a';
+  v_before bigint;
+  v_id     uuid;
+BEGIN
+  -- A custom role of company A, so there is something for an unfiltered
+  -- statement to take. is_system = false is what the policy keys on.
+  INSERT INTO roles (name, description, company_id, is_system)
+  VALUES ('PR custom role', 'pr', co_a, false)
+  RETURNING id INTO v_id;
+  INSERT INTO role_permissions (role_id, page_key, can_view, can_edit)
+  VALUES (v_id, 'salaries', true, true);
+
+  SELECT count(*) INTO v_before FROM roles WHERE is_system = false;
+  PERFORM _pr_ok('there is a custom role for an unfiltered DELETE to reach',
+    v_before > 0);
+
+  -- The platform owner holds company_users.manage and has no context open.
+  PERFORM _pr_ok('an unfiltered DELETE on roles takes nothing from a platform account with no context',
+    _pr_try(owner, 'WITH d AS (DELETE FROM public.roles RETURNING 1) SELECT count(*)::text FROM d') = '0');
+  PERFORM _pr_ok('…and the same on role_permissions',
+    _pr_try(owner, 'WITH d AS (DELETE FROM public.role_permissions RETURNING 1) SELECT count(*)::text FROM d') = '0');
+  PERFORM _pr_reset();
+  PERFORM _pr_ok('…and the custom role is still there',
+    (SELECT count(*) FROM roles WHERE is_system = false) = v_before);
+
+  /*
+    The same for UPDATE, and note what changed about *how* it is refused. RLS
+    filters an UPDATE by USING and raises 42501 only for a row that passes USING
+    and fails WITH CHECK. Before 20260923110010 the capability branch let every
+    non-system row through USING, so an unfiltered UPDATE reached the WITH CHECK
+    and raised; now no row passes USING, so it touches nothing and raises
+    nothing. Both are refusals — this asserts the count, which is the part that
+    means "no row was changed" under either shape.
+  */
+  PERFORM _pr_ok('an unfiltered UPDATE on roles changes nothing either',
+    _pr_try(owner, 'WITH u AS (UPDATE public.roles SET description = ''pr'' RETURNING 1) SELECT count(*)::text FROM u') = '0');
+  PERFORM _pr_reset();
+
+  /*
+    The negative control, without which '0' above proves nothing: the same
+    unfiltered shape, run by a principal the policy does admit, must return a
+    non-zero count. It is run on role_permissions rather than roles, because an
+    unfiltered DELETE on roles can meet a foreign key from a profile that
+    references one and raise instead of answering a count.
+  */
+  PERFORM _pr_ok('the probe can return a non-zero count: a company admin''s unfiltered DELETE does',
+    _pr_try('a0000000-0000-4000-8000-000000000001',
+            'WITH d AS (DELETE FROM public.role_permissions RETURNING 1) SELECT count(*)::text FROM d') <> '0');
+  PERFORM _pr_reset();
 END $$;
 
 ROLLBACK;

@@ -8,14 +8,26 @@
   ## The gap, measured rather than assumed
 
   `20260917130000` gave both tables a write branch that names a capability and
-  **no company**:
+  **no company**. Be exact about which clause that actually opens, because only
+  one of the six is reachable and the others are defence in depth:
 
-      roles_update   USING (is_system = false
-                            AND ((company_id = get_user_company_id() AND is_company_admin())
-                                 OR platform_can('company_users.manage')))
-      roles_delete   USING (is_system = false
-                            AND ((company_id = get_user_company_id() AND is_company_admin())
-                                 OR platform_can('company_users.manage')))
+      roles_insert   WITH CHECK (company_id = get_user_company_id() AND (… OR platform_can(…)))
+      roles_update   USING      (is_system = false AND (… OR platform_can(…)))
+                     WITH CHECK (company_id = get_user_company_id() AND (… OR platform_can(…)))
+      roles_delete   USING      (is_system = false AND (… OR platform_can(…)))
+
+  - **INSERT is closed** by the company term in its first conjunct: for a
+    company-less staff account `get_user_company_id()` is NULL outside a
+    context, and `company_id = NULL` is NULL, which denies.
+  - **UPDATE's USING is open, and its WITH CHECK closes it** — the new row must
+    still satisfy the company term, so nothing can be updated.
+  - **DELETE has no WITH CHECK.** Its USING clause is the whole decision, and
+    that is the one reachable hole.
+  - **`role_permissions`' three write policies reach their company through an
+    `EXISTS` on `roles`**, which is subject to `roles_select` — and with the
+    read seam false and no context open, that shows a platform account the
+    system roles and nothing else. So they were already closed; they are
+    rewritten here for one shape across both tables, not because they leaked.
 
   `tests/rls/matrix.sql` reads `..` for both cells and says why, in its own
   comment beside them: "`company_users.manage` still says yes, but the row is no
@@ -57,7 +69,16 @@
   `get_user_company_id()` answers the context's company and `is_company_admin()`
   is true (`20260917140000` :576-579), so the *first* disjunct already grants
   every write a support session makes; the new term restates it and refuses
-  everything else. In a `view` context both are false and both terms are false.
+  everything else.
+
+  **The observable behaviour changes in exactly one state: no context open.**
+  Both tables already carry `refuse_read_only_context_write`, a BEFORE STATEMENT
+  trigger that raises `P0001 / support_session_required` for a *view* context —
+  so a view context was refused there before this file and is refused there
+  after it, by the trigger, which fires first. `tests/rls/platform-contexts.sql`
+  expects `ERR P0001%` for a view context and `rows 1` for a support one, and
+  both still hold. What no trigger covered is the context-less account, which is
+  what this file closes in the policy.
   `manage-users` and the Rollen screen are unaffected: the edge function runs as
   the service role, for which RLS does not apply, and a company admin writes
   through the first disjunct as before.
