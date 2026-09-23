@@ -1420,6 +1420,11 @@ UPDATE _mx_expected x
 -- tenant tables: T for every statement it issues, and for a move only where the
 -- row could be locked first.
 --
+-- Since 20260923110010 roles and role_permissions no longer let a view context
+-- lock the row at all — their write policies ask the support session's company
+-- instead of a capability with no company term — so their two move cells are
+-- '..'. activation_code_attempts is untouched by that migration and keeps 'T.'.
+--
 -- company_settings and user_profiles are the shell tables deliberately *not*
 -- behind it: a trigger there would refuse platform_subscription_assign and
 -- platform_company_lifecycle — audited RPCs that name their own company — and
@@ -1434,16 +1439,33 @@ UPDATE _mx_expected x SET staff_view = o.sv, staff_support = o.ss
     -- roles and their permissions: visible for the context's company, written
     -- only inside the support session. A move is refused by the pin trigger
     -- once the support session lets the statement through at all.
+    --
+    -- The two move cells moved from 'T.' to '..' for the *view* column with
+    -- 20260923110010, and the reason is the mechanical one this file already
+    -- states for the tenant tables above: the probe must take the row with
+    -- SELECT … FOR UPDATE first, and that applies the UPDATE policy's USING.
+    -- Until that migration the USING carried `OR platform_can('company_users.manage')`
+    -- with no company term, which is true for a staff account in any context or
+    -- none — so the row could be locked, the UPDATE was issued, and the pin
+    -- trigger spoke (T). The platform branch is now the *support* session's
+    -- company, which is NULL in a view context, so there is nothing to lock, no
+    -- UPDATE is ever issued, and neither trigger runs: the silent answer, not T.
+    -- That is the tightening and not a lost refusal — '..' is the row never
+    -- having been reachable, where 'T.' was the policy admitting it and a
+    -- trigger catching it. staff_support is unchanged: there the first disjunct
+    -- grants, the statement is issued, and the pin trigger refuses the move.
     ('roles',                    'S', 'Y.', 'Y.'),
     ('roles',                    'I', 'TT', 'YR'),
     ('roles',                    'U', 'TT', 'Y.'),
     ('roles',                    'D', 'TT', 'Y.'),
-    ('roles',                    'M', 'T.', 'T.'),
+    -- view: the row can no longer be locked (20260923110010) — see above.
+    ('roles',                    'M', '..', 'T.'),
     ('role_permissions',         'S', 'Y.', 'Y.'),
     ('role_permissions',         'I', 'TT', 'YR'),
     ('role_permissions',         'U', 'TT', 'Y.'),
     ('role_permissions',         'D', 'TT', 'Y.'),
-    ('role_permissions',         'M', 'T.', 'T.'),
+    -- view: the row can no longer be locked (20260923110010) — see above.
+    ('role_permissions',         'M', '..', 'T.'),
     -- The company's legal details (20260921110000, 3.13a; 20260923100000,
     -- 3.13b). Before 3.13a the view column inserted company A's row (YR) — the
     -- context completed the company term and companies.lifecycle the rest —

@@ -71,14 +71,31 @@
   every write a support session makes; the new term restates it and refuses
   everything else.
 
-  **The observable behaviour changes in exactly one state: no context open.**
-  Both tables already carry `refuse_read_only_context_write`, a BEFORE STATEMENT
-  trigger that raises `P0001 / support_session_required` for a *view* context —
-  so a view context was refused there before this file and is refused there
-  after it, by the trigger, which fires first. `tests/rls/platform-contexts.sql`
-  expects `ERR P0001%` for a view context and `rows 1` for a support one, and
-  both still hold. What no trigger covered is the context-less account, which is
-  what this file closes in the policy.
+  **What changes, state by state.** Both tables carry
+  `refuse_read_only_context_write`, a BEFORE STATEMENT trigger that raises
+  `P0001 / support_session_required` for a *view* context.
+
+  - **No context open** — the one thing this file closes. No trigger covered it:
+    the read-only trigger returns without raising when no context is open, and
+    the policy said yes. Now the policy says no.
+  - **A support context** — unchanged. The first disjunct already granted every
+    write, and the pin trigger still refuses a move.
+  - **A view context, for a statement that is issued** — unchanged in what the
+    caller sees. The statement trigger fires on the statement, not on a row, so
+    it raises whether or not the policy would have matched anything.
+    `tests/rls/platform-contexts.sql` expects `ERR P0001%` there and still gets
+    it.
+  - **A view context, for a *move*** — this is the one observable change beyond
+    the context-less case, and `tests/rls/matrix.sql`'s `roles M` and
+    `role_permissions M` cells record it: `T.` becomes `..`. The move probe has
+    to take the row with `SELECT … FOR UPDATE` before it issues any UPDATE, and
+    that applies this policy's USING. The old capability branch was true for a
+    staff account in any context, so the row could be locked, the UPDATE was
+    issued and the pin trigger spoke; the new branch is NULL in view mode, so
+    there is nothing to lock, **no UPDATE is ever issued, and neither trigger
+    runs**. That is a tightening, not a lost refusal: `..` is the row never
+    having been reachable, where `T.` was the policy admitting it and a trigger
+    catching it afterwards.
   `manage-users` and the Rollen screen are unaffected: the edge function runs as
   the service role, for which RLS does not apply, and a company admin writes
   through the first disjunct as before.
