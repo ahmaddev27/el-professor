@@ -151,7 +151,8 @@ const SalariesManagement: React.FC<SalariesManagementProps> = ({ drivers }) => {
       // reporting it, and a truncated income set understates a driver's revenue —
       // a figure this screen then writes into the salaries table.
       // The `label` values below are interpolated into fetchAllPaginated's error
-      // template, which follows the UI language once `t` is handed to it.
+      // template; a caller's label arrives already translated, and the sentence
+      // around it carries its own key (engine.fetch.*).
       const dataPromises = Promise.all([
         fetchAllPaginated<any>(
           (from, to) => supabase
@@ -161,7 +162,7 @@ const SalariesManagement: React.FC<SalariesManagementProps> = ({ drivers }) => {
             .order('period_start', { ascending: false })
             .order('id', { ascending: true })
             .range(from, to),
-          { label: t('overview.load.gehaelter'), t },
+          { label: t('overview.load.gehaelter') },
         ),
         fetchAllPaginated<any>(
           (from, to) => supabase
@@ -171,7 +172,7 @@ const SalariesManagement: React.FC<SalariesManagementProps> = ({ drivers }) => {
             .order('date', { ascending: false })
             .order('id', { ascending: true })
             .range(from, to),
-          { label: t('overview.load.umsaetze'), t },
+          { label: t('overview.load.umsaetze') },
         ),
       ]);
 

@@ -199,7 +199,7 @@ export default function BargeldbestandPage() {
         .lte('movement_date', monthEnd)
         .order('id', { ascending: true })
         .range(from, to),
-      { label: t('bargeld.load.movements'), t },
+      { label: t('bargeld.load.movements') },
     );
   }
 
@@ -234,7 +234,7 @@ export default function BargeldbestandPage() {
             .lte('date', monthEnd)
             .order('id', { ascending: true })
             .range(from, to),
-          { label: t('bargeld.load.income'), t },
+          { label: t('bargeld.load.income') },
         ),
         fetchAllPaginated<BelegRow>(
           (from, to) => supabase
@@ -245,7 +245,7 @@ export default function BargeldbestandPage() {
             .lte('date', monthEnd)
             .order('id', { ascending: true })
             .range(from, to),
-          { label: t('bargeld.load.belege'), t },
+          { label: t('bargeld.load.belege') },
         ),
         // Out of scope the policy answers an empty set, which reads exactly
         // like "no payouts". Don't ask, and don't claim a zero below.

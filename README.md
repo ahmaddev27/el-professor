@@ -21,7 +21,7 @@
 
 A multi-tenant SaaS for German taxi and Mietwagen fleets: import the monthly Fahrtenbuch (the XLSX ride log), assign drivers to vehicle blocks, and produce the Stundennachweise and a corrected Fahrtenbuch that reconcile with the Steuerberater's figures. Around that it keeps drivers, vehicles, Belege, salaries, the weekly Abrechnung and the cash till.
 
-A React SPA on a self-hosted Supabase stack (PostgreSQL, Auth, Storage, Edge Functions); there is no application server of our own. The UI is German and English with German as the fallback, and generated documents, domain terms, money and dates stay German (`41,47`, `DD.MM.YYYY`).
+A React SPA on a self-hosted Supabase stack (PostgreSQL, Auth, Storage, Edge Functions); there is no application server of our own. The UI is German and English with German as the fallback, and generated documents, domain terms, money and dates stay German (`41,47`, `DD.MM.YYYY`). Since 23.09.2026 every screen is converted: the engines name a dictionary key beside their German text (PR #112) and the last visible labels, buttons and empty states go through `t(...)`.
 
 ## Status
 

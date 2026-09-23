@@ -10090,9 +10090,9 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
         .eq('is_canceled', false)
         .order('id', { ascending: true })
         .range(from, to),
-      // Interpolated into fetchAllPaginated's error text, which follows the UI
-      // language once `t` is handed to it.
-      { label: t('common.driver'), t },
+      // Interpolated into fetchAllPaginated's error text. A caller's label
+      // arrives already translated; the sentence around it carries its own key.
+      { label: t('common.driver') },
     )
       .then((data) => {
         const seen = new Map<string, string>();
@@ -10289,9 +10289,9 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
           .order('source_row_index', { ascending: true, nullsFirst: false })
           .order('id', { ascending: true })
           .range(from, to),
-        // Interpolated into fetchAllPaginated's error text, which follows the UI
-        // language once `t` is handed to it.
-        { label: t('hwh.colRides'), t },
+        // Interpolated into fetchAllPaginated's error text. A caller's label
+        // arrives already translated; the sentence around it carries its own key.
+        { label: t('hwh.colRides') },
       );
 
       // Resolve owner driver name from saved driver_configs_json
