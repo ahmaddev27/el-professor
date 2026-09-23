@@ -425,24 +425,50 @@ interface Span {
   status?: IssueStatus;
 }
 
-/** A finding's place on the clock: its evidence trips (or shifts) from first start to last end. */
-function issueSpan(issue: Issue, trips: Map<string, AnalysisTrip>, shifts: Map<string, AnalysisShift>): Span | null {
-  let startMs = Infinity;
-  let endMs = -Infinity;
+/**
+ * A finding's marks on the clock: **one per piece of evidence**, at exactly
+ * that trip's or shift's interval.
+ *
+ * Not one span from the first start to the last end, which is what this did
+ * first: a finding about the whole month (no shift records, a budget that
+ * cannot be computed) cites every trip of the driver, and the span between the
+ * first and the last of them painted every day in between — including days on
+ * which nothing happened, which then appeared on the timeline at all.
+ *
+ * A finding that cites *every* analysed trip of the driver is a statement
+ * about the month rather than about a moment, and gets no mark: the findings
+ * list carries it, and a mark on each of sixty rides says nothing.
+ */
+function issueSpans(
+  issue: Issue,
+  analysedIds: ReadonlySet<string>,
+  trips: Map<string, AnalysisTrip>,
+  shifts: Map<string, AnalysisShift>,
+): Span[] {
+  const citesEveryTrip =
+    analysedIds.size > 1 &&
+    issue.tripIds.length >= analysedIds.size &&
+    [...analysedIds].every(id => issue.tripIds.includes(id));
+  if (citesEveryTrip) return [];
+
+  const spans: Span[] = [];
   for (const id of issue.tripIds) {
     const trip = trips.get(id);
     if (trip?.start_ms == null) continue;
-    startMs = Math.min(startMs, trip.start_ms);
-    endMs = Math.max(endMs, trip.end_ms ?? trip.start_ms);
+    spans.push({
+      lane: 'issue',
+      startMs: trip.start_ms,
+      endMs: Math.max(trip.end_ms ?? trip.start_ms, trip.start_ms),
+      refId: issue.id,
+      status: issue.status,
+    });
   }
   for (const id of issue.shiftIds ?? []) {
     const shift = shifts.get(id);
     if (!shift) continue;
-    startMs = Math.min(startMs, shift.start_ms);
-    endMs = Math.max(endMs, shift.end_ms);
+    spans.push({ lane: 'issue', startMs: shift.start_ms, endMs: Math.max(shift.end_ms, shift.start_ms), refId: issue.id, status: issue.status });
   }
-  if (!Number.isFinite(startMs)) return null;
-  return { lane: 'issue', startMs, endMs: Math.max(endMs, startMs), refId: issue.id, status: issue.status };
+  return spans;
 }
 
 /**
@@ -474,10 +500,9 @@ export function driverTimeline(
   for (const block of result.blocks) {
     if (block.driverId === driverId) spans.push({ lane: 'block', startMs: block.startMs, endMs: block.endMs, refId: block.id });
   }
-  const issues = result.issues.filter(issue => issue.driverId === driverId);
-  for (const issue of issues) {
-    const span = issueSpan(issue, trips, shiftsById);
-    if (span) spans.push(span);
+  const analysedIds = new Set(driver.analysedTripIds);
+  for (const issue of result.issues.filter(issue => issue.driverId === driverId)) {
+    spans.push(...issueSpans(issue, analysedIds, trips, shiftsById));
   }
 
   const days = new Map<string, TimelineSegment[]>();

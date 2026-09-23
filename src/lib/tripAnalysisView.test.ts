@@ -309,4 +309,42 @@ describe('driverTimeline', () => {
   it('answers nothing for a driver the result does not know', () => {
     expect(driverTimeline(result(), 'nobody', [])).toEqual([]);
   });
+
+  /*
+    A finding about the month — no shift records, a budget that cannot be
+    computed — cites every trip of the driver. Drawn as one span from the
+    first to the last of them it painted every day in between, including days
+    on which nothing happened, which then appeared on the timeline at all.
+  */
+  it('draws no mark for a finding that cites every analysed trip, and one per evidence trip otherwise', () => {
+    const first = trip('t1', { start_ms: at('2026-08-03T06:00:00Z'), end_ms: at('2026-08-03T06:30:00Z') });
+    const last = trip('t2', { start_ms: at('2026-08-07T06:00:00Z'), end_ms: at('2026-08-07T06:30:00Z') });
+    const days = driverTimeline(
+      result({
+        trips: [
+          { trip: first, blockId: 'drv1#0', excludedBecause: [], outsideShiftMs: null, issueIds: ['i1'] },
+          { trip: last, blockId: 'drv1#1', excludedBecause: [], outsideShiftMs: null, issueIds: ['i1', 'i2'] },
+        ],
+        blocks: [
+          block({ id: 'drv1#0', tripIds: ['t1'], startMs: first.start_ms!, endMs: first.end_ms! }),
+          block({ id: 'drv1#1', index: 1, tripIds: ['t2'], startMs: last.start_ms!, endMs: last.end_ms! }),
+        ],
+        drivers: [driverAnalysis({ tripIds: ['t1', 't2'], analysedTripIds: ['t1', 't2'], blockIds: ['drv1#0', 'drv1#1'] })],
+        issues: [
+          issue('i1', { type: 'no_shift_records', status: 'unverifiable', tripIds: ['t1', 't2'] }),
+          issue('i2', { type: 'missing_vehicle', status: 'conflict', tripIds: ['t2'] }),
+        ],
+      }),
+      'drv1',
+      [],
+    );
+    // Only the two days that carry a trip, not the three between them.
+    expect(days.map(d => d.dateKey)).toEqual(['2026-08-03', '2026-08-07']);
+    expect(days[0].segments.some(s => s.lane === 'issue')).toBe(false);
+    const marks = days[1].segments.filter(s => s.lane === 'issue');
+    expect(marks.map(s => s.refId)).toEqual(['i2']);
+    // The mark sits exactly on its evidence, not across the month.
+    expect(marks[0].startMs).toBe(last.start_ms);
+    expect(marks[0].endMs).toBe(last.end_ms);
+  });
 });
