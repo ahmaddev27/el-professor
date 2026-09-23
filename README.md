@@ -34,7 +34,7 @@ A React SPA on a self-hosted Supabase stack (PostgreSQL, Auth, Storage, Edge Fun
 | **0** | Releases, rollback, staging protection | `▰▰▰▰▰▰` 6/6 | live on both |
 | **1** | OTP and account security | `▰▰▰▰▰▰▱` 6/7 | Google sign-in is on for staging; production waits only for the owner's Impressum and privacy text |
 | **2** | Design system and prototype | `▰▰▰` 3/3 | live |
-| **3** | Platform panel and permissions | `▰▰▰▰▰▰▰▰▰▰▰▰▱` 12/13 | 3.13b in progress: staff reads confined to a session, and the legacy `/super-admin` routes removed |
+| **3** | Platform panel and permissions | `▰▰▰▰▰▰▰▰▰▰▰▰▱` 12/13 | 3.13b open as a PR: the company's own settings are read inside a context, nothing links to `/super-admin` any more, and the Benutzer list no longer stops at GoTrue's first 50 accounts |
 | **4** | Cash salary receipt | `▰▰▰` 3/3 | live |
 | **5** | Design rollout | `▰▰▰▰` 4/4 | every screen batch merged; `AppLayout` itself moves last |
 | **FA** | Fahrtenbuch analysis | `▰▰▱` 2/3 | import reliability and the analysis engine are live; the settings and the Fahrtenanalyse screen are being built |
@@ -47,6 +47,7 @@ Detail lives elsewhere, one place each: [PROGRESS.md](PROGRESS.md) per step with
 
 - **The Impressum and the privacy text**, filled once in `/admin` → settings. Google sign-in on production is then one switch and one Deploy.
 - **Rotate the secrets that were exposed in chat.**
+- **D14 — whether the panel's company list and its money move behind audited read models.** Slice 3.13b closed the last *company-owned* table a platform account read by capability; `companies` and the three subscription tables stay on `companies.read` by plan 3.A's design. Closing them is a UI change to four screens, not a policy edit. [HANDOFF.md](HANDOFF.md) has the lift.
 - The open decisions and questions listed in [HANDOFF.md](HANDOFF.md), including how overlapping salary rows are merged.
 
 ## Environments
