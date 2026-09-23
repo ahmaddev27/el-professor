@@ -29,10 +29,6 @@
       "style": 22,
       "color": 3
     },
-    "src/components/BackupManagement.tsx": {
-      "style": 18,
-      "color": 0
-    },
     "src/components/ConfirmationModal.tsx": {
       "style": 11,
       "color": 2
@@ -41,29 +37,17 @@
       "style": 77,
       "color": 14
     },
-    "src/components/DriverModal.tsx": {
-      "style": 64,
-      "color": 2
-    },
     "src/components/DriverSalarySummaryCard.tsx": {
       "style": 35,
       "color": 74
-    },
-    "src/components/DriversManagement.tsx": {
-      "style": 45,
-      "color": 32
     },
     "src/components/EnvironmentBanner.tsx": {
       "style": 6,
       "color": 2
     },
     "src/components/FahrtenbuchImportModal.tsx": {
-      "style": 118,
+      "style": 94,
       "color": 4
-    },
-    "src/components/FahrtenbuchTripsView.tsx": {
-      "style": 77,
-      "color": 2
     },
     "src/components/FinalizePlanningModal.tsx": {
       "style": 50,
@@ -89,25 +73,17 @@
       "style": 1154,
       "color": 834
     },
-    "src/components/IncomeManagement.tsx": {
-      "style": 97,
-      "color": 13
-    },
     "src/components/InvoiceDetailModal.tsx": {
       "style": 17,
       "color": 5
     },
     "src/components/LanguageSwitcher.tsx": {
       "style": 5,
-      "color": 7
+      "color": 0
     },
     "src/components/LockedFeaturePage.tsx": {
       "style": 15,
       "color": 3
-    },
-    "src/components/LoginForm.tsx": {
-      "style": 0,
-      "color": 45
     },
     "src/components/ManualSubscriptionModal.tsx": {
       "style": 22,
@@ -122,16 +98,12 @@
       "color": 50
     },
     "src/components/MonatsplanungAppliedRuns.tsx": {
-      "style": 67,
-      "color": 74
+      "style": 39,
+      "color": 37
     },
     "src/components/MonatsplanungAssignmentPreview.tsx": {
       "style": 331,
       "color": 346
-    },
-    "src/components/MonatsplanungDriverPool.tsx": {
-      "style": 16,
-      "color": 11
     },
     "src/components/MonatsplanungStundennachweisPreview.tsx": {
       "style": 207,
@@ -141,29 +113,13 @@
       "style": 24,
       "color": 3
     },
-    "src/components/ReceiptList.tsx": {
-      "style": 75,
-      "color": 3
-    },
-    "src/components/ReceiptModal.tsx": {
-      "style": 76,
-      "color": 21
-    },
     "src/components/ReferralCodesManagement.tsx": {
       "style": 42,
       "color": 11
     },
     "src/components/RoleModal.tsx": {
-      "style": 59,
-      "color": 69
-    },
-    "src/components/RolesManagement.tsx": {
-      "style": 25,
+      "style": 2,
       "color": 0
-    },
-    "src/components/SalariesManagement.tsx": {
-      "style": 95,
-      "color": 9
     },
     "src/components/SalaryDetailsModal.tsx": {
       "style": 104,
@@ -197,10 +153,6 @@
       "style": 87,
       "color": 37
     },
-    "src/components/UserManagement.tsx": {
-      "style": 105,
-      "color": 22
-    },
     "src/components/UserMenu.tsx": {
       "style": 21,
       "color": 0
@@ -209,33 +161,13 @@
       "style": 46,
       "color": 2
     },
-    "src/components/auth/AuthShell.tsx": {
-      "style": 0,
-      "color": 8
-    },
     "src/components/auth/EmphasizedText.tsx": {
       "style": 1,
       "color": 0
     },
     "src/components/auth/GoogleButton.tsx": {
       "style": 0,
-      "color": 12
-    },
-    "src/components/auth/NoticeBox.tsx": {
-      "style": 1,
-      "color": 8
-    },
-    "src/components/auth/OtpChallenge.tsx": {
-      "style": 5,
-      "color": 8
-    },
-    "src/components/auth/OtpCodeInput.tsx": {
-      "style": 2,
-      "color": 7
-    },
-    "src/components/auth/authStyles.ts": {
-      "style": 0,
-      "color": 12
+      "color": 10
     },
     "src/components/settings/AnnouncementsEditor.tsx": {
       "style": 38,
@@ -253,14 +185,6 @@
       "style": 12,
       "color": 0
     },
-    "src/components/signup/PlanSelection.tsx": {
-      "style": 20,
-      "color": 47
-    },
-    "src/components/signup/plans.ts": {
-      "style": 0,
-      "color": 3
-    },
     "src/components/ui/Dialog.tsx": {
       "style": 0,
       "color": 1
@@ -274,68 +198,20 @@
       "color": 111
     },
     "src/pages/AbrechnungPage.tsx": {
-      "style": 235,
-      "color": 356
-    },
-    "src/pages/AccountBlockedPage.tsx": {
-      "style": 0,
-      "color": 22
+      "style": 48,
+      "color": 121
     },
     "src/pages/AccountPage.tsx": {
       "style": 33,
       "color": 0
     },
-    "src/pages/ActivationPage.tsx": {
-      "style": 45,
-      "color": 9
-    },
-    "src/pages/AuthCallbackPage.tsx": {
-      "style": 0,
-      "color": 18
-    },
-    "src/pages/BargeldbestandPage.tsx": {
-      "style": 61,
-      "color": 12
-    },
-    "src/pages/BelegePage.tsx": {
-      "style": 8,
-      "color": 1
-    },
     "src/pages/CompaniesPage.tsx": {
       "style": 264,
       "color": 21
     },
-    "src/pages/CompanyBillingPage.tsx": {
-      "style": 66,
-      "color": 24
-    },
     "src/pages/CompanyPlannerPage.tsx": {
-      "style": 96,
-      "color": 48
-    },
-    "src/pages/CompanySuspendedPage.tsx": {
-      "style": 0,
-      "color": 21
-    },
-    "src/pages/CompleteRegistrationPage.tsx": {
-      "style": 0,
-      "color": 38
-    },
-    "src/pages/DocumentsPage.tsx": {
-      "style": 128,
-      "color": 13
-    },
-    "src/pages/FahrerPage.tsx": {
-      "style": 2,
-      "color": 0
-    },
-    "src/pages/ForgotPasswordPage.tsx": {
-      "style": 0,
-      "color": 1
-    },
-    "src/pages/InviteAcceptPage.tsx": {
-      "style": 0,
-      "color": 3
+      "style": 29,
+      "color": 15
     },
     "src/pages/LandingPage.tsx": {
       "style": 327,
@@ -353,10 +229,6 @@
       "style": 188,
       "color": 111
     },
-    "src/pages/PendingApprovalPage.tsx": {
-      "style": 0,
-      "color": 22
-    },
     "src/pages/PlatformAuditPage.tsx": {
       "style": 49,
       "color": 0
@@ -373,29 +245,13 @@
       "style": 67,
       "color": 1
     },
-    "src/pages/RejectedPage.tsx": {
-      "style": 0,
-      "color": 25
-    },
-    "src/pages/SalariesPage.tsx": {
-      "style": 7,
-      "color": 0
-    },
-    "src/pages/SetPasswordPage.tsx": {
-      "style": 0,
-      "color": 54
-    },
     "src/pages/SettingsPage.tsx": {
-      "style": 124,
-      "color": 10
-    },
-    "src/pages/SignupPage.tsx": {
-      "style": 0,
-      "color": 66
+      "style": 2,
+      "color": 6
     },
     "src/pages/StundennachweisPage.tsx": {
-      "style": 224,
-      "color": 91
+      "style": 154,
+      "color": 71
     },
     "src/pages/SubscriptionBillingPage.tsx": {
       "style": 81,
@@ -404,18 +260,6 @@
     "src/pages/SuperAdminDashboard.tsx": {
       "style": 197,
       "color": 28
-    },
-    "src/pages/UmsaetzePage.tsx": {
-      "style": 2,
-      "color": 0
-    },
-    "src/pages/UsersPage.tsx": {
-      "style": 8,
-      "color": 0
-    },
-    "src/pages/VerifyEmailPage.tsx": {
-      "style": 0,
-      "color": 1
     },
     "src/pages/WerkstattPage.tsx": {
       "style": 54,

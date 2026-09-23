@@ -4,7 +4,8 @@
  * Tokens live in src/index.css and are mapped in tailwind.config.js; the
  * preview at /design-preview shows every component in use. Of the existing
  * screens, the Gehaltsquittung dialog and receipt list (plan 4.3a) and, since
- * phase 5 batch 1, Fahrzeuge and Fixkosten use it. Phase 5 moves the others
+ * phase 5 batch 1, Fahrzeuge and Fixkosten use it; batch 3 adds the frames of
+ * Dokumente, Monatsplanung and Stundennachweis. Phase 5 moves the others
  * across in batches.
  */
 export { Alert, type AlertProps, type AlertTone } from './Alert';
@@ -45,6 +46,8 @@ export { Field, useFieldControlProps, type FieldProps } from './Field';
 export { formatDate, formatEuro, formatEuroCents, formatNumber, formatPercent } from './format';
 export { Input, type InputProps } from './Input';
 export { KpiCard, type KpiCardProps, type KpiTrend } from './KpiCard';
+export { MessageDialog, type MessageDialogProps, type MessageDialogTone } from './MessageDialog';
+export { NativeSelect, type NativeSelectProps } from './NativeSelect';
 export { PageHeader, type PageHeaderProps } from './PageHeader';
 export { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from './Select';
 export { Skeleton } from './Skeleton';

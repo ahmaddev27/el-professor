@@ -5,6 +5,7 @@ import { useToast } from '../contexts/ToastContext';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { useTranslation } from '../contexts/LanguageContext';
 import type { TranslationKey } from '../i18n';
+import { Alert, Button, Card } from './ui';
 
 // Holds TranslationKeys: this list is module-level and t() is a hook value.
 const BACKED_UP_TABLE_KEYS: TranslationKey[] = [
@@ -43,81 +44,63 @@ export default function BackupManagement() {
     }
   };
 
+  // ── Presentation (phase 5) ────────────────────────────────────────────────
+  // The backup itself is unchanged: one button, the company the session is in,
+  // the time it last ran in this tab. Drawn with the design system.
+
   return (
-    <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', borderRadius: '0.5rem', boxShadow: 'var(--shadow-sm)', padding: '1.5rem' }}>
-      <div className="flex items-center gap-3 mb-6">
-        <div style={{ background: 'var(--accent-subtle)', borderRadius: '0.5rem', padding: '0.75rem' }}>
-          <Database style={{ color: 'var(--accent)' }} className="w-6 h-6" />
-        </div>
+    <Card className="grid gap-5 p-5 font-ui sm:p-6">
+      <div className="flex items-center gap-3">
+        <span aria-hidden className="flex size-11 shrink-0 items-center justify-center rounded-surface bg-brand-soft text-brand-text">
+          <Database className="size-5" />
+        </span>
         <div>
-          <h3 style={{ color: 'var(--text-primary)' }} className="text-lg font-semibold">{t('bill.backup.title')}</h3>
-          <p style={{ color: 'var(--text-secondary)' }} className="text-sm">{t('bill.backup.subtitle')}</p>
+          <h2 className="text-[15px] font-semibold text-fg">{t('bill.backup.title')}</h2>
+          <p className="text-sm text-fg-muted">{t('bill.backup.subtitle')}</p>
         </div>
       </div>
 
-      <div className="space-y-4">
-        <div style={{ background: 'var(--accent-subtle)', border: '1px solid var(--accent)', borderRadius: '0.5rem', padding: '1rem', display: 'flex', alignItems: 'flex-start', gap: '0.75rem' }}>
-          <AlertCircle style={{ color: 'var(--accent)', flexShrink: 0, marginTop: '0.125rem' }} className="w-5 h-5" />
-          <div style={{ color: 'var(--text-primary)', fontSize: '0.875rem' }}>
-            <p className="font-medium mb-1">{t('bill.backup.formatTitle')}</p>
-            <p>{t('bill.backup.formatBody')}</p>
-          </div>
-        </div>
+      <Alert tone="brand" role="note" icon={AlertCircle} title={t('bill.backup.formatTitle')}>
+        {t('bill.backup.formatBody')}
+      </Alert>
 
-        <div style={{ background: 'var(--bg-subtle)', borderRadius: '0.5rem', padding: '1rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <div>
-            <p style={{ color: 'var(--text-primary)', fontSize: '0.875rem', fontWeight: 500 }}>{t('bill.backup.last')}</p>
-            <p style={{ color: 'var(--text-secondary)', fontSize: '0.875rem' }}>
-              {lastBackupTime ? lastBackupTime : t('bill.backup.never')}
-            </p>
-          </div>
-        </div>
-
-        <button
-          onClick={handleCreateBackup}
-          disabled={isLoading}
-          style={{
-            width: '100%',
-            background: isLoading ? 'var(--bg-muted)' : 'var(--accent)',
-            color: isLoading ? 'var(--text-tertiary)' : 'var(--text-inverse)',
-            borderRadius: '0.5rem',
-            padding: '0.5rem 1rem',
-            border: 'none',
-            fontWeight: 500,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: '0.5rem',
-            cursor: isLoading ? 'not-allowed' : 'pointer',
-          }}
-          onMouseEnter={e => { if (!isLoading) e.currentTarget.style.background = 'var(--accent-hover)'; }}
-          onMouseLeave={e => (e.currentTarget.style.background = isLoading ? 'var(--bg-muted)' : 'var(--accent)')}
-        >
-          {isLoading ? (
-            <>
-              <RefreshCw className="w-5 h-5 animate-spin" />
-              {t('bill.backup.creating')}
-            </>
-          ) : (
-            <>
-              <Download className="w-5 h-5" />
-              {t('bill.backup.createNow')}
-            </>
-          )}
-        </button>
-
-        <div style={{ borderTop: '1px solid var(--border)', marginTop: '1.5rem', paddingTop: '1.5rem' }}>
-          <h4 style={{ color: 'var(--text-primary)', fontSize: '0.875rem', fontWeight: 600, marginBottom: '0.75rem' }}>{t('bill.backup.tablesTitle')}</h4>
-          <ul className="grid grid-cols-1 md:grid-cols-2 gap-2" style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
-            {BACKED_UP_TABLE_KEYS.map(key => (
-              <li key={key} className="flex items-center gap-2">
-                <span style={{ width: '0.375rem', height: '0.375rem', background: 'var(--accent)', borderRadius: '9999px', display: 'inline-block', flexShrink: 0 }}></span>
-                {t(key)}
-              </li>
-            ))}
-          </ul>
-        </div>
+      <div className="rounded-control bg-sunken p-4">
+        <p className="text-sm font-medium text-fg">{t('bill.backup.last')}</p>
+        <p className="text-sm tabular-nums text-fg-muted">
+          {lastBackupTime ? lastBackupTime : t('bill.backup.never')}
+        </p>
       </div>
-    </div>
+
+      <Button
+        size="lg"
+        className="w-full"
+        onClick={handleCreateBackup}
+        disabled={isLoading}
+      >
+        {isLoading ? (
+          <>
+            <RefreshCw aria-hidden className="motion-safe:animate-spin" />
+            {t('bill.backup.creating')}
+          </>
+        ) : (
+          <>
+            <Download aria-hidden />
+            {t('bill.backup.createNow')}
+          </>
+        )}
+      </Button>
+
+      <div className="border-t border-line pt-5">
+        <h3 className="mb-3 text-sm font-semibold text-fg">{t('bill.backup.tablesTitle')}</h3>
+        <ul className="grid grid-cols-1 gap-2 text-sm text-fg-muted md:grid-cols-2">
+          {BACKED_UP_TABLE_KEYS.map(key => (
+            <li key={key} className="flex items-center gap-2">
+              <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-brand" />
+              {t(key)}
+            </li>
+          ))}
+        </ul>
+      </div>
+    </Card>
   );
 }

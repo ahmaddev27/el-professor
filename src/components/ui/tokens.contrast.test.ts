@@ -107,6 +107,45 @@ const PAIRS: Array<{ fg: string; bg: string; min: number }> = [
   ]),
   // A row's delete icon turns critical on the ghost button's hover fill.
   { fg: 'critical', bg: 'sunken', min: NON_TEXT },
+  // Phase 5, batch 2. An amount keeps its sign's colour — paid, Bar zurück,
+  // a Beleg — in a table row whose hover fill and totals row are sunken, and
+  // the Gehälter screen marks a manually adjusted salary in brand-text there.
+  // (Measured on full sunken: the hover is sunken at half strength over
+  // raised, so it lies between two measured pairs.)
+  ...['positive', 'critical', 'brand-text'].map(fg => ({ fg, bg: 'sunken', min: TEXT })),
+  // Phase 5, batch 3. The same fill under a run's exception note on a row's hover.
+  // Its other two words on sunken — "Alle löschen" / "Plan endgültig löschen"
+  // in critical, a reassigned driver in brand-text — are batch 2's pairs above.
+  { fg: 'caution', bg: 'sunken', min: TEXT },
+  // Phase 5, batch 1b renders batch 2's three sunken pairs too: the Beleg
+  // form's OCR candidates (the chosen value positive, a rejected one critical)
+  // and its idle drop zone (brand-text). New here: a field the OCR read with low
+  // confidence is framed caution beside a "Bitte prüfen" badge, and an Umsätze
+  // amount that will be saved is framed positive — a border that carries a
+  // state, on the field's own fill.
+  { fg: 'caution', bg: 'field', min: NON_TEXT },
+  { fg: 'positive', bg: 'field', min: NON_TEXT },
+  // Phase 5, batch 4. The chosen tier's card is brand-soft, under fg and
+  // fg-muted text (above) and a brand border and check. Its price unit was
+  // fg-subtle first, which this list caught at 4.38:1 in dark; it is fg-muted.
+  // The price box and the activation code's countdown row are sunken, and carry
+  // the discounts in positive and the countdown in positive, caution or
+  // critical as it runs out: batches 2 and 3's three sunken pairs above.
+  { fg: 'brand', bg: 'brand-soft', min: NON_TEXT },
+];
+
+/**
+ * Batch 4's one-time-code block also renders inside Mein Konto, which is still
+ * legacy: its hint, labels, quiet buttons and resend link sit on the legacy
+ * card `--bg-surface`, and its six boxes draw a line-strong border there.
+ */
+const ON_LEGACY_SURFACE: Array<{ fg: string; min: number }> = [
+  { fg: 'fg', min: TEXT },
+  { fg: 'fg-muted', min: TEXT },
+  { fg: 'brand-text', min: TEXT },
+  { fg: 'line-strong', min: NON_TEXT },
+  { fg: 'focus', min: NON_TEXT },
+  { fg: 'brand', min: NON_TEXT },
 ];
 
 /**
@@ -267,6 +306,61 @@ describe.each<Theme>(['light', 'dark'])('%s Phase-2 tokens on the legacy page ba
       console.log(`${theme}\t${fg}\tbg-base (legacy)\t${ratio.toFixed(2)}\t${min}`);
     }
     expect(ratio).toBeGreaterThanOrEqual(min);
+  });
+});
+
+describe.each<Theme>(['light', 'dark'])('%s Phase-2 tokens on the legacy card background', theme => {
+  const tokens = parseTokens(theme);
+  const card = parseLegacyTokens(theme)['bg-surface'];
+
+  it('finds the legacy card background as an opaque colour', () => {
+    expect(card).toHaveLength(3);
+  });
+
+  it.each(ON_LEGACY_SURFACE)('$fg on --bg-surface reaches $min:1', ({ fg, min }) => {
+    const ratio = contrast(tokens[fg], card as Rgb);
+    if (process.env.PRINT_CONTRAST) {
+      console.log(`${theme}\t${fg}\tbg-surface (legacy)\t${ratio.toFixed(2)}\t${min}`);
+    }
+    expect(ratio).toBeGreaterThanOrEqual(min);
+  });
+});
+
+/**
+ * Two colours no token owns, on screens batch 4 moved and in both themes.
+ *
+ * The staging banner is the same orange bar in light and dark: its white label
+ * must read on it. The Google button keeps Google's own colours, which its
+ * branding guidelines fix — the light button (#FFFFFF, border #747775, text
+ * #1F1F1F) and the dark one (#131314, #8E918F, #E3E3E3): each label must read on
+ * its fill, and each border must stand out from the page it sits on.
+ *
+ * Both read the colours from the component's source, so changing one there
+ * without looking here fails.
+ */
+describe('fixed colours on the signed-out screens', () => {
+  const hex = (value: string): Rgb => [0, 2, 4].map(i => parseInt(value.slice(i, i + 2), 16)) as Rgb;
+  const banner = readFileSync(new URL('../EnvironmentBanner.tsx', import.meta.url), 'utf8');
+  const google = readFileSync(new URL('../auth/GoogleButton.tsx', import.meta.url), 'utf8');
+
+  it('the staging banner\'s white label reaches 4.5:1 on its orange', () => {
+    const fill = /background:\s*'#([0-9a-fA-F]{6})'/.exec(banner)?.[1];
+    const label = /color:\s*'#([0-9a-fA-F]{6})'/.exec(banner)?.[1];
+    expect(fill).toBeDefined();
+    expect(label).toBeDefined();
+    expect(contrast(hex(label!), hex(fill!))).toBeGreaterThanOrEqual(TEXT);
+  });
+
+  it.each([
+    { theme: 'light' as Theme, prefix: '', fill: 'FFFFFF', border: '747775', label: '1F1F1F' },
+    { theme: 'dark' as Theme, prefix: 'dark:', fill: '131314', border: '8E918F', label: 'E3E3E3' },
+  ])('the $theme Google button: its label on its fill, its border on the page', ({ theme, prefix, fill, border, label }) => {
+    expect(google).toContain(`${prefix}bg-[#${fill}]`);
+    expect(google).toContain(`${prefix}border-[#${border}]`);
+    expect(google).toContain(`${prefix}text-[#${label}]`);
+    expect(contrast(hex(label), hex(fill))).toBeGreaterThanOrEqual(TEXT);
+    expect(contrast(hex(border), parseTokens(theme).canvas)).toBeGreaterThanOrEqual(NON_TEXT);
+    expect(contrast(hex(border), parseTokens(theme).raised)).toBeGreaterThanOrEqual(NON_TEXT);
   });
 });
 

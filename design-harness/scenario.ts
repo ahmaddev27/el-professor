@@ -1,25 +1,45 @@
 /**
  * What the harness shows, read once from the query string.
  *
- *   screen  fahrzeuge | fixkosten                       (default fahrzeuge)
- *   data    default | empty | limit | error | missing | loading
- *           limit:   the plan's car limit equals the active vehicles
- *           error:   the first read fails with a network error
+ *   screen  fahrzeuge | fixkosten | gehaelter | abrechnung | bargeld
+ *           | belege | fahrer | umsaetze                            (default fahrzeuge)
+ *           (batch 3's screens are chosen by batch3/routes.tsx)
+ *   data    default | empty | limit | error | missing | loading | drivers-error
+ *           limit:   the plan's limit equals what is active (vehicles, or drivers on Fahrer)
+ *           error:   the first read fails with a network error; on batch 1b's
+ *                    screens every table fails, as when the network is down
  *           missing: the first read fails as if the table did not exist (PGRST204)
  *           loading: the first read never answers
- *   role    admin | viewer                              (viewer may read, not edit)
+ *           drivers-error: Gehälter only, the driver list itself fails to load
+ *           next-month-fails: Abrechnung and Bargeldbestand, September loads and
+ *                    every read of October fails — the month after a good one
+ *   role   admin | viewer | view | billing                (viewer may read, not edit)
+ *           view:    a platform account inside a read-only view context
+ *           billing: a platform billing account inside a view context; it
+ *                    holds no business.read, so the cash ledger is out of scope
+ *   ocr     ok | uncertain | fail                        (Belege: what a scanned image yields; default uncertain)
  *   theme   light | dark                                (written to the app's own storage key)
  *   lang    de | en                                     (likewise)
  */
 
-export type HarnessScreen = 'fahrzeuge' | 'fixkosten';
-export type HarnessData = 'default' | 'empty' | 'limit' | 'error' | 'missing' | 'loading';
-export type HarnessRole = 'admin' | 'viewer';
+export type HarnessScreen =
+  | 'fahrzeuge'
+  | 'fixkosten'
+  | 'gehaelter'
+  | 'abrechnung'
+  | 'bargeld'
+  | 'belege'
+  | 'fahrer'
+  | 'umsaetze';
+export type HarnessData = 'default' | 'empty' | 'limit' | 'error' | 'missing' | 'loading' | 'drivers-error' | 'next-month-fails';
+export type HarnessRole = 'admin' | 'viewer' | 'view' | 'billing';
+export type HarnessOcr = 'ok' | 'uncertain' | 'fail';
 
 export interface HarnessScenario {
   screen: HarnessScreen;
   data: HarnessData;
   role: HarnessRole;
+  ocr: HarnessOcr;
 }
 
 const params = new URLSearchParams(window.location.search);
@@ -30,10 +50,18 @@ function pick<T extends string>(name: string, allowed: readonly T[], fallback: T
 }
 
 export const scenario: HarnessScenario = {
-  screen: pick('screen', ['fahrzeuge', 'fixkosten'] as const, 'fahrzeuge'),
-  data: pick('data', ['default', 'empty', 'limit', 'error', 'missing', 'loading'] as const, 'default'),
-  role: pick('role', ['admin', 'viewer'] as const, 'admin'),
+  screen: pick(
+    'screen',
+    ['fahrzeuge', 'fixkosten', 'gehaelter', 'abrechnung', 'bargeld', 'belege', 'fahrer', 'umsaetze'] as const,
+    'fahrzeuge',
+  ),
+  data: pick('data', ['default', 'empty', 'limit', 'error', 'missing', 'loading', 'drivers-error', 'next-month-fails'] as const, 'default'),
+  role: pick('role', ['admin', 'viewer', 'view', 'billing'] as const, 'admin'),
+  ocr: pick('ocr', ['ok', 'uncertain', 'fail'] as const, 'uncertain'),
 };
+
+/** A platform account inside a company's view context, rather than a member of it. */
+export const isPlatformReader = scenario.role === 'view' || scenario.role === 'billing';
 
 /** Applied before the providers read storage, so a URL alone sets the look. */
 export function applyStoredPreferences(): void {
@@ -49,3 +77,7 @@ export function applyStoredPreferences(): void {
 
 export const HARNESS_COMPANY_ID = '00000000-0000-4000-8000-00000000c0de';
 export const HARNESS_USER_ID = '00000000-0000-4000-8000-0000000000a1';
+/** A second member of the invented company, the dispatcher who files most Belege. */
+export const HARNESS_DISPATCHER_ID = '00000000-0000-4000-8000-0000000000a2';
+/** An account that left the company: its rows keep its id, and no profile names it. */
+export const HARNESS_FORMER_USER_ID = '00000000-0000-4000-8000-0000000000a3';

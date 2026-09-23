@@ -249,7 +249,9 @@ export function DataTable<Row>({
                         type="button"
                         onClick={() => toggleSort(column.id)}
                         className={cn(
-                          'inline-flex items-center gap-1 rounded-sm transition-colors hover:text-fg',
+                          // On a touch screen the sort button fills the 40 px header row
+                          // instead of hugging its 20 px of text.
+                          'inline-flex items-center gap-1 rounded-sm transition-colors hover:text-fg [@media(pointer:coarse)]:min-h-10',
                           'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus',
                           active && 'text-fg',
                         )}

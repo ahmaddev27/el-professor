@@ -236,14 +236,15 @@ DECLARE
 BEGIN
   PERFORM _pr_reset();
   -- 20260919120000 (plan 3.10, first half) seeds seller, trial and invoice,
-  -- and 20260920130000 the mail sender, the four mail templates and the feature
-  -- flags; tests/rls/settings.sql and announcements.sql cover those. This file
-  -- still owns the two keys 3.9 seeded.
-  PERFORM _pr_ok('the two keys of 3.9 are seeded, both at version 1, among the eleven that now exist',
+  -- 20260920130000 the mail sender, the four mail templates and the feature
+  -- flags, and 20260921120000 legal.impressum and legal.privacy;
+  -- tests/rls/settings.sql, announcements.sql and legal-pages.sql cover those.
+  -- This file still owns the two keys 3.9 seeded.
+  PERFORM _pr_ok('the two keys of 3.9 are seeded, both at version 1, among the thirteen that now exist',
     (SELECT count(*) = 2 AND bool_and(version = 1 AND updated_by IS NULL)
        FROM app_private.platform_settings
       WHERE key IN ('price_book', 'plan_features'))
-    AND (SELECT count(*) = 11 FROM app_private.platform_settings));
+    AND (SELECT count(*) = 13 FROM app_private.platform_settings));
 
   PERFORM _pr_ok('both seeds pass the validator they are written for',
     NOT EXISTS (SELECT 1 FROM app_private.platform_settings s

@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Play, AlertTriangle, CheckCircle2, Car as CarIcon, Clock, Info, ChevronRight, ChevronDown, ArrowLeft, CalendarDays, History, Euro, ListChecks } from 'lucide-react';
+import { Play, AlertTriangle, CheckCircle2, Car as CarIcon, Clock, Info, ChevronRight, ChevronDown, ArrowLeft, CalendarDays, History, Euro, ListChecks, type LucideIcon } from 'lucide-react';
+import { Alert, Badge, Button, Card, CardContent, CardTitle, Field, Input, NativeSelect, PageHeader } from '../components/ui';
 import { supabase } from '../lib/supabase';
 import { useFahrtenbuch, type FahrtenbuchTrip } from '../hooks/useFahrtenbuch';
 import {
@@ -226,83 +227,47 @@ export default function CompanyPlannerPage() {
     }
   };
 
+  // ── Presentation (phase 5) ────────────────────────────────────────────────
+  // Everything above is the page's logic and is unchanged. Below, the frame —
+  // the header, the mode cards and Phase 1's parameter form — only draws; the
+  // parameter fields keep their onChange handlers, bounds and fallbacks
+  // character for character, and the planning components further down are
+  // mounted with the same props as before.
+  const subtitle =
+    planningMode === 'selection' ? t('mp.planner.pickMode')
+    : planningMode === 'new_month' ? t('mp.planner.phase1Title')
+    : planningMode === 'historical' ? t('mp.planner.historicalTitle')
+    : null;
+
   return (
-    <div className="p-6 max-w-7xl mx-auto">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>
-          {t('mp.title')}
-        </h1>
-        {planningMode === 'selection' && (
-          <p className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>
-            {t('mp.planner.pickMode')}
-          </p>
-        )}
-        {planningMode === 'new_month' && (
-          <p className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>
-            {t('mp.planner.phase1Title')}
-          </p>
-        )}
-        {planningMode === 'historical' && (
-          <p className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>
-            {t('mp.planner.historicalTitle')}
-          </p>
-        )}
-      </div>
+    <div className="mx-auto max-w-7xl">
+      <PageHeader className="font-ui" title={t('mp.title')} description={subtitle} />
 
       {/* ── Mode selection ── */}
       {planningMode === 'selection' && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-2">
-          {/* Card 1 — Neue Monatsplanung */}
-          <div
-            className="rounded-2xl p-6 flex flex-col gap-4"
-            style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}
-          >
-            <div className="flex items-center gap-3">
-              <div className="rounded-xl p-2.5" style={{ background: 'rgba(37,99,235,0.1)' }}>
-                <CalendarDays size={22} style={{ color: '#2563eb' }} />
-              </div>
-              <h2 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>
-                {t('mp.planner.newPlanTitle')}
-              </h2>
-            </div>
-            <p className="text-sm leading-relaxed flex-1" style={{ color: 'var(--text-secondary)' }}>
-              {t('mp.planner.newPlanDesc')}
-            </p>
-            <button
-              onClick={() => setPlanningMode('new_month')}
-              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold self-start transition-all hover:brightness-110 active:scale-[0.98]"
-              style={{ background: '#2563eb', color: '#fff' }}
-            >
-              <Play size={15} />
-              {t('mp.planner.newPlanStart')}
-            </button>
-          </div>
-
-          {/* Card 2 — Alter Monat / Steuerberater-Abgleich */}
-          <div
-            className="rounded-2xl p-6 flex flex-col gap-4"
-            style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}
-          >
-            <div className="flex items-center gap-3">
-              <div className="rounded-xl p-2.5" style={{ background: 'rgba(124,58,237,0.1)' }}>
-                <History size={22} style={{ color: '#7c3aed' }} />
-              </div>
-              <h2 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>
-                {t('mp.planner.oldMonthTitle')}
-              </h2>
-            </div>
-            <p className="text-sm leading-relaxed flex-1" style={{ color: 'var(--text-secondary)' }}>
-              {t('mp.planner.oldMonthDesc')}
-            </p>
-            <button
-              onClick={() => setPlanningMode('hist_mode_selection')}
-              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold self-start transition-all hover:brightness-110 active:scale-[0.98]"
-              style={{ background: '#7c3aed', color: '#fff' }}
-            >
-              <History size={15} />
-              {t('mp.planner.historicalStart')}
-            </button>
-          </div>
+        <div className="grid grid-cols-1 gap-4 font-ui md:grid-cols-2">
+          <ModeCard
+            icon={CalendarDays}
+            title={t('mp.planner.newPlanTitle')}
+            description={t('mp.planner.newPlanDesc')}
+            action={
+              <Button onClick={() => setPlanningMode('new_month')}>
+                <Play aria-hidden />
+                {t('mp.planner.newPlanStart')}
+              </Button>
+            }
+          />
+          <ModeCard
+            icon={History}
+            title={t('mp.planner.oldMonthTitle')}
+            description={t('mp.planner.oldMonthDesc')}
+            action={
+              <Button onClick={() => setPlanningMode('hist_mode_selection')}>
+                <History aria-hidden />
+                {t('mp.planner.historicalStart')}
+              </Button>
+            }
+          />
         </div>
       )}
 
@@ -313,108 +278,70 @@ export default function CompanyPlannerPage() {
 
       {/* ── Historical mode selection ── */}
       {planningMode === 'hist_mode_selection' && (
-        <div className="max-w-3xl mx-auto px-2">
-          <button
-            onClick={() => setPlanningMode('selection')}
-            className="inline-flex items-center gap-2 text-sm font-medium mb-6 transition-colors hover:opacity-80"
-            style={{ color: 'var(--text-secondary)' }}
-          >
-            <ArrowLeft size={15} />
-            {t('mp.planner.backToSelection')}
-          </button>
-
-          <div className="mb-6">
-            <h2 className="text-xl font-bold mb-1" style={{ color: 'var(--text-primary)' }}>
-              {t('mp.planner.histModeTitle')}
-            </h2>
-            <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-              {t('mp.planner.histModeDesc')}
-            </p>
+        <div className="mx-auto grid max-w-3xl grid-cols-1 gap-5 font-ui">
+          <div>
+            <Button variant="ghost" size="sm" className="-ml-2" onClick={() => setPlanningMode('selection')}>
+              <ArrowLeft aria-hidden />
+              {t('mp.planner.backToSelection')}
+            </Button>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-5">
+          <div>
+            <h2 className="text-lg font-semibold text-fg">{t('mp.planner.histModeTitle')}</h2>
+            <p className="mt-1 text-sm text-fg-muted">{t('mp.planner.histModeDesc')}</p>
+          </div>
+
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             {/* Card 1 — Mit Brutto-Gehältern */}
-            <div
-              className="rounded-2xl p-6 flex flex-col gap-4 cursor-pointer transition-all hover:brightness-105"
-              style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}
-            >
-              <div className="flex items-start gap-3">
-                <div className="rounded-xl p-2.5 shrink-0" style={{ background: 'rgba(124,58,237,0.1)' }}>
-                  <Euro size={22} style={{ color: '#7c3aed' }} />
-                </div>
-                <div className="flex flex-col gap-1">
-                  <h3 className="text-base font-bold" style={{ color: 'var(--text-primary)' }}>
-                    {t('mp.planner.bruttoTitle')}
-                  </h3>
-                  <span
-                    className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold self-start"
-                    style={{ background: 'rgba(21,128,61,0.1)', color: '#15803d' }}
-                  >
-                    {t('mp.planner.badgeAvailable')}
-                  </span>
-                </div>
-              </div>
-              <p className="text-sm leading-relaxed flex-1" style={{ color: 'var(--text-secondary)' }}>
-                {t('mp.planner.bruttoDesc')}
-              </p>
-              <button
-                onClick={() => {
-                  setReconciliationMode('brutto_salary');
-                  setPlanningMode('historical_reconciliation');
-                }}
-                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold self-start transition-all hover:brightness-110 active:scale-[0.98]"
-                style={{ background: '#7c3aed', color: '#fff' }}
-              >
-                <Euro size={15} />
-                {t('mp.planner.bruttoStart')}
-              </button>
-            </div>
+            <ModeCard
+              icon={Euro}
+              headingLevel="h3"
+              title={t('mp.planner.bruttoTitle')}
+              badge={
+                <Badge tone="positive">
+                  <CheckCircle2 aria-hidden />
+                  {t('mp.planner.badgeAvailable')}
+                </Badge>
+              }
+              description={t('mp.planner.bruttoDesc')}
+              action={
+                <Button
+                  onClick={() => {
+                    setReconciliationMode('brutto_salary');
+                    setPlanningMode('historical_reconciliation');
+                  }}
+                >
+                  <Euro aria-hidden />
+                  {t('mp.planner.bruttoStart')}
+                </Button>
+              }
+            />
 
             {/* Card 2 — Mit Arbeitsstunden */}
-            <div
-              className="rounded-2xl p-6 flex flex-col gap-4"
-              style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', opacity: 0.9 }}
-            >
-              <div className="flex items-start gap-3">
-                <div className="rounded-xl p-2.5 shrink-0" style={{ background: 'rgba(37,99,235,0.1)' }}>
-                  <ListChecks size={22} style={{ color: '#2563eb' }} />
-                </div>
-                <div className="flex flex-col gap-1">
-                  <h3 className="text-base font-bold" style={{ color: 'var(--text-primary)' }}>
-                    {t('mp.planner.hoursTitle')}
-                  </h3>
-                  <span
-                    className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold self-start"
-                    style={{ background: 'rgba(37,99,235,0.1)', color: '#1d4ed8' }}
-                  >
-                    {t('mp.planner.badgeNew')}
-                  </span>
-                </div>
-              </div>
-              <p className="text-sm leading-relaxed flex-1" style={{ color: 'var(--text-secondary)' }}>
-                {t('mp.planner.hoursDesc')}
-              </p>
-              <button
-                onClick={() => {
-                  setReconciliationMode('working_hours');
-                  setPlanningMode('hist_working_hours');
-                }}
-                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold self-start transition-all hover:brightness-110 active:scale-[0.98]"
-                style={{ background: '#2563eb', color: '#fff' }}
-              >
-                <ListChecks size={15} />
-                {t('mp.planner.hoursStart')}
-              </button>
-            </div>
+            <ModeCard
+              icon={ListChecks}
+              headingLevel="h3"
+              title={t('mp.planner.hoursTitle')}
+              badge={<Badge tone="brand">{t('mp.planner.badgeNew')}</Badge>}
+              description={t('mp.planner.hoursDesc')}
+              action={
+                <Button
+                  onClick={() => {
+                    setReconciliationMode('working_hours');
+                    setPlanningMode('hist_working_hours');
+                  }}
+                >
+                  <ListChecks aria-hidden />
+                  {t('mp.planner.hoursStart')}
+                </Button>
+              }
+            />
           </div>
 
-          <div
-            className="rounded-xl px-4 py-3 text-xs"
-            style={{ background: 'rgba(124,58,237,0.06)', border: '1px solid rgba(124,58,237,0.15)', color: 'var(--text-secondary)' }}
-          >
-            <span className="font-semibold" style={{ color: 'var(--text-primary)' }}>{t('mp.planner.noteLabel')}</span>{' '}
+          <Alert tone="neutral" role="note">
+            <strong className="font-semibold text-fg">{t('mp.planner.noteLabel')}</strong>{' '}
             {t('mp.planner.histModeHint')}
-          </div>
+          </Alert>
         </div>
       )}
 
@@ -426,175 +353,139 @@ export default function CompanyPlannerPage() {
       {/* ── Normal planning workflow (new_month) ── */}
       {planningMode === 'new_month' && (
         <div>
-          <button
-            onClick={() => setPlanningMode('selection')}
-            className="inline-flex items-center gap-2 text-sm font-medium mb-5 transition-colors hover:opacity-80"
-            style={{ color: 'var(--text-secondary)' }}
-          >
-            <ArrowLeft size={15} />
+          <Button variant="ghost" size="sm" className="-ml-2 mb-3 font-ui" onClick={() => setPlanningMode('selection')}>
+            <ArrowLeft aria-hidden />
             {t('mp.planner.backToSelection')}
-          </button>
+          </Button>
 
-      <div
-        className="rounded-xl p-5 mb-6"
-        style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}
-      >
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          <div>
-            <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5"
-              style={{ color: 'var(--text-tertiary)' }}>
-              {t('common.month')}
-            </label>
-            <select
-              value={month}
-              onChange={e => setMonth(Number(e.target.value))}
-              className="w-full px-3 py-2 rounded-lg text-sm"
-              style={{ background: 'var(--bg-input)', color: 'var(--text-primary)', border: '1px solid var(--border)' }}
-            >
-              {MONTH_KEYS.map((key, i) => (
-                <option key={key} value={i + 1}>{t(key)}</option>
-              ))}
-            </select>
+      <Card className="mb-6 font-ui">
+        <CardContent className="grid gap-5 pt-5">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
+            <Field label={t('common.month')}>
+              <NativeSelect
+                value={month}
+                onChange={e => setMonth(Number(e.target.value))}
+              >
+                {MONTH_KEYS.map((key, i) => (
+                  <option key={key} value={i + 1}>{t(key)}</option>
+                ))}
+              </NativeSelect>
+            </Field>
+            <Field label={t('mp.planner.year')}>
+              <NativeSelect
+                value={year}
+                onChange={e => setYear(Number(e.target.value))}
+              >
+                {yearOptions.map(y => (
+                  <option key={y} value={y}>{y}</option>
+                ))}
+              </NativeSelect>
+            </Field>
+            <Field label={t('mp.planner.importFile')} className="md:col-span-2">
+              <NativeSelect
+                value={selectedImportId}
+                onChange={e => setSelectedImportId(e.target.value)}
+                disabled={loadingImports || filteredImports.length === 0}
+              >
+                {filteredImports.length === 0 ? (
+                  <option value="">{t('mp.planner.noImportFound', { month: t(MONTH_KEYS[month - 1]), year })}</option>
+                ) : (
+                  filteredImports.map(i => (
+                    <option key={i.id} value={i.id}>
+                      {i.file_name} ({t('mp.planner.importRows', { rows: i.row_count })}, {new Date(i.imported_at).toLocaleDateString('de-DE')})
+                    </option>
+                  ))
+                )}
+              </NativeSelect>
+            </Field>
           </div>
-          <div>
-            <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5"
-              style={{ color: 'var(--text-tertiary)' }}>
-              {t('mp.planner.year')}
-            </label>
-            <select
-              value={year}
-              onChange={e => setYear(Number(e.target.value))}
-              className="w-full px-3 py-2 rounded-lg text-sm"
-              style={{ background: 'var(--bg-input)', color: 'var(--text-primary)', border: '1px solid var(--border)' }}
-            >
-              {yearOptions.map(y => (
-                <option key={y} value={y}>{y}</option>
-              ))}
-            </select>
-          </div>
-          <div className="md:col-span-2">
-            <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5"
-              style={{ color: 'var(--text-tertiary)' }}>
-              {t('mp.planner.importFile')}
-            </label>
-            <select
-              value={selectedImportId}
-              onChange={e => setSelectedImportId(e.target.value)}
-              disabled={loadingImports || filteredImports.length === 0}
-              className="w-full px-3 py-2 rounded-lg text-sm"
-              style={{ background: 'var(--bg-input)', color: 'var(--text-primary)', border: '1px solid var(--border)' }}
-            >
-              {filteredImports.length === 0 ? (
-                <option value="">{t('mp.planner.noImportFound', { month: t(MONTH_KEYS[month - 1]), year })}</option>
-              ) : (
-                filteredImports.map(i => (
-                  <option key={i.id} value={i.id}>
-                    {i.file_name} ({t('mp.planner.importRows', { rows: i.row_count })}, {new Date(i.imported_at).toLocaleDateString('de-DE')})
-                  </option>
-                ))
-              )}
-            </select>
-          </div>
-        </div>
 
-        <div className="mt-4 flex items-center gap-3 flex-wrap">
-          <button
-            onClick={handleRun}
-            disabled={running || !selectedImportId}
-            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-bold shadow-sm transition-all hover:shadow-md hover:brightness-110 active:scale-[0.98] active:brightness-95 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:shadow-sm disabled:active:scale-100"
-            style={{ background: 'var(--primary, #2563eb)', color: 'var(--primary-contrast, #fff)' }}
-          >
-            <Play size={16} />
-            {running ? t('mp.planner.loadingTrips') : t('mp.planner.buildBlocks')}
-          </button>
-          <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg" style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)' }}>
-            <span className="text-xs font-semibold" style={{ color: 'var(--text-secondary)' }}>
-              {t('mp.planner.blockSeparator')}:
-            </span>
-            <input
-              type="number"
-              min={1}
-              max={720}
-              step={1}
-              value={blockSeparatorGap}
-              onChange={e => {
-                const v = parseInt(e.target.value, 10);
-                setBlockSeparatorGap(Number.isFinite(v) && v > 0 ? v : VEHICLE_BLOCK_GAP_MINUTES);
-              }}
-              className="w-16 px-2 py-1 rounded text-sm text-right"
-              style={{ background: 'var(--bg-input)', color: 'var(--text-primary)', border: '1px solid var(--border)' }}
-            />
-            <span className="text-xs" style={{ color: 'var(--text-tertiary)' }}>{t('mp.minShort')}</span>
+          {/* The four block parameters. Each field keeps its bounds and its
+              fallback for an empty or unreadable entry exactly as before. */}
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <Field label={t('mp.planner.blockSeparator')}>
+              <div className="flex items-center gap-2">
+                <Input
+                  type="number"
+                  min={1}
+                  max={720}
+                  step={1}
+                  value={blockSeparatorGap}
+                  onChange={e => {
+                    const v = parseInt(e.target.value, 10);
+                    setBlockSeparatorGap(Number.isFinite(v) && v > 0 ? v : VEHICLE_BLOCK_GAP_MINUTES);
+                  }}
+                  className="w-24 text-right"
+                />
+                <span className="text-[13px] text-fg-muted">{t('mp.minShort')}</span>
+              </div>
+            </Field>
+            <Field label={t('mp.planner.minBlockDuration')}>
+              <div className="flex items-center gap-2">
+                <Input
+                  type="number"
+                  min={0}
+                  max={120}
+                  step={1}
+                  value={minBlockDuration}
+                  onChange={e => {
+                    const v = parseInt(e.target.value, 10);
+                    if (!Number.isFinite(v)) {
+                      setMinBlockDuration(MIN_VEHICLE_BLOCK_DURATION_MINUTES);
+                    } else {
+                      setMinBlockDuration(Math.max(0, Math.min(120, v)));
+                    }
+                  }}
+                  className="w-24 text-right"
+                />
+                <span className="text-[13px] text-fg-muted">
+                  {t('mp.minShort')}{minBlockDuration === 0 ? ` ${t('mp.planner.disabledSuffix')}` : ''}
+                </span>
+              </div>
+            </Field>
+            <Field label={t('mp.planner.maxBlockDuration')}>
+              <div className="flex items-center gap-2">
+                <Input
+                  type="number"
+                  min={MAX_BLOCK_DURATION_LOWER_BOUND}
+                  max={MAX_BLOCK_DURATION_UPPER_BOUND}
+                  step={1}
+                  value={maxBlockDuration}
+                  onChange={e => {
+                    const v = parseInt(e.target.value, 10);
+                    if (!Number.isFinite(v)) {
+                      setMaxBlockDuration(DEFAULT_MAX_VEHICLE_BLOCK_DURATION_MINUTES);
+                    } else {
+                      setMaxBlockDuration(Math.max(MAX_BLOCK_DURATION_LOWER_BOUND, Math.min(MAX_BLOCK_DURATION_UPPER_BOUND, v)));
+                    }
+                  }}
+                  className="w-24 text-right"
+                />
+                <span className="text-[13px] text-fg-muted">{t('mp.minShort')}</span>
+              </div>
+            </Field>
+            <Field label={t('mp.vehicleSwitchBuffer')}>
+              <div className="flex items-center gap-2">
+                <Input
+                  type="number"
+                  min={0}
+                  max={240}
+                  step={5}
+                  value={vehicleSwitchBuffer}
+                  onChange={e => {
+                    const v = parseInt(e.target.value, 10);
+                    setVehicleSwitchBuffer(Number.isFinite(v) && v >= 0 ? v : DEFAULT_VEHICLE_SWITCH_BUFFER_MINUTES);
+                  }}
+                  className="w-24 text-right"
+                />
+                <span className="text-[13px] text-fg-muted">{t('mp.minShort')}</span>
+              </div>
+            </Field>
           </div>
-          <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg" style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)' }}>
-            <span className="text-xs font-semibold" style={{ color: 'var(--text-secondary)' }}>
-              {t('mp.planner.minBlockDuration')}:
-            </span>
-            <input
-              type="number"
-              min={0}
-              max={120}
-              step={1}
-              value={minBlockDuration}
-              onChange={e => {
-                const v = parseInt(e.target.value, 10);
-                if (!Number.isFinite(v)) {
-                  setMinBlockDuration(MIN_VEHICLE_BLOCK_DURATION_MINUTES);
-                } else {
-                  setMinBlockDuration(Math.max(0, Math.min(120, v)));
-                }
-              }}
-              className="w-16 px-2 py-1 rounded text-sm text-right"
-              style={{ background: 'var(--bg-input)', color: 'var(--text-primary)', border: '1px solid var(--border)' }}
-            />
-            <span className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
-              {t('mp.minShort')}{minBlockDuration === 0 ? ` ${t('mp.planner.disabledSuffix')}` : ''}
-            </span>
-          </div>
-          <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg" style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)' }}>
-            <span className="text-xs font-semibold" style={{ color: 'var(--text-secondary)' }}>
-              {t('mp.planner.maxBlockDuration')}:
-            </span>
-            <input
-              type="number"
-              min={MAX_BLOCK_DURATION_LOWER_BOUND}
-              max={MAX_BLOCK_DURATION_UPPER_BOUND}
-              step={1}
-              value={maxBlockDuration}
-              onChange={e => {
-                const v = parseInt(e.target.value, 10);
-                if (!Number.isFinite(v)) {
-                  setMaxBlockDuration(DEFAULT_MAX_VEHICLE_BLOCK_DURATION_MINUTES);
-                } else {
-                  setMaxBlockDuration(Math.max(MAX_BLOCK_DURATION_LOWER_BOUND, Math.min(MAX_BLOCK_DURATION_UPPER_BOUND, v)));
-                }
-              }}
-              className="w-20 px-2 py-1 rounded text-sm text-right"
-              style={{ background: 'var(--bg-input)', color: 'var(--text-primary)', border: '1px solid var(--border)' }}
-            />
-            <span className="text-xs" style={{ color: 'var(--text-tertiary)' }}>{t('mp.minShort')}</span>
-          </div>
-          <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg" style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)' }}>
-            <span className="text-xs font-semibold" style={{ color: 'var(--text-secondary)' }}>
-              {t('mp.vehicleSwitchBuffer')}:
-            </span>
-            <input
-              type="number"
-              min={0}
-              max={240}
-              step={5}
-              value={vehicleSwitchBuffer}
-              onChange={e => {
-                const v = parseInt(e.target.value, 10);
-                setVehicleSwitchBuffer(Number.isFinite(v) && v >= 0 ? v : DEFAULT_VEHICLE_SWITCH_BUFFER_MINUTES);
-              }}
-              className="w-16 px-2 py-1 rounded text-sm text-right"
-              style={{ background: 'var(--bg-input)', color: 'var(--text-primary)', border: '1px solid var(--border)' }}
-            />
-            <span className="text-xs" style={{ color: 'var(--text-tertiary)' }}>{t('mp.minShort')}</span>
-          </div>
-          <div className="text-xs flex items-center gap-1.5" style={{ color: 'var(--text-tertiary)' }}>
-            <Info size={13} />
+
+          <p className="flex items-start gap-2 text-[13px] text-fg-muted">
+            <Info aria-hidden className="mt-0.5 size-4 shrink-0 text-fg-subtle" />
+            <span>
             {t('mp.planner.defaultsHint', {
               gap: VEHICLE_BLOCK_GAP_MINUTES,
               minBlock: MIN_VEHICLE_BLOCK_DURATION_MINUTES,
@@ -603,26 +494,27 @@ export default function CompanyPlannerPage() {
               upper: MAX_BLOCK_DURATION_UPPER_BOUND,
               buffer: DEFAULT_VEHICLE_SWITCH_BUFFER_MINUTES,
             })}
-          </div>
-          <div className="text-xs flex items-start gap-1.5 mt-1 px-3 py-2 rounded-lg w-full" style={{ background: 'rgba(37,99,235,0.06)', color: '#1e40af', border: '1px solid rgba(37,99,235,0.18)' }}>
-            <Info size={13} className="shrink-0 mt-0.5" />
-            <span>
-              <strong>{t('mp.planner.safetyRulesLabel')}</strong>{' '}
-              {t('mp.planner.safetyRulesBody', { buffer: vehicleSwitchBuffer })}
             </span>
-          </div>
-        </div>
+          </p>
 
-        {error && (
-          <div
-            className="mt-4 px-3 py-2 rounded-lg text-sm flex items-center gap-2"
-            style={{ background: 'var(--bg-danger-subtle, #fef2f2)', color: 'var(--danger, #b91c1c)' }}
-          >
-            <AlertTriangle size={15} />
-            {error}
+          <Alert tone="brand" role="note">
+              <strong className="font-semibold text-fg">{t('mp.planner.safetyRulesLabel')}</strong>{' '}
+              {t('mp.planner.safetyRulesBody', { buffer: vehicleSwitchBuffer })}
+          </Alert>
+
+          {error && <Alert tone="critical">{error}</Alert>}
+
+          <div>
+            <Button
+            onClick={handleRun}
+            disabled={running || !selectedImportId}
+            >
+              <Play aria-hidden />
+            {running ? t('mp.planner.loadingTrips') : t('mp.planner.buildBlocks')}
+            </Button>
           </div>
-        )}
-      </div>
+        </CardContent>
+      </Card>
 
       {result && <BlockStatusBanner result={result} />}
       {DEBUG_MODE && result && <ResultPanels result={result} blockSeparatorMin={blockSeparatorGap} maxBlockMin={maxBlockDuration} />}
@@ -681,23 +573,13 @@ function BlockStatusBanner({ result }: { result: Phase1Result }) {
   }
 
   return (
-    <div
-      className="mt-4 rounded-xl px-4 py-3 flex items-center gap-3"
-      style={{ background: 'rgba(21,128,61,0.06)', border: '1px solid rgba(21,128,61,0.22)', color: 'var(--text-primary)' }}
-    >
-      <CheckCircle2 size={16} style={{ color: '#15803d', flexShrink: 0 }} />
-      <span className="text-sm">
-        <span className="font-semibold" style={{ color: '#15803d' }}>{t('mp.planner.blocksCreated')}</span>
-        {' '}
-        <span style={{ color: 'var(--text-secondary)' }}>
-          {t('mp.planner.blocksCreatedDetail', {
-            blocks: s.blocks_total,
-            vehicles: s.vehicles,
-            trips: s.abgeschlossen,
-          })}
-        </span>
-      </span>
-    </div>
+    <Alert tone="positive" className="mt-4" title={t('mp.planner.blocksCreated')}>
+      {t('mp.planner.blocksCreatedDetail', {
+        blocks: s.blocks_total,
+        vehicles: s.vehicles,
+        trips: s.abgeschlossen,
+      })}
+    </Alert>
   );
 }
 
@@ -994,5 +876,38 @@ function Td({ children, align }: { children: React.ReactNode; align?: 'left' | '
     <td className="px-3 py-2" style={{ color: 'var(--text-primary)', textAlign: align ?? 'left' }}>
       {children}
     </td>
+  );
+}
+
+/** One planning mode to choose: what it is for, and the button that starts it (phase 5). */
+function ModeCard({
+  icon: Icon,
+  title,
+  description,
+  action,
+  badge,
+  headingLevel = 'h2',
+}: {
+  icon: LucideIcon;
+  title: string;
+  description: string;
+  action: React.ReactNode;
+  badge?: React.ReactNode;
+  headingLevel?: 'h2' | 'h3';
+}) {
+  return (
+    <Card className="flex flex-col gap-4 p-6">
+      <div className="flex items-start gap-3">
+        <span className="flex size-10 shrink-0 items-center justify-center rounded-control bg-brand-soft text-brand-text">
+          <Icon aria-hidden className="size-5" />
+        </span>
+        <div className="grid justify-items-start gap-1.5 pt-1.5">
+          <CardTitle as={headingLevel} className="text-base">{title}</CardTitle>
+          {badge}
+        </div>
+      </div>
+      <p className="flex-1 text-sm leading-relaxed text-fg-muted">{description}</p>
+      <div>{action}</div>
+    </Card>
   );
 }

@@ -158,11 +158,12 @@ DECLARE
 BEGIN
   PERFORM _st_reset();
 
-  -- 3.9's two, 3.10's first three, and 20260920130000's six (the mail sender,
-  -- four templates, the feature flags). Section 7 and announcements.sql cover
-  -- the six.
-  PERFORM _st_ok('eleven keys now, the three of 3.10''s first half among them',
-    (SELECT count(*) = 11 FROM app_private.platform_settings)
+  -- 3.9's two, 3.10's first three, 20260920130000's six (the mail sender,
+  -- four templates, the feature flags) and 20260921120000's legal.impressum
+  -- and legal.privacy. Section 7 and announcements.sql cover the six,
+  -- legal-pages.sql the last two.
+  PERFORM _st_ok('thirteen keys now, the three of 3.10''s first half among them',
+    (SELECT count(*) = 13 FROM app_private.platform_settings)
     AND (SELECT count(*) = 3 FROM app_private.platform_settings
           WHERE key IN ('seller', 'trial', 'invoice') AND version = 1 AND updated_by IS NULL));
 

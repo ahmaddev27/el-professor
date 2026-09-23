@@ -2323,6 +2323,12 @@ INSERT INTO _mx_rpc (label, stmt, want, hole) VALUES
     ('get_app_config() carries the feature map',
      $q$SELECT (get_app_config() -> 'plan_features' IS NOT NULL)::text$q$,
      'PYYYYYY', NULL),
+    -- 20260921120000: the Impressum and the privacy text are public pages, so
+    -- anon and every signed-in principal read them. tests/rls/legal-pages.sql
+    -- pins which fields that answer carries
+    ('get_legal_pages() carries an Impressum',
+     $q$SELECT (get_legal_pages() -> 'impressum' IS NOT NULL)::text$q$,
+     'YYYYYYY', NULL),
     -- 20260920130000 (plan 3.10): the invoice screen's sender. companies.read,
     -- which every staff role holds, so only the platform principal gets Y; a
     -- company user is refused as a return value and anon holds no EXECUTE

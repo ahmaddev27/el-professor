@@ -12,6 +12,7 @@ import { format, differenceInDays } from 'date-fns';
 import { de } from 'date-fns/locale';
 import { useTranslation } from '../contexts/LanguageContext';
 import type { TranslationKey } from '../i18n';
+import { Alert, Badge, Button, Card, DataTable, EmptyState, PageHeader, cn, type DataTableColumn } from '../components/ui';
 
 // Map keys are the stored `subscription_duration_type` values and must not be
 // translated; the values hold a TranslationKey because t() is a hook value and
@@ -144,14 +145,6 @@ export default function CompanyBillingPage() {
     ? (() => { try { return format(new Date(subscriptionExpiresAt), 'dd. MMMM yyyy', { locale: de }); } catch { return null; } })()
     : null;
 
-  const aboStatusColor =
-    subActive ? 'var(--success)' :
-    subExpired ? 'var(--warning)' :
-    'var(--danger)';
-  const aboStatusBg =
-    subActive ? 'rgba(34,197,94,0.10)' :
-    subExpired ? 'rgba(245,158,11,0.10)' :
-    'rgba(239,68,68,0.10)';
   const aboStatusLabel =
     subActive ? t('sa.status.active') :
     subExpired ? t('sa.billing.statusExpired') :
@@ -173,293 +166,246 @@ export default function CompanyBillingPage() {
 
   const hasHistory = history.length > 0;
 
+  // ── Presentation (phase 5) ────────────────────────────────────────────────
+  // Everything above is unchanged: whose subscription this is (the opened
+  // company's inside a support session, the account's own otherwise), the
+  // rule that judges it, and every date and figure. The two colour picks that
+  // sat among them are the tone below, chosen in the same order.
+
+  const aboTone: 'positive' | 'caution' | 'critical' =
+    subActive ? 'positive' :
+    subExpired ? 'caution' :
+    'critical';
+  const StatusIcon = subActive ? CheckCircle : subExpired ? AlertCircle : XCircle;
+
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-24">
-        <RefreshCw size={24} className="animate-spin" style={{ color: 'var(--accent)' }} />
+      <div role="status" className="flex items-center justify-center py-24 font-ui">
+        <RefreshCw aria-hidden className="size-6 text-brand-text motion-safe:animate-spin" />
+        <span className="sr-only">{t('sa.billing.title')}</span>
       </div>
     );
   }
 
+  const activateButton = (
+    <Button onClick={() => navigate('/abo-aktivieren')}>
+      <KeyRound aria-hidden />
+      {t('sa.billing.activateCta')}
+    </Button>
+  );
+
+  // Each row's state, worked out as the old table body did, from the order
+  // the rows were read in — the table below does not sort.
+  const historyRows = history.map((row, idx) => {
+    const isCurrentActive = subActive && idx === 0 && companyDetail?.last_activation_code_id === row.id;
+    const appliedExpiry = row.applied_subscription_expires_at;
+    const isPastPeriod = appliedExpiry ? new Date(appliedExpiry) <= new Date() : false;
+    return { row, isCurrentActive, isPastPeriod };
+  });
+  type HistoryRow = (typeof historyRows)[number];
+
+  const historyColumns: DataTableColumn<HistoryRow>[] = [
+    {
+      id: 'date',
+      header: t('common.date'),
+      cell: ({ row }) => (
+        <span className="whitespace-nowrap font-medium tabular-nums">
+          {row.used_at
+            ? (() => { try { return format(new Date(row.used_at), 'dd.MM.yyyy HH:mm', { locale: de }); } catch { return '-'; } })()
+            : '-'}
+        </span>
+      ),
+    },
+    {
+      id: 'type',
+      header: t('sa.billing.col.type'),
+      cell: () => <span className="whitespace-nowrap text-fg-muted">{t('sa.billing.rowTypeCash')}</span>,
+    },
+    {
+      id: 'duration',
+      header: t('sa.billing.col.duration'),
+      cell: ({ row }) => (
+        <span className="whitespace-nowrap text-fg-muted">
+          {row.duration_type
+            ? (DURATION_LABELS[row.duration_type] ? t(DURATION_LABELS[row.duration_type]) : row.duration_type)
+            : '-'}
+        </span>
+      ),
+    },
+    {
+      id: 'from',
+      header: t('sa.billing.col.activeFrom'),
+      cell: ({ row }) => <span className="whitespace-nowrap tabular-nums text-fg-muted">{fmtDate(row.applied_subscription_started_at)}</span>,
+    },
+    {
+      id: 'to',
+      header: t('sa.billing.col.activeTo'),
+      cell: ({ row, isPastPeriod }) => (
+        <span className={cn('whitespace-nowrap font-medium tabular-nums', isPastPeriod ? 'text-caution' : 'text-fg')}>
+          {fmtDate(row.applied_subscription_expires_at)}
+        </span>
+      ),
+    },
+    {
+      id: 'code',
+      header: t('sa.billing.col.code'),
+      cell: ({ row }) => (
+        <span className="font-mono text-xs tracking-widest text-fg-subtle">
+          {row.code_last4 ? `••${row.code_last4}` : '••••'}
+        </span>
+      ),
+    },
+    {
+      id: 'status',
+      header: t('common.status'),
+      cell: ({ isCurrentActive, isPastPeriod }) => {
+        if (isCurrentActive) {
+          return <Badge tone="positive"><CheckCircle aria-hidden />{t('sa.billing.rowCurrentlyActive')}</Badge>;
+        } else if (isPastPeriod) {
+          return <Badge tone="caution"><Clock aria-hidden />{t('sa.billing.statusExpired')}</Badge>;
+        } else {
+          return <Badge tone="brand"><CheckCircle aria-hidden />{t('sa.billing.rowUsed')}</Badge>;
+        }
+      },
+    },
+  ];
+
+  const detail = (label: string, value: React.ReactNode, tone?: string) => (
+    <div>
+      <dt className="mb-1 text-xs font-medium text-fg-muted">{label}</dt>
+      <dd className={cn('text-sm font-medium tabular-nums', tone ?? 'text-fg')}>{value}</dd>
+    </div>
+  );
+
   return (
-    <div className="space-y-6">
-      <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>{t('sa.billing.title')}</h1>
+    <div className="grid grid-cols-1 gap-6 font-ui">
+      <PageHeader title={t('sa.billing.title')} className="pb-0" />
 
       {/* Abo Status Header Card */}
-      <div className="rounded-xl p-5" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
-        <div className="flex items-center justify-between flex-wrap gap-4">
-          <div className="flex items-center gap-4">
-            <div className="w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: aboStatusBg }}>
-              <ShieldCheck size={20} style={{ color: aboStatusColor }} />
-            </div>
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-wider mb-1" style={{ color: 'var(--text-tertiary)' }}>{t('sa.billing.statusLabel')}</p>
-              <div className="flex items-center gap-2 flex-wrap">
-                <span
-                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold"
-                  style={{ background: aboStatusBg, color: aboStatusColor }}
-                >
-                  {subActive ? <CheckCircle size={11} /> : subExpired ? <AlertCircle size={11} /> : <XCircle size={11} />}
+      <Card className="p-5">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div className="flex min-w-0 items-center gap-4">
+            <span
+              aria-hidden
+              className={cn(
+                'flex size-11 shrink-0 items-center justify-center rounded-surface',
+                aboTone === 'positive' ? 'bg-positive-soft text-positive' : aboTone === 'caution' ? 'bg-caution-soft text-caution' : 'bg-critical-soft text-critical',
+              )}
+            >
+              <ShieldCheck className="size-5" />
+            </span>
+            <div className="min-w-0">
+              <p className="mb-1 text-xs font-medium text-fg-muted">{t('sa.billing.statusLabel')}</p>
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge tone={aboTone}>
+                  <StatusIcon aria-hidden />
                   {aboStatusLabel}
-                </span>
+                </Badge>
                 {subActive && subExpiry && (
-                  <span className="flex items-center gap-1.5 text-sm" style={{ color: 'var(--text-secondary)' }}>
-                    <CalendarDays size={13} style={{ color: 'var(--success)' }} />
+                  <span className="flex flex-wrap items-center gap-1.5 text-sm text-fg-muted">
+                    <CalendarDays aria-hidden className="size-3.5 text-positive" />
                     {t('sa.billing.activeUntilColon')}
-                    <span className="font-semibold" style={{ color: 'var(--text-primary)' }}>{subExpiry}</span>
+                    <span className="font-semibold text-fg">{subExpiry}</span>
                     {daysRemaining !== null && (
-                      <span
-                        className="text-xs px-1.5 py-0.5 rounded-md font-medium"
-                        style={{
-                          background: daysRemaining <= 7 ? 'var(--warning-subtle)' : 'rgba(34,197,94,0.10)',
-                          color: daysRemaining <= 7 ? 'var(--warning)' : 'var(--success)',
-                        }}
-                      >
+                      <Badge tone={daysRemaining <= 7 ? 'caution' : 'positive'}>
                         {tPlural({ one: 'sa.billing.dayCount.one', other: 'sa.billing.dayCount.other' }, daysRemaining)}
-                      </span>
+                      </Badge>
                     )}
                   </span>
                 )}
                 {subExpired && subExpiry && (
-                  <span className="flex items-center gap-1.5 text-sm" style={{ color: 'var(--text-secondary)' }}>
-                    <CalendarDays size={13} style={{ color: 'var(--warning)' }} />
+                  <span className="flex flex-wrap items-center gap-1.5 text-sm text-fg-muted">
+                    <CalendarDays aria-hidden className="size-3.5 text-caution" />
                     {t('sa.billing.expiredOnColon')}
-                    <span className="font-semibold" style={{ color: 'var(--warning)' }}>{subExpiry}</span>
+                    <span className="font-semibold text-caution">{subExpiry}</span>
                   </span>
                 )}
               </div>
             </div>
           </div>
-          {!subActive && (
-            <button
-              onClick={() => navigate('/abo-aktivieren')}
-              className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all hover:-translate-y-0.5 hover:shadow-[0_4px_16px_rgba(6,182,212,0.3)]"
-              style={{ background: 'linear-gradient(135deg, #06b6d4, #3b82f6)', color: '#fff' }}
-            >
-              <KeyRound size={14} />
-              {t('sa.billing.activateCta')}
-            </button>
-          )}
+          {!subActive && activateButton}
         </div>
-      </div>
+      </Card>
 
       {/* Active subscription detail */}
       {subActive && (
-        <div className="rounded-xl p-6 space-y-4" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
+        <Card className="grid gap-4 p-5 sm:p-6">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
-              style={{ background: 'rgba(34,197,94,0.10)' }}>
-              <CheckCircle size={18} style={{ color: 'var(--success)' }} />
-            </div>
+            <span aria-hidden className="flex size-10 shrink-0 items-center justify-center rounded-surface bg-positive-soft text-positive">
+              <CheckCircle className="size-[18px]" />
+            </span>
             <div>
-              <h2 className="font-semibold" style={{ color: 'var(--text-primary)' }}>{t('sa.billing.activeSubTitle')}</h2>
-              <p className="text-xs mt-0.5" style={{ color: 'var(--text-secondary)' }}>{t('sa.billing.activeSubSub')}</p>
+              <h2 className="font-semibold text-fg">{t('sa.billing.activeSubTitle')}</h2>
+              <p className="mt-0.5 text-xs text-fg-muted">{t('sa.billing.activeSubSub')}</p>
             </div>
           </div>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 pt-1">
-            {subStarted && (
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-wider mb-1" style={{ color: 'var(--text-tertiary)' }}>{t('sa.billing.startedOn')}</p>
-                <p className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>{subStarted}</p>
-              </div>
+          <dl className="grid grid-cols-2 gap-4 pt-1 sm:grid-cols-4">
+            {subStarted && detail(t('sa.billing.startedOn'), subStarted)}
+            {subExpiry && detail(t('sa.billing.activeUntil'), subExpiry)}
+            {durLabel && detail(t('sa.billing.term'), durLabel)}
+            {lastCodeLast4 && detail(t('sa.billing.activationCode'), <span className="font-mono tracking-widest">••{lastCodeLast4}</span>)}
+            {daysRemaining !== null && detail(
+              t('sa.billing.remainingTerm'),
+              tPlural({ one: 'sa.billing.dayCount.one', other: 'sa.billing.dayCount.other' }, daysRemaining),
+              cn('font-semibold', daysRemaining <= 7 ? 'text-caution' : 'text-positive'),
             )}
-            {subExpiry && (
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-wider mb-1" style={{ color: 'var(--text-tertiary)' }}>{t('sa.billing.activeUntil')}</p>
-                <p className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>{subExpiry}</p>
-              </div>
-            )}
-            {durLabel && (
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-wider mb-1" style={{ color: 'var(--text-tertiary)' }}>{t('sa.billing.term')}</p>
-                <p className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>{durLabel}</p>
-              </div>
-            )}
-            {lastCodeLast4 && (
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-wider mb-1" style={{ color: 'var(--text-tertiary)' }}>{t('sa.billing.activationCode')}</p>
-                <p className="text-sm font-mono font-medium tracking-widest" style={{ color: 'var(--text-primary)' }}>
-                  ••{lastCodeLast4}
-                </p>
-              </div>
-            )}
-            {daysRemaining !== null && (
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-wider mb-1" style={{ color: 'var(--text-tertiary)' }}>{t('sa.billing.remainingTerm')}</p>
-                <p
-                  className="text-sm font-semibold"
-                  style={{ color: daysRemaining <= 7 ? 'var(--warning)' : 'var(--success)' }}
-                >
-                  {tPlural({ one: 'sa.billing.dayCount.one', other: 'sa.billing.dayCount.other' }, daysRemaining)}
-                </p>
-              </div>
-            )}
-          </div>
-        </div>
+          </dl>
+        </Card>
       )}
 
       {/* Expired state */}
       {!subActive && subExpired && (
-        <div className="rounded-xl p-6 text-center space-y-3" style={{ background: 'var(--bg-surface)', border: '1px solid rgba(245,158,11,0.3)' }}>
-          <div className="w-14 h-14 rounded-full flex items-center justify-center mx-auto"
-            style={{ background: 'rgba(245,158,11,0.10)', border: '1px solid rgba(245,158,11,0.25)' }}>
-            <AlertCircle size={26} style={{ color: 'var(--warning)' }} />
-          </div>
-          <p className="font-semibold" style={{ color: 'var(--text-primary)' }}>{t('sa.billing.expiredTitle')}</p>
-          <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>
-            {t('sa.billing.expiredSub')}
-          </p>
-          <button
-            onClick={() => navigate('/abo-aktivieren')}
-            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all hover:-translate-y-0.5 hover:shadow-[0_4px_16px_rgba(6,182,212,0.3)] mt-1"
-            style={{ background: 'linear-gradient(135deg, #06b6d4, #3b82f6)', color: '#fff' }}
-          >
-            <KeyRound size={14} />
-            {t('sa.billing.activateCta')}
-          </button>
-        </div>
+        <Card className="p-6">
+          <EmptyState
+            size="sm"
+            icon={AlertCircle}
+            title={t('sa.billing.expiredTitle')}
+            description={t('sa.billing.expiredSub')}
+            action={activateButton}
+          />
+        </Card>
       )}
 
       {/* Inactive state (no history) */}
       {!subActive && !subExpired && !hasHistory && (
-        <div className="rounded-xl p-8 text-center space-y-3" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
-          <div className="w-14 h-14 rounded-full flex items-center justify-center mx-auto"
-            style={{ background: 'rgba(239,68,68,0.10)', border: '1px solid rgba(239,68,68,0.2)' }}>
-            <XCircle size={26} style={{ color: 'var(--danger)' }} />
-          </div>
-          <p className="font-semibold" style={{ color: 'var(--text-primary)' }}>{t('sa.billing.noneTitle')}</p>
-          <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>
-            {t('sa.billing.noneSub')}
-          </p>
-          <button
-            onClick={() => navigate('/abo-aktivieren')}
-            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all hover:-translate-y-0.5 hover:shadow-[0_4px_16px_rgba(6,182,212,0.3)] mt-1"
-            style={{ background: 'linear-gradient(135deg, #06b6d4, #3b82f6)', color: '#fff' }}
-          >
-            <KeyRound size={14} />
-            {t('sa.billing.activateCta')}
-          </button>
-        </div>
+        <Card className="p-6">
+          <EmptyState
+            size="sm"
+            icon={XCircle}
+            title={t('sa.billing.noneTitle')}
+            description={t('sa.billing.noneSub')}
+            action={activateButton}
+          />
+        </Card>
       )}
 
       {/* Inactive with previous history — show note but don't hide history */}
       {!subActive && !subExpired && hasHistory && (
-        <div className="rounded-xl p-4 flex items-start gap-3" style={{ background: 'rgba(239,68,68,0.06)', border: '1px solid rgba(239,68,68,0.2)' }}>
-          <XCircle size={16} style={{ color: 'var(--danger)', flexShrink: 0, marginTop: 1 }} />
-          <div>
-            <p className="text-sm font-semibold" style={{ color: 'var(--danger)' }}>{t('sa.billing.noneTitle')}</p>
-            <p className="text-xs mt-0.5" style={{ color: 'var(--text-secondary)' }}>
-              {t('sa.billing.inactiveWithHistory')}
-            </p>
-          </div>
-        </div>
+        <Alert tone="critical" role="status" icon={XCircle} title={t('sa.billing.noneTitle')}>
+          {t('sa.billing.inactiveWithHistory')}
+        </Alert>
       )}
 
       {/* Activation history */}
-      <div>
-        <div className="flex items-center gap-2 mb-3">
-          <History size={16} style={{ color: 'var(--text-tertiary)' }} />
-          <h2 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>{t('sa.billing.historyTitle')}</h2>
-        </div>
+      <section className="grid gap-3">
+        <h2 className="flex items-center gap-2 text-lg font-semibold text-fg">
+          <History aria-hidden className="size-4 text-fg-subtle" />
+          {t('sa.billing.historyTitle')}
+        </h2>
         {history.length === 0 ? (
-          <div className="rounded-xl p-8 text-center" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
-            <Clock size={32} className="mx-auto mb-2 opacity-30" style={{ color: 'var(--text-tertiary)' }} />
-            <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>{t('sa.billing.historyEmpty')}</p>
-          </div>
+          <Card>
+            <EmptyState size="sm" icon={Clock} title={t('sa.billing.historyEmpty')} />
+          </Card>
         ) : (
-          <div className="rounded-xl overflow-hidden" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                    {([
-                      'common.date', 'sa.billing.col.type', 'sa.billing.col.duration',
-                      'sa.billing.col.activeFrom', 'sa.billing.col.activeTo',
-                      'sa.billing.col.code', 'common.status',
-                    ] as const).map((h, i) => (
-                      <th
-                        key={i}
-                        className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider"
-                        style={{ color: 'var(--text-tertiary)' }}
-                      >
-                        {t(h)}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {history.map((row, idx) => {
-                    const isCurrentActive = subActive && idx === 0 && companyDetail?.last_activation_code_id === row.id;
-                    const appliedExpiry = row.applied_subscription_expires_at;
-                    const isPastPeriod = appliedExpiry ? new Date(appliedExpiry) <= new Date() : false;
-
-                    let rowStatus: React.ReactNode;
-                    if (isCurrentActive) {
-                      rowStatus = (
-                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold"
-                          style={{ background: 'rgba(34,197,94,0.12)', color: 'var(--success)' }}>
-                          <CheckCircle size={11} />{t('sa.billing.rowCurrentlyActive')}
-                        </span>
-                      );
-                    } else if (isPastPeriod) {
-                      rowStatus = (
-                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold"
-                          style={{ background: 'rgba(245,158,11,0.10)', color: 'var(--warning)' }}>
-                          <Clock size={11} />{t('sa.billing.statusExpired')}
-                        </span>
-                      );
-                    } else {
-                      rowStatus = (
-                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold"
-                          style={{ background: 'rgba(6,182,212,0.10)', color: 'var(--accent)' }}>
-                          <CheckCircle size={11} />{t('sa.billing.rowUsed')}
-                        </span>
-                      );
-                    }
-
-                    return (
-                      <tr
-                        key={row.id}
-                        className="transition-colors"
-                        style={{ borderBottom: '1px solid var(--border)' }}
-                        onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-muted)')}
-                        onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
-                      >
-                        <td className="px-4 py-3 font-medium whitespace-nowrap" style={{ color: 'var(--text-primary)' }}>
-                          {row.used_at
-                            ? (() => { try { return format(new Date(row.used_at), 'dd.MM.yyyy HH:mm', { locale: de }); } catch { return '-'; } })()
-                            : '-'}
-                        </td>
-                        <td className="px-4 py-3 whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>
-                          {t('sa.billing.rowTypeCash')}
-                        </td>
-                        <td className="px-4 py-3 whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>
-                          {row.duration_type
-                            ? (DURATION_LABELS[row.duration_type] ? t(DURATION_LABELS[row.duration_type]) : row.duration_type)
-                            : '-'}
-                        </td>
-                        <td className="px-4 py-3 whitespace-nowrap text-xs" style={{ color: 'var(--text-secondary)' }}>
-                          {fmtDate(row.applied_subscription_started_at)}
-                        </td>
-                        <td className="px-4 py-3 whitespace-nowrap text-xs font-medium"
-                          style={{ color: isPastPeriod ? 'var(--warning)' : 'var(--text-primary)' }}>
-                          {fmtDate(row.applied_subscription_expires_at)}
-                        </td>
-                        <td className="px-4 py-3 font-mono text-xs tracking-widest" style={{ color: 'var(--text-tertiary)' }}>
-                          {row.code_last4 ? `••${row.code_last4}` : '••••'}
-                        </td>
-                        <td className="px-4 py-3">
-                          {rowStatus}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </div>
+          <DataTable
+            caption={t('sa.billing.historyTitle')}
+            columns={historyColumns}
+            rows={historyRows}
+            getRowId={({ row }) => row.id}
+            density="compact"
+          />
         )}
-      </div>
+      </section>
     </div>
   );
 }

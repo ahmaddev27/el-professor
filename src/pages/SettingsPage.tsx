@@ -1,20 +1,18 @@
 import React, { useState, useEffect } from 'react';
 import {
-  Settings as SettingsIcon,
   Save,
   Building2,
   Mail,
-  Phone,
   MapPin,
   User,
   FileText,
   CreditCard,
-  Palette,
   Eye,
   Upload,
   X,
   AlertCircle,
   Users,
+  Lock,
 } from 'lucide-react';
 import { useCompanySettings, resolveLogoUrl } from '../contexts/CompanySettingsContext';
 import { useToast } from '../contexts/ToastContext';
@@ -22,16 +20,8 @@ import { CompanySettingsFormData } from '../types/settings';
 import { supabase } from '../lib/supabase';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { useTranslation } from '../contexts/LanguageContext';
-
-const inputStyle: React.CSSProperties = {
-  background: 'var(--bg-subtle)',
-  border: '1px solid var(--border)',
-  borderRadius: '0.5rem',
-  color: 'var(--text-primary)',
-  fontSize: '0.875rem',
-  padding: '0.5rem 0.75rem',
-  outline: 'none',
-};
+import { Alert, Button, Card, CardContent, CardHeader, CardTitle, Field, Input, NativeSelect, PageHeader, buttonVariants, cn } from '../components/ui';
+import { controlFrameClass } from '../components/ui/Input';
 
 const SettingsPage: React.FC = () => {
   const { t } = useTranslation();
@@ -314,664 +304,481 @@ const SettingsPage: React.FC = () => {
     }
   };
 
+  // ── Presentation (phase 5) ────────────────────────────────────────────────
+  // Everything above is unchanged: the form's state, the save, the logo's
+  // upload to the company's own folder and its removal, and Zurücksetzen.
+  //
+  // One thing is new, and it only draws: in a platform read context
+  // (`companyScope.readOnly`, which this screen already read for the upload's
+  // message) the whole form is a disabled fieldset under a note, where it used
+  // to be an editable form whose save the database refuses since 3.13a
+  // (owner's answer, 22.09.2026). The handlers are the same either way.
+
+  const textArea = cn(controlFrameClass, 'h-auto py-2 leading-relaxed [@media(pointer:coarse)]:h-auto');
+
+  const section = (icon: React.ElementType, title: string, children: React.ReactNode) => {
+    const Icon = icon;
+    return (
+      <Card>
+        <CardHeader className="justify-start gap-2">
+          <Icon aria-hidden className="size-5 text-brand-text" />
+          <CardTitle>{title}</CardTitle>
+        </CardHeader>
+        <CardContent>{children}</CardContent>
+      </Card>
+    );
+  };
+
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-8">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2" style={{ borderColor: 'var(--accent)' }}></div>
+      <div role="status" className="flex items-center justify-center py-8 font-ui">
+        <div aria-hidden className="size-8 rounded-full border-2 border-line border-b-brand motion-safe:animate-spin" />
+        <span className="sr-only">{t('nav.settings')}</span>
       </div>
     );
   }
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="rounded-xl p-6 text-white" style={{ background: 'linear-gradient(to right, var(--accent), var(--accent-hover))', boxShadow: 'var(--shadow-md)' }}>
-        <div className="flex items-center justify-between">
-          <div className="flex items-center space-x-3">
-            <div className="bg-white bg-opacity-20 rounded-lg p-2">
-              <SettingsIcon className="text-white" size={32} />
-            </div>
-            <div>
-              <h1 className="text-3xl font-bold">{t('nav.settings')}</h1>
-              <p className="mt-1" style={{ color: 'rgba(255,255,255,0.8)' }}>{t('settings.subtitle')}</p>
-            </div>
-          </div>
-        </div>
-      </div>
+    <div className="grid grid-cols-1 gap-6 font-ui">
+      <PageHeader title={t('nav.settings')} description={t('settings.subtitle')} className="pb-0" />
 
-      <form onSubmit={handleSubmit} className="space-y-6">
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Main Form Column */}
-          <div className="lg:col-span-2 space-y-6">
-            {/* Company Logo */}
-            <div className="rounded-xl p-6" style={{ background: 'var(--bg-surface)', boxShadow: 'var(--shadow-sm)', border: '1px solid var(--border)' }}>
-              <div className="flex items-center space-x-2 mb-4">
-                <Upload style={{ color: 'var(--accent-text)' }} size={24} />
-                <h2 className="text-xl font-bold" style={{ color: 'var(--text-primary)' }}>{t('settings.logo')}</h2>
-              </div>
-              <div className="space-y-4">
-                {logoPreview && (
-                  <div className="flex items-center justify-center p-4 rounded-lg" style={{ background: 'var(--bg-subtle)' }}>
-                    <img
-                      src={logoPreview}
-                      alt={t('settings.logo')}
-                      className="h-24 object-contain"
-                      onError={(e) => {
-                        console.warn(t('settings.logoLoadFailed'), logoPreview);
-                        (e.currentTarget as HTMLImageElement).style.display = 'none';
-                        const placeholder = e.currentTarget.nextElementSibling as HTMLElement;
-                        if (placeholder) placeholder.style.display = 'flex';
-                      }}
-                    />
-                    <div
-                      style={{
-                        display: 'none',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        height: '6rem',
-                        width: '12rem',
-                        background: 'var(--bg-muted)',
-                        border: '1px dashed var(--border)',
-                        borderRadius: '0.5rem',
-                        color: 'var(--text-tertiary)',
-                        fontSize: '0.75rem',
-                        flexDirection: 'column',
-                        gap: '0.25rem',
-                      }}
-                    >
-                      <AlertCircle size={20} />
-                      <span>{t('settings.logoUnavailable')}</span>
-                    </div>
-                  </div>
-                )}
-                <div className="flex flex-col sm:flex-row gap-3">
-                  <label className="flex-1">
-                    <input
-                      type="file"
-                      accept="image/png,image/jpeg,image/jpg,image/svg+xml,image/webp"
-                      onChange={handleLogoUpload}
-                      disabled={uploading}
-                      className="hidden"
-                      id="logo-upload"
-                    />
-                    <div
-                      className="flex items-center justify-center space-x-2 px-4 py-2 rounded-lg transition-colors cursor-pointer disabled:opacity-50"
-                      style={{ background: 'var(--accent)', color: 'var(--text-inverse)' }}
-                      onMouseEnter={e => (e.currentTarget.style.background = 'var(--accent-hover)')}
-                      onMouseLeave={e => (e.currentTarget.style.background = 'var(--accent)')}
-                    >
-                      <Upload size={20} />
-                      <span>{uploading ? t('settings.uploading') : t('settings.uploadLogo')}</span>
-                    </div>
-                  </label>
+      {companyScope.readOnly && (
+        <Alert tone="brand" role="note" icon={Lock} title={t('settings.readOnlyTitle')}>
+          {t('settings.readOnlyBody')}
+        </Alert>
+      )}
+
+      <form onSubmit={handleSubmit}>
+        <fieldset disabled={companyScope.readOnly} className="m-0 grid min-w-0 grid-cols-1 gap-6 border-0 p-0">
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+            {/* Main Form Column */}
+            <div className="grid grid-cols-1 content-start gap-6 lg:col-span-2">
+              {/* Company Logo */}
+              {section(Upload, t('settings.logo'), (
+                <div className="grid gap-4">
                   {logoPreview && (
-                    <button
-                      type="button"
-                      onClick={handleRemoveLogo}
-                      disabled={uploading}
-                      className="flex items-center justify-center space-x-2 px-4 py-2 rounded-lg transition-colors disabled:opacity-50"
-                      style={{ border: '1px solid var(--danger)', color: 'var(--danger)', background: 'transparent' }}
-                      onMouseEnter={e => (e.currentTarget.style.background = 'var(--danger-subtle)')}
-                      onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
-                    >
-                      <X size={20} />
-                      <span>{t('common.remove')}</span>
-                    </button>
+                    <div className="flex items-center justify-center rounded-control bg-sunken p-4">
+                      <img
+                        src={logoPreview}
+                        alt={t('settings.logo')}
+                        className="h-24 object-contain"
+                        onError={(e) => {
+                          console.warn(t('settings.logoLoadFailed'), logoPreview);
+                          (e.currentTarget as HTMLImageElement).style.display = 'none';
+                          const placeholder = e.currentTarget.nextElementSibling as HTMLElement;
+                          if (placeholder) placeholder.style.display = 'flex';
+                        }}
+                      />
+                      {/* Shown by the handler above when the logo cannot be loaded. */}
+                      <div className="hidden h-24 w-48 flex-col items-center justify-center gap-1 rounded-control border border-dashed border-line-strong bg-raised text-xs text-fg-subtle">
+                        <AlertCircle aria-hidden className="size-5" />
+                        <span>{t('settings.logoUnavailable')}</span>
+                      </div>
+                    </div>
                   )}
-                </div>
-                <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>
-                  Unterstützte Formate: PNG, JPG, SVG, WebP (max. 5MB)
-                </p>
-              </div>
-            </div>
-
-            {/* Company Identity */}
-            <div className="rounded-xl p-6" style={{ background: 'var(--bg-surface)', boxShadow: 'var(--shadow-sm)', border: '1px solid var(--border)' }}>
-              <div className="flex items-center space-x-2 mb-4">
-                <Building2 style={{ color: 'var(--accent-text)' }} size={24} />
-                <h2 className="text-xl font-bold" style={{ color: 'var(--text-primary)' }}>{t('settings.identity')}</h2>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="md:col-span-2">
-                  <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>
-                    Firmenname *
-                  </label>
-                  <input
-                    type="text"
-                    value={formData.company_name}
-                    onChange={(e) => setFormData({ ...formData, company_name: e.target.value })}
-                    className="w-full"
-                    style={inputStyle}
-                    required
-                  />
-                </div>
-                <div className="md:col-span-2">
-                  <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>
-                    Rechtliche Firmenbezeichnung
-                  </label>
-                  <input
-                    type="text"
-                    value={formData.legal_company_name}
-                    onChange={(e) => setFormData({ ...formData, legal_company_name: e.target.value })}
-                    className="w-full"
-                    style={inputStyle}
-                  />
-                </div>
-                <div className="md:col-span-2">
-                  <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>
-                    Slogan
-                  </label>
-                  <input
-                    type="text"
-                    value={formData.slogan}
-                    onChange={(e) => setFormData({ ...formData, slogan: e.target.value })}
-                    className="w-full"
-                    style={inputStyle}
-                    placeholder={t('settings.egTagline')}
-                  />
-                </div>
-              </div>
-            </div>
-
-            {/* Contact Information */}
-            <div className="rounded-xl p-6" style={{ background: 'var(--bg-surface)', boxShadow: 'var(--shadow-sm)', border: '1px solid var(--border)' }}>
-              <div className="flex items-center space-x-2 mb-4">
-                <Mail style={{ color: 'var(--accent-text)' }} size={24} />
-                <h2 className="text-xl font-bold" style={{ color: 'var(--text-primary)' }}>{t('settings.contact')}</h2>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>
-                    E-Mail
-                  </label>
-                  <input
-                    type="email"
-                    value={formData.email}
-                    onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                    className="w-full"
-                    style={inputStyle}
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>
-                    Support E-Mail
-                  </label>
-                  <input
-                    type="email"
-                    value={formData.support_email}
-                    onChange={(e) => setFormData({ ...formData, support_email: e.target.value })}
-                    className="w-full"
-                    style={inputStyle}
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>
-                    Telefon
-                  </label>
-                  <input
-                    type="tel"
-                    value={formData.phone}
-                    onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                    className="w-full"
-                    style={inputStyle}
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>
-                    Mobil
-                  </label>
-                  <input
-                    type="tel"
-                    value={formData.mobile}
-                    onChange={(e) => setFormData({ ...formData, mobile: e.target.value })}
-                    className="w-full"
-                    style={inputStyle}
-                  />
-                </div>
-                <div className="md:col-span-2">
-                  <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>
-                    Website
-                  </label>
-                  <input
-                    type="url"
-                    value={formData.website}
-                    onChange={(e) => setFormData({ ...formData, website: e.target.value })}
-                    className="w-full"
-                    style={inputStyle}
-                    placeholder="https://..."
-                  />
-                </div>
-              </div>
-            </div>
-
-            {/* Address */}
-            <div className="rounded-xl p-6" style={{ background: 'var(--bg-surface)', boxShadow: 'var(--shadow-sm)', border: '1px solid var(--border)' }}>
-              <div className="flex items-center space-x-2 mb-4">
-                <MapPin style={{ color: 'var(--accent-text)' }} size={24} />
-                <h2 className="text-xl font-bold" style={{ color: 'var(--text-primary)' }}>{t('common.address')}</h2>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>
-                    Straße
-                  </label>
-                  <input
-                    type="text"
-                    value={formData.street}
-                    onChange={(e) => setFormData({ ...formData, street: e.target.value })}
-                    className="w-full"
-                    style={inputStyle}
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>
-                    Hausnummer
-                  </label>
-                  <input
-                    type="text"
-                    value={formData.house_number}
-                    onChange={(e) => setFormData({ ...formData, house_number: e.target.value })}
-                    className="w-full"
-                    style={inputStyle}
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>
-                    PLZ
-                  </label>
-                  <input
-                    type="text"
-                    value={formData.postal_code}
-                    onChange={(e) => setFormData({ ...formData, postal_code: e.target.value })}
-                    className="w-full"
-                    style={inputStyle}
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>
-                    Stadt
-                  </label>
-                  <input
-                    type="text"
-                    value={formData.city}
-                    onChange={(e) => setFormData({ ...formData, city: e.target.value })}
-                    className="w-full"
-                    style={inputStyle}
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>
-                    Bundesland
-                  </label>
-                  <input
-                    type="text"
-                    value={formData.state}
-                    onChange={(e) => setFormData({ ...formData, state: e.target.value })}
-                    className="w-full"
-                    style={inputStyle}
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>
-                    Land
-                  </label>
-                  <input
-                    type="text"
-                    value={formData.country}
-                    onChange={(e) => setFormData({ ...formData, country: e.target.value })}
-                    className="w-full"
-                    style={inputStyle}
-                  />
-                </div>
-              </div>
-            </div>
-
-            {/* Management */}
-            <div className="rounded-xl p-6" style={{ background: 'var(--bg-surface)', boxShadow: 'var(--shadow-sm)', border: '1px solid var(--border)' }}>
-              <div className="flex items-center space-x-2 mb-4">
-                <User style={{ color: 'var(--accent-text)' }} size={24} />
-                <h2 className="text-xl font-bold" style={{ color: 'var(--text-primary)' }}>{t('settings.management')}</h2>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>
-                    Geschäftsführer
-                  </label>
-                  <input
-                    type="text"
-                    value={formData.manager_name}
-                    onChange={(e) => setFormData({ ...formData, manager_name: e.target.value })}
-                    className="w-full"
-                    style={inputStyle}
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>
-                    Inhaber
-                  </label>
-                  <input
-                    type="text"
-                    value={formData.owner_name}
-                    onChange={(e) => setFormData({ ...formData, owner_name: e.target.value })}
-                    className="w-full"
-                    style={inputStyle}
-                  />
-                </div>
-                <div className="md:col-span-2">
-                  <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>
-                    Vertretungsberechtigter
-                  </label>
-                  <input
-                    type="text"
-                    value={formData.authorized_representative}
-                    onChange={(e) => setFormData({ ...formData, authorized_representative: e.target.value })}
-                    className="w-full"
-                    style={inputStyle}
-                  />
-                </div>
-              </div>
-            </div>
-
-            {/* Operations */}
-            <div className="rounded-xl p-6" style={{ background: 'var(--bg-surface)', boxShadow: 'var(--shadow-sm)', border: '1px solid var(--border)' }}>
-              <div className="flex items-center space-x-2 mb-4">
-                <Users style={{ color: 'var(--accent-text)' }} size={24} />
-                <h2 className="text-xl font-bold" style={{ color: 'var(--text-primary)' }}>{t('settings.operations')}</h2>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>
-                    Fahrer pro Fahrzeug
-                  </label>
-                  <select
-                    value={driversPerCar}
-                    onChange={(e) => setDriversPerCar(Number(e.target.value))}
-                    style={inputStyle}
-                    className="w-full"
-                  >
-                    {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(n => (
-                      <option key={n} value={n}>{n}</option>
-                    ))}
-                  </select>
-                  <p className="text-xs mt-1" style={{ color: 'var(--text-tertiary)' }}>
-                    Maximale Anzahl aktiver Fahrer = Fahrzeuge x {driversPerCar}
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            {/* Legal Data */}
-            <div className="rounded-xl p-6" style={{ background: 'var(--bg-surface)', boxShadow: 'var(--shadow-sm)', border: '1px solid var(--border)' }}>
-              <div className="flex items-center space-x-2 mb-4">
-                <FileText style={{ color: 'var(--accent-text)' }} size={24} />
-                <h2 className="text-xl font-bold" style={{ color: 'var(--text-primary)' }}>{t('settings.legal')}</h2>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>
-                    USt-IdNr.
-                  </label>
-                  <input
-                    type="text"
-                    value={formData.vat_id}
-                    onChange={(e) => setFormData({ ...formData, vat_id: e.target.value })}
-                    className="w-full"
-                    style={inputStyle}
-                    placeholder="DE123456789"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>
-                    Steuernummer
-                  </label>
-                  <input
-                    type="text"
-                    value={formData.tax_number}
-                    onChange={(e) => setFormData({ ...formData, tax_number: e.target.value })}
-                    className="w-full"
-                    style={inputStyle}
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>
-                    Handelsregisternummer
-                  </label>
-                  <input
-                    type="text"
-                    value={formData.commercial_register}
-                    onChange={(e) => setFormData({ ...formData, commercial_register: e.target.value })}
-                    className="w-full"
-                    style={inputStyle}
-                    placeholder="HRB 12345"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>
-                    Registergericht
-                  </label>
-                  <input
-                    type="text"
-                    value={formData.court_of_registration}
-                    onChange={(e) => setFormData({ ...formData, court_of_registration: e.target.value })}
-                    className="w-full"
-                    style={inputStyle}
-                    placeholder={t('settings.egCourt')}
-                  />
-                </div>
-              </div>
-            </div>
-
-            {/* Banking Data */}
-            <div className="rounded-xl p-6" style={{ background: 'var(--bg-surface)', boxShadow: 'var(--shadow-sm)', border: '1px solid var(--border)' }}>
-              <div className="flex items-center space-x-2 mb-4">
-                <CreditCard style={{ color: 'var(--accent-text)' }} size={24} />
-                <h2 className="text-xl font-bold" style={{ color: 'var(--text-primary)' }}>{t('settings.bank')}</h2>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="md:col-span-2">
-                  <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>
-                    Kontoinhaber
-                  </label>
-                  <input
-                    type="text"
-                    value={formData.account_holder}
-                    onChange={(e) => setFormData({ ...formData, account_holder: e.target.value })}
-                    className="w-full"
-                    style={inputStyle}
-                  />
-                </div>
-                <div className="md:col-span-2">
-                  <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>
-                    Bankname
-                  </label>
-                  <input
-                    type="text"
-                    value={formData.bank_name}
-                    onChange={(e) => setFormData({ ...formData, bank_name: e.target.value })}
-                    className="w-full"
-                    style={inputStyle}
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>
-                    IBAN
-                  </label>
-                  <input
-                    type="text"
-                    value={formData.iban}
-                    onChange={(e) => setFormData({ ...formData, iban: e.target.value.toUpperCase() })}
-                    className="w-full"
-                    style={inputStyle}
-                    placeholder="DE89 3704 0044 0532 0130 00"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>
-                    BIC
-                  </label>
-                  <input
-                    type="text"
-                    value={formData.bic}
-                    onChange={(e) => setFormData({ ...formData, bic: e.target.value.toUpperCase() })}
-                    className="w-full"
-                    style={inputStyle}
-                    placeholder="COBADEFFXXX"
-                  />
-                </div>
-              </div>
-            </div>
-
-            {/* Document Defaults */}
-            <div className="rounded-xl p-6" style={{ background: 'var(--bg-surface)', boxShadow: 'var(--shadow-sm)', border: '1px solid var(--border)' }}>
-              <div className="flex items-center space-x-2 mb-4">
-                <FileText style={{ color: 'var(--accent-text)' }} size={24} />
-                <h2 className="text-xl font-bold" style={{ color: 'var(--text-primary)' }}>{t('settings.documents')}</h2>
-              </div>
-              <div className="grid grid-cols-1 gap-4">
-                <div>
-                  <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>
-                    Standardort für Unterschriften
-                  </label>
-                  <input
-                    type="text"
-                    value={formData.default_signature_city}
-                    onChange={(e) => setFormData({ ...formData, default_signature_city: e.target.value })}
-                    className="w-full"
-                    style={inputStyle}
-                    placeholder={t('settings.egCity')}
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>
-                    Standard Fußzeilentext
-                  </label>
-                  <textarea
-                    value={formData.default_footer_text}
-                    onChange={(e) => setFormData({ ...formData, default_footer_text: e.target.value })}
-                    className="w-full"
-                    style={inputStyle}
-                    rows={3}
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>
-                    Standard E-Mail-Signatur
-                  </label>
-                  <textarea
-                    value={formData.default_email_signature}
-                    onChange={(e) => setFormData({ ...formData, default_email_signature: e.target.value })}
-                    className="w-full"
-                    style={inputStyle}
-                    rows={4}
-                  />
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Preview Column */}
-          <div className="lg:col-span-1">
-            <div className="rounded-xl p-6 sticky top-6" style={{ background: 'var(--bg-surface)', boxShadow: 'var(--shadow-sm)', border: '1px solid var(--border)' }}>
-              <div className="flex items-center space-x-2 mb-4">
-                <Eye style={{ color: 'var(--accent-text)' }} size={24} />
-                <h2 className="text-xl font-bold" style={{ color: 'var(--text-primary)' }}>{t('common.preview')}</h2>
-              </div>
-              <div className="space-y-4">
-                {/* Logo Preview */}
-                {logoPreview && (
-                  <div className="text-center">
-                    <img
-                      src={logoPreview}
-                      alt="Company Logo"
-                      className="h-16 mx-auto object-contain"
-                    />
+                  <div className="flex flex-col gap-3 sm:flex-row">
+                    <label className="flex-1">
+                      <input
+                        type="file"
+                        accept="image/png,image/jpeg,image/jpg,image/svg+xml,image/webp"
+                        onChange={handleLogoUpload}
+                        disabled={uploading}
+                        className="peer sr-only"
+                        id="logo-upload"
+                      />
+                      <span
+                        className={cn(
+                          buttonVariants({ variant: 'primary' }),
+                          'w-full cursor-pointer peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-focus',
+                          'peer-disabled:cursor-not-allowed peer-disabled:opacity-50',
+                        )}
+                      >
+                        <Upload aria-hidden />
+                        <span>{uploading ? t('settings.uploading') : t('settings.uploadLogo')}</span>
+                      </span>
+                    </label>
+                    {logoPreview && (
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        onClick={handleRemoveLogo}
+                        disabled={uploading}
+                        className="text-critical"
+                      >
+                        <X aria-hidden />
+                        <span>{t('common.remove')}</span>
+                      </Button>
+                    )}
                   </div>
-                )}
-
-                {/* Company Name */}
-                <div className="text-center">
-                  <h3 className="text-xl font-bold" style={{ color: 'var(--text-primary)' }}>{formData.company_name}</h3>
-                  {formData.slogan && (
-                    <p className="text-sm mt-1" style={{ color: 'var(--text-tertiary)' }}>{formData.slogan}</p>
-                  )}
+                  <p className="text-sm text-fg-subtle">{t('settings.logoFormats')}</p>
                 </div>
+              ))}
 
-                <div className="pt-4 space-y-3 text-sm" style={{ borderTop: '1px solid var(--border)' }}>
-                  {/* Address */}
-                  {(formData.street || formData.city) && (
-                    <div>
-                      <p className="font-medium" style={{ color: 'var(--text-secondary)' }}>{t('settings.addressLabel')}</p>
-                      <p style={{ color: 'var(--text-tertiary)' }}>
-                        {formData.street} {formData.house_number}
-                        {formData.street && <br />}
-                        {formData.postal_code} {formData.city}
-                      </p>
-                    </div>
-                  )}
-
-                  {/* Contact */}
-                  {(formData.email || formData.phone) && (
-                    <div>
-                      <p className="font-medium" style={{ color: 'var(--text-secondary)' }}>{t('settings.contactLabel')}</p>
-                      {formData.email && <p style={{ color: 'var(--text-tertiary)' }}>{formData.email}</p>}
-                      {formData.phone && <p style={{ color: 'var(--text-tertiary)' }}>{formData.phone}</p>}
-                    </div>
-                  )}
-
-                  {/* Banking */}
-                  {formData.iban && (
-                    <div>
-                      <p className="font-medium" style={{ color: 'var(--text-secondary)' }}>{t('settings.bankLabel')}</p>
-                      {formData.bank_name && <p style={{ color: 'var(--text-tertiary)' }}>{formData.bank_name}</p>}
-                      <p className="font-mono text-xs" style={{ color: 'var(--text-tertiary)' }}>{formData.iban}</p>
-                    </div>
-                  )}
-
-                  {/* Legal */}
-                  {(formData.vat_id || formData.tax_number) && (
-                    <div>
-                      <p className="font-medium" style={{ color: 'var(--text-secondary)' }}>{t('settings.legalLabel')}</p>
-                      {formData.vat_id && (
-                        <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>USt-IdNr: {formData.vat_id}</p>
-                      )}
-                      {formData.tax_number && (
-                        <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>St.-Nr: {formData.tax_number}</p>
-                      )}
-                    </div>
-                  )}
+              {/* Company Identity */}
+              {section(Building2, t('settings.identity'), (
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                  <Field label={t('settings.field.companyName')} required className="md:col-span-2">
+                    <Input
+                      type="text"
+                      value={formData.company_name}
+                      onChange={(e) => setFormData({ ...formData, company_name: e.target.value })}
+                      required
+                    />
+                  </Field>
+                  <Field label={t('settings.field.legalName')} className="md:col-span-2">
+                    <Input
+                      type="text"
+                      value={formData.legal_company_name}
+                      onChange={(e) => setFormData({ ...formData, legal_company_name: e.target.value })}
+                    />
+                  </Field>
+                  <Field label={t('settings.field.slogan')} className="md:col-span-2">
+                    <Input
+                      type="text"
+                      value={formData.slogan}
+                      onChange={(e) => setFormData({ ...formData, slogan: e.target.value })}
+                      placeholder={t('settings.egTagline')}
+                    />
+                  </Field>
                 </div>
-              </div>
+              ))}
+
+              {/* Contact Information */}
+              {section(Mail, t('settings.contact'), (
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                  <Field label={t('settings.field.email')}>
+                    <Input
+                      type="email"
+                      value={formData.email}
+                      onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                    />
+                  </Field>
+                  <Field label={t('settings.field.supportEmail')}>
+                    <Input
+                      type="email"
+                      value={formData.support_email}
+                      onChange={(e) => setFormData({ ...formData, support_email: e.target.value })}
+                    />
+                  </Field>
+                  <Field label={t('settings.field.phone')}>
+                    <Input
+                      type="tel"
+                      value={formData.phone}
+                      onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                    />
+                  </Field>
+                  <Field label={t('settings.field.mobile')}>
+                    <Input
+                      type="tel"
+                      value={formData.mobile}
+                      onChange={(e) => setFormData({ ...formData, mobile: e.target.value })}
+                    />
+                  </Field>
+                  <Field label={t('settings.field.website')} className="md:col-span-2">
+                    <Input
+                      type="url"
+                      value={formData.website}
+                      onChange={(e) => setFormData({ ...formData, website: e.target.value })}
+                      placeholder="https://..."
+                    />
+                  </Field>
+                </div>
+              ))}
+
+              {/* Address */}
+              {section(MapPin, t('common.address'), (
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                  <Field label={t('settings.field.street')}>
+                    <Input
+                      type="text"
+                      value={formData.street}
+                      onChange={(e) => setFormData({ ...formData, street: e.target.value })}
+                    />
+                  </Field>
+                  <Field label={t('settings.field.houseNumber')}>
+                    <Input
+                      type="text"
+                      value={formData.house_number}
+                      onChange={(e) => setFormData({ ...formData, house_number: e.target.value })}
+                    />
+                  </Field>
+                  <Field label={t('settings.field.postalCode')}>
+                    <Input
+                      type="text"
+                      value={formData.postal_code}
+                      onChange={(e) => setFormData({ ...formData, postal_code: e.target.value })}
+                    />
+                  </Field>
+                  <Field label={t('settings.field.city')}>
+                    <Input
+                      type="text"
+                      value={formData.city}
+                      onChange={(e) => setFormData({ ...formData, city: e.target.value })}
+                    />
+                  </Field>
+                  <Field label={t('settings.field.state')}>
+                    <Input
+                      type="text"
+                      value={formData.state}
+                      onChange={(e) => setFormData({ ...formData, state: e.target.value })}
+                    />
+                  </Field>
+                  <Field label={t('settings.field.country')}>
+                    <Input
+                      type="text"
+                      value={formData.country}
+                      onChange={(e) => setFormData({ ...formData, country: e.target.value })}
+                    />
+                  </Field>
+                </div>
+              ))}
+
+              {/* Management */}
+              {section(User, t('settings.management'), (
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                  <Field label={t('settings.field.managerName')}>
+                    <Input
+                      type="text"
+                      value={formData.manager_name}
+                      onChange={(e) => setFormData({ ...formData, manager_name: e.target.value })}
+                    />
+                  </Field>
+                  <Field label={t('settings.field.ownerName')}>
+                    <Input
+                      type="text"
+                      value={formData.owner_name}
+                      onChange={(e) => setFormData({ ...formData, owner_name: e.target.value })}
+                    />
+                  </Field>
+                  <Field label={t('settings.field.representative')} className="md:col-span-2">
+                    <Input
+                      type="text"
+                      value={formData.authorized_representative}
+                      onChange={(e) => setFormData({ ...formData, authorized_representative: e.target.value })}
+                    />
+                  </Field>
+                </div>
+              ))}
+
+              {/* Operations */}
+              {section(Users, t('settings.operations'), (
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                  <Field label={t('settings.field.driversPerCar')} hint={t('settings.field.driversPerCarHint', { n: driversPerCar })} id="settings-drivers-per-car">
+                    <NativeSelect
+                      id="settings-drivers-per-car"
+                      aria-describedby="settings-drivers-per-car-hint"
+                      value={driversPerCar}
+                      onChange={(e) => setDriversPerCar(Number(e.target.value))}
+                    >
+                      {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(n => (
+                        <option key={n} value={n}>{n}</option>
+                      ))}
+                    </NativeSelect>
+                  </Field>
+                </div>
+              ))}
+
+              {/* Legal Data */}
+              {section(FileText, t('settings.legal'), (
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                  <Field label={t('settings.field.vatId')}>
+                    <Input
+                      type="text"
+                      value={formData.vat_id}
+                      onChange={(e) => setFormData({ ...formData, vat_id: e.target.value })}
+                      placeholder="DE123456789"
+                    />
+                  </Field>
+                  <Field label={t('settings.field.taxNumber')}>
+                    <Input
+                      type="text"
+                      value={formData.tax_number}
+                      onChange={(e) => setFormData({ ...formData, tax_number: e.target.value })}
+                    />
+                  </Field>
+                  <Field label={t('settings.field.commercialRegister')}>
+                    <Input
+                      type="text"
+                      value={formData.commercial_register}
+                      onChange={(e) => setFormData({ ...formData, commercial_register: e.target.value })}
+                      placeholder="HRB 12345"
+                    />
+                  </Field>
+                  <Field label={t('settings.field.registerCourt')}>
+                    <Input
+                      type="text"
+                      value={formData.court_of_registration}
+                      onChange={(e) => setFormData({ ...formData, court_of_registration: e.target.value })}
+                      placeholder={t('settings.egCourt')}
+                    />
+                  </Field>
+                </div>
+              ))}
+
+              {/* Banking Data */}
+              {section(CreditCard, t('settings.bank'), (
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                  <Field label={t('settings.field.accountHolder')} className="md:col-span-2">
+                    <Input
+                      type="text"
+                      value={formData.account_holder}
+                      onChange={(e) => setFormData({ ...formData, account_holder: e.target.value })}
+                    />
+                  </Field>
+                  <Field label={t('settings.field.bankName')} className="md:col-span-2">
+                    <Input
+                      type="text"
+                      value={formData.bank_name}
+                      onChange={(e) => setFormData({ ...formData, bank_name: e.target.value })}
+                    />
+                  </Field>
+                  <Field label={t('settings.field.iban')}>
+                    <Input
+                      type="text"
+                      value={formData.iban}
+                      onChange={(e) => setFormData({ ...formData, iban: e.target.value.toUpperCase() })}
+                      placeholder="DE89 3704 0044 0532 0130 00"
+                    />
+                  </Field>
+                  <Field label={t('settings.field.bic')}>
+                    <Input
+                      type="text"
+                      value={formData.bic}
+                      onChange={(e) => setFormData({ ...formData, bic: e.target.value.toUpperCase() })}
+                      placeholder="COBADEFFXXX"
+                    />
+                  </Field>
+                </div>
+              ))}
+
+              {/* Document Defaults */}
+              {section(FileText, t('settings.documents'), (
+                <div className="grid grid-cols-1 gap-4">
+                  <Field label={t('settings.field.signatureCity')}>
+                    <Input
+                      type="text"
+                      value={formData.default_signature_city}
+                      onChange={(e) => setFormData({ ...formData, default_signature_city: e.target.value })}
+                      placeholder={t('settings.egCity')}
+                    />
+                  </Field>
+                  <Field label={t('settings.field.footerText')} id="settings-footer-text">
+                    <textarea
+                      id="settings-footer-text"
+                      value={formData.default_footer_text}
+                      onChange={(e) => setFormData({ ...formData, default_footer_text: e.target.value })}
+                      className={textArea}
+                      rows={3}
+                    />
+                  </Field>
+                  <Field label={t('settings.field.emailSignature')} id="settings-email-signature">
+                    <textarea
+                      id="settings-email-signature"
+                      value={formData.default_email_signature}
+                      onChange={(e) => setFormData({ ...formData, default_email_signature: e.target.value })}
+                      className={textArea}
+                      rows={4}
+                    />
+                  </Field>
+                </div>
+              ))}
+            </div>
+
+            {/* Preview Column */}
+            <div className="lg:col-span-1">
+              <Card className="lg:sticky lg:top-6">
+                <CardHeader className="justify-start gap-2">
+                  <Eye aria-hidden className="size-5 text-brand-text" />
+                  <CardTitle>{t('common.preview')}</CardTitle>
+                </CardHeader>
+                <CardContent className="grid gap-4">
+                  {/* Logo Preview */}
+                  {logoPreview && (
+                    <div className="text-center">
+                      <img
+                        src={logoPreview}
+                        alt={t('settings.logo')}
+                        className="mx-auto h-16 object-contain"
+                      />
+                    </div>
+                  )}
+
+                  {/* Company Name */}
+                  <div className="text-center">
+                    <p className="text-lg font-semibold text-fg">{formData.company_name}</p>
+                    {formData.slogan && (
+                      <p className="mt-1 text-sm text-fg-subtle">{formData.slogan}</p>
+                    )}
+                  </div>
+
+                  <div className="grid gap-3 border-t border-line pt-4 text-sm">
+                    {/* Address */}
+                    {(formData.street || formData.city) && (
+                      <div>
+                        <p className="font-medium text-fg-muted">{t('settings.addressLabel')}</p>
+                        <p className="text-fg-subtle">
+                          {formData.street} {formData.house_number}
+                          {formData.street && <br />}
+                          {formData.postal_code} {formData.city}
+                        </p>
+                      </div>
+                    )}
+
+                    {/* Contact */}
+                    {(formData.email || formData.phone) && (
+                      <div className="min-w-0">
+                        <p className="font-medium text-fg-muted">{t('settings.contactLabel')}</p>
+                        {formData.email && <p className="break-all text-fg-subtle">{formData.email}</p>}
+                        {formData.phone && <p className="text-fg-subtle">{formData.phone}</p>}
+                      </div>
+                    )}
+
+                    {/* Banking */}
+                    {formData.iban && (
+                      <div>
+                        <p className="font-medium text-fg-muted">{t('settings.bankLabel')}</p>
+                        {formData.bank_name && <p className="text-fg-subtle">{formData.bank_name}</p>}
+                        <p className="font-mono text-xs text-fg-subtle">{formData.iban}</p>
+                      </div>
+                    )}
+
+                    {/* Legal */}
+                    {(formData.vat_id || formData.tax_number) && (
+                      <div>
+                        <p className="font-medium text-fg-muted">{t('settings.legalLabel')}</p>
+                        {formData.vat_id && (
+                          <p className="text-xs text-fg-subtle">{t('settings.preview.vatId', { value: formData.vat_id })}</p>
+                        )}
+                        {formData.tax_number && (
+                          <p className="text-xs text-fg-subtle">{t('settings.preview.taxNumber', { value: formData.tax_number })}</p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
             </div>
           </div>
-        </div>
 
-        {/* Action Buttons */}
-        <div className="rounded-xl p-6" style={{ background: 'var(--bg-surface)', boxShadow: 'var(--shadow-sm)', border: '1px solid var(--border)' }}>
-          <div className="flex justify-end space-x-3">
-            <button
+          {/* Action Buttons */}
+          <div className="flex justify-end gap-3 rounded-surface border border-line bg-raised p-4 shadow-raised">
+            <Button
               type="button"
+              variant="secondary"
               onClick={handleReset}
-              className="px-6 py-2 rounded-lg transition-colors"
-              style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)', background: 'transparent' }}
-              onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-muted)')}
-              onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
               disabled={saving}
             >
-              Zurücksetzen
-            </button>
-            <button
+              {t('settings.reset')}
+            </Button>
+            <Button
               type="submit"
               disabled={saving}
-              className="px-6 py-2 rounded-lg transition-colors flex items-center space-x-2 disabled:opacity-50"
-              style={{ background: 'var(--accent)', color: 'var(--text-inverse)' }}
-              onMouseEnter={e => (e.currentTarget.style.background = 'var(--accent-hover)')}
-              onMouseLeave={e => (e.currentTarget.style.background = 'var(--accent)')}
             >
-              <Save size={20} />
-              <span>{saving ? t('settings.savingEllipsis') : 'Speichern'}</span>
-            </button>
+              <Save aria-hidden />
+              <span>{saving ? t('settings.savingEllipsis') : t('common.save')}</span>
+            </Button>
           </div>
-        </div>
+        </fieldset>
       </form>
     </div>
   );

@@ -1,5 +1,7 @@
 import React, { useEffect, useState } from 'react';
+import { AlertTriangle, Loader2, RotateCw } from 'lucide-react';
 import SalariesManagement from '../components/SalariesManagement';
+import { Button, Card, EmptyState, PageHeader } from '../components/ui';
 import { Driver } from '../types/receipt';
 import { supabase } from '../lib/supabase';
 import { handleDatabaseError } from '../utils/errorHandler';
@@ -48,31 +50,41 @@ const SalariesPage: React.FC = () => {
     }
   };
 
+  // ── Presentation (phase 5) ────────────────────────────────────────────────
+  // Everything above is the page's logic and is unchanged; everything below
+  // only draws it. While the drivers load, and when they fail to, the page
+  // renders nothing of SalariesManagement — as before, an empty driver list
+  // after a failure is never handed on as if it were the company's.
+
   if (loading) {
     return (
-      <div className="flex flex-col items-center justify-center h-64 space-y-4">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2" style={{ borderColor: 'var(--accent)' }}></div>
-        <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>{t('salaries.loadingDrivers')}</p>
+      <div className="font-ui">
+        <PageHeader title={t('sal.title')} description={t('sal.subtitle')} />
+        <div role="status" className="flex items-center justify-center gap-3 py-16 text-sm text-fg-muted">
+          <Loader2 aria-hidden className="size-5 motion-safe:animate-spin" />
+          {t('salaries.loadingDrivers')}
+        </div>
       </div>
     );
   }
 
   if (loadError) {
     return (
-      <div className="flex flex-col items-center justify-center h-64 space-y-4">
-        <div className="text-center">
-          <p className="text-lg font-semibold mb-2" style={{ color: 'var(--danger)' }}>{t('salaries.loadFailed')}</p>
-          <p className="text-sm mb-4" style={{ color: 'var(--text-secondary)' }}>{t('salaries.noConnection')}</p>
-        </div>
-        <button
-          onClick={loadDrivers}
-          className="px-6 py-2 rounded-lg transition-colors"
-          style={{ background: 'var(--accent)', color: 'var(--text-inverse)' }}
-          onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'var(--accent-hover)'; }}
-          onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'var(--accent)'; }}
-        >
-          Erneut versuchen
-        </button>
+      <div className="font-ui">
+        <PageHeader title={t('sal.title')} description={t('sal.subtitle')} />
+        <Card>
+          <EmptyState
+            icon={AlertTriangle}
+            title={t('salaries.loadFailed')}
+            description={t('salaries.noConnection')}
+            action={
+              <Button variant="secondary" onClick={loadDrivers}>
+                <RotateCw aria-hidden />
+                {t('ui.table.retry')}
+              </Button>
+            }
+          />
+        </Card>
       </div>
     );
   }

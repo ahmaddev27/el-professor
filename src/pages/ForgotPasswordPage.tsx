@@ -17,13 +17,8 @@ import type { OtpNotice } from '../lib/otpUi';
 import AuthShell from '../components/auth/AuthShell';
 import NoticeBox from '../components/auth/NoticeBox';
 import OtpChallenge from '../components/auth/OtpChallenge';
-import {
-  authInputClass,
-  authLabelClass,
-  authPrimaryButtonClass,
-  authQuietLinkClass,
-  authSpinnerClass,
-} from '../components/auth/authStyles';
+import { authFieldIconClass, authFieldWithIconClass, authQuietLinkClass } from '../components/auth/authStyles';
+import { Button, Field, Input } from '../components/ui';
 
 type Challenge = { email: string; cooldownSeconds: number; notice: OtpNotice };
 
@@ -72,6 +67,11 @@ const ForgotPasswordPage: React.FC = () => {
     if (!signedIn) return { ok: false, reason: 'session_failed' };
   };
 
+  // ── Presentation (phase 5) ────────────────────────────────────────────────
+  // Everything above is unchanged. The first step keeps its one button, named
+  // "Code senden" as the e2e suite asks for it, and no second button whose name
+  // contains those words; the code step is the shared OtpChallenge.
+
   return (
     <AuthShell
       title={t('forgot.title')}
@@ -95,39 +95,30 @@ const ForgotPasswordPage: React.FC = () => {
           backLabel={t('forgot.changeEmail')}
         />
       ) : (
-        <form onSubmit={sendCode} className="space-y-4" noValidate>
+        <form onSubmit={sendCode} className="grid gap-4" noValidate>
           {error && <NoticeBox tone="error" announce>{formatOtpMessage(error, t, tPlural)}</NoticeBox>}
 
-          <div>
-            <label htmlFor="forgot-email" className={authLabelClass}>
-              {t('forgot.emailLabel')}
-            </label>
+          <Field label={t('forgot.emailLabel')} id="forgot-email">
             <div className="relative">
-              <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 text-white/25" size={16} aria-hidden="true" />
-              <input
+              <Mail aria-hidden className={authFieldIconClass} />
+              <Input
                 id="forgot-email"
                 type="email"
                 autoComplete="email"
                 value={email}
                 onChange={event => setEmail(event.target.value)}
-                className={authInputClass}
+                className={authFieldWithIconClass}
                 placeholder={t('forgot.emailPlaceholder')}
                 required
                 autoFocus
               />
             </div>
-          </div>
+          </Field>
 
-          <button type="submit" disabled={sending || !email.trim()} className={`${authPrimaryButtonClass} mt-2`}>
-            {sending ? (
-              <span className={authSpinnerClass} aria-hidden="true" />
-            ) : (
-              <>
-                <Send size={15} aria-hidden="true" />
-                <span>{t('forgot.sendCode')}</span>
-              </>
-            )}
-          </button>
+          <Button type="submit" size="lg" disabled={sending || !email.trim()} loading={sending} className="mt-1 w-full">
+            {!sending && <Send aria-hidden />}
+            <span>{t('forgot.sendCode')}</span>
+          </Button>
         </form>
       )}
     </AuthShell>

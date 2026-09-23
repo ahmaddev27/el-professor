@@ -8,31 +8,53 @@
  *
  * `window.__harness.pending` counts unanswered queries; the capture script
  * waits for it to reach zero before it takes a screenshot.
+ *
+ * `window.__harness.writes` records every insert, update and delete a screen
+ * sends — table, payload and equality filters — so a flow can check what a
+ * click wrote, not only what the screen shows afterwards (flows-batch1b.mjs).
  */
 import { assignmentRows, carsRows, driversRows, fixedCostRows, type Row } from '../fixtures';
+import { batch2Drivers, batch2PrimaryTable, batch2Rpc, batch2Tables, isBatch2Screen } from '../fixtures-batch2';
+import { batch3Tables, recordBatch3Rpc, recordBatch3Write } from '../batch3/fixtures';
+import { batch1bFailsEveryTable, batch1bPrimaryTable, batch1bTables } from '../fixtures-batch1b';
 import { scenario } from '../scenario';
 
 type QueryError = { message: string; code: string; details?: string; hint?: string };
 type Result = { data: unknown; error: QueryError | null; count?: number | null };
+type Write = { table: string; op: 'insert' | 'update' | 'delete'; payload: unknown; filters: Array<[string, string, unknown]> };
 
 const ANSWER_DELAY_MS = 120;
 
 declare global {
   interface Window {
-    __harness: { pending: number; answered: number };
+    __harness: { pending: number; answered: number; writes: Write[] };
   }
 }
-window.__harness = { pending: 0, answered: 0 };
+window.__harness = { pending: 0, answered: 0, writes: [] };
 
-const PRIMARY_TABLE = scenario.screen === 'fixkosten' ? 'fixed_costs' : 'cars';
+const PRIMARY_TABLE =
+  batch2PrimaryTable(scenario) ?? batch1bPrimaryTable(scenario) ?? (scenario.screen === 'fixkosten' ? 'fixed_costs' : 'cars');
 
 function seed(): Map<string, Row[]> {
-  const empty = scenario.data === 'empty';
+  // Batch 1b's `empty` empties only its screen's own table (fixtures-batch1b.ts).
+  const empty = scenario.data === 'empty' && batch1bPrimaryTable(scenario) === null;
+  // Batch 2: the drivers carry a salary ratio, and an empty Gehälter screen is
+  // one with no drivers, since a driver without income still gets a row.
+  const drivers = !isBatch2Screen(scenario)
+    ? driversRows()
+    : scenario.screen === 'gehaelter' && empty ? [] : batch2Drivers(driversRows());
   return new Map<string, Row[]>([
     ['cars', empty ? [] : carsRows()],
     ['car_driver_assignments', empty ? [] : assignmentRows()],
-    ['drivers', driversRows()],
+    ['drivers', drivers],
     ['fixed_costs', empty ? [] : fixedCostRows()],
+    ...batch2Tables(scenario),
+    // Batch 1b's tables, on its own screens only; later entries win, so its
+    // drivers, with the payroll columns the Fahrer form reads, replace the ones above.
+    ...batch1bTables(scenario),
+    // Batch 3's tables, on its own screens only (empty on any other). Later
+    // entries win, so there its richer drivers replace the ones above.
+    ...batch3Tables(),
   ]);
 }
 
@@ -40,9 +62,13 @@ const store = seed();
 let nextId = 1;
 
 /** The failure a scenario asks for, on every statement against the screen's own table. */
-function scenarioFailure(table: string): QueryError | null {
+function scenarioFailure(table: string, dateFrom: string | null): QueryError | null {
+  if (batch1bFailsEveryTable(scenario)) return { message: 'TypeError: Failed to fetch', code: '' };
   if (table !== PRIMARY_TABLE) return null;
-  if (scenario.data === 'error') return { message: 'TypeError: Failed to fetch', code: '' };
+  if (scenario.data === 'next-month-fails') {
+    return dateFrom?.startsWith('2026-10') ? { message: 'TypeError: Failed to fetch', code: '' } : null;
+  }
+  if (scenario.data === 'error' || scenario.data === 'drivers-error') return { message: 'TypeError: Failed to fetch', code: '' };
   if (scenario.data === 'missing') {
     return { message: `relation "public.${table}" does not exist`, code: 'PGRST204' };
   }
@@ -53,14 +79,27 @@ class FakeQuery implements PromiseLike<Result> {
   private op: 'select' | 'insert' | 'update' | 'delete' = 'select';
   private payload: Row | Row[] | null = null;
   private readonly filters: Array<(row: Row) => boolean> = [];
-  private orderBy: { column: string; ascending: boolean } | null = null;
+  /** The equality filters as written, for the write log. */
+  private readonly filterLog: Array<[string, string, unknown]> = [];
+  // Every .order() applies, the first one first, as in PostgREST: the planning
+  // screens order rides by date, then start time, then id.
+  private readonly orderBy: Array<{ column: string; ascending: boolean }> = [];
   private returnRows = false;
   private singleRow = false;
+  /** The lower bound of a `date` range, so a scenario can fail one month's reads. */
+  private dateFrom: string | null = null;
+  // .range() pages for real: the product's `while (true)` + `.range()` loops
+  // stop on a short page, and a page that ignored its window would never be one.
+  private window: [number, number] | null = null;
+  private counted = false;
+  private headOnly = false;
 
   constructor(private readonly table: string) {}
 
-  select(): this {
+  select(_columns?: string, options?: { count?: string; head?: boolean }): this {
     if (this.op !== 'select') this.returnRows = true;
+    if (options?.count) this.counted = true;
+    if (options?.head) this.headOnly = true;
     return this;
   }
 
@@ -83,25 +122,70 @@ class FakeQuery implements PromiseLike<Result> {
 
   eq(column: string, value: unknown): this {
     this.filters.push(row => row[column] === value);
+    this.filterLog.push(['eq', column, value]);
     return this;
   }
 
   neq(column: string, value: unknown): this {
     this.filters.push(row => row[column] !== value);
+    this.filterLog.push(['neq', column, value]);
     return this;
   }
 
   in(column: string, values: unknown[]): this {
     this.filters.push(row => values.includes(row[column]));
+    this.filterLog.push(['in', column, values]);
+    return this;
+  }
+
+  // Comparisons as PostgREST reads them: a NULL never satisfies one. Dates are
+  // stored as `YYYY-MM-DD` text, which compares correctly as a string.
+  gt(column: string, value: unknown): this {
+    this.filters.push(row => row[column] != null && compareForFilter(row[column], value) > 0);
+    return this;
+  }
+
+  gte(column: string, value: unknown): this {
+    // Batch 2: the lower bound of a `date` range, so a scenario can fail one month's reads.
+    if (column === 'date') this.dateFrom = String(value);
+    this.filters.push(row => row[column] != null && compareForFilter(row[column], value) >= 0);
+    return this;
+  }
+
+
+  lt(column: string, value: unknown): this {
+    this.filters.push(row => row[column] != null && compareForFilter(row[column], value) < 0);
+    return this;
+  }
+
+  lte(column: string, value: unknown): this {
+    this.filters.push(row => row[column] != null && compareForFilter(row[column], value) <= 0);
+    return this;
+  }
+
+  is(column: string, value: unknown): this {
+    this.filters.push(row => (value === null ? row[column] == null : row[column] === value));
+    return this;
+  }
+
+  not(column: string, operator: string, value: unknown): this {
+    if (operator === 'is') this.filters.push(row => (value === null ? row[column] != null : row[column] !== value));
+    else if (operator === 'eq') this.filters.push(row => row[column] !== value);
+    return this;
+  }
+
+  /** Accepts every row: the one caller (AssignmentPreview's note query) only narrows a small table. */
+  or(): this {
     return this;
   }
 
   order(column: string, options?: { ascending?: boolean }): this {
-    this.orderBy = { column, ascending: options?.ascending ?? true };
+    this.orderBy.push({ column, ascending: options?.ascending ?? true });
     return this;
   }
 
-  range(): this {
+  range(from: number, to: number): this {
+    this.window = [from, to];
     return this;
   }
 
@@ -140,18 +224,34 @@ class FakeQuery implements PromiseLike<Result> {
   }
 
   private run(): Result {
-    const failure = scenarioFailure(this.table);
+    if (this.op !== 'select') {
+      recordBatch3Write(this.table, this.op);
+      window.__harness.writes.push({
+        table: this.table,
+        op: this.op,
+        payload: JSON.parse(JSON.stringify(this.payload ?? null)),
+        filters: this.filterLog.map(([kind, column, value]) => [kind, column, value]),
+      });
+    }
+    const failure = scenarioFailure(this.table, this.dateFrom);
     if (failure) return { data: null, error: failure };
 
     const rows = store.get(this.table) ?? [];
     switch (this.op) {
       case 'select': {
         const selected = rows.filter(row => this.matches(row));
-        if (this.orderBy) {
-          const { column, ascending } = this.orderBy;
-          selected.sort((a, b) => String(a[column] ?? '').localeCompare(String(b[column] ?? ''), 'de') * (ascending ? 1 : -1));
+        if (this.orderBy.length > 0) {
+          selected.sort((a, b) => {
+            for (const { column, ascending } of this.orderBy) {
+              const order = compareValues(a[column], b[column]);
+              if (order !== 0) return ascending ? order : -order;
+            }
+            return 0;
+          });
         }
-        return this.shape(selected);
+        const count = selected.length;
+        const page = this.window ? selected.slice(this.window[0], this.window[1] + 1) : selected;
+        return { ...this.shape(page), count: this.counted ? count : null };
       }
       case 'insert': {
         const now = new Date().toISOString();
@@ -192,16 +292,49 @@ class FakeQuery implements PromiseLike<Result> {
 
   private shape(rows: Row[]): Result {
     if (this.op !== 'select' && !this.returnRows) return { data: null, error: null };
+    if (this.headOnly) return { data: null, error: null };
     if (this.singleRow) return { data: rows[0] ?? null, error: null };
     return { data: rows.map(row => ({ ...row })), error: null };
   }
 }
 
+/** For a filter: numbers as numbers, anything else as plain text (a `YYYY-MM-DD` date compares correctly). */
+function compareForFilter(a: unknown, b: unknown): number {
+  if (typeof a === 'number' && typeof b === 'number') return a - b;
+  const [x, y] = [String(a), String(b)];
+  return x < y ? -1 : x > y ? 1 : 0;
+}
+
+/** For an order: numbers as numbers (month 12 after month 8), everything else as German text; NULL last. */
+function compareValues(a: unknown, b: unknown): number {
+  if (a == null || b == null) return a == null ? (b == null ? 0 : 1) : -1;
+  if (typeof a === 'number' && typeof b === 'number') return a - b;
+  return String(a).localeCompare(String(b), 'de');
+}
+
 const unavailable = async () => ({ data: null, error: { message: 'Not available in the screen harness', code: 'HARNESS' } });
+
+/** An RPC a batch's fixtures answer, counted and delayed like a query; any other is unavailable. */
+function rpc(name: string, args?: Record<string, unknown>): PromiseLike<Result> {
+  // Batch 3 records every call on its screens, so its flows can prove they sent none.
+  recordBatch3Rpc(name);
+  const answer = batch2Rpc(scenario, store, name, args);
+  if (!answer) return unavailable();
+  window.__harness.pending += 1;
+  const neverAnswers = scenario.data === 'loading' && name === PRIMARY_TABLE;
+  return new Promise<Result>(resolve => {
+    if (neverAnswers) return;
+    setTimeout(() => {
+      window.__harness.pending -= 1;
+      window.__harness.answered += 1;
+      resolve(answer);
+    }, ANSWER_DELAY_MS);
+  });
+}
 
 export const supabase = {
   from: (table: string) => new FakeQuery(table),
-  rpc: unavailable,
+  rpc,
   auth: {
     getSession: async () => ({ data: { session: null }, error: null }),
     getUser: async () => ({ data: { user: null }, error: null }),

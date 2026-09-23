@@ -26,7 +26,8 @@ import {
 import EmphasizedText from './EmphasizedText';
 import NoticeBox from './NoticeBox';
 import OtpCodeInput from './OtpCodeInput';
-import { authPrimaryButtonClass, authQuietLinkClass, authSpinnerClass, type AuthSurface } from './authStyles';
+import type { AuthSurface } from './authStyles';
+import { Button, cn } from '../ui';
 
 export interface OtpChallengeProps {
   purpose: OtpPurpose;
@@ -195,26 +196,14 @@ const OtpChallenge: React.FC<OtpChallengeProps> = ({
   const resendDisabled = busy !== null || secondsLeft > 0;
   const describedBy = hint === null ? alertId : `${hintId} ${alertId}`;
 
-  const appButtonStyle = (inactive: boolean): React.CSSProperties => ({
-    background: inactive ? 'var(--bg-muted)' : 'var(--accent)',
-    color: inactive ? 'var(--text-tertiary)' : 'var(--text-inverse)',
-    cursor: inactive ? 'not-allowed' : 'pointer',
-  });
-
-  const resendClass = isDark
-    ? `inline-flex items-center gap-1.5 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
-        needsNewCode
-          ? 'px-3 py-2 rounded-xl border border-cyan-500/40 bg-cyan-500/10 text-cyan-200 font-semibold hover:bg-cyan-500/20'
-          : 'text-cyan-300/80 hover:text-cyan-200'
-      }`
-    : `inline-flex items-center gap-1.5 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
-        needsNewCode ? 'px-3 py-2 rounded-lg' : ''
-      }`;
-  const resendStyle: React.CSSProperties | undefined = isDark
-    ? undefined
-    : needsNewCode
-      ? { background: 'var(--accent)', color: 'var(--text-inverse)' }
-      : { color: 'var(--accent-text)' };
+  // ── Presentation (phase 5) ────────────────────────────────────────────────
+  // Everything above is the challenge's behaviour and is unchanged, the derived
+  // `verifyDisabled`, `resendDisabled` and `describedBy` included. Below it is
+  // drawn with the design system: the two live regions stay where they were
+  // and always exist; the verify button spans the card on a signed-out screen
+  // (`isDark`, the older name of that surface) and keeps its own width inside
+  // Mein Konto; "new code" becomes a solid button once only a new code can
+  // help, and is a quiet link until then.
 
   return (
     <form
@@ -223,20 +212,16 @@ const OtpChallenge: React.FC<OtpChallengeProps> = ({
         event.preventDefault();
         void verify(code);
       }}
+      className="font-ui"
     >
       {hint !== null && (
-        <p
-          id={hintId}
-          className={`mb-4 text-sm leading-relaxed break-words ${isDark ? 'text-white/60' : ''}`}
-          style={isDark ? undefined : { color: 'var(--text-secondary)' }}
-        >
+        <p id={hintId} className="mb-4 break-words text-sm leading-relaxed text-fg-muted">
           {hint ?? (
             <EmphasizedText
               template={t('otp.code.hint')}
               placeholder="email"
               value={recipient}
-              className={isDark ? 'text-cyan-300' : 'font-medium'}
-              style={isDark ? undefined : { color: 'var(--text-primary)' }}
+              className="font-medium text-fg"
             />
           )}
         </p>
@@ -262,63 +247,54 @@ const OtpChallenge: React.FC<OtpChallengeProps> = ({
       <div id={alertId} role="alert" aria-atomic="true">
         {notice?.tone === 'error' && (
           <div className="mt-4">
-            <NoticeBox tone="error" surface={surface}>{formatOtpMessage(notice.message, t, tPlural)}</NoticeBox>
+            <NoticeBox tone="error">{formatOtpMessage(notice.message, t, tPlural)}</NoticeBox>
           </div>
         )}
       </div>
       <div role="status" aria-atomic="true">
         {notice?.tone === 'success' && (
           <div className="mt-4">
-            <NoticeBox tone="success" surface={surface}>{formatOtpMessage(notice.message, t, tPlural)}</NoticeBox>
+            <NoticeBox tone="success">{formatOtpMessage(notice.message, t, tPlural)}</NoticeBox>
           </div>
         )}
       </div>
 
-      <button
+      <Button
         type="submit"
+        size={isDark ? 'lg' : 'md'}
         disabled={verifyDisabled}
-        className={isDark
-          ? `${authPrimaryButtonClass} mt-5`
-          : 'mt-5 w-full rounded-lg px-4 py-2 text-sm font-medium transition-colors flex items-center justify-center gap-2'}
-        style={isDark ? undefined : appButtonStyle(verifyDisabled)}
+        loading={busy === 'verify'}
+        className={cn('mt-5', isDark && 'w-full')}
       >
         {busy === 'verify' ? (
-          <>
-            <span className={authSpinnerClass} aria-hidden="true" />
-            <span>{t('otp.verifying')}</span>
-          </>
+          <span>{t('otp.verifying')}</span>
         ) : (
           <>
-            <ShieldCheck size={15} aria-hidden="true" />
+            <ShieldCheck aria-hidden />
             <span>{verifyLabel ?? t('otp.verify')}</span>
           </>
         )}
-      </button>
+      </Button>
 
-      <div className={`mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 ${onBack ? 'justify-between' : 'justify-end'}`}>
+      <div className={cn('mt-4 flex flex-wrap items-center gap-x-4 gap-y-2', onBack ? 'justify-between' : 'justify-end')}>
         {onBack && (
-          <button
-            type="button"
-            onClick={onBack}
-            disabled={busy !== null}
-            className={isDark ? `${authQuietLinkClass} disabled:opacity-50` : 'inline-flex items-center gap-1.5 text-sm disabled:opacity-50'}
-            style={isDark ? undefined : { color: 'var(--text-secondary)' }}
-          >
-            <ArrowLeft size={14} aria-hidden="true" />
+          <Button type="button" variant="ghost" size="sm" onClick={onBack} disabled={busy !== null} className="-ml-2">
+            <ArrowLeft aria-hidden />
             {backLabel ?? t('common.back')}
-          </button>
+          </Button>
         )}
-        <button
+        <Button
           ref={resendButton}
           type="button"
+          variant={needsNewCode ? 'primary' : 'ghost'}
+          size="sm"
           onClick={() => { void resend(); }}
           disabled={resendDisabled}
-          className={resendClass}
-          style={resendStyle}
+          className={cn(!needsNewCode && 'text-brand-text hover:text-brand-text')}
         >
-          <RefreshCw size={14} className={busy === 'resend' ? 'animate-spin' : ''} aria-hidden="true" />
+          <RefreshCw aria-hidden className={busy === 'resend' ? 'motion-safe:animate-spin' : ''} />
           <span>{secondsLeft > 0 ? t('otp.resendIn', { seconds: secondsLeft }) : t('otp.resend')}</span>
-        </button>
+        </Button>
       </div>
     </form>
   );

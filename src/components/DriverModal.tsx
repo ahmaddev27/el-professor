@@ -1,8 +1,22 @@
 import React, { useState, useEffect } from 'react';
-import { X, Save, User, ChevronDown, ChevronUp } from 'lucide-react';
+import { ChevronDown, Save, User } from 'lucide-react';
 import { Driver } from '../types/receipt';
 import { useTranslation } from '../contexts/LanguageContext';
 import type { TranslationKey } from '../i18n';
+import {
+  Button,
+  cn,
+  Field,
+  Input,
+  NativeSelect,
+  Sheet,
+  SheetBody,
+  SheetContent,
+  SheetDescription,
+  SheetFooter,
+  SheetHeader,
+  SheetTitle,
+} from './ui';
 
 type Gender = 'male' | 'female' | '';
 
@@ -52,17 +66,6 @@ interface DriverModalProps {
   driver?: Driver;
   title: string;
 }
-
-const inputStyle: React.CSSProperties = {
-  background: 'var(--bg-subtle)',
-  border: '1px solid var(--border)',
-  borderRadius: '0.5rem',
-  color: 'var(--text-primary)',
-  fontSize: '0.875rem',
-  padding: '0.5rem 0.75rem',
-  outline: 'none',
-  width: '100%',
-};
 
 const DEFAULT_PLANNING: DriverPlanningFields = {
   employment_type: 'employee',
@@ -160,414 +163,334 @@ const DriverModal: React.FC<DriverModalProps> = ({
 
   if (!isOpen) return null;
 
+  // ── Presentation (phase 5) ────────────────────────────────────────────────
+  // Everything above is the form's logic and is unchanged, less the module-level
+  // inline input style object, which only drew. The values these fields bind —
+  // salary_ratio as the percent the driver keeps, the planning fields as text
+  // the hook parses — and every handler below are the old ones, verbatim.
+
+  const formId = 'driver-form';
+
+  /** A checkbox row: the whole row is the label, so the touch target is the row. */
+  const checkboxClass = 'size-4 shrink-0 cursor-pointer accent-brand';
+
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-      <div style={{ background: 'var(--bg-surface)', borderRadius: '0.5rem', boxShadow: 'var(--shadow-lg)' }}
-        className="w-full max-w-lg max-h-[90vh] overflow-y-auto">
-        <div className="flex items-center justify-between p-6 sticky top-0"
-          style={{ background: 'var(--bg-surface)', borderBottom: '1px solid var(--border)' }}>
-          <h2 style={{ color: 'var(--text-primary)' }} className="text-xl font-semibold flex items-center space-x-2">
-            <User size={20} />
-            <span>{title}</span>
-          </h2>
-          <button
-            onClick={onClose}
-            style={{ color: 'var(--text-tertiary)' }}
-            onMouseEnter={e => (e.currentTarget.style.color = 'var(--text-secondary)')}
-            onMouseLeave={e => (e.currentTarget.style.color = 'var(--text-tertiary)')}
-          >
-            <X size={24} />
-          </button>
-        </div>
+    <Sheet
+      open
+      onOpenChange={open => {
+        if (!open) onClose();
+      }}
+    >
+      <SheetContent
+        // A click beside the form must not throw away what was typed; the old
+        // modal ignored it as well. Escape and the close button still close.
+        onInteractOutside={event => event.preventDefault()}
+      >
+        <SheetHeader>
+          <SheetTitle className="flex items-center gap-2">
+            <User aria-hidden className="size-5 text-fg-subtle" />
+            {title}
+          </SheetTitle>
+          <SheetDescription>{t('fleet.driverFormDescription')}</SheetDescription>
+        </SheetHeader>
 
-        <form onSubmit={handleSubmit} className="p-6 space-y-4">
-          {/* Core fields */}
-          <div>
-            <label style={{ color: 'var(--text-secondary)' }} className="block text-sm font-medium mb-1">
-              {t('fleet.driverName')} *
-            </label>
-            <input
-              type="text"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              style={inputStyle}
-              placeholder={t('fleet.driverNamePlaceholder')}
-              required
-            />
-          </div>
-
-          <div>
-            <label style={{ color: 'var(--text-secondary)' }} className="block text-sm font-medium mb-1">
-              {t('fleet.personalnummer')} *
-            </label>
-            <input
-              type="text"
-              value={personalnummer}
-              onChange={(e) => setPersonalnummer(e.target.value)}
-              style={inputStyle}
-              placeholder={t('fleet.personalnummerPlaceholder')}
-              required
-            />
-            <p style={{ color: 'var(--text-tertiary)' }} className="text-xs mt-1">
-              {t('fleet.personalnummerHint')}
-            </p>
-          </div>
-
-          <div>
-            <label style={{ color: 'var(--text-secondary)' }} className="block text-sm font-medium mb-1">
-              {t('fleet.salutationGender')}
-            </label>
-            <select
-              value={gender}
-              onChange={(e) => setGender(e.target.value as Gender)}
-              style={inputStyle}
-            >
-              <option value="">{t('fleet.notSpecified')}</option>
-              <option value="male">{t('fleet.male')}</option>
-              <option value="female">{t('fleet.female')}</option>
-            </select>
-            <p style={{ color: 'var(--text-tertiary)' }} className="text-xs mt-1">
-              {t('fleet.genderHint')}
-            </p>
-          </div>
-
-          <div>
-            <label style={{ color: 'var(--text-secondary)' }} className="block text-sm font-medium mb-1">
-              {t('fleet.revenueShare')}
-            </label>
-            <div className="relative">
-              <input
-                type="number"
-                value={salaryRatio}
-                onChange={(e) => setSalaryRatio(e.target.value)}
-                min="0"
-                max="100"
-                step="0.1"
-                style={{ ...inputStyle, padding: '0.5rem 2rem 0.5rem 0.75rem' }}
-                placeholder="50"
+        <SheetBody>
+          <form id={formId} onSubmit={handleSubmit} className="grid gap-5">
+            <Field label={t('fleet.driverName')} required>
+              <Input
+                type="text"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder={t('fleet.driverNamePlaceholder')}
                 required
               />
-              <span style={{ color: 'var(--text-tertiary)' }} className="absolute right-3 top-1/2 transform -translate-y-1/2">%</span>
-            </div>
-            <p style={{ color: 'var(--text-tertiary)' }} className="text-xs mt-1">
-              {t('fleet.revenueShareHint')}
-            </p>
-          </div>
+            </Field>
 
-          {/* Planning section (collapsible) */}
-          <div style={{ border: '1px solid var(--border)', borderRadius: '0.5rem', overflow: 'hidden' }}>
-            <button
-              type="button"
-              onClick={() => setShowPlanning(v => !v)}
-              className="w-full flex items-center justify-between px-4 py-3 text-sm font-medium text-left"
-              style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)' }}
-            >
-              <span>{t('fleet.planningSettings')}</span>
-              {showPlanning ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-            </button>
+            <Field label={t('fleet.personalnummer')} hint={t('fleet.personalnummerHint')} required>
+              <Input
+                type="text"
+                value={personalnummer}
+                onChange={(e) => setPersonalnummer(e.target.value)}
+                placeholder={t('fleet.personalnummerPlaceholder')}
+                required
+              />
+            </Field>
 
-            {showPlanning && (
-              <div className="p-4 space-y-4">
-                <div>
-                  <label style={{ color: 'var(--text-secondary)' }} className="block text-sm font-medium mb-1">
-                    {t('fleet.driverRole')}
-                  </label>
-                  <select
-                    value={planning.employment_type}
-                    onChange={e => setPlanning(p => ({ ...p, employment_type: e.target.value as 'employee' | 'company_owner' }))}
-                    style={inputStyle}
-                  >
-                    <option value="employee">{t('fleet.employee')}</option>
-                    <option value="company_owner">{t('fleet.companyOwner')}</option>
-                  </select>
-                  <p style={{ color: 'var(--text-tertiary)' }} className="text-xs mt-1">
-                    {t('fleet.driverRoleHint')}
-                  </p>
-                </div>
+            <Field label={t('fleet.salutationGender')} hint={t('fleet.genderHint')}>
+              <NativeSelect
+                value={gender}
+                onChange={(e) => setGender(e.target.value as Gender)}
+              >
+                <option value="">{t('fleet.notSpecified')}</option>
+                <option value="male">{t('fleet.male')}</option>
+                <option value="female">{t('fleet.female')}</option>
+              </NativeSelect>
+            </Field>
 
-                <div>
-                  <label style={{ color: 'var(--text-secondary)' }} className="block text-sm font-medium mb-1">
-                    {t('fleet.planUsage')}
-                  </label>
-                  <select
-                    value={planning.driver_usage_type}
-                    onChange={e => setPlanning(p => ({ ...p, driver_usage_type: e.target.value as 'regular' | 'coverage_only' }))}
-                    style={inputStyle}
-                  >
-                    <option value="regular">{t('fleet.regularDriver')}</option>
-                    <option value="coverage_only">{t('fleet.coverageDriver')}</option>
-                  </select>
-                  <p style={{ color: 'var(--text-tertiary)' }} className="text-xs mt-1">
-                    {t('fleet.planUsageHint')}
-                  </p>
-                </div>
+            <Field label={t('fleet.revenueShare')} hint={t('fleet.revenueShareHint')} required>
+              <div className="relative">
+                <Input
+                  type="number"
+                  value={salaryRatio}
+                  onChange={(e) => setSalaryRatio(e.target.value)}
+                  min="0"
+                  max="100"
+                  step="0.1"
+                  className="pr-8"
+                  placeholder="50"
+                  required
+                />
+                <span aria-hidden className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm text-fg-subtle">%</span>
+              </div>
+            </Field>
 
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label style={{ color: 'var(--text-secondary)' }} className="block text-sm font-medium mb-1">
-                      {t('fleet.targetHoursMonth')}
-                    </label>
-                    <input
-                      type="number"
-                      value={planning.target_monthly_hours}
-                      onChange={e => setPlanning(p => ({ ...p, target_monthly_hours: e.target.value }))}
-                      style={inputStyle}
-                      placeholder={t('fleet.targetHoursPlaceholder')}
-                      min="0"
-                      step="0.5"
-                    />
+            {/* Planning section (collapsible) */}
+            <div className="overflow-hidden rounded-surface border border-line">
+              <button
+                type="button"
+                onClick={() => setShowPlanning(v => !v)}
+                aria-expanded={showPlanning}
+                aria-controls="driver-planning-fields"
+                className={cn(
+                  'flex min-h-11 w-full items-center justify-between gap-3 bg-sunken px-4 py-3 text-left text-sm font-semibold text-fg transition-colors hover:bg-sunken/70',
+                  'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-focus',
+                )}
+              >
+                <span>{t('fleet.planningSettings')}</span>
+                <ChevronDown aria-hidden className={cn('size-4 shrink-0 text-fg-subtle transition-transform', showPlanning && 'rotate-180')} />
+              </button>
+
+              {showPlanning && (
+                <div id="driver-planning-fields" className="grid gap-5 p-4">
+                  <Field label={t('fleet.driverRole')} hint={t('fleet.driverRoleHint')}>
+                    <NativeSelect
+                      value={planning.employment_type}
+                      onChange={e => setPlanning(p => ({ ...p, employment_type: e.target.value as 'employee' | 'company_owner' }))}
+                    >
+                      <option value="employee">{t('fleet.employee')}</option>
+                      <option value="company_owner">{t('fleet.companyOwner')}</option>
+                    </NativeSelect>
+                  </Field>
+
+                  <Field label={t('fleet.planUsage')} hint={t('fleet.planUsageHint')}>
+                    <NativeSelect
+                      value={planning.driver_usage_type}
+                      onChange={e => setPlanning(p => ({ ...p, driver_usage_type: e.target.value as 'regular' | 'coverage_only' }))}
+                    >
+                      <option value="regular">{t('fleet.regularDriver')}</option>
+                      <option value="coverage_only">{t('fleet.coverageDriver')}</option>
+                    </NativeSelect>
+                  </Field>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <Field label={t('fleet.targetHoursMonth')}>
+                      <Input
+                        type="number"
+                        value={planning.target_monthly_hours}
+                        onChange={e => setPlanning(p => ({ ...p, target_monthly_hours: e.target.value }))}
+                        placeholder={t('fleet.targetHoursPlaceholder')}
+                        min="0"
+                        step="0.5"
+                      />
+                    </Field>
+                    <Field label={t('fleet.maxHoursMonth')}>
+                      <Input
+                        type="number"
+                        value={planning.max_monthly_hours}
+                        onChange={e => setPlanning(p => ({ ...p, max_monthly_hours: e.target.value }))}
+                        placeholder={t('fleet.maxHoursPlaceholder')}
+                        min="0"
+                        step="0.5"
+                      />
+                    </Field>
                   </div>
-                  <div>
-                    <label style={{ color: 'var(--text-secondary)' }} className="block text-sm font-medium mb-1">
-                      {t('fleet.maxHoursMonth')}
-                    </label>
-                    <input
-                      type="number"
-                      value={planning.max_monthly_hours}
-                      onChange={e => setPlanning(p => ({ ...p, max_monthly_hours: e.target.value }))}
-                      style={inputStyle}
-                      placeholder={t('fleet.maxHoursPlaceholder')}
-                      min="0"
-                      step="0.5"
-                    />
-                  </div>
-                </div>
 
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label style={{ color: 'var(--text-secondary)' }} className="block text-sm font-medium mb-1">
-                      {t('fleet.minSalary')}
-                    </label>
-                    <input
-                      type="number"
-                      value={planning.planning_min_salary}
-                      onChange={e => { setPlanning(p => ({ ...p, planning_min_salary: e.target.value })); setSalaryRangeError(''); }}
-                      style={inputStyle}
-                      placeholder={t('fleet.minSalaryPlaceholder')}
-                      min="0"
-                      step="0.01"
-                    />
+                  <div className="grid grid-cols-2 gap-3">
+                    <Field label={t('fleet.minSalary')}>
+                      <Input
+                        type="number"
+                        value={planning.planning_min_salary}
+                        onChange={e => { setPlanning(p => ({ ...p, planning_min_salary: e.target.value })); setSalaryRangeError(''); }}
+                        invalid={Boolean(salaryRangeError)}
+                        placeholder={t('fleet.minSalaryPlaceholder')}
+                        min="0"
+                        step="0.01"
+                      />
+                    </Field>
+                    <Field label={t('fleet.maxSalary')}>
+                      <Input
+                        type="number"
+                        value={planning.planning_max_salary}
+                        onChange={e => { setPlanning(p => ({ ...p, planning_max_salary: e.target.value })); setSalaryRangeError(''); }}
+                        invalid={Boolean(salaryRangeError)}
+                        placeholder={t('fleet.maxSalaryPlaceholder')}
+                        min="0"
+                        step="0.01"
+                      />
+                    </Field>
+                    {salaryRangeError && (
+                      <p role="alert" className="col-span-2 text-xs font-medium text-critical">{salaryRangeError}</p>
+                    )}
                   </div>
-                  <div>
-                    <label style={{ color: 'var(--text-secondary)' }} className="block text-sm font-medium mb-1">
-                      {t('fleet.maxSalary')}
-                    </label>
-                    <input
-                      type="number"
-                      value={planning.planning_max_salary}
-                      onChange={e => { setPlanning(p => ({ ...p, planning_max_salary: e.target.value })); setSalaryRangeError(''); }}
-                      style={inputStyle}
-                      placeholder={t('fleet.maxSalaryPlaceholder')}
-                      min="0"
-                      step="0.01"
-                    />
-                  </div>
-                  {salaryRangeError && (
-                    <div className="col-span-2 text-xs" style={{ color: '#b91c1c' }}>{salaryRangeError}</div>
-                  )}
-                </div>
 
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label style={{ color: 'var(--text-secondary)' }} className="block text-sm font-medium mb-1">
-                      {t('fleet.hourlyRate')}
-                    </label>
-                    <input
-                      type="number"
-                      value={planning.planning_hourly_rate}
-                      onChange={e => setPlanning(p => ({ ...p, planning_hourly_rate: e.target.value }))}
-                      style={inputStyle}
-                      placeholder={t('fleet.hourlyRatePlaceholder')}
-                      min="0"
-                      step="0.01"
-                    />
+                  <div className="grid grid-cols-2 gap-3">
+                    <Field label={t('fleet.hourlyRate')}>
+                      <Input
+                        type="number"
+                        value={planning.planning_hourly_rate}
+                        onChange={e => setPlanning(p => ({ ...p, planning_hourly_rate: e.target.value }))}
+                        placeholder={t('fleet.hourlyRatePlaceholder')}
+                        min="0"
+                        step="0.01"
+                      />
+                    </Field>
+                    <Field label={t('fleet.planningPriority')} hint={t('fleet.planningPriorityHint')}>
+                      <Input
+                        type="number"
+                        value={planning.planning_priority}
+                        onChange={e => setPlanning(p => ({ ...p, planning_priority: e.target.value }))}
+                        placeholder="100"
+                        min="1"
+                        max="999"
+                      />
+                    </Field>
                   </div>
-                </div>
 
-                <div className="grid grid-cols-2 gap-3 items-center">
-                  <div>
-                    <label style={{ color: 'var(--text-secondary)' }} className="block text-sm font-medium mb-1">
-                      {t('fleet.planningPriority')}
-                    </label>
-                    <input
-                      type="number"
-                      value={planning.planning_priority}
-                      onChange={e => setPlanning(p => ({ ...p, planning_priority: e.target.value }))}
-                      style={inputStyle}
-                      placeholder="100"
-                      min="1"
-                      max="999"
-                    />
-                    <p style={{ color: 'var(--text-tertiary)' }} className="text-xs mt-1">
-                      {t('fleet.planningPriorityHint')}
-                    </p>
-                  </div>
-                  <div>
-                    <label style={{ color: 'var(--text-secondary)' }} className="block text-sm font-medium mb-2">
-                      {t('fleet.planningEnabled')}
-                    </label>
-                    <label className="flex items-center gap-2 cursor-pointer">
+                  <fieldset className="grid gap-3">
+                    <legend className="sr-only">{t('fleet.planningSettings')}</legend>
+                    <label className="flex min-h-11 cursor-pointer items-center gap-3 text-sm text-fg">
                       <input
                         type="checkbox"
                         checked={planning.planning_enabled}
                         onChange={e => setPlanning(p => ({ ...p, planning_enabled: e.target.checked }))}
-                        className="w-4 h-4"
+                        className={checkboxClass}
                       />
-                      <span style={{ color: 'var(--text-secondary)' }} className="text-sm">
-                        {planning.planning_enabled ? t('overview.status.active') : t('overview.status.inactive')}
+                      <span>
+                        <span className="font-medium">{t('fleet.planningEnabled')}</span>
+                        <span className="text-fg-muted">
+                          {' · '}
+                          {planning.planning_enabled ? t('overview.status.active') : t('overview.status.inactive')}
+                        </span>
                       </span>
                     </label>
-                  </div>
-                </div>
 
-                <div>
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={planning.can_cover_other_drivers}
-                      onChange={e => setPlanning(p => ({ ...p, can_cover_other_drivers: e.target.checked }))}
-                      className="w-4 h-4"
-                    />
-                    <span style={{ color: 'var(--text-secondary)' }} className="text-sm font-medium">
-                      {t('fleet.canCoverOthers')}
-                    </span>
-                  </label>
-                  <p style={{ color: 'var(--text-tertiary)' }} className="text-xs mt-1 ml-6">
-                    {t('fleet.canCoverOthersHint')}
-                  </p>
-                </div>
-
-                <div className="pt-3 mt-3" style={{ borderTop: '1px solid var(--border)' }}>
-                  <p className="text-sm font-semibold mb-2" style={{ color: 'var(--text-primary)' }}>
-                    {t('fleet.workWindowTitle')}
-                  </p>
-                  <p className="text-xs mb-3" style={{ color: 'var(--text-tertiary)' }}>
-                    {t('fleet.workWindowHint')}
-                  </p>
-                  <div className="mb-3">
-                    <label className="flex items-center gap-2 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={planning.is_full_day_available}
-                        onChange={e => setPlanning(p => ({ ...p, is_full_day_available: e.target.checked }))}
-                        className="w-4 h-4"
-                      />
-                      <span style={{ color: 'var(--text-secondary)' }} className="text-sm font-medium">
-                        {t('fleet.fullDayAvailable')}
-                      </span>
-                    </label>
-                    <p style={{ color: 'var(--text-tertiary)' }} className="text-xs mt-1 ml-6">
-                      {t('fleet.fullDayAvailableHint')}
-                    </p>
-                  </div>
-                  {planning.is_full_day_available ? (
-                    <div
-                      className="px-3 py-2 rounded-lg text-sm font-medium"
-                      style={{ background: 'var(--bg-subtle)', color: 'var(--text-primary)', border: '1px solid var(--border)' }}
-                    >
-                      {t('fleet.workTimeAllDay')}
-                    </div>
-                  ) : (
-                    <div className="grid grid-cols-2 gap-3">
-                      <div>
-                        <label style={{ color: 'var(--text-secondary)' }} className="block text-sm font-medium mb-1">
-                          {t('fleet.workStart')}
-                        </label>
+                    <div>
+                      <label className="flex min-h-11 cursor-pointer items-center gap-3 text-sm font-medium text-fg">
                         <input
-                          type="time"
-                          value={planning.work_window_start}
-                          onChange={e => setPlanning(p => ({ ...p, work_window_start: e.target.value }))}
-                          style={inputStyle}
+                          type="checkbox"
+                          checked={planning.can_cover_other_drivers}
+                          onChange={e => setPlanning(p => ({ ...p, can_cover_other_drivers: e.target.checked }))}
+                          className={checkboxClass}
                         />
-                      </div>
-                      <div>
-                        <label style={{ color: 'var(--text-secondary)' }} className="block text-sm font-medium mb-1">
-                          {t('fleet.workEnd')}
-                        </label>
-                        <input
-                          type="time"
-                          value={planning.work_window_end}
-                          onChange={e => setPlanning(p => ({ ...p, work_window_end: e.target.value }))}
-                          style={inputStyle}
-                        />
-                      </div>
+                        <span>{t('fleet.canCoverOthers')}</span>
+                      </label>
+                      <p className="ml-7 text-xs text-fg-subtle">{t('fleet.canCoverOthersHint')}</p>
                     </div>
-                  )}
-                  <div className="mt-3">
-                    <label style={{ color: 'var(--text-secondary)' }} className="block text-sm font-medium mb-2">
-                      {t('fleet.allowedWeekdays')}
-                    </label>
-                    <div className="flex flex-wrap gap-2">
-                      {WEEKDAY_OPTIONS.map(wd => {
-                        const active = planning.allowed_weekdays.includes(wd.value);
-                        return (
-                          <button
-                            key={wd.value}
-                            type="button"
-                            onClick={() => setPlanning(p => ({
-                              ...p,
-                              allowed_weekdays: active
-                                ? p.allowed_weekdays.filter(d => d !== wd.value)
-                                : [...p.allowed_weekdays, wd.value].sort((a, b) => a - b),
-                            }))}
-                            className="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
-                            style={{
-                              background: active ? 'var(--accent)' : 'var(--bg-subtle)',
-                              color: active ? 'var(--text-inverse)' : 'var(--text-secondary)',
-                              border: `1px solid ${active ? 'var(--accent)' : 'var(--border)'}`,
-                            }}
-                          >
-                            {t(wd.label)}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                  <div className="mt-3">
-                    <label className="flex items-center gap-2 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={planning.allow_outside_shift_exceptions}
-                        onChange={e => setPlanning(p => ({ ...p, allow_outside_shift_exceptions: e.target.checked }))}
-                        className="w-4 h-4"
-                      />
-                      <span style={{ color: 'var(--text-secondary)' }} className="text-sm font-medium">
-                        {t('fleet.allowOutsideExceptions')}
-                      </span>
-                    </label>
-                    <p style={{ color: 'var(--text-tertiary)' }} className="text-xs mt-1 ml-6">
-                      {t('fleet.allowOutsideExceptionsHint')}
-                    </p>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
+                  </fieldset>
 
-          <div className="flex justify-end space-x-3 pt-4">
-            <button
-              type="button"
-              onClick={onClose}
-              style={{ color: 'var(--text-secondary)', background: 'var(--bg-subtle)', border: '1px solid var(--border)', borderRadius: '0.5rem', padding: '0.5rem 1rem' }}
-              onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-muted)')}
-              onMouseLeave={e => (e.currentTarget.style.background = 'var(--bg-subtle)')}
-            >
-              {t('common.cancel')}
-            </button>
-            <button
-              type="submit"
-              style={{ background: 'var(--accent)', color: 'var(--text-inverse)', borderRadius: '0.5rem', padding: '0.5rem 1rem', border: 'none' }}
-              onMouseEnter={e => (e.currentTarget.style.background = 'var(--accent-hover)')}
-              onMouseLeave={e => (e.currentTarget.style.background = 'var(--accent)')}
-              className="flex items-center space-x-2"
-            >
-              <Save size={16} />
-              <span>{t('common.save')}</span>
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
+                  <fieldset className="grid gap-4 border-t border-line pt-4">
+                    <legend className="float-left mb-1 w-full text-sm font-semibold text-fg">{t('fleet.workWindowTitle')}</legend>
+                    <p className="clear-both text-xs text-fg-subtle">{t('fleet.workWindowHint')}</p>
+
+                    <div>
+                      <label className="flex min-h-11 cursor-pointer items-center gap-3 text-sm font-medium text-fg">
+                        <input
+                          type="checkbox"
+                          checked={planning.is_full_day_available}
+                          onChange={e => setPlanning(p => ({ ...p, is_full_day_available: e.target.checked }))}
+                          className={checkboxClass}
+                        />
+                        <span>{t('fleet.fullDayAvailable')}</span>
+                      </label>
+                      <p className="ml-7 text-xs text-fg-subtle">{t('fleet.fullDayAvailableHint')}</p>
+                    </div>
+
+                    {planning.is_full_day_available ? (
+                      <p className="rounded-control border border-line bg-sunken px-3 py-2 text-sm font-medium text-fg">
+                        {t('fleet.workTimeAllDay')}
+                      </p>
+                    ) : (
+                      <div className="grid grid-cols-2 gap-3">
+                        <Field label={t('fleet.workStart')}>
+                          <Input
+                            type="time"
+                            value={planning.work_window_start}
+                            onChange={e => setPlanning(p => ({ ...p, work_window_start: e.target.value }))}
+                          />
+                        </Field>
+                        <Field label={t('fleet.workEnd')}>
+                          <Input
+                            type="time"
+                            value={planning.work_window_end}
+                            onChange={e => setPlanning(p => ({ ...p, work_window_end: e.target.value }))}
+                          />
+                        </Field>
+                      </div>
+                    )}
+
+                    <div role="group" aria-labelledby="driver-weekdays-label" className="grid gap-2">
+                      <p id="driver-weekdays-label" className="text-[13px] font-medium text-fg-muted">
+                        {t('fleet.allowedWeekdays')}
+                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        {WEEKDAY_OPTIONS.map(wd => {
+                          const active = planning.allowed_weekdays.includes(wd.value);
+                          return (
+                            <button
+                              key={wd.value}
+                              type="button"
+                              aria-pressed={active}
+                              onClick={() => setPlanning(p => ({
+                                ...p,
+                                allowed_weekdays: active
+                                  ? p.allowed_weekdays.filter(d => d !== wd.value)
+                                  : [...p.allowed_weekdays, wd.value].sort((a, b) => a - b),
+                              }))}
+                              className={cn(
+                                'h-8 min-w-11 rounded-control border px-3 text-xs font-semibold transition-colors [@media(pointer:coarse)]:h-10',
+                                'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus',
+                                active
+                                  ? 'border-brand bg-brand text-brand-fg hover:bg-brand-hover'
+                                  : 'border-line bg-raised text-fg-muted hover:bg-sunken hover:text-fg',
+                              )}
+                            >
+                              {t(wd.label)}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="flex min-h-11 cursor-pointer items-center gap-3 text-sm font-medium text-fg">
+                        <input
+                          type="checkbox"
+                          checked={planning.allow_outside_shift_exceptions}
+                          onChange={e => setPlanning(p => ({ ...p, allow_outside_shift_exceptions: e.target.checked }))}
+                          className={checkboxClass}
+                        />
+                        <span>{t('fleet.allowOutsideExceptions')}</span>
+                      </label>
+                      <p className="ml-7 text-xs text-fg-subtle">{t('fleet.allowOutsideExceptionsHint')}</p>
+                    </div>
+                  </fieldset>
+                </div>
+              )}
+            </div>
+          </form>
+        </SheetBody>
+
+        <SheetFooter>
+          <Button variant="secondary" onClick={onClose}>
+            {t('common.cancel')}
+          </Button>
+          <Button type="submit" form={formId}>
+            <Save aria-hidden />
+            {t('common.save')}
+          </Button>
+        </SheetFooter>
+      </SheetContent>
+    </Sheet>
   );
 };
 

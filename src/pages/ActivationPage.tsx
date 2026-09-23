@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  KeyRound, CheckCircle2, AlertCircle, RefreshCw,
+  KeyRound, CheckCircle2, RefreshCw,
   CalendarCheck, ArrowLeft, Clock, ShieldCheck,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
@@ -11,6 +11,7 @@ import { format, differenceInDays } from 'date-fns';
 import { de } from 'date-fns/locale';
 import { useTranslation } from '../contexts/LanguageContext';
 import type { TranslationKey } from '../i18n';
+import { Alert, Badge, Button, Card, Field, Input, cn } from '../components/ui';
 
 type SubmitState = 'idle' | 'loading' | 'success' | 'error';
 
@@ -40,15 +41,18 @@ function CodeCountdown({ seconds }: { seconds: number }) {
     return () => clearInterval(id);
   }, [seconds]);
 
+  // ── Presentation (phase 5) ──
+  // The countdown above is unchanged; the colour it ends in moved to a token.
   if (remaining <= 0) {
-    return <span style={{ color: 'var(--danger)' }}>{t('activation.expired')}</span>;
+    return <span className="font-semibold text-critical">{t('activation.expired')}</span>;
   }
   const mins = Math.floor(remaining / 60);
   const secs = remaining % 60;
-  const color = remaining < 30 ? 'var(--danger)' : remaining < 60 ? 'var(--warning)' : 'var(--success)';
+  // The same three thresholds as before: under half a minute, under a minute, more.
+  const tone = remaining < 30 ? 'text-critical' : remaining < 60 ? 'text-caution' : 'text-positive';
 
   return (
-    <span className="font-mono font-bold tabular-nums" style={{ color }}>
+    <span className={cn('font-mono font-bold tabular-nums', tone)}>
       {String(mins).padStart(2, '0')}:{String(secs).padStart(2, '0')}
     </span>
   );
@@ -151,131 +155,108 @@ const ActivationPage: React.FC = () => {
   const expiryDisplay = newExpiry ?? subscriptionExpiresAt;
   const displayName = profile?.email || profile?.full_name;
   const subInactive = !isSubscriptionActive;
-  const subStatusLabel = isSubscriptionActive ? 'Aktiv' : (effectiveSubscriptionStatus === 'expired' ? t('activation.expiredShort') : 'Inaktiv');
+
+  // ── Presentation (phase 5) ────────────────────────────────────────────────
+  // Everything above is unchanged — the preview, the five-attempt block, the
+  // redeem_activation_code call, the refresh of the subscription and the plan,
+  // the redirect to /billing — except the status word's last line: the same
+  // three answers, now in the UI language where they were German literals.
+  const subStatusLabel = isSubscriptionActive ? t('sa.status.active') : (effectiveSubscriptionStatus === 'expired' ? t('activation.expiredShort') : t('sa.status.inactive'));
 
   // ── Success view ────────────────────────────────────────────────────────────
   if (submitState === 'success') {
     return (
-      <div className="max-w-lg mx-auto py-6">
-        <div className="rounded-2xl p-8 text-center space-y-5" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
-          <div className="w-16 h-16 rounded-full flex items-center justify-center mx-auto"
-            style={{ background: 'rgba(34,197,94,0.12)', border: '1px solid rgba(34,197,94,0.25)' }}>
-            <CheckCircle2 size={30} style={{ color: 'var(--success)' }} />
-          </div>
+      <div className="mx-auto max-w-lg py-6 font-ui">
+        <Card role="status" className="grid gap-5 p-8 text-center">
+          <span aria-hidden className="mx-auto flex size-16 items-center justify-center rounded-full bg-positive-soft text-positive">
+            <CheckCircle2 className="size-8" />
+          </span>
           <div>
-            <h2 className="text-xl font-bold mb-2" style={{ color: 'var(--text-primary)' }}>
-              Abo erfolgreich aktiviert
-            </h2>
+            <h1 className="mb-2 text-xl font-semibold text-fg">{t('activation.successTitle')}</h1>
             {expiryDisplay && (
-              <div className="flex items-center justify-center gap-2 text-sm" style={{ color: 'var(--text-secondary)' }}>
-                <CalendarCheck size={14} style={{ color: 'var(--success)' }} />
+              <div className="flex flex-wrap items-center justify-center gap-2 text-sm text-fg-muted">
+                <CalendarCheck aria-hidden className="size-3.5 text-positive" />
                 <span>{t('activation.aboActiveUntil')}</span>
-                <span className="font-semibold" style={{ color: 'var(--success)' }}>
+                <span className="font-semibold tabular-nums text-positive">
                   {format(new Date(expiryDisplay), 'dd.MM.yyyy', { locale: de })}
                 </span>
               </div>
             )}
           </div>
-          <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>
-            Sie werden in Kürze weitergeleitet…
-          </p>
-        </div>
+          <p className="text-sm text-fg-subtle">{t('activation.redirecting')}</p>
+        </Card>
       </div>
     );
   }
 
   // ── Main form view ──────────────────────────────────────────────────────────
   return (
-    <div className="max-w-lg mx-auto py-4 space-y-5">
+    <div className="mx-auto grid max-w-lg grid-cols-1 gap-5 py-4 font-ui">
 
       {/* Back button */}
-      <button
-        onClick={() => navigate('/billing')}
-        className="flex items-center gap-1.5 text-sm font-medium transition-colors"
-        style={{ color: 'var(--text-tertiary)' }}
-        onMouseEnter={e => (e.currentTarget.style.color = 'var(--text-primary)')}
-        onMouseLeave={e => (e.currentTarget.style.color = 'var(--text-tertiary)')}
-      >
-        <ArrowLeft size={15} />
-        Zurück zu Abonnement
-      </button>
+      <Button variant="ghost" size="sm" onClick={() => navigate('/billing')} className="-ml-2 justify-self-start">
+        <ArrowLeft aria-hidden />
+        {t('activation.backToBilling')}
+      </Button>
 
       {/* Page title */}
       <div>
-        <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>{t('activation.activateAbo')}</h1>
-        <p className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>
-          Geben Sie Ihren Aktivierungscode ein, um Ihr Abonnement freizuschalten.
-        </p>
+        <h1 className="text-2xl font-semibold tracking-tight text-fg">{t('activation.activateAbo')}</h1>
+        <p className="mt-1 text-sm text-fg-muted">{t('activation.subtitle')}</p>
       </div>
 
       {/* Subscription status card */}
-      <div className="rounded-xl p-4" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
-        <div className="flex items-center justify-between flex-wrap gap-3">
+      <Card className="p-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0"
-              style={{ background: subInactive ? 'var(--danger-subtle)' : 'rgba(34,197,94,0.10)' }}>
-              <ShieldCheck size={16} style={{ color: subInactive ? 'var(--danger)' : 'var(--success)' }} />
-            </div>
+            <span
+              aria-hidden
+              className={cn(
+                'flex size-9 shrink-0 items-center justify-center rounded-control',
+                subInactive ? 'bg-critical-soft text-critical' : 'bg-positive-soft text-positive',
+              )}
+            >
+              <ShieldCheck className="size-4" />
+            </span>
             <div>
-              <p className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>
-                Abo-Status
-              </p>
-              <p className="text-sm font-semibold mt-0.5" style={{ color: subInactive ? 'var(--danger)' : 'var(--success)' }}>
+              <p className="text-xs font-medium text-fg-muted">{t('activation.statusLabel')}</p>
+              <p className={cn('mt-0.5 text-sm font-semibold', subInactive ? 'text-critical' : 'text-positive')}>
                 {subStatusLabel}
               </p>
             </div>
           </div>
           {displayName && (
-            <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
-              Angemeldet als {displayName}
+            <p className="min-w-0 break-all text-xs text-fg-subtle">
+              {t('activation.signedInAs', { name: displayName })}
             </p>
           )}
         </div>
-        <p className="text-xs mt-3" style={{ color: 'var(--text-tertiary)' }}>
-          Der Aktivierungscode ist nach Erstellung 2 Minuten gültig. Geben Sie ihn direkt nach Erhalt ein.
-        </p>
-      </div>
+        <p className="mt-3 text-xs text-fg-subtle">{t('activation.validityNote')}</p>
+      </Card>
 
       {/* Code form */}
-      <div className="rounded-xl p-6 space-y-5" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
+      <Card className="grid gap-5 p-5 sm:p-6">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
-            style={{ background: 'var(--accent-subtle)' }}>
-            <KeyRound size={18} style={{ color: 'var(--accent)' }} />
-          </div>
+          <span aria-hidden className="flex size-10 shrink-0 items-center justify-center rounded-surface bg-brand-soft text-brand-text">
+            <KeyRound className="size-[18px]" />
+          </span>
           <div>
-            <h2 className="font-semibold" style={{ color: 'var(--text-primary)' }}>{t('activation.enterCode')}</h2>
-            <p className="text-xs mt-0.5" style={{ color: 'var(--text-secondary)' }}>
-              Den Code erhalten Sie von Ihrem Administrator
-            </p>
+            <h2 className="font-semibold text-fg">{t('activation.enterCode')}</h2>
+            <p className="mt-0.5 text-xs text-fg-muted">{t('activation.codeFromAdmin')}</p>
           </div>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit} className="grid gap-4">
           {submitState === 'error' && errorMsg && (
-            <div className="p-3.5 rounded-xl flex items-start gap-2.5"
-              style={{ background: 'var(--danger-subtle)', border: '1px solid rgba(239,68,68,0.2)' }}>
-              <AlertCircle size={15} style={{ color: 'var(--danger)', flexShrink: 0, marginTop: 1 }} />
-              <span className="text-sm" style={{ color: 'var(--danger)' }}>{errorMsg}</span>
-            </div>
+            <Alert tone="critical" title={errorMsg} />
           )}
 
           {isBlocked && (
-            <div className="p-3.5 rounded-xl flex items-start gap-2.5"
-              style={{ background: 'var(--warning-subtle)', border: '1px solid rgba(245,158,11,0.2)' }}>
-              <AlertCircle size={15} style={{ color: 'var(--warning)', flexShrink: 0, marginTop: 1 }} />
-              <span className="text-sm" style={{ color: 'var(--warning)' }}>
-                Zu viele Versuche. Bitte wenden Sie sich an den Support.
-              </span>
-            </div>
+            <Alert tone="caution" title={t('activation.tooManyAttempts')} />
           )}
 
-          <div>
-            <label className="block text-xs font-semibold uppercase tracking-wider mb-2"
-              style={{ color: 'var(--text-tertiary)' }}>
-              Aktivierungscode
-            </label>
-            <input
+          <Field label={t('activation.codeLabel')}>
+            <Input
               type="text"
               inputMode="numeric"
               pattern="\d{6}"
@@ -285,60 +266,47 @@ const ActivationPage: React.FC = () => {
               disabled={submitState === 'loading' || isBlocked}
               placeholder={t('activation.codePlaceholder')}
               autoFocus
-              className="w-full px-4 py-4 rounded-xl focus:outline-none focus:ring-2 transition-all text-2xl font-mono tracking-[0.5em] text-center disabled:opacity-40"
-              style={{
-                background: 'var(--bg-subtle)',
-                border: '1px solid var(--border)',
-                color: 'var(--text-primary)',
-              }}
-              onFocus={e => (e.currentTarget.style.borderColor = 'var(--accent)')}
-              onBlur={e => (e.currentTarget.style.borderColor = 'var(--border)')}
+              // The digits are spaced out; the placeholder is a phrase and is not,
+              // or "6-stelliger Code" runs off a phone's width.
+              className="h-16 text-center font-mono text-2xl tracking-[0.5em] placeholder:font-ui placeholder:text-base placeholder:tracking-normal [@media(pointer:coarse)]:h-16 [@media(pointer:coarse)]:text-2xl"
             />
-          </div>
+          </Field>
 
           {/* Preview countdown — shown when 6 digits are typed */}
           {code.length === 6 && (
-            <div className="flex items-center justify-center gap-2 py-2.5 rounded-lg"
-              style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)' }}>
+            <div role="status" className="flex flex-wrap items-center justify-center gap-2 rounded-control border border-line bg-sunken py-2.5 text-sm">
               {previewLoading ? (
-                <><RefreshCw size={13} className="animate-spin" style={{ color: 'var(--text-tertiary)' }} />
-                <span className="text-sm" style={{ color: 'var(--text-tertiary)' }}>{t('activation.checking')}</span></>
+                <><RefreshCw aria-hidden className="size-3.5 text-fg-subtle motion-safe:animate-spin" />
+                <span className="text-fg-muted">{t('activation.checking')}</span></>
               ) : preview ? (
                 <>
-                  <Clock size={13} style={{ color: 'var(--text-tertiary)' }} />
-                  <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>{t('activation.validFor')}</span>
+                  <Clock aria-hidden className="size-3.5 text-fg-subtle" />
+                  <span className="text-fg-muted">{t('activation.validFor')}</span>
                   <CodeCountdown seconds={preview.seconds_remaining} />
-                  <span className="text-xs px-1.5 py-0.5 rounded-md font-medium"
-                    style={{ background: 'var(--accent-subtle)', color: 'var(--accent)' }}>
+                  <Badge tone="brand">
                     {DURATION_LABELS[preview.duration_type] ? t(DURATION_LABELS[preview.duration_type]) : preview.duration_type}
-                  </span>
+                  </Badge>
                 </>
               ) : (
-                <span className="text-sm" style={{ color: 'var(--text-tertiary)' }}>
-                  Code nicht gefunden oder abgelaufen
-                </span>
+                <span className="text-fg-muted">{t('activation.codeNotFound')}</span>
               )}
             </div>
           )}
 
-          <button
+          <Button
             type="submit"
+            size="lg"
             disabled={code.length !== 6 || submitState === 'loading' || isBlocked}
-            className="w-full py-3.5 px-4 rounded-xl font-semibold text-sm transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed hover:-translate-y-0.5 flex items-center justify-center gap-2"
-            style={{
-              background: 'linear-gradient(135deg, #06b6d4, #3b82f6)',
-              color: '#fff',
-              boxShadow: code.length === 6 && !isBlocked ? '0 4px 16px rgba(6,182,212,0.3)' : 'none',
-            }}
+            className="w-full"
           >
             {submitState === 'loading' ? (
-              <><RefreshCw size={15} className="animate-spin" />{t('activation.beingChecked')}</>
+              <><RefreshCw aria-hidden className="motion-safe:animate-spin" />{t('activation.beingChecked')}</>
             ) : (
-              <><KeyRound size={15} />{t('activation.redeem')}</>
+              <><KeyRound aria-hidden />{t('activation.redeem')}</>
             )}
-          </button>
+          </Button>
         </form>
-      </div>
+      </Card>
     </div>
   );
 };

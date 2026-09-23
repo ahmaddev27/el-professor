@@ -81,16 +81,25 @@ const GoogleButton: React.FC<GoogleButtonProps> = ({
     // button disabled keeps a second press from starting a second flow.
   };
 
+  // ── Presentation (phase 5) ────────────────────────────────────────────────
+  // Everything above is unchanged: nothing renders until GoTrue reports the
+  // provider, and a press starts one flow. The rule and the hint below follow
+  // the design tokens. The button itself keeps Google's own colours, not ours:
+  // Google's branding guidelines allow its light theme (fill #FFFFFF, border
+  // #747775, text #1F1F1F) and its dark theme (#131314, #8E918F, #E3E3E3) and
+  // nothing else, and the mark's four colours may not change at all. Those are
+  // the colours the style ratchet still counts in this file.
+
   // The spacing above the button belongs here, not to a wrapper on the screens:
   // a wrapper still occupies its margin while this returns null, which would
   // move every signed-out screen by 20 px with the provider switched off.
   return (
-    <div className="mt-5 space-y-4">
+    <div className="mt-5 space-y-4 font-ui">
       {divider && (
         <div className="flex items-center gap-3" aria-hidden="true">
-          <span className="h-px flex-1 bg-white/10" />
-          <span className="text-[11px] uppercase tracking-wider text-white/30">{t('auth.google.or')}</span>
-          <span className="h-px flex-1 bg-white/10" />
+          <span className="h-px flex-1 bg-line" />
+          <span className="text-xs text-fg-subtle">{t('auth.google.or')}</span>
+          <span className="h-px flex-1 bg-line" />
         </div>
       )}
       <div className="space-y-2">
@@ -98,12 +107,12 @@ const GoogleButton: React.FC<GoogleButtonProps> = ({
           type="button"
           onClick={() => { void press(); }}
           disabled={starting}
-          className="w-full flex items-center justify-center gap-2.5 py-3 px-4 rounded-xl bg-white text-[#1f1f1f] font-semibold text-sm hover:bg-white/90 focus:outline-none focus:ring-2 focus:ring-cyan-500/50 transition-colors disabled:opacity-60 disabled:cursor-not-allowed [@media(pointer:coarse)]:py-3.5"
+          className="flex h-11 w-full items-center justify-center gap-2.5 rounded-control border border-[#747775] bg-[#FFFFFF] px-4 text-sm font-semibold text-[#1F1F1F] transition-[filter] hover:brightness-95 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus disabled:cursor-not-allowed disabled:opacity-60 dark:border-[#8E918F] dark:bg-[#131314] dark:text-[#E3E3E3] dark:hover:brightness-125 [@media(pointer:coarse)]:h-12"
         >
           <GoogleMark />
           <span>{starting ? t('auth.google.starting') : t(labelKey)}</span>
         </button>
-        {hintKey && <p className="text-[11px] text-white/30 text-center leading-relaxed">{t(hintKey)}</p>}
+        {hintKey && <p className="text-center text-xs leading-relaxed text-fg-subtle">{t(hintKey)}</p>}
       </div>
     </div>
   );

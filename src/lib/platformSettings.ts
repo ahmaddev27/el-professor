@@ -2,7 +2,7 @@
  * Reading and writing `app_private.platform_settings` from the panel
  * (plan 3.E / 3.6c). Pure: the calls are in `platformSettingsClient.ts`.
  *
- * Eleven keys exist, and each has its own authority:
+ * Thirteen keys exist, and each has its own authority:
  *
  * - **reading** needs `settings.read` — but billing holds that capability for
  *   the prices alone, so for a billing account every other key is `forbidden`
@@ -14,7 +14,9 @@
  *   gated screen for every non-trial company below premium — and it covers the
  *   keys of plan 3.10: the seller printed on every invoice, the length of every
  *   new company's trial, the invoice defaults, the sender name and the four
- *   code-mail templates; and plan 3.11's feature flags.
+ *   code-mail templates; plan 3.11's feature flags; and the two legal pages,
+ *   the Impressum at /impressum (`legal.impressum`) and the privacy policy at
+ *   /datenschutz (`legal.privacy`), migration 20260921120000.
  *
  * The invoice screen reads the seller through its own RPC
  * (`platform_invoice_seller`, `companies.read`), because the roles that
@@ -32,7 +34,7 @@
  *
  * The parsers and the form validators below mirror
  * `app_private.platform_settings_problem` (migrations 20260916150000,
- * 20260917120000 and 20260919120000) so a typo is named on its own field rather
+ * 20260917120000, 20260919120000 and 20260921120000) so a typo is named on its own field rather
  * than answered with a whole-document refusal. They decide nothing: the
  * database validates every value it stores, and refuses what it will not.
  */
@@ -45,6 +47,7 @@ import { parsePlanFeatures } from '../utils/planFeatures';
 import type { Plan } from '../contexts/PlanContext';
 import type { PlatformAccess, PlatformCapability } from './platformAccess';
 import { platformAccessCan } from './platformAccess';
+import { IMPRESSUM_FIELDS, type ImpressumField } from './legalPages';
 import {
   MAIL_TEMPLATE_DEFAULTS,
   MAIL_TEMPLATE_HAS_BUTTON,
@@ -61,6 +64,7 @@ export const SETTING_KEYS = [
   'mail.template.signup_verify', 'mail.template.password_reset',
   'mail.template.invite_activate', 'mail.template.email_change',
   'feature_flags',
+  'legal.impressum', 'legal.privacy',
 ] as const;
 export type SettingKey = typeof SETTING_KEYS[number];
 
@@ -644,6 +648,262 @@ export function mailTemplateDefaultsKept(purpose: MailTemplatePurpose, form: Mai
     paragraphs: sameParagraphs(form.paragraphs.map(p => p.trim()), defaults.paragraphs),
     button: !MAIL_TEMPLATE_HAS_BUTTON[purpose] || form.button.trim() === defaults.button,
   };
+}
+
+// ─── The Impressum (legal.impressum, 20260921120000) ─────────────────────────
+
+/**
+ * The facts `/impressum` publishes, as the owner enters them for it: any of the
+ * fourteen `IMPRESSUM_FIELDS` and nothing else. `{}` means nothing is published.
+ *
+ * **A key of its own, never part of `seller`.** The release before this one
+ * reads a seller only when it names exactly its eleven fields, so storing more
+ * there would break its invoice PDF on a rollback. The invoice's name, address
+ * and VAT id reach this form only when the owner presses the button that copies
+ * them (`impressumFormWithSeller`), for him to read and save — never otherwise.
+ */
+export type ImpressumDocument = Readonly<Partial<Record<ImpressumField, string>>>;
+export type ImpressumForm = Record<ImpressumField, string>;
+
+/** `platform_settings_problem_legal`'s bound: the one every seller field has. */
+export const IMPRESSUM_MAX_FIELD_LENGTH = 200;
+
+/**
+ * The checks on the two contact fields the page links. `\s` is wider than the
+ * database's `[:space:]`, so the screen refuses at least what the database does.
+ */
+export const IMPRESSUM_CONTACT_EMAIL = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+const IMPRESSUM_CONTACT_PHONE = /^\+?[0-9 ()/.-]+$/;
+const IMPRESSUM_MIN_PHONE_DIGITS = 3;
+
+/** Digits, spaces and `+ ( ) / . -`, with at least three digits. */
+export function isContactPhone(text: string): boolean {
+  return IMPRESSUM_CONTACT_PHONE.test(text) && text.replace(/[^0-9]/g, '').length >= IMPRESSUM_MIN_PHONE_DIGITS;
+}
+
+const KNOWN_IMPRESSUM_FIELDS: ReadonlySet<string> = new Set(IMPRESSUM_FIELDS);
+
+/** The path the database names a field by, or null when it would accept the text. */
+function impressumFieldProblem(field: ImpressumField, text: string): string | null {
+  const path = `legal.impressum.${field}`;
+  if (text.length > IMPRESSUM_MAX_FIELD_LENGTH || CONTROL_CHARACTERS.test(text)) return path;
+  const trimmed = text.trim();
+  if (field === 'contact_email' && trimmed !== '' && !IMPRESSUM_CONTACT_EMAIL.test(trimmed)) return path;
+  if (field === 'contact_phone' && trimmed !== '' && !isContactPhone(trimmed)) return path;
+  return null;
+}
+
+export function parseImpressumDocument(value: unknown): ImpressumDocument | null {
+  if (!isRecord(value)) return null;
+  const doc: Partial<Record<ImpressumField, string>> = {};
+  for (const [key, text] of Object.entries(value)) {
+    if (!KNOWN_IMPRESSUM_FIELDS.has(key)) return null;
+    const field = key as ImpressumField;
+    if (typeof text !== 'string' || impressumFieldProblem(field, text)) return null;
+    doc[field] = text;
+  }
+  return doc;
+}
+
+export function impressumToForm(doc: ImpressumDocument): ImpressumForm {
+  const form = {} as ImpressumForm;
+  for (const field of IMPRESSUM_FIELDS) form[field] = doc[field] ?? '';
+  return form;
+}
+
+/**
+ * The form back into the document a save sends, or the first field the
+ * database would refuse. Each value is trimmed, and a field left empty is left
+ * out, so an emptied form saves `{}` — the Impressum is taken down.
+ */
+export function impressumFromForm(form: ImpressumForm): { value: ImpressumDocument } | { error: string } {
+  const doc: Partial<Record<ImpressumField, string>> = {};
+  for (const field of IMPRESSUM_FIELDS) {
+    const text = form[field].trim();
+    const problem = impressumFieldProblem(field, text);
+    if (problem) return { error: problem };
+    if (text !== '') doc[field] = text;
+  }
+  return { value: doc };
+}
+
+/**
+ * The editor's "copy from the invoice" button: the seller's name, address and
+ * VAT id, put into the fields the form has left empty. Nothing the owner typed
+ * is overwritten, nothing is saved — he reads the result and saves it himself.
+ */
+export function impressumFormWithSeller(form: ImpressumForm, seller: Seller): ImpressumForm {
+  const fromSeller: Partial<Record<ImpressumField, string>> = {
+    legal_name: seller.name,
+    street: seller.street,
+    house_number: seller.house_number,
+    postal_code: seller.postal_code,
+    city: seller.city,
+    vat_id: seller.vat_id,
+  };
+  const next = { ...form };
+  for (const field of IMPRESSUM_FIELDS) {
+    const value = fromSeller[field]?.trim() ?? '';
+    if (next[field].trim() === '' && value !== '') next[field] = value;
+  }
+  return next;
+}
+
+// ─── The privacy policy (legal.privacy, 20260921120000) ──────────────────────
+
+/**
+ * The privacy policy `/datenschutz` publishes: the lawyer's text as German
+ * paragraphs of plain text, and the date it is valid from ("Stand"). `{}` means
+ * nothing is published — the seed, and what an emptied editor saves.
+ *
+ * Every bound below is `app_private.platform_settings_problem_legal`'s. The
+ * database refuses what breaks one regardless; the screen checks first only so
+ * the owner is told which paragraph, rather than that the document was refused.
+ */
+export type PrivacyDocument =
+  | { readonly as_of: string; readonly paragraphs: readonly string[] }
+  | { readonly as_of?: undefined; readonly paragraphs?: undefined };
+
+/**
+ * The one exception to the 16384 bytes every other key may take: a lawyer's
+ * text is longer. It cannot be raised freely — `audit_write` refuses a value
+ * above 32768 bytes, and every save records the text before and after.
+ */
+export const PRIVACY_MAX_BYTES = 32000;
+export const PRIVACY_MAX_PARAGRAPHS = 300;
+export const PRIVACY_PARAGRAPH_MAX_LENGTH = 4000;
+const PRIVACY_MIN_YEAR = 2000;
+const PRIVACY_MAX_YEAR = 2100;
+
+/** A calendar date as storage writes it, `YYYY-MM-DD`, between 2000 and 2100. */
+export function isStorageDate(text: string): boolean {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text);
+  if (!match) return false;
+  const [year, month, day] = [Number(match[1]), Number(match[2]), Number(match[3])];
+  if (year < PRIVACY_MIN_YEAR || year > PRIVACY_MAX_YEAR || month < 1 || month > 12 || day < 1) return false;
+  // Day 0 of the next month is the last day of this one; UTC, so no zone moves it.
+  return day <= new Date(Date.UTC(year, month, 0)).getUTCDate();
+}
+
+/** `21.09.2026` (or `1.9.2026`) as `2026-09-21`, or null for anything that is not a real date. */
+export function parseGermanDate(text: string): string | null {
+  const match = /^(\d{1,2})\.(\d{1,2})\.(\d{4})$/.exec(text.trim());
+  if (!match) return null;
+  const iso = `${match[3]}-${match[2].padStart(2, '0')}-${match[1].padStart(2, '0')}`;
+  return isStorageDate(iso) ? iso : null;
+}
+
+/** Control characters, except the line break a paragraph may hold (an address block). */
+// eslint-disable-next-line no-control-regex -- matching control characters is the point
+const PRIVACY_CONTROL_CHARACTERS = /[\u0000-\u0009\u000b-\u001f\u007f-\u009f]/;
+
+/** Whether the database would refuse one paragraph. */
+export function privacyParagraphRefused(text: string): boolean {
+  return text.trim() === ''
+    || text.length > PRIVACY_PARAGRAPH_MAX_LENGTH
+    || PRIVACY_CONTROL_CHARACTERS.test(text)
+    // a blank line belongs between two paragraphs, not inside one
+    || /\n *\n/.test(text)
+    // plain text: nothing that could be read as markup
+    || /[<>]/.test(text);
+}
+
+/**
+ * How many bytes PostgreSQL counts for the document — `octet_length(value::text)`,
+ * the measure the validator bounds. jsonb prints a space after every `:` and
+ * `,`, and sorts `as_of` before `paragraphs`; its string escapes are JSON's.
+ */
+export function privacyStoredBytes(doc: PrivacyDocument): number {
+  const text = doc.paragraphs === undefined
+    ? '{}'
+    : `{"as_of": ${JSON.stringify(doc.as_of)}, "paragraphs": [${doc.paragraphs.map(p => JSON.stringify(p)).join(', ')}]}`;
+  return new TextEncoder().encode(text).length;
+}
+
+export function parsePrivacyDocument(value: unknown): PrivacyDocument | null {
+  if (!isRecord(value)) return null;
+  const keys = Object.keys(value).sort();
+  if (keys.length === 0) return {};
+  if (keys.length !== 2 || keys[0] !== 'as_of' || keys[1] !== 'paragraphs') return null;
+
+  const { as_of: asOf, paragraphs } = value;
+  if (typeof asOf !== 'string' || !isStorageDate(asOf)) return null;
+  if (!Array.isArray(paragraphs) || paragraphs.length < 1 || paragraphs.length > PRIVACY_MAX_PARAGRAPHS) return null;
+  if (!paragraphs.every(p => typeof p === 'string' && !privacyParagraphRefused(p))) return null;
+
+  const doc: PrivacyDocument = { as_of: asOf, paragraphs: paragraphs as string[] };
+  return privacyStoredBytes(doc) > PRIVACY_MAX_BYTES ? null : doc;
+}
+
+/**
+ * The editor holds the text as the lawyer delivered it — paragraphs separated
+ * by a blank line — and the date the way a German reader writes it.
+ */
+export interface PrivacyForm {
+  /** `TT.MM.JJJJ`; empty when nothing is published. */
+  asOf: string;
+  text: string;
+}
+
+export function privacyToForm(doc: PrivacyDocument): PrivacyForm {
+  if (doc.paragraphs === undefined) return { asOf: '', text: '' };
+  const [year, month, day] = doc.as_of.split('-');
+  return { asOf: `${day}.${month}.${year}`, text: doc.paragraphs.join('\n\n') };
+}
+
+/**
+ * Pasted text into paragraphs: Windows line ends become `\n` and a tab a space
+ * (a word processor puts them in; neither means anything on a web page), each
+ * line loses trailing blanks, and a blank line — even one holding spaces — ends
+ * a paragraph. Nothing else is changed: no word, no character of the text.
+ */
+export function splitPrivacyParagraphs(text: string): string[] {
+  return text
+    .replace(/\r\n?/g, '\n')
+    .replace(/\t/g, ' ')
+    .split(/\n\s*\n/)
+    .map(paragraph => paragraph.split('\n').map(line => line.trimEnd()).join('\n').trim())
+    .filter(paragraph => paragraph !== '');
+}
+
+/**
+ * The form back into the document a save sends, or the first path the database
+ * would refuse. An empty form is `{}` — the text is taken down; a text needs its
+ * date and a date needs its text.
+ */
+export function privacyFromForm(form: PrivacyForm): { value: PrivacyDocument } | { error: string } {
+  const paragraphs = splitPrivacyParagraphs(form.text);
+  const asOfText = form.asOf.trim();
+  if (paragraphs.length === 0 && asOfText === '') return { value: {} };
+  if (paragraphs.length === 0) return { error: 'legal.privacy.paragraphs' };
+
+  const asOf = parseGermanDate(asOfText);
+  if (!asOf) return { error: 'legal.privacy.as_of' };
+  if (paragraphs.length > PRIVACY_MAX_PARAGRAPHS) return { error: 'legal.privacy.paragraphs' };
+
+  const refused = paragraphs.findIndex(privacyParagraphRefused);
+  if (refused >= 0) return { error: `legal.privacy.paragraphs.${refused}` };
+
+  const value: PrivacyDocument = { as_of: asOf, paragraphs };
+  if (privacyStoredBytes(value) > PRIVACY_MAX_BYTES) return { error: 'value_size' };
+  return { value };
+}
+
+/**
+ * A refusal path of `privacyFromForm` as the sentence the editor shows beside
+ * the text, counting paragraphs from 1 the way a reader does.
+ */
+export function privacyProblemMessage(path: string): { key: TranslationKey; vars: Record<string, number> } {
+  const paragraph = /^legal\.privacy\.paragraphs\.(\d+)$/.exec(path);
+  if (paragraph) {
+    return {
+      key: 'admin.settings.privacy.problem.paragraph',
+      vars: { number: Number(paragraph[1]) + 1, max: PRIVACY_PARAGRAPH_MAX_LENGTH },
+    };
+  }
+  if (path === 'legal.privacy.as_of') return { key: 'admin.settings.privacy.problem.asOf', vars: {} };
+  if (path === 'value_size') return { key: 'admin.settings.privacy.problem.size', vars: { max: PRIVACY_MAX_BYTES } };
+  return { key: 'admin.settings.privacy.problem.paragraphs', vars: { max: PRIVACY_MAX_PARAGRAPHS } };
 }
 
 // ─── Reading a stored value for one key ──────────────────────────────────────

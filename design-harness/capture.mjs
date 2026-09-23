@@ -13,16 +13,24 @@
  * Every shot is a full page at 375, 768 or 1280 CSS pixels, light and dark,
  * except the dialogs, which are the viewport (a dialog is fixed to it).
  *
+ * A run warms the server on one thrown-away page before its first shot, gives
+ * every shot a hard cap, and takes a shot that failed once more after the
+ * others; it fails only for a shot that fails twice.
+ *
  * `--root <dir>` renders another checkout's screens with this script, e.g. a
  * `git worktree` of the commit before a batch, so both sets come from the same
  * harness and the same browser settings. That checkout needs node_modules and
  * e2e/node_modules (a directory junction to this one's is enough).
  */
+import { createHash } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
+import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createServer } from 'vite';
+// Batch 3 waits for its chained reads with its own quiet(); this file has one for the DOM.
+import { quiet as quietBatch3 } from './batch3/shots.mjs';
 
 const args = process.argv.slice(2);
 const arg = name => {
@@ -36,9 +44,10 @@ const renderRoot = resolve(arg('root') ?? ownRoot);
 const e2eRequire = createRequire(join(ownRoot, 'e2e', 'package.json'));
 const set = arg('set');
 const batch = arg('batch') ?? 'batch1';
-const only = arg('only');
+// Several name parts, comma-separated, retake several shots under one server start.
+const only = arg('only')?.split(',').filter(Boolean);
 if (set !== 'before' && set !== 'after') {
-  console.error('usage: node design-harness/capture.mjs --set before|after [--batch batch1] [--only <name part>]');
+  console.error('usage: node design-harness/capture.mjs --set before|after [--batch batch1] [--only <name part>[,<name part>…]]');
   process.exit(2);
 }
 
@@ -63,7 +72,7 @@ const STATE_VARIANTS = [
   { width: 375, theme: 'dark' },
 ];
 
-const SHOTS = [
+const BATCH1_SHOTS = [
   { name: 'fahrzeuge', query: { screen: 'fahrzeuge' } },
   { name: 'fixkosten', query: { screen: 'fixkosten' } },
   { name: 'fahrzeuge-formular', query: { screen: 'fahrzeuge' }, act: openAdd, dialog: true, variants: STATE_VARIANTS },
@@ -81,14 +90,55 @@ const SHOTS = [
   { name: 'fixkosten-en', query: { screen: 'fixkosten', lang: 'en' }, variants: [{ width: 375, theme: 'light' }] },
 ];
 
+// A later batch keeps its list in its own module, design-harness/shots-<batch>.mjs.
+const SHOTS = batch === 'batch1' ? BATCH1_SHOTS : (await import(`./shots-${batch}.mjs`)).SHOTS;
+
 const allVariants = WIDTHS.flatMap(width => THEMES.map(theme => ({ width, theme })));
 
+/**
+ * A shot still unfinished after this is abandoned, its context closed, and
+ * taken again once the others are done. Longer than the first page's own
+ * allowance below, so it only ever ends a page that hangs.
+ */
+const SHOT_TIMEOUT_MS = 660_000;
+
 async function settle(page) {
+  // Generous: the first page of a run can be reloaded once by Vite while it
+  // optimizes dependencies, and batch 3's pages are large.
   await page.waitForFunction(() => window.__harness && window.__harness.answered > 0 && window.__harness.pending === 0, null, {
-    timeout: 15_000,
+    timeout: 180_000,
   });
   await page.evaluate(() => document.fonts.ready);
-  await page.waitForTimeout(350);
+  await quiet(page);
+}
+
+/**
+ * Until the page has not changed for half a second (at most ten seconds).
+ * The answered queries are not the last render: the Gehälter screen commits
+ * one frame with the new salary rows and the previous calculations before its
+ * effect recomputes them — every stored driver briefly flagged as overlapping,
+ * every figure 0,00 € — and on a machine short of memory a fixed pause caught
+ * that frame.
+ */
+async function quiet(page) {
+  await page.evaluate(
+    () =>
+      new Promise(resolve => {
+        let timer = setTimeout(done, 500);
+        const cap = setTimeout(done, 10_000);
+        const observer = new MutationObserver(() => {
+          clearTimeout(timer);
+          timer = setTimeout(done, 500);
+        });
+        observer.observe(document.body, { subtree: true, childList: true, characterData: true, attributes: true });
+        function done() {
+          observer.disconnect();
+          clearTimeout(timer);
+          clearTimeout(cap);
+          resolve();
+        }
+      }),
+  );
 }
 
 /** PNG bytes to WebP, encoded by the same Chrome that took them. */
@@ -109,6 +159,10 @@ async function toWebp(encoder, png) {
 const server = await createServer({
   configFile: join(renderRoot, 'design-harness', 'vite.config.ts'),
   logLevel: 'warn',
+  // Vite's dependency cache defaults to node_modules/.vite. Worktrees that link
+  // node_modules to one checkout would share it, and one harness run rewriting
+  // it reloads another's pages mid-shot; each checkout gets its own.
+  cacheDir: join(tmpdir(), 'el-professor-harness', createHash('sha1').update(renderRoot).digest('hex').slice(0, 12)),
   // Another harness may hold the port; take the next free one.
   server: { strictPort: false },
 });
@@ -125,52 +179,112 @@ mkdirSync(outDir, { recursive: true });
 let taken = 0;
 const problems = [];
 
-try {
-  for (const shot of SHOTS) {
-    for (const { width, theme } of shot.variants ?? allVariants) {
-      const file = `${width}-${theme}-${shot.name}.webp`;
-      if (only && !file.includes(only)) continue;
+const queue = SHOTS.flatMap(shot =>
+  (shot.variants ?? allVariants)
+    .map(({ width, theme }) => ({ shot, width, theme, file: `${width}-${theme}-${shot.name}.webp` }))
+    .filter(({ file }) => !only || only.some(part => file.includes(part))),
+);
 
-      // A phone is a touch screen: the 375 px shots emulate one, so a coarse
-      // pointer grows the controls as it does on a real phone. 768 and 1280
-      // keep a mouse, the densest layout a tablet or laptop can show.
-      const phone = width < 768;
-      const context = await browser.newContext({
-        viewport: { width, height: phone ? 812 : 900 },
-        isMobile: phone,
-        hasTouch: phone,
-        deviceScaleFactor: 1,
-        locale: 'de-DE',
-        timezoneId: 'Europe/Berlin',
-        reducedMotion: 'reduce',
-      });
-      // install(), not setFixedTime(): a clock that never moves hangs anything
-      // that waits for Date.now() to pass a deadline. This one starts at
-      // FIXED_NOW and runs.
-      await context.clock.install({ time: FIXED_NOW });
-      const page = await context.newPage();
+async function openPage(shot, width, theme, file) {
+  // A phone is a touch screen: the 375 px shots emulate one, so a coarse
+  // pointer grows the controls as it does on a real phone. 768 and 1280
+  // keep a mouse, the densest layout a tablet or laptop can show.
+  const phone = width < 768;
+  const context = await browser.newContext({
+    // A `tall` dialog shot (batch 1b) opens a taller window, so a long form shows whole.
+    viewport: { width, height: shot.tall ? 1500 : phone ? 812 : 900 },
+    isMobile: phone,
+    hasTouch: phone,
+    deviceScaleFactor: 1,
+    locale: 'de-DE',
+    timezoneId: 'Europe/Berlin',
+    reducedMotion: 'reduce',
+  });
+  try {
+    // install(), not setFixedTime(): a clock that never moves hangs anything
+    // that waits for Date.now() to pass a deadline. This one starts at
+    // FIXED_NOW and runs.
+    await context.clock.install({ time: FIXED_NOW });
+    const page = await context.newPage();
+    if (file) {
       page.on('pageerror', error => problems.push(`${file}: ${error.message}`));
       page.on('console', message => {
         if (message.type() === 'error') problems.push(`${file}: console: ${message.text()}`);
       });
-
-      const query = new URLSearchParams({ theme, lang: 'de', ...shot.query });
-      // The first visit waits for Vite to transform the whole module graph.
-      // `load` is not awaited: with the clock installed it can stall, and
-      // settle() below is the real readiness test.
-      await page.goto(`${origin}/design-harness/?${query}`, { waitUntil: 'domcontentloaded', timeout: 90_000 });
-      await settle(page);
-      if (shot.act) {
-        await shot.act(page);
-        await page.waitForTimeout(500);
-      }
-
-      const png = await page.screenshot({ fullPage: !shot.dialog, animations: 'disabled' });
-      writeFileSync(join(outDir, file), await toWebp(encoder, png));
-      taken += 1;
-      console.log(`  ${file}`);
-      await context.close();
     }
+    const query = new URLSearchParams({ theme, lang: 'de', ...shot.query });
+    // The first visit waits for Vite to transform the whole module graph,
+    // which on a machine short of memory has taken more than five minutes.
+    // `load` is not awaited: with the clock installed it can stall, and
+    // settle() below is the real readiness test.
+    // Batch 3's pages pull in the planning wizards, several megabytes of source.
+    await page.goto(`${origin}/design-harness/?${query}`, { waitUntil: 'domcontentloaded', timeout: 600_000 });
+    await settle(page);
+    return { context, page };
+  } catch (error) {
+    await context.close().catch(() => undefined);
+    throw error;
+  }
+}
+
+async function takeShot({ shot, width, theme, file }) {
+  let context;
+  const work = (async () => {
+    const opened = await openPage(shot, width, theme, file);
+    context = opened.context;
+    if (shot.act) {
+      await shot.act(opened.page);
+      await opened.page.waitForTimeout(500);
+    }
+    // Batch 3's screens chain their reads; wait until none has been pending for a while.
+    if (batch === 'batch3') await quietBatch3(opened.page);
+    const png = await opened.page.screenshot({ fullPage: !shot.dialog, animations: 'disabled' });
+    writeFileSync(join(outDir, file), await toWebp(encoder, png));
+  })();
+  let timer;
+  const deadline = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`no screenshot after ${SHOT_TIMEOUT_MS / 1000} s`)), SHOT_TIMEOUT_MS);
+  });
+  try {
+    await Promise.race([work, deadline]);
+  } finally {
+    clearTimeout(timer);
+    // Closing the context also ends whatever an abandoned attempt still waits on.
+    await context?.close().catch(() => undefined);
+    work.catch(() => undefined);
+  }
+}
+
+try {
+  // Warm up: the first page a fresh server serves pays for transforming the
+  // whole module graph. This visit is thrown away, so no shot's own time goes
+  // on it.
+  if (queue.length > 0) {
+    const started = Date.now();
+    const { context } = await openPage(queue[0].shot, 1280, 'light', null);
+    await context.close();
+    console.log(`  (warm-up ${((Date.now() - started) / 1000).toFixed(1)} s)`);
+  }
+
+  let pending = queue;
+  for (let attempt = 1; attempt <= 2 && pending.length > 0; attempt += 1) {
+    const failed = [];
+    for (const item of pending) {
+      const started = Date.now();
+      try {
+        await takeShot(item);
+        taken += 1;
+        console.log(`  ${item.file}  ${((Date.now() - started) / 1000).toFixed(1)} s`);
+      } catch (error) {
+        console.log(`  ${item.file}  FAILED (attempt ${attempt}): ${String(error.message).split('\n')[0]}`);
+        failed.push(item);
+      }
+    }
+    pending = failed;
+  }
+  if (pending.length > 0) {
+    console.error(`\n${pending.length} shots failed twice: ${pending.map(item => item.file).join(', ')}`);
+    process.exitCode = 1;
   }
 } catch (error) {
   console.error(error);

@@ -12,13 +12,17 @@ import type { TranslationKey } from '../../i18n';
  * and `t()` is a hook value. Every consumer resolves it at the render site.
  * `name` is not a key: a tier is called Basic, Advanced or Premium in every
  * language.
+ *
+ * Each tier used to carry a colour of its own, which painted its card, its
+ * price and the fleet slider (audit finding 9: three colours for three plans).
+ * Since phase 5 batch 4 the one brand colour marks the chosen tier, so the
+ * field is gone; nothing else read it.
  */
 export interface PlanDef {
   id: Plan;
   name: string;
   sub: TranslationKey;
   highlight: boolean;
-  color: string;
   features: TranslationKey[];
 }
 
@@ -28,7 +32,6 @@ export const PLANS: PlanDef[] = [
     name: 'Basic',
     sub: 'signup.plan.basicSub',
     highlight: false,
-    color: '#06b6d4',
     features: ['nav.overview', 'nav.belege', 'nav.fahrer', 'nav.cars', 'nav.umsaetze', 'nav.fixkosten', 'nav.bargeldbestand'],
   },
   {
@@ -36,7 +39,6 @@ export const PLANS: PlanDef[] = [
     name: 'Advanced',
     sub: 'landing.plan.advancedSub',
     highlight: true,
-    color: '#f59e0b',
     features: ['signup.plan.everythingInBasic', 'nav.werkstatt', 'nav.abrechnung', 'nav.notes', 'locked.feature.rollenNutzer'],
   },
   {
@@ -44,7 +46,6 @@ export const PLANS: PlanDef[] = [
     name: 'Premium',
     sub: 'landing.plan.premiumSub',
     highlight: false,
-    color: '#10b981',
     features: ['signup.plan.everythingInAdvanced', 'nav.salaries', 'nav.documents', 'locked.feature.stundennachweis'],
   },
 ];

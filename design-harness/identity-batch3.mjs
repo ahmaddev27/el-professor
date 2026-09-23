@@ -1,0 +1,399 @@
+#!/usr/bin/env node
+/**
+ * Phase 5 batch 3, proven as text: the converted screens only draw differently.
+ *
+ *   node design-harness/identity-batch3.mjs [--base <commit>]    (default: merge-base with origin/staging)
+ *
+ * Batch 3 moves screens that produce statutory documents, so "look only" is
+ * not taken on trust. For each converted file this compares the base commit's
+ * text with the working tree's:
+ *
+ *   1. Verbatim. Every line of the old file outside the ranges declared as
+ *      redrawn below appears in the new file unchanged, in the same order, as
+ *      the same contiguous chunks. That covers every query, calculation,
+ *      handler body and state line the file had above its markup.
+ *
+ *   2. Carried. Inside a redrawn range, every expression the old markup
+ *      evaluated — an event handler, a disabled/value/min/max guard, the
+ *      condition of a conditional block, a formatting call — must still appear
+ *      in the new file (compared with all whitespace removed, since the markup
+ *      around it is re-indented). Only presentation is exempt: className and
+ *      style values, icon sizes, keys, and the legacy hover handlers that
+ *      painted borders. Anything else that went is listed below with the
+ *      reason, and an unlisted loss fails the run.
+ *
+ *   3. Sensitive. Every line of the old file, redrawn or not, that reads or
+ *      writes data, calls the clock or Math, parses a number, formats a date or
+ *      an amount, or checks a permission, appears in the new file (whitespace
+ *      removed), unless it is listed below with the reason.
+ *
+ * And for the branch as a whole: every file it changes matches the allow-list
+ * at the end, so no document builder, engine, export module or golden-master
+ * snapshot can change without this run failing.
+ */
+import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const git = (...args) => execFileSync('git', args, { cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+const argIndex = process.argv.indexOf('--base');
+const base = argIndex > 0 ? process.argv[argIndex + 1] : git('merge-base', 'HEAD', 'origin/staging').trim();
+
+// ── What was converted, and what was allowed to go ─────────────────────────
+
+/**
+ * `redrawn`: old line ranges (1-based, inclusive) replaced by new markup.
+ * `dropped`: fragments or sensitive lines of the old text that are gone on
+ * purpose, each with its reason. A fragment is matched after whitespace
+ * removal, as the checks compare it.
+ */
+const FILES = CONFIG();
+
+// ── Checks ───────────────────────────────────────────────────────────────────
+
+const squash = text => text.replace(/\s+/g, '');
+const SENSITIVE =
+  /supabase|\.from\(|\.rpc\(|\.range\(|\.eq\(|\.in\(|\.not\(|\.order\(|\.upsert\(|\.insert\(|\.update\(|\.delete\(|new Date|Date\.|getTime|getMonth|getFullYear|getDate\(|getDay\(|Math\.|parseInt|parseFloat|toFixed|toLocale|navigate\(|while \(true\)|\bcan\(|isAdmin|isSuperAdmin|companyId|mayEdit|disabled=/;
+const PRESENTATION_ATTRS = new Set(['className', 'style', 'size', 'key', 'onMouseEnter', 'onMouseLeave', 'strokeWidth']);
+
+/**
+ * The balanced {…} groups of a region, with the attribute each belongs to.
+ * A presentation attribute (className, style, the legacy hover handlers) is
+ * skipped whole, braces inside it included; every other group is kept and
+ * also searched, so a handler inside a conditional block is found too.
+ */
+function braceGroups(text) {
+  const groups = [];
+  for (let start = 0; start < text.length; start += 1) {
+    if (text[start] !== '{') continue;
+    let depth = 0;
+    let quote = null;
+    let end = -1;
+    for (let i = start; i < text.length; i += 1) {
+      const char = text[i];
+      if (quote) {
+        if (char === '\\') { i += 1; continue; }
+        if (char === quote) quote = null;
+        continue;
+      }
+      if (char === '"' || char === "'" || char === '`') { quote = char; continue; }
+      if (char === '{') depth += 1;
+      else if (char === '}') {
+        depth -= 1;
+        if (depth === 0) { end = i; break; }
+      }
+    }
+    if (end < 0) continue;
+    const attribute = /([A-Za-z-]+)=$/.exec(text.slice(Math.max(0, start - 40), start))?.[1] ?? null;
+    if (attribute && PRESENTATION_ATTRS.has(attribute)) {
+      start = end;
+      continue;
+    }
+    groups.push({ attribute, inner: text.slice(start + 1, end) });
+  }
+  return groups;
+}
+
+/**
+ * What of a group must survive. An expression without markup survives whole.
+ * One that renders markup must keep what decides the markup: the condition in
+ * front of it, the collection a list is drawn from, and each `: cond ?` of an
+ * else-if chain. The markup itself is what was redrawn.
+ */
+function logicOf({ inner }) {
+  const trimmed = inner.trim();
+  if (!trimmed || trimmed.startsWith('/*')) return [];
+  if (/^(['"`])[^'"`]*\1$/.test(trimmed)) return []; // a plain string
+  if (/^-?\d+(\.\d+)?$/.test(trimmed)) return []; // a plain number
+  const jsx = /(^|[^\w$.)\]])<[A-Za-z]/.exec(trimmed);
+  if (!jsx) return [trimmed];
+  const logic = [];
+  let head = trimmed.slice(0, jsx.index + jsx[1].length).trim().replace(/\(\s*$/, '').trim();
+  const mapped = /^([\s\S]*?)\.map\(\s*\(?[^)]*\)?\s*=>$/.exec(head);
+  if (mapped) head = mapped[1];
+  head = head.replace(/(&&|\?)$/, '').trim();
+  if (head) logic.push(head);
+  for (const match of trimmed.matchAll(/\)\s*:\s*([^<>{}()]+?)\s*\?\s*\(?\s*</g)) logic.push(match[1].trim());
+  return logic;
+}
+
+/** A redrawn range is `[from, to]` of markup, or `[from, to, 'code']` for code with no markup (imports, a removed helper). */
+const within = (line, ranges) => ranges.some(([from, to]) => line >= from && line <= to);
+
+/** A JSX container `{expr}` or a parenthesised `(expr)` compares as `expr`. */
+const bare = line => squash(line).replace(/^\{(.*)\}$/, '$1').replace(/^\((.*)\),?$/, '$1');
+
+function checkFile(config) {
+  const oldText = git('show', `${base}:${config.path}`).replace(/\r\n/g, '\n');
+  const newText = readFileSync(join(root, config.path), 'utf8').replace(/\r\n/g, '\n');
+  const oldLines = oldText.split('\n');
+  const newSquashed = squash(newText);
+  // A dropped fragment ending in "…" names a long expression by its start.
+  const dropped = new Map((config.dropped ?? []).map(([fragment, reason]) => [squash(fragment), reason]));
+  const droppedKey = key => {
+    if (dropped.has(key)) return key;
+    for (const candidate of dropped.keys()) {
+      if (candidate.endsWith('…') && key.startsWith(candidate.slice(0, -1))) return candidate;
+    }
+    return null;
+  };
+  const used = new Set();
+  const insertedAfter = new Set(config.insertedAfter ?? []);
+  const problems = [];
+  const excused = [];
+  const excuse = (key, label) => {
+    used.add(key);
+    excused.push(`${label.replace(/\s+/g, ' ').slice(0, 100)} — ${dropped.get(key)}`);
+  };
+
+  // 0. What a drop moved elsewhere must be there: each expression is looked
+  //    for in the new file, whitespace aside.
+  let required = 0;
+  for (const fragment of config.mustContain ?? []) {
+    if (newSquashed.includes(squash(fragment))) required += 1;
+    else problems.push(`must still contain, and does not: ${fragment.slice(0, 140)}`);
+  }
+
+  // 1. Verbatim chunks, in order. A chunk ends at a redrawn range and after
+  //    each line the config says new lines were inserted after.
+  const chunks = [];
+  let current = [];
+  oldLines.forEach((line, index) => {
+    const number = index + 1;
+    if (within(number, config.redrawn)) {
+      if (current.length) chunks.push(current);
+      current = [];
+      return;
+    }
+    current.push({ line, number });
+    if (insertedAfter.has(number)) {
+      chunks.push(current);
+      current = [];
+    }
+  });
+  if (current.length) chunks.push(current);
+  let cursor = 0;
+  let verbatimLines = 0;
+  for (const chunk of chunks) {
+    const body = chunk.map(entry => entry.line).join('\n');
+    const at = newText.indexOf(body, cursor);
+    if (at < 0) {
+      problems.push(`old lines ${chunk[0].number}–${chunk.at(-1).number} are not in the new file verbatim and in order`);
+    } else {
+      cursor = at + body.length;
+      verbatimLines += chunk.length;
+    }
+  }
+
+  // 2. Logic carried out of the redrawn markup.
+  let carried = 0;
+  for (const [from, to, kind] of config.redrawn) {
+    if (kind === 'code') continue;
+    const region = oldLines.slice(from - 1, to).join('\n');
+    for (const group of braceGroups(region)) {
+      for (const logic of logicOf(group)) {
+        const key = squash(logic);
+        if (newSquashed.includes(key)) { carried += 1; continue; }
+        const excusedBy = droppedKey(key);
+        if (excusedBy) { excuse(excusedBy, logic); continue; }
+        problems.push(`lost from lines ${from}–${to}: ${logic.replace(/\s+/g, ' ').slice(0, 160)}`);
+      }
+    }
+  }
+
+  // 3. Sensitive lines anywhere in the old file.
+  let sensitive = 0;
+  oldLines.forEach((line, index) => {
+    if (!SENSITIVE.test(line)) return;
+    const key = bare(line);
+    if (!key || newSquashed.includes(key)) { sensitive += 1; return; }
+    // An opening tag whose element was swapped (<button> for <Button>) passes
+    // when its attributes are all still there, in the same order.
+    const attributes = key.replace(/^<[A-Za-z.]+/, '');
+    if (key.startsWith('<') && attributes && newSquashed.includes(attributes)) { sensitive += 1; return; }
+    const excusedBy = droppedKey(key);
+    if (excusedBy) { excuse(excusedBy, `line ${index + 1}: ${line.trim()}`); return; }
+    problems.push(`sensitive line ${index + 1} changed or lost: ${line.trim().slice(0, 160)}`);
+  });
+
+  // An excuse nothing needed is a stale claim; it fails like a loss.
+  for (const [key, reason] of dropped) {
+    if (!used.has(key)) problems.push(`listed as dropped but not missing: ${key.slice(0, 80)} (${reason.slice(0, 40)}…)`);
+  }
+
+  return { config, verbatimLines, oldLineCount: oldLines.length, carried, sensitive, required, excused, problems };
+}
+
+// ── The branch as a whole ────────────────────────────────────────────────────
+
+/** Every path this branch may change. Nothing that builds a document or plans a month is on it. */
+const ALLOWED = [
+  /^src\/pages\/(DocumentsPage|CompanyPlannerPage|StundennachweisPage)\.tsx$/,
+  /^src\/components\/(MonatsplanungDriverPool|MonatsplanungAppliedRuns|FahrtenbuchTripsView)\.tsx$/,
+  /^src\/components\/ui\//,
+  /^src\/i18n\/(de|en)\.ts$/,
+  /^scripts\/style-ratchet\.test\.ts$/,
+  /^(style|typecheck)-baseline\.json$/,
+  /^design-harness\//,
+  /^Docs\/design\//,
+  /^(CLAUDE|HANDOFF|PROGRESS|README)\.md$/,
+  /^el-professor-plan\.html$/,
+];
+
+const changed = git('diff', '--name-only', base).split('\n').filter(Boolean);
+const untracked = git('ls-files', '--others', '--exclude-standard').split('\n').filter(Boolean);
+const outside = [...changed, ...untracked].filter(path => !ALLOWED.some(pattern => pattern.test(path)));
+
+let failed = false;
+console.log(`base ${base.slice(0, 10)}\n`);
+for (const config of FILES) {
+  const result = checkFile(config);
+  console.log(`${config.path}`);
+  console.log(`  verbatim   ${result.verbatimLines} of ${result.oldLineCount} old lines, in order`);
+  console.log(`  carried    ${result.carried} expressions out of the redrawn markup`);
+  console.log(`  sensitive  ${result.sensitive} data, clock, maths, format and permission lines present`);
+  if (result.config.mustContain) console.log(`  required   ${result.required} of ${result.config.mustContain.length} moved expressions found`);
+  for (const line of result.excused) console.log(`  dropped    ${line}`);
+  for (const line of result.problems) console.log(`  FAIL       ${line}`);
+  if (result.problems.length) failed = true;
+  console.log('');
+}
+if (outside.length) {
+  failed = true;
+  console.log('FAIL files outside the batch 3 allow-list changed:');
+  for (const path of outside) console.log(`  ${path}`);
+} else {
+  console.log(`${changed.length + untracked.length} changed files, all inside the allow-list (no document builder, engine or snapshot touched).`);
+}
+process.exit(failed ? 1 : 0);
+
+function CONFIG() {
+  return [
+    {
+      path: 'src/pages/DocumentsPage.tsx',
+      // 1–2: the React and icon imports. 83–87: fmtEuro, the old euro display
+      // helper. 320–791: from `cardBase` to the end, the markup. The design
+      // system's import is the one insertion, after line 14.
+      redrawn: [[1, 2, 'code'], [83, 87, 'code'], [320, 791]],
+      insertedAfter: [14],
+      dropped: [
+        ["return v.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €';",
+          'fmtEuro, a display helper; euro amounts are written by formatEuro (utils/money.ts), "—" for none as before'],
+        ['fmtEuro(group.totalGross)', "the month's gross, now grossLabel(group.totalGross): the same figure, written through utils/money.ts"],
+        ['fmtEuro(rec.calculated_salary)', "a record's gross, now grossLabel(rec.calculated_salary): the same figure, written through utils/money.ts"],
+        ['e => e.stopPropagation()', 'the group header is no longer one clickable row; its toggle is a button of its own, so its actions need not stop the click'],
+        ['t(h)', 'the eight column headers were one loop over their keys; the columns now name the same keys one by one'],
+        [`([
+                              'common.driver', 'doc.personalnummer', 'doc.totalHours', 'doc.grossExpected',
+                              'doc.workingDays', 'doc.savedAt', 'doc.updatedAt', 'doc.tableActions',
+                            ] as TranslationKey[])`, 'the same header keys, now one per column'],
+        [`background: 'var(--bg-surface)',
+    border: '1px solid var(--border)',
+    boxShadow: 'var(--shadow-sm)',`, 'cardBase, the tool cards\' legacy style object'],
+      ],
+    },
+    {
+      path: 'src/pages/CompanyPlannerPage.tsx',
+      // 2: the icon import. 229–625: the page's markup down to Phase 1's
+      // parameter card; the planning components below it (626–671) are kept
+      // verbatim, as are ResultPanels, StatCard, Th and Td, the ?debug=1
+      // panels. 683–702: BlockStatusBanner's drawing (its test above stays).
+      // ModeCard is appended at the end.
+      redrawn: [[2, 2, 'code'], [229, 625], [683, 702]],
+      dropped: [],
+    },
+    {
+      path: 'src/pages/StundennachweisPage.tsx',
+      // 4: the icon import (the design system's import follows line 12).
+      // 2139–2152: IS, the steps' shared input style. 2235–2290: Step 1's
+      // markup. 2463–2476: tabBtn, Step 2's tab style; 2477–2659: its markup.
+      // 3737–3842: the loading state, header, progress bar, step switch and
+      // the generating state. StepHeading is inserted after 2222. Everything
+      // else — the engine, both generators, exportPDF, TimeInput, the page's
+      // reads, save, and the whole sheet (summary, notes, limits, warnings,
+      // Timesheet) — must be verbatim.
+      redrawn: [[4, 4, 'code'], [2139, 2152, 'code'], [2235, 2290], [2463, 2476, 'code'], [2477, 2659], [3737, 3842]],
+      insertedAfter: [12, 2222],
+      dropped: [],
+    },
+    {
+      path: 'src/components/MonatsplanungDriverPool.tsx',
+      // 247–398: the pool's markup. 400–496: ChipBtn, Stat, Tag and Field, its
+      // drawing helpers, rewritten whole (their call sites keep their props).
+      // The design system's import follows line 5.
+      redrawn: [[247, 398], [400, 496, 'code']],
+      insertedAfter: [5],
+      dropped: [
+        ["d.planning_min_salary != null ? `${d.planning_min_salary.toFixed(2)} €` : '—'",
+          'a salary range bound, now `d.planning_min_salary != null ? euro(d.planning_min_salary) : \'—\'`, written through utils/money.ts: "2.100,00 €" where toFixed wrote "2100.00 €"'],
+        ["d.planning_max_salary != null ? `${d.planning_max_salary.toFixed(2)} €` : '—'",
+          'the upper bound, the same way'],
+        ['d.planning_min_salary.toFixed(2)', 'the template part of the same expression'],
+        ['d.planning_max_salary.toFixed(2)', 'the template part of the same expression'],
+      ],
+    },
+    {
+      path: 'src/components/MonatsplanungAppliedRuns.tsx',
+      // 277–317: the list's card, messages and empty state. 389–444: the
+      // delete dialog and the card's end. 470–499: RunGroups' markup.
+      // 523–626: RunRow's markup. Between them, RunDetailModal, the
+      // Stundennachweis preview with its error boundary and fallback, and
+      // FinalizePlanningModal are mounted verbatim (318–388), and the export
+      // dialog itself (629 on) is untouched. The design system's import
+      // follows line 30.
+      redrawn: [[277, 317], [389, 444], [470, 499], [523, 626]],
+      insertedAfter: [30],
+      dropped: [],
+    },
+    {
+      path: 'src/components/FahrtenbuchTripsView.tsx',
+      // 2: the icon import (the design system's import follows line 11).
+      // 34–40: STATUS_COLORS, the status colours, replaced by STATUS_TONE;
+      // STATUS_LABEL_KEYS, the words, stays. 152–157: inputSt, the fields'
+      // style object. 158–553: the markup. Everything from the hook call to
+      // statusLabel — the filters, totals and paging — is verbatim.
+      redrawn: [[2, 2, 'code'], [34, 40, 'code'], [152, 157, 'code'], [158, 553]],
+      insertedAfter: [11],
+      dropped: [
+        ["([ { labelKey: 'imp.trips.cardTotal'…", 'the four summary cards were one list; each is a KpiCard now, with its figure listed under mustContain'],
+        ["labelKey: 'imp.trips.cardTotal' as TranslationKey…", 'the first card, now a KpiCard: see mustContain'],
+        ["labelKey: 'imp.trips.cardTotalPrice' as TranslationKey…", 'the fare total, now euro(totalPrice) through utils/money.ts: toLocaleString with only a minimum of two digits printed a float sum with three'],
+        ["labelKey: 'imp.trips.cardTotalTip' as TranslationKey…", 'the tip total, now euro(totalTip), the same way'],
+        ["labelKey: 'imp.trips.cardPage' as TranslationKey…", 'the page card, now a KpiCard: see mustContain'],
+        ["{ labelKey: 'imp.trips.cardTotalPrice' as TranslationKey…", 'the fare total card line, as above'],
+        ["{ labelKey: 'imp.trips.cardTotalTip' as TranslationKey…", 'the tip total card line, as above'],
+        ['t(c.labelKey)', 'the card list\'s label, value and caption lookups, now each KpiCard\'s own props'],
+        ['c.value', 'as above'],
+        ['c.sub', 'as above'],
+        ['minimumFractionDigits: 2', 'toLocaleString\'s options for the amounts that now go through formatEuro'],
+        ["([ 'common.date'…", 'the eleven header keys, now named one per DataTable column'],
+        ['t(headerKey)', 'as above'],
+        ['pageTrips.map((trip, i) => {…', 'the desktop rows, now DataTable columns; their cells are carried one by one'],
+        ['const st = STATUS_COLORS[trip.plausibility_status] || STATUS_COLORS.pending;…', 'the status colours, now STATUS_TONE[…] ?? \'neutral\', the same fallback to the pending look'],
+        ['pageTrips.map(trip => {…', 'the phone cards\' list, drawn again from pageTrips (see mustContain)'],
+        ["trip.price_amount.toLocaleString('de-DE', { minimumFractionDigits: 2 })…", 'a fare, now euro(trip.price_amount) through utils/money.ts'],
+        ["{trip.price_amount.toLocaleString('de-DE', { minimumFractionDigits: 2 })} €", 'the same fare, as its table line'],
+        ["trip.tip_amount > 0 ? trip.tip_amount.toLocaleString(…", "a tip, now trip.tip_amount > 0 ? euro(trip.tip_amount) : '—' (see mustContain)"],
+        ['trip.price_amount.toFixed(2)', 'a phone card\'s fare, now euro(trip.price_amount): a German amount where toFixed wrote a US decimal point'],
+        ["<div><span style={{ color: 'var(--text-tertiary)' }}>{t('imp.trips.price')}…", 'the phone card\'s fare line, as above'],
+      ],
+      mustContain: [
+        'String(filteredTrips.length)',
+        "canceledCount > 0 ? t('imp.trips.activeAndCanceled', { active: activeCount, canceled: canceledCount }) : undefined",
+        'euro(totalPrice)',
+        'euro(totalTip)',
+        '`${showFrom}\\u2013${showTo}`',
+        "t('imp.trips.ofTotal', { count: filteredTrips.length })",
+        "trip.tip_amount > 0 ? euro(trip.tip_amount) : '—'",
+        'euro(trip.price_amount)',
+        "STATUS_TONE[trip.plausibility_status] ?? 'neutral'",
+        'const sameDriver = trip.original_driver_name === trip.assigned_driver_name;',
+        "sameDriver ? '—' : trip.assigned_driver_name",
+        '{pageTrips.map(trip => {',
+        'rows={pageTrips}',
+      ],
+    },
+  ];
+}

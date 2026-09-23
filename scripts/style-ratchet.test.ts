@@ -122,4 +122,87 @@ describe('the committed baseline', () => {
       expect(baseline.files[path], path).toBeUndefined();
     }
   });
+
+  it('holds the phase 5 batch-2 screens at zero, and Abrechnung at its share image', () => {
+    for (const path of ['src/components/SalariesManagement.tsx', 'src/pages/BargeldbestandPage.tsx', 'src/pages/SalariesPage.tsx']) {
+      expect(baseline.files[path], path).toBeUndefined();
+    }
+    // What Abrechnung keeps is the off-screen card html2canvas renders into the
+    // shared PNG, renderTankenquoteCard inside it and the canvas background: the
+    // picture's own look, left as it was on purpose.
+    expect(baseline.files['src/pages/AbrechnungPage.tsx']).toEqual({ style: 48, color: 121 });
+  });
+
+  it('holds the phase 5 batch-3 screens that moved whole at zero', () => {
+    // CompanyPlannerPage, StundennachweisPage and MonatsplanungAppliedRuns
+    // moved their frames only; what they keep is listed in HANDOFF.md.
+    for (const path of [
+      'src/pages/DocumentsPage.tsx',
+      'src/components/MonatsplanungDriverPool.tsx',
+      'src/components/FahrtenbuchTripsView.tsx',
+      'src/components/ui/NativeSelect.tsx',
+    ]) {
+      expect(baseline.files[path], path).toBeUndefined();
+    }
+  });
+
+  it('holds the phase 5 batch-1b screens at zero: Belege, Fahrer and Umsätze are on the design system', () => {
+    for (const path of [
+      'src/components/ReceiptList.tsx',
+      'src/components/ReceiptModal.tsx',
+      'src/components/DriversManagement.tsx',
+      'src/components/DriverModal.tsx',
+      'src/components/IncomeManagement.tsx',
+      'src/pages/BelegePage.tsx',
+      'src/pages/FahrerPage.tsx',
+      'src/pages/UmsaetzePage.tsx',
+    ]) {
+      expect(baseline.files[path], path).toBeUndefined();
+    }
+  });
+
+  it('holds the phase 5 batch-4 screens at zero, and their three exceptions where they are', () => {
+    for (const path of [
+      // Sign-in, codes, registration and the takeovers.
+      'src/components/LoginForm.tsx',
+      'src/components/auth/AuthShell.tsx',
+      'src/components/auth/AccountStatusPage.tsx',
+      'src/components/auth/BrandMark.tsx',
+      'src/components/auth/NoticeBox.tsx',
+      'src/components/auth/OtpChallenge.tsx',
+      'src/components/auth/OtpCodeInput.tsx',
+      'src/components/auth/authStyles.ts',
+      'src/components/signup/PlanSelection.tsx',
+      'src/components/signup/plans.ts',
+      'src/pages/ForgotPasswordPage.tsx',
+      'src/pages/VerifyEmailPage.tsx',
+      'src/pages/SetPasswordPage.tsx',
+      'src/pages/InviteAcceptPage.tsx',
+      'src/pages/SignupPage.tsx',
+      'src/pages/CompleteRegistrationPage.tsx',
+      'src/pages/AuthCallbackPage.tsx',
+      'src/pages/AccountBlockedPage.tsx',
+      'src/pages/PendingApprovalPage.tsx',
+      'src/pages/RejectedPage.tsx',
+      'src/pages/CompanySuspendedPage.tsx',
+      // Benutzer, Rollen, Abonnement.
+      'src/components/UserManagement.tsx',
+      'src/components/BackupManagement.tsx',
+      'src/components/RolesManagement.tsx',
+      'src/pages/UsersPage.tsx',
+      'src/pages/RolesPage.tsx',
+      'src/pages/ActivationPage.tsx',
+      'src/pages/CompanyBillingPage.tsx',
+      'src/components/ui/MessageDialog.tsx',
+    ]) {
+      expect(baseline.files[path], path).toBeUndefined();
+    }
+    // What is left is not styling to convert: Google's own button and mark
+    // colours, which its branding guidelines fix; RoleModal's scroll lock and
+    // SettingsPage's logo fallback, both kept verbatim as logic; and the
+    // company's default brand colours in SettingsPage's form data.
+    expect(baseline.files['src/components/auth/GoogleButton.tsx']).toEqual({ style: 0, color: 10 });
+    expect(baseline.files['src/components/RoleModal.tsx']).toEqual({ style: 2, color: 0 });
+    expect(baseline.files['src/pages/SettingsPage.tsx']).toEqual({ style: 2, color: 6 });
+  });
 });

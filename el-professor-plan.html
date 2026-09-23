@@ -429,7 +429,7 @@
     <p class="lede">الطلبات الخمسة من ملف المتطلبات، مقسومة على 6 مراحل. كل مرحلة بتنبني وبتنفحص على الستيج، وبعدين بتنشر على البرودكشن بزر منك، ومعها زر رجوع إذا صار إشي.</p>
     <div class="meta">
       <span class="pill info">قيد التنفيذ · المراحل 0–5</span>
-      <span>آخر تحديث: <span class="num">21.09.2026</span></span>
+      <span>آخر تحديث: <span class="num">22.09.2026</span></span>
       <span>المصدر: <code>elprofessor_requirements_ar.pdf</code></span>
     </div>
   </header>
@@ -474,7 +474,10 @@
         <li><a href="#p2"><span class="no">2</span><h3>نظام التصميم والنموذج</h3></a><ul class="chips"><li class="chip">متوسط</li><li class="chip">اندمج عالستيج</li></ul><p class="gate">البوابة انفتحت: وافقت على النموذج بـ 15.09</p></li>
         <li><a href="#p3"><span class="no">3</span><h3>فصل المنصة والصلاحيات</h3></a><ul class="chips"><li class="chip">كبير جداً</li><li class="chip">3.0 و3.1 و3.3 و3.5 و3.6 و3.9 اندمجوا</li><li class="chip">3.4أ و 3.4ب والملفات اندمجوا</li><li class="chip">3.4ج بالمراجعة</li><li class="chip">3.8-U2 بالمراجعة</li><li class="chip">3.12 بالمراجعة</li><li class="chip">3.10 و3.11 بالمراجعة</li><li class="chip">3.13أ بالمراجعة</li></ul></li>
         <li><a href="#p4"><span class="no">4</span><h3>إيصال الراتب النقدي</h3></a><ul class="chips"><li class="chip">متوسط</li><li class="chip">الأساس اندمج</li></ul></li>
-        <li><a href="#p5"><span class="no">5</span><h3>تعميم التصميم</h3></a><ul class="chips"><li class="chip">كبير</li><li class="chip">الدفعة 1 بلّشت: Fahrzeuge وFixkosten بالمراجعة</li></ul></li>
+        <li><a href="#p5"><span class="no">5</span><h3>تعميم التصميم</h3></a><ul class="chips"><li class="chip">كبير</li><li class="chip">الدفعة 1 اندمجت جزئياً، والدفعتين 1ب و2 بالمراجعة</li><li class="chip">الدفعة 3 بالمراجعة</li></ul></li>
+        <li><a href="#p5"><span class="no">5</span><h3>تعميم التصميم</h3></a><ul class="chips"><li class="chip">كبير</li><li class="chip">الدفعة 1 اندمجت جزئياً، والدفعة 2 بالمراجعة</li><li class="chip">الدفعة 3 بالمراجعة</li></ul></li>
+        <li><a><span class="no">+</span><h3>تحليل رحلات Fahrtenbuch</h3></a><ul class="chips"><li class="chip">B المحرك بالمراجعة (PR #103)</li></ul><p class="gate">بيقرأ وبيبلّغ بس: ولا رحلة بتتغيّر سائقها أو وقتها أو سعرها</p></li>
+        <li><a href="#progress"><span class="no">FA</span><h3>تحليل دفتر الرحلات</h3></a><ul class="chips"><li class="chip">الإصدار الأول</li><li class="chip">A الاستيراد بالمراجعة</li></ul></li>
       </ol>
     </section>
 
@@ -498,6 +501,7 @@
       </div>
       <p class="muted">التوثيق بـ <code>CLAUDE.md</code> تحدّث بـ PR #4.</p>
       <p class="muted">المراحل 1–4: المرحلة 1 كلها صارت عالستيج (PRs #11 و#16 و#14)، وناقصها الفحص النهائي. أساس إيصال الراتب اندمج (PR #13). PRs مفتوحة: #12 خط أساس الصلاحيات، و#17 التصميم وهو تحت المراجعة.</p>
+      <p class="muted"><strong>تحليل دفتر الرحلات، الشريحة A (22.09.2026، PR #104، بالمراجعة):</strong> الاستيراد صار يحفظ وقت الرحلة الحقيقي بالثواني على توقيت برلين، وحالة صريحة (مكتملة/ملغاة/مش معروفة)، وعلامة مراجعة بدل حذف الصف الناقص، ويرفض نفس الملف ونفس الرحلة مرتين. إضافة بس: ولا رحلة تغيّر سائقها أو وقتها أو سعرها. عينة آب: 2209 صف، 2165 مكتملة، 44 ملغاة، والـ22 رحلة اللي بعد نص الليل صارت بيومها الصح، والرفع التاني انرفض.</p>
       <p class="muted"><strong>إصلاح أمني 15.09.2026:</strong> كان في دوال مفتوحة للزوار بدون تسجيل دخول، أخطرها قائمة كل المستخدمين بإيميلاتهم. انسكّرت يدوياً على البرودكشن والستيج بموافقتك، والـ migration بيثبّت الإغلاق بالكود.</p>
     </section>
 
@@ -953,7 +957,7 @@ AND (c.subscription_expires_at IS NULL OR c.subscription_expires_at &gt; now())<
       </div>
 
       <div class="step">
-        <h3><span class="step-no">3.8</span>نموذج اشتراك واحد <span class="pill ok">U0 اندمج</span> <span class="pill ok">U1 اندمج</span> <span class="pill ok">U2 اندمج</span> <span class="pill ok">U3 اندمج</span> <span class="pill warn">إصلاح الخطة بالمراجعة</span></h3>
+        <h3><span class="step-no">3.8</span>نموذج اشتراك واحد <span class="pill ok">U0 اندمج</span> <span class="pill ok">U1 اندمج</span> <span class="pill ok">U2 اندمج</span> <span class="pill ok">U3 اندمج</span> <span class="pill warn">إصلاح الخطة بالمراجعة</span> <span class="pill warn">إصلاح الإلغاء اليدوي بالمراجعة</span></h3>
         <ul class="list">
           <li><strong>U0 (PR #21):</strong> تقرير قراءة بس على الستيج، لقى 15 صنف تعارض بين الأنظمة الأربعة اللي بتقرر إذا الشركة مشتركة.</li>
           <li><strong>U1 (اندمج 17.09.2026):</strong> جدول واحد للفترات المدفوعة أو الممنوحة (<code>subscription_coverage</code>)، ودالة وحدة بتشتق منه حالة الاشتراك وتاريخ الانتهاء والخطة. الكتّاب القدام ضلوا شغالين متل ما هم، بس صاروا يسجّلوا الفترة بدل ما يكتبوا الأعمدة بإيدهم.</li>
@@ -966,7 +970,8 @@ AND (c.subscription_expires_at IS NULL OR c.subscription_expires_at &gt; now())<
           <li><strong>قرار تشغيلي ضلّ:</strong> ربط الكنس اليومي بالسيرفر. بدونه الفاتورة اللي بتنولد وما حدا بيأشّرها مدفوعة ما بتمنح إشي. التجربة الجافّة وسطرين الـ cron صاروا جاهزين للنسخ بـ HANDOFF.md، والترتيب: الستيج أول وبعدين البرودكشن.</li>
           <li><strong>U3 (PR #85، اندمج):</strong> ما في إشي بيكتب أعمدة الاشتراك الخمسة مباشرة. trigger على جدول الشركات بيرفض أي تغيير عليها من الأدوار اللي بتوصل من المتصفح أو من الـ functions، وفحص بيقرا كل الدوال وبيفشّل الإصدار إذا ظهر كاتب جديد، واختبار بالكود بيفشل إذا ظهرت كتابة مباشرة. <strong>ولا شركة بيتغيّر وصولها</strong>، والكنس ما بيتغيّر من هالشريحة.</li>
           <li><strong>إصلاح الخطة (PR #88، migration <code>20260920150000</code>):</strong> شركة خلصت كل فتراتها، إذا تغيّرت خطتها من اللوحة، كانت أول إعادة حساب ترجّعها للخطة القديمة. هلأ الدالة بتاخد الخطة بس من فترة لسا ما خلصت، وهي نفس الفترات اللي تغيير الخطة بيكتب عليها، وإذا ما في ولا وحدة الخطة بتضل. <strong>لحظة النشر ما بتتغيّر ولا شركة.</strong> والشركة اللي العيب رجّع خطتها من قبل ما بترجع لحالها: بتنحط خطتها من جديد من اللوحة بعد النشر. استعلامَي القراءة للبرودكشن بـ HANDOFF.md.</li>
-          <li><strong>قرارين جداد إلك من الإصلاح (بـ U2، قبل ربط كنس الفواتير):</strong> (1) فاتورة خلصت مهلتها وبعدين انأشّرت مدفوعة بترجّع الخطة القديمة. (2) إعادة تطبيق فاتورة بترجّع صف كان التعديل اليدوي لغاه، فالشركة اللي وقّفت اشتراكها بإيدك بترجع تفوت. وهاي بتمسّ الوصول.</li>
+          <li><strong>قرارين جداد إلك من الإصلاح (بـ U2، قبل ربط كنس الفواتير):</strong> (1) فاتورة خلصت مهلتها وبعدين انأشّرت مدفوعة بترجّع الخطة القديمة. (2) إعادة تطبيق فاتورة بترجّع صف كان التعديل اليدوي لغاه، فالشركة اللي وقّفت اشتراكها بإيدك بترجع تفوت. وهاي بتمسّ الوصول. <strong>(2) انصلحت، شوف تحت.</strong></li>
+          <li><strong>إصلاح الإلغاء اليدوي (PR #96، migration <code>20260921130000</code>، بالمراجعة):</strong> الفترة اللي لغاها تعديلك اليدوي ما عادت ترجع بإعادة تطبيق الفاتورة ولا بالكنس، فـ«منتهية» بتضل «منتهية». بترجع بس إذا الفاتورة نفسها هي اللي لغتها ورجعت ما عادت ملغية، أو إذا انأشّرت مدفوعة من اللوحة بعد تعديلك. بنفرّق بينهم بسبب الإلغاء المكتوب على الفترة. <strong>لحظة النشر ما بتتغيّر ولا شركة.</strong> وهاد اللي كان مانع تركيب الكنس: بعد ما ينزل، التجربة الجافة الجديدة بـ HANDOFF.md وبعدين سطر الـ cron، الستيج أول.</li>
         </ul>
       </div>
 
@@ -988,6 +993,17 @@ AND (c.subscription_expires_at IS NULL OR c.subscription_expires_at &gt; now())<
           <li><strong>حماية «ممنوع التعديل والحذف» ضلت زي ما هي</strong>، إلا باب واحد ضيق: الحذف بيعدّي بس من جوّا هالدالة، وبس بنفس المعاملة، وبس لصاحب الجدول. ولا حساب من المتصفح ولا من الـ functions بيقدر يوصلها أو يمسح سطر. التعديل والتفريغ ممنوعين دايماً.</li>
           <li><strong>ما رح ينمسح ولا سطر قبل أيلول 2027</strong>، لأنه أقدم سطور القراءة من 16.09.2026.</li>
           <li>الدالة ما بتشتغل لحالها، بسطر cron عالسيرفر: <strong>انركّب عالستيج بـ 21.09.2026</strong>، والبرودكشن لسا — سطره جاهز بـ HANDOFF.md.</li>
+        </ul>
+      </div>
+
+      <div class="step">
+        <h3><span class="step-no">1.6-و</span>صفحتا Impressum وسياسة الخصوصية <span class="pill warn">بالمراجعة (PR #97)</span></h3>
+        <ul class="list">
+          <li><strong>ليش:</strong> البرودكشن ما فيه Impressum (القانون الألماني بيطلبه) ولا سياسة خصوصية، وجوجل ما بيشتغل عالبرودكشن بدون رابط سياسة خصوصية.</li>
+          <li>صفحتين عامّتين <code>/impressum</code> و<code>/datenschutz</code> بيفتحوا لأي حدا، وبيعرضوا اللي بتكتبه إنت من اللوحة (<em>Einstellungen → Impressum / Datenschutz</em>) وبس — <strong>ولا معلومة ولا جملة قانونية مخترعة</strong>؛ والصفحة الفاضية بتقول بصراحة إنه لسا ما في محتوى.</li>
+          <li>14 خانة بس بتطلع للعالم (الاسم والشكل القانوني، العنوان، الممثل، الإيميل والتلفون، السجل التجاري، USt-IdNr، والمسؤول عن المحتوى) — <strong>أبداً مش الحساب البنكي ولا الرقم الضريبي ولا ترقيم الفواتير</strong>.</li>
+          <li><strong>بيانات البائع اللي عالفواتير ما انلمست</strong>، عشان الرجوع لنسخة أقدم ما يخرّب الفاتورة؛ وفي زر بينقل الاسم والعنوان للـ Impressum بس لما تضغطه إنت.</li>
+          <li>بعد ما تعبّي الصفحتين عالبرودكشن: رابط <code>https://elprofessor.eu/datenschutz</code> بشاشة موافقة جوجل، و<code>GOOGLE_SIGNIN_ENABLED=true</code>، وزر النشر (الخطوات بـ HANDOFF.md).</li>
         </ul>
       </div>
 
@@ -1122,10 +1138,10 @@ AND (c.subscription_expires_at IS NULL OR c.subscription_expires_at &gt; now())<
           <table>
             <thead><tr><th>الدفعة</th><th>الصفحات</th></tr></thead>
             <tbody>
-              <tr><td class="num">1</td><td>Belege، Fahrer، Fahrzeuge، Umsätze، Fixkosten <span class="pill info">Fahrzeuge وFixkosten بالمراجعة (PR #90)، الباقي بعدهم</span></td></tr>
-              <tr><td class="num">2</td><td>Gehälter، Abrechnung، Bargeldbestand</td></tr>
-              <tr><td class="num">3</td><td>Dokumente، Monatsplanung، Stundennachweis (العرض بس)</td></tr>
-              <tr><td class="num">4</td><td>Benutzer، Rollen، Einstellungen، Abonnement، وصفحات الدخول</td></tr>
+              <tr><td class="num">1</td><td>Belege، Fahrer، Fahrzeuge، Umsätze، Fixkosten <span class="pill ok">Fahrzeuge وFixkosten اندمجوا (PR #90)</span> <span class="pill info">Belege وFahrer وUmsätze بالمراجعة (PR #100)</span></td></tr>
+              <tr><td class="num">2</td><td>Gehälter، Abrechnung، Bargeldbestand <span class="pill info">بالمراجعة (PR #98)</span></td></tr>
+              <tr><td class="num">3</td><td>Dokumente، Monatsplanung، Stundennachweis (العرض بس) <span class="pill info">بالمراجعة (PR #99)</span></td></tr>
+              <tr><td class="num">4</td><td>Benutzer، Rollen، Einstellungen، Abonnement، وصفحات الدخول <span class="pill info">بالمراجعة · PR #101</span></td></tr>
               <tr><td class="num">5</td><td>لوحة المنصة</td></tr>
             </tbody>
           </table>
@@ -1143,7 +1159,7 @@ AND (c.subscription_expires_at IS NULL OR c.subscription_expires_at &gt; now())<
       </div>
 
       <div class="step">
-        <h3><span class="step-no">5.1</span>الدفعة 1، أول شاشتين: Fahrzeuge وFixkosten <span class="pill info">بالمراجعة · PR #90</span></h3>
+        <h3><span class="step-no">5.1</span>الدفعة 1، أول شاشتين: Fahrzeuge وFixkosten <span class="pill ok">اندمجت · PR #90</span></h3>
         <ul class="list">
           <li><strong>ليش شاشتين بس:</strong> هدول أقل شاشات الدفعة فيهم منطق رواتب، فالطريقة بتنحكم عليها بمكان الغلطة فيه أرخص. Belege وFahrer وUmsätze بييجوا بعد المراجعة، وبيمشوا على نفس الطريقة.</li>
           <li><strong>شو تغيّر:</strong> الشكل بس. شو الشاشة بتقرا وبتحسب وبتكتب وبتتحقق منه ضل نفس النص حرفياً، وهاد مفحوص حرف بحرف. عنوان واحد لكل صفحة، جدول واحد بدل البطاقات، والتبويبات لحالة الـ TÜV، والمبالغ بالطريقة الألمانية بأرقام متساوية العرض.</li>
@@ -1152,6 +1168,55 @@ AND (c.subscription_expires_at IS NULL OR c.subscription_expires_at &gt; now())<
           <li><strong>فحص تلقائي جديد:</strong> بيعدّ التنسيقات المكتوبة يدوياً والألوان الثابتة بكل ملف، وبيوقف البناء إذا زادت. الشاشتين صاروا صفر.</li>
           <li><strong>لقطات قبل وبعد:</strong> 34 لقطة لكل وحدة، 375 و768 و1280، فاتح وغامق، بـ <code>Docs/design/phase5/batch1/</code>، على بيانات مخترعة بنفس الإطار الحقيقي للبرنامج.</li>
           <li><strong>بيستنى قرارك:</strong> سطر «Benutzerinfo» اللي بيطلع إيميل المستخدم ودوره على Fixkosten ضل، بس صار صغير تحت الجدول. شيله قرارك.</li>
+        </ul>
+      </div>
+
+      <div class="step">
+        <h3><span class="step-no">5.1ب</span>الدفعة 1ب: Belege وFahrer وUmsätze <span class="pill info">بالمراجعة · PR #100</span></h3>
+        <ul class="list">
+          <li><strong>شو تغيّر:</strong> الشكل بس، على نفس طريقة الدفعة 1. كل ملف انقارن سطر بسطر مع الستيج بأداة (<code>design-harness/identity-proof.mjs</code>): المنطق نفس النص، وكل كود ورا زر أو خانة موجود حرفياً بالشاشة الجديدة.</li>
+          <li><strong>رقم الـ Beleg:</strong> بيضل من النظام، والمسح الضوئي ما بيلمسه — وانفحص عالرقم اللي انحفظ فعلاً.</li>
+          <li><strong>Umsätze:</strong> بطاقات السائقين اللي كانت بتنسحب بالماوس صارت جدول واحد، وكل صف فيه نفس الحساب.</li>
+          <li><strong>لما قاعدة البيانات ما ترد:</strong> الشاشات بتقول إنها ما قدرت تحمّل، بدل «ما في شي» و«0,00 €»؛ وبـ Umsätze كمان لما بس جدول الإيرادات يفشل.</li>
+          <li><strong>جلسة القراءة من المنصّة:</strong> ما بتشوف ولا زر كتابة.</li>
+          <li><strong>لقطات وفحوصات:</strong> <span class="num">65</span> لقطة قبل و<span class="num">65</span> بعد بـ <code>Docs/design/phase5/batch1b/</code>، و<span class="num">27</span> فحص بيضغطوا كل إضافة وتعديل وحذف ورفض.</li>
+          <li><strong>عيوب طلعت:</strong> تعديل «Inhaber» من شاشة Fahrer كان بيرجّعه «موظف» — انصلح بـ #102؛ وفلتر الأسبوع بـ Belege بيشيل يوم الأحد — لسا مفتوح، بـ PR لحاله.</li>
+        </ul>
+      </div>
+
+      <div class="step">
+        <h3><span class="step-no">5.2</span>الدفعة 2: Gehälter وAbrechnung وBargeldbestand <span class="pill info">بالمراجعة · PR #98</span></h3>
+        <ul class="list">
+          <li><strong>شو تغيّر:</strong> الشكل بس، على أربع ملفات. المبالغ صارت بالطريقة الألمانية بكل مكان (كانت بعض الشاشات تكتب <span class="num">1234.56</span> بنقطة)، والجداول صارت جدول واحد مرتب لكل أسبوع أو شهر.</li>
+          <li><strong>مفحوص نصّياً:</strong> أداة بتقارن منطق كل ملف بالنسخة القديمة سطر بسطر، وبتتأكد إن كل حساب كان مكتوب جوّا الشاشة لسا موجود حرفياً. وملفات Excel نزّلناها من النسختين وقارنّا كل خلية: متطابقة.</li>
+          <li><strong>التغيير الوحيد بالسلوك، عن قصد:</strong> لما التحميل يفشل، الشاشة ما عادت تعرض <span class="num">0,00 €</span> ولا أرقام الشهر اللي قبل تحت اسم الشهر الجديد. بتطلع رسالة خطأ مع «إعادة المحاولة».</li>
+          <li><strong>ضلّوا عالشكل القديم:</strong> صورة Abrechnung اللي بتنبعت للسائق (هي وثيقة)، وملخّص السائق (كمان صورة)، ونوافذ الدفعات — هدول إلهم خطوة لحالهم.</li>
+          <li><strong>عالموبايل:</strong> Abrechnung كانت أعرض من الشاشة بـ <span class="num">134</span> بكسل، وهلأ ولا شاشة بتطلع برّا.</li>
+          <li><strong>لقطات قبل وبعد:</strong> <span class="num">47</span> لكل وحدة بـ <code>Docs/design/phase5/batch2/</code>، منها شهر فيه إيصال راتب انلغى بالشهر اللي بعده، وحساب billing ما بيقدر يقرا الصندوق كامل.</li>
+        </ul>
+      </div>
+
+      <div class="step">
+        <h3><span class="step-no">5.3</span>الدفعة 3: Dokumente وMonatsplanung وStundennachweis (العرض بس) <span class="pill info">بالمراجعة · PR #99</span></h3>
+        <ul class="list">
+          <li><strong>القاعدة الأشد:</strong> هالشاشات بتطلّع أوراق رسمية للمحاسب، فولا ملف بيبني مستند انفتح، ولا منطق تخطيط ولا Lohnart ولا Finalisierung اتغيّر.</li>
+          <li><strong>شو انتقل:</strong> Dokumente كلها وعرض الـ Fahrtenbuch، اختيار السائقين، وإطار الـ Monatsplanung والـ Stundennachweis (العناوين والأزرار والخطوات والنوافذ).</li>
+          <li><strong>شو ضل قديم:</strong> ورقة الـ Stundennachweis وملخّصها، شاشات المرحلة 3 و4 والتطبيق، المعاينة، الـ Finalisierung، تصدير الـ Fahrtenbuch، والمعالجين التاريخيين — لأنها بتحسب وهي بترسم.</li>
+          <li><strong>مفحوص كنص:</strong> سكربت بيقارن كل ملف بالقديم: 5645 سطر حرفياً، 668 تعبير، 440 سطر حساس، وكل شي انشال مكتوب سببه. ووقف كل مرة جرّبنا نخرّب فيها عن قصد.</li>
+          <li><strong>لقطات وفحوصات:</strong> 51 لقطة قبل و51 بعد بـ <code>Docs/design/phase5/batch3/</code>، و20 فحص ما بيحفظوا ولا بيطبّقوا شي.</li>
+          <li><strong>المبالغ:</strong> صارت كلها ألمانية. التواريخ ما انلمست.</li>
+        </ul>
+      </div>
+
+      <div class="step">
+        <h3><span class="step-no">5.4</span>الدفعة 4: صفحات الدخول والحساب، Benutzer، Rollen، Einstellungen، Abonnement <span class="pill info">بالمراجعة · PR #101</span></h3>
+        <ul class="list">
+          <li><strong>شو انتقل:</strong> كل شاشات الدخول (الدخول، نسيت كلمة المرور، الكود، تعيين كلمة المرور، الدعوة، التسجيل وتسجيل جوجل)، والصفحات الأربعة اللي بتطلع بدل البرنامج، وBenutzer وRollen وEinstellungen وAbonnement.</li>
+          <li><strong>شاشات الدخول صارت تمشي مع الفاتح والغامق</strong>، حسب قرارك بـ 22.09. قبل كانت غامقة دايماً.</li>
+          <li><strong>شكل بس، ومثبت بسكربت:</strong> كل كتلة منطق حرف بحرف، كل استدعاء بنفس المعطيات، وكل خاصية بتعمل إشي بالواجهة. و<code>App.tsx</code> والـ contexts و<code>src/lib</code> ما انلمسوا.</li>
+          <li><strong>Einstellungen بجلسة قراءة:</strong> الخانات صارت مقفولة مع ملاحظة، حسب قرارك.</li>
+          <li><strong>بيستنى قرارك:</strong> زر «Passwort zurücksetzen» وشارة «Passwortänderung erforderlich» على جدول Benutzer عاللابتوب (موجودين عالموبايل بس، متل قبل). وعيب لقيناه: «Anwenden» بشاشة التسجيل بجوجل بيبعت التسجيل كله.</li>
+          <li><strong>لقطات قبل وبعد</strong> بـ <code>Docs/design/phase5/batch4/</code>، فيها كل رسالة رفض بشاشة الدخول، شاشة الكود، شريط الستيج، وجلسة القراءة.</li>
         </ul>
       </div>
     </section>
@@ -1167,7 +1232,7 @@ AND (c.subscription_expires_at IS NULL OR c.subscription_expires_at &gt; now())<
             <tr><td class="num">2</td><td>التصميم والنموذج</td><td>متوسط</td><td>0، وموافقتك</td><td><span class="pill ok">اندمج</span></td></tr>
             <tr><td class="num">3</td><td>المنصة والصلاحيات</td><td>كبير جداً</td><td>1، و2 للواجهة</td><td><span class="pill info">قيد البناء</span></td></tr>
             <tr><td class="num">4</td><td>إيصال الراتب</td><td>متوسط</td><td>2 للواجهة، وقرار صفوف الرواتب المكررة</td><td><span class="pill ok">اندمج عالستيج</span></td></tr>
-            <tr><td class="num">5</td><td>تعميم التصميم</td><td>كبير</td><td>2</td><td><span class="pill">ما بلّشت</span></td></tr>
+            <tr><td class="num">5</td><td>تعميم التصميم</td><td>كبير</td><td>2</td><td><span class="pill info">قيد التنفيذ</span></td></tr>
           </tbody>
         </table>
       </div>
@@ -1186,6 +1251,7 @@ AND (c.subscription_expires_at IS NULL OR c.subscription_expires_at &gt; now())<
         <li><span class="when">المرحلة 3</span><span>قرارات D1–D13 وبيانات البائع للفواتير (التفاصيل بالخطة). <strong>D8–D10 انحسمت بـ 17.09.2026</strong> مع قواعد الاشتراك الستة؛ اللي ضل منها لـ U2 هو رقم أيام السماح للفواتير. <strong>وD4 انحسم بـ 21.09.2026</strong> (12 شهر للقراءات و36 للباقي).</span><span class="pill warn">لسا</span></li>
         <li><span class="when">D4</span><span>تركيب سطر الـ cron اليومي لمسح السجل القديم عالبرودكشن (الستيج انركّب بـ 21.09.2026؛ السطر بـ HANDOFF.md). وجملة سياسة الخصوصية عن مدة الاحتفاظ جاهزة بـ HANDOFF.md للمحامي.</span><span class="pill">لاحقاً</span></li>
         <li><span class="when">المرحلة 0</span><span>مفتاح <code>OTP_PEPPER</code> للبرودكشن.</span><span class="pill ok">خلص</span></li>
+        <li><span class="when">1.6-و</span><span>تعبئة صفحتَي Impressum وسياسة الخصوصية عالبرودكشن بعد ما ينزلوا (البيانات منك، ونص الخصوصية من المحامي)، وبعدها خطوات جوجل بـ HANDOFF.md.</span><span class="pill warn">لسا</span></li>
         <li><span class="when">جوجل 1.6</span><span>سياسة خصوصية وImpressum، وقرارَي G1 وG2. <b>G3 انحسم بـ 17.09.2026: عميل Google واحد للبيئتين</b>، فالبرودكشن ما عاد بدّه عميل خاص — بس بدنا نضيف رابط رجوع البرودكشن للعميل نفسه، ونكتب <code>GOOGLE_CLIENT_SHARED=true</code> بملفّي <code>.env</code> الاثنين، وإلا <code>deploy.sh</code> بيرفض النشر. الخطر اللي وافقت عليه: الستيج على نسخة من حسابات البرودكشن، فعميل واحد يعني شاشة موافقة وحدة وجمهور توكن واحد بالبيئتين. (عميل الستيج جاهز وجوجل شغّال عليه من 16.09.2026؛ وقاعدة "الجلسة بكلمة مرور" من الخادم انبنت بـ 17.09.2026، فبضل على البرودكشن السياسة والImpressum.)</span><span class="pill warn">لسا</span></li>
         <li><span class="when">المرحلة 4</span><span><b>قرار دمج صفوف الرواتب المتداخلة انحسم بـ 17.09.2026: بتدمجها بإيدك قبل الدفع، ورفض الدفع النقدي بيضل مقصود.</b> وPR #71 بيخلّيها بتنشاف على شاشة الرواتب، وبيثبت إنه ما في غير مسارين بينشئوا صف راتب — الاثنين بضغطة يد على نفس الشاشة — فالتداخل من خانتَي التاريخ الحرّتين مش من أي workflow مدعوم. وPR #73 نزل بعده بنفس اليوم وهو النص التاني: حذف الصف من نفس الشاشة، فما عاد الدمج بده تعديل مباشر بقاعدة البيانات. <b>اللي ضل عليك:</b> تختار كيف نمنع الجديد من الاقتراح المكتوب بوصف PR #71 (فحص بالواجهة، ثم trigger عند الإنشاء، ومنصوح ضد exclusion constraint) — وخلّي ببالك إنه trigger عند <b>التعديل</b> رح يكسر خطوة التوسيع بالدمج، فالمنع لازم يكون عند الإنشاء بس.</span><span class="pill warn">ناقص اختيار المنع</span></li>
       </ul>
