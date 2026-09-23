@@ -340,13 +340,19 @@ const AdminLoginRedirect: React.FC = () => {
 };
 
 /**
- * `/super-admin/*` — the panel's previous entry, until plan slice 3.13.
+ * `/super-admin/*` — the panel's previous entry.
+ *
+ * Slice 3.13b removed the last in-app link to it: the company sidebar, the user
+ * menu, the overview card and the platform dashboard's own links all name
+ * ADMIN_BASE now, so nothing in the product produces one of these paths any
+ * more. **The redirect itself stays**, and on purpose — a bookmark, a browser's
+ * autocomplete and a link in somebody's notes outlive the release that stopped
+ * writing the path, and an operator following one should land on the panel
+ * rather than on the marketing page through the public catch-all.
  *
  * The panel is registered once, under `/admin`, and every old path is rewritten
- * onto it here. So a bookmark, and the in-app links that still say
- * `/super-admin` (the company sidebar, the user menu, the overview card and the
- * platform dashboard's own links), reach exactly the screen they always did,
- * and there is no second copy of the routes that could drift from the first.
+ * onto it here, so there is no second copy of the routes that could drift from
+ * the first.
  */
 const LegacyAdminRedirect: React.FC = () => {
   const location = useLocation();
@@ -637,8 +643,9 @@ function App() {
 
               {/* The panel's previous entry. One panel and not two: every
                   /super-admin path is rewritten onto /admin, for a platform
-                  account and a company user alike. Plan slice 3.13 removes this
-                  together with the links that still point at it. */}
+                  account and a company user alike. Slice 3.13b removed the
+                  links that pointed at it; this stays for the bookmarks that
+                  already exist. */}
               <Route path={`${LEGACY_ADMIN_BASE}/*`} element={<LegacyAdminRedirect />} />
             </Routes>
           </BrowserRouter>

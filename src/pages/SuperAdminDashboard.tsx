@@ -21,7 +21,7 @@ import { calcPricing, fmt as fmtPrice } from '../utils/pricing';
 import { useAppConfig } from '../contexts/AppConfigContext';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { contextRefusalMessage } from '../lib/supportSession';
-import { TENANT_HOME } from '../lib/adminGate';
+import { ADMIN_BASE, TENANT_HOME } from '../lib/adminGate';
 import { useTranslation } from '../contexts/LanguageContext';
 import { subscriptionIsActive } from '../utils/planState';
 import type { CompanyStatus } from '../contexts/AuthContext';
@@ -732,7 +732,7 @@ export default function SuperAdminDashboard() {
             {t('common.update')}
           </button>
           <Link
-            to="/super-admin/companies"
+            to={`${ADMIN_BASE}/companies`}
             className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-opacity hover:opacity-85"
             style={{ background: 'var(--warning-solid)', color: 'white' }}
           >
@@ -1223,7 +1223,7 @@ export default function SuperAdminDashboard() {
             </h3>
           </div>
           <Link
-            to="/super-admin/companies"
+            to={`${ADMIN_BASE}/companies`}
             className="flex items-center gap-1.5 text-xs font-semibold transition-colors"
             style={{ color: 'var(--accent)' }}
             onMouseEnter={e => (e.currentTarget.style.opacity = '0.7')}
@@ -1434,7 +1434,7 @@ export default function SuperAdminDashboard() {
         </div>
         {companies.length > 8 && (
           <div className="px-5 py-3 border-t text-center" style={{ borderColor: 'var(--border)' }}>
-            <Link to="/super-admin/companies" className="text-xs font-semibold" style={{ color: 'var(--accent)' }}>
+            <Link to={`${ADMIN_BASE}/companies`} className="text-xs font-semibold" style={{ color: 'var(--accent)' }}>
               {t('sa.dash.showAllCompanies', { count: companies.length })}
             </Link>
           </div>
@@ -1487,11 +1487,19 @@ export default function SuperAdminDashboard() {
           <h3 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>{t('sa.dash.quickAccess')}</h3>
         </div>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          {/*
+            Every target is inside the panel. Two of these were the tenant
+            paths '/users' and '/settings', which a company-less platform
+            account cannot reach at all — it never sees the tenant router — so
+            both landed on the public catch-all. The panel's own equivalents
+            are the user directory and the platform settings; a role without
+            the capability for one is refused there, as it is from the sidebar.
+          */}
           {[
-            { id: 'manageCompanies', label: t('sa.dash.quick.manageCompanies'), icon: Building2, color: 'var(--warning)', to: '/super-admin/companies' },
-            { id: 'newCompany', label: t('sa.dash.quick.newCompany'), icon: Plus, color: 'var(--success)', to: '/super-admin/companies' },
-            { id: 'manageUsers', label: t('sa.dash.quick.manageUsers'), icon: Users, color: 'var(--accent)', to: '/users' },
-            { id: 'settings', label: t('common.settings'), icon: Shield, color: 'var(--text-secondary)', to: '/settings' },
+            { id: 'manageCompanies', label: t('sa.dash.quick.manageCompanies'), icon: Building2, color: 'var(--warning)', to: `${ADMIN_BASE}/companies` },
+            { id: 'newCompany', label: t('sa.dash.quick.newCompany'), icon: Plus, color: 'var(--success)', to: `${ADMIN_BASE}/companies` },
+            { id: 'manageUsers', label: t('sa.dash.quick.manageUsers'), icon: Users, color: 'var(--accent)', to: `${ADMIN_BASE}/verzeichnisse` },
+            { id: 'settings', label: t('common.settings'), icon: Shield, color: 'var(--text-secondary)', to: `${ADMIN_BASE}/einstellungen` },
           ].map(action => (
             <Link
               key={action.id}
