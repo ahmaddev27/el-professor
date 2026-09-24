@@ -103,8 +103,10 @@ const Sidebar: React.FC<SidebarProps> = ({ isSupportAdmin }) => {
 
   const SidebarContent = () => (
     <div className="flex h-full flex-col">
-      {/* Logo */}
-      <div className="flex items-center gap-3 border-b border-line px-4 py-4">
+      {/* Logo. Below `lg` the menu button is fixed over this row's left edge —
+          it covered the mark whenever the drawer was open — so the lockup
+          starts clear of it there and keeps its old inset on a desktop. */}
+      <div className="flex items-center gap-3 border-b border-line py-4 pl-14 pr-4 lg:pl-4">
         <div className="flex h-8 w-8 shrink-0 items-center justify-center">
           <img src="/professor_logo_white.svg" alt="El-Professor" className="h-8 w-8 object-contain" />
         </div>
