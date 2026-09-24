@@ -1,21 +1,29 @@
 import React, { useState, useEffect } from 'react';
 import { Save, ShieldCheck } from 'lucide-react';
-import { Role, RolePermission, PAGE_DEFINITIONS } from '../types/role';
+import { Role, RolePermission, RoleWithPermissions, PAGE_DEFINITIONS } from '../types/role';
+import { emptyPermissions, permissionsFromTemplate, type PermissionMap } from '../lib/companyRoles';
 import { useTranslation } from '../contexts/LanguageContext';
-import { Alert, Button, Dialog, DialogContent, DialogDescription, DialogTitle, Field, Input, cn } from './ui';
+import { Alert, Button, Dialog, DialogContent, DialogDescription, DialogTitle, Field, Input, NativeSelect, cn } from './ui';
 import { controlFrameClass } from './ui/Input';
 
 interface RoleModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSave: (role: Partial<Role>, permissions: Partial<RolePermission>[]) => Promise<void>;
+  /*
+    The permissions travel as the **map** the form holds, keyed by page_key, not
+    as a list of rows. `permissionPayload()` — the caller's next step — reads
+    `map[page_key]` for each of the sixteen known areas, so a list handed over
+    here resolves to `undefined` on every lookup, every entry is dropped, and
+    `company_role_save` is called with an empty `p_permissions`: a role saved
+    with no permissions at all, which is every holder locked out of every page.
+    That is the exact failure 20260923120000 was written to make impossible, so
+    the two halves state the same type.
+  */
+  onSave: (role: Partial<Role>, permissions: PermissionMap) => Promise<void>;
   role?: Role;
   existingPermissions?: RolePermission[];
-}
-
-interface PermissionState {
-  can_view: boolean;
-  can_edit: boolean;
+  /** The system roles a new role may be copied from. Ignored when editing one. */
+  templates?: readonly RoleWithPermissions[];
 }
 
 const RoleModal: React.FC<RoleModalProps> = ({
@@ -24,11 +32,13 @@ const RoleModal: React.FC<RoleModalProps> = ({
   onSave,
   role,
   existingPermissions = [],
+  templates = [],
 }) => {
   const { t, tPlural } = useTranslation();
   const [roleName, setRoleName] = useState('');
   const [roleDescription, setRoleDescription] = useState('');
-  const [permissionMap, setPermissionMap] = useState<Record<string, PermissionState>>({});
+  const [permissionMap, setPermissionMap] = useState<PermissionMap>({});
+  const [templateId, setTemplateId] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [validationError, setValidationError] = useState('');
   const [isInitialized, setIsInitialized] = useState(false);
@@ -41,27 +51,36 @@ const RoleModal: React.FC<RoleModalProps> = ({
     if (isInitialized) return;
 
     setValidationError('');
+    setTemplateId('');
 
     if (role) {
       setRoleName(role.name);
       setRoleDescription(role.description);
-      const perms: Record<string, PermissionState> = {};
-      existingPermissions.forEach(p => {
-        perms[p.page_key] = { can_view: p.can_view, can_edit: p.can_edit };
-      });
-      setPermissionMap(perms);
+      // A full map over all sixteen areas, not only the rows that exist: a role
+      // stores no row for an area it does not permit, and a map with holes is
+      // drawn as unset by one box and read as absent by the next.
+      setPermissionMap(permissionsFromTemplate(existingPermissions));
     } else {
       setRoleName('');
       setRoleDescription('');
-      const perms: Record<string, PermissionState> = {};
-      PAGE_DEFINITIONS.forEach(page => {
-        perms[page.key] = { can_view: false, can_edit: false };
-      });
-      setPermissionMap(perms);
+      setPermissionMap(emptyPermissions());
     }
 
     setIsInitialized(true);
   }, [isOpen, role, existingPermissions, isInitialized]);
+
+  /*
+    "Als Kopie von": a new role starts from a system role's boxes. The template
+    is read through `permissionsFromTemplate`, which drops a key this build does
+    not know — `company_role_save` refuses an unknown page_key, so an older
+    browser copying a template a newer migration widened would otherwise fail on
+    save with nothing on screen to explain it.
+  */
+  const applyTemplate = (id: string) => {
+    setTemplateId(id);
+    const chosen = templates.find(candidate => candidate.id === id);
+    setPermissionMap(chosen ? permissionsFromTemplate(chosen.permissions) : emptyPermissions());
+  };
 
   useEffect(() => {
     if (isOpen) {
@@ -111,11 +130,7 @@ const RoleModal: React.FC<RoleModalProps> = ({
       const roleData: Partial<Role> = { name: trimmedName, description: roleDescription.trim() };
       if (role) roleData.id = role.id;
 
-      const permissionsData: Partial<RolePermission>[] = Object.entries(permissionMap).map(
-        ([page_key, perms]) => ({ page_key, can_view: perms.can_view, can_edit: perms.can_edit })
-      );
-
-      await onSave(roleData, permissionsData);
+      await onSave(roleData, permissionMap);
       onClose();
     } catch (err: any) {
       setValidationError(err.message || t('users.roles.error.save'));
@@ -141,6 +156,13 @@ const RoleModal: React.FC<RoleModalProps> = ({
 
   const viewLabel = t('users.roles.col.view');
   const editLabel = t('users.roles.col.edit');
+  /*
+    A system role is opened to be read. `roles_update` requires
+    `is_system = false` and `company_role_save` answers `not_found` for a role
+    that is not this company's — so offering Save here would only produce "Diese
+    Rolle wurde nicht gefunden" for a row the screen is showing.
+  */
+  const readOnly = Boolean(role?.is_system);
 
   return (
     <Dialog open onOpenChange={next => { if (!next) handleClose(); }}>
@@ -170,12 +192,33 @@ const RoleModal: React.FC<RoleModalProps> = ({
             {validationError && <Alert tone="critical" title={validationError} />}
 
             {/* SYSTEM ROLE NOTE */}
-            {role?.is_system && (
-              <Alert tone="brand" role="note">{t('users.roles.systemRoleNote')}</Alert>
+            {readOnly && (
+              <Alert tone="brand" role="note" title={t('users.roles.systemCannotEdit')}>
+                {t('users.roles.systemRoleNote')}
+              </Alert>
             )}
 
             {/* ROLE NAME + DESCRIPTION */}
-            <div className="grid gap-4">
+            <div className="grid grid-cols-1 gap-4">
+              {!role && templates.length > 0 && (
+                <Field
+                  label={t('users.roles.template.label')}
+                  id="role-template"
+                  hint={t('users.roles.template.hint')}
+                >
+                  <NativeSelect
+                    id="role-template"
+                    value={templateId}
+                    onChange={e => applyTemplate(e.target.value)}
+                    disabled={isSubmitting}
+                  >
+                    <option value="">{t('users.roles.template.blank')}</option>
+                    {templates.map(template => (
+                      <option key={template.id} value={template.id}>{template.name}</option>
+                    ))}
+                  </NativeSelect>
+                </Field>
+              )}
               <Field label={t('users.roles.nameLabel')} id="role-name" required>
                 <Input
                   id="role-name"
@@ -233,7 +276,7 @@ const RoleModal: React.FC<RoleModalProps> = ({
                       canView={canView}
                       canEdit={canEdit}
                       isLast={isLast}
-                      isSubmitting={isSubmitting}
+                      isSubmitting={isSubmitting || readOnly}
                       onToggleView={toggleView}
                       onToggleEdit={toggleEdit}
                       viewLabel={viewLabel}
@@ -249,19 +292,21 @@ const RoleModal: React.FC<RoleModalProps> = ({
           <div className="flex flex-col-reverse gap-2 border-t border-line px-5 py-4 sm:flex-row sm:justify-end sm:px-6">
             <Button
               type="button"
-              variant="secondary"
+              variant={readOnly ? 'primary' : 'secondary'}
               onClick={handleClose}
               disabled={isSubmitting}
             >
-              {t('common.cancel')}
+              {readOnly ? t('common.close') : t('common.cancel')}
             </Button>
-            <Button
-              type="submit"
-              disabled={isSubmitting}
-            >
-              <Save aria-hidden />
-              {isSubmitting ? t('common.saving') : t('common.save')}
-            </Button>
+            {!readOnly && (
+              <Button
+                type="submit"
+                disabled={isSubmitting}
+              >
+                <Save aria-hidden />
+                {isSubmitting ? t('common.saving') : t('common.save')}
+              </Button>
+            )}
           </div>
         </form>
       </DialogContent>

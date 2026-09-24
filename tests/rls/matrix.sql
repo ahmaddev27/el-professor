@@ -203,6 +203,14 @@
   reported as `UNCOVERED`. That is a warning, not a failure: parallel branches
   add tables and functions, and each adds its own lines here.
 
+  **The sweep says nothing about a SECURITY INVOKER function**, because it
+  filters on `p.prosecdef`. Such a function runs under the caller's RLS, so the
+  table lines already describe what it can reach — but its own refusals, and
+  whether it folds a policy's 42501 into an answer of its own, are visible
+  nowhere else. `company_role_save` and `company_role_delete` (20260923120000)
+  are the first of that kind and are written out by hand below; a silent run is
+  not evidence that the next one is covered.
+
   ## Not covered
 
     - storage.objects policies: tests/fixtures/storage-shim.sql lets a migration
@@ -2303,6 +2311,15 @@ INSERT INTO app_private.platform_announcements
 VALUES (_mx_id('rpc_announcement', 'a'), 'info', 'MX', 'MX probe', 'all', now() - interval '1 hour')
 ON CONFLICT (id) DO NOTHING;
 
+-- A company role of A for the two company-roles RPCs (20260923120000) to edit
+-- and delete: its own row rather than the table section's, so no account holds
+-- it and `company_role_delete` answers about the policies and not about the
+-- foreign key. A name no other probe uses, because the per-company unique index
+-- is case-insensitive.
+INSERT INTO roles (id, name, description, company_id, is_system)
+VALUES (_mx_id('rpc_role', 'a'), 'mx-rpc-role-a', 'MX rpc role', _mx_co('a'), false)
+ON CONFLICT (id) DO NOTHING;
+
 -- Checked in the order listed. `stmt` is filled for company A (see _mx_fill).
 --
 -- `want` carries the seven principals of the columns above. `staff` carries the
@@ -2822,7 +2839,39 @@ INSERT INTO _mx_rpc (label, stmt, want, hole) VALUES
      'PPPPPPP', NULL),
     ('notification_delivery_settle(company A''s probe row)',
      $q$SELECT notification_delivery_settle({ref:notification_deliveries}, true, 1)::text$q$,
-     'PPPPPPP', NULL);
+     'PPPPPPP', NULL),
+    /*
+      The company-roles RPCs of 20260923120000, and the reason they are written
+      out by hand: both are **SECURITY INVOKER**, so the uncovered-function
+      sweep at the end of this file — which filters on `p.prosecdef` — will
+      never report them. It is silent about them by construction, not because
+      they are covered.
+
+      They answer `{"ok": …}` rather than `{"success": …}`, so the probe reads
+      `->> 'ok'` and lets `_mx_call` classify the plain word, the way the read
+      models' lines do.
+
+      Every cell is RLS speaking, since neither function runs past it:
+        anon        no EXECUTE (P)
+        viewer,     roles_insert's WITH CHECK refuses and raises 42501, which
+        editor,     the function catches as insufficient_privilege; the UPDATE
+        supervisor  and DELETE are refused by the USING clauses and match no
+                    row. Two mechanisms, one `not_authorized` (N)
+        admin       its own company's administrator (Y)
+        other       creates in *its own* company (Y), and company A's role is
+                    invisible to it, so the edit and the delete answer
+                    `not_found` (N)
+        super       no context, so get_user_company_id() is NULL and both
+                    answer `no_company` before touching anything (N)
+      tests/rls/company-roles.sql takes the same principals through the
+      refusals by name.
+    */
+    ('company_role_save(a new role of A)',
+     $q$SELECT company_role_save('mx-rpc-neu', 'MX', '[{"page_key":"drivers","can_view":true,"can_edit":false}]'::jsonb) ->> 'ok'$q$,
+     'PNNNYYN', NULL),
+    ('company_role_delete(company role of A)',
+     $q$SELECT company_role_delete({ref:rpc_role}) ->> 'ok'$q$,
+     'PNNNYNN', NULL);
 
 -- What an open context changes, RPC by RPC. Everything not named here answers
 -- the same with a context as without one, so it takes `super`'s character
@@ -2863,7 +2912,17 @@ UPDATE _mx_rpc r SET staff = o.staff
     ('replace_monthly_planning_run(applied run of A)',              'TY'),
     ('delete_or_archive_monthly_planning_run(run of A)',            'TY'),
     ('purge_old_monthly_planning_runs(month of A''s archived run)',  'TY'),
-    ('reassign_fahrtenbuch_trip(trip of A)',                        'TY')
+    ('reassign_fahrtenbuch_trip(trip of A)',                        'TY'),
+    -- the company-roles RPCs: `roles` and `role_permissions` both carry
+    -- refuse_read_only_context_write, which is a BEFORE STATEMENT trigger and
+    -- so speaks before any policy is consulted — a view context is refused
+    -- (T), and the refusal travels out of the function unchanged, because only
+    -- unique_violation and insufficient_privilege are caught. In a support
+    -- session the policies' own platform branch is
+    -- `company_id = platform_support_company_id()` (20260923110010), which is
+    -- the opened company, so both succeed exactly as its administrator's do (Y)
+    ('company_role_save(a new role of A)',                          'TY'),
+    ('company_role_delete(company role of A)',                      'TY')
   ) AS o(label, staff)
  WHERE r.label = o.label;
 
@@ -2888,7 +2947,9 @@ BEGIN
       ('replace_monthly_planning_run(applied run of A)'),
       ('delete_or_archive_monthly_planning_run(run of A)'),
       ('purge_old_monthly_planning_runs(month of A''s archived run)'),
-      ('reassign_fahrtenbuch_trip(trip of A)')
+      ('reassign_fahrtenbuch_trip(trip of A)'),
+      ('company_role_save(a new role of A)'),
+      ('company_role_delete(company role of A)')
     ) AS o(label)
    WHERE NOT EXISTS (SELECT 1 FROM _mx_rpc r WHERE r.label = o.label AND r.staff IS NOT NULL);
 
