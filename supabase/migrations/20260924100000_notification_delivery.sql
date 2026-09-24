@@ -126,8 +126,6 @@
   branch carried over character for character. That is a slice of its own.
 */
 
-\set ON_ERROR_STOP on
-
 -- ─── 1. The table ───────────────────────────────────────────────────────────
 
 CREATE TABLE IF NOT EXISTS public.notification_deliveries (
@@ -245,6 +243,16 @@ STABLE
 SECURITY DEFINER
 SET search_path = pg_catalog, public
 AS $fn$
+#variable_conflict use_column
+-- The pragma above is the second wall, and it has to be the first thing in the
+-- body. Four of this function's OUT parameters share a name with a column it
+-- selects (`company_id`, `trial_end`, `subscription_status`,
+-- `subscription_expires_at`) and one, `cars`, with a table it reads. Every
+-- reference below is qualified, so none is ambiguous today; this keeps a later
+-- edit that drops an alias from resolving a column to an empty OUT parameter
+-- instead of failing. No local (`v_limit`, `v_today`) or parameter
+-- (`p_tuev_soon_days`, `p_limit`, `p_after`) shares a name with any column
+-- read here, so nothing this function means as a variable is caught by it.
 DECLARE
   v_limit integer;
   v_today date;
@@ -291,7 +299,7 @@ BEGIN
              'notification_type',    s.notification_type,
              'enabled',              s.enabled,
              'email_global_enabled', s.email_global_enabled)
-             ORDER BY s.notification_type) AS rows
+             ORDER BY s.notification_type) AS items
       FROM public.notification_settings s
       JOIN page ON page.id = s.company_id
      GROUP BY s.company_id
@@ -302,7 +310,7 @@ BEGIN
              'id',               v.id,
              'kennzeichen',      v.kennzeichen,
              'tuev_gueltig_bis', to_char(v.tuev_gueltig_bis, 'YYYY-MM-DD'))
-             ORDER BY v.tuev_gueltig_bis, v.id) AS rows
+             ORDER BY v.tuev_gueltig_bis, v.id) AS items
       FROM public.cars v
       JOIN page ON page.id = v.company_id
      WHERE v.tuev_gueltig_bis IS NOT NULL
@@ -314,7 +322,7 @@ BEGIN
            jsonb_agg(jsonb_build_object(
              'notification_type', d.notification_type,
              'target_id',         d.target_id,
-             'period_key',        d.period_key)) AS rows
+             'period_key',        d.period_key)) AS items
       FROM public.notification_deliveries d
       JOIN page ON page.id = d.company_id
      WHERE d.target_id = d.company_id
@@ -324,9 +332,9 @@ BEGIN
   )
   SELECT page.id, page.name, page.trial_end, page.subscription_status,
          page.subscription_expires_at,
-         COALESCE(page_settings.rows, '[]'::jsonb),
-         COALESCE(page_cars.rows,     '[]'::jsonb),
-         COALESCE(page_sent.rows,     '[]'::jsonb)
+         COALESCE(page_settings.items, '[]'::jsonb),
+         COALESCE(page_cars.items,     '[]'::jsonb),
+         COALESCE(page_sent.items,     '[]'::jsonb)
     FROM page
     LEFT JOIN page_settings ON page_settings.company_id = page.id
     LEFT JOIN page_cars     ON page_cars.company_id     = page.id

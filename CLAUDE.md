@@ -73,7 +73,7 @@ Two things they already pin down:
 
 `vitest.config.ts` pins `TZ=Europe/Berlin`. The payroll code walks local calendar days, so night, Sunday and holiday classification is timezone-dependent and the snapshots only mean anything in the product's own zone.
 
-The same run tests the edge functions' pure modules: `vitest.config.ts` also includes `supabase/functions/_shared/**/*.test.ts`. Those modules (`otp-core.ts`, `smtp-core.ts`, `email-layout.mjs`, `otp-mail.ts`, `mail-template.ts`, `platform-access.ts`, `manage-users-routes.ts`) import nothing from Deno, `npm:` or `jsr:`; keep it that way, or Node cannot load them. The Deno glue around them is checked with `deno check` in a throwaway `denoland/deno` container.
+The same run tests the edge functions' pure modules: `vitest.config.ts` also includes `supabase/functions/_shared/**/*.test.ts`. Those modules (`otp-core.ts`, `smtp-core.ts`, `email-layout.mjs`, `otp-mail.ts`, `mail-template.ts`, `platform-access.ts`, `manage-users-routes.ts`, `notification-core.ts`, `notification-mail.ts`) import nothing from Deno, `npm:` or `jsr:`; keep it that way, or Node cannot load them. Their Deno halves — `activation-code-delivery.ts`, `notification-delivery.ts` — do, and have no test file for that reason. The Deno glue around them is checked with `deno check` in a throwaway `denoland/deno` container.
 
 Component-embedded logic — the premium models inside `FinalizePlanningModal` and `MonatsplanungStundennachweisPreview` — is **not** covered, because testing it requires extracting it, and extraction is the sort of refactor these tests exist to make safe. Cover it after Phase 3 establishes what the numbers should be.
 
