@@ -352,6 +352,13 @@ services:
   # discard). It is deployed with the switch and called by nothing while Google
   # sign-in is off.
   #
+  # notify-expiries is the nightly TÜV / trial notification job. Nothing in the
+  # browser calls it: it is driven by a host cron line holding the service key,
+  # installed by hand like the OTP housekeeping and the audit purge (HANDOFF.md
+  # carries the line and the dry run). Deploying it does not start sending —
+  # with no cron line it is never called, and a call with no body reports and
+  # sends nothing.
+  #
   # extract-receipt and update-income-weeks are deployed but unreachable in
   # practice: nothing in src/ calls either, and extract-receipt performs no auth
   # check while spending ANTHROPIC_API_KEY, so it is left without an API key

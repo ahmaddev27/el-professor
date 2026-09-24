@@ -5389,7 +5389,7 @@ export const en: PartialDictionary = {
   'notif.disableAll':                      'Disable all',
   'notif.emailNotifications':              'Email notifications',
   'notif.enableAll':                       'Enable all',
-  'notif.infoNote':                        'Email notifications go to the company\'s email address. For TÜV notifications, vehicles are checked daily.',
+  'notif.infoNote':                        'Email notifications go to every active administrator of the company with a confirmed email address. The check runs once a day, and each due date is reported exactly once. When a TÜV date is renewed, El-Professor reports again for the new date.',
   'notif.reset':                           'Reset',
   'notif.saveFailedWith':                  'Could not save: {message}',
   'notif.subtitle':                        'Choose which email notifications you want to receive.',

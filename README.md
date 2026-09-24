@@ -38,6 +38,7 @@ A React SPA on a self-hosted Supabase stack (PostgreSQL, Auth, Storage, Edge Fun
 | **4** | Cash salary receipt | `▰▰▰` 3/3 | live |
 | **5** | Design rollout | `▰▰▰▰` 4/4 | every screen batch merged; `AppLayout` itself moves last |
 | **FA** | Fahrtenbuch analysis | `▰▰▱` 2/3 | import reliability and the analysis engine are live; the settings tables and the Fahrtenanalyse screen are open as a PR — it shows and explains a month of imported rides and changes no trip |
+| **BN** | Notifications | `▰` 1/1 | open as a PR. The Benachrichtigungen screen had been a preference panel for a feature that was never built — nothing read its table. A TÜV expiry and a trial end now reach the company's administrators, once per occurrence and never nightly, and a paying customer still on `status = 'trial'` is told nothing about a trial. **Nothing is sent until the owner approves one host cron line** |
 
 **Production serves `9f5e833`** (23.09.2026): phase 5 complete, the legal pages, the invoice-coverage fix, Fahrtenbuch import reliability, and two defects that had been live — an Inhaber saved as an employee when edited, and every user edit without a new password failing.
 
@@ -47,6 +48,7 @@ Detail lives elsewhere, one place each: [PROGRESS.md](PROGRESS.md) per step with
 
 - **The Impressum and the privacy text**, filled once in `/admin` → settings. Google sign-in on production is then one switch and one Deploy.
 - **Rotate the secrets that were exposed in chat.**
+- **The notification job's cron line**, staging first, after reading a dry run. Staging mail reaches real customers, so arming it there is a decision of its own. [HANDOFF.md](HANDOFF.md) has the dry run and both lines.
 - **D14 — whether the panel's company list and its money move behind audited read models.** Slice 3.13b closed the last *company-owned* table a platform account read by capability; `companies` and the three subscription tables stay on `companies.read` by plan 3.A's design. Closing them is a UI change to four screens, not a policy edit. [HANDOFF.md](HANDOFF.md) has the lift.
 - The open decisions and questions listed in [HANDOFF.md](HANDOFF.md), including how overlapping salary rows are merged.
 

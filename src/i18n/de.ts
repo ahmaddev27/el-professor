@@ -5417,7 +5417,10 @@ export const de = {
   'notif.disableAll':                      'Alle deaktivieren',
   'notif.emailNotifications':              'E-Mail-Benachrichtigungen',
   'notif.enableAll':                       'Alle aktivieren',
-  'notif.infoNote':                        'E-Mail-Benachrichtigungen werden an die E-Mail-Adresse des Unternehmens gesendet. Für TÜV-Benachrichtigungen wird täglich geprüft ob Fahrzeuge betroffen sind.',
+  // Corrected with the notification job (20260924100000): the mails go to the
+  // company's active administrators, not to one company address, and each
+  // occurrence is sent once — a TÜV date that is renewed is a new occurrence.
+  'notif.infoNote':                        'E-Mail-Benachrichtigungen gehen an alle aktiven Administratoren des Unternehmens mit bestätigter E-Mail-Adresse. Es wird einmal täglich geprüft; jede Fälligkeit wird genau einmal gemeldet. Wird ein TÜV-Datum erneuert, meldet sich El-Professor zum neuen Datum wieder.',
   'notif.reset':                           'Zurücksetzen',
   'notif.saveFailedWith':                  'Fehler beim Speichern: {message}',
   'notif.subtitle':                        'Verwalten Sie welche E-Mail-Benachrichtigungen Sie erhalten möchten.',
