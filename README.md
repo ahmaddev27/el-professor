@@ -5,7 +5,7 @@
 [![Production](https://img.shields.io/website?url=https%3A%2F%2Felprofessor.eu&label=production&up_message=online&down_message=offline)](https://elprofessor.eu)
 [![Staging](https://img.shields.io/website?url=https%3A%2F%2Fapp.elprofessor.eu%2Fversion.txt&label=staging&up_message=online&down_message=offline)](https://app.elprofessor.eu)
 [![E2E on staging](https://img.shields.io/badge/e2e%20on%20staging-16%20passed%2C%201%20skipped-2ea44f)](e2e/README.md)
-[![Plan](https://img.shields.io/badge/plan-36%20of%2039%20steps%20·%2092%25-2ea44f)](el-professor-plan.html)
+[![Plan](https://img.shields.io/badge/plan-36%20of%2040%20steps%20·%2090%25-2ea44f)](el-professor-plan.html)
 
 ![React](https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=black)
 ![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&logoColor=white)
@@ -25,9 +25,9 @@ A React SPA on a self-hosted Supabase stack (PostgreSQL, Auth, Storage, Edge Fun
 
 ## Status
 
-> Last update: **23.09.2026**. A step counts once it is merged into `staging` and verified there.
+> Last update: **24.09.2026**. A step counts once it is merged into `staging` and verified there.
 
-`▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▱▱` **36 of 39 steps · 92%**
+`▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▱▱` **36 of 40 steps · 90%**
 
 | Phase | What | Progress | State |
 |---|---|---|---|
@@ -36,7 +36,7 @@ A React SPA on a self-hosted Supabase stack (PostgreSQL, Auth, Storage, Edge Fun
 | **2** | Design system and prototype | `▰▰▰` 3/3 | live |
 | **3** | Platform panel and permissions | `▰▰▰▰▰▰▰▰▰▰▰▰▱` 12/13 | 3.13b open as a PR: the company’s own settings are read inside a context, nothing links to `/super-admin` any more, and the Benutzer list no longer stops at GoTrue’s first 50 accounts. The `support`, `billing` and `read_only` staff roles are enabled in review (owner’s decision, 23.09.2026) |
 | **4** | Cash salary receipt | `▰▰▰` 3/3 | live |
-| **5** | Design rollout | `▰▰▰▰` 4/4 | every screen batch merged; `AppLayout` itself moves last |
+| **5** | Design rollout | `▰▰▰▰▱` 4/5 | every screen batch merged; the frame itself — `AppLayout`, the sidebar, the two banners and the support bar — is open as a PR. `AdminLayout` stays legacy on purpose |
 | **FA** | Fahrtenbuch analysis | `▰▰▱` 2/3 | import reliability and the analysis engine are live; the settings tables and the Fahrtenanalyse screen are open as a PR — it shows and explains a month of imported rides and changes no trip |
 | **BN** | Notifications | `▰` 1/1 | open as a PR. The Benachrichtigungen screen had been a preference panel for a feature that was never built — nothing read its table. A TÜV expiry and a trial end now reach the company's administrators, once per occurrence and never nightly, and a paying customer still on `status = 'trial'` is told nothing about a trial. **Nothing is sent until the owner approves one host cron line** |
 
