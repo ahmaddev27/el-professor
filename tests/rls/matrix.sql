@@ -241,6 +241,22 @@
       staging. No migration older than the fixture revoked a table privilege,
       so the table cells do not depend on that history.
 
+  ## What a cell does not prove
+
+  A cell records what the probe got, and a probe can be lied to. Schema USAGE is
+  resolved when a statement is *parsed*, and plpgsql caches the parsed form, so
+  a privilege error inside a SECURITY INVOKER trigger or function is raised only
+  for the first role that cannot parse it — and the owner, who runs every
+  fixture and every validity pass in this same session, always can. Until the
+  guard in `_mx_become`, every principal probed after the owner reused the
+  owner's plan and read as allowed. PR #117 is the instance: a trigger calling
+  into `app_private` made the Rollen screen unusable for every company
+  administrator, and this file printed `roles I` as `Y` twice.
+
+  The guard is one `DISCARD PLANS` per principal; the plan-cache section below
+  proves the probe is no longer fooled, and fails if the guard is reverted.
+  `SET matrix.uncache = 'off'` at the top of this file is the negative control.
+
   ## Running
 
   The whole file runs inside BEGIN … ROLLBACK, so the tests/rls files after it
@@ -251,6 +267,12 @@
 \set ON_ERROR_STOP on
 
 BEGIN;
+
+-- The plan-cache guard in `_mx_become`, on. Its whole reason is written there.
+-- Change this to 'off' to run the negative control: the plan-cache section
+-- below must then fail, and the difference in wall-clock time between the two
+-- runs is what the guard costs.
+SET matrix.uncache = 'on';
 
 -- ─── helpers ────────────────────────────────────────────────────────────────
 
@@ -274,6 +296,46 @@ BEGIN
   IF p_who = 'owner' THEN
     RETURN;
   END IF;
+
+  /*
+    Why a principal's probe begins by throwing the session's cached plans away.
+
+    Schema USAGE is checked when a statement is *parsed* — the parser resolves
+    `app_private.f()` and asks for USAGE there — and plpgsql caches the parsed
+    form of every static statement in a function body. So the first role that
+    can parse such a call inside a SECURITY INVOKER trigger caches it for the
+    whole session, and the owner, who runs every fixture, every `p_pre` and the
+    validity pass, always can. Every principal probed afterwards then reuses
+    that plan and is never refused.
+
+    That is not hypothetical. PR #117 shipped `enforce_company_role_shape`, a
+    SECURITY INVOKER trigger on `roles` calling a helper in `app_private`, and
+    the feature was dead for every company administrator with
+    `42501 permission denied for schema app_private`. This file reported
+    `roles I` as `Y` for the admin principal, on two runs.
+
+    It is one privilege class and only one. Table privileges are re-checked by
+    the executor on every execution, function EXECUTE at executor init with the
+    role in force at that moment, and RLS re-plans when the role changes; schema
+    USAGE is resolved once, by the parser. tests/tools/plan-cache-repro.sql is
+    the measurement of all three.
+
+    `DISCARD PLANS` is legal inside a transaction block and inside SPI — only
+    `DISCARD ALL` is refused there. It goes here, before either `SET LOCAL ROLE`
+    below, rather than after the fixture loop, because the owner also runs
+    `p_pre` inside `_mx_try` and `_mx_move_try`, the validity pass at the end of
+    every line, and `_mx_become('owner')` in the scenario section. One line
+    here is complete by construction; anything narrower is a list of the owner's
+    execution sites, and the next person to add a section breaks it silently.
+
+    `matrix.uncache = 'off'` is the negative control: set it at the top of this
+    file and the plan-cache section below must fail. It is also how the cost of
+    this line is measured — run the kit once each way.
+  */
+  IF coalesce(current_setting('matrix.uncache', true), 'on') <> 'off' THEN
+    EXECUTE 'DISCARD PLANS';
+  END IF;
+
   IF p_who = 'anon' THEN
     PERFORM set_config('request.jwt.claim.sub', '', true);
     PERFORM set_config('request.jwt.claim.role', 'anon', true);
@@ -493,6 +555,124 @@ LANGUAGE sql IMMUTABLE AS $$
   SELECT ARRAY['anon', 'viewer-a', 'editor-a', 'supervisor-a', 'admin-a', 'admin-b', 'super',
                'staff-view', 'staff-support']
 $$;
+
+-- ─── the probe itself, before anything relies on it ─────────────────────────
+/*
+  `_mx_try` must not be maskable by the owner pass that runs beside it.
+
+  This section builds PR #117's shape out of nothing — a schema nobody may use,
+  a SECURITY INVOKER trigger on a `public` table that calls into it — and walks
+  the sequence this file walks: the owner writes the row, then a principal
+  writes it. If the plan cache is still deciding the answer, the principal is
+  allowed and every table line below is worth less than it looks.
+
+  Three steps, and the middle one is the control:
+
+    1  the owner's write succeeds, and the trigger's call is now cached
+    2  a principal writes *without* the guard, by hand. It must be ALLOWED —
+       that is the mask, and it is what makes step 3 mean something. If it is
+       refused, the artefact no longer reproduces on this PostgreSQL; that is a
+       WARNING and not a failure, because the guard is then merely unnecessary
+    3  the same write through `_mx_try`, which discards the plans first, must be
+       refused `42501 permission denied for schema _mx_unreachable`
+
+  Step 3 is what fails when the guard in `_mx_become` is reverted or when
+  `matrix.uncache` is 'off'. It runs before the fixtures so the instrument is
+  checked before the measurements are taken, and it drops everything it made so
+  the UNCOVERED scan at the end of the table matrix has nothing extra to report.
+
+  A standalone version of the same experiment, with controls for function
+  EXECUTE and table privileges, is tests/tools/plan-cache-repro.sql. It is not
+  part of the kit.
+*/
+CREATE SCHEMA _mx_unreachable;
+CREATE FUNCTION _mx_unreachable.answer() RETURNS boolean
+LANGUAGE sql IMMUTABLE AS $$ SELECT true $$;
+
+CREATE TABLE public._mx_plan_cache_rows (note text);
+GRANT INSERT ON public._mx_plan_cache_rows TO authenticated;
+
+-- SECURITY INVOKER, which is the default: the body is parsed as whoever writes
+-- the table, and `authenticated` holds no USAGE on _mx_unreachable.
+CREATE FUNCTION public._mx_plan_cache_guard() RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = pg_catalog, public
+AS $$
+BEGIN
+  PERFORM _mx_unreachable.answer();
+  RETURN NEW;
+END $$;
+
+CREATE TRIGGER _mx_plan_cache_guard BEFORE INSERT ON public._mx_plan_cache_rows
+  FOR EACH ROW EXECUTE FUNCTION public._mx_plan_cache_guard();
+
+DO $plancache$
+DECLARE
+  c_write CONSTANT text := $q$INSERT INTO public._mx_plan_cache_rows (note) VALUES ('probe')$q$;
+  v_owner   text;
+  v_masked  text;
+  v_guarded text;
+  v_state   text;
+  v_msg     text;
+BEGIN
+  -- 0. The premise. If `authenticated` could use the schema after all, every
+  --    step below would be ALLOWED and step 3 would report a missing guard
+  --    that is in fact present.
+  IF has_schema_privilege('authenticated', '_mx_unreachable', 'USAGE') THEN
+    RAISE EXCEPTION 'plan-cache section: authenticated holds USAGE on _mx_unreachable, so this probe tests nothing';
+  END IF;
+
+  -- 1. The owner's pass, twice, for two different reasons.
+  --
+  --    Through `_mx_try` first, because that is this file's own test that a
+  --    probe statement is valid — a refusal below must not be a malformed
+  --    INSERT in disguise. That pass is rolled back with its subtransaction.
+  --
+  --    Then as a plain statement, which is the fixture loop's shape and the
+  --    warming that actually happens in this file: it is not inside anything
+  --    that will unwind, so the trigger's cached call cannot depend on how
+  --    plpgsql treats a plan prepared inside an aborted subtransaction.
+  v_owner := _mx_try('owner', NULL, c_write);
+  IF v_owner <> 'Y' THEN
+    RAISE EXCEPTION 'plan-cache section: the owner could not write the probe row (%), so nothing below it means anything', v_owner;
+  END IF;
+  EXECUTE c_write;
+
+  -- 2. The control: a principal, by hand, with the cache left warm.
+  BEGIN
+    EXECUTE 'SET LOCAL ROLE authenticated';
+    EXECUTE c_write;
+    EXECUTE 'SET LOCAL ROLE NONE';
+    v_masked := 'ALLOWED';
+  EXCEPTION WHEN OTHERS THEN
+    GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE, v_msg = MESSAGE_TEXT;
+    EXECUTE 'SET LOCAL ROLE NONE';
+    v_masked := v_state || ' ' || v_msg;
+  END;
+
+  IF v_masked = 'ALLOWED' THEN
+    RAISE NOTICE 'ok  plan-cache control: the owner''s pass does mask a schema refusal from a principal';
+  ELSIF v_masked LIKE '42501 permission denied for schema%' THEN
+    RAISE WARNING 'the plan-cache mask did not reproduce (%). Either this PostgreSQL re-checks schema USAGE on a cached plan, or this probe no longer reproduces it. The guard below is then unnecessary rather than wrong — read tests/tools/plan-cache-repro.sql before removing it', v_masked;
+  ELSE
+    RAISE EXCEPTION 'plan-cache section: the control failed for an unrelated reason (%) — the probe is built wrong', v_masked;
+  END IF;
+
+  -- 3. The guard. `_mx_try` discards the plans, so the trigger's call is parsed
+  --    again, this time as the principal.
+  v_guarded := _mx_try('admin-a', NULL, c_write);
+  IF left(v_guarded, 1) <> 'P' OR v_guarded NOT LIKE '%permission denied for schema _mx_unreachable%' THEN
+    RAISE EXCEPTION
+      'plan-cache guard is gone: a principal writing through a SECURITY INVOKER trigger that reaches a schema it cannot use was answered % — expected P|42501|permission denied for schema _mx_unreachable. Restore the DISCARD PLANS in _mx_become, or set matrix.uncache back to ''on''',
+      v_guarded;
+  END IF;
+  RAISE NOTICE 'ok  plan-cache guard: _mx_try refuses it — %', substr(v_guarded, 3, 80);
+END $plancache$;
+
+DROP TRIGGER _mx_plan_cache_guard ON public._mx_plan_cache_rows;
+DROP FUNCTION public._mx_plan_cache_guard();
+DROP TABLE public._mx_plan_cache_rows;
+DROP SCHEMA _mx_unreachable CASCADE;
 
 -- Failures from every section are collected and reported together at the end,
 -- so one run shows the whole diff rather than the first cell that moved.
@@ -1698,6 +1878,11 @@ DECLARE
   expected text[];
   n_lines  int := 0;
   n_bad    int := 0;
+  n_probes int := 0;
+  -- The table matrix is the bulk of this file's work and the only part whose
+  -- cost the plan-cache guard changes, so it times itself: run the kit once
+  -- with matrix.uncache 'on' and once 'off' and the difference is the guard.
+  t_start  constant timestamptz := clock_timestamp();
 BEGIN
   FOR r IN SELECT s.*, m.tbl AS move_tbl, m.mov, m.mov_pre, m.owner_must AS move_owner_must, m.note AS move_note
              FROM _mx_spec s LEFT JOIN _mx_move m ON m.tbl = s.tbl
@@ -1741,6 +1926,7 @@ BEGIN
             outcome := CASE WHEN v_op = 'M'
                             THEN _mx_move_try('owner', pre, r.tbl, _mx_fill(r.key, r.tbl, side), _mx_fill(r.mov, r.tbl, side))
                             ELSE _mx_try('owner', pre, stmt) END;
+            n_probes := n_probes + 1;
             IF left(outcome, 1) IS DISTINCT FROM owner_must THEN
               INSERT INTO _mx_failures VALUES ('matrix', format('%s %s', r.tbl, v_op),
                 format('probe is invalid — the owner must answer %s (side %s): %s  [%s]', owner_must, side, outcome, stmt));
@@ -1749,6 +1935,7 @@ BEGIN
             outcome := CASE WHEN v_op = 'M'
                             THEN _mx_move_try(who_logins[i], pre, r.tbl, _mx_fill(r.key, r.tbl, side), _mx_fill(r.mov, r.tbl, side))
                             ELSE _mx_try(who_logins[i], pre, stmt) END;
+            n_probes := n_probes + 1;
             cell := cell || left(outcome, 1);
             IF length(outcome) > 1 THEN
               details := details || format(E'\n      %s/%s: %s', who_names[i], side, substr(outcome, 3, 160));
@@ -1784,7 +1971,10 @@ BEGIN
     END LOOP;
   END LOOP;
 
-  RAISE NOTICE '── matrix: % lines, % differ from the recorded baseline ──', n_lines, n_bad;
+  RAISE NOTICE '── matrix: % lines, % differ from the recorded baseline, % probes in % (matrix.uncache=%) ──',
+    n_lines, n_bad, n_probes,
+    justify_interval(clock_timestamp() - t_start),
+    coalesce(current_setting('matrix.uncache', true), 'on');
 
   -- A table or view nobody characterized is one whose access nobody has looked
   -- at. Reported, not failed: streams running in parallel add tables, and each
