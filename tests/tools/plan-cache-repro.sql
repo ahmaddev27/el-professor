@@ -2,9 +2,25 @@
   The plpgsql plan-cache mask, reproduced from nothing.
 
   **This is an instrument, not a gate.** It lives in tests/tools/ and not in
-  tests/rls/ on purpose: scripts/rls-test.mjs runs every `tests/rls/*.sql` in
-  name order, and this file is a one-off measurement, run by hand when somebody
-  needs the answer again. Nothing in CI calls it.
+  tests/rls/ on purpose: scripts/rls-test.mjs runs every `.sql` file in
+  tests/rls/ in name order, and this file is a one-off measurement, run by hand
+  when somebody needs the answer again. Nothing in CI calls it.
+
+  That last sentence is also the hazard, and it cost a round trip on the first
+  version of this file. **PostgreSQL block comments nest.** A shell glob for the
+  files in a directory — a slash, then a star — opens a *second* comment inside
+  this one, which nothing ever closes, so psql swallows the file to EOF and
+  reports an unterminated comment at line 1. Backticks do not protect it: the
+  lexer does not know what a backtick is. The delimiters are deliberately not
+  written out anywhere in this file, the same rule the header of
+  `app_private.function_code` states for the same reason.
+
+  What makes this file the one it happened to: a file under tests/rls/ would
+  have failed loudly on the next kit run, and **this one is run by nobody**, so
+  it had no gate. It has one now — `src/utils/sqlComments.test.ts` scans every
+  `.sql` file under tests/ for an unterminated comment, dollar quote or string,
+  with nesting, and it runs in `npm run build`. Write a glob here as "every
+  `.sql` file in that directory" and it never arises.
 
   ## What it answers
 
