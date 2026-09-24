@@ -907,7 +907,17 @@ INSERT INTO _mx_spec VALUES
 (57, 'driver_month_budget', $q$id = {id}$q$,
   $q$INSERT INTO driver_month_budget (id, company_id, driver_id, year, month) VALUES ({id}, {co}, {ref:drivers}, 2026, 1)$q$, NULL,
   $q$INSERT INTO driver_month_budget (company_id, driver_id, year, month) VALUES ({co}, {ref:drivers}, 2026, 2)$q$,
-  $q$reserved_hours = reserved_hours$q$);
+  $q$reserved_hours = reserved_hours$q$),
+-- The notification job's record of what it has sent (20260924100000). It is the
+-- first business table a client cannot write at all: the two writers are
+-- SECURITY DEFINER functions granted to service_role, so `authenticated` holds
+-- SELECT and nothing else and every I, U, D and M cell is a missing GRANT.
+(58, 'notification_deliveries', $q$id = {id}$q$,
+  $q$INSERT INTO notification_deliveries (id, company_id, notification_type, target_id, period_key)
+     VALUES ({id}, {co}, 'trial_abgelaufen', {co}, '2099-01-01')$q$, NULL,
+  $q$INSERT INTO notification_deliveries (company_id, notification_type, target_id, period_key)
+     VALUES ({co}, 'trial_abgelaufen', {co}, '2098-01-01')$q$,
+  $q$recipient_count = recipient_count$q$);
 
 -- ─── how each row is moved to the other tenant ──────────────────────────────
 -- The M probe takes the row through `key` and sets `mov` on it (`_mx_move_try`),
@@ -995,7 +1005,11 @@ INSERT INTO _mx_move VALUES
 -- A budget carries one driver's pay snapshot, so it never leaves its driver,
 -- company or month: driver_month_budget_guard refuses the move for every
 -- writer, before the WITH CHECK is asked.
-('driver_month_budget',                  $q$company_id = {other_co}$q$, NULL, 'T', 'driver_month_budget_guard refuses it even for the owner');
+('driver_month_budget',                  $q$company_id = {other_co}$q$, NULL, 'T', 'driver_month_budget_guard refuses it even for the owner'),
+-- The dedupe key names the target as well as the company, and the probe rows
+-- carry their own company as the target, so A's row moved into B collides with
+-- nothing of B's: no mov_pre, and the owner pass moves it.
+('notification_deliveries',              $q$company_id = {other_co}$q$, NULL, 'Y', NULL);
 
 -- Fixtures go in once; the file can be re-run against a kept container.
 DO $$
@@ -1284,6 +1298,16 @@ INSERT INTO _mx_expected (tbl, op, anon, viewer, editor, supervisor, admin, othe
 ('monthly_planning_manual_exceptions', 'U', '..', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
 ('monthly_planning_manual_exceptions', 'D', '..', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
 ('monthly_planning_manual_exceptions', 'M', '..', '..', '..', 'R.', 'R.', '.R', '..', NULL),
+-- 20260924100000. The one business table a client cannot write: the nightly
+-- notification job writes it through two SECURITY DEFINER functions granted to
+-- service_role, so `authenticated` holds SELECT alone and I, U, D and M are a
+-- missing GRANT for everybody, the administrator included. anon holds nothing
+-- at all. The read is the ordinary tenant shape, so it is not role-gated.
+('notification_deliveries',           'S', 'PP', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('notification_deliveries',            'I', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', NULL),
+('notification_deliveries',            'U', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', NULL),
+('notification_deliveries',            'D', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', NULL),
+('notification_deliveries',            'M', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', NULL),
 ('notification_settings',             'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
 ('notification_settings',              'I', 'RR', 'RR', 'RR', 'RR', 'YR', 'RY', 'RR', NULL),
 ('notification_settings',              'U', '..', '..', '..', '..', 'Y.', '.Y', '..', NULL),
@@ -1537,6 +1561,12 @@ UPDATE _mx_expected x SET staff_view = o.sv, staff_support = o.ss
     -- having been reachable, where 'T.' was the policy admitting it and a
     -- trigger catching it. staff_support is unchanged: there the first disjunct
     -- grants, the statement is issued, and the pin trigger refuses the move.
+    -- The notification job's record (20260924100000). Only its SELECT line is
+    -- listed: the write cells are a missing GRANT for every principal, so the
+    -- copy of `super` is already right, while `super` reads nothing without a
+    -- context and a context makes the company's rows readable — the tenant
+    -- shape's whole claim, and the reason the line cannot be left as copied.
+    ('notification_deliveries',  'S', 'Y.', 'Y.'),
     ('roles',                    'S', 'Y.', 'Y.'),
     ('roles',                    'I', 'TT', 'YR'),
     ('roles',                    'U', 'TT', 'Y.'),
