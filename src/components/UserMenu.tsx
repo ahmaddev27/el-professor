@@ -5,6 +5,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useTranslation } from '../contexts/LanguageContext';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { ADMIN_BASE } from '../lib/adminGate';
+import { cn } from './ui';
 
 const UserMenu: React.FC = () => {
   const [isOpen, setIsOpen] = useState(false);
@@ -32,6 +33,13 @@ const UserMenu: React.FC = () => {
     }
   };
 
+  // ── Presentation (phase 5) ────────────────────────────────────────────────
+  //
+  // `roleLabels` and `initials` are unchanged; `roleColors` held the look half
+  // of the same idea and is token classes now. The menu keeps its own open
+  // state and its click-catcher rather than becoming a Radix menu, because that
+  // would rewrite the handlers this change must leave alone.
+
   const roleLabels: Record<string, string> = {
     admin: 'Administrator',
     supervisor: 'Supervisor',
@@ -39,20 +47,17 @@ const UserMenu: React.FC = () => {
     viewer: 'Betrachter',
   };
 
-  const roleColors: Record<string, { bg: string; color: string }> = {
-    admin:      { bg: 'var(--danger-subtle)',  color: 'var(--danger)' },
-    supervisor: { bg: 'var(--warning-subtle)', color: 'var(--warning)' },
-    editor:     { bg: 'var(--accent-subtle)',  color: 'var(--accent-text)' },
-    viewer:     { bg: 'var(--bg-muted)',       color: 'var(--text-secondary)' },
+  const roleColors: Record<string, string> = {
+    admin:      'bg-critical-soft text-critical',
+    supervisor: 'bg-caution-soft text-caution',
+    editor:     'bg-brand-soft text-brand-text',
+    viewer:     'bg-sunken text-fg-muted',
   };
 
   const getRoleBadge = (role: string) => {
     const colors = roleColors[role] || roleColors.viewer;
     return (
-      <span
-        className="text-xs font-semibold px-2 py-0.5 rounded-full"
-        style={{ background: colors.bg, color: colors.color }}
-      >
+      <span className={cn('rounded-full px-2 py-0.5 text-xs font-semibold', colors)}>
         {roleLabels[role] || role}
       </span>
     );
@@ -65,22 +70,17 @@ const UserMenu: React.FC = () => {
     .join('')
     .toUpperCase();
 
+  const menuItemClass = 'flex w-full items-center gap-2.5 rounded-control px-3 py-2 text-left text-sm transition-colors';
+
   return (
     <div className="flex items-center gap-2">
       {isViewingAsCompany && (
-        <div
-          className="flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-semibold"
-          style={{
-            background: 'var(--warning-subtle)',
-            border: '1px solid var(--warning)',
-            color: 'var(--warning)',
-          }}
-        >
-          <Building2 size={13} className="flex-shrink-0" />
-          <span className="hidden sm:inline truncate max-w-[120px]">{activeCompany?.name}</span>
+        <div className="flex items-center gap-2 rounded-control border border-caution bg-caution-soft px-3 py-1.5 text-xs font-semibold text-caution">
+          <Building2 size={13} className="shrink-0" />
+          <span className="hidden max-w-[120px] truncate sm:inline">{activeCompany?.name}</span>
           <button
             onClick={handleExitCompany}
-            className="flex-shrink-0 ml-1 rounded transition-opacity hover:opacity-70"
+            className="ml-1 shrink-0 rounded transition-opacity hover:opacity-70"
             title={t('shell.exitCompanyView')}
           >
             <XIcon size={13} />
@@ -90,61 +90,37 @@ const UserMenu: React.FC = () => {
       <div className="relative">
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="flex items-center gap-2.5 px-3 py-1.5 rounded-xl transition-all duration-150"
-        style={{
-          border: '1px solid var(--border)',
-          background: 'var(--bg-subtle)',
-          color: 'var(--text-primary)',
-        }}
-        onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'var(--bg-muted)'; }}
-        onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'var(--bg-subtle)'; }}
+        className="flex items-center gap-2.5 rounded-control border border-line bg-canvas px-3 py-1.5 text-fg transition-colors hover:bg-sunken focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
       >
-        <div
-          className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0"
-          style={{ background: 'var(--accent)', color: 'var(--text-inverse)' }}
-        >
+        <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-brand text-xs font-bold text-brand-fg">
           {initials}
         </div>
-        <div className="text-left hidden sm:block">
-          <div className="text-xs font-semibold leading-tight" style={{ color: 'var(--text-primary)' }}>
+        <div className="hidden text-left sm:block">
+          <div className="text-xs font-semibold leading-tight text-fg">
             {profile?.full_name || user?.email?.split('@')[0]}
           </div>
         </div>
         <ChevronDown
           size={14}
-          className={`transition-transform duration-200 flex-shrink-0`}
-          style={{
-            color: 'var(--text-tertiary)',
-            transform: isOpen ? 'rotate(180deg)' : 'rotate(0deg)',
-          }}
+          className={cn('shrink-0 text-fg-subtle transition-transform duration-200', isOpen && 'rotate-180')}
         />
       </button>
 
       {isOpen && (
         <>
           <div className="fixed inset-0 z-10" onClick={() => setIsOpen(false)} />
-          <div
-            className="absolute right-0 mt-2 w-60 rounded-xl z-20 overflow-hidden animate-fade-in"
-            style={{
-              background: 'var(--bg-surface)',
-              border: '1px solid var(--border)',
-              boxShadow: 'var(--shadow-lg)',
-            }}
-          >
+          <div className="animate-fade-in absolute right-0 z-20 mt-2 w-60 overflow-hidden rounded-surface border border-line bg-overlay shadow-overlay">
             {/* User info */}
-            <div className="p-4 border-b" style={{ borderColor: 'var(--border)' }}>
+            <div className="border-b border-line p-4">
               <div className="flex items-center gap-3">
-                <div
-                  className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0"
-                  style={{ background: 'var(--accent)', color: 'var(--text-inverse)' }}
-                >
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-brand text-sm font-bold text-brand-fg">
                   {initials}
                 </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold truncate" style={{ color: 'var(--text-primary)' }}>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-semibold text-fg">
                     {profile?.full_name || 'Benutzer'}
                   </p>
-                  <p className="text-xs truncate" style={{ color: 'var(--text-tertiary)' }}>
+                  <p className="truncate text-xs text-fg-subtle">
                     {profile?.email}
                   </p>
                   {profile?.role && <div className="mt-1.5">{getRoleBadge(profile.role)}</div>}
@@ -158,20 +134,14 @@ const UserMenu: React.FC = () => {
                   there was no way to change your own password inside the app. */}
               <button
                 onClick={() => { setIsOpen(false); navigate('/mein-konto'); }}
-                className="w-full px-3 py-2 text-left text-sm rounded-lg flex items-center gap-2.5 transition-colors"
-                style={{ color: 'var(--text-secondary)' }}
-                onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'var(--bg-muted)'; (e.currentTarget as HTMLElement).style.color = 'var(--text-primary)'; }}
-                onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'transparent'; (e.currentTarget as HTMLElement).style.color = 'var(--text-secondary)'; }}
+                className={cn(menuItemClass, 'text-fg-muted hover:bg-sunken hover:text-fg')}
               >
                 <Settings size={14} />
                 <span>{t('account.title')}</span>
               </button>
               <button
                 onClick={handleSignOut}
-                className="w-full px-3 py-2 text-left text-sm rounded-lg flex items-center gap-2.5 transition-colors"
-                style={{ color: 'var(--danger)' }}
-                onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'var(--danger-subtle)'; }}
-                onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'transparent'; }}
+                className={cn(menuItemClass, 'text-critical hover:bg-critical-soft')}
               >
                 <LogOut size={14} />
                 <span>{t('common.logout')}</span>

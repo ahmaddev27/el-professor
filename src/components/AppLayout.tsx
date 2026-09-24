@@ -64,7 +64,10 @@ const AppLayout: React.FC<AppLayoutProps> = ({ isSupportAdmin }) => {
               </Button>
             </div>
             <div className="flex items-center gap-2">
-              <LanguageSwitcher />
+              {/* The design-system variant, which already existed for the
+                  signed-out screens. The `default` one stays exactly as it is,
+                  because AdminLayout and the legal pages still draw it. */}
+              <LanguageSwitcher variant="ui" />
               <UserMenu />
             </div>
           </div>

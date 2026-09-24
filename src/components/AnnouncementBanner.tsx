@@ -25,16 +25,6 @@ import { cn } from './ui';
  * loading: the answer being replaced may belong to the account before it.
  */
 
-// ── Presentation (phase 5) ──────────────────────────────────────────────────
-// The tone map is the look half of this file and nothing else reads it: the
-// design system's `brand` and `caution` tones, the same pair Alert draws. The
-// body stays `fg-muted` so a long announcement reads as text rather than as one
-// block of colour — both pairs are measured on both soft fills.
-const TONE_STYLE: Record<Announcement['tone'], { box: string; text: string; Icon: React.ElementType }> = {
-  info:    { box: 'border-brand/20 bg-brand-soft',     text: 'text-brand-text', Icon: Info },
-  warning: { box: 'border-caution/20 bg-caution-soft', text: 'text-caution',    Icon: AlertTriangle },
-};
-
 function wasDismissed(a: Announcement): boolean {
   try {
     return localStorage.getItem(dismissalKey(a)) === '1';
@@ -51,6 +41,19 @@ function rememberDismissal(a: Announcement): void {
     // Not remembered: it comes back on the next load, and nothing else is lost.
   }
 }
+
+// ── Presentation (phase 5) ──────────────────────────────────────────────────
+// The tone map is the look half of this file and nothing else reads it: the
+// design system's `brand` and `caution` tones, the same pair Alert draws. The
+// body stays `fg-muted` so a long announcement reads as text rather than as one
+// block of colour — both pairs are measured on both soft fills.
+//
+// This item also renders inside the platform panel, which is still the legacy
+// AdminLayout: the tokens are global CSS variables, so it draws the same there.
+const TONE_STYLE: Record<Announcement['tone'], { box: string; text: string; Icon: React.ElementType }> = {
+  info:    { box: 'border-brand/20 bg-brand-soft',     text: 'text-brand-text', Icon: Info },
+  warning: { box: 'border-caution/20 bg-caution-soft', text: 'text-caution',    Icon: AlertTriangle },
+};
 
 /** One announcement, as a tenant sees it. The settings screen's preview renders the same. */
 export const AnnouncementItem: React.FC<{
