@@ -474,7 +474,7 @@
         <li><a href="#p2"><span class="no">2</span><h3>نظام التصميم والنموذج</h3></a><ul class="chips"><li class="chip">متوسط</li><li class="chip">اندمج عالستيج</li></ul><p class="gate">البوابة انفتحت: وافقت على النموذج بـ 15.09</p></li>
         <li><a href="#p3"><span class="no">3</span><h3>فصل المنصة والصلاحيات</h3></a><ul class="chips"><li class="chip">كبير جداً</li><li class="chip">12 من 13 اندمجوا وعالبرودكشن</li><li class="chip">شريحة C: صلاحيات الشركة وصلت لكل الجداول (PR #110، بالمراجعة)</li><li class="chip">3.13ب بالمراجعة: إعدادات الشركة بجلسة، وروابط <code>/super-admin</code> انشالت</li><li class="chip">وتفعيل الأدوار التلاتة بالمراجعة</li></ul></li>
         <li><a href="#p4"><span class="no">4</span><h3>إيصال الراتب النقدي</h3></a><ul class="chips"><li class="chip">متوسط</li><li class="chip">الأساس اندمج</li></ul></li>
-        <li><a href="#p5"><span class="no">5</span><h3>تعميم التصميم</h3></a><ul class="chips"><li class="chip">كبير</li><li class="chip">كل الدفعات اندمجت وعالبرودكشن</li><li class="chip">ضايل الإطار AppLayout بالآخر</li></ul></li>
+        <li><a href="#p5"><span class="no">5</span><h3>تعميم التصميم</h3></a><ul class="chips"><li class="chip">كبير</li><li class="chip">كل الدفعات اندمجت وعالبرودكشن</li><li class="chip">الإطار AppLayout بالمراجعة</li></ul></li>
         <li><a href="#progress"><span class="no">FA</span><h3>تحليل دفتر الرحلات</h3></a><ul class="chips"><li class="chip">الإصدار الأول</li><li class="chip">A الاستيراد وB المحرك اندمجوا</li><li class="chip">C وD الإعدادات والشاشة بالمراجعة</li></ul><p class="gate">بيقرأ وبيبلّغ بس: ولا رحلة بتتغيّر سائقها أو وقتها أو سعرها</p></li>
         <li><a href="#progress"><span class="no">BN</span><h3>التنبيهات</h3></a><ul class="chips"><li class="chip">صغير</li><li class="chip">انبنت، بالمراجعة</li><li class="chip">TÜV والتجربة</li></ul><p class="gate">البوابة عندك: ولا إيميل بينبعت لحد ما تسمح بسطر cron عالسيرفر</p></li>
       </ol>
@@ -1172,7 +1172,8 @@ AND (c.subscription_expires_at IS NULL OR c.subscription_expires_at &gt; now())<
               <tr><td class="num">2</td><td>Gehälter، Abrechnung، Bargeldbestand <span class="pill info">بالمراجعة (PR #98)</span></td></tr>
               <tr><td class="num">3</td><td>Dokumente، Monatsplanung، Stundennachweis (العرض بس) <span class="pill info">بالمراجعة (PR #99)</span></td></tr>
               <tr><td class="num">4</td><td>Benutzer، Rollen، Einstellungen، Abonnement، وصفحات الدخول <span class="pill info">بالمراجعة · PR #101</span></td></tr>
-              <tr><td class="num">5</td><td>لوحة المنصة</td></tr>
+              <tr><td class="num">5</td><td>الإطار نفسه: <code>AppLayout</code> والقائمة الجانبية والشريطين وشريط جلسة الدعم <span class="pill info">بالمراجعة · PR #116</span></td></tr>
+              <tr><td class="num">6</td><td>لوحة المنصة (<code>AdminLayout</code>) — آخر إطار ضل على الشكل القديم</td></tr>
             </tbody>
           </table>
         </div>
@@ -1247,6 +1248,19 @@ AND (c.subscription_expires_at IS NULL OR c.subscription_expires_at &gt; now())<
           <li><strong>Einstellungen بجلسة قراءة:</strong> الخانات صارت مقفولة مع ملاحظة، حسب قرارك.</li>
           <li><strong>بيستنى قرارك:</strong> زر «Passwort zurücksetzen» وشارة «Passwortänderung erforderlich» على جدول Benutzer عاللابتوب (موجودين عالموبايل بس، متل قبل). وعيب لقيناه: «Anwenden» بشاشة التسجيل بجوجل بيبعت التسجيل كله.</li>
           <li><strong>لقطات قبل وبعد</strong> بـ <code>Docs/design/phase5/batch4/</code>، فيها كل رسالة رفض بشاشة الدخول، شاشة الكود، شريط الستيج، وجلسة القراءة.</li>
+        </ul>
+      </div>
+
+      <div class="step">
+        <h3><span class="step-no">5.5</span>الإطار نفسه: <code>AppLayout</code> <span class="pill info">بالمراجعة · PR #116</span></h3>
+        <ul class="list">
+          <li><strong>ليش هاي أخطر قطعة بالمرحلة:</strong> كل شاشة بالبرنامج بتنرسم جوّا هالإطار، فالغلطة هون بتطلع على كل الصفحات مرة وحدة مش على صفحة وحدة. عشان هيك انتركت لآخر إشي.</li>
+          <li><strong>شو انتقل:</strong> سبع ملفات — الإطار، القائمة الجانبية، قائمة المستخدم، شريط التجربة، شريط إعلانات المنصة، شريط جلسة الدعم، ونافذة سبب الجلسة.</li>
+          <li><strong>وشو بيتغيّر بالعين؟ تقريباً ولا إشي:</strong> خلفية الصفحة القديمة والجديدة <strong>نفس اللون بالضبط</strong> بالثيم الفاتح، وبالغامق بيفرقوا شعرة — يعني ولا شاشة من اللي انتقلت بالدفعات الأربع بتتحرك تحتها. اللي بيبيّن: سطر القائمة المفتوح صار بلون نظام التصميم بدل الحبّة المعبّاية، وزر «اختر خطة» صار أزرق.</li>
+          <li><strong>شكل بس، ومثبت بسكربت:</strong> كل كتلة منطق طلعت حرف بحرف متل ما كانت — قائمة الصفحات وفحص الصلاحية وعدّاد الدقايق. واللي انحذف كله كان كود بيلوّن عند مرور الماوس. وجرّبنا السكربت يفشل عن قصد قبل ما نصدّقه.</li>
+          <li><strong>ما حذفنا ولا فحص لون عشان ينجح الفحص:</strong> الكتلة اللي كانت مكتوبة للإطار القديم ضلّت، لأنه لوحة الإدارة لسا على اللون القديم وشاشاتها مبنية بنظام التصميم.</li>
+          <li><strong>ست شاشات ما انتقلت أبداً</strong> (الرئيسية، الملاحظات، الورشة، التنبيهات، حسابي، وصفحة «الميزة مقفولة») وهلق بتنرسم جوّا إطار جديد — فتحنا تلاتة منهم باللقطات عشان نشوف الوصلة مش نفترضها.</li>
+          <li><strong>لوحة الإدارة <code>AdminLayout</code> تركناها عن قصد</strong> — إطار تاني ومش من شغل هالدفعة. هي آخر إطار ضل على الشكل القديم.</li>
         </ul>
       </div>
     </section>

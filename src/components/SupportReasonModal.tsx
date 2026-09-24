@@ -5,6 +5,7 @@ import {
   SUPPORT_REASON_MAX_LENGTH,
   supportReasonProblem,
 } from '../lib/supportSession';
+import { Button, cn } from './ui';
 
 interface Props {
   companyName: string;
@@ -41,22 +42,29 @@ const SupportReasonModal: React.FC<Props> = ({ companyName, busy, onCancel, onCo
     onConfirm(reason);
   };
 
+  // ── Presentation (phase 5) ────────────────────────────────────────────────
+  //
+  // The dialog keeps its own overlay rather than becoming the design system's
+  // Radix `Dialog`: that would add an Escape key and a focus trap this dialog
+  // never had, and rewire `onCancel` through `onOpenChange`. Only the colours
+  // moved. The confirm button is the brand fill because the design system has
+  // no `caution` fill for a white label to read on; the tone is carried by the
+  // icon, the title and the words, as it is everywhere else.
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.5)' }}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[rgb(5_8_16/0.55)] p-4">
       <div
-        className="w-full max-w-lg rounded-2xl p-6 space-y-4"
-        style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}
+        className="w-full max-w-lg space-y-4 rounded-surface border border-line bg-overlay p-6 font-ui shadow-overlay"
         role="dialog"
         aria-modal="true"
       >
         <div className="flex items-center gap-3">
-          <LifeBuoy size={22} style={{ color: 'var(--warning)' }} />
-          <h2 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>
+          <LifeBuoy size={22} className="text-caution" />
+          <h2 className="text-lg font-semibold text-fg">
             {t('support.reason.title', { company: companyName })}
           </h2>
         </div>
 
-        <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+        <p className="text-sm text-fg-muted">
           {t('support.reason.body')}
         </p>
 
@@ -69,45 +77,38 @@ const SupportReasonModal: React.FC<Props> = ({ companyName, busy, onCancel, onCo
             onChange={event => setReason(event.target.value)}
             onBlur={() => setTouched(true)}
             placeholder={t('support.reason.placeholder')}
-            className="w-full rounded-xl px-3 py-2 text-sm"
-            style={{
-              background: 'var(--bg-subtle)',
-              border: `1px solid ${showProblem ? 'var(--danger)' : 'var(--border)'}`,
-              color: 'var(--text-primary)',
-            }}
+            className={cn(
+              'w-full rounded-control border bg-field px-3 py-2 text-sm text-fg placeholder:text-fg-subtle',
+              'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus',
+              showProblem ? 'border-critical' : 'border-line-strong',
+            )}
           />
           <div className="flex justify-between text-xs">
-            <span style={{ color: 'var(--danger)' }}>
+            <span className="text-critical">
               {showProblem ? t(problem === 'empty' ? 'support.reason.required' : 'support.reason.tooLong') : ''}
             </span>
-            <span className="tabular-nums" style={{ color: 'var(--text-tertiary)' }}>
+            <span className="tabular-nums text-fg-subtle">
               {reason.trim().length}/{SUPPORT_REASON_MAX_LENGTH}
             </span>
           </div>
         </div>
 
         <div className="flex justify-end gap-2">
-          <button
+          <Button
             type="button"
+            variant="secondary"
             onClick={onCancel}
             disabled={busy}
-            className="px-4 py-2 rounded-xl text-sm font-medium disabled:opacity-50"
-            style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
           >
             {t('common.cancel')}
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
             onClick={submit}
             disabled={busy}
-            className="px-4 py-2 rounded-xl text-sm font-semibold disabled:opacity-50"
-            // --warning-solid with white on it: --warning is a text colour and
-            // fails contrast as a fill, and --text-inverse flips to near-black
-            // in dark mode. accentLabel.contrast.test.ts is the rule.
-            style={{ background: 'var(--warning-solid)', color: '#ffffff' }}
           >
             {t('support.reason.confirm')}
-          </button>
+          </Button>
         </div>
       </div>
     </div>

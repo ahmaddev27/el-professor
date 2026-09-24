@@ -18,6 +18,7 @@ import { batch2Drivers, batch2PrimaryTable, batch2Rpc, batch2Tables, isBatch2Scr
 import { batch3Tables, recordBatch3Rpc, recordBatch3Write } from '../batch3/fixtures';
 import { batch1bFailsEveryTable, batch1bPrimaryTable, batch1bTables } from '../fixtures-batch1b';
 import { analysisFailure, analysisTables } from '../analysis/fixtures';
+import { applayoutTables } from '../applayout/fixtures';
 import { scenario } from '../scenario';
 
 type QueryError = { message: string; code: string; details?: string; hint?: string };
@@ -58,6 +59,8 @@ function seed(): Map<string, Row[]> {
     ...batch3Tables(),
     // The Fahrtenanalyse's tables, on its own screen only (analysis/fixtures.ts).
     ...analysisTables(),
+    // The frame batch's tables, on its own screens only (applayout/fixtures.ts).
+    ...applayoutTables(),
   ]);
 }
 

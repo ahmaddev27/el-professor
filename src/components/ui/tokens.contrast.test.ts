@@ -125,6 +125,10 @@ const PAIRS: Array<{ fg: string; bg: string; min: number }> = [
   // state, on the field's own fill.
   { fg: 'caution', bg: 'field', min: NON_TEXT },
   { fg: 'positive', bg: 'field', min: NON_TEXT },
+  // Phase 5, the frame. The support session's reason is the first field outside
+  // `Input` to frame itself critical when it is refused, which is the primitive's
+  // own `aria-[invalid=true]:border-critical` — the third state of that border.
+  { fg: 'critical', bg: 'field', min: NON_TEXT },
   // Phase 5, batch 4. The chosen tier's card is brand-soft, under fg and
   // fg-muted text (above) and a brand border and check. Its price unit was
   // fg-subtle first, which this list caught at 4.38:1 in dark; it is fg-muted.
@@ -149,19 +153,29 @@ const ON_LEGACY_SURFACE: Array<{ fg: string; min: number }> = [
 ];
 
 /**
- * Phase 5 moves screens onto the design system one at a time, inside the
- * legacy AppLayout, whose page background is the legacy `--bg-base` and not
- * `--canvas`. Until the shell itself moves, a converted screen's page header,
- * tab labels, notes and focus rings sit on that legacy colour: the Phase-2
- * foreground on a legacy background, a pair neither block above measures.
+ * A Phase-2 foreground on the legacy page background `--bg-base`.
+ *
+ * This block was written for the company app, whose AppLayout painted
+ * `--bg-base` while the screens inside it moved one batch at a time. AppLayout
+ * moved with phase 5's last batch and paints `--canvas` now, so these pairs are
+ * no longer about the company app — but they are not obsolete, because
+ * **AdminLayout still paints `--bg-base`** and the platform screens inside it
+ * are built from the design system: the Team roster, the Protokoll, the
+ * settings editors and their previews. The same six pairs are still rendered,
+ * in the panel rather than in the tenant shell, so the block stays and only its
+ * reason changes. It retires when AdminLayout moves.
+ *
+ * In light the two backgrounds are the same colour (#f4f6fa / #F4F6FA), so this
+ * block can only ever diverge from the `canvas` pairs in dark, where
+ * `--bg-base` is #0b0f17 against `--canvas` #0A0F1C.
  */
 const ON_LEGACY_PAGE: Array<{ fg: string; min: number }> = [
   { fg: 'fg', min: TEXT },
   { fg: 'fg-muted', min: TEXT },
   { fg: 'fg-subtle', min: TEXT },
-  // The Fahrzeuge header's active-vehicle count, once the plan's limit is reached.
+  // A destructive action's word: "Deaktivieren" on the Team roster.
   { fg: 'critical', min: TEXT },
-  // The active tab's underline and every control's focus ring.
+  // An active control's mark and every control's focus ring.
   { fg: 'brand', min: NON_TEXT },
   { fg: 'focus', min: NON_TEXT },
 ];

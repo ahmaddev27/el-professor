@@ -8,10 +8,12 @@ import { cn } from './ui';
  * Compact language picker for the app headers and the sign-in screen.
  *
  * `variant="ui"` is the design-system look, for the signed-out screens since
- * phase 5 batch 4: token classes that follow the theme, a 40 px target on a
- * touch screen. `default` is the legacy app headers' look and moves with
- * AppLayout. (A third variant, `dark`, painted the old always-dark sign-in
- * screens; nothing uses it any more.)
+ * phase 5 batch 4 and for AppLayout's header since the frame moved: token
+ * classes that follow the theme, a 40 px target on a touch screen. `default`
+ * is the legacy header look, and the two shells still on the legacy variables
+ * draw it — AdminLayout and the legal pages. It moves when AdminLayout does.
+ * (A third variant, `dark`, painted the old always-dark sign-in screens;
+ * nothing uses it any more.)
  */
 const LanguageSwitcher: React.FC<{ variant?: 'default' | 'ui' }> = ({ variant = 'default' }) => {
   const { language, setLanguage, t } = useTranslation();

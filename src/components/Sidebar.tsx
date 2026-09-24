@@ -13,6 +13,7 @@ import type { TranslationKey } from '../i18n';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { LegalLinks } from './legal/LegalLinks';
 import { ADMIN_BASE } from '../lib/adminGate';
+import { cn } from './ui';
 
 interface SidebarProps {
   isSupportAdmin: boolean;
@@ -63,6 +64,21 @@ const Sidebar: React.FC<SidebarProps> = ({ isSupportAdmin }) => {
     setIsMobileMenuOpen(false);
   };
 
+  // ── Presentation (phase 5) ────────────────────────────────────────────────
+  //
+  // `renderNavItem` keeps its permission gate — `can(item.feature)` and the
+  // early return — where it was; only the drawing below it moved. The hover and
+  // active colours were hand-painted through `style` and two imperative mouse
+  // handlers; they are token classes now, which is the whole of what changed.
+  //
+  // The section rows are `text-fg-subtle`, the item rows `text-fg-muted`, and
+  // the active row is the design system's navigation fill (`bg-brand-soft`,
+  // `text-brand-text`) rather than the old filled accent pill.
+
+  const navItemClass = 'flex w-full items-center gap-3 rounded-control px-3 py-2.5 text-sm font-medium transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-focus [@media(pointer:coarse)]:py-3';
+
+  const sectionLabelClass = 'px-3 pb-1 pt-3 text-[10px] font-semibold uppercase tracking-wider text-fg-subtle';
+
   const renderNavItem = (item: NavItem) => {
     const Icon = item.icon;
     const allowed = can(item.feature);
@@ -75,52 +91,37 @@ const Sidebar: React.FC<SidebarProps> = ({ isSupportAdmin }) => {
         key={item.path}
         to={item.path}
         onClick={() => setIsMobileMenuOpen(false)}
-        className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-150 w-full"
-        style={({ isActive }) =>
-          isActive
-            ? { background: 'var(--accent)', color: 'var(--text-inverse)', boxShadow: '0 2px 10px rgba(6,182,212,0.2)' }
-            : { color: 'var(--text-secondary)', background: 'transparent' }
+        className={({ isActive }) =>
+          cn(navItemClass, isActive ? 'bg-brand-soft text-brand-text' : 'text-fg-muted hover:bg-sunken hover:text-fg')
         }
-        onMouseEnter={e => {
-          const el = e.currentTarget as HTMLElement;
-          if (!el.getAttribute('aria-current')) {
-            el.style.background = 'var(--bg-muted)';
-            el.style.color = 'var(--text-primary)';
-          }
-        }}
-        onMouseLeave={e => {
-          const el = e.currentTarget as HTMLElement;
-          if (!el.getAttribute('aria-current')) {
-            el.style.background = 'transparent';
-            el.style.color = 'var(--text-secondary)';
-          }
-        }}
       >
-        <Icon size={16} className="flex-shrink-0" />
+        <Icon size={16} className="shrink-0" />
         <span>{t(item.labelKey)}</span>
       </NavLink>
     );
   };
 
   const SidebarContent = () => (
-    <div className="flex flex-col h-full">
-      {/* Logo */}
-      <div className="px-4 py-4 border-b flex items-center gap-3" style={{ borderColor: 'var(--border)' }}>
-        <div className="w-8 h-8 flex-shrink-0 flex items-center justify-center">
-          <img src="/professor_logo_white.svg" alt="El-Professor" className="w-8 h-8 object-contain" />
+    <div className="flex h-full flex-col">
+      {/* Logo. Below `lg` the menu button is fixed over this row's left edge —
+          it covered the mark whenever the drawer was open — so the lockup
+          starts clear of it there and keeps its old inset on a desktop. */}
+      <div className="flex items-center gap-3 border-b border-line py-4 pl-14 pr-4 lg:pl-4">
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center">
+          <img src="/professor_logo_white.svg" alt="El-Professor" className="h-8 w-8 object-contain" />
         </div>
         <div className="min-w-0">
-          <p className="text-sm font-bold truncate" style={{ color: 'var(--text-primary)' }}>
+          <p className="truncate text-sm font-bold text-fg">
             {isViewingAsCompany ? activeCompany?.name : (settings?.company_name || 'El-Professor')}
           </p>
-          <p className="text-[10px]" style={{ color: isViewingAsCompany ? 'var(--warning)' : 'var(--text-tertiary)' }}>
+          <p className={cn('text-[10px]', isViewingAsCompany ? 'text-caution' : 'text-fg-subtle')}>
             {isViewingAsCompany ? t('shell.superAdminView') : t('shell.systemName')}
           </p>
         </div>
       </div>
 
       {/* Nav */}
-      <nav className="flex-1 overflow-y-auto py-3 px-2 space-y-0.5">
+      <nav className="flex-1 space-y-0.5 overflow-y-auto px-2 py-3">
         {NAV_ITEMS.map(renderNavItem)}
 
         {/* `isSupportAdmin` is the profile's `admin` role. A platform account
@@ -131,11 +132,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isSupportAdmin }) => {
             the database's. */}
         {(isSupportAdmin || isViewingAsCompany) && (
           <>
-            <div className="pt-3 pb-1 px-3">
-              <p className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>
-                {t('nav.section.management')}
-              </p>
-            </div>
+            <p className={sectionLabelClass}>{t('nav.section.management')}</p>
             {ADMIN_ITEMS.map(renderNavItem)}
           </>
         )}
@@ -146,19 +143,12 @@ const Sidebar: React.FC<SidebarProps> = ({ isSupportAdmin }) => {
             3.13b; that path is now only a redirect for old bookmarks.) */}
         {isSuperAdmin && isViewingAsCompany && (
           <>
-            <div className="pt-3 pb-1 px-3">
-              <p className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>
-                {t('nav.section.superAdmin')}
-              </p>
-            </div>
+            <p className={sectionLabelClass}>{t('nav.section.superAdmin')}</p>
             <button
               onClick={() => { exitCompany(); setIsMobileMenuOpen(false); navigate(ADMIN_BASE); }}
-              className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-150 w-full"
-              style={{ color: 'var(--warning)', background: 'transparent' }}
-              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'var(--warning-subtle)'; }}
-              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'transparent'; }}
+              className={cn(navItemClass, 'text-caution hover:bg-caution-soft')}
             >
-              <ArrowLeft size={16} className="flex-shrink-0" />
+              <ArrowLeft size={16} className="shrink-0" />
               <span>{t('nav.backToAdmin')}</span>
             </button>
           </>
@@ -166,15 +156,12 @@ const Sidebar: React.FC<SidebarProps> = ({ isSupportAdmin }) => {
       </nav>
 
       {/* Logout */}
-      <div className="p-2 border-t" style={{ borderColor: 'var(--border)' }}>
+      <div className="border-t border-line p-2">
         <button
           onClick={handleLogout}
-          className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium w-full transition-all duration-150"
-          style={{ color: 'var(--danger)' }}
-          onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'var(--danger-subtle)'; }}
-          onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'transparent'; }}
+          className={cn(navItemClass, 'text-critical hover:bg-critical-soft')}
         >
-          <LogOut size={16} className="flex-shrink-0" />
+          <LogOut size={16} className="shrink-0" />
           <span>{t('common.logout')}</span>
         </button>
         {/* Impressum and Datenschutz, owed from every page; a new tab, so
@@ -189,36 +176,25 @@ const Sidebar: React.FC<SidebarProps> = ({ isSupportAdmin }) => {
       {/* Mobile button */}
       <button
         onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-        className="lg:hidden fixed top-3 left-4 z-50 p-2 rounded-lg transition-colors"
-        style={{
-          background: 'var(--bg-surface)',
-          border: '1px solid var(--border)',
-          color: 'var(--text-secondary)',
-          boxShadow: 'var(--shadow-sm)',
-        }}
+        className="fixed left-4 top-3 z-50 rounded-control border border-line bg-raised p-2 text-fg-muted shadow-raised transition-colors hover:bg-sunken hover:text-fg focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus lg:hidden"
       >
         {isMobileMenuOpen ? <X size={18} /> : <Menu size={18} />}
       </button>
 
-      {/* Mobile overlay */}
+      {/* Mobile overlay — the design system's scrim, as Dialog paints it. */}
       {isMobileMenuOpen && (
         <div
-          className="lg:hidden fixed inset-0 z-30"
-          style={{ background: 'rgba(0,0,0,0.5)' }}
+          className="fixed inset-0 z-30 bg-[rgb(5_8_16/0.55)] lg:hidden"
           onClick={() => setIsMobileMenuOpen(false)}
         />
       )}
 
       {/* Sidebar */}
       <aside
-        className={`fixed top-0 left-0 z-40 h-full w-64 transform transition-transform duration-300 ease-in-out border-r ${
-          isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full'
-        } lg:translate-x-0`}
-        style={{
-          background: 'var(--bg-surface)',
-          borderColor: 'var(--border)',
-          boxShadow: 'var(--shadow-lg)',
-        }}
+        className={cn(
+          'fixed left-0 top-0 z-40 h-full w-64 transform border-r border-line bg-raised shadow-overlay transition-transform duration-300 ease-in-out lg:translate-x-0',
+          isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full',
+        )}
       >
         <SidebarContent />
       </aside>
