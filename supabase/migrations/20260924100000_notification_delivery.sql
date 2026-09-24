@@ -101,16 +101,37 @@
     - the two TÜV types are about a vehicle, not about billing, and are sent to
       any approved, unsuspended company that has the type switched on.
 
-  ## Decision 4 — the table is written by the job and by nobody else
+  ## Decision 4 — the table is written by the job and by nobody else, and it
+  ##              still carries both context triggers
 
   There is no INSERT, UPDATE or DELETE policy on `notification_deliveries` and
-  no grant for `authenticated` beyond SELECT. A client cannot write it at all,
-  so it carries **neither** `refuse_read_only_context_write` **nor**
-  `record_support_write`: that pair is derived from the set of tables a client
-  writes, and `tests/rls/support-write-audit.sql` checks the two together, so a
-  table with neither is simply not in that set. The two writers are SECURITY
-  DEFINER functions granted to `service_role` alone, and a support session
-  writes nothing here because nothing but those functions writes here.
+  no grant for `authenticated` beyond SELECT. A client cannot write it at all.
+  The two writers are SECURITY DEFINER functions granted to `service_role`
+  alone, which carries no `auth.uid()`, so `refuse_read_only_context_write`
+  returns on its first branch for them and `record_support_write` is never
+  armed: the job costs one `current_setting` per statement and nothing else.
+
+  **It carries both triggers anyway**, and the first version of this migration
+  did not — it reasoned from "no client writes it today" and asserted that the
+  table had no triggers at all. `tests/rls/platform-contexts.sql` section 14
+  caught it, and the rule it enforces is the right one:
+
+      every table whose policies name get_active_company_id()
+      carries refuse_read_only_context_write
+
+  That is keyed on the **policies**, not on today's grants, and deliberately so:
+  the next person to add an INSERT policy here — for the "zuletzt gemeldet"
+  panel, say — will not re-derive the argument above, and without the triggers
+  their write would go through in a view context and leave no audit row in a
+  support session. Deriving the shape from the tenancy predicate is what makes
+  that impossible to forget. The pair is installed together, because
+  `tests/rls/support-write-audit.sql` section 1 fails a table carrying one
+  without the other in either direction.
+
+  The alternative was to drop `get_active_company_id()` from the SELECT policy,
+  which would take the table out of the rule's scope. That is only right if a
+  company should never read its own delivery history, and the opposite is the
+  likely future, so it was not taken.
 
   SELECT is the ordinary business shape, so a company can be shown its own
   notification history later without another migration, and so the tenant
@@ -194,6 +215,30 @@ BEGIN
     'company_id = (SELECT public.get_active_company_id()) '
     'OR (SELECT public.platform_reads_company_data()))';
 END $mig$;
+
+-- The two triggers every table in this shape carries, with the same names and
+-- the same definitions as the 39 tables 20260917140000 and 20260920110000
+-- derived them onto. Nothing can write this table through the API today, so
+-- neither fires for a client; they are here so that the day an INSERT policy is
+-- added, a view context is refused and a support session is recorded without
+-- anyone having to remember. See decision 4 in the header.
+--
+-- For the job they cost one GUC read per statement and nothing more: it calls
+-- through SECURITY DEFINER functions as `service_role`, whose JWT carries no
+-- `sub`, so refuse_read_only_context_write returns on its `v_uid IS NULL`
+-- branch without setting the flag, and record_support_write's WHEN never opens.
+
+DROP TRIGGER IF EXISTS refuse_read_only_context_write ON public.notification_deliveries;
+CREATE TRIGGER refuse_read_only_context_write
+  BEFORE INSERT OR UPDATE OR DELETE ON public.notification_deliveries
+  FOR EACH STATEMENT EXECUTE FUNCTION app_private.refuse_read_only_context_write();
+
+DROP TRIGGER IF EXISTS record_support_write ON public.notification_deliveries;
+CREATE TRIGGER record_support_write
+  AFTER INSERT OR UPDATE OR DELETE ON public.notification_deliveries
+  FOR EACH ROW
+  WHEN (current_setting('app_private.support_write_context', true) <> '')
+  EXECUTE FUNCTION app_private.record_support_write();
 
 -- ─── 3. The candidate query ─────────────────────────────────────────────────
 
@@ -561,14 +606,31 @@ BEGIN
     RAISE EXCEPTION 'notification self-check: the dedupe rule must be a UNIQUE constraint on (company_id, notification_type, target_id, period_key)';
   END IF;
 
-  -- 5. No client-write triggers, because no client writes it. The pair is
-  --    derived from the tables a client writes and is checked together by
-  --    tests/rls/support-write-audit.sql; carrying one of them here would fail
-  --    that file for a table nothing can write anyway.
-  SELECT count(*) INTO v_n FROM pg_trigger
+  -- 5. Both context triggers, and only those two. The rule is keyed on the
+  --    policies, not on today's grants: a table whose policies name
+  --    get_active_company_id() carries the refusal trigger
+  --    (tests/rls/platform-contexts.sql section 14), and a table carrying one
+  --    of the pair without the other fails tests/rls/support-write-audit.sql
+  --    section 1 in either direction. The first version of this migration
+  --    asserted zero triggers here and the kit refused it.
+  SELECT string_agg(tgname, ', ' ORDER BY tgname) INTO v_wrong
+    FROM pg_trigger
    WHERE tgrelid = 'public.notification_deliveries'::regclass AND NOT tgisinternal;
-  IF v_n <> 0 THEN
-    RAISE EXCEPTION 'notification self-check: notification_deliveries carries % trigger(s); it is written by the job alone', v_n;
+  IF v_wrong IS DISTINCT FROM 'record_support_write, refuse_read_only_context_write' THEN
+    RAISE EXCEPTION 'notification self-check: the table must carry exactly the two context triggers; found %',
+      coalesce(v_wrong, '<none>');
+  END IF;
+
+  -- tgtype 30: STATEMENT + INSERT + DELETE + UPDATE, BEFORE. tgtype 29: the
+  -- same three events, FOR EACH ROW, AFTER. The same shapes as the 39.
+  SELECT count(*) INTO v_n FROM pg_trigger
+   WHERE tgrelid = 'public.notification_deliveries'::regclass AND NOT tgisinternal
+     AND ((tgname = 'refuse_read_only_context_write' AND tgtype = 30 AND tgenabled = 'O')
+          OR (tgname = 'record_support_write' AND tgtype = 29 AND tgenabled = 'O'
+              AND tgqual IS NOT NULL
+              AND pg_get_triggerdef(oid) ~ 'app_private\.support_write_context'));
+  IF v_n <> 2 THEN
+    RAISE EXCEPTION 'notification self-check: the two context triggers are not in the shape the 39 tables carry';
   END IF;
 
   -- 6. The candidate query must not have acquired a subscription term. The two

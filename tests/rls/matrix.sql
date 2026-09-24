@@ -2796,7 +2796,33 @@ INSERT INTO _mx_rpc (label, stmt, want, hole) VALUES
     -- role reads Y
     ('platform_context_current()',
      $q$SELECT platform_context_current()::text$q$,
-     'PNNNNNY', NULL);
+     'PNNNNNY', NULL),
+    -- The notification job (20260924100000). These three are the only SECURITY
+    -- DEFINER functions in `public` granted to `service_role` and to nobody
+    -- else, so every cell here is P — the revoke proved rather than trusted,
+    -- and `staff` falls to PP by the default rule below, because a context
+    -- grants no EXECUTE.
+    --
+    -- The assertion worth having is on notification_candidates: it runs past
+    -- RLS and reads **across companies** by design, so an `authenticated` cell
+    -- that ever moved off P would be a cross-tenant read of every company's
+    -- cars, settings and delivery history in one call. The other two write the
+    -- delivery record the whole dedupe rule rests on; a client that could call
+    -- notification_delivery_claim could silence its own next TÜV warning, and
+    -- one that could call _settle could mark a notification sent that was not.
+    --
+    -- The arguments never run — the call is refused before that — but they
+    -- must still resolve to these signatures, or the probe would answer 42883
+    -- and read as E rather than P.
+    ('notification_candidates(the 60-day window, one page)',
+     $q$SELECT count(*)::text FROM notification_candidates(60, 1)$q$,
+     'PPPPPPP', NULL),
+    ('notification_delivery_claim(company A, its own trial)',
+     $q$SELECT notification_delivery_claim({co}, 'trial_abgelaufen', {co}, '2097-01-01')::text$q$,
+     'PPPPPPP', NULL),
+    ('notification_delivery_settle(company A''s probe row)',
+     $q$SELECT notification_delivery_settle({ref:notification_deliveries}, true, 1)::text$q$,
+     'PPPPPPP', NULL);
 
 -- What an open context changes, RPC by RPC. Everything not named here answers
 -- the same with a context as without one, so it takes `super`'s character

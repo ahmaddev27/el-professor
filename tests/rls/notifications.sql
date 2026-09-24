@@ -10,11 +10,13 @@
   What is covered, in order:
 
     1. shape      the table carries RLS and exactly one policy, the business
-                  SELECT shape; no client may write it, and it carries neither
-                  of the two support-session triggers because nothing but the
-                  job writes it; the three functions are SECURITY DEFINER with
-                  a pinned search_path and EXECUTE for service_role alone —
-                  anon in particular, which Supabase grants by default
+                  SELECT shape; no client may write it; it carries **both**
+                  context triggers, in the shape every other tenant table
+                  carries them — the rule is keyed on the policies naming
+                  get_active_company_id(), not on who writes today — and the
+                  three functions are SECURITY DEFINER with a pinned
+                  search_path and EXECUTE for service_role alone, anon in
+                  particular, which Supabase grants by default
     2. tenants    a member reads its own company's rows and never another
                   company's; nobody writes, so a move between companies is
                   refused for having no UPDATE policy at all
@@ -22,6 +24,10 @@
                   candidate query does not offer that company to the job
     4. platform   a platform account reads nothing outside a context, reads the
                   opened company's rows inside one, and writes neither way
+    4b. job       the job's own claim and settle carry no session, so neither
+                  trigger arms: nothing is refused and nothing is recorded —
+                  the check that the pair added in section 1 did not put an
+                  audit row on every notification, every night
     5. dedupe     the unique constraint is the rule: a second claim for the
                   same occurrence answers NULL, a new expiry date is a new
                   occurrence, and the two TÜV types are separate occurrences
@@ -133,6 +139,17 @@ BEGIN
   PERFORM _nt_reset();
   RETURN v_out;
 END $$;
+
+/** The audit log's high-water mark, so each check counts only its own rows. */
+CREATE OR REPLACE FUNCTION _nt_mark() RETURNS bigint
+LANGUAGE sql AS $$ SELECT coalesce(max(l.id), 0) FROM app_private.platform_audit_log l $$;
+
+/** Support-write rows after a mark. */
+CREATE OR REPLACE FUNCTION _nt_rows(p_since bigint) RETURNS bigint
+LANGUAGE sql AS $$
+  SELECT count(*) FROM app_private.platform_audit_log l
+   WHERE l.id > p_since AND l.action ~ '^support_write\.'
+$$;
 
 -- ─── principals and data ────────────────────────────────────────────────────
 --
@@ -249,13 +266,32 @@ BEGIN
     AND NOT has_table_privilege('service_role', 'public.notification_deliveries',
                                 'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER'));
 
-  -- The two support-session triggers go together on the tables a client
-  -- writes; support-write-audit.sql fails a table carrying one without the
-  -- other. Nothing but the job writes this one, so it carries neither, and
-  -- that has to stay true or that file will start reporting this table.
-  SELECT count(*) INTO v_n FROM pg_trigger
+  -- The two context triggers, and only those two. The rule they follow is
+  -- keyed on the *policies*, not on today's grants: platform-contexts.sql
+  -- section 14 requires the refusal trigger on every table whose policies name
+  -- get_active_company_id(), and support-write-audit.sql section 1 fails a
+  -- table carrying one of the pair without the other, in either direction.
+  -- Nothing can write this table through the API, so neither fires for a
+  -- client today; they are here so the day an INSERT policy is added, a view
+  -- context is refused and a support session recorded without anyone having to
+  -- remember. The first version of this file asserted zero triggers and the
+  -- kit refused the migration.
+  SELECT string_agg(tgname, ', ' ORDER BY tgname) INTO v_wrong
+    FROM pg_trigger
    WHERE tgrelid = 'public.notification_deliveries'::regclass AND NOT tgisinternal;
-  PERFORM _nt_ok('shape: no client-write triggers, because no client writes it', v_n = 0);
+  PERFORM _nt_ok(format('shape: exactly the two context triggers [%s]', coalesce(v_wrong, '<none>')),
+    v_wrong = 'record_support_write, refuse_read_only_context_write');
+
+  -- The same shapes the 39 tables of 3.4a/3.4c carry: the refusal per
+  -- statement and BEFORE (tgtype 30), the audit per row and AFTER, gated on
+  -- the flag (tgtype 29).
+  SELECT count(*) INTO v_n FROM pg_trigger
+   WHERE tgrelid = 'public.notification_deliveries'::regclass AND NOT tgisinternal
+     AND ((tgname = 'refuse_read_only_context_write' AND tgtype = 30 AND tgenabled = 'O')
+          OR (tgname = 'record_support_write' AND tgtype = 29 AND tgenabled = 'O'
+              AND tgqual IS NOT NULL
+              AND pg_get_triggerdef(oid) ~ 'app_private\.support_write_context'));
+  PERFORM _nt_ok('shape: …in the shape every other tenant table carries them', v_n = 2);
 
   -- The three functions.
   SELECT string_agg(v.sig, ', ') INTO v_wrong
@@ -419,9 +455,12 @@ BEGIN
     _nt_try(u_s, s_s, format('SELECT count(*)::text FROM notification_deliveries WHERE id = %L',
                              _nt_id('delivery:a'))) = '1');
 
-  -- A support session writes every other tenant table; it writes this one as
-  -- little as a company member does, because the job is the only writer. So
-  -- there is no support-write audit row to look for, and none is expected.
+  -- A support session writes every other tenant table. Here it is stopped one
+  -- step earlier than the view context is: `authenticated` holds no INSERT,
+  -- UPDATE or DELETE grant at all, so the statement never reaches a policy or
+  -- a trigger. The table carries both triggers all the same (section 1) — they
+  -- are the shape, not the permission, and they are what will refuse and
+  -- record the day an INSERT policy is added.
   PERFORM _nt_ok('platform: a support session writes nothing here either',
     _nt_try(u_s, s_s, format('UPDATE notification_deliveries SET recipient_count = 9 WHERE id = %L',
                              _nt_id('delivery:a'))) LIKE 'ERR 42501%'
@@ -432,6 +471,35 @@ BEGIN
 
   PERFORM _nt_ok('platform: neither session may call the job''s functions',
     _nt_try(u_s, s_s, 'SELECT count(*)::text FROM notification_candidates(60)') LIKE 'ERR 42501%');
+END $$;
+
+-- ─── 4b. the job's own writes are not recorded, and cost nothing ────────────
+--
+-- The job reaches the table through SECURITY DEFINER functions called as
+-- `service_role`, whose JWT carries a role and no `sub`. So `auth.uid()` is
+-- NULL, `refuse_read_only_context_write` returns on its first branch without
+-- setting the flag, and `record_support_write`'s WHEN never opens. Without
+-- this check the pair added in section 1 could have been armed for the job —
+-- which would have written one audit row per notification, every night, with
+-- no actor and no context, and refused the write with `support_session_required`.
+
+DO $$
+DECLARE
+  co_a   constant uuid := 'c0000000-0000-4000-8000-00000000000a';
+  v_mark bigint;
+  v_id   uuid;
+BEGIN
+  PERFORM _nt_reset();
+  v_mark := _nt_mark();
+
+  -- As the kit runs, with no JWT at all: the same condition the service role
+  -- meets, and the branch the trigger takes for it.
+  v_id := notification_delivery_claim(co_a, 'trial_bald_ablaufend', co_a, '2095-01-01');
+  PERFORM _nt_ok('job: a claim with no session goes through', v_id IS NOT NULL);
+  PERFORM _nt_ok('job: …and the settle too', notification_delivery_settle(v_id, true, 1) = true);
+  PERFORM _nt_ok('job: neither leaves a support-write audit row', _nt_rows(v_mark) = 0);
+  PERFORM _nt_ok('job: and the flag was never armed',
+    coalesce(current_setting('app_private.support_write_context', true), '') = '');
 END $$;
 
 -- ─── 5. the dedupe rule ─────────────────────────────────────────────────────
