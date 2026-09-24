@@ -80,7 +80,14 @@ for (const screen of SCREENS) {
         };
       });
 
-      const mismatch = Math.abs(before.docScroll - before.bodyScroll) > 4;
+      // A doc/body difference only matters on a page that actually scrolls. On
+      // a page shorter than the viewport the root still fills it — `min-h-dvh`
+      // — while the body box stops at its content, and nothing scrolls either
+      // way. The leak this is looking for is the opposite: a document that
+      // scrolls further than its body, which is what a nested scroller does
+      // when its height escapes to the root.
+      const scrolls = before.docScroll > before.viewport + 4;
+      const mismatch = scrolls && Math.abs(before.docScroll - before.bodyScroll) > 4;
       // The header is sticky, so once the page has scrolled past it, it sits at
       // the top of the viewport and stays there.
       const stuck = after.headerTop !== null && after.headerTop >= -1 && after.headerTop <= 2;
