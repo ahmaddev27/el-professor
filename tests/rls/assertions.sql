@@ -576,21 +576,23 @@ BEGIN
       AS $probe$ BEGIN RETURN _probe_hidden.thing(); END $probe$;
       GRANT EXECUTE ON FUNCTION public._probe_offender() TO authenticated;
 
-      CREATE TABLE public._probe_pol (n int);
+      -- not `n`: the enclosing block declares a variable of that name, and a
+      -- column that shadows one is the kind of thing that works until it does not
+      CREATE TABLE public._probe_pol (probe_n int);
       ALTER TABLE public._probe_pol ENABLE ROW LEVEL SECURITY;
       GRANT SELECT ON public._probe_pol TO authenticated;
       CREATE POLICY _probe_pol_select ON public._probe_pol
         FOR SELECT TO authenticated USING (_probe_hidden.thing());
 
       RAISE EXCEPTION USING ERRCODE = 'ZZ003', MESSAGE =
-        CASE WHEN EXISTS (SELECT 1 FROM _invoker_reaches_confined_schema()
-                           WHERE api_role = 'authenticated'
-                             AND routine LIKE '%_probe_offender%'
-                             AND nspname = '_probe_hidden') THEN 'a' ELSE '-' END ||
-        CASE WHEN EXISTS (SELECT 1 FROM _policy_reaches_confined_schema()
-                           WHERE api_role = 'authenticated'
-                             AND policy_name = '_probe_pol_select'
-                             AND nspname = '_probe_hidden') THEN 'b' ELSE '-' END;
+        (CASE WHEN EXISTS (SELECT 1 FROM _invoker_reaches_confined_schema()
+                            WHERE api_role = 'authenticated'
+                              AND routine LIKE '%_probe_offender%'
+                              AND nspname = '_probe_hidden') THEN 'a' ELSE '-' END) ||
+        (CASE WHEN EXISTS (SELECT 1 FROM _policy_reaches_confined_schema()
+                            WHERE api_role = 'authenticated'
+                              AND policy_name = '_probe_pol_select'
+                              AND nspname = '_probe_hidden') THEN 'b' ELSE '-' END);
     EXCEPTION WHEN SQLSTATE 'ZZ003' THEN
       control := SQLERRM;
     END;
