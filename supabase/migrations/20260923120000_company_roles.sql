@@ -107,12 +107,35 @@
   with the same company term (`current_role_permits`, `manage-users.roleIdFor`),
   so it reads such a row correctly. That is why this is not an epoch matter.
 
-  ## Ownership
+  ## Ownership, and why the two helpers are in `public`
 
-  Every function here is `SET search_path = public, pg_catalog` and
-  schema-qualified. `app_private.role_page_keys()` follows the four rules for
-  that schema: no API role holds USAGE on it, and the REVOKE below is the
-  second wall.
+  Every function here is `SET search_path` and schema-qualified.
+
+  `role_page_keys()` and `role_name_is_system_reserved()` are in **`public`**,
+  not in `app_private`, and that is not a style choice. Both are read from two
+  places that run as the **caller**: `enforce_company_role_shape`, a
+  SECURITY INVOKER trigger fired by whoever writes `roles`, and
+  `company_role_save`, which is SECURITY INVOKER by design. `authenticated`
+  holds no USAGE on `app_private` and no EXECUTE on anything in it — that is
+  the rule, asserted on every release by `20260919120000`'s self-check — so a
+  call from either place is refused with `42501 permission denied`. Measured in
+  a throwaway PostgreSQL 16 before this file was corrected: a company admin's
+  plain `INSERT INTO roles` died on the trigger, and `company_role_save`
+  answered `{"ok": false, "reason": "not_authorized"}`, because `42501` is
+  `insufficient_privilege` and the function's own handler caught it. The
+  feature would have been dead on arrival, and the message would have blamed
+  the administrator's role.
+
+  Neither function is security state. One returns a constant list of sixteen
+  page keys; the other answers whether a **system** role carries a name, and
+  every system role is readable by every signed-in caller through
+  `roles_select` (`company_id IS NULL OR …`), so a SECURITY INVOKER function in
+  `public` gives exactly the answer a definer would. They are revoked from
+  PUBLIC and anon and granted to `authenticated` and `service_role`, the two
+  roles that write `roles` and so fire the trigger.
+
+  Self-check 9 is the rule rather than the instance: no function the trigger or
+  either RPC reaches may name `app_private`.
 */
 
 -- ─── 1. Two companies may hold a role of the same name ──────────────────────
@@ -167,8 +190,13 @@ CREATE INDEX IF NOT EXISTS idx_user_profiles_role_id
 
   STABLE and NULL-safe: a NULL or blank name is not reserved (the RPC and the
   NOT NULL column refuse it for their own reasons), never an error.
+
+  In `public` and SECURITY INVOKER, for the reason in the header: both callers
+  run as the caller, and `authenticated` cannot reach `app_private`. Under RLS
+  the answer is the same for everyone — `roles_select` shows every system role
+  to every signed-in caller — so a definer would add nothing but reach.
 */
-CREATE OR REPLACE FUNCTION app_private.role_name_is_system_reserved(p_name text)
+CREATE OR REPLACE FUNCTION public.role_name_is_system_reserved(p_name text)
 RETURNS boolean
 LANGUAGE sql
 STABLE
@@ -181,7 +209,7 @@ AS $$
   );
 $$;
 
-COMMENT ON FUNCTION app_private.role_name_is_system_reserved(text) IS
+COMMENT ON FUNCTION public.role_name_is_system_reserved(text) IS
   'Does a system role (company_id IS NULL) already hold this name? Compared on '
   'lower(btrim(...)), the expression roles_system_name_key is built on.';
 
@@ -230,7 +258,7 @@ BEGIN
         USING ERRCODE = 'P0001', HINT = 'company_role_not_system';
     END IF;
 
-    IF app_private.role_name_is_system_reserved(NEW.name) THEN
+    IF public.role_name_is_system_reserved(NEW.name) THEN
       RAISE EXCEPTION
         'The role name "%" is reserved: a system role already carries it, and '
         'user_profiles.role is read as an authority under that name.', btrim(NEW.name)
@@ -341,8 +369,12 @@ CREATE TRIGGER user_profiles_role_scope_guard
   `src/utils/rolePageKeys.test.ts` reads the newest migration that defines this
   list and fails when it and PAGE_DEFINITIONS differ, so the two move together.
   A screen added later adds its key here in the same migration that seeds it.
+
+  In `public` rather than beside `plan_feature_keys()` in `app_private`, because
+  its one reader is SECURITY INVOKER; see the header. The list is a constant and
+  says nothing a signed-in caller cannot already read off its own roles screen.
 */
-CREATE OR REPLACE FUNCTION app_private.role_page_keys()
+CREATE OR REPLACE FUNCTION public.role_page_keys()
 RETURNS text[]
 LANGUAGE sql
 IMMUTABLE
@@ -355,7 +387,7 @@ AS $$
   ]::text[];
 $$;
 
-COMMENT ON FUNCTION app_private.role_page_keys() IS
+COMMENT ON FUNCTION public.role_page_keys() IS
   'The page_keys a role_permissions row may name — PAGE_DEFINITIONS in '
   'src/types/role.ts. Pinned against it by src/utils/rolePageKeys.test.ts.';
 
@@ -408,7 +440,7 @@ DECLARE
   v_company    uuid;
   v_name       text := btrim(coalesce(p_name, ''));
   v_role_id    uuid := p_role_id;
-  v_keys       text[] := app_private.role_page_keys();
+  v_keys       text[] := public.role_page_keys();
   v_rows       int;
   v_entry      jsonb;
   v_seen       text[] := ARRAY[]::text[];
@@ -436,7 +468,7 @@ BEGIN
   IF length(v_name) > 60 THEN
     RETURN jsonb_build_object('ok', false, 'reason', 'name_too_long');
   END IF;
-  IF app_private.role_name_is_system_reserved(v_name) THEN
+  IF public.role_name_is_system_reserved(v_name) THEN
     RETURN jsonb_build_object('ok', false, 'reason', 'name_reserved');
   END IF;
 
@@ -621,9 +653,18 @@ COMMENT ON FUNCTION public.company_role_delete(uuid) IS
   INVOKER, so anon would reach nothing through them — the revoke is the second
   wall, and the self-check asks for it.
 
-  `app_private.role_page_keys()` and the two trigger helpers are revoked from
-  everyone: no API role holds USAGE on `app_private`, and these are called only
-  from a trigger or from a function that already runs as a role that does.
+  The two helpers are revoked the same way and then granted to `authenticated`
+  **and `service_role`**: both are read by `enforce_company_role_shape`, which
+  is SECURITY INVOKER and fires for whoever writes `roles` — a company
+  administrator through PostgREST, and an edge function holding the service
+  key. A role that may write the table and may not read the helper cannot write
+  it at all; that is the defect the header describes, and the grant is what
+  closes it. anon holds neither, and `roles_insert` is `TO authenticated`
+  anyway, so anon never reaches the trigger.
+
+  The two trigger functions themselves stay revoked from everyone. A trigger's
+  EXECUTE is checked when the trigger is created, not when it fires, so no
+  caller needs it.
 */
 REVOKE ALL ON FUNCTION public.company_role_save(text, text, jsonb, uuid)
   FROM PUBLIC, anon, authenticated, service_role;
@@ -632,10 +673,13 @@ REVOKE ALL ON FUNCTION public.company_role_delete(uuid)
 GRANT EXECUTE ON FUNCTION public.company_role_save(text, text, jsonb, uuid) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.company_role_delete(uuid) TO authenticated;
 
-REVOKE ALL ON FUNCTION app_private.role_page_keys()
+REVOKE ALL ON FUNCTION public.role_page_keys()
   FROM PUBLIC, anon, authenticated, service_role;
-REVOKE ALL ON FUNCTION app_private.role_name_is_system_reserved(text)
+REVOKE ALL ON FUNCTION public.role_name_is_system_reserved(text)
   FROM PUBLIC, anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.role_page_keys()                     TO authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.role_name_is_system_reserved(text)   TO authenticated, service_role;
+
 REVOKE ALL ON FUNCTION app_private.enforce_company_role_shape()
   FROM PUBLIC, anon, authenticated, service_role;
 REVOKE ALL ON FUNCTION app_private.enforce_user_profile_role_scope()
@@ -760,12 +804,30 @@ BEGIN
     RAISE EXCEPTION 'slice B self-check 6: authenticated cannot execute a company-roles RPC';
   END IF;
 
+  --    …and the two helpers the trigger and the RPC read as the caller. anon
+  --    holds neither; authenticated and service_role hold both, because a role
+  --    that may write `roles` fires the trigger and the trigger reads them.
+  FOREACH v_missing IN ARRAY ARRAY[
+    'public.role_page_keys()',
+    'public.role_name_is_system_reserved(text)'
+  ] LOOP
+    IF has_function_privilege('anon', v_missing, 'EXECUTE') THEN
+      RAISE EXCEPTION 'slice B self-check 6: anon can execute %', v_missing;
+    END IF;
+    FOREACH v_fn IN ARRAY ARRAY['authenticated', 'service_role'] LOOP
+      IF NOT has_function_privilege(v_fn, v_missing, 'EXECUTE') THEN
+        RAISE EXCEPTION
+          'slice B self-check 6: % cannot execute % — it writes roles, so it fires enforce_company_role_shape, which reads it', v_fn, v_missing;
+      END IF;
+    END LOOP;
+  END LOOP;
+
   -- 7. Sixteen page keys, and no duplicate among them.
-  SELECT cardinality(app_private.role_page_keys()) INTO v_count;
+  SELECT cardinality(public.role_page_keys()) INTO v_count;
   IF v_count <> 16 THEN
     RAISE EXCEPTION 'slice B self-check 7: role_page_keys() holds % keys, expected 16', v_count;
   END IF;
-  SELECT count(DISTINCT k) INTO v_count FROM unnest(app_private.role_page_keys()) AS k;
+  SELECT count(DISTINCT k) INTO v_count FROM unnest(public.role_page_keys()) AS k;
   IF v_count <> 16 THEN
     RAISE EXCEPTION 'slice B self-check 7: role_page_keys() repeats a key';
   END IF;
@@ -786,10 +848,49 @@ BEGIN
   SELECT count(*) INTO v_count
     FROM public.roles r
    WHERE r.company_id IS NOT NULL
-     AND app_private.role_name_is_system_reserved(r.name);
+     AND public.role_name_is_system_reserved(r.name);
   IF v_count > 0 THEN
     RAISE EXCEPTION 'slice B self-check 8: % company role(s) already carry a system role''s name', v_count;
   END IF;
+
+  /*
+    9. Nothing on a caller's own path may reach `app_private`.
+
+    The rule, not the instance. `enforce_company_role_shape`,
+    `enforce_user_profile_role_scope` and the two RPCs all run as the caller,
+    and `authenticated` holds no USAGE on `app_private` and no EXECUTE on
+    anything in it. A call from any of them is `42501 permission denied` — and
+    in `company_role_save` that is `insufficient_privilege`, which its own
+    handler catches and reports as `not_authorized`, so the feature fails
+    silently and blames the administrator's role. This file shipped that way
+    once; the check is what stops it coming back, in this body or in a later
+    restatement.
+
+    `public.` is checked as well as the bare name, so a call written either way
+    is caught. A *reference in a comment* would trip it too, which is the right
+    side to err on.
+  */
+  FOREACH v_fn IN ARRAY ARRAY[
+    'public.company_role_save',
+    'public.company_role_delete',
+    'app_private.enforce_company_role_shape',
+    'app_private.enforce_user_profile_role_scope',
+    'public.role_page_keys',
+    'public.role_name_is_system_reserved'
+  ] LOOP
+    SELECT string_agg(p.prosrc, E'\n') INTO v_body
+      FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+     WHERE n.nspname = split_part(v_fn, '.', 1)
+       AND p.proname = split_part(v_fn, '.', 2)
+       AND NOT p.prosecdef;
+    IF v_body IS NULL THEN
+      RAISE EXCEPTION 'slice B self-check 9: %() is missing, or is no longer SECURITY INVOKER', v_fn;
+    END IF;
+    IF position('app_private.' IN v_body) > 0 THEN
+      RAISE EXCEPTION
+        'slice B self-check 9: %() runs as the caller and names app_private — authenticated cannot reach it, so the write fails as "not_authorized"', v_fn;
+    END IF;
+  END LOOP;
 
   SELECT count(*) INTO v_count FROM public.roles WHERE company_id IS NULL;
   RAISE NOTICE 'slice B: % system role(s), % company role(s)',
