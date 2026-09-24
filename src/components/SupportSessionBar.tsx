@@ -108,17 +108,19 @@ const SupportSessionBar: React.FC = () => {
   };
 
   const support = bar.kind === 'support';
-  const tone = support ? 'var(--warning)' : 'var(--accent)';
+
+  // ── Presentation (phase 5) ────────────────────────────────────────────────
+  // `support` still decides every word and every control below; only the
+  // colours it picks moved, to the design system's `caution` for a live session
+  // and `brand` for a read-only view. The bar stays deliberately loud.
+  const tone = support
+    ? 'border-caution bg-caution-soft text-caution'
+    : 'border-brand bg-brand-soft text-brand-text';
 
   return (
     <>
       <div
-        className="px-4 py-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm font-medium"
-        style={{
-          background: support ? 'var(--warning-subtle)' : 'var(--bg-subtle)',
-          borderBottom: `1px solid ${tone}`,
-          color: tone,
-        }}
+        className={`px-4 py-2 flex flex-wrap items-center gap-x-2 gap-y-1 border-b font-ui text-sm font-medium ${tone}`}
         role="status"
       >
         {support ? <LifeBuoy size={16} /> : <Eye size={16} />}
