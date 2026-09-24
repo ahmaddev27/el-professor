@@ -490,11 +490,22 @@ BEGIN
     END IF;
     v_seen := v_seen || v_page;
 
-    -- jsonb equality rather than a cast: `(x ->> 'can_view')::boolean` raises
-    -- 22P02 on anything that is not a boolean word, and an argument this
-    -- function cannot read must be a stated refusal, not a cast error.
-    v_view := (v_entry -> 'can_view') = 'true'::jsonb;
-    v_edit := (v_entry -> 'can_edit') = 'true'::jsonb;
+    /*
+      jsonb comparison rather than a cast: `(x ->> 'can_view')::boolean` raises
+      22P02 on anything that is not a boolean word, and an argument this
+      function cannot read must be a stated refusal, not a cast error.
+
+      `IS NOT DISTINCT FROM` and not `=`, and that is the whole guard. An entry
+      that simply leaves `can_view` out — `{"page_key": "drivers", "can_edit":
+      true}`, which the screen never sends but a direct PostgREST call may —
+      makes `v_entry -> 'can_view'` SQL NULL, so `= 'true'::jsonb` is NULL,
+      `v_edit AND NOT v_view` is NULL, `IF NULL THEN` does not fire, and the
+      rule below fails **open**: the row is stored with can_edit true and
+      can_view NULL (the column is nullable), which is exactly the state
+      "bearbeiten ohne ansehen" exists to prevent. The RLS kit caught it.
+    */
+    v_view := (v_entry -> 'can_view') IS NOT DISTINCT FROM 'true'::jsonb;
+    v_edit := (v_entry -> 'can_edit') IS NOT DISTINCT FROM 'true'::jsonb;
     IF v_edit AND NOT v_view THEN
       RETURN jsonb_build_object('ok', false, 'reason', 'edit_without_view',
                                 'page_key', v_page);
@@ -531,14 +542,19 @@ BEGIN
     RETURNING id INTO v_role_id;
   END IF;
 
+  -- `IS NOT DISTINCT FROM` again, for the same reason as the loop above and
+  -- one more: `can_view` and `can_edit` are nullable, so a `=` against an
+  -- absent key would store NULL rather than false, and a NULL that reads as
+  -- "not permitted" in one query and as unknown in the next is not a
+  -- permission row anyone can reason about.
   INSERT INTO public.role_permissions (role_id, page_key, can_view, can_edit)
   SELECT v_role_id,
          entry ->> 'page_key',
-         (entry -> 'can_view') = 'true'::jsonb,
-         (entry -> 'can_edit') = 'true'::jsonb
+         (entry -> 'can_view') IS NOT DISTINCT FROM 'true'::jsonb,
+         (entry -> 'can_edit') IS NOT DISTINCT FROM 'true'::jsonb
     FROM jsonb_array_elements(p_permissions) AS entry
-   WHERE (entry -> 'can_view') = 'true'::jsonb
-      OR (entry -> 'can_edit') = 'true'::jsonb;
+   WHERE (entry -> 'can_view') IS NOT DISTINCT FROM 'true'::jsonb
+      OR (entry -> 'can_edit') IS NOT DISTINCT FROM 'true'::jsonb;
 
   RETURN jsonb_build_object('ok', true, 'role_id', v_role_id);
 EXCEPTION

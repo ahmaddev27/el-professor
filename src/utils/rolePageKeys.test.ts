@@ -1,6 +1,6 @@
 /**
- * `PAGE_DEFINITIONS` and `app_private.role_page_keys()` are one list written
- * twice, and they have to move together.
+ * `PAGE_DEFINITIONS` and `public.role_page_keys()` are one list written twice,
+ * and they have to move together.
  *
  * The screen builds a role's permission rows from `PAGE_DEFINITIONS` and
  * nothing else — `permissionPayload()` walks exactly those keys — and
@@ -32,7 +32,7 @@ import { ROLE_PAGE_KEYS } from '../lib/companyRoles';
   rather than any array literal is what keeps a second array elsewhere in the
   same file from being read as the list.
 */
-const KEYS_IN_ARRAY = /FUNCTION app_private\.role_page_keys\(\)[\s\S]*?SELECT ARRAY\[([\s\S]*?)\]/;
+const KEYS_IN_ARRAY = /FUNCTION public\.role_page_keys\(\)[\s\S]*?SELECT ARRAY\[([\s\S]*?)\]/;
 
 const keysInMigration = (): string[] => {
   const dir = fileURLToPath(new URL('../../supabase/migrations/', import.meta.url));
@@ -42,7 +42,7 @@ const keysInMigration = (): string[] => {
     .map(file => readFileSync(dir + file, 'utf8'))
     .filter(sql => KEYS_IN_ARRAY.test(sql));
 
-  if (defining.length === 0) throw new Error('no migration defines app_private.role_page_keys()');
+  if (defining.length === 0) throw new Error('no migration defines public.role_page_keys()');
   const body = defining[defining.length - 1].match(KEYS_IN_ARRAY);
   // The keys carry hyphens (`fixed-costs`, `cash-balance`), which a
   // `[a-z][a-z0-9_]*` pattern would cut in half and turn into two halves that
