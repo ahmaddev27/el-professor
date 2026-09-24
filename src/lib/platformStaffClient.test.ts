@@ -42,6 +42,7 @@ const {
   fetchStaffPage,
   inviteStaffMember,
   resendStaffInvite,
+  setStaffRole,
 } = await import('./platformStaffClient');
 
 const API = 'https://api.example.test';
@@ -129,10 +130,61 @@ describe('disableStaffMember and enableStaffMember', () => {
 
   it('surfaces the last-owner refusal with its reason, for the hint beside it', async () => {
     rpc.mockResolvedValue({
-      data: { success: false, reason: 'last_owner', error: 'Der letzte aktive Inhaber der Plattform kann nicht deaktiviert werden.' },
+      data: { success: false, reason: 'last_owner', error: 'Der letzte aktive Inhaber der Plattform kann nicht deaktiviert oder herabgestuft werden.' },
       error: null,
     });
     await expect(disableStaffMember(USER)).rejects.toMatchObject({ reason: 'last_owner' });
+  });
+});
+
+describe('setStaffRole', () => {
+  it('sends the role it was given, for every one of the four', async () => {
+    for (const role of PLATFORM_ROLES) {
+      await setStaffRole(USER, role, null);
+      expect(lastRpc()).toEqual({
+        fn: 'platform_staff_set_role',
+        args: { p_user_id: USER, p_role: role, p_note: null },
+      });
+    }
+  });
+
+  /*
+    The RPC's own default is `owner`. A call that let the role go missing would
+    therefore *promote* the member instead of failing, which is the one failure
+    nobody would see: the call succeeds and the screen says the change went
+    through.
+  */
+  it('never sends a missing or substituted role', async () => {
+    await setStaffRole(USER, 'read_only', null);
+    expect(lastRpc().args.p_role).toBe('read_only');
+    expect(lastRpc().args).toHaveProperty('p_role');
+  });
+
+  it('trims a note and sends null for one of spaces, which leaves the row’s note alone', async () => {
+    await setStaffRole(USER, 'billing', '  neue Zuständigkeit  ');
+    expect(lastRpc().args.p_note).toBe('neue Zuständigkeit');
+
+    await setStaffRole(USER, 'billing', '   ');
+    expect(lastRpc().args.p_note).toBeNull();
+  });
+
+  it('throws the German sentence the function wrote, carrying its reason', async () => {
+    for (const [reason, sentence] of [
+      ['last_owner', 'Der letzte aktive Inhaber der Plattform kann nicht deaktiviert oder herabgestuft werden.'],
+      ['member_disabled', 'Dieses Mitglied ist deaktiviert. Bitte zuerst aktivieren und die Rolle danach ändern.'],
+      ['already_in_role', 'Dieses Mitglied hat diese Rolle bereits.'],
+      ['not_found', 'Nicht gefunden.'],
+      ['denied', 'Keine Berechtigung für diese Aktion.'],
+    ] as const) {
+      rpc.mockResolvedValue({ data: { success: false, reason, error: sentence }, error: null });
+      await expect(setStaffRole(USER, 'support', null)).rejects.toThrow(sentence);
+      await expect(setStaffRole(USER, 'support', null)).rejects.toMatchObject({ reason });
+    }
+  });
+
+  it('reports a role the database refuses as invalid, not as a success', async () => {
+    rpc.mockResolvedValue({ data: { success: false, reason: 'invalid', error: 'Ungültige Eingabe.' }, error: null });
+    await expect(setStaffRole(USER, NOT_A_ROLE, null)).rejects.toBeInstanceOf(PlatformRpcError);
   });
 });
 

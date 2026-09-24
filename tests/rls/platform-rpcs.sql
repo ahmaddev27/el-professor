@@ -20,6 +20,11 @@
     5. staff       all four roles can be added, disabled and re-enabled, each
                    with its own audit row; the last active owner is protected;
                    and a role outside the four is refused
+    5b. set_role   an existing member moves between the four, keeping who
+                   granted it, when and the note; the last active owner is not
+                   demoted; a missing row, a disabled one, a no-op and an
+                   unknown role are each refused with their own reason; and an
+                   owner may step back from their own row while another remains
     6. edge door   platform_audit_record accepts only the listed actions, lets a
                    role without the capability record nothing but its refusal,
                    and refuses a namespace the database writes itself
@@ -258,7 +263,8 @@ BEGIN
       'public.platform_discount_code_delete(uuid)',
       'public.platform_staff_add(uuid,text,text)',
       'public.platform_staff_disable(uuid)',
-      'public.platform_staff_enable(uuid)'
+      'public.platform_staff_enable(uuid)',
+      'public.platform_staff_set_role(uuid,text,text)'
     ]) AS sig
   LOOP
     PERFORM _pr_ok(format('EXECUTE on %s: anon no, authenticated yes, service_role no', r.sig),
@@ -343,7 +349,12 @@ BEGIN
     ('platform_staff_add(owner)',
      $q$SELECT platform_staff_add('3b000000-0000-4000-8000-000000000006', 'owner', 'pr')::text$q$, 'YNNNN'),
     ('platform_staff_disable(another owner)',
-     $q$SELECT platform_staff_disable('3b000000-0000-4000-8000-000000000002')::text$q$, 'YNNNN');
+     $q$SELECT platform_staff_disable('3b000000-0000-4000-8000-000000000002')::text$q$, 'YNNNN'),
+    -- 20260923140000. Moving the seeded support row to billing: a change no
+    -- role but owner may make, and one the owner may make because two active
+    -- owners remain at this point, so nothing here is a last-owner refusal.
+    ('platform_staff_set_role(support → billing)',
+     $q$SELECT platform_staff_set_role('3b000000-0000-4000-8000-000000000003', 'billing')::text$q$, 'YNNNN');
 
   FOR r IN SELECT * FROM _pr_rpc ORDER BY ord LOOP
     v_got := '';
@@ -611,6 +622,185 @@ BEGIN
     PERFORM _pr_ok('the trigger refuses deleting the last active owner directly',
       SQLERRM LIKE '%last active owner%');
   END;
+END $$;
+
+-- ─── 5b. platform_staff_set_role (20260923140000) ───────────────────────────
+
+/*
+  An existing member moves between the four roles. Before it, the only way was
+  to disable the row and add it again, which lost `created_by`, `created_at` and
+  the note and wrote a removal and a fresh grant for what was one change — so
+  those three columns surviving is an assertion here, not a detail.
+
+  Section 5 leaves exactly one active owner (the `owner` principal) and three
+  active members, one per other role. This section ends by putting the team back
+  as it found it, so sections 6 to 9 see what they always did.
+*/
+DO $$
+DECLARE
+  owner    constant uuid := '3b000000-0000-4000-8000-000000000001';
+  billing  constant uuid := '3b000000-0000-4000-8000-000000000004';  -- active, billing
+  readonly constant uuid := '3b000000-0000-4000-8000-000000000005';  -- active, read_only
+  cand_sup constant uuid := '3b000000-0000-4000-8000-000000000008';  -- active, support
+  cand_bil constant uuid := '3b000000-0000-4000-8000-000000000009';  -- active, billing
+  cand_ro  constant uuid := '3b000000-0000-4000-8000-00000000000a';  -- active, read_only
+  target   constant uuid := '3b000000-0000-4000-8000-000000000006';  -- disabled owner
+  in_co    constant uuid := '3b000000-0000-4000-8000-000000000007';  -- no staff row
+  admin_a  constant uuid := 'a0000000-0000-4000-8000-000000000001';
+  v_from    bigint;
+  v_rows    bigint;
+  v_row     app_private.platform_audit_log%ROWTYPE;
+  v_by      uuid;
+  v_created timestamptz;
+  v_note    text;
+BEGIN
+  -- Each of the four roles against it, and a company admin. Every probe here is
+  -- _pr_try, so nothing it might change survives.
+  PERFORM _pr_ok('changing a role is staff.manage: an active support account is denied',
+    _pr_reason(_pr_try(cand_sup, format('SELECT platform_staff_set_role(%L, %L)::text', billing, 'owner'))) = 'denied');
+  PERFORM _pr_ok('…a billing account is denied',
+    _pr_reason(_pr_try(cand_bil, format('SELECT platform_staff_set_role(%L, %L)::text', billing, 'owner'))) = 'denied');
+  PERFORM _pr_ok('…a read_only account is denied',
+    _pr_reason(_pr_try(cand_ro, format('SELECT platform_staff_set_role(%L, %L)::text', billing, 'owner'))) = 'denied');
+  PERFORM _pr_ok('…a company administrator is denied, with the same reason as a platform role',
+    _pr_reason(_pr_try(admin_a, format('SELECT platform_staff_set_role(%L, %L)::text', billing, 'owner'))) = 'denied');
+  PERFORM _pr_ok('…and an owner is not',
+    _pr_yn(_pr_try(owner, format('SELECT platform_staff_set_role(%L, %L)::text', billing, 'owner'))) = 'Y');
+
+  -- The change itself, and the three columns the old dance destroyed.
+  PERFORM _pr_reset();
+  SELECT s.created_by, s.created_at, s.note INTO v_by, v_created, v_note
+    FROM app_private.platform_staff s WHERE s.user_id = cand_sup;
+
+  SELECT coalesce(max(id), 0) INTO v_from FROM app_private.platform_audit_log;
+  PERFORM _pr_ok('an owner moves a support member to billing',
+    (_pr_do(owner, format('SELECT platform_staff_set_role(%L, %L)::text', cand_sup, 'billing'))::jsonb ->> 'success') = 'true');
+  PERFORM _pr_reset();
+  PERFORM _pr_ok('…and the row holds billing',
+    app_private.platform_staff_role_of(cand_sup) = 'billing');
+  PERFORM _pr_ok('…keeping who granted it, when, and the note — the three the disable-and-add-again dance lost',
+    EXISTS (SELECT 1 FROM app_private.platform_staff s
+             WHERE s.user_id = cand_sup
+               AND s.created_by IS NOT DISTINCT FROM v_by
+               AND s.created_at = v_created
+               AND s.note IS NOT DISTINCT FROM v_note));
+
+  SELECT count(*) INTO v_rows FROM app_private.platform_audit_log
+   WHERE id > v_from AND action = 'platform_staff.set_role';
+  PERFORM _pr_ok(format('…and the function wrote exactly one row of its own, got %s', v_rows), v_rows = 1);
+
+  SELECT * INTO v_row FROM app_private.platform_audit_log
+   WHERE id > v_from AND action = 'platform_staff.set_role';
+  PERFORM _pr_ok('…naming the actor, its role, the target and the role before and after',
+    v_row.category = 'staff' AND v_row.outcome = 'ok'
+    AND v_row.actor_user_id = owner AND v_row.actor_role = 'owner'
+    AND v_row.target_type = 'platform_staff' AND v_row.target_id = cand_sup::text
+    AND v_row.before_value ->> 'role' = 'support'
+    AND v_row.after_value ->> 'role' = 'billing'
+    AND (v_row.after_value ->> 'self')::boolean = false);
+  PERFORM _pr_ok('…and the table''s own trigger recorded the same change beside it',
+    EXISTS (SELECT 1 FROM app_private.platform_audit_log l
+             WHERE l.id > v_from AND l.action = 'platform_staff.update'
+               AND l.target_id = cand_sup::text
+               AND l.actor_user_id = owner AND l.actor_role = 'owner'
+               AND l.after_value ->> 'role' = 'billing'));
+
+  -- A call that would change nothing is refused, not recorded as a change.
+  SELECT coalesce(max(id), 0) INTO v_from FROM app_private.platform_audit_log;
+  PERFORM _pr_ok('asking for the role the member already holds answers already_in_role',
+    _pr_reason(_pr_do(owner, format('SELECT platform_staff_set_role(%L, %L)::text', cand_sup, 'billing'))) = 'already_in_role');
+  SELECT count(*) INTO v_rows FROM app_private.platform_audit_log WHERE id > v_from;
+  PERFORM _pr_ok(format('…and that is one audit row and no table change, got %s', v_rows), v_rows = 1);
+  SELECT * INTO v_row FROM app_private.platform_audit_log WHERE id > v_from;
+  PERFORM _pr_ok('…recorded as an error, in the staff category, naming the reason',
+    v_row.category = 'staff' AND v_row.action = 'platform_staff.set_role'
+    AND v_row.outcome = 'error' AND v_row.after_value ->> 'reason' = 'already_in_role');
+
+  -- The argument contract, the same four as platform_staff_add's.
+  PERFORM _pr_ok('a role outside the four is refused as invalid',
+    _pr_reason(_pr_do(owner, format('SELECT platform_staff_set_role(%L, %L)::text', cand_sup, 'admin'))) = 'invalid');
+  PERFORM _pr_ok('an empty role is refused as invalid',
+    _pr_reason(_pr_do(owner, format('SELECT platform_staff_set_role(%L, %L)::text', cand_sup, ''))) = 'invalid');
+  PERFORM _pr_ok('a NULL role is refused as invalid',
+    _pr_reason(_pr_do(owner, format('SELECT platform_staff_set_role(%L, NULL)::text', cand_sup))) = 'invalid');
+  PERFORM _pr_reset();
+  PERFORM _pr_ok('…and none of the three changed the row',
+    app_private.platform_staff_role_of(cand_sup) = 'billing');
+
+  -- An account with no staff row, and one whose row is paused.
+  PERFORM _pr_ok('an account that is not on the team is not_found',
+    _pr_reason(_pr_do(owner, format('SELECT platform_staff_set_role(%L, %L)::text', in_co, 'support'))) = 'not_found');
+  PERFORM _pr_ok('a disabled member is refused: enable it first, and the role comes back as it was',
+    _pr_reason(_pr_do(owner, format('SELECT platform_staff_set_role(%L, %L)::text', target, 'read_only'))) = 'member_disabled');
+  PERFORM _pr_reset();
+  PERFORM _pr_ok('…and the paused row still carries the role it was paused with',
+    EXISTS (SELECT 1 FROM app_private.platform_staff s
+             WHERE s.user_id = target AND s.role = 'owner' AND s.disabled_at IS NOT NULL));
+
+  -- The last active owner: the same refusal as disabling it, recorded the same
+  -- way, and the trigger underneath refuses the same change directly.
+  SELECT coalesce(max(id), 0) INTO v_from FROM app_private.platform_audit_log;
+  PERFORM _pr_ok('the last active owner cannot be demoted',
+    _pr_reason(_pr_do(owner, format('SELECT platform_staff_set_role(%L, %L)::text', owner, 'read_only'))) = 'last_owner');
+  SELECT * INTO v_row FROM app_private.platform_audit_log WHERE id > v_from;
+  PERFORM _pr_ok('…and that refusal is audited as denied, like disabling it',
+    v_row.action = 'platform_staff.set_role' AND v_row.outcome = 'denied'
+    AND v_row.after_value ->> 'reason' = 'last_owner');
+  PERFORM _pr_reset();
+  PERFORM _pr_ok('…and the owner still holds the role',
+    app_private.platform_staff_role_of(owner) = 'owner');
+
+  BEGIN
+    UPDATE app_private.platform_staff SET role = 'support' WHERE user_id = owner;
+    RAISE EXCEPTION 'FAIL: the last active owner was demoted directly';
+  EXCEPTION WHEN SQLSTATE 'P0001' THEN
+    PERFORM _pr_ok('the trigger refuses demoting the last active owner directly',
+      SQLERRM LIKE '%last active owner%');
+  END;
+
+  /*
+    The caller's own row. staff.manage is the owner's capability alone, so the
+    only self-change that can reach this function is an owner taking power away
+    from itself — and the case that would lock the platform out is the one
+    above, which is refused for anybody. With a second owner present it is
+    allowed, and the `self` flag makes it findable in the log.
+  */
+  PERFORM _pr_ok('an owner promotes the billing member to owner, so two remain',
+    (_pr_do(owner, format('SELECT platform_staff_set_role(%L, %L)::text', cand_sup, 'owner'))::jsonb ->> 'success') = 'true');
+  PERFORM _pr_reset();
+  PERFORM _pr_ok('…and the platform now has two active owners',
+    (SELECT count(*) FROM app_private.platform_staff s
+      WHERE s.role = 'owner' AND s.disabled_at IS NULL) = 2);
+
+  SELECT coalesce(max(id), 0) INTO v_from FROM app_private.platform_audit_log;
+  PERFORM _pr_ok('an owner may step back from their own row while another owner remains',
+    (_pr_do(owner, format('SELECT platform_staff_set_role(%L, %L)::text', owner, 'read_only'))::jsonb ->> 'success') = 'true');
+  SELECT * INTO v_row FROM app_private.platform_audit_log
+   WHERE id > v_from AND action = 'platform_staff.set_role';
+  PERFORM _pr_ok('…and the row marks it as the caller''s own, so a self-demotion is findable',
+    (v_row.after_value ->> 'self')::boolean
+    AND v_row.actor_user_id = owner AND v_row.target_id = owner::text
+    AND v_row.before_value ->> 'role' = 'owner'
+    AND v_row.after_value ->> 'role' = 'read_only');
+  PERFORM _pr_reset();
+  PERFORM _pr_ok('…and the account holds read_only from that moment',
+    app_private.platform_staff_role_of(owner) = 'read_only');
+  PERFORM _pr_ok('…so it can no longer change any role, its own included',
+    _pr_reason(_pr_do(owner, format('SELECT platform_staff_set_role(%L, %L)::text', owner, 'owner'))) = 'denied');
+
+  -- Put the team back as section 5 left it: the other owner restores this one,
+  -- then steps back itself, which is a second self-demotion from the other side.
+  PERFORM _pr_ok('the remaining owner restores it',
+    (_pr_do(cand_sup, format('SELECT platform_staff_set_role(%L, %L)::text', owner, 'owner'))::jsonb ->> 'success') = 'true');
+  PERFORM _pr_ok('…and then steps back to support itself',
+    (_pr_do(cand_sup, format('SELECT platform_staff_set_role(%L, %L)::text', cand_sup, 'support'))::jsonb ->> 'success') = 'true');
+  PERFORM _pr_reset();
+  PERFORM _pr_ok('the team is as section 5 left it: one active owner, the candidate back on support',
+    app_private.platform_staff_role_of(owner) = 'owner'
+    AND app_private.platform_staff_role_of(cand_sup) = 'support'
+    AND app_private.platform_staff_role_of(readonly) = 'read_only'
+    AND (SELECT count(*) FROM app_private.platform_staff s
+          WHERE s.role = 'owner' AND s.disabled_at IS NULL) = 1);
 END $$;
 
 -- ─── 6. the edge functions' door ────────────────────────────────────────────

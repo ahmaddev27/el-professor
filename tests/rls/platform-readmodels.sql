@@ -930,9 +930,11 @@ END $$;
 
   11f is the actor finding. The NULL actors measured on staging came from rows
   written with no session at all. A change made through platform_staff_add,
-  _disable and _enable names its caller, with its role, on the function's own
-  row and on the trigger's row, and platform_staff_add records the caller in
-  created_by, which is where the list's "granted by" comes from.
+  _disable, _enable and _set_role (20260923140000) names its caller, with its
+  role, on the function's own row and on the trigger's row, and
+  platform_staff_add records the caller in created_by, which is where the list's
+  "granted by" comes from — and which a role change keeps, so the roster still
+  names who granted a membership after the role has moved.
 */
 
 -- One more account, company-less and still pending_invite: the owner adds it
@@ -1322,6 +1324,37 @@ BEGIN
                                      AND (l.after_value ->> 'disabled_at') IS NULL)
        FROM app_private.platform_audit_log l
       WHERE l.id > v_from AND l.action = 'platform_staff.update' AND l.target_id = invitee::text));
+
+  -- So does a role change (20260923140000), which is the reason the roster can
+  -- show a role at all without the row having been removed and written again:
+  -- `created_by`, `created_at` and the note survive it, and the list still names
+  -- who granted the membership.
+  SELECT coalesce(max(l.id), 0) INTO v_from FROM app_private.platform_audit_log l;
+  v := _rm_json(owner, format('SELECT platform_staff_set_role(%L, %L)::text', invitee, 'support'));
+  PERFORM _rm_ok('set_role: an owner moves the member to support', (v ->> 'success') = 'true');
+  PERFORM _rm_reset();
+
+  SELECT * INTO r FROM app_private.platform_audit_log l
+   WHERE l.id > v_from AND l.action = 'platform_staff.set_role' AND l.target_id = invitee::text
+   ORDER BY l.id;
+  PERFORM _rm_ok('set_role: the function''s own row carries the caller as actor, in its role, and both roles',
+    r.id IS NOT NULL AND r.category = 'staff' AND r.outcome = 'ok'
+    AND r.actor_user_id = owner AND r.actor_role = 'owner'
+    AND r.before_value ->> 'role' = 'owner' AND r.after_value ->> 'role' = 'support'
+    AND (r.after_value ->> 'self')::boolean = false);
+  PERFORM _rm_ok('set_role: the trigger''s row carries the same actor and role',
+    (SELECT count(*) = 1 AND bool_and(l.actor_user_id = owner AND l.actor_role = 'owner'
+                                     AND (l.after_value ->> 'role') = 'support')
+       FROM app_private.platform_audit_log l
+      WHERE l.id > v_from AND l.action = 'platform_staff.update' AND l.target_id = invitee::text));
+
+  v := _rm_json(owner, $q$SELECT platform_staff_list(NULL, 'email_asc', 100, 0)::text$q$);
+  SELECT i INTO v_item FROM jsonb_array_elements(v -> 'items') i WHERE (i ->> 'user_id')::uuid = invitee;
+  PERFORM _rm_ok('set_role: the list shows the new role and still names who granted the membership',
+    v_item ->> 'role' = 'support'
+    AND v_item ->> 'status' = 'active'
+    AND v_item ->> 'created_by' = owner::text
+    AND v_item ->> 'created_by_email' = 'rm-owner@test.invalid');
 END $$;
 
 -- 11g. the plan, and the namespace

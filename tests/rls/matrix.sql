@@ -2470,6 +2470,13 @@ INSERT INTO _mx_rpc (label, stmt, want, hole) VALUES
     ('platform_staff_enable(a disabled owner)',
      $q$SELECT platform_staff_enable({ref:rpc_staff_disabled})::text$q$,
      'PNNNNNY', NULL),
+    -- 20260923140000: an existing member's role. Demoting an active owner needs
+    -- another active owner to remain, and the platform principal is one, so
+    -- this is a change the RPC allows rather than a last_owner refusal.
+    -- tests/rls/platform-rpcs.sql section 5b takes it through every refusal.
+    ('platform_staff_set_role(an active owner → support)',
+     $q$SELECT platform_staff_set_role({ref:rpc_staff_active}, 'support')::text$q$,
+     'PNNNNNY', NULL),
     -- the settings RPCs of 20260916150000. Both answer ok=false without an
     -- active staff role, so only the platform principal gets Y; anon holds
     -- EXECUTE on neither. tests/rls/pricing.sql probes them by role

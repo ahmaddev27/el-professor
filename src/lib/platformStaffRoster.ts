@@ -111,16 +111,35 @@ export function mayReEnable(member: PlatformStaffRow): boolean {
 }
 
 /**
+ * Whether the screen offers to change this member's role
+ * (`platform_staff_set_role`, migration 20260923140000).
+ *
+ * Two rules, and the database holds both:
+ *
+ * - **An active member only.** A disabled row keeps the role it was paused
+ *   with — `platform_staff_enable` restores exactly that — and the RPC refuses
+ *   a disabled row with `member_disabled`. Change the role first, then disable.
+ * - **Not the last active owner**, whose only available changes are demotions,
+ *   and every one of them is refused with `last_owner`. `isLastOwner` is known
+ *   only from a complete roster, so from a partial one the button stays and the
+ *   database answers, exactly as `wouldRemoveLastOwner` is used for disabling.
+ */
+export function mayChangeRole(member: PlatformStaffRow, isLastOwner: boolean): boolean {
+  return member.status === 'active' && !isLastOwner;
+}
+
+/**
  * The roles the forms may offer, in the order the picker shows them:
  * `owner` first because it is the default and what every existing member holds.
  *
  * `PLATFORM_ROLES` is the one list, shared with `platform_whoami()`'s answer and
  * with the table's own CHECK constraint. **No option here can leave the platform
- * without an active owner:** these two forms only ever *add* a row, and there is
- * no RPC that changes an existing member's role — `platform_staff_keep_owner`
- * refuses a demotion underneath in any case. What can remove the last owner is
- * disabling it, which `wouldRemoveLastOwner` above keeps off the screen and
- * `platform_staff_disable` refuses with `last_owner`.
+ * without an active owner:** the two add forms only ever create a row, and the
+ * role change `mayChangeRole` gates is kept off the last active owner — whose
+ * demotion `platform_staff_set_role` refuses with `last_owner` and
+ * `platform_staff_keep_owner` refuses underneath in any case. What else can
+ * remove the last owner is disabling it, which `wouldRemoveLastOwner` above
+ * keeps off the screen and `platform_staff_disable` refuses the same way.
  */
 export const STAFF_ROLE_OPTIONS: readonly PlatformRole[] = PLATFORM_ROLES;
 
@@ -171,6 +190,8 @@ export function isUserId(value: string): boolean {
  * need the reason behind the rule as well:
  *
  * - `last_owner`: the platform would be left with nobody who can administer it.
+ *   Since 20260923140000 a role change can run into it too — a demotion of the
+ *   last active owner is refused with the same reason as disabling one.
  * - `account_in_company`: platform accounts belong to no company.
  *
  * `role_requires_3_3` is deliberately not here any more: since migration

@@ -1,11 +1,15 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
-  RefreshCw, ShieldAlert, Info, UserPlus, Mail, Ban, CheckCircle, Users, Lock, AlertTriangle,
+  RefreshCw, ShieldAlert, Info, UserPlus, Mail, Ban, CheckCircle, Users, Lock, AlertTriangle, UserCog,
 } from 'lucide-react';
+import { useAuth } from '../contexts/AuthContext';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { useToast } from '../contexts/ToastContext';
 import { useTranslation } from '../contexts/LanguageContext';
 import type { TranslationKey, TranslationVars } from '../i18n';
+import {
+  Button, ConfirmDialog, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+} from '../components/ui';
 import { PlatformRpcError } from '../lib/platformRpc';
 import { PLATFORM_ROLES, type PlatformRole } from '../lib/platformAccess';
 import { platformReadRefusalKey, type PlatformStaffRow } from '../lib/platformReadModels';
@@ -16,6 +20,7 @@ import {
   inviteStaffMember,
   loadStaffRoster,
   resendStaffInvite,
+  setStaffRole,
 } from '../lib/platformStaffClient';
 import {
   activeOwnerCount,
@@ -23,6 +28,7 @@ import {
   grantedBy,
   isStaffRole,
   isUserId,
+  mayChangeRole,
   offersResend,
   staffRefusalHintKey,
   STAFF_ROLE_OPTIONS,
@@ -52,16 +58,38 @@ import { deDate, shortId } from '../lib/platformFormat';
  * customer's business data, and that is the decision being taken at the moment
  * of the click.
  *
- * No choice here can leave the platform without an active owner: both forms only
- * ever *add* a row, and no RPC changes an existing member's role.
+ * ## Changing a member's role
+ *
+ * `platform_staff_set_role` (migration 20260923140000) moves an existing member
+ * between the four, keeping `created_by`, `created_at` and the note — before it,
+ * the only way was to disable the row and add it again, which lost all three and
+ * wrote a removal and a fresh grant into the audit log for what was one change.
+ *
+ * The control is offered for an **active** member who is not the last active
+ * owner (`mayChangeRole`), and it is two steps: the same `RoleField` as the two
+ * add forms, then a confirmation naming the member and both roles. An authority
+ * change is worth a sentence before it happens, and a picker that applies on
+ * change would make one an accident of a keystroke.
+ *
+ * Changing your **own** row is allowed while another owner remains — the
+ * migration's header has the reasoning, in short: `staff.manage` is the owner's
+ * capability alone, so every self-change this page can send takes power away,
+ * and the case that would lock the platform out is the last active owner's,
+ * which is refused for anybody. The confirmation says plainly what is lost and
+ * that only another owner can undo it.
+ *
+ * No choice here can leave the platform without an active owner: the two forms
+ * only ever *add* a row, and the role change is kept off the last active owner.
  *
  * ## The last active owner
  *
- * `platform_staff_disable` refuses it with `last_owner`, and the table's trigger
- * `platform_staff_keep_owner` raises underneath. The page shows that member as
- * the last active owner instead of a disable button, and says so above the
- * list — but only when it read the whole roster; from a partial one it draws no
- * conclusion and leaves the decision to the database.
+ * `platform_staff_disable` refuses disabling it with `last_owner`, and
+ * `platform_staff_set_role` refuses demoting it with the same reason; the
+ * table's trigger `platform_staff_keep_owner` raises underneath either. The page
+ * shows that member as the last active owner instead of the disable and
+ * role-change buttons, and says so above the list — but only when it read the
+ * whole roster; from a partial one it draws no conclusion and leaves the
+ * decision to the database.
  */
 
 const cardStyle: React.CSSProperties = {
@@ -115,9 +143,17 @@ interface MemberActionsProps extends MemberView {
   onResend: (userId: string) => void;
   onDisable: (userId: string) => void;
   onEnable: (userId: string) => void;
+  onChangeRole: (member: PlatformStaffRow) => void;
+}
+
+/** The member whose role is being changed, and the role picked so far. */
+interface RoleEdit {
+  member: PlatformStaffRow;
+  role: PlatformRole;
 }
 
 const PlatformTeamPage: React.FC = () => {
+  const { user } = useAuth();
   const { platformCan } = useSuperAdmin();
   const { showToast } = useToast();
   const { t } = useTranslation();
@@ -141,6 +177,11 @@ const PlatformTeamPage: React.FC = () => {
   const [addRole, setAddRole] = useState<PlatformRole>(DEFAULT_STAFF_ROLE);
   const [addNote, setAddNote] = useState('');
   const [adding, setAdding] = useState(false);
+
+  // Two pieces of state, not one: cancelling the confirmation goes back to the
+  // picker with the chosen role, rather than throwing the choice away.
+  const [roleEdit, setRoleEdit] = useState<RoleEdit | null>(null);
+  const [confirmingRole, setConfirmingRole] = useState(false);
 
   const load = useCallback(async () => {
     if (!mayManage) return;
@@ -205,6 +246,30 @@ const PlatformTeamPage: React.FC = () => {
     }
   };
 
+  /** Opens the picker on the role the member holds, so nothing is preselected. */
+  const beginRoleChange = (member: PlatformStaffRow) => {
+    setRoleEdit({ member, role: isStaffRole(member.role) ? member.role : DEFAULT_STAFF_ROLE });
+    setConfirmingRole(false);
+  };
+
+  const closeRoleChange = () => {
+    setRoleEdit(null);
+    setConfirmingRole(false);
+  };
+
+  const applyRoleChange = () => {
+    if (!roleEdit) return;
+    const { member, role } = roleEdit;
+    closeRoleChange();
+    // The note is left alone: the RPC treats NULL as "unchanged", so a role
+    // change never erases what somebody wrote about a member.
+    void runOnMember(
+      member.user_id,
+      () => setStaffRole(member.user_id, role, null),
+      'admin.team.role.change.success',
+    );
+  };
+
   const add = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!isUserId(addUserId)) {
@@ -246,6 +311,7 @@ const PlatformTeamPage: React.FC = () => {
     onResend: (userId: string) => void runOnMember(userId, () => resendStaffInvite(userId), 'admin.team.invite.resent'),
     onDisable: (userId: string) => void runOnMember(userId, () => disableStaffMember(userId), 'admin.team.disabled'),
     onEnable: (userId: string) => void runOnMember(userId, () => enableStaffMember(userId), 'admin.team.enabled'),
+    onChangeRole: beginRoleChange,
   };
 
   return (
@@ -419,7 +485,82 @@ const PlatformTeamPage: React.FC = () => {
           </form>
         </div>
       </section>
+
+      <RoleChangeFlow
+        t={t}
+        edit={roleEdit}
+        confirming={confirmingRole}
+        isSelf={roleEdit?.member.user_id === user?.id}
+        onPick={role => setRoleEdit(prev => (prev ? { ...prev, role } : prev))}
+        onContinue={() => setConfirmingRole(true)}
+        onBack={() => setConfirmingRole(false)}
+        onCancel={closeRoleChange}
+        onConfirm={applyRoleChange}
+      />
     </div>
+  );
+};
+
+/**
+ * Picking the new role, then confirming it.
+ *
+ * The picker is the page's own `RoleField`, so the four choices and the sentence
+ * under each are written once. The confirmation is the design system's
+ * `ConfirmDialog`: it names the member and both roles, because this is a change
+ * of authority and not of a detail. Its tone is `danger` only for the caller's
+ * own row — the one change nobody at this screen can undo.
+ */
+const RoleChangeFlow: React.FC<{
+  t: Translate;
+  edit: RoleEdit | null;
+  confirming: boolean;
+  isSelf: boolean;
+  onPick: (role: PlatformRole) => void;
+  onContinue: () => void;
+  onBack: () => void;
+  onCancel: () => void;
+  onConfirm: () => void;
+}> = ({ t, edit, confirming, isSelf, onPick, onContinue, onBack, onCancel, onConfirm }) => {
+  if (!edit) return null;
+
+  const member = edit.member.email ?? t('admin.team.noAddress');
+  const from = roleLabel(t, edit.member.role);
+  const to = roleLabel(t, edit.role);
+  const unchanged = edit.role === edit.member.role;
+
+  return (
+    <>
+      <Dialog open={!confirming} onOpenChange={next => { if (!next) onCancel(); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t('admin.team.role.change.title')}</DialogTitle>
+            <DialogDescription>{t('admin.team.role.change.subtitle', { member, role: from })}</DialogDescription>
+          </DialogHeader>
+          <RoleField t={t} value={edit.role} onChange={onPick} />
+          {unchanged && <p className="text-xs text-fg-muted">{t('admin.team.role.change.same')}</p>}
+          <DialogFooter>
+            <Button variant="secondary" onClick={onCancel}>{t('common.cancel')}</Button>
+            <Button onClick={onContinue} disabled={unchanged}>{t('admin.team.role.change.submit')}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <ConfirmDialog
+        open={confirming}
+        onClose={onBack}
+        onConfirm={onConfirm}
+        tone={isSelf ? 'danger' : 'primary'}
+        icon={UserCog}
+        title={t('admin.team.role.change.confirmTitle')}
+        confirmLabel={t('admin.team.role.change.confirmSubmit')}
+        description={
+          <>
+            {t('admin.team.role.change.confirmBody', { member, from, to })}
+            {isSelf && <span className="mt-2 block font-semibold">{t('admin.team.role.change.confirmSelf')}</span>}
+          </>
+        }
+      />
+    </>
   );
 };
 
@@ -494,10 +635,23 @@ const GrantedBy: React.FC<{ member: PlatformStaffRow; t: Translate }> = ({ membe
   );
 };
 
-const MemberActions: React.FC<MemberActionsProps> = ({ member, isLastOwner, working, t, onResend, onDisable, onEnable }) => {
+const MemberActions: React.FC<MemberActionsProps> = ({
+  member, isLastOwner, working, t, onResend, onDisable, onEnable, onChangeRole,
+}) => {
   const active = member.status === 'active';
   return (
     <>
+      {/* An active member who is not the last active owner; a disabled row keeps
+          the role it was paused with, and re-enabling restores exactly that. */}
+      {mayChangeRole(member, isLastOwner) && (
+        <button
+          onClick={() => onChangeRole(member)}
+          disabled={working}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap border border-[var(--border)] text-[var(--text-secondary)] disabled:opacity-60"
+        >
+          <UserCog size={13} />{t('admin.team.role.change')}
+        </button>
+      )}
       {offersResend(member) && (
         <button
           onClick={() => onResend(member.user_id)}
@@ -541,11 +695,13 @@ const MemberActions: React.FC<MemberActionsProps> = ({ member, isLastOwner, work
 };
 
 /**
- * The role a new member gets, with what it may do said underneath.
+ * The role a member gets — new, or changed — with what it may do said underneath.
  *
- * The four are `STAFF_ROLE_OPTIONS`, the same list the database's CHECK
- * constraint and capability matrix hold. Nothing offered here can leave the
- * platform without an active owner — see the module header — so this picker
+ * One picker for all three forms: the two that add a member and the one that
+ * moves an existing one, so the four choices and the sentence under each are
+ * written once. The four are `STAFF_ROLE_OPTIONS`, the same list the database's
+ * CHECK constraint and capability matrix hold. Nothing offered here can leave
+ * the platform without an active owner — see the module header — so this picker
  * needs no guard of its own; `isStaffRole` only keeps a value the browser did
  * not put there from reaching the RPC as a role.
  */

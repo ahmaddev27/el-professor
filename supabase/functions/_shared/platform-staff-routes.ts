@@ -10,7 +10,7 @@
  */
 import type { AuditCategory, PlatformCapability } from './platform-access.ts';
 
-export type PlatformStaffRouteName = 'invite' | 'resend-invite';
+export type PlatformStaffRouteName = 'invite' | 'resend-invite' | 'set-role';
 
 export interface PlatformStaffRoute {
   name: PlatformStaffRouteName;
@@ -24,6 +24,12 @@ export interface PlatformStaffRoute {
 export const PLATFORM_STAFF_ROUTES: readonly PlatformStaffRoute[] = [
   { name: 'invite',        method: 'POST', segment: '/invite',        capability: 'staff.manage', category: 'write', action: 'platform_staff_invite.create' },
   { name: 'resend-invite', method: 'POST', segment: '/resend-invite', capability: 'staff.manage', category: 'write', action: 'platform_staff_invite.resend' },
+  // 20260923140000: an existing member's role, through
+  // `public.platform_staff_set_role`, which applies every rule and writes its
+  // own audit row in the same transaction as the change. The action is not in
+  // the `platform_staff.` namespace: `platform_audit_record` refuses that one
+  // because the database writes it itself.
+  { name: 'set-role',      method: 'POST', segment: '/set-role',      capability: 'staff.manage', category: 'write', action: 'platform_staff_role.set' },
 ];
 
 /**
@@ -81,4 +87,20 @@ export function parseStaffRole(role: unknown): PlatformStaffRole | null {
 /** Whether this request may create a staff row with the role it asked for. */
 export function staffRoleIsAllowed(role: unknown): boolean {
   return parseStaffRole(role) !== null;
+}
+
+/**
+ * The role a **change** asks for, or null — including for a request that named
+ * none (20260923140000).
+ *
+ * `parseStaffRole`'s `owner` default is right where a row is *created*: that is
+ * the RPC's own default and what the release before the four roles sent. It is
+ * wrong where a row already exists, because a body that forgot its `role` would
+ * then read as "make this member an owner" — a promotion nobody asked for, of
+ * an account that already holds some other role. So the set-role route asks
+ * this one, and a missing role is refused like an unknown one.
+ */
+export function parseStaffRoleChange(role: unknown): PlatformStaffRole | null {
+  if (role === undefined || role === null) return null;
+  return parseStaffRole(role);
 }

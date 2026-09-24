@@ -1,5 +1,6 @@
 /**
- * Inviting a member of the platform team (plan 3.5).
+ * The platform team's own function: inviting a member (plan 3.5), and since
+ * 20260923140000 changing an existing member's role.
  *
  * The same shape as a manage-users invitation: the account is created with a
  * random password nobody is told, its profile is written as `pending_invite`,
@@ -22,6 +23,14 @@
  * created, then ok or error, and a denied row for a caller who may not.
  * `platform_staff_add` asks for the capability a second time, in the same
  * transaction that writes the row.
+ *
+ * `/set-role` is the HTTP door to `platform_staff_set_role`, the same shape:
+ * this function validates the body and the RPC decides everything else in one
+ * transaction. The Team page calls that RPC directly, as it does
+ * `platform_staff_disable` and `_enable` — a role change needs no service-role
+ * step, so there is nothing for the function to add on the way — and the route
+ * exists for the same reason `/invite` and `platform_staff_add` both do: one
+ * audited door per team change, reachable with a token alone.
  */
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from 'npm:@supabase/supabase-js@2'
@@ -38,6 +47,7 @@ import {
 } from '../_shared/platform-access.ts'
 import {
   parseStaffRole,
+  parseStaffRoleChange,
   resolvePlatformStaffRoute,
   STAFF_ROLE_REFUSAL_DE,
 } from '../_shared/platform-staff-routes.ts'
@@ -56,11 +66,18 @@ interface ResendRequest {
   user_id: string
 }
 
+interface SetRoleRequest {
+  user_id: string
+  /** One of the four platform roles. A change must name it; there is no default. */
+  role: string
+  note?: string
+}
+
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
-/** What platform_staff_add answers. */
-interface StaffAddResult {
+/** What the platform_staff_* write RPCs answer. */
+interface StaffRpcResult {
   success: boolean
   reason?: string
   error?: string
@@ -230,7 +247,7 @@ Deno.serve(async (req: Request) => {
           await discardAccount()
           throw addError
         }
-        const added = addData as StaffAddResult | null
+        const added = addData as StaffRpcResult | null
         if (!added?.success) {
           await discardAccount()
           throw new UserError(added?.error ?? 'Das Konto konnte dem Plattform-Team nicht hinzugefügt werden.',
@@ -337,6 +354,51 @@ Deno.serve(async (req: Request) => {
       })
 
       return json(req, 200, { success: true, invite: { status: 'sent' } })
+    }
+
+    // =========================================================================
+    // SET ROLE — an existing member moves to another platform role
+    // =========================================================================
+    //
+    // Everything that decides the outcome is in `platform_staff_set_role`
+    // (20260923140000): one transaction that asks staff.manage again, refuses a
+    // demotion of the last active owner, a row that is missing or disabled, a
+    // no-op and a role outside the four, and writes its own audit row for
+    // whichever of those happened. This route validates the body, nothing else —
+    // a second copy of those rules here could only drift from them.
+    if (route.name === 'set-role') {
+      const body: SetRoleRequest = await req.json()
+      const userId = body?.user_id
+
+      if (typeof userId !== 'string' || !UUID_PATTERN.test(userId)) {
+        throw new UserError('Ungültige Anfrage: user_id fehlt oder ist ungültig.', 400)
+      }
+      // A change must name its role: see parseStaffRoleChange. A body that
+      // forgot it would otherwise read as "make this member an owner".
+      const role = parseStaffRoleChange(body.role)
+      if (role === null) {
+        throw new UserError(STAFF_ROLE_REFUSAL_DE, 400, 'invalid_role')
+      }
+
+      auditTarget.targetType = 'platform_staff'
+      auditTarget.targetId = userId
+      auditTarget.after = { role }
+
+      await platformWrite(async () => {
+        const { data, error } = await supabaseUser.rpc('platform_staff_set_role', {
+          p_user_id: userId,
+          p_role: role,
+          p_note: typeof body.note === 'string' && body.note.trim() ? body.note.trim() : null,
+        })
+        if (error) throw error
+        const changed = data as StaffRpcResult | null
+        if (!changed?.success) {
+          throw new UserError(changed?.error ?? 'Die Rolle konnte nicht geändert werden.',
+            changed?.reason === 'denied' ? 403 : 409, changed?.reason)
+        }
+      })
+
+      return json(req, 200, { success: true, staff: { user_id: userId, role } })
     }
 
     recordPlatformFailure = null
