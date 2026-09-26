@@ -191,6 +191,33 @@ END $$;
     the day it stopped being SECURITY DEFINER. `support_write_context` is not an
     object in that schema; `role_name_is_system_reserved` was.
 
+  ## The failure mode these readers have, twice over
+
+  **An instrument that measures itself rather than the world.** It has now
+  happened three times on this branch, and it is the thing to check first when a
+  reader here reports something surprising:
+
+  - the EXECUTE probe in `tests/tools/plan-cache-repro.sql` called an inlinable
+    callee, so it measured the planner folding a call away rather than a
+    privilege;
+  - `tests/tools/plan-cache-repro.sql` itself would not parse, because prose in
+    its header opened a nested block comment;
+  - and the schema reader below failed on `_execute_reach_exemptions()`, whose
+    body holds `app_private.enforce_company_role_shape` as an exemption *key* —
+    read as a reference to it.
+
+  Hence the `proname !~ '^_'` filter in `_reachable_invoker()` and the `relname`
+  one in the policy reader: `^_` is matrix.sql's own convention for the kit's
+  plumbing, used by its UNCOVERED sweep. **The positive control's offenders are
+  named `probe_*` for exactly that reason**, so the filter cannot hide them —
+  and because the control asserts that the readers *find* something, a filter
+  that was too broad fails the run rather than silencing it. A control that
+  asserted an absence could be silenced; this one cannot.
+
+  The helpers are also revoked from the API roles (below), because the reason all
+  three roles reached that exemption list in the first place was Supabase's
+  default grant on every new `public` function.
+
   ## Its limits, so nobody mistakes it for more
 
   - It reads text. Dynamic SQL built at runtime is invisible to it, as is a
@@ -253,6 +280,19 @@ LANGUAGE sql STABLE AS $fn$
      WHERE NOT p.prosecdef
        AND l.lanname IN ('plpgsql', 'sql')
        AND p.prokind IN ('f', 'p')
+       -- The kit's own plumbing is not part of the world these readers measure,
+       -- and it has to be excluded or they measure themselves. `_execute_reach_exemptions()`
+       -- holds `app_private.enforce_company_role_shape` as a *key*, and the
+       -- schema reader read that as a reference and failed on the very list it
+       -- is meant to excuse. `^_` is matrix.sql's own convention for this, used
+       -- by its UNCOVERED sweep. The positive control's offenders are named
+       -- `probe_*` precisely so this filter does not hide them.
+       --
+       -- It costs no real coverage, and that is checked rather than assumed: no
+       -- function created anywhere in supabase/migrations or in the fixture has a
+       -- name beginning with an underscore. If one ever does, it is invisible to
+       -- these readers and needs a name that is not the kit's convention.
+       AND p.proname !~ '^_'
        AND NOT EXISTS (SELECT 1 FROM pg_depend d
                         WHERE d.classid = 'pg_proc'::regclass
                           AND d.objid = p.oid AND d.deptype = 'e')
@@ -420,6 +460,8 @@ LANGUAGE sql STABLE AS $fn$
            coalesce(pg_get_expr(p.polwithcheck, p.polrelid), '') AS expr
       FROM pg_policy p
       JOIN pg_class  c ON c.oid = p.polrelid
+     -- as above, and for the same reason: the kit's own tables are not the world
+     WHERE c.relname !~ '^_'
   )
   SELECT s.api_role, pol.relation, pol.polname, s.nspname, m.parts[1]
     FROM pol
@@ -432,6 +474,36 @@ LANGUAGE sql STABLE AS $fn$
      AND (pol.polroles = '{0}'::oid[] OR r.oid = ANY (pol.polroles))
      AND _object_exists_in(s.nspoid, m.parts[1])
 $fn$;
+
+/*
+  Every helper in this file is revoked from the API roles.
+
+  Two reasons, and the first is the one that cost a round trip. Supabase's default
+  privileges grant EXECUTE on each new `public` function to PUBLIC, anon,
+  authenticated and service_role — the trap CLAUDE.md names for every new
+  function — so `_execute_reach_exemptions()` was reachable by all three roles and
+  the schema reader flagged it. The filter above is what stops a reader seeing the
+  kit's plumbing; this is what stops the plumbing being reachable in the first
+  place, which is the same defect closed at its source rather than at the
+  instrument.
+
+  Second: these helpers run only as the connecting role, from `DO` blocks in this
+  file and the ones after it, and a `SET LOCAL ROLE` inside them does not need the
+  target role to hold EXECUTE on the helper itself. So nothing is given up.
+*/
+REVOKE ALL ON FUNCTION _as(uuid)                                FROM PUBLIC, anon, authenticated, service_role;
+REVOKE ALL ON FUNCTION _as_anon()                               FROM PUBLIC, anon, authenticated, service_role;
+REVOKE ALL ON FUNCTION _allowed(uuid, text)                     FROM PUBLIC, anon, authenticated, service_role;
+REVOKE ALL ON FUNCTION _check(text, boolean, boolean)           FROM PUBLIC, anon, authenticated, service_role;
+REVOKE ALL ON FUNCTION _outcome(uuid, text)                     FROM PUBLIC, anon, authenticated, service_role;
+REVOKE ALL ON FUNCTION _api_roles()                             FROM PUBLIC, anon, authenticated, service_role;
+REVOKE ALL ON FUNCTION _confined_schemas()                      FROM PUBLIC, anon, authenticated, service_role;
+REVOKE ALL ON FUNCTION _object_exists_in(oid, text)             FROM PUBLIC, anon, authenticated, service_role;
+REVOKE ALL ON FUNCTION _reachable_invoker()                     FROM PUBLIC, anon, authenticated, service_role;
+REVOKE ALL ON FUNCTION _invoker_reaches_confined_schema()       FROM PUBLIC, anon, authenticated, service_role;
+REVOKE ALL ON FUNCTION _invoker_calls_unexecutable_function()   FROM PUBLIC, anon, authenticated, service_role;
+REVOKE ALL ON FUNCTION _execute_reach_exemptions()              FROM PUBLIC, anon, authenticated, service_role;
+REVOKE ALL ON FUNCTION _policy_reaches_confined_schema()        FROM PUBLIC, anon, authenticated, service_role;
 
 -- ─── the matrix ─────────────────────────────────────────────────────────────
 
@@ -679,50 +751,50 @@ BEGIN
       message so it cannot depend on what a rolled-back block leaves behind.
     */
     BEGIN
-      CREATE SCHEMA _probe_hidden;
-      CREATE FUNCTION _probe_hidden.thing() RETURNS boolean
+      CREATE SCHEMA probe_hidden;
+      CREATE FUNCTION probe_hidden.thing() RETURNS boolean
         LANGUAGE sql IMMUTABLE AS 'SELECT true';
 
       -- SECURITY INVOKER, granted to authenticated: branch (b).
-      CREATE FUNCTION public._probe_offender() RETURNS boolean
+      CREATE FUNCTION public.probe_offender() RETURNS boolean
       LANGUAGE plpgsql
       SET search_path = pg_catalog, public
-      AS $probe$ BEGIN RETURN _probe_hidden.thing(); END $probe$;
-      GRANT EXECUTE ON FUNCTION public._probe_offender() TO authenticated;
+      AS $probe$ BEGIN RETURN probe_hidden.thing(); END $probe$;
+      GRANT EXECUTE ON FUNCTION public.probe_offender() TO authenticated;
 
       -- not `n`: the enclosing block declares a variable of that name, and a
       -- column that shadows one is the kind of thing that works until it does not
-      CREATE TABLE public._probe_pol (probe_n int);
-      ALTER TABLE public._probe_pol ENABLE ROW LEVEL SECURITY;
-      GRANT SELECT ON public._probe_pol TO authenticated;
-      CREATE POLICY _probe_pol_select ON public._probe_pol
-        FOR SELECT TO authenticated USING (_probe_hidden.thing());
+      CREATE TABLE public.probe_pol (probe_n int);
+      ALTER TABLE public.probe_pol ENABLE ROW LEVEL SECURITY;
+      GRANT SELECT ON public.probe_pol TO authenticated;
+      CREATE POLICY probe_pol_select ON public.probe_pol
+        FOR SELECT TO authenticated USING (probe_hidden.thing());
 
       -- and the third reader's offender: a public function authenticated may
       -- not execute, called from an invoker function it may
-      CREATE FUNCTION public._probe_ungranted() RETURNS boolean
+      CREATE FUNCTION public.probe_ungranted() RETURNS boolean
         LANGUAGE plpgsql AS $probe$ BEGIN RETURN true; END $probe$;
-      REVOKE ALL ON FUNCTION public._probe_ungranted() FROM PUBLIC, anon, authenticated, service_role;
+      REVOKE ALL ON FUNCTION public.probe_ungranted() FROM PUBLIC, anon, authenticated, service_role;
 
-      CREATE FUNCTION public._probe_caller() RETURNS boolean
+      CREATE FUNCTION public.probe_caller() RETURNS boolean
       LANGUAGE plpgsql
       SET search_path = pg_catalog, public
-      AS $probe$ BEGIN RETURN public._probe_ungranted(); END $probe$;
-      GRANT EXECUTE ON FUNCTION public._probe_caller() TO authenticated;
+      AS $probe$ BEGIN RETURN public.probe_ungranted(); END $probe$;
+      GRANT EXECUTE ON FUNCTION public.probe_caller() TO authenticated;
 
       RAISE EXCEPTION USING ERRCODE = 'ZZ003', MESSAGE =
         (CASE WHEN EXISTS (SELECT 1 FROM _invoker_reaches_confined_schema()
                             WHERE api_role = 'authenticated'
-                              AND routine LIKE '%_probe_offender%'
-                              AND nspname = '_probe_hidden') THEN 'a' ELSE '-' END) ||
+                              AND routine LIKE '%probe_offender%'
+                              AND nspname = 'probe_hidden') THEN 'a' ELSE '-' END) ||
         (CASE WHEN EXISTS (SELECT 1 FROM _policy_reaches_confined_schema()
                             WHERE api_role = 'authenticated'
-                              AND policy_name = '_probe_pol_select'
-                              AND nspname = '_probe_hidden') THEN 'b' ELSE '-' END) ||
+                              AND policy_name = 'probe_pol_select'
+                              AND nspname = 'probe_hidden') THEN 'b' ELSE '-' END) ||
         (CASE WHEN EXISTS (SELECT 1 FROM _invoker_calls_unexecutable_function()
                             WHERE api_role = 'authenticated'
-                              AND routine LIKE '%_probe_caller%'
-                              AND called = 'public._probe_ungranted') THEN 'c' ELSE '-' END);
+                              AND routine LIKE '%probe_caller%'
+                              AND called = 'public.probe_ungranted') THEN 'c' ELSE '-' END);
     EXCEPTION WHEN SQLSTATE 'ZZ003' THEN
       control := SQLERRM;
     END;

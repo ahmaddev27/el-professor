@@ -109,7 +109,42 @@ Like the golden masters, the matrix records **today's** behaviour, holes include
 
 **The guard is unaffected by every row of this table and by the open question, and by construction rather than by luck:** `DISCARD PLANS` forces a re-plan, and a re-plan under the principal can neither reuse the owner's name resolution nor fold away a function the principal may not execute.
 
-**`tests/tools/plan-cache-repro.sql` is a standalone instrument**, deliberately outside `tests/rls/` so nothing in the kit runs it: it builds every shape from nothing, asserts its premises and reports each step without asserting an outcome. Its step **H** answers the question the rest of the file cannot. Every other step warms the cache as the **owner**, a superuser, which made it easy to read the mask as an artefact of a test fixture — but **PostgREST pools one backend across roles**, with `SET LOCAL ROLE` per transaction and the plan cache belonging to the backend, so if an ordinary role that holds a privilege can warm a plan for one that does not, the mask reaches production. H warms as one ordinary role and reads as another, neither a superuser nor `bypassrls`, with no owner in the path, for schema USAGE and for the one callee shape that masked. **With no mechanism established there is no argument that the mask needs an owner**, so run H rather than assume it: the confinement is measured or it is nothing.
+**`tests/tools/plan-cache-repro.sql` is a standalone instrument**, deliberately outside `tests/rls/` so nothing in the kit runs it: it builds every shape from nothing, asserts its premises and reports each step without asserting an outcome. Its step **H** answers the question the rest of the file cannot. Every other step warms the cache as the **owner**, a superuser, which made it easy to read the mask as an artefact of a test fixture — but **PostgREST pools one backend across roles**, with `SET LOCAL ROLE` per transaction and the plan cache belonging to the backend, so if an ordinary role that holds a privilege can warm a plan for one that does not, the mask reaches production. H warms as one ordinary role and reads as another, neither a superuser nor `bypassrls`, with no owner in the path, for schema USAGE and for the one callee shape that masked.
+
+**Step H: the mask is not the owner's, and not the kit's. Measured 26.09.2026.** Two ordinary roles on one session — neither a superuser, neither `bypassrls` — one holding the privilege and one not: the holder plans the statement, the other executes it and **is allowed**, for schema `USAGE` and for an inlinable `sql` callee alike. So this is a general property of a shared plan cache, and PostgREST pools one backend across roles.
+
+**Our production exposure is nil today, and that is measured too, read-only on production.** Both masked classes need a warmer that holds the privilege and a reader that does not, on one backend, and PostgREST switches between exactly three roles:
+
+```sql
+-- 1. schemas one API role may use and another may not
+SELECT n.nspname,
+       has_schema_privilege('anon',          n.oid, 'USAGE') AS anon,
+       has_schema_privilege('authenticated', n.oid, 'USAGE') AS authenticated,
+       has_schema_privilege('service_role',  n.oid, 'USAGE') AS service_role
+  FROM pg_namespace n
+ WHERE n.nspname NOT LIKE 'pg\_%' AND n.nspname <> 'information_schema'
+   AND (has_schema_privilege('anon',          n.oid, 'USAGE')::int
+      + has_schema_privilege('authenticated', n.oid, 'USAGE')::int
+      + has_schema_privilege('service_role',  n.oid, 'USAGE')::int) NOT IN (0, 3);
+
+-- 2. inlinable sql functions granted unevenly (a SET clause blocks inlining, F3)
+SELECT p.oid::regprocedure,
+       has_function_privilege('anon',          p.oid, 'EXECUTE') AS anon,
+       has_function_privilege('authenticated', p.oid, 'EXECUTE') AS authenticated,
+       has_function_privilege('service_role',  p.oid, 'EXECUTE') AS service_role
+  FROM pg_proc p JOIN pg_language l ON l.oid = p.prolang
+ WHERE l.lanname = 'sql' AND p.prokind = 'f' AND NOT p.proretset
+   AND NOT p.prosecdef AND p.proconfig IS NULL
+   AND (has_function_privilege('anon',          p.oid, 'EXECUTE')::int
+      + has_function_privilege('authenticated', p.oid, 'EXECUTE')::int
+      + has_function_privilege('service_role',  p.oid, 'EXECUTE')::int) NOT IN (0, 3);
+```
+
+Query 1 returned **one** row, `vault` (`service_role` only), which holds no secrets and is named nowhere in `supabase/migrations`, `src` or `supabase/functions`. Query 2 returned **none**. And all three API roles lack `USAGE` on `app_private`, so **the boundary this whole section is about cannot be warmed by any pooled role** — the only role that could is the owner, which never runs on PostgREST's pool.
+
+**It is a standing property, not a fixed bug.** A future migration that grants one API role `USAGE` on a schema another lacks, or adds an inlinable `sql` function (no `SET` clause) granted unevenly, reopens it. Re-run both queries when either happens.
+
+**No third assertion was added, because the two readers above already fail on exactly the cases that could bite our code.** The mask needs the *reader* role to lack a privilege on something a reachable invoker function touches — a schema it cannot use, or a function it cannot execute — and that is precisely what `_invoker_reaches_confined_schema()` and `_invoker_calls_unexecutable_function()` test, on the shape, whether or not the plan cache happens to hide it that day. A schema that is unevenly usable but that no reachable invoker function names cannot be masked, because there is no statement to warm; the moment one names it, the first reader fails. The two queries above are the wider survey, and they belong in an investigation rather than in a gate.
 
 **A file under `tests/tools/` has no gate, so one was added.** The first version of that instrument did not parse: **PostgreSQL block comments nest**, and a header quoting a shell glob for a directory's files — a slash then a star — opened a second comment that nothing closed, so psql swallowed the file and reported an unterminated comment at line 1. Backticks do not protect it; the lexer is inside a comment and knows nothing else. Quoting the *closing* delimiter has the mirror problem and ends the comment early. The rule is the one `app_private.function_code`'s header already states: **name the delimiters in words, never write them out inside a comment**, and write a glob as "every `.sql` file in that directory". `src/utils/sqlComments.test.ts` now scans every `.sql` file under `tests/` and `supabase/migrations/` for a block comment, dollar quote or string left open at EOF, with nesting, and runs in `npm run build` — a lexical check only, and it says nothing about whether the SQL is valid. The migrations and `tests/rls/` had the kit as a gate already; what this adds is catching it before a VPS round trip, which is the cost a kit-only gate carries (see *CI is green on SQL it never parses* in the same spirit).
 

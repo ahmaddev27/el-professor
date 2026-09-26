@@ -335,6 +335,17 @@ CREATE TRIGGER pc_guard_table BEFORE INSERT ON public.pc_rows_table
 
   Asserted premises, no asserted outcome, and the verdict prints what it found —
   the same shape as F1/F2/F3, for the same reason.
+
+  **Measured 26.09.2026 on PostgreSQL 17.6: both halves crossed.** The mask is a
+  general property of a shared plan cache and not an artefact of a superuser or of
+  this file. What that means for this product is a separate, measured question and
+  the answer is in CLAUDE.md beside the taxonomy: **nil exposure today**, because
+  no schema and no inlinable function is granted unevenly across the three roles
+  PostgREST switches between in a way anything reaches, and none of the three can
+  use `app_private` at all — so the boundary this work is about can only be warmed
+  by the owner, which never runs on the pool. It is a standing property, so the
+  two catalogue queries in CLAUDE.md are the thing to re-run whenever a migration
+  grants one API role what another lacks.
 */
 CREATE ROLE pc_warmer NOLOGIN;
 GRANT USAGE ON SCHEMA public TO pc_warmer;
