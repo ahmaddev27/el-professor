@@ -882,6 +882,15 @@ BEGIN
   -- It is a privilege rule, not an RLS rule: a table may legitimately have RLS
   -- off when no API role can reach it at all, which is why the test is the
   -- conjunction rather than "every public table has RLS".
+  --
+  -- **What this rule cannot do here, so nobody reads more into a green run than
+  -- it says:** the kit's database is production's --schema=public dump plus the
+  -- migration chain, and that dump carries none of the three tables above — they
+  -- exist only where the Realtime image has booted. So for image-created tables
+  -- this assertion passes vacuously. It earns its place against a table one of
+  -- *our* migrations adds, which is the case we control. Catching the next
+  -- image-created one means running the same query against the live databases;
+  -- HANDOFF.md carries it as a host step with the query.
   DECLARE
     n_open  int;
     open_ls text;

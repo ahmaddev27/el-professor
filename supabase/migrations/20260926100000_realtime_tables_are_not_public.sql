@@ -64,9 +64,34 @@
   consequence, which is what we can own.
 */
 
-REVOKE ALL ON TABLE public.tenants           FROM anon, authenticated;
-REVOKE ALL ON TABLE public.extensions        FROM anon, authenticated;
-REVOKE ALL ON TABLE public.schema_migrations FROM anon, authenticated;
+/*
+  Conditional, because these three exist only where the Realtime image has run.
+  The RLS kit builds its database from production's --schema=public dump plus the
+  migration chain, and that dump does **not** carry them — the first version of
+  this migration failed there with `relation "public.tenants" does not exist`.
+  So a plain REVOKE would make every kit run and every fresh environment fail on
+  a table that is not theirs to have.
+
+  That absence has a consequence worth stating rather than discovering later:
+  **the kit cannot test this fix.** Its database never contains an image-created
+  table, so the assertion added in tests/rls/assertions.sql finds nothing here
+  and passes vacuously for these three. It earns its place against a table one of
+  *our* migrations adds — which is the case we control — and the live check
+  against production and staging is a host step, recorded in HANDOFF.md.
+*/
+DO $$
+DECLARE
+  t text;
+  n int := 0;
+BEGIN
+  FOREACH t IN ARRAY ARRAY['tenants', 'extensions', 'schema_migrations'] LOOP
+    IF to_regclass('public.' || quote_ident(t)) IS NOT NULL THEN
+      EXECUTE format('REVOKE ALL ON TABLE public.%I FROM anon, authenticated', t);
+      n := n + 1;
+    END IF;
+  END LOOP;
+  RAISE NOTICE 'revoked anon and authenticated on % of 3 Realtime tables present here', n;
+END $$;
 
 -- PostgREST reloads its schema cache on DDL through the image's pgrst_ddl_watch
 -- event trigger; a REVOKE is not DDL, so tell it explicitly or the three stay
@@ -98,5 +123,7 @@ BEGIN
       'Either enable RLS with policies, or revoke anon and authenticated.', v_bad;
   END IF;
 
-  RAISE NOTICE 'ok  no table in public has RLS disabled while granting anon or authenticated';
+  RAISE NOTICE 'ok  no table in public has RLS disabled while granting anon or authenticated (% such table(s) present)',
+    (SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = 'public' AND c.relkind = 'r' AND NOT c.relrowsecurity);
 END $$;
