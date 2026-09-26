@@ -98,10 +98,10 @@
 
   ## Columns, for the owner's data protection review
 
-  Invoices (18): id, company_id, company_name, company_street,
-             company_house_number, company_postal_code, company_city, plan_name,
-             invoice_month, invoice_year, invoice_number, amount, status,
-             due_date, paid_at, cash_received_amount, receipt_note, created_at.
+  Invoices (17): id, company_id, company_name, company_address,
+             company_postal_code, company_city, plan_name, invoice_month,
+             invoice_year, invoice_number, amount, status, due_date, paid_at,
+             cash_received_amount, receipt_note, created_at.
              Left out: subscription_id, payment_method (no screen renders it —
              both the table and the detail dialog print "Barzahlung" as a
              literal), updated_at, and **paid_by and collected_by**, which are
@@ -111,7 +111,29 @@
              that cannot build the document would be useless; they are columns
              of `companies`, which this decision leaves readable, so carrying
              them widens nothing. The company's e-mail address was selected by
-             the old query and rendered nowhere, so it is not carried.
+             the old query and rendered nowhere, so it is not carried, and
+             neither is `country`, which no document prints.
+
+             **The address is `companies.address`, one line, and finding out why
+             cost a defect.** The screen this replaces asked PostgREST for
+             `companies(name, email, street, house_number, postal_code, city)`
+             and the detail dialog and the PDF composed `street` + `house_number`
+             above `postal_code` + `city`. `public.companies` has no `street`
+             and no `house_number` — it carries `address`, `city`, `postal_code`
+             and `country`, which is what `platform_company_create` writes and
+             what CompaniesPage edits; the two column names belong to
+             `company_settings` (20260402053937). So that embedded select was
+             answered with `42703 column companies.street does not exist`, and
+             the page did `if (invRes.data) setInvoices(...)`, which on an error
+             is `data: null` — so the Rechnungen tab has been showing "Keine
+             Rechnungen" and five of its six figures as zero for as long as the
+             query has read that way (since the baseline commit), and the detail
+             dialog's address row never rendered. The first draft of this
+             migration copied the two names into the read model, where they
+             would have failed loudly instead: self-check 6 EXPLAINs the
+             statement, so the release would have stopped here. The list carries
+             `address` and the PDF composes `address` above `postal_code city`,
+             the same two lines CompaniesPage already prints from.
   Subscriptions (9): id, company_id, company_name, plan_id, plan_name, status,
              starts_at, billing_day, monthly_price.
              Left out: ends_at, payment_method and created_at (rendered
@@ -289,7 +311,7 @@ BEGIN
   RETURN $sql$
 WITH filtered AS (
   SELECT i.id, i.company_id, c.name AS company_name,
-         c.street AS company_street, c.house_number AS company_house_number,
+         c.address AS company_address,
          c.postal_code AS company_postal_code, c.city AS company_city,
          pl.name AS plan_name,
          i.invoice_month, i.invoice_year, i.invoice_number, i.amount, i.status,
@@ -345,8 +367,7 @@ SELECT jsonb_build_object(
              'id',                    p.id,
              'company_id',            p.company_id,
              'company_name',          p.company_name,
-             'company_street',        p.company_street,
-             'company_house_number',  p.company_house_number,
+             'company_address',       p.company_address,
              'company_postal_code',   p.company_postal_code,
              'company_city',          p.company_city,
              'plan_name',             p.plan_name,
@@ -447,7 +468,10 @@ SET search_path = pg_catalog, public
 AS $$
 DECLARE
   c_action   CONSTANT text := 'platform_read.invoices_list';
-  c_min_year CONSTANT integer := 2020;   -- subscription_invoices' own CHECK
+  -- 2020 is subscription_invoices' own CHECK (20260607125649). There is no
+  -- upper CHECK; 2100 is this contract's, so a picker sending a typo asks for
+  -- nothing rather than scanning the table for a year that cannot exist.
+  c_min_year CONSTANT integer := 2020;
   c_max_year CONSTANT integer := 2100;
   v_status  text;
   v_search  text;
@@ -621,7 +645,7 @@ GRANT EXECUTE ON FUNCTION public.generate_invoice_number(integer) TO authenticat
 DO $selfcheck$
 DECLARE
   c_invoice_keys CONSTANT text[] := ARRAY[
-    'id','company_id','company_name','company_street','company_house_number',
+    'id','company_id','company_name','company_address',
     'company_postal_code','company_city','plan_name','invoice_month','invoice_year',
     'invoice_number','amount','status','due_date','paid_at','cash_received_amount',
     'receipt_note','created_at'];
@@ -755,9 +779,12 @@ BEGIN
   END IF;
 
   -- The columns the invoice list must not carry, whatever a later edit intends.
+  -- c.street and c.house_number are on the list because the first draft of this
+  -- file read them: they are columns of company_settings, not of companies (see
+  -- the header), so naming them here is both a widening and a broken statement.
   IF app_private.platform_invoices_list_statement() ~ '\mi\.(paid_by|collected_by|payment_method|updated_at)\M'
-     OR app_private.platform_invoices_list_statement() ~ '\mc\.email\M' THEN
-    RAISE EXCEPTION '20260924110000 self-check: the invoice list reads an account id, a payment method or an address the screen does not show';
+     OR app_private.platform_invoices_list_statement() ~ '\mc\.(email|country|street|house_number)\M' THEN
+    RAISE EXCEPTION '20260924110000 self-check: the invoice list reads an account id, a payment method, or a column of companies the screen does not show';
   END IF;
 
   IF app_private.platform_subscriptions_list_statement() ~ '\ms\.(notes|payment_method|updated_at|ends_at)\M' THEN
