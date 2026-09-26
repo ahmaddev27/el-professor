@@ -47,6 +47,17 @@
                     a change made through the staff functions names its caller
                     on both rows it writes and in created_by, while a row
                     written with no session has no actor at all
+   12. the money    platform_invoices_list and platform_subscriptions_list
+                    (20260924110000, decision D14): the seventh and eighth read
+                    models, in the same shape, asking **billing.manage** — so a
+                    `support` or `read_only` account, which keeps the company
+                    list, is refused the invoices, the amounts and the payment
+                    trail and gets a `denied` row for asking. Plus the six
+                    figures the browser used to compute over every invoice of
+                    every customer, the documented columns, and
+                    generate_invoice_number, which had to become a definer or
+                    invoice generation would have reported every company as
+                    skipped and created nothing
 */
 
 \set ON_ERROR_STOP on
@@ -1379,6 +1390,484 @@ BEGIN
   PERFORM _rm_ok('platform_audit_record refuses platform_read.staff_list, whatever the role and outcome',
     _rm_try(owner,    $q$SELECT platform_audit_record('read', 'platform_read.staff_list', 'ok')::text$q$) LIKE 'ERR 22023%'
     AND _rm_try(readonly, $q$SELECT platform_audit_record('read', 'platform_read.staff_list', 'denied')::text$q$) LIKE 'ERR 22023%');
+END $$;
+
+-- ─── 12. the money: platform_invoices_list and platform_subscriptions_list ───
+--
+-- Migration 20260924110000, decision D14 (24.09.2026). The four billing tables
+-- lost their `companies.read` branch, so a platform account reads an invoice,
+-- a subscription, the payment trail or a coverage period inside an open context
+-- or through these two models, and nowhere else. They ask **billing.manage** —
+-- owner and billing — which is the capability that already writes all four.
+--
+-- What `support` and `read_only` lose is the whole point of the slice, so it is
+-- asserted from both sides: the refusal here, and the tenant term in
+-- tests/rls/matrix.sql and section 7 of tests/rls/subscriptions.sql.
+
+CREATE OR REPLACE FUNCTION _rm_billing_plan(p_which text) RETURNS text
+LANGUAGE plpgsql AS $$
+DECLARE
+  v_plan text := '';
+  r      record;
+BEGIN
+  IF p_which = 'invoices' THEN
+    FOR r IN EXECUTE 'EXPLAIN (ANALYZE, COSTS OFF, TIMING OFF, SUMMARY OFF) '
+                     || app_private.platform_invoices_list_statement()
+             USING NULL::uuid, NULL::integer, NULL::integer, NULL::text, NULL::text, 100, 0
+    LOOP v_plan := v_plan || r."QUERY PLAN" || E'\n'; END LOOP;
+  ELSIF p_which = 'subscriptions' THEN
+    FOR r IN EXECUTE 'EXPLAIN (ANALYZE, COSTS OFF, TIMING OFF, SUMMARY OFF) '
+                     || app_private.platform_subscriptions_list_statement()
+             USING NULL::uuid, NULL::text, 100, 0
+    LOOP v_plan := v_plan || r."QUERY PLAN" || E'\n'; END LOOP;
+  ELSE
+    RAISE EXCEPTION 'unknown billing statement %', p_which;
+  END IF;
+  RETURN v_plan;
+END $$;
+
+-- 12a. privileges and shape, on 20260916140000's terms
+
+DO $$
+DECLARE
+  r record;
+BEGIN
+  PERFORM _rm_reset();
+
+  FOR r IN
+    SELECT * FROM (VALUES
+      -- signature                                                                        anon   authn  service
+      ('public.platform_invoices_list(uuid,integer,integer,text,text,integer,integer)',    false, true,  false),
+      ('public.platform_subscriptions_list(uuid,text,integer,integer)',                    false, true,  false),
+      ('app_private.platform_invoices_list_statement()',                                   false, false, false),
+      ('app_private.platform_subscriptions_list_statement()',                              false, false, false),
+      -- generate_invoice_number joined them as a definer. The service role keeps
+      -- its grant (20260915120000) and now gets NULL: it has no auth.uid().
+      ('public.generate_invoice_number(integer)',                                          false, true,  true)
+    ) AS t(sig, anon, authn, service)
+  LOOP
+    PERFORM _rm_ok(format('EXECUTE on %s: anon %s, authenticated %s, service_role %s', r.sig, r.anon, r.authn, r.service),
+      has_function_privilege('anon',           r.sig::regprocedure, 'EXECUTE') = r.anon
+      AND has_function_privilege('authenticated', r.sig::regprocedure, 'EXECUTE') = r.authn
+      AND has_function_privilege('service_role',  r.sig::regprocedure, 'EXECUTE') = r.service);
+  END LOOP;
+
+  PERFORM _rm_ok('both billing models are SECURITY DEFINER, VOLATILE and pin their search_path',
+    NOT EXISTS (
+      SELECT 1 FROM pg_proc p
+       WHERE p.pronamespace = 'public'::regnamespace
+         AND p.proname IN ('platform_invoices_list', 'platform_subscriptions_list', 'generate_invoice_number')
+         AND (NOT p.prosecdef
+              OR p.provolatile <> 'v'
+              OR NOT EXISTS (SELECT 1 FROM unnest(coalesce(p.proconfig, '{}'::text[])) c WHERE c LIKE 'search_path=%'))));
+
+  PERFORM _rm_ok('anon may call neither billing model',
+    _rm_try(NULL, 'SELECT platform_invoices_list()::text') LIKE 'ERR 42501%'
+    AND _rm_try(NULL, 'SELECT platform_subscriptions_list()::text') LIKE 'ERR 42501%');
+  PERFORM _rm_ok('the service role may not call them either: it has no auth.uid() to answer for',
+    _rm_try(NULL, 'SELECT platform_invoices_list()::text', true) LIKE 'ERR 42501%'
+    AND _rm_try(NULL, 'SELECT platform_subscriptions_list()::text', true) LIKE 'ERR 42501%');
+  PERFORM _rm_ok('authenticated cannot reach either app_private half',
+    _rm_try('3b000000-0000-4000-8000-000000000001', 'SELECT app_private.platform_invoices_list_statement()') LIKE 'ERR 42501%'
+    AND _rm_try('3b000000-0000-4000-8000-000000000001', 'SELECT app_private.platform_subscriptions_list_statement()') LIKE 'ERR 42501%');
+END $$;
+
+-- 12b. role x function: billing.manage, and what support and read_only lose
+
+DO $$
+DECLARE
+  p      record;
+  r      record;
+  v_got  jsonb;
+BEGIN
+  FOR p IN
+    SELECT * FROM (VALUES
+      ('owner',          '3b000000-0000-4000-8000-000000000001'::uuid, true),
+      ('billing',        '3b000000-0000-4000-8000-000000000003'::uuid, true),
+      -- the behaviour change D14 makes, stated per role
+      ('support',        '3b000000-0000-4000-8000-000000000002'::uuid, false),
+      ('read_only',      '3b000000-0000-4000-8000-000000000004'::uuid, false),
+      ('disabled',       '3b000000-0000-4000-8000-000000000005'::uuid, false),
+      ('company admin',  'a0000000-0000-4000-8000-000000000001'::uuid, false),
+      ('company viewer', 'a0000000-0000-4000-8000-000000000003'::uuid, false)
+    ) AS t(label, uid, may)
+  LOOP
+    FOR r IN SELECT * FROM (VALUES
+      ('platform_invoices_list()'), ('platform_subscriptions_list()')
+    ) AS t(call)
+    LOOP
+      v_got := _rm_json(p.uid, format('SELECT %s::text', r.call));
+      IF (v_got ->> 'ok')::boolean IS DISTINCT FROM p.may THEN
+        RAISE EXCEPTION 'FAIL: % for % — expected ok %, got %', r.call, p.label, p.may, v_got::text;
+      END IF;
+      IF NOT p.may AND (v_got ->> 'reason') IS DISTINCT FROM 'not_authorized' THEN
+        RAISE EXCEPTION 'FAIL: % for % — a refusal must say not_authorized, got %', r.call, p.label, v_got::text;
+      END IF;
+      IF NOT p.may AND v_got ? 'items' THEN
+        RAISE EXCEPTION 'FAIL: % for % returned items with its refusal', r.call, p.label;
+      END IF;
+      -- A refusal carries no figure either: an amount beside "not permitted"
+      -- would be the read this decision closed.
+      IF NOT p.may AND v_got ? 'summary' THEN
+        RAISE EXCEPTION 'FAIL: % for % returned a summary with its refusal', r.call, p.label;
+      END IF;
+    END LOOP;
+    RAISE NOTICE 'ok  both billing lists answer as expected for %', p.label;
+  END LOOP;
+
+  -- The same two accounts still read the company list, which D14 left open on
+  -- purpose: that list is how a company is chosen to open a context on.
+  PERFORM _rm_ok('support and read_only keep the company list they pick a company from',
+    (_rm_json('3b000000-0000-4000-8000-000000000002', 'SELECT platform_companies_list()::text') ->> 'ok')::boolean
+    AND (_rm_json('3b000000-0000-4000-8000-000000000004', 'SELECT platform_companies_list()::text') ->> 'ok')::boolean);
+
+  -- generate_invoice_number answers NULL rather than raising: a run must fail
+  -- per company with a message, not abort halfway.
+  PERFORM _rm_ok('generate_invoice_number: a number for billing.manage, NULL for everyone else',
+    _rm_do('3b000000-0000-4000-8000-000000000001', 'SELECT generate_invoice_number(2026)') LIKE 'INV-2026-%'
+    AND _rm_do('3b000000-0000-4000-8000-000000000003', 'SELECT generate_invoice_number(2026)') LIKE 'INV-2026-%'
+    AND _rm_do('3b000000-0000-4000-8000-000000000002', 'SELECT generate_invoice_number(2026)') = '<null>'
+    AND _rm_do('3b000000-0000-4000-8000-000000000004', 'SELECT generate_invoice_number(2026)') = '<null>'
+    AND _rm_do('a0000000-0000-4000-8000-000000000001', 'SELECT generate_invoice_number(2026)') = '<null>');
+
+  -- It runs as its owner now, so the sequence it continues is every company's
+  -- and not the caller's. The seeded invoices are RM-2026-…, so 2026 has no
+  -- INV- number yet and the first is 0001; what matters is that a platform
+  -- account and not the policy decides.
+  PERFORM _rm_ok('generate_invoice_number reads past the narrowed policy, as its owner',
+    _rm_do('3b000000-0000-4000-8000-000000000001', 'SELECT generate_invoice_number(2026)')
+      = _rm_do('3b000000-0000-4000-8000-000000000003', 'SELECT generate_invoice_number(2026)'));
+END $$;
+
+-- 12c. the columns, for the data protection review
+
+DO $$
+DECLARE
+  c_invoice_keys CONSTANT text[] := ARRAY[
+    'id','company_id','company_name','company_address','company_postal_code',
+    'company_city','plan_name','invoice_month','invoice_year','invoice_number',
+    'amount','status','due_date','paid_at','cash_received_amount','receipt_note',
+    'created_at'];
+  c_sub_keys CONSTANT text[] := ARRAY[
+    'id','company_id','company_name','plan_id','plan_name','status','starts_at',
+    'billing_day','monthly_price'];
+  owner constant uuid := '3b000000-0000-4000-8000-000000000001';
+  v      jsonb;
+  v_item jsonb;
+BEGIN
+  PERFORM _rm_reset();
+
+  -- The address is companies.address, one line. The screen this replaced asked
+  -- PostgREST for companies(street, house_number), which are columns of
+  -- company_settings: the query was answered 42703 and the invoice list was
+  -- always empty. Naming either here is both a widening and a broken statement.
+  UPDATE companies
+     SET address = 'Hauptstr. 7', postal_code = '20095', city = 'Hamburg'
+   WHERE id = 'c0000000-0000-4000-8000-00000000000a';
+
+  v := _rm_json(owner, 'SELECT platform_invoices_list(NULL, NULL, NULL, NULL, NULL, 100, 0)::text');
+  PERFORM _rm_ok('invoices: every row carries exactly the documented columns',
+    jsonb_array_length(v -> 'items') >= 7
+    AND (SELECT bool_and(_rm_keys(i) = (SELECT array_agg(k ORDER BY k) FROM unnest(c_invoice_keys) k))
+           FROM jsonb_array_elements(v -> 'items') i));
+
+  PERFORM _rm_ok('invoices: no account id, no payment method, no e-mail address, in any row',
+    (SELECT bool_and(NOT (i ? 'paid_by') AND NOT (i ? 'collected_by')
+                     AND NOT (i ? 'payment_method') AND NOT (i ? 'subscription_id')
+                     AND NOT (i ? 'company_email') AND NOT (i ? 'updated_at')
+                     AND NOT (i ? 'company_street') AND NOT (i ? 'company_house_number')
+                     AND NOT (i ? 'company_country'))
+       FROM jsonb_array_elements(v -> 'items') i));
+
+  SELECT i INTO v_item FROM jsonb_array_elements(v -> 'items') i
+   WHERE i ->> 'invoice_number' = 'RM-2026-0001';
+  PERFORM _rm_ok('invoices: the recipient''s name, street line and town, for the PDF',
+    v_item ->> 'company_name' IS NOT NULL
+    AND v_item ->> 'company_address'     = 'Hauptstr. 7'
+    AND v_item ->> 'company_postal_code' = '20095'
+    AND v_item ->> 'company_city'        = 'Hamburg'
+    AND v_item ->> 'plan_name'           = 'RM Plan');
+
+  v := _rm_json(owner, 'SELECT platform_subscriptions_list(NULL, NULL, 100, 0)::text');
+  PERFORM _rm_ok('subscriptions: every row carries exactly the documented columns',
+    jsonb_array_length(v -> 'items') >= 2
+    AND (SELECT bool_and(_rm_keys(i) = (SELECT array_agg(k ORDER BY k) FROM unnest(c_sub_keys) k))
+           FROM jsonb_array_elements(v -> 'items') i));
+  PERFORM _rm_ok('subscriptions: no notes — free text that may hold anything — and no ends_at',
+    (SELECT bool_and(NOT (i ? 'notes') AND NOT (i ? 'ends_at')
+                     AND NOT (i ? 'payment_method') AND NOT (i ? 'created_at')
+                     AND NOT (i ? 'updated_at'))
+       FROM jsonb_array_elements(v -> 'items') i));
+END $$;
+
+-- 12d. the six figures, and the one that moved to Europe/Berlin
+
+DO $$
+DECLARE
+  owner constant uuid := '3b000000-0000-4000-8000-000000000001';
+  v        jsonb;
+  v_before integer;
+  v_after  integer;
+  v_month  integer := EXTRACT(month FROM (now() AT TIME ZONE 'Europe/Berlin'))::integer;
+  v_year   integer := EXTRACT(year  FROM (now() AT TIME ZONE 'Europe/Berlin'))::integer;
+BEGIN
+  PERFORM _rm_reset();
+
+  v := _rm_json(owner, 'SELECT platform_invoices_list(NULL, NULL, NULL, NULL, NULL, 100, 0)::text') -> 'summary';
+
+  -- Three 'open' rows: two of company A and one of company B.
+  PERFORM _rm_ok('figures: open_count counts every open invoice, not the page''s',
+    (v ->> 'open_count')::int = 3);
+
+  -- The billing page's own rule, and it is *not* platform_companies_list's:
+  -- status 'overdue' is not counted here, only an 'open' row past its due date.
+  -- The fixture carries one of each, so the two figures differ by design and
+  -- this line is what says which is which.
+  PERFORM _rm_ok('figures: overdue_count is open-and-past-due, never status overdue',
+    (v ->> 'overdue_count')::int = 1
+    AND (SELECT (i ->> 'overdue_invoice_count')::int = 2
+           FROM jsonb_array_elements(_rm_json(owner, 'SELECT platform_companies_list()::text') -> 'items') i
+          WHERE i ->> 'id' = 'c0000000-0000-4000-8000-00000000000a'));
+
+  -- Six invoices of 49, one of company B: 343 over the unfiltered set.
+  PERFORM _rm_ok('figures: filtered_amount and filtered_collected sum the filtered set',
+    (v ->> 'filtered_amount')::numeric = 343
+    AND (v ->> 'filtered_collected')::numeric = 98);
+
+  -- A receipt of exactly 0,00 counts the full amount, because the browser wrote
+  -- `cash_received_amount || amount` and JavaScript's `||` takes 0 as absent.
+  -- coalesce() here would count 0 and quietly change a figure an operator reads.
+  UPDATE subscription_invoices SET cash_received_amount = 0
+   WHERE id = 'ce000000-0000-4000-8000-000000000004';
+  PERFORM _rm_ok('figures: a cash receipt of exactly 0,00 counts the invoice amount, as the browser did',
+    (_rm_json(owner, 'SELECT platform_invoices_list(NULL, NULL, NULL, NULL, NULL, 100, 0)::text')
+       -> 'summary' ->> 'filtered_collected')::numeric = 98);
+  UPDATE subscription_invoices SET cash_received_amount = NULL
+   WHERE id = 'ce000000-0000-4000-8000-000000000004';
+
+  PERFORM _rm_ok('figures: the sums follow the filter, the three counts do not',
+    (SELECT (s ->> 'filtered_amount')::numeric = 49 AND (s ->> 'open_count')::int = 3
+       FROM (SELECT _rm_json(owner,
+               $q$SELECT platform_invoices_list('c0000000-0000-4000-8000-00000000000b')::text$q$) -> 'summary' AS s) x));
+
+  PERFORM _rm_ok('figures: years is the year picker''s options',
+    (v -> 'years') @> '[2026]'::jsonb);
+
+  -- paid_this_month_count is measured rather than recomputed: one paid invoice
+  -- in the current Berlin month must raise it by exactly one, and one in another
+  -- month must not raise it at all. The month the operator's browser was in is
+  -- what this figure used to follow.
+  v_before := (v ->> 'paid_this_month_count')::int;
+
+  INSERT INTO company_subscriptions (id, company_id, plan_id, monthly_price)
+  VALUES ('c1000000-0000-4000-8000-00000000000c', 'cb000000-0000-4000-8000-000000000003',
+          'cf000000-0000-4000-8000-000000000001', 49);
+  INSERT INTO subscription_invoices (id, company_id, subscription_id, invoice_month, invoice_year,
+                                     invoice_number, amount, status, due_date, paid_at)
+  VALUES ('ce000000-0000-4000-8000-00000000000c', 'cb000000-0000-4000-8000-000000000003',
+          'c1000000-0000-4000-8000-00000000000c', v_month, v_year,
+          'RM-NOW-0001', 49, 'paid', current_date, now());
+
+  v_after := (_rm_json(owner, 'SELECT platform_invoices_list(NULL, NULL, NULL, NULL, NULL, 100, 0)::text')
+                -> 'summary' ->> 'paid_this_month_count')::int;
+  PERFORM _rm_ok('figures: paid_this_month_count counts the current Europe/Berlin month',
+    v_after = v_before + 1);
+
+  UPDATE subscription_invoices
+     SET invoice_month = CASE WHEN v_month = 1 THEN 12 ELSE v_month - 1 END,
+         invoice_year  = CASE WHEN v_month = 1 THEN v_year - 1 ELSE v_year END
+   WHERE id = 'ce000000-0000-4000-8000-00000000000c';
+  PERFORM _rm_ok('figures: …and not the month before it',
+    (_rm_json(owner, 'SELECT platform_invoices_list(NULL, NULL, NULL, NULL, NULL, 100, 0)::text')
+       -> 'summary' ->> 'paid_this_month_count')::int = v_before);
+
+  DELETE FROM subscription_invoices WHERE id = 'ce000000-0000-4000-8000-00000000000c';
+  DELETE FROM company_subscriptions WHERE id = 'c1000000-0000-4000-8000-00000000000c';
+
+  -- The subscriptions summary: every active subscription, and the count each
+  -- plan card prints. Both are the whole table's, not the page's.
+  v := _rm_json(owner, 'SELECT platform_subscriptions_list(NULL, NULL, 100, 0)::text') -> 'summary';
+  PERFORM _rm_ok('figures: active_count and active_by_plan are the whole table''s',
+    (v ->> 'active_count')::int = 2
+    AND (v -> 'active_by_plan' ->> 'cf000000-0000-4000-8000-000000000001')::int = 2);
+END $$;
+
+-- 12e. one audit row per call, and a refusal that keeps its own
+
+DO $$
+DECLARE
+  owner    constant uuid := '3b000000-0000-4000-8000-000000000001';
+  support  constant uuid := '3b000000-0000-4000-8000-000000000002';
+  admin_a  constant uuid := 'a0000000-0000-4000-8000-000000000001';
+  v_before bigint;
+  r        record;
+BEGIN
+  PERFORM _rm_reset();
+
+  v_before := _rm_audit_count();
+  PERFORM _rm_do(owner, $q$SELECT platform_invoices_list('c0000000-0000-4000-8000-00000000000a', 9, 2026)::text$q$);
+  PERFORM _rm_ok('audit: exactly one row per invoice-list call', _rm_audit_count() - v_before = 1);
+
+  SELECT * INTO r FROM app_private.platform_audit_log ORDER BY id DESC LIMIT 1;
+  PERFORM _rm_ok('audit: a read by that account, in its role, naming the request, the company and the count',
+    r.category = 'read' AND r.action = 'platform_read.invoices_list' AND r.outcome = 'ok'
+    AND r.actor_user_id = owner AND r.actor_role = 'owner'
+    AND r.target_type = 'invoice'
+    AND r.company_id = 'c0000000-0000-4000-8000-00000000000a'
+    AND (r.after_value -> 'request' ->> 'month') = '9'
+    AND (r.after_value ->> 'returned') IS NOT NULL);
+
+  -- The row records what was asked and how much came back, never a row of it:
+  -- an audit log that copies the invoices would be the read it records.
+  PERFORM _rm_ok('audit: the row carries no invoice of its own',
+    r.after_value::text !~ 'RM-2026-' AND r.before_value IS NULL);
+
+  v_before := _rm_audit_count();
+  PERFORM _rm_do(owner, 'SELECT platform_subscriptions_list()::text');
+  PERFORM _rm_ok('audit: one row per subscription-list call, with its own action',
+    _rm_audit_count() - v_before = 1
+    AND (SELECT l.action = 'platform_read.subscriptions_list' AND l.target_type = 'subscription'
+           FROM app_private.platform_audit_log l ORDER BY l.id DESC LIMIT 1));
+
+  -- A refusal is a return value, so the row survives. This is the row that says
+  -- a support account tried to read the money.
+  v_before := _rm_audit_count();
+  PERFORM _rm_do(support, 'SELECT platform_invoices_list()::text');
+  PERFORM _rm_ok('audit: a staff refusal is one denied row, by that member, in its role',
+    _rm_audit_count() - v_before = 1
+    AND (SELECT l.outcome = 'denied' AND l.actor_user_id = support AND l.actor_role = 'support'
+                AND l.action = 'platform_read.invoices_list'
+           FROM app_private.platform_audit_log l ORDER BY l.id DESC LIMIT 1));
+
+  -- A company user writes nothing at all, or any member could fill the log.
+  v_before := _rm_audit_count();
+  PERFORM _rm_do(admin_a, 'SELECT platform_invoices_list()::text');
+  PERFORM _rm_do(admin_a, 'SELECT platform_subscriptions_list()::text');
+  PERFORM _rm_ok('audit: a caller without a staff role writes no row at all',
+    _rm_audit_count() = v_before);
+
+  -- A broken contract raises before anything is read, so there is nothing to
+  -- record.
+  v_before := _rm_audit_count();
+  PERFORM _rm_do(owner, 'SELECT platform_invoices_list(NULL, 13)::text');
+  PERFORM _rm_ok('audit: a broken argument records nothing', _rm_audit_count() = v_before);
+
+  -- The namespace belongs to the database: no staff role may forge either row
+  -- through the edge functions' door.
+  PERFORM _rm_ok('platform_audit_record refuses both new actions, whatever the role',
+    _rm_try(owner,   $q$SELECT platform_audit_record('read', 'platform_read.invoices_list', 'ok')::text$q$) LIKE 'ERR 22023%'
+    AND _rm_try(support, $q$SELECT platform_audit_record('read', 'platform_read.subscriptions_list', 'denied')::text$q$) LIKE 'ERR 22023%');
+END $$;
+
+-- 12f. the argument contract
+
+DO $$
+DECLARE
+  owner constant uuid := '3b000000-0000-4000-8000-000000000001';
+BEGIN
+  PERFORM _rm_reset();
+
+  -- A month or a year outside its range is a broken contract, not an empty
+  -- result: the screen sends NULL for "all", never 0. The message is fixed and
+  -- names no value.
+  PERFORM _rm_ok('invoices: month 0 and 13 are refused with 22023, 1 and 12 are not',
+    _rm_do(owner, 'SELECT platform_invoices_list(NULL, 0)::text')  LIKE 'ERR 22023%'
+    AND _rm_do(owner, 'SELECT platform_invoices_list(NULL, 13)::text') LIKE 'ERR 22023%'
+    AND (_rm_json(owner, 'SELECT platform_invoices_list(NULL, 1)::text')  ->> 'ok')::boolean
+    AND (_rm_json(owner, 'SELECT platform_invoices_list(NULL, 12)::text') ->> 'ok')::boolean);
+  PERFORM _rm_ok('invoices: a year outside 2020..2100 is refused, the bounds themselves are not',
+    _rm_do(owner, 'SELECT platform_invoices_list(NULL, NULL, 2019)::text') LIKE 'ERR 22023%'
+    AND _rm_do(owner, 'SELECT platform_invoices_list(NULL, NULL, 2101)::text') LIKE 'ERR 22023%'
+    AND (_rm_json(owner, 'SELECT platform_invoices_list(NULL, NULL, 2020)::text') ->> 'ok')::boolean
+    AND (_rm_json(owner, 'SELECT platform_invoices_list(NULL, NULL, 2100)::text') ->> 'ok')::boolean);
+
+  -- The shared helpers, on both models: the page maximum and the offset ceiling.
+  PERFORM _rm_ok('both: the page maximum is 100 and the offset ceiling 10000',
+    _rm_do(owner, 'SELECT platform_invoices_list(NULL, NULL, NULL, NULL, NULL, 101, 0)::text') LIKE 'ERR 22023%'
+    AND _rm_do(owner, 'SELECT platform_invoices_list(NULL, NULL, NULL, NULL, NULL, 100, 10001)::text') LIKE 'ERR 22023%'
+    AND _rm_do(owner, 'SELECT platform_subscriptions_list(NULL, NULL, 0, 0)::text') LIKE 'ERR 22023%'
+    AND _rm_do(owner, 'SELECT platform_subscriptions_list(NULL, NULL, 100, -1)::text') LIKE 'ERR 22023%'
+    AND (_rm_json(owner, 'SELECT platform_subscriptions_list(NULL, NULL, 100, 10000)::text') ->> 'ok')::boolean);
+
+  -- A status is a token: anything that is not one is refused before a row is
+  -- read, and one no row carries finds nothing instead of raising. An empty
+  -- string is "not given", which platform_read_token answers with NULL — so the
+  -- screens send NULL for 'all' out of habit, not because '' would raise.
+  PERFORM _rm_ok('both: a status must be a token; one no row carries just finds nothing',
+    _rm_do(owner, $q$SELECT platform_invoices_list(NULL, NULL, NULL, 'Paid OR 1=1')::text$q$) LIKE 'ERR 22023%'
+    AND _rm_do(owner, $q$SELECT platform_subscriptions_list(NULL, 'Active!')::text$q$) LIKE 'ERR 22023%'
+    AND (_rm_json(owner, $q$SELECT platform_invoices_list(NULL, NULL, NULL, 'gibtsnicht')::text$q$) ->> 'total')::int = 0
+    AND (_rm_json(owner, $q$SELECT platform_invoices_list(NULL, NULL, NULL, '')::text$q$) ->> 'total')::int = 7);
+
+  -- The search reads the company name and the invoice number, and LIKE's own
+  -- characters are literal. The negative controls are the two wildcards: an
+  -- unescaped '%' or '_' would match every invoice number, and the only name
+  -- carrying a literal percent sign has no invoice.
+  PERFORM _rm_ok('invoices: the search reads the invoice number and the company name',
+    (_rm_json(owner, $q$SELECT platform_invoices_list(NULL, NULL, NULL, NULL, 'RM-2026-0003')::text$q$) ->> 'total')::int = 1
+    AND (_rm_json(owner, $q$SELECT platform_invoices_list(NULL, NULL, NULL, NULL, 'RM-2026-')::text$q$) ->> 'total')::int = 7);
+  PERFORM _rm_ok('invoices: a wildcard in the search is a literal, not a match-all',
+    (_rm_json(owner, $q$SELECT platform_invoices_list(NULL, NULL, NULL, NULL, '%')::text$q$) ->> 'total')::int = 0
+    AND (_rm_json(owner, $q$SELECT platform_invoices_list(NULL, NULL, NULL, NULL, '_')::text$q$) ->> 'total')::int = 0);
+  PERFORM _rm_ok('invoices: a search longer than 100 characters is refused',
+    _rm_do(owner, format($q$SELECT platform_invoices_list(NULL, NULL, NULL, NULL, %L)::text$q$, repeat('a', 101)))
+      LIKE 'ERR 22023%');
+END $$;
+
+-- 12g. paging, and the plan
+
+DO $$
+DECLARE
+  owner constant uuid := '3b000000-0000-4000-8000-000000000001';
+  v_p1   jsonb;
+  v_p2   jsonb;
+  v_plan text;
+BEGIN
+  PERFORM _rm_reset();
+
+  v_p1 := _rm_json(owner, 'SELECT platform_invoices_list(NULL, NULL, NULL, NULL, NULL, 2, 0)::text');
+  v_p2 := _rm_json(owner, 'SELECT platform_invoices_list(NULL, NULL, NULL, NULL, NULL, 2, 2)::text');
+  PERFORM _rm_ok('paging: total is the whole set, items are the page, and two pages do not overlap',
+    (v_p1 ->> 'total')::int = 7 AND (v_p2 ->> 'total')::int = 7
+    AND jsonb_array_length(v_p1 -> 'items') = 2
+    AND jsonb_array_length(v_p2 -> 'items') = 2
+    AND NOT EXISTS (SELECT 1
+                      FROM jsonb_array_elements(v_p1 -> 'items') a
+                      JOIN jsonb_array_elements(v_p2 -> 'items') b
+                        ON (a ->> 'id') = (b ->> 'id')));
+
+  -- The order is fixed at newest period first: the three .order() calls the
+  -- screen used to send PostgREST. There is no sort argument, deliberately.
+  -- The fixture's periods are 9, 9, 8, 7, 6, 5 and 4 of 2026, so page 1 holds
+  -- the two 9s and page 2 continues at 8.
+  PERFORM _rm_ok('paging: newest period first, with no sort argument to give',
+    (v_p1 -> 0 ->> 'invoice_month')::int = 9
+    AND (v_p1 -> 1 ->> 'invoice_month')::int = 9
+    AND (v_p2 -> 0 ->> 'invoice_month')::int = 8
+    AND (v_p2 -> 1 ->> 'invoice_month')::int = 7);
+
+  -- The summary is the same whichever page is asked for: it describes the set,
+  -- not the page.
+  PERFORM _rm_ok('paging: the summary belongs to the set, not to the page',
+    (v_p1 -> 'summary') = (v_p2 -> 'summary'));
+
+  v_plan := _rm_billing_plan('invoices');
+  RAISE NOTICE 'invoice list plan:%', E'\n' || v_plan;
+  PERFORM _rm_ok('invoices: the plan reads neither fahrtenbuch_trips nor receipts nor company_settings',
+    v_plan !~ 'fahrtenbuch_trips' AND v_plan !~ 'receipts' AND v_plan !~ 'company_settings');
+  -- The three counts and the year list read the table once each, which is what
+  -- the figures are; what must never appear is a scan per company row.
+  PERFORM _rm_ok('invoices: subscription_invoices is scanned a fixed number of times, never once per company',
+    _rm_scans(v_plan, 'subscription_invoices') BETWEEN 1 AND 4
+    AND _rm_scans(v_plan, 'companies') BETWEEN 1 AND 2);
+
+  v_plan := _rm_billing_plan('subscriptions');
+  RAISE NOTICE 'subscription list plan:%', E'\n' || v_plan;
+  PERFORM _rm_ok('subscriptions: the plan reads no tenant table',
+    v_plan !~ 'fahrtenbuch_trips' AND v_plan !~ 'receipts'
+    AND v_plan !~ 'drivers' AND v_plan !~ 'company_settings');
+  PERFORM _rm_ok('subscriptions: company_subscriptions is scanned twice at most — the page and the active counts',
+    _rm_scans(v_plan, 'company_subscriptions') BETWEEN 1 AND 2);
 END $$;
 
 DO $$ BEGIN RAISE NOTICE '── platform-readmodels: all checks passed ──'; END $$;
