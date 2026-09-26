@@ -1,24 +1,14 @@
-import React, { useState } from 'react';
-import { X, FileText, Loader2 } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { X, FileText, Loader2, AlertTriangle } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
 import { useTranslation } from '../contexts/LanguageContext';
 import type { TranslationKey } from '../i18n';
-
-interface CompanySub {
-  id: string;
-  company_id: string;
-  plan_id: string;
-  status: string;
-  billing_day: number;
-  monthly_price: number;
-  companies: { name: string } | null;
-  subscription_plans: { name: string } | null;
-}
+import { fetchAllActiveSubscriptions, fetchInvoicedCompanyIds } from '../lib/platformBillingClient';
+import type { PlatformSubscriptionRow } from '../lib/platformBilling';
 
 interface Props {
-  subscriptions: CompanySub[];
   onClose: () => void;
   onGenerated: () => void;
 }
@@ -32,7 +22,7 @@ const MONTH_KEYS: TranslationKey[] = [
   'bill.month.september', 'bill.month.october', 'bill.month.november', 'bill.month.december',
 ];
 
-export default function GenerateInvoicesModal({ subscriptions, onClose, onGenerated }: Props) {
+export default function GenerateInvoicesModal({ onClose, onGenerated }: Props) {
   const { user } = useAuth();
   const { showToast } = useToast();
   const { t, tPlural } = useTranslation();
@@ -42,35 +32,56 @@ export default function GenerateInvoicesModal({ subscriptions, onClose, onGenera
   const [generating, setGenerating] = useState(false);
   const [results, setResults] = useState<{ created: number; skipped: number; errors: string[] } | null>(null);
 
-  const activeSubs = subscriptions.filter(s => s.status === 'active');
+  /**
+   * Every active subscription, read through the audited read model since
+   * decision D14 — the page cannot pass them any more, because it holds one
+   * server-side page of 100 and generating from a page would skip customers
+   * silently, which is the defect slice 3.13b fixed in `manage-users/list`.
+   * `null` means the list could not be read whole, and then nothing is
+   * generated: a run over a partial list creates the wrong month.
+   */
+  const [activeSubs, setActiveSubs] = useState<PlatformSubscriptionRow[] | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchAllActiveSubscriptions()
+      .catch(() => null)
+      .then(rows => {
+        if (cancelled) return;
+        setActiveSubs(rows);
+        setLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, []);
+
+  const companyLabel = (sub: PlatformSubscriptionRow) => sub.company_name || sub.company_id.slice(0, 8);
 
   const handleGenerate = async () => {
-    if (!user) return;
+    if (!user || !activeSubs) return;
     setGenerating(true);
     const created: string[] = [];
     const skipped: string[] = [];
     const errors: string[] = [];
 
     try {
-      // Check existing invoices for this month
-      const { data: existing } = await supabase
-        .from('subscription_invoices')
-        .select('company_id')
-        .eq('invoice_month', month)
-        .eq('invoice_year', year);
-
-      const existingSet = new Set((existing || []).map(e => e.company_id));
+      // Which companies already have an invoice for this period. The invoice
+      // table is no longer readable across companies, so this is the audited
+      // read model; null means the check could not be made, and then the
+      // UNIQUE (company_id, invoice_month, invoice_year) decides, exactly as it
+      // did when the direct query failed and returned nothing.
+      const existingSet = (await fetchInvoicedCompanyIds(month, year)) ?? new Set<string>();
 
       for (const sub of activeSubs) {
         if (existingSet.has(sub.company_id)) {
-          skipped.push((sub.companies as any)?.name || sub.company_id.slice(0, 8));
+          skipped.push(companyLabel(sub));
           continue;
         }
 
         // Generate invoice number via RPC
         const { data: invNum } = await supabase.rpc('generate_invoice_number', { p_year: year });
         if (!invNum) {
-          errors.push(t('bill.invoice.numberFailed', { company: (sub.companies as any)?.name ?? '' }));
+          errors.push(t('bill.invoice.numberFailed', { company: companyLabel(sub) }));
           continue;
         }
 
@@ -92,12 +103,12 @@ export default function GenerateInvoicesModal({ subscriptions, onClose, onGenera
 
         if (insertErr) {
           if (insertErr.code === '23505') {
-            skipped.push((sub.companies as any)?.name || sub.company_id.slice(0, 8));
+            skipped.push(companyLabel(sub));
           } else {
-            errors.push(`${(sub.companies as any)?.name}: ${insertErr.message}`);
+            errors.push(`${companyLabel(sub)}: ${insertErr.message}`);
           }
         } else {
-          created.push((sub.companies as any)?.name || sub.company_id.slice(0, 8));
+          created.push(companyLabel(sub));
         }
       }
 
@@ -134,7 +145,9 @@ export default function GenerateInvoicesModal({ subscriptions, onClose, onGenera
             <div>
               <h2 className="font-bold" style={{ color: 'var(--text-primary)' }}>{t('bill.invoice.generateTitle')}</h2>
               <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
-                {tPlural({ one: 'bill.invoice.activeSubs.one', other: 'bill.invoice.activeSubs.other' }, activeSubs.length)}
+                {loading
+                  ? t('common.loading')
+                  : tPlural({ one: 'bill.invoice.activeSubs.one', other: 'bill.invoice.activeSubs.other' }, activeSubs?.length ?? 0)}
               </p>
             </div>
           </div>
@@ -155,11 +168,22 @@ export default function GenerateInvoicesModal({ subscriptions, onClose, onGenera
             </div>
           </div>
 
-          <div className="p-3 rounded-xl text-sm" style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)' }}>
-            {t('bill.invoice.hintPeriodLead', { count: activeSubs.length })}{' '}
-            <strong>{t(MONTH_KEYS[month - 1])} {year}</strong>
-            {t('bill.invoice.hintPeriodTail')}
-          </div>
+          {/* A list that could not be read whole is not generated from: an
+              invoice run over part of the customers is the wrong month, and an
+              empty count would read as "no active subscriptions". */}
+          {!loading && activeSubs === null ? (
+            <div className="flex items-start gap-2 p-3 rounded-xl text-sm"
+              style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid var(--danger)', color: 'var(--text-primary)' }}>
+              <AlertTriangle size={16} className="flex-shrink-0 mt-0.5" style={{ color: 'var(--danger)' }} />
+              <span>{t('admin.read.failed')}</span>
+            </div>
+          ) : (
+            <div className="p-3 rounded-xl text-sm" style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)' }}>
+              {t('bill.invoice.hintPeriodLead', { count: activeSubs?.length ?? 0 })}{' '}
+              <strong>{t(MONTH_KEYS[month - 1])} {year}</strong>
+              {t('bill.invoice.hintPeriodTail')}
+            </div>
+          )}
 
           {results && (
             <div className="p-3 rounded-xl text-sm space-y-1" style={{
@@ -181,9 +205,9 @@ export default function GenerateInvoicesModal({ subscriptions, onClose, onGenera
           </button>
           <button
             onClick={handleGenerate}
-            disabled={generating || activeSubs.length === 0}
+            disabled={generating || loading || !activeSubs || activeSubs.length === 0}
             className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold text-white"
-            style={{ background: 'var(--accent)', opacity: generating || activeSubs.length === 0 ? 0.6 : 1 }}
+            style={{ background: 'var(--accent)', opacity: generating || loading || !activeSubs || activeSubs.length === 0 ? 0.6 : 1 }}
           >
             {generating
               ? <><Loader2 size={16} className="animate-spin" /> {t('bill.invoice.generating')}</>

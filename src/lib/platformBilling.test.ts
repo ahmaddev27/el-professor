@@ -4,6 +4,7 @@ import {
   EMPTY_INVOICE_SUMMARY,
   EMPTY_SUBSCRIPTION_SUMMARY,
   collectAllPages,
+  invoiceCompanyAddress,
   invoiceRpcArgs,
   parseBillingPage,
   parseInvoiceRow,
@@ -15,9 +16,9 @@ import {
   type PlatformInvoiceSummary,
 } from './platformBilling';
 
-/** The eighteen keys migration 20260924110000 documents, and nothing else. */
+/** The seventeen keys migration 20260924110000 documents, and nothing else. */
 const INVOICE_KEYS = [
-  'id', 'company_id', 'company_name', 'company_street', 'company_house_number',
+  'id', 'company_id', 'company_name', 'company_address',
   'company_postal_code', 'company_city', 'plan_name', 'invoice_month', 'invoice_year',
   'invoice_number', 'amount', 'status', 'due_date', 'paid_at', 'cash_received_amount',
   'receipt_note', 'created_at',
@@ -30,7 +31,7 @@ const SUBSCRIPTION_KEYS = [
 
 const rawInvoice = {
   id: 'i1', company_id: 'c1', company_name: 'Taxi Nord',
-  company_street: 'Hauptstr.', company_house_number: '7',
+  company_address: 'Hauptstr. 7',
   company_postal_code: '20095', company_city: 'Hamburg',
   plan_name: 'Advanced', invoice_month: 9, invoice_year: 2026,
   invoice_number: 'INV-2026-0007', amount: 49, status: 'open',
@@ -49,7 +50,7 @@ describe('parseInvoiceRow', () => {
   it('carries no account id even when the database sends one', () => {
     // paid_by and collected_by are deliberately not in the read model. If a
     // later migration widened it, the row type must be widened on purpose.
-    const row = parseInvoiceRow({ ...rawInvoice, paid_by: 'u1', collected_by: 'u2' }) as Record<string, unknown>;
+    const row = parseInvoiceRow({ ...rawInvoice, paid_by: 'u1', collected_by: 'u2' }) as unknown as Record<string, unknown>;
     expect(row.paid_by).toBeUndefined();
     expect(row.collected_by).toBeUndefined();
   });
@@ -66,13 +67,51 @@ describe('parseInvoiceRow', () => {
   });
 });
 
+describe('invoiceCompanyAddress', () => {
+  /**
+   * The read model carries `companies.address`, `postal_code` and `city`. The
+   * screen it replaced asked PostgREST for `street` and `house_number`, which
+   * are columns of `company_settings`: the query was answered 42703 and the
+   * invoice list was always empty. Migration 20260924110000's header records it.
+   */
+  const NEWLINE = String.fromCharCode(10);
+
+  it('prints the street line above the postal code and the town', () => {
+    expect(invoiceCompanyAddress(parseInvoiceRow(rawInvoice)))
+      .toBe(`Hauptstr. 7${NEWLINE}20095 Hamburg`);
+  });
+
+  it('leaves out a line the company has not filled in', () => {
+    expect(invoiceCompanyAddress({
+      company_address: 'Hauptstr. 7', company_postal_code: null, company_city: null,
+    })).toBe('Hauptstr. 7');
+    expect(invoiceCompanyAddress({
+      company_address: null, company_postal_code: '20095', company_city: 'Hamburg',
+    })).toBe('20095 Hamburg');
+    expect(invoiceCompanyAddress({
+      company_address: null, company_postal_code: null, company_city: 'Hamburg',
+    })).toBe('Hamburg');
+  });
+
+  it('is null when the company has no address at all, so nothing is printed', () => {
+    // The PDF's companyAddress is nullable for exactly this: an empty line
+    // under the recipient's name reads as a missing address, not as none.
+    expect(invoiceCompanyAddress({
+      company_address: null, company_postal_code: null, company_city: null,
+    })).toBeNull();
+    expect(invoiceCompanyAddress({
+      company_address: '  ', company_postal_code: '', company_city: '   ',
+    })).toBeNull();
+  });
+});
+
 describe('parseSubscriptionRow', () => {
   it('reads exactly the documented columns and no notes', () => {
     const row = parseSubscriptionRow({
       id: 's1', company_id: 'c1', company_name: 'Taxi Nord', plan_id: 'p1',
       plan_name: 'Advanced', status: 'active', starts_at: '2026-01-01',
       billing_day: 5, monthly_price: 49, notes: 'zahlt bar, Chef ist krank',
-    }) as Record<string, unknown>;
+    }) as unknown as Record<string, unknown>;
     expect(Object.keys(row).sort()).toEqual([...SUBSCRIPTION_KEYS].sort());
     expect(row.notes).toBeUndefined();
   });

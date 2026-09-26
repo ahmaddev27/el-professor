@@ -20,8 +20,8 @@
  * ## The columns are deliberately reduced
  *
  * No account id (`paid_by`, `collected_by`), no `notes`, no customer e-mail
- * address. The company's name and postal address are carried because the
- * invoice PDF prints them. Which columns each list carries is a data protection
+ * address and no country. The company's name and postal address are carried
+ * because the invoice PDF prints them. Which columns each list carries is a data protection
  * decision recorded in migration 20260924110000, pinned key by key by
  * `tests/rls/platform-readmodels.sql` and by that migration's own self-check;
  * do not widen a row type without widening the migration first.
@@ -48,8 +48,14 @@ export interface PlatformInvoiceRow {
   id: string;
   company_id: string;
   company_name: string | null;
-  company_street: string | null;
-  company_house_number: string | null;
+  /**
+   * `companies.address` — the street line, one field. The screen this replaced
+   * asked for `street` and `house_number`, which are columns of
+   * `company_settings` and not of `companies`, so the query was refused and the
+   * invoice list was always empty; migration 20260924110000's header has the
+   * whole finding. The PDF composes this above `postal_code city`.
+   */
+  company_address: string | null;
   company_postal_code: string | null;
   company_city: string | null;
   /** The plan of the subscription the invoice hangs off, or null where it is gone. */
@@ -144,8 +150,7 @@ export function parseInvoiceRow(raw: Record<string, unknown>): PlatformInvoiceRo
     id: str(raw.id),
     company_id: str(raw.company_id),
     company_name: nullableStr(raw.company_name),
-    company_street: nullableStr(raw.company_street),
-    company_house_number: nullableStr(raw.company_house_number),
+    company_address: nullableStr(raw.company_address),
     company_postal_code: nullableStr(raw.company_postal_code),
     company_city: nullableStr(raw.company_city),
     plan_name: nullableStr(raw.plan_name),
@@ -162,6 +167,28 @@ export function parseInvoiceRow(raw: Record<string, unknown>): PlatformInvoiceRo
     receipt_note: nullableStr(raw.receipt_note),
     created_at: nullableStr(raw.created_at),
   };
+}
+
+/**
+ * The recipient's address as the invoice PDF and the detail dialog print it:
+ * the street line, then the postal code and town. Null when the company has no
+ * address at all, so a caller shows nothing rather than an empty line — and the
+ * PDF's own field is nullable for that reason.
+ *
+ * It lives here rather than in the page because two callers compose it and
+ * because the composition is what the read model's columns are for.
+ */
+export function invoiceCompanyAddress(row: {
+  company_address: string | null;
+  company_postal_code: string | null;
+  company_city: string | null;
+}): string | null {
+  const street = row.company_address?.trim() || '';
+  const town = [row.company_postal_code?.trim(), row.company_city?.trim()]
+    .filter(Boolean)
+    .join(' ');
+  const lines = [street, town].filter(Boolean);
+  return lines.length === 0 ? null : lines.join('\n');
 }
 
 export function parseSubscriptionRow(raw: Record<string, unknown>): PlatformSubscriptionRow {

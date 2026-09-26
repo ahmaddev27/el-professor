@@ -27,6 +27,7 @@ import {
   BILLING_PAGE_SIZE,
   EMPTY_INVOICE_SUMMARY,
   EMPTY_SUBSCRIPTION_SUMMARY,
+  invoiceCompanyAddress,
   type InvoiceQuery,
   type PlatformInvoiceRow,
   type PlatformInvoiceSummary,
@@ -252,7 +253,10 @@ export default function SubscriptionBillingPage() {
   //
   // The buyer's address comes from the read model, which carries it for exactly
   // this reason (decision D14): a document that cannot name its recipient is
-  // not one to send.
+  // not one to send. It is `companies.address` over `postal_code city`, the two
+  // lines CompaniesPage prints; the `street` + `house_number` this used to
+  // compose are columns of company_settings, so the query behind it was refused
+  // and no invoice ever reached this function (migration 20260924110000).
   const handleDownloadPdf = async (inv: PlatformInvoiceRow) => {
     const seller = await getInvoiceSeller().catch(() => null);
     if (!seller) {
@@ -261,10 +265,7 @@ export default function SubscriptionBillingPage() {
     }
 
     const planName = inv.plan_name || 'Abonnement';
-    const addr = inv.company_street
-      ? [inv.company_street, inv.company_house_number].filter(Boolean).join(' ')
-        + (inv.company_postal_code ? `\n${inv.company_postal_code} ${inv.company_city || ''}` : '')
-      : null;
+    const addr = invoiceCompanyAddress(inv);
     const { sellerName, sellerAddress, sellerTaxInfo, sellerBank } = invoiceSellerFields(seller);
 
     const pdfData: InvoicePdfData = {

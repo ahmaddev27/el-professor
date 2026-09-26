@@ -3,6 +3,7 @@ import { X, Download, CheckCircle, Clock, AlertTriangle, XCircle, Banknote } fro
 import { format } from 'date-fns';
 import { de } from 'date-fns/locale';
 import { useTranslation } from '../contexts/LanguageContext';
+import { invoiceCompanyAddress } from '../lib/platformBilling';
 
 // Month names are date formatting, which stays German in both UI languages
 // (see the header of src/i18n/index.ts).
@@ -11,13 +12,33 @@ const MONTHS_DE = [
   'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember',
 ];
 
+/**
+ * `invoiceCompanyAddress` returns the recipient's address in the two lines the
+ * PDF prints. This dialog's rows are one line each, so it joins them.
+ */
+const NEWLINE = String.fromCharCode(10);
+
 function fmtEur(v: number) {
   return v.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €';
 }
 
+/**
+ * One row of `platform_invoices_list` (migration 20260924110000, decision D14).
+ * It used to be a PostgREST row with `companies(...)` and
+ * `company_subscriptions(subscription_plans(name))` embedded; since the invoice
+ * table is no longer readable across companies, the read model answers those
+ * three as flat columns. `company_address` is `companies.address`, one line —
+ * the `street` and `house_number` this dialog used to print are columns of
+ * `company_settings`, so the old query was refused and this dialog never opened.
+ */
 interface Invoice {
   id: string;
   company_id: string;
+  company_name: string | null;
+  company_address: string | null;
+  company_postal_code: string | null;
+  company_city: string | null;
+  plan_name: string | null;
   invoice_month: number;
   invoice_year: number;
   invoice_number: string;
@@ -27,9 +48,7 @@ interface Invoice {
   paid_at: string | null;
   cash_received_amount: number | null;
   receipt_note: string | null;
-  created_at: string;
-  companies?: { name: string; email?: string | null; street?: string | null; house_number?: string | null; postal_code?: string | null; city?: string | null } | null;
-  company_subscriptions?: { plan_id: string; subscription_plans: { name: string } | null } | null;
+  created_at: string | null;
 }
 
 interface Props {
@@ -44,8 +63,9 @@ export default function InvoiceDetailModal({ invoice, onClose, onDownloadPdf }: 
   const { t } = useTranslation();
   const isPaid = invoice.status === 'paid';
   const isOverdue = invoice.status === 'open' && new Date(invoice.due_date) < new Date();
-  const co = invoice.companies;
-  const planName = invoice.company_subscriptions?.subscription_plans?.name || t('bill.invoice.subscriptionFallback');
+  const companyName = invoice.company_name;
+  const address = invoiceCompanyAddress(invoice);
+  const planName = invoice.plan_name || t('bill.invoice.subscriptionFallback');
   const kind = isPaid ? t('bill.invoice.receipt') : t('bill.invoice.invoice');
 
   const row = (label: string, value: string | React.ReactNode) => (
@@ -63,7 +83,7 @@ export default function InvoiceDetailModal({ invoice, onClose, onDownloadPdf }: 
             <h2 className="font-bold text-lg" style={{ color: 'var(--text-primary)' }}>
               {t('bill.invoice.titled', { kind, number: invoice.invoice_number })}
             </h2>
-            <p className="text-xs mt-0.5" style={{ color: 'var(--text-tertiary)' }}>{co?.name || t('common.unknown')}</p>
+            <p className="text-xs mt-0.5" style={{ color: 'var(--text-tertiary)' }}>{companyName || t('common.unknown')}</p>
           </div>
           <button onClick={onClose} style={{ color: 'var(--text-tertiary)' }}><X size={20} /></button>
         </div>
@@ -82,8 +102,8 @@ export default function InvoiceDetailModal({ invoice, onClose, onDownloadPdf }: 
 
           {/* Details */}
           <div>
-            {row(t('bill.invoice.company'), co?.name || '-')}
-            {co?.street && row(t('common.address'), `${co.street} ${co.house_number || ''}, ${co.postal_code || ''} ${co.city || ''}`)}
+            {row(t('bill.invoice.company'), companyName || '-')}
+            {address && row(t('common.address'), address.split(NEWLINE).join(', '))}
             {row(t('bill.invoice.plan'), planName)}
             {row(t('bill.invoice.period'), `${MONTHS_DE[invoice.invoice_month - 1]} ${invoice.invoice_year}`)}
             {row(t('bill.invoice.number'), invoice.invoice_number)}
