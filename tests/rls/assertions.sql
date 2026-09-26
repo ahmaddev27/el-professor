@@ -299,19 +299,19 @@ $fn$;
   SECURITY INVOKER function must not **call** a function the role may not
   execute. This reader finds those.
 
-  **It warns; it does not fail.** Not hedging — the reason is specific. The rule
-  above ships as a failure because its false-positive count on a clean head was
-  known before it shipped: 36 without the reachability branches, 0 with them, so
-  a red run means a real defect. This one has no such number yet: nobody has run
-  it, and it has two noise sources the schema reader does not — a function name
-  can appear inside a string literal that builds dynamic SQL, where
-  comment-stripping does not reach it, and `service_role` holds Supabase's
-  default EXECUTE on a great many invoker functions while a large number of this
-  project's own functions are deliberately `authenticated`-only, so a call that
-  no service-role path ever makes still matches. Shipping it as a failure before
-  that count is read would either break the kit for everyone or, worse, be
-  silenced by whoever it blocked. It becomes a failure in the commit that reads
-  the count, with any genuine hit fixed in the same one.
+  **It fails, with one recorded exemption.** It shipped as a warning for exactly
+  one release, while its false-positive count on a clean head was unknown — the
+  rule above could ship red immediately because its count was known first (36
+  without the reachability branches, 0 with them). That count is now in: **one
+  row**, measured 26.09.2026, and neither noise source this reader was built to
+  tolerate fired. So it fails like the other two, and the single explained case is
+  a keyed exemption below rather than a warning nobody reads twice.
+
+  The two noise sources are still real and are the reason the narrowing below
+  matters: a function name can appear inside a string literal that builds dynamic
+  SQL, where comment-stripping does not reach it, and `service_role` holds
+  Supabase's default EXECUTE on a great many invoker functions while a large
+  number of this project's own functions are deliberately `authenticated`-only.
 
   What it is narrowed by, so the number means something:
 
@@ -354,6 +354,41 @@ LANGUAGE sql STABLE AS $fn$
      AND NOT EXISTS (SELECT 1 FROM pg_proc p
                       WHERE p.pronamespace = cd.nspoid AND p.proname = cd.name
                         AND has_function_privilege(cd.api_role, p.oid, 'EXECUTE'))
+$fn$;
+
+/*
+  The one case on a clean head, recorded with its reason and failed on anything
+  else. Measured 26.09.2026: this reader returns exactly one row, and neither of
+  the noise sources it was built to tolerate fired — no dynamic-SQL string
+  literal, no `service_role` match.
+
+  This repository's idiom for a known, explained case is not a warning that a
+  passing run prints and nobody reads. It is a recorded exemption with a reason
+  beside it, failing on anything that moves: `matrix.sql` does it per cell,
+  `tests/rls/subscriptions.sql` does it as `HOLE[revival]`. So this reader fails,
+  and this table is the exemption.
+
+  Keyed on all three of role, invoker function and called function. A wildcard on
+  any one of them would let the exemption absorb a different defect — another
+  function reaching the same helper, or this function reaching something else.
+
+  **What would make the exemption wrong:** `roles_insert` is `TO authenticated`,
+  so `anon` cannot insert a role whatever the grant on the helper says, and the
+  trigger is unreachable for it. Granting `anon` EXECUTE would widen what it can
+  reach in order to change a refusal's SQLSTATE, which is why 20260923120000
+  does not. **If `roles_insert` ever admits `anon`, that premise is gone** and the
+  grant has to be reconsidered rather than this line extended. The same fact is
+  recorded at `roles I` in matrix.sql; the two move together.
+*/
+CREATE OR REPLACE FUNCTION _execute_reach_exemptions()
+RETURNS TABLE (api_role text, routine text, called text, reason text)
+LANGUAGE sql IMMUTABLE AS $fn$
+  SELECT * FROM (VALUES
+    ('anon'::text,
+     'app_private.enforce_company_role_shape()'::text,
+     'public.role_name_is_system_reserved'::text,
+     'roles_insert is TO authenticated, so anon never reaches this trigger (20260923120000)'::text)
+  ) AS t(api_role, routine, called, reason)
 $fn$;
 
 /*
@@ -634,7 +669,6 @@ BEGIN
     findings text;
     n_hits   int;
     n_scan   int;
-    probe    record;
   BEGIN
     /*
       The positive control, first and in a subtransaction that is always
@@ -716,19 +750,33 @@ BEGIN
     END IF;
     RAISE NOTICE 'ok  no SECURITY INVOKER function an API role can reach names a schema it cannot use (% invoker functions scanned)', n_scan;
 
-    -- The EXECUTE class: reported, not asserted. The reader's header says why,
-    -- and the count these lines print is what decides when it becomes a failure.
-    SELECT count(*) INTO n_hits FROM _invoker_calls_unexecutable_function();
-    IF n_hits = 0 THEN
-      RAISE NOTICE 'ok  no SECURITY INVOKER function an API role can reach calls a function it may not execute (0 — this reader can become a failure)';
-    ELSE
-      RAISE WARNING 'EXECUTE-REACH % case(s): a SECURITY INVOKER function an API role can reach calls a function that role may not execute. Masked by the plan cache exactly as a schema is, so matrix.sql cannot be relied on to show it. Reported and not failed until the count on a clean head is read — see the reader''s header', n_hits;
-      FOR probe IN SELECT * FROM _invoker_calls_unexecutable_function()
-                    ORDER BY api_role, routine, called LOOP
-        RAISE WARNING 'EXECUTE-REACH   %: % (%) calls %',
-          probe.api_role, probe.routine, probe.reached_by, probe.called;
-      END LOOP;
+    -- The EXECUTE class. Fails like the two above; the one explained case on a
+    -- clean head is a keyed exemption, and anything else turns the run red.
+    SELECT count(*),
+           coalesce(string_agg(format('%s reaches %s (%s) and calls %s',
+                                      h.api_role, h.routine, h.reached_by, h.called), E'\n    '), '')
+      INTO n_hits, findings
+      FROM _invoker_calls_unexecutable_function() h
+     WHERE NOT EXISTS (SELECT 1 FROM _execute_reach_exemptions() x
+                        WHERE x.api_role = h.api_role
+                          AND x.routine = h.routine
+                          AND x.called = h.called);
+    IF n_hits > 0 THEN
+      RAISE EXCEPTION E'FAIL: a SECURITY INVOKER function an API role can reach calls a function that role may not execute — the call is refused 42501 for every such caller, and the plan cache can hide it:\n    %', findings;
     END IF;
+    -- The exemptions must still be real, or a row silently kept alive here would
+    -- excuse a defect that no longer looks like it.
+    SELECT count(*) INTO n_scan
+      FROM _execute_reach_exemptions() x
+     WHERE NOT EXISTS (SELECT 1 FROM _invoker_calls_unexecutable_function() h
+                        WHERE x.api_role = h.api_role
+                          AND x.routine = h.routine
+                          AND x.called = h.called);
+    IF n_scan > 0 THEN
+      RAISE EXCEPTION 'FAIL: % EXECUTE-reach exemption(s) match nothing any more — the case they excuse is gone, so the line goes with it', n_scan;
+    END IF;
+    RAISE NOTICE 'ok  no SECURITY INVOKER function an API role can reach calls a function it may not execute, beyond % recorded exemption(s)',
+      (SELECT count(*) FROM _execute_reach_exemptions());
 
     -- And the same for a policy expression, which is parsed under the querying
     -- role and binds SECURITY DEFINER functions too.

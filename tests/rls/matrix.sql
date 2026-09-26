@@ -1542,27 +1542,35 @@ INSERT INTO _mx_expected (tbl, op, anon, viewer, editor, supervisor, admin, othe
 ('role_permissions',                   'D', '..', '..', '..', '..', 'Y.', '.Y', '..', NULL),
 ('role_permissions',                   'M', '..', '..', '..', '..', 'T.', '.T', '..', NULL),
 ('roles',                              'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
--- anon was RR until the plan-cache guard went into `_mx_become`, and the move
--- to PP is the guard working, not a change in access.
+-- anon was RR until the plan-cache guard went into `_mx_become`, and the move to
+-- PP is the guard working. **anon is refused either way — the reason moved, not
+-- the access.** Say that first, because it is the part a reader needs.
 --
--- 20260923120000 puts an INSERT trigger on this table whose function reads
+-- The observation, which is all this comment asserts: 20260923120000 puts an
+-- INSERT trigger on this table whose function calls
 -- `public.role_name_is_system_reserved`, granted to `authenticated` and
--- `service_role` and to nobody else. Under the warm cache the owner's pass had
--- already resolved that call, so anon's INSERT was never checked against the
--- grant and `roles_insert`'s WITH CHECK refused first: R. With the plans
--- discarded the function check runs first and answers
--- `42501 permission denied for function role_name_is_system_reserved`: P.
+-- `service_role` and not to `anon`. With the owner's plans still cached, anon's
+-- INSERT was refused by `roles_insert`'s WITH CHECK and read R. With the plans
+-- discarded it is refused by the missing grant on that function and reads P.
 --
--- **anon is refused either way** — the outcome did not move, the reason did. It
--- is also the second, independent observation of the class
--- tests/tools/plan-cache-repro.sql measures at step F: function EXECUTE is
--- resolved at plan time and is masked exactly as schema USAGE is.
+-- **The mechanism is deliberately not stated here, because it is not yet
+-- measured.** Two accounts have been offered and each has a problem: "the cached
+-- EXECUTE check was skipped" is hard to square with step F1 of
+-- tests/tools/plan-cache-repro.sql, where a plpgsql callee is refused with the
+-- cache just as warm; and "the planner inlined the call away" is hard to square
+-- with that helper carrying a `SET search_path` clause, which the optimiser's own
+-- rules say blocks inlining. Step F3 of that file is this helper's exact shape —
+-- `sql`, `STABLE`, with a SET clause — and it is the probe that settles it. Write
+-- the mechanism here when F3 has answered, and not before: a reading of the
+-- PostgreSQL source has been wrong about this three times on this branch, in
+-- both directions.
 --
 -- anon is deliberately left without that EXECUTE. `roles_insert` is
 -- `TO authenticated`, so anon cannot insert a role whatever the grant says;
 -- granting it would widen what anon can reach in order to change a refusal's
--- SQLSTATE. That is the reasoning 20260923120000's own grant block gives, and
--- this cell now agrees with it out loud.
+-- SQLSTATE. That is the reasoning 20260923120000's own grant block gives, and it
+-- is the same fact as the one named exemption in assertions.sql's EXECUTE-reach
+-- rule — if `roles_insert` ever admits anon, both need revisiting together.
 ('roles',                              'I', 'PP', 'RR', 'RR', 'RR', 'YR', 'RY', 'RR', NULL),
 -- …and the same for the roles themselves: visible only through a context.
 ('roles',                              'U', '..', '..', '..', '..', 'Y.', '.Y', '..', NULL),
