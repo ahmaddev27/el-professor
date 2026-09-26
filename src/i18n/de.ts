@@ -2227,6 +2227,10 @@ export const de = {
   'sa.status.suspended':                   'Gesperrt',
   'sa.status.trial':                       'Testphase',
   'sa.subs.accessDenied':                  'Zugriff verweigert.',
+  // Entscheidung D14 (24.09.2026): Rechnungen, Abonnements und Zahlungen liest
+  // nur billing.manage. Support und read_only behalten die Unternehmensliste
+  // und den Abo-Status jedes Unternehmens.
+  'sa.subs.noAccessBody':                  'Rechnungen und Zahlungen sind der Rolle „Billing" vorbehalten. Der Abo-Status jedes Unternehmens steht in der Unternehmensliste.',
   'sa.subs.actionCancel':                  'Stornieren',
   'sa.subs.actionInvoicePdf':              'Rechnung PDF',
   'sa.subs.actionMarkPaidCash':            'Als bar bezahlt',

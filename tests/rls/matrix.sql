@@ -146,16 +146,21 @@
   3.13b (20260923100000) closed the last of the shell that is the *company's*
   own data rather than the platform's record of it: `company_settings` SELECT
   dropped its `companies.read` branch, so `super` reads neither row and the two
-  context principals read the company they opened. What stays — `companies`,
-  `company_subscriptions`, `subscription_invoices`,
-  `subscription_payment_audit` and `subscription_coverage`, all on
-  `companies.read`, plus the `codes.manage` reads — is the platform's own
-  record of a customer, kept there by plan 3.A. Closing it means moving
-  CompaniesPage, SuperAdminDashboard, SubscriptionBillingPage and five smaller
-  company pickers onto paged, audited read models, and a company list that can
-  only be read inside a context is self-defeating, since that list is how a
-  company is chosen to open one on. That is open decision D14 in HANDOFF.md,
-  and the cells stay untagged — they are a decision, not a hole.
+  context principals read the company they opened.
+
+  D14, answered on 24.09.2026 (20260924110000), split what was left. The owner
+  took the middle path. `companies` **stays** on `companies.read`: that list is
+  how a company is chosen to open a context on, so requiring a context to read
+  it is circular, and it carries no money — its S cell is still YY and that is a
+  decision, not a hole. The four that carry a customer's billing address and
+  what they paid — `company_subscriptions`, `subscription_invoices`,
+  `subscription_payment_audit` and `subscription_coverage` — moved behind two
+  audited read models on `billing.manage`, so their S cells read '..' for
+  `super` and 'Y.' for the two context principals, and four more cells moved
+  with them for a mechanical reason written out at the lines themselves. The
+  `codes.manage` reads are untouched: an activation code is not a customer's
+  money. What the four tables cost a `support` or `read_only` account, and what
+  it keeps, is section 12 of tests/rls/platform-readmodels.sql.
 
   Slice C (20260923130000) closed the last thing 3.3 wrote down and left alone:
   its own table list says "no role gate today, and none added: a viewer writes
@@ -1322,18 +1327,38 @@ INSERT INTO _mx_expected (tbl, op, anon, viewer, editor, supervisor, admin, othe
 ('company_settings',                   'U', '..', '..', '..', '..', 'Y.', '.Y', '..', NULL),
 ('company_settings',                   'D', '..', '..', '..', '..', '..', '..', '..', NULL),
 ('company_settings',                   'M', '..', '..', '..', '..', 'R.', '.R', '..', NULL),
--- Not a hole and not a support-session matter: the money a platform account
--- reads to run the business is companies.read's, which every staff role holds
--- by design (plan 3.A). 20260917140000 confines the *business* tables; these
--- three stay where 20260917130000 put them.
-('company_subscriptions',              'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'YY', NULL),
+-- The money moved with decision D14 (24.09.2026, migration 20260924110000).
+-- Until then this read was `companies.read`'s, which every staff role holds by
+-- design (plan 3.A), so a `read_only` account read every customer's invoices,
+-- amounts and payment trail with no context and no audit row — wider than
+-- platform_drivers_list allows for a driver's name, and the asymmetry the
+-- decision closed. The predicate is the tenant term alone now, which for a
+-- company-less staff account is the open context's company, so `super` reads
+-- neither row and the two context principals read company A's (the override
+-- below). Across companies a platform account reads these tables through
+-- platform_invoices_list and platform_subscriptions_list, which ask
+-- billing.manage and write one audit row per call.
+--
+-- U, D and M move with S and not on their own: their own policies still name
+-- billing.manage with no company term, but `UPDATE … SET notes = notes WHERE
+-- id = …` and `DELETE … WHERE id = …` read a column, so PostgreSQL applies the
+-- SELECT policies to the existing row as well (the rule this file's header
+-- already states for M), and a row the SELECT policy hides cannot be written.
+-- Nothing in the product notices: every billing write is one of the SECURITY
+-- DEFINER RPCs of 20260916130000, which run as their owner and never through
+-- these policies.
+('company_subscriptions',              'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
 ('company_subscriptions',              'I', 'RR', 'RR', 'RR', 'RR', 'RR', 'RR', 'YY', NULL),
-('company_subscriptions',              'U', '..', '..', '..', '..', '..', '..', 'YY', NULL),
-('company_subscriptions',              'D', '..', '..', '..', '..', '..', '..', 'YY', NULL),
--- M was YY: billing.manage could re-point an existing subscription at another
--- company, because these policies carry no company term at all. 20260917130000
--- pins company_id with a trigger, so the row may be edited and not moved.
-('company_subscriptions',              'M', '..', '..', '..', '..', '..', '..', 'TT', NULL),
+('company_subscriptions',              'U', '..', '..', '..', '..', '..', '..', '..', NULL),
+('company_subscriptions',              'D', '..', '..', '..', '..', '..', '..', '..', NULL),
+-- M was YY before 20260917130000: billing.manage could re-point an existing
+-- subscription at another company, because these policies carry no company term
+-- at all. That migration pins company_id with a trigger, so the row could be
+-- edited and not moved (TT). Since D14 the row cannot even be taken with
+-- SELECT … FOR UPDATE, so no UPDATE is issued and the pin trigger never speaks:
+-- '..' is the row never having been reachable, where TT was the policy admitting
+-- it and a trigger catching it.
+('company_subscriptions',              'M', '..', '..', '..', '..', '..', '..', '..', NULL),
 ('discount_code_redemptions',          'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'YY', NULL),
 ('discount_code_redemptions',          'I', 'RR', 'RR', 'RR', 'RR', 'RR', 'RR', 'RR', NULL),
 ('discount_code_redemptions',          'U', '..', '..', '..', '..', '..', '..', '..', NULL),
@@ -1619,7 +1644,12 @@ INSERT INTO _mx_expected (tbl, op, anon, viewer, editor, supervisor, admin, othe
 -- the point, since the page explaining the block is the one that shows them.
 -- Every other cell is PP: `authenticated` is granted SELECT and nothing else,
 -- and the only writers are the SECURITY DEFINER helpers in app_private.
-('subscription_coverage',              'S', 'PP', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'YY', NULL),
+--
+-- S moved with decision D14: the capability branch is gone, so `super` reads
+-- neither period. No read model carries this table — nothing in the product
+-- reads a coverage period across companies, and one that no screen shows would
+-- be code with no caller — so inside a context is the only way to see one.
+('subscription_coverage',              'S', 'PP', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
 ('subscription_coverage',              'I', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', NULL),
 ('subscription_coverage',              'U', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', NULL),
 ('subscription_coverage',              'D', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', NULL),
@@ -1629,14 +1659,26 @@ INSERT INTO _mx_expected (tbl, op, anon, viewer, editor, supervisor, admin, othe
 ('subscription_admin_actions',         'U', '..', '..', '..', '..', '..', '..', 'YY', NULL),
 ('subscription_admin_actions',         'D', '..', '..', '..', '..', '..', '..', 'YY', NULL),
 ('subscription_admin_actions',         'M', '..', '..', '..', '..', '..', '..', 'YY', NULL),
-('subscription_invoices',              'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'YY', NULL),
+-- Decision D14, with company_subscriptions above: S, U, D and M move together,
+-- for the reason written out there. The invoice list a platform account reads
+-- across companies is platform_invoices_list, on billing.manage, one audit row
+-- per call. `generate_invoice_number` had to become SECURITY DEFINER in the same
+-- migration or invoice generation would have reported every company as skipped
+-- (its rpc line below moved with it).
+('subscription_invoices',              'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
 ('subscription_invoices',              'I', 'RR', 'RR', 'RR', 'RR', 'RR', 'RR', 'YY', NULL),
-('subscription_invoices',              'U', '..', '..', '..', '..', '..', '..', 'YY', NULL),
-('subscription_invoices',              'D', '..', '..', '..', '..', '..', '..', 'YY', NULL),
--- M was YY, and an invoice re-attributed to another company re-attributes
--- money. Pinned by the same trigger.
-('subscription_invoices',              'M', '..', '..', '..', '..', '..', '..', 'TT', NULL),
-('subscription_payment_audit',         'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'YY', NULL),
+('subscription_invoices',              'U', '..', '..', '..', '..', '..', '..', '..', NULL),
+('subscription_invoices',              'D', '..', '..', '..', '..', '..', '..', '..', NULL),
+-- M was YY before 20260917130000, and an invoice re-attributed to another
+-- company re-attributes money; that migration pinned it with a trigger (TT).
+-- Since D14 the row cannot be taken at all, so the trigger never speaks.
+('subscription_invoices',              'M', '..', '..', '..', '..', '..', '..', '..', NULL),
+-- The payment trail: S moves with the two tables above, and nothing else can.
+-- I stays YY — an INSERT with no RETURNING reads no column, so no SELECT policy
+-- applies to it — and there is no UPDATE or DELETE policy at all. No read model
+-- carries the trail: nothing in the product reads it, across companies or
+-- otherwise.
+('subscription_payment_audit',         'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
 ('subscription_payment_audit',         'I', 'RR', 'RR', 'RR', 'RR', 'RR', 'RR', 'YY', NULL),
 ('subscription_payment_audit',         'U', '..', '..', '..', '..', '..', '..', '..', NULL),
 ('subscription_payment_audit',         'D', '..', '..', '..', '..', '..', '..', '..', NULL),
@@ -1869,7 +1911,42 @@ UPDATE _mx_expected x SET staff_view = o.sv, staff_support = o.ss
     ('user_profiles',            'U', '..', 'Y.'),
     ('user_profiles',            'D', '..', 'Y.'),
     ('user_profiles',            'M', '..', 'T.'),
-    ('companies',                'D', 'TT', 'TT')
+    ('companies',                'D', 'TT', 'TT'),
+    -- The four billing tables, decision D14 (20260924110000). Both columns used
+    -- to copy super's YY, which is what the capability answered: the context had
+    -- nothing to do with it. The capability is gone from their SELECT, so the
+    -- context is now the whole answer — company A's rows, not company B's, in
+    -- either mode. This is the line that says a *view* context reads a
+    -- customer's invoices and subscriptions at all, and reading them is what a
+    -- view context is for.
+    --
+    -- U and D follow S rather than their own policies, which still name
+    -- billing.manage with no company term: the probe's UPDATE and DELETE read a
+    -- column in their WHERE, so the SELECT policy decides which row they can
+    -- reach. M is 'T.' for the same reason — company A's row can be taken with
+    -- SELECT … FOR UPDATE, the UPDATE is issued, and pin_billing_company_id
+    -- refuses the move; company B's row is never visible.
+    --
+    -- **Deliberately recorded, not closed here:** a *view* context therefore
+    -- still edits and deletes the supported company's subscription and invoice
+    -- rows. These two tables carry no refuse_read_only_context_write — they are
+    -- the account shell, not one of 3.4a's 36 tenant tables — and D14 is a
+    -- decision about who may *read* the money. Narrowing their writes to the
+    -- support session, the way 3.13a narrowed company_settings and
+    -- user_profiles, is its own slice. It is strictly tighter than before, where
+    -- both context modes wrote *either* company's rows.
+    ('company_subscriptions',      'S', 'Y.', 'Y.'),
+    ('company_subscriptions',      'U', 'Y.', 'Y.'),
+    ('company_subscriptions',      'D', 'Y.', 'Y.'),
+    ('company_subscriptions',      'M', 'T.', 'T.'),
+    ('subscription_invoices',      'S', 'Y.', 'Y.'),
+    ('subscription_invoices',      'U', 'Y.', 'Y.'),
+    ('subscription_invoices',      'D', 'Y.', 'Y.'),
+    ('subscription_invoices',      'M', 'T.', 'T.'),
+    -- no UPDATE or DELETE policy, so only S can move
+    ('subscription_payment_audit', 'S', 'Y.', 'Y.'),
+    -- SELECT is the only privilege a client role holds
+    ('subscription_coverage',      'S', 'Y.', 'Y.')
   ) AS o(tbl, op, sv, ss)
  WHERE x.tbl = o.tbl AND x.op = o.op;
 
@@ -2661,11 +2738,29 @@ INSERT INTO _mx_rpc (label, stmt, want, hole) VALUES
     ('platform_staff_list() is allowed',
      $q$SELECT platform_staff_list() ->> 'ok'$q$,
      'PNNNNNY', NULL),
+    -- the seventh and eighth read models, 20260924110000 (decision D14): the
+    -- money. Both ask billing.manage, which `super` holds as an owner and no
+    -- company principal does. tests/rls/platform-readmodels.sql section 12 takes
+    -- the other three staff roles through them — `support` and `read_only` are
+    -- refused, which is the behaviour change the decision makes
+    ('platform_invoices_list() is allowed',
+     $q$SELECT platform_invoices_list() ->> 'ok'$q$,
+     'PNNNNNY', NULL),
+    ('platform_subscriptions_list() is allowed',
+     $q$SELECT platform_subscriptions_list() ->> 'ok'$q$,
+     'PNNNNNY', NULL),
     -- anon's EXECUTE revoked by 20260915120000; the platform's invoice screen
-    -- calls it signed in
+    -- calls it signed in. It was SECURITY INVOKER and read subscription_invoices
+    -- under the caller's own RLS, so every principal got a number — a company
+    -- user's computed from its own invoices, which was never a number it could
+    -- use. D14 narrowed that policy, which would have left it answering
+    -- 'INV-<year>-0001' for every call and made invoice generation report every
+    -- company as skipped and create nothing, with no error anywhere. It is a
+    -- definer behind billing.manage now and answers NULL ('0' here) to anyone
+    -- else, which GenerateInvoicesModal already reports per company.
     ('generate_invoice_number(2026)',
      $q$SELECT generate_invoice_number(2026)$q$,
-     'PYYYYYY', NULL),
+     'P00000Y', NULL),
     -- anon's EXECUTE on both activation-code RPCs revoked by 20260915110000
     -- 20260916130020: a member of the code's own company still previews it, and
     -- the super admin no longer does — it belongs to no company, and the

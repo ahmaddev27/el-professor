@@ -2210,6 +2210,7 @@ export const en: PartialDictionary = {
   'sa.status.suspended':                   'Suspended',
   'sa.status.trial':                       'Trial',
   'sa.subs.accessDenied':                  'Access denied.',
+  'sa.subs.noAccessBody':                  'Invoices and payments are the billing role’s. Every company’s subscription state is in the company list.',
   'sa.subs.actionCancel':                  'Cancel invoice',
   'sa.subs.actionInvoicePdf':              'Invoice PDF',
   'sa.subs.actionMarkPaidCash':            'Mark as paid in cash',

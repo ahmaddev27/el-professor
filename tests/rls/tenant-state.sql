@@ -594,9 +594,36 @@ BEGIN
     AND _ts_try(owner_u, format('UPDATE companies SET name = name WHERE id = %L', co_ok)) = 'rows 1');
   PERFORM _ts_ok('capabilities: support cannot delete a company (companies.hard_delete is the owner''s)',
     _ts_try(support, format('DELETE FROM companies WHERE id = %L', _ts_id('company:rejected'))) = 'rows 0');
-  PERFORM _ts_ok('capabilities: read_only cannot write a subscription or an invoice, billing can',
+  -- Both answer `rows 0` since 20260924110000 (decision D14), and for the two
+  -- different reasons the user_profiles line below already describes: read_only
+  -- holds no billing.manage and never reaches the USING clause, while billing
+  -- holds it and cannot see the row its UPDATE names. The SELECT policy of
+  -- company_subscriptions is the tenant term alone now, neither principal has a
+  -- context open, and an UPDATE whose WHERE reads `company_id` needs the SELECT
+  -- policy to admit the row first. So the line no longer claims to contrast
+  -- them; it asserts that no platform account writes a company's subscription
+  -- from outside it.
+  --
+  -- billing's own writes are unaffected where the product makes them: every
+  -- billing write is one of the SECURITY DEFINER RPCs of 20260916130000, which
+  -- run as their owner and never through these policies. The capability itself
+  -- stays pinned in tests/rls/platform-authority.sql and its RPCs in
+  -- tests/rls/platform-rpcs.sql.
+  PERFORM _ts_ok('capabilities: with no context open, no platform account writes a company''s subscription through the table — billing included (D14)',
     _ts_try(readonly, format('UPDATE company_subscriptions SET monthly_price = monthly_price WHERE company_id = %L', co_ok)) = 'rows 0'
-    AND _ts_try(billing, format('UPDATE company_subscriptions SET monthly_price = monthly_price WHERE company_id = %L', co_ok)) = 'rows 1');
+    AND _ts_try(billing, format('UPDATE company_subscriptions SET monthly_price = monthly_price WHERE company_id = %L', co_ok)) = 'rows 0');
+  -- …and it does not read them either, which is the half the decision is about.
+  -- These four lines asserted nothing before: the SELECT carried
+  -- `OR platform_can('companies.read')`, held by all four staff roles, so every
+  -- customer's invoices, amounts, payment trail and coverage periods were
+  -- readable with no context and no audit row — wider than platform_drivers_list
+  -- allows for a driver's name. Across companies it is the two audited read
+  -- models now (tests/rls/platform-readmodels.sql section 12).
+  PERFORM _ts_ok('capabilities: …and with no context open no platform account reads a company''s money (D14)',
+    _ts_try(owner_u,  format('SELECT count(*)::text FROM company_subscriptions WHERE company_id = %L', co_ok)) = '0'
+    AND _ts_try(billing, format('SELECT count(*)::text FROM subscription_invoices WHERE company_id = %L', co_ok)) = '0'
+    AND _ts_try(support, format('SELECT count(*)::text FROM subscription_invoices WHERE company_id = %L', co_ok)) = '0'
+    AND _ts_try(readonly, format('SELECT count(*)::text FROM company_subscriptions WHERE company_id = %L', co_ok)) = '0');
   PERFORM _ts_ok('capabilities: support cannot change the price list (pricing.manage is billing''s and the owner''s)',
     _ts_try(support, 'UPDATE subscription_plans SET name = name') = 'rows 0'
     AND _ts_try(billing, 'UPDATE subscription_plans SET name = name') <> 'rows 0');

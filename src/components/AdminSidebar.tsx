@@ -28,7 +28,11 @@ interface AdminNavItem {
 const ADMIN_NAV_ITEMS: AdminNavItem[] = [
   { path: '/admin',                  icon: BarChart3,   labelKey: 'admin.nav.platform',    requires: 'companies.read', end: true },
   { path: '/admin/companies',        icon: Building2,   labelKey: 'admin.nav.companies',   requires: 'companies.read' },
-  { path: '/admin/billing',          icon: Receipt,     labelKey: 'admin.nav.billing',     requires: 'companies.read' },
+  // Decision D14 (24.09.2026): the invoices, the subscriptions and the payment
+  // trail are behind two audited read models that ask for billing.manage, so
+  // the entry follows that capability. A support or read_only account keeps
+  // /admin/companies, where every company's own subscription state is shown.
+  { path: '/admin/billing',          icon: Receipt,     labelKey: 'admin.nav.billing',     requires: 'billing.manage' },
   // The diagnosis reads a company's Fahrtenbuch and planning data.
   { path: '/admin/abnahme-diagnose', icon: Stethoscope, labelKey: 'admin.nav.diagnostics', requires: 'business.read' },
   // The directories read every company's vehicles, drivers and users through

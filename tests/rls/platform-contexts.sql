@@ -40,6 +40,11 @@
                       context and not `companies.read` (20260923100000, plan
                       3.13b): four roles × {no context, view, support, another
                       company's context}
+   16. the money      the four billing tables follow the context and not
+                      `companies.read` (20260924110000, decision D14) — and the
+                      inverse pair only this file can state: `billing` reads them
+                      through the audited call and can open no context, while
+                      `read_only` can open a context and is refused the call
 
   What is deliberately not here: the storage policies, which are
   tests/rls/storage.sql's (20260920100000, the file half of plan 3.C), and the
@@ -578,10 +583,14 @@ BEGIN
     so company Y's row is now invisible to a session open on company X, and
     both halves of the answer are the same zero.
 
-    The distinction the old line drew still exists on the tables that kept a
-    capability — companies, the three subscription tables and
-    subscription_coverage (open decision D14) — and section 15 covers the new
-    rule across all four staff roles and every context state.
+    The distinction the old line drew still exists on the one table that kept a
+    capability: `companies`. Decision D14 (24.09.2026, 20260924110000) took the
+    other four — company_subscriptions, subscription_invoices,
+    subscription_payment_audit and subscription_coverage — behind two audited
+    read models on billing.manage, so a session open on company X reads none of
+    company Y's money either. `companies` stays open by the same decision,
+    because that list is how a company is chosen to open a context on. Section 15
+    covers the new rule across all four staff roles and every context state.
   */
   PERFORM _pc_ok('support: …and nothing of the other company''s settings, which it no longer reads either (3.13b)',
     _pc_try(u_o, s_o, format('UPDATE company_settings SET company_name = ''PC support'' WHERE company_id = %L', co_y))
@@ -1133,6 +1142,150 @@ BEGIN
   PERFORM _pc_reset();
 
   PERFORM _pc_ok('settings: every context this section opened is closed again',
+    (SELECT count(*) FROM app_private.platform_company_contexts WHERE closed_at IS NULL) = 0);
+END $$;
+
+-- ─── 16. the money: the context or the audited call, and the two do not meet ─
+--
+-- Decision D14 (24.09.2026, migration 20260924110000). `company_subscriptions`,
+-- `subscription_invoices`, `subscription_payment_audit` and
+-- `subscription_coverage` lost the `companies.read` branch every staff role
+-- holds, so what is left is the tenant term — the open context's company for a
+-- company-less staff account — plus two audited read models on
+-- **billing.manage**.
+--
+-- The pair those two halves make is the whole shape of the decision, and neither
+-- file alone can see it. tests/rls/platform-readmodels.sql section 12 takes the
+-- roles through the read models; tests/rls/matrix.sql probes an owner with a
+-- context. What only this file can state is the **inverse**:
+--
+--   billing    holds billing.manage, so it reads every customer's money through
+--              the audited call — and cannot open a context at all (15c), so the
+--              audited call is the only way it ever reaches an invoice
+--   read_only  cannot make the audited call, and can open a *view* context — so
+--              it reads the money of the one company it opened, recorded as a
+--              context rather than as a read row
+--
+-- Nothing is open when this section starts: section 15 closes the three contexts
+-- it opened and asserts it.
+
+DO $$
+DECLARE
+  co_x  constant uuid := _pc_id('company:x');
+  co_y  constant uuid := _pc_id('company:y');
+  u_ro  constant uuid := _pc_id('user:readonly');
+  s_ro  constant uuid := _pc_id('session:readonly');
+  u_bi  constant uuid := _pc_id('user:billing');
+  s_bi  constant uuid := _pc_id('session:billing');
+  v      record;
+  v_open jsonb;
+  v_qual text;
+BEGIN
+  -- One subscription, one invoice, one payment-trail row and one coverage period
+  -- per company: enough for each table's predicate to have something to answer
+  -- about on both sides.
+  INSERT INTO subscription_plans (id, name, monthly_price, included_cars)
+  VALUES (_pc_id('plan:pc'), 'PC Plan', 49, 5)
+  ON CONFLICT (id) DO NOTHING;
+
+  INSERT INTO company_subscriptions (id, company_id, plan_id, monthly_price) VALUES
+    (_pc_id('sub:x'), co_x, _pc_id('plan:pc'), 49),
+    (_pc_id('sub:y'), co_y, _pc_id('plan:pc'), 49)
+  ON CONFLICT (id) DO NOTHING;
+
+  INSERT INTO subscription_invoices (id, company_id, subscription_id, invoice_month, invoice_year,
+                                     invoice_number, amount, status, due_date) VALUES
+    (_pc_id('inv:x'), co_x, _pc_id('sub:x'), 1, 2026, 'PC-2026-0001', 49, 'open', '2026-01-31'),
+    (_pc_id('inv:y'), co_y, _pc_id('sub:y'), 1, 2026, 'PC-2026-0002', 49, 'open', '2026-01-31')
+  ON CONFLICT (id) DO NOTHING;
+
+  INSERT INTO subscription_payment_audit (id, invoice_id, company_id, action, changed_by) VALUES
+    (_pc_id('pay:x'), _pc_id('inv:x'), co_x, 'pc', _pc_id('user:owner')),
+    (_pc_id('pay:y'), _pc_id('inv:y'), co_y, 'pc', _pc_id('user:owner'))
+  ON CONFLICT (id) DO NOTHING;
+
+  INSERT INTO subscription_coverage (id, company_id, source, period_start, period_end) VALUES
+    (_pc_id('cov:x'), co_x, 'manual', now(), now() + interval '30 days'),
+    (_pc_id('cov:y'), co_y, 'manual', now(), now() + interval '30 days')
+  ON CONFLICT (id) DO NOTHING;
+
+  -- 16a. The predicates themselves: the tenant term, no capability, no seam.
+  FOR v IN SELECT * FROM (VALUES
+    ('company_subscriptions',      'company_subscriptions_select'),
+    ('subscription_invoices',      'subscription_invoices_select'),
+    ('subscription_payment_audit', 'subscription_payment_audit_select'),
+    ('subscription_coverage',      'subscription_coverage_select')
+  ) AS t(tbl, pol) LOOP
+    SELECT coalesce(p.qual, '') INTO v_qual
+      FROM pg_policies p
+     WHERE p.schemaname = 'public' AND p.tablename = v.tbl AND p.policyname = v.pol;
+    PERFORM _pc_ok(format('money: %s names the tenant term and no platform capability', v.pol),
+      v_qual ~ 'get_user_company_id' AND v_qual !~ 'platform_can'
+      AND v_qual !~ 'platform_reads_company_data');
+  END LOOP;
+
+  -- 16b. With nothing open, no staff role reads any of the four — whatever
+  -- capability it holds. Before D14 every one of them read both companies.
+  FOR v IN SELECT * FROM (VALUES ('owner'), ('support'), ('readonly'), ('billing')) AS r(who) LOOP
+    PERFORM _pc_ok(format('money: with no context open %s reads none of the four tables', v.who),
+      _pc_try(_pc_id('user:' || v.who), _pc_id('session:' || v.who), format(
+        $q$SELECT ((SELECT count(*) FROM company_subscriptions      WHERE company_id IN (%1$L, %2$L))
+                 + (SELECT count(*) FROM subscription_invoices      WHERE company_id IN (%1$L, %2$L))
+                 + (SELECT count(*) FROM subscription_payment_audit WHERE company_id IN (%1$L, %2$L))
+                 + (SELECT count(*) FROM subscription_coverage      WHERE company_id IN (%1$L, %2$L)))::text$q$,
+        co_x, co_y)) = '0');
+  END LOOP;
+
+  -- 16c. billing is the account the decision hands the money to, and 15c has
+  -- already shown it can open no context: so for billing the audited call is the
+  -- only way to an invoice, and it answers both companies.
+  PERFORM _pc_ok('money: billing reads every company''s invoices and subscriptions through the audited models',
+    _pc_field(_pc_try(u_bi, s_bi, 'SELECT platform_invoices_list()::text'), 'ok') = 'true'
+    AND _pc_field(_pc_try(u_bi, s_bi, 'SELECT platform_subscriptions_list()::text'), 'ok') = 'true');
+  PERFORM _pc_ok('money: …and read_only, which can open a context, is refused both of them',
+    _pc_field(_pc_try(u_ro, s_ro, 'SELECT platform_invoices_list()::text'), 'reason') = 'not_authorized'
+    AND _pc_field(_pc_try(u_ro, s_ro, 'SELECT platform_subscriptions_list()::text'), 'reason') = 'not_authorized');
+
+  -- 16d. read_only opens a view context on X. Opened here and not through
+  -- _pc_try, which rolls its subtransaction back.
+  PERFORM _pc_as(u_ro, s_ro);
+  v_open := public.platform_context_open(co_x, 'view');
+  PERFORM _pc_reset();
+  PERFORM _pc_ok('money: read_only opened a view context on X', (v_open ->> 'success') = 'true');
+
+  PERFORM _pc_ok('money: inside that context it reads X''s subscription, invoice, trail and coverage',
+    _pc_try(u_ro, s_ro, format(
+      $q$SELECT ((SELECT count(*) FROM company_subscriptions      WHERE company_id = %1$L)
+               + (SELECT count(*) FROM subscription_invoices      WHERE company_id = %1$L)
+               + (SELECT count(*) FROM subscription_payment_audit WHERE company_id = %1$L)
+               + (SELECT count(*) FROM subscription_coverage      WHERE company_id = %1$L))::text$q$,
+      co_x)) = '4');
+  PERFORM _pc_ok('money: …and none of company Y''s',
+    _pc_try(u_ro, s_ro, format(
+      $q$SELECT ((SELECT count(*) FROM company_subscriptions      WHERE company_id = %1$L)
+               + (SELECT count(*) FROM subscription_invoices      WHERE company_id = %1$L)
+               + (SELECT count(*) FROM subscription_payment_audit WHERE company_id = %1$L)
+               + (SELECT count(*) FROM subscription_coverage      WHERE company_id = %1$L))::text$q$,
+      co_y)) = '0');
+  -- The context does not hand it the read model either: one is a capability and
+  -- the other is a company, and neither stands in for the other.
+  PERFORM _pc_ok('money: a context does not make the audited call permitted',
+    _pc_field(_pc_try(u_ro, s_ro, 'SELECT platform_invoices_list()::text'), 'reason') = 'not_authorized');
+
+  -- 16e. A company's own members are untouched: the term that answers them is
+  -- the one that was always there, and it is the *shell* helper, so a company
+  -- whose subscription lapsed still reads its own invoices — which is the whole
+  -- reason /abo-aktivieren and /billing are reachable in that state.
+  PERFORM _pc_ok('money: company X''s administrator still reads X''s invoice and not Y''s',
+    _pc_try(_pc_id('user:admin-x'), _pc_id('session:admin-x'), format(
+      'SELECT count(*)::text FROM subscription_invoices WHERE company_id = %L', co_x)) = '1'
+    AND _pc_try(_pc_id('user:admin-x'), _pc_id('session:admin-x'), format(
+      'SELECT count(*)::text FROM subscription_invoices WHERE company_id = %L', co_y)) = '0');
+
+  PERFORM _pc_as(u_ro, s_ro);
+  PERFORM public.platform_context_close();
+  PERFORM _pc_reset();
+  PERFORM _pc_ok('money: the context this section opened is closed again',
     (SELECT count(*) FROM app_private.platform_company_contexts WHERE closed_at IS NULL) = 0);
 END $$;
 
