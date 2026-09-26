@@ -5,7 +5,7 @@
 [![Production](https://img.shields.io/website?url=https%3A%2F%2Felprofessor.eu&label=production&up_message=online&down_message=offline)](https://elprofessor.eu)
 [![Staging](https://img.shields.io/website?url=https%3A%2F%2Fapp.elprofessor.eu%2Fversion.txt&label=staging&up_message=online&down_message=offline)](https://app.elprofessor.eu)
 [![E2E on staging](https://img.shields.io/badge/e2e%20on%20staging-16%20passed%2C%201%20skipped-2ea44f)](e2e/README.md)
-[![Plan](https://img.shields.io/badge/plan-36%20of%2040%20steps%20·%2090%25-2ea44f)](el-professor-plan.html)
+[![Plan](https://img.shields.io/badge/plan-40%20of%2041%20steps%20·%2098%25-2ea44f)](el-professor-plan.html)
 
 ![React](https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=black)
 ![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&logoColor=white)
@@ -25,22 +25,24 @@ A React SPA on a self-hosted Supabase stack (PostgreSQL, Auth, Storage, Edge Fun
 
 ## Status
 
-> Last update: **24.09.2026**. A step counts once it is merged into `staging` and verified there.
+> Last update: **26.09.2026**. A step counts once it is merged into `staging` and verified there.
 
-`▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▱▱` **36 of 40 steps · 90%**
+`▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▱` **40 of 41 steps · 98%**
+
+The headline is the Progress column below, added up: 6+6+3+13+3+5+3+1 of 6+7+3+13+3+5+3+1. It read "36 of 40" while that column already summed to 37 of 41, so it had been kept by hand and drifted; it is derived from the table now. The one step still out is Google sign-in on production, which waits on the owner's Impressum and privacy text.
 
 | Phase | What | Progress | State |
 |---|---|---|---|
 | **0** | Releases, rollback, staging protection | `▰▰▰▰▰▰` 6/6 | live on both |
 | **1** | OTP and account security | `▰▰▰▰▰▰▱` 6/7 | Google sign-in is on for staging; production waits only for the owner's Impressum and privacy text |
 | **2** | Design system and prototype | `▰▰▰` 3/3 | live |
-| **3** | Platform panel and permissions | `▰▰▰▰▰▰▰▰▰▰▰▰▱` 12/13 | 3.13b open as a PR: the company’s own settings are read inside a context, nothing links to `/super-admin` any more, and the Benutzer list no longer stops at GoTrue’s first 50 accounts. The `support`, `billing` and `read_only` staff roles are enabled in review (owner’s decision, 23.09.2026). Company permissions: slice C reaches the tables it did not (PR #110) and **slice B lets a company name a role of its own** (PR #117) — the global unique name that made that impossible was also the only thing stopping a role called `admin` from granting administration by name |
+| **3** | Platform panel and permissions | `▰▰▰▰▰▰▰▰▰▰▰▰▰` 13/13 | 3.13b is on staging (the company’s own settings are read inside a context, nothing links to `/super-admin`, and the Benutzer list no longer stops at GoTrue’s first 50 accounts), and so are the `support`, `billing` and `read_only` staff roles (PR #109), company permissions slice C (PR #110) and **slice B, which lets a company name a role of its own** (PR #117) — the global unique name that made that impossible was also the only thing stopping a role called `admin` from granting administration by name. **Decision D14 is answered and open as a PR:** a customer's invoices, subscriptions, payment trail and coverage periods are read through two audited read models on `billing.manage`, so `support` and `read_only` no longer read every customer's money unrecorded; the company list stays open, because it is how a company is chosen to open a context on |
 | **4** | Cash salary receipt | `▰▰▰` 3/3 | live |
-| **5** | Design rollout | `▰▰▰▰▱` 4/5 | every screen batch merged; the frame itself — `AppLayout`, the sidebar, the two banners and the support bar — is open as a PR. `AdminLayout` stays legacy on purpose |
-| **FA** | Fahrtenbuch analysis | `▰▰▱` 2/3 | import reliability and the analysis engine are live; the settings tables and the Fahrtenanalyse screen are open as a PR — it shows and explains a month of imported rides and changes no trip |
-| **BN** | Notifications | `▰` 1/1 | open as a PR. The Benachrichtigungen screen had been a preference panel for a feature that was never built — nothing read its table. A TÜV expiry and a trial end now reach the company's administrators, once per occurrence and never nightly, and a paying customer still on `status = 'trial'` is told nothing about a trial. **Nothing is sent until the owner approves one host cron line** |
+| **5** | Design rollout | `▰▰▰▰▰` 5/5 | every screen batch and the frame itself — `AppLayout`, the sidebar, the two banners and the support bar (PR #116) — are on staging. `AdminLayout` stays legacy on purpose |
+| **FA** | Fahrtenbuch analysis | `▰▰▰` 3/3 | on staging only, deliberately: import reliability, the analysis engine, and the settings tables with the Fahrtenanalyse screen (PR #111), which shows and explains a month of imported rides and changes no trip |
+| **BN** | Notifications | `▰` 1/1 | on staging (PR #115). The Benachrichtigungen screen had been a preference panel for a feature that was never built — nothing read its table. A TÜV expiry and a trial end now reach the company's administrators, once per occurrence and never nightly, and a paying customer still on `status = 'trial'` is told nothing about a trial. **Nothing is sent until the owner approves one host cron line** |
 
-**Production serves `9f5e833`** (23.09.2026): phase 5 complete, the legal pages, the invoice-coverage fix, Fahrtenbuch import reliability, and two defects that had been live — an Inhaber saved as an employee when edited, and every user edit without a new password failing.
+**Production serves `dbc42d2`** (24.09.2026, PR #107): the legal pages, the invoice-coverage fix, Fahrtenbuch import reliability, and two defects that had been live — an Inhaber saved as an employee when edited, and every user edit without a new password failing. **Staging is 16 commits ahead** and carries everything in the table above that says "on staging"; the next production release is a rehearsal and the owner's button.
 
 **In review, outside the phase table:** the RLS kit could be lied to. PostgreSQL resolves schema `USAGE` when a statement is *parsed* and plpgsql caches the parsed form, so a privilege error inside a `SECURITY INVOKER` trigger is raised only for the first role that cannot parse it — and the permission matrix runs every fixture as the owner before it probes anyone. PR #117's roles trigger reached `app_private`, which no company administrator may use: the feature was dead for every user and the kit passed twice. One `DISCARD PLANS` per principal closes it, a regression section fails if that is reverted, and two catalogue rules in `assertions.sql` stop the shape coming back. What the cache masks is a table rather than a sentence, and it is measured rather than read off the source — a reading of PostgreSQL's internals was wrong three times here, in both directions. Schema `USAGE` is masked; `EXECUTE` is masked only for an inlinable `sql` callee and not for a plpgsql one or one carrying a `SET` clause; table privileges and RLS are not. One thing is measured and **unexplained** — why the matrix's `roles I` cell moved — and it is recorded as open rather than guessed at. The mask is also **not** confined to a test fixture: two ordinary roles on one pooled connection are enough, one holding a privilege and one not. **Production exposure is nil today, measured read-only** — no schema and no inlinable function is granted unevenly across the three roles PostgREST uses in a way anything reaches, and none of them can use `app_private` at all — but it is a standing property, so a migration that grants one of those roles what another lacks reopens it. The two queries to re-run are in CLAUDE.md.
 
@@ -51,7 +53,7 @@ Detail lives elsewhere, one place each: [PROGRESS.md](PROGRESS.md) per step with
 - **The Impressum and the privacy text**, filled once in `/admin` → settings. Google sign-in on production is then one switch and one Deploy.
 - **Rotate the secrets that were exposed in chat.**
 - **The notification job's cron line**, staging first, after reading a dry run. Staging mail reaches real customers, so arming it there is a decision of its own. [HANDOFF.md](HANDOFF.md) has the dry run and both lines.
-- **D14 — whether the panel's company list and its money move behind audited read models.** Slice 3.13b closed the last *company-owned* table a platform account read by capability; `companies` and the three subscription tables stay on `companies.read` by plan 3.A's design. Closing them is a UI change to four screens, not a policy edit. [HANDOFF.md](HANDOFF.md) has the lift.
+- ~~**D14 — whether the panel's company list and its money move behind audited read models.**~~ **Answered 24.09.2026**, the middle path: the four billing tables moved behind two audited read models on `billing.manage`, the company list stayed open. What is left of it is smaller and still the owner's — whether a *view* support context should keep being able to edit a subscription row. [HANDOFF.md](HANDOFF.md) has both.
 - The open decisions and questions listed in [HANDOFF.md](HANDOFF.md), including how overlapping salary rows are merged.
 
 ## Environments
