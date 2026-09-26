@@ -21,6 +21,7 @@ import InvoiceDetailModal from '../components/InvoiceDetailModal';
 import { generateSubscriptionPdf, InvoicePdfData } from '../utils/subscriptionPdf';
 import { getInvoiceSeller } from '../lib/platformSettingsClient';
 import { invoiceSellerFields } from '../lib/platformSettings';
+import { Alert, Button } from '../components/ui';
 import { fetchInvoices, fetchSubscriptions } from '../lib/platformBillingClient';
 import { fetchCompanies } from '../lib/platformDirectoryClient';
 import {
@@ -71,6 +72,42 @@ function monthLabel(t: (key: TranslationKey) => string, month: number): string {
 
 function fmtEur(v: number) {
   return v.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €';
+}
+
+/**
+ * Server-side paging for the two tables below (decision D14): the invoices and
+ * the subscriptions are read one page at a time now, so both tabs need one of
+ * these and it is written once.
+ *
+ * `hasNext` is `directoryHasNextPage`, which is false past `platform_read_offset`'s
+ * ceiling — rows beyond it exist and no page can reach them, so a button that
+ * would raise 22023 is never offered. Drawn with the design system rather than
+ * with this screen's inline styles: the style ratchet holds every legacy file at
+ * its count, and AdminLayout already renders `Button` on --bg-base for the Team
+ * and Protokoll screens, so no new colour pair is introduced.
+ */
+function Pager({
+  page, pages, hasNext, onPage, t,
+}: {
+  page: number;
+  pages: number;
+  hasNext: boolean;
+  onPage: (pageIndex: number) => void;
+  t: (key: TranslationKey, vars?: Record<string, string | number>) => string;
+}) {
+  return (
+    <div className="flex items-center justify-end gap-3 font-ui">
+      <Button variant="secondary" size="sm" disabled={page === 0} onClick={() => onPage(Math.max(0, page - 1))}>
+        <ChevronLeft size={14} />{t('admin.common.prev')}
+      </Button>
+      <span className="text-xs text-fg-muted tabular-nums">
+        {t('admin.common.pageOf', { page: page + 1, pages })}
+      </span>
+      <Button variant="secondary" size="sm" disabled={!hasNext} onClick={() => onPage(page + 1)}>
+        {t('admin.common.next')}<ChevronRight size={14} />
+      </Button>
+    </div>
+  );
 }
 
 // ─── Component ──────────────────────────────────────────────────────────────
@@ -401,13 +438,15 @@ export default function SubscriptionBillingPage() {
   // it is told so here rather than shown an empty table, which would read as
   // "this customer has no invoices".
   if (!canBilling) {
+    // Drawn with the design system rather than with this screen's inline styles:
+    // the style ratchet holds every legacy file at its count, and new markup that
+    // spells a colour out again is what it exists to stop. AdminLayout already
+    // renders these primitives on --bg-base for the Team and Protokoll screens,
+    // so the pair is one tokens.contrast.test.ts already measures.
     return (
-      <div className="flex flex-col items-center justify-center py-20 rounded-2xl text-center"
-        style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
-        <ShieldAlert size={40} className="mb-3" style={{ color: 'var(--warning)' }} />
-        <p className="font-medium" style={{ color: 'var(--text-primary)' }}>{t('admin.read.denied')}</p>
-        <p className="text-sm mt-1" style={{ color: 'var(--text-tertiary)' }}>{t('sa.subs.noAccessBody')}</p>
-      </div>
+      <Alert tone="caution" icon={ShieldAlert} title={t('admin.read.denied')} className="font-ui">
+        {t('sa.subs.noAccessBody')}
+      </Alert>
     );
   }
 
@@ -470,13 +509,7 @@ export default function SubscriptionBillingPage() {
       </div>
 
       {/* A read that did not happen: no figure below is shown as a zero. */}
-      {problem && (
-        <div className="flex items-start gap-2 rounded-xl p-3 text-sm"
-          style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid var(--danger)', color: 'var(--text-primary)' }}>
-          <AlertTriangle size={16} className="flex-shrink-0 mt-0.5" style={{ color: 'var(--danger)' }} />
-          <span>{t(problem)}</span>
-        </div>
-      )}
+      {problem && <Alert tone="critical" className="font-ui">{t(problem)}</Alert>}
 
       {/* KPI Cards */}
       {!problem && (
@@ -552,10 +585,13 @@ export default function SubscriptionBillingPage() {
                   style={{ background: 'var(--bg-surface)', color: 'var(--text-primary)', border: '1px solid var(--border)' }}
                 />
               </div>
-              <button type="submit" className="px-4 py-2.5 rounded-xl text-sm font-semibold"
-                style={{ background: 'var(--accent)', color: 'var(--text-inverse)' }}>
+              {/* The design system's Button, for the reason Pager gives: a new
+                  inline style in a legacy file is what the style ratchet stops.
+                  `type="submit"` is explicit — the primitive defaults to
+                  "button", and this one submits the form. */}
+              <Button type="submit" size="md" className="font-semibold">
                 {t('admin.common.search')}
-              </button>
+              </Button>
             </form>
             <select
               value={query.month}
@@ -664,27 +700,13 @@ export default function SubscriptionBillingPage() {
           </div>
 
           {invoicePages > 1 && (
-            <div className="flex items-center justify-end gap-3">
-              <button
-                onClick={() => setQuery(q => ({ ...q, pageIndex: Math.max(0, q.pageIndex - 1) }))}
-                disabled={query.pageIndex === 0}
-                className="flex items-center gap-1 px-3 py-2 rounded-xl text-sm"
-                style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)', opacity: query.pageIndex === 0 ? 0.5 : 1 }}
-              >
-                <ChevronLeft size={14} />{t('admin.common.prev')}
-              </button>
-              <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>
-                {t('admin.common.pageOf', { page: query.pageIndex + 1, pages: invoicePages })}
-              </span>
-              <button
-                onClick={() => setQuery(q => ({ ...q, pageIndex: q.pageIndex + 1 }))}
-                disabled={!invoiceHasNext}
-                className="flex items-center gap-1 px-3 py-2 rounded-xl text-sm"
-                style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)', opacity: invoiceHasNext ? 1 : 0.5 }}
-              >
-                {t('admin.common.next')}<ChevronRight size={14} />
-              </button>
-            </div>
+            <Pager
+              page={query.pageIndex}
+              pages={invoicePages}
+              hasNext={invoiceHasNext}
+              onPage={pageIndex => setQuery(q => ({ ...q, pageIndex }))}
+              t={t}
+            />
           )}
         </div>
       )}
@@ -750,27 +772,13 @@ export default function SubscriptionBillingPage() {
           </div>
 
           {subscriptionPages > 1 && (
-            <div className="flex items-center justify-end gap-3">
-              <button
-                onClick={() => setSubscriptionPage(p => Math.max(0, p - 1))}
-                disabled={subscriptionPage === 0}
-                className="flex items-center gap-1 px-3 py-2 rounded-xl text-sm"
-                style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)', opacity: subscriptionPage === 0 ? 0.5 : 1 }}
-              >
-                <ChevronLeft size={14} />{t('admin.common.prev')}
-              </button>
-              <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>
-                {t('admin.common.pageOf', { page: subscriptionPage + 1, pages: subscriptionPages })}
-              </span>
-              <button
-                onClick={() => setSubscriptionPage(p => p + 1)}
-                disabled={!subscriptionHasNext}
-                className="flex items-center gap-1 px-3 py-2 rounded-xl text-sm"
-                style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)', opacity: subscriptionHasNext ? 1 : 0.5 }}
-              >
-                {t('admin.common.next')}<ChevronRight size={14} />
-              </button>
-            </div>
+            <Pager
+              page={subscriptionPage}
+              pages={subscriptionPages}
+              hasNext={subscriptionHasNext}
+              onPage={setSubscriptionPage}
+              t={t}
+            />
           )}
         </div>
       )}

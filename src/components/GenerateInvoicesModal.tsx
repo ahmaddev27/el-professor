@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from 'react';
-import { X, FileText, Loader2, AlertTriangle } from 'lucide-react';
+import { X, FileText, Loader2 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
 import { useTranslation } from '../contexts/LanguageContext';
 import type { TranslationKey } from '../i18n';
+import { Alert } from './ui';
 import { fetchAllActiveSubscriptions, fetchInvoicedCompanyIds } from '../lib/platformBillingClient';
 import type { PlatformSubscriptionRow } from '../lib/platformBilling';
 
@@ -172,11 +173,10 @@ export default function GenerateInvoicesModal({ onClose, onGenerated }: Props) {
               invoice run over part of the customers is the wrong month, and an
               empty count would read as "no active subscriptions". */}
           {!loading && activeSubs === null ? (
-            <div className="flex items-start gap-2 p-3 rounded-xl text-sm"
-              style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid var(--danger)', color: 'var(--text-primary)' }}>
-              <AlertTriangle size={16} className="flex-shrink-0 mt-0.5" style={{ color: 'var(--danger)' }} />
-              <span>{t('admin.read.failed')}</span>
-            </div>
+            // Drawn with the design system, not with this dialog's inline styles:
+            // the style ratchet holds this file at its count. The soft critical
+            // fill on the legacy card is a pair tokens.contrast.test.ts measures.
+            <Alert tone="critical" className="font-ui">{t('admin.read.failed')}</Alert>
           ) : (
             <div className="p-3 rounded-xl text-sm" style={{ background: 'var(--bg-subtle)', color: 'var(--text-secondary)' }}>
               {t('bill.invoice.hintPeriodLead', { count: activeSubs?.length ?? 0 })}{' '}
