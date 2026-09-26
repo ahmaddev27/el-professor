@@ -37,7 +37,8 @@
   the trigger's call once and every principal after it reuses that plan. The
   privilege check never runs a second time.
 
-  This file establishes seven things, each printed as its own NOTICE:
+  This file establishes eight things, each printed as its own NOTICE, and every
+  premise it depends on is asserted before the first of them:
 
     A  the owner's write succeeds and warms the cache
     B  the principal's identical write succeeds too — the mask
@@ -47,14 +48,38 @@
     D  the principal's write, after the discard, is refused 42501
     E  granting USAGE makes the same write succeed — so D was about USAGE and
        about nothing else
-    F  function EXECUTE is **not** masked: an owner pass that warms a call the
-       principal may not execute still leaves the principal refused
-    G  table privileges are **not** masked either, on the same shape
+    F1 function EXECUTE, through a **plpgsql** function the principal may not
+       execute. Not asserted, measured: the verdict prints which class it is
+    F2 the same through an inlinable `sql IMMUTABLE` function, which proves
+       nothing about privilege and is here to say so
+    G  a table privilege, on the same shape
 
-  F and G are what make the claim in CLAUDE.md a measurement rather than a
-  reading of the source: the plan cache hides exactly one privilege class,
-  schema USAGE, because that one is resolved by the parser while the other two
-  are re-checked per execution (`init_fcache`, `ExecCheckPermissions`).
+  ## What the first run of this file got wrong, and why both halves are kept
+
+  Measured on PostgreSQL 17.6, 26.09.2026: **two privilege classes are masked by
+  the plan cache, not one.** Schema USAGE is (A, B, D), and so is function
+  EXECUTE. A table privilege is not — G is refused with the cache just as warm.
+
+  The first version of this file predicted that function EXECUTE would be
+  refused, on a reading of where PostgreSQL checks it, and had two faults at
+  once. The reading was **wrong**: EXECUTE is resolved when the statement is
+  planned, like USAGE. And the probe was **weak**: it called a `LANGUAGE sql`,
+  `IMMUTABLE` function whose body selects a constant — the textbook inlinable
+  shape — so the planner folded the call away entirely and the owner's cached
+  plan held no function reference at all. It would have answered ALLOWED whatever
+  the privilege rule was.
+
+  Two faults pointing the same way is the worst case for an instrument, because
+  the wrong answer looks confirmed. What settled it was a second, independent
+  observation: with the guard in place, `tests/rls/matrix.sql`'s `roles I` cell
+  moved `RR` to `PP` for `anon`, with
+  `42501 permission denied for function role_name_is_system_reserved` — the same
+  class, in the real schema, on a real migration. F1 and F2 are both kept so a
+  later reader can separate "PostgreSQL behaves unexpectedly" from "the
+  instrument was wrong" without re-deriving any of this.
+
+  The guard in `matrix.sql` is unaffected by which classes are masked: there is
+  one plan cache and `DISCARD PLANS` empties all of it.
 
   ## Running it
 
@@ -121,12 +146,37 @@ CREATE TRIGGER pc_guard BEFORE INSERT ON public.pc_rows
 
 -- ─── the two controls: a function grant, and a table grant ──────────────────
 
--- Step F: a function in a schema the principal CAN use, whose EXECUTE it does
--- not hold. If EXECUTE were a parse-time check like USAGE, the owner's pass
--- would mask it in the same way.
-CREATE FUNCTION public.pc_open() RETURNS boolean
+/*
+  Step F: function EXECUTE, warmed by the owner exactly as A warms the schema
+  check, on a schema the principal CAN use — so the only thing that can refuse
+  the write is the grant on the function.
+
+  **It is probed twice, and the difference between the two is the point.**
+
+  The first version of this file had only F2, and F2 answered ALLOWED. Read as a
+  measurement of the EXECUTE class that would say EXECUTE is masked. It is not a
+  measurement of it at all: `LANGUAGE sql` + `IMMUTABLE` + a body that selects a
+  constant is the textbook inlinable function. The planner inlines it into the
+  calling expression and folds it to the constant, so the plan the owner cached
+  holds **no function call whatsoever** — there is nothing left for the principal
+  to be refused on, cache or no cache. The probe measured inlining, not
+  privilege.
+
+  F1 is the real probe: a `plpgsql` function, which is never inlined into its
+  caller and never pre-evaluated, so the call survives into the cached plan.
+
+  F2 stays, labelled, because a file that silently changed its answer would
+  leave the next reader unable to tell "PostgreSQL behaves unexpectedly" from
+  "the instrument was wrong". Run together they separate the two: if F1 refuses
+  and F2 allows, the first run's surprise was inlining and nothing else.
+*/
+CREATE FUNCTION public.pc_open_plpgsql() RETURNS boolean
+LANGUAGE plpgsql AS $$ BEGIN RETURN true; END $$;
+REVOKE ALL ON FUNCTION public.pc_open_plpgsql() FROM PUBLIC;
+
+CREATE FUNCTION public.pc_open_inlinable() RETURNS boolean
 LANGUAGE sql IMMUTABLE AS $$ SELECT true $$;
-REVOKE ALL ON FUNCTION public.pc_open() FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.pc_open_inlinable() FROM PUBLIC;
 
 CREATE TABLE public.pc_rows_exec (note text);
 GRANT INSERT ON public.pc_rows_exec TO pc_principal;
@@ -136,12 +186,27 @@ LANGUAGE plpgsql
 SET search_path = pg_catalog, public
 AS $$
 BEGIN
-  PERFORM public.pc_open();
+  PERFORM public.pc_open_plpgsql();
   RETURN NEW;
 END $$;
 
 CREATE TRIGGER pc_guard_exec BEFORE INSERT ON public.pc_rows_exec
   FOR EACH ROW EXECUTE FUNCTION public.pc_guard_exec();
+
+CREATE TABLE public.pc_rows_exec_inline (note text);
+GRANT INSERT ON public.pc_rows_exec_inline TO pc_principal;
+
+CREATE FUNCTION public.pc_guard_exec_inline() RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = pg_catalog, public
+AS $$
+BEGIN
+  PERFORM public.pc_open_inlinable();
+  RETURN NEW;
+END $$;
+
+CREATE TRIGGER pc_guard_exec_inline BEFORE INSERT ON public.pc_rows_exec_inline
+  FOR EACH ROW EXECUTE FUNCTION public.pc_guard_exec_inline();
 
 -- Step G: a table the principal may not read, in a schema it CAN use, so the
 -- refusal can only be the table privilege and never the schema.
@@ -224,8 +289,10 @@ DECLARE
   c_direct    text;
   d_refused   text;
   e_granted   text;
-  f_exec      text;
-  f_owner     text;
+  f1_exec     text;
+  f1_owner    text;
+  f2_exec     text;
+  f2_owner    text;
   g_table     text;
   g_owner     text;
   v_verdict   text[] := ARRAY[]::text[];
@@ -234,6 +301,29 @@ BEGIN
   RAISE NOTICE ' ';
   RAISE NOTICE '════ plan-cache reproduction ════';
   RAISE NOTICE 'server: %', version();
+  RAISE NOTICE ' ';
+
+  /*
+    The premises, before anything is measured. Each of the three probes below
+    can be defeated by a setup that silently did not take — a schema the
+    principal can use after all, a REVOKE that did not remove the grant PUBLIC
+    gave it — and each of those would read as "allowed" and be mistaken for a
+    mask. The first version of this file asserted the premise for the schema and
+    not for the other two, and that is exactly where it went wrong.
+  */
+  IF has_schema_privilege('pc_principal', 'pc_hidden', 'USAGE') THEN
+    RAISE EXCEPTION 'premise: pc_principal can use pc_hidden, so A-E measure nothing';
+  END IF;
+  IF has_function_privilege('pc_principal', 'public.pc_open_plpgsql()', 'EXECUTE') THEN
+    RAISE EXCEPTION 'premise: pc_principal holds EXECUTE on pc_open_plpgsql, so F1 measures nothing';
+  END IF;
+  IF has_function_privilege('pc_principal', 'public.pc_open_inlinable()', 'EXECUTE') THEN
+    RAISE EXCEPTION 'premise: pc_principal holds EXECUTE on pc_open_inlinable, so F2 measures nothing';
+  END IF;
+  IF has_table_privilege('pc_principal', 'public.pc_closed', 'SELECT') THEN
+    RAISE EXCEPTION 'premise: pc_principal can read pc_closed, so G measures nothing';
+  END IF;
+  RAISE NOTICE 'premises ok: no USAGE on pc_hidden, no EXECUTE on either pc_open_*, no SELECT on pc_closed';
   RAISE NOTICE ' ';
 
   -- A. The owner writes. This compiles pc_guard()'s call to pc_hidden.answer()
@@ -302,21 +392,43 @@ BEGIN
   END IF;
   RAISE NOTICE ' ';
 
-  -- F. The first control: function EXECUTE, warmed by the owner exactly as in
-  --    A and B, on a schema the principal can use.
-  f_owner := public.pc_write('pc_rows_exec', NULL, 'owner warms the EXECUTE path');
-  f_exec  := public.pc_write('pc_rows_exec', 'pc_principal', 'principal, EXECUTE not held');
-  RAISE NOTICE 'F  owner INSERT (warms)               -> %', f_owner;
-  RAISE NOTICE 'F  principal INSERT, no discard       -> %', f_exec;
-  RAISE NOTICE '   expected REFUSED 42501 permission denied for function pc_open';
-  RAISE NOTICE '   — function EXECUTE is checked at executor init, so it is never masked';
-  IF f_owner <> 'ALLOWED' THEN
+  -- F. The EXECUTE class, twice. F1 is the measurement; F2 reproduces the
+  --    first run's surprise and identifies it as inlining rather than privilege.
+  --    Neither is asserted: what the answer *is* is the open question, and an
+  --    instrument that fails when the world disagrees with it measures nothing.
+  f1_owner := public.pc_write('pc_rows_exec', NULL, 'owner warms the EXECUTE path');
+  f1_exec  := public.pc_write('pc_rows_exec', 'pc_principal', 'principal, EXECUTE not held');
+  RAISE NOTICE 'F1 owner INSERT (warms), plpgsql fn   -> %', f1_owner;
+  RAISE NOTICE 'F1 principal INSERT, no discard       -> %', f1_exec;
+  RAISE NOTICE '   a plpgsql function is never inlined, so the call is really in the';
+  RAISE NOTICE '   cached plan. REFUSED here means function EXECUTE is re-checked per';
+  RAISE NOTICE '   execution; ALLOWED means it is resolved at plan time and masked too';
+  IF f1_owner <> 'ALLOWED' THEN
     v_ok := false;
-    v_verdict := v_verdict || ('F''s owner pass failed, so its control proves nothing: ' || f_owner);
-  ELSIF f_exec NOT LIKE 'REFUSED 42501 permission denied for function%' THEN
-    v_ok := false;
+    v_verdict := v_verdict || ('F1''s owner pass failed, so F1 measures nothing: ' || f1_owner);
+  ELSIF f1_exec LIKE 'REFUSED 42501 permission denied for function%' THEN
     v_verdict := v_verdict ||
-      ('F: function EXECUTE behaved unlike the reading of it — ' || f_exec);
+      'MEASURED: function EXECUTE is NOT masked — re-checked per execution, like a table privilege';
+  ELSIF f1_exec = 'ALLOWED' THEN
+    v_verdict := v_verdict ||
+      'MEASURED: function EXECUTE IS masked, like schema USAGE — two classes are hidden, not one';
+  ELSE
+    v_ok := false;
+    v_verdict := v_verdict || ('F1 was refused for an unrelated reason: ' || f1_exec);
+  END IF;
+  RAISE NOTICE ' ';
+
+  f2_owner := public.pc_write('pc_rows_exec_inline', NULL, 'owner warms the inlinable path');
+  f2_exec  := public.pc_write('pc_rows_exec_inline', 'pc_principal', 'principal, EXECUTE not held');
+  RAISE NOTICE 'F2 owner INSERT (warms), inlinable fn -> %', f2_owner;
+  RAISE NOTICE 'F2 principal INSERT, no discard       -> %', f2_exec;
+  RAISE NOTICE '   expected ALLOWED, and it proves nothing about privilege: an';
+  RAISE NOTICE '   IMMUTABLE sql function selecting a constant is inlined and folded,';
+  RAISE NOTICE '   so the owner''s cached plan holds no function call at all. This is';
+  RAISE NOTICE '   the first run''s F, kept to name what it really measured';
+  IF f2_exec <> 'ALLOWED' THEN
+    v_verdict := v_verdict ||
+      ('F2 was refused (' || f2_exec || '), so this planner did not inline the function — read F1 alone');
   END IF;
   RAISE NOTICE ' ';
 
@@ -338,11 +450,18 @@ BEGIN
   RAISE NOTICE ' ';
 
   RAISE NOTICE '════ VERDICT ════';
-  IF v_ok AND b_masked = 'ALLOWED' THEN
-    RAISE NOTICE 'The mask reproduces, DISCARD PLANS lifts it, and it is specific to';
-    RAISE NOTICE 'schema USAGE: function EXECUTE and table privileges were refused with';
-    RAISE NOTICE 'the cache just as warm. tests/rls/matrix.sql''s guard is doing the one';
-    RAISE NOTICE 'thing that is needed, and no more.';
+  IF v_ok AND b_masked = 'ALLOWED' AND d_refused LIKE 'REFUSED 42501 permission denied for schema%' THEN
+    RAISE NOTICE 'The mask reproduces on schema USAGE (A, B), DISCARD PLANS lifts it (C, D),';
+    RAISE NOTICE 'and D was about USAGE alone (E). A table privilege is NOT masked: G was';
+    RAISE NOTICE 'refused with the cache just as warm. The EXECUTE class is whichever of';
+    RAISE NOTICE 'the two MEASURED lines below F1 printed — read that, do not assume it.';
+    RAISE NOTICE 'tests/rls/matrix.sql''s guard covers every class either way: there is one';
+    RAISE NOTICE 'plan cache and DISCARD PLANS empties all of it.';
+  END IF;
+  IF g_table LIKE 'REFUSED 42501 permission denied for table%' THEN
+    RAISE NOTICE 'MEASURED: table privileges are NOT masked — re-checked on every execution';
+  ELSIF g_owner = 'ALLOWED' THEN
+    RAISE NOTICE 'MEASURED: table privileges ARE masked too (%) — wider than any reading of it', g_table;
   END IF;
   IF cardinality(v_verdict) > 0 THEN
     FOR i IN 1 .. cardinality(v_verdict) LOOP
@@ -351,8 +470,8 @@ BEGIN
   END IF;
   IF NOT v_ok THEN
     RAISE NOTICE ' ';
-    RAISE NOTICE 'Something above did not behave as read. Paste the whole output back;';
-    RAISE NOTICE 'the guard in matrix.sql may need a different method.';
+    RAISE NOTICE 'A premise or an owner pass failed, so at least one step measured nothing.';
+    RAISE NOTICE 'Paste the whole output back before drawing anything from it.';
   END IF;
   RAISE NOTICE '═════════════════';
 END $run$;

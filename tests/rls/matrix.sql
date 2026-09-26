@@ -314,11 +314,14 @@ BEGIN
     `42501 permission denied for schema app_private`. This file reported
     `roles I` as `Y` for the admin principal, on two runs.
 
-    It is one privilege class and only one. Table privileges are re-checked by
-    the executor on every execution, function EXECUTE at executor init with the
-    role in force at that moment, and RLS re-plans when the role changes; schema
-    USAGE is resolved once, by the parser. tests/tools/plan-cache-repro.sql is
-    the measurement of all three.
+    It is two privilege classes, measured on PostgreSQL 17.6 and not deduced —
+    an earlier version of this comment said one, from a reading of the source
+    that was wrong. Schema USAGE is masked, and so is **function EXECUTE**: both
+    are resolved when the statement is planned. A table privilege is not, being
+    re-checked by the executor on every execution, and RLS re-plans when the role
+    changes. tests/tools/plan-cache-repro.sql measures all three; the `roles I`
+    expectation below is the same finding seen a second time, in this file, on a
+    real migration.
 
     `DISCARD PLANS` is legal inside a transaction block and inside SPI — only
     `DISCARD ALL` is refused there. It goes here, before either `SET LOCAL ROLE`
@@ -1539,7 +1542,28 @@ INSERT INTO _mx_expected (tbl, op, anon, viewer, editor, supervisor, admin, othe
 ('role_permissions',                   'D', '..', '..', '..', '..', 'Y.', '.Y', '..', NULL),
 ('role_permissions',                   'M', '..', '..', '..', '..', 'T.', '.T', '..', NULL),
 ('roles',                              'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('roles',                              'I', 'RR', 'RR', 'RR', 'RR', 'YR', 'RY', 'RR', NULL),
+-- anon was RR until the plan-cache guard went into `_mx_become`, and the move
+-- to PP is the guard working, not a change in access.
+--
+-- 20260923120000 puts an INSERT trigger on this table whose function reads
+-- `public.role_name_is_system_reserved`, granted to `authenticated` and
+-- `service_role` and to nobody else. Under the warm cache the owner's pass had
+-- already resolved that call, so anon's INSERT was never checked against the
+-- grant and `roles_insert`'s WITH CHECK refused first: R. With the plans
+-- discarded the function check runs first and answers
+-- `42501 permission denied for function role_name_is_system_reserved`: P.
+--
+-- **anon is refused either way** — the outcome did not move, the reason did. It
+-- is also the second, independent observation of the class
+-- tests/tools/plan-cache-repro.sql measures at step F: function EXECUTE is
+-- resolved at plan time and is masked exactly as schema USAGE is.
+--
+-- anon is deliberately left without that EXECUTE. `roles_insert` is
+-- `TO authenticated`, so anon cannot insert a role whatever the grant says;
+-- granting it would widen what anon can reach in order to change a refusal's
+-- SQLSTATE. That is the reasoning 20260923120000's own grant block gives, and
+-- this cell now agrees with it out loud.
+('roles',                              'I', 'PP', 'RR', 'RR', 'RR', 'YR', 'RY', 'RR', NULL),
 -- …and the same for the roles themselves: visible only through a context.
 ('roles',                              'U', '..', '..', '..', '..', 'Y.', '.Y', '..', NULL),
 ('roles',                              'D', '..', '..', '..', '..', 'Y.', '.Y', '..', NULL),

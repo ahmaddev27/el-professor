@@ -236,8 +236,13 @@ LANGUAGE sql STABLE AS $fn$
     SELECT 1 FROM pg_type  x WHERE x.typnamespace = p_nsp AND x.typname = lower(p_name))
 $fn$;
 
-CREATE OR REPLACE FUNCTION _invoker_reaches_confined_schema()
-RETURNS TABLE (api_role text, routine text, nspname text, object_name text, reached_by text)
+/*
+  The reachable SECURITY INVOKER functions, per API role, with their bodies and
+  comments stripped. Both readers below start here, so "can reach" is defined
+  once. Branches (a) and (b) are the ones argued for above.
+*/
+CREATE OR REPLACE FUNCTION _reachable_invoker()
+RETURNS TABLE (oid oid, api_role text, routine text, body text, reached_by text)
 LANGUAGE sql STABLE AS $fn$
   WITH invoker AS (
     SELECT p.oid,
@@ -251,30 +256,104 @@ LANGUAGE sql STABLE AS $fn$
        AND NOT EXISTS (SELECT 1 FROM pg_depend d
                         WHERE d.classid = 'pg_proc'::regclass
                           AND d.objid = p.oid AND d.deptype = 'e')
-  ),
-  reachable AS (
-    -- (a) fired as the role, by a trigger on a table the role may write
-    SELECT i.oid, c.api_role,
-           format('%s on %s', t.tgname, t.tgrelid::regclass::text) AS reached_by
-      FROM invoker i
-      JOIN pg_trigger t  ON t.tgfoid = i.oid AND NOT t.tgisinternal
-      JOIN pg_class   tc ON tc.oid = t.tgrelid
-      CROSS JOIN _api_roles() c
-     WHERE has_schema_privilege(c.api_role, tc.relnamespace, 'USAGE')
-       AND has_table_privilege(c.api_role, t.tgrelid, 'INSERT, UPDATE, DELETE, TRUNCATE')
-    UNION
-    -- (b) called by the role directly
-    SELECT i.oid, c.api_role, format('EXECUTE granted to %s', c.api_role)
-      FROM invoker i
-      CROSS JOIN _api_roles() c
-     WHERE has_function_privilege(c.api_role, i.oid, 'EXECUTE')
   )
-  SELECT rr.api_role, i.routine, s.nspname, m.parts[1], rr.reached_by
-    FROM reachable rr
-    JOIN invoker i ON i.oid = rr.oid
+  -- (a) fired as the role, by a trigger on a table the role may write
+  SELECT i.oid, c.api_role, i.routine, i.body,
+         format('%s on %s', t.tgname, t.tgrelid::regclass::text)
+    FROM invoker i
+    JOIN pg_trigger t  ON t.tgfoid = i.oid AND NOT t.tgisinternal
+    JOIN pg_class   tc ON tc.oid = t.tgrelid
+    CROSS JOIN _api_roles() c
+   WHERE has_schema_privilege(c.api_role, tc.relnamespace, 'USAGE')
+     AND has_table_privilege(c.api_role, t.tgrelid, 'INSERT, UPDATE, DELETE, TRUNCATE')
+  UNION
+  -- (b) called by the role directly
+  SELECT i.oid, c.api_role, i.routine, i.body, format('EXECUTE granted to %s', c.api_role)
+    FROM invoker i
+    CROSS JOIN _api_roles() c
+   WHERE has_function_privilege(c.api_role, i.oid, 'EXECUTE')
+$fn$;
+
+CREATE OR REPLACE FUNCTION _invoker_reaches_confined_schema()
+RETURNS TABLE (api_role text, routine text, nspname text, object_name text, reached_by text)
+LANGUAGE sql STABLE AS $fn$
+  SELECT DISTINCT rr.api_role, rr.routine, s.nspname, m.parts[1], rr.reached_by
+    FROM _reachable_invoker() rr
     JOIN _confined_schemas() s ON s.api_role = rr.api_role
-    CROSS JOIN LATERAL regexp_matches(i.body, '\m' || s.nspname || '\.([a-z_][a-z0-9_$]*)', 'gi') AS m(parts)
+    CROSS JOIN LATERAL regexp_matches(rr.body, '\m' || s.nspname || '\.([a-z_][a-z0-9_$]*)', 'gi') AS m(parts)
    WHERE _object_exists_in(s.nspoid, m.parts[1])
+$fn$;
+
+/*
+  ── The EXECUTE class, reported and not yet asserted ────────────────────────
+
+  Function `EXECUTE` is masked by the plan cache exactly as schema `USAGE` is —
+  both are resolved when the statement is planned. That was **measured** on
+  PostgreSQL 17.6 (tests/tools/plan-cache-repro.sql, step F1), after a reading of
+  the source said the opposite and a first probe written from that reading
+  confirmed the wrong answer for a second reason. `matrix.sql`'s `roles I` cell
+  is the same finding in this kit: `anon` reads `PP`, not `RR`, because
+  `role_name_is_system_reserved` is granted to `authenticated` and not to it.
+
+  So the class is real and the rule is the mirror of the one above: a reachable
+  SECURITY INVOKER function must not **call** a function the role may not
+  execute. This reader finds those.
+
+  **It warns; it does not fail.** Not hedging — the reason is specific. The rule
+  above ships as a failure because its false-positive count on a clean head was
+  known before it shipped: 36 without the reachability branches, 0 with them, so
+  a red run means a real defect. This one has no such number yet: nobody has run
+  it, and it has two noise sources the schema reader does not — a function name
+  can appear inside a string literal that builds dynamic SQL, where
+  comment-stripping does not reach it, and `service_role` holds Supabase's
+  default EXECUTE on a great many invoker functions while a large number of this
+  project's own functions are deliberately `authenticated`-only, so a call that
+  no service-role path ever makes still matches. Shipping it as a failure before
+  that count is read would either break the kit for everyone or, worse, be
+  silenced by whoever it blocked. It becomes a failure in the commit that reads
+  the count, with any genuine hit fixed in the same one.
+
+  What it is narrowed by, so the number means something:
+
+  - only names that resolve to a real function in a schema the role **can** use —
+    a call into a confined schema is the reader above's finding, not a second
+    report of the same line;
+  - a bare name is skipped when `pg_catalog` holds one too, because every
+    function here runs with `search_path = pg_catalog, public` and `pg_catalog`
+    wins. That is what keeps `format(`, `coalesce(`, `count(` and the rest out;
+  - a name is flagged only when **no overload** of it is executable by the role,
+    so an overloaded function with one granted signature is never reported;
+  - a function calling itself is not a finding.
+*/
+CREATE OR REPLACE FUNCTION _invoker_calls_unexecutable_function()
+RETURNS TABLE (api_role text, routine text, called text, reached_by text)
+LANGUAGE sql STABLE AS $fn$
+  WITH called AS (
+    SELECT rr.api_role, rr.oid, rr.routine, rr.reached_by,
+           m.parts[1] IS NOT NULL                  AS qualified,
+           lower(coalesce(m.parts[1], 'public'))   AS nsp,
+           lower(m.parts[2])                       AS name
+      FROM _reachable_invoker() rr
+      CROSS JOIN LATERAL regexp_matches(
+              rr.body, '\m(?:([a-z_][a-z0-9_]*)\.)?([a-z_][a-z0-9_$]*)\s*\(', 'gi') AS m(parts)
+  ),
+  candidates AS (
+    SELECT c.*, n.oid AS nspoid
+      FROM called c
+      JOIN pg_namespace n ON n.nspname = c.nsp
+     WHERE has_schema_privilege(c.api_role, n.oid, 'USAGE')
+       AND (c.qualified
+            OR NOT EXISTS (SELECT 1 FROM pg_proc pc
+                            WHERE pc.pronamespace = 'pg_catalog'::regnamespace
+                              AND pc.proname = c.name))
+  )
+  SELECT DISTINCT cd.api_role, cd.routine, cd.nsp || '.' || cd.name, cd.reached_by
+    FROM candidates cd
+   WHERE EXISTS (SELECT 1 FROM pg_proc p
+                  WHERE p.pronamespace = cd.nspoid AND p.proname = cd.name AND p.oid <> cd.oid)
+     AND NOT EXISTS (SELECT 1 FROM pg_proc p
+                      WHERE p.pronamespace = cd.nspoid AND p.proname = cd.name
+                        AND has_function_privilege(cd.api_role, p.oid, 'EXECUTE'))
 $fn$;
 
 /*
@@ -555,6 +634,7 @@ BEGIN
     findings text;
     n_hits   int;
     n_scan   int;
+    probe    record;
   BEGIN
     /*
       The positive control, first and in a subtransaction that is always
@@ -584,6 +664,18 @@ BEGIN
       CREATE POLICY _probe_pol_select ON public._probe_pol
         FOR SELECT TO authenticated USING (_probe_hidden.thing());
 
+      -- and the third reader's offender: a public function authenticated may
+      -- not execute, called from an invoker function it may
+      CREATE FUNCTION public._probe_ungranted() RETURNS boolean
+        LANGUAGE plpgsql AS $probe$ BEGIN RETURN true; END $probe$;
+      REVOKE ALL ON FUNCTION public._probe_ungranted() FROM PUBLIC, anon, authenticated, service_role;
+
+      CREATE FUNCTION public._probe_caller() RETURNS boolean
+      LANGUAGE plpgsql
+      SET search_path = pg_catalog, public
+      AS $probe$ BEGIN RETURN public._probe_ungranted(); END $probe$;
+      GRANT EXECUTE ON FUNCTION public._probe_caller() TO authenticated;
+
       RAISE EXCEPTION USING ERRCODE = 'ZZ003', MESSAGE =
         (CASE WHEN EXISTS (SELECT 1 FROM _invoker_reaches_confined_schema()
                             WHERE api_role = 'authenticated'
@@ -592,14 +684,20 @@ BEGIN
         (CASE WHEN EXISTS (SELECT 1 FROM _policy_reaches_confined_schema()
                             WHERE api_role = 'authenticated'
                               AND policy_name = '_probe_pol_select'
-                              AND nspname = '_probe_hidden') THEN 'b' ELSE '-' END);
+                              AND nspname = '_probe_hidden') THEN 'b' ELSE '-' END) ||
+        (CASE WHEN EXISTS (SELECT 1 FROM _invoker_calls_unexecutable_function()
+                            WHERE api_role = 'authenticated'
+                              AND routine LIKE '%_probe_caller%'
+                              AND called = 'public._probe_ungranted') THEN 'c' ELSE '-' END);
     EXCEPTION WHEN SQLSTATE 'ZZ003' THEN
       control := SQLERRM;
     END;
     PERFORM _check(format('the invoker-reach reader finds a deliberate offender [%s]', control),
       control LIKE 'a%', true);
     PERFORM _check(format('the policy reader finds a deliberate offender [%s]', control),
-      control LIKE '%b', true);
+      control LIKE '_b%', true);
+    PERFORM _check(format('the EXECUTE reader finds a deliberate offender [%s]', control),
+      control LIKE '%c', true);
 
     -- A SECURITY INVOKER function an API role can reach, naming a schema that
     -- role cannot use, is refused 42501 for every such caller. PR #117 is the
@@ -617,6 +715,20 @@ BEGIN
       RAISE EXCEPTION E'FAIL: a SECURITY INVOKER function an API role can reach names a schema it cannot use — every such call is refused 42501:\n    %', findings;
     END IF;
     RAISE NOTICE 'ok  no SECURITY INVOKER function an API role can reach names a schema it cannot use (% invoker functions scanned)', n_scan;
+
+    -- The EXECUTE class: reported, not asserted. The reader's header says why,
+    -- and the count these lines print is what decides when it becomes a failure.
+    SELECT count(*) INTO n_hits FROM _invoker_calls_unexecutable_function();
+    IF n_hits = 0 THEN
+      RAISE NOTICE 'ok  no SECURITY INVOKER function an API role can reach calls a function it may not execute (0 — this reader can become a failure)';
+    ELSE
+      RAISE WARNING 'EXECUTE-REACH % case(s): a SECURITY INVOKER function an API role can reach calls a function that role may not execute. Masked by the plan cache exactly as a schema is, so matrix.sql cannot be relied on to show it. Reported and not failed until the count on a clean head is read — see the reader''s header', n_hits;
+      FOR probe IN SELECT * FROM _invoker_calls_unexecutable_function()
+                    ORDER BY api_role, routine, called LOOP
+        RAISE WARNING 'EXECUTE-REACH   %: % (%) calls %',
+          probe.api_role, probe.routine, probe.reached_by, probe.called;
+      END LOOP;
+    END IF;
 
     -- And the same for a policy expression, which is parsed under the querying
     -- role and binds SECURITY DEFINER functions too.
