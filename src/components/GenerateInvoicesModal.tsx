@@ -8,6 +8,7 @@ import type { TranslationKey } from '../i18n';
 import { Alert } from './ui';
 import { fetchAllActiveSubscriptions, fetchInvoicedCompanyIds } from '../lib/platformBillingClient';
 import type { PlatformSubscriptionRow } from '../lib/platformBilling';
+import { invoiceDueDate } from '../utils/invoiceDueDate';
 
 interface Props {
   onClose: () => void;
@@ -86,7 +87,7 @@ export default function GenerateInvoicesModal({ onClose, onGenerated }: Props) {
           continue;
         }
 
-        const dueDate = new Date(year, month - 1, Math.min(sub.billing_day, 28));
+        const dueDate = invoiceDueDate(year, month, sub.billing_day);
 
         const { error: insertErr } = await supabase
           .from('subscription_invoices')
@@ -99,7 +100,7 @@ export default function GenerateInvoicesModal({ onClose, onGenerated }: Props) {
             amount: sub.monthly_price,
             status: 'open',
             payment_method: 'cash',
-            due_date: dueDate.toISOString().split('T')[0],
+            due_date: dueDate,
           });
 
         if (insertErr) {
