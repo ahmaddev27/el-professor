@@ -37,8 +37,8 @@
   the trigger's call once and every principal after it reuses that plan. The
   privilege check never runs a second time.
 
-  This file reports nine things, each printed as its own NOTICE, and every
-  premise it depends on is asserted before the first of them. It **reports**: the
+  This file reports eleven things, each printed as its own NOTICE, and every
+  premise it depends on is asserted before the step that needs it. It **reports**: the
   verdict block draws no conclusion, because a verdict here printed a one-line
   answer about function EXECUTE once and that answer was wrong. The taxonomy
   built from these lines lives in CLAUDE.md.
@@ -57,6 +57,10 @@
     F3 the same through a `sql STABLE` function **with** a SET clause, which is
        the shape of 20260923120000's helper and of matrix.sql's `roles I` cell
     G  a table privilege, on the same shape
+    H1 schema USAGE warmed by one ordinary role and read by another, with **no
+       owner anywhere in the path** — whether a pooled backend can carry the mask
+       between two signed-in users
+    H2 the same for the one callee shape that masked in F2
 
   F1, F2 and F3 differ in exactly the property that decides whether the planner
   may fold the call away, and **none of the three is asserted**: which of them a
@@ -84,14 +88,30 @@
   3. `tests/rls/matrix.sql`'s `roles I` cell moved `RR` to `PP` for `anon` with
      `permission denied for function role_name_is_system_reserved`, and inlining
      was offered as the account of it. That helper is `LANGUAGE sql STABLE` **with
-     a SET clause**, and the reading of the optimiser says a function carrying one
-     is not inlined — which would put it with F1 and leave the cell's mask
-     unexplained. **F3 is that exact shape**, and it is the probe that settles
-     which account is right. Until it has run, neither is written into the cell's
-     comment or into CLAUDE.md.
+     a SET clause**; F3 is that exact shape and came back **REFUSED with the cache
+     warm**, which kills the inlining account as well.
 
-  The lesson the file now carries in its own structure: a reading of PostgreSQL's
-  source has been wrong here three times, in both directions. Measure it.
+  So **the mechanism behind `roles I` is not established**, and nothing in this
+  file or in CLAUDE.md claims one. What the three probes do is rule things out:
+
+    F1 refused  →  a real call's EXECUTE is re-checked per execution
+    F3 refused  →  and that holds for `roles I`'s own callee shape
+    F2 allowed  →  only a callee the planner may fold away is masked, and
+                   `roles I`'s is not one
+
+  Something about the real path differs from every probe here in a way nobody has
+  identified. The differences that have not been probed, as leads and **not as
+  explanations**: the real trigger is BEFORE INSERT **OR UPDATE**, the probes'
+  fire on INSERT only; the real callee's body reads an RLS table (`public.roles`)
+  where the probes' select a constant; the real table has RLS enabled with
+  policies and the probe tables have none, so the real path has a WITH CHECK that
+  can refuse and the probes do not; and the real trigger function lives in
+  `app_private` rather than `public`. Each is something to probe, and a fourth
+  confident paragraph is exactly what must not be written instead.
+
+  The lesson the file carries in its own structure: a reading of PostgreSQL's
+  source has been wrong here three times, in both directions, and each read as
+  confirmed at the time. Measure it.
 
   The guard in `matrix.sql` is unaffected by every one of these, and by
   construction rather than by luck: `DISCARD PLANS` forces a re-plan, and a
@@ -290,6 +310,79 @@ END $$;
 CREATE TRIGGER pc_guard_table BEFORE INSERT ON public.pc_rows_table
   FOR EACH ROW EXECUTE FUNCTION public.pc_guard_table();
 
+-- ─── Step H: is the mask confined to the owner at all? ──────────────────────
+/*
+  Every step above warms the cache as the **owner**, a superuser that bypasses
+  RLS and holds every grant. That made it easy to read the mask as an artefact of
+  this file's fixture pass. It is not safe to keep reading it that way, for two
+  reasons:
+
+  - **PostgREST pools connections.** One PostgreSQL backend serves requests from
+    many roles in turn, with `SET LOCAL ROLE` per transaction, and the plan cache
+    belongs to the backend and not to the role. If an ordinary role that holds a
+    privilege can warm a plan for one that does not, the mask is a property of a
+    shared backend and reaches production, not only the kit.
+  - **No mechanism is established.** F1, F2 and F3 between them killed both
+    accounts of why `matrix.sql`'s `roles I` moved. With no mechanism there is no
+    argument that the mask is confined to a superuser, so the confinement has to
+    be measured rather than assumed.
+
+  So H takes the owner out of the path entirely. Two ordinary roles: `pc_warmer`
+  holds the grant and plans the statement first; `pc_principal` does not hold it
+  and runs the same statement second. Both halves of the one class that masked
+  (H2, an inlinable callee) and of the class this whole guard exists for (H1,
+  schema USAGE) are probed.
+
+  Asserted premises, no asserted outcome, and the verdict prints what it found —
+  the same shape as F1/F2/F3, for the same reason.
+*/
+CREATE ROLE pc_warmer NOLOGIN;
+GRANT USAGE ON SCHEMA public TO pc_warmer;
+GRANT pc_warmer TO CURRENT_USER;
+
+-- H1: schema USAGE. A second hidden schema, because step E granted pc_principal
+-- USAGE on the first one.
+CREATE SCHEMA pc_hidden2;
+CREATE FUNCTION pc_hidden2.answer() RETURNS boolean
+LANGUAGE sql IMMUTABLE AS $$ SELECT true $$;
+GRANT USAGE ON SCHEMA pc_hidden2 TO pc_warmer;
+
+CREATE TABLE public.pc_rows_pool_schema (note text);
+GRANT INSERT ON public.pc_rows_pool_schema TO pc_warmer, pc_principal;
+
+CREATE FUNCTION public.pc_guard_pool_schema() RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = pg_catalog, public
+AS $$
+BEGIN
+  PERFORM pc_hidden2.answer();
+  RETURN NEW;
+END $$;
+
+CREATE TRIGGER pc_guard_pool_schema BEFORE INSERT ON public.pc_rows_pool_schema
+  FOR EACH ROW EXECUTE FUNCTION public.pc_guard_pool_schema();
+
+-- H2: function EXECUTE, on the one callee shape that masked (F2's).
+CREATE FUNCTION public.pc_open_inlinable2() RETURNS boolean
+LANGUAGE sql IMMUTABLE AS $$ SELECT true $$;
+REVOKE ALL ON FUNCTION public.pc_open_inlinable2() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.pc_open_inlinable2() TO pc_warmer;
+
+CREATE TABLE public.pc_rows_pool_exec (note text);
+GRANT INSERT ON public.pc_rows_pool_exec TO pc_warmer, pc_principal;
+
+CREATE FUNCTION public.pc_guard_pool_exec() RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = pg_catalog, public
+AS $$
+BEGIN
+  PERFORM public.pc_open_inlinable2();
+  RETURN NEW;
+END $$;
+
+CREATE TRIGGER pc_guard_pool_exec BEFORE INSERT ON public.pc_rows_pool_exec
+  FOR EACH ROW EXECUTE FUNCTION public.pc_guard_pool_exec();
+
 -- ─── helpers ────────────────────────────────────────────────────────────────
 
 /*
@@ -357,6 +450,10 @@ DECLARE
   f3_owner    text;
   g_table     text;
   g_owner     text;
+  h1_warm     text;
+  h1_read     text;
+  h2_warm     text;
+  h2_read     text;
   v_verdict   text[] := ARRAY[]::text[];
   v_ok        boolean := true;
 BEGIN
@@ -524,6 +621,59 @@ BEGIN
   END IF;
   RAISE NOTICE ' ';
 
+  /*
+    H. The owner is not in this path. Premises first, and they are the whole
+    validity of the step: a warmer that may not do the thing warms nothing, a
+    reader that may do it proves nothing, and a role that bypasses RLS or is a
+    superuser is not an ordinary role.
+  */
+  IF NOT has_schema_privilege('pc_warmer', 'pc_hidden2', 'USAGE') THEN
+    RAISE EXCEPTION 'premise: pc_warmer cannot use pc_hidden2, so H1 warms nothing';
+  END IF;
+  IF has_schema_privilege('pc_principal', 'pc_hidden2', 'USAGE') THEN
+    RAISE EXCEPTION 'premise: pc_principal can use pc_hidden2, so H1 measures nothing';
+  END IF;
+  IF NOT has_function_privilege('pc_warmer', 'public.pc_open_inlinable2()', 'EXECUTE') THEN
+    RAISE EXCEPTION 'premise: pc_warmer holds no EXECUTE on pc_open_inlinable2, so H2 warms nothing';
+  END IF;
+  IF has_function_privilege('pc_principal', 'public.pc_open_inlinable2()', 'EXECUTE') THEN
+    RAISE EXCEPTION 'premise: pc_principal holds EXECUTE on pc_open_inlinable2, so H2 measures nothing';
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_roles
+              WHERE rolname IN ('pc_warmer', 'pc_principal')
+                AND (rolsuper OR rolbypassrls)) THEN
+    RAISE EXCEPTION 'premise: one of the two H roles is a superuser or bypasses RLS, so neither stands in for authenticated';
+  END IF;
+  RAISE NOTICE 'H premises ok: pc_warmer holds both grants, pc_principal neither, and neither role is super or bypassrls';
+
+  -- Nothing has executed either guard function, and a discard makes that
+  -- independent of anything above rather than merely true today.
+  PERFORM public.pc_discard_via_execute();
+
+  h1_warm := public.pc_write('pc_rows_pool_schema', 'pc_warmer',    'pc_warmer warms the schema path');
+  h1_read := public.pc_write('pc_rows_pool_schema', 'pc_principal', 'pc_principal, no USAGE');
+  RAISE NOTICE 'H1 pc_warmer INSERT (warms)           -> %', h1_warm;
+  RAISE NOTICE 'H1 pc_principal INSERT, no discard    -> %', h1_read;
+  RAISE NOTICE '   schema USAGE, warmed by an ordinary role and read by another.';
+  RAISE NOTICE '   REFUSED means the mask needs the owner. ALLOWED means it does not,';
+  RAISE NOTICE '   and a pooled backend can carry it between two signed-in users';
+
+  h2_warm := public.pc_write('pc_rows_pool_exec', 'pc_warmer',    'pc_warmer warms the EXECUTE path');
+  h2_read := public.pc_write('pc_rows_pool_exec', 'pc_principal', 'pc_principal, no EXECUTE');
+  RAISE NOTICE 'H2 pc_warmer INSERT (warms)           -> %', h2_warm;
+  RAISE NOTICE 'H2 pc_principal INSERT, no discard    -> %', h2_read;
+  RAISE NOTICE '   the same for the one callee shape that masked in F2';
+
+  IF h1_warm <> 'ALLOWED' THEN
+    v_ok := false;
+    v_verdict := array_append(v_verdict, ('H1''s warmer was refused, so H1 warmed nothing: ' || h1_warm));
+  END IF;
+  IF h2_warm <> 'ALLOWED' THEN
+    v_ok := false;
+    v_verdict := array_append(v_verdict, ('H2''s warmer was refused, so H2 warmed nothing: ' || h2_warm));
+  END IF;
+  RAISE NOTICE ' ';
+
   RAISE NOTICE '════ WHAT EACH PROBE FOUND ════';
   RAISE NOTICE 'This block reports. It draws no conclusion on purpose: an earlier version';
   RAISE NOTICE 'printed a one-line answer about function EXECUTE and that answer was wrong,';
@@ -537,6 +687,8 @@ BEGIN
   RAISE NOTICE '  EXECUTE, inlinable sql callee (F2)  %', f2_exec;
   RAISE NOTICE '  EXECUTE, sql + SET callee (F3)      %', f3_exec;
   RAISE NOTICE '  table privilege (G)                 %', g_table;
+  RAISE NOTICE '  schema USAGE, no owner (H1)         %', h1_read;
+  RAISE NOTICE '  EXECUTE, inlinable, no owner (H2)   %', h2_read;
   RAISE NOTICE ' ';
   RAISE NOTICE 'How to read a line: ALLOWED with the cache warm means the class is masked —';
   RAISE NOTICE 'the owner''s plan decided it. REFUSED means it is re-checked per execution.';
@@ -547,6 +699,18 @@ BEGIN
   RAISE NOTICE 'by construction rather than by luck: DISCARD PLANS forces a re-plan, and a';
   RAISE NOTICE 're-plan under the principal can neither reuse the owner''s resolution nor';
   RAISE NOTICE 'inline a function the principal may not execute.';
+  IF h1_read = 'ALLOWED' OR h2_read = 'ALLOWED' THEN
+    RAISE NOTICE ' ';
+    RAISE NOTICE '*** STOP AND READ: a mask crossed two ordinary roles with no owner in the';
+    RAISE NOTICE '*** path (H1=%, H2=%). PostgREST pools one backend across roles, so this is', h1_read, h2_read;
+    RAISE NOTICE '*** a statement about the product and not about this file. Take it to the';
+    RAISE NOTICE '*** owner before anything else is written down.';
+  ELSIF h1_warm = 'ALLOWED' AND h2_warm = 'ALLOWED' THEN
+    RAISE NOTICE ' ';
+    RAISE NOTICE 'H: neither mask crossed two ordinary roles, so on this PostgreSQL it needs';
+    RAISE NOTICE 'the owner. That is measured here, not assumed from the absence of a';
+    RAISE NOTICE 'mechanism.';
+  END IF;
   IF cardinality(v_verdict) > 0 THEN
     RAISE NOTICE ' ';
     FOR i IN 1 .. cardinality(v_verdict) LOOP

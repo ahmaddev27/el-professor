@@ -1553,17 +1553,30 @@ INSERT INTO _mx_expected (tbl, op, anon, viewer, editor, supervisor, admin, othe
 -- INSERT was refused by `roles_insert`'s WITH CHECK and read R. With the plans
 -- discarded it is refused by the missing grant on that function and reads P.
 --
--- **The mechanism is deliberately not stated here, because it is not yet
--- measured.** Two accounts have been offered and each has a problem: "the cached
--- EXECUTE check was skipped" is hard to square with step F1 of
--- tests/tools/plan-cache-repro.sql, where a plpgsql callee is refused with the
--- cache just as warm; and "the planner inlined the call away" is hard to square
--- with that helper carrying a `SET search_path` clause, which the optimiser's own
--- rules say blocks inlining. Step F3 of that file is this helper's exact shape —
--- `sql`, `STABLE`, with a SET clause — and it is the probe that settles it. Write
--- the mechanism here when F3 has answered, and not before: a reading of the
--- PostgreSQL source has been wrong about this three times on this branch, in
--- both directions.
+-- **Why it moved is NOT established, and this comment is where that is recorded
+-- rather than guessed.** Two accounts were offered and tests/tools/
+-- plan-cache-repro.sql killed both:
+--
+--   F1 (plpgsql callee)            REFUSED with the cache warm
+--   F3 (sql STABLE + SET clause,   REFUSED with the cache warm
+--       this helper's exact shape)
+--   F2 (sql IMMUTABLE, no SET)     ALLOWED — only a callee the planner may fold
+--                                  away is masked, and this one is not
+--
+-- So it is neither "the cached EXECUTE check was skipped" (F1 and F3 refuse warm)
+-- nor "the planner inlined the call away" (F3 is that shape and still refuses).
+-- Something about the real path differs from every probe in that file and nobody
+-- has found it. Leads, **not explanations**: this trigger is BEFORE INSERT OR
+-- UPDATE and the probes' fire on INSERT only; this callee's body reads
+-- `public.roles`, an RLS table, where the probes' select a constant; this table
+-- has RLS with policies and a WITH CHECK that can refuse, and the probe tables
+-- have neither; and this trigger function lives in `app_private`.
+--
+-- Do not replace this with a fourth confident paragraph. Three readings of
+-- PostgreSQL's source have been wrong here, in both directions, each reading as
+-- confirmed at the time. The guard is unaffected either way: DISCARD PLANS forces
+-- a re-plan, and a re-plan under the principal can neither reuse the owner's name
+-- resolution nor fold away a function the principal may not execute.
 --
 -- anon is deliberately left without that EXECUTE. `roles_insert` is
 -- `TO authenticated`, so anon cannot insert a role whatever the grant says;
