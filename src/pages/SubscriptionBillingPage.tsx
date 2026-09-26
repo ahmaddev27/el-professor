@@ -223,6 +223,13 @@ export default function SubscriptionBillingPage() {
 
   // The company picker is read once per screen: every call writes an audit row,
   // so it is not reloaded per filter change.
+  //
+  // It is **one page**, the first 100 companies by name, and that is a bounded
+  // list rather than a complete one — `platform_companies_list` caps a page at
+  // 100. Paging it here would be several audit rows per screen open for a
+  // convenience, and a company past the hundredth is still reachable: the search
+  // box filters on the company name in SQL. Give the picker a search of its own
+  // before this grows past a hundred customers.
   useEffect(() => {
     if (!canBilling) return;
     let cancelled = false;
