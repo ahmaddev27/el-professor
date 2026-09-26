@@ -863,5 +863,60 @@ BEGIN
     RAISE NOTICE 'ok  no policy expression names a schema its callers cannot use (% policies scanned)', n_scan;
   END;
 
+  -- ─── a table in public with RLS off must grant no API role ────────────────
+  --
+  -- Not our tables: the supabase/realtime image creates `tenants`, `extensions`
+  -- and `schema_migrations` in `public` on boot, and Supabase's DEFAULT
+  -- PRIVILEGES on that schema hand every new table there to anon and
+  -- authenticated. Measured on production and staging on 26.09.2026: all three
+  -- had RLS off, no policies, and all seven privileges for anon, and the public
+  -- API answered 200 on each — `tenants` returning the 108-character Realtime
+  -- signing secret, `extensions.settings` returning db_password. 20260926100000
+  -- revokes them.
+  --
+  -- The revoke fixes three tables; this rule is the half that matters, because
+  -- the cause is a default privilege and so the *next* table an image creates in
+  -- public arrives the same way. Exactly three tables violated it before that
+  -- migration and none after, so it ships as a failure with no exemption list.
+  --
+  -- It is a privilege rule, not an RLS rule: a table may legitimately have RLS
+  -- off when no API role can reach it at all, which is why the test is the
+  -- conjunction rather than "every public table has RLS".
+  --
+  -- **What this rule cannot do here, so nobody reads more into a green run than
+  -- it says:** the kit's database is production's --schema=public dump plus the
+  -- migration chain, and that dump carries none of the three tables above — they
+  -- exist only where the Realtime image has booted. So for image-created tables
+  -- this assertion passes vacuously. It earns its place against a table one of
+  -- *our* migrations adds, which is the case we control. Catching the next
+  -- image-created one means running the same query against the live databases;
+  -- HANDOFF.md carries it as a host step with the query.
+  DECLARE
+    n_open  int;
+    open_ls text;
+  BEGIN
+    SELECT count(*), coalesce(string_agg(format('%s grants %s to %s', relname, privs, grantee), E'
+    ' ORDER BY relname), '')
+      INTO n_open, open_ls
+      FROM (
+        SELECT c.relname, g.grantee,
+               string_agg(DISTINCT g.privilege_type, ',' ORDER BY g.privilege_type) AS privs
+          FROM pg_class c
+          JOIN pg_namespace n ON n.oid = c.relnamespace
+          JOIN information_schema.role_table_grants g
+            ON g.table_schema = 'public' AND g.table_name = c.relname
+         WHERE n.nspname = 'public'
+           AND c.relkind = 'r'
+           AND NOT c.relrowsecurity
+           AND g.grantee IN ('anon', 'authenticated')
+         GROUP BY c.relname, g.grantee
+      ) x;
+    IF n_open > 0 THEN
+      RAISE EXCEPTION E'FAIL: a table in public has RLS disabled and still grants an API role, so the publishable anon key reads it over the API:
+    %', open_ls;
+    END IF;
+    RAISE NOTICE 'ok  no table in public has RLS disabled while granting anon or authenticated';
+  END;
+
   RAISE NOTICE '── all assertions passed ──';
 END $$;
