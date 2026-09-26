@@ -1836,15 +1836,58 @@ BEGIN
                       JOIN jsonb_array_elements(v_p2 -> 'items') b
                         ON (a ->> 'id') = (b ->> 'id')));
 
-  -- The order is fixed at newest period first: the three .order() calls the
-  -- screen used to send PostgREST. There is no sort argument, deliberately.
-  -- The fixture's periods are 9, 9, 8, 7, 6, 5 and 4 of 2026, so page 1 holds
-  -- the two 9s and page 2 continues at 8.
-  PERFORM _rm_ok('paging: newest period first, with no sort argument to give',
-    (v_p1 -> 0 ->> 'invoice_month')::int = 9
-    AND (v_p1 -> 1 ->> 'invoice_month')::int = 9
-    AND (v_p2 -> 0 ->> 'invoice_month')::int = 8
-    AND (v_p2 -> 1 ->> 'invoice_month')::int = 7);
+  /*
+    The order is fixed at newest period first: the three .order() calls the
+    screen used to send PostgREST. There is no sort argument, deliberately.
+
+    The whole sequence rather than four spot values, and read through `'items'`.
+    The first version of these lines asked `v_p1 -> 0`, but the function answers
+    an **object** and `jsonb -> integer` is the *array* accessor, so every one of
+    them was NULL — and `_rm_ok` refuses NULL on the principle that a check which
+    could not be evaluated proved nothing. **That principle is the only reason
+    this surfaced instead of sitting green for ever**, which is worth knowing
+    before anyone relaxes it the next time a NULL is inconvenient.
+  */
+  PERFORM _rm_ok('paging: the whole list is newest period first, with no sort argument to give',
+    (SELECT array_agg((t.i ->> 'invoice_month')::int ORDER BY t.o)
+       FROM jsonb_array_elements(
+              _rm_json(owner, 'SELECT platform_invoices_list(NULL, NULL, NULL, NULL, NULL, 100, 0)::text')
+                -> 'items') WITH ORDINALITY AS t(i, o))
+      = ARRAY[9, 9, 8, 7, 6, 5, 4]);
+
+  /*
+    Two invoices share a period — company A's September and company B's — and
+    `id` is what separates them. It is the primary key, so
+    `ORDER BY invoice_year DESC, invoice_month DESC, created_at DESC, id` is
+    **total**: no two rows tie on all four legs, and page 2 can never repeat a
+    row from page 1. A list an operator pages through has to be totally ordered,
+    and this is the leg that makes it so.
+
+    **`created_at DESC` is the one leg this fixture cannot exercise, and it is
+    not redundant.** All seven rows come from one multi-row INSERT, so they share
+    a transaction timestamp and that leg always ties here. It earns its place on
+    real data, where two invoices of the same period in different companies are
+    ordered by when they were raised rather than by the accident of a uuid — the
+    uuid is the last resort, not the intended sort. Do not delete it as dead.
+  */
+  PERFORM _rm_ok('paging: a shared period is broken by id, ascending, which is what makes the order total',
+    (v_p1 -> 'items' -> 0 ->> 'invoice_month')::int = 9
+    AND (v_p1 -> 'items' -> 1 ->> 'invoice_month')::int = 9
+    AND (v_p1 -> 'items' -> 0 ->> 'id')::uuid < (v_p1 -> 'items' -> 1 ->> 'id')::uuid
+    AND (v_p2 -> 'items' -> 0 ->> 'invoice_month')::int = 8
+    AND (v_p2 -> 'items' -> 1 ->> 'invoice_month')::int = 7);
+
+  -- And the property itself, measured rather than argued: every page of the
+  -- list, two rows at a time, holds all seven invoices exactly once. Four
+  -- audited calls, at offsets 0, 2, 4 and 6; the last page holds one row.
+  PERFORM _rm_ok('paging: the four pages together hold every invoice exactly once',
+    (SELECT count(*) = 7 AND count(DISTINCT p.id) = 7
+       FROM (SELECT (t.i ->> 'id') AS id
+               FROM generate_series(0, 6, 2) AS g(off)
+               CROSS JOIN LATERAL jsonb_array_elements(
+                 _rm_json(owner, format(
+                   'SELECT platform_invoices_list(NULL, NULL, NULL, NULL, NULL, 2, %s)::text', g.off))
+                   -> 'items') AS t(i)) AS p));
 
   -- The summary is the same whichever page is asked for: it describes the set,
   -- not the page.
