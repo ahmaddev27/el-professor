@@ -140,16 +140,58 @@ const SKIP_LINE_RE = /\b(datum|uhrzeit|startzeitpunkt|beendigungszeitpunkt|tse|s
 // Matches: "14,21 l", "1,829 EUR/l", "EUR/L", "€/l", "EUR pro Liter", etc.
 const FUEL_UNIT_LINE_RE = /eur\s*\/\s*l|EUR\/L|€\s*\/\s*l|\d+[,\.]\d+\s*l\b|liter|ltr\b|menge|preis\s*\/\s*l|einzelpreis|eur\s*pro\s*l/i;
 
-// Amount format: 25,32 or 25.32
-const AMOUNT_RE = /\b(\d{1,4}[,\.]\d{2})\b/g;
+/**
+ * Amount format: `25,32`, `25.32`, or German grouping — `2.480,00`.
+ *
+ * The grouped alternative comes first, and it is why this is not one pattern.
+ * `\b(\d{1,4}[,.]\d{2})\b` **cannot match a grouped amount, and matches a piece of
+ * one instead.** On '2.480,00': `\d{1,4}` takes '2', `[,.]` takes '.', `\d{2}`
+ * takes '48', and the closing `\b` then sits between '8' and '0' — two word
+ * characters — so it fails, and nothing else can start at '2'. The scan moves on
+ * and matches **'480,00'**, because the '.' before it is a non-word character so
+ * the leading `\b` holds. `parseRawAmount` accepts 480.00, being under the 10000
+ * ceiling, and the Beleg is created with 480,00 € instead of 2.480,00 € — with no
+ * uncertainty warning, and that figure goes on to the Abrechnung and the
+ * Tankenquote.
+ *
+ * '1.000,00' behaved differently and harmlessly: the piece it matched was
+ * '000,00', which parses to 0 and is rejected. So the defect only bites when the
+ * group after the separator starts with a non-zero digit — which is most of them.
+ *
+ * **Measured on production 27.09.2026**: of 915 receipts exactly **1** has an
+ * expense of 1000 or more, and the maximum is 1000.00 — so this is latent today
+ * and lives on the next Werkstatt or fuel invoice over a thousand euros.
+ *
+ * Only **German** grouping is added. English grouping (`1,234.56`) would need
+ * `parseRawAmount`'s normalisation changed as well, and nothing measured asks for
+ * it. An amount at or above 10000 now matches as a whole and is then rejected by
+ * the ceiling, so it yields no candidate at all rather than a plausible fragment.
+ */
+const AMOUNT_RE = /\b(\d{1,3}(?:\.\d{3})+,\d{2}|\d{1,4}[,.]\d{2})\b/g;
+
+/**
+ * A captured amount with its grouping removed and its decimal separator as a dot.
+ *
+ * This was written out three times as `raw.replace(',', '.')` — for the two label
+ * value sets and for the candidate's own key. Those three only ever compare
+ * against each other, so being naive was consistent; it stops being consistent the
+ * moment a capture carries grouping, since '2.480,00' would become '2.480.00'.
+ * Every currently occurring amount normalises to exactly the same string as
+ * before: '25,32' -> '25.32' and '25.32' -> '25.32'.
+ */
+function normalizeAmountRaw(raw: string): string {
+  return raw.includes(',') ? raw.replace(/\./g, '').replace(',', '.') : raw;
+}
 
 function parseRawAmount(raw: string): number | null {
-  // German: 25,32 → 25.32; English: 25.32 → 25.32
-  const normalized = raw.includes(',') ? raw.replace(/\./g, '').replace(',', '.') : raw;
-  const n = parseFloat(normalized);
+  // German: 25,32 → 25.32; English: 25.32 → 25.32; grouped: 2.480,00 → 2480.00
+  const n = parseFloat(normalizeAmountRaw(raw));
   if (isNaN(n) || n <= 0 || n >= 10000) return null;
   return Math.round(n * 100) / 100;
 }
+
+/** Exported for `receiptOcrAmount.test.ts`, which pins the two above. */
+export const __ocrInternals = { AMOUNT_RE, normalizeAmountRaw, parseRawAmount };
 
 // Format a number as German decimal string: 41.47 → "41,47"
 export function formatAmountDE(n: number): string {
@@ -171,10 +213,10 @@ function extractAmountCandidates(lines: string[], datePartSet: Set<string>): Ocr
     const lower = line.toLowerCase();
     const amtsInLine = [...line.matchAll(AMOUNT_RE)].map(m => m[1]);
     if (/gesamtbetrag|z[-\s]?summe|endbetrag|zu\s*zahlen|total/i.test(line)) {
-      amtsInLine.forEach(v => gesamtValues.add(v.replace(',', '.')));
+      amtsInLine.forEach(v => gesamtValues.add(normalizeAmountRaw(v)));
     }
     if (/\bbrutto\b/i.test(line) && !/netto|mwst/i.test(lower)) {
-      amtsInLine.forEach(v => bruttoValues.add(v.replace(',', '.')));
+      amtsInLine.forEach(v => bruttoValues.add(normalizeAmountRaw(v)));
     }
     // Capture gegeben and Rückgeld amounts for consistency cross-check
     if (/\bgegeben\b/i.test(line) && !/rückgeld|wechselgeld/i.test(line)) {
@@ -271,7 +313,7 @@ function extractAmountCandidates(lines: string[], datePartSet: Set<string>): Ocr
       let score = 10;
       const reasons: string[] = [];
 
-      const normalizedRaw = raw.replace(',', '.');
+      const normalizedRaw = normalizeAmountRaw(raw);
 
       // Context lines
       const prevLine = lines[idx - 1] ?? '';
