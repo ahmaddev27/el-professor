@@ -194,11 +194,17 @@ function getHolidaysForYear(year: number, bundesland?: string | null): Set<strin
   if (['BW', 'BY', 'NW', 'RP', 'SL'].includes(bl))
     h.add(fmt(new Date(year, 10, 1)));
 
-  // Buß- und Bettag — SN (Wednesday before Nov 23)
+  // Buß- und Bettag — SN. The Wednesday STRICTLY before 23 November, so always
+  // between the 16th and the 22nd.
+  //
+  // This landed on a TUESDAY in every single year. The offset was
+  // `((getDay() + 4) % 7) + 1` — the `+ 1` pushed one day past the Wednesday, so
+  // 2026 gave 17 November instead of the 18th, and so on for 2020..2035 without
+  // exception. Same formula as utils/germanHolidays.ts now; they stay two copies
+  // because merging the duplicate holiday tables is not this change.
   if (bl === 'SN') {
     const nov23 = new Date(year, 10, 23);
-    const bbt   = add(nov23, -(((nov23.getDay() + 4) % 7) + 1)); // last Wed before Nov 23
-    h.add(fmt(bbt));
+    h.add(fmt(add(nov23, -(((nov23.getDay() - 3) + 7) % 7 || 7))));
   }
 
   return h;
