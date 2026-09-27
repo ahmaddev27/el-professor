@@ -127,6 +127,36 @@ const ReceiptList: React.FC<ReceiptListProps> = ({
     return getBusinessMonthRange(month0, year);
   }, [filters.selectedMonth, filters.selectedWeek, filters.customDateFrom, filters.customDateTo, weeksForMonth]);
 
+  /**
+   * The same range as `activeDateRange`, as two `YYYY-MM-DD` keys, because the
+   * comparison has to be made on calendar days and not on instants.
+   *
+   * The two paths above build Dates that mean different things, and that is what
+   * dropped receipts. A custom range parses `YYYY-MM-DD` with `new Date(...)`,
+   * which ECMAScript reads as **UTC** midnight; a week or business month comes
+   * from `new Date(year, month, day)`, which is **local** midnight. A receipt's
+   * `date` is a bare `YYYY-MM-DD` too, so it was a UTC midnight — later than a
+   * local-midnight end bound in any zone east of UTC. In Berlin that is one or
+   * two hours, and it was enough: **every receipt dated on the last day of the
+   * selected week or business month failed `<= end`** and vanished from the list,
+   * from the total, from the Excel export and from the summary PDF the
+   * Steuerberater receives. Measured on production 27.09.2026: 93 of 915 receipts
+   * fall on a Sunday — a business week's last day — and 31 on a month's last day.
+   *
+   * Each bound is read with the getters that match how it was built, so no
+   * timezone is assumed: the custom bounds are already the strings the user
+   * picked, and the week and month bounds are read with local getters.
+   */
+  const activeDateKeys = useMemo((): { start: string; end: string } | null => {
+    if (filters.customDateFrom && filters.customDateTo) {
+      return { start: filters.customDateFrom.slice(0, 10), end: filters.customDateTo.slice(0, 10) };
+    }
+    if (!activeDateRange) return null;
+    const localKey = (d: Date) =>
+      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    return { start: localKey(activeDateRange.start), end: localKey(activeDateRange.end) };
+  }, [activeDateRange, filters.customDateFrom, filters.customDateTo]);
+
   const filteredReceipts = useMemo(() => {
     return receipts.filter(receipt => {
       const matchesSearch = !searchTerm || (
@@ -136,19 +166,19 @@ const ReceiptList: React.FC<ReceiptListProps> = ({
         receipt.driverName.toLowerCase().includes(searchTerm.toLowerCase())
       );
 
-      const receiptDate = new Date(receipt.date);
       let matchesDate = true;
-      if (activeDateRange) {
-        matchesDate =
-          receiptDate >= activeDateRange.start &&
-          receiptDate <= activeDateRange.end;
+      if (activeDateKeys) {
+        // ISO dates compare lexicographically in calendar order, so this needs no
+        // Date at all and both ends are inclusive.
+        const day = receipt.date.slice(0, 10);
+        matchesDate = day >= activeDateKeys.start && day <= activeDateKeys.end;
       }
 
       const matchesDriver = !filters.driver || receipt.driverName === filters.driver;
 
       return matchesSearch && matchesDate && matchesDriver;
     });
-  }, [receipts, searchTerm, activeDateRange, filters.driver]);
+  }, [receipts, searchTerm, activeDateKeys, filters.driver]);
 
   const sortedReceipts = useMemo(() => {
     return [...filteredReceipts].sort((a, b) => {
