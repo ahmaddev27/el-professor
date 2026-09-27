@@ -243,7 +243,7 @@ export interface BuildVehicleBlocksResult {
 
 // ── Datetime resolution ────────────────────────────────────────────────────────
 
-function resolveFullDatetime(trip: FahrtenbuchTrip, which: 'start' | 'end'): string {
+export function resolveFullDatetime(trip: FahrtenbuchTrip, which: 'start' | 'end'): string {
   const raw = (trip.raw_data_json ?? {}) as Record<string, unknown>;
   const startKeys = ['Uhrzeit des Fahrtbeginns', 'Fahrtbeginn', 'start_datetime', 'StartDatetime', 'Fahrt_Beginn', 'FahrtBeginn'];
   const endKeys   = ['Uhrzeit des Fahrtendes',   'Fahrtende',   'end_datetime',   'EndDatetime',   'Fahrt_Ende',   'FahrtEnde'];
@@ -269,7 +269,7 @@ function resolveFullDatetime(trip: FahrtenbuchTrip, which: 'start' | 'end'): str
   return `${date}T${timePart}`;
 }
 
-function parseFullDatetimeMs(dt: string): number {
+export function parseFullDatetimeMs(dt: string): number {
   if (!dt) return 0;
   if (/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/.test(dt)) {
     const ms = Date.parse(dt.replace(' ', 'T'));

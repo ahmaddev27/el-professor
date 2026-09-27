@@ -1173,6 +1173,9 @@ Secrets never enter git:
 
 ## Gotchas learned the hard way
 
+- **`tests/deploy/google-signin-guards.test.ts` fails under parallel load, and passes alone.** Seen 27.09.2026: in a full `npx vitest run` on a loaded machine, 8 of its 22 tests failed with the guard's output arriving as an empty string; the same file run on its own passed 15 with 7 skipped. The file shells out to `deploy.sh`'s guard for every case and spends ~156 s in subprocesses, so under contention a spawn returns nothing and the assertion compares `''`. **The failures are not a regression and not a flaky guard** — the guard is fine; the test's way of invoking it is. Worth making it robust (assert on a non-empty output first, or serialise the file) before it wastes someone's afternoon, since an empty answer currently reads as "the guard refused nothing".
+
+
 - **ridy is off limits.** Its deploys reset its Caddyfile. The guard restored our section on both of ridy's deploys on 14.09.2026 (10:57 and 11:11 CEST).
 - **`gh pr merge --delete-branch` switches the local checkout to the local base branch,** which may be stale. Pull right after.
 - **`workflow_dispatch` workflows only become runnable once the file is on the default branch** (`main`).

@@ -55,6 +55,8 @@ import {
   type DriverPlanningExclusion,
   computeLohnartSeconds,
   getGermanNationalHolidays,
+  resolveFullDatetime,
+  parseFullDatetimeMs,
 } from '../utils/historicalWorkingHoursCleanEngine';
 import {
   exportHistoricalWorkingHoursFahrtenbuch,
@@ -9048,26 +9050,27 @@ function buildDriverHourSummary(
     }
 
     const noteDriver = noteReassignments.get(trip.id);
-    // Resolve timestamps
-    const raw = trip.raw_data_json as Record<string, unknown> | null;
-    let startMs = 0, endMs = 0;
-    if (raw) {
-      const datetimeLike: string[] = [];
-      for (const k of Object.keys(raw)) {
-        const v = String(raw[k] ?? '');
-        if (/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/.test(v)) datetimeLike.push(v);
-      }
-      if (datetimeLike.length >= 1) startMs = Date.parse(datetimeLike[0].replace(' ', 'T')) || 0;
-      if (datetimeLike.length >= 2) endMs   = Date.parse(datetimeLike[1].replace(' ', 'T')) || 0;
-    }
-    if (!startMs && trip.trip_date && trip.start_time) {
-      startMs = Date.parse(`${trip.trip_date}T${trip.start_time.length === 5 ? trip.start_time + ':00' : trip.start_time}`) || 0;
-    }
-    if (!endMs && trip.trip_date && trip.end_time) {
-      let ms = Date.parse(`${trip.trip_date}T${trip.end_time.length === 5 ? trip.end_time + ':00' : trip.end_time}`) || 0;
-      if (ms > 0 && startMs > 0 && ms < startMs) ms += 86400000;
-      endMs = ms;
-    }
+    // Resolve timestamps by COLUMN NAME, through the clean engine's own reader.
+    //
+    // This used to collect every ISO-shaped value in raw_data_json by iterating
+    // Object.keys() and take the first as the start and the second as the end.
+    // Measured on staging 27.09.2026 over all 13959 imported rides: for 13513 of
+    // them (96.8%) the first ISO value is "Uhrzeit des Fahrtendes" — the ride's
+    // END — and the second is "Uhrzeit des Fahrtbeginns". So start and end were
+    // swapped, `endMs <= startMs` held, and addLohnart's guard returned without
+    // accumulating. Nearly every ride was silently dropped from this summary,
+    // which is both rendered (DriverHourSummaryTable) and stored
+    // (driver_hour_summary_json), so a driver's hours read as almost nothing.
+    //
+    // resolveFullDatetime asks for the named column, accepts the German
+    // DD.MM.YYYY form as well as ISO, and falls back to trip_date + start_time /
+    // end_time — the same resolution the block engine uses for the same rides,
+    // so the summary and the blocks can no longer disagree about a ride's hours.
+    let startMs = parseFullDatetimeMs(resolveFullDatetime(trip, 'start'));
+    let endMs   = parseFullDatetimeMs(resolveFullDatetime(trip, 'end'));
+    // A ride that ends past midnight carries the same trip_date on both columns
+    // only in the fallback; keep the day roll the old code applied there.
+    if (endMs > 0 && startMs > 0 && endMs < startMs) endMs += 86400000;
     if (!startMs) continue;
 
     const driverRaw = noteDriver
