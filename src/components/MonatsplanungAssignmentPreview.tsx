@@ -37,6 +37,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useTranslation } from '../contexts/LanguageContext';
 import type { TranslationKey } from '../i18n';
 import { engineText } from '../i18n/engineMessage';
+import { assessDay, formatShiftDuration, type DayWindow } from '../utils/shiftDayLimits';
 import {
   validateDriverNotesForPlanStep,
   buildRideIntervalsFromBlocks,
@@ -284,7 +285,7 @@ export default function MonatsplanungAssignmentPreview({
   // renderer switch on — data, never shown. `labelKey` is what renders.
   interface QualityIssue { label: string; labelKey: TranslationKey; details: string[]; vehicleOverlaps?: VehicleOverlapDetail[] }
 
-  const planQualitaet = useMemo<{ issues: QualityIssue[]; vehicleOverlaps: VehicleOverlapDetail[] } | null>(() => {
+  const planQualitaet = useMemo<{ issues: QualityIssue[]; vehicleOverlaps: VehicleOverlapDetail[]; durationWarningDetails: string[] } | null>(() => {
     const issues: QualityIssue[] = [];
 
     const nonCanceled = trips.filter(trip => !trip.is_canceled);
@@ -299,6 +300,7 @@ export default function MonatsplanungAssignmentPreview({
     }
 
     const vehicleOverlaps: VehicleOverlapDetail[] = [];
+    const durationWarningDetails: string[] = [];
 
     for (const [carId, carTrips] of byCar) {
       const withTs = carTrips.map(trip => {
@@ -438,51 +440,48 @@ export default function MonatsplanungAssignmentPreview({
       issues.push({ label: 'Fahrzeugwechsel zu kurz', labelKey: 'mp.quality.vehicleSwitchTooShort', details: driverSwitchDetails });
     }
 
-    // Part D: Max 3 Schichten — based on proposed assignments from phase4 or result
+    // Part D: the Stundennachweis duration limits per driver-day, as a warning.
+    //
+    // This was a "Max. 3 Schichten" blocker and could never fire: the loop above
+    // it broke at `count >= 3`, and the condition below asked whether count was
+    // `> 3`. It also threw away the absolute instants it had just read, taking
+    // `startMs % 86400000` to get a time of day, which is what CLAUDE.md forbids
+    // ("never from a bare HH:MM:SS string") — the windows are now compared as
+    // instants, so a block over midnight merges correctly.
+    //
+    // It is a warning and not a blocker on purpose. The count of three is
+    // display-only compression, so it is not a limit at all (see
+    // utils/shiftDayLimits.ts for the measurement). The two durations are a real
+    // rule, but they are enforced on the built Stundennachweis rows, where
+    // validateRowDurations blocks save and PDF export; blocking "Plan anwenden"
+    // on a different computation of the same rule risks refusing a month the
+    // Stundennachweis would accept. So it is surfaced here, where the operator
+    // can still act on it, and it does not disable the button.
     if (result) {
-      const MAX_SHIFT = 270;
-      const MAX_DAY = 510;
-      type DayShifts = Array<{ s: number; e: number }>;
-      const dayShiftsMap = new Map<string, DayShifts>();
+      const dayShiftsMap = new Map<string, DayWindow[]>();
       for (const state of result.driverStates) {
         for (const ab of state.assigned) {
           const key = `${state.driver_id}_${ab.service_date}`;
-          const startMs = new Date(ab.block_start_datetime).getTime();
-          const endMs = new Date(ab.block_end_datetime).getTime();
-          const sMin = Math.floor((startMs % 86400000) / 60000);
-          const eMin = Math.floor((endMs % 86400000) / 60000);
           const arr = dayShiftsMap.get(key) ?? [];
-          arr.push({ s: sMin, e: eMin > sMin ? eMin : eMin + 1440 });
+          arr.push({
+            startMs: new Date(ab.block_start_datetime).getTime(),
+            endMs: new Date(ab.block_end_datetime).getTime(),
+          });
           dayShiftsMap.set(key, arr);
         }
       }
-      const max3Details: string[] = [];
       for (const [key, windows] of dayShiftsMap) {
-        windows.sort((a, b) => a.s - b.s);
-        const merged: DayShifts = [];
-        for (const w of windows) {
-          const last = merged[merged.length - 1];
-          if (!last || w.s > last.e) merged.push({ ...w });
-          else last.e = Math.max(last.e, w.e);
-        }
-        let count = 0, dayTotal = 0;
-        for (const m of merged) {
-          if (count >= 3 || dayTotal >= MAX_DAY) break;
-          const dur = Math.min(m.e - m.s, MAX_SHIFT, MAX_DAY - dayTotal);
-          if (dur > 0) { count++; dayTotal += dur; }
-        }
-        if (count > 3) {
-          const [driverId, date] = key.split('_');
-          const driverName = result.driverStates.find(s => s.driver_id === driverId)?.driver_name ?? driverId;
-          max3Details.push(`${driverName} · ${date.split('-').reverse().join('.')}`);
-        }
-      }
-      if (max3Details.length > 0) {
-        issues.push({ label: 'Max. 3 Schichten pro Fahrer/Tag', labelKey: 'mp.quality.maxThreeShifts', details: max3Details });
+        const day = assessDay(windows);
+        if (!day.exceedsDayLimit && !day.exceedsShiftLimit) continue;
+        const [driverId, date] = key.split('_');
+        const driverName = result.driverStates.find(s => s.driver_id === driverId)?.driver_name ?? driverId;
+        durationWarningDetails.push(
+          `${driverName} · ${date.split('-').reverse().join('.')} · Tag ${formatShiftDuration(day.dayMinutes)} · längste Schicht ${formatShiftDuration(day.longestShiftMinutes)}`,
+        );
       }
     }
 
-    return { issues, vehicleOverlaps };
+    return { issues, vehicleOverlaps, durationWarningDetails };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [trips, result]);
 
@@ -2297,6 +2296,17 @@ export default function MonatsplanungAssignmentPreview({
                     <p className="text-xs px-4 pb-2" style={{ color: '#92400e' }}>
                       {t('mp.quality.purgeNotice')}
                     </p>
+                  )}
+                  {/* Duration warning: does not block applying — see Part D above. */}
+                  {(planQualitaet?.durationWarningDetails.length ?? 0) > 0 && (
+                    <div className="text-xs px-4 pb-2">
+                      <p className="mb-1 font-semibold">
+                        {t('mp.quality.durationWarning', { count: planQualitaet!.durationWarningDetails.length })}
+                      </p>
+                      {planQualitaet!.durationWarningDetails.slice(0, 10).map((line, i) => (
+                        <p key={i} className="tabular-nums">{line}</p>
+                      ))}
+                    </div>
                   )}
                   {qualityHardBlockers > 0 && (
                     <button
