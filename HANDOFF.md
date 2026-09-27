@@ -1063,6 +1063,11 @@ SQL
 
 ## Installed on the host by hand, not by CI
 
+- **`super@professor.com`'s production password was set to the same one staging uses, on 27.09.2026, at the owner's explicit instruction and after the risk was put to him.** The account was never missing: it exists in both environments, `email_confirmed_at` set, not banned, an **active `owner` row** in `app_private.platform_staff`, and it had signed in on 23.09 in both. What differed was the password — staging accepted it, production answered `400 invalid_credentials` — which is why it read as "not on production". It was changed through GoTrue's admin endpoint (`PUT /auth/v1/admin/users/<id>`) with the service role key, so the hash is GoTrue's own, and verified immediately by a password grant that returned 200 with a token. Nothing else about the account was touched; no `.env`, no container, no migration.
+
+  **The risk the owner accepted, written down because it does not expire:** this is a platform `owner` account on a live product with real customers' data, and the password is the single most-guessed string there is. `/login` is the one public sign-in screen since 17.09.2026, and the only limit in front of it is GoTrue's `RATE_LIMIT_TOKEN` — 60 requests per 5 minutes **per source IP**, shared with token refresh — so there is **no per-account lockout anywhere in the product** and a guesser with rotating addresses is not bounded. An owner session reads and writes every company's rows through the support-session and audited-RPC paths. Changing it later is one admin call; the exposure until then is real. The alternative offered and declined was a generated strong password handed over once.
+
+
 - `/usr/local/sbin/el-professor-release`: `deploy/ci-release.sh`. It is the only thing the CI key can run: `release`, `rollback`, `status`. Reinstall it before merging a workflow change that relies on it.
 - `/usr/local/sbin/el-professor-caddy-guard` plus its systemd `.path`/`.timer`/`.service` units: `deploy/caddy/guard.sh`.
 - `/srv/caddy-sites/elprofessor.caddy`: the published routes. Change them only through `deploy/caddy/publish.sh`.
