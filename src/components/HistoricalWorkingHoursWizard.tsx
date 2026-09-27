@@ -3888,6 +3888,17 @@ function InhaberFreeWindowSearchView({
           vehicle: block.vehicle,
           oldDriver: trip ? (trip.assigned_driver_name || trip.original_driver_name || '') : '',
           newDriver: resolvedOwnerName ?? inhaberName,
+          // These three were omitted, and the compiler had been saying so all
+          // along — TS2345 at this line, one of the 207 errors the ratchet
+          // carries. Four checks below read newStartMs off these rows, and
+          // `undefined < number` is false, so every one of them reported nothing:
+          // the Inhaber's own overlaps, the per-vehicle overlaps, the conflicts
+          // against trips that did not move, and the driver-exclusion check.
+          // CLAUDE.md: "Only overlaps the app itself created are blocking errors"
+          // — these are exactly those, and they were all silent.
+          origStartMs: ride.originalStartMs,
+          origEndMs: ride.originalEndMs,
+          newStartMs,
           newEndMs,
           durSec: ride.durationSec,
           offsetMs,

@@ -1093,6 +1093,17 @@ Secrets never enter git:
 
 ## Waiting on the owner
 
+- **Ausgleichsstunden are in the expected Brutto and on the screen, but not in the Stundennachweis PDF — nor in what is stored.** Found 27.09.2026. `MonatsplanungStundennachweisPreview.tsx:1553-1565` adds each driver's adjustment total to `expected_brutto` and attaches `ausgleich_hours` / `ausgleich_amount`; the screen prints them (`:2250-2260`) and the Excel dump gives them a column of their own (`:1110`, `:1159`). But `buildPdfRows(g, …)` (`:887`, called at `:1653` and by the download button) builds its rows from the group's shifts and **never reads `ausgleich_hours`**, and `rowsForStorage` is built from those same rows — so the hours are absent from the PDF the Steuerberater receives and from the saved record. `adjustmentMap` reaches exactly three places (`:1555` the Brutto, `:2170` the deviation panel, `:3388` inside it) and the document builder is not one of them.
+
+  **Why this needs a decision and not a patch:** CLAUDE.md states the rule as *"Ausgleichsstunden exist only in the Stundennachweis, always as Lohnart 1000 with no premium,"* which reads as "the Stundennachweis is where they belong." If that is right, the PDF is missing hours whose money it already claims, and the document does not reconcile with its own Brutto. But putting them in means **choosing a day and a time span for hours nobody worked**, in a statutory record — which cannot be invented here. An `AdjustmentRecord` carries `hours`, `amount` and a reason (`Gehaltsausgleich: Transfer von <driver>`) and **no date**.
+
+  Two readings, and the owner picks:
+  1. **They belong in this PDF.** Then the owner says on which day and at what times an Ausgleich appears — and whether it is one row or spread.
+  2. **They belong in the other Stundennachweis** — `StundennachweisPage`'s generator, which synthesises hours to hit a Brutto target and would absorb them by construction. Then this preview's Brutto is the thing that is wrong to include them in, and the fix is on the money side, not the document side.
+
+  Until then the mismatch is visible on screen (the card prints worked hours and Ausgleich separately) but silent in the PDF.
+
+
 - **A night shift that does not cross midnight is paid no night premium at all.** Found 27.09.2026 while checking the review's claim that `nightMinsForSeg` returns 0 for such a shift. It does, and the measurement below is the product's own two functions copied verbatim (`StundennachweisPage.tsx:339-362`) against the window their own comment claims, 20:00–06:00:
 
   | shift | `nachtarbeit` | `nachtarbeit04` | true 20:00–06:00 | paid at +40% | night minutes lost |
