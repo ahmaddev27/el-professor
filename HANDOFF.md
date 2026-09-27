@@ -1093,6 +1093,28 @@ Secrets never enter git:
 
 ## Waiting on the owner
 
+- **A night shift that does not cross midnight is paid no night premium at all.** Found 27.09.2026 while checking the review's claim that `nightMinsForSeg` returns 0 for such a shift. It does, and the measurement below is the product's own two functions copied verbatim (`StundennachweisPage.tsx:339-362`) against the window their own comment claims, 20:00–06:00:
+
+  | shift | `nachtarbeit` | `nachtarbeit04` | true 20:00–06:00 | paid at +40% | night minutes lost |
+  |---|---|---|---|---|---|
+  | 22:00–02:00 | 240 | 120 | 240 | 240 | 0 |
+  | 20:00–23:00 | 180 | 0 | 180 | 180 | 0 |
+  | 01:00–05:00 | **0** | 180 | 240 | **0** | **240** |
+  | 03:00–08:00 | **0** | 60 | 180 | **0** | **180** |
+  | 00:00–06:00 | **0** | 240 | 360 | **0** | **360** |
+  | 04:00–06:00 | **0** | **0** | 120 | **0** | **120** |
+  | 05:00–09:00 | **0** | **0** | 60 | **0** | **60** |
+
+  The cause is exact: `seg1` takes `max(f, 20*60)` so it is empty for a shift starting before 20:00, and `seg2` needs `absTo > 24*60` so it is empty for a shift that does not cross midnight. **There is no term for the part of a shift that lies in 00:00–06:00 of its own day.** Only `nachtarbeit` feeds money (`:585`, the 1501 +40% line); `nachtarbeit04` is a display column and enters no total, so the review's second claim — that the two overlapping columns double-count — **is wrong, and is recorded as wrong.** The error is one-directional: night work is **under**-credited, never over.
+
+  **This is a decision and not a fix, because three contracts for this one column contradict each other and only §3b can choose:**
+  1. the function's own comment — "night minutes (20:00–06:00)", one flat +40%, "there is no separate 00–04 tier";
+  2. the generator's — `nachtarbeit` is 20:00–23:59 and `nacht04` is 00:00–04:00, disjoint, which it enforces by writing `nachtarbeit04` and **clearing** `nachtarbeit` on those rows (`:1689-1690`, `:1744-1745`) — and its comment says `calcRow` "would count 00:00–06:00 as nachtarbeit", which the measurement above shows it does not, so that override was written against an assumption that is already false;
+  3. CLAUDE.md's — `1500 = nightSec − night0to4Sec` at 25% and `1501 = night0to4Sec` at 40%, two mutually exclusive wage types, which is a third model again.
+
+  Fixing the arithmetic to match any one of the three changes what a Stundennachweis pays, and picking one is the §3b judgement `Docs/audit/REMEDIATION-PLAN.md` says the payroll work is blocked on. The measurement is here so the decision starts from numbers. **Note the interaction:** correcting (1) makes the generator's clearing load-bearing for the first time, so the two must be decided together.
+
+
 - **Which of the three treatments of 4:30 and 8:30 is the rule?** Found while fixing the dead max-3-Schichten check (PR for `fix/shift-limits-honest`). The same two constants, 270 and 510 minutes, are used three different ways in the product, and only one of them can be what the Stundennachweis is supposed to say:
   - **A block.** `StundennachweisPage.tsx:411-418` states the rule outright — each Schicht at most 4:30, the day at most 8:30 — and `validateRowDurations` enforces it: `hasDurationViolations` disables Speichern and PDF-Export and returns early from both handlers (`:3562`, `:3584`, `:3718`, `:3727`). A day over the limit cannot be saved or exported, with no override.
   - **A silent cap.** `AbnahmeDiagnosticPage.tsx:116-125` and the Stundennachweis generator (`StundennachweisPage.tsx:933`, `:962`, `:1458`, `:1574`, `:1797`) clamp with `Math.min(..., MAX_SHIFT, MAX_DAY - dayTotal)`. Under that treatment a driver who worked 9:00 is recorded as 8:30 and nothing is refused.
