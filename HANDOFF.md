@@ -1063,6 +1063,11 @@ SQL
 
 ## Installed on the host by hand, not by CI
 
+- **`super@professor.com`'s production password was set to the same one staging uses, on 27.09.2026, at the owner's explicit instruction and after the risk was put to him.** The account was never missing: it exists in both environments, `email_confirmed_at` set, not banned, an **active `owner` row** in `app_private.platform_staff`, and it had signed in on 23.09 in both. What differed was the password — staging accepted it, production answered `400 invalid_credentials` — which is why it read as "not on production". It was changed through GoTrue's admin endpoint (`PUT /auth/v1/admin/users/<id>`) with the service role key, so the hash is GoTrue's own, and verified immediately by a password grant that returned 200 with a token. Nothing else about the account was touched; no `.env`, no container, no migration.
+
+  **The risk the owner accepted, written down because it does not expire:** this is a platform `owner` account on a live product with real customers' data, and the password is the single most-guessed string there is. `/login` is the one public sign-in screen since 17.09.2026, and the only limit in front of it is GoTrue's `RATE_LIMIT_TOKEN` — 60 requests per 5 minutes **per source IP**, shared with token refresh — so there is **no per-account lockout anywhere in the product** and a guesser with rotating addresses is not bounded. An owner session reads and writes every company's rows through the support-session and audited-RPC paths. Changing it later is one admin call; the exposure until then is real. The alternative offered and declined was a generated strong password handed over once.
+
+
 - `/usr/local/sbin/el-professor-release`: `deploy/ci-release.sh`. It is the only thing the CI key can run: `release`, `rollback`, `status`. Reinstall it before merging a workflow change that relies on it.
 - `/usr/local/sbin/el-professor-caddy-guard` plus its systemd `.path`/`.timer`/`.service` units: `deploy/caddy/guard.sh`.
 - `/srv/caddy-sites/elprofessor.caddy`: the published routes. Change them only through `deploy/caddy/publish.sh`.
@@ -1092,6 +1097,17 @@ Secrets never enter git:
 | Run the end-to-end tests | `cd e2e && npm install && npm run setup && npm test` (details in `e2e/README.md`) |
 
 ## Waiting on the owner
+
+- **Ausgleichsstunden are in the expected Brutto and on the screen, but not in the Stundennachweis PDF — nor in what is stored.** Found 27.09.2026. `MonatsplanungStundennachweisPreview.tsx:1553-1565` adds each driver's adjustment total to `expected_brutto` and attaches `ausgleich_hours` / `ausgleich_amount`; the screen prints them (`:2250-2260`) and the Excel dump gives them a column of their own (`:1110`, `:1159`). But `buildPdfRows(g, …)` (`:887`, called at `:1653` and by the download button) builds its rows from the group's shifts and **never reads `ausgleich_hours`**, and `rowsForStorage` is built from those same rows — so the hours are absent from the PDF the Steuerberater receives and from the saved record. `adjustmentMap` reaches exactly three places (`:1555` the Brutto, `:2170` the deviation panel, `:3388` inside it) and the document builder is not one of them.
+
+  **Why this needs a decision and not a patch:** CLAUDE.md states the rule as *"Ausgleichsstunden exist only in the Stundennachweis, always as Lohnart 1000 with no premium,"* which reads as "the Stundennachweis is where they belong." If that is right, the PDF is missing hours whose money it already claims, and the document does not reconcile with its own Brutto. But putting them in means **choosing a day and a time span for hours nobody worked**, in a statutory record — which cannot be invented here. An `AdjustmentRecord` carries `hours`, `amount` and a reason (`Gehaltsausgleich: Transfer von <driver>`) and **no date**.
+
+  Two readings, and the owner picks:
+  1. **They belong in this PDF.** Then the owner says on which day and at what times an Ausgleich appears — and whether it is one row or spread.
+  2. **They belong in the other Stundennachweis** — `StundennachweisPage`'s generator, which synthesises hours to hit a Brutto target and would absorb them by construction. Then this preview's Brutto is the thing that is wrong to include them in, and the fix is on the money side, not the document side.
+
+  Until then the mismatch is visible on screen (the card prints worked hours and Ausgleich separately) but silent in the PDF.
+
 
 - **A night shift that does not cross midnight is paid no night premium at all.** Found 27.09.2026 while checking the review's claim that `nightMinsForSeg` returns 0 for such a shift. It does, and the measurement below is the product's own two functions copied verbatim (`StundennachweisPage.tsx:339-362`) against the window their own comment claims, 20:00–06:00:
 
