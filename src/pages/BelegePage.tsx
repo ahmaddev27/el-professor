@@ -9,11 +9,12 @@ import { Receipt, Driver } from '../types/receipt';
 import ReceiptList, { PdfFilterInfo } from '../components/ReceiptList';
 import ReceiptModal from '../components/ReceiptModal';
 import { Alert, Button, ConfirmDialog, DataTable, KpiCard, PageHeader } from '../components/ui';
-import { exportToExcel } from '../utils/excelExport';
+import { exportTableToExcel } from '../utils/excelExport';
 import { handleDatabaseError } from '../utils/errorHandler';
 import { generateReceiptPdf } from '../utils/receiptPdf';
 import { supabase } from '../lib/supabase';
 import { useTranslation } from '../contexts/LanguageContext';
+import { formatEuro } from '../components/ui/format';
 
 interface ConfirmModalState {
   isOpen: boolean;
@@ -136,9 +137,48 @@ const BelegePage: React.FC = () => {
     setIsReceiptModalOpen(true);
   };
 
+  /*
+    Belege are expenses. The old exportToExcel() built a "financial report" around
+    income, a running balance, ROI and a profit/loss verdict — and Receipt carries
+    none of those: it has `expense` and no `income`, no `balance`. So the function
+    threw `TypeError: Cannot read properties of undefined (reading 'toFixed')`
+    before writing a cell, for every company with at least one Beleg, with no
+    try/catch and no error boundary — the click produced no file and no message.
+    Measured by calling it on one real-shaped Receipt.
+
+    This uses exportTableToExcel, the generic dump six other screens already use
+    (Fahrzeuge, Fahrer, Fixkosten, Benutzer, Bargeldbestand, Werkstatt), and
+    reports what a Beleg actually is. Per CLAUDE.md this dump is not a statutory
+    form, so its headers follow the UI language like any other label.
+  */
   const handleExportExcel = () => {
     const toExport = filteredReceipts.length > 0 ? filteredReceipts : receipts;
-    exportToExcel(toExport, 0, filteredReceipts.length > 0);
+    const total = toExport.reduce((sum, r) => sum + (r.expense || 0), 0);
+    exportTableToExcel({
+      filename: `belege_${new Date().toISOString().slice(0, 10)}`,
+      sheetTitle: t('belege.title'),
+      moduleName: t('belege.title'),
+      filterSummary: filteredReceipts.length > 0 ? [t('belege.filterApplied')] : [],
+      columns: [
+        { key: 'receiptNumber', label: t('belege.number'), width: 20 },
+        { key: 'date', label: t('common.date'), width: 14, format: v => new Date(v as string).toLocaleDateString('de-DE') },
+        { key: 'driverName', label: t('common.driver'), width: 22 },
+        { key: 'description', label: t('common.description'), width: 40 },
+        { key: 'paymentMethod', label: t('belege.paymentMethod'), width: 16,
+          format: v => v === 'uberweisung' ? t('belege.transfer') : t('belege.cash') },
+        { key: 'expense', label: t('belege.amount'), width: 16, align: 'right',
+          format: v => formatEuro(v as number) },
+      ],
+      rows: toExport.map(r => ({
+        receiptNumber: r.receiptNumber,
+        date: r.date,
+        driverName: r.driverName,
+        description: r.description,
+        paymentMethod: r.paymentMethod ?? 'bar',
+        expense: r.expense,
+      })),
+      totals: { expense: formatEuro(total) },
+    });
   };
 
   const handleDownloadPdf = (filtered: Receipt[], filterInfo: PdfFilterInfo) => {
