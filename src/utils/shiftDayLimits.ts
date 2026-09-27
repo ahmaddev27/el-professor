@@ -95,3 +95,9 @@ export function compressToThree(merged: DayWindow[]): DayWindow[] {
   }
   return out
 }
+
+/** Minutes as the German H:MM the Stundennachweis and both screens print. */
+export function formatShiftDuration(minutes: number): string {
+  const whole = Math.round(minutes)
+  return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, '0')}`
+}

@@ -43,6 +43,7 @@ import {
 import MonatsplanungStundennachweisPreview from './MonatsplanungStundennachweisPreview';
 import { useTranslation } from '../contexts/LanguageContext';
 import type { TranslationKey } from '../i18n';
+import { assessDay, formatShiftDuration, type DayWindow } from '../utils/shiftDayLimits';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -74,7 +75,7 @@ type CheckId =
   | 'driverAssigned'
   | 'blockIdPresent'
   | 'timesPresent'
-  | 'maxThreeShifts'
+  | 'shiftCompression'
   | 'vehicleSwitchGap'
   | 'driverOverlap'
   | 'vehicleOverlap'
@@ -152,7 +153,7 @@ const CHECK_LABEL_KEYS: Record<CheckId, TranslationKey> = {
   driverAssigned:          'fin.check.driverAssigned',
   blockIdPresent:          'fin.check.blockIdPresent',
   timesPresent:            'fin.check.timesPresent',
-  maxThreeShifts:          'fin.check.maxThreeShifts',
+  shiftCompression:        'fin.check.shiftCompression',
   vehicleSwitchGap:        'fin.check.vehicleSwitchGap',
   driverOverlap:           'fin.check.driverOverlap',
   vehicleOverlap:          'fin.check.vehicleOverlap',
@@ -181,12 +182,6 @@ const CHECK_SUGGESTIONS: Partial<Record<CheckId, readonly TranslationKey[]>> = {
     'fin.suggest.vehicleOverlap.2',
     'fin.suggest.vehicleOverlap.3',
     'fin.suggest.vehicleOverlap.4',
-  ],
-  maxThreeShifts: [
-    'fin.suggest.maxThreeShifts.1',
-    'fin.suggest.maxThreeShifts.2',
-    'fin.suggest.maxThreeShifts.3',
-    'fin.suggest.maxThreeShifts.4',
   ],
   driverAssigned: [
     'fin.suggest.driverAssigned.1',
@@ -389,66 +384,68 @@ export default function FinalizePlanningModal({ run, companyId, userId, onClose,
         detail: missingTime === 0 ? DETAIL_OK : tr('fin.detail.withoutTimes', { count: missingTime }),
       });
 
-      // 8. Max-3-Schichten-Regel per driver per day (compressed view)
-      const MAX_SHIFT = 270; // 4:30
-      const MAX_DAY = 510;   // 8:30
-      function toMins(time: string): number {
-        const [h, m] = time.split(':').map(Number);
-        return h * 60 + m;
-      }
-      function segDur(s: string, e: string): number {
-        const f = toMins(s), t2 = toMins(e);
-        return t2 >= f ? t2 - f : 1440 - f + t2;
-      }
-      type DayKey = string; // "driverId_date"
-      const dayShifts = new Map<DayKey, Array<{ s: number; e: number }>>();
+      // 8. Schicht compression, and a warning about the Stundennachweis duration
+      //    limits. This row reports; it does not gate. Three reasons, measured:
+      //
+      //    · The count of three is not a limit. CLAUDE.md: "Schicht compression
+      //      (max 3 shifts/day) is display- and export-only." Measured on staging
+      //      26.09.2026: 1090 of 1178 driver-days (92.5%) compress, so gating on
+      //      it would stop almost every month from being finalized. The condition
+      //      that used to sit here — `merged.length > 3` after a loop that exits
+      //      at `<= 3` — was unreachable, so this check has always voted "pass".
+      //      A gate that always passes is worse than no gate, hence the label
+      //      change: this row is a note now, and says so.
+      //
+      //    · The two duration limits ARE enforced, but downstream and not here:
+      //      validateRowDurations in StundennachweisPage blocks save and PDF
+      //      export for a Schicht over 4:30 or a day over 8:30 (:3562, :3584,
+      //      :3718, :3727). It measures the three built Stundennachweis rows;
+      //      this screen has the raw merged windows. Those are not the same
+      //      number, so failing here on this one would risk refusing a month the
+      //      Stundennachweis would have accepted. It warns instead, and names the
+      //      day, so the operator is not left to discover it two screens later.
+      //
+      //    · The arithmetic is now absolute instants, per CLAUDE.md: "Build
+      //      intervals from date-midnight-ms + secondOfDay * 1000, never from a
+      //      bare HH:MM:SS string." The old toMins() gave end < start for a ride
+      //      over midnight, so two overlapping night shifts merged to two rows
+      //      where the same overlap in daylight merged to one — which made the
+      //      compressed-day count itself wrong. See utils/shiftDayLimits.ts.
+      const dayShifts = new Map<string, DayWindow[]>();
       for (const trip of nonCanceled) {
         if (!trip.start_time || !trip.end_time || !trip.assigned_driver_id) continue;
-        const key: DayKey = `${trip.assigned_driver_id}_${trip.trip_date}`;
+        const startMs = parseTsMs(trip.trip_date, trip.start_time);
+        let endMs = parseTsMs(trip.trip_date, trip.end_time);
+        if (endMs <= startMs) endMs += 86400000; // the ride ended after midnight
+        const key = `${trip.assigned_driver_id}_${trip.trip_date}`;
         const arr = dayShifts.get(key) ?? [];
-        arr.push({ s: toMins(trip.start_time.slice(0, 5)), e: toMins(trip.end_time.slice(0, 5)) });
+        arr.push({ startMs, endMs });
         dayShifts.set(key, arr);
       }
       let compressedDayCount = 0;
-      let max3HardViolations = 0;
-      const max3ViolationDetails: string[] = [];
+      const durationWarnings: string[] = [];
       for (const [dayKey, windows] of dayShifts) {
-        windows.sort((a, b) => a.s - b.s);
-        // Step 1: merge overlapping windows
-        const merged: Array<{ s: number; e: number }> = [];
-        for (const w of windows) {
-          const last = merged[merged.length - 1];
-          if (!last || w.s > last.e) merged.push({ ...w });
-          else last.e = Math.max(last.e, w.e);
-        }
-        // Step 2: smallest-gap compression — keep merging the closest adjacent pair until ≤3
-        const hadMore = merged.length > 3;
-        while (merged.length > 3) {
-          let minGap = Infinity, minIdx = 0;
-          for (let i = 0; i < merged.length - 1; i++) {
-            const gap = merged[i + 1].s - merged[i].e;
-            if (gap < minGap) { minGap = gap; minIdx = i; }
-          }
-          merged[minIdx] = { s: merged[minIdx].s, e: Math.max(merged[minIdx].e, merged[minIdx + 1].e) };
-          merged.splice(minIdx + 1, 1);
-        }
-        if (hadMore) compressedDayCount++;
-        // After compression merged.length is always ≤3; flag only if somehow still above (safety net)
-        if (merged.length > 3) {
-          max3HardViolations++;
-          const [dId, date] = dayKey.split('_');
-          const dName = nonCanceled.find(trip => trip.assigned_driver_id === dId)?.assigned_driver_name ?? dId;
-          max3ViolationDetails.push(tr('fin.detail.shiftViolationLine', { driver: dName, date, count: merged.length }));
-        }
+        const day = assessDay(windows);
+        if (day.needsCompression) compressedDayCount++;
+        if (!day.exceedsDayLimit && !day.exceedsShiftLimit) continue;
+        const [dId, date] = dayKey.split('_');
+        const dName = nonCanceled.find(trip => trip.assigned_driver_id === dId)?.assigned_driver_name ?? dId;
+        durationWarnings.push(tr('fin.detail.durationWarningLine', {
+          driver: dName,
+          date,
+          day: formatShiftDuration(day.dayMinutes),
+          shift: formatShiftDuration(day.longestShiftMinutes),
+        }));
       }
+      const compressionNote = compressedDayCount > 0
+        ? trPlural({ one: 'fin.detail.compressedDays.one', other: 'fin.detail.compressedDays.other' }, compressedDayCount)
+        : DETAIL_OK;
       results.push({
-        id: 'maxThreeShifts',
-        ok: max3HardViolations === 0,
-        detail: max3HardViolations === 0
-          ? compressedDayCount > 0
-            ? trPlural({ one: 'fin.detail.compressedDays.one', other: 'fin.detail.compressedDays.other' }, compressedDayCount)
-            : DETAIL_OK
-          : `${tr('fin.detail.shiftCompressionFailed', { count: max3HardViolations })}\n${max3ViolationDetails.slice(0, 10).join('\n')}${max3ViolationDetails.length > 10 ? `\n${tr('fin.detail.andMore', { count: max3ViolationDetails.length - 10 })}` : ''}`,
+        id: 'shiftCompression',
+        ok: true, // a note, never a gate — see the three reasons above
+        detail: durationWarnings.length === 0
+          ? compressionNote
+          : `${compressionNote}\n${tr('fin.detail.durationWarning', { count: durationWarnings.length })}\n${durationWarnings.slice(0, 10).join('\n')}${durationWarnings.length > 10 ? `\n${tr('fin.detail.andMore', { count: durationWarnings.length - 10 })}` : ''}`,
       });
 
       // ── Inner helpers: full-timestamp math (avoids HH:MM wrap-around) ────
