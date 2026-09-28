@@ -126,15 +126,26 @@ const SettingsPage: React.FC = () => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    // Validate file type
-    const validTypes = ['image/png', 'image/jpeg', 'image/jpg', 'image/svg+xml', 'image/webp'];
+    // Validate file type.
+    //
+    // `image/svg+xml` was here and is gone on purpose. An SVG is a document, not
+    // a picture: served inline with that content type it runs whatever script it
+    // carries, and `company-logos` is a public bucket on the API origin. Uploading
+    // is gated on is_company_admin(), so this list was the only thing between a
+    // company administrator and a script executing on api.elprofessor.eu.
+    //
+    // This is the browser's half. The bucket refuses it too since
+    // 20260928100000 — that is the wall, this is the message.
+    const validTypes = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp'];
     if (!validTypes.includes(file.type)) {
       showError(t('settings.badFileType'), t('settings.badFileTypeBody'));
       return;
     }
 
-    // Validate file size (max 5MB)
-    if (file.size > 5 * 1024 * 1024) {
+    // Validate file size. The bucket's own limit is 2 MiB since 20260928100000,
+    // so a larger file is refused by storage with a message nobody wrote; this
+    // check is what explains it. The largest logo on production is 233 KiB.
+    if (file.size > 2 * 1024 * 1024) {
       showError(t('settings.fileTooLarge'), t('settings.fileTooLargeBody'));
       return;
     }
