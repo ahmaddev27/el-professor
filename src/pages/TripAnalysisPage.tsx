@@ -130,8 +130,22 @@ export default function TripAnalysisPage() {
   const [loadFailed, setLoadFailed] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
 
-  /** Only the newest request may install an answer, so a fast month change cannot be overwritten. */
-  const requestRef = useRef(0);
+  /**
+   * One counter per load, not one shared by both, so only the newest request of
+   * *that* load may install its answer and a fast month change cannot be
+   * overwritten.
+   *
+   * With a single counter the two effects cancelled each other whenever they ran
+   * in the same commit — a retry (`reloadKey`), or a change of company while an
+   * `importId` was still set. The company effect took a number, the month effect
+   * then took the next one, and the company effect's own `finally` is guarded by
+   * `request === requestRef.current`, so it never cleared `loadingCompany`. The
+   * retry had already cleared `loadFailed`, which is the branch that carries the
+   * retry button, so the screen fell through to the skeleton and stayed there
+   * with nothing to press: only a page reload got out of it.
+   */
+  const companyRequestRef = useRef(0);
+  const monthRequestRef = useRef(0);
 
   // Memoised so the effects below can name it: a fresh object each render
   // would re-run every load on every keystroke.
@@ -143,7 +157,7 @@ export default function TripAnalysisPage() {
       setLoadingCompany(false);
       return;
     }
-    const request = ++requestRef.current;
+    const request = ++companyRequestRef.current;
     setLoadingCompany(true);
     setLoadFailed(false);
     void (async () => {
@@ -153,16 +167,16 @@ export default function TripAnalysisPage() {
           loadCompanyDrivers(companyId),
           loadSettings(companyId),
         ]);
-        if (request !== requestRef.current) return;
+        if (request !== companyRequestRef.current) return;
         setImports(importList);
         setDrivers(driverList);
         setSettingsRow(settings);
       } catch (error) {
         console.error('Fahrtenanalyse: loading the company failed', error);
-        if (request !== requestRef.current) return;
+        if (request !== companyRequestRef.current) return;
         setLoadFailed(true);
       } finally {
-        if (request === requestRef.current) setLoadingCompany(false);
+        if (request === companyRequestRef.current) setLoadingCompany(false);
       }
     })();
   }, [companyId, reloadKey]);
@@ -204,7 +218,7 @@ export default function TripAnalysisPage() {
       setBudgetRows([]);
       return;
     }
-    const request = ++requestRef.current;
+    const request = ++monthRequestRef.current;
     setLoadingMonth(true);
     setLoadFailed(false);
     void (async () => {
@@ -214,13 +228,13 @@ export default function TripAnalysisPage() {
           loadSavedStundennachweise(companyId, period.year, period.month),
           loadBudgets(companyId, period.year, period.month),
         ]);
-        if (request !== requestRef.current) return;
+        if (request !== monthRequestRef.current) return;
         setTripRows(trips);
         setSavedRecords(saved);
         setBudgetRows(budgets);
       } catch (error) {
         console.error('Fahrtenanalyse: loading the month failed', error);
-        if (request !== requestRef.current) return;
+        if (request !== monthRequestRef.current) return;
         // The rows on screen belong to the month before this one; keeping them
         // under the new month's name would be the worse of the two lies.
         setTripRows([]);
@@ -228,7 +242,7 @@ export default function TripAnalysisPage() {
         setBudgetRows([]);
         setLoadFailed(true);
       } finally {
-        if (request === requestRef.current) setLoadingMonth(false);
+        if (request === monthRequestRef.current) setLoadingMonth(false);
       }
     })();
   }, [companyId, importId, period, reloadKey]);
