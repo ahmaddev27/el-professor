@@ -105,9 +105,6 @@ export interface ReceiptDocumentText {
   confirmation: string;
   amount: { label: string; figures: string; words: string };
   facts: ReceiptDocumentRow[];
-  balanceHeading: string;
-  balance: ReceiptDocumentRow[];
-  settlement: string;
   placeAndDate: { label: string; value: string };
   signatures: {
     employee: { caption: string; name: string };
@@ -288,7 +285,6 @@ export function buildReceiptDocumentText(input: ReceiptDocumentInput): ReceiptDo
   const problem = receiptDocumentProblem(input);
   if (problem) throw new ReceiptDocumentError(problem);
   const { figures } = input;
-  const period = `${germanDate(input.periodStart)} – ${germanDate(input.periodEnd)}`;
   const businessMonth = germanBusinessMonth(input.businessMonth);
   const paymentDate = germanDate(input.paymentDate);
   const amountFigures = euro(figures.amountCents);
@@ -309,33 +305,36 @@ export function buildReceiptDocumentText(input: ReceiptDocumentInput): ReceiptDo
       employer: `der Firma ${input.company.name}`,
       employerNote: '(nachfolgend Arbeitgeber genannt)',
     },
+    // The sheet names the Abrechnungsmonat and nothing else about the period.
+    //
+    // Owner's decision, 28.09.2026, marked on a printed receipt. It replaces the
+    // half of the 18.09.2026 decision that put the Abrechnungsmonat *beside* the
+    // Zeitraum: the month alone identifies the salary, and it is still the one
+    // fact that explains the GQ-YYYY in the number, since a January period can
+    // carry December's year.
     confirmation:
-      `Der Arbeitnehmer bestätigt hiermit, am ${paymentDate} als Barzahlung auf das Gehalt für den Zeitraum ` +
-      `${period} den Betrag von ${amountFigures} (in Worten: ${amountWords}) vom Arbeitgeber erhalten zu haben. ` +
-      'Mit seiner Unterschrift bestätigt der Arbeitnehmer den Erhalt des oben genannten Betrages.',
+      `Der Arbeitnehmer bestätigt hiermit, am ${paymentDate} als Barzahlung auf das Gehalt für ` +
+      `${businessMonth} den Betrag von ${amountFigures} (in Worten: ${amountWords}) vom Arbeitgeber ` +
+      'erhalten zu haben. Mit seiner Unterschrift bestätigt der Arbeitnehmer den Erhalt des oben ' +
+      'genannten Betrages.',
     amount: { label: 'Betrag (EUR)', figures: amountFigures, words: amountWords },
-    // Abrechnungsmonat sits between the two dates it is derived from and paid
-    // against, because it is the one fact on the sheet that explains the
-    // GQ-YYYY in the number: a January period can carry December's year.
     facts: [
-      { label: 'Zeitraum', value: period, emphasis: false },
       { label: 'Abrechnungsmonat', value: businessMonth, emphasis: false },
       { label: 'Zahlungsdatum', value: paymentDate, emphasis: false },
     ],
-    balanceHeading: 'Stand des Gehalts bei dieser Zahlung',
-    balance: [
-      { label: 'Fälliges Nettogehalt', value: euro(figures.dueCents), emphasis: false },
-      { label: 'Bereits überwiesen', value: euro(figures.paidBankCents), emphasis: false },
-      { label: 'Bereits bar gezahlt', value: euro(figures.paidCashManualCents), emphasis: false },
-      { label: 'Bar zurück aus der Wochenabrechnung', value: euro(figures.paidCashWeeklyCents), emphasis: false },
-      { label: 'Frühere Gehaltsquittungen', value: euro(figures.paidCashReceiptsCents), emphasis: false },
-      { label: 'Offen vor dieser Zahlung', value: euro(figures.remainingBeforeCents), emphasis: true },
-      { label: 'Diese Barzahlung', value: amountFigures, emphasis: false },
-      { label: 'Offen nach dieser Zahlung', value: euro(figures.remainingAfterCents), emphasis: true },
-    ],
-    settlement: figures.isPartial
-      ? `Teilzahlung: Nach dieser Zahlung bleiben ${euro(figures.remainingAfterCents)} offen.`
-      : 'Mit dieser Zahlung ist das Gehalt für den Zeitraum vollständig bezahlt.',
+    // The salary-status table and the Teilzahlung sentence are gone, by the same
+    // decision, and deliberately with nothing in their place: the sheet states the
+    // amount, the month and the date of payment, and no balances at all.
+    //
+    // What that costs, said plainly because the owner chose it knowing: the signed
+    // paper no longer distinguishes a part payment from a full one. Two receipts
+    // for the same month read identically apart from their amount and number. The
+    // distinction lives on the screen — GehaltsquittungModal still shows the full
+    // balance before the payment is confirmed — and in the ledger, which keeps
+    // every figure that used to be printed here.
+    //
+    // `figures` is still computed and still governs the refusal to pay more than
+    // the balance; it simply is not printed.
     placeAndDate: { label: 'Ort, Datum', value: `${input.place.trim()}, den ${paymentDate}` },
     signatures: {
       employee: { caption: 'Unterschrift Arbeitnehmer', name: input.driver.name },

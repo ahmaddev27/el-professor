@@ -109,31 +109,10 @@ export function GehaltsquittungSheet({ text }: { text: ReceiptDocumentText }) {
         ))}
       </div>
 
-      <div style={{ ...caption, marginBottom: '6px' }}>{text.balanceHeading}</div>
-      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px', marginBottom: '10px' }}>
-        <tbody>
-          {text.balance.map(row => (
-            <tr key={row.label} style={{ borderBottom: '1px solid #eee' }}>
-              <td style={{ padding: '4px 0', color: row.emphasis ? '#111' : '#444', fontWeight: row.emphasis ? 700 : 400 }}>
-                {row.label}
-              </td>
-              <td
-                style={{
-                  padding: '4px 0',
-                  textAlign: 'right',
-                  whiteSpace: 'nowrap',
-                  color: '#111',
-                  fontWeight: row.emphasis ? 700 : 400,
-                  fontVariantNumeric: 'tabular-nums',
-                }}
-              >
-                {row.value}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      <p style={{ fontSize: '11px', color: '#333', margin: 0 }}>{text.settlement}</p>
+      {/* The salary-status table and the Teilzahlung sentence stood here until the
+          owner's decision of 28.09.2026. The sheet now states the amount, the
+          Abrechnungsmonat and the date of payment, and no balances at all — see
+          the note in utils/salaryCashReceiptDocument.ts for what that costs. */}
 
       <div style={{ flex: 1, minHeight: '28px' }} />
 

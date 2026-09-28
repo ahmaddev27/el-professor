@@ -68,32 +68,41 @@ describe('buildReceiptDocumentText — a confirmed partial payment', () => {
     });
   });
 
-  it('states the confirmation with period, payment date, figures and words', () => {
+  it('states the confirmation with the Abrechnungsmonat, payment date, figures and words', () => {
+    // Owner's decision, 28.09.2026: the sheet names the month, never the period.
     expect(text.confirmation).toBe(
-      'Der Arbeitnehmer bestätigt hiermit, am 14.09.2026 als Barzahlung auf das Gehalt für den Zeitraum ' +
-        '03.08.2026 – 30.08.2026 den Betrag von 1.234,56 EUR (in Worten: Eintausendzweihundertvierunddreißig Euro ' +
+      'Der Arbeitnehmer bestätigt hiermit, am 14.09.2026 als Barzahlung auf das Gehalt für ' +
+        'August 2026 den Betrag von 1.234,56 EUR (in Worten: Eintausendzweihundertvierunddreißig Euro ' +
         'und sechsundfünfzig Cent) vom Arbeitgeber erhalten zu haben. Mit seiner Unterschrift bestätigt der ' +
         'Arbeitnehmer den Erhalt des oben genannten Betrages.',
     );
+    expect(text.confirmation).not.toContain('Zeitraum');
+    expect(text.confirmation).not.toContain('03.08.2026');
     expect(text.facts).toEqual([
-      { label: 'Zeitraum', value: '03.08.2026 – 30.08.2026', emphasis: false },
       { label: 'Abrechnungsmonat', value: 'August 2026', emphasis: false },
       { label: 'Zahlungsdatum', value: '14.09.2026', emphasis: false },
     ]);
   });
 
-  it('prints the balance the snapshot holds, Bar zurück on its own line, in German number format', () => {
-    expect(text.balance.map(row => [row.label, row.value])).toEqual([
-      ['Fälliges Nettogehalt', '2.500,00 EUR'],
-      ['Bereits überwiesen', '1.000,00 EUR'],
-      ['Bereits bar gezahlt', '20,00 EUR'],
-      ['Bar zurück aus der Wochenabrechnung', '50,00 EUR'],
-      ['Frühere Gehaltsquittungen', '0,00 EUR'],
-      ['Offen vor dieser Zahlung', '1.430,00 EUR'],
-      ['Diese Barzahlung', '1.234,56 EUR'],
-      ['Offen nach dieser Zahlung', '195,44 EUR'],
-    ]);
-    expect(text.settlement).toBe('Teilzahlung: Nach dieser Zahlung bleiben 195,44 EUR offen.');
+  it('prints no balances at all — no table, no settlement line', () => {
+    // The salary-status table and the Teilzahlung sentence were removed by the
+    // same decision, with nothing in their place. This test is the record of
+    // that: the document object must not carry them back.
+    //
+    // What it costs, and the owner chose it knowing: the signed paper no longer
+    // tells a part payment from a full one. Two receipts for the same month read
+    // identically apart from amount and number.
+    const asAny = text as unknown as Record<string, unknown>;
+    expect(asAny.balance).toBeUndefined();
+    expect(asAny.balanceHeading).toBeUndefined();
+    expect(asAny.settlement).toBeUndefined();
+
+    // And none of the figures the ledger still holds may appear anywhere on it.
+    const printed = JSON.stringify(text);
+    for (const gone of ['Fälliges Nettogehalt', 'Bereits überwiesen', 'Offen vor dieser Zahlung',
+                        'Offen nach dieser Zahlung', 'Teilzahlung', '2.500,00', '1.430,00', '195,44']) {
+      expect(printed).not.toContain(gone);
+    }
   });
 
   it('closes with place, date and both signature lines', () => {
@@ -107,13 +116,19 @@ describe('buildReceiptDocumentText — a confirmed partial payment', () => {
 });
 
 describe('buildReceiptDocumentText — other states', () => {
-  it('says so when the payment settles the salary', () => {
-    const text = buildReceiptDocumentText({
+  it('reads the same whether the payment settles the salary or not', () => {
+    // The consequence of the 28.09.2026 decision, asserted rather than implied:
+    // a full payment and a part payment differ only in their amount.
+    const settling = buildReceiptDocumentText({
       ...partial,
       figures: { ...partial.figures, amountCents: 143000, remainingAfterCents: 0, isPartial: false },
     });
-    expect(text.settlement).toBe('Mit dieser Zahlung ist das Gehalt für den Zeitraum vollständig bezahlt.');
-    expect(text.amount.words).toBe('Eintausendvierhundertdreißig Euro und null Cent');
+    expect(settling.amount.words).toBe('Eintausendvierhundertdreißig Euro und null Cent');
+
+    const stillOpen = buildReceiptDocumentText(partial);
+    expect(settling.facts).toEqual(stillOpen.facts);
+    expect(settling.confirmation.replace('1.430,00', 'X').replace(/\(in Worten:[^)]*\)/, '(W)'))
+      .toBe(stillOpen.confirmation.replace('1.234,56', 'X').replace(/\(in Worten:[^)]*\)/, '(W)'));
   });
 
   it('marks the preview as not valid and leaves the number to the database', () => {
@@ -155,7 +170,6 @@ describe('buildReceiptDocumentText — other states', () => {
     });
     expect(text.number).toBe('Nr. wird bei der Bestätigung vergeben');
     expect(text.facts).toEqual([
-      { label: 'Zeitraum', value: '01.01.2026 – 25.01.2026', emphasis: false },
       { label: 'Abrechnungsmonat', value: 'Dezember 2025', emphasis: false },
       { label: 'Zahlungsdatum', value: '14.09.2026', emphasis: false },
     ]);
