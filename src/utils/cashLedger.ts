@@ -22,6 +22,16 @@ import { toCents } from './money';
  * and until a company issues its first Gehaltsquittung the last term is 0,
  * which is exactly the figure the screen showed before this module existed.
  *
+ * **Only a Beleg paid in cash leaves the till.** `receipts.payment_method` is
+ * `'bar'` or `'uberweisung'` (CHECK, default `'bar'`), and a bank transfer
+ * never touched the till — the money left the account, not the cash box. The
+ * database has always read it that way: `abrechnung_weekly`
+ * (20260402065740:120) and `get_current_cash_balance`
+ * (20260607124839:138) both restrict to `payment_method = 'bar'`, so a screen
+ * that counts every Beleg contradicts the weekly Abrechnung the same company
+ * reads one menu item away. `cashBelegRows()` is that restriction, applied by
+ * the caller that asked for the column.
+ *
  * **"Bar zurück" counts as paid and moves no cash.** The weekly settlement
  * writes a `salary_payments` row with `source_type = 'weekly_cash_difference'`
  * and no `cash_movements` row: the money was kept back from a weekly
@@ -92,6 +102,13 @@ export interface BelegRow {
   description?: string | null;
   driver_name?: string | null;
   date: string;
+  /**
+   * `'bar'` or `'uberweisung'`, as `receipts.payment_method` stores it.
+   * Optional because a caller that reads the receipt through another shape
+   * (`utils/overviewHelpers.ts` maps a `Receipt`) does not carry it — see
+   * `cashBelegRows`, which is where the column is required.
+   */
+  payment_method?: string | null;
 }
 
 export interface CashMovementRow {
@@ -142,6 +159,33 @@ export function bargeldIncomeEntries(
   }));
 }
 
+/**
+ * The Belege that left the till, out of the Belege of a period.
+ *
+ * `payment_method = 'bar'` is the database's own rule, kept character for
+ * character: `abrechnung_weekly` and `get_current_cash_balance` both write it
+ * that way, so a NULL is excluded here exactly as SQL excludes it. The column
+ * defaults to `'bar'`, so a NULL is an explicit act rather than an unset
+ * value, and staging's copy of production holds none (853 `bar`, 4
+ * `uberweisung`, 0 NULL on 28.09.2026).
+ *
+ * A caller that never selected the column gets nothing back, which shows up as
+ * a total of 0,00 € — loud, not silent. That is deliberate: the rule belongs
+ * next to the query that asks for the column, and a caller working from a row
+ * shape without it must not be given a quietly plausible figure.
+ */
+export function cashBelegRows<Row extends { payment_method?: string | null }>(
+  rows: readonly Row[],
+): Row[] {
+  return rows.filter(row => row.payment_method === 'bar');
+}
+
+/**
+ * Every row given here is counted as cash out. Pass Belege through
+ * `cashBelegRows` first when the rows carry `payment_method`: a bank-paid
+ * Beleg never left the till, and counting it understates the cash a company
+ * holds.
+ */
 export function belegEntries(
   rows: readonly BelegRow[],
   labels: CashLedgerLabels,

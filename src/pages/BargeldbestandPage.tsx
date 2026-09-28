@@ -12,6 +12,7 @@ import { fetchAllPaginated } from '../utils/fetchAllPaginated';
 import {
   bargeldIncomeEntries,
   belegEntries,
+  cashBelegRows,
   cashLedgerDriverNames,
   cashMovementEntries,
   filterCashEntries,
@@ -49,10 +50,20 @@ import {
  * Bargeldbestand reads one ledger.
  *
  * The money rule: cash in is the Bargeld a driver hands over; cash out is a
- * Beleg and a Gehaltsquittung, the cash salary payment
+ * Beleg *paid in cash* and a Gehaltsquittung, the cash salary payment
  * confirm_salary_cash_payment books into public.cash_movements. Voiding one
  * books the cash back on the day of the void. The weekly "Bar zurück" counts
  * as paid and writes no movement, so it never leaves the till here.
+ *
+ * `receipts.payment_method` decides the first of those: `'uberweisung'` money
+ * left the bank account, not the cash box, and `abrechnung_weekly` and
+ * `get_current_cash_balance` have always restricted to `'bar'`. This screen
+ * did not ask for the column at all, so it charged every Beleg to the till and
+ * read lower than the till was — by 110,00 € in 04/2026 and 79,91 € in
+ * 05/2026 for the one company on staging that has bank-paid Belege (4 of 857
+ * rows, measured 28.09.2026). The select below asks for it and
+ * cashBelegRows() applies the rule, so the balance, the cards, the table and
+ * the Excel dump all now say what the weekly Abrechnung says.
  *
  * Before this the screen summed Bargeld minus Belege and knew nothing of the
  * third term, so a salary paid out of the till left the balance untouched.
@@ -239,7 +250,10 @@ export default function BargeldbestandPage() {
         fetchAllPaginated<BelegRow>(
           (from, to) => supabase
             .from('receipts')
-            .select('id, expense, description, driver_name, date')
+            // payment_method is load-bearing, not decoration: without it
+            // cashBelegRows() below keeps nothing and the Belege total reads
+            // 0,00 €. src/utils/moneyScreenFailures.test.ts pins it.
+            .select('id, expense, description, driver_name, date, payment_method')
             .eq('company_id', companyId)
             .gte('date', monthStart)
             .lte('date', monthEnd)
@@ -259,7 +273,8 @@ export default function BargeldbestandPage() {
 
       const allEntries = sortCashEntriesByDateDesc([
         ...bargeldIncomeEntries(incomeRows, ledgerLabels),
-        ...belegEntries(receiptRows, ledgerLabels),
+        // Only the cash ones: a bank transfer never passed through the till.
+        ...belegEntries(cashBelegRows(receiptRows), ledgerLabels),
         ...cashMovementEntries(movementRows, ledgerLabels, payoutDrivers),
       ]);
 

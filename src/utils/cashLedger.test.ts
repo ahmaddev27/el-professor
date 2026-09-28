@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   bargeldIncomeEntries,
   belegEntries,
+  cashBelegRows,
   cashLedgerDriverNames,
   cashMovementEntries,
   filterCashEntries,
@@ -206,6 +207,61 @@ describe('entry building', () => {
   it('leaves a payout without a driver when its receipt is not in the lookup', () => {
     const [entry] = cashMovementEntries([movement({ id: 'm1', source_id: 'gone' })], labels, { r1: 'Ali' });
     expect(entry.driverName).toBe('');
+  });
+});
+
+describe('cashBelegRows — only a Beleg paid in cash left the till', () => {
+  /**
+   * The rule: `receipts.payment_method` is `'bar'` or `'uberweisung'`, and only
+   * `'bar'` moved money out of the cash box. `abrechnung_weekly` and
+   * `get_current_cash_balance` have always restricted to `'bar'`; the
+   * Bargeldbestand did not ask for the column at all, so it charged a bank
+   * transfer to the till and read lower than the till was. Measured on
+   * staging's copy of production, 28.09.2026: 853 `'bar'`, 4 `'uberweisung'`
+   * (189,91 €), 0 NULL.
+   */
+  const mixed = [
+    { id: 'b1', expense: '40.25', description: 'Tanken',  driver_name: 'Ali', date: '2026-04-03', payment_method: 'bar' },
+    { id: 'b2', expense: '110.00', description: 'Reifen', driver_name: 'Ali', date: '2026-04-11', payment_method: 'uberweisung' },
+  ];
+
+  it('keeps the cash Beleg and drops the bank transfer', () => {
+    expect(cashBelegRows(mixed).map(r => r.id)).toEqual(['b1']);
+  });
+
+  it('is what the till balance now reads', () => {
+    const totals = summarizeCashLedger([
+      ...bargeldIncomeEntries(
+        [{ id: 'i1', amount: '500.00', description: null, driver_name: 'Ali', date: '2026-04-02' }],
+        labels,
+      ),
+      ...belegEntries(cashBelegRows(mixed), labels),
+    ]);
+
+    expect(totals.belegExpenseCents).toBe(4025);
+    expect(totals.balanceCents).toBe(50000 - 4025);
+  });
+
+  /**
+   * The negative control: the old figure, spelled out. `belegEntries` still
+   * counts every row it is given — `utils/overviewHelpers.ts` passes a row
+   * shape that carries no `payment_method` and must keep the figure it has —
+   * so the exclusion has to come from `cashBelegRows` and from nowhere else. If
+   * a later change moves the filter inside `belegEntries`, this fails.
+   */
+  it('was 189,91 € worth of bank Belege too low, and belegEntries alone still is', () => {
+    const unfiltered = summarizeCashLedger(belegEntries(mixed, labels));
+    expect(unfiltered.belegExpenseCents).toBe(4025 + 11000);
+  });
+
+  it("excludes a NULL exactly as SQL's `payment_method = 'bar'` excludes it", () => {
+    const rows = [
+      { id: 'n1', expense: '10.00', date: '2026-04-01', payment_method: null },
+      { id: 'n2', expense: '10.00', date: '2026-04-01' },
+      { id: 'n3', expense: '10.00', date: '2026-04-01', payment_method: 'BAR' },
+      { id: 'n4', expense: '10.00', date: '2026-04-01', payment_method: 'bar' },
+    ];
+    expect(cashBelegRows(rows).map(r => r.id)).toEqual(['n4']);
   });
 });
 

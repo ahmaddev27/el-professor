@@ -172,6 +172,26 @@ export function AbrechnungPage() {
     }
   };
 
+  /**
+   * Tankenquote's two reads.
+   *
+   * The rule being preserved: Tankenquote counts only receipts whose Kategorie
+   * is `Tanken` for that driver and period, over Netto-Fahrpreis plus
+   * Aktionen, and only the percentage is shown. Neither term changes here.
+   *
+   * What changes is that a failed read no longer answers zero. `data` is null
+   * on an error, so `?? []` turned a refusal into "this driver bought no
+   * fuel": with the receipts read failed and the income read fine, the quote
+   * computed as 0 / umsatz and the card printed **Tankenquote 0,00 %** — on
+   * the card html2canvas renders and the driver is sent. CLAUDE.md: a figure
+   * whose load failed is not shown.
+   *
+   * Throwing puts it on the failure path the two callers already have: their
+   * catch shows `abr.detailsFailed` and never sets `detailModalData`, so no
+   * card is drawn and no image can be exported from it. Deliberately *not*
+   * `loadFailed` — that flag blanks the whole Abrechnung table, whose own RPC
+   * read succeeded, and its retry button re-runs that RPC and not this.
+   */
   const fetchTankenAndUmsatz = async (
     driverName: string,
     startIso: string,
@@ -192,6 +212,9 @@ export function AbrechnungPage() {
         .lte('date', endIso)
         .in('type', ['umsatz', 'aktionen']),
     ]);
+
+    if (receiptsRes.error) throw receiptsRes.error;
+    if (incomeRes.error) throw incomeRes.error;
 
     const tankenBrutto = (receiptsRes.data ?? [])
       .filter(r => /^tanken$/i.test((r.description ?? '').trim()))
@@ -272,6 +295,10 @@ export function AbrechnungPage() {
 
       setDetailModalData(detailData);
     } catch (error: any) {
+      // Nothing half-loaded stays on screen. Not a proven-reachable path — the
+      // open modal covers the rows — but the invariant is cheaper to hold
+      // unconditionally than to re-derive from the overlay's geometry.
+      setDetailModalData(null);
       showToast('error', t('abr.detailsFailed'), error.message);
     }
   };
@@ -299,6 +326,10 @@ export function AbrechnungPage() {
 
       setDetailModalData(detailData);
     } catch (error: any) {
+      // Nothing half-loaded stays on screen. Not a proven-reachable path — the
+      // open modal covers the rows — but the invariant is cheaper to hold
+      // unconditionally than to re-derive from the overlay's geometry.
+      setDetailModalData(null);
       showToast('error', t('abr.detailsFailed'), error.message);
     }
   };
