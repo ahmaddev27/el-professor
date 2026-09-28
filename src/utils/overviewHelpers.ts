@@ -9,6 +9,7 @@ import {
   type CashLedgerLabels,
   type CashMovementRow,
 } from './cashLedger';
+import { salaryDueState } from './salaryDue';
 
 // Type-only: this module names a dictionary key beside its German text.
 import type { EngineMessageKey, EngineMessageVars } from '../i18n/engineMessageTypes';
@@ -264,17 +265,44 @@ export function calcSalaryAlerts(
 ): SalaryAlert[] {
   const driverMap = new Map(drivers.map(d => [d.id, d.name]));
 
+  /**
+   * Which rows still owe money is derived from the row's own figures, not from
+   * the stored `payment_status`, and the figure owed is the base —
+   * `COALESCE(netto_salary, amount_due)` — not `amount_due` alone.
+   *
+   * Three things were wrong here, and each of them makes this panel claim a
+   * number:
+   *
+   *  · the filter trusted the stored word, so a row whose status was written
+   *    against an older base was listed or hidden on that basis. The Gehälter
+   *    screen now derives the same status, so a stored word would have put the
+   *    two screens in open disagreement.
+   *  · `amountDue` ignored `netto_salary` altogether, so a manually adjusted
+   *    salary was alerted at its calculated amount. Measured on staging
+   *    28.09.2026: 1 row, wrong by 558,80 €.
+   *  · `remaining_balance || amount_due` fell through to the full salary
+   *    whenever the stored remainder was exactly 0 — latent today (0 staging
+   *    rows), and wrong by the whole amount when it fires.
+   *
+   * This function is given no income rows, so it cannot recompute the base the
+   * way the Gehälter screen does; it derives from the stored figures, which is
+   * at least self-consistent. `calcPeriodMetrics` and `calcDriverPerformance`
+   * deliberately keep reading the stored `amount_due`: there the salary is a
+   * cost in a profit figure, not a claim about what is owed, and restating a
+   * month's salary cost is a different decision from refusing a stale status.
+   */
   return salaries
-    .filter(s => s.payment_status === 'unpaid' || s.payment_status === 'partially_paid')
-    .map(s => ({
-      id: s.id,
-      driverName: s.driver_name || driverMap.get(s.driver_id) || 'Unbekannt',
-      amountDue: Number(s.amount_due),
-      amountPaid: Number(s.total_paid || 0),
-      remaining: Number(s.remaining_balance || s.amount_due),
-      status: (s.payment_status as 'unpaid' | 'partially_paid'),
-      periodStart: s.period_start,
-      periodEnd: s.period_end,
+    .map(s => ({ row: s, due: salaryDueState(s, s.total_paid) }))
+    .filter(({ due }) => due.paymentStatus !== 'paid')
+    .map(({ row, due }) => ({
+      id: row.id,
+      driverName: row.driver_name || driverMap.get(row.driver_id) || 'Unbekannt',
+      amountDue: due.base,
+      amountPaid: due.totalPaid,
+      remaining: due.remaining,
+      status: (due.paymentStatus as 'unpaid' | 'partially_paid'),
+      periodStart: row.period_start,
+      periodEnd: row.period_end,
     }));
 }
 

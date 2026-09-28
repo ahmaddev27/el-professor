@@ -3,6 +3,9 @@ import { format } from 'date-fns';
 import { de } from 'date-fns/locale';
 import { SalaryCalculation } from '../types/receipt';
 import { CompanySettings } from '../types/settings';
+import { receiptCompany } from './salaryCashReceiptDocument';
+import { salaryBase } from './salaryDue';
+import { payrollSplit } from './payrollSplit';
 
 export interface DriverPdfOptions {
   salary: SalaryCalculation;
@@ -46,8 +49,26 @@ export function generateDriverSalaryPdf(opts: DriverPdfOptions): void {
   const col2 = marginL + contentW;
 
   const companyName = settings?.company_name || 'Unternehmen';
-  const calculatedSalaryTotal = salary.netto_salary ?? salary.amount_due ?? 0;
-  const hasPayroll = payrollGrossAmount != null || payrollNetAmount != null;
+  const calculatedSalaryTotal = salaryBase(salary);
+
+  /**
+   * The letterhead address, composed from the columns `company_settings`
+   * actually has.
+   *
+   * This read `settings.address`, which is not a field of `CompanySettings` — the
+   * address is four columns (`street`, `house_number`, `postal_code`, `city`) —
+   * so the expression was always `undefined` and **no company's address has ever
+   * printed on this PDF**. `receiptCompany` is the composition the
+   * Gehaltsquittung and the Trinkgeld-Quittung already use, so the three
+   * documents cannot disagree about how an address is written. 2 of 24 staging
+   * companies have those columns filled and will now print them; for the other
+   * 22 the block is omitted exactly as it is today.
+   *
+   * Joined onto **one** line, because that is the single 5 mm row the layout
+   * below budgeted for it: every card on this page has a fixed height and the
+   * page is already tight (see the note on the split card).
+   */
+  const addressLine = receiptCompany(settings).addressLines.join(', ');
 
   // ─── Header band ───
   doc.setFillColor(37, 99, 235);
@@ -73,11 +94,11 @@ export function generateDriverSalaryPdf(opts: DriverPdfOptions): void {
   doc.setFont('helvetica', 'bold');
   doc.text(companyName, marginL, y);
   y += 6;
-  if (settings?.address) {
+  if (addressLine) {
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(10);
     doc.setTextColor(80, 80, 80);
-    doc.text(settings.address, marginL, y);
+    doc.text(addressLine, marginL, y);
     y += 5;
   }
   y += 4;
@@ -138,13 +159,36 @@ export function generateDriverSalaryPdf(opts: DriverPdfOptions): void {
   doc.text(fmtEur(calculatedSalaryTotal), col2 - 2, y, { align: 'right' });
   y = calcCardY + calcCardH + 10;
 
-  // ─── Payroll split card (only if data provided) ───
-  if (hasPayroll) {
-    const gross = payrollGrossAmount ?? 0;
+  /**
+   * ─── Payroll split card ───
+   *
+   * The rule, stated before editing: cash = total − Brutto, bank = Netto,
+   * payout = cash + bank. **The cash remainder is only defined once the Brutto
+   * is known**, so the card is printed only for an established split.
+   *
+   * Each of the three `??` fallbacks here recomputed the figure the caller had
+   * declined to supply — `cash = calculatedSalaryTotal - (gross ?? 0)` — which
+   * is exactly the arithmetic that printed the whole salary as cash for a row
+   * carrying only the Steuerberater's Netto, and then a payout larger than the
+   * salary. Recomputing it here also gave the PDF a second answer to a question
+   * `utils/payrollSplit.ts` already answers, so the split is asked for once and
+   * the caller's figures are used as given.
+   *
+   * Measured on staging 28.09.2026: 0 of 53 rows hold a Netto without a Brutto,
+   * so no PDF already handed out changes. 7 rows hold a Brutto above the salary
+   * and keep printing a negative Bargehalt with its warning, unchanged.
+   */
+  const split = payrollSplit({
+    total: calculatedSalaryTotal,
+    gross: payrollGrossAmount,
+    net: payrollNetAmount,
+  });
+  if (split.established) {
+    const gross = split.gross;
     const net = payrollNetAmount ?? 0;
-    const cash = cashSalaryAmount ?? (calculatedSalaryTotal - gross);
-    const bank = bankSalaryAmount ?? net;
-    const total = totalNetPayout ?? (cash + bank);
+    const cash = cashSalaryAmount ?? split.cash;
+    const bank = bankSalaryAmount ?? split.bank;
+    const total = totalNetPayout ?? split.payout;
     const cashNeg = cash < -0.01;
 
     const splitCardY = y;
