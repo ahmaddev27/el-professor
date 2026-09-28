@@ -1111,7 +1111,7 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
       <SalaryPaymentReceiptPreview
         receiptId={receiptPreviewId}
         onClose={() => setReceiptPreviewId(null)}
-        onOpenDocuments={id => navigate('/dokumente', { state: { focusReceiptId: id } })}
+        onOpenDocuments={id => navigate('/salaries', { state: { focusReceiptId: id } })}
       />
 
       {/* The cash payment entered above, continued as a Gehaltsquittung: the

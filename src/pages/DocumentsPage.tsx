@@ -1,11 +1,9 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef, useId } from 'react';
-import { Clock, ChevronRight, ChevronDown, Receipt, Car, MapPin, ArrowLeft, Trash2, ExternalLink, FileDown, FileSearch, Download, Banknote, type LucideIcon } from 'lucide-react';
+import { Clock, ChevronRight, ChevronDown, Receipt, Car, MapPin, ArrowLeft, Trash2, ExternalLink, FileDown, FileSearch, Download, type LucideIcon } from 'lucide-react';
 import TrinkgeldQuittungModal from '../components/TrinkgeldQuittungModal';
 import MietwagenauftragModal from '../components/MietwagenauftragModal';
-import GehaltsquittungModal from '../components/GehaltsquittungModal';
-import GehaltsquittungList from '../components/GehaltsquittungList';
 import FahrtenbuchTripsView from '../components/FahrtenbuchTripsView';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import type { DriverOption, CarOption } from '../components/FahrtenbuchImportModal';
 import { exportStundennachweisAsPdf, toPdfDayRow } from '../utils/stundennachweisPdfExport';
@@ -137,15 +135,10 @@ const DocumentsPage: React.FC = () => {
   const { t, tPlural } = useTranslation();
   const [isTrinkgeldModalOpen, setIsTrinkgeldModalOpen] = useState(false);
   const [isMietwagenModalOpen, setIsMietwagenModalOpen] = useState(false);
-  const [isGehaltsquittungModalOpen, setIsGehaltsquittungModalOpen] = useState(false);
   // Bumped when the dialog issues a receipt or attaches a signed copy, so the list reloads.
-  const [receiptsVersion, setReceiptsVersion] = useState(0);
   const [subView, setSubView] = useState<SubView>('main');
 
   // SalaryDetailsModal links a locked payment to its receipt through router state.
-  const location = useLocation();
-  const focusReceiptState = (location.state as { focusReceiptId?: unknown } | null)?.focusReceiptId;
-  const focusReceiptId = typeof focusReceiptState === 'string' ? focusReceiptState : null;
 
   // Drivers and cars for Fahrtenbuch matching
   const [drivers, setDrivers] = useState<DriverOption[]>([]);
@@ -597,13 +590,6 @@ const DocumentsPage: React.FC = () => {
               onClick={() => setIsTrinkgeldModalOpen(true)}
             />
             <ToolCard
-              icon={Banknote}
-              title={t('doc.gehaltsquittung')}
-              description={t('doc.gehaltsquittungDesc')}
-              badges={[t('doc.badgeTemplate'), t('doc.badgePdfExport')]}
-              onClick={() => setIsGehaltsquittungModalOpen(true)}
-            />
-            <ToolCard
               icon={Car}
               title={t('doc.mietwagenauftrag')}
               description={t('doc.mietwagenauftragDesc')}
@@ -629,12 +615,10 @@ const DocumentsPage: React.FC = () => {
           </div>
         </section>
 
-        {/* ── Gehaltsquittungen ─────────────────────────────────────────────────── */}
-        <GehaltsquittungList
-          refreshKey={receiptsVersion}
-          focusReceiptId={focusReceiptId}
-          onCreate={() => setIsGehaltsquittungModalOpen(true)}
-        />
+        {/* The Gehaltsquittung — its tool card, its archive and its dialog — moved
+            to the Gehalter screen on 28.09.2026 at the owner's request, so the
+            whole feature lives where a salary is paid. Nothing of it is reachable
+            from here any more. */}
 
         {/* ── Saved Stundennachweise archive ─────────────────────────────────────── */}
         <section aria-labelledby="documents-archive-heading" className="grid grid-cols-1 gap-3 font-ui">
@@ -728,11 +712,6 @@ const DocumentsPage: React.FC = () => {
 
       <TrinkgeldQuittungModal isOpen={isTrinkgeldModalOpen} onClose={() => setIsTrinkgeldModalOpen(false)} />
       <MietwagenauftragModal  isOpen={isMietwagenModalOpen} onClose={() => setIsMietwagenModalOpen(false)} />
-      <GehaltsquittungModal
-        open={isGehaltsquittungModalOpen}
-        onOpenChange={setIsGehaltsquittungModalOpen}
-        onChanged={() => setReceiptsVersion(version => version + 1)}
-      />
     </div>
   );
 };
