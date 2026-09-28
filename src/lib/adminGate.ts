@@ -305,3 +305,140 @@ export function googleSignInRefusal(session: {
   if (!session.cameFromGoogle || !session.isPlatformAccount) return null;
   return { to: SIGN_IN_PATH, messageKey: 'auth.google.error.platformStaff' };
 }
+
+// ─── Who may reach the tenant app ────────────────────────────────────────────
+
+/**
+ * What App.tsx shows instead of the tenant router, once the profile has
+ * answered and the account is not platform staff.
+ *
+ * - `allow` — the tenant app.
+ * - `noCompany` — the profile carries no `company_id` and this account is not
+ *   platform staff, so there is no company for any screen to query.
+ * - `companySuspended` — `CompanySuspendedPage`, as before.
+ * - `companyUnusable` — the company exists but its state is not one a session
+ *   may work in (`inactive`, or a state this build has never heard of).
+ * - `companyDeleted` — `deleted` or `archived`.
+ *
+ * ## Why both halves live here, and why they are one function
+ *
+ * The two gates this replaces were wrong in the same way: each named the states
+ * it knew and let every other one through into the tenant router, where every
+ * query asks for `company_id = null` (or for a company the database refuses) and
+ * the screens fill with `invalid input syntax for type uuid: "null"`.
+ *
+ * 1. **A company-less account that is not platform staff had no gate at all.**
+ *    `platformAccountRoute` above answers `tenant` for it on its very first line
+ *    — correctly, since that guard is only about platform accounts — and
+ *    `needsCompanyRegistration` (`src/lib/googleAccount.ts`) answers false,
+ *    correctly too, since it is about a Google account that has not registered
+ *    yet. Neither is the missing gate; this is. Measured on staging on
+ *    28.09.2026: **one account is in exactly that state** — a platform owner
+ *    whose `app_private.platform_staff` row was disabled, which
+ *    `platform_staff_sync_profile()` mirrors by clearing
+ *    `user_profiles.is_super_admin`, leaving a profile that is `active`, carries
+ *    no company and is no longer staff. On production the same shape exists, but
+ *    that profile happens to read `suspended`, so the account block above
+ *    catches it; nothing about production's state is load-bearing here.
+ * 2. **`companies.status` was tested for `'suspended'` alone**, while the column
+ *    admits `active`, `trial`, `suspended`, `inactive`, `archived` and `deleted`,
+ *    and `get_active_company_id()` answers NULL for everything outside
+ *    `active`/`trial`. `AuthContext.checkProfileAccess` — the *sign-in* path —
+ *    already maps all of them, so the two paths disagreed: a restored session
+ *    reached the app where a fresh sign-in was refused. Measured on staging:
+ *    0 companies at `inactive`, `archived` or `deleted`, so this half is latent
+ *    today, which is the only reason it is a ride-along and not an incident.
+ *
+ * ## Two rules that are easy to lose
+ *
+ * **A state this build does not know locks.** Anything outside `active`/`trial`
+ * ends on a block page, `''` and a future word alike, because the database is
+ * the authority on what a company may do and it already refuses them.
+ *
+ * **A company-less `pending_invite` profile is let through**, and that is not an
+ * oversight. `platform-staff` writes a member's profile with no company and that
+ * status *before* `platform_staff_add` gives it the staff row the flag is
+ * mirrored from, so for that moment an invited member looks exactly like case 1
+ * above. Blocking it would take a full-page takeover and put it in front of the
+ * invitation the person is in the middle of accepting — the gates in App.tsx run
+ * above the router, so they cover `/einladung` and `/set-new-password` too.
+ * (No browser can be in that window today: the invitation code is mailed only
+ * after the staff row exists, and `otp_issue` refuses a company-less profile
+ * that holds no active staff row, so such an account has no way to obtain a
+ * session at all. It is guarded because the flow, not the impossibility, is what
+ * the next change has to keep.)
+ *
+ * ## What is deliberately *not* blocked
+ *
+ * A company whose row could not be read. `AuthContext` leaves `companyStatus`
+ * null then, and null is an unanswered question, not a status — the same
+ * distinction `profileLoaded` exists for. Reading it as a block would turn one
+ * failed `companies` select into "Zugang gesperrt" with nothing to retry, and
+ * the database refuses the rows anyway.
+ */
+export type TenantAccessGate =
+  | 'allow'
+  | 'noCompany'
+  | 'companySuspended'
+  | 'companyUnusable'
+  | 'companyDeleted';
+
+/**
+ * The company states a session may work in, mirroring `get_active_company_id()`
+ * (`companies.status IN ('active','trial')`, plan 3.3). Every other state, known
+ * or not, is refused.
+ */
+const COMPANY_STATES_THAT_WORK: readonly string[] = ['active', 'trial'];
+
+/**
+ * The profile status of a platform member whose invitation is still in flight.
+ * Read the `pending_invite` rule above before narrowing this.
+ */
+const INVITE_IN_FLIGHT_STATUS = 'pending_invite';
+
+export interface TenantAccessState {
+  /**
+   * `user_profiles.is_super_admin`: routing only, and it grants nothing. True
+   * hands the decision to `platformAccountRoute` and to the panel's own gate.
+   */
+  isSuperAdmin: boolean;
+  /** `user_profiles.company_id` is set. */
+  hasCompany: boolean;
+  /** `user_profiles.status`, as the row carries it. */
+  profileStatus: string | null | undefined;
+  /** `companies.status`, or null/undefined while it has not been read. */
+  companyStatus: string | null | undefined;
+  /**
+   * `companies.approval_status`. Since `20260919150000` it cannot carry
+   * `'suspended'` any more; it is still read so that a rollback to the release
+   * before that migration keeps blocking a company suspended under the old
+   * convention.
+   */
+  companyApprovalStatus: string | null | undefined;
+}
+
+/**
+ * The caller must already know the profile query has **answered** — App.tsx
+ * waits on `profileLoaded` before any gate — or a load still in flight reads as
+ * an account that has no company.
+ */
+export function tenantAccessGate(state: TenantAccessState): TenantAccessGate {
+  // Platform staff are not tenants. Where they belong is platformAccountRoute's
+  // answer, and what they may do is the database's.
+  if (state.isSuperAdmin) return 'allow';
+
+  if (!state.hasCompany) {
+    return state.profileStatus === INVITE_IN_FLIGHT_STATUS ? 'allow' : 'noCompany';
+  }
+
+  if (state.companyStatus === 'suspended' || state.companyApprovalStatus === 'suspended') {
+    return 'companySuspended';
+  }
+  if (state.companyStatus === 'deleted' || state.companyStatus === 'archived') {
+    return 'companyDeleted';
+  }
+  // An unanswered question, not a status: see above.
+  if (state.companyStatus === null || state.companyStatus === undefined) return 'allow';
+
+  return COMPANY_STATES_THAT_WORK.includes(state.companyStatus) ? 'allow' : 'companyUnusable';
+}

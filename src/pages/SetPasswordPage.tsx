@@ -14,7 +14,7 @@ const MIN_LEN = 8;
 
 const SetPasswordPage: React.FC = () => {
   const { t } = useTranslation();
-  const { setAuthNotice, clearAuthNotice } = useAuth();
+  const { setAuthNotice, clearAuthNotice, refreshProfile } = useAuth();
   const navigate = useNavigate();
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
@@ -129,23 +129,49 @@ const SetPasswordPage: React.FC = () => {
         return;
       }
 
-      if (isInvite) {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (user) {
-          await supabase
-            .from('user_profiles')
-            .update({ status: 'active', activated_at: new Date().toISOString(), must_change_password: false })
-            .eq('user_id', user.id);
-        }
-      } else {
-        // Clear must_change_password flag for temp-password users.
-        const { data: { user } } = await supabase.auth.getUser();
-        if (user) {
-          await supabase
-            .from('user_profiles')
-            .update({ must_change_password: false })
-            .eq('user_id', user.id);
-        }
+      /*
+        The profile write, and its answer.
+
+        Both branches used to discard the `error` their UPDATE returns, and a
+        missing user read as "nothing to do": a refused or failed write left
+        `must_change_password` true (or an invitation still `pending_invite`)
+        while this page said *Passwort gespeichert* and sent the account on to
+        `/`. `MustChangePasswordGuard` then sent it straight back here, and the
+        person had no way out of that loop and nothing on screen saying why.
+
+        So the write is now one statement whose answer decides what the page
+        shows, and a session whose user cannot be read is a failure too — it is
+        the one thing that proves the write reached the right row. The password
+        itself has already been changed at this point and is not undone; the
+        message is the neutral one, because what failed is the *rest* of the
+        change and the account can try again with the new password in hand.
+
+        `.select()` is there because the `error` alone would not have been
+        enough: an UPDATE that RLS matches no row for answers 204 with no error
+        at all, which is the likelier of the two failures — the policy's own arm
+        here is `user_id = auth.uid()` and the privilege guard raises for a
+        column it refuses. A row back is the only proof the column changed. It
+        reads a column the account may always read: the same self arm carries
+        `user_profiles_select`.
+      */
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        setError(t('forgot.unexpected'));
+        return;
+      }
+      const profileFields = isInvite
+        // An invitation is accepted by this write: the account becomes usable.
+        ? { status: 'active', activated_at: new Date().toISOString(), must_change_password: false }
+        // A temporary password was just replaced, so the forced change is done.
+        : { must_change_password: false };
+      const { data: written, error: profileErr } = await supabase
+        .from('user_profiles')
+        .update(profileFields)
+        .eq('user_id', user.id)
+        .select('user_id');
+      if (profileErr || !written || written.length === 0) {
+        setError(t('forgot.unexpected'));
+        return;
       }
 
       setSuccess(true);
@@ -196,7 +222,31 @@ const SetPasswordPage: React.FC = () => {
         return;
       }
 
-      setTimeout(() => navigate('/', { replace: true }), 1200);
+      /*
+        Re-read the profile before leaving, or the account arrives back here.
+
+        `MustChangePasswordGuard` (App.tsx) reads `mustChangePassword`, which is
+        AuthContext's *copy* of `user_profiles.must_change_password`. The write
+        above cleared the column, not the copy: nothing else re-reads the profile
+        until a token refresh or a page reload, so `navigate('/')` hit the guard
+        with the flag still true and it sent the browser straight back to
+        `/set-new-password` — a loop with no way out but reloading the tab, on
+        the one screen a temporary password forces every new employee through.
+
+        The same re-read matters for an invitation, whose `pending_invite` status
+        is what this page's own copy (`isInvite`) is built from.
+
+        A refresh that fails leaves the copy as it was and the redirect behaves
+        as it did before, which is why the navigation does not wait on its
+        success: `refreshProfile` retries internally and records its own failure,
+        and holding the person on a success panel for ever would be worse than
+        the loop it replaces.
+      */
+      setTimeout(() => {
+        void refreshProfile()
+          .catch(() => { /* the copy stays as it was, and the redirect still runs */ })
+          .finally(() => navigate('/', { replace: true }));
+      }, 1200);
     } catch {
       setError(t('forgot.unexpected'));
     } finally {

@@ -1,7 +1,7 @@
 import React, { Suspense, lazy } from 'react';
 import { AlertCircle } from 'lucide-react';
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
-import { useAuth } from './contexts/AuthContext';
+import { useAuth, type BlockReason } from './contexts/AuthContext';
 import { CompanySettingsProvider } from './contexts/CompanySettingsContext';
 import { SuperAdminProvider, useSuperAdmin } from './contexts/SuperAdminContext';
 import { PlanProvider, usePlan, FeatureKey } from './contexts/PlanContext';
@@ -69,6 +69,8 @@ import {
   platformEntry,
   platformEntryPath,
   rememberedPanelPath,
+  tenantAccessGate,
+  type TenantAccessGate,
 } from './lib/adminGate';
 
 // ─── Design preview (Phase 2 prototype) ──────────────────────────────────────
@@ -422,6 +424,32 @@ const ProfileUnavailableScreen: React.FC<{ onRetry: () => void; onSignOut: () =>
   );
 };
 
+/**
+ * The sentence each refused company state shows, as an existing `BlockReason`.
+ *
+ * `AccountBlockedPage` renders `BLOCK_MESSAGE_KEYS[reason]`, and both that map
+ * and the reason union live in `AuthContext`, with their German and English
+ * sentences in the two dictionaries. So these are the nearest true sentences
+ * already written, not the ones this gate would word for itself:
+ *
+ * - `noCompany` → *Ihr Unternehmenskonto ist nicht mehr aktiv. Bitte
+ *   kontaktieren Sie den Support.* The account is attached to no company and no
+ *   platform role, and support — not "your administrator", which it no longer
+ *   has — is who can restore either. A sentence of its own ("dieses Konto ist
+ *   keinem Unternehmen zugeordnet") would need a new reason in `AuthContext` and
+ *   a key in both dictionaries; those files belong to other work in flight.
+ * - `companyUnusable` → the same sentence, which is exactly what `inactive`
+ *   means and the honest wording for a state this build has never seen.
+ * - `companyDeleted` → *Ihr Unternehmenskonto wurde gelöscht.* — `deleted` and
+ *   `archived`, the pair `AuthContext.checkProfileAccess` already maps to it, so
+ *   the sign-in path and this one say the same thing.
+ */
+const TENANT_GATE_BLOCK_REASONS: Record<Exclude<TenantAccessGate, 'allow' | 'companySuspended'>, BlockReason> = {
+  noCompany:       'company_inactive',
+  companyUnusable: 'company_inactive',
+  companyDeleted:  'company_deleted',
+};
+
 // ─── App ──────────────────────────────────────────────────────────────────────
 
 function App() {
@@ -523,10 +551,13 @@ function App() {
     return <RejectedPage />;
   }
   /*
-    Suspension, from the one column that records it.
+    Suspension — and every other company state a session may not work in, and
+    the account that has no company at all. One decision, `tenantAccessGate`,
+    kept pure and tested beside the other routing rules; read it for why each
+    branch answers the way it does, and for what was measured on staging.
 
-    `companyStatus` is the test since 20260919150000 (plan 3.F step U1), which
-    moved every suspended flag onto `companies.status` and stopped
+    `companyStatus` is the suspension test since 20260919150000 (plan 3.F step
+    U1), which moved every suspended flag onto `companies.status` and stopped
     `approval_status` and `subscription_status` from carrying the value at all.
     Before that this gate read `companyApprovalStatus`, and only
     `platform_company_set_approval('suspend')` ever set it — a suspension from
@@ -538,9 +569,23 @@ function App() {
     `companyApprovalStatus` is kept in the test so that a rollback to the
     previous release, which leaves this database as it is, still blocks a
     company that was suspended before the migration ran and never re-read.
+
+    The approval gates stay above this one, so a company that is both suspended
+    and unapproved keeps showing the waiting page it shows today — measured on
+    staging: 2 companies are in exactly that pair of states.
   */
-  if (!isSuperAdmin && (companyStatus === 'suspended' || companyApprovalStatus === 'suspended')) {
+  const tenantGate = tenantAccessGate({
+    isSuperAdmin,
+    hasCompany: !!profile?.company_id,
+    profileStatus: profile?.status,
+    companyStatus,
+    companyApprovalStatus,
+  });
+  if (tenantGate === 'companySuspended') {
     return <CompanySuspendedPage />;
+  }
+  if (tenantGate !== 'allow') {
+    return <AccountBlockedPage reason={TENANT_GATE_BLOCK_REASONS[tenantGate]} />;
   }
 
   /*
