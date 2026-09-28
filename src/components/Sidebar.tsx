@@ -6,6 +6,7 @@ import {
   StickyNote, Car, Wrench, Shield, Settings, Bell, CalendarDays, CreditCard, ArrowLeft,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
+import BrandLogo from './BrandLogo';
 import { useCompanySettings } from '../contexts/CompanySettingsContext';
 import { usePlan, FeatureKey } from '../contexts/PlanContext';
 import { useTranslation } from '../contexts/LanguageContext';
@@ -108,7 +109,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isSupportAdmin }) => {
           starts clear of it there and keeps its old inset on a desktop. */}
       <div className="flex items-center gap-3 border-b border-line py-4 pl-14 pr-4 lg:pl-4">
         <div className="flex h-8 w-8 shrink-0 items-center justify-center">
-          <img src="/professor_logo_white.svg" alt="El-Professor" className="h-8 w-8 object-contain" />
+          <BrandLogo className="h-8 w-8 object-contain" />
         </div>
         <div className="min-w-0">
           <p className="truncate text-sm font-bold text-fg">
