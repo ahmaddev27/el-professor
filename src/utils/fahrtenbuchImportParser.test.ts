@@ -15,9 +15,12 @@ import {
   buildTripRows,
   classifyTimestampCell,
   deriveTripTimes,
+  driverMatchInfo,
   findOrderTransmissionColumn,
   isMissingCell,
   mapTripStatus,
+  matchDriverName,
+  normalise,
   normaliseDriverName,
   normalisePlate,
   parseDate,
@@ -539,5 +542,140 @@ describe('the preview counts', () => {
     expect(summary.reasons.unknown_status).toBe(1);
     expect(summary.reasons.missing_end).toBe(1);
     expect(summary.timeSources).toMatchObject({ source_start_end: 2, missing: 2 });
+  });
+});
+
+/*
+  The wizard's step 2 picks which driver an imported name means. Until 28.09.2026
+  it took the first driver in the company's list whose normalised name contained
+  the imported one, or was contained in it, and marked the pair confirmed — so
+  canGoNext let the step through and a month of rides was attributed without
+  anyone looking.
+
+  Measured 28.09.2026, production and staging alike: of 13,959 stored rides, 0
+  carry the matcher's footprint — a ride whose assigned driver is still the one
+  the import picked, while the file's name and that driver's name do not normalise
+  alike. (Comparing against `drivers.name` as it reads today answers 9 instead,
+  and all 9 are one staging driver renamed to 'probe-rename' after its import,
+  which is why the comparison is made against the ride's own
+  assigned_driver_name.) So every case below is latent, not a repair.
+
+  `legacyFirstHit` is the code as it stood, kept here as the negative control:
+  each test states what it answered, so a return to first-hit semantics fails the
+  matchDriverName assertion beside it rather than passing unnoticed.
+*/
+interface TestDriver { id: string; name: string }
+
+function legacyFirstHit(
+  name: string,
+  drivers: readonly TestDriver[],
+): { matchedDriverId: string | null; confirmed: boolean } {
+  const norm = normalise(name);
+  const found = drivers.find(d =>
+    normalise(d.name) === norm ||
+    normalise(d.name).includes(norm) ||
+    norm.includes(normalise(d.name))
+  );
+  return { matchedDriverId: found?.id || null, confirmed: !!found };
+}
+
+const THREE_DRIVERS: TestDriver[] = [
+  { id: 'd1', name: 'Ali Hassan' },
+  { id: 'd2', name: 'Alia Demir' },
+  { id: 'd3', name: 'Bekir Yilmaz' },
+];
+
+describe('matching an imported driver name', () => {
+  it('confirms a name a driver actually carries', () => {
+    expect(matchDriverName('Ali Hassan', THREE_DRIVERS)).toEqual({
+      kind: 'exact', driverId: 'd1', driverName: 'Ali Hassan',
+    });
+    expect(driverMatchInfo('Ali Hassan', THREE_DRIVERS)).toEqual({
+      matchedDriverId: 'd1', matchedDriverName: 'Ali Hassan', confirmed: true,
+    });
+    // Spelling does not have to agree: normalise keeps [a-z0-9] only.
+    expect(matchDriverName('  ali-hassan ', THREE_DRIVERS)).toMatchObject({ kind: 'exact', driverId: 'd1' });
+  });
+
+  it('offers a single near-match but leaves it for the user to confirm', () => {
+    expect(matchDriverName('Bekir', THREE_DRIVERS)).toEqual({
+      kind: 'suggestion', driverId: 'd3', driverName: 'Bekir Yilmaz',
+    });
+    expect(driverMatchInfo('Bekir', THREE_DRIVERS)).toEqual({
+      matchedDriverId: 'd3', matchedDriverName: 'Bekir Yilmaz', confirmed: false,
+    });
+    // Negative control: the old matcher confirmed exactly this pair, which is
+    // what let a shortened name through step 2 with nobody looking at it.
+    expect(legacyFirstHit('Bekir', THREE_DRIVERS)).toEqual({ matchedDriverId: 'd3', confirmed: true });
+  });
+
+  it('offers nothing when two drivers could be meant, and does not depend on list order', () => {
+    const reversed = [THREE_DRIVERS[1], THREE_DRIVERS[0], THREE_DRIVERS[2]];
+    expect(matchDriverName('Ali', THREE_DRIVERS)).toEqual({ kind: 'ambiguous' });
+    expect(matchDriverName('Ali', reversed)).toEqual({ kind: 'ambiguous' });
+    expect(driverMatchInfo('Ali', THREE_DRIVERS)).toEqual({
+      matchedDriverId: null, matchedDriverName: 'Ali', confirmed: false,
+    });
+    // Negative control: "Ali" is a substring of both "Ali Hassan" and
+    // "Alia Demir", so the old matcher confirmed whichever the company's driver
+    // list happened to hold first — a different person for the same file.
+    expect(legacyFirstHit('Ali', THREE_DRIVERS)).toEqual({ matchedDriverId: 'd1', confirmed: true });
+    expect(legacyFirstHit('Ali', reversed)).toEqual({ matchedDriverId: 'd2', confirmed: true });
+  });
+
+  it('offers nothing when two drivers normalise to the same name', () => {
+    const twins: TestDriver[] = [
+      { id: 'a', name: 'Max Müller' },
+      { id: 'b', name: 'MaxMüller' },
+    ];
+    expect(normalise('Max Müller')).toBe(normalise('MaxMüller'));
+    expect(matchDriverName('Max Müller', twins)).toEqual({ kind: 'ambiguous' });
+    // Negative control: the old matcher confirmed the first of the two.
+    expect(legacyFirstHit('Max Müller', twins)).toEqual({ matchedDriverId: 'a', confirmed: true });
+  });
+
+  it('offers nothing for a name that names nobody', () => {
+    expect(matchDriverName('Zoe Schmidt', THREE_DRIVERS)).toEqual({ kind: 'none' });
+    expect(driverMatchInfo('Zoe Schmidt', THREE_DRIVERS)).toEqual({
+      matchedDriverId: null, matchedDriverName: 'Zoe Schmidt', confirmed: false,
+    });
+    // The old matcher agreed here — this is the one case it got right.
+    expect(legacyFirstHit('Zoe Schmidt', THREE_DRIVERS)).toEqual({ matchedDriverId: null, confirmed: false });
+  });
+
+  it('matches nobody to a cell that normalises to nothing', () => {
+    // isMissingCell only drops an empty cell and the \N marker, so a driver
+    // column holding "-" reaches the matcher as the name "-".
+    expect(isMissingCell('-')).toBe(false);
+    expect(normalise('-')).toBe('');
+    expect(matchDriverName('-', THREE_DRIVERS)).toEqual({ kind: 'none' });
+    // Negative control: '' is a substring of every name, so the old matcher
+    // confirmed the first driver in the list for a cell naming nobody.
+    expect(legacyFirstHit('-', THREE_DRIVERS)).toEqual({ matchedDriverId: 'd1', confirmed: true });
+  });
+
+  it('never treats a driver whose own name normalises to nothing as a candidate', () => {
+    const withBlank: TestDriver[] = [{ id: 'x', name: '---' }, THREE_DRIVERS[0]];
+    expect(matchDriverName('Ali', withBlank)).toEqual({
+      kind: 'suggestion', driverId: 'd1', driverName: 'Ali Hassan',
+    });
+    // Negative control: every name contains '', so the old matcher answered the
+    // blank-named driver for every imported name and confirmed it.
+    expect(legacyFirstHit('Ali', withBlank)).toEqual({ matchedDriverId: 'x', confirmed: true });
+  });
+
+  it('leaves normalise alone: an umlaut still does not match its transcription', () => {
+    /*
+      Characterization, not a wish. normalise drops every character outside
+      [a-z0-9], so "Müller" becomes "mller" and "Muller" becomes "muller" and
+      neither contains the other. The pair therefore reaches the user unmatched,
+      which is safe. Widening normalise is a separate decision: the importer reads
+      headers and status words with the same function, and normaliseDriverName —
+      which does keep the letters — feeds source_row_key and must not be used
+      here.
+    */
+    const one: TestDriver[] = [{ id: 'm', name: 'Max Muller' }];
+    expect(matchDriverName('Max Müller', one)).toEqual({ kind: 'none' });
+    expect(legacyFirstHit('Max Müller', one)).toEqual({ matchedDriverId: null, confirmed: false });
   });
 });
