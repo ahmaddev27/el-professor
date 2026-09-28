@@ -12,6 +12,9 @@
 
 import * as XLSX from 'xlsx';
 import { supabase } from '../lib/supabase';
+// One home for the source-cell number formats, so this exporter and the
+// Fahrtenbuch one cannot drift apart on what a serial means.
+import { applySourceCellFormats } from './fahrtenbuchExport';
 
 const BATCH = 1000;
 
@@ -413,6 +416,11 @@ export async function exportAppliedRunXlsx(
   // XLSX sheet names are capped at 31 chars and forbid : \ / ? * [ ]
   const originalSheetName = rawSheetName.replace(/[:\\/?*[\]]/g, '_').slice(0, 31);
   const ws = XLSX.utils.aoa_to_sheet(originalRows);
+  // A source cell Excel held as a date arrived as a serial (the importer reads
+  // with raw: true) and would otherwise be delivered as that serial. Row 0 is
+  // the header and is never touched — Originalformat reproduces it byte for
+  // byte, which the strict header check above already guards.
+  applySourceCellFormats(ws, prep.headers, originalRows.slice(1));
   XLSX.utils.book_append_sheet(wb, ws, originalSheetName);
 
   if (mode === 'audit') {

@@ -1,5 +1,5 @@
 import * as XLSX from 'xlsx';
-import { FahrtenbuchTrip } from '../hooks/useFahrtenbuch';
+import type { FahrtenbuchTrip } from '../hooks/useFahrtenbuch';
 import { validateDriverNotesForPlanStep, type NoteViolation } from './driverNoteValidation';
 import type { StructuredNote } from './monatsplanungPhase3';
 
@@ -54,7 +54,7 @@ const DRIVER_COL_CANDIDATES = [
   'fahrername', 'fahrer name', 'fahrer', 'driver name', 'driver',
 ];
 
-const FAHRTENBUCH_ORIGINAL_COLUMNS = [
+export const FAHRTENBUCH_ORIGINAL_COLUMNS = [
   'Datum/Uhrzeit Auftragseingang',
   'Uhrzeit der Auftragsuebermittlung',
   'Geplante Abholzeit',
@@ -74,6 +74,115 @@ const FAHRTENBUCH_ORIGINAL_COLUMNS = [
   'Zielort',
   'Vorreservierte Fahrt',
 ];
+
+/**
+ * ── Number formats for source cells that arrive as Excel serials ──
+ *
+ * The importer reads the sheet with `XLSX.read(bytes, { raw: true, cellDates:
+ * false })` and `sheet_to_json(ws, { raw: true })` (`FahrtenbuchImportModal`),
+ * so a cell Excel stores as a *date* arrives as its serial — `46265` for a
+ * date, `0.3451` for a time, `46265.3451` for both — and that serial is what
+ * lands in `raw_data_json`. Written straight back with no number format, it
+ * reaches the Steuerberater as `46265` where the source sheet read
+ * `31.08.2026`.
+ *
+ * **The source cell's own format string is not available here.** The importer
+ * keeps values only; a cell's `z` is never stored, on the import row or
+ * anywhere else. So the discriminator is the **column**, never the JS type:
+ * `Fahrpreis`, `Trinkgeld` and `Kilometer` are legitimately numeric and must
+ * stay bare numbers, and a type-led rule would date-format all three.
+ *
+ * The column *name* is not enough to say *which* format either. Measured on
+ * staging on 28.09.2026, `Uhrzeit des Fahrtbeginns` holds
+ * `2026-06-02 17:27:20.000` — a full datetime, despite "Uhrzeit". The serial is
+ * the reliable witness, read only inside a column already known to hold a date
+ * or a time: below 1 it is a time of day, a whole number is a date, and a
+ * fraction above 1 is both.
+ *
+ * Measured the same day: 13,959 of 13,959 rows on production *and* staging
+ * carry all six of these columns as text and all three money columns as
+ * numbers, so **no cell either exporter writes today changes**. The rule fails
+ * closed — an unrecognised column, a value that is not a finite number, and a
+ * number outside the plausible-serial window are all passed through untouched —
+ * which is what keeps the 'original' export mode reproducing the imported
+ * sheet.
+ */
+function normaliseSourceColumn(column: string): string {
+  return column.toLowerCase().trim().replace(/\s+/g, ' ');
+}
+
+/**
+ * The columns of an Uber Fahrtenbuch export that hold a date, a time or both.
+ * A subset of FAHRTENBUCH_ORIGINAL_COLUMNS, which the test asserts; the three
+ * money columns are deliberately absent.
+ */
+const DATE_TIME_SOURCE_COLUMNS: ReadonlySet<string> = new Set(
+  [
+    'Datum/Uhrzeit Auftragseingang',
+    'Uhrzeit der Auftragsuebermittlung',
+    'Geplante Abholzeit',
+    'Datum der Fahrt',
+    'Uhrzeit des Fahrtbeginns',
+    'Uhrzeit des Fahrtendes',
+  ].map(normaliseSourceColumn),
+);
+
+/** Excel number-format codes. German display, the DD.MM.YYYY the product uses throughout. */
+export const EXCEL_FORMAT_DATE = 'dd.mm.yyyy';
+export const EXCEL_FORMAT_TIME = 'hh:mm:ss';
+export const EXCEL_FORMAT_DATETIME = 'dd.mm.yyyy hh:mm:ss';
+
+/**
+ * 01.01.2000 and 01.01.2100 as Excel serials (verified against the 1899-12-30
+ * epoch). A number in a date column outside this window is not a date anybody
+ * typed — a 0, a count of minutes, an identifier — so it is left alone rather
+ * than rendered as a date in 1904 or 2431.
+ */
+const SERIAL_DATE_MIN = 36526;
+const SERIAL_DATE_MAX = 73051;
+
+/**
+ * The Excel number format a source cell needs, or null to write it exactly as
+ * this exporter writes it today.
+ */
+export function sourceCellNumberFormat(column: string, value: unknown): string | null {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return null;
+  if (!DATE_TIME_SOURCE_COLUMNS.has(normaliseSourceColumn(column))) return null;
+  // A fraction below 1 carries no date part: it is a time of day.
+  if (value > 0 && value < 1) return EXCEL_FORMAT_TIME;
+  // Exactly 0 is ambiguous — midnight, or the zero an empty numeric cell reads
+  // as. It is left untouched on purpose: a bare `0` is visibly wrong to whoever
+  // opens the sheet, where a spurious `00:00:00` looks like a real time and
+  // would be believed.
+  if (value < SERIAL_DATE_MIN || value >= SERIAL_DATE_MAX) return null;
+  return Number.isInteger(value) ? EXCEL_FORMAT_DATE : EXCEL_FORMAT_DATETIME;
+}
+
+/**
+ * Give every source cell that arrived as a serial its number format, in place.
+ * `rows` is the data only — `r + 1` skips the header row, which is never
+ * touched, because the 'original' mode has to reproduce the imported headers
+ * byte for byte. Returns how many cells were formatted.
+ */
+export function applySourceCellFormats(
+  ws: XLSX.WorkSheet,
+  columns: readonly string[],
+  rows: readonly (readonly unknown[])[],
+): number {
+  let formatted = 0;
+  for (let r = 0; r < rows.length; r++) {
+    for (let c = 0; c < columns.length; c++) {
+      const z = sourceCellNumberFormat(columns[c], rows[r][c]);
+      if (!z) continue;
+      const cell = ws[XLSX.utils.encode_cell({ r: r + 1, c })];
+      if (!cell) continue;
+      cell.t = 'n';
+      cell.z = z;
+      formatted++;
+    }
+  }
+  return formatted;
+}
 
 function findDriverColumn(keys: string[]): string | null {
   const normalized = keys.map(k => k.toLowerCase().trim());
@@ -151,6 +260,7 @@ export function exportFahrtenbuch({ trips, month, year, importFileName, sourceCo
 
   const data = [headers, ...rows];
   const ws = XLSX.utils.aoa_to_sheet(data);
+  applySourceCellFormats(ws, columns, rows);
 
   ws['!cols'] = columns.map((col, ci) => {
     const maxLen = Math.max(
