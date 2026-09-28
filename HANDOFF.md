@@ -1098,6 +1098,13 @@ Secrets never enter git:
 
 ## Waiting on the owner
 
+- **Google sign-in is LIVE on production while the Impressum and the privacy page are both empty.** Measured 28.09.2026, read-only. `GOOGLE_SIGNIN_ENABLED=true` in `/srv/PRO/deploy/.env`, and GoTrue's own `/auth/v1/settings` on `api.elprofessor.eu` answers `external.google: true`, so the switch is not merely set — the provider is serving. But `app_private.platform_settings` holds `legal.impressum` and `legal.privacy` as `{}` on production, two bytes each. `App.tsx` renders the Impressum only once its own `legal_name` is filled, so `/impressum` and `/datenschutz` show nothing.
+
+  **Why this is written here rather than fixed:** the content is the owner's to write, and every earlier note in this file recorded the production Google switch as *waiting* on exactly these two texts. So either the decision changed and this is intended, or the switch went on ahead of the texts by accident. Only the owner knows which. For a German SaaS an Impressum is required by §5 DDG and a privacy notice by DSGVO Art. 13, and the Art. 13 duty is at its sharpest for an OAuth flow that hands an identity provider a request on the visitor's behalf.
+
+  **What was checked at the same time and is fine:** GoTrue reports `disable_signup: false`, which is expected — its entrypoint opens signup exactly when the Google provider is on — and Kong's `auth-v1-closed` block still answers **403** on `/auth/v1/signup`, `/auth/v1/otp` and `/auth/v1/magiclink` on production, so open signup stays contained the way the design intends. Nothing about the wall has drifted.
+
+
 - **Which Bundesland gets which holiday — the table itself, not the dates.** Raised 27.09.2026 while fixing Buß- und Bettag's date, and deliberately left alone, because each line of it decides whether a Feiertagszuschlag of +125% is owed. Three things are wrong or doubtful in the two tables, and none of them is a calendar calculation:
   - **`utils/germanHolidays.ts` grants Buß- und Bettag to `SN` and `TH`.** Since 1995 it has been a statutory public holiday in **Sachsen only**; in Thüringen it is not. So a Thüringen company would be paid a premium that is not owed. `pages/StundennachweisPage.tsx` has it for `SN` alone, so the two tables already disagree on this.
   - **`germanHolidays.ts` has no Reformationstag at all**, and omits Allerheiligen for `BW` — both from review finding H28, both unverified by me.

@@ -165,13 +165,24 @@ const DiscountCodeInput: React.FC<{
   // The check above is unchanged, and so is when it runs: the button, and
   // Enter in the field. The server's own sentence is shown as it arrives.
   //
-  // The two buttons are `type="submit"` on purpose: the legacy ones named no
-  // type, and a button without one submits the form it sits in. On the Google
-  // registration screen this block sits inside that screen's form, so
-  // "Anwenden" and removing a code have always submitted the registration as
-  // well — a defect, recorded in HANDOFF.md for the owner, and not this
-  // look-only change's to fix. The design-system Button defaults to "button",
-  // so the old behaviour has to be asked for.
+  // The two buttons are `type="button"`, and Enter in the field calls
+  // preventDefault. That is the fix for the defect the previous version of this
+  // comment recorded and deliberately kept.
+  //
+  // Both buttons used to be `type="submit"`, copied from legacy ones that named no
+  // type — and a button without one submits the form it sits in. On the Google
+  // registration screen (`CompleteRegistrationPage.tsx`, `<form onSubmit={submit}>`
+  // at :247, this block at :284, the form closing at :319) that form CREATES THE
+  // COMPANY. So all three ways of using this field submitted the registration:
+  // pressing "Anwenden", pressing the X to remove a code, and pressing Enter in the
+  // field, which submits implicitly because the handler never called
+  // preventDefault. `handleApply` is async, so the company was created before the
+  // code could be applied — the discount silently lost.
+  //
+  // It is reachable on production. Measured 28.09.2026: GoTrue's own
+  // /auth/v1/settings reports `external.google: true` there, so the Google
+  // registration screen is live. `SignupPage` renders this block OUTSIDE its two
+  // forms, so the password signup was never affected.
 
   if (applied) {
     return (
@@ -182,7 +193,7 @@ const DiscountCodeInput: React.FC<{
           <span className="text-fg-muted">{t('signup.discount.applied')}</span>
         </div>
         <Button
-          type="submit"
+          type="button"
           variant="ghost"
           size="icon-sm"
           onClick={() => { onRemoved(); setMessage(null); }}
@@ -204,14 +215,14 @@ const DiscountCodeInput: React.FC<{
             type="text"
             value={code}
             onChange={e => setCode(e.target.value.toUpperCase())}
-            onKeyDown={e => e.key === 'Enter' && handleApply()}
+            onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleApply(); } }}
             placeholder={t('signup.discount.label')}
             aria-label={t('signup.discount.label')}
             className="pl-8 font-mono"
           />
         </div>
         <Button
-          type="submit"
+          type="button"
           variant="secondary"
           onClick={handleApply}
           disabled={loading || !code.trim()}
