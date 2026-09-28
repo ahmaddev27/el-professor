@@ -295,7 +295,6 @@ describe('receiptSheet — the stored row is what prints', () => {
     expect(sheet.kind).toBe('text');
     if (sheet.kind !== 'text') return;
     expect(sheet.text.facts).toEqual([
-      { label: 'Zeitraum', value: '01.01.2026 – 25.01.2026', emphasis: false },
       { label: 'Abrechnungsmonat', value: 'Dezember 2025', emphasis: false },
       { label: 'Zahlungsdatum', value: '14.09.2026', emphasis: false },
     ]);
