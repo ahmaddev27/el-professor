@@ -31,6 +31,7 @@ import { exportSalariesToExcel } from '../utils/excelExport';
 import { getBusinessMonthRange } from '../utils/weekCalculations';
 import { findOverlappingSalaryPeriods, groupSalaryPeriodsByDriver } from '../utils/salaryPeriodOverlap';
 import { formatSalaryDue, formatStoredDate, salaryRowWriteRefusal } from '../utils/salaryRowEdit';
+import { calcSalaryFromIncome, salaryBase, salaryDueState } from '../utils/salaryDue';
 import { receiptScope } from '../utils/salaryCashReceiptFlow';
 import { generateDriverSalaryPdf } from '../utils/driverSalaryPdf';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
@@ -218,9 +219,13 @@ const SalariesManagement: React.FC<SalariesManagementProps> = ({ drivers }) => {
         .filter(i => i.type === 'trinkgeld')
         .reduce((sum, i) => sum + Number(i.amount), 0);
 
-      const salaryRatio = driver.salary_ratio ?? 0.5;
-      const revenueShare = revenue * salaryRatio;
-      const amountDue = revenueShare + tips;
+      // (Umsatz + Aktionen) × salary_ratio + Trinkgeld × 100%, and the default
+      // ratio for a driver who has none — utils/salaryDue.ts holds the rule.
+      const { salaryRatio, revenueShare, amountDue } = calcSalaryFromIncome({
+        revenue,
+        tips,
+        salaryRatio: driver.salary_ratio,
+      });
 
       const existingSalary = salaries.find(
         s =>
@@ -229,17 +234,25 @@ const SalariesManagement: React.FC<SalariesManagementProps> = ({ drivers }) => {
           s.period_end === periodEnd
       );
 
-      // Use netto_salary if available (manual adjustments), otherwise use calculated amount_due
-      const totalSalary = Number(existingSalary?.netto_salary || amountDue);
-      const totalPaidAmount = Number(existingSalary?.total_paid || 0);
-      const remainingAmount = Math.max(0, totalSalary - totalPaidAmount);
-
-      // Calculate payment status based on actual payments
-      const calculatedPaymentStatus = totalPaidAmount === 0
-        ? 'unpaid'
-        : totalPaidAmount >= totalSalary
-        ? 'paid'
-        : 'partially_paid';
+      /**
+       * The base is COALESCE(netto_salary, the amount recomputed just above) —
+       * a manual adjustment wins, otherwise this period's live figure.
+       *
+       * The status and the remaining balance are then **derived from that base**
+       * rather than read off the row. The stored `payment_status` was computed
+       * against whatever the base was when the last payment was entered, and it
+       * is set on every row, so `existingSalary?.payment_status || derived` meant
+       * the derivation never ran: measured on staging 28.09.2026, 28 of 53 rows
+       * hold a drifted `amount_due` and 5 read "bezahlt" while money is owed.
+       *
+       * Display only. Nothing here is written back — an issued Gehaltsquittung's
+       * base is frozen by design, and two production receipts hang off drifted
+       * rows.
+       */
+      const due = salaryDueState(
+        { netto_salary: existingSalary?.netto_salary, amount_due: amountDue },
+        existingSalary?.total_paid,
+      );
 
       return {
         driver_id: driver.id,
@@ -249,13 +262,14 @@ const SalariesManagement: React.FC<SalariesManagementProps> = ({ drivers }) => {
         tips,
         revenue_share: revenueShare,
         amount_due: amountDue,
-        netto_salary: existingSalary?.netto_salary ? Number(existingSalary.netto_salary) : undefined,
+        // `!= null` and not truthiness: an adjustment to zero is a decision.
+        netto_salary: existingSalary?.netto_salary != null ? Number(existingSalary.netto_salary) : undefined,
         status: existingSalary?.status || 'unpaid',
         paid_at: existingSalary?.paid_at,
         salary_id: existingSalary?.id,
-        total_paid: totalPaidAmount,
-        remaining_balance: remainingAmount,
-        payment_status: existingSalary?.payment_status || calculatedPaymentStatus,
+        total_paid: due.totalPaid,
+        remaining_balance: due.remaining,
+        payment_status: due.paymentStatus,
         period_start: periodStart,
         period_end: periodEnd
       };
@@ -407,7 +421,11 @@ const SalariesManagement: React.FC<SalariesManagementProps> = ({ drivers }) => {
     });
   };
 
-  const totalDue = calculations.reduce((sum, c) => sum + c.amount_due, 0);
+  // The base, not the calculated amount: the `total` column below shows
+  // COALESCE(netto_salary, amount_due), so summing amount_due made the KPI
+  // disagree with the column under it wherever an adjustment exists (1 staging
+  // row, by 558,80 €).
+  const totalDue = calculations.reduce((sum, c) => sum + salaryBase(c), 0);
   const totalTips = calculations.reduce((sum, c) => sum + c.tips, 0);
   const totalRevenueShare = calculations.reduce((sum, c) => sum + c.revenue_share, 0);
   const paidCount = calculations.filter(c => c.status === 'paid').length;
@@ -500,8 +518,8 @@ const SalariesManagement: React.FC<SalariesManagementProps> = ({ drivers }) => {
                 here: the name, the four actions and the salary do not fit a
                 375 px screen side by side. */}
             <span className="inline-flex items-center gap-1 font-semibold tabular-nums sm:hidden">
-              {euro(calc.netto_salary || calc.amount_due)}
-              {calc.netto_salary && calc.netto_salary !== calc.amount_due && (
+              {euro(salaryBase(calc))}
+              {calc.netto_salary != null && calc.netto_salary !== calc.amount_due && (
                 <span className="text-brand-text" title={t('sal.manuallyAdjusted')}>
                   *<span className="sr-only"> {t('sal.manuallyAdjusted')}</span>
                 </span>
@@ -528,12 +546,12 @@ const SalariesManagement: React.FC<SalariesManagementProps> = ({ drivers }) => {
       header: t('sal.col.totalSalary'),
       kind: 'currency',
       hideBelow: 'sm',
-      value: calc => calc.netto_salary || calc.amount_due,
+      value: calc => salaryBase(calc),
       sortable: true,
       cell: calc => (
         <span className="inline-flex items-center justify-end gap-1 font-semibold">
-          {euro(calc.netto_salary || calc.amount_due)}
-          {calc.netto_salary && calc.netto_salary !== calc.amount_due && (
+          {euro(salaryBase(calc))}
+          {calc.netto_salary != null && calc.netto_salary !== calc.amount_due && (
             <span className="text-brand-text" title={t('sal.manuallyAdjusted')}>
               *<span className="sr-only"> {t('sal.manuallyAdjusted')}</span>
             </span>

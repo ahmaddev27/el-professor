@@ -32,7 +32,12 @@ export interface DriverSalarySummaryProps {
   remainingSalary: number;
   brutto: number | null;
   nettoBank: number | null;
+  /** `total − Brutto`, or null while the Brutto is unknown and the split states no cash figure. */
   cashSalary: number | null;
+  /** `cash + bank`, or null when the split is not established. Never recomputed here. */
+  totalNetPayout: number | null;
+  /** `payout − already paid` — the Restgehalt — or null when there is no payout to subtract from. */
+  remainingPayout: number | null;
   companyName?: string;
 }
 
@@ -181,6 +186,8 @@ const DriverSalarySummaryCard: React.FC<DriverSalarySummaryProps> = ({
   brutto,
   nettoBank,
   cashSalary,
+  totalNetPayout,
+  remainingPayout,
   companyName,
 }) => {
   const { t } = useTranslation();
@@ -196,11 +203,22 @@ const DriverSalarySummaryCard: React.FC<DriverSalarySummaryProps> = ({
   const bruttoVal = brutto ?? 0;
   const nettoBankVal = nettoBank ?? 0;
   const cashVal = cashSalary ?? 0;
-  const totalNetPayout = nettoBankVal + cashVal;
   const cashIsNeg = cashVal < -0.01;
 
-  // Restgehalt = Gesamt Netto Auszahlung - Bereits gezahltes Gehalt
-  const restgehalt = totalNetPayout - alreadyPaidSalary;
+  /**
+   * The payout and the Restgehalt arrive computed, from utils/payrollSplit.ts.
+   *
+   * This card used to add them up itself — `totalNetPayout = nettoBank + cash`
+   * and `restgehalt = totalNetPayout − alreadyPaid` — which stated a figure for a
+   * split whose Brutto was never entered: with a Netto and no Brutto the caller
+   * passed the whole salary as cash, so the image sent to the driver showed a
+   * payout larger than the salary and a Restgehalt debt to match. A split that
+   * states no payout now shows "–" rather than a number; this is the image the
+   * driver receives, so it must not claim an amount nobody computed.
+   */
+  const restgehalt = remainingPayout;
+  const payoutKnown = totalNetPayout != null;
+  const restIsOwed = restgehalt != null && restgehalt > 0.01;
 
   const exportCanvas = async (): Promise<HTMLCanvasElement | null> => {
     if (!cardRef.current) return null;
@@ -470,8 +488,8 @@ const DriverSalarySummaryCard: React.FC<DriverSalarySummaryProps> = ({
             icon={<ArrowRightLeft size={16} color={cashIsNeg ? '#fbbf24' : '#34d399'} />}
             title={t('sal.summary.totalNet')}
             subtitle={t('sal.summary.totalNetSub')}
-            value={hasPayroll ? fmtEur(totalNetPayout) : '–'}
-            valueColor={hasPayroll ? (cashIsNeg ? '#fde68a' : '#6ee7b7') : 'rgba(255,255,255,0.3)'}
+            value={payoutKnown ? fmtEur(totalNetPayout) : '–'}
+            valueColor={payoutKnown ? (cashIsNeg ? '#fde68a' : '#6ee7b7') : 'rgba(255,255,255,0.3)'}
             rowBackground={cashIsNeg ? 'rgba(251,191,36,0.07)' : 'rgba(52,211,153,0.07)'}
             isLarge
           />
@@ -491,12 +509,12 @@ const DriverSalarySummaryCard: React.FC<DriverSalarySummaryProps> = ({
 
           {/* 9. Restgehalt */}
           <SummaryRow
-            icon={<Clock size={16} color={restgehalt > 0.01 ? '#fb923c' : '#34d399'} />}
+            icon={<Clock size={16} color={restIsOwed ? '#fb923c' : '#34d399'} />}
             title={t('sal.summary.remaining')}
-            subtitle={t('sal.summary.remainingSub')}
+            subtitle={restgehalt == null ? t('sal.summary.grossNotEntered') : t('sal.summary.remainingSub')}
             value={fmtEur(restgehalt)}
-            valueColor={restgehalt > 0.01 ? '#fdba74' : '#6ee7b7'}
-            rowBackground={restgehalt > 0.01 ? 'rgba(251,146,60,0.07)' : 'rgba(52,211,153,0.06)'}
+            valueColor={restIsOwed ? '#fdba74' : '#6ee7b7'}
+            rowBackground={restIsOwed ? 'rgba(251,146,60,0.07)' : 'rgba(52,211,153,0.06)'}
             isLarge
           />
         </div>

@@ -20,6 +20,8 @@ import {
   findOverlappingSalary,
   receiptScope,
 } from '../utils/salaryCashReceiptFlow';
+import { derivePaymentStatus, remainingDue } from '../utils/salaryDue';
+import { payrollRemaining, payrollSplit } from '../utils/payrollSplit';
 import { toCents } from '../utils/money';
 import { formatEuroCents } from './ui';
 import type { GehaltsquittungPreselect } from '../hooks/useGehaltsquittungFlow';
@@ -119,21 +121,26 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
   // The system-calculated total salary
   const calculatedSalaryTotal = salary.netto_salary ?? salary.amount_due ?? 0;
 
-  // Derived payroll split values
-  const payrollGross = payrollData.payroll_gross_amount ?? 0;
-  const payrollNet = payrollData.payroll_net_amount ?? 0;
-  const cashSalary = calculatedSalaryTotal - payrollGross;
-  const bankSalary = payrollNet;
-  const totalNetPayout = cashSalary + bankSalary;
+  /**
+   * The payroll split: cash = total − Brutto, bank = Netto, payout = cash + bank.
+   *
+   * `payrollSplit` states no cash figure while the Brutto is unknown. Before it,
+   * `payrollGross = gross ?? 0` made a row with only the Steuerberater's Netto
+   * report the *whole* salary as cash and the Netto on top — a payout larger
+   * than the salary. 0 of 53 staging rows are in that state, so no document
+   * already issued changes.
+   */
+  const split = payrollSplit({
+    total: calculatedSalaryTotal,
+    gross: payrollData.payroll_gross_amount,
+    net: payrollData.payroll_net_amount,
+  });
 
-  const hasPayrollData = payrollData.payroll_gross_amount != null || payrollData.payroll_net_amount != null;
-  const grossExceedsTotal = payrollGross > calculatedSalaryTotal + 0.01;
-  const cashIsNegative = cashSalary < -0.01;
-
-  // Payment tracking
+  // Payment tracking: the status follows the payments against the base, and is
+  // never read off `salaries.payment_status` — utils/salaryDue.ts holds the rule.
   const totalPaid = payments.reduce((sum, p) => sum + Number(p.amount), 0);
-  const remainingBalance = Math.max(0, calculatedSalaryTotal - totalPaid);
-  const paymentStatus = totalPaid === 0 ? 'unpaid' : totalPaid >= calculatedSalaryTotal ? 'paid' : 'partially_paid';
+  const remainingBalance = remainingDue(calculatedSalaryTotal, totalPaid);
+  const paymentStatus = derivePaymentStatus(calculatedSalaryTotal, totalPaid);
 
   useEffect(() => {
     if (isOpen && salary.salary_id) {
@@ -565,9 +572,10 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
       settings,
       payrollGrossAmount: payrollData.payroll_gross_amount,
       payrollNetAmount: payrollData.payroll_net_amount,
-      cashSalaryAmount: hasPayrollData ? cashSalary : undefined,
-      bankSalaryAmount: hasPayrollData ? bankSalary : undefined,
-      totalNetPayout: hasPayrollData ? totalNetPayout : undefined,
+      // Only a split whose Brutto is known carries figures into the PDF.
+      cashSalaryAmount: split.cash ?? undefined,
+      bankSalaryAmount: split.established ? split.bank : undefined,
+      totalNetPayout: split.payout ?? undefined,
     });
   };
 
@@ -681,7 +689,9 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
                 remainingSalary={remainingBalance}
                 brutto={payrollData.payroll_gross_amount}
                 nettoBank={payrollData.payroll_net_amount}
-                cashSalary={hasPayrollData ? cashSalary : null}
+                cashSalary={split.cash}
+                totalNetPayout={split.payout}
+                remainingPayout={payrollRemaining(split, totalPaid)}
                 companyName={settings?.company_name}
               />
             )}
@@ -781,7 +791,7 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
                 </div>
 
                 {/* Warning: gross > calculated total */}
-                {grossExceedsTotal && (
+                {split.grossExceedsTotal && (
                   <div style={{ background: 'var(--danger-subtle)', border: '1px solid var(--danger)', borderRadius: '0.375rem', padding: '0.625rem 0.875rem' }} className="flex items-center gap-2">
                     <AlertCircle size={16} style={{ color: 'var(--danger)', flexShrink: 0 }} />
                     <span style={{ fontSize: '0.875rem', color: 'var(--danger)' }}>
@@ -790,8 +800,20 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
                   </div>
                 )}
 
-                {/* Computed breakdown — shown once at least one field is filled */}
-                {hasPayrollData && (
+                {/* The Brutto is what the cash remainder is measured against, so
+                    without it the payout is not computed at all. Saying so is the
+                    whole change: the block used to show the full salary as cash. */}
+                {split.problem === 'gross_missing' && (
+                  <div style={{ background: 'var(--warning-subtle)', border: '1px solid var(--warning)', borderRadius: '0.375rem', padding: '0.625rem 0.875rem' }} className="flex items-center gap-2">
+                    <AlertCircle size={16} style={{ color: 'var(--warning)', flexShrink: 0 }} />
+                    <span style={{ fontSize: '0.875rem', color: 'var(--warning)' }}>
+                      {t('sal.payroll.grossLabel')} — {t('sal.summary.grossNotEntered')}
+                    </span>
+                  </div>
+                )}
+
+                {/* Computed breakdown — shown once the split is established */}
+                {split.established && (
                   <div style={{ background: 'var(--bg-subtle)', borderRadius: '0.5rem', padding: '1rem', border: '1px solid var(--border)' }} className="space-y-0">
                     <p style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-tertiary)', marginBottom: '0.625rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                       {t('sal.payroll.computedPayout')}
@@ -803,15 +825,15 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
                         <Banknote size={15} style={{ color: 'var(--success)' }} />
                         <span style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>{t('sal.payroll.cashSalary')}</span>
                         <span style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)' }}>
-                          ({fmtEur(calculatedSalaryTotal)} − {fmtEur(payrollGross)})
+                          ({fmtEur(calculatedSalaryTotal)} − {fmtEur(split.gross)})
                         </span>
                       </div>
                       <span style={{
                         fontWeight: 700,
-                        color: cashIsNegative ? 'var(--danger)' : 'var(--text-primary)',
+                        color: split.cashIsNegative ? 'var(--danger)' : 'var(--text-primary)',
                       }}>
-                        {fmtEur(cashSalary)}
-                        {cashIsNegative && <span style={{ fontSize: '0.75rem', marginLeft: '0.25rem' }}>⚠</span>}
+                        {fmtEur(split.cash)}
+                        {split.cashIsNegative && <span style={{ fontSize: '0.75rem', marginLeft: '0.25rem' }}>⚠</span>}
                       </span>
                     </div>
 
@@ -821,7 +843,7 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
                         <Building2 size={15} style={{ color: 'var(--accent)' }} />
                         <span style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>{t('sal.payroll.bankSalary')}</span>
                       </div>
-                      <span style={{ fontWeight: 700, color: 'var(--text-primary)' }}>{fmtEur(bankSalary)}</span>
+                      <span style={{ fontWeight: 700, color: 'var(--text-primary)' }}>{fmtEur(split.bank)}</span>
                     </div>
 
                     {/* Total net payout */}
@@ -832,10 +854,10 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
                       <span style={{
                         fontSize: '1.125rem',
                         fontWeight: 700,
-                        color: cashIsNegative ? 'var(--warning)' : 'var(--success)',
+                        color: split.cashIsNegative ? 'var(--warning)' : 'var(--success)',
                       }}>
-                        {fmtEur(totalNetPayout)}
-                        {cashIsNegative && (
+                        {fmtEur(split.payout)}
+                        {split.cashIsNegative && (
                           <span style={{ fontSize: '0.75rem', color: 'var(--warning)', marginLeft: '0.5rem', fontWeight: 400 }}>
                             {t('sal.payroll.cashNegative')}
                           </span>
