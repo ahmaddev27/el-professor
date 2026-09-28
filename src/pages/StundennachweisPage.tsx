@@ -3330,6 +3330,16 @@ const StundennachweisPage: React.FC = () => {
   const [generating, setGenerating]= useState(false);
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  /**
+   * The one failure state this screen gets, and nothing else: a refused save
+   * used to reach only console.error, so the button went back to "Speichern"
+   * and the operator had no way to tell a stored sheet from a lost one. A
+   * refusal needs no network fault — a platform support session and a role
+   * without the `stundennachweise` gate are both turned away by RLS with the
+   * request otherwise fine. 31 saved Stundennachweise exist on staging's copy
+   * of production (28.09.2026), so this is the write path in use.
+   */
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [generatingExcel, setGeneratingExcel] = useState(false);
   const [fueMonth, setFueMonth] = useState(new Date().getMonth() + 1);
   const [fueYear, setFueYear] = useState(new Date().getFullYear());
@@ -3588,7 +3598,7 @@ const StundennachweisPage: React.FC = () => {
   const handleSave = async () => {
     if (!selDriver || !companyId) return;
     if (hasDurationViolations) return;
-    setSaving(true); setSaveSuccess(false);
+    setSaving(true); setSaveSuccess(false); setSaveError(null);
     try {
       const workingDays = rows.filter(r => r.grundlohn).length;
       // Serialize rows with stable local date_key instead of raw Date objects
@@ -3632,6 +3642,13 @@ const StundennachweisPage: React.FC = () => {
       setTimeout(() => setSaveSuccess(false), 3000);
     } catch (e) {
       console.error('Fehler beim Speichern:', e);
+      // PostgREST's error is a plain object, not an Error, so `e instanceof
+      // Error` would drop exactly the sentence that says why — which for a
+      // policy refusal is the only sentence there is.
+      const detail = typeof e === 'object' && e !== null && 'message' in e
+        ? String((e as { message?: unknown }).message ?? '').trim()
+        : '';
+      setSaveError(detail || t('overview.error.unknown'));
     } finally {
       setSaving(false);
     }
@@ -3778,6 +3795,13 @@ const StundennachweisPage: React.FC = () => {
 
       {step === 'sheet' && !generating && selDriver && (
         <>
+          {/* A refused or failed save says so, next to the button that failed. */}
+          {saveError && (
+            <Alert tone="critical" title={t('stn.err.saveFailed')}>
+              {saveError}
+            </Alert>
+          )}
+
           {/* ── Summary bar ── */}
           <div className="rounded-xl p-4 flex flex-wrap items-center gap-6"
             style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-sm)' }}>
