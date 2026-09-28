@@ -3,10 +3,15 @@ import {
   currentLoadState,
   loadReceiptForPreview,
   paymentRowActions,
+  paymentRowStorno,
   receiptPreviewView,
   receiptSheet,
+  stornoStep,
+  voidReasonProblem,
   type PaymentRowContext,
   type PaymentRowInput,
+  type PaymentRowStorno,
+  type PaymentRowStornoContext,
   type ReceiptLoadState,
   type ReceiptPreviewRequest,
   type ReceiptStatusOnly,
@@ -340,5 +345,191 @@ describe('receiptSheet — the stored row is what prints', () => {
       kind: 'problem',
       problem: 'missing_company_name',
     });
+  });
+});
+
+// ─── The Storno on the payment row ──────────────────────────────────────────
+
+/**
+ * The rule under test: a Gehaltsquittung payment is undone only by voiding its
+ * receipt — which removes the payment, books the amount back into the till on
+ * the day of the void, and keeps the receipt on record as voided. These tests
+ * pin what the row may offer; they never assert that a payment can be deleted,
+ * because it cannot.
+ */
+
+/** An editor of their own company: what void_salary_cash_receipt requires. */
+const mayVoid: PaymentRowStornoContext = { scope: 'own_company', mayEditSalaries: true };
+
+/**
+ * NEGATIVE CONTROL — the behaviour before this change, written out.
+ *
+ * The payment row offered a lock and, at most, "Quittung ansehen": the Storno
+ * existed only on the Gehaltsquittung list. So the old answer for every row,
+ * Gehaltsquittung or not, was "nothing here".
+ */
+const beforeThisChange = (): PaymentRowStorno => ({ kind: 'hidden' });
+
+describe('paymentRowStorno', () => {
+  it('offers the Storno on a Gehaltsquittung row, carrying its receipt id', () => {
+    expect(paymentRowStorno(receiptPayment, mayVoid)).toEqual({ kind: 'offered', receiptId: RECEIPT_A });
+  });
+
+  it('is what changed: the row used to offer nothing at all', () => {
+    // NEGATIVE CONTROL. With the old behaviour in place this assertion fails.
+    expect(paymentRowStorno(receiptPayment, mayVoid)).not.toEqual(beforeThisChange());
+  });
+
+  it('does not make the row editable: the payment itself stays locked', () => {
+    // NEGATIVE CONTROL for the guard. The trigger refuses every edit and delete
+    // of a `gehaltsquittung` row, and adding a Storno must not hand those
+    // buttons back. The row keeps `kind: 'receipt'` in every context.
+    expect(paymentRowActions(receiptPayment, inOwnCompany).kind).toBe('receipt');
+    expect(paymentRowActions(receiptPayment, { ...inOwnCompany, scope: 'other_company' }).kind).toBe('receipt');
+    expect(paymentRowActions(receiptPayment, { ...inOwnCompany, planIncludesDokumente: false }).kind).toBe('receipt');
+  });
+
+  it('shows nothing on a row that is not a Gehaltsquittung — those have a real delete', () => {
+    expect(paymentRowStorno({ payment_type: 'cash', source_type: 'manual' }, mayVoid)).toEqual({ kind: 'hidden' });
+    expect(paymentRowStorno({ payment_type: 'bank', source_type: 'manual' }, mayVoid)).toEqual({ kind: 'hidden' });
+    expect(paymentRowStorno({ payment_type: 'cash' }, mayVoid)).toEqual({ kind: 'hidden' });
+    expect(paymentRowStorno({ payment_type: 'cash', source_type: null }, mayVoid)).toEqual({ kind: 'hidden' });
+    expect(paymentRowStorno({ payment_type: 'cash', source_type: 'weekly_cash_difference' }, mayVoid)).toEqual({
+      kind: 'hidden',
+    });
+  });
+
+  it('offers the Storno on a bank-typed Gehaltsquittung row too, because the trigger keys on the source', () => {
+    expect(paymentRowStorno({ ...receiptPayment, payment_type: 'bank' }, mayVoid)).toEqual({
+      kind: 'offered',
+      receiptId: RECEIPT_A,
+    });
+  });
+
+  it('refuses a platform support session by name, in either context mode', () => {
+    // The owner's decision of 18.09.2026: a support session issues, voids and
+    // signs nothing here. `receiptScope` answers `other_company` inside a
+    // context, and since 20260921110010 the RPC refuses it as well
+    // (`platform_session_not_allowed`, the same sentence).
+    expect(paymentRowStorno(receiptPayment, { scope: 'other_company', mayEditSalaries: true })).toEqual({
+      kind: 'blocked',
+      refusal: 'company_mismatch',
+    });
+  });
+
+  it('refuses an account that belongs to no company', () => {
+    expect(paymentRowStorno(receiptPayment, { scope: 'no_company', mayEditSalaries: true })).toEqual({
+      kind: 'blocked',
+      refusal: 'no_company',
+    });
+  });
+
+  it('refuses a caller without edit rights on salaries, the right the RPC checks', () => {
+    expect(paymentRowStorno(receiptPayment, { scope: 'own_company', mayEditSalaries: false })).toEqual({
+      kind: 'blocked',
+      refusal: 'not_authorized',
+    });
+  });
+
+  it('names the scope before the role, so the permanent rule is the sentence shown', () => {
+    expect(paymentRowStorno(receiptPayment, { scope: 'other_company', mayEditSalaries: false })).toEqual({
+      kind: 'blocked',
+      refusal: 'company_mismatch',
+    });
+  });
+
+  it('refuses a Gehaltsquittung row that names no receipt: there is nothing to void', () => {
+    expect(paymentRowStorno({ ...receiptPayment, source_reference: undefined }, mayVoid)).toEqual({
+      kind: 'blocked',
+      refusal: 'receipt_not_found',
+    });
+    expect(paymentRowStorno({ ...receiptPayment, source_reference: '   ' }, mayVoid)).toEqual({
+      kind: 'blocked',
+      refusal: 'receipt_not_found',
+    });
+    expect(paymentRowStorno({ ...receiptPayment, source_reference: null }, mayVoid)).toEqual({
+      kind: 'blocked',
+      refusal: 'receipt_not_found',
+    });
+  });
+
+  it('trims the stored id, so a padded reference still names its receipt', () => {
+    expect(paymentRowStorno({ ...receiptPayment, source_reference: ` ${RECEIPT_A} ` }, mayVoid)).toEqual({
+      kind: 'offered',
+      receiptId: RECEIPT_A,
+    });
+  });
+
+  it('is not gated on the plan, although issuing is', () => {
+    // The Storno is the only undo. Gating it on `dokumente` — which
+    // `plan_features` can change under a company — would leave a cash payment
+    // that can be neither edited, nor deleted, nor voided. The preview does go
+    // dark in that case, and that difference is deliberate.
+    const planOff: PaymentRowContext = { planIncludesDokumente: false, scope: 'own_company' };
+    expect(paymentRowActions(receiptPayment, planOff)).toEqual({ kind: 'receipt', preview: false });
+    expect(paymentRowStorno(receiptPayment, mayVoid)).toEqual({ kind: 'offered', receiptId: RECEIPT_A });
+  });
+});
+
+describe('stornoStep — what the dialog offers for the receipt it loaded', () => {
+  it('waits while the receipt is loading', () => {
+    expect(stornoStep({ status: 'loading', receiptId: RECEIPT_A })).toEqual({ kind: 'loading' });
+  });
+
+  it('offers the Storno for a confirmed receipt', () => {
+    expect(stornoStep({ status: 'loaded', receiptId: RECEIPT_A, receipt: { status: 'confirmed' } })).toEqual({
+      kind: 'ready',
+    });
+  });
+
+  it('offers nothing for a receipt that was already voided elsewhere', () => {
+    // NEGATIVE CONTROL for the idempotent RPC. void_salary_cash_receipt returns
+    // a voided receipt unchanged instead of raising, so a second Storno would
+    // report success while writing nothing, booking no cash back and dropping
+    // the reason that was typed. `voided` is therefore its own step, and the
+    // one thing it must never be is `ready`.
+    const step = stornoStep({ status: 'loaded', receiptId: RECEIPT_A, receipt: { status: 'voided' } });
+    expect(step).toEqual({ kind: 'voided' });
+    expect(step).not.toEqual({ kind: 'ready' });
+  });
+
+  it('passes a refusal through', () => {
+    expect(stornoStep({ status: 'failed', receiptId: RECEIPT_A, refusal: 'company_mismatch' })).toEqual({
+      kind: 'refusal',
+      refusal: 'company_mismatch',
+    });
+    expect(stornoStep({ status: 'failed', receiptId: RECEIPT_A, refusal: 'unexpected' })).toEqual({
+      kind: 'refusal',
+      refusal: 'unexpected',
+    });
+  });
+
+  it('reports a receipt the query did not find', () => {
+    expect(stornoStep({ status: 'loaded', receiptId: RECEIPT_A, receipt: null })).toEqual({
+      kind: 'refusal',
+      refusal: 'receipt_not_found',
+    });
+  });
+
+  it('never offers a Storno of the receipt opened before', () => {
+    // Voiding the wrong receipt moves cash and marks the wrong document. An
+    // answer held for receipt A must read as loading under a dialog opened on
+    // receipt B, which is what currentLoadState is for.
+    const loadedA: ReceiptLoadState = { status: 'loaded', receiptId: RECEIPT_A, receipt: { status: 'confirmed' } };
+    expect(stornoStep(currentLoadState(loadedA, RECEIPT_B))).toEqual({ kind: 'loading' });
+    expect(stornoStep(currentLoadState(loadedA, RECEIPT_A))).toEqual({ kind: 'ready' });
+  });
+});
+
+describe('voidReasonProblem', () => {
+  it('requires a reason, which the RPC refuses without', () => {
+    expect(voidReasonProblem('')).toBe('invalid_reason');
+    expect(voidReasonProblem('   ')).toBe('invalid_reason');
+    expect(voidReasonProblem('\n\t')).toBe('invalid_reason');
+  });
+
+  it('accepts a reason, and judges it the way the RPC trims it', () => {
+    expect(voidReasonProblem('Falscher Betrag')).toBeNull();
+    expect(voidReasonProblem('  Falscher Betrag  ')).toBeNull();
   });
 });

@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { X, Plus, CreditCard as Edit2, Trash2, DollarSign, AlertCircle, FileText, CheckSquare, Square, Building2, Banknote, LayoutDashboard, Zap, Lock, Eye } from 'lucide-react';
+import React, { useState, useEffect, type FormEvent } from 'react';
+import { X, Plus, CreditCard as Edit2, Trash2, DollarSign, AlertCircle, FileText, CheckSquare, Square, Building2, Banknote, LayoutDashboard, Zap, Lock, Eye, Ban } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { SalaryPayment, SalaryCalculation } from '../types/receipt';
 import { supabase } from '../lib/supabase';
@@ -12,18 +12,48 @@ import SalaryPaymentModal from './SalaryPaymentModal';
 import SalaryPaymentReceiptPreview from './SalaryPaymentReceiptPreview';
 import GehaltsquittungModal from './GehaltsquittungModal';
 import ConfirmationModal from './ConfirmationModal';
-import { paymentRowActions } from '../utils/salaryPaymentReceiptRow';
+import {
+  currentLoadState,
+  loadReceiptForPreview,
+  paymentRowActions,
+  paymentRowStorno,
+  stornoStep,
+  voidReasonProblem,
+  type ReceiptLoadState,
+} from '../utils/salaryPaymentReceiptRow';
 import { PAYMENT_WRITE_REFUSAL_KEYS, decidePaymentWrite } from '../utils/salaryPaymentWrite';
 import {
   REFUSAL_MESSAGE_KEYS,
   confirmationBlock,
   findOverlappingSalary,
+  outcomeIsUnknown,
   receiptScope,
+  type ReceiptActionRefusal,
 } from '../utils/salaryCashReceiptFlow';
 import { derivePaymentStatus, remainingDue } from '../utils/salaryDue';
 import { payrollRemaining, payrollSplit } from '../utils/payrollSplit';
+import {
+  loadReceiptById,
+  voidReceipt,
+  type SalaryCashReceipt,
+  type SalaryCashReceiptWithDriver,
+} from '../lib/salaryCashReceipts';
+import { ReceiptAlert, useRefusalMessage } from './GehaltsquittungParts';
 import { toCents } from '../utils/money';
-import { formatEuroCents } from './ui';
+import {
+  Button,
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  Field,
+  Input,
+  formatDate,
+  formatEuroCents,
+} from './ui';
 import type { GehaltsquittungPreselect } from '../hooks/useGehaltsquittungFlow';
 import { generateDriverSalaryPdf } from '../utils/driverSalaryPdf';
 import DriverSalarySummaryCard from './DriverSalarySummaryCard';
@@ -84,6 +114,15 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
   const [paymentToDelete, setPaymentToDelete] = useState<SalaryPayment | null>(null);
   /** The Gehaltsquittung shown over this screen; null while none is open. */
   const [receiptPreviewId, setReceiptPreviewId] = useState<string | null>(null);
+  /**
+   * The Gehaltsquittung this screen is about to void; null while none is.
+   *
+   * Voiding is the only way a payment written by confirm_salary_cash_payment
+   * leaves the salary, and it is one RPC: the receipt is marked voided with its
+   * reason, the payment row is deleted, and the amount is booked back into the
+   * till on the day of the void. The dialog below asks for that reason.
+   */
+  const [stornoReceiptId, setStornoReceiptId] = useState<string | null>(null);
   /** The cash payment handed to the Gehaltsquittung flow; null while none is being issued. */
   const [receiptDraft, setReceiptDraft] = useState<GehaltsquittungPreselect | null>(null);
   /**
@@ -549,6 +588,21 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
     await onUpdate();
   };
 
+  /**
+   * The screen after a Storno. `void_salary_cash_receipt` deleted the payment
+   * inside its own transaction and booked the cash back, so this row disappears
+   * and the salary's paid figures change: both are re-read from the database
+   * rather than adjusted here.
+   *
+   * Also called when the outcome is unknown — no answer, or one that names no
+   * reason — because the void may have gone through. Then nothing is claimed;
+   * the list is simply re-read, and the dialog keeps showing what it knows.
+   */
+  const reloadAfterStorno = async () => {
+    await fetchPayments();
+    await onUpdate();
+  };
+
   const handleDeletePayment = async () => {
     if (!paymentToDelete) return;
     try {
@@ -980,6 +1034,22 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
                           planIncludesDokumente: planIncludes('dokumente'),
                           scope: receiptsScope,
                         });
+                        // The Storno is the row's only way out of a Gehaltsquittung
+                        // payment, and it asks what the RPC asks: the caller's own
+                        // company (never a platform support session) and edit rights
+                        // on salaries. It is not gated on the plan — see
+                        // paymentRowStorno.
+                        const storno = paymentRowStorno(payment, {
+                          scope: receiptsScope,
+                          mayEditSalaries: rolePermits('salaries', 'edit'),
+                        });
+                        // Why the row cannot be voided belongs on the lock itself,
+                        // next to where the button would be, rather than inside a
+                        // dialog that opens only to refuse.
+                        const lockedLabel =
+                          storno.kind === 'blocked'
+                            ? `${t('sal.payment.receiptLocked')} ${t(REFUSAL_MESSAGE_KEYS[storno.refusal])}`
+                            : t('sal.payment.receiptLocked');
                         return (
                         <tr
                           key={payment.id}
@@ -1052,13 +1122,14 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
                             {rowActions.kind === 'receipt' ? (
                               // Written by confirm_salary_cash_payment; a trigger refuses any edit or
                               // delete, so the row changes only by voiding its receipt. The preview
-                              // shows the stored receipt in place; the Documents page is reachable
-                              // from inside it, where a copy is uploaded or the receipt voided.
+                              // shows the stored receipt in place, and the Storno beside it runs the
+                              // one RPC that removes the payment, books the cash back and keeps the
+                              // receipt on record as voided.
                               <div className="flex items-center justify-end gap-2">
                                 <span
                                   role="img"
-                                  aria-label={t('sal.payment.receiptLocked')}
-                                  title={t('sal.payment.receiptLocked')}
+                                  aria-label={lockedLabel}
+                                  title={lockedLabel}
                                   style={{ color: 'var(--text-tertiary)', display: 'inline-flex' }}
                                 >
                                   <Lock size={16} />
@@ -1076,6 +1147,22 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
                                   >
                                     <Eye size={14} />
                                     {t('sal.payment.previewReceipt')}
+                                  </button>
+                                )}
+                                {storno.kind === 'offered' && (
+                                  // Classes rather than an inline style, so the screen's
+                                  // style-ratchet count does not move; the colours are the
+                                  // legacy ones the delete button beside it uses.
+                                  <button
+                                    type="button"
+                                    onClick={() => setStornoReceiptId(storno.receiptId)}
+                                    aria-label={t('sal.payment.voidAria', {
+                                      date: format(new Date(payment.payment_date), 'dd.MM.yyyy'),
+                                    })}
+                                    className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-[13px] font-medium text-[color:var(--danger)] hover:bg-[color:var(--danger-subtle)]"
+                                  >
+                                    <Ban size={14} />
+                                    {t('gq.action.void')}
                                   </button>
                                 )}
                               </div>
@@ -1143,6 +1230,20 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
         onOpenDocuments={id => navigate('/salaries', { state: { focusReceiptId: id } })}
       />
 
+      {/* The row's Storno: the one operation that removes a Gehaltsquittung
+          payment. It runs void_salary_cash_receipt through the same voidReceipt
+          helper the Gehaltsquittung list uses — there is no second path. */}
+      <PaymentStornoDialog
+        receiptId={stornoReceiptId}
+        onClose={() => setStornoReceiptId(null)}
+        onVoided={receipt => {
+          setStornoReceiptId(null);
+          showToast('success', t('gq.void.done', { number: receipt.receipt_number }));
+          void reloadAfterStorno();
+        }}
+        onUnknownOutcome={() => void reloadAfterStorno()}
+      />
+
       {/* The cash payment entered above, continued as a Gehaltsquittung: the
           balance, the place of payment, the German receipt and its one
           confirmation. Once it is issued the new row carries
@@ -1167,5 +1268,190 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
     </>
   );
 };
+
+/**
+ * A stored amount, ready to print. `toCents` refuses anything that is not a
+ * finite decimal by throwing, and this dialog renders inside a screen that sits
+ * under no error boundary, so an unreadable figure becomes "—" instead of
+ * unmounting the application — the same rule `overlappingSalaryAmount` above
+ * follows.
+ */
+function storedAmountText(amount: number | string): string {
+  try {
+    return formatEuroCents(toCents(amount));
+  } catch {
+    return '—';
+  }
+}
+
+/**
+ * The Storno of one Gehaltsquittung, opened from its own payment row.
+ *
+ * THE RULE IT PRESERVES: a payment written by `confirm_salary_cash_payment` is
+ * removed only by `void_salary_cash_receipt`, which in one transaction marks the
+ * receipt voided with the typed reason, deletes the payment, and books the
+ * amount back into the till dated the day of the void. Nothing here deletes a
+ * row or computes a figure; the one call goes through `voidReceipt`, the same
+ * helper the Gehaltsquittung list uses, so there is no second path.
+ *
+ * A `Dialog` and not a `ConfirmDialog`, because it must stay open while the RPC
+ * runs and show a refusal in place: the reason is typed here, and closing on a
+ * refusal would lose it.
+ *
+ * It loads the receipt before offering anything, and that is not decoration.
+ * Voiding is idempotent in the database — an already voided receipt comes back
+ * unchanged rather than raising — so a payment row that was voided in another
+ * tab would report a successful Storno while writing nothing, booking no cash
+ * back and dropping the reason. The load also puts the receipt's number, amount
+ * and payment date in front of whoever is about to void it, read from the stored
+ * row. It goes through `loadReceiptForPreview` with the caller's **own**
+ * company, the path the preview takes, so a platform support session is refused
+ * by name before any query goes out: it issues, voids and signs nothing here
+ * (owner's decision, 18.09.2026), and since 20260921110010 the RPC refuses it
+ * too.
+ */
+function PaymentStornoDialog({
+  receiptId,
+  onClose,
+  onVoided,
+  onUnknownOutcome,
+}: {
+  receiptId: string | null;
+  onClose: () => void;
+  onVoided: (receipt: SalaryCashReceipt) => void;
+  onUnknownOutcome: () => void;
+}) {
+  const { t } = useTranslation();
+  const refusalMessage = useRefusalMessage();
+  const { companyId } = useAuth();
+  const { effectiveCompanyId, isViewingAsCompany } = useSuperAdmin();
+
+  const [state, setState] = useState<ReceiptLoadState<SalaryCashReceiptWithDriver>>({
+    status: 'loading',
+    receiptId: null,
+  });
+  const [reason, setReason] = useState('');
+  const [touched, setTouched] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [refusal, setRefusal] = useState<ReceiptActionRefusal | null>(null);
+
+  useEffect(() => {
+    if (!receiptId) return undefined;
+    setReason('');
+    setTouched(false);
+    setRefusal(null);
+    setState({ status: 'loading', receiptId });
+
+    let active = true;
+    void loadReceiptForPreview(
+      { receiptId, companyId, effectiveCompanyId, isViewingAsCompany },
+      loadReceiptById,
+    ).then(next => {
+      if (active) setState(next);
+    });
+    return () => {
+      active = false;
+    };
+  }, [receiptId, companyId, effectiveCompanyId, isViewingAsCompany]);
+
+  // React paints the newly opened receiptId a frame before the effect above
+  // runs, so anything this state still holds for the receipt opened before
+  // counts as loading. Voiding the receipt shown a frame earlier would move cash
+  // and mark the wrong document.
+  const current = currentLoadState(state, receiptId);
+  const receipt = current.status === 'loaded' ? current.receipt : null;
+  const step = stornoStep(current);
+  const reasonProblem = voidReasonProblem(reason);
+
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!receiptId || busy || step.kind !== 'ready') return;
+    setTouched(true);
+    if (reasonProblem) return;
+    setBusy(true);
+    setRefusal(null);
+    try {
+      const result = await voidReceipt(receiptId, reason.trim());
+      if (result.ok) {
+        onVoided(result.receipt);
+        return;
+      }
+      setRefusal(result.refusal);
+      // No answer, or one that names no reason: the Storno may have gone
+      // through, so the payment list is re-read and nothing is claimed here.
+      if (outcomeIsUnknown(result.refusal)) onUnknownOutcome();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Dialog
+      open={receiptId !== null}
+      onOpenChange={open => {
+        if (!open && !busy) onClose();
+      }}
+    >
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{t('sal.payment.voidTitle')}</DialogTitle>
+          <DialogDescription>{t('sal.payment.voidIntro')}</DialogDescription>
+        </DialogHeader>
+
+        {step.kind === 'loading' ? (
+          <p role="status" className="py-4 text-center text-sm text-fg-muted">
+            {t('sal.payment.receiptLoading')}
+          </p>
+        ) : null}
+        {step.kind === 'refusal' ? <ReceiptAlert tone="caution">{refusalMessage(step.refusal)}</ReceiptAlert> : null}
+        {/* Voiding deletes the payment, so a receipt reached from a payment row
+            and found voided was voided elsewhere since this list loaded. */}
+        {step.kind === 'voided' ? (
+          <ReceiptAlert tone="caution">{t('sal.payment.receiptVoidedNotice')}</ReceiptAlert>
+        ) : null}
+
+        {step.kind === 'ready' && receipt ? (
+          <form onSubmit={event => void submit(event)} className="grid gap-4" noValidate>
+            <p className="text-sm text-fg">
+              {t('sal.payment.voidReceiptLine', {
+                number: receipt.receipt_number,
+                amount: storedAmountText(receipt.amount),
+                date: formatDate(receipt.payment_date),
+              })}
+            </p>
+            {/* There is no "edit": the path is a Storno and then a new payment.
+                Saying so here is cheaper than letting someone look for it. */}
+            <p className="text-[13px] text-fg-muted">{t('sal.payment.voidThenReenter')}</p>
+            <Field
+              label={t('gq.void.reason')}
+              hint={t('gq.void.reasonHint')}
+              error={touched && reasonProblem ? refusalMessage(reasonProblem) : undefined}
+              required
+            >
+              <Input value={reason} onChange={event => setReason(event.target.value)} maxLength={500} />
+            </Field>
+            {refusal ? <ReceiptAlert tone="critical">{refusalMessage(refusal)}</ReceiptAlert> : null}
+            <DialogFooter>
+              <DialogClose asChild>
+                <Button variant="secondary" disabled={busy}>
+                  {t('common.cancel')}
+                </Button>
+              </DialogClose>
+              <Button type="submit" variant="danger" loading={busy}>
+                {t('gq.action.void')}
+              </Button>
+            </DialogFooter>
+          </form>
+        ) : (
+          <DialogFooter>
+            <DialogClose asChild>
+              <Button variant="secondary">{t('common.close')}</Button>
+            </DialogClose>
+          </DialogFooter>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
 
 export default SalaryDetailsModal;
