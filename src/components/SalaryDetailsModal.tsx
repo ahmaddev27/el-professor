@@ -804,9 +804,16 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
                     without it the payout is not computed at all. Saying so is the
                     whole change: the block used to show the full salary as cash. */}
                 {split.problem === 'gross_missing' && (
-                  <div style={{ background: 'var(--warning-subtle)', border: '1px solid var(--warning)', borderRadius: '0.375rem', padding: '0.625rem 0.875rem' }} className="flex items-center gap-2">
-                    <AlertCircle size={16} style={{ color: 'var(--warning)', flexShrink: 0 }} />
-                    <span style={{ fontSize: '0.875rem', color: 'var(--warning)' }}>
+                  <div
+                    style={{ background: 'var(--warning-subtle)', border: '1px solid var(--warning)', color: 'var(--warning)' }}
+                    className="flex items-center gap-2 rounded-md px-3.5 py-2.5"
+                  >
+                    {/* The colour is set once here and inherited: lucide draws in
+                        currentColor, so the icon and the sentence need none of
+                        their own. Three inline styles become one, which is what
+                        keeps this file under the style ratchet. */}
+                    <AlertCircle size={16} className="shrink-0" />
+                    <span className="text-sm">
                       {t('sal.payroll.grossLabel')} — {t('sal.summary.grossNotEntered')}
                     </span>
                   </div>
@@ -833,7 +840,7 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
                         color: split.cashIsNegative ? 'var(--danger)' : 'var(--text-primary)',
                       }}>
                         {fmtEur(split.cash)}
-                        {split.cashIsNegative && <span style={{ fontSize: '0.75rem', marginLeft: '0.25rem' }}>⚠</span>}
+                        {split.cashIsNegative && <span className="ml-1 text-xs">⚠</span>}
                       </span>
                     </div>
 
