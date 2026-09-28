@@ -126,6 +126,126 @@ function fmtH(min: number): string {
   return `${(min / 60).toFixed(2)}h`;
 }
 
+/**
+ * The imported sheet's own identity, read from `fahrtenbuch_imports`.
+ *
+ * `exportAppliedRunXlsx(…, 'original')` must reproduce the imported sheet's
+ * headers byte for byte — that is the whole point of the `'original'` mode, and
+ * CLAUDE.md states it as a rule. It takes both of these off the run summary:
+ * `source_columns_json` is the header row it emits and validates against, and
+ * `source_sheet_name` is the tab name. With neither in hand it falls back to the
+ * union of every trip's `raw_data_json` keys and to the sheet name `Sheet1` —
+ * and that key order is the source's only by accident (most rides list the
+ * ride's end before its start), so the fallback is a different document.
+ */
+export interface ImportSheetMeta {
+  source_sheet_name: string | null;
+  source_columns_json: string[] | null;
+}
+
+/**
+ * The run reference `MonatsplanungStundennachweisPreview` takes. It is the
+ * component's own `AppliedRunRef`, restated here because the object literal that
+ * used to be written inline omitted `import_id` altogether — a standing
+ * `TS2741` — which left the preview's "Fahrtenbuch herunterladen" button
+ * (`disabled={… || !run.import_id}`) permanently disabled when it was opened
+ * from this screen.
+ */
+export interface StundennachweisRunRef {
+  id: string;
+  company_id: string;
+  month: number;
+  year: number;
+  status: string;
+  file_name: string;
+  applied_at: string | null;
+  import_id: string | null;
+  source_sheet_name: string | null;
+  source_columns_json: string[] | null;
+}
+
+/** True when the header row we hold can actually reproduce the source sheet. */
+export function importHeadersUsable(meta: ImportSheetMeta | null): boolean {
+  const headers = meta?.source_columns_json;
+  return Array.isArray(headers) && headers.some(h => typeof h === 'string' && h.length > 0);
+}
+
+/**
+ * Builds the reference handed to the Stundennachweis preview.
+ *
+ * `import_id` is withheld while the header metadata is missing, and that is
+ * deliberate: the preview gates its Fahrtenbuch download on `run.import_id`, so
+ * a null keeps a statutory ride log from being produced against metadata we
+ * failed to read, rather than emitting one whose header row and sheet name came
+ * from a fallback. CLAUDE.md: a figure whose load failed is not shown.
+ */
+export function buildStundennachweisRunRef(
+  run: AppliedRunSummary,
+  meta: ImportSheetMeta | null,
+): StundennachweisRunRef {
+  const usable = importHeadersUsable(meta);
+  return {
+    id: run.id,
+    company_id: run.company_id,
+    month: run.month,
+    year: run.year,
+    status: run.status,
+    file_name: run.file_name,
+    applied_at: run.applied_at,
+    import_id: usable ? run.import_id : null,
+    source_sheet_name: usable ? (meta?.source_sheet_name ?? null) : null,
+    source_columns_json: usable ? (meta?.source_columns_json ?? null) : null,
+  };
+}
+
+/**
+ * Why the "Plan anwenden" button is refused, or null when it is not.
+ *
+ * The order is the precedence the screen has always shown, with one arm added:
+ * `notes_unavailable` sits ahead of `notes`, because a `driver_notes` read that
+ * failed leaves an empty map, and an empty map produces zero violations — which
+ * is indistinguishable from "no driver is excluded". `exclude_from_plan` is a
+ * hard phase-3 constraint, so the gate has to refuse rather than report a clean
+ * check it never ran.
+ */
+export type ApplyGateBlocker =
+  | 'not_complete'
+  | 'needs_change_set'
+  | 'open_blocks'
+  | 'validation'
+  | 'quality'
+  | 'notes_unavailable'
+  | 'notes'
+  | 'no_import_id'
+  | 'already_applied';
+
+export interface ApplyGateInput {
+  phase3Ok: boolean;
+  phase4Ok: boolean;
+  hasOpenBlocks: boolean;
+  hasValidationViolations: boolean;
+  hasQualityBlockers: boolean;
+  notesLoadFailed: boolean;
+  hasNoteViolations: boolean;
+  hasImportId: boolean;
+  alreadyApplied: boolean;
+}
+
+export function evaluateApplyGate(input: ApplyGateInput): { canApply: boolean; blockedBy: ApplyGateBlocker | null } {
+  const blockedBy: ApplyGateBlocker | null =
+    !input.phase3Ok ? 'not_complete'
+    : !input.phase4Ok ? 'needs_change_set'
+    : input.hasOpenBlocks ? 'open_blocks'
+    : input.hasValidationViolations ? 'validation'
+    : input.hasQualityBlockers ? 'quality'
+    : input.notesLoadFailed ? 'notes_unavailable'
+    : input.hasNoteViolations ? 'notes'
+    : !input.hasImportId ? 'no_import_id'
+    : input.alreadyApplied ? 'already_applied'
+    : null;
+  return { canApply: blockedBy === null, blockedBy };
+}
+
 export default function MonatsplanungAssignmentPreview({
   blocks,
   selectedDrivers,
@@ -191,26 +311,82 @@ export default function MonatsplanungAssignmentPreview({
 
   // ── Structured driver notes (exclude_from_plan) ──────────────────────────
   const [driverNotesMap, setDriverNotesMap] = useState<Map<string, StructuredNote[]>>(new Map());
+  /**
+   * The one failure state this screen gains. `exclude_from_plan` is a HARD
+   * phase-3 constraint, and this read used to discard its `error`: on a refusal
+   * or a network fault the map stayed empty, `validateDriverNotesForPlanStep`
+   * found nothing to violate, and the screen reported "keine Fahrten in
+   * ausgeschlossenen Fahrer-Zeiträumen" and let the plan be applied. That is the
+   * constraint failing open under a green claim.
+   */
+  const [notesLoadFailed, setNotesLoadFailed] = useState(false);
   useEffect(() => {
     if (!companyId) return;
     const firstDay = `${year}-${String(month).padStart(2, '0')}-01`;
     const lastDay = new Date(year, month, 0).toISOString().slice(0, 10);
+    setNotesLoadFailed(false);
+    const failed = () => {
+      setDriverNotesMap(new Map());
+      setNotesLoadFailed(true);
+    };
     supabase
       .from('driver_notes')
       .select('id, driver_id, note_type, note_text, note_planning_behavior, is_full_day, start_date, end_date, note_date, start_time, end_time')
       .eq('company_id', companyId)
       .eq('note_planning_behavior', 'exclude_from_plan')
       .or(`start_date.lte.${lastDay},end_date.gte.${firstDay},note_date.gte.${firstDay}`)
-      .then(({ data }) => {
+      .then(({ data, error }) => {
+        // postgrest-js turns a fetch failure into `{ data: null, error }` as
+        // long as throwOnError() was not called, so this one branch covers a
+        // refusal and an unreachable database alike. The rejection handler
+        // below is the second wall, not the first.
+        if (error || !data) {
+          failed();
+          return;
+        }
         const map = new Map<string, StructuredNote[]>();
-        for (const note of (data ?? [])) {
+        for (const note of data) {
           const arr = map.get(note.driver_id) ?? [];
           arr.push(note as StructuredNote);
           map.set(note.driver_id, arr);
         }
         setDriverNotesMap(map);
-      });
+      }, failed);
   }, [companyId, month, year]);
+
+  // ── The imported sheet's headers, for the corrected Fahrtenbuch ──────────
+  // Read here rather than in the preview because this screen is what hands the
+  // run to it; see ImportSheetMeta above for why the export cannot do without
+  // them. A read that fails leaves this null, and buildStundennachweisRunRef
+  // then withholds import_id.
+  const [importMeta, setImportMeta] = useState<ImportSheetMeta | null>(null);
+  useEffect(() => {
+    if (!importId) {
+      setImportMeta(null);
+      return;
+    }
+    let cancelled = false;
+    setImportMeta(null);
+    const fail = () => { if (!cancelled) setImportMeta(null); };
+    supabase
+      .from('fahrtenbuch_imports')
+      .select('source_sheet_name, source_columns_json')
+      .eq('id', importId)
+      .maybeSingle()
+      .then(({ data, error }) => {
+        if (cancelled) return;
+        if (error || !data) {
+          fail();
+          return;
+        }
+        const columns = data.source_columns_json;
+        setImportMeta({
+          source_sheet_name: (data.source_sheet_name as string | null) ?? null,
+          source_columns_json: Array.isArray(columns) ? (columns as string[]) : null,
+        });
+      }, fail);
+    return () => { cancelled = true; };
+  }, [importId]);
 
   // ── Driver-note violations: recomputed whenever result or driverNotesMap changes ──
   // Global: used for Section F display only (all assigned blocks)
@@ -224,7 +400,10 @@ export default function MonatsplanungAssignmentPreview({
     }).violations;
   }, [result, driverNotesMap, selectedDrivers, t]);
 
-  const noteViolationsOk = noteViolations.length === 0;
+  // "OK" means the check ran and found nothing — not that it found nothing.
+  // A failed read leaves driverNotesMap empty, so noteViolations is [] for the
+  // same reason it is [] when no driver is excluded at all.
+  const noteViolationsOk = !notesLoadFailed && noteViolations.length === 0;
 
   // Scoped: used for Section E apply gate — only change rows that will actually be written
   // Remaining "Nicht zugewiesen" blocks outside the selected preview must NOT block apply.
@@ -606,11 +785,32 @@ export default function MonatsplanungAssignmentPreview({
       applied_at: applyResult.applied_at ?? null,
       applied_by: applyResult.applied_by ?? null,
       apply_summary_json: null,
-      settings_json: null,
+      // R4. The two settings the rest of the chain has to know the run was
+      // built with. `apply_monthly_planning_run` does NOT persist either of
+      // them yet — measured on staging, where every stored settings_json holds
+      // only block_separator_minutes and min/max_block_duration_minutes — so a
+      // run re-read from the database still reports neither, and this object is
+      // the only place they survive until that migration lands.
+      //
+      // It is not inert in the meantime: FinalizePlanningModal reads
+      // `run.settings_json['vehicle_switch_buffer_minutes']` off this prop and
+      // otherwise falls back to its 30-minute default, which is what makes a
+      // month planned with a smaller buffer impossible to finalize. The other
+      // three keys stay the RPC's to store; MonatsplanungAppliedRuns reads them
+      // from the database, never from here.
+      settings_json: {
+        vehicle_switch_buffer_minutes: vehicleSwitchBufferMinutes,
+        one_vehicle_per_driver_day: oneVehiclePerDriverDay,
+      },
       summary_json: null,
       file_name: sourceFileName,
-      source_columns_json: null,
-      source_sheet_name: null,
+      // The imported sheet's own headers and tab name. FinalizePlanningModal's
+      // "Fahrtenbuch erneut herunterladen" hands this very object to
+      // exportAppliedRunXlsx(…, 'original'), which reproduces them byte for
+      // byte or falls back to the union of raw_data_json keys — a different
+      // document. Null while the read is in flight or failed.
+      source_columns_json: importMeta?.source_columns_json ?? null,
+      source_sheet_name: importMeta?.source_sheet_name ?? null,
       imported_at: '',
     };
   };
@@ -1469,9 +1669,11 @@ export default function MonatsplanungAssignmentPreview({
             {/* Fahrer-Notizen debug line */}
             <div className="mt-3 flex items-center gap-2 text-xs px-3 py-1.5 rounded" style={{ background: noteViolationsOk ? 'rgba(21,128,61,0.07)' : 'rgba(220,38,38,0.07)', color: noteViolationsOk ? '#166534' : '#991b1b' }}>
               <Shield size={12} />
-              {noteViolationsOk
-                ? t('mp.notes.checkedOk')
-                : tPlural({ one: 'mp.notes.checkedError.one', other: 'mp.notes.checkedError.other' }, noteViolations.length)}
+              {notesLoadFailed
+                ? `${t('mp.notes.sectionTitle')} — ${t('common.errorLoad')}`
+                : noteViolationsOk
+                  ? t('mp.notes.checkedOk')
+                  : tPlural({ one: 'mp.notes.checkedError.one', other: 'mp.notes.checkedError.other' }, noteViolations.length)}
             </div>
 
             {result.repair_summary.attempted > 0 && (
@@ -2206,15 +2408,29 @@ export default function MonatsplanungAssignmentPreview({
                   v.multiple_vehicles_per_day_violations > 0;
                 const hasQualityBlockers = qualityHardBlockers > 0;
                 const hasNoteViolations = sectionENoteViolations.length > 0;
-                const canApply = phase3Ok && phase4Ok && !hasOpen && !hasViolations && !hasQualityBlockers && !hasNoteViolations && !!importId && !applyResult?.success;
-                const disabledReason = !phase3Ok ? t('mp.apply.blockedNotComplete')
-                  : !phase4Ok ? t('mp.apply.blockedNeedsChangeSet')
-                  : hasOpen ? t('mp.apply.blockedOpenBlocks')
-                  : hasViolations ? t('mp.apply.blockedValidation')
-                  : hasQualityBlockers ? t('mp.apply.blockedQuality')
-                  : hasNoteViolations ? t('mp.apply.blockedNotes')
-                  : !importId ? t('mp.apply.blockedNoImportId')
-                  : applyResult?.success ? t('mp.apply.blockedAlreadyApplied')
+                const { canApply, blockedBy } = evaluateApplyGate({
+                  phase3Ok,
+                  phase4Ok,
+                  hasOpenBlocks: hasOpen,
+                  hasValidationViolations: hasViolations,
+                  hasQualityBlockers,
+                  notesLoadFailed,
+                  hasNoteViolations,
+                  hasImportId: !!importId,
+                  alreadyApplied: !!applyResult?.success,
+                });
+                const disabledReason = blockedBy === 'not_complete' ? t('mp.apply.blockedNotComplete')
+                  : blockedBy === 'needs_change_set' ? t('mp.apply.blockedNeedsChangeSet')
+                  : blockedBy === 'open_blocks' ? t('mp.apply.blockedOpenBlocks')
+                  : blockedBy === 'validation' ? t('mp.apply.blockedValidation')
+                  : blockedBy === 'quality' ? t('mp.apply.blockedQuality')
+                  // No dictionary key of its own: de.ts and en.ts belong to
+                  // another change in this batch, so the sentence is composed
+                  // from two keys both dictionaries already carry.
+                  : blockedBy === 'notes_unavailable' ? `${t('mp.notes.sectionTitle')} — ${t('common.errorLoad')}`
+                  : blockedBy === 'notes' ? t('mp.apply.blockedNotes')
+                  : blockedBy === 'no_import_id' ? t('mp.apply.blockedNoImportId')
+                  : blockedBy === 'already_applied' ? t('mp.apply.blockedAlreadyApplied')
                   : null;
                 return (
                   <>
@@ -2655,13 +2871,17 @@ export default function MonatsplanungAssignmentPreview({
                     {t('mp.notes.sectionTitle')}
                   </span>
                   <span className="text-xs ml-1" style={{ color: noteViolationsOk ? '#166534' : '#b91c1c' }}>
-                    {noteViolationsOk
-                      ? `— ${t('mp.notes.noneExcluded')}`
-                      : `— ${tPlural({ one: 'mp.notes.violationCount.one', other: 'mp.notes.violationCount.other' }, noteViolations.length)}`}
+                    {notesLoadFailed
+                      ? `— ${t('common.errorLoad')}`
+                      : noteViolationsOk
+                        ? `— ${t('mp.notes.noneExcluded')}`
+                        : `— ${tPlural({ one: 'mp.notes.violationCount.one', other: 'mp.notes.violationCount.other' }, noteViolations.length)}`}
                   </span>
                 </div>
 
-                {!noteViolationsOk && (
+                {/* Nothing to list when the read failed: the three rows below
+                    are computed from the violations, and there are none. */}
+                {!notesLoadFailed && !noteViolationsOk && (
                   <div className="px-4 pb-4">
                     <div className="grid grid-cols-1 gap-3 mb-3">
                       {/* Row A: Fahrer vollständig zugewiesen */}
@@ -3010,15 +3230,7 @@ export default function MonatsplanungAssignmentPreview({
 
       {stundenRun && (
         <MonatsplanungStundennachweisPreview
-          run={{
-            id: stundenRun.id,
-            company_id: stundenRun.company_id,
-            month: stundenRun.month,
-            year: stundenRun.year,
-            status: stundenRun.status,
-            file_name: stundenRun.file_name,
-            applied_at: stundenRun.applied_at,
-          }}
+          run={buildStundennachweisRunRef(stundenRun, importMeta)}
           onClose={() => setStundenRun(null)}
         />
       )}
