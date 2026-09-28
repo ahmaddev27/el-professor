@@ -50,10 +50,10 @@ interface RideInterval {
   endMs: number;
 }
 
-/** Parse YYYY-MM-DD → UTC midnight ms. Returns NaN on failure. */
-function parseDateUtcMs(d: string): number {
+/** Parse YYYY-MM-DD into its calendar parts. Returns null on failure. */
+function parseDateParts(d: string): { y: number; m: number; d: number } | null {
   const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(d);
-  return m ? Date.UTC(+m[1], +m[2] - 1, +m[3]) : NaN;
+  return m ? { y: +m[1], m: +m[2] - 1, d: +m[3] } : null;
 }
 
 /** Parse HH:MM → minutes. Returns null on failure. */
@@ -129,6 +129,82 @@ function noteTypeLabelKey(note: StructuredNote): EngineMessageKey | undefined {
   return NOTE_TYPE_LABELS[note.note_type] ? `engine.noteType.${note.note_type}` : undefined;
 }
 
+/** A note's active window on one calendar day, half-open: `[start, end)`. */
+export interface NoteInterval {
+  start: number;
+  end: number;
+}
+
+/**
+ * Iteration cap, so an open-ended or far-future note cannot freeze the browser.
+ * Counted inclusively as day 0…366, exactly as the two day loops this replaces
+ * did with `Math.min(end, start + 366 * MS_PER_DAY)`.
+ */
+const NOTE_RANGE_DAY_CAP = 366;
+
+/**
+ * The instants an `exclude_from_plan` note covers — one half-open interval per
+ * calendar day of its range. This is the one source for that window: Phase 3's
+ * `checkStructuredNote` and `findBlockingNote` below both read it, because they
+ * held a copy each and the copies are what drifted.
+ *
+ * **The base is LOCAL midnight.** The block instants these are compared against
+ * are local: Phase 1 builds `actual_start_ms` with `new Date(y, m, d, h, min)`,
+ * and `parseLocalDatetime` below parses the same wall clock. Both copies built
+ * the note window at `Date.UTC` instead, which in Europe/Berlin put every window
+ * one or two hours late — so a note's first day was unprotected until 01:00 or
+ * 02:00 local. Measured on staging 28.09.2026 against the 9 live
+ * `exclude_from_plan` notes: 53 rides fell inside the window as it was built, 64
+ * inside the correct one, and the 11 in the gap were all 00:00–02:00 local on the
+ * first day of a note's range — rides given to a driver marked sick or on
+ * holiday, because this hard constraint failed open.
+ *
+ * **Every boundary is built from its own day's calendar parts**, never by adding
+ * 86 400 000 ms to the day before. So the 23- and 25-hour days at a DST
+ * transition still end exactly where the next day begins, and a note's 08:00 is
+ * 08:00 on every day of its range rather than drifting an hour after March.
+ *
+ * Rules carried over unchanged: a note with `is_full_day`, or with a missing or
+ * unparseable time on either side, covers the whole calendar day; an end time at
+ * or before the start time crosses midnight into the next day; the range's end
+ * date is inclusive; and a note with no date at all covers nothing.
+ */
+export function noteExclusionIntervals(note: StructuredNote): NoteInterval[] {
+  const startDate = note.start_date ?? (note.note_date ? note.note_date.slice(0, 10) : null);
+  const endDate = note.end_date ?? startDate;
+  if (!startDate || !endDate) return [];
+
+  const from = parseDateParts(startDate);
+  const to = parseDateParts(endDate);
+  if (!from || !to) return [];
+  const lastDayStart = new Date(to.y, to.m, to.d).getTime();
+
+  // A full day is the default, and an unreadable time falls back to it.
+  const sMin = note.is_full_day ? null : parseTimeMin(note.start_time);
+  const eMin = note.is_full_day ? null : parseTimeMin(note.end_time);
+
+  const out: NoteInterval[] = [];
+  for (let i = 0; i <= NOTE_RANGE_DAY_CAP; i++) {
+    const dayStart = new Date(from.y, from.m, from.d + i).getTime();
+    if (dayStart > lastDayStart) break;
+
+    if (sMin == null || eMin == null) {
+      out.push({ start: dayStart, end: new Date(from.y, from.m, from.d + i + 1).getTime() });
+    } else if (eMin > sMin) {
+      out.push({
+        start: new Date(from.y, from.m, from.d + i, 0, sMin).getTime(),
+        end: new Date(from.y, from.m, from.d + i, 0, eMin).getTime(),
+      });
+    } else {
+      out.push({
+        start: new Date(from.y, from.m, from.d + i, 0, sMin).getTime(),
+        end: new Date(from.y, from.m, from.d + i + 1, 0, eMin).getTime(),
+      });
+    }
+  }
+  return out;
+}
+
 /**
  * Check whether a single [startMs, endMs) interval overlaps any exclude_from_plan
  * note for the given driver. Returns the first matching note or null.
@@ -142,53 +218,14 @@ export function findBlockingNote(
   const notes = driverNotesMap.get(driverId);
   if (!notes || notes.length === 0) return null;
 
-  const MS_PER_DAY = 86_400_000;
-
   for (const note of notes) {
     if (note.note_planning_behavior !== 'exclude_from_plan') continue;
 
-    const noteStartDate = note.start_date ?? (note.note_date ? note.note_date.slice(0, 10) : null);
-    const noteEndDate = note.end_date ?? noteStartDate;
-    if (!noteStartDate) continue;
-
-    const noteRangeStart = parseDateUtcMs(noteStartDate);
-    // Inclusive end → exclusive: add one full day
-    const noteRangeEndInclusive = parseDateUtcMs(noteEndDate!);
-    if (isNaN(noteRangeStart) || isNaN(noteRangeEndInclusive)) continue;
-
-    // Cap iteration at 366 days to prevent browser freeze with open-ended notes.
-    const cappedRangeEnd = Math.min(noteRangeEndInclusive, noteRangeStart + 366 * MS_PER_DAY);
-
-    let dateMs = noteRangeStart;
-    while (dateMs <= cappedRangeEnd) {
-      let noteIntervalStart: number;
-      let noteIntervalEnd: number;
-
-      if (note.is_full_day || !note.start_time || !note.end_time) {
-        noteIntervalStart = dateMs;
-        noteIntervalEnd = dateMs + MS_PER_DAY;
-      } else {
-        const sMin = parseTimeMin(note.start_time);
-        const eMin = parseTimeMin(note.end_time);
-        if (sMin == null || eMin == null) {
-          noteIntervalStart = dateMs;
-          noteIntervalEnd = dateMs + MS_PER_DAY;
-        } else if (eMin > sMin) {
-          noteIntervalStart = dateMs + sMin * 60_000;
-          noteIntervalEnd = dateMs + eMin * 60_000;
-        } else {
-          // Cross-midnight
-          noteIntervalStart = dateMs + sMin * 60_000;
-          noteIntervalEnd = dateMs + MS_PER_DAY + eMin * 60_000;
-        }
-      }
-
-      // Overlap: [startMs, endMs) ∩ [noteStart, noteEnd) ≠ ∅
-      if (startMs < noteIntervalEnd && endMs > noteIntervalStart) {
+    for (const iv of noteExclusionIntervals(note)) {
+      // Overlap: [startMs, endMs) ∩ [iv.start, iv.end) ≠ ∅
+      if (startMs < iv.end && endMs > iv.start) {
         return note;
       }
-
-      dateMs += MS_PER_DAY;
     }
   }
   return null;
