@@ -924,9 +924,18 @@ INSERT INTO _mx_spec VALUES
   $q$INSERT INTO salary_payments (id, salary_id, payment_type, amount, company_id) VALUES ({id}, {ref:salaries}, 'cash', 1, {co})$q$, NULL,
   $q$INSERT INTO salary_payments (salary_id, payment_type, amount, company_id) VALUES ({ref:salaries}, 'bank', 1, {co})$q$,
   $q$description = description$q$),
+-- The two statements below name `check_date`, and they must keep naming it.
+-- The column defaults to CURRENT_DATE, so before 20260928121500 both rows landed
+-- on today and the old key `(car_id, week_number, year)` still told them apart by
+-- their week_number. The new key is `(car_id, date_trunc('week', check_date))`,
+-- which does not read week_number at all — so with the default both rows fall in
+-- one calendar week and the probe's INSERT dies 23505 for every principal that
+-- RLS would have admitted. That would report a uniqueness collision as an
+-- authorization result, which is not what this row measures.
+-- Fixed dates a fortnight apart, so the probe keeps measuring the policy.
 (22, 'werkstatt_checks', $q$id = {id}$q$,
-  $q$INSERT INTO werkstatt_checks (id, car_id, week_number, year, created_by, company_id) VALUES ({id}, {ref:cars}, 1, 2026, {admin}, {co})$q$, NULL,
-  $q$INSERT INTO werkstatt_checks (car_id, week_number, year, created_by, company_id) VALUES ({ref:cars}, 2, 2026, {admin}, {co})$q$,
+  $q$INSERT INTO werkstatt_checks (id, car_id, week_number, year, check_date, created_by, company_id) VALUES ({id}, {ref:cars}, 1, 2026, DATE '2026-01-05', {admin}, {co})$q$, NULL,
+  $q$INSERT INTO werkstatt_checks (car_id, week_number, year, check_date, created_by, company_id) VALUES ({ref:cars}, 2, 2026, DATE '2026-01-19', {admin}, {co})$q$,
   $q$notes = notes$q$),
 (23, 'fahrtenbuch_imports', $q$id = {id}$q$,
   $q$INSERT INTO fahrtenbuch_imports (id, company_id, month, year, file_name, imported_by) VALUES ({id}, {co}, 1, 2026, 'mx.xlsx', {admin})$q$, NULL,
