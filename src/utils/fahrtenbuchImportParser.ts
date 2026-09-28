@@ -712,6 +712,91 @@ export async function sha256HexOfText(text: string): Promise<string> {
 export interface DriverMatchInfo { matchedDriverId: string | null; matchedDriverName: string }
 export interface CarMatchInfo { matchedCarId: string | null }
 
+/** A driver the company has, as step 2 of the wizard offers them. */
+export interface DriverCandidate { id: string; name: string }
+
+/** Which driver an imported name means — see `matchDriverName`. */
+export type DriverNameMatch =
+  /** One driver carries that name. Safe to offer as already settled. */
+  | { kind: 'exact'; driverId: string; driverName: string }
+  /** Exactly one driver could be meant. Offered, but the user confirms it. */
+  | { kind: 'suggestion'; driverId: string; driverName: string }
+  /** Two or more drivers could be meant, so none is offered. */
+  | { kind: 'ambiguous' }
+  /** No driver could be meant. */
+  | { kind: 'none' };
+
+/**
+ * Which driver an imported name means, and how sure that is.
+ *
+ * The comparison is the importer's own `normalise` (lowercase, [a-z0-9] only),
+ * which is what this matcher has always used. It is **not**
+ * `normaliseDriverName` and must never become it: that one feeds
+ * `source_row_key`, unique per company, so changing it would make every ride
+ * already stored look like a different ride and break re-import detection.
+ *
+ * Why a substring hit is never `exact`: `normalise` keeps letters and digits
+ * only, so "Ali" is a substring of both "Ali Hassan" and "Alia Demir". The
+ * matcher took whichever of the two happened to come first in the company's
+ * driver list and marked the pair confirmed, which let step 2 through without a
+ * glance — and a month of rides, and so a month of salary, was attributed to a
+ * driver nobody had chosen. Two or more candidates therefore offer none: a name
+ * the file spells differently is the user's to resolve, not ours to guess.
+ *
+ * Two drivers whose names normalise alike are `ambiguous` for the same reason.
+ *
+ * What a wrong answer costs: `buildTripRows` writes this match into
+ * `original_driver_id` as well as `assigned_driver_id`, and
+ * protect_fahrtenbuch_immutable_fields refuses every later change to
+ * `original_driver_*`. So a ride assigned to the wrong driver here can be
+ * reassigned, but the record of who originally drove it cannot be corrected at
+ * all — the import would have to be deleted and read in again.
+ */
+export function matchDriverName(
+  importedName: string,
+  drivers: readonly DriverCandidate[],
+): DriverNameMatch {
+  const norm = normalise(importedName);
+  // An empty key is a substring of every name and every name is a substring of
+  // it, so it would match the whole driver list.
+  if (norm === '') return { kind: 'none' };
+  const candidates = drivers
+    .map(driver => ({ driver, norm: normalise(driver.name) }))
+    .filter(c => c.norm !== '');
+
+  const exact = candidates.filter(c => c.norm === norm);
+  if (exact.length === 1) {
+    return { kind: 'exact', driverId: exact[0].driver.id, driverName: exact[0].driver.name };
+  }
+  if (exact.length > 1) return { kind: 'ambiguous' };
+
+  const partial = candidates.filter(c => c.norm.includes(norm) || norm.includes(c.norm));
+  if (partial.length === 1) {
+    return { kind: 'suggestion', driverId: partial[0].driver.id, driverName: partial[0].driver.name };
+  }
+  if (partial.length > 1) return { kind: 'ambiguous' };
+  return { kind: 'none' };
+}
+
+/**
+ * The same answer in the shape step 2 of the wizard keeps it in: the driver it
+ * offers, and whether that offer still needs a person. Only an `exact` match is
+ * confirmed; a `suggestion` is pre-selected and waits. It lives here rather than
+ * in the modal so the rule is stated once and can be tested.
+ */
+export function driverMatchInfo(
+  importedName: string,
+  drivers: readonly DriverCandidate[],
+): DriverMatchInfo & { confirmed: boolean } {
+  const match = matchDriverName(importedName, drivers);
+  const offered = match.kind === 'exact' || match.kind === 'suggestion' ? match : null;
+  return {
+    matchedDriverId: offered?.driverId ?? null,
+    matchedDriverName: offered?.driverName ?? importedName,
+    confirmed: match.kind === 'exact',
+  };
+}
+
 export interface BuildContext {
   rows: readonly RawRow[];
   colMap: ColMap;
