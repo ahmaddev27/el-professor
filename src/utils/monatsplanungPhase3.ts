@@ -4,7 +4,7 @@
 
 import type { Phase1VehicleBlock } from './monatsplanungPhase1';
 import type { PlanningDriver } from '../components/MonatsplanungDriverPool';
-import { buildRideIntervalsFromBlocks, validateDriverNotesForPlanStep, NOTE_TYPE_LABELS, type NoteViolation } from './driverNoteValidation';
+import { buildRideIntervalsFromBlocks, validateDriverNotesForPlanStep, noteExclusionIntervals, NOTE_TYPE_LABELS, type NoteViolation } from './driverNoteValidation';
 // Type-only: the engine names a dictionary key beside its German text and never
 // resolves one. See src/i18n/engineMessage.ts.
 import type { EngineMessageKey, EngineMessageVars } from '../i18n/engineMessageTypes';
@@ -295,10 +295,26 @@ const HARD_NOTE_TOKENS: Array<{ token: RegExp; reason: string }> = [
   { token: /nicht\s+sonntag/i, reason: 'Notiz: nicht sonntags' },
 ];
 
+/**
+ * Parse `YYYY-MM-DDTHH:MM` as LOCAL wall clock → ms, which is what the name has
+ * always claimed and what every caller needs.
+ *
+ * It read `Date.UTC`, and the two are not interchangeable here. Phase 1 writes
+ * `block_start_datetime` with `isoLocal(...)` and `actual_start_ms` with
+ * `.getTime()` of the same moment, so the string and the number are two spellings
+ * of one instant — parsing the string as UTC put this fallback one or two hours
+ * away from the instant the very same block carries in `actual_start_ms`. Blocks
+ * are compared with each other (overlap, vehicle-switch buffer), against the note
+ * windows, and printed by `fmtMsDateTime`, which reads local — so the fallback
+ * branch also displayed a 22:00 block as midnight in summer.
+ *
+ * `driverNoteValidation.parseLocalDatetime` is the same function and was already
+ * correct; this is the copy that was not.
+ */
 function parseLocalIsoMs(iso: string): number {
   const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(iso);
   if (!m) return 0;
-  return Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]);
+  return new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]).getTime();
 }
 
 /** Prefer actual UTC ms from raw_data_json; fall back to ISO datetime parse. */
@@ -332,6 +348,37 @@ function blockTimeOfDayMinutes(b: Phase1VehicleBlock): { start: number; end: num
   if (ed > sd) end += 24 * 60;
   if (end < start) end += 24 * 60;
   return { start, end };
+}
+
+/**
+ * Does a block fit inside a driver's Dienstzeit?
+ *
+ * `blockTimeOfDayMinutes` measures both ends from the *start* day's midnight, so
+ * a block running past midnight reports an end above 24:00.
+ *
+ * A window whose end is not after its start — 20:00–06:00 — is an overnight
+ * Dienstzeit, and that is two stretches of every day: `wStart`→24:00 and
+ * 00:00→`wEnd`. A block can sit in either. The first arm is the evening stretch.
+ * The second is a block lying wholly after midnight — a night driver's ordinary
+ * 01:00–03:00, whose `bStart` is 60 and so could never clear `bStart >= wStart`
+ * at 1200. Every such block was refused inside the driver's own window; 7 of the
+ * drivers configured this way are live (staging, 28.09.2026, of 10 with an
+ * overnight window — the other 3 are `is_full_day_available` and never reach here).
+ *
+ * `bEnd <= wEnd` is sufficient on its own for that arm: `bStart <= bEnd` always,
+ * so the whole block then lies within 00:00→`wEnd`. A block that merely ends
+ * inside the window after starting outside it — 04:00–08:00 against 20:00–06:00 —
+ * still fails both arms and is still refused.
+ *
+ * One function because this rule had two copies, in `checkWindow` and in
+ * `evaluateManualCandidate`, and they must answer identically or the assignment
+ * preview and the manual dialog disagree about the same block. The rejection this
+ * feeds, `outside_working_time_window`, stays bypassable; nothing here touches a
+ * hard constraint.
+ */
+function blockFitsWorkWindow(bStart: number, bEnd: number, wStart: number, wEnd: number): boolean {
+  if (wStart <= wEnd) return bStart >= wStart && bEnd <= wEnd;
+  return (bStart >= wStart && bEnd <= 24 * 60 + wEnd) || bEnd <= wEnd;
 }
 
 function fmtMinAsTime(m: number): string {
@@ -370,13 +417,7 @@ function checkWindow(driver: PlanningDriver, block: Phase1VehicleBlock): Rejecte
     const wEnd = timeToMin(driver.work_window_end);
     if (wStart != null && wEnd != null) {
       const { start: bStart, end: bEnd } = blockTimeOfDayMinutes(block);
-      let ok = false;
-      if (wStart <= wEnd) {
-        ok = bStart >= wStart && bEnd <= wEnd;
-      } else {
-        ok = bStart >= wStart && bEnd <= 24 * 60 + wEnd;
-      }
-      if (!ok) {
+      if (!blockFitsWorkWindow(bStart, bEnd, wStart, wEnd)) {
         return {
           driver_id: driver.id,
           driver_name: driver.name,
@@ -548,12 +589,6 @@ function checkNote(driver: PlanningDriver, block: Phase1VehicleBlock): RejectedC
   return null;
 }
 
-/** Parse a YYYY-MM-DD date string into UTC midnight ms. Returns NaN on failure. */
-function parseDateMs(d: string): number {
-  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(d);
-  return m ? Date.UTC(+m[1], +m[2] - 1, +m[3]) : NaN;
-}
-
 /** Humanise a structured note type/text for rejection detail messages. */
 function structuredNoteLabel(note: StructuredNote): string {
   return NOTE_TYPE_LABELS[note.note_type] ?? note.note_text ?? note.note_type;
@@ -576,6 +611,12 @@ function fmtDateDe(d: string): string {
 /**
  * Check whether any exclude_from_plan structured note for this driver overlaps
  * the candidate block. Returns a RejectedCandidate if blocked, null otherwise.
+ *
+ * The window comes from `noteExclusionIntervals`, which this function and
+ * `findBlockingNote` now share — a local-midnight base, stepped by calendar day.
+ * This function used to build its own at UTC midnight, one or two hours late, so
+ * the hard `note_constraint` failed open over the first hours of a note's first
+ * day. The two copies are why the same defect had to be fixed twice.
  */
 function checkStructuredNote(
   driver: PlanningDriver,
@@ -591,47 +632,15 @@ function checkStructuredNote(
   for (const note of notes) {
     if (note.note_planning_behavior !== 'exclude_from_plan') continue;
 
-    // Determine the note's active date range (UTC midnight boundaries)
+    // These two are for the rejection message only. The window itself is the
+    // shared helper's, which resolves the same fallback for its own dates.
     const noteStartDate = note.start_date ?? (note.note_date ? note.note_date.slice(0, 10) : null);
     const noteEndDate = note.end_date ?? noteStartDate;
     if (!noteStartDate) continue;
 
-    const noteRangeStart = parseDateMs(noteStartDate);
-    const noteRangeEnd = parseDateMs(noteEndDate!);
-    if (isNaN(noteRangeStart) || isNaN(noteRangeEnd)) continue;
-
-    // Cap to 366 days to avoid freezing the browser with open-ended or far-future dates.
-    const MS_PER_DAY = 86_400_000;
-    const cappedRangeEnd = Math.min(noteRangeEnd, noteRangeStart + 366 * MS_PER_DAY);
-    let dateMs = noteRangeStart;
-    while (dateMs <= cappedRangeEnd) {
-      let noteIntervalStart: number;
-      let noteIntervalEnd: number;
-
-      if (note.is_full_day || !note.start_time || !note.end_time) {
-        // Full-day: entire calendar day
-        noteIntervalStart = dateMs;
-        noteIntervalEnd = dateMs + MS_PER_DAY;
-      } else {
-        const sMin = timeToMin(note.start_time);
-        const eMin = timeToMin(note.end_time);
-        if (sMin == null || eMin == null) {
-          // Malformed times — treat as full day
-          noteIntervalStart = dateMs;
-          noteIntervalEnd = dateMs + MS_PER_DAY;
-        } else if (eMin > sMin) {
-          // Same-day interval
-          noteIntervalStart = dateMs + sMin * 60_000;
-          noteIntervalEnd = dateMs + eMin * 60_000;
-        } else {
-          // Cross-midnight interval: start on this day, end next day
-          noteIntervalStart = dateMs + sMin * 60_000;
-          noteIntervalEnd = dateMs + MS_PER_DAY + eMin * 60_000;
-        }
-      }
-
+    for (const iv of noteExclusionIntervals(note)) {
       // Overlap check: [bStart, bEnd) ∩ [noteStart, noteEnd) ≠ ∅
-      if (bStartMs < noteIntervalEnd && bEndMs > noteIntervalStart) {
+      if (bStartMs < iv.end && bEndMs > iv.start) {
         const label = structuredNoteLabel(note);
         const datePart = noteStartDate === noteEndDate
           ? fmtDateDe(noteStartDate)
@@ -657,8 +666,6 @@ function checkStructuredNote(
           },
         };
       }
-
-      dateMs += MS_PER_DAY;
     }
   }
   return null;
@@ -1968,8 +1975,7 @@ export function evaluateManualCandidate(
       const wEnd = timeToMin(driver.work_window_end);
       if (wStart != null && wEnd != null) {
         const { start: bStart, end: bEnd } = blockTimeOfDayMinutes(u);
-        const ok = wStart <= wEnd ? bStart >= wStart && bEnd <= wEnd : bStart >= wStart && bEnd <= 24 * 60 + wEnd;
-        if (!ok) blocking.push('Außerhalb Dienstzeit');
+        if (!blockFitsWorkWindow(bStart, bEnd, wStart, wEnd)) blocking.push('Außerhalb Dienstzeit');
       }
     }
   }
