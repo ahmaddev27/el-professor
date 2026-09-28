@@ -89,6 +89,29 @@ export const useDatabase = () => {
     }
   };
 
+  /**
+   * A write attempted while the hook is not connected reaches nothing, so it
+   * must fail rather than resolve.
+   *
+   * The read branches below fall back to `localStorage`, which CLAUDE.md records
+   * as a legacy quirk of this hook. The *write* half of that fallback was never
+   * built: every use of it in this file is a `getItem`. Six write branches
+   * nevertheless resolved — `updateDriver`, `deleteDriver`, `updateReceipt` and
+   * `deleteReceipt` with a bare `return`, and `addDriver` and `addReceipt` by
+   * handing the caller a fabricated row with a `Date.now()` id. Every one of the
+   * six call sites then showed its success toast and reloaded a list that could
+   * not contain the row.
+   *
+   * This does not build the missing fallback — CLAUDE.md is explicit that this
+   * hook is not a pattern to extend. It makes the discarded write say so. Each
+   * caller already wraps the call in `try`/`catch` and renders
+   * `handleDatabaseError(err)`, which passes an `Error`'s own message through,
+   * so the sentence below is what the screen shows.
+   */
+  const refuseOfflineWrite = (): never => {
+    throw new Error(t('db.offlineWrite'));
+  };
+
   // Driver operations
   const getDrivers = async (): Promise<Driver[]> => {
     if (!isConnected) {
@@ -159,8 +182,7 @@ export const useDatabase = () => {
 
   const addDriver = async (name: string, salaryRatio: number = 0.5, personalnummer?: string, gender?: 'male' | 'female' | null, planning?: DriverPlanningFields): Promise<Driver> => {
     if (!isConnected) {
-      const newDriver: Driver = { id: Date.now().toString(), name, salary_ratio: salaryRatio, personalnummer, gender: gender ?? null };
-      return newDriver;
+      refuseOfflineWrite();
     }
 
     try {
@@ -198,7 +220,7 @@ export const useDatabase = () => {
 
   const updateDriver = async (id: string, name: string, salaryRatio: number = 0.5, status?: 'active' | 'inactive', personalnummer?: string, gender?: 'male' | 'female' | null, planning?: DriverPlanningFields): Promise<void> => {
     if (!isConnected) {
-      return;
+      refuseOfflineWrite();
     }
 
     try {
@@ -233,7 +255,7 @@ export const useDatabase = () => {
 
   const deleteDriver = async (id: string): Promise<void> => {
     if (!isConnected) {
-      return;
+      refuseOfflineWrite();
     }
 
     try {
@@ -329,9 +351,7 @@ export const useDatabase = () => {
 
   const addReceipt = async (receipt: Omit<Receipt, 'id'>): Promise<Receipt> => {
     if (!isConnected) {
-      addDebugInfo('📱 Adding receipt to localStorage');
-      const newReceipt: Receipt = { ...receipt, id: Date.now().toString() };
-      return newReceipt;
+      refuseOfflineWrite();
     }
 
     try {
@@ -384,7 +404,7 @@ export const useDatabase = () => {
 
   const updateReceipt = async (id: string, receipt: Partial<Receipt>): Promise<void> => {
     if (!isConnected) {
-      return;
+      refuseOfflineWrite();
     }
 
     try {
@@ -414,7 +434,7 @@ export const useDatabase = () => {
 
   const deleteReceipt = async (id: string): Promise<void> => {
     if (!isConnected) {
-      return;
+      refuseOfflineWrite();
     }
 
     try {
