@@ -15,6 +15,17 @@ interface Driver {
   name: string;
 }
 
+/**
+ * A company car, as this screen needs it: the plate it is known by and whether
+ * it is still in the fleet. `cars` carries no model or type column, so the plate
+ * is the whole description — the owner's choice when told (28.09.2026).
+ */
+interface Car {
+  id: string;
+  kennzeichen: string;
+  status: string;
+}
+
 type NotePlanningBehavior = 'neutral' | 'exclude_from_plan' | 'must_include_in_plan';
 
 interface Note {
@@ -32,7 +43,60 @@ interface Note {
   end_time?: string | null;
   start_date?: string | null;
   end_date?: string | null;
+  /**
+   * Optional: which car the incident happened on, so a Blitzer photo or a
+   * Bußgeldbescheid addressed to a plate can be tied back to the Fahrtenbuch.
+   * A key into `cars`, never free text — `B-XX 1234` and `B-XX-1234` would
+   * otherwise become two vehicles. It records; nothing looks anything up with
+   * it, and no planning code ever sees it (see `loadNotes`).
+   */
+  car_id?: string | null;
   drivers?: { name: string };
+  cars?: { kennzeichen: string } | null;
+}
+
+/** One entry of the car picker: the id that is stored, and what it reads as. */
+interface CarOption {
+  id: string;
+  label: string;
+}
+
+/**
+ * The cars the picker offers for a note.
+ *
+ * Every car of the company, in the order they were loaded (by plate), including
+ * the retired ones — an incident note records something that already happened,
+ * and a ticket arriving for a car the fleet has since sold is exactly the case
+ * this field exists for. A retired car is therefore labelled, not hidden.
+ *
+ * `selected` is the note being edited. Its car is normally in `cars` already;
+ * the extra entry exists for the one case where it is not — the car list failed
+ * to load — because a `<select>` whose value matches no option falls back to the
+ * first one, and saving the form would then silently drop the note's car.
+ *
+ * Takes its inactive label as a function: this is module scope, where t() is not
+ * a value, the same way `noteDisplayLabel` below does it.
+ *
+ * Pure, and deliberately not exported: no page in this repository exports a
+ * helper, and doing so turns off React Fast Refresh for the whole file
+ * (`react-refresh/only-export-components`). Moving it to `src/utils/` with a
+ * vitest file of its own is the right home for it, and is a change of its own.
+ */
+function carPickerOptions(
+  cars: Car[],
+  selected: { id: string; plate: string | null } | null,
+  labelInactive: (plate: string) => string,
+): CarOption[] {
+  const options = cars.map(car => ({
+    id: car.id,
+    label: car.status === 'active' ? car.kennzeichen : labelInactive(car.kennzeichen),
+  }));
+
+  if (selected && selected.id && !cars.some(car => car.id === selected.id)) {
+    options.push({ id: selected.id, label: selected.plate ?? selected.id });
+  }
+
+  return options;
 }
 
 // `label` holds a TranslationKey: this list is module-level and t() is a
@@ -73,6 +137,7 @@ const inputStyle: React.CSSProperties = {
 
 interface FormData {
   driver_id: string;
+  car_id: string;             // '' means no car: the field is optional
   note_date: string;          // datetime-local — kept for backward compat / must_include times
   start_date: string;         // date only (YYYY-MM-DD)
   end_date: string;           // date only (YYYY-MM-DD)
@@ -87,6 +152,7 @@ interface FormData {
 
 const DEFAULT_FORM: FormData = {
   driver_id:              '',
+  car_id:                 '',
   note_date:              format(new Date(), "yyyy-MM-dd'T'HH:mm"),
   start_date:             format(new Date(), 'yyyy-MM-dd'),
   end_date:               format(new Date(), 'yyyy-MM-dd'),
@@ -123,6 +189,7 @@ export function NotesPage() {
   const { t } = useTranslation();
   const [notes, setNotes]           = useState<Note[]>([]);
   const [drivers, setDrivers]       = useState<Driver[]>([]);
+  const [cars, setCars]             = useState<Car[]>([]);
   const [loading, setLoading]       = useState(true);
   const [showModal, setShowModal]   = useState(false);
   const [editingNote, setEditingNote] = useState<Note | null>(null);
@@ -150,13 +217,14 @@ export function NotesPage() {
     setSelectedDriver('');
     setNotes([]);
     setDrivers([]);
+    setCars([]);
     if (companyId) loadData();
   }, [companyId]);
 
   const loadData = async () => {
     try {
       setLoading(true);
-      await Promise.all([loadNotes(), loadDrivers()]);
+      await Promise.all([loadNotes(), loadDrivers(), loadCars()]);
     } catch (error: any) {
       showToast('error', error.message || t('salaries.loadFailed'));
     } finally {
@@ -165,9 +233,21 @@ export function NotesPage() {
   };
 
   const loadNotes = async () => {
+    // The plate travels with the note, the way `drivers(name)` already does, so it
+    // is shown from the note's own row and does not depend on the separate car
+    // list below. The embed names its foreign key rather than the table alone:
+    // PostgREST answers 300 for an embed it finds more than one path for, and that
+    // would fail the whole list rather than one field. The constraint is created in
+    // 20260928120000.
+    //
+    // This is the only query in the product that reads `car_id`. Every consumer
+    // that feeds the planning engine names its columns explicitly
+    // (MonatsplanungAssignmentPreview, MonatsplanungStundennachweisPreview,
+    // StundennachweisPage, HistoricalWorkingHoursWizard), so no engine input can
+    // carry the car.
     const { data, error } = await supabase
       .from('driver_notes')
-      .select('*, drivers(name)')
+      .select('*, drivers(name), cars!driver_notes_car_id_fkey(kennzeichen)')
       .eq('company_id', companyId)
       .order('note_date', { ascending: false });
     if (error) throw error;
@@ -183,6 +263,17 @@ export function NotesPage() {
       .order('name');
     if (error) throw error;
     setDrivers(data || []);
+  };
+
+  // Every car of the company, retired ones included: see carPickerOptions.
+  const loadCars = async () => {
+    const { data, error } = await supabase
+      .from('cars')
+      .select('id, kennzeichen, status')
+      .eq('company_id', companyId)
+      .order('kennzeichen');
+    if (error) throw error;
+    setCars(data || []);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -207,6 +298,9 @@ export function NotesPage() {
 
       const noteData = {
         driver_id:              formData.driver_id,
+        // Optional by design: '' is stored as NULL, not as an empty string, so
+        // "no car" stays one value and the foreign key has nothing to resolve.
+        car_id:                 formData.car_id || null,
         note_date:              canonicalDate,
         note_text:              formData.note_text.trim(),
         created_by:             user.id,
@@ -249,6 +343,7 @@ export function NotesPage() {
     const ed = note.end_date   ?? sd;
     setFormData({
       driver_id:              note.driver_id,
+      car_id:                 note.car_id ?? '',
       note_date:              format(new Date(note.note_date), "yyyy-MM-dd'T'HH:mm"),
       start_date:             sd,
       end_date:               ed,
@@ -331,8 +426,14 @@ export function NotesPage() {
       const yesNo = (v?: boolean | null) => v ? t('common.yes') : t('common.no');
 
       // Sheet 1: Notizen
+      // The plate is on this sheet and on no other: it is what a Bußgeldbescheid
+      // names, so a record the office cannot get out of the screen would not be a
+      // record. Sheet 3 lists planning exclusions, where a car means nothing.
+      // This dump carries no statutory form, so its headers follow the UI
+      // language like every other label here (CLAUDE.md, "Language").
       const notizRows = toExport.map(note => ({
         [t('common.driver')]: getDriverName(note),
+        [t('ta.col.vehicle')]: note.cars?.kennzeichen ?? '',
         [t('notes.noteType')]: noteTypeLabel(note.note_type),
         [t('notes.planningBehaviour')]: behaviorLabel(note.note_planning_behavior),
         [t('notes.noteDate')]: fmtDate(note.note_date),
@@ -399,6 +500,23 @@ export function NotesPage() {
       setExporting(false);
     }
   };
+
+  /*
+    The picker's entries. The note being edited is passed in so its own car stays
+    selectable when the fleet has retired it, or when the car list failed to load
+    — a `<select>` whose value matches no option silently falls back to the first,
+    which here would drop the car on the next save.
+
+    `gq.driver.inactive` is '{name} (inaktiv)' / '{name} (inactive)' in both
+    dictionaries and is reused as-is because src/i18n belongs to another change;
+    a `notes.carInactive` of its own would read better and is worth adding.
+  */
+  const editingCarId = editingNote?.car_id ?? '';
+  const carOptions = carPickerOptions(
+    cars,
+    editingCarId ? { id: editingCarId, plate: editingNote?.cars?.kennzeichen ?? null } : null,
+    plate => t('gq.driver.inactive', { name: plate }),
+  );
 
   const filteredNotes = notes.filter(note => {
     const matchesSearch =
@@ -580,6 +698,19 @@ export function NotesPage() {
                         {(k => k ? t(k) : note.note_type)(NOTE_TYPES.find(nt => nt.value === note.note_type)?.label)}
                       </span>
                     )}
+                    {/*
+                      The plate, when the note names a car. The classes carry the
+                      legacy variables instead of an inline style object because
+                      this screen is not converted yet and the style ratchet is at
+                      its baseline (PlatformTeamPage does the same).
+                      Shown from the note's own joined row, so a plate is never
+                      guessed: no car, or a plate that did not load, shows nothing.
+                    */}
+                    {note.cars?.kennzeichen && (
+                      <span className="px-1.5 py-0.5 rounded text-xs font-medium bg-[var(--bg-muted)] text-[var(--text-secondary)]">
+                        {note.cars.kennzeichen}
+                      </span>
+                    )}
                   </div>
                   <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>{noteDateLabel(note, t)}</p>
                   {note.note_planning_behavior && note.note_planning_behavior !== 'neutral' && (
@@ -669,6 +800,35 @@ export function NotesPage() {
                     <option value="must_include_in_plan">{t('notes.effect.require')}</option>
                   </select>
                 </div>
+              </div>
+
+              {/*
+                Car — optional. It records which vehicle an incident happened on,
+                so a ticket addressed to a plate can be tied back to the
+                Fahrtenbuch. A picker over the company's own cars, never free
+                text, so the stored value is a key and not two spellings of one
+                plate. The plain `<select>` matches the four already on this
+                screen — it is not converted to the design system, and its inline
+                styles sit exactly at the ratchet's baseline, so the legacy look is
+                carried in classes here. Never the Radix `Select`, whose
+                `onValueChange` would rewrite this handler.
+              */}
+              <div>
+                <label htmlFor="note-car" className="block text-sm font-medium mb-2 text-[var(--text-secondary)]">
+                  {t('ta.col.vehicle')}{' '}
+                  <span className="font-normal text-[var(--text-tertiary)]">{t('notes.descriptionOptional')}</span>
+                </label>
+                <select
+                  id="note-car"
+                  value={formData.car_id}
+                  onChange={e => setFormData(p => ({ ...p, car_id: e.target.value }))}
+                  className="w-full rounded-lg border border-[var(--border)] bg-[var(--bg-subtle)] px-3 py-2 text-sm text-[var(--text-primary)] outline-none"
+                >
+                  <option value="">{t('imp.optionNoCar')}</option>
+                  {carOptions.map(option => (
+                    <option key={option.id} value={option.id}>{option.label}</option>
+                  ))}
+                </select>
               </div>
 
               {/* Date range toggle */}
