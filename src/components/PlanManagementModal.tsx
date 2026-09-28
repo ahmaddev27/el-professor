@@ -3,6 +3,7 @@ import { X, Plus, Save, CreditCard, Trash2 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useToast } from '../contexts/ToastContext';
 import { useTranslation } from '../contexts/LanguageContext';
+import { parsePlanPriceInput } from '../utils/planPriceInput';
 
 interface Plan {
   id: string;
@@ -44,11 +45,23 @@ export default function PlanManagementModal({ plans, onClose, onSaved }: Props) 
       showToast('error', t('bill.plan.fillRequired'));
       return;
     }
+    // The price is read by `parsePlanPriceInput`, not by `parseFloat`: the field
+    // is free text and a German administrator writes '1.200,00', which
+    // `parseFloat(text.replace(',', '.'))` turned into 1.2 — a plan sold for
+    // 1,20 € instead of 1200 €, stored with no error and no warning. Text it
+    // will not read answers null, which is refused here rather than stored: the
+    // old body handed the insert `NaN`, and supabase-js serialises that as
+    // `null`.
+    const monthlyPrice = parsePlanPriceInput(form.monthly_price);
+    if (monthlyPrice === null) {
+      showToast('error', t('bill.plan.priceInvalid'));
+      return;
+    }
     setSaving(true);
     try {
       const payload = {
         name: form.name,
-        monthly_price: parseFloat(form.monthly_price.replace(',', '.')),
+        monthly_price: monthlyPrice,
         included_cars: parseInt(form.included_cars),
         drivers_per_car_limit: parseInt(form.drivers_per_car_limit) || 4,
       };

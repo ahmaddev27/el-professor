@@ -358,9 +358,18 @@ const PainCard: React.FC<{ value: string; label: string; desc: string; accent: s
 
 // ─── Feature card ─────────────────────────────────────────────────────────────
 
+/**
+ * The prop is `accent`, as on `PainCard` above, because that is the key the
+ * twelve card literals below pass through `{...f}`. It was `accentColor`, so
+ * every one of the twelve rendered `background: 'undefined18'`, a border of
+ * `'undefined30'`, a hover border of `'undefined33'` and an undefined icon
+ * colour — on the product's own front page, on every visit. Renaming the prop
+ * rather than the twelve literals keeps the data untouched and keeps the two
+ * card components naming the same thing the same way.
+ */
 const FeatureCard: React.FC<{
-  icon: React.ReactNode; title: string; desc: string; accentColor: string;
-}> = ({ icon, title, desc, accentColor }) => (
+  icon: React.ReactNode; title: string; desc: string; accent: string;
+}> = ({ icon, title, desc, accent }) => (
   <div style={{
     background: CARD,
     border: `1px solid ${BORDER}`,
@@ -370,7 +379,7 @@ const FeatureCard: React.FC<{
     transition: 'border-color 0.3s, background 0.3s',
   }}
     onMouseEnter={e => {
-      (e.currentTarget as HTMLElement).style.borderColor = `${accentColor}33`;
+      (e.currentTarget as HTMLElement).style.borderColor = `${accent}33`;
       (e.currentTarget as HTMLElement).style.background = '#121c2d';
     }}
     onMouseLeave={e => {
@@ -380,10 +389,10 @@ const FeatureCard: React.FC<{
   >
     <div style={{
       width: 40, height: 40, borderRadius: 10,
-      background: `${accentColor}18`,
-      border: `1px solid ${accentColor}30`,
+      background: `${accent}18`,
+      border: `1px solid ${accent}30`,
       display: 'flex', alignItems: 'center', justifyContent: 'center',
-      marginBottom: 14, color: accentColor,
+      marginBottom: 14, color: accent,
     }}>
       {icon}
     </div>
@@ -803,7 +812,13 @@ const LandingPage: React.FC = () => {
         transition: 'all 0.3s',
       }}>
         <div className="px-4 md:px-6" style={{ maxWidth: 1200, margin: '0 auto', height: 64, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <img src="/professor_logo_white.svg" alt="El-Professor" style={{ height: 30, objectFit: 'contain' }} />
+          {/* The landing page is always dark, whatever the app theme is, so it takes
+              the on-dark mark directly rather than through BrandLogo's pair. The
+              wordmark carries the name beside it, so the mark is decorative. */}
+          <span className="flex items-center gap-2.5">
+            <img src="/brand/mark-on-dark.png" alt="" className="h-[30px] w-auto object-contain" />
+            <img src="/brand/wordmark-on-dark.png" alt="El-Professor" className="h-[17px] w-auto object-contain" />
+          </span>
 
           <nav style={{ alignItems: 'center', gap: 28 }} className="hidden md:flex">
             {navLinks.map(l => (
@@ -1244,7 +1259,10 @@ const LandingPage: React.FC = () => {
         <div style={{ maxWidth: 1200, margin: '0 auto' }}>
           <div className="mb-10 grid grid-cols-2 gap-x-6 gap-y-8 md:mb-12 md:grid-cols-[2fr_1fr_1fr_1fr] md:gap-10">
             <div className="col-span-2 md:col-span-1">
-              <img src="/professor_logo_white.svg" alt="El-Professor" style={{ height: 28, objectFit: 'contain', marginBottom: 14, opacity: 0.8 }} />
+              <span className="mb-3.5 flex items-center gap-2 opacity-80">
+                <img src="/brand/mark-on-dark.png" alt="" className="h-7 w-auto object-contain" />
+                <img src="/brand/wordmark-on-dark.png" alt="El-Professor" className="h-4 w-auto object-contain" />
+              </span>
               <p style={{ fontSize: 13, color: 'rgba(255,255,255,0.35)', lineHeight: 1.65, maxWidth: 260 }}>
                 {t('landing.footer.tagline')}
               </p>
