@@ -1,6 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { AlertTriangle, Loader2, RotateCw } from 'lucide-react';
+import { useLocation } from 'react-router-dom';
 import SalariesManagement from '../components/SalariesManagement';
+import GehaltsquittungList from '../components/GehaltsquittungList';
+import GehaltsquittungModal from '../components/GehaltsquittungModal';
 import { Button, Card, EmptyState, PageHeader } from '../components/ui';
 import { Driver } from '../types/receipt';
 import { supabase } from '../lib/supabase';
@@ -11,6 +14,12 @@ import { useTranslation } from '../contexts/LanguageContext';
 
 const SalariesPage: React.FC = () => {
   const { t } = useTranslation();
+
+  const location = useLocation();
+  const [isReceiptModalOpen, setIsReceiptModalOpen] = useState(false);
+  const [receiptsVersion, setReceiptsVersion] = useState(0);
+  const focusReceiptState = (location.state as { focusReceiptId?: unknown } | null)?.focusReceiptId;
+  const focusReceiptId = typeof focusReceiptState === 'string' ? focusReceiptState : null;
   const [drivers, setDrivers] = useState<Driver[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
@@ -89,7 +98,30 @@ const SalariesPage: React.FC = () => {
     );
   }
 
-  return <SalariesManagement drivers={drivers} />;
+  return (
+    <div className="grid gap-6">
+      <SalariesManagement drivers={drivers} />
+
+      {/* The Gehaltsquittung lives here since 28.09.2026, at the owner's request:
+          it left the Dokumente screen entirely, so issuing one and finding one
+          again both happen where a salary is paid.
+
+          `focusReceiptId` still arrives in the router's location state, because
+          SalaryDetailsModal links to a receipt it has just written — that link
+          now points at this screen rather than /dokumente. */}
+      <GehaltsquittungList
+        refreshKey={receiptsVersion}
+        focusReceiptId={focusReceiptId}
+        onCreate={() => setIsReceiptModalOpen(true)}
+      />
+
+      <GehaltsquittungModal
+        open={isReceiptModalOpen}
+        onOpenChange={setIsReceiptModalOpen}
+        onChanged={() => setReceiptsVersion(version => version + 1)}
+      />
+    </div>
+  );
 };
 
 export default SalariesPage;
