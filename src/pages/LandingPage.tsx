@@ -812,7 +812,13 @@ const LandingPage: React.FC = () => {
         transition: 'all 0.3s',
       }}>
         <div className="px-4 md:px-6" style={{ maxWidth: 1200, margin: '0 auto', height: 64, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <img src="/professor_logo_white.svg" alt="El-Professor" style={{ height: 30, objectFit: 'contain' }} />
+          {/* The landing page is always dark, whatever the app theme is, so it takes
+              the on-dark mark directly rather than through BrandLogo's pair. The
+              wordmark carries the name beside it, so the mark is decorative. */}
+          <span className="flex items-center gap-2.5">
+            <img src="/brand/mark-on-dark.png" alt="" className="h-[30px] w-auto object-contain" />
+            <img src="/brand/wordmark-on-dark.png" alt="El-Professor" className="h-[17px] w-auto object-contain" />
+          </span>
 
           <nav style={{ alignItems: 'center', gap: 28 }} className="hidden md:flex">
             {navLinks.map(l => (
@@ -1253,7 +1259,10 @@ const LandingPage: React.FC = () => {
         <div style={{ maxWidth: 1200, margin: '0 auto' }}>
           <div className="mb-10 grid grid-cols-2 gap-x-6 gap-y-8 md:mb-12 md:grid-cols-[2fr_1fr_1fr_1fr] md:gap-10">
             <div className="col-span-2 md:col-span-1">
-              <img src="/professor_logo_white.svg" alt="El-Professor" style={{ height: 28, objectFit: 'contain', marginBottom: 14, opacity: 0.8 }} />
+              <span className="mb-3.5 flex items-center gap-2 opacity-80">
+                <img src="/brand/mark-on-dark.png" alt="" className="h-7 w-auto object-contain" />
+                <img src="/brand/wordmark-on-dark.png" alt="El-Professor" className="h-4 w-auto object-contain" />
+              </span>
               <p style={{ fontSize: 13, color: 'rgba(255,255,255,0.35)', lineHeight: 1.65, maxWidth: 260 }}>
                 {t('landing.footer.tagline')}
               </p>
