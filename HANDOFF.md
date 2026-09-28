@@ -1098,6 +1098,17 @@ Secrets never enter git:
 
 ## Waiting on the owner
 
+- **Two customers' logos are SVG files already sitting in a public bucket, and stopping the next upload does not remove them.** Measured on production, 28.09.2026: `company-logos` holds 7 objects — `image/jpeg`, `image/png` and **two `image/svg+xml`**, 117,755 and 101,117 bytes, belonging to two different companies. The bucket is public by design (`CompanySettingsContext` builds every logo URL with `getPublicUrl`; the Mietwagenauftrag prints it), and it is served from the API origin.
+
+  **Why an SVG is different from the other six.** It is a document, not a picture: served inline with `Content-Type: image/svg+xml` it executes whatever script it carries. Uploading is gated on `is_company_admin()`, so until `20260928100000` the type list in `SettingsPage` was the only thing between a company administrator and a script running on `api.elprofessor.eu`.
+
+  **The bound, as narrowly as it was established.** The application keeps its Supabase session in the *app* origin's localStorage, so a script on the API origin does not read it simply by being there. What it certainly gets is execution on a trusted domain — a phishing surface and same-origin footing against whatever that origin does hold. Whether it can be carried further **was not established**, and was not the reason for the change.
+
+  **What was done, and what was deliberately not.** `20260928100000` gives the bucket an allow-list of `image/png`, `image/jpeg`, `image/webp` and a 2 MiB limit, and `SettingsPage` drops `image/svg+xml` from its own list. `allowed_mime_types` gates **uploads only** — it does not retro-reject what is stored. So the next SVG is refused and **the two existing ones are untouched and still served**.
+
+  **The decision is yours**, because the alternatives all cost a customer something: leave them (they are presumably the logos those two companies chose, and no evidence says otherwise); ask the two companies to re-upload a PNG and delete the SVGs; or convert them server-side, which changes a file a customer supplied without asking. Deleting a customer's file is not ours to do.
+
+
 - **The fix plan of 28.09.2026 is `Docs/audit/FIX_PLAN_2026-09-28.md`, and it is where the next session starts.** 44 agents produced it: one read-only verifier per open P0, two adversarial lenses per confirmation, four triage agents over the 53 untriaged P1s, one synthesis. Every severity in it was measured against production or staging, read-only — which is the point: **of the thirteen findings the 26.09 review filed as P0, ten affect zero rows today**, two survived as live and one turned out to be a decision. It carries fourteen ordered items, ten disjoint file groups that can be worked in parallel, the four that need SQL and one kit run, ten owner decisions, twelve findings it refuses to act on with the reason, and a section naming every claim in it that is still reasoned rather than measured.
 
   **The three worth knowing before anything else:**
