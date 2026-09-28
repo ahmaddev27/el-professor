@@ -3,7 +3,7 @@ import { X, Save, Wrench, Calendar } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
-import { getWeekNumber, getWeeksOfMonth, getWeekNumberForDate } from '../utils/weekCalculations';
+import { getWeekNumber, getWeeksOfMonth, getWeekNumberForDate, getBusinessMonth } from '../utils/weekCalculations';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { useTranslation } from '../contexts/LanguageContext';
 
@@ -148,10 +148,40 @@ export default function WerkstattCheckModal({
 
       const selectedDate = checkDate || weekData.firstDay.toISOString().split('T')[0];
 
+      /*
+        The rule being preserved — business week ownership (CLAUDE.md,
+        utils/weekCalculations): a week runs Monday to Sunday and belongs to the
+        month containing its Monday, and `week_number` is the 1..5 ordinal of
+        that week inside its business month.
+
+        Both columns are descriptive: since migration 20260928121500 the table's
+        uniqueness rule is UNIQUE (car_id, date_trunc('week', check_date)), and
+        nothing reads week_number as a key — WerkstattPage loads by check_date
+        between the selected week's Monday and Sunday, OverviewPage orders by
+        check_date, and no screen renders it.
+
+        What changes here is which date they describe: the row's own
+        `check_date`, not the month the navigator happens to show.
+        `selectedMonth.getFullYear()` was the calendar year of the navigated
+        Date, while the week dropdown beside it lists the weeks of that date's
+        *business* month (getWeeksOfMonth -> getBusinessMonth), so on 01.-04.
+        January a check was stored as week 5 of 2026 for a week belonging to
+        December 2025. Measured on staging on 28.09.2026: 3 of the 7 stored rows
+        carry a week_number that is not the ordinal of their own check_date.
+
+        Parsed field by field rather than with `new Date(string)`: a bare
+        'YYYY-MM-DD' is read as UTC midnight, which is the previous day west of
+        Greenwich, and this whole calendar is local. A value the browser could
+        not produce falls back to the old source rather than throwing the save.
+      */
+      const [datePartYear, datePartMonth, datePartDay] = selectedDate.split('-').map(Number);
+      const parsedCheckDate = new Date(datePartYear, datePartMonth - 1, datePartDay);
+      const weekSource = Number.isNaN(parsedCheckDate.getTime()) ? selectedMonth : parsedCheckDate;
+
       const checkData = {
         car_id: carId,
-        week_number: selectedWeek,
-        year: selectedMonth.getFullYear(),
+        week_number: getWeekNumberForDate(weekSource),
+        year: getBusinessMonth(weekSource).year,
         check_date: selectedDate,
         status,
         notes: notes.trim(),
