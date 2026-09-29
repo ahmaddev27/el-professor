@@ -115,11 +115,16 @@ const DriversManagement: React.FC<DriversManagementProps> = ({
         { key: 'createdAt',                     label: t('fleet.createdAt'),              width: 16, format: v => v ? new Date(v as string).toLocaleDateString('de-DE') : '' },
       ],
       rows: drivers as unknown as Record<string, unknown>[],
-      totals: {
-        name: t('fleet.driversTotalsLine', {
+      // The totals row's LABEL, not a figure in the Fahrername column: keyed on
+      // the first column it was discarded unrendered, so the file said
+      // "Gesamt (N Einträge)" instead. `totals: {}` keeps the row — none of the
+      // per-driver figures below is a column this list sums.
+      labels: {
+        totalsRow: t('fleet.driversTotalsLine', {
           total: drivers.length, active: activeDrivers.length, inactive: inactiveDrivers.length,
         }),
       },
+      totals: {},
     });
   };
 

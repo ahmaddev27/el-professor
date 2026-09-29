@@ -9,9 +9,11 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
   real-shaped Receipt.
 
   Both halves are pinned: the exporter the screen uses now reaches the write with
-  real rows on that same input, and the old one is kept as the negative control so
-  nobody wires it back. xlsx's writeFile is mocked at the module boundary — the
-  real one is a DOM download and its property is not redefinable.
+  real rows on that same input, and the old one can no longer be wired back
+  because it no longer exists — deleted under the owner's decision D-E, which the
+  second test below states as the absence of the export rather than as a throw.
+  xlsx's writeFile is mocked at the module boundary — the real one is a DOM
+  download and its property is not redefinable.
 */
 // vi.mock is hoisted above every other statement, so the spy has to be created
 // inside vi.hoisted or the factory closes over a variable that does not exist yet.
@@ -21,7 +23,8 @@ vi.mock('xlsx', async (importOriginal) => {
   return { ...real, writeFile, default: { ...real, writeFile } }
 })
 
-import { exportTableToExcel, exportToExcel } from './excelExport'
+import * as excelExport from './excelExport'
+import { exportTableToExcel } from './excelExport'
 import type { Receipt } from '../types/receipt'
 
 const ONE: Receipt[] = [{
@@ -46,8 +49,12 @@ describe('the Belege Excel export', () => {
     expect(writeFile).toHaveBeenCalledTimes(1)
   })
 
-  it('negative control: the old exportToExcel still throws on the same input, before writing', () => {
-    expect(() => exportToExcel(ONE, 0, false)).toThrow(TypeError)
-    expect(writeFile).not.toHaveBeenCalled()
+  it('negative control: the old exportToExcel is gone, so nothing can wire it back', () => {
+    // It threw a TypeError on this very `ONE` before it was deleted: it read
+    // `receipt.income` and `receipt.balance`, which the Receipt model has never
+    // carried. Absence is the stronger pin — a throw could be "fixed" by adding
+    // the two fields to a row and the report would still be built on a model the
+    // database does not have.
+    expect(Object.keys(excelExport)).not.toContain('exportToExcel')
   })
 })
