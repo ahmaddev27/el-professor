@@ -4,6 +4,7 @@ import {
   LayoutDashboard, FileText, Users, DollarSign, Plus,
   Menu, X, UserCog, Receipt, Wallet, LogOut, Calculator,
   StickyNote, Car, Wrench, Shield, Settings, Bell, CalendarDays, CreditCard, ArrowLeft,
+  Database,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import BrandLogo from './BrandLogo';
@@ -44,11 +45,17 @@ const NAV_ITEMS: NavItem[] = [
   { path: '/company-planner', icon: CalendarDays,   labelKey: 'nav.planner',        feature: 'dokumente' },
 ];
 
+// `feature: 'overview'` is this file's existing spelling for "on every plan":
+// `overview` is `basic`, the lowest rank, so `can()` is true for every plan. The
+// Basic plan is sold with a backup, so Datensicherung is listed on those terms
+// beside /billing and /settings rather than behind `rollen_nutzer`, which is
+// `advanced` and used to hide it from the very customers who had paid for it.
 const ADMIN_ITEMS: NavItem[] = [
-  { path: '/users',    icon: UserCog,    labelKey: 'nav.users',    feature: 'rollen_nutzer' },
-  { path: '/roles',    icon: Shield,     labelKey: 'nav.roles',    feature: 'rollen_nutzer' },
-  { path: '/billing',  icon: CreditCard, labelKey: 'nav.billing',  feature: 'overview' },
-  { path: '/settings', icon: Settings,   labelKey: 'nav.settings', feature: 'overview' },
+  { path: '/users',          icon: UserCog,    labelKey: 'nav.users',         feature: 'rollen_nutzer' },
+  { path: '/roles',          icon: Shield,     labelKey: 'nav.roles',         feature: 'rollen_nutzer' },
+  { path: '/datensicherung', icon: Database,   labelKey: 'bill.backup.title', feature: 'overview' },
+  { path: '/billing',        icon: CreditCard, labelKey: 'nav.billing',       feature: 'overview' },
+  { path: '/settings',       icon: Settings,   labelKey: 'nav.settings',      feature: 'overview' },
 ];
 
 const Sidebar: React.FC<SidebarProps> = ({ isSupportAdmin }) => {

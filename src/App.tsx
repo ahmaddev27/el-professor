@@ -29,6 +29,7 @@ import WerkstattPage from './pages/WerkstattPage';
 import { AbrechnungPage } from './pages/AbrechnungPage';
 import { NotesPage } from './pages/NotesPage';
 import UsersPage from './pages/UsersPage';
+import BackupPage from './pages/BackupPage';
 import RolesPage from './pages/RolesPage';
 import DocumentsPage from './pages/DocumentsPage';
 import StundennachweisPage from './pages/StundennachweisPage';
@@ -665,6 +666,20 @@ function App() {
                 <Route path="roles"    element={<CompanyAdminRoute><PlanGate feature="rollen_nutzer"><RolesPage /></PlanGate></CompanyAdminRoute>} />
                 <Route path="billing"  element={<CompanyAdminRoute><CompanyBillingPage /></CompanyAdminRoute>} />
                 <Route path="settings" element={<CompanyAdminRoute><SettingsPage /></CompanyAdminRoute>} />
+                {/* Datensicherung was a tab on Benutzer, which is gated on
+                    `rollen_nutzer` — advanced. The Basic plan is sold with a
+                    backup (LandingPage.tsx:543), so a Basic administrator could
+                    not reach the feature they had paid for. It is administrator-
+                    only and deliberately NOT plan-gated, the shape /billing and
+                    /settings already use for "every plan, admins only".
+                    A FeatureKey of its own would need a migration seeding
+                    `plan_features`, and a feature the stored map does not name
+                    reads as premium for every plan — the same reason given for
+                    /fahrtenanalyse above. A gate at `basic` and no gate are
+                    behaviourally identical anyway, `basic` being the lowest
+                    rank, so the key would buy nothing and risk locking every
+                    gated screen if the map and the build ever disagreed. */}
+                <Route path="datensicherung" element={<CompanyAdminRoute><BackupPage /></CompanyAdminRoute>} />
                 <Route path="*" element={<Navigate to="/overview" replace />} />
               </Route>
 
