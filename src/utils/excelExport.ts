@@ -1051,12 +1051,27 @@ export const exportSalariesToExcel = (salaries: SalaryCalculation[], periodStart
 
 // ─── Generic reusable table export ────────────────────────────────────────────
 
+export type ExportColumnType = 'text' | 'number' | 'integer' | 'money' | 'percent';
+
 export interface ExportColumn {
   key: string;
   label: string;
   width?: number;
   align?: 'left' | 'center' | 'right';
+  /**
+   * The display of a TEXT column. A numeric column is displayed by its number
+   * format instead, so `format` is ignored there — pass one or the other, never
+   * both, or the cell reads as text again by accident.
+   */
   format?: (value: unknown) => string;
+  /**
+   * Write the cell as a typed value with a German display format, so Excel can
+   * sum, sort and compute with it. Default: 'text'.
+   *
+   * THE INVARIANT: a column that does not opt in renders byte-identically to
+   * before this existed — same `t`, same `v`, no `z` key at all.
+   */
+  type?: ExportColumnType;
 }
 
 /**
@@ -1097,7 +1112,8 @@ export interface ExportOptions {
   columns: ExportColumn[];
   rows: Record<string, unknown>[];
   filterSummary?: string[];
-  totals?: Record<string, string>;
+  /** A number is written as a number cell in its column's format; a string as text. */
+  totals?: Record<string, string | number>;
   /** Defaults to the German wording this export has always had. */
   labels?: Partial<ExportChromeLabels>;
 }
@@ -1127,6 +1143,21 @@ const T = {
   FOOTER_LINE:  'CBD5E1',
 } as const;
 
+// ─── Number formats ───────────────────────────────────────────────────────────
+// An xlsx number format is stored in EN-US convention and Excel renders it with
+// the viewer's locale. So German 1.234,56 is written '#,##0.00' — NOT
+// '#.##0,00', which would produce a file that looks right to nobody.
+//
+// 'percent' multiplies by 100 on display, so a column using it must hold the
+// FRACTION (0.4147 for 41,47 %). A column whose raw value is already multiplied
+// uses 'number' and keeps the % in its label.
+const NUMBER_FORMATS: Record<Exclude<ExportColumnType, 'text'>, string> = {
+  number:  '#,##0.00',
+  integer: '#,##0',
+  money:   '#,##0.00\\ "€"',
+  percent: '0.0%',
+} as const;
+
 // ─── Style helpers ────────────────────────────────────────────────────────────
 
 function gridBorder() {
@@ -1153,9 +1184,44 @@ function cell(
   c: number,
   value: string | number,
   style: object,
+  numberFormat?: string,
 ) {
   const addr = XLSX.utils.encode_cell({ r, c });
   ws[addr] = { t: typeof value === 'number' ? 'n' : 's', v: value, s: style };
+  // Set only for a column that opted in, so every other cell keeps exactly the
+  // three keys it has always had.
+  if (numberFormat) ws[addr].z = numberFormat;
+}
+
+/**
+ * The finite number a raw value stands for, or null when it stands for none.
+ *
+ * Null is never coerced to 0: a 0,00 € where the datum is missing is a wrong
+ * figure, and this product's figures reconcile against an accountant's. The
+ * caller falls back to the text path instead.
+ */
+function asFiniteNumber(raw: unknown): number | null {
+  if (typeof raw === 'number') return Number.isFinite(raw) ? raw : null;
+  if (typeof raw === 'string') {
+    // Number('   ') is 0, so an all-whitespace string must be refused by hand.
+    const trimmed = raw.trim();
+    if (trimmed === '') return null;
+    const parsed = Number(trimmed);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+/**
+ * The number cell a column asks for, or null to leave the value on the text path
+ * — because the column did not opt in, or because its value cannot be read.
+ * Returns an object rather than a number so that a legitimate 0 stays truthy.
+ */
+function numericCell(col: ExportColumn, raw: unknown): { value: number; z: string } | null {
+  if (!col.type || col.type === 'text') return null;
+  const value = asFiniteNumber(raw);
+  if (value === null) return null;
+  return { value, z: NUMBER_FORMATS[col.type] };
 }
 
 function blank(ws: XLSX.WorkSheet, r: number, numCols: number, bg = 'FFFFFF') {
@@ -1167,8 +1233,13 @@ function blank(ws: XLSX.WorkSheet, r: number, numCols: number, bg = 'FFFFFF') {
 
 // ─── Main export function ─────────────────────────────────────────────────────
 
-export function exportTableToExcel(opts: ExportOptions): void {
-  const { filename, sheetTitle, moduleName, columns, rows, filterSummary = [], totals } = opts;
+/**
+ * Builds the workbook `exportTableToExcel` writes. Split out so the sheet can be
+ * inspected cell by cell in a test without touching the filesystem —
+ * `XLSX.writeFile` is the only part that does.
+ */
+export function buildTableWorkbook(opts: ExportOptions): XLSX.WorkBook {
+  const { sheetTitle, moduleName, columns, rows, filterSummary = [], totals } = opts;
   const labels: ExportChromeLabels = { ...DEFAULT_EXPORT_CHROME, ...(opts.labels ?? {}) };
   const N = columns.length;
   const exportedAt  = new Date().toLocaleString('de-DE');
@@ -1301,9 +1372,14 @@ export function exportTableToExcel(opts: ExportOptions): void {
 
     columns.forEach((col, c) => {
       const rawVal   = dataRow[col.key];
-      const formatted = col.format
-        ? col.format(rawVal)
-        : rawVal == null ? '' : String(rawVal);
+      const numeric  = numericCell(col, rawVal);
+      // A numeric column is displayed by its `z`; a text column by its `format`.
+      // With no number to write, the text path below is exactly what it always was.
+      const formatted = numeric
+        ? numeric.value
+        : col.format
+          ? col.format(rawVal)
+          : rawVal == null ? '' : String(rawVal);
 
       cell(ws, R, c, formatted, {
         font:      { sz: 10, name: 'Calibri', color: { rgb: '1E293B' } },
@@ -1324,7 +1400,7 @@ export function exportTableToExcel(opts: ExportOptions): void {
             ? { style: 'medium', color: { rgb: T.COL_HEAD_BG } }
             : { style: 'thin',   color: { rgb: T.ROW_BORDER_V } },
         },
-      });
+      }, numeric?.z);
     });
     R++;
   });
@@ -1366,7 +1442,13 @@ export function exportTableToExcel(opts: ExportOptions): void {
 
     columns.forEach((col, c) => {
       const isLabel = c === 0;
-      const val     = isLabel ? chromeText(labels.totalsRow, rows.length) : (totals[col.key] ?? '');
+      // The first cell is always the label, as it always was — never a figure.
+      // The label follows the UI language since #112; only the figures are ours.
+      const rawTotal = totals[col.key];
+      const numeric  = isLabel ? null : numericCell(col, rawTotal);
+      const val      = isLabel
+        ? chromeText(labels.totalsRow, rows.length)
+        : numeric ? numeric.value : (rawTotal ?? '');
       cell(ws, R, c, val, {
         font: {
           bold:  true,
@@ -1386,7 +1468,7 @@ export function exportTableToExcel(opts: ExportOptions): void {
           left:   c === 0     ? { style: 'medium', color: { rgb: T.COL_HEAD_BG } } : { style: 'thin', color: { rgb: T.ROW_BORDER_V } },
           right:  c === N - 1 ? { style: 'medium', color: { rgb: T.COL_HEAD_BG } } : { style: 'thin', color: { rgb: T.ROW_BORDER_V } },
         },
-      });
+      }, numeric?.z);
     });
     R++;
   } else {
@@ -1495,6 +1577,11 @@ export function exportTableToExcel(opts: ExportOptions): void {
 
   XLSX.utils.book_append_sheet(wb, ws, moduleName.slice(0, 31));
 
-  const safeFilename = filename.endsWith('.xlsx') ? filename : `${filename}.xlsx`;
+  return wb;
+}
+
+export function exportTableToExcel(opts: ExportOptions): void {
+  const wb = buildTableWorkbook(opts);
+  const safeFilename = opts.filename.endsWith('.xlsx') ? opts.filename : `${opts.filename}.xlsx`;
   XLSX.writeFile(wb, safeFilename);
 }

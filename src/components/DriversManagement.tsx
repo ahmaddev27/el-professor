@@ -91,16 +91,21 @@ const DriversManagement: React.FC<DriversManagementProps> = ({
         { key: 'status',                        label: t('common.status'),                width: 12, format: v => v === 'active' ? t('overview.status.active') : t('overview.status.inactive') },
         { key: 'gender',                        label: t('fleet.salutation'),             width: 10, format: v => v === 'male' ? t('fleet.salutationMr') : v === 'female' ? t('fleet.salutationMrs') : '' },
         { key: 'employment_type',               label: t('fleet.employmentType'),         width: 22, format: v => v === 'company_owner' ? t('fleet.companyOwner') : v === 'employee' ? t('fleet.employed') : '' },
-        { key: 'salaryRatio',                   label: t('fleet.salaryShare'),            width: 16, align: 'right' as const, format: v => v != null ? `${((v as number) * 100).toFixed(0)} %` : '' },
+        // drivers.salary_ratio is numeric(5,4) between 0 and 1 — the fraction
+        // Excel's percent format expects, since it multiplies by 100 itself.
+        { key: 'salaryRatio',                   label: t('fleet.salaryShare'),            width: 16, align: 'right' as const, type: 'percent' },
         { key: 'planning_enabled',              label: t('fleet.planningActive'),         width: 14, format: yesNo },
-        { key: 'planning_hourly_rate',          label: t('fleet.hourlyRate'),             width: 16, align: 'right' as const, format: v => v != null ? `${(v as number).toFixed(2)} €` : '' },
-        { key: 'planning_min_salary',           label: t('fleet.minSalary'),              width: 16, align: 'right' as const, format: v => v != null ? `${(v as number).toFixed(2)} €` : '' },
-        { key: 'planning_max_salary',           label: t('fleet.maxSalary'),              width: 16, align: 'right' as const, format: v => v != null ? `${(v as number).toFixed(2)} €` : '' },
-        { key: 'target_monthly_hours',          label: t('fleet.targetHoursShort'),       width: 16, align: 'right' as const, format: v => v != null ? String(v) : '' },
-        { key: 'max_monthly_hours',             label: t('fleet.maxHoursShort'),          width: 16, align: 'right' as const, format: v => v != null ? String(v) : '' },
+        // Euros, not cents: planning_hourly_rate is numeric and both salary
+        // bounds are numeric(10,2), all of them stored as euro amounts.
+        { key: 'planning_hourly_rate',          label: t('fleet.hourlyRate'),             width: 16, align: 'right' as const, type: 'money' },
+        { key: 'planning_min_salary',           label: t('fleet.minSalary'),              width: 16, align: 'right' as const, type: 'money' },
+        { key: 'planning_max_salary',           label: t('fleet.maxSalary'),              width: 16, align: 'right' as const, type: 'money' },
+        // Both hour columns are plain `numeric`, so a half hour is possible.
+        { key: 'target_monthly_hours',          label: t('fleet.targetHoursShort'),       width: 16, align: 'right' as const, type: 'number' },
+        { key: 'max_monthly_hours',             label: t('fleet.maxHoursShort'),          width: 16, align: 'right' as const, type: 'number' },
         { key: 'driver_usage_type',             label: t('fleet.usageType'),              width: 20, format: v => v === 'regular' ? t('fleet.regular') : v === 'coverage_only' ? t('fleet.coverageOnly') : '' },
         { key: 'can_cover_other_drivers',       label: t('fleet.canCover'),               width: 14, format: yesNo },
-        { key: 'planning_priority',             label: t('fleet.priority'),               width: 12, align: 'right' as const, format: v => v != null ? String(v) : '' },
+        { key: 'planning_priority',             label: t('fleet.priority'),               width: 12, align: 'right' as const, type: 'integer' },
         { key: 'allowed_weekdays',              label: t('fleet.allowedWeekdaysColumn'),  width: 28, format: v => Array.isArray(v) ? (v as number[]).map(n => WEEKDAYS[n] ?? n).join(', ') : v == null ? t('common.all') : '' },
         { key: 'work_window_start',             label: t('fleet.workWindowFrom'),         width: 18, format: v => v != null ? String(v) : '' },
         { key: 'work_window_end',               label: t('fleet.workWindowTo'),           width: 18, format: v => v != null ? String(v) : '' },
