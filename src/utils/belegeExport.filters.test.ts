@@ -65,11 +65,31 @@ const receipt = (over: Partial<Receipt> = {}): Receipt => ({
   ...over,
 });
 
-const AUGUST: ReceiptExportFilters = {
-  dateRange: { start: '2026-08-01', end: '2026-08-30' },
-  week: 35,
+/**
+ * A state the screen can actually produce. The first draft of this fixture used
+ * `week: 35` with the whole month's range, and it was neither: selecting a week
+ * narrows `activeDateKeys` to that week's Monday–Sunday, and
+ * `getBusinessWeeksForMonth` numbers the weeks of the month `index + 1`, so the
+ * field runs 1..5 and can never hold 35. That mattered — `35` made the old
+ * filename's `_KW35` read plausibly for late August and hid the fact that the
+ * number is not a Kalenderwoche at all.
+ *
+ * Measured for August 2026: the Mondays are the 3rd, 10th, 17th, 24th and 31st,
+ * so Woche 3 is 17.08.–23.08. — ISO calendar week 34, not 3.
+ */
+const AUGUST_WEEK_3: ReceiptExportFilters = {
+  dateRange: { start: '2026-08-17', end: '2026-08-23' },
+  week: 3,
   driver: 'Ali',
   search: 'Tanken',
+};
+
+/** The whole business month: `getBusinessMonthRange(7, 2026)`, measured. */
+const AUGUST_MONTH: ReceiptExportFilters = {
+  dateRange: { start: '2026-08-03', end: '2026-09-06' },
+  week: null,
+  driver: 'Ali',
+  search: '',
 };
 
 const SHEET = 'Belege';
@@ -138,9 +158,9 @@ describe('both export buttons write the same rows', () => {
 
 describe('the filter band states the filter that was applied', () => {
   it('names the period, the week, the driver and the search', () => {
-    expect(describeReceiptFilters(AUGUST, de)).toEqual([
-      'Zeitraum: 01.08.2026 – 30.08.2026',
-      'Woche 35',
+    expect(describeReceiptFilters(AUGUST_WEEK_3, de)).toEqual([
+      'Zeitraum: 17.08.2026 – 23.08.2026',
+      'Woche 3',
       'Fahrer: Ali',
       'Suchen: Tanken',
     ]);
@@ -156,9 +176,8 @@ describe('the filter band states the filter that was applied', () => {
   });
 
   it('omits the week and the search only when they are unset', () => {
-    const monthOnly: ReceiptExportFilters = { ...AUGUST, week: null, search: '' };
-    expect(describeReceiptFilters(monthOnly, de)).toEqual([
-      'Zeitraum: 01.08.2026 – 30.08.2026',
+    expect(describeReceiptFilters(AUGUST_MONTH, de)).toEqual([
+      'Zeitraum: 03.08.2026 – 06.09.2026',
       'Fahrer: Ali',
     ]);
   });
@@ -168,8 +187,8 @@ describe('the filter band states the filter that was applied', () => {
   });
 
   it('reaches the workbook, in the filter row', () => {
-    const ws = sheetOf([receipt()], AUGUST);
-    expect(at(ws, FILTER_ROW, 0).v).toContain('Zeitraum: 01.08.2026 – 30.08.2026');
+    const ws = sheetOf([receipt()], AUGUST_WEEK_3);
+    expect(at(ws, FILTER_ROW, 0).v).toContain('Zeitraum: 17.08.2026 – 23.08.2026');
     expect(at(ws, FILTER_ROW, 0).v).toContain('Fahrer: Ali');
   });
 });
@@ -243,8 +262,8 @@ describe('dates', () => {
     // Scoped to the cells this module writes. The exporter's own meta and footer
     // rows carry `new Date().toLocaleString('de-DE')`, whose output depends on
     // the runner's ICU data, and they are not this module's to assert.
-    const ws = sheetOf([receipt({ date: '2026-09-01' })], AUGUST);
-    const columns = buildBelegeExportOptions([], AUGUST, de).columns.length;
+    const ws = sheetOf([receipt({ date: '2026-09-01' })], AUGUST_WEEK_3);
+    const columns = buildBelegeExportOptions([], AUGUST_WEEK_3, de).columns.length;
     const ours: string[] = [];
     for (const r of [FILTER_ROW, FIRST_DATA_ROW]) {
       for (let c = 0; c < columns; c++) {
@@ -258,7 +277,17 @@ describe('dates', () => {
 
 describe('the filename', () => {
   it('names the period the file holds, not the day it was written', () => {
-    expect(belegeExportFilename(AUGUST)).toBe('belege_2026-08-01_2026-08-30_KW35');
+    expect(belegeExportFilename(AUGUST_MONTH)).toBe('belege_2026-08-03_2026-09-06');
+  });
+
+  it('names the week the way the screen does, and never as a Kalenderwoche', () => {
+    // `week` is the week WITHIN the month (getBusinessWeeksForMonth numbers them
+    // `index + 1`), so it runs 1..5. `KW` means Kalenderwoche: `…_KW3` for the
+    // third week of August 2026 — 17.08.–23.08., ISO calendar week 34 — names
+    // mid-January to anyone who reads German. The screen's own word for this
+    // number is "Woche", in both the week dropdown and the active-week band.
+    expect(belegeExportFilename(AUGUST_WEEK_3)).toBe('belege_2026-08-17_2026-08-23_Woche3');
+    expect(belegeExportFilename(AUGUST_WEEK_3)).not.toMatch(/KW/);
   });
 
   it('says so when the file holds everything', () => {

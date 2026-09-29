@@ -48,7 +48,14 @@ export interface ReceiptExportFilters {
    * period's last day.
    */
   dateRange: { start: string; end: string } | null;
-  /** The business week inside the selected month, or null for all weeks. */
+  /**
+   * The business week **inside the selected month** — 1..5, as
+   * `getBusinessWeeksForMonth` numbers them (`index + 1` over the month's
+   * Mondays) — or null for all weeks. It is not an ISO calendar week, so nothing
+   * here may label it `KW`. The screen cannot set this and a custom date range at
+   * once: both date inputs reset `selectedWeek` to 0 and `handleWeekChange`
+   * clears both dates, so a week named here was always the week applied.
+   */
   week: number | null;
   /** The chosen driver's name, or '' for all drivers. */
   driver: string;
@@ -88,16 +95,24 @@ export function describeReceiptFilters(filters: ReceiptExportFilters, t: Transla
 /**
  * The file's own name, built from the period it holds rather than from the day
  * it was written. A folder of `belege_2026-09-24.xlsx` says when somebody
- * clicked; a folder of `belege_2026-08-01_2026-08-30_KW35.xlsx` says what is
+ * clicked; a folder of `belege_2026-08-17_2026-08-23_Woche3.xlsx` says what is
  * inside. The driver stays out of the name — transliterating "Müller" for a
  * filename is the summary PDF's own business, and duplicating it here would
  * give the two files two spellings — and the band inside names it.
+ *
+ * NOT `KW`. `KW` is *Kalenderwoche* in German, and this number is nothing of the
+ * kind: `getBusinessWeeksForMonth` numbers the weeks of the selected month
+ * `index + 1`, so it runs 1..5 and 3 means "the third week of this month".
+ * August 2026's third week is 17.08.–23.08., whose ISO calendar week is 34 — a
+ * file named `…_KW3` would name mid-January to every reader who knows what KW
+ * means. `Woche` is the word the screen itself uses for this number, in the week
+ * dropdown and in the active-week band, so the file and the screen agree.
  */
 export function belegeExportFilename(filters: ReceiptExportFilters): string {
   const period = filters.dateRange
     ? `${filters.dateRange.start}_${filters.dateRange.end}`
     : 'alle';
-  const week = filters.week !== null ? `_KW${filters.week}` : '';
+  const week = filters.week !== null ? `_Woche${filters.week}` : '';
   return `belege_${period}${week}`;
 }
 
