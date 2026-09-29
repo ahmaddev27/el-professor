@@ -363,7 +363,12 @@ const FixedCostsManagement: React.FC = () => {
     <div className="font-ui">
       {header(
         <>
-          <Button variant="secondary" onClick={handleExport}>
+          {/* The rule: an empty table and a total of 0,00 € are claims about the
+              company's data, and after a read that failed the screen has made no
+              such observation. `loadFailed` already withholds the KpiCard and
+              blanks the table; the same claim inside a workbook is one the screen
+              cannot take back once the file has left the browser. */}
+          <Button variant="secondary" onClick={handleExport} disabled={loadFailed}>
             <Download aria-hidden />
             {t('common.exportExcelShort')}
           </Button>
