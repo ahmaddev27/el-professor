@@ -1,5 +1,5 @@
 import React, { useState, useEffect, type ReactNode } from 'react';
-import { Download, Plus, RotateCw, Trash2 } from 'lucide-react';
+import { Plus, RotateCw, Trash2 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useCompanyScope } from '../hooks/useCompanyScope';
 import { useToast } from '../contexts/ToastContext';
@@ -10,11 +10,11 @@ import ReceiptList, { PdfFilterInfo } from '../components/ReceiptList';
 import ReceiptModal from '../components/ReceiptModal';
 import { Alert, Button, ConfirmDialog, DataTable, KpiCard, PageHeader } from '../components/ui';
 import { exportTableToExcel } from '../utils/excelExport';
+import { buildBelegeExportOptions, type ReceiptExportFilters } from '../utils/belegeExport';
 import { handleDatabaseError } from '../utils/errorHandler';
 import { generateReceiptPdf } from '../utils/receiptPdf';
 import { supabase } from '../lib/supabase';
 import { useTranslation } from '../contexts/LanguageContext';
-import { formatEuro } from '../components/ui/format';
 
 interface ConfirmModalState {
   isOpen: boolean;
@@ -39,7 +39,11 @@ const BelegePage: React.FC = () => {
   const [userDisplayNames, setUserDisplayNames] = useState<Map<string, string>>(new Map());
   const [isReceiptModalOpen, setIsReceiptModalOpen] = useState(false);
   const [editingReceipt, setEditingReceipt] = useState<Receipt | null>(null);
-  const [filteredReceipts, setFilteredReceipts] = useState<Receipt[]>([]);
+  // CLAUDE.md, "A figure whose load failed is not shown": one state, cleared
+  // where the load starts and set in its existing catch, and the export withheld
+  // while it is set. Without it a failed read wrote a workbook whose totals row
+  // claimed 0,00 € for a company that has Belege.
+  const [loadFailed, setLoadFailed] = useState(false);
   const [confirmModal, setConfirmModal] = useState<ConfirmModalState>({
     isOpen: false,
     title: '',
@@ -55,12 +59,9 @@ const BelegePage: React.FC = () => {
     if (!dbLoading) loadData();
   }, [dbLoading]);
 
-  useEffect(() => {
-    setFilteredReceipts(receipts);
-  }, [receipts]);
-
   const loadData = async () => {
     setLoading(true);
+    setLoadFailed(false);
     try {
       const [receiptsData, driversData, profilesRes] = await Promise.all([
         receiptActions.get(),
@@ -77,6 +78,7 @@ const BelegePage: React.FC = () => {
       setUserDisplayNames(nameMap);
     } catch (error) {
       console.error('Error loading data:', error);
+      setLoadFailed(true);
     } finally {
       setLoading(false);
     }
@@ -144,41 +146,22 @@ const BelegePage: React.FC = () => {
     threw `TypeError: Cannot read properties of undefined (reading 'toFixed')`
     before writing a cell, for every company with at least one Beleg, with no
     try/catch and no error boundary — the click produced no file and no message.
-    Measured by calling it on one real-shaped Receipt.
+    It is deleted now (the owner's decision D-E), and this uses
+    exportTableToExcel, the generic dump six other screens already use
+    (Fahrzeuge, Fahrer, Fixkosten, Benutzer, Bargeldbestand, Werkstatt). Per
+    CLAUDE.md this dump is not a statutory form, so its headers follow the UI
+    language like any other label.
 
-    This uses exportTableToExcel, the generic dump six other screens already use
-    (Fahrzeuge, Fahrer, Fixkosten, Benutzer, Bargeldbestand, Werkstatt), and
-    reports what a Beleg actually is. Per CLAUDE.md this dump is not a statutory
-    form, so its headers follow the UI language like any other label.
+    THE RULE THIS PRESERVES: the file holds the rows the operator is looking at,
+    and says which filter produced them. The rows and the filter therefore arrive
+    as arguments from the list that computed them — the same values, from the same
+    binding, that the summary PDF beside it receives. This page no longer keeps a
+    copy of the filtered list: it kept one, `filteredReceipts`, whose only writer
+    was a callback nothing called, so the header's Excel button exported every
+    Beleg the company had ever entered and stamped it "Gefilterte Auswahl".
   */
-  const handleExportExcel = () => {
-    const toExport = filteredReceipts.length > 0 ? filteredReceipts : receipts;
-    const total = toExport.reduce((sum, r) => sum + (r.expense || 0), 0);
-    exportTableToExcel({
-      filename: `belege_${new Date().toISOString().slice(0, 10)}`,
-      sheetTitle: t('belege.title'),
-      moduleName: t('belege.title'),
-      filterSummary: filteredReceipts.length > 0 ? [t('belege.filterApplied')] : [],
-      columns: [
-        { key: 'receiptNumber', label: t('belege.number'), width: 20 },
-        { key: 'date', label: t('common.date'), width: 14, format: v => new Date(v as string).toLocaleDateString('de-DE') },
-        { key: 'driverName', label: t('common.driver'), width: 22 },
-        { key: 'description', label: t('common.description'), width: 40 },
-        { key: 'paymentMethod', label: t('belege.paymentMethod'), width: 16,
-          format: v => v === 'uberweisung' ? t('belege.transfer') : t('belege.cash') },
-        { key: 'expense', label: t('belege.amount'), width: 16, align: 'right',
-          format: v => formatEuro(v as number) },
-      ],
-      rows: toExport.map(r => ({
-        receiptNumber: r.receiptNumber,
-        date: r.date,
-        driverName: r.driverName,
-        description: r.description,
-        paymentMethod: r.paymentMethod ?? 'bar',
-        expense: r.expense,
-      })),
-      totals: { expense: formatEuro(total) },
-    });
+  const handleExportExcel = (rows: Receipt[], filters: ReceiptExportFilters) => {
+    exportTableToExcel(buildBelegeExportOptions(rows, filters, t));
   };
 
   const handleDownloadPdf = (filtered: Receipt[], filterInfo: PdfFilterInfo) => {
@@ -247,26 +230,27 @@ const BelegePage: React.FC = () => {
 
   return (
     <div className="font-ui">
+      {/* The Excel button is no longer here. It sits in ReceiptList beside the
+          summary PDF, because both write the filtered list and only that
+          component knows what it is — from here the button could reach the rows
+          on screen only through a copy, and the copy was the defect. */}
+      {/* A read context, or a role without the right, adds nothing (plan 3.4b);
+          handleAddReceipt refuses it as well. With the export moved out, this is
+          the only header action left — so it is passed as itself rather than
+          wrapped in a fragment, which PageHeader would render as an empty
+          actions row for a reader who may not add. */}
       {header(
-        <>
-          <Button variant="secondary" onClick={handleExportExcel}>
-            <Download aria-hidden />
-            {t('common.exportExcelShort')}
+        canCreate ? (
+          <Button
+            onClick={() => {
+              setEditingReceipt(null);
+              setIsReceiptModalOpen(true);
+            }}
+          >
+            <Plus aria-hidden />
+            {t('belege.add')}
           </Button>
-          {/* A read context, or a role without the right, adds nothing (plan
-              3.4b); handleAddReceipt refuses it as well. */}
-          {canCreate ? (
-            <Button
-              onClick={() => {
-                setEditingReceipt(null);
-                setIsReceiptModalOpen(true);
-              }}
-            >
-              <Plus aria-hidden />
-              {t('belege.add')}
-            </Button>
-          ) : null}
-        </>,
+        ) : undefined,
       )}
 
       <ReceiptList
@@ -274,11 +258,12 @@ const BelegePage: React.FC = () => {
         drivers={drivers}
         onEdit={handleEditReceipt}
         onDelete={handleDeleteReceipt}
-        onExportFiltered={(filtered) => setFilteredReceipts(filtered)}
+        onExportExcel={handleExportExcel}
         onDownloadPdf={handleDownloadPdf}
         canEdit={canEditReceipt}
         canDelete={canDeleteReceipt}
         userDisplayNames={userDisplayNames}
+        exportDisabled={loadFailed}
       />
 
       {isReceiptModalOpen && (
