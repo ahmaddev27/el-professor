@@ -1989,6 +1989,7 @@ export const de = {
   'sa.billing.col.activeTo':               'Aktiv bis',
   'sa.billing.col.code':                   'Code',
   'sa.billing.col.duration':               'Dauer',
+  'sa.billing.col.source':                 'Quelle',
   'sa.billing.col.type':                   'Typ',
   'sa.billing.dayCount.one':               '{count} Tag',
   'sa.billing.dayCount.other':             '{count} Tage',
@@ -1999,15 +2000,33 @@ export const de = {
   'sa.billing.expiredOnColon':             'Abgelaufen am:',
   'sa.billing.expiredSub':                 'Ihr Abonnement ist abgelaufen. Bitte geben Sie einen neuen Aktivierungscode ein.',
   'sa.billing.expiredTitle':               'Abonnement abgelaufen',
-  'sa.billing.historyEmpty':               'Noch keine Aktivierungen vorhanden',
+  // Die Liste zeigt jeden erfassten Zeitraum — Rechnung, Aktivierungscode,
+  // manuelle Freigabe, Testphase, Übernahme —, nicht nur Aktivierungen.
+  'sa.billing.historyEmpty':               'Noch keine Abo-Zeiträume erfasst',
   'sa.billing.historyTitle':               'Zahlungs- & Aktivierungshistorie',
   'sa.billing.inactiveWithHistory':        'Das Abonnement ist aktuell nicht aktiv. Frühere Aktivierungen sind unten sichtbar.',
+  'sa.billing.loadFailed':                 'Abo-Daten nicht geladen',
+  'sa.billing.loadFailedBody':             'Ihr Abo-Status und Ihre Historie konnten nicht geladen werden. Solange das so ist, werden hier keine Zahlen angezeigt. Bitte laden Sie die Seite neu.',
   'sa.billing.noneSub':                    'Bitte geben Sie einen Aktivierungscode ein, um Ihr Abonnement freizuschalten.',
   'sa.billing.noneTitle':                  'Kein aktives Abonnement',
+  // Ein Zeitraum ohne Ende (period_end IS NULL) ist unbefristet, nicht
+  // unbekannt — ein Strich würde das Gegenteil behaupten.
+  'sa.billing.openEnded':                  'Unbefristet',
   'sa.billing.remainingTerm':              'Restlaufzeit',
+  // Fünf Zustände eines Zeitraums, siehe src/lib/companyCoverageHistory.ts:
+  // „Ohne Freigabe“ ist ein erfasster Zeitraum, der nie Zugang gewährt hat, und
+  // ist deshalb nicht dasselbe wie „Abgelaufen“ oder „Zurückgenommen“.
+  'sa.billing.rowBlocked':                 'Ohne Freigabe',
   'sa.billing.rowCurrentlyActive':         'Aktuell aktiv',
+  'sa.billing.rowFuture':                  'Geplant',
   'sa.billing.rowTypeCash':                'Barzahlung / Aktivierungscode',
   'sa.billing.rowUsed':                    'Verwendet',
+  'sa.billing.rowWithdrawn':               'Zurückgenommen',
+  'sa.billing.source.activationCode':      'Aktivierungscode',
+  'sa.billing.source.invoice':             'Rechnung',
+  'sa.billing.source.manual':              'Manuelle Freigabe',
+  'sa.billing.source.migration':           'Übernahme',
+  'sa.billing.source.trial':               'Testphase',
   'sa.billing.startedOn':                  'Gestartet am',
   'sa.billing.statusExpired':              'Abgelaufen',
   'sa.billing.statusLabel':                'Abo-Status',
@@ -4830,6 +4849,11 @@ export const de = {
 
   'admin.read.denied': 'Keine Berechtigung',
   'admin.read.failed': 'Die Daten konnten nicht geladen werden.',
+  // Ein Wert, der nicht gelesen werden konnte, wird nie als Zahl gezeigt — auch
+  // nicht als 0. Diese drei Sätze sagen statt einer Zahl, was fehlt.
+  'admin.read.failedTitle':   'Nicht geladen',
+  'admin.read.partial':       'Angezeigt: {shown} von {total} — dies ist eine Seite, keine vollständige Liste.',
+  'admin.read.countsUnknown': 'Die zugehörigen Zahlen konnten nicht gelesen werden und stehen als „–“.',
 
   'admin.common.refresh':       'Aktualisieren',
   'admin.common.search':        'Suchen',

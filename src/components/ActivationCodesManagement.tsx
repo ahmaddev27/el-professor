@@ -10,8 +10,18 @@ import {
 } from 'lucide-react';
 import { format, addDays, addMonths, addYears } from 'date-fns';
 import { de } from 'date-fns/locale';
+import { Alert } from './ui';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
+
+/**
+ * The code list is one page, newest first. It always was — the `.limit(200)`
+ * has been there from the start — but nothing on screen said so, so on a
+ * platform past 200 codes the history read as complete while the oldest codes
+ * were simply absent. The number is named here so the note and the query cannot
+ * drift apart.
+ */
+const CODES_PAGE_SIZE = 200;
 
 type DurationType = '1_monat' | '3_monate' | '1_jahr' | 'benutzerdefiniert';
 type CodeStatus   = 'active' | 'used' | 'expired' | 'revoked';
@@ -323,8 +333,15 @@ export default function ActivationCodesManagement({ companies: propCompanies }: 
   const { t } = useTranslation();
 
   const [codes, setCodes]       = useState<ActivationCode[]>([]);
+  /** How many codes exist in all, or null where the database did not say. */
+  const [codeTotal, setCodeTotal] = useState<number | null>(null);
   const [companies, setCompanies] = useState<CompanyOption[]>(propCompanies ?? []);
   const [loading, setLoading]   = useState(true);
+  /**
+   * A read that did not succeed. The table then says so instead of "Keine
+   * Einträge für diesen Filter", which is a claim about which codes exist.
+   */
+  const [loadFailed, setLoadFailed] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [activeFilter, setActiveFilter] = useState<FilterTab>('all');
@@ -357,13 +374,18 @@ export default function ActivationCodesManagement({ companies: propCompanies }: 
 
   const load = useCallback(async () => {
     setLoading(true);
+    setLoadFailed(false);
     try {
-      const { data: codesRaw, error } = await supabase
+      // The cap is real and the screen now says so: `count: 'exact'` asks the
+      // database how many rows there are in total, so a platform past 200 codes
+      // is told it is looking at a page rather than at its whole history.
+      const { data: codesRaw, error, count } = await supabase
         .from('activation_codes')
-        .select('id, code_last4, company_id, target_email, duration_type, custom_days, custom_expires_at, expires_at, used_at, used_company_id, revoked_at, status, created_at, deleted_at, hidden_at, hidden_reason')
+        .select('id, code_last4, company_id, target_email, duration_type, custom_days, custom_expires_at, expires_at, used_at, used_company_id, revoked_at, status, created_at, deleted_at, hidden_at, hidden_reason', { count: 'exact' })
         .order('created_at', { ascending: false })
-        .limit(200);
+        .limit(CODES_PAGE_SIZE);
       if (error) throw error;
+      setCodeTotal(typeof count === 'number' ? count : null);
 
       const allCompanyIds = new Set<string>();
       (codesRaw ?? []).forEach(c => {
@@ -398,6 +420,10 @@ export default function ActivationCodesManagement({ companies: propCompanies }: 
         setCompanies(comps ?? []);
       }
     } catch (err: any) {
+      console.error(err);
+      setCodes([]);
+      setCodeTotal(null);
+      setLoadFailed(true);
       showToast('error', err.message || t('common.errorLoad'));
     } finally {
       setLoading(false);
@@ -710,6 +736,17 @@ export default function ActivationCodesManagement({ companies: propCompanies }: 
               <h3 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
                 {t('codes.history', { count: filteredCodes.length })}
               </h3>
+              {/*
+                A page, not a list. Said beside the heading, and only when the
+                database reported more codes than this page holds — the line
+                inherits the header's colour, so it adds no inline style and no
+                Phase-2 token pair on a legacy surface.
+              */}
+              {codeTotal !== null && codeTotal > codes.length && (
+                <span className="text-[11px]">
+                  {t('admin.read.partial', { shown: codes.length, total: codeTotal })}
+                </span>
+              )}
             </div>
             <button
               onClick={() => load()}
@@ -754,6 +791,13 @@ export default function ActivationCodesManagement({ companies: propCompanies }: 
         {loading ? (
           <div className="flex items-center justify-center py-10">
             <RefreshCw size={20} className="animate-spin" style={{ color: 'var(--text-tertiary)' }} />
+          </div>
+        ) : loadFailed ? (
+          /* Not "no entries for this filter" — the codes were not read. */
+          <div className="p-4">
+            <Alert tone="critical" className="font-ui" title={t('admin.read.failedTitle')}>
+              {t('admin.read.failed')}
+            </Alert>
           </div>
         ) : filteredCodes.length === 0 ? (
           <div className="py-10 text-center" style={{ color: 'var(--text-tertiary)' }}>

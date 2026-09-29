@@ -141,6 +141,20 @@ export default function SubscriptionBillingPage() {
    * claims, and a read that did not happen must not make them.
    */
   const [problem, setProblem] = useState<TranslationKey | null>(null);
+  /**
+   * The third read has a failure of its own, separate from `problem`.
+   *
+   * `subscription_plans_select` is `USING (true)` (20260917130000), so an error
+   * here is never an RLS refusal — it is a transport failure, a gateway 502
+   * during a release or a schema-cache miss. It was not inspected at all, and
+   * the Tarife tab then said "Noch keine Tarife angelegt", inviting an owner to
+   * create plans that already exist.
+   *
+   * It is deliberately not folded into `problem`, which hides the KPI cards: the
+   * invoice and subscription figures may have been read perfectly well, and
+   * withholding facts that *were* read is the mirror image of the defect.
+   */
+  const [plansFailed, setPlansFailed] = useState(false);
 
   // Filters. The search box is submitted rather than applied per keystroke:
   // every call to a read model writes one row into an append-only audit log.
@@ -175,6 +189,7 @@ export default function SubscriptionBillingPage() {
   const loadData = useCallback(async () => {
     setLoading(true);
     setProblem(null);
+    setPlansFailed(false);
     try {
       const [plansRes, invRes, subsRes] = await Promise.all([
         supabase.from('subscription_plans').select('*').order('monthly_price'),
@@ -182,7 +197,14 @@ export default function SubscriptionBillingPage() {
         fetchSubscriptions({ companyId: null, status: null, pageIndex: subscriptionPage }),
       ]);
 
-      if (plansRes.data) setPlans(plansRes.data);
+      // A catalogue that could not be read is not an empty catalogue.
+      if (plansRes.error) {
+        console.error(plansRes.error);
+        setPlans([]);
+        setPlansFailed(true);
+      } else {
+        setPlans(plansRes.data ?? []);
+      }
 
       if (!invRes.ok || !subsRes.ok) {
         setInvoices([]);
@@ -209,6 +231,8 @@ export default function SubscriptionBillingPage() {
       setSubscriptions([]);
       setSubscriptionTotal(0);
       setSubscriptionSummary(EMPTY_SUBSCRIPTION_SUMMARY);
+      setPlans([]);
+      setPlansFailed(true);
       setProblem('admin.read.failed');
       showToast('error', t('sa.subs.errorLoad'));
     } finally {
@@ -793,7 +817,16 @@ export default function SubscriptionBillingPage() {
       {/* Plans Tab */}
       {activeTab === 'plans' && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {plans.length === 0 ? (
+          {plansFailed ? (
+            /* Not "no plans exist" — the catalogue was not read. Offering
+               "Tarif erstellen" here would invite a duplicate of a plan that is
+               already there, so the button is withheld with the claim. */
+            <div className="col-span-full">
+              <Alert tone="critical" className="font-ui" title={t('admin.read.failedTitle')}>
+                {t('admin.read.failed')}
+              </Alert>
+            </div>
+          ) : plans.length === 0 ? (
             <div className="col-span-full text-center py-16" style={{ color: 'var(--text-tertiary)' }}>
               <CreditCard size={40} className="mx-auto mb-3 opacity-40" />
               <p className="text-sm">{t('sa.subs.noPlans')}</p>
