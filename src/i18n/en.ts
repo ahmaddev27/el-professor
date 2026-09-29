@@ -384,6 +384,14 @@ export const en: PartialDictionary = {
   'ui.table.retry':           'Try again',
   'ui.table.total':           'Total',
 
+  // ── The generic Excel export's own chrome (src/utils/excelExport.ts) ──────
+  'ui.export.chrome.empty':   'No data',
+  'ui.export.chrome.filters': 'Active filters:',
+  'ui.export.chrome.totals':  'Total  ({count} entries)',
+  'ui.export.chrome.footer':  'El-Professor management system  —  {count} records exported',
+  'ui.export.filterLine':     '{label}: {value}',
+  'ui.export.failed':         'The export could not be created',
+
   // ── Design preview (Phase 2 prototype at /design-preview) ─────────────────
   // The preview's components are left out of production builds; these strings
   // still ship with the dictionary, like every other key.
@@ -2632,6 +2640,12 @@ export const en: PartialDictionary = {
   'users.roles.error.stillAssigned':       'This role is still held by {count} user accounts. Give those accounts another role first.',
   'users.roles.error.systemRole':          'System roles cannot be changed.',
   'users.roles.error.unknownArea':         'An unknown area was sent. Please reload the page.',
+  // See de.ts: every role is exported against every area, not only the stored rows.
+  'users.roles.export.area':               'Area',
+  'users.roles.export.areaKey':            'Area key',
+  'users.roles.export.canEdit':            'Edit',
+  'users.roles.export.canView':            'View',
+  'users.roles.export.scope':              'Own roles and system templates · {roles} roles × {areas} areas',
   'users.roles.holders':                   'Users',
   'users.roles.holders.none':              'Nobody',
   'users.roles.holders.count.one':         '{count} user',
@@ -2955,6 +2969,12 @@ export const en: PartialDictionary = {
   'gq.done.title':                         'Receipt {number} issued',
   'gq.driver.inactive':                    '{name} (inactive)',
   'gq.driver.placeholder':                 'Choose a driver',
+  // See de.ts for why the business year is a column of its own.
+  'gq.export.businessYear':                'Business year',
+  'gq.export.filterAll':                   'All Gehaltsquittungen, voided ones included',
+  'gq.export.periodFrom':                  'Period from',
+  'gq.export.periodTo':                    'Period to',
+  'gq.export.voidedOn':                    'Voided on',
   'gq.list.caption':                       'Gehaltsquittungen',
   'gq.list.clearSearch':                   'Clear search',
   'gq.list.description':                   'Confirmed cash salary payments, with status and signed copy.',
@@ -3763,6 +3783,21 @@ export const en: PartialDictionary = {
   'imp.th.start':                          'Start',
   'imp.th.startAt':                        'Start',
   'imp.th.tip':                            'Trinkgeld',
+  // See de.ts: the Fahrtenliste is the working list, never the statutory
+  // Fahrtenbuch, so its wording follows the UI language.
+  'imp.export.canceled':                   'Canceled',
+  'imp.export.download':                   'Trip list (Excel)',
+  'imp.export.endAt':                      'End (timestamp)',
+  'imp.export.sheetTitle':                 'Trip list',
+  'imp.export.startAt':                    'Start (timestamp)',
+  'imp.export.timeSource':                 'Time source',
+  'imp.export.timeSource.ambiguous':       'Ambiguous',
+  'imp.export.timeSource.fallbackTripDate': 'Fallback: date of the trip',
+  'imp.export.timeSource.missing':         'Missing',
+  'imp.export.timeSource.sourceStartEnd':  'Source: start and end',
+  'imp.export.timeSource.unparsed':        'Unreadable',
+  'imp.trips.loadFailed':                  'The trips could not be loaded',
+  'imp.trips.loadFailedBody':              'The list below may still show the trips of the month selected before. The downloads stay disabled until the trips have loaded.',
   'imp.title':                             'Import Fahrtenbuch',
   'imp.toast.failedTitle':                 'Import failed',
   'imp.toast.successDetail':               '{count} trips were imported, {duplicates} duplicates refused.',

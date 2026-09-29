@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Plus, CreditCard as Edit2, Trash2, Shield, ShieldCheck, Info, Eye } from 'lucide-react';
+import { Download, Plus, CreditCard as Edit2, Trash2, Shield, ShieldCheck, Info, Eye } from 'lucide-react';
 import { supabase } from '../lib/supabase';
-import { Role, RolePermission, RoleWithPermissions } from '../types/role';
+import { PAGE_DEFINITIONS, Role, RolePermission, RoleWithPermissions } from '../types/role';
 import RoleModal from './RoleModal';
 import {
   deleteRefusalMessage,
@@ -9,12 +9,16 @@ import {
   permissionPayload,
   roleActionVerdict,
   roleHolderCounts,
+  ROLE_PAGE_KEYS,
   saveRefusalMessage,
   templateRoles,
   type PermissionMap,
   type ProfileRoleRow,
   type RoleRpcResult,
 } from '../lib/companyRoles';
+import { exportTableToExcel } from '../utils/excelExport';
+import { buildRolesExport } from '../utils/tableExportRows';
+import { useExportChrome } from '../hooks/useExportChrome';
 import { useToast } from '../contexts/ToastContext';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { useTranslation } from '../contexts/LanguageContext';
@@ -22,6 +26,7 @@ import { Alert, Badge, Button, ConfirmDialog, DataTable, EmptyState, PageHeader,
 
 const RolesManagement: React.FC = () => {
   const { t, tPlural } = useTranslation();
+  const exportChrome = useExportChrome();
   const [roles, setRoles] = useState<RoleWithPermissions[]>([]);
   const [holders, setHolders] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
@@ -186,6 +191,61 @@ const RolesManagement: React.FC = () => {
   const templates = useMemo(() => templateRoles(roles), [roles]);
   const companyRoles = useMemo(() => ownRoles(roles), [roles]);
 
+  /**
+   * The access matrix as a workbook — the only artefact that answers "who could
+   * read Gehälter". The screen's permissions column is a summary sentence
+   * ("{view} ansehen, {edit} bearbeiten"), which is unusable in a file.
+   *
+   * **The rule being preserved: a page a role does not permit must read No, not
+   * be absent.** A system role stores no `role_permissions` row at all for an
+   * area it does not permit, so flattening `role.permissions` would emit a
+   * different number of rows per role and leave every unpermitted area out — and
+   * an access review reads a missing row as "not applicable". So the file is the
+   * full matrix, one row per role and each of the sixteen page keys, resolved
+   * through `permissionsFromTemplate`, the same helper RoleModal draws its boxes
+   * with, which also applies `can_edit → can_view` exactly as the form and
+   * `company_role_save` apply it. The file therefore says what an operator sees
+   * when they open the role.
+   *
+   * `getPermissionsSummary` above is left alone: it counts the raw rows, so a
+   * stored `{can_view: false, can_edit: true}` is one permission there and
+   * view + edit here. The matrix is what the database enforces.
+   */
+  const handleExport = () => {
+    try {
+      exportTableToExcel(buildRolesExport({
+        companyRoles,
+        templates,
+        holders,
+        labels: {
+          sheetTitle: t('users.roles.title'),
+          role: t('users.form.role'),
+          roleType: t('users.roles.type'),
+          typeSystem: t('users.roles.typeSystem'),
+          typeCustom: t('users.roles.typeCustom'),
+          description: t('common.description'),
+          holders: t('users.roles.holders'),
+          area: t('users.roles.export.area'),
+          areaKey: t('users.roles.export.areaKey'),
+          view: t('users.roles.export.canView'),
+          edit: t('users.roles.export.canEdit'),
+          yes: t('common.yes'),
+          no: t('common.no'),
+          // PAGE_DEFINITIONS already carries a TranslationKey per page, the same
+          // label RoleModal prints, so the area names cost no new keys.
+          areaNames: Object.fromEntries(PAGE_DEFINITIONS.map((page): [string, string] => [page.key, t(page.label)])),
+          scope: t('users.roles.export.scope', {
+            roles: companyRoles.length + templates.length,
+            areas: ROLE_PAGE_KEYS.length,
+          }),
+          chrome: exportChrome,
+        },
+      }));
+    } catch (error: any) {
+      showToast('error', t('ui.export.failed'), error?.message);
+    }
+  };
+
   // ── Presentation (phase 5) ────────────────────────────────────────────────
   // The list is split in two, which is what the screen was missing: the four
   // system roles are templates a company may read and copy but never write —
@@ -323,16 +383,31 @@ const RolesManagement: React.FC = () => {
       <PageHeader
         title={t('users.roles.title')}
         description={t('users.roles.subtitle')}
-        actions={!readOnly && (
-          <Button
-            onClick={() => {
-              setSelectedRole(undefined);
-              setIsModalOpen(true);
-            }}
-          >
-            <Plus aria-hidden />
-            <span>{t('users.roles.new')}</span>
-          </Button>
+        actions={(
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Offered in a read-only support context too: the matrix is a read
+                and writes nothing. Withheld while the read failed, because a
+                matrix built from no roles would read as "nobody has access". */}
+            <Button
+              variant="secondary"
+              disabled={loadFailed || roles.length === 0}
+              onClick={handleExport}
+            >
+              <Download aria-hidden />
+              <span>{t('common.exportExcelShort')}</span>
+            </Button>
+            {!readOnly && (
+              <Button
+                onClick={() => {
+                  setSelectedRole(undefined);
+                  setIsModalOpen(true);
+                }}
+              >
+                <Plus aria-hidden />
+                <span>{t('users.roles.new')}</span>
+              </Button>
+            )}
+          </div>
         )}
         className="pb-0"
       />
