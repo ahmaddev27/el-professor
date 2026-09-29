@@ -111,6 +111,13 @@ const DriversManagement: React.FC<DriversManagementProps> = ({
         { key: 'work_window_end',               label: t('fleet.workWindowTo'),           width: 18, format: v => v != null ? String(v) : '' },
         { key: 'is_full_day_available',         label: t('fleet.fullDayAvailableShort'),  width: 18, format: yesNo },
         { key: 'allow_outside_shift_exceptions',label: t('fleet.exceptionsAllowed'),      width: 18, format: yesNo },
+        // These two keys are camelCase because the rows below are the objects
+        // `mapDriverRow` builds, not raw `drivers` rows — its explicit key list
+        // is what every key here has to appear in. `createdAt` was missing from
+        // it, and because `rows` is cast to Record<string, unknown> the type
+        // system could not see it: the column exported 40 blank cells under
+        // "Erstellt am" for a fleet of 40. `driverRow.test.ts` reads these keys
+        // out of this file and fails when the mapper stops emitting one.
         { key: 'createdBy',                     label: t('fleet.createdBy'),              width: 28 },
         { key: 'createdAt',                     label: t('fleet.createdAt'),              width: 16, format: v => v ? new Date(v as string).toLocaleDateString('de-DE') : '' },
       ],

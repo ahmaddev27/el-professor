@@ -7,6 +7,19 @@
  * Inhaber into an employee on the next save of any field — and planning then
  * applied the hour limits an Inhaber is exempt from. The create and update
  * paths in `useDatabase` already carried it; only the list read did not.
+ *
+ * THE RULE THIS FILE HAS TO KEEP: this mapper is the only producer of the
+ * objects the Fahrer screen renders and exports, and its key list is explicit,
+ * so a column the screen reads under a name the mapper does not emit is blank
+ * with nothing thrown and nothing logged. `created_at` was exactly that: the
+ * Fahrer export declared a `createdAt` column, `.select('*')` had the value in
+ * hand, and the mapper dropped it — 40 drivers, 40 empty cells under
+ * "Erstellt am". `driverRow.test.ts` now reads the export's declared keys out
+ * of `DriversManagement.tsx` and fails when one of them is not emitted here.
+ *
+ * The audit columns keep the `Driver` type's camelCase — `createdBy`,
+ * `createdAt` — not the column's `created_at`, so the pair reads the same way
+ * in the export and in `canEditDriver`.
  */
 import type { Driver } from '../types/receipt';
 
@@ -15,6 +28,7 @@ export interface DriverRow {
   name: string;
   salary_ratio: number;
   created_by?: string | null;
+  created_at?: string | null;
   status?: string | null;
   personalnummer?: string | null;
   gender?: string | null;
@@ -43,6 +57,7 @@ export function mapDriverRow(d: DriverRow): Driver {
     salary_ratio: d.salary_ratio,
     salaryRatio: d.salary_ratio,
     createdBy: d.created_by || undefined,
+    createdAt: d.created_at || undefined,
     status: (d.status || 'active') as 'active' | 'inactive',
     personalnummer: d.personalnummer || undefined,
     gender: (d.gender ?? null) as 'male' | 'female' | null,
