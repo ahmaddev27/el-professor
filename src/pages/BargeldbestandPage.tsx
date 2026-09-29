@@ -343,7 +343,9 @@ export default function BargeldbestandPage() {
         { key: 'type',        label: t('fleet.typeColumn'),    width: 14, format: v => v === 'income' ? t('bargeld.incomeCol') : t('bargeld.expenseCol') },
         { key: 'driver_name', label: t('common.driver'),        width: 22 },
         { key: 'description', label: t('common.description'),  width: 36 },
-        { key: 'amount',      label: t('bargeld.amountEuro'),    width: 16, align: 'right', format: v => (v as number).toFixed(2) },
+        // The row below divides the ledger's integer cents by 100, so what
+        // reaches this column is euros — the unit the money format prints.
+        { key: 'amount',      label: t('bargeld.amountEuro'),    width: 16, align: 'right', type: 'money' },
       ],
       rows: filteredEntries.map(entry => ({
         date: entry.date,

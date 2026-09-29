@@ -215,11 +215,12 @@ const FixedCostsManagement: React.FC = () => {
       moduleName: t('nav.fixkosten'),
       columns: [
         { key: 'description', label: t('common.description'),    width: 40 },
-        { key: 'amount',      label: t('fleet.amountPerMonth'),  width: 20, align: 'right', format: v => Number(v).toFixed(2) },
+        // fixed_costs.amount is numeric(10,2) — euros, not cents.
+        { key: 'amount',      label: t('fleet.amountPerMonth'),  width: 20, align: 'right', type: 'money' },
         { key: 'created_at',  label: t('fleet.createdAt'),       width: 16, format: v => v ? new Date(v as string).toLocaleDateString('de-DE') : '' },
       ],
       rows: fixedCosts as unknown as Record<string, unknown>[],
-      totals: { amount: totalFixedCosts.toFixed(2) },
+      totals: { amount: totalFixedCosts },
     });
   };
 
