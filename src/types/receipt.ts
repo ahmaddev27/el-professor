@@ -51,6 +51,8 @@ export interface Driver {
   salary_ratio?: number;
   salaryRatio?: number;
   createdBy?: string;
+  /** `drivers.created_at`, carried by `mapDriverRow` for the Fahrer export. */
+  createdAt?: string;
   status?: 'active' | 'inactive';
   personalnummer?: string;
   gender?: 'male' | 'female' | null;

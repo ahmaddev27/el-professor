@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { mapDriverRow, type DriverRow } from './driverRow';
 
@@ -29,6 +30,7 @@ describe('mapDriverRow', () => {
       salary_ratio: 0.5,
       salaryRatio: 0.5,
       createdBy: undefined,
+      createdAt: undefined,
       status: 'active',
       personalnummer: undefined,
       gender: null,
@@ -49,5 +51,50 @@ describe('mapDriverRow', () => {
       allow_outside_shift_exceptions: false,
       is_full_day_available: false,
     });
+  });
+
+  it('carries created_at, which the Fahrer export prints as "Erstellt am"', () => {
+    expect(mapDriverRow(row({ created_at: '2026-09-29T08:30:00Z' })).createdAt)
+      .toBe('2026-09-29T08:30:00Z');
+  });
+});
+
+/**
+ * The Fahrer export's rows are the objects `mapDriverRow` builds, and
+ * `exportTableToExcel` reads each column as `dataRow[col.key]`. A key the
+ * mapper does not emit therefore exports a blank cell for every driver, in
+ * every company, for ever — with nothing thrown and nothing logged, because
+ * `ExportColumn.key` is a bare `string` and the call site casts its rows to
+ * `Record<string, unknown>`. That is how the `createdAt` column shipped blank.
+ *
+ * This reads the keys out of the screen rather than importing it, so the check
+ * needs no renderer and none of the five contexts `DriversManagement` pulls in.
+ * The same shape catches the next missing column for free.
+ */
+describe('the Fahrer export declares no column the mapper cannot fill', () => {
+  const source = readFileSync(
+    new URL('../components/DriversManagement.tsx', import.meta.url),
+    'utf8',
+  );
+
+  /** The `key: '…'` literals of the `columns: [ … ]` array inside handleExport. */
+  const declaredKeys = (): string[] => {
+    const start = source.indexOf('columns: [');
+    const end   = source.indexOf('rows:', start);
+    if (start === -1 || end === -1 || end <= start) return [];
+    return [...source.slice(start, end).matchAll(/\bkey:\s*'([^']+)'/g)].map(m => m[1]);
+  };
+
+  it('finds the column list at all, so a restructured screen cannot pass by silence', () => {
+    // A negative control: without this, deleting the export would make the
+    // assertion below vacuously true.
+    expect(declaredKeys().length).toBeGreaterThanOrEqual(20);
+    expect(declaredKeys()).toContain('name');
+  });
+
+  it('emits every key the export declares', () => {
+    const emitted = Object.keys(mapDriverRow(row()));
+    const missing = declaredKeys().filter(key => !emitted.includes(key));
+    expect(missing).toEqual([]);
   });
 });
