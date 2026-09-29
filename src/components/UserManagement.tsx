@@ -775,7 +775,11 @@ const UserManagement: React.FC = () => {
         { key: 'created_at',  label: t('users.export.createdAt'),  width: 16, format: v => v ? new Date(v as string).toLocaleDateString('de-DE') : '' },
       ],
       rows: users as unknown as Record<string, unknown>[],
-      totals: { full_name: t('users.export.totalRow', { count: users.length }) },
+      // The totals row's LABEL, not a figure in the name column: keyed on the
+      // first column it was discarded unrendered, so the file said
+      // "Gesamt (N Einträge)" instead. `totals: {}` keeps the row.
+      labels: { totalsRow: t('users.export.totalRow', { count: users.length }) },
+      totals: {},
     });
   };
 

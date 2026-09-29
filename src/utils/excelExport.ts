@@ -1,774 +1,9 @@
 import * as XLSX from 'xlsx';
-import { Receipt, Income, SalaryCalculation } from '../types/receipt';
-
-export const exportToExcel = (receipts: Receipt[], initialBalance: number = 0, isFiltered: boolean = false) => {
-  // Create workbook with enhanced properties
-  const wb = XLSX.utils.book_new();
-  wb.Props = {
-    Title: "El-Professor - Professional Financial Report",
-    Subject: "Comprehensive Financial Analysis and Receipt Management",
-    Author: "El-Professor Management System",
-    CreatedDate: new Date(),
-    Company: "El-Professor Solutions"
-  };
-  
-  // Calculate comprehensive statistics
-  const totalIncome = receipts.reduce((sum, receipt) => sum + receipt.income, 0);
-  const totalExpense = receipts.reduce((sum, receipt) => sum + receipt.expense, 0);
-  const netResult = totalIncome - totalExpense;
-  const finalBalance = receipts.length > 0 ? receipts[receipts.length - 1].balance : initialBalance;
-  
-  // Sort receipts chronologically
-  const sortedReceipts = [...receipts].sort((a, b) => 
-    new Date(a.date).getTime() - new Date(b.date).getTime()
-  );
-  
-  // Get unique drivers for statistics
-  const uniqueDrivers = [...new Set(receipts.map(r => r.driverName))];
-  const avgTransactionValue = receipts.length > 0 ? (totalIncome + totalExpense) / receipts.length : 0;
-  
-  // Create professional data structure with proper table formatting
-  const excelData = [
-    // MAIN HEADER SECTION
-    ['EL-PROFESSOR', '', '', 'PROFESSIONAL FINANCIAL REPORT', '', '', '', '', '', '', ''],
-    ['', '', '', '', '', '', '', '', '', '', ''],
-
-    // EXECUTIVE SUMMARY TABLE
-    ['EXECUTIVE SUMMARY', '', '', '', '', '', '', '', '', '', ''],
-    ['', '', '', '', '', '', '', '', '', '', ''],
-    ['Metric', 'Value', 'Status', '', 'Period Info', 'Details', '', '', '', '', ''],
-    ['Report Date', new Date().toLocaleDateString('de-DE'), 'Current', '', 'Total Receipts', sortedReceipts.length.toString(), '', '', '', '', ''],
-    ['Period Range', sortedReceipts.length > 0 ? `${new Date(sortedReceipts[0].date).toLocaleDateString('de-DE')} - ${new Date(sortedReceipts[sortedReceipts.length - 1].date).toLocaleDateString('de-DE')}` : 'No Data', 'Active', '', 'Active Drivers', uniqueDrivers.length.toString(), '', '', '', '', ''],
-    ['Filter Applied', isFiltered ? 'YES' : 'NO', isFiltered ? 'Filtered' : 'Complete', '', 'Avg Transaction', avgTransactionValue.toFixed(2) + ' EUR', '', '', '', '', ''],
-    ['', '', '', '', '', '', '', '', '', '', ''],
-    
-    // FINANCIAL DASHBOARD TABLE
-    ['FINANCIAL DASHBOARD', '', '', '', '', '', '', '', '', '', ''],
-    ['', '', '', '', '', '', '', '', '', '', ''],
-    ['Financial Position', 'Amount (EUR)', 'Status', 'Trend', '', 'Key Metrics', 'Value', 'Performance', '', '', ''],
-    ['Opening Balance', initialBalance.toFixed(2), initialBalance >= 0 ? 'POSITIVE' : 'NEGATIVE', initialBalance >= 0 ? 'STABLE' : 'RISK', '', 'Total Volume', (totalIncome + totalExpense).toFixed(2), 'EUR', '', '', ''],
-    ['Total Income', totalIncome.toFixed(2), totalIncome > 0 ? 'REVENUE' : 'NONE', totalIncome > 0 ? 'ACTIVE' : 'INACTIVE', '', 'Net Result', netResult.toFixed(2), netResult >= 0 ? 'PROFIT' : 'LOSS', '', '', ''],
-    ['Total Expenses', totalExpense.toFixed(2), totalExpense > 0 ? 'COSTS' : 'NONE', totalExpense > 0 ? 'ACTIVE' : 'INACTIVE', '', 'ROI Percentage', totalExpense > 0 ? ((netResult / totalExpense) * 100).toFixed(1) + '%' : 'N/A', '', '', '', ''],
-    ['Net Position', netResult.toFixed(2), netResult >= 0 ? 'PROFIT' : 'LOSS', netResult >= 0 ? 'GROWTH' : 'DECLINE', '', 'Liquidity Status', finalBalance >= 0 ? 'HEALTHY' : 'CRITICAL', finalBalance >= 0 ? 'SECURE' : 'ALERT', '', '', ''],
-    ['Closing Balance', finalBalance.toFixed(2), finalBalance >= 0 ? 'POSITIVE' : 'NEGATIVE', finalBalance >= 0 ? 'STRONG' : 'WEAK', '', 'Business Trend', netResult >= 0 ? 'UPWARD' : 'DOWNWARD', netResult >= 0 ? 'EXPANDING' : 'CONTRACTING', '', '', ''],
-    ['', '', '', '', '', '', '', '', '', '', ''],
-    
-    // DRIVER PERFORMANCE TABLE
-    ['DRIVER PERFORMANCE ANALYSIS', '', '', '', '', '', '', '', '', '', ''],
-    ['', '', '', '', '', '', '', '', '', '', ''],
-    ['Driver Name', 'Receipt Count', 'Income (EUR)', 'Expenses (EUR)', 'Net Amount (EUR)', 'Performance', 'Efficiency', '', '', '', ''],
-    
-    // Driver statistics with enhanced metrics
-    ...uniqueDrivers.map(driver => {
-      const driverReceipts = receipts.filter(r => r.driverName === driver);
-      const driverIncome = driverReceipts.reduce((sum, r) => sum + r.income, 0);
-      const driverExpense = driverReceipts.reduce((sum, r) => sum + r.expense, 0);
-      const driverNet = driverIncome - driverExpense;
-      const efficiency = driverReceipts.length > 0 ? (driverNet / driverReceipts.length).toFixed(2) : '0.00';
-      return [driver, driverReceipts.length.toString(), driverIncome.toFixed(2), driverExpense.toFixed(2), driverNet.toFixed(2), driverNet >= 0 ? 'PROFITABLE' : 'LOSS', efficiency + ' EUR/Receipt', '', '', '', ''];
-    }),
-    
-    ['', '', '', '', '', '', '', '', '', '', ''],
-    ['DRIVER TOTALS', uniqueDrivers.length.toString() + ' Drivers', totalIncome.toFixed(2), totalExpense.toFixed(2), netResult.toFixed(2), netResult >= 0 ? 'OVERALL PROFIT' : 'OVERALL LOSS', avgTransactionValue.toFixed(2) + ' EUR Avg', '', '', '', ''],
-    ['', '', '', '', '', '', '', '', '', '', ''],
-    
-    // DETAILED TRANSACTIONS TABLE
-    ['DETAILED TRANSACTION RECORDS', '', '', '', '', '', '', '', '', '', ''],
-    ['', '', '', '', '', '', '', '', '', '', ''],
-    ['Receipt No.', 'Date', 'Driver', 'Description', 'Postal Code', 'City', 'Income (EUR)', 'Expenses (EUR)', 'Balance (EUR)', 'Type', 'Status'],
-
-    // Transaction data with enhanced formatting
-    ...sortedReceipts.map((receipt, index) => {
-      const type = receipt.income > 0 ? 'INCOME' :
-                   receipt.expense > 0 ? 'EXPENSE' : 'NEUTRAL';
-      const status = receipt.balance >= 0 ? 'POSITIVE' : 'NEGATIVE';
-      return [
-        receipt.receiptNumber,
-        new Date(receipt.date).toLocaleDateString('de-DE'),
-        receipt.driverName,
-        receipt.description,
-        receipt.postalCode || '',
-        receipt.city || '',
-        receipt.income > 0 ? receipt.income.toFixed(2) : '',
-        receipt.expense > 0 ? receipt.expense.toFixed(2) : '',
-        receipt.balance.toFixed(2),
-        type,
-        status
-      ];
-    }),
-    
-    // SUMMARY AND TOTALS TABLE
-    ['', '', '', '', '', '', '', '', '', '', ''],
-    ['PERIOD SUMMARY', '', '', '', '', '', '', '', '', '', ''],
-    ['', '', '', '', '', '', '', '', '', '', ''],
-    ['Summary Item', 'Count', 'Amount (EUR)', 'Percentage', '', 'Final Status', 'Assessment', '', '', '', ''],
-    ['Income Transactions', receipts.filter(r => r.income > 0).length.toString(), totalIncome.toFixed(2), totalIncome > 0 ? ((totalIncome / (totalIncome + totalExpense)) * 100).toFixed(1) + '%' : '0%', '', 'Revenue Stream', totalIncome > 0 ? 'ACTIVE' : 'INACTIVE', '', '', '', ''],
-    ['Expense Transactions', receipts.filter(r => r.expense > 0).length.toString(), totalExpense.toFixed(2), totalExpense > 0 ? ((totalExpense / (totalIncome + totalExpense)) * 100).toFixed(1) + '%' : '0%', '', 'Cost Management', totalExpense > 0 ? 'ACTIVE' : 'INACTIVE', '', '', '', ''],
-    ['Net Business Result', receipts.length.toString(), netResult.toFixed(2), '100%', '', 'Overall Performance', netResult >= 0 ? 'SUCCESSFUL' : 'NEEDS ATTENTION', '', '', '', ''],
-    ['Final Balance Position', '1', finalBalance.toFixed(2), finalBalance >= 0 ? 'POSITIVE' : 'NEGATIVE', '', 'Financial Health', finalBalance >= 0 ? 'EXCELLENT' : 'REQUIRES REVIEW', '', '', '', ''],
-    ['', '', '', '', '', '', '', '', '', '', ''],
-    
-    // FOOTER SECTION
-    ['', '', '', '', '', '', '', '', '', '', ''],
-    ['El-Professor Professional Financial Report', '', '', `Generated: ${new Date().toLocaleString('de-DE')}`, '', '', '', '', '', '', ''],
-    ['This document contains confidential financial information', '', '', 'Authorized Personnel Only', '', '', '', '', '', '', '']
-  ];
-
-  // Create worksheet
-  const ws = XLSX.utils.aoa_to_sheet(excelData);
-  
-  // ENHANCED COLUMN CONFIGURATION
-  ws['!cols'] = [
-    { wch: 20 },  // Column A - Labels/Names
-    { wch: 15 },  // Column B - Values/Counts
-    { wch: 15 },  // Column C - Amounts
-    { wch: 25 },  // Column D - Descriptions/Status
-    { wch: 12 },  // Column E - Postal Code
-    { wch: 20 },  // Column F - City
-    { wch: 15 },  // Column G - Income
-    { wch: 15 },  // Column H - Expenses
-    { wch: 15 },  // Column I - Balance
-    { wch: 12 },  // Column J - Type
-    { wch: 12 }   // Column K - Status
-  ];
-
-  // Calculate dynamic section positions
-  const executiveSummaryStart = 2;
-  const executiveSummaryHeaderRow = 4;
-  const executiveSummaryDataStart = 5;
-  const executiveSummaryDataEnd = 7;
-  
-  const financialDashboardStart = executiveSummaryDataEnd + 3;
-  const financialDashboardHeaderRow = financialDashboardStart + 2;
-  const financialDashboardDataStart = financialDashboardHeaderRow + 1;
-  const financialDashboardDataEnd = financialDashboardDataStart + 4;
-  
-  const driverPerformanceStart = financialDashboardDataEnd + 3;
-  const driverPerformanceHeaderRow = driverPerformanceStart + 2;
-  const driverPerformanceDataStart = driverPerformanceHeaderRow + 1;
-  const driverPerformanceDataEnd = driverPerformanceDataStart + uniqueDrivers.length;
-  const driverTotalsRow = driverPerformanceDataEnd + 1;
-  
-  const transactionTableStart = driverTotalsRow + 4;
-  const transactionTableHeaderRow = transactionTableStart + 2;
-  const transactionTableDataStart = transactionTableHeaderRow + 1;
-  const transactionTableDataEnd = transactionTableDataStart + sortedReceipts.length - 1;
-  
-  const summaryTableStart = transactionTableDataEnd + 4;
-  const summaryTableHeaderRow = summaryTableStart + 2;
-  const summaryTableDataStart = summaryTableHeaderRow + 1;
-  const summaryTableDataEnd = summaryTableDataStart + 3;
-
-  // Get worksheet range
-  const range = XLSX.utils.decode_range(ws['!ref'] || 'A1');
-  
-  // PROFESSIONAL STYLING WITH COMPREHENSIVE BORDERS AND TABLE FORMATTING
-  for (let R = range.s.r; R <= range.e.r; ++R) {
-    for (let C = range.s.c; C <= range.e.c; ++C) {
-      const cell_address = XLSX.utils.encode_cell({ c: C, r: R });
-      if (!ws[cell_address]) continue;
-      
-      const cellValue = ws[cell_address].v;
-      
-      // MAIN HEADER STYLING
-      if (R === 0) {
-        ws[cell_address].s = {
-          font: { 
-            bold: true, 
-            size: 24, 
-            color: { rgb: "FFFFFF" },
-            name: "Calibri"
-          },
-          alignment: { horizontal: "center", vertical: "center" },
-          fill: { fgColor: { rgb: "1E3A8A" } },
-          border: {
-            top: { style: "thick", color: { rgb: "000000" } },
-            bottom: { style: "thick", color: { rgb: "000000" } },
-            left: { style: "thick", color: { rgb: "000000" } },
-            right: { style: "thick", color: { rgb: "000000" } }
-          }
-        };
-      }
-      
-      // SECTION HEADERS
-      if (cellValue && typeof cellValue === 'string' && 
-          (cellValue.includes('EXECUTIVE SUMMARY') || 
-           cellValue.includes('FINANCIAL DASHBOARD') || 
-           cellValue.includes('DRIVER PERFORMANCE ANALYSIS') ||
-           cellValue.includes('DETAILED TRANSACTION RECORDS') ||
-           cellValue.includes('PERIOD SUMMARY'))) {
-        ws[cell_address].s = {
-          font: { 
-            bold: true, 
-            size: 16, 
-            color: { rgb: "FFFFFF" },
-            name: "Calibri"
-          },
-          alignment: { horizontal: "center", vertical: "center" },
-          fill: { fgColor: { rgb: "059669" } },
-          border: {
-            top: { style: "thick", color: { rgb: "000000" } },
-            bottom: { style: "thick", color: { rgb: "000000" } },
-            left: { style: "thick", color: { rgb: "000000" } },
-            right: { style: "thick", color: { rgb: "000000" } }
-          }
-        };
-      }
-      
-      // EXECUTIVE SUMMARY TABLE
-      if (R >= executiveSummaryHeaderRow && R <= executiveSummaryDataEnd && C <= 8) {
-        const isHeaderRow = R === executiveSummaryHeaderRow;
-        const isDataRow = R >= executiveSummaryDataStart && R <= executiveSummaryDataEnd;
-        
-        if (isHeaderRow) {
-          ws[cell_address].s = {
-            font: { bold: true, size: 12, color: { rgb: "FFFFFF" }, name: "Calibri" },
-            alignment: { horizontal: "center", vertical: "center" },
-            fill: { fgColor: { rgb: "1E40AF" } },
-            border: {
-              top: { style: "thick", color: { rgb: "000000" } },
-              bottom: { style: "thick", color: { rgb: "000000" } },
-              left: { style: "medium", color: { rgb: "000000" } },
-              right: { style: "medium", color: { rgb: "000000" } }
-            }
-          };
-        }
-        
-        if (isDataRow) {
-          const isEvenRow = (R - executiveSummaryDataStart) % 2 === 0;
-          ws[cell_address].s = {
-            font: { size: 11, name: "Calibri" },
-            alignment: { horizontal: "left", vertical: "center" },
-            fill: { fgColor: { rgb: isEvenRow ? "EBF8FF" : "F0F9FF" } },
-            border: {
-              top: { style: "thin", color: { rgb: "000000" } },
-              bottom: { style: "thin", color: { rgb: "000000" } },
-              left: { style: "thin", color: { rgb: "000000" } },
-              right: { style: "thin", color: { rgb: "000000" } }
-            }
-          };
-        }
-      }
-      
-      // FINANCIAL DASHBOARD TABLE
-      if (R >= financialDashboardHeaderRow && R <= financialDashboardDataEnd && C <= 8) {
-        const isHeaderRow = R === financialDashboardHeaderRow;
-        const isDataRow = R >= financialDashboardDataStart && R <= financialDashboardDataEnd;
-        
-        if (isHeaderRow) {
-          ws[cell_address].s = {
-            font: { bold: true, size: 12, color: { rgb: "FFFFFF" }, name: "Calibri" },
-            alignment: { horizontal: "center", vertical: "center" },
-            fill: { fgColor: { rgb: "7C3AED" } },
-            border: {
-              top: { style: "thick", color: { rgb: "000000" } },
-              bottom: { style: "thick", color: { rgb: "000000" } },
-              left: { style: "medium", color: { rgb: "000000" } },
-              right: { style: "medium", color: { rgb: "000000" } }
-            }
-          };
-        }
-        
-        if (isDataRow) {
-          const isEvenRow = (R - financialDashboardDataStart) % 2 === 0;
-          ws[cell_address].s = {
-            font: { size: 11, name: "Calibri" },
-            alignment: { horizontal: "center", vertical: "center" },
-            fill: { fgColor: { rgb: isEvenRow ? "F3E8FF" : "FAF5FF" } },
-            border: {
-              top: { style: "thin", color: { rgb: "000000" } },
-              bottom: { style: "thin", color: { rgb: "000000" } },
-              left: { style: "thin", color: { rgb: "000000" } },
-              right: { style: "thin", color: { rgb: "000000" } }
-            }
-          };
-          
-          // Color coding for financial values
-          if ((C === 1 || C === 6) && cellValue && typeof cellValue === 'string') {
-            const value = parseFloat(cellValue.replace(',', '.'));
-            if (!isNaN(value)) {
-              ws[cell_address].s.font.color = { rgb: value >= 0 ? "059669" : "DC2626" };
-              ws[cell_address].s.font.bold = true;
-            }
-          }
-          
-          // Status column styling
-          if ((C === 2 || C === 3 || C === 7) && cellValue && typeof cellValue === 'string') {
-            if (cellValue.includes('POSITIVE') || cellValue.includes('PROFIT') || cellValue.includes('REVENUE') || cellValue.includes('HEALTHY') || cellValue.includes('GROWTH')) {
-              ws[cell_address].s.font.color = { rgb: "059669" };
-              ws[cell_address].s.font.bold = true;
-            } else if (cellValue.includes('NEGATIVE') || cellValue.includes('LOSS') || cellValue.includes('COSTS') || cellValue.includes('CRITICAL') || cellValue.includes('DECLINE')) {
-              ws[cell_address].s.font.color = { rgb: "DC2626" };
-              ws[cell_address].s.font.bold = true;
-            }
-          }
-        }
-      }
-      
-      // DRIVER PERFORMANCE TABLE
-      if (R >= driverPerformanceHeaderRow && R <= driverTotalsRow && C <= 8) {
-        const isHeaderRow = R === driverPerformanceHeaderRow;
-        const isDataRow = R >= driverPerformanceDataStart && R <= driverPerformanceDataEnd;
-        const isTotalsRow = R === driverTotalsRow;
-        
-        if (isHeaderRow) {
-          ws[cell_address].s = {
-            font: { bold: true, size: 12, color: { rgb: "FFFFFF" }, name: "Calibri" },
-            alignment: { horizontal: "center", vertical: "center" },
-            fill: { fgColor: { rgb: "F59E0B" } },
-            border: {
-              top: { style: "thick", color: { rgb: "000000" } },
-              bottom: { style: "thick", color: { rgb: "000000" } },
-              left: { style: "medium", color: { rgb: "000000" } },
-              right: { style: "medium", color: { rgb: "000000" } }
-            }
-          };
-        }
-        
-        if (isDataRow) {
-          const isEvenRow = (R - driverPerformanceDataStart) % 2 === 0;
-          ws[cell_address].s = {
-            font: { size: 11, name: "Calibri" },
-            alignment: { horizontal: "center", vertical: "center" },
-            fill: { fgColor: { rgb: isEvenRow ? "FEF3C7" : "FFFBEB" } },
-            border: {
-              top: { style: "thin", color: { rgb: "000000" } },
-              bottom: { style: "thin", color: { rgb: "000000" } },
-              left: { style: "thin", color: { rgb: "000000" } },
-              right: { style: "thin", color: { rgb: "000000" } }
-            }
-          };
-          
-          // Color code driver performance
-          if (C === 4 && cellValue) { // Net amount
-            const value = parseFloat(cellValue.toString());
-            ws[cell_address].s.font.color = { rgb: value >= 0 ? "059669" : "DC2626" };
-            ws[cell_address].s.font.bold = true;
-          }
-          
-          if (C === 5 && cellValue && typeof cellValue === 'string') { // Performance status
-            ws[cell_address].s.font.color = { rgb: cellValue.includes('PROFITABLE') ? "059669" : "DC2626" };
-            ws[cell_address].s.font.bold = true;
-          }
-        }
-        
-        if (isTotalsRow) {
-          ws[cell_address].s = {
-            font: { bold: true, size: 12, color: { rgb: "FFFFFF" }, name: "Calibri" },
-            alignment: { horizontal: "center", vertical: "center" },
-            fill: { fgColor: { rgb: "D97706" } },
-            border: {
-              top: { style: "thick", color: { rgb: "000000" } },
-              bottom: { style: "thick", color: { rgb: "000000" } },
-              left: { style: "medium", color: { rgb: "000000" } },
-              right: { style: "medium", color: { rgb: "000000" } }
-            }
-          };
-        }
-      }
-      
-      // TRANSACTION TABLE
-      if (R >= transactionTableHeaderRow && R <= transactionTableDataEnd && C <= 10) {
-        const isHeaderRow = R === transactionTableHeaderRow;
-        const isDataRow = R >= transactionTableDataStart && R <= transactionTableDataEnd;
-        
-        if (isHeaderRow) {
-          ws[cell_address].s = {
-            font: { bold: true, size: 12, color: { rgb: "FFFFFF" }, name: "Calibri" },
-            alignment: { horizontal: "center", vertical: "center" },
-            fill: { fgColor: { rgb: "1E40AF" } },
-            border: {
-              top: { style: "thick", color: { rgb: "000000" } },
-              bottom: { style: "thick", color: { rgb: "000000" } },
-              left: { style: "medium", color: { rgb: "000000" } },
-              right: { style: "medium", color: { rgb: "000000" } }
-            }
-          };
-        }
-        
-        if (isDataRow) {
-          const isEvenRow = (R - transactionTableDataStart) % 2 === 0;
-          ws[cell_address].s = {
-            font: { size: 10, name: "Calibri" },
-            alignment: { 
-              horizontal: C === 3 ? "left" : "center", 
-              vertical: "center" 
-            },
-            fill: { fgColor: { rgb: isEvenRow ? "F1F5F9" : "FFFFFF" } },
-            border: {
-              top: { style: "thin", color: { rgb: "000000" } },
-              bottom: { style: "thin", color: { rgb: "000000" } },
-              left: { style: "thin", color: { rgb: "000000" } },
-              right: { style: "thin", color: { rgb: "000000" } }
-            }
-          };
-          
-          // Financial columns coloring
-          if (C === 6 && cellValue) { // Income
-            ws[cell_address].s.font = { color: { rgb: "059669" }, bold: true, size: 10 };
-          }
-          if (C === 7 && cellValue) { // Expense
-            ws[cell_address].s.font = { color: { rgb: "DC2626" }, bold: true, size: 10 };
-          }
-          if (C === 8) { // Balance
-            const balance = parseFloat(cellValue?.toString() || '0');
-            ws[cell_address].s.font = {
-              color: { rgb: balance >= 0 ? "059669" : "DC2626" },
-              bold: true,
-              size: 10
-            };
-          }
-          if (C === 9 && cellValue && typeof cellValue === 'string') { // Type
-            if (cellValue.includes('INCOME')) {
-              ws[cell_address].s.font.color = { rgb: "059669" };
-            } else if (cellValue.includes('EXPENSE')) {
-              ws[cell_address].s.font.color = { rgb: "DC2626" };
-            }
-            ws[cell_address].s.font.bold = true;
-          }
-          if (C === 10 && cellValue && typeof cellValue === 'string') { // Status
-            ws[cell_address].s.font.color = { rgb: cellValue.includes('POSITIVE') ? "059669" : "DC2626" };
-            ws[cell_address].s.font.bold = true;
-          }
-        }
-      }
-      
-      // SUMMARY TABLE
-      if (R >= summaryTableHeaderRow && R <= summaryTableDataEnd && C <= 8) {
-        const isHeaderRow = R === summaryTableHeaderRow;
-        const isDataRow = R >= summaryTableDataStart && R <= summaryTableDataEnd;
-        
-        if (isHeaderRow) {
-          ws[cell_address].s = {
-            font: { bold: true, size: 12, color: { rgb: "FFFFFF" }, name: "Calibri" },
-            alignment: { horizontal: "center", vertical: "center" },
-            fill: { fgColor: { rgb: "059669" } },
-            border: {
-              top: { style: "thick", color: { rgb: "000000" } },
-              bottom: { style: "thick", color: { rgb: "000000" } },
-              left: { style: "medium", color: { rgb: "000000" } },
-              right: { style: "medium", color: { rgb: "000000" } }
-            }
-          };
-        }
-        
-        if (isDataRow) {
-          const isEvenRow = (R - summaryTableDataStart) % 2 === 0;
-          ws[cell_address].s = {
-            font: { size: 11, name: "Calibri", bold: true },
-            alignment: { horizontal: "center", vertical: "center" },
-            fill: { fgColor: { rgb: isEvenRow ? "ECFDF5" : "F0FDF4" } },
-            border: {
-              top: { style: "thin", color: { rgb: "000000" } },
-              bottom: { style: "thin", color: { rgb: "000000" } },
-              left: { style: "thin", color: { rgb: "000000" } },
-              right: { style: "thin", color: { rgb: "000000" } }
-            }
-          };
-          
-          // Color code summary values
-          if (C === 2 && cellValue) { // Amount
-            const value = parseFloat(cellValue.toString());
-            ws[cell_address].s.font.color = { rgb: value >= 0 ? "059669" : "DC2626" };
-          }
-          
-          if ((C === 5 || C === 6) && cellValue && typeof cellValue === 'string') { // Status columns
-            if (cellValue.includes('EXCELLENT') || cellValue.includes('SUCCESSFUL') || cellValue.includes('ACTIVE')) {
-              ws[cell_address].s.font.color = { rgb: "059669" };
-            } else if (cellValue.includes('ATTENTION') || cellValue.includes('REVIEW') || cellValue.includes('INACTIVE')) {
-              ws[cell_address].s.font.color = { rgb: "DC2626" };
-            }
-          }
-        }
-      }
-      
-      // FOOTER STYLING
-      const footerStart = summaryTableDataEnd + 3;
-      if (R >= footerStart && C <= 10) {
-        ws[cell_address].s = {
-          font: { size: 10, color: { rgb: "6B7280" }, italic: true, name: "Calibri" },
-          alignment: { horizontal: "center", vertical: "center" },
-          fill: { fgColor: { rgb: "F9FAFB" } },
-          border: {
-            top: { style: "thin", color: { rgb: "000000" } },
-            bottom: { style: "thin", color: { rgb: "000000" } },
-            left: { style: "thin", color: { rgb: "000000" } },
-            right: { style: "thin", color: { rgb: "000000" } }
-          }
-        };
-      }
-    }
-  }
-
-  // COMPREHENSIVE MERGE CONFIGURATIONS FOR TABLE STRUCTURE
-  ws['!merges'] = [
-    // Main header
-    { s: { r: 0, c: 0 }, e: { r: 0, c: 2 } }, // Company name
-    { s: { r: 0, c: 3 }, e: { r: 0, c: 10 } }, // Report title
-
-    // Section headers (full width)
-    { s: { r: executiveSummaryStart, c: 0 }, e: { r: executiveSummaryStart, c: 10 } },
-    { s: { r: financialDashboardStart, c: 0 }, e: { r: financialDashboardStart, c: 10 } },
-    { s: { r: driverPerformanceStart, c: 0 }, e: { r: driverPerformanceStart, c: 10 } },
-    { s: { r: transactionTableStart, c: 0 }, e: { r: transactionTableStart, c: 10 } },
-    { s: { r: summaryTableStart, c: 0 }, e: { r: summaryTableStart, c: 10 } },
-
-    // Footer merges
-    { s: { r: range.e.r - 1, c: 0 }, e: { r: range.e.r - 1, c: 3 } },
-    { s: { r: range.e.r - 1, c: 4 }, e: { r: range.e.r - 1, c: 10 } },
-    { s: { r: range.e.r, c: 0 }, e: { r: range.e.r, c: 4 } },
-    { s: { r: range.e.r, c: 5 }, e: { r: range.e.r, c: 10 } }
-  ];
-
-  // ENHANCED PRINT SETUP
-  ws['!margins'] = { 
-    left: 0.5, 
-    right: 0.5, 
-    top: 0.8, 
-    bottom: 0.8, 
-    header: 0.3, 
-    footer: 0.3 
-  };
-  
-  ws['!printSetup'] = {
-    paperSize: 9, // A4
-    orientation: 'landscape',
-    scale: 80,
-    fitToWidth: 1,
-    fitToHeight: 0,
-    blackAndWhite: false,
-    draft: false,
-    cellComments: 'None',
-    useFirstPageNumber: true,
-    horizontalDpi: 600,
-    verticalDpi: 600,
-    copies: 1
-  };
-
-  // Add freeze panes for better navigation
-  ws['!freeze'] = { xSplit: 1, ySplit: transactionTableHeaderRow + 1 };
-
-  // Add worksheet to workbook
-  XLSX.utils.book_append_sheet(wb, ws, 'Financial Report');
-
-  // CREATE CHARTS SHEET
-  const chartsData = [
-    // Title
-    ['EL-PROFESSOR - VISUAL ANALYTICS DASHBOARD', '', '', '', '', '', '', '', '', ''],
-    ['', '', '', '', '', '', '', '', '', ''],
-
-    // Income vs Expenses Chart Data
-    ['INCOME VS EXPENSES COMPARISON', '', '', '', '', '', '', '', '', ''],
-    ['', '', '', '', '', '', '', '', '', ''],
-    ['Category', 'Amount (EUR)', '', '', '', '', '', '', '', ''],
-    ['Total Income', totalIncome.toFixed(2), '', '', '', '', '', '', '', ''],
-    ['Total Expenses', totalExpense.toFixed(2), '', '', '', '', '', '', '', ''],
-    ['Net Result', netResult.toFixed(2), '', '', '', '', '', '', '', ''],
-    ['', '', '', '', '', '', '', '', '', ''],
-    ['', '', '', '', '', '', '', '', '', ''],
-
-    // Monthly Trend Data
-    ['MONTHLY FINANCIAL TREND', '', '', '', '', '', '', '', '', ''],
-    ['', '', '', '', '', '', '', '', '', ''],
-    ['Month', 'Income', 'Expenses', 'Net', '', '', '', '', '', ''],
-
-    // Calculate monthly data
-    ...(() => {
-      const monthlyData = new Map<string, { income: number; expense: number }>();
-      sortedReceipts.forEach(receipt => {
-        const month = new Date(receipt.date).toLocaleDateString('de-DE', { year: 'numeric', month: 'short' });
-        const existing = monthlyData.get(month) || { income: 0, expense: 0 };
-        monthlyData.set(month, {
-          income: existing.income + receipt.income,
-          expense: existing.expense + receipt.expense
-        });
-      });
-
-      return Array.from(monthlyData.entries()).map(([month, data]) => [
-        month,
-        data.income.toFixed(2),
-        data.expense.toFixed(2),
-        (data.income - data.expense).toFixed(2),
-        '', '', '', '', '', ''
-      ]);
-    })(),
-
-    ['', '', '', '', '', '', '', '', '', ''],
-    ['', '', '', '', '', '', '', '', '', ''],
-
-    // Driver Performance Chart Data
-    ['DRIVER PERFORMANCE COMPARISON', '', '', '', '', '', '', '', '', ''],
-    ['', '', '', '', '', '', '', '', '', ''],
-    ['Driver', 'Income (EUR)', 'Expenses (EUR)', 'Net (EUR)', '', '', '', '', '', ''],
-
-    ...uniqueDrivers.map(driver => {
-      const driverReceipts = receipts.filter(r => r.driverName === driver);
-      const driverIncome = driverReceipts.reduce((sum, r) => sum + r.income, 0);
-      const driverExpense = driverReceipts.reduce((sum, r) => sum + r.expense, 0);
-      return [
-        driver,
-        driverIncome.toFixed(2),
-        driverExpense.toFixed(2),
-        (driverIncome - driverExpense).toFixed(2),
-        '', '', '', '', '', ''
-      ];
-    }),
-
-    ['', '', '', '', '', '', '', '', '', ''],
-    ['', '', '', '', '', '', '', '', '', ''],
-
-    // Transaction Type Distribution
-    ['TRANSACTION TYPE DISTRIBUTION', '', '', '', '', '', '', '', '', ''],
-    ['', '', '', '', '', '', '', '', '', ''],
-    ['Type', 'Count', 'Percentage', '', '', '', '', '', '', ''],
-    ['Income Transactions', receipts.filter(r => r.income > 0).length.toString(), ((receipts.filter(r => r.income > 0).length / receipts.length) * 100).toFixed(1) + '%', '', '', '', '', '', '', ''],
-    ['Expense Transactions', receipts.filter(r => r.expense > 0).length.toString(), ((receipts.filter(r => r.expense > 0).length / receipts.length) * 100).toFixed(1) + '%', '', '', '', '', '', '', ''],
-    ['', '', '', '', '', '', '', '', '', ''],
-    ['', '', '', '', '', '', '', '', '', ''],
-
-    // Balance Evolution
-    ['BALANCE EVOLUTION OVER TIME', '', '', '', '', '', '', '', '', ''],
-    ['', '', '', '', '', '', '', '', '', ''],
-    ['Date', 'Balance (EUR)', '', '', '', '', '', '', '', ''],
-
-    ...sortedReceipts.map(receipt => [
-      new Date(receipt.date).toLocaleDateString('de-DE'),
-      receipt.balance.toFixed(2),
-      '', '', '', '', '', '', '', ''
-    ]),
-
-    ['', '', '', '', '', '', '', '', '', ''],
-    ['', '', '', '', '', '', '', '', '', ''],
-
-    // Key Performance Indicators
-    ['KEY PERFORMANCE INDICATORS (KPIs)', '', '', '', '', '', '', '', '', ''],
-    ['', '', '', '', '', '', '', '', '', ''],
-    ['KPI', 'Value', 'Status', '', '', '', '', '', '', ''],
-    ['Average Transaction Value', avgTransactionValue.toFixed(2) + ' EUR', avgTransactionValue > 100 ? 'HIGH' : 'MODERATE', '', '', '', '', '', '', ''],
-    ['Income/Expense Ratio', totalExpense > 0 ? (totalIncome / totalExpense).toFixed(2) : 'N/A', totalIncome > totalExpense ? 'HEALTHY' : 'CRITICAL', '', '', '', '', '', '', ''],
-    ['Profit Margin', totalIncome > 0 ? ((netResult / totalIncome) * 100).toFixed(1) + '%' : '0%', netResult >= 0 ? 'POSITIVE' : 'NEGATIVE', '', '', '', '', '', '', ''],
-    ['Active Drivers', uniqueDrivers.length.toString(), uniqueDrivers.length > 5 ? 'EXCELLENT' : 'GOOD', '', '', '', '', '', '', ''],
-    ['Transaction Volume', receipts.length.toString(), receipts.length > 50 ? 'HIGH' : 'MODERATE', '', '', '', '', '', '', '']
-  ];
-
-  const chartsWs = XLSX.utils.aoa_to_sheet(chartsData);
-
-  // Style charts sheet
-  chartsWs['!cols'] = Array(10).fill({ wch: 18 });
-
-  const chartsRange = XLSX.utils.decode_range(chartsWs['!ref'] || 'A1');
-  for (let R = chartsRange.s.r; R <= chartsRange.e.r; ++R) {
-    for (let C = chartsRange.s.c; C <= chartsRange.e.c; ++C) {
-      const cell_address = XLSX.utils.encode_cell({ c: C, r: R });
-      if (!chartsWs[cell_address]) continue;
-
-      const cellValue = chartsWs[cell_address].v;
-
-      // Main title
-      if (R === 0) {
-        chartsWs[cell_address].s = {
-          font: { bold: true, size: 24, color: { rgb: "FFFFFF" }, name: "Calibri" },
-          alignment: { horizontal: "center", vertical: "center" },
-          fill: { fgColor: { rgb: "1E3A8A" } },
-          border: {
-            top: { style: "thick", color: { rgb: "000000" } },
-            bottom: { style: "thick", color: { rgb: "000000" } },
-            left: { style: "thick", color: { rgb: "000000" } },
-            right: { style: "thick", color: { rgb: "000000" } }
-          }
-        };
-      }
-
-      // Section headers
-      if (cellValue && typeof cellValue === 'string' && cellValue.includes('COMPARISON') ||
-          cellValue && typeof cellValue === 'string' && cellValue.includes('TREND') ||
-          cellValue && typeof cellValue === 'string' && cellValue.includes('DISTRIBUTION') ||
-          cellValue && typeof cellValue === 'string' && cellValue.includes('EVOLUTION') ||
-          cellValue && typeof cellValue === 'string' && cellValue.includes('KPI')) {
-        chartsWs[cell_address].s = {
-          font: { bold: true, size: 14, color: { rgb: "FFFFFF" }, name: "Calibri" },
-          alignment: { horizontal: "center", vertical: "center" },
-          fill: { fgColor: { rgb: "059669" } },
-          border: {
-            top: { style: "thick", color: { rgb: "000000" } },
-            bottom: { style: "thick", color: { rgb: "000000" } },
-            left: { style: "medium", color: { rgb: "000000" } },
-            right: { style: "medium", color: { rgb: "000000" } }
-          }
-        };
-      }
-
-      // Data cells with borders
-      if (cellValue && cellValue !== '') {
-        if (!chartsWs[cell_address].s) {
-          chartsWs[cell_address].s = {};
-        }
-        if (!chartsWs[cell_address].s.border) {
-          chartsWs[cell_address].s.border = {
-            top: { style: "thin", color: { rgb: "000000" } },
-            bottom: { style: "thin", color: { rgb: "000000" } },
-            left: { style: "thin", color: { rgb: "000000" } },
-            right: { style: "thin", color: { rgb: "000000" } }
-          };
-        }
-
-        // Number formatting
-        if (typeof cellValue === 'string' && cellValue.includes('.')) {
-          const numValue = parseFloat(cellValue);
-          if (!isNaN(numValue) && chartsWs[cell_address].s) {
-            chartsWs[cell_address].s.font = {
-              ...chartsWs[cell_address].s.font,
-              color: { rgb: numValue >= 0 ? "059669" : "DC2626" },
-              bold: true
-            };
-          }
-        }
-
-        // Status coloring
-        if (typeof cellValue === 'string' &&
-            (cellValue.includes('HIGH') || cellValue.includes('HEALTHY') || cellValue.includes('POSITIVE') ||
-             cellValue.includes('EXCELLENT') || cellValue.includes('GOOD'))) {
-          if (chartsWs[cell_address].s) {
-            chartsWs[cell_address].s.font = {
-              ...chartsWs[cell_address].s.font,
-              color: { rgb: "059669" },
-              bold: true
-            };
-          }
-        } else if (typeof cellValue === 'string' &&
-                   (cellValue.includes('CRITICAL') || cellValue.includes('NEGATIVE') || cellValue.includes('LOW'))) {
-          if (chartsWs[cell_address].s) {
-            chartsWs[cell_address].s.font = {
-              ...chartsWs[cell_address].s.font,
-              color: { rgb: "DC2626" },
-              bold: true
-            };
-          }
-        }
-      }
-    }
-  }
-
-  // Merge title cells
-  chartsWs['!merges'] = [
-    { s: { r: 0, c: 0 }, e: { r: 0, c: 9 } }
-  ];
-
-  XLSX.utils.book_append_sheet(wb, chartsWs, 'Charts & Analytics');
-
-  // FILENAME GENERATION
-  const today = new Date().toISOString().split('T')[0];
-  const filterSuffix = isFiltered ? '_Filtered' : '';
-  const periodSuffix = receipts.length > 0 ? 
-    `_${new Date(sortedReceipts[0].date).toLocaleDateString('de-DE').replace(/\./g, '-')}_to_${new Date(sortedReceipts[sortedReceipts.length - 1].date).toLocaleDateString('de-DE').replace(/\./g, '-')}` : 
-    '';
-  const filename = `El-Professor_Professional_Report_${today}${periodSuffix}${filterSuffix}.xlsx`;
-  
-  // SAVE FILE
-  XLSX.writeFile(wb, filename);
-
-  console.log(`Professional Excel report created successfully: ${filename}`);
-};
+import { Income, SalaryCalculation } from '../types/receipt';
+// `salaryDueState` is `salaryBase` — COALESCE(netto_salary, amount_due) — plus
+// the payment derivation, from the module SalariesManagement imports. Both
+// quantities this export prints come from there and are never spelled here.
+import { salaryDueState } from './salaryDue';
 
 export const exportIncomeToExcel = (incomes: Income[], fromDate?: string, toDate?: string) => {
   const wb = XLSX.utils.book_new();
@@ -926,12 +161,47 @@ export const exportSalariesToExcel = (salaries: SalaryCalculation[], periodStart
     CreatedDate: new Date()
   };
 
+  /**
+   * ── THE RULE THIS FUNCTION PRESERVES ─────────────────────────────────────
+   * **Due is `COALESCE(netto_salary, amount_due)`, and paid is derived from the
+   * payments — never from the stored status word.**
+   *
+   * It is the rule `confirm_salary_cash_payment` applies when it decides how
+   * much cash a driver may be handed, and since 28.09.2026 the rule
+   * `SalariesManagement` applies on screen. This export was the last reader of
+   * the two quantities that correction discarded — `amount_due` on its own and
+   * `salaries.status` — so the Gehälter screen and the Gehälter file printed
+   * different numbers for the same month, and the file printed the ones the
+   * screen had stopped trusting.
+   *
+   * Both quantities therefore come from `utils/salaryDue.ts`, the same module
+   * the screen imports. Never inline either of them here: a second copy of a
+   * payroll rule is exactly how the screen and the file drifted apart, and what
+   * this file prints reaches a person's pay.
+   */
+  const priced = salaries.map(salary => ({ salary, due: salaryDueState(salary, salary.total_paid) }));
+
   const totalRevenue = salaries.reduce((sum, s) => sum + s.revenue, 0);
   const totalTips = salaries.reduce((sum, s) => sum + s.tips, 0);
   const totalRevenueShare = salaries.reduce((sum, s) => sum + s.revenue_share, 0);
-  const totalDue = salaries.reduce((sum, s) => sum + s.amount_due, 0);
-  const paidCount = salaries.filter(s => s.status === 'paid').length;
-  const unpaidCount = salaries.filter(s => s.status === 'unpaid').length;
+  const totalDue = priced.reduce((sum, p) => sum + p.due.base, 0);
+  const paidCount = priced.filter(p => p.due.paymentStatus === 'paid').length;
+  const partiallyPaidCount = priced.filter(p => p.due.paymentStatus === 'partially_paid').length;
+  const unpaidCount = priced.filter(p => p.due.paymentStatus === 'unpaid').length;
+
+  // A derived status has three values where the stored word had two, so the
+  // summary carries all three and the three counts still sum to the driver
+  // count. The wording of this dump is German throughout, as it always has
+  // been; it is not one of the statutory documents, so translating it is a
+  // separate change and not this one.
+  const STATUS_LABEL: Record<'paid' | 'partially_paid' | 'unpaid', string> = {
+    paid:           'Bezahlt',
+    partially_paid: 'Teilweise bezahlt',
+    unpaid:         'Unbezahlt',
+  };
+
+  const SUMMARY_SECTION = 'ZUSAMMENFASSUNG';
+  const DRIVER_SECTION  = 'GEHALTSÜBERSICHT PRO FAHRER';
 
   const excelData = [
     ['EL-PROFESSOR - GEHALTSABRECHNUNG', '', '', '', '', '', ''],
@@ -941,28 +211,34 @@ export const exportSalariesToExcel = (salaries: SalaryCalculation[], periodStart
     ['Anzahl Fahrer', salaries.length.toString(), '', '', '', '', ''],
     ['', '', '', '', '', '', ''],
 
-    ['ZUSAMMENFASSUNG', '', '', '', '', '', ''],
+    [SUMMARY_SECTION, '', '', '', '', '', ''],
     ['', '', '', '', '', '', ''],
     ['Metrik', 'Betrag (€)', 'Status', '', '', '', ''],
     ['Gesamt Umsatz', totalRevenue.toFixed(2), '', '', '', '', ''],
     ['Gesamt Trinkgeld', totalTips.toFixed(2), '', '', '', '', ''],
     ['Gesamt Umsatzanteil', totalRevenueShare.toFixed(2), '', '', '', '', ''],
     ['Gesamt Fällig', totalDue.toFixed(2), '', '', '', '', ''],
-    ['Bezahlt', paidCount.toString(), '', '', '', '', ''],
-    ['Unbezahlt', unpaidCount.toString(), '', '', '', '', ''],
+    [STATUS_LABEL.paid, paidCount.toString(), '', '', '', '', ''],
+    [STATUS_LABEL.partially_paid, partiallyPaidCount.toString(), '', '', '', '', ''],
+    [STATUS_LABEL.unpaid, unpaidCount.toString(), '', '', '', '', ''],
     ['', '', '', '', '', '', ''],
 
-    ['GEHALTSÜBERSICHT PRO FAHRER', '', '', '', '', '', ''],
+    [DRIVER_SECTION, '', '', '', '', '', ''],
     ['', '', '', '', '', '', ''],
     ['Fahrer', 'Umsatz (€)', 'Anteil (%)', 'Umsatzanteil (€)', 'Trinkgeld (€)', 'Fälliger Betrag (€)', 'Status'],
-    ...salaries.map(salary => [
+    // `due.base`, not `amount_due`: a manual netto adjustment wins over the
+    // calculated amount. `due.paymentStatus`, not `salary.status`: the stored
+    // word was computed against whatever the base was when the last payment was
+    // entered, and the screen recomputes the base from the period's income rows
+    // on every load.
+    ...priced.map(({ salary, due }) => [
       salary.driver_name,
       salary.revenue.toFixed(2),
       (salary.salary_ratio * 100).toFixed(1) + '%',
       salary.revenue_share.toFixed(2),
       salary.tips.toFixed(2),
-      salary.amount_due.toFixed(2),
-      salary.status === 'paid' ? 'Bezahlt' : 'Unbezahlt'
+      due.base.toFixed(2),
+      STATUS_LABEL[due.paymentStatus]
     ]),
     ['', '', '', '', '', '', ''],
     ['GESAMT', totalRevenue.toFixed(2), '', totalRevenueShare.toFixed(2), totalTips.toFixed(2), totalDue.toFixed(2), '']
@@ -1033,10 +309,19 @@ export const exportSalariesToExcel = (salaries: SalaryCalculation[], periodStart
     }
   }
 
+  // The two section bands are found by their own text rather than counted by
+  // hand. The literals were 6 and 17: 6 was right, 17 was the blank row BELOW
+  // the driver band, so the driver section title has never been merged and an
+  // empty row was. Deriving them also keeps the summary's new third count line
+  // from silently shifting the band it merges.
+  const bandRow = (title: string) => excelData.findIndex(row => row[0] === title);
+  const summaryRow = bandRow(SUMMARY_SECTION);
+  const driverRow  = bandRow(DRIVER_SECTION);
+
   ws['!merges'] = [
     { s: { r: 0, c: 0 }, e: { r: 0, c: 6 } },
-    { s: { r: 6, c: 0 }, e: { r: 6, c: 6 } },
-    { s: { r: 17, c: 0 }, e: { r: 17, c: 6 } }
+    ...(summaryRow >= 0 ? [{ s: { r: summaryRow, c: 0 }, e: { r: summaryRow, c: 6 } }] : []),
+    ...(driverRow  >= 0 ? [{ s: { r: driverRow,  c: 0 }, e: { r: driverRow,  c: 6 } }] : []),
   ];
 
   XLSX.utils.book_append_sheet(wb, ws, 'Gehälter');
@@ -1112,7 +397,14 @@ export interface ExportOptions {
   columns: ExportColumn[];
   rows: Record<string, unknown>[];
   filterSummary?: string[];
-  /** A number is written as a number cell in its column's format; a string as text. */
+  /**
+   * The totals row's figures, by column key. A number is written as a number
+   * cell in its column's format; a string as text.
+   *
+   * THE CONTRACT: the row's FIRST cell is its label and carries no figure, so
+   * naming `columns[0].key` here throws — that wording goes in
+   * `labels.totalsRow`. Pass `{}` for a totals row that carries only its label.
+   */
   totals?: Record<string, string | number>;
   /** Defaults to the German wording this export has always had. */
   labels?: Partial<ExportChromeLabels>;
@@ -1241,6 +533,32 @@ function blank(ws: XLSX.WorkSheet, r: number, numCols: number, bg = 'FFFFFF') {
 export function buildTableWorkbook(opts: ExportOptions): XLSX.WorkBook {
   const { sheetTitle, moduleName, columns, rows, filterSummary = [], totals } = opts;
   const labels: ExportChromeLabels = { ...DEFAULT_EXPORT_CHROME, ...(opts.labels ?? {}) };
+
+  // ── The totals row's first cell is its label, and there is only one cell ───
+  // THE RULE: `totals` names the columns that carry a figure; column 0 carries
+  // the row's label. Block 6 below writes that label unconditionally, so a
+  // `totals` entry keyed to the first column could never be rendered — and was
+  // dropped with no warning, which is what this refuses.
+  //
+  // It refuses rather than moving the label, because the label in the first cell
+  // is the one piece of chrome every file this export has ever produced carries,
+  // and a count sentence in the Kennzeichen or Fahrername column would be
+  // sorted and filtered as data. Three callers were tripping over this —
+  // Fahrzeuge, Fahrer and Benutzer — and every one of them was passing its own
+  // WORDING and not a figure, so `labels.totalsRow` is where they belong. No
+  // figure was ever lost; wording was.
+  //
+  // Loud, not a console warning: every call site is in this repository, so this
+  // is a wrong program rather than wrong data, and it is meant to fail the first
+  // click and the test rather than reach a customer's file.
+  if (totals && columns.length > 0 && Object.prototype.hasOwnProperty.call(totals, columns[0].key)) {
+    throw new Error(
+      `exportTableToExcel: totals['${columns[0].key}'] can never be rendered — the first ` +
+      `column of the totals row is that row's label. Pass wording as labels.totalsRow, ` +
+      `and put a figure in any column but the first.`,
+    );
+  }
+
   const N = columns.length;
   const exportedAt  = new Date().toLocaleString('de-DE');
   const exportedDate = new Date().toLocaleDateString('de-DE');
@@ -1442,8 +760,10 @@ export function buildTableWorkbook(opts: ExportOptions): XLSX.WorkBook {
 
     columns.forEach((col, c) => {
       const isLabel = c === 0;
-      // The first cell is always the label, as it always was — never a figure.
-      // The label follows the UI language since #112; only the figures are ours.
+      // The first cell is always the label, as it always was — never a figure,
+      // which the guard at the top of this function now enforces instead of
+      // silently discarding one. The label follows the UI language since #112;
+      // only the figures are ours.
       const rawTotal = totals[col.key];
       const numeric  = isLabel ? null : numericCell(col, rawTotal);
       const val      = isLabel

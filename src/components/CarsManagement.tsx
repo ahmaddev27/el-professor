@@ -242,7 +242,12 @@ export default function CarsManagement() {
           : label;
         return { ...(c as unknown as Record<string, unknown>), tuev_status: statusLabel };
       }),
-      totals: { kennzeichen: t('fleet.carsTotal', { count: filteredCars.length }) },
+      // This line is the totals row's LABEL, not a figure in the Kennzeichen
+      // column: keyed on the first column it was discarded unrendered, so the
+      // file said "Gesamt (N Einträge)" instead. `totals: {}` keeps the row —
+      // the table has no column to total.
+      labels: { totalsRow: t('fleet.carsTotal', { count: filteredCars.length }) },
+      totals: {},
     });
   };
 
