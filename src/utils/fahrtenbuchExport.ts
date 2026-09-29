@@ -224,7 +224,11 @@ export function safeSheetName(rawName: string | null | undefined): string {
   if (!rawName || rawName.trim().length === 0) return FALLBACK;
 
   // 5 then 2. A replacement never changes the length, so the cap is exact.
-  let name = rawName.replace(/[:\/?*[\]]/g, '_').slice(0, 31);
+  // The backslash is in the class. It was omitted in the first version of this
+  // helper while the docblock above already listed it, and the library-measured
+  // test below is what caught that: `a/b\c` came out as `a_b\c` and
+  // `book_append_sheet` still threw.
+  let name = rawName.replace(/[:\\/?*[\]]/g, '_').slice(0, 31);
   // 3, both ends and greedily: "''a''" needs more than one character per end.
   name = name.replace(/^'+/, '').replace(/'+$/, '');
   // 1. A name that was nothing but apostrophes is empty now.
