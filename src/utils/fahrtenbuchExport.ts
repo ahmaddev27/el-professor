@@ -184,6 +184,81 @@ export function applySourceCellFormats(
   return formatted;
 }
 
+/**
+ * ── The sheet name a workbook may actually carry ──
+ *
+ * `sourceSheetName` is `fahrtenbuch_imports.source_sheet_name`, written
+ * verbatim from the workbook the customer uploaded (`FahrtenbuchImportModal`:
+ * `setSourceSheetName(wb.SheetNames[0] || 'Sheet1')`). Nothing validates it on
+ * the way in, and `book_append_sheet` does not sanitise — it calls
+ * `check_ws_name`, which **throws**. Read from the pinned library
+ * (xlsx 0.20.3, `xlsx.js` `check_ws_name`), it refuses five things:
+ *
+ *   1. a blank name;
+ *   2. more than 31 characters;
+ *   3. an apostrophe as the first **or** the last character — it tests
+ *      `charCodeAt(0)` and `charCodeAt(length - 1)`, so both ends;
+ *   4. the name `History`, in any case;
+ *   5. any of `: ] [ * ? / \`.
+ *
+ * A throw inside a React event handler with no catch and no app-wide error
+ * boundary is a click that produces no file and no message. So the name is
+ * corrected rather than refused: a tab label is not part of the statutory
+ * record, and a Fahrtenbuch the Steuerberater can open beats no file at all.
+ *
+ * **The rule this preserves: nothing but the tab label changes.** The header row
+ * and every cell value are untouched, so the `'original'` mode still reproduces
+ * the imported sheet byte for byte. This function never sees them.
+ *
+ * **The order is load-bearing.** Truncating to 31 can *create* a trailing
+ * apostrophe, so the cap runs before the apostrophes are stripped; stripping
+ * only ever shortens, so it cannot breach the cap afterwards. The reserved-name
+ * test runs last, because stripping turns `'history'` into `history`.
+ *
+ * One home, so this exporter, `monatsplanungXlsxExport` — which had the only
+ * copy of this rule, covering 2 of the 5 conditions — cannot drift apart on
+ * what the library accepts.
+ */
+export function safeSheetName(rawName: string | null | undefined): string {
+  const FALLBACK = 'Sheet1';
+  if (!rawName || rawName.trim().length === 0) return FALLBACK;
+
+  // 5 then 2. A replacement never changes the length, so the cap is exact.
+  let name = rawName.replace(/[:\/?*[\]]/g, '_').slice(0, 31);
+  // 3, both ends and greedily: "''a''" needs more than one character per end.
+  name = name.replace(/^'+/, '').replace(/'+$/, '');
+  // 1. A name that was nothing but apostrophes is empty now.
+  if (name.trim().length === 0) return FALLBACK;
+  // 4. Only ever a 7-character name, so the added character cannot breach the cap.
+  if (name.toLowerCase() === 'history') return `${name}_`;
+  return name;
+}
+
+/** Why the Fahrtenbuch export produced no workbook. */
+export type FahrtenbuchExportBlockedReason = 'no_trips' | 'no_raw_data' | 'no_columns';
+
+/**
+ * The export could not build a workbook, and says which of the three conditions
+ * stopped it. Each one used to be a bare `return`: the user clicked
+ * "Fahrtenbuch herunterladen" and nothing happened at all.
+ *
+ * Thrown rather than returned, because that is what reaches the user today.
+ * `HistoricalReconciliationWizard` wraps both of its calls in `try/catch` and
+ * puts `e.message` on screen, beside a `throw new Error(t('rec2.…'))` of its
+ * own; a result object would need every caller edited before any of them spoke.
+ * The sentence is German for the same reason — it is rendered as-is. `reason` is
+ * the stable half: key a later translation off it, never off the wording.
+ */
+export class FahrtenbuchExportBlockedError extends Error {
+  readonly reason: FahrtenbuchExportBlockedReason;
+
+  constructor(reason: FahrtenbuchExportBlockedReason, message: string) {
+    super(message);
+    this.name = 'FahrtenbuchExportBlockedError';
+    this.reason = reason;
+  }
+}
+
 function findDriverColumn(keys: string[]): string | null {
   const normalized = keys.map(k => k.toLowerCase().trim());
   for (const candidate of DRIVER_COL_CANDIDATES) {
@@ -208,7 +283,15 @@ interface ExportOptions {
 }
 
 export function exportFahrtenbuch({ trips, month, year, importFileName, sourceColumns, sourceSheetName, skipSort }: ExportOptions) {
-  if (trips.length === 0) return;
+  // Each of the three refusals below used to be a bare `return`: the user
+  // clicked "Fahrtenbuch herunterladen" and nothing happened — no file, no
+  // message, no console entry. They now say which condition stopped them.
+  if (trips.length === 0) {
+    throw new FahrtenbuchExportBlockedError(
+      'no_trips',
+      'Keine Fahrten für diesen Zeitraum vorhanden. Es wurde kein Fahrtenbuch erstellt.',
+    );
+  }
 
   const SORT_COL = 'Uhrzeit der Auftragsuebermittlung';
   const firstRawCheck = (trips[0].raw_data_json ?? {}) as Record<string, unknown>;
@@ -229,7 +312,12 @@ export function exportFahrtenbuch({ trips, month, year, importFileName, sourceCo
   });
 
   const firstRaw = ordered[0].raw_data_json;
-  if (!firstRaw || typeof firstRaw !== 'object') return;
+  if (!firstRaw || typeof firstRaw !== 'object') {
+    throw new FahrtenbuchExportBlockedError(
+      'no_raw_data',
+      'Die Originaldaten der ersten Fahrt fehlen. Das Fahrtenbuch kann nicht in der Originalform erstellt werden.',
+    );
+  }
 
   const rawKeys = Object.keys(firstRaw);
 
@@ -240,10 +328,23 @@ export function exportFahrtenbuch({ trips, month, year, importFileName, sourceCo
     const allMatch = FAHRTENBUCH_ORIGINAL_COLUMNS.every(c => rawKeys.includes(c));
     columns = allMatch ? FAHRTENBUCH_ORIGINAL_COLUMNS : rawKeys;
   }
-  if (columns.length === 0) return;
+  // Reachable: `raw_data_json` is `jsonb NOT NULL DEFAULT '{}'`, and since the
+  // import slice of 20260922100000 a row the file left incomplete is stored and
+  // flagged rather than dropped. `{}` passes the guard above, `Object.keys({})`
+  // is `[]`, and no column set can be derived from it.
+  if (columns.length === 0) {
+    throw new FahrtenbuchExportBlockedError(
+      'no_columns',
+      'Die Spalten der Originaldatei konnten nicht ermittelt werden. Das Fahrtenbuch kann nicht erstellt werden.',
+    );
+  }
 
   const driverCol = findDriverColumn(columns);
-  const sheetName = sourceSheetName || 'Sheet1';
+  // The customer's own tab label, which `check_ws_name` throws on for five
+  // different reasons. Corrected, never refused: a tab label is not part of the
+  // statutory record, and the header row and every cell value below are
+  // untouched, so 'original' mode still reproduces the sheet byte for byte.
+  const sheetName = safeSheetName(sourceSheetName);
 
   const headers = [...columns];
   const rows = ordered.map(trip => {
