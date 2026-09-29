@@ -280,3 +280,56 @@ the document, unlike the other three in the repo.
 - **The two build-gate failures** were proven pre-existing but not diagnosed.
 - **The cost of a paged panel export** in audit rows and wall-clock is unmeasured; time one on
   staging before relying on it.
+
+---
+
+# The owner's decisions, 29.09.2026 — all five answered
+
+| | decision | what it means in code |
+|---|---|---|
+| **D-A** | **Move the gate.** | The Basic plan keeps its published `Backup` feature; `BackupManagement` stops being reachable only behind `PlanGate feature="rollen_nutzer"` (`advanced`). The promise on the pricing page stands and the product honours it. |
+| **D-B** | **A new library, and clean work.** | **ExcelJS 4.4.0**, and **only for `src/utils/excelExport.ts`** — the operational table exports. The ~500 lines of style objects start drawing instead of being deleted. |
+| **D-C** | **Name the page export what it is.** | A panel export writes the page the operator is looking at, and the workbook says so in its filter band and its filename. No hidden paging, no audit-row storm, no file labelled as a list it does not hold. |
+| **D-D** | **Do the right thing.** | Taken as: the read models' reduced column set **stands**. No salary, no bank detail, no personal identifier beyond the name, no account holding a staff row. An export never widens what a role may read. |
+| **D-E** | **Yes — do it right, clean work.** | `exportToExcel` (770 lines, a `Receipt` model the database does not have, merge arithmetic drifting up to six rows) is **deleted**, and Belege is routed through the generic helper with its filters actually applied. |
+
+## Why ExcelJS, and why only for one module
+
+Measured on 29.09.2026: `exceljs@4.4.0`, last published December 2024, full support for fills, fonts,
+borders, alignment, merges, frozen panes, column widths and number formats — every property the dead
+`T` token block already describes. The two alternatives were rejected on evidence:
+`xlsx-js-style@1.2.0` was last published **May 2022** and is a fork of SheetJS **0.18** (we are on
+0.20.3); `write-excel-file` is maintained but narrower and far less used.
+
+**The statutory writers do not move.** `src/utils/fahrtenbuchExport.ts` and
+`src/utils/historicalWorkingHoursFahrtenbuchExport.ts` stay on `xlsx`, because the `'original'` mode
+must reproduce an imported sheet's headers **byte for byte** and a corrected Fahrtenbuch is a
+statutory record. Rewriting that onto a different writer risks the one thing that must not change.
+
+Two libraries therefore coexist, and the split is the design, not an accident: **`exceljs` writes
+operational tables that a person reads and sorts; `xlsx` reproduces statutory sheets byte for byte.**
+Group 4's fixes (the unvalidated sheet name, the silent return) happen on `xlsx`, unchanged.
+
+## A correction to this document's own figures
+
+An earlier revision of this plan said the typecheck baseline is 213. That was measured against a
+working tree **15 merged commits behind `origin/staging`**. On the real base:
+
+- `typecheck-baseline.json` carries `maxErrors: 213` — a **ceiling**, not an expected count;
+- the **actual** count on `origin/staging` is **199**, and on the `fix/excel-numeric-cells` branch
+  it is also **199**.
+
+The other correction stands and matters more: **`npx tsc --noEmit` at the repo root checks nothing**,
+because the root `tsconfig.json` has `"files": []`. The real check is `-p tsconfig.app.json`.
+
+## And a caveat that shaped the plan
+
+The audit ran against that same stale tree. **Nine of the seventeen files it names differ on
+`origin/staging`**, so its line numbers are approximate for those nine and at least one finding is
+already fixed there: #112 translated the export's own chrome, which the audit reported as
+"hard-coded German while the column headers follow the UI language".
+
+Every implementing agent is therefore instructed to **re-establish its finding against the current
+code before changing anything**, and to report a finding that has already been fixed as such rather
+than inventing work. Where an agent's measurement and this plan disagree, the agent's measurement
+wins and the difference is recorded.
