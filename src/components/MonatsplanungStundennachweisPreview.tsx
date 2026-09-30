@@ -3326,6 +3326,40 @@ function GehaltsabweichungSection({
     setApplyError('');
     let updatedCount = 0;
 
+    /*
+     * Mark this run's active finalization stale, and reload.
+     *
+     * One function because **both** exits need it. A transfer is a loop of
+     * `reassign_fahrtenbuch_trip` calls with no transaction — CLAUDE.md records
+     * the non-atomicity as a known defect and it stays — so a failure part way
+     * through leaves the earlier trips already moved. Until now the failure path
+     * returned before this write, so the finalization went on reading
+     * `is_stale = false` over trips that had changed underneath it: the operator
+     * saw the error, the documents stayed downloadable, and nothing said they no
+     * longer matched the data. 10 production finalizations exist and all 10 are
+     * `is_stale = false`.
+     *
+     * `stale_reason` names the partial case separately, because "a transfer was
+     * applied" and "a transfer was applied to some of its trips and then failed"
+     * are different facts for whoever reads the audit row. It is stored audit
+     * text and stays German, like the reason and note the RPC persists above.
+     */
+    const markStaleAndReload = (partialOf: number | null) => {
+      void supabase
+        .from('planning_finalizations')
+        .update({
+          is_stale: true,
+          stale_reason: partialOf === null
+            ? 'Transfer nach Finalisierung angewendet'
+            : `Transfer nach Finalisierung teilweise angewendet: ${updatedCount} von ${partialOf} Fahrten`,
+          stale_at: new Date().toISOString(),
+        })
+        .eq('planning_run_id', runId)
+        .eq('is_stale', false);
+      onReload();
+      onTransferApplied?.();
+    };
+
     for (const tripId of tripIds) {
       const { data, error } = await supabase.rpc('reassign_fahrtenbuch_trip', {
         p_trip_id: tripId,
@@ -3346,6 +3380,10 @@ function GehaltsabweichungSection({
         }));
         setApplying(false);
         setPendingApply(null);
+        // Only when something actually moved. A transfer that failed on its first
+        // trip changed nothing, so the finalization is still true and marking it
+        // stale would send the operator to re-finalize over identical data.
+        if (updatedCount > 0) markStaleAndReload(tripIds.length);
         return;
       }
       updatedCount++;
@@ -3361,17 +3399,7 @@ function GehaltsabweichungSection({
     setApplying(false);
     setPendingApply(null);
     setTransferAppliedCount(c => c + 1);
-
-    // Mark active finalization for this run as stale
-    void supabase
-      .from('planning_finalizations')
-      // stale_reason is stored audit text, not a label — it stays German.
-      .update({ is_stale: true, stale_reason: 'Transfer nach Finalisierung angewendet', stale_at: new Date().toISOString() })
-      .eq('planning_run_id', runId)
-      .eq('is_stale', false);
-
-    onReload();
-    onTransferApplied?.();
+    markStaleAndReload(null);
   };
 
   const applyAusgleich = async (dev: DriverDeviation) => {
