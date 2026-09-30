@@ -66,6 +66,33 @@ describe('buildTableWorkbook — numeric columns', () => {
     expect(at(ws, FIRST_DATA_ROW, 2)).toMatchObject({ t: 'n', v: 0.4147, z: '0.0%' });
   });
 
+  it('writes a kilometres column as an integer number cell carrying its unit', () => {
+    const ws = sheetOf({
+      columns: [{ key: 'km_stand', label: 'KM-Stand', type: 'kilometres' }],
+      rows: [{ km_stand: 123456 }],
+    });
+
+    const cell = at(ws, FIRST_DATA_ROW, 0);
+    // The raw integer, not a pre-formatted "123.456 km" string: the unit lives in
+    // the cell's format, so Excel can still sort and compare the column.
+    expect(cell.t).toBe('n');
+    expect(cell.v).toBe(123456);
+    expect(cell.z).toBe('#,##0\\ "km"');
+  });
+
+  it('leaves a kilometres value it cannot read on the text path rather than writing 0', () => {
+    const ws = sheetOf({
+      columns: [{ key: 'km_stand', label: 'KM-Stand', type: 'kilometres' }],
+      rows: [{ km_stand: null }],
+    });
+
+    // A 0 km odometer where the reading is missing is a wrong figure, and this is
+    // also why the Werkstatt column passes no `format`: a callback here would be
+    // handed the null the number path refused.
+    expect(at(ws, FIRST_DATA_ROW, 0)).toMatchObject({ t: 's', v: '' });
+    expect(at(ws, FIRST_DATA_ROW, 0).z).toBeUndefined();
+  });
+
   it('coerces a numeric string to a number', () => {
     const ws = sheetOf({
       columns: [{ key: 'amount', label: 'Betrag', type: 'money' }],

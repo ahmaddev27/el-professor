@@ -224,7 +224,15 @@ export default function WerkstattPage() {
         { key: 'check_date',  label: t('common.date'),         width: 14, format: v => new Date(v as string).toLocaleDateString('de-DE') },
         { key: 'kennzeichen', label: t('werkstatt.plate'),    width: 16 },
         { key: 'status',      label: t('common.status'),         width: 14, format: v => ({ positive: t('werkstatt.positive'), negative: t('werkstatt.negative'), repaired: t('werkstatt.repaired') }[v as string] ?? String(v)) },
-        { key: 'km_stand',    label: t('werkstatt.odometer'),       width: 14, align: 'right', format: v => `${(v as number).toLocaleString('de-DE')} km` },
+        // An odometer reading is the column an operator sorts and compares, so it
+        // is written as a number with its unit in the cell format — never as the
+        // text `format` produced. The `format` callback is dropped in the same
+        // move on purpose: with a `type` set it runs only when the value cannot
+        // be read as a finite number, and `(null as number).toLocaleString()`
+        // throws, which would kill the whole export. `km_stand` is `integer NOT
+        // NULL` today (20260302064012), so that path is unreachable — it becomes
+        // reachable the moment the column is made nullable.
+        { key: 'km_stand',    label: t('werkstatt.odometer'),       width: 14, align: 'right', type: 'kilometres' },
         { key: 'oil_status',  label: t('werkstatt.oilStatus'),      width: 18 },
         { key: 'notes',       label: t('common.notes'),        width: 36 },
         { key: 'repair_notes',label: t('werkstatt.repair'),      width: 36 },
