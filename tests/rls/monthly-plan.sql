@@ -537,6 +537,7 @@ DECLARE
   c_plan CONSTANT uuid := _mp_id('plan:a-work');
   v_row  monthly_plan_drivers;
   v_out  text;
+  v_hint text;
 BEGIN
   -- Everything but driver_id and `selected` is the database's. The client sends
   -- a wrong name, a wrong owner flag and invented pay, and none of it survives.
@@ -609,7 +610,8 @@ BEGIN
     VALUES (c_co, c_plan, _mp_id('driver:inv'), NULL, false, false);
     v_out := 'allowed';
   EXCEPTION WHEN OTHERS THEN
-    v_out := coalesce(nullif(PG_EXCEPTION_HINT, ''), SQLSTATE);
+    GET STACKED DIAGNOSTICS v_hint = PG_EXCEPTION_HINT;
+    v_out := coalesce(nullif(v_hint, ''), SQLSTATE);
   END;
   PERFORM _mp_ok('section 7 rule 8: only the owner may be in a plan without being selected [' || v_out || ']',
     v_out = 'monthly_plan_driver_not_selected');
@@ -620,7 +622,8 @@ BEGIN
     VALUES (c_co, c_plan, _mp_id('driver:b'), NULL, true, false);
     v_out := 'allowed';
   EXCEPTION WHEN OTHERS THEN
-    v_out := coalesce(nullif(PG_EXCEPTION_HINT, ''), SQLSTATE);
+    GET STACKED DIAGNOSTICS v_hint = PG_EXCEPTION_HINT;
+    v_out := coalesce(nullif(v_hint, ''), SQLSTATE);
   END;
   PERFORM _mp_ok('section 13: another company''s driver is refused [' || v_out || ']',
     v_out = 'driver_company_mismatch');
@@ -632,7 +635,8 @@ BEGIN
      WHERE id = _mp_id('pd:work-ok');
     v_out := 'allowed';
   EXCEPTION WHEN OTHERS THEN
-    v_out := coalesce(nullif(PG_EXCEPTION_HINT, ''), SQLSTATE);
+    GET STACKED DIAGNOSTICS v_hint = PG_EXCEPTION_HINT;
+    v_out := coalesce(nullif(v_hint, ''), SQLSTATE);
   END;
   PERFORM _mp_ok('section 13: a snapshot stays with its plan and its driver [' || v_out || ']',
     v_out = 'monthly_plan_child_key_fixed');
@@ -734,6 +738,7 @@ DECLARE
   c_co    CONSTANT uuid := 'c0000000-0000-4000-8000-00000000000a';
   c_plan  CONSTANT uuid := _mp_id('plan:a-work');
   v_out   text;
+  v_hint  text;
 BEGIN
   -- Section 23: an empty plan is a failed save, not a month with nothing to do.
   PERFORM _mp_ok('confirm: a plan with no blocks is refused, by return value',
@@ -762,7 +767,9 @@ BEGIN
             '2026-11-03 08:00+01', '2026-11-03 09:00+01', 60, 60,
             _mp_id('driver:b'), NULL, 'best_fit');
     v_out := 'allowed';
-  EXCEPTION WHEN OTHERS THEN v_out := coalesce(nullif(PG_EXCEPTION_HINT, ''), SQLSTATE);
+  EXCEPTION WHEN OTHERS THEN
+      GET STACKED DIAGNOSTICS v_hint = PG_EXCEPTION_HINT;
+      v_out := coalesce(nullif(v_hint, ''), SQLSTATE);
   END;
   PERFORM _mp_ok('section 7 rule 8: a block cannot be given to a driver the plan does not list [' || v_out || ']',
     v_out = 'monthly_plan_driver_not_in_plan');
