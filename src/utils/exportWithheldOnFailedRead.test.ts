@@ -200,11 +200,19 @@ describe('the exporter still has no failure channel, so the guard belongs at the
    * Three statements: build, name, write. No early return and no argument that
    * could say "this read failed". If that ever changes, the three guards above
    * should move into the exporter and this test is where you will be told.
+   *
+   * The write is `downloadStyledWorkbook` since the ExcelJS swap, and not
+   * `XLSX.writeFile`: xlsx 0.20.3 discards every fill, font, border and
+   * alignment `buildTableWorkbook` describes (`get_cell_style` reads only
+   * `cell.z`), so the styling drew nothing. What this test is about is unchanged
+   * — the exporter still writes a workbook for whatever rows it is handed, with
+   * no failure channel and no early exit — and the assertion names the writer
+   * that now does it rather than being dropped.
    */
   it('writes a workbook for whatever rows it is handed', () => {
     const body = between(source, 'export function exportTableToExcel(opts: ExportOptions): void {', '\n}');
     expect(body).toContain('buildTableWorkbook(opts)');
-    expect(body).toContain('XLSX.writeFile(wb, safeFilename)');
+    expect(body).toContain('downloadStyledWorkbook(wb, safeFilename)');
     expect(body).not.toMatch(/\breturn\b/);
   });
 

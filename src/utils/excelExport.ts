@@ -1,4 +1,33 @@
+/**
+ * TWO LIBRARIES LIVE HERE, AND THAT SPLIT IS THE DESIGN — NOT AN ACCIDENT.
+ *
+ * `xlsx@0.20.3` (the community build) discards every cell style on write:
+ * `get_cell_style` reads exactly one property, `cell.z`, and writes `fontId:0,
+ * fillId:0, borderId:0`, while `write_sty_xml` emits one hard-coded font, two
+ * fills and one empty border for the whole file. `ws['!freeze']` is not a key
+ * the library reads at all — its `write_ws_xml_sheetviews` emits no `<pane>`.
+ * So the design the generic table exporter below describes drew NOTHING: those
+ * files came out plain, however many fills and borders were named.
+ *
+ * `exportTableToExcel` therefore writes through `exceljs` now, from
+ * `./styledWorkbookDownload` — the operational lists a person reads, sorts and
+ * filters. Everything else in this file STAYS on `xlsx`, deliberately:
+ * `exportIncomeToExcel` and `exportSalariesToExcel` here, and
+ * `fahrtenbuchExport.ts` / `historicalWorkingHoursFahrtenbuchExport.ts`, whose
+ * `'original'` mode must reproduce an imported sheet's headers byte for byte and
+ * whose output is a statutory record an accountant reconciles against.
+ *
+ * Do not "unify" them. One library reproduces a prescribed sheet exactly; the
+ * other paints a readable one.
+ *
+ * `buildTableWorkbook` is unchanged by that swap and still returns an
+ * `XLSX.WorkBook`: it is the description of the file — values, `z` formats, `s`
+ * styles and the `!` sheet settings — which the new writer translates. Keeping
+ * it is what keeps the number formats, the `asFiniteNumber` rule and the
+ * column-0 totals guard the exact code they were, still asserted cell by cell.
+ */
 import * as XLSX from 'xlsx';
+import { downloadStyledWorkbook } from './styledWorkbookDownload';
 import { Income, SalaryCalculation } from '../types/receipt';
 // `salaryDueState` is `salaryBase` — COALESCE(netto_salary, amount_due) — plus
 // the payment derivation, from the module SalariesManagement imports. Both
@@ -909,5 +938,14 @@ export function buildTableWorkbook(opts: ExportOptions): XLSX.WorkBook {
 export function exportTableToExcel(opts: ExportOptions): void {
   const wb = buildTableWorkbook(opts);
   const safeFilename = opts.filename.endsWith('.xlsx') ? opts.filename : `${opts.filename}.xlsx`;
-  XLSX.writeFile(wb, safeFilename);
+  // ExcelJS produces a buffer, so writing is asynchronous where `XLSX.writeFile`
+  // was synchronous — and this function's `void` signature, which every call
+  // site is written against, has nowhere to hand a failure. A rejection is
+  // logged rather than left unhandled; a real message on the button would mean
+  // changing that signature, which is a change of its own. The guard against a
+  // file that claims nought after a failed read stays at the call site either
+  // way: this still writes a workbook for whatever rows it is handed.
+  void downloadStyledWorkbook(wb, safeFilename).catch((error: unknown) => {
+    console.error('exportTableToExcel: writing the workbook failed', error);
+  });
 }

@@ -12,8 +12,16 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
   real rows on that same input, and the old one can no longer be wired back
   because it no longer exists — deleted under the owner's decision D-E, which the
   second test below states as the absence of the export rather than as a throw.
-  xlsx's writeFile is mocked at the module boundary — the real one is a DOM
-  download and its property is not redefinable.
+
+  The write is mocked at the module boundary, because the real one is a DOM
+  download and this suite runs in node. Since the ExcelJS swap that write is
+  `downloadStyledWorkbook`, not `XLSX.writeFile`: xlsx 0.20.3 discards every
+  fill, font, border and alignment the exporter describes (`get_cell_style` reads
+  only `cell.z`), so a styled table written through it came out plain. The
+  assertion is the same one — the exporter reaches its write with real rows —
+  against the writer that now performs it, and `XLSX.writeFile` stays mocked as
+  the negative control: a regression back onto the styleless writer fails here
+  rather than silently producing an unstyled file.
 */
 // vi.mock is hoisted above every other statement, so the spy has to be created
 // inside vi.hoisted or the factory closes over a variable that does not exist yet.
@@ -22,6 +30,14 @@ vi.mock('xlsx', async (importOriginal) => {
   const real = await importOriginal<typeof import('xlsx')>()
   return { ...real, writeFile, default: { ...real, writeFile } }
 })
+
+// Resolves, because `exportTableToExcel` attaches a `.catch` to what it returns.
+// A bare factory rather than one spreading the real module: that module lazily
+// imports exceljs, and nothing here needs it loaded.
+const { downloadStyledWorkbook } = vi.hoisted(() => ({
+  downloadStyledWorkbook: vi.fn(() => Promise.resolve()),
+}))
+vi.mock('./styledWorkbookDownload', () => ({ downloadStyledWorkbook }))
 
 import * as excelExport from './excelExport'
 import { exportTableToExcel } from './excelExport'
@@ -33,7 +49,10 @@ const ONE: Receipt[] = [{
   paymentMethod: 'bar',
 }]
 
-beforeEach(() => writeFile.mockClear())
+beforeEach(() => {
+  writeFile.mockClear()
+  downloadStyledWorkbook.mockClear()
+})
 
 describe('the Belege Excel export', () => {
   it('the generic exporter reaches the write for a real Receipt, where the old one threw', () => {
@@ -46,7 +65,19 @@ describe('the Belege Excel export', () => {
       rows: ONE.map(r => ({ receiptNumber: r.receiptNumber, expense: r.expense })),
       totals: { expense: '42,50 EUR' },
     })).not.toThrow()
-    expect(writeFile).toHaveBeenCalledTimes(1)
+    expect(downloadStyledWorkbook).toHaveBeenCalledTimes(1)
+    // The workbook that reached the write is a real one with the row in it, not
+    // an empty object the exporter happened to hand over. A6 is the first data
+    // row: rows 0-4 are accent, title, meta, spacer and the column header.
+    const [workbook, filename] = downloadStyledWorkbook.mock.calls[0] as unknown as [
+      { Sheets: Record<string, Record<string, { v?: unknown } | undefined>> },
+      string,
+    ]
+    expect(filename).toBe('belege_test.xlsx')
+    expect(workbook.Sheets.Belege.A6?.v).toBe('BEL-1')
+    // Negative control: not through the writer that would have dropped every
+    // fill, font and border on the way out.
+    expect(writeFile).not.toHaveBeenCalled()
   })
 
   it('negative control: the old exportToExcel is gone, so nothing can wire it back', () => {
