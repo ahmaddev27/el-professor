@@ -1122,7 +1122,39 @@ INSERT INTO _mx_spec VALUES
      VALUES ({id}, {co}, 'trial_abgelaufen', {co}, '2099-01-01')$q$, NULL,
   $q$INSERT INTO notification_deliveries (company_id, notification_type, target_id, period_key)
      VALUES ({co}, 'trial_abgelaufen', {co}, '2098-01-01')$q$,
-  $q$recipient_count = recipient_count$q$);
+  $q$recipient_count = recipient_count$q$),
+-- The monthly plan (20260930100000): the proposal, its per-driver snapshot, its
+-- blocks and the rides they are made of. 20260917130000's business shape with
+-- slice C's Dokumente page on every write, so a viewer and an editor read it and
+-- write none of it. Each child names the parent above it, and each probe row is
+-- a *draft*: a confirmed plan is frozen, so its U and D cells would be T for
+-- everybody, the owner included, and would measure the freeze instead of the
+-- policies.
+(59, 'monthly_plans', $q$id = {id}$q$,
+  $q$INSERT INTO monthly_plans (id, company_id, year, month, switch_minutes) VALUES ({id}, {co}, 2026, 10, 30)$q$, NULL,
+  $q$INSERT INTO monthly_plans (company_id, year, month, switch_minutes) VALUES ({co}, 2026, 11, 30)$q$,
+  $q$switch_minutes = switch_minutes$q$),
+-- driver_name and is_owner are the guard's, whatever goes in here.
+(60, 'monthly_plan_drivers', $q$id = {id}$q$,
+  $q$INSERT INTO monthly_plan_drivers (id, company_id, plan_id, driver_id, driver_name, selected, is_owner)
+     VALUES ({id}, {co}, {ref:monthly_plans}, {ref:drivers}, NULL, true, false)$q$, NULL,
+  $q$INSERT INTO monthly_plan_drivers (company_id, plan_id, driver_id, driver_name, selected, is_owner)
+     VALUES ({co}, {ref:monthly_plans}, {ref:drivers2}, NULL, true, false)$q$,
+  $q$selected = selected$q$),
+-- An unassigned block, which section 8 asks for anyway and which needs no
+-- snapshot row for the guard to resolve a driver name against.
+(61, 'monthly_plan_blocks', $q$id = {id}$q$,
+  $q$INSERT INTO monthly_plan_blocks (id, company_id, plan_id, block_key, car_identifier, starts_at, ends_at, span_minutes, ride_minutes)
+     VALUES ({id}, {co}, {ref:monthly_plans}, 'mx-{s}', 'MX-CAR', '2026-10-01 08:23+02', '2026-10-01 09:44+02', 81, 81)$q$, NULL,
+  $q$INSERT INTO monthly_plan_blocks (company_id, plan_id, block_key, car_identifier, starts_at, ends_at, span_minutes, ride_minutes)
+     VALUES ({co}, {ref:monthly_plans}, 'mx-new-{s}', 'MX-CAR', '2026-10-02 08:00+02', '2026-10-02 09:00+02', 60, 60)$q$,
+  $q$block_key = block_key$q$),
+(62, 'monthly_plan_block_trips', $q$id = {id}$q$,
+  $q$INSERT INTO monthly_plan_block_trips (id, company_id, plan_id, block_id, trip_id, starts_at, ends_at, minutes, time_source)
+     VALUES ({id}, {co}, {ref:monthly_plans}, {ref:monthly_plan_blocks}, {ref:mx_plan_trip}, '2026-10-01 08:23+02', '2026-10-01 09:44+02', 81, 'instants')$q$, NULL,
+  $q$INSERT INTO monthly_plan_block_trips (company_id, plan_id, block_id, trip_id, starts_at, ends_at, minutes, time_source)
+     VALUES ({co}, {ref:monthly_plans}, {ref:monthly_plan_blocks}, {ref:mx_plan_trip_new}, '2026-10-01 09:50+02', '2026-10-01 10:20+02', 30, 'instants')$q$,
+  $q$minutes = minutes$q$);
 
 -- ─── how each row is moved to the other tenant ──────────────────────────────
 -- The M probe takes the row through `key` and sets `mov` on it (`_mx_move_try`),
@@ -1214,7 +1246,14 @@ INSERT INTO _mx_move VALUES
 -- The dedupe key names the target as well as the company, and the probe rows
 -- carry their own company as the target, so A's row moved into B collides with
 -- nothing of B's: no mov_pre, and the owner pass moves it.
-('notification_deliveries',              $q$company_id = {other_co}$q$, NULL, 'Y', NULL);
+('notification_deliveries',              $q$company_id = {other_co}$q$, NULL, 'Y', NULL),
+-- 20260930100000: a plan stays with its company and month, and a child stays
+-- with its plan, so all four guards refuse the move before any WITH CHECK is
+-- reached, for the owner too, as driver_month_budget's guard does.
+('monthly_plans',                        $q$company_id = {other_co}$q$, NULL, 'T', 'monthly_plan_guard refuses it even for the owner'),
+('monthly_plan_drivers',                 $q$company_id = {other_co}$q$, NULL, 'T', 'monthly_plan_driver_guard refuses it even for the owner'),
+('monthly_plan_blocks',                  $q$company_id = {other_co}$q$, NULL, 'T', 'monthly_plan_child_guard refuses it even for the owner'),
+('monthly_plan_block_trips',             $q$company_id = {other_co}$q$, NULL, 'T', 'monthly_plan_child_guard refuses it even for the owner');
 
 -- Fixtures go in once; the file can be re-run against a kept container.
 DO $$
@@ -1517,6 +1556,30 @@ INSERT INTO _mx_expected (tbl, op, anon, viewer, editor, supervisor, admin, othe
 ('income',                            'U', '..', '..', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
 ('income',                            'D', '..', '..', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
 ('income',                            'M', '..', '..', 'R.', 'R.', 'R.', '.R', '..', NULL),
+-- 20260930100000, the monthly plan. The same cells as company_planning_runs, the
+-- Dokumente page of slice C on every write, with two differences: anon holds no
+-- privilege at all here (PP, as on 20260922110000's two tables), and a move is T
+-- rather than R, because the guards raise before the WITH CHECK is reached.
+('monthly_plan_block_trips',           'S', 'PP', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('monthly_plan_block_trips',           'I', 'PP', 'RR', 'RR', 'YR', 'YR', 'RY', 'RR', NULL),
+('monthly_plan_block_trips',           'U', 'PP', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('monthly_plan_block_trips',           'D', 'PP', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('monthly_plan_block_trips',           'M', 'PP', '..', '..', 'T.', 'T.', '.T', '..', NULL),
+('monthly_plan_blocks',                'S', 'PP', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('monthly_plan_blocks',                'I', 'PP', 'RR', 'RR', 'YR', 'YR', 'RY', 'RR', NULL),
+('monthly_plan_blocks',                'U', 'PP', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('monthly_plan_blocks',                'D', 'PP', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('monthly_plan_blocks',                'M', 'PP', '..', '..', 'T.', 'T.', '.T', '..', NULL),
+('monthly_plan_drivers',               'S', 'PP', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('monthly_plan_drivers',               'I', 'PP', 'RR', 'RR', 'YR', 'YR', 'RY', 'RR', NULL),
+('monthly_plan_drivers',               'U', 'PP', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('monthly_plan_drivers',               'D', 'PP', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('monthly_plan_drivers',               'M', 'PP', '..', '..', 'T.', 'T.', '.T', '..', NULL),
+('monthly_plans',                      'S', 'PP', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('monthly_plans',                      'I', 'PP', 'RR', 'RR', 'YR', 'YR', 'RY', 'RR', NULL),
+('monthly_plans',                      'U', 'PP', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('monthly_plans',                      'D', 'PP', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('monthly_plans',                      'M', 'PP', '..', '..', 'T.', 'T.', '.T', '..', NULL),
 ('monthly_planning_manual_exceptions','S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
 -- slice C: page 'documents' — viewer and editor hold no can_edit there, so the writes are refused.
 ('monthly_planning_manual_exceptions', 'I', 'RR', 'RR', 'RR', 'YR', 'YR', 'RY', 'RR', NULL),
@@ -1791,7 +1854,10 @@ UPDATE _mx_expected x
      'historical_reconciliation_drivers', 'historical_reconciliation_results',
      'historical_reconciliation_wh_drivers',
      -- 20260922110000: the same shape and the same two triggers
-     'trip_analysis_settings', 'driver_month_budget');
+     'trip_analysis_settings', 'driver_month_budget',
+     -- 20260930100000: the same shape and the same two triggers
+     'monthly_plans', 'monthly_plan_drivers', 'monthly_plan_blocks',
+     'monthly_plan_block_trips');
 
 -- The account shell, where the rule above does not apply and the column
 -- copied from `super` is wrong: these predicates read get_user_company_id(),
@@ -2641,6 +2707,21 @@ INSERT INTO roles (id, name, description, company_id, is_system)
 VALUES (_mx_id('rpc_role', 'a'), 'mx-rpc-role-a', 'MX rpc role', _mx_co('a'), false)
 ON CONFLICT (id) DO NOTHING;
 
+-- A draft monthly plan of company A for monthly_plan_confirm to make active
+-- (20260930100000). Its one block is unassigned, so the plan is not empty and
+-- no driver's hours cap is in play — this line probes who may confirm, not what
+-- the confirm gate re-derives, which tests/rls/monthly-plan.sql does. Every
+-- probe is rolled back, so each principal finds it as a draft.
+INSERT INTO monthly_plans (id, company_id, year, month, switch_minutes)
+VALUES (_mx_id('rpc_monthly_plan', 'a'), _mx_co('a'), 2027, 3, 30)
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO monthly_plan_blocks (id, company_id, plan_id, block_key, car_identifier,
+                                 starts_at, ends_at, span_minutes, ride_minutes)
+VALUES (_mx_id('rpc_monthly_block', 'a'), _mx_co('a'), _mx_id('rpc_monthly_plan', 'a'),
+        'mx-rpc', 'MX-CAR', '2027-03-02 08:23+01', '2027-03-02 09:44+01', 81, 81)
+ON CONFLICT (id) DO NOTHING;
+
 -- Checked in the order listed. `stmt` is filled for company A (see _mx_fill).
 --
 -- `want` carries the seven principals of the columns above. `staff` carries the
@@ -2952,6 +3033,30 @@ INSERT INTO _mx_rpc (label, stmt, want, hole) VALUES
      $q$SELECT reassign_fahrtenbuch_trip({ref:fahrtenbuch_trips}, {ref:drivers}, 'MX', 'pending', 'mx', 'mx')::text$q$,
      'PTTYYTT', NULL),
 
+    -- The monthly plan's two RPCs (20260930100000). Both ask
+    -- get_active_company_id() and then current_role_permits('documents', true),
+    -- like slice C's five above, so the viewer and the editor are T and `super`
+    -- is T on the state branch, having neither a company nor a context.
+    --
+    -- `other` differs between them, and each answer is the point of its
+    -- function: company B's admin saving A's driver is refused by the snapshot
+    -- guard (T, driver_company_mismatch), while confirming A's plan is a
+    -- *return value* (N, plan_not_found) — section 9's screen has to show two
+    -- choices, so a refusal there may not be an exception.
+    ('monthly_plan_save(a plan of A''s driver)',
+     $q$SELECT ((monthly_plan_save(jsonb_build_object(
+          'year', 2027, 'month', 4, 'switch_minutes', 30,
+          'drivers', jsonb_build_array(jsonb_build_object('driver_id', {ref:drivers}, 'selected', true)),
+          'blocks', jsonb_build_array(jsonb_build_object(
+            'block_key', 'mx-save', 'car_identifier', 'MX-CAR',
+            'starts_at', '2027-04-01 08:23+02', 'ends_at', '2027-04-01 09:44+02',
+            'span_minutes', 81, 'ride_minutes', 81))))
+        ->> 'block_count')::int = 1)::text$q$,
+     'PTTYYTT', NULL),
+    ('monthly_plan_confirm(draft plan of A)',
+     $q$SELECT monthly_plan_confirm({ref:rpc_monthly_plan})::text$q$,
+     'PTTYYNT', NULL),
+
     -- the Abrechnung and cash RPCs: security invoker, so they return what the
     -- income, receipts and cash_transactions policies let the caller read.
     -- anon's EXECUTE revoked by 20260427075001 and 20260428102656.
@@ -3261,7 +3366,13 @@ UPDATE _mx_rpc r SET staff = o.staff
     -- `company_id = platform_support_company_id()` (20260923110010), which is
     -- the opened company, so both succeed exactly as its administrator's do (Y)
     ('company_role_save(a new role of A)',                          'TY'),
-    ('company_role_delete(company role of A)',                      'TY')
+    ('company_role_delete(company role of A)',                      'TY'),
+    -- 20260930100000: a view context is refused by the Dokumente page gate,
+    -- whose platform branch asks for a *support* session; inside one, both write
+    -- the opened company's rows as its administrator would, and every row they
+    -- write leaves an audit row (3.4c).
+    ('monthly_plan_save(a plan of A''s driver)',                     'TY'),
+    ('monthly_plan_confirm(draft plan of A)',                        'TY')
   ) AS o(label, staff)
  WHERE r.label = o.label;
 
@@ -3288,7 +3399,9 @@ BEGIN
       ('purge_old_monthly_planning_runs(month of A''s archived run)'),
       ('reassign_fahrtenbuch_trip(trip of A)'),
       ('company_role_save(a new role of A)'),
-      ('company_role_delete(company role of A)')
+      ('company_role_delete(company role of A)'),
+      ('monthly_plan_save(a plan of A''s driver)'),
+      ('monthly_plan_confirm(draft plan of A)')
     ) AS o(label)
    WHERE NOT EXISTS (SELECT 1 FROM _mx_rpc r WHERE r.label = o.label AND r.staff IS NOT NULL);
 
