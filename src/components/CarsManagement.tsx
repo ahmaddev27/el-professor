@@ -101,6 +101,15 @@ function TuevStatusCell({ info }: { info: TuevInfo }) {
 export default function CarsManagement() {
   const [cars, setCars] = useState<CarWithDrivers[]>([]);
   const [loading, setLoading] = useState(true);
+  /*
+    The rule: an empty fleet is a claim about the company's data, and after a
+    read that failed the screen has made no such observation. `loadCars`' catch
+    only logged and raised a toast, so `cars` stayed `[]` and the Excel export
+    wrote a fleet of nought into a file that leaves the browser and reaches an
+    accountant. One failure state per screen (CLAUDE.md's batch-2 rule), cleared
+    where the load starts and set in the existing catch.
+  */
+  const [loadFailed, setLoadFailed] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingCar, setEditingCar] = useState<CarWithDrivers | null>(null);
   const [tuevFilter, setTuevFilter] = useState<TuevFilter>('all');
@@ -122,6 +131,7 @@ export default function CarsManagement() {
   const loadCars = async () => {
     try {
       setLoading(true);
+      setLoadFailed(false);
 
       const { data: carsData, error: carsError } = await supabase
         .from('cars')
@@ -163,6 +173,7 @@ export default function CarsManagement() {
     } catch (error: any) {
       console.error('Error loading cars:', error);
       showToast('error', t('fleet.carsLoadFailed', { error: error.message }));
+      setLoadFailed(true);
     } finally {
       setLoading(false);
     }
@@ -357,7 +368,7 @@ export default function CarsManagement() {
         }
         actions={
           <>
-            <Button variant="secondary" onClick={handleExport}>
+            <Button variant="secondary" onClick={handleExport} disabled={loadFailed}>
               <Download aria-hidden />
               {t('common.exportExcelShort')}
             </Button>
