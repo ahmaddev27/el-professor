@@ -263,7 +263,18 @@ export class FahrtenbuchExportBlockedError extends Error {
   }
 }
 
-function findDriverColumn(keys: string[]): string | null {
+/**
+ * The header that holds the driver name, by name: an exact match against the
+ * candidates above, then a containment match.
+ *
+ * Exported because `monthlyPlanFahrtenbuchExport` needs the same question
+ * answered and a third copy of a heuristic is how two exports come to disagree
+ * about which column they replaced. `monatsplanungXlsxExport.detectDriverColumn`
+ * is a second, different answer to it (it also matches a cell's *value* against
+ * `original_driver_name`); folding the three into one belongs in a change that
+ * touches all three call sites.
+ */
+export function findDriverColumn(keys: string[]): string | null {
   const normalized = keys.map(k => k.toLowerCase().trim());
   for (const candidate of DRIVER_COL_CANDIDATES) {
     const idx = normalized.indexOf(candidate);
