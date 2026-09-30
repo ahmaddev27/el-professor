@@ -3054,10 +3054,10 @@ INSERT INTO _mx_rpc (label, stmt, want, hole) VALUES
     -- matrix line can honestly ask of a state-changing function.
     ('monthly_plan_save(execute grant only)',
      $q$SELECT has_function_privilege(current_user, 'public.monthly_plan_save(jsonb)', 'EXECUTE')::text$q$,
-     'PTTTTTT', NULL),
+     'NYYYYYY', NULL),
     ('monthly_plan_confirm(execute grant only)',
      $q$SELECT has_function_privilege(current_user, 'public.monthly_plan_confirm(uuid,boolean)', 'EXECUTE')::text$q$,
-     'PTTTTTT', NULL),
+     'NYYYYYY', NULL),
 
     -- the Abrechnung and cash RPCs: security invoker, so they return what the
     -- income, receipts and cash_transactions policies let the caller read.
@@ -3373,8 +3373,13 @@ UPDATE _mx_rpc r SET staff = o.staff
     -- whose platform branch asks for a *support* session; inside one, both write
     -- the opened company's rows as its administrator would, and every row they
     -- write leaves an audit row (3.4c).
-    ('monthly_plan_save(execute grant only)',                        'TT'),
-    ('monthly_plan_confirm(execute grant only)',                     'TT')
+    -- `has_function_privilege` answers a boolean, so these two read N/Y and not
+    -- P/T like the probes that call their function: anon holds no EXECUTE and
+    -- every signed-in role does. What the grant does NOT say is whether a caller
+    -- may confirm a particular plan — that is the function's own gate, and it is
+    -- probed per principal in tests/rls/monthly-plan.sql.
+    ('monthly_plan_save(execute grant only)',                        'YY'),
+    ('monthly_plan_confirm(execute grant only)',                     'YY')
   ) AS o(label, staff)
  WHERE r.label = o.label;
 
