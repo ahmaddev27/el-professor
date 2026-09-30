@@ -433,12 +433,14 @@ BEGIN
   -- is refused by the index and not by a function anybody could bypass.
   PERFORM set_config('app_private.monthly_plan_transition',
     'plan:' || _mp_id('plan:a-draft')::text || ':' || pg_current_xact_id()::text, true);
-  UPDATE monthly_plans SET status = 'confirmed',
-         -- `monthly_plans_confirmed_together` and `_status_matches_confirmation`
-         -- require the stamps beside the word, so a direct UPDATE has to carry
-         -- them. Without them this statement is refused by the WRONG constraint
-         -- and the section proves nothing about the unique index it is testing.
-         confirmed_at = now(), confirmed_by = _mp_u('admin-a')
+  -- The trigger writes confirmed_at and confirmed_by ITSELF, from the session —
+  -- "the actor and the time are the database's, whatever the caller sent". So
+  -- the statement must run inside a session, not carry the stamps: passing them
+  -- is overwritten, and with no session confirmed_by comes out NULL and the
+  -- pair constraint refuses the row, which is the WRONG constraint and proves
+  -- nothing about the unique index this section tests.
+  PERFORM _mp_as(_mp_u('admin-a'));
+  UPDATE monthly_plans SET status = 'confirmed'
    WHERE id = _mp_id('plan:a-draft');
   PERFORM set_config('app_private.monthly_plan_transition', '', true);
   PERFORM _mp_ok('section 9: the seeded plan of company A is now the month''s confirmed plan',
@@ -456,12 +458,14 @@ BEGIN
   BEGIN
     PERFORM set_config('app_private.monthly_plan_transition',
       'plan:' || _mp_id('plan:a-second')::text || ':' || pg_current_xact_id()::text, true);
-    UPDATE monthly_plans SET status = 'confirmed',
-         -- `monthly_plans_confirmed_together` and `_status_matches_confirmation`
-         -- require the stamps beside the word, so a direct UPDATE has to carry
-         -- them. Without them this statement is refused by the WRONG constraint
-         -- and the section proves nothing about the unique index it is testing.
-         confirmed_at = now(), confirmed_by = _mp_u('admin-a')
+    -- The trigger writes confirmed_at and confirmed_by ITSELF, from the session —
+  -- "the actor and the time are the database's, whatever the caller sent". So
+  -- the statement must run inside a session, not carry the stamps: passing them
+  -- is overwritten, and with no session confirmed_by comes out NULL and the
+  -- pair constraint refuses the row, which is the WRONG constraint and proves
+  -- nothing about the unique index this section tests.
+  PERFORM _mp_as(_mp_u('admin-a'));
+  UPDATE monthly_plans SET status = 'confirmed'
    WHERE id = _mp_id('plan:a-second');
     v_out := 'allowed';
   EXCEPTION WHEN unique_violation THEN
@@ -474,12 +478,14 @@ BEGIN
   -- The same month of another company is untouched by the rule.
   PERFORM set_config('app_private.monthly_plan_transition',
     'plan:' || _mp_id('plan:b-draft')::text || ':' || pg_current_xact_id()::text, true);
-  UPDATE monthly_plans SET status = 'confirmed',
-         -- `monthly_plans_confirmed_together` and `_status_matches_confirmation`
-         -- require the stamps beside the word, so a direct UPDATE has to carry
-         -- them. Without them this statement is refused by the WRONG constraint
-         -- and the section proves nothing about the unique index it is testing.
-         confirmed_at = now(), confirmed_by = _mp_u('admin-a')
+  -- The trigger writes confirmed_at and confirmed_by ITSELF, from the session —
+  -- "the actor and the time are the database's, whatever the caller sent". So
+  -- the statement must run inside a session, not carry the stamps: passing them
+  -- is overwritten, and with no session confirmed_by comes out NULL and the
+  -- pair constraint refuses the row, which is the WRONG constraint and proves
+  -- nothing about the unique index this section tests.
+  PERFORM _mp_as(_mp_u('admin-a'));
+  UPDATE monthly_plans SET status = 'confirmed'
    WHERE id = _mp_id('plan:b-draft');
   PERFORM set_config('app_private.monthly_plan_transition', '', true);
   PERFORM _mp_ok('section 9: the same month of another company may be confirmed too',
