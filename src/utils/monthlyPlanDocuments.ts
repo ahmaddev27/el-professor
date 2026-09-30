@@ -249,8 +249,23 @@ export interface MonthlyPlanDocumentBuilder {
    * who is in the month.
    */
   subjects?(plan: StoredMonthlyPlan): DocumentSubject[];
-  preview(request: MonthlyPlanDocumentRequest): DocumentPreview;
-  file(request: MonthlyPlanDocumentRequest): Promise<MonthlyPlanFile>;
+  /**
+   * Data the document needs that a stored plan does not carry, fetched once.
+   *
+   * Only the Fahrtenbuch has one, and the reason is §10's own: that document is
+   * the *imported* sheet with the driver column overlaid, so it needs the
+   * imported headers (`fahrtenbuch_imports.source_columns_json`) and every
+   * original row (`fahrtenbuch_trips.raw_data_json`) — neither of which is part
+   * of a plan, and neither of which may be reconstructed from one. `preview` is
+   * synchronous by design (see `DocumentPreview`), so the read happens here and
+   * its result is handed to both `preview` and `file` unchanged.
+   *
+   * A builder without this method needs nothing beyond the plan, and the screen
+   * calls it with `loaded` left undefined.
+   */
+  load?(request: MonthlyPlanDocumentRequest): Promise<unknown>;
+  preview(request: MonthlyPlanDocumentRequest, loaded?: unknown): DocumentPreview;
+  file(request: MonthlyPlanDocumentRequest, loaded?: unknown): Promise<MonthlyPlanFile>;
 }
 
 export type MonthlyPlanDocumentBuilders =

@@ -5728,4 +5728,7 @@ export const en: PartialDictionary = {
   'sa.subs.export.invoicesTitle':         'Invoices',
   'sa.subs.export.note':                  'Note',
   'sa.subs.export.subscriptionsTitle':    'Subscriptions',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'mplan.docs.preparing': 'Loading the import\'s original data …',
 };

@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, Download, FileText, Info } from 'lucide-react';
 import {
   Alert,
@@ -184,11 +184,13 @@ export default function MonthlyPlanDocumentsStep({
       subjectId: string | undefined,
       subjectLabel: string | undefined,
       busyKey: string,
+      /** Whatever the builder's own `load` answered; undefined when it has none. */
+      loaded: unknown,
     ) => {
       setBusy(busyKey);
       setFailure(prev => ({ ...prev, [documentKind]: undefined }));
       try {
-        const file = await builder.file({ plan, subjectId, generatedAt: stamp });
+        const file = await builder.file({ plan, subjectId, generatedAt: stamp }, loaded);
         // The builder names its own file; this is the fallback for one that does
         // not, and it carries the marker either way.
         triggerDownload(
@@ -296,8 +298,24 @@ interface DocumentTabProps {
     subjectId: string | undefined,
     subjectLabel: string | undefined,
     busyKey: string,
+    loaded: unknown,
   ) => void;
 }
+
+/**
+ * The state of a builder's optional `load` step.
+ *
+ * `idle` is the whole state for a builder that has none, and the preview runs
+ * immediately. For one that has (only the Fahrtenbuch, which overlays the plan
+ * onto the *imported* rows), `pending` withholds the preview and the download
+ * button rather than rendering an empty document — an empty Fahrtenbuch is a
+ * claim that the month had no rides.
+ */
+type LoadState =
+  | { state: 'idle' }
+  | { state: 'pending' }
+  | { state: 'ready'; value: unknown }
+  | { state: 'error'; message: string };
 
 function DocumentTab({
   documentKind,
@@ -330,6 +348,40 @@ function DocumentTab({
     }
   }, [builder, plan]);
 
+  /**
+   * The builder's own `load` step, run once per plan.
+   *
+   * Only the Fahrtenbuch has one. It is an effect and not part of `preview`
+   * because a preview must stay synchronous: every figure in it is a string the
+   * builder already wrote, and a preview that could suspend would need the screen
+   * to hold a half-built document.
+   *
+   * `cancelled` is not defensive noise — switching driver or month while the read
+   * is in flight would otherwise let the older answer install itself over the
+   * newer one, which is `AppConfigProvider`'s rule for the same race.
+   */
+  const [loaded, setLoaded] = useState<LoadState>({ state: 'idle' });
+  const load = builder?.load;
+
+  useEffect(() => {
+    if (!load || !builder) {
+      setLoaded({ state: 'idle' });
+      return;
+    }
+    let cancelled = false;
+    setLoaded({ state: 'pending' });
+    load.call(builder, { plan, generatedAt })
+      .then(value => { if (!cancelled) setLoaded({ state: 'ready', value }); })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        setLoaded({
+          state: 'error',
+          message: error instanceof Error ? error.message : String(error),
+        });
+      });
+    return () => { cancelled = true; };
+  }, [load, builder, plan, generatedAt]);
+
   const blocked = documentBlockReason({ plan, loadFailed, confirmable, builder, subjects });
 
   // The chosen subject, or the first one. A choice that is still in the list is
@@ -346,21 +398,31 @@ function DocumentTab({
    */
   const preview = useMemo<{ document: DocumentPreview } | { error: string } | null>(() => {
     if (blocked || !builder) return null;
+    // A failed prerequisite is the document's failure, reported in the same place
+    // as a builder that threw: either way no document exists and none is offered.
+    if (loaded.state === 'error') return { error: loaded.message };
+    if (loaded.state === 'pending') return null;
     try {
       return {
-        document: builder.preview({ plan, subjectId: activeSubject?.id, generatedAt }),
+        document: builder.preview(
+          { plan, subjectId: activeSubject?.id, generatedAt },
+          loaded.state === 'ready' ? loaded.value : undefined,
+        ),
       };
     } catch (error) {
       return { error: error instanceof Error ? error.message : String(error) };
     }
-  }, [blocked, builder, plan, activeSubject, generatedAt]);
+  }, [blocked, builder, plan, activeSubject, generatedAt, loaded]);
 
   const busyKey = `${documentKind}:${activeSubject?.id ?? 'all'}`;
   const previewError = preview !== null && 'error' in preview ? preview.error : null;
   // A download is offered only for a document that could be previewed: the two
   // read the same plan through the same builder, so a preview that failed is a
   // document that must not be handed to an accountant.
-  const canDownload = builder != null && !blocked && previewError === null && busy === null;
+  const canDownload =
+    builder != null && !blocked && previewError === null && busy === null
+    && loaded.state !== 'pending';
+  const loadedValue = loaded.state === 'ready' ? loaded.value : undefined;
 
   return (
     <div className="space-y-4">
@@ -376,6 +438,13 @@ function DocumentTab({
         <Alert tone="critical" title={t('mplan.docs.previewFailed')}>
           <span className="text-[13px]">{previewError}</span>
         </Alert>
+      ) : null}
+
+      {/* The Fahrtenbuch reads the import's original rows before it can be
+          drawn. Saying so is not decoration: without it the tab shows a
+          description and no table, which reads as a document with no rows. */}
+      {!blocked && loaded.state === 'pending' ? (
+        <Alert tone="neutral">{t('mplan.docs.preparing')}</Alert>
       ) : null}
 
       {failure ? (
@@ -406,7 +475,9 @@ function DocumentTab({
           disabled={!canDownload}
           onClick={() =>
             builder &&
-            onDownload(builder, documentKind, activeSubject?.id, activeSubject?.label, busyKey)
+            onDownload(
+              builder, documentKind, activeSubject?.id, activeSubject?.label, busyKey, loadedValue,
+            )
           }
         >
           <Download aria-hidden className="size-4" />
@@ -416,7 +487,9 @@ function DocumentTab({
           <Button
             variant="secondary"
             disabled={!canDownload}
-            onClick={() => builder && onDownload(builder, documentKind, undefined, undefined, `${documentKind}:all`)}
+            onClick={() => builder && onDownload(
+              builder, documentKind, undefined, undefined, `${documentKind}:all`, loadedValue,
+            )}
           >
             <Download aria-hidden className="size-4" />
             {busy === `${documentKind}:all`

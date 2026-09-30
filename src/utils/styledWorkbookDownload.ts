@@ -414,17 +414,20 @@ type ExcelJsWorkbookCtor = new () => ExcelJsWorkbookLike & {
 };
 
 /**
- * Writes `source` as a styled .xlsx and offers it to the browser as `filename`.
+ * Writes `source` as a styled .xlsx and answers it as a Blob.
+ *
+ * Split out of `downloadStyledWorkbook` so a caller that must hand the bytes
+ * somewhere other than the browser's download can — the monthly plan's
+ * documents return a `{filename, blob}` pair, and building the workbook twice, or
+ * writing a second unstyled one with `XLSX.write`, would give that one document a
+ * different look from every other table export.
  *
  * ExcelJS is imported HERE, lazily, and not at the top of the module: it is
  * substantially larger than xlsx, and a user who never presses an export button
  * must never download it. Same shape as App.tsx's `lazy(() => import(…))` for
  * the design preview.
  */
-export async function downloadStyledWorkbook(
-  source: XLSX.WorkBook,
-  filename: string,
-): Promise<void> {
+export async function styledWorkbookBlob(source: XLSX.WorkBook): Promise<Blob> {
   // Typed as `unknown` so nothing here depends on exceljs's own .d.ts.
   const loaded: unknown = await import('exceljs');
   const candidate = loaded as { Workbook?: unknown; default?: { Workbook?: unknown } };
@@ -447,5 +450,13 @@ export async function downloadStyledWorkbook(
   const part: BlobPart = buffer instanceof Uint8Array
     ? new Uint8Array(buffer).buffer
     : buffer;
-  triggerDownload(new Blob([part], { type: SHEET_MIME }), filename);
+  return new Blob([part], { type: SHEET_MIME });
+}
+
+/** Writes `source` as a styled .xlsx and offers it to the browser as `filename`. */
+export async function downloadStyledWorkbook(
+  source: XLSX.WorkBook,
+  filename: string,
+): Promise<void> {
+  triggerDownload(await styledWorkbookBlob(source), filename);
 }

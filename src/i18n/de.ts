@@ -5784,4 +5784,7 @@ export const de = {
   'sa.subs.export.invoicesTitle':         'Rechnungen',
   'sa.subs.export.note':                  'Notiz',
   'sa.subs.export.subscriptionsTitle':    'Abonnements',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'mplan.docs.preparing': 'Die Originaldaten des Imports werden geladen …',
 } as const;
