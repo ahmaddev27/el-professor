@@ -1,8 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Plus, Wrench, Calendar, AlertCircle, CheckCircle, CreditCard as Edit2, Trash2, Download } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useToast } from '../contexts/ToastContext';
-import { getWeeksOfMonth, getWeekNumberForDate } from '../utils/weekCalculations';
+import { getWeeksOfMonth, getWeekNumberForDate, type WeekOfMonth } from '../utils/weekCalculations';
 import WerkstattCheckModal from '../components/WerkstattCheckModal';
 import ConfirmationModal from '../components/ConfirmationModal';
 import { format } from 'date-fns';
@@ -24,24 +24,82 @@ interface WerkstattCheck {
   car?: { kennzeichen: string };
 }
 
+/**
+ * The week the screen is showing, resolved from the month it is showing.
+ *
+ * THE RULE PRESERVED: a business week belongs to the month containing its
+ * MONDAY (`utils/weekCalculations.ts`), and a `weekNumber` is that Monday's
+ * 1-based ordinal *inside that business month* — 1..5. It is not an ISO
+ * Kalenderwoche. Week 1 of October 2026 is 05.10.–11.10.; week 1 of November
+ * 2026 is 02.11.–08.11. So a `weekNumber` names a date range only together with
+ * its month, and the rows read, the week named in the filter band and the week
+ * named in the filename must all be resolved from the SAME (month, weekNumber)
+ * pair — never one from the pair and another from a second, lagging copy.
+ *
+ * That is exactly what went wrong. `weeks` was `useState`, written by the effect
+ * that watches `selectedMonth`, and `loadChecks` read it while its own effect
+ * depended on `[selectedMonth, selectedWeek]` alone. Change the month while the
+ * selected week is 1 and the load effect runs on the same commit, with the
+ * PREVIOUS month's `weeks` still in state; it finds that month's week 1 and
+ * loads its rows. The reset to week 1 then changes nothing, so the deps never
+ * move and the load never repeats. The header, the dropdown, the filter band and
+ * the filename all said the new month while the rows were the old month's — and
+ * because no read had failed, there was no error and no toast anywhere.
+ *
+ * The fix is to stop keeping a second copy: `weeks` is derived at render and
+ * this function re-derives the range from the two values the effect already
+ * depends on, so no dependency array can be stale.
+ */
+export function resolveWerkstattWeek(anchor: Date, weekNumber: number): WeekOfMonth | null {
+  return getWeeksOfMonth(anchor).find(week => week.weekNumber === weekNumber) ?? null;
+}
+
 export default function WerkstattPage() {
   const { t } = useTranslation();
   const [checks, setChecks] = useState<WerkstattCheck[]>([]);
   const [filteredChecks, setFilteredChecks] = useState<WerkstattCheck[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedMonth, setSelectedMonth] = useState(new Date());
-  const [selectedWeek, setSelectedWeek] = useState<number>(1);
-  const [weeks, setWeeks] = useState<any[]>([]);
+  /**
+   * Today's week, so the first load asks for the week the screen is already
+   * showing. The effect below computes the same number for the mounting month,
+   * so it sets no new value and the mount makes exactly one query. It used to
+   * start at 1 and be corrected by that effect — which is a no-op whenever
+   * today's week *is* 1, leaving the first (and only) load with a week the
+   * `weeks` state did not hold yet: no query at all, an empty list and an empty
+   * export, about one week in four.
+   */
+  const [selectedWeek, setSelectedWeek] = useState<number>(() => getWeekNumberForDate(new Date()));
+  /**
+   * Derived, never state. A `useState` copy is written one render *after*
+   * `selectedMonth` changes, and `loadChecks` read exactly that lagging copy.
+   * Deriving it also gives the week dropdown its options on the first render.
+   */
+  const weeks = getWeeksOfMonth(selectedMonth);
   const [statusFilter, setStatusFilter] = useState<'all' | 'positive' | 'negative' | 'repaired'>('all');
   const [showModal, setShowModal] = useState(false);
   const [selectedCheck, setSelectedCheck] = useState<WerkstattCheck | null>(null);
   const [checkToDelete, setCheckToDelete] = useState<WerkstattCheck | null>(null);
+  /**
+   * The reason the last load failed, or null. THE RULE: a figure whose load
+   * failed is not shown and not exported — an empty list under the new week's
+   * name is a claim that the week holds no checks. It carries the reason rather
+   * than a bare boolean only because the Werkstatt module owns no
+   * "…and therefore nothing is shown" sentence of its own, and the reason is
+   * what the toast already says; it is stored raw so a language switch cannot
+   * leave a sentence in the language it was thrown in.
+   */
+  const [loadFailed, setLoadFailed] = useState<string | null>(null);
+  /**
+   * Which load is the newest. A month change fires the load effect twice — once
+   * for the month, once for the week it resets — so two reads are in flight in
+   * the ordinary case and the slower one must not be allowed to land last.
+   */
+  const loadSequence = useRef(0);
   const { showToast } = useToast();
   const { effectiveCompanyId: companyId } = useSuperAdmin();
 
   useEffect(() => {
-    const weeksOfMonth = getWeeksOfMonth(selectedMonth);
-    setWeeks(weeksOfMonth);
     const today = new Date();
     if (today.getMonth() === selectedMonth.getMonth() && today.getFullYear() === selectedMonth.getFullYear()) {
       setSelectedWeek(getWeekNumberForDate(today));
@@ -54,10 +112,18 @@ export default function WerkstattPage() {
   useEffect(() => { filterChecks(); }, [checks, statusFilter]);
 
   const loadChecks = async () => {
+    const sequence = loadSequence.current + 1;
+    loadSequence.current = sequence;
+    // Only the newest load may write state; an older answer that lands later is
+    // dropped rather than allowed to overwrite the week now on screen.
+    const isNewest = () => loadSequence.current === sequence;
     try {
       setLoading(true);
-      const weekData = weeks.find(w => w.weekNumber === selectedWeek);
-      if (!weekData) { setChecks([]); return; }
+      setLoadFailed(null);
+      // Re-derived from the two values this load's effect depends on, so it can
+      // never read a `weeks` copy belonging to the month before this one.
+      const weekData = resolveWerkstattWeek(selectedMonth, selectedWeek);
+      if (!weekData) { if (isNewest()) setChecks([]); return; }
 
       const { data, error } = await supabase
         .from('werkstatt_checks')
@@ -68,11 +134,17 @@ export default function WerkstattPage() {
         .order('check_date', { ascending: false });
 
       if (error) throw error;
-      setChecks(data || []);
+      if (isNewest()) setChecks(data || []);
     } catch (error: any) {
+      if (!isNewest()) return;
+      // The rows of the week that loaded last must not survive under the name of
+      // the week that failed: the list, the cards and the export all say "this
+      // week", so the previous week's plates read as this week's checks.
+      setChecks([]);
+      setLoadFailed(error?.message ? String(error.message) : '');
       showToast('error', t('werkstatt.errorLoadChecks', { error: error.message }));
     } finally {
-      setLoading(false);
+      if (isNewest()) setLoading(false);
     }
   };
 
@@ -124,11 +196,19 @@ export default function WerkstattPage() {
   };
 
   function handleExport() {
+    // Second wall for the rule above: the button is disabled while the load
+    // failed, and a caller that gets past it still writes no file. A sheet of
+    // zero rows under this week's name is the same false claim as an empty list.
+    if (loadFailed !== null) return;
     const monthLabel = selectedMonth.toLocaleDateString('de-DE', { month: 'long', year: 'numeric' });
-    const weekInfo = weeks.find(w => w.weekNumber === selectedWeek);
+    const weekInfo = resolveWerkstattWeek(selectedMonth, selectedWeek);
     const filters: string[] = [
       t('werkstatt.filterMonth', { value: monthLabel }),
-      t('werkstatt.filterPeriod', { value: weekInfo?.label ?? t('werkstatt.calendarWeek', { number: selectedWeek }) }),
+      // `common.weekNumber` is "Woche {number}" — the words the dropdown and the
+      // Belege filename use. `werkstatt.calendarWeek` was "KW {number}", and KW
+      // is *Kalenderwoche*: for the third week of August 2026 (17.08.–23.08.,
+      // ISO week 34) "KW 3" named mid-January to anyone who reads German.
+      t('werkstatt.filterPeriod', { value: weekInfo?.label ?? t('common.weekNumber', { number: selectedWeek }) }),
     ];
     if (statusFilter !== 'all') {
       const labels: Record<string, string> = { positive: t('werkstatt.positive'), negative: t('werkstatt.negative'), repaired: t('werkstatt.repaired') };
@@ -136,7 +216,7 @@ export default function WerkstattPage() {
     }
 
     exportTableToExcel({
-      filename: `werkstatt_${format(selectedMonth, 'yyyy-MM')}_KW${selectedWeek}`,
+      filename: `werkstatt_${format(selectedMonth, 'yyyy-MM')}_Woche${selectedWeek}`,
       sheetTitle: t('werkstatt.checksTitle'),
       moduleName: t('nav.werkstatt'),
       filterSummary: filters,
@@ -167,6 +247,15 @@ export default function WerkstattPage() {
     fontSize: '0.875rem', padding: '0.375rem 0.75rem', outline: 'none',
   };
 
+  /**
+   * The failed-read panel and the empty-state panel are one card with two sets
+   * of values, not two cards. Written as two the screen would carry five more
+   * inline styles and one more literal colour, which the per-file style ratchet
+   * fails on; the icon, the heading, the body and the button are chosen here and
+   * in the ternaries below instead.
+   */
+  const EmptyStateIcon = loadFailed !== null ? AlertCircle : Wrench;
+
   const statusButtons = [
     { key: 'all' as const, label: t('common.all'), activeColor: 'var(--text-primary)', activeBg: 'var(--bg-elevated)' },
     { key: 'negative' as const, label: t('werkstatt.negative'), activeColor: 'var(--danger)', activeBg: 'var(--danger-subtle)' },
@@ -189,9 +278,14 @@ export default function WerkstattPage() {
         <div className="flex items-center gap-2">
           <button
             onClick={handleExport}
+            disabled={loadFailed !== null}
             className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-opacity hover:opacity-80"
-            style={{ background: 'var(--success-solid)', color: 'white' }}
-            title={t('common.exportExcel')}
+            style={{
+              background: 'var(--success-solid)', color: 'white',
+              opacity: loadFailed !== null ? 0.5 : 1,
+              cursor: loadFailed !== null ? 'not-allowed' : 'pointer',
+            }}
+            title={loadFailed !== null ? t('werkstatt.loadFailed') : t('common.exportExcel')}
           >
             <Download className="w-4 h-4" />
             Excel
@@ -273,23 +367,31 @@ export default function WerkstattPage() {
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 mx-auto" style={{ borderColor: 'var(--warning)' }}></div>
           <p className="mt-4 text-sm" style={{ color: 'var(--text-secondary)' }}>{t('werkstatt.loading')}</p>
         </div>
-      ) : filteredChecks.length === 0 ? (
+      ) : loadFailed !== null || filteredChecks.length === 0 ? (
         <div className="rounded-xl p-12 text-center" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-sm)' }}>
-          <Wrench className="w-16 h-16 mx-auto mb-4" style={{ color: 'var(--text-tertiary)' }} />
-          <h3 className="text-lg font-medium mb-2" style={{ color: 'var(--text-primary)' }}>{t('werkstatt.none')}</h3>
+          <EmptyStateIcon className="w-16 h-16 mx-auto mb-4" style={{ color: loadFailed !== null ? 'var(--danger)' : 'var(--text-tertiary)' }} />
+          <h3 className="text-lg font-medium mb-2" style={{ color: 'var(--text-primary)' }}>
+            {loadFailed !== null ? t('werkstatt.loadFailed') : t('werkstatt.none')}
+          </h3>
           <p className="mb-4 text-sm" style={{ color: 'var(--text-secondary)' }}>
-            {statusFilter === 'all'
-              ? t('werkstatt.noneWeek')
-              : t('werkstatt.noneWithStatus', { status: getStatusConfig(statusFilter).label })}
+            {loadFailed !== null
+              ? (loadFailed || t('common.error'))
+              : statusFilter === 'all'
+                ? t('werkstatt.noneWeek')
+                : t('werkstatt.noneWithStatus', { status: getStatusConfig(statusFilter).label })}
           </p>
-          <button
-            onClick={() => { setSelectedCheck(null); setShowModal(true); }}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg"
-            style={{ background: 'var(--warning-solid)', color: 'white' }}
-          >
-            <Plus className="w-5 h-5" />
-            {t('werkstatt.firstCheck')}
-          </button>
+          {/* Not offered while the read failed: "create the first check" says the
+              week holds none, which is the one thing this panel cannot claim. */}
+          {loadFailed === null && (
+            <button
+              onClick={() => { setSelectedCheck(null); setShowModal(true); }}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg"
+              style={{ background: 'var(--warning-solid)', color: 'white' }}
+            >
+              <Plus className="w-5 h-5" />
+              {t('werkstatt.firstCheck')}
+            </button>
+          )}
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
