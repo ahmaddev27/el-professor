@@ -439,5 +439,13 @@ export async function downloadStyledWorkbook(
   const workbook = new Workbook();
   applyStyledWorkbook(source, workbook);
   const buffer = await workbook.xlsx.writeBuffer();
-  triggerDownload(new Blob([buffer], { type: SHEET_MIME }), filename);
+  // `writeBuffer` is declared as `ArrayBuffer | Uint8Array`, and `BlobPart`
+  // accepts neither union member without narrowing — TypeScript rejects the
+  // union itself, not either half of it. Narrowed rather than cast, so a future
+  // exceljs that returns something else fails to compile here instead of
+  // producing a Blob of "[object Object]" that downloads as a corrupt file.
+  const part: BlobPart = buffer instanceof Uint8Array
+    ? new Uint8Array(buffer).buffer
+    : buffer;
+  triggerDownload(new Blob([part], { type: SHEET_MIME }), filename);
 }
