@@ -418,6 +418,7 @@ DECLARE
   c_co CONSTANT uuid := 'c0000000-0000-4000-8000-00000000000a';
   v_def text;
   v_admin_a uuid;
+  v_admin_b uuid;
   v_out text;
 BEGIN
   SELECT pg_get_indexdef(to_regclass('public.monthly_plans_one_confirmed_per_month')) INTO v_def;
@@ -435,6 +436,7 @@ BEGIN
   -- `_mp_u` out with "permission denied for table _mp_who". Resolved once here,
   -- as the owner, before any switch.
   v_admin_a := _mp_u('admin-a');
+  v_admin_b := _mp_u('admin-b');
 
   -- Directly, with no RPC in the path: the second confirmed plan of one month
   -- is refused by the index and not by a function anybody could bypass.
@@ -491,7 +493,9 @@ BEGIN
   -- is overwritten, and with no session confirmed_by comes out NULL and the
   -- pair constraint refuses the row, which is the WRONG constraint and proves
   -- nothing about the unique index this section tests.
-  PERFORM _mp_as(v_admin_a);
+  -- Company B's plan, so company B's administrator: the tenant policies refuse
+  -- admin-a here, and rightly — the row is not that company's.
+  PERFORM _mp_as(v_admin_b);
   UPDATE monthly_plans SET status = 'confirmed'
    WHERE id = _mp_id('plan:b-draft');
   PERFORM set_config('app_private.monthly_plan_transition', '', true);
