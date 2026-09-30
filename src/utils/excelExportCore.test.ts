@@ -25,12 +25,24 @@ import * as XLSX from 'xlsx';
  * `XLSX.writeFile` is mocked at the module boundary, because the real one is a
  * DOM download; mocking it also hands the test the workbook that would have been
  * written. `XLSX.utils` stays real, so the sheet is read back the way Excel would.
+ * It is still `exportSalariesToExcel`'s writer — a plain dump with no styling to
+ * lose — while `exportTableToExcel` writes through `downloadStyledWorkbook` since
+ * the ExcelJS swap, xlsx 0.20.3 having discarded every fill, font and border it
+ * was handed. Both are mocked, so "nothing was written" below still means it.
  */
 const { writeFile } = vi.hoisted(() => ({ writeFile: vi.fn() }));
 vi.mock('xlsx', async (importOriginal) => {
   const real = await importOriginal<typeof import('xlsx')>();
   return { ...real, writeFile, default: { ...real, writeFile } };
 });
+
+// Resolves, because `exportTableToExcel` attaches a `.catch` to what it returns.
+// A bare factory rather than one spreading the real module: that module lazily
+// imports exceljs, and nothing here needs it loaded.
+const { downloadStyledWorkbook } = vi.hoisted(() => ({
+  downloadStyledWorkbook: vi.fn(() => Promise.resolve()),
+}));
+vi.mock('./styledWorkbookDownload', () => ({ downloadStyledWorkbook }));
 
 import * as excelExport from './excelExport';
 import {
@@ -84,7 +96,10 @@ const TWO_COLUMNS: ExportColumn[] = [
   { key: 'amount', label: 'Betrag', type: 'money' },
 ];
 
-beforeEach(() => writeFile.mockClear());
+beforeEach(() => {
+  writeFile.mockClear();
+  downloadStyledWorkbook.mockClear();
+});
 
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -140,6 +155,11 @@ describe('2 — a totals value on the first column is refused, not dropped', () 
         columns: TWO_COLUMNS, rows: [], totals: { plate: 'x' },
       }),
     ).toThrow(/can never be rendered/);
+    // Both writers, so "before anything is written" is not satisfied merely by
+    // `exportTableToExcel` no longer being the one that calls `XLSX.writeFile`.
+    // The refusal is still SYNCHRONOUS — it is raised in `buildTableWorkbook`,
+    // ahead of the asynchronous write — which is what lets `toThrow` see it.
+    expect(downloadStyledWorkbook).not.toHaveBeenCalled();
     expect(writeFile).not.toHaveBeenCalled();
   });
 
