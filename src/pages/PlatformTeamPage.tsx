@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
-  RefreshCw, ShieldAlert, Info, UserPlus, Mail, Ban, CheckCircle, Users, Lock, AlertTriangle, UserCog,
+  RefreshCw, ShieldAlert, Info, UserPlus, Mail, Ban, CheckCircle, Users, Lock, AlertTriangle, UserCog, Download,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
@@ -35,6 +35,10 @@ import {
   wouldRemoveLastOwner,
 } from '../lib/platformStaffRoster';
 import { deDate, shortId } from '../lib/platformFormat';
+import { exportTableToExcel } from '../utils/excelExport';
+import { buildStaffExport } from '../lib/panelExports';
+import { useExportChrome } from '../hooks/useExportChrome';
+import { berlinToday } from '../utils/salaryCashReceiptFlow';
 
 /**
  * Team — the platform staff (plan 3.5 / 3.12).
@@ -157,6 +161,7 @@ const PlatformTeamPage: React.FC = () => {
   const { platformCan } = useSuperAdmin();
   const { showToast } = useToast();
   const { t } = useTranslation();
+  const exportChrome = useExportChrome();
 
   const mayManage = platformCan('staff.manage');
 
@@ -291,6 +296,62 @@ const PlatformTeamPage: React.FC = () => {
     }
   };
 
+  /**
+   * The roster as a workbook — the access-review artefact, and the platform's
+   * counterpart to the Rollen matrix a company exports. It answers "who could
+   * read every customer's data" in a form that can be attached to a review; the
+   * screen answers it only by being looked at.
+   *
+   * **The rule being preserved: a file says what it holds.** `collectStaffRoster`
+   * pages `platform_staff_list` to the end, so unlike every other panel export
+   * this one is the whole list — and the band says so only when `complete` is
+   * true. When the paging stopped early the band says the roster is partial
+   * rather than the file implying a complete team; it is not withheld, because a
+   * partial roster is still a fact once it is labelled as one.
+   *
+   * It carries the full `user_id`, which no other export here does: the screen
+   * already shows it (shortened, with the whole value in the cell's title) and
+   * "Vorhandenes Konto hinzufügen" takes exactly that id, so a roster without it
+   * cannot be acted on. These are platform accounts, never a customer's.
+   */
+  const handleExport = () => {
+    try {
+      exportTableToExcel(buildStaffExport({
+        rows: members,
+        complete,
+        today: berlinToday(),
+        labels: {
+          sheetTitle: t('admin.team.title'),
+          member: t('admin.team.col.member'),
+          userId: t('admin.team.export.userId'),
+          role: t('admin.team.col.role'),
+          status: t('admin.team.col.status'),
+          disabledOn: t('admin.team.export.disabledOn'),
+          invitationPending: t('admin.team.export.invitationPending'),
+          grantedBy: t('admin.team.col.grantedBy'),
+          since: t('admin.team.export.since'),
+          note: t('admin.team.col.note'),
+          // The four roles, named as the picker names them. A fifth value the
+          // database might hold is written verbatim by the builder.
+          roleNames: Object.fromEntries(
+            PLATFORM_ROLES.map((role): [string, string] => [role, roleLabel(t, role)]),
+          ),
+          statusActive: t('admin.dir.status.active'),
+          statusDisabled: t('admin.team.status.disabled'),
+          yes: t('common.yes'),
+          no: t('common.no'),
+          noAddress: t('admin.team.noAddress'),
+          grantedByUnrecorded: t('admin.team.grantedBy.unrecorded'),
+          scopeComplete: t('admin.team.export.scopeComplete'),
+          scopeIncomplete: t('admin.team.export.scopeIncomplete'),
+          chrome: exportChrome,
+        },
+      }));
+    } catch (error: any) {
+      showToast('error', t('ui.export.failed'), error?.message);
+    }
+  };
+
   if (!mayManage) {
     return (
       <div className="flex flex-col items-center justify-center py-20 rounded-2xl text-center" style={cardStyle}>
@@ -321,13 +382,27 @@ const PlatformTeamPage: React.FC = () => {
           <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>{t('admin.team.title')}</h1>
           <p className="text-sm mt-0.5" style={{ color: 'var(--text-secondary)' }}>{t('admin.team.subtitle')}</p>
         </div>
-        <button
-          onClick={() => void load()}
-          className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium"
-          style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
-        >
-          <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />{t('admin.common.refresh')}
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Withheld while the read failed or is running, and on an empty
+              roster: a file saying nobody holds platform rights would be the
+              most misleading artefact this screen could produce. An *incomplete*
+              roster is exported and labelled, which is a different case. */}
+          <Button
+            variant="secondary"
+            disabled={loading || problem !== null || members.length === 0}
+            onClick={handleExport}
+            title={t('common.exportExcel')}
+          >
+            <Download size={14} aria-hidden />{t('admin.export.download')}
+          </Button>
+          <button
+            onClick={() => void load()}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium"
+            style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
+          >
+            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />{t('admin.common.refresh')}
+          </button>
+        </div>
       </div>
 
       {/* The roster */}
