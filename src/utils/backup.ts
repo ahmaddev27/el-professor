@@ -40,7 +40,13 @@
  * when a backup is actually opened), and a warning toast instead of a success
  * one. Do not drop any of the three on the grounds that the other two cover it.
  */
-import { supabase } from '../lib/supabase';
+// `supabase` is imported lazily, inside the two functions that need the live
+// client. A static import pulls in `src/lib/supabase.ts`, which reads
+// `window.location.origin` at module scope — so merely importing this file threw
+// `ReferenceError: window is not defined` in the `node` environment the whole
+// vitest suite runs in, and `backup.test.ts` could not load the module it tests.
+// `createBackup` already takes its client as an argument for exactly that
+// reason; this makes the default reachable from a test too.
 
 /**
  * PostgREST caps a select at 1,000 rows. Reading page by page and stopping on a
@@ -346,11 +352,18 @@ export async function createBackup(
   // `as unknown as` once, here: supabase-js's builders satisfy this surface but
   // its generics do not line up with a hand-written one. The cast is at the one
   // seam rather than spread through the reads.
-  client: BackupClient = supabase as unknown as BackupClient,
+  client?: BackupClient,
 ): Promise<BackupData> {
   if (!companyId) {
     throw new Error('Company ID is required for backup');
   }
+
+  // The live client, resolved only when the caller supplied none. `as unknown as`
+  // once, here: supabase-js's builders satisfy this surface but its generics do
+  // not line up with a hand-written one. The cast is at the one seam rather than
+  // spread through the reads.
+  const db: BackupClient =
+    client ?? ((await import('../lib/supabase')).supabase as unknown as BackupClient);
 
   const backup: BackupData = {
     timestamp: new Date().toISOString(),
@@ -371,7 +384,7 @@ export async function createBackup(
   };
 
   for (const table of BACKUP_TABLES) {
-    const read = await readTenantTable(client, table, companyId);
+    const read = await readTenantTable(db, table, companyId);
     if (!read.ok) {
       console.error(`Backup: ${table} could not be read:`, read.error);
       record({ table, status: 'failed', rows: 0, discardedRows: read.discarded, error: read.error });
@@ -399,7 +412,7 @@ export async function createBackup(
       });
       continue;
     }
-    const read = await readChildTable(client, child, idsOf(parentRows));
+    const read = await readChildTable(db, child, idsOf(parentRows));
     if (!read.ok) {
       console.error(`Backup: ${child.table} could not be read:`, read.error);
       record({ table: child.table, status: 'failed', rows: 0, discardedRows: read.discarded, error: read.error });
