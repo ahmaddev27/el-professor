@@ -4,6 +4,8 @@ import { useToast } from '../contexts/ToastContext';
 import { useTranslation } from '../contexts/LanguageContext';
 import type { TranslationKey } from '../i18n';
 import { Plus, CreditCard as Edit2, Trash2, RefreshCw, Gift, Check, X, ToggleLeft, ToggleRight } from 'lucide-react';
+import { referralUsageCounts } from '../lib/panelFigures';
+import { Alert } from './ui';
 import { format } from 'date-fns';
 import { de } from 'date-fns/locale';
 
@@ -14,7 +16,13 @@ interface ReferralCode {
   description: string | null;
   is_active: boolean;
   created_at: string;
-  usage_count?: number;
+  /**
+   * Null where the companies this is counted over were not read. It used to be
+   * `usageMap[r.ref_code] ?? 0`, so a failed company read in the parent made
+   * every code report a confident `0 Nutzungen` — the one figure this section
+   * exists to report. See referralUsageCounts() for the rule.
+   */
+  usage_count?: number | null;
 }
 
 interface CompanyRow {
@@ -26,6 +34,13 @@ interface CompanyRow {
 
 interface Props {
   companies: CompanyRow[];
+  /**
+   * Whether `companies` is the platform's companies, or whatever was left after
+   * a read that did not succeed. The parent sets it false in its catch; where it
+   * is false, every usage figure here is unknown rather than zero, and the
+   * screen says so instead of counting.
+   */
+  companiesKnown: boolean;
 }
 
 const emptyForm = { ref_code: '', name: '', description: '' };
@@ -41,11 +56,17 @@ const TABLE_HEADER_KEYS: (TranslationKey | null)[] = [
   null,
 ];
 
-export default function ReferralCodesManagement({ companies }: Props) {
+export default function ReferralCodesManagement({ companies, companiesKnown }: Props) {
   const { showToast } = useToast();
   const { t, tPlural } = useTranslation();
   const [referrals, setReferrals] = useState<ReferralCode[]>([]);
   const [loading, setLoading] = useState(true);
+  /**
+   * The `referrals` read itself failed. Distinct from `companiesKnown`, which is
+   * about the list the usage figures are counted over: this one decides whether
+   * "Noch keine Empfehlungscodes" may be said at all.
+   */
+  const [loadFailed, setLoadFailed] = useState(false);
   const [form, setForm] = useState(emptyForm);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -54,6 +75,7 @@ export default function ReferralCodesManagement({ companies }: Props) {
 
   const load = useCallback(async () => {
     setLoading(true);
+    setLoadFailed(false);
     try {
       const { data, error } = await supabase
         .from('referrals')
@@ -61,21 +83,21 @@ export default function ReferralCodesManagement({ companies }: Props) {
         .order('created_at', { ascending: false });
       if (error) throw error;
 
-      // Count usage per ref_code
-      const usageMap: Record<string, number> = {};
-      for (const c of companies) {
-        if (c.referral_code_used) {
-          usageMap[c.referral_code_used] = (usageMap[c.referral_code_used] || 0) + 1;
-        }
-      }
+      // Count usage per ref_code — or, where the companies were not read, do
+      // not count at all. `referralUsageCounts` answers null per code then.
+      const rows = data ?? [];
+      const usageMap = referralUsageCounts(rows.map(r => r.ref_code), companies, companiesKnown);
 
-      setReferrals((data ?? []).map(r => ({ ...r, usage_count: usageMap[r.ref_code] ?? 0 })));
+      setReferrals(rows.map(r => ({ ...r, usage_count: usageMap[r.ref_code] ?? null })));
     } catch (err: any) {
+      console.error(err);
+      setReferrals([]);
+      setLoadFailed(true);
       showToast('error', err.message || t('common.errorLoad'));
     } finally {
       setLoading(false);
     }
-  }, [companies]);
+  }, [companies, companiesKnown]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -233,11 +255,30 @@ export default function ReferralCodesManagement({ companies }: Props) {
         </div>
       )}
 
+      {/*
+        Why the Nutzungen column is a dash. The count is taken over the parent's
+        company list, so when that list was not read there is no count — and a
+        section whose whole point is "how often was this code used" must say that
+        rather than print zeroes.
+      */}
+      {!loadFailed && !companiesKnown && (
+        <Alert tone="caution" className="font-ui" title={t('admin.read.failedTitle')}>
+          {t('admin.read.countsUnknown')}
+        </Alert>
+      )}
+
       {/* Table */}
       <div style={cardStyle} className="overflow-hidden">
         {loading ? (
           <div className="flex items-center justify-center py-10">
             <RefreshCw size={20} className="animate-spin" style={{ color: 'var(--text-tertiary)' }} />
+          </div>
+        ) : loadFailed ? (
+          /* Not "no referral codes yet" — the list was not read. */
+          <div className="p-4">
+            <Alert tone="critical" className="font-ui" title={t('admin.read.failedTitle')}>
+              {t('admin.read.failed')}
+            </Alert>
           </div>
         ) : referrals.length === 0 ? (
           <div className="py-10 text-center" style={{ color: 'var(--text-tertiary)' }}>
@@ -277,7 +318,8 @@ export default function ReferralCodesManagement({ companies }: Props) {
                           className="flex items-center gap-1.5 text-sm font-semibold transition-colors"
                           style={{ color: (r.usage_count ?? 0) > 0 ? '#10b981' : 'var(--text-tertiary)' }}
                         >
-                          {r.usage_count ?? 0}
+                          {/* A dash, not a zero, where the companies were not read. */}
+                          {r.usage_count ?? '–'}
                           {(r.usage_count ?? 0) > 0 && <span className="text-[10px] font-normal">{t('codes.col.company')}</span>}
                         </button>
                       </td>

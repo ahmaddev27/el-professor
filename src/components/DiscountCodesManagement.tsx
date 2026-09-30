@@ -7,6 +7,7 @@ import { useToast } from '../contexts/ToastContext';
 import { useTranslation } from '../contexts/LanguageContext';
 import type { TranslationKey } from '../i18n';
 import { fmt as fmtPrice } from '../utils/pricing';
+import { Alert } from './ui';
 import { format } from 'date-fns';
 import { de } from 'date-fns/locale';
 
@@ -314,26 +315,52 @@ const DiscountCodeModal: React.FC<ModalProps> = ({ dc, companies, onClose, onSav
 
 // ─── Redemptions popover ──────────────────────────────────────────────────────
 
+const REDEMPTIONS_PAGE_SIZE = 50;
+
 const RedemptionsPanel: React.FC<{ codeId: string }> = ({ codeId }) => {
   const { t } = useTranslation();
   const [rows, setRows] = useState<Redemption[]>([]);
+  const [total, setTotal] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
+  // This panel is the only place a discount's euro effect per company is shown,
+  // so "Noch keine Einlösungen." must not stand in for a read that failed.
+  const [loadFailed, setLoadFailed] = useState(false);
 
   useEffect(() => {
     (async () => {
-      const { data } = await supabase
+      setLoadFailed(false);
+      const { data, error, count } = await supabase
         .from('discount_code_redemptions')
-        .select('*, companies(name)')
+        .select('*, companies(name)', { count: 'exact' })
         .eq('discount_code_id', codeId)
         .order('redeemed_at', { ascending: false })
-        .limit(50);
-      setRows((data ?? []).map((r: any) => ({ ...r, company_name: r.companies?.name })));
+        .limit(REDEMPTIONS_PAGE_SIZE);
+      if (error) {
+        console.error(error);
+        setRows([]);
+        setTotal(null);
+        setLoadFailed(true);
+      } else {
+        setRows((data ?? []).map((r: any) => ({ ...r, company_name: r.companies?.name })));
+        setTotal(typeof count === 'number' ? count : null);
+      }
       setLoading(false);
     })();
   }, [codeId]);
 
   if (loading) return <p className="text-xs text-center py-3" style={{ color: 'var(--text-tertiary)' }}>{t('common.loading')}</p>;
-  if (!rows.length) return <p className="text-xs text-center py-3" style={{ color: 'var(--text-tertiary)' }}>{t('codes.discount.noRedemptions')}</p>;
+  /*
+    One paragraph, two sentences, and the sentence is the signal — not the
+    colour. It keeps the panel's existing muted tone on purpose: `text-critical`
+    on this legacy card background would be a contrast pair nothing measures yet
+    (tokens.contrast.test.ts, ON_LEGACY_SURFACE), and the wording already says
+    which of the two happened.
+  */
+  if (loadFailed || !rows.length) return (
+    <p className="text-xs text-center py-3" style={{ color: 'var(--text-tertiary)' }}>
+      {loadFailed ? t('admin.read.failed') : t('codes.discount.noRedemptions')}
+    </p>
+  );
 
   return (
     <div className="overflow-x-auto">
@@ -357,6 +384,20 @@ const RedemptionsPanel: React.FC<{ codeId: string }> = ({ codeId }) => {
               <td className="py-1.5 text-right font-semibold" style={{ color: 'var(--text-primary)' }}>{fmtPrice(r.final_price)} €</td>
             </tr>
           ))}
+          {/*
+            This is one page of at most 50, not the code's whole redemption
+            history: say so rather than let the rows read as all of them. The
+            line carries no colour of its own — it inherits the ambient legacy
+            text colour, so it adds neither an inline style nor a Phase-2 token
+            pair on a legacy background that nothing measures yet.
+          */}
+          {total !== null && total > rows.length && (
+            <tr>
+              <td colSpan={5} className="pt-2 text-[11px]">
+                {t('admin.read.partial', { shown: rows.length, total })}
+              </td>
+            </tr>
+          )}
         </tbody>
       </table>
     </div>
@@ -387,17 +428,39 @@ const DiscountCodesManagement: React.FC = () => {
   const [modalDc, setModalDc] = useState<DiscountCode | 'new' | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<{ open: boolean; dc: DiscountCode | null }>({ open: false, dc: null });
+  /**
+   * A read that did not succeed. Neither the table's "Noch keine Rabattcodes
+   * erstellt." nor the header's "N Codes · M aktiv" is shown while it is set:
+   * both are claims about what exists on the platform, and a read that failed
+   * makes neither.
+   */
+  const [loadFailed, setLoadFailed] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [{ data: codesData }, { data: companiesData }] = await Promise.all([
-      supabase.from('discount_codes').select('*').order('created_at', { ascending: false }),
-      supabase.from('companies').select('id, name').order('name'),
-    ]);
-    setCodes(codesData ?? []);
-    setCompanies(companiesData ?? []);
-    setLoading(false);
-  }, []);
+    setLoadFailed(false);
+    try {
+      // Both errors are bound. Neither was, so a refusal or a transport failure
+      // emptied the table in silence — and because nothing caught a rejected
+      // Promise.all either, `loading` stayed true and the panel span for ever.
+      const [codesRes, companiesRes] = await Promise.all([
+        supabase.from('discount_codes').select('*').order('created_at', { ascending: false }),
+        supabase.from('companies').select('id, name').order('name'),
+      ]);
+      if (codesRes.error) throw codesRes.error;
+      if (companiesRes.error) throw companiesRes.error;
+      setCodes(codesRes.data ?? []);
+      setCompanies(companiesRes.data ?? []);
+    } catch (err: any) {
+      console.error(err);
+      setCodes([]);
+      setCompanies([]);
+      setLoadFailed(true);
+      showToast('error', err?.message || t('common.errorLoad'));
+    } finally {
+      setLoading(false);
+    }
+  }, [showToast, t]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -466,9 +529,12 @@ const DiscountCodesManagement: React.FC = () => {
           <div>
             <h1 className="text-2xl font-bold text-white">{t('codes.discount.title')}</h1>
             <p className="text-sm" style={{ color: 'rgba(255,255,255,0.45)' }}>
-              {tPlural({ one: 'codes.countCode.one', other: 'codes.countCode.other' }, codes.length)}
-              {' · '}
-              {t('codes.activeCount', { count: codes.filter(c => c.active).length })}
+              {/* Two counts over a list that was not read are not counts of zero. */}
+              {loadFailed ? t('admin.read.failedTitle') : (<>
+                {tPlural({ one: 'codes.countCode.one', other: 'codes.countCode.other' }, codes.length)}
+                {' · '}
+                {t('codes.activeCount', { count: codes.filter(c => c.active).length })}
+              </>)}
             </p>
           </div>
         </div>
@@ -486,6 +552,13 @@ const DiscountCodesManagement: React.FC = () => {
       <div className="rounded-xl overflow-hidden" style={{ background: 'var(--bg-surface)', boxShadow: 'var(--shadow-md)', border: '1px solid var(--border)' }}>
         {loading ? (
           <div className="py-16 text-center" style={{ color: 'var(--text-tertiary)' }}>{t('common.loading')}</div>
+        ) : loadFailed ? (
+          /* Not "no discount codes exist" — the list was not read. */
+          <div className="p-4">
+            <Alert tone="critical" className="font-ui" title={t('admin.read.failedTitle')}>
+              {t('admin.read.failed')}
+            </Alert>
+          </div>
         ) : codes.length === 0 ? (
           <div className="py-16 text-center">
             <Tag size={40} className="mx-auto mb-3 opacity-20" style={{ color: 'var(--text-tertiary)' }} />

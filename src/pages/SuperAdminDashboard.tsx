@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase';
 import { useToast } from '../contexts/ToastContext';
 import { fetchCompanies } from '../lib/platformDirectoryClient';
 import { collectCompanyCounts, UNKNOWN_COMPANY_COUNTS, type CompanyCounts } from '../lib/platformReadModels';
+import { driversAllowance } from '../lib/panelFigures';
 import {
   Building2, Users, Car, FileText, TrendingUp, AlertTriangle,
   CheckCircle, Clock, XCircle, PauseCircle, Plus, ExternalLink,
@@ -24,6 +25,7 @@ import { contextRefusalMessage } from '../lib/supportSession';
 import { ADMIN_BASE, TENANT_HOME } from '../lib/adminGate';
 import { useTranslation } from '../contexts/LanguageContext';
 import { subscriptionIsActive } from '../utils/planState';
+import { Alert } from '../components/ui';
 import type { CompanyStatus } from '../contexts/AuthContext';
 import type { TranslationKey } from '../i18n';
 
@@ -60,7 +62,19 @@ interface CompanyRow {
    * minute tick. Where it is false the counts are 0 and mean nothing.
    */
   counts_known: boolean;
-  drivers_per_car_limit: number;
+  /**
+   * The company's `company_settings.drivers_per_car_limit`, and **null where it
+   * was not read**.
+   *
+   * `collectCompanyCounts` records the key only where the read model returned a
+   * number, so a company whose settings row is missing — or whose column is null
+   * — is absent from the map even on a wholly successful read. This was
+   * `dpcMap[c.id] ?? 4`, which made the Fahrer column print a denominator of the
+   * screen's own invention (`–/12` where the truth may be `–/6`) and decided the
+   * red "limit reached" colour from it. There is no default any more:
+   * `driversAllowance()` answers null and the cell prints a dash.
+   */
+  drivers_per_car_limit: number | null;
   subscription_status: string | null;
   subscription_expires_at: string | null;
   subscription_started_at: string | null;
@@ -345,6 +359,18 @@ export default function SuperAdminDashboard() {
   }, [openCompany, navigate, showToast, t]);
 
   const [companies, setCompanies] = useState<CompanyRow[]>([]);
+  /**
+   * Whether the company list in state above is the platform's, or whatever was
+   * left after a read that did not succeed.
+   *
+   * It describes the list currently held, not the request in flight, so it is
+   * **not** cleared where the load starts: a silent reload must not make the
+   * list on screen read as unknown while it is still the last good one. A failed
+   * attempt does clear it — including a failed minute tick, because a reload
+   * that failed means the list on screen may no longer be the platform's, and
+   * `ReferralCodesManagement` counts its usage figures over exactly this list.
+   */
+  const [companiesKnown, setCompaniesKnown] = useState(false);
   const [kpis, setKpis] = useState<PlatformKPIs | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -440,10 +466,11 @@ export default function SuperAdminDashboard() {
         driver_count: dcMap[c.id] || 0,
         active_car_count: ccMap[c.id] || 0,
         counts_known: counts.known && ucMap[c.id] !== undefined,
-        drivers_per_car_limit: dpcMap[c.id] ?? 4,
+        drivers_per_car_limit: dpcMap[c.id] ?? null,
       }));
 
       setCompanies(enriched);
+      setCompaniesKnown(true);
 
       // Compute KPIs
       const now = new Date();
@@ -478,12 +505,18 @@ export default function SuperAdminDashboard() {
       };
       setKpis(kpiData);
     } catch (err: any) {
+      // The list on screen is no longer vouched for, so nothing counted over it
+      // is either. `companies` is deliberately left as it was: a stale list the
+      // screen marks as unconfirmed beats an empty one that claims there are no
+      // customers.
+      console.error(err);
+      setCompaniesKnown(false);
       showToast('error', t('sa.dash.errorLoad'));
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [t]);
+  }, [showToast, t]);
 
   // Opening the page is a deliberate read, so it reads the counts.
   useEffect(() => { load(false, true); }, [load]);
@@ -742,6 +775,19 @@ export default function SuperAdminDashboard() {
         </div>
       </div>
 
+      {/*
+        The company list was not read, so nothing counted over it is a fact:
+        "0 Unternehmen", an empty customer table and a code with 0 Nutzungen all
+        read as statements about the platform, and this says they are not. The
+        KPI cards need no guard — `kpis` stays null until a read succeeds, so
+        they are absent rather than zero.
+      */}
+      {!loading && !companiesKnown && (
+        <Alert tone="caution" className="font-ui" title={t('admin.read.failedTitle')}>
+          {t('admin.read.failed')}
+        </Alert>
+      )}
+
       {/* ── Section tabs ───────────────────────────────────────────────────────── */}
       <div className="flex gap-1 p-1 rounded-xl flex-wrap" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', width: 'fit-content' }}>
         {([
@@ -775,7 +821,7 @@ export default function SuperAdminDashboard() {
       {canCodes && activeSection === 'discounts' && <DiscountCodesManagement />}
 
       {/* ── Referral Codes section ─────────────────────────────────────────────── */}
-      {canCodes && activeSection === 'referrals' && <ReferralCodesManagement companies={companies} />}
+      {canCodes && activeSection === 'referrals' && <ReferralCodesManagement companies={companies} companiesKnown={companiesKnown} />}
 
       {/* ── Activation Codes section ───────────────────────────────────────────── */}
       {canCodes && activeSection === 'activation' && <ActivationCodesManagement companies={companies} />}
@@ -1322,9 +1368,18 @@ export default function SuperAdminDashboard() {
 
                   {/* Fahrer aktiv / limit */}
                   <td className="px-4 py-3">
-                    <span className="text-xs" style={{ color: c.counts_known && c.driver_count >= (c.subscription_car_limit * c.drivers_per_car_limit) ? 'var(--danger)' : 'var(--text-secondary)' }}>
-                      {c.counts_known ? c.driver_count : '–'}/{c.subscription_car_limit * c.drivers_per_car_limit}
-                    </span>
+                    {(() => {
+                      // Both halves of the fraction, and the red colour, now come
+                      // from figures that were read. An unknown allowance is a
+                      // dash, never a plausible number.
+                      const allowance = driversAllowance(c.subscription_car_limit, c.drivers_per_car_limit);
+                      const atLimit = c.counts_known && allowance !== null && c.driver_count >= allowance;
+                      return (
+                        <span className="text-xs" style={{ color: atLimit ? 'var(--danger)' : 'var(--text-secondary)' }}>
+                          {c.counts_known ? c.driver_count : '–'}/{allowance ?? '–'}
+                        </span>
+                      );
+                    })()}
                   </td>
 
                   {/* Calculated price */}

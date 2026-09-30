@@ -7,12 +7,20 @@ import { subscriptionIsActive } from '../utils/planState';
 import {
   CheckCircle, XCircle, CalendarDays, RefreshCw, KeyRound,
   Clock, ShieldCheck, History, AlertCircle,
+  type LucideIcon,
 } from 'lucide-react';
 import { format, differenceInDays } from 'date-fns';
 import { de } from 'date-fns/locale';
 import { useTranslation } from '../contexts/LanguageContext';
 import type { TranslationKey } from '../i18n';
 import { Alert, Badge, Button, Card, DataTable, EmptyState, PageHeader, cn, type DataTableColumn } from '../components/ui';
+import {
+  coverageHistory,
+  parseCoverageRows,
+  type CoverageEntry,
+  type CoverageSource,
+  type CoverageState,
+} from '../lib/companyCoverageHistory';
 
 // Map keys are the stored `subscription_duration_type` values and must not be
 // translated; the values hold a TranslationKey because t() is a hook value and
@@ -39,15 +47,45 @@ interface CompanySubDetail {
   subscription_expires_at: string | null;
 }
 
-interface ActivationHistoryRow {
-  id: string;
-  code_last4: string | null;
-  duration_type: string | null;
-  used_at: string | null;
-  status: string;
-  applied_subscription_started_at: string | null;
-  applied_subscription_expires_at: string | null;
-}
+/*
+  The five sources of a coverage period, as labels. Keys are the stored
+  `subscription_coverage.source` values and must not be translated; the values
+  hold a TranslationKey because t() is a hook value and this map is
+  module-level.
+*/
+const SOURCE_LABELS: Record<CoverageSource, TranslationKey> = {
+  invoice:         'sa.billing.source.invoice',
+  activation_code: 'sa.billing.source.activationCode',
+  manual:          'sa.billing.source.manual',
+  trial:           'sa.billing.source.trial',
+  migration:       'sa.billing.source.migration',
+};
+
+/* The badge each period state gets. Same order as CoverageState's own. */
+const STATE_LABELS: Record<CoverageState, TranslationKey> = {
+  withdrawn: 'sa.billing.rowWithdrawn',
+  blocked:   'sa.billing.rowBlocked',
+  future:    'sa.billing.rowFuture',
+  current:   'sa.billing.rowCurrentlyActive',
+  past:      'sa.billing.statusExpired',
+};
+
+const STATE_TONES: Record<CoverageState, 'positive' | 'caution' | 'neutral' | 'brand'> = {
+  withdrawn: 'neutral',
+  blocked:   'caution',
+  future:    'brand',
+  current:   'positive',
+  past:      'caution',
+};
+
+/* Colour is never the only signal, so every state carries its own icon too. */
+const STATE_ICONS: Record<CoverageState, LucideIcon> = {
+  withdrawn: XCircle,
+  blocked:   AlertCircle,
+  future:    CalendarDays,
+  current:   CheckCircle,
+  past:      Clock,
+};
 
 function fmtDate(iso: string | null | undefined) {
   if (!iso) return '—';
@@ -69,12 +107,19 @@ export default function CompanyBillingPage() {
 
   const [companyDetail, setCompanyDetail] = useState<CompanySubDetail | null>(null);
   const [lastCodeLast4, setLastCodeLast4] = useState<string | null>(null);
-  const [history, setHistory] = useState<ActivationHistoryRow[]>([]);
+  const [history, setHistory] = useState<CoverageEntry[]>([]);
   const [loading, setLoading] = useState(true);
+  /**
+   * A read that did not succeed. Neither the Abo-Status card nor the history is
+   * drawn while it is set: "kein aktives Abonnement" and "noch keine
+   * Zeiträume" are both claims, and a read that failed makes neither.
+   */
+  const [loadFailed, setLoadFailed] = useState(false);
 
   const loadData = useCallback(async () => {
     if (!companyId) return;
     setLoading(true);
+    setLoadFailed(false);
     try {
       const [detailRes, histRes] = await Promise.all([
         supabase
@@ -82,37 +127,57 @@ export default function CompanyBillingPage() {
           .select('subscription_started_at, subscription_duration_type, last_activation_code_id, subscription_status, subscription_expires_at')
           .eq('id', companyId)
           .maybeSingle(),
+        /*
+          The history is `subscription_coverage`, not `activation_codes`.
+
+          `activation_codes` is gated on `platform_can('codes.manage')` with no
+          tenant term, so a company role was *filtered* to zero rows — no error,
+          no refusal, just an empty list under the heading "Zahlungs- &
+          Aktivierungshistorie". `subscription_coverage` is keyed on
+          `get_user_company_id()`, the caller's own company (and, for a
+          company-less platform account, the company its context names), so an
+          empty answer here honestly means no periods were recorded. See the
+          header of src/lib/companyCoverageHistory.ts.
+
+          Every source is shown, not only `activation_code`: a customer billed by
+          invoice has the same right to the Zahlungs- half of the heading.
+        */
         supabase
-          .from('activation_codes')
-          .select('id, code_last4, duration_type, used_at, status, applied_subscription_started_at, applied_subscription_expires_at')
-          .eq('used_company_id', companyId)
-          .eq('status', 'used')
-          .is('hidden_at', null)
-          .is('deleted_at', null)
-          .order('used_at', { ascending: false }),
+          .from('subscription_coverage')
+          .select('id, source, period_start, period_end, grants_access, status, created_at')
+          .eq('company_id', companyId)
+          .order('period_start', { ascending: false }),
       ]);
+
+      if (detailRes.error) throw detailRes.error;
+      if (histRes.error) throw histRes.error;
 
       const detail = detailRes.data as CompanySubDetail | null;
       setCompanyDetail(detail);
-      if (histRes.data) setHistory(histRes.data as ActivationHistoryRow[]);
+      setHistory(coverageHistory(parseCoverageRows(histRes.data), new Date()));
 
       if (detail?.last_activation_code_id) {
-        const match = (histRes.data as ActivationHistoryRow[] | null)?.find(
-          r => r.id === detail.last_activation_code_id
-        );
-        if (match) {
-          setLastCodeLast4(match.code_last4);
-        } else {
-          const { data: codeRow } = await supabase
-            .from('activation_codes')
-            .select('code_last4')
-            .eq('id', detail.last_activation_code_id)
-            .maybeSingle();
-          setLastCodeLast4((codeRow as { code_last4: string | null } | null)?.code_last4 ?? null);
-        }
+        /*
+          Best effort, and deliberately not part of the failure above: this row
+          resolves only for a caller holding `codes.manage` (an owner inside a
+          support session). A company role reads nothing here, `lastCodeLast4`
+          stays null, and the field is then *omitted* from the card rather than
+          printed as "••••" — so no claim is made either way, and a refusal here
+          must not blank the page.
+        */
+        const { data: codeRow } = await supabase
+          .from('activation_codes')
+          .select('code_last4')
+          .eq('id', detail.last_activation_code_id)
+          .maybeSingle();
+        setLastCodeLast4((codeRow as { code_last4: string | null } | null)?.code_last4 ?? null);
       }
     } catch (err) {
       console.error(err);
+      setCompanyDetail(null);
+      setLastCodeLast4(null);
+      setHistory([]);
+      setLoadFailed(true);
     } finally {
       setLoading(false);
     }
@@ -166,6 +231,21 @@ export default function CompanyBillingPage() {
 
   const hasHistory = history.length > 0;
 
+  /*
+    Whether there is an Abo-Status to print at all.
+
+    For a company user the three figures come from AuthContext, which this
+    screen's own read does not touch — so a failed read here leaves the status
+    word intact and only the detail fields (Gestartet am, Laufzeit,
+    Restlaufzeit) drop out, each already conditional on the row being there.
+
+    Inside a support session they come from the row that failed. `subActive`
+    would then be false and `subExpired` false, and the screen would tell an
+    operator "Kein aktives Abonnement" about a company it never managed to
+    read — a claim from a read that did not happen.
+  */
+  const statusKnown = !loadFailed || !inSupportSession;
+
   // ── Presentation (phase 5) ────────────────────────────────────────────────
   // Everything above is unchanged: whose subscription this is (the opened
   // company's inside a support session, the account's own otherwise), the
@@ -194,78 +274,58 @@ export default function CompanyBillingPage() {
     </Button>
   );
 
-  // Each row's state, worked out as the old table body did, from the order
-  // the rows were read in — the table below does not sort.
-  const historyRows = history.map((row, idx) => {
-    const isCurrentActive = subActive && idx === 0 && companyDetail?.last_activation_code_id === row.id;
-    const appliedExpiry = row.applied_subscription_expires_at;
-    const isPastPeriod = appliedExpiry ? new Date(appliedExpiry) <= new Date() : false;
-    return { row, isCurrentActive, isPastPeriod };
-  });
-  type HistoryRow = (typeof historyRows)[number];
+  /*
+    Each row's state is `coverageState()`, not a guess from its position in the
+    list. The old table decided "Aktuell aktiv" by `idx === 0` plus a match on
+    `last_activation_code_id`, which the read it came from could never return to
+    a company user anyway; a period now says what it is from its own columns.
 
-  const historyColumns: DataTableColumn<HistoryRow>[] = [
+    The Laufzeit and Code columns are gone: both lived on `activation_codes`,
+    which no company role reads, so they can only be left out — never filled in
+    from somewhere else.
+  */
+  const historyColumns: DataTableColumn<CoverageEntry>[] = [
     {
       id: 'date',
       header: t('common.date'),
       cell: ({ row }) => (
         <span className="whitespace-nowrap font-medium tabular-nums">
-          {row.used_at
-            ? (() => { try { return format(new Date(row.used_at), 'dd.MM.yyyy HH:mm', { locale: de }); } catch { return '-'; } })()
+          {row.created_at
+            ? (() => { try { return format(new Date(row.created_at), 'dd.MM.yyyy HH:mm', { locale: de }); } catch { return '-'; } })()
             : '-'}
         </span>
       ),
     },
     {
-      id: 'type',
-      header: t('sa.billing.col.type'),
-      cell: () => <span className="whitespace-nowrap text-fg-muted">{t('sa.billing.rowTypeCash')}</span>,
-    },
-    {
-      id: 'duration',
-      header: t('sa.billing.col.duration'),
+      id: 'source',
+      header: t('sa.billing.col.source'),
       cell: ({ row }) => (
         <span className="whitespace-nowrap text-fg-muted">
-          {row.duration_type
-            ? (DURATION_LABELS[row.duration_type] ? t(DURATION_LABELS[row.duration_type]) : row.duration_type)
-            : '-'}
+          {row.source ? t(SOURCE_LABELS[row.source]) : (row.sourceRaw || '-')}
         </span>
       ),
     },
     {
       id: 'from',
       header: t('sa.billing.col.activeFrom'),
-      cell: ({ row }) => <span className="whitespace-nowrap tabular-nums text-fg-muted">{fmtDate(row.applied_subscription_started_at)}</span>,
+      cell: ({ row }) => <span className="whitespace-nowrap tabular-nums text-fg-muted">{fmtDate(row.period_start)}</span>,
     },
     {
       id: 'to',
       header: t('sa.billing.col.activeTo'),
-      cell: ({ row, isPastPeriod }) => (
-        <span className={cn('whitespace-nowrap font-medium tabular-nums', isPastPeriod ? 'text-caution' : 'text-fg')}>
-          {fmtDate(row.applied_subscription_expires_at)}
-        </span>
-      ),
-    },
-    {
-      id: 'code',
-      header: t('sa.billing.col.code'),
-      cell: ({ row }) => (
-        <span className="font-mono text-xs tracking-widest text-fg-subtle">
-          {row.code_last4 ? `••${row.code_last4}` : '••••'}
+      cell: ({ row, state }) => (
+        <span className={cn('whitespace-nowrap font-medium tabular-nums', state === 'past' ? 'text-caution' : 'text-fg')}>
+          {/* No end means unbefristet, which a dash would deny. */}
+          {row.period_end ? fmtDate(row.period_end) : t('sa.billing.openEnded')}
         </span>
       ),
     },
     {
       id: 'status',
       header: t('common.status'),
-      cell: ({ isCurrentActive, isPastPeriod }) => {
-        if (isCurrentActive) {
-          return <Badge tone="positive"><CheckCircle aria-hidden />{t('sa.billing.rowCurrentlyActive')}</Badge>;
-        } else if (isPastPeriod) {
-          return <Badge tone="caution"><Clock aria-hidden />{t('sa.billing.statusExpired')}</Badge>;
-        } else {
-          return <Badge tone="brand"><CheckCircle aria-hidden />{t('sa.billing.rowUsed')}</Badge>;
-        }
+      cell: ({ state }) => {
+        const Icon = STATE_ICONS[state];
+        return <Badge tone={STATE_TONES[state]}><Icon aria-hidden />{t(STATE_LABELS[state])}</Badge>;
       },
     },
   ];
@@ -281,7 +341,15 @@ export default function CompanyBillingPage() {
     <div className="grid grid-cols-1 gap-6 font-ui">
       <PageHeader title={t('sa.billing.title')} className="pb-0" />
 
+      {/* A read that did not happen: nothing below is drawn from it. */}
+      {loadFailed && (
+        <Alert tone="critical" title={t('sa.billing.loadFailed')}>
+          {t('sa.billing.loadFailedBody')}
+        </Alert>
+      )}
+
       {/* Abo Status Header Card */}
+      {statusKnown && (
       <Card className="p-5">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div className="flex min-w-0 items-center gap-4">
@@ -326,9 +394,10 @@ export default function CompanyBillingPage() {
           {!subActive && activateButton}
         </div>
       </Card>
+      )}
 
       {/* Active subscription detail */}
-      {subActive && (
+      {statusKnown && subActive && (
         <Card className="grid gap-4 p-5 sm:p-6">
           <div className="flex items-center gap-3">
             <span aria-hidden className="flex size-10 shrink-0 items-center justify-center rounded-surface bg-positive-soft text-positive">
@@ -354,7 +423,7 @@ export default function CompanyBillingPage() {
       )}
 
       {/* Expired state */}
-      {!subActive && subExpired && (
+      {statusKnown && !subActive && subExpired && (
         <Card className="p-6">
           <EmptyState
             size="sm"
@@ -367,7 +436,7 @@ export default function CompanyBillingPage() {
       )}
 
       {/* Inactive state (no history) */}
-      {!subActive && !subExpired && !hasHistory && (
+      {statusKnown && !subActive && !subExpired && !hasHistory && (
         <Card className="p-6">
           <EmptyState
             size="sm"
@@ -380,13 +449,18 @@ export default function CompanyBillingPage() {
       )}
 
       {/* Inactive with previous history — show note but don't hide history */}
-      {!subActive && !subExpired && hasHistory && (
+      {statusKnown && !subActive && !subExpired && hasHistory && (
         <Alert tone="critical" role="status" icon={XCircle} title={t('sa.billing.noneTitle')}>
           {t('sa.billing.inactiveWithHistory')}
         </Alert>
       )}
 
-      {/* Activation history */}
+      {/*
+        Payment & activation history. Withheld entirely when the read failed:
+        "Noch keine Abo-Zeiträume erfasst" is a statement about the customer's
+        payments, and the Alert above already says why there is nothing here.
+      */}
+      {!loadFailed && (
       <section className="grid gap-3">
         <h2 className="flex items-center gap-2 text-lg font-semibold text-fg">
           <History aria-hidden className="size-4 text-fg-subtle" />
@@ -400,12 +474,13 @@ export default function CompanyBillingPage() {
           <DataTable
             caption={t('sa.billing.historyTitle')}
             columns={historyColumns}
-            rows={historyRows}
+            rows={history}
             getRowId={({ row }) => row.id}
             density="compact"
           />
         )}
       </section>
+      )}
     </div>
   );
 }
