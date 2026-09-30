@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { RefreshCw, ShieldAlert, Info, ChevronDown, ChevronUp, ScrollText } from 'lucide-react';
+import { RefreshCw, ShieldAlert, Info, ChevronDown, ChevronUp, ScrollText, Download } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { useTranslation } from '../contexts/LanguageContext';
@@ -17,6 +17,12 @@ import { fetchAuditPage } from '../lib/platformAuditClient';
 import { fetchCompanies } from '../lib/platformDirectoryClient';
 import type { PlatformCompanyRow } from '../lib/platformReadModels';
 import { EMPTY_CELL, deCount, deDateTime, shortId } from '../lib/platformFormat';
+import { exportTableToExcel } from '../utils/excelExport';
+import { buildAuditExport } from '../lib/panelExports';
+import { useExportChrome } from '../hooks/useExportChrome';
+import { useToast } from '../contexts/ToastContext';
+import { berlinToday } from '../utils/salaryCashReceiptFlow';
+import { Button } from '../components/ui';
 
 /**
  * Protokoll — who read what, and who changed what (plan 3.B / 3.G).
@@ -95,6 +101,8 @@ const PlatformAuditPage: React.FC = () => {
   const { user } = useAuth();
   const { platformCan, isPlatformStaff } = useSuperAdmin();
   const { t } = useTranslation();
+  const { showToast } = useToast();
+  const exportChrome = useExportChrome();
 
   // Every active staff role may read its own rows, so the page is opened for
   // any of them; `audit.read` is what widens the scope, and the answer says so.
@@ -166,6 +174,82 @@ const PlatformAuditPage: React.FC = () => {
     void load(applied, null);
   }, [mayRead, applied, load]);
 
+  /**
+   * The log as a workbook — what an incident report or a data protection request
+   * is answered with, which a scrolling table cannot be.
+   *
+   * **The rule being preserved: a file says what it holds.** The log pages by a
+   * keyset cursor on `(occurred_at, id)`, so there is no total to divide and no
+   * page number to print — the file is the rows loaded so far, and the band says
+   * exactly that. "Mehr laden" is how an operator puts more in it, and each press
+   * is one audited `platform_read.audit_list` row; the export itself asks the
+   * database for nothing, so it costs no audit row and cannot reach a row
+   * `app_private.platform_audit_purge()` has already deleted.
+   *
+   * The band also carries the scope the answer reported: an account without
+   * `audit.read` receives only the rows it is the actor of, and a file that did
+   * not say so would read as "the platform was quiet".
+   */
+  const handleExport = () => {
+    try {
+      exportTableToExcel(buildAuditExport({
+        rows,
+        filters: [
+          {
+            label: t('admin.audit.filter.category'),
+            value: applied.category ? t(CATEGORY_LABELS[applied.category]) : null,
+          },
+          {
+            label: t('admin.audit.filter.outcome'),
+            value: applied.outcome ? t(OUTCOME_LABELS[applied.outcome]) : null,
+          },
+          { label: t('admin.audit.export.filterAction'), value: applied.actionPrefix || null },
+          {
+            label: t('admin.audit.filter.company'),
+            value: applied.companyId
+              ? companies.find(company => company.id === applied.companyId)?.name ?? applied.companyId
+              : null,
+          },
+          { label: t('admin.audit.export.filterFrom'), value: applied.from || null },
+          { label: t('admin.audit.export.filterTo'), value: applied.to || null },
+          {
+            label: t('admin.audit.export.filterMineOnly'),
+            value: applied.mineOnly ? t('common.yes') : null,
+          },
+        ],
+        filterLineTemplate: t('ui.export.filterLine'),
+        today: berlinToday(),
+        labels: {
+          sheetTitle: t('admin.audit.title'),
+          time: t('admin.audit.col.time'),
+          actor: t('admin.audit.col.actor'),
+          actorRole: t('admin.audit.export.actorRole'),
+          action: t('admin.audit.col.action'),
+          category: t('admin.audit.export.category'),
+          outcome: t('admin.audit.col.outcome'),
+          target: t('admin.audit.col.target'),
+          targetId: t('admin.audit.export.targetId'),
+          company: t('admin.audit.col.company'),
+          before: t('admin.audit.before'),
+          after: t('admin.audit.after'),
+          categoryNames: Object.fromEntries(
+            AUDIT_CATEGORIES.map((category): [string, string] => [category, t(CATEGORY_LABELS[category])]),
+          ),
+          outcomeNames: Object.fromEntries(
+            AUDIT_OUTCOMES.map((outcome): [string, string] => [outcome, t(OUTCOME_LABELS[outcome])]),
+          ),
+          loadedNote: t('admin.audit.export.loaded'),
+          // Only where the answer actually restricted the scope. Before the first
+          // answer `scope` is null and no claim is made either way.
+          ownScopeNote: scope !== null && scope !== 'all' ? t('admin.audit.scopeOwn') : null,
+          chrome: exportChrome,
+        },
+      }));
+    } catch (error: any) {
+      showToast('error', t('ui.export.failed'), error?.message);
+    }
+  };
+
   if (!mayRead) {
     return (
       <div className="flex flex-col items-center justify-center py-20 rounded-2xl text-center"
@@ -184,13 +268,26 @@ const PlatformAuditPage: React.FC = () => {
           <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>{t('admin.audit.title')}</h1>
           <p className="text-sm mt-0.5" style={{ color: 'var(--text-secondary)' }}>{t('admin.audit.subtitle')}</p>
         </div>
-        <button
-          onClick={() => void load(applied, null)}
-          className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium"
-          style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
-        >
-          <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />{t('admin.common.refresh')}
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Withheld while the read failed, while one is running and while
+              nothing is loaded: an audit file of nought entries reads as "nothing
+              happened", which is the strongest claim on this screen. */}
+          <Button
+            variant="secondary"
+            disabled={loading || problem !== null || rows.length === 0}
+            onClick={handleExport}
+            title={t('common.exportExcel')}
+          >
+            <Download size={14} />{t('admin.export.download')}
+          </Button>
+          <button
+            onClick={() => void load(applied, null)}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium"
+            style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
+          >
+            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />{t('admin.common.refresh')}
+          </button>
+        </div>
       </div>
 
       {/* What this account is actually allowed to see, once the answer says so. */}

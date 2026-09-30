@@ -22,6 +22,14 @@ import { generateSubscriptionPdf, InvoicePdfData } from '../utils/subscriptionPd
 import { getInvoiceSeller } from '../lib/platformSettingsClient';
 import { invoiceSellerFields } from '../lib/platformSettings';
 import { Alert, Button } from '../components/ui';
+import { exportTableToExcel } from '../utils/excelExport';
+import {
+  buildInvoicesExport,
+  buildSubscriptionsExport,
+  type FilterEntry,
+} from '../lib/panelExports';
+import { useExportChrome } from '../hooks/useExportChrome';
+import { berlinToday } from '../utils/salaryCashReceiptFlow';
 import { fetchInvoices, fetchSubscriptions } from '../lib/platformBillingClient';
 import { fetchCompanies } from '../lib/platformDirectoryClient';
 import {
@@ -122,6 +130,7 @@ export default function SubscriptionBillingPage() {
   const canPricing = platformCan('pricing.manage');
   const { showToast } = useToast();
   const { t } = useTranslation();
+  const exportChrome = useExportChrome();
 
   const [plans, setPlans] = useState<SubscriptionPlan[]>([]);
   const [subscriptions, setSubscriptions] = useState<PlatformSubscriptionRow[]>([]);
@@ -279,6 +288,121 @@ export default function SubscriptionBillingPage() {
   // every invoice of every customer.
 
   const activeSubCount = subscriptionSummary.activeCount;
+
+  // ── Excel exports ──
+  //
+  // **The rule being preserved: a file says what it holds.** Both read models
+  // cap a page at 100 rows and write one audited `read` row per call, so an
+  // export writes the page on screen and the workbook says so — in its filter
+  // band and in its filename (decision D-C). Re-reading every page here would
+  // fill the append-only audit log for a convenience and produce a file whose
+  // own row count nobody could check.
+  //
+  // Both are withheld while `problem` is set or the read is still running: an
+  // invoice list of nought and a total of 0,00 € are claims, and a file makes
+  // them with more authority than a screen.
+  //
+  // `billing.manage` is not re-checked here because it cannot be false — the
+  // component returns the refusal Alert above before this renders — and the
+  // database refuses each read regardless.
+
+  const statusNames: Readonly<Record<string, string>> = {
+    open: t('sa.subs.invoiceStatus.open'),
+    paid: t('sa.subs.invoiceStatus.paid'),
+    overdue: t('sa.subs.invoiceStatus.overdue'),
+    canceled: t('sa.subs.invoiceStatus.canceled'),
+  };
+
+  /** What the operator filtered the invoice list by, for the band. */
+  const invoiceFilterEntries = (): FilterEntry[] => [
+    {
+      label: t('sa.subs.export.filterMonth'),
+      value: query.month >= 1 && query.month <= 12 ? monthLabel(t, query.month) : t('sa.subs.filterAllMonths'),
+    },
+    { label: t('sa.subs.export.filterYear'), value: String(query.year) },
+    {
+      label: t('common.status'),
+      value: query.status === 'all' ? t('sa.subs.filterAllStatuses') : statusNames[query.status] ?? query.status,
+    },
+    {
+      label: t('sa.subs.col.company'),
+      value: query.companyId
+        ? companies.find(company => company.id === query.companyId)?.name ?? query.companyId
+        : t('sa.subs.filterAllCompanies'),
+    },
+    { label: t('sa.subs.export.filterSearch'), value: query.search || null },
+  ];
+
+  const handleExportInvoices = () => {
+    try {
+      exportTableToExcel(buildInvoicesExport({
+        rows: invoices,
+        // The summary is the database's own sum over the whole filtered set.
+        // The builder puts it in the totals row only where the file holds that
+        // whole set, and in the band — labelled as the whole filter — otherwise.
+        summary: invoiceSummary,
+        scope: { pageIndex: query.pageIndex, total: invoiceTotal, rowCount: invoices.length, pageSize: BILLING_PAGE_SIZE },
+        filters: invoiceFilterEntries(),
+        filterLineTemplate: t('ui.export.filterLine'),
+        // The period the operator asked for: a month where one is picked, else
+        // the year alone, so two files of one year do not overwrite each other.
+        periodSlug: query.month >= 1 && query.month <= 12
+          ? `${query.year}-${String(query.month).padStart(2, '0')}`
+          : String(query.year),
+        labels: {
+          sheetTitle: t('sa.subs.export.invoicesTitle'),
+          company: t('sa.subs.col.company'),
+          plan: t('sa.subs.col.plan'),
+          period: t('sa.subs.col.monthYear'),
+          number: t('sa.subs.col.number'),
+          amount: t('common.amount'),
+          collected: t('sa.subs.export.collected'),
+          status: t('common.status'),
+          due: t('sa.subs.col.due'),
+          paidOn: t('sa.subs.col.paidOn'),
+          note: t('sa.subs.export.note'),
+          created: t('sa.subs.export.created'),
+          statusNames,
+          monthNames: MONTH_KEYS.map(key => t(key)),
+          expected: t('sa.subs.export.expected'),
+          totalsCollected: t('sa.subs.export.collectedTotal'),
+          scope: { whole: t('admin.export.scope.whole'), page: t('admin.export.scope.page') },
+          chrome: exportChrome,
+        },
+      }));
+    } catch (error: any) {
+      showToast('error', t('ui.export.failed'), error?.message);
+    }
+  };
+
+  const handleExportSubscriptions = () => {
+    try {
+      exportTableToExcel(buildSubscriptionsExport({
+        rows: subscriptions,
+        activeCount: activeSubCount,
+        scope: { pageIndex: subscriptionPage, total: subscriptionTotal, rowCount: subscriptions.length, pageSize: BILLING_PAGE_SIZE },
+        // The tab has no filter controls, so there is nothing to list.
+        filters: [],
+        filterLineTemplate: t('ui.export.filterLine'),
+        today: berlinToday(),
+        labels: {
+          sheetTitle: t('sa.subs.export.subscriptionsTitle'),
+          company: t('sa.subs.col.company'),
+          plan: t('sa.subs.col.plan'),
+          pricePerMonth: t('sa.subs.col.pricePerMonth'),
+          status: t('common.status'),
+          start: t('sa.subs.col.start'),
+          billingDay: t('sa.subs.col.billingDay'),
+          statusNames,
+          activeCount: t('sa.subs.export.activeCount'),
+          scope: { whole: t('admin.export.scope.whole'), page: t('admin.export.scope.page') },
+          chrome: exportChrome,
+        },
+      }));
+    } catch (error: any) {
+      showToast('error', t('ui.export.failed'), error?.message);
+    }
+  };
 
   // ── Mark unpaid ──
   const handleMarkUnpaid = async (inv: PlatformInvoiceRow) => {
@@ -624,6 +748,19 @@ export default function SubscriptionBillingPage() {
                 {t('admin.common.search')}
               </Button>
             </form>
+            {/* The page on screen as a workbook. Withheld while the read failed
+                or is running: a file of nought invoices is a claim. Drawn with
+                the design system for the reason `Pager` gives — a new inline
+                style in a legacy file is what the style ratchet stops. */}
+            <Button
+              variant="secondary"
+              size="md"
+              disabled={loading || problem !== null || invoices.length === 0}
+              onClick={handleExportInvoices}
+              title={t('common.exportExcel')}
+            >
+              <Download size={14} />{t('admin.export.download')}
+            </Button>
             <select
               value={query.month}
               onChange={e => change({ month: +e.target.value })}
@@ -745,6 +882,19 @@ export default function SubscriptionBillingPage() {
       {/* Subscriptions Tab */}
       {activeTab === 'subscriptions' && (
         <div className="space-y-4">
+          {/* Same rule as the invoice tab's: the page on screen, said so in the
+              file, and nothing while the read did not succeed. */}
+          <div className="flex justify-end">
+            <Button
+              variant="secondary"
+              size="md"
+              disabled={loading || problem !== null || subscriptions.length === 0}
+              onClick={handleExportSubscriptions}
+              title={t('common.exportExcel')}
+            >
+              <Download size={14} />{t('admin.export.download')}
+            </Button>
+          </div>
           <div className="rounded-xl overflow-hidden" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">

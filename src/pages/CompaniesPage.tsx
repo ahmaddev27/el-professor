@@ -5,7 +5,7 @@ import {
   CheckCircle, XCircle, PauseCircle, AlertCircle, Users, ChevronRight,
   Globe, Mail, Phone, MapPin, Calendar, RefreshCw, ArrowLeft, User,
   Shield, X, Save, ExternalLink, Archive, Trash2, AlertTriangle,
-  RotateCcw, Lock, ChevronDown,
+  RotateCcw, Lock, ChevronDown, Download,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { callPlatformRpc } from '../lib/platformRpc';
@@ -22,6 +22,11 @@ import { format, differenceInDays } from 'date-fns';
 import { de } from 'date-fns/locale';
 import { useTranslation } from '../contexts/LanguageContext';
 import type { TranslationKey } from '../i18n';
+import { exportTableToExcel } from '../utils/excelExport';
+import { buildCompaniesExport } from '../lib/panelExports';
+import { useExportChrome } from '../hooks/useExportChrome';
+import { berlinToday } from '../utils/salaryCashReceiptFlow';
+import { Alert, Button } from '../components/ui';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -1077,9 +1082,22 @@ export default function CompaniesPage() {
   const canOpenCompany = platformCan('business.read');
   const { showToast } = useToast();
   const { t } = useTranslation();
+  const exportChrome = useExportChrome();
 
   const [companies, setCompanies] = useState<CompanyListItem[]>([]);
   const [loading, setLoading] = useState(true);
+  /**
+   * The `companies` read did not succeed.
+   *
+   * It had no flag at all: the catch showed a toast and left `companies` at
+   * whatever it held — `[]` on a first load — so the screen drew "Noch keine
+   * Unternehmen" over a platform that has nineteen, and the header's count said
+   * 0. A toast is gone in four seconds; the claim stays. **The rule: a list whose
+   * read did not succeed is not an empty list**, and the Excel export below is
+   * withheld while this is set, because a file makes that claim with more
+   * authority than a screen does.
+   */
+  const [loadFailed, setLoadFailed] = useState(false);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | CompanyStatus>('all');
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -1090,6 +1108,7 @@ export default function CompaniesPage() {
   const loadCompanies = useCallback(async () => {
     try {
       setLoading(true);
+      setLoadFailed(false);
       const { data, error } = await supabase.from('companies').select('*').order('created_at', { ascending: false });
       if (error) throw error;
 
@@ -1117,6 +1136,7 @@ export default function CompaniesPage() {
       }
       setCompanies((data || []).map(c => ({ ...c, user_count: userCounts[c.id] })) as CompanyListItem[]);
     } catch {
+      setLoadFailed(true);
       showToast('error', t('sa.companies.errorLoad'));
     } finally {
       setLoading(false);
@@ -1192,6 +1212,75 @@ export default function CompaniesPage() {
     }
   };
 
+  /**
+   * The customer list as a workbook.
+   *
+   * **The rule being preserved: a file says what it holds.** Unlike every other
+   * panel screen, this one reads `public.companies` directly — the one table
+   * decision D14 left readable on `companies.read`, because choosing a company
+   * to open a context on cannot itself require a context — so the file covers
+   * every row the screen read and the band says "ganze Liste" rather than naming
+   * a page. What it does not claim is a *complete platform*: PostgREST answers a
+   * `select('*')` with at most 1000 rows, and a nineteen-customer platform is
+   * nowhere near that, but the wording is about the screen's own list either way.
+   *
+   * The columns are the screen's own five plus the slug. `select('*')` also hands
+   * this page `legal_name`, `phone`, `address`, `postal_code`, `country` and
+   * `logo_url`; none is on screen and none is in the file — the recipient's
+   * postal address already travels on the invoice PDF, which is the document
+   * that needs it. Widening this is a data protection decision.
+   *
+   * `user_count` is absent for a company `platform_companies_list` did not reach
+   * on its one page; the builder writes an em dash there and names how many rows
+   * are affected, exactly as the table prints a dash. There is deliberately no
+   * totals row: a sum over a column with unknown cells is a wrong number.
+   */
+  const handleExport = () => {
+    try {
+      exportTableToExcel(buildCompaniesExport({
+        rows: filtered.map(company => ({
+          name: company.name,
+          slug: company.slug,
+          status: company.status,
+          email: company.email,
+          city: company.city,
+          created_at: company.created_at,
+          user_count: company.user_count,
+        })),
+        filters: [
+          {
+            label: t('common.status'),
+            value: statusFilter === 'all' ? t('common.all') : t(STATUS_CONFIG[statusFilter].label),
+          },
+          { label: t('sa.companies.export.filterSearch'), value: search || null },
+        ],
+        filterLineTemplate: t('ui.export.filterLine'),
+        today: berlinToday(),
+        labels: {
+          sheetTitle: t('sa.companies.title'),
+          name: t('sa.companies.col.name'),
+          slug: t('sa.companies.export.slug'),
+          status: t('common.status'),
+          email: t('sa.companies.export.email'),
+          city: t('sa.companies.export.city'),
+          users: t('sa.companies.users'),
+          created: t('sa.companies.created'),
+          // STATUS_CONFIG, the module-level map `StatusBadge` draws from, so the
+          // word in the file is the word on the badge. A value outside the six
+          // the CHECK constraint allows is written verbatim by the builder.
+          statusNames: Object.fromEntries(
+            Object.entries(STATUS_CONFIG).map(([status, config]): [string, string] => [status, t(config.label)]),
+          ),
+          scopeWhole: t('admin.export.scope.whole'),
+          countsIncomplete: t('sa.companies.export.countsIncomplete'),
+          chrome: exportChrome,
+        },
+      }));
+    } catch (error: any) {
+      showToast('error', t('ui.export.failed'), error?.message);
+    }
+  };
+
   const filtered = companies.filter(c => {
     const matchSearch = !search ||
       c.name.toLowerCase().includes(search.toLowerCase()) ||
@@ -1259,15 +1348,43 @@ export default function CompaniesPage() {
       <div className="flex items-center justify-between flex-wrap gap-4">
         <div>
           <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>{t('sa.companies.title')}</h1>
-          <p className="text-sm mt-0.5" style={{ color: 'var(--text-secondary)' }}>{t('sa.companies.subtitle', { count: companies.length })}</p>
+          {/* "Super Admin — N Unternehmen" over a failed read said 0, which is a
+              figure this screen did not read. The Alert below says so instead. */}
+          {!loadFailed && (
+            <p className="text-sm mt-0.5" style={{ color: 'var(--text-secondary)' }}>{t('sa.companies.subtitle', { count: companies.length })}</p>
+          )}
         </div>
-        <button onClick={() => setShowCreateModal(true)} className={`${canLifecycle ? 'flex' : 'hidden'} items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold`}
-          style={{ background: 'var(--accent)', color: 'var(--text-inverse)' }}
-          onMouseEnter={e => (e.currentTarget.style.opacity = '0.85')}
-          onMouseLeave={e => (e.currentTarget.style.opacity = '1')}>
-          <Plus size={16} />{t('sa.companies.createButton')}
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          {/* The customer list as a workbook. Withheld while the read failed or
+              is running, and while the filter matches nothing: a file of nought
+              customers is a claim. Drawn with the design system rather than a
+              third copy of this screen's inline button styles — the style
+              ratchet holds every legacy file at its count. */}
+          <Button
+            variant="secondary"
+            disabled={loading || loadFailed || filtered.length === 0}
+            onClick={handleExport}
+            title={t('common.exportExcel')}
+          >
+            <Download size={16} />{t('admin.export.download')}
+          </Button>
+          <button onClick={() => setShowCreateModal(true)} className={`${canLifecycle ? 'flex' : 'hidden'} items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold`}
+            style={{ background: 'var(--accent)', color: 'var(--text-inverse)' }}
+            onMouseEnter={e => (e.currentTarget.style.opacity = '0.85')}
+            onMouseLeave={e => (e.currentTarget.style.opacity = '1')}>
+            <Plus size={16} />{t('sa.companies.createButton')}
+          </button>
+        </div>
       </div>
+
+      {/* A read that did not succeed. The list below may be empty or stale, and
+          either way the export stays disabled — this is the sentence the toast
+          could not be, because a toast is gone in four seconds. */}
+      {loadFailed && (
+        <Alert tone="critical" className="font-ui" title={t('sa.companies.loadFailed')}>
+          {t('sa.companies.loadFailedBody')}
+        </Alert>
+      )}
 
       {/* Filters */}
       <div className="flex items-center gap-3 flex-wrap">
@@ -1295,7 +1412,14 @@ export default function CompaniesPage() {
       ) : filtered.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-20 rounded-2xl" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
           <Building2 size={40} className="mb-3" style={{ color: 'var(--text-tertiary)' }} />
-          <p className="font-medium" style={{ color: 'var(--text-primary)' }}>{t(search || statusFilter !== 'all' ? 'sa.companies.noMatches' : 'sa.companies.noneYet')}</p>
+          {/* "Noch keine Unternehmen" is a claim about the platform. After a
+              failed read it is not one this screen may make, so it says what
+              actually happened instead — the Alert above carries the detail. */}
+          <p className="font-medium" style={{ color: 'var(--text-primary)' }}>
+            {t(loadFailed
+              ? 'sa.companies.loadFailed'
+              : search || statusFilter !== 'all' ? 'sa.companies.noMatches' : 'sa.companies.noneYet')}
+          </p>
         </div>
       ) : (
         <div className="rounded-2xl overflow-hidden" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
