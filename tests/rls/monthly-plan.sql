@@ -433,7 +433,13 @@ BEGIN
   -- is refused by the index and not by a function anybody could bypass.
   PERFORM set_config('app_private.monthly_plan_transition',
     'plan:' || _mp_id('plan:a-draft')::text || ':' || pg_current_xact_id()::text, true);
-  UPDATE monthly_plans SET status = 'confirmed' WHERE id = _mp_id('plan:a-draft');
+  UPDATE monthly_plans SET status = 'confirmed',
+         -- `monthly_plans_confirmed_together` and `_status_matches_confirmation`
+         -- require the stamps beside the word, so a direct UPDATE has to carry
+         -- them. Without them this statement is refused by the WRONG constraint
+         -- and the section proves nothing about the unique index it is testing.
+         confirmed_at = now(), confirmed_by = (SELECT uid FROM _mp_who WHERE who = 'admin-a')
+   WHERE id = _mp_id('plan:a-draft');
   PERFORM set_config('app_private.monthly_plan_transition', '', true);
   PERFORM _mp_ok('section 9: the seeded plan of company A is now the month''s confirmed plan',
     (SELECT status = 'confirmed' AND confirmed_at IS NOT NULL
@@ -450,7 +456,13 @@ BEGIN
   BEGIN
     PERFORM set_config('app_private.monthly_plan_transition',
       'plan:' || _mp_id('plan:a-second')::text || ':' || pg_current_xact_id()::text, true);
-    UPDATE monthly_plans SET status = 'confirmed' WHERE id = _mp_id('plan:a-second');
+    UPDATE monthly_plans SET status = 'confirmed',
+         -- `monthly_plans_confirmed_together` and `_status_matches_confirmation`
+         -- require the stamps beside the word, so a direct UPDATE has to carry
+         -- them. Without them this statement is refused by the WRONG constraint
+         -- and the section proves nothing about the unique index it is testing.
+         confirmed_at = now(), confirmed_by = (SELECT uid FROM _mp_who WHERE who = 'admin-a')
+   WHERE id = _mp_id('plan:a-second');
     v_out := 'allowed';
   EXCEPTION WHEN unique_violation THEN
     v_out := 'refused';
@@ -462,7 +474,13 @@ BEGIN
   -- The same month of another company is untouched by the rule.
   PERFORM set_config('app_private.monthly_plan_transition',
     'plan:' || _mp_id('plan:b-draft')::text || ':' || pg_current_xact_id()::text, true);
-  UPDATE monthly_plans SET status = 'confirmed' WHERE id = _mp_id('plan:b-draft');
+  UPDATE monthly_plans SET status = 'confirmed',
+         -- `monthly_plans_confirmed_together` and `_status_matches_confirmation`
+         -- require the stamps beside the word, so a direct UPDATE has to carry
+         -- them. Without them this statement is refused by the WRONG constraint
+         -- and the section proves nothing about the unique index it is testing.
+         confirmed_at = now(), confirmed_by = (SELECT uid FROM _mp_who WHERE who = 'admin-a')
+   WHERE id = _mp_id('plan:b-draft');
   PERFORM set_config('app_private.monthly_plan_transition', '', true);
   PERFORM _mp_ok('section 9: the same month of another company may be confirmed too',
     (SELECT status = 'confirmed' FROM monthly_plans WHERE id = _mp_id('plan:b-draft')));
