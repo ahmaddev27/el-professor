@@ -668,6 +668,12 @@ SET search_path = pg_catalog, public
 AS $fn$
 DECLARE
   v_driver   record;
+  -- Every append below casts its literal with ::text. Without it the literal is
+  -- of unknown type, PostgreSQL resolves `text[] || unknown` as array || array,
+  -- and tries to read 'missing_hourly_rate' as an array literal — which fails at
+  -- run time with `malformed array literal`, on the first driver whose figures
+  -- have a problem. The RLS kit caught it; nothing in the migration's own
+  -- self-check could, because the self-check inserts no driver with a bad rate.
   v_problems text[] := '{}'::text[];
   v_rate     numeric;
 BEGIN
@@ -728,26 +734,26 @@ BEGIN
             END;
 
   IF v_driver.planning_hourly_rate IS NULL THEN
-    v_problems := v_problems || 'missing_hourly_rate';
+    v_problems := v_problems || 'missing_hourly_rate'::text;
   ELSIF v_rate IS NULL THEN
     -- Present but unusable. A different problem from missing: somebody typed
     -- something.
-    v_problems := v_problems || 'invalid_hourly_rate';
+    v_problems := v_problems || 'invalid_hourly_rate'::text;
   END IF;
 
   IF v_driver.planning_min_salary IS NULL
      OR NOT (v_driver.planning_min_salary < 'Infinity'::numeric) THEN
-    v_problems := v_problems || 'missing_min_salary';
+    v_problems := v_problems || 'missing_min_salary'::text;
   END IF;
   IF v_driver.planning_max_salary IS NULL
      OR NOT (v_driver.planning_max_salary < 'Infinity'::numeric) THEN
-    v_problems := v_problems || 'missing_max_salary';
+    v_problems := v_problems || 'missing_max_salary'::text;
   END IF;
   IF v_driver.planning_min_salary IS NOT NULL AND v_driver.planning_max_salary IS NOT NULL
      AND v_driver.planning_min_salary < 'Infinity'::numeric
      AND v_driver.planning_max_salary < 'Infinity'::numeric
      AND v_driver.planning_min_salary > v_driver.planning_max_salary THEN
-    v_problems := v_problems || 'min_salary_above_max';
+    v_problems := v_problems || 'min_salary_above_max'::text;
   END IF;
 
   NEW.range_problems := v_problems;
