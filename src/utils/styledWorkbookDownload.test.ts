@@ -237,9 +237,12 @@ describe('the sheet settings reach the writer', () => {
 
   it('carries the column widths and the row heights', () => {
     const recording = translate();
-    expect(recording.columns.get(1)?.width).toBe(20);
+    // The width xlsx itself wrote for `wch: 20`: `char2width` adds the 5-pixel
+    // cell padding, and ExcelJS writes `width` straight through, so handing it
+    // the bare 20 would make every column 0.83 characters tighter than today's.
+    expect(recording.columns.get(1)?.width).toBe(20.83203125);
     // No width given, so the exporter's floor of 18 applies.
-    expect(recording.columns.get(2)?.width).toBe(18);
+    expect(recording.columns.get(2)?.width).toBe(18.83203125);
     expect(recording.rows.get(2)?.height).toBe(32);
     expect(recording.rows.get(HEADER_ROW)?.height).toBe(22);
   });

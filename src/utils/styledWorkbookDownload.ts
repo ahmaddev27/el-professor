@@ -152,6 +152,34 @@ function toArgb(rgb: string): string {
 }
 
 /**
+ * xlsx's default maximum digit width, in pixels (`DEF_MDW` in its source). It is
+ * a module-level mutable there, and `find_mdw_colw` moves it while PARSING a
+ * workbook — so xlsx's own column widths depend on whether the page happened to
+ * import a Fahrtenbuch first. Pinning it makes this writer's widths
+ * deterministic, which xlsx's were not.
+ */
+const XLSX_DEFAULT_MAX_DIGIT_WIDTH = 6;
+
+/**
+ * The width xlsx would have written for a `wch`, so the swap does not narrow
+ * every column of every export by five pixels.
+ *
+ * xlsx does not write `wch` through: `col_obj_w` passes it to `char2width`,
+ *
+ *   function char2width(chr) { return (Math.round((chr * MDW + 5)/MDW*256))/256; }
+ *
+ * which adds the 5-pixel cell padding — `wch: 20` reaches the file as
+ * `width="20.832"`. ExcelJS writes `column.width` straight into the attribute,
+ * so handing it the bare 20 would make every column 0.83 characters tighter
+ * than the one the user has today, on a change whose whole point is that the
+ * file reads better.
+ */
+function wchToSheetWidth(wch: number): number {
+  const mdw = XLSX_DEFAULT_MAX_DIGIT_WIDTH;
+  return Math.round(((wch * mdw + 5) / mdw) * 256) / 256;
+}
+
+/**
  * ExcelJS's vertical alignment vocabulary is `top | middle | bottom |
  * distributed | justify`, and OOXML's is `top | center | bottom | …` — ExcelJS
  * maps `middle` onto `center` itself. So the `'center'` this exporter has always
@@ -318,9 +346,9 @@ function applyStyledSheet(
     pageSetup: settings.margins ? { margins: settings.margins } : undefined,
   });
 
-  // Column widths. xlsx's `wch` and ExcelJS's `width` are both character widths.
+  // Column widths, converted so the columns come out the width they are today.
   settings.cols?.forEach((col, index) => {
-    if (col?.wch != null) worksheet.getColumn(index + 1).width = col.wch;
+    if (col?.wch != null) worksheet.getColumn(index + 1).width = wchToSheetWidth(col.wch);
   });
 
   // Cells. Iterating the keys rather than the range keeps the sparse rows sparse
