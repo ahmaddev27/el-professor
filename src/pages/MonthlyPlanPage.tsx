@@ -33,6 +33,7 @@ import { useCompanyScope } from '../hooks/useCompanyScope';
 import { useTranslation } from '../contexts/LanguageContext';
 import type { TranslationKey } from '../i18n';
 import MonatsplanungDriverPool, { type PlanningDriver } from '../components/MonatsplanungDriverPool';
+import MonthlyPlanDocumentsStep from '../components/MonthlyPlanDocumentsStep';
 import { DEFAULT_VEHICLE_SWITCH_BUFFER_MINUTES } from '../utils/monatsplanungPhase3';
 import {
   assignBlocks,
@@ -59,6 +60,7 @@ import {
   type PlanRowStatus,
   type PlanSummaryRow,
 } from '../utils/monthlyPlanScreens';
+import { storedPlanFromGenerated } from '../utils/monthlyPlanDocuments';
 
 /**
  * The monthly plan, as the four screens §1 asks for (acceptance criteria 1–4,
@@ -598,6 +600,55 @@ export default function MonthlyPlanPage() {
     [summaryRows],
   );
 
+  // ── Screen 3 → 4: the plan in the shape the three documents read ──────────
+  //
+  // §12 and criterion 22: every total in every document comes from one plan. The
+  // projection is column for column the four tables of
+  // `20260930100000_monthly_plan.sql`, so when §9's save and confirm step is
+  // wired this screen reads those rows back and hands the **same object** to the
+  // same builders — the documents do not change. Handing them the engine's
+  // `PlanBlock[]` instead would have to be rewritten then, and a rewritten
+  // document contract is how one document comes to have two builders, which is
+  // the defect the existing Stundennachweis pipeline already has.
+  //
+  // `PlanBlockTrip` carries the original driver's name but not the id, so the id
+  // cannot be recovered from the blocks; §2 asks for it to be kept, so it comes
+  // from the rides this plan was built from. `loadTrips` clears the plan, and any
+  // change to the selection or the switch duration clears it too, so `trips` and
+  // `plan` can never describe two different months.
+  const originalDriverIdByTrip = useMemo(
+    // `as const` makes each entry a tuple; without it `.map` infers
+    // `(string | null)[]` and the Map constructor does not accept it.
+    () => new Map((trips ?? []).map(r => [r.id, r.original_driver_id] as const)),
+    [trips],
+  );
+
+  const storedPlan = useMemo(() => {
+    if (!plan || !selectedMonth || !companyId) return null;
+    return storedPlanFromGenerated({
+      companyId,
+      year: selectedMonth.year,
+      month: selectedMonth.month,
+      importId: importId || null,
+      switchMinutes: plan.switchMinutes,
+      generation: plan.seed,
+      blocks: plan.blocks,
+      drivers: plan.drivers,
+      result: plan.result,
+      warnings: plan.validation.warnings,
+      selectedDriverIds,
+      originalDriverIdByTrip,
+    });
+  }, [plan, selectedMonth, companyId, importId, selectedDriverIds, originalDriverIdByTrip]);
+
+  /**
+   * Every read a plan depends on. The four are already the condition for a plan
+   * existing at all, so on screen 4 they are false by construction — passing them
+   * anyway is what keeps the rule ("a figure whose load failed is not shown and
+   * not exported") true if a later slice loads anything else here.
+   */
+  const anyReadFailed = importsFailed || tripsFailed || notesFailed || extrasFailed;
+
   // ── Presentation ──────────────────────────────────────────────────────────
 
   const columns: DataTableColumn<PlanSummaryRow>[] = useMemo(
@@ -1127,36 +1178,19 @@ export default function MonthlyPlanPage() {
         </div>
       ) : null}
 
-      {/* ── Screen 4: the documents ──────────────────────────────────────── */}
-      {step === 4 && plan ? (
-        <div className="space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <FileText aria-hidden className="size-4 text-fg-muted" />
-                {t('mplan.docs.title')}
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {/* The plan is held in memory and nothing has been written. Saying
-                  so is the point of this screen until the save step and the three
-                  documents exist — a success message here would claim a stored
-                  plan that no table holds. */}
-              <Alert tone="caution" title={t('mplan.docs.notSavedTitle')}>
-                {t('mplan.docs.notSavedYet')}
-              </Alert>
-              <p className="text-sm text-fg-muted">{t('mplan.docs.placeholder')}</p>
-              <ul className="list-disc space-y-1 pl-5 text-sm text-fg-muted">
-                <li>{t('mplan.docs.stundennachweis')}</li>
-                <li>{t('mplan.docs.fahrtenbuch')}</li>
-                <li>{t('mplan.docs.payrollSummary')}</li>
-              </ul>
-            </CardContent>
-          </Card>
-          <Button variant="secondary" onClick={() => setStep(3)}>
-            {t('mplan.back')}
-          </Button>
-        </div>
+      {/* ── Screen 4: the documents ──────────────────────── */}
+      {/* Everything here is drawn by the three document builders from
+          `storedPlan`, which is the stored plan column for column. The step
+          component holds no planning rule and formats no figure — its own header
+          says why that is the point, and `monthlyPlanDocuments.ts` is the
+          contract it renders. */}
+      {step === 4 && storedPlan ? (
+        <MonthlyPlanDocumentsStep
+          plan={storedPlan}
+          confirmable={plan?.validation.confirmable === true}
+          loadFailed={anyReadFailed}
+          onBack={() => setStep(3)}
+        />
       ) : null}
     </div>
   );

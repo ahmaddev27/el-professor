@@ -31,6 +31,14 @@ export interface PdfDayRow {
   sonntag:       string;
   feiertag:      string;
   weihnachten:   string;
+  /**
+   * A short marker printed beside the date, after the `[N]` note marker.
+   * The monthly-plan Stundennachweis uses it for `(n)` — the day's real number
+   * of periods — when more than three had to be shown in three column pairs, so
+   * the three printed pairs never read as the whole day. Absent for every other
+   * caller, and then the date cell is unchanged.
+   */
+  marker?:       string;
   [key: string]: unknown;
 }
 
@@ -131,6 +139,15 @@ export interface StundennachweisExportData {
   historicalLohnartReconciliation?: HistoricalLohnartReconciliation;
   /** When true: this is the Inhaber/Ausgleichsfahrer — show adjusted wording. */
   isOwnerDriver?: boolean;
+  /**
+   * One line under the title, for a document about a month that has not
+   * happened: "PLANUNG / VORSCHAU — kein Arbeitszeitnachweis · Erstellt am …".
+   *
+   * It occupies the same slot as the historical subtitle, so a caller that sets
+   * neither renders exactly as before. `isHistorical` wins if both are set —
+   * a historical reconciliation is never a proposal.
+   */
+  planningNotice?: string;
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -227,6 +244,11 @@ export function toPdfDayRow(
 
 function _buildDoc(data: StundennachweisExportData): jsPDF {
   const { driver, month, year, rows, totals, notes = [], warnings = [], isHistorical = false, historicalCorrections = [] } = data;
+  // A planning proposal, never a record. Empty for every existing caller, which
+  // is what keeps their header byte-identical.
+  const planningNotice = !isHistorical && typeof data.planningNotice === 'string'
+    ? data.planningNotice.trim()
+    : '';
   const monthName    = MONTH_NAMES_DE[month - 1];
   const nextMonthDay = new Date(month === 12 ? year + 1 : year, month === 12 ? 0 : month, 1);
   const today        = format(nextMonthDay, 'dd.MM.yyyy');
@@ -290,10 +312,14 @@ function _buildDoc(data: StundennachweisExportData): jsPDF {
     pdf.text(`Pers.-Nr.: ${driver.personalnummer}`, ML, y + 11);
   }
   setB(14); pdf.setTextColor(...C_BLACK);
-  pdf.text('Stundennachweis', PW / 2, y + (isHistorical ? 5.5 : 7.5), { align: 'center' });
+  pdf.text('Stundennachweis', PW / 2, y + (isHistorical || planningNotice ? 5.5 : 7.5), { align: 'center' });
   if (isHistorical) {
     setN(8); pdf.setTextColor(...C_MED);
     pdf.text('Historischer Abgleich', PW / 2, y + 11, { align: 'center' });
+  } else if (planningNotice) {
+    setB(7); pdf.setTextColor(150, 70, 0);
+    pdf.text(planningNotice, PW / 2, y + 11, { align: 'center' });
+    pdf.setTextColor(...C_BLACK);
   }
   setB(10); pdf.setTextColor(...C_BLACK);
   pdf.text(`${monthName} ${year}`, PW - MR, y + 6, { align: 'right' });
@@ -355,7 +381,10 @@ function _buildDoc(data: StundennachweisExportData): jsPDF {
     if (bold) setB(7.5); else setN(7.5);
     // Show plain "Notiz" marker in date cell if note highlight
     const noteMarker = row.noteHighlight ? ' [N]' : '';
-    pdf.text(`${row.weekday} ${format(row.date, 'dd.MM.yy')}${noteMarker}`, colX[0] + 1.5, cy2);
+    // §11's marker: absent for every caller that does not set it, so the cell is
+    // unchanged for the four existing ones.
+    const planMarker = typeof row.marker === 'string' && row.marker ? ` ${row.marker}` : '';
+    pdf.text(`${row.weekday} ${format(row.date, 'dd.MM.yy')}${noteMarker}${planMarker}`, colX[0] + 1.5, cy2);
     if (row.isHol) {
       setN(6); pdf.setTextColor(130, 60, 0);
       pdf.text('F', colX[0] + cols[0].w - 3, cy2);
