@@ -502,13 +502,30 @@ BEGIN
   PERFORM _mp_ok('section 9: the same month of another company may be confirmed too',
     (SELECT status = 'confirmed' FROM monthly_plans WHERE id = _mp_id('plan:b-draft')));
 
+  -- Back to the owner before the delete, and this is not tidiness.
+  --
+  -- The statement above left the session as company B's administrator, and this
+  -- row is company A's. A DELETE whose WHERE names a row the SELECT policy hides
+  -- is not an error — RLS filters it, so it deletes ZERO rows and reports
+  -- success. The row would have stayed confirmed, silently, and the sections
+  -- below would have run against a month that already has its one confirmed
+  -- plan. Only INSERT and UPDATE raise on a hidden row, which is why the file
+  -- first failed on the statement AFTER this one and not on this one.
+  PERFORM _mp_reset();
+
   -- Put both back to drafts for the sections below. A superseded plan is the
   -- only other way out, and it needs the marker too, so this is a delete.
   DELETE FROM monthly_plans WHERE id = _mp_id('plan:a-second');
+  PERFORM _mp_ok('section 9: the second plan is gone, so the month is free again',
+    NOT EXISTS (SELECT 1 FROM monthly_plans WHERE id = _mp_id('plan:a-second')));
 END $$;
 
 -- The two plans confirmed above are frozen now, so section 7 uses them and the
 -- sections in between get drafts of their own.
+--
+-- As the owner: `SET LOCAL ROLE` outlives the DO block that issued it, so a
+-- file-level statement runs as whatever role the last block left behind. The
+-- block above ends with `_mp_reset()` for exactly this reason.
 INSERT INTO monthly_plans (id, company_id, year, month, switch_minutes)
 VALUES (_mp_id('plan:a-work'), 'c0000000-0000-4000-8000-00000000000a', 2026, 11, 30);
 
