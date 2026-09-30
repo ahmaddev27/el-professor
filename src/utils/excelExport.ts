@@ -336,7 +336,7 @@ export const exportSalariesToExcel = (salaries: SalaryCalculation[], periodStart
 
 // ─── Generic reusable table export ────────────────────────────────────────────
 
-export type ExportColumnType = 'text' | 'number' | 'integer' | 'money' | 'percent';
+export type ExportColumnType = 'text' | 'number' | 'integer' | 'money' | 'percent' | 'kilometres';
 
 export interface ExportColumn {
   key: string;
@@ -443,11 +443,17 @@ const T = {
 // 'percent' multiplies by 100 on display, so a column using it must hold the
 // FRACTION (0.4147 for 41,47 %). A column whose raw value is already multiplied
 // uses 'number' and keeps the % in its label.
+//
+// 'kilometres' is an integer with its unit in the cell's format rather than in
+// the value, which is what keeps an odometer reading summable and sortable while
+// it still reads as "123.456 km". The unit symbol is the same word in German and
+// English, so it carries no language and stays out of the dictionaries.
 const NUMBER_FORMATS: Record<Exclude<ExportColumnType, 'text'>, string> = {
-  number:  '#,##0.00',
-  integer: '#,##0',
-  money:   '#,##0.00\\ "€"',
-  percent: '0.0%',
+  number:     '#,##0.00',
+  integer:    '#,##0',
+  money:      '#,##0.00\\ "€"',
+  percent:    '0.0%',
+  kilometres: '#,##0\\ "km"',
 } as const;
 
 // ─── Style helpers ────────────────────────────────────────────────────────────
