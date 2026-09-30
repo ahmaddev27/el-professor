@@ -438,7 +438,7 @@ BEGIN
          -- require the stamps beside the word, so a direct UPDATE has to carry
          -- them. Without them this statement is refused by the WRONG constraint
          -- and the section proves nothing about the unique index it is testing.
-         confirmed_at = now(), confirmed_by = (SELECT uid FROM _mp_who WHERE who = 'admin-a')
+         confirmed_at = now(), confirmed_by = _mp_u('admin-a')
    WHERE id = _mp_id('plan:a-draft');
   PERFORM set_config('app_private.monthly_plan_transition', '', true);
   PERFORM _mp_ok('section 9: the seeded plan of company A is now the month''s confirmed plan',
@@ -461,7 +461,7 @@ BEGIN
          -- require the stamps beside the word, so a direct UPDATE has to carry
          -- them. Without them this statement is refused by the WRONG constraint
          -- and the section proves nothing about the unique index it is testing.
-         confirmed_at = now(), confirmed_by = (SELECT uid FROM _mp_who WHERE who = 'admin-a')
+         confirmed_at = now(), confirmed_by = _mp_u('admin-a')
    WHERE id = _mp_id('plan:a-second');
     v_out := 'allowed';
   EXCEPTION WHEN unique_violation THEN
@@ -479,7 +479,7 @@ BEGIN
          -- require the stamps beside the word, so a direct UPDATE has to carry
          -- them. Without them this statement is refused by the WRONG constraint
          -- and the section proves nothing about the unique index it is testing.
-         confirmed_at = now(), confirmed_by = (SELECT uid FROM _mp_who WHERE who = 'admin-a')
+         confirmed_at = now(), confirmed_by = _mp_u('admin-a')
    WHERE id = _mp_id('plan:b-draft');
   PERFORM set_config('app_private.monthly_plan_transition', '', true);
   PERFORM _mp_ok('section 9: the same month of another company may be confirmed too',
