@@ -44,7 +44,7 @@ import MonatsplanungStundennachweisPreview from './MonatsplanungStundennachweisP
 import { useTranslation } from '../contexts/LanguageContext';
 import type { TranslationKey } from '../i18n';
 import { assessDay, formatShiftDuration, type DayWindow } from '../utils/shiftDayLimits';
-import { localHourMs, localMidnightMs, nextLocalMidnightMs } from '../utils/localDayWindow';
+import { localHourMs, localMidnightMs, nextLocalMidnightMs, splitAtLocalMidnight } from '../utils/localDayWindow';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -797,30 +797,27 @@ export default function FinalizePlanningModal({ run, companyId, userId, onClose,
        *     piece and start compressing where it did not before; that is correct,
        *     and compression stays display-only either way.
        */
-      const finDayBlocks: FinBlock[] = [];
-      for (const b of finBlocks) {
-        let pieceSeq = 0;
-        for (let from = b.block_start_ms; from < b.block_end_ms; ) {
-          const dayEnd = nextLocalMidnightMs(localMidnightMs(from));
-          const to = Math.min(b.block_end_ms, dayEnd);
-          const night = computeBlockNight(from, to);
-          const d = new Date(from);
-          finDayBlocks.push({
-            block_id: pieceSeq === 0 ? b.block_id : `${b.block_id}_d${pieceSeq}`,
+      const finDayBlocks: FinBlock[] = finBlocks.flatMap(b =>
+        splitAtLocalMidnight(b.block_start_ms, b.block_end_ms).map((piece, i) => {
+          const night = computeBlockNight(piece.startMs, piece.endMs);
+          return {
+            block_id: i === 0 ? b.block_id : `${b.block_id}_d${i}`,
             driver_id: b.driver_id,
             driver_name: b.driver_name,
             // The piece's own local calendar day, never the file's date.
-            service_date: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`,
-            block_start_ms: from,
-            block_end_ms: to,
-            duration_minutes: Math.floor((to - from) / 60000),
+            service_date: piece.dateKey,
+            block_start_ms: piece.startMs,
+            block_end_ms: piece.endMs,
+            // Apportioned, not floored per piece — see `splitAtLocalMidnight`.
+            // The night buckets need no such care: `computeBlockNight` already
+            // floors per local day inside its own loop, so calling it per piece
+            // floors exactly the same overlaps as calling it on the whole block.
+            duration_minutes: piece.minutes,
             nachtarbeit: night.nacht,
             nacht04: night.n04,
-          });
-          pieceSeq++;
-          from = to;
-        }
-      }
+          };
+        }),
+      );
 
       const driverMap = new Map<string, DriverSummary & { blockSet: Set<string> }>();
       for (const trip of nonCanceled) {

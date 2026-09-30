@@ -103,3 +103,64 @@ export function localHourMs(dayMs: number, hour: number): number {
   const at = new Date(d.getFullYear(), d.getMonth(), d.getDate(), hour).getTime();
   return Math.min(Math.max(at, dayMs), dayEnd);
 }
+
+/** `YYYY-MM-DD` for the local calendar day containing `ms`. */
+export function localDateKey(ms: number): string {
+  const d = new Date(ms);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+/** One calendar day's share of an interval. */
+export interface LocalDayPiece {
+  startMs: number;
+  endMs: number;
+  /** The piece's own local calendar day. */
+  dateKey: string;
+  /**
+   * Whole minutes of this piece, apportioned so the pieces **sum to exactly**
+   * `Math.floor((endMs - startMs) / 60000)` of the interval they came from. See
+   * `splitAtLocalMidnight` for why that is not `Math.floor` per piece.
+   */
+  minutes: number;
+}
+
+/**
+ * Cut `[startMs, endMs)` at every local midnight it crosses.
+ *
+ * ## Why the minutes are apportioned rather than floored per piece
+ *
+ * Rides carry seconds, so a block's length is rarely a whole number of minutes.
+ * Flooring each piece independently loses up to one minute **per extra piece**:
+ * a 90.5-minute block cut into 30.7 + 59.8 floors to 30 + 59 = 89, where the
+ * whole block floors to 90. A Stundennachweis whose day rows no longer add up to
+ * its own monthly total is worse than the attribution defect the split exists to
+ * fix, and the first version of that split had exactly this bug — it is recorded
+ * here because the property reads as obviously true and is not.
+ *
+ * So each piece takes the difference of the **cumulative** floor from the
+ * interval's start, which makes the pieces sum to the interval's own floored
+ * minutes by construction, whatever the seconds are and however many days it
+ * spans.
+ *
+ * An empty or reversed interval yields no pieces.
+ */
+export function splitAtLocalMidnight(startMs: number, endMs: number): LocalDayPiece[] {
+  const pieces: LocalDayPiece[] = [];
+  if (!(endMs > startMs)) return pieces;
+
+  let elapsedBefore = 0;
+  for (let from = startMs; from < endMs; ) {
+    const to = Math.min(endMs, nextLocalMidnightMs(localMidnightMs(from)));
+    const elapsedAfter = to - startMs;
+    pieces.push({
+      startMs: from,
+      endMs: to,
+      dateKey: localDateKey(from),
+      minutes: Math.floor(elapsedAfter / 60000) - Math.floor(elapsedBefore / 60000),
+    });
+    elapsedBefore = elapsedAfter;
+    from = to;
+  }
+  return pieces;
+}

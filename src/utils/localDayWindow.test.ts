@@ -12,7 +12,13 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { localHourMs, localMidnightMs, nextLocalMidnightMs } from './localDayWindow';
+import {
+  localDateKey,
+  localHourMs,
+  localMidnightMs,
+  nextLocalMidnightMs,
+  splitAtLocalMidnight,
+} from './localDayWindow';
 
 const H = 3_600_000;
 
@@ -183,5 +189,112 @@ describe('localHourMs', () => {
     expect(new Date(two).getHours()).toBe(3);   // normalised forward
     expect(three).toBeGreaterThanOrEqual(two);  // never negative width
     expect(three - two).toBe(0);
+  });
+});
+
+describe('splitAtLocalMidnight', () => {
+  /**
+   * The load-bearing claim of the whole day-split fix, and the one that reads as
+   * obviously true. **It is not**, and the first version of the split in
+   * `FinalizePlanningModal` got it wrong: flooring each piece independently
+   * loses up to one minute per extra piece, so a Stundennachweis's day rows
+   * would no longer add up to its own monthly total.
+   *
+   * The control is written out rather than described: `naive` is the arithmetic
+   * that shipped first, and the assertion is that it disagrees while the real
+   * one does not.
+   */
+  it('apportions minutes so the pieces sum to the interval, where per-piece flooring does not', () => {
+    const naive = (from: number, to: number) =>
+      splitAtLocalMidnight(from, to)
+        .reduce((sum, p) => sum + Math.floor((p.endMs - p.startMs) / 60000), 0);
+    const whole = (from: number, to: number) => Math.floor((to - from) / 60000);
+    const apportioned = (from: number, to: number) =>
+      splitAtLocalMidnight(from, to).reduce((sum, p) => sum + p.minutes, 0);
+
+    // The control is SEARCHED for, not hand-picked. A chosen example is a
+    // liability here: the first one written for this test happened to have
+    // fractions that summed below a minute, so per-piece flooring got the right
+    // answer and the control silently proved nothing. Sweeping every
+    // second-of-minute pair over a midnight-crossing shift finds the cases that
+    // lose a minute and the cases that do not, and asserts both.
+    let lost = 0, exact = 0;
+    for (let ss = 0; ss < 60; ss++) {
+      for (let es = 0; es < 60; es++) {
+        const from = new Date(2026, 5, 15, 22, 0, ss).getTime();
+        const to   = new Date(2026, 5, 16, 1, 30, es).getTime();
+        if (naive(from, to) === whole(from, to) - 1) lost++;
+        else if (naive(from, to) === whole(from, to)) exact++;
+        else throw new Error(`unexpected naive deficit at ${ss}/${es}`);
+        // Whatever the seconds are, the apportioned sum is the interval's own.
+        expect(apportioned(from, to)).toBe(whole(from, to));
+      }
+    }
+
+    // Both halves must be non-empty, or the control is vacuous in one direction:
+    // "flooring is sometimes wrong" and "flooring is sometimes right" are each
+    // needed for the fix to be the thing under test.
+    expect(lost).toBeGreaterThan(0);
+    expect(exact).toBeGreaterThan(0);
+    expect(lost + exact).toBe(3600);
+  });
+
+  it('is minute-preserving over every start second and every span, single or multi-day', () => {
+    for (let sec = 0; sec < 60; sec++) {
+      for (const hours of [1, 3, 9, 26, 50]) {
+        const from = new Date(2026, 5, 15, 21, 17, sec).getTime();
+        const to = from + hours * 3_600_000 + 37_000;
+        const pieces = splitAtLocalMidnight(from, to);
+        expect(pieces.reduce((s2, p) => s2 + p.minutes, 0))
+          .toBe(Math.floor((to - from) / 60000));
+        // And the pieces tile the interval with no gap and no overlap.
+        expect(pieces[0].startMs).toBe(from);
+        expect(pieces[pieces.length - 1].endMs).toBe(to);
+        for (let i = 1; i < pieces.length; i++) {
+          expect(pieces[i].startMs).toBe(pieces[i - 1].endMs);
+        }
+      }
+    }
+  });
+
+  it('gives each piece its own calendar day, which is the attribution being fixed', () => {
+    // 23:30 Saturday to 01:15 Sunday: the defect filed all of this under
+    // Saturday, so the 75 Sunday minutes earned no Sonntag premium.
+    const sat = new Date(2026, 5, 13, 23, 30).getTime();   // 13.06.2026 is a Saturday
+    const sun = new Date(2026, 5, 14, 1, 15).getTime();
+    expect(new Date(sat).getDay()).toBe(6);
+
+    const pieces = splitAtLocalMidnight(sat, sun);
+    expect(pieces.map(p => p.dateKey)).toEqual(['2026-06-13', '2026-06-14']);
+    expect(pieces.map(p => p.minutes)).toEqual([30, 75]);
+    expect(new Date(pieces[1].startMs).getDay()).toBe(0);   // Sunday
+  });
+
+  it('is one piece for a block inside a day, and none for an empty or reversed one', () => {
+    const from = new Date(2026, 5, 15, 9).getTime();
+    expect(splitAtLocalMidnight(from, from + 3_600_000)).toHaveLength(1);
+    expect(splitAtLocalMidnight(from, from)).toHaveLength(0);
+    expect(splitAtLocalMidnight(from, from - 1)).toHaveLength(0);
+  });
+
+  it('splits by calendar day across both DST transitions, not by 24 hours', () => {
+    // Fall back: the middle day is 25 hours, so a 48-hour block spans 3 days.
+    const autumn = new Date(2026, 9, 24, 12).getTime();
+    const aPieces = splitAtLocalMidnight(autumn, autumn + 48 * 3_600_000);
+    expect(aPieces.map(p => p.dateKey)).toEqual(['2026-10-24', '2026-10-25', '2026-10-26']);
+    expect(aPieces[1].endMs - aPieces[1].startMs).toBe(25 * 3_600_000);
+
+    // Spring forward: the middle day is 23 hours.
+    const spring = new Date(2026, 2, 28, 12).getTime();
+    const sPieces = splitAtLocalMidnight(spring, spring + 48 * 3_600_000);
+    expect(sPieces.map(p => p.dateKey)).toEqual(['2026-03-28', '2026-03-29', '2026-03-30']);
+    expect(sPieces[1].endMs - sPieces[1].startMs).toBe(23 * 3_600_000);
+  });
+});
+
+describe('localDateKey', () => {
+  it('answers the local day, which is a different day from the UTC one at night', () => {
+    // 15.06.2026 00:30 local is 14.06 22:30 UTC.
+    expect(localDateKey(Date.UTC(2026, 5, 14, 22, 30))).toBe('2026-06-15');
   });
 });
