@@ -39,6 +39,7 @@ import CompaniesPage from './pages/CompaniesPage';
 import SuperAdminDashboard from './pages/SuperAdminDashboard';
 import NotificationsPage from './pages/NotificationsPage';
 import CompanyPlannerPage from './pages/CompanyPlannerPage';
+import MonthlyPlanPage from './pages/MonthlyPlanPage';
 import SubscriptionBillingPage from './pages/SubscriptionBillingPage';
 import CompanyBillingPage from './pages/CompanyBillingPage';
 import AbnahmeDiagnosticPage from './pages/AbnahmeDiagnosticPage';
@@ -651,6 +652,14 @@ function App() {
                 <Route path="dokumente/:id/bearbeiten" element={<PlanGate feature="dokumente"><DocumentsPage /></PlanGate>} />
                 <Route path="stundennachweis" element={<PlanGate feature="dokumente"><StundennachweisPage /></PlanGate>} />
                 <Route path="company-planner" element={<PlanGate feature="dokumente"><CompanyPlannerPage /></PlanGate>} />
+                {/* The monthly plan of the §1 requirement: four screens over the
+                    engine in src/utils/monthlyPlan/. Gated on `dokumente`, the
+                    same feature as the planner it sits beside and the same
+                    `page_key` slice C gave the planning tables — a FeatureKey of
+                    its own would need a migration seeding `plan_features`, and a
+                    feature the stored map does not name reads as premium for
+                    every plan. */}
+                <Route path="monatsplan" element={<PlanGate feature="dokumente"><MonthlyPlanPage /></PlanGate>} />
                 {/* Fahrtenanalyse reads the Fahrtenbuch a company imported under
                     Dokumente, so it is gated on the same feature rather than on
                     a key of its own: a new FeatureKey would need a migration

@@ -4,7 +4,7 @@ import {
   LayoutDashboard, FileText, Users, DollarSign, Plus,
   Menu, X, UserCog, Receipt, Wallet, LogOut, Calculator,
   StickyNote, Car, Wrench, Shield, Settings, Bell, CalendarDays, CreditCard, ArrowLeft,
-  Database,
+  Database, ListChecks,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import BrandLogo from './BrandLogo';
@@ -43,6 +43,7 @@ const NAV_ITEMS: NavItem[] = [
   { path: '/salaries',           icon: Wallet,      labelKey: 'nav.salaries',       feature: 'gehaelter' },
   { path: '/dokumente',       icon: FileText,       labelKey: 'nav.documents',      feature: 'dokumente' },
   { path: '/company-planner', icon: CalendarDays,   labelKey: 'nav.planner',        feature: 'dokumente' },
+  { path: '/monatsplan',      icon: ListChecks,     labelKey: 'nav.monthlyPlan',    feature: 'dokumente' },
 ];
 
 // `feature: 'overview'` is this file's existing spelling for "on every plan":
