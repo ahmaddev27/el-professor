@@ -32,6 +32,7 @@ import { exportAppliedRunXlsx, type AppliedRunSummary } from '../utils/monatspla
 import { exportFahreruebersichtImportFormat, type FahreruebersichtImportRow } from '../utils/fahreruebersichtExport';
 import { useTranslation } from '../contexts/LanguageContext';
 import type { TranslationKey, TranslationVars } from '../i18n';
+import { localHourMs, localMidnightMs, nextLocalMidnightMs } from '../utils/localDayWindow';
 
 // Screen-text month names for the preview heading. TranslationKeys, because
 // this table is module-level and t() is a hook value. The PDF keeps its own
@@ -209,15 +210,30 @@ function localDateString(ms: number): string {
 
 // Compute minutes between `startMs` and `endMs` that fall in [bucketStartHour, bucketEndHour)
 // applied recurrently for every calendar day touched by the shift.
+//
+// Both the day step and the bucket edges are CALENDAR/WALL-CLOCK, never fixed
+// millisecond arithmetic, and this function carried both mistakes:
+//
+//   - `d += 24 * 60 * 60 * 1000` is an hour off on each of the two days a year
+//     the offset changes, and it does not recover — once the walk is an hour off
+//     local midnight it stays off for every later day of the same shift, so the
+//     buckets of an ordinary Monday after a transition are shifted too.
+//   - `d + hour * 3600000` is an hour off on the transition day itself: a
+//     spring-forward day is 23 hours, so `midnight + 4h` is local 05:00 and the
+//     00:00-04:00 bucket swallows an hour of the next one; a fall-back day is 25
+//     hours, so it is local 03:00 and the bucket gives an hour away.
+//
+// 26 production trips sit on 29.03.2026 and the next transition is 25.10.2026.
+// The bucket HOURS are untouched: this screen's Nachtarbeit still opens at 23:00
+// while the clean engine's opens at 20:00, because choosing between the two is a
+// decision about §3b EStG and not about timezones.
 function minutesInBucket(startMs: number, endMs: number, bucketStartHour: number, bucketEndHour: number): number {
   if (endMs <= startMs) return 0;
   let total = 0;
   // Walk by day-of-shift: snap startMs back to local midnight, iterate per day.
-  const first = new Date(startMs);
-  const dayStart = new Date(first.getFullYear(), first.getMonth(), first.getDate()).getTime();
-  for (let d = dayStart; d < endMs; d += 24 * 60 * 60 * 1000) {
-    const bs = d + bucketStartHour * 60 * 60 * 1000;
-    const be = d + bucketEndHour * 60 * 60 * 1000;
+  for (let d = localMidnightMs(startMs); d < endMs; d = nextLocalMidnightMs(d)) {
+    const bs = localHourMs(d, bucketStartHour);
+    const be = localHourMs(d, bucketEndHour);
     const overlap = Math.max(0, Math.min(endMs, be) - Math.max(startMs, bs));
     total += overlap;
   }
@@ -661,8 +677,7 @@ function msToHHMM(ms: number): string {
 
 // Local midnight (00:00:00.000) of the calendar day containing `ms`.
 function localMidnightOf(ms: number): number {
-  const d = new Date(ms);
-  return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  return localMidnightMs(ms);
 }
 
 // Split a ShiftBlock at calendar-day boundaries for Stundennachweis display.
@@ -677,7 +692,7 @@ function splitBlockForDisplay(block: ShiftBlock): DisplaySegment[] {
   let cursor = startMs;
 
   while (cursor < endMs) {
-    const midnightNext = localMidnightOf(cursor) + 24 * 60 * 60 * 1000;
+    const midnightNext = nextLocalMidnightMs(localMidnightOf(cursor));
     const sliceEnd = Math.min(endMs, midnightNext);
 
     const dateStr = localDateString(cursor);
@@ -803,7 +818,7 @@ function mergeAndCompressDisplaySegments(segments: DisplaySegment[]): DisplaySeg
   return merged.map((m): DisplaySegment => {
     const night = computeNightBuckets(m.startMs, m.endMs);
     const endsAtMidnight =
-      m.endMs === localMidnightOf(m.startMs) + 24 * 60 * 60 * 1000;
+      m.endMs === nextLocalMidnightMs(localMidnightOf(m.startMs));
     const displayEnd = endsAtMidnight ? '23:59' : msToHHMM(m.endMs);
     return {
       block_id:             m.block_id,
@@ -3311,6 +3326,40 @@ function GehaltsabweichungSection({
     setApplyError('');
     let updatedCount = 0;
 
+    /*
+     * Mark this run's active finalization stale, and reload.
+     *
+     * One function because **both** exits need it. A transfer is a loop of
+     * `reassign_fahrtenbuch_trip` calls with no transaction — CLAUDE.md records
+     * the non-atomicity as a known defect and it stays — so a failure part way
+     * through leaves the earlier trips already moved. Until now the failure path
+     * returned before this write, so the finalization went on reading
+     * `is_stale = false` over trips that had changed underneath it: the operator
+     * saw the error, the documents stayed downloadable, and nothing said they no
+     * longer matched the data. 10 production finalizations exist and all 10 are
+     * `is_stale = false`.
+     *
+     * `stale_reason` names the partial case separately, because "a transfer was
+     * applied" and "a transfer was applied to some of its trips and then failed"
+     * are different facts for whoever reads the audit row. It is stored audit
+     * text and stays German, like the reason and note the RPC persists above.
+     */
+    const markStaleAndReload = (partialOf: number | null) => {
+      void supabase
+        .from('planning_finalizations')
+        .update({
+          is_stale: true,
+          stale_reason: partialOf === null
+            ? 'Transfer nach Finalisierung angewendet'
+            : `Transfer nach Finalisierung teilweise angewendet: ${updatedCount} von ${partialOf} Fahrten`,
+          stale_at: new Date().toISOString(),
+        })
+        .eq('planning_run_id', runId)
+        .eq('is_stale', false);
+      onReload();
+      onTransferApplied?.();
+    };
+
     for (const tripId of tripIds) {
       const { data, error } = await supabase.rpc('reassign_fahrtenbuch_trip', {
         p_trip_id: tripId,
@@ -3331,6 +3380,10 @@ function GehaltsabweichungSection({
         }));
         setApplying(false);
         setPendingApply(null);
+        // Only when something actually moved. A transfer that failed on its first
+        // trip changed nothing, so the finalization is still true and marking it
+        // stale would send the operator to re-finalize over identical data.
+        if (updatedCount > 0) markStaleAndReload(tripIds.length);
         return;
       }
       updatedCount++;
@@ -3346,17 +3399,7 @@ function GehaltsabweichungSection({
     setApplying(false);
     setPendingApply(null);
     setTransferAppliedCount(c => c + 1);
-
-    // Mark active finalization for this run as stale
-    void supabase
-      .from('planning_finalizations')
-      // stale_reason is stored audit text, not a label — it stays German.
-      .update({ is_stale: true, stale_reason: 'Transfer nach Finalisierung angewendet', stale_at: new Date().toISOString() })
-      .eq('planning_run_id', runId)
-      .eq('is_stale', false);
-
-    onReload();
-    onTransferApplied?.();
+    markStaleAndReload(null);
   };
 
   const applyAusgleich = async (dev: DriverDeviation) => {

@@ -16,6 +16,7 @@ import type { FahrtenbuchTrip } from '../hooks/useFahrtenbuch';
 // Type-only: the engine names a dictionary key beside its German text and
 // never resolves one. See src/i18n/engineMessage.ts.
 import type { EngineMessageKey, EngineMessageVars } from '../i18n/engineMessageTypes';
+import { localHourMs } from './localDayWindow';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -136,18 +137,30 @@ export function computeLohnartSeconds(startMs: number, endMs: number, holidaySet
     const isSunday  = d.getDay() === 0;
     const isHoliday = holidaySet.has(dayKey);
 
-    // Windows within this local calendar day:
+    // Windows within this local calendar day, as WALL-CLOCK hours.
+    //
+    // `dMs + N * 3600000` is one hour wrong on each of the two days a year the
+    // offset changes, in opposite directions: a spring-forward day is 23 hours,
+    // so `midnight + 4h` is local 05:00 and the 00:00-04:00 band swallows an
+    // hour of the next one, moving it from 1500 (25 %) into 1501 (40 %); a
+    // fall-back day is 25 hours, so it is local 03:00 and the band gives an hour
+    // away to 1500 instead. 26 production trips sit on 29.03.2026 and the next
+    // transition is 25.10.2026. `localHourMs` answers the instant local hour N
+    // begins, whatever the day is worth. The hours themselves are unchanged —
+    // this engine's night band still opens at 20:00 and the Stundennachweis
+    // preview's still at 23:00, because choosing between them is a decision
+    // about §3b EStG and not about timezones.
     // N40: 00:00–04:00
     const n40Start = dMs;
-    const n40End   = dMs + 4 * 3600000;
+    const n40End   = localHourMs(dMs, 4);
     // N25 early: 04:00–06:00
-    const n25eStart = dMs + 4 * 3600000;
-    const n25eEnd   = dMs + 6 * 3600000;
+    const n25eStart = localHourMs(dMs, 4);
+    const n25eEnd   = localHourMs(dMs, 6);
     // Base: 06:00–20:00
-    const baseStart = dMs + 6 * 3600000;
-    const baseEnd   = dMs + 20 * 3600000;
+    const baseStart = localHourMs(dMs, 6);
+    const baseEnd   = localHourMs(dMs, 20);
     // N25 late: 20:00–24:00
-    const n25lStart = dMs + 20 * 3600000;
+    const n25lStart = localHourMs(dMs, 20);
     const n25lEnd   = nextDayMs;
 
     const dayOverlap = msOverlap(startMs, endMs, dMs, nextDayMs);

@@ -44,6 +44,7 @@ import MonatsplanungStundennachweisPreview from './MonatsplanungStundennachweisP
 import { useTranslation } from '../contexts/LanguageContext';
 import type { TranslationKey } from '../i18n';
 import { assessDay, formatShiftDuration, type DayWindow } from '../utils/shiftDayLimits';
+import { localHourMs, localMidnightMs, nextLocalMidnightMs, splitAtLocalMidnight } from '../utils/localDayWindow';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -460,16 +461,35 @@ export default function FinalizePlanningModal({ run, companyId, userId, onClose,
         const lo = Math.max(sMs, rS), hi = Math.min(eMs, rE);
         return lo < hi ? hi - lo : 0;
       }
+      /*
+       * The bands are LOCAL wall-clock hours on LOCAL calendar days, and this
+       * function measured neither.
+       *
+       * `Math.floor(sMs / 86400000) * 86400000` is midnight **UTC**. In
+       * Europe/Berlin that boundary is local 01:00 in winter and local 02:00 in
+       * summer, so `day + 4 * 3600000` was local 05:00 or 06:00 and the band
+       * labelled 00:00-04:00 actually measured 01:00-05:00 or 02:00-06:00 —
+       * **every day of the year**, not only on a transition day. The 23:00-24:00
+       * band measured 00:00-01:00 or 01:00-02:00, which is inside the 00:00-04:00
+       * band, so the two stopped being the mutually exclusive split the comment
+       * below claims and the same minute could be paid twice.
+       *
+       * `day += 86400000` is the smaller, DST-only half of the same mistake, and
+       * it does not recover: once the walk is an hour off it stays off for every
+       * later day of the shift.
+       *
+       * The band hours are unchanged. This file's Nachtarbeit opens at 23:00
+       * while `historicalWorkingHoursCleanEngine` opens at 20:00, and choosing
+       * between the two is a decision about §3b EStG, not about timezones.
+       */
       function computeBlockNight(sMs: number, eMs: number): { nacht: number; n04: number } {
-        const sDay = Math.floor(sMs / 86400000) * 86400000;
-        const eDay = Math.floor((eMs - 1) / 86400000) * 86400000;
         let nacht = 0, n04 = 0;
-        for (let day = sDay; day <= eDay; day += 86400000) {
+        for (let day = localMidnightMs(sMs); day < eMs; day = nextLocalMidnightMs(day)) {
           // 04:00–06:00 and 23:00–00:00 are Nachtarbeit (mutually exclusive with 0–4)
-          nacht += Math.floor(overlapMs(sMs, eMs, day + 4 * 3600000, day + 6 * 3600000) / 60000);
-          nacht += Math.floor(overlapMs(sMs, eMs, day + 23 * 3600000, day + 24 * 3600000) / 60000);
+          nacht += Math.floor(overlapMs(sMs, eMs, localHourMs(day, 4), localHourMs(day, 6)) / 60000);
+          nacht += Math.floor(overlapMs(sMs, eMs, localHourMs(day, 23), localHourMs(day, 24)) / 60000);
           // 00:00–04:00 is Nacht 0–4 exclusively
-          n04   += Math.floor(overlapMs(sMs, eMs, day, day + 4 * 3600000) / 60000);
+          n04   += Math.floor(overlapMs(sMs, eMs, day, localHourMs(day, 4)) / 60000);
         }
         return { nacht, n04 };
       }
@@ -744,6 +764,61 @@ export default function FinalizePlanningModal({ run, companyId, userId, onClose,
           ? tr('fin.detail.coverageOk', { count: nonCanceled.length })
           : coverageLines.join('\n'),
       });
+
+      /*
+       * Cut every block at LOCAL midnight, so a day's figures are that day's.
+       *
+       * `service_date` was `trip.trip_date` — the date the imported file gives the
+       * ride — and a block inherits it from the first ride in it. So a block from
+       * 23:30 Saturday to 01:15 Sunday was filed wholly under **Saturday**: its 75
+       * Sunday minutes earned no Sonntag premium, while the mirror case, 23:30
+       * Sunday to 01:15 Monday, gave the Sonntag premium to Monday's minutes.
+       * The Uber export makes this worse than it sounds, because it dates a ride
+       * starting just after midnight to the *previous* day (CLAUDE.md says so of
+       * `trip_date`), so the two errors do not cancel out.
+       *
+       * **Measured LIVE: 33 trips / 401 minutes across 19 driver-month documents
+       * in the four finalized months (May-Aug 2026).**
+       *
+       * Three properties this keeps, and each is a reason the split is here and
+       * not somewhere easier:
+       *
+       *   - **It is minute-preserving.** The pieces tile the block, so every
+       *     driver's Grundlohn total, work minutes and night minutes are
+       *     byte-identical to before; only the day each minute is attributed to
+       *     moves. `computeBlockNight` already walks local days, so summing it per
+       *     piece equals calling it once on the whole block.
+       *   - **It runs after the coverage check**, which asserts that one block
+       *     contains each whole trip (`b.sMs <= tSMs && b.eMs >= tEMs`). Splitting
+       *     first would make every cross-midnight trip read as uncovered and fail
+       *     a blocking pre-flight check — the finalization gate has no override.
+       *   - **It runs before the compression loop**, so the max-three rule is
+       *     applied to the day's real pieces. A driver-day may therefore gain a
+       *     piece and start compressing where it did not before; that is correct,
+       *     and compression stays display-only either way.
+       */
+      const finDayBlocks: FinBlock[] = finBlocks.flatMap(b =>
+        splitAtLocalMidnight(b.block_start_ms, b.block_end_ms).map((piece, i) => {
+          const night = computeBlockNight(piece.startMs, piece.endMs);
+          return {
+            block_id: i === 0 ? b.block_id : `${b.block_id}_d${i}`,
+            driver_id: b.driver_id,
+            driver_name: b.driver_name,
+            // The piece's own local calendar day, never the file's date.
+            service_date: piece.dateKey,
+            block_start_ms: piece.startMs,
+            block_end_ms: piece.endMs,
+            // Apportioned, not floored per piece — see `splitAtLocalMidnight`.
+            // The night buckets need no such care: `computeBlockNight` already
+            // floors per local day inside its own loop, so calling it per piece
+            // floors exactly the same overlaps as calling it on the whole block.
+            duration_minutes: piece.minutes,
+            nachtarbeit: night.nacht,
+            nacht04: night.n04,
+          };
+        }),
+      );
+
       const driverMap = new Map<string, DriverSummary & { blockSet: Set<string> }>();
       for (const trip of nonCanceled) {
         const name = trip.assigned_driver_name ?? tr('fin.unknownDriver');
@@ -755,8 +830,12 @@ export default function FinalizePlanningModal({ run, companyId, userId, onClose,
         d.trips++;
         if (trip.assignment_block_id) d.blockSet.add(trip.assignment_block_id);
       }
-      // Accumulate block-level time data (uses ms arithmetic, handles overnight correctly)
-      for (const b of finBlocks) {
+      // Accumulate block-level time data from the day-split pieces: `workMinutes`
+      // and `nightMinutes` are unchanged by the split (it tiles the block), and
+      // `sundayMinutes` is the figure it corrects — it now counts the minutes that
+      // are actually on a Sunday rather than every minute of a block whose file
+      // date happened to be one.
+      for (const b of finDayBlocks) {
         const d = driverMap.get(b.driver_id);
         if (!d) continue;
         d.workMinutes  += b.duration_minutes;
@@ -767,7 +846,7 @@ export default function FinalizePlanningModal({ run, companyId, userId, onClose,
 
       // Build per-driver per-day PDF rows (used for Stundennachweis download in done state)
       const driverDateBlocks = new Map<string, Map<string, FinBlock[]>>();
-      for (const b of finBlocks) {
+      for (const b of finDayBlocks) {
         if (!driverDateBlocks.has(b.driver_id)) driverDateBlocks.set(b.driver_id, new Map());
         const dateMap = driverDateBlocks.get(b.driver_id)!;
         const arr = dateMap.get(b.service_date) ?? [];
@@ -805,6 +884,19 @@ export default function FinalizePlanningModal({ run, companyId, userId, onClose,
           const [sy, sm, sd] = serviceDate.split('-').map(Number);
           const date = new Date(sy, sm - 1, sd);
           const dow = date.getDay();
+          /*
+           * A piece that runs to local midnight prints its end as `23:59`, which
+           * is `MonatsplanungStundennachweisPreview`'s own convention for the same
+           * column and not a new one invented here: before the day split a
+           * cross-midnight block was one row whose Bis read *earlier* than its
+           * Von, and after it a row reading `23:30 - 00:00` says the shift ended
+           * as the day began. Display only — every figure in the row comes from
+           * `duration_minutes`, never from these strings.
+           */
+          const endLabel = (b2: FinBlock) =>
+            b2.block_end_ms === nextLocalMidnightMs(localMidnightMs(b2.block_start_ms))
+              ? '23:59'
+              : msToHHMM(b2.block_end_ms);
           const isSun = dow === 0;
           const dayGrund = dayBlocks.reduce((s, b2) => s + b2.duration_minutes, 0);
           const dayNacht = dayBlocks.reduce((s, b2) => s + b2.nachtarbeit, 0);
@@ -814,11 +906,11 @@ export default function FinalizePlanningModal({ run, companyId, userId, onClose,
             date, weekday: WDAY_SHORT[dow],
             isSat: dow === 6, isSun, isHol: false,
             von1: dayBlocks[0] ? msToHHMM(dayBlocks[0].block_start_ms) : '',
-            bis1: dayBlocks[0] ? msToHHMM(dayBlocks[0].block_end_ms)   : '',
+            bis1: dayBlocks[0] ? endLabel(dayBlocks[0])                : '',
             von2: dayBlocks[1] ? msToHHMM(dayBlocks[1].block_start_ms) : '',
-            bis2: dayBlocks[1] ? msToHHMM(dayBlocks[1].block_end_ms)   : '',
+            bis2: dayBlocks[1] ? endLabel(dayBlocks[1])                : '',
             von3: dayBlocks[2] ? msToHHMM(dayBlocks[2].block_start_ms) : '',
-            bis3: dayBlocks[2] ? msToHHMM(dayBlocks[2].block_end_ms)   : '',
+            bis3: dayBlocks[2] ? endLabel(dayBlocks[2])                : '',
             grundlohn:     minsToDecStr(dayGrund),
             nachtarbeit:   minsToDecStr(dayNacht),
             nachtarbeit04: minsToDecStr(dayN04),
