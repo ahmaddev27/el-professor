@@ -25,11 +25,11 @@ A React SPA on a self-hosted Supabase stack (PostgreSQL, Auth, Storage, Edge Fun
 
 ## Status
 
-> Last update: **26.09.2026**. A step counts once it is merged into `staging` and verified there.
+> Last update: **30.09.2026**. A step counts once it is merged into `staging` and verified there.
 
-`▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▱` **40 of 41 steps · 98%**
+`▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▱▱▱` **43 of 46 steps · 93%**
 
-The headline is the Progress column below, added up: 6+6+3+13+3+5+3+1 of 6+7+3+13+3+5+3+1. It read "36 of 40" while that column already summed to 37 of 41, so it had been kept by hand and drifted; it is derived from the table now. The one step still out is Google sign-in on production, which waits on the owner's Impressum and privacy text.
+The headline is the Progress column below, added up: 6+6+3+13+3+5+3+1+3 of 6+7+3+13+3+5+3+1+5. It is derived from the table rather than kept by hand, which is how it once came to read "36 of 40" over a column already summing to 37 of 41. Three steps are still out: Google sign-in on production, which waits on the owner's Impressum and privacy text, and the monthly plan's documents and its migration, both in review.
 
 | Phase | What | Progress | State |
 |---|---|---|---|
@@ -41,6 +41,7 @@ The headline is the Progress column below, added up: 6+6+3+13+3+5+3+1 of 6+7+3+1
 | **5** | Design rollout | `▰▰▰▰▰` 5/5 | every screen batch and the frame itself — `AppLayout`, the sidebar, the two banners and the support bar (PR #116) — are on staging. `AdminLayout` stays legacy on purpose |
 | **FA** | Fahrtenbuch analysis | `▰▰▰` 3/3 | on staging only, deliberately: import reliability, the analysis engine, and the settings tables with the Fahrtenanalyse screen (PR #111), which shows and explains a month of imported rides and changes no trip |
 | **BN** | Notifications | `▰` 1/1 | on staging (PR #115). The Benachrichtigungen screen had been a preference panel for a feature that was never built — nothing read its table. A TÜV expiry and a trial end now reach the company's administrators, once per occurrence and never nightly, and a paying customer still on `status = 'trial'` is told nothing about a trial. **Nothing is sent until the owner approves one host cron line** |
+| **MP** | Monthly plan (Monatsplanung) | `▰▰▰▱▱` 3/5 | the engine (PR #162), the ExcelJS table writer (PR #164) and the four screens (PR #165) are on staging. **The three documents are in review (PR #167)** — a Stundennachweis per driver, the planned Fahrtenbuch and the payroll hours summary, all from one stored plan; the wiring between them had shipped as an empty map, so the tab drew nothing. **The migration for the four tables is not a PR yet**: it carries the unique index and the advisory lock that the older `company_planning_runs` never had. Every output is a proposal — `PLANUNG / VORSCHAU` in the header, `_PLANUNG_` in the filename, and no write to `fahrtenbuch_trips` on any path |
 
 **Production serves `dbc42d2`** (24.09.2026, PR #107): the legal pages, the invoice-coverage fix, Fahrtenbuch import reliability, and two defects that had been live — an Inhaber saved as an employee when edited, and every user edit without a new password failing. **Staging is 16 commits ahead** and carries everything in the table above that says "on staging"; the next production release is a rehearsal and the owner's button.
 
