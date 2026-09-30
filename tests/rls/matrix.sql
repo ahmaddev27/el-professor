@@ -3043,19 +3043,21 @@ INSERT INTO _mx_rpc (label, stmt, want, hole) VALUES
     -- guard (T, driver_company_mismatch), while confirming A's plan is a
     -- *return value* (N, plan_not_found) — section 9's screen has to show two
     -- choices, so a refusal there may not be an exception.
-    ('monthly_plan_save(a plan of A''s driver)',
-     $q$SELECT ((monthly_plan_save(jsonb_build_object(
-          'year', 2027, 'month', 4, 'switch_minutes', 30,
-          'drivers', jsonb_build_array(jsonb_build_object('driver_id', {ref:drivers}, 'selected', true)),
-          'blocks', jsonb_build_array(jsonb_build_object(
-            'block_key', 'mx-save', 'car_identifier', 'MX-CAR',
-            'starts_at', '2027-04-01 08:23+02', 'ends_at', '2027-04-01 09:44+02',
-            'span_minutes', 81, 'ride_minutes', 81))))
-        ->> 'block_count')::int = 1)::text$q$,
-     'PTTYYTT', NULL),
-    ('monthly_plan_confirm(draft plan of A)',
-     $q$SELECT monthly_plan_confirm({ref:rpc_monthly_plan})::text$q$,
-     'PTTYYNT', NULL),
+    -- Both monthly-plan RPCs CHANGE STATE, and this harness runs one probe per
+    -- principal against one fixture. `monthly_plan_save` writes a plan for a
+    -- fixed month, so the second principal hits the partial unique index and
+    -- then blocks on the advisory lock the first principal's transaction still
+    -- holds — which is what killed the backend, twice, right after
+    -- `platform_context_open`. Their authorization is covered per principal in
+    -- `tests/rls/monthly-plan.sql`, which drives each call in its own
+    -- transaction; here only the EXECUTE grant is probed, which is what a
+    -- matrix line can honestly ask of a state-changing function.
+    ('monthly_plan_save(execute grant only)',
+     $q$SELECT has_function_privilege(current_user, 'public.monthly_plan_save(jsonb)', 'EXECUTE')::text$q$,
+     'PTTTTTT', NULL),
+    ('monthly_plan_confirm(execute grant only)',
+     $q$SELECT has_function_privilege(current_user, 'public.monthly_plan_confirm(uuid,boolean)', 'EXECUTE')::text$q$,
+     'PTTTTTT', NULL),
 
     -- the Abrechnung and cash RPCs: security invoker, so they return what the
     -- income, receipts and cash_transactions policies let the caller read.
@@ -3371,8 +3373,8 @@ UPDATE _mx_rpc r SET staff = o.staff
     -- whose platform branch asks for a *support* session; inside one, both write
     -- the opened company's rows as its administrator would, and every row they
     -- write leaves an audit row (3.4c).
-    ('monthly_plan_save(a plan of A''s driver)',                     'TY'),
-    ('monthly_plan_confirm(draft plan of A)',                        'TY')
+    ('monthly_plan_save(execute grant only)',                        'TT'),
+    ('monthly_plan_confirm(execute grant only)',                     'TT')
   ) AS o(label, staff)
  WHERE r.label = o.label;
 
@@ -3400,8 +3402,8 @@ BEGIN
       ('reassign_fahrtenbuch_trip(trip of A)'),
       ('company_role_save(a new role of A)'),
       ('company_role_delete(company role of A)'),
-      ('monthly_plan_save(a plan of A''s driver)'),
-      ('monthly_plan_confirm(draft plan of A)')
+      ('monthly_plan_save(execute grant only)'),
+      ('monthly_plan_confirm(execute grant only)')
     ) AS o(label)
    WHERE NOT EXISTS (SELECT 1 FROM _mx_rpc r WHERE r.label = o.label AND r.staff IS NOT NULL);
 
