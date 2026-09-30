@@ -389,6 +389,19 @@ export const de = {
   'ui.table.retry':           'Erneut versuchen',
   'ui.table.total':           'Summe',
 
+  // ── The generic Excel export's own chrome (src/utils/excelExport.ts) ──────
+  // Not a statutory form, so its wording follows the UI language like any other
+  // label. The German values below are byte-identical to DEFAULT_EXPORT_CHROME,
+  // so a German file is unchanged; `{count}` is substituted by the exporter and
+  // must survive t(), which it does because interpolate() returns the template
+  // unchanged when no vars are passed.
+  'ui.export.chrome.empty':   'Keine Daten vorhanden',
+  'ui.export.chrome.filters': 'Aktive Filter:',
+  'ui.export.chrome.totals':  'Gesamt  ({count} Einträge)',
+  'ui.export.chrome.footer':  'El-Professor Verwaltungssystem  —  {count} Datensätze exportiert',
+  'ui.export.filterLine':     '{label}: {value}',
+  'ui.export.failed':         'Der Export konnte nicht erstellt werden',
+
   // ── Design preview (Phase 2 prototype at /design-preview) ─────────────────
   // The preview's components are left out of production builds; these strings
   // still ship with the dictionary, like every other key.
@@ -2689,6 +2702,13 @@ export const de = {
   'users.roles.error.stillAssigned':       'Diese Rolle ist noch {count} Benutzerkonten zugewiesen. Weisen Sie diesen Konten zuerst eine andere Rolle zu.',
   'users.roles.error.systemRole':          'Systemrollen können nicht geändert werden.',
   'users.roles.error.unknownArea':         'Ein unbekannter Bereich wurde gesendet. Bitte laden Sie die Seite neu.',
+  // The access matrix export: one row per role and area, so a page a role does
+  // not permit reads Nein/Nein rather than being absent from the file.
+  'users.roles.export.area':               'Bereich',
+  'users.roles.export.areaKey':            'Bereichsschlüssel',
+  'users.roles.export.canEdit':            'Bearbeiten',
+  'users.roles.export.canView':            'Ansehen',
+  'users.roles.export.scope':              'Eigene Rollen und Systemvorlagen · {roles} Rollen × {areas} Bereiche',
   'users.roles.holders':                   'Benutzer',
   'users.roles.holders.none':              'Niemand',
   'users.roles.holders.count.one':         '{count} Benutzer',
@@ -3010,6 +3030,15 @@ export const de = {
   'gq.done.title':                         'Quittung {number} ausgestellt',
   'gq.driver.inactive':                    '{name} (inaktiv)',
   'gq.driver.placeholder':                 'Fahrer auswählen',
+  // The export's own columns. The list splits the period into two columns so a
+  // period is filterable, and names the business year explicitly: the GQ-YYYY in
+  // the number is the salary's business year since 20260919160000 and the
+  // payment's year before it, so the number alone cannot be grouped by.
+  'gq.export.businessYear':                'Geschäftsjahr',
+  'gq.export.filterAll':                   'Alle Gehaltsquittungen, inklusive Stornos',
+  'gq.export.periodFrom':                  'Zeitraum von',
+  'gq.export.periodTo':                    'Zeitraum bis',
+  'gq.export.voidedOn':                    'Storniert am',
   'gq.list.caption':                       'Gehaltsquittungen',
   'gq.list.clearSearch':                   'Suche zurücksetzen',
   'gq.list.description':                   'Bestätigte Barzahlungen von Gehältern, mit Status und unterschriebener Kopie.',
@@ -3818,6 +3847,25 @@ export const de = {
   'imp.th.start':                          'Start',
   'imp.th.startAt':                        'Beginn',
   'imp.th.tip':                            'Trinkgeld',
+  // The Fahrtenliste: the working list of rides, NOT the statutory corrected
+  // Fahrtenbuch the other button builds. Its own noun and its own filename, so
+  // the two files cannot be confused. `imp.export.startAt` / `.endAt` are the
+  // ride's real instants; `trip_date` is the file's "Datum der Fahrt", which the
+  // Uber export dates a day early for a ride starting just after midnight, and
+  // `imp.export.timeSource` is what says which of the two to trust.
+  'imp.export.canceled':                   'Storniert',
+  'imp.export.download':                   'Fahrtenliste (Excel)',
+  'imp.export.endAt':                      'Ende (Zeitstempel)',
+  'imp.export.sheetTitle':                 'Fahrtenliste',
+  'imp.export.startAt':                    'Beginn (Zeitstempel)',
+  'imp.export.timeSource':                 'Zeitquelle',
+  'imp.export.timeSource.ambiguous':       'Mehrdeutig',
+  'imp.export.timeSource.fallbackTripDate': 'Ersatz: Datum der Fahrt',
+  'imp.export.timeSource.missing':         'Fehlt',
+  'imp.export.timeSource.sourceStartEnd':  'Quelle: Start und Ende',
+  'imp.export.timeSource.unparsed':        'Unlesbar',
+  'imp.trips.loadFailed':                  'Fehler beim Laden der Fahrten',
+  'imp.trips.loadFailedBody':              'Die Liste unten kann noch die Fahrten des zuvor gewählten Monats zeigen. Die Downloads bleiben deaktiviert, bis die Fahrten geladen sind.',
   'imp.title':                             'Fahrtenbuch importieren',
   'imp.toast.failedTitle':                 'Import fehlgeschlagen',
   'imp.toast.successDetail':               '{count} Fahrten wurden importiert, {duplicates} Duplikate abgewiesen.',

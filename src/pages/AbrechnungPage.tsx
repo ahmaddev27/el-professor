@@ -22,6 +22,9 @@ import { useTheme } from '../contexts/ThemeContext';
 import { format } from 'date-fns';
 import { getWeeksOfMonth, getBusinessMonthRange, getBusinessWeeksForMonth } from '../utils/weekCalculations';
 import html2canvas from 'html2canvas';
+import { exportTableToExcel } from '../utils/excelExport';
+import { buildAbrechnungExport } from '../utils/tableExportRows';
+import { useExportChrome } from '../hooks/useExportChrome';
 import { useTranslation } from '../contexts/LanguageContext';
 import {
   Alert,
@@ -100,6 +103,7 @@ const MONTH_NAMES = [
 
 export function AbrechnungPage() {
   const { t } = useTranslation();
+  const exportChrome = useExportChrome();
   const [viewMode, setViewMode] = useState<ViewMode>('weekly');
   const [weeklyData, setWeeklyData] = useState<WeeklyAbrechnung[]>([]);
   const [monthlyData, setMonthlyData] = useState<MonthlyAbrechnung[]>([]);
@@ -572,9 +576,76 @@ export function AbrechnungPage() {
     }), { anzahl_belege: 0, ausgegebene_bargeld: 0, bargeld: 0, bar_zuruck: 0 });
   };
 
+  /**
+   * The Abrechnung as a workbook — the screen's first output that is not a
+   * picture. Until now its only export was an html2canvas PNG of one driver's
+   * card, reachable from the row-detail dialog alone, so a month of some thirty
+   * amounts was retyped into the Steuerberater's figures by hand.
+   *
+   * **The rule being preserved: the weekly balance is cash collected minus cash
+   * expenses, and positive means the driver owes the company.** `bar_zuruck`
+   * reaches the file with its sign unchanged — the same number `barZurueck()`
+   * prints below, which colours a negative red and does not flip it.
+   *
+   * Nothing is recomputed. The rows are `getFilteredData()` /
+   * `getFilteredMonthlyData()`, and the totals are this screen's own
+   * `calculateWeekTotals` / `calculateMonthlyTotals` over exactly that set, so
+   * the file and the table cannot disagree. The screen prints one totals row per
+   * week and the workbook has one, so the file's is the sum over the whole
+   * filtered set.
+   *
+   * The off-screen html2canvas card and `generateSettlementImageBlob` are
+   * untouched: a picture's look is its content, and this adds a second output
+   * beside it. The filter band names the period, the view, the driver and the
+   * week, because a saved file is read without these controls beside it.
+   */
+  const handleExport = () => {
+    const weekly = viewMode === 'weekly';
+    const rows = weekly ? getFilteredData() : getFilteredMonthlyData();
+    const totals = weekly ? calculateWeekTotals(getFilteredData()) : calculateMonthlyTotals(getFilteredMonthlyData());
+    const filterLine = (label: string, value: string) => t('ui.export.filterLine', { label, value });
+    const filterSummary = [
+      // MONTH_NAMES, not a dictionary key: the headings above the tables print
+      // the same array, so the file names the period exactly as the screen does.
+      filterLine(t('common.period'), `${MONTH_NAMES[selectedMonth - 1]} ${selectedYear}`),
+      filterLine(t('abr.viewMode'), weekly ? t('abr.weekly') : t('abr.monthly')),
+      filterLine(t('common.driver'), selectedDriver === 'all' ? t('common.allDrivers') : selectedDriver),
+    ];
+    if (weekly) {
+      filterSummary.push(filterLine(t('common.week'), selectedWeek === 'all' ? t('abr.allWeeks') : getWeekLabel(selectedWeek)));
+    }
+
+    try {
+      exportTableToExcel(buildAbrechnungExport({
+        mode: viewMode,
+        rows,
+        totals,
+        year: selectedYear,
+        month: selectedMonth,
+        filterSummary,
+        labels: {
+          sheetTitle: t('nav.abrechnung'),
+          week: t('common.week'),
+          weeks: t('common.weeks'),
+          driver: t('common.driver'),
+          belege: t('abr.belegCount'),
+          spent: t('abr.col.spentCash'),
+          cash: t('abr.col.cash'),
+          barZurueck: t('abr.col.barZurueck'),
+          chrome: exportChrome,
+        },
+      }));
+    } catch (error: any) {
+      // A throw in an onClick with no error boundary produces no file and no
+      // message, which is the silent refusal #154 had to fix elsewhere.
+      showToast('error', t('ui.export.failed'), error?.message);
+    }
+  };
+
   // ── Presentation (phase 5) ────────────────────────────────────────────────
   // Everything above is the screen's logic and is unchanged, but for the five
-  // `loadFailed` lines; everything below only draws it. The tables show the
+  // `loadFailed` lines and `handleExport`, which only reads what is already
+  // there; everything below only draws it. The tables show the
   // RPC's rows and the sums calculateWeekTotals and calculateMonthlyTotals
   // return, formatted through utils/money.ts (formatEuro): this block adds no
   // arithmetic. Bar zurück is the RPC's bar_zuruck, cash collected minus cash
@@ -594,6 +665,10 @@ export function AbrechnungPage() {
       {euro(amount)}
     </span>
   );
+
+  // How many rows the export would write, so the button is offered for neither an
+  // empty month nor a filter that matches nothing.
+  const exportableRows = viewMode === 'weekly' ? getFilteredData().length : getFilteredMonthlyData().length;
 
   type AbrechnungTotals = { anzahl_belege: number; ausgegebene_bargeld: number; bargeld: number; bar_zuruck: number };
 
@@ -871,6 +946,18 @@ export function AbrechnungPage() {
                 </SelectContent>
               </Select>
             </Field>
+            {/* Withheld while the read failed or is still running: an empty
+                sheet and a total of 0,00 € are claims about the month, and this
+                one is reconciled against the Steuerberater's figures. */}
+            <Button
+              variant="secondary"
+              className="col-span-2 sm:col-span-1"
+              disabled={loading || loadFailed || exportableRows === 0}
+              onClick={handleExport}
+            >
+              <Download aria-hidden />
+              {t('common.exportExcelShort')}
+            </Button>
           </div>
         </Card>
 
