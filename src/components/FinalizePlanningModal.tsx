@@ -44,6 +44,7 @@ import MonatsplanungStundennachweisPreview from './MonatsplanungStundennachweisP
 import { useTranslation } from '../contexts/LanguageContext';
 import type { TranslationKey } from '../i18n';
 import { assessDay, formatShiftDuration, type DayWindow } from '../utils/shiftDayLimits';
+import { localHourMs, localMidnightMs, nextLocalMidnightMs } from '../utils/localDayWindow';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -460,16 +461,35 @@ export default function FinalizePlanningModal({ run, companyId, userId, onClose,
         const lo = Math.max(sMs, rS), hi = Math.min(eMs, rE);
         return lo < hi ? hi - lo : 0;
       }
+      /*
+       * The bands are LOCAL wall-clock hours on LOCAL calendar days, and this
+       * function measured neither.
+       *
+       * `Math.floor(sMs / 86400000) * 86400000` is midnight **UTC**. In
+       * Europe/Berlin that boundary is local 01:00 in winter and local 02:00 in
+       * summer, so `day + 4 * 3600000` was local 05:00 or 06:00 and the band
+       * labelled 00:00-04:00 actually measured 01:00-05:00 or 02:00-06:00 —
+       * **every day of the year**, not only on a transition day. The 23:00-24:00
+       * band measured 00:00-01:00 or 01:00-02:00, which is inside the 00:00-04:00
+       * band, so the two stopped being the mutually exclusive split the comment
+       * below claims and the same minute could be paid twice.
+       *
+       * `day += 86400000` is the smaller, DST-only half of the same mistake, and
+       * it does not recover: once the walk is an hour off it stays off for every
+       * later day of the shift.
+       *
+       * The band hours are unchanged. This file's Nachtarbeit opens at 23:00
+       * while `historicalWorkingHoursCleanEngine` opens at 20:00, and choosing
+       * between the two is a decision about §3b EStG, not about timezones.
+       */
       function computeBlockNight(sMs: number, eMs: number): { nacht: number; n04: number } {
-        const sDay = Math.floor(sMs / 86400000) * 86400000;
-        const eDay = Math.floor((eMs - 1) / 86400000) * 86400000;
         let nacht = 0, n04 = 0;
-        for (let day = sDay; day <= eDay; day += 86400000) {
+        for (let day = localMidnightMs(sMs); day < eMs; day = nextLocalMidnightMs(day)) {
           // 04:00–06:00 and 23:00–00:00 are Nachtarbeit (mutually exclusive with 0–4)
-          nacht += Math.floor(overlapMs(sMs, eMs, day + 4 * 3600000, day + 6 * 3600000) / 60000);
-          nacht += Math.floor(overlapMs(sMs, eMs, day + 23 * 3600000, day + 24 * 3600000) / 60000);
+          nacht += Math.floor(overlapMs(sMs, eMs, localHourMs(day, 4), localHourMs(day, 6)) / 60000);
+          nacht += Math.floor(overlapMs(sMs, eMs, localHourMs(day, 23), localHourMs(day, 24)) / 60000);
           // 00:00–04:00 is Nacht 0–4 exclusively
-          n04   += Math.floor(overlapMs(sMs, eMs, day, day + 4 * 3600000) / 60000);
+          n04   += Math.floor(overlapMs(sMs, eMs, day, localHourMs(day, 4)) / 60000);
         }
         return { nacht, n04 };
       }
