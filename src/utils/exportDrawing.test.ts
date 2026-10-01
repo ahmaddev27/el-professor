@@ -30,6 +30,18 @@
  * It says nothing about whether the colours are *nice*. A number that is a
  * number, a border that exists and a name that is absent are the three things
  * that can be measured.
+ *
+ * ## What it does not reach, so nobody assumes it covers everything
+ *
+ * - **The Fahrtenanalyse report** is drawn too, and asserted in its own file
+ *   (`tripAnalysisReport.test.ts`, "the drawing"), on the description rather than
+ *   on the written bytes. Its four sheets are not uniform tables, so they are not
+ *   `ExportOptions` and cannot be listed here.
+ * - **The Fahrerübersicht** (`exportFahreruebersichtToExcel`) exports no builder —
+ *   it writes the file itself — so there is nothing here to hand to the writer. It
+ *   had always DESCRIBED a fully drawn sheet, 22 styles and all, and xlsx threw
+ *   every one away; the correction was the writer, not the drawing.
+ * - **The Fahrtenbuch exports** must stay plain and are not a defect.
  */
 import { describe, it, expect } from 'vitest';
 import * as XLSX from 'xlsx';
