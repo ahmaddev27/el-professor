@@ -56,6 +56,14 @@ import { localDateKey } from '../localDayWindow';
  */
 export const DEFAULT_MIN_BLOCK_MINUTES = 90;
 
+/**
+ * The longest block the screen offers by default, in minutes.
+ *
+ * 360 — six hours, the figure the owner named on 01.10.2026. A default and not a
+ * rule: the control on screen 2 sets it per run, and 0 there means no maximum.
+ */
+export const DEFAULT_MAX_BLOCK_MINUTES = 360;
+
 /** Where a ride's instants came from, so nothing is silently guessed. */
 export type TripTimeSource = 'instants' | 'date_and_clock' | 'unusable';
 
@@ -160,6 +168,23 @@ export interface BuildBlocksOptions {
    * the difference shows on screen as idle time.
    */
   minBlockMinutes?: number;
+  /**
+   * The longest block the merge may produce, in minutes. Omitted or 0 means no
+   * maximum.
+   *
+   * It bounds the merge above as `minBlockMinutes` drives it below, and the two
+   * are read together: a short block is joined to a neighbour only while the
+   * result stays within this. Without it the merge produced a ten-hour block of
+   * which six hours were idle, which is what the owner reported.
+   *
+   * **It never splits a block.** The gap rule has already split at every gap of at
+   * least `switchMinutes`, so a block longer than this contains only gaps SHORTER
+   * than the switch duration — there is no point in it where a driver or vehicle
+   * could change, and a single ride cannot be cut at all. Such a block is reported
+   * in `longBlocks` instead, which is the honest answer rather than a sheet that
+   * claims a change of hands that could not happen.
+   */
+  maxBlockMinutes?: number;
 }
 
 export interface BuildBlocksResult {
@@ -175,6 +200,14 @@ export interface BuildBlocksResult {
    * block, and there is nothing on that day to merge it with. The screen says so.
    */
   shortBlocks: { blockId: string; spanMinutes: number }[];
+  /**
+   * Blocks longer than `maxBlockMinutes`, with the length they have.
+   *
+   * Reported and never split, for the reason in `maxBlockMinutes` above. A block
+   * is on this list only when the rides themselves run that long with no gap big
+   * enough to part them.
+   */
+  longBlocks: { blockId: string; spanMinutes: number }[];
 }
 
 const MS_PER_MINUTE = 60_000;
@@ -305,6 +338,10 @@ export function buildBlocks(
     && (options.minBlockMinutes as number) > 0
     ? Math.floor(options.minBlockMinutes as number)
     : 0;
+  const maxBlockMinutes = Number.isFinite(options.maxBlockMinutes ?? NaN)
+    && (options.maxBlockMinutes as number) > 0
+    ? Math.floor(options.maxBlockMinutes as number)
+    : 0;
 
   const rejected: RejectedTrip[] = [];
   const overlaps: VehicleOverlap[] = [];
@@ -430,7 +467,9 @@ export function buildBlocks(
     flush();
   }
 
-  const merged = minBlockMinutes > 0 ? mergeShortBlocks(blocks, minBlockMinutes) : blocks;
+  const merged = minBlockMinutes > 0
+    ? mergeShortBlocks(blocks, minBlockMinutes, maxBlockMinutes)
+    : blocks;
 
   // Chronological across vehicles, so the screen reads as a month rather than as
   // a list of cars. Tie-broken on the block id, which already carries the vehicle.
@@ -442,7 +481,13 @@ export function buildBlocks(
         .map(block => ({ blockId: block.id, spanMinutes: block.spanMinutes }))
     : [];
 
-  return { blocks: merged, rejected, overlaps, canceledCount, shortBlocks };
+  const longBlocks = maxBlockMinutes > 0
+    ? merged
+        .filter(block => block.spanMinutes > maxBlockMinutes)
+        .map(block => ({ blockId: block.id, spanMinutes: block.spanMinutes }))
+    : [];
+
+  return { blocks: merged, rejected, overlaps, canceledCount, shortBlocks, longBlocks };
 }
 
 /**
@@ -464,19 +509,29 @@ export function buildBlocks(
  *   A tie goes to the earlier neighbour, so the result does not depend on
  *   iteration order.
  *
- * ## No maximum, deliberately
+ * ## The ceiling, added 01.10.2026
  *
- * Merging can produce a long block — a quiet day whose three short runs are
- * hours apart becomes one long, mostly idle block. That is refused where it
- * should be: §7's daily maximum and working-time window are checked per driver
- * at assignment, where a refusal is shown with its reason. Capping it here would
- * hide the same outcome as a silently short block instead.
+ * This pass shipped with no maximum, on the argument that §7's daily maximum and
+ * working-time window would refuse an absurd result per driver at assignment. The
+ * owner read the first screen it produced and overruled it, rightly: the block
+ * was `06:00-16:00, 10,00 h, 4 Fahrten, davon Leerlauf 6,00` — ten hours of which
+ * six were waiting, which §7 would happily assign and no operator would send
+ * anybody out on.
+ *
+ * So `maxBlockMinutes` bounds the join: a merge that would exceed it is not
+ * available, and a short block with no neighbour that fits stays short and is
+ * reported. The earlier argument was not wrong about §7 — it was wrong that a
+ * refusal at assignment is the same thing as not building the block.
  *
  * Pure, and it returns new blocks rather than mutating: the ids of merged blocks
  * disappear, and a caller holding one would otherwise read a block that no longer
  * describes the month.
  */
-function mergeShortBlocks(blocks: PlanBlock[], minBlockMinutes: number): PlanBlock[] {
+function mergeShortBlocks(
+  blocks: PlanBlock[],
+  minBlockMinutes: number,
+  maxBlockMinutes: number,
+): PlanBlock[] {
   const byVehicleDay = new Map<string, PlanBlock[]>();
   for (const block of blocks) {
     const key = `${block.vehicleId}|${localDateKey(block.startMs)}`;
@@ -490,25 +545,56 @@ function mergeShortBlocks(blocks: PlanBlock[], minBlockMinutes: number): PlanBlo
   for (const group of byVehicleDay.values()) {
     let current = [...group].sort((a, b) => a.startMs - b.startMs || a.id.localeCompare(b.id));
 
-    // Each pass merges exactly one pair, so the loop cannot run more times than
-    // there are blocks in the group.
-    for (let guard = current.length; guard > 0 && current.length > 1; guard--) {
+    // Blocks that are short and have no neighbour the ceiling allows. They are
+    // skipped rather than ending the pass: the first version of the ceiling broke
+    // out of the loop on the first stuck block, which left every OTHER short block
+    // on that day unmerged — a correct refusal for one block silently becoming a
+    // refusal for all of them.
+    const stuck = new Set<string>();
+
+    // Each pass either merges one pair or marks one block stuck, so the loop
+    // cannot run more times than twice the number of blocks in the group.
+    for (let guard = current.length * 2; guard > 0 && current.length > 1; guard--) {
       let shortestIndex = -1;
       for (let i = 0; i < current.length; i++) {
         if (current[i].spanMinutes >= minBlockMinutes) continue;
+        if (stuck.has(current[i].id)) continue;
         if (shortestIndex < 0 || current[i].spanMinutes < current[shortestIndex].spanMinutes) {
           shortestIndex = i;
         }
       }
-      if (shortestIndex < 0) break; // nothing left under the minimum
+      if (shortestIndex < 0) break; // nothing left that is short and still joinable
 
+      const short = current[shortestIndex];
       const before = shortestIndex > 0 ? current[shortestIndex - 1] : null;
       const after = shortestIndex < current.length - 1 ? current[shortestIndex + 1] : null;
-      const gapBefore = before ? current[shortestIndex].startMs - before.endMs : Infinity;
-      const gapAfter = after ? after.startMs - current[shortestIndex].endMs : Infinity;
+
+      // The ceiling, which is the whole of the owner's "not more than six hours":
+      // a join whose result would exceed it is not available at all. Without this
+      // the pass produced a ten-hour block of which six hours were idle, by
+      // chaining short runs across a quiet day.
+      const fits = (other: PlanBlock | null): boolean => {
+        if (!other) return false;
+        if (maxBlockMinutes <= 0) return true;
+        const startMs = Math.min(short.startMs, other.startMs);
+        const endMs = Math.max(short.endMs, other.endMs);
+        return minutesBetween(startMs, endMs) <= maxBlockMinutes;
+      };
+
+      const gapBefore = fits(before) ? short.startMs - before!.endMs : Infinity;
+      const gapAfter = fits(after) ? after!.startMs - short.endMs : Infinity;
+
+      // Neither neighbour can take it without breaking the ceiling: it stays short
+      // and is reported, which is better than a block nobody can be sent out on.
+      // Marked rather than breaking, so the other short blocks of the day are
+      // still considered.
+      if (gapBefore === Infinity && gapAfter === Infinity) {
+        stuck.add(short.id);
+        continue;
+      }
 
       // `<=` so a tie takes the earlier neighbour.
-      const mergeWithBefore = before !== null && gapBefore <= gapAfter;
+      const mergeWithBefore = gapBefore <= gapAfter;
       const first = mergeWithBefore ? shortestIndex - 1 : shortestIndex;
       const second = mergeWithBefore ? shortestIndex : shortestIndex + 1;
 

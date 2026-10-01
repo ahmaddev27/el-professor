@@ -381,6 +381,7 @@ describe('buildBlocks — §14 edge cases, all surfaced', () => {
       // what `switchMinutes` alone means. An exact deep-equal is deliberate here:
       // it is what catches a key added to the result and left unreported.
       shortBlocks: [],
+      longBlocks: [],
     });
   });
 });
@@ -528,5 +529,94 @@ describe('buildBlocks — the minimum block length', () => {
     expect(r.blocks[0].rideMinutes).toBe(40);    // four ten-minute rides
     expect(r.blocks[0].trips).toHaveLength(4);
     expect(r.shortBlocks).toEqual([]);
+  });
+});
+
+// ─── The maximum block length (owner, 01.10.2026) ────────────────────────────
+//
+// The owner read the first screen the minimum produced and overruled the note in
+// `mergeShortBlocks` that said there is no maximum. The block he saw was
+// `06:00–16:00, 10,00 h, 4 Fahrten, davon Leerlauf 6,00` — ten hours of which six
+// were waiting, built by the merge chaining short runs across a quiet day.
+//
+// So the ceiling is first of all a bound on the MERGE. It never splits: the gap
+// rule has already split at every gap of at least `switchMinutes`, so a block
+// longer than the maximum holds only gaps shorter than the switch duration, and
+// cutting there would put a driver change into a gap too short for one.
+
+describe('buildBlocks — the maximum block length', () => {
+  it('refuses a merge that would exceed the maximum, and reports what stays short', () => {
+    // Three 20-minute runs at 06:00, 11:00 and 16:00 — one car, one day. With a
+    // 90-minute minimum and no ceiling the pass chains all three into a
+    // ten-hour-twenty block. With a six-hour ceiling it cannot.
+    const rides = [
+      trip({ id: 'a', startTime: '06:00', endTime: '06:20' }),
+      trip({ id: 'b', startTime: '11:00', endTime: '11:20' }),
+      trip({ id: 'c', startTime: '16:00', endTime: '16:20' }),
+    ];
+
+    const unbounded = buildBlocks(rides, { switchMinutes: 30, minBlockMinutes: 90 });
+    expect(unbounded.blocks).toHaveLength(1);
+    expect(unbounded.blocks[0].spanMinutes).toBe(620);   // 06:00 → 16:20
+    expect(unbounded.longBlocks, 'no maximum asked for, so nothing is reported')
+      .toEqual([]);
+
+    const bounded = buildBlocks(rides, {
+      switchMinutes: 30, minBlockMinutes: 90, maxBlockMinutes: 360,
+    });
+    // 06:00–11:20 is 320 minutes, which fits; adding 16:00 would make 620, which
+    // does not. So two blocks, and the second is short with nowhere to go.
+    expect(bounded.blocks).toHaveLength(2);
+    expect(bounded.blocks[0].spanMinutes).toBe(320);
+    expect(bounded.blocks[1].spanMinutes).toBe(20);
+    expect(bounded.shortBlocks.map(b => b.spanMinutes)).toEqual([20]);
+    expect(bounded.longBlocks, 'nothing exceeds the ceiling').toEqual([]);
+
+    // And the rides are all still there, in both.
+    const rideMinutes = (r: typeof bounded) =>
+      r.blocks.reduce((sum, b) => sum + b.rideMinutes, 0);
+    expect(rideMinutes(bounded)).toBe(rideMinutes(unbounded));
+  });
+
+  it('one stuck block does not stop the others from merging', () => {
+    // The first version of the ceiling broke out of the loop on the first block it
+    // could not place, which left every other short block of that day unmerged —
+    // a correct refusal for one silently becoming a refusal for all.
+    const rides = [
+      trip({ id: 'a', startTime: '06:00', endTime: '06:20' }),  // far from the rest
+      trip({ id: 'b', startTime: '14:00', endTime: '14:20' }),  // these two are
+      trip({ id: 'c', startTime: '15:00', endTime: '15:20' }),  // joinable
+    ];
+    const r = buildBlocks(rides, {
+      switchMinutes: 30, minBlockMinutes: 90, maxBlockMinutes: 360,
+    });
+    // 'a' cannot join 14:00 (that would be 8h20), but b+c become one 80-minute
+    // block — still under the minimum, and reported, but they DID merge.
+    expect(r.blocks).toHaveLength(2);
+    expect(r.blocks.map(b => b.spanMinutes).sort((x, y) => x - y)).toEqual([20, 80]);
+  });
+
+  it('reports a block that is genuinely too long, and never splits it', () => {
+    // One continuous ride of seven hours. There is no gap to split at and a ride
+    // is never cut, so the honest answer is to say so.
+    const r = buildBlocks(
+      [trip({ id: 'a', startTime: '06:00', endTime: '13:00' })],
+      { switchMinutes: 30, maxBlockMinutes: 360 },
+    );
+    expect(r.blocks).toHaveLength(1);
+    expect(r.blocks[0].spanMinutes).toBe(420);
+    expect(r.blocks[0].trips).toHaveLength(1);
+    expect(r.longBlocks).toEqual([{ blockId: r.blocks[0].id, spanMinutes: 420 }]);
+  });
+
+  it('asks for no maximum when none is given', () => {
+    // The negative control: without the option the build is what it was, and a
+    // long block is not reported as a problem.
+    const r = buildBlocks(
+      [trip({ id: 'a', startTime: '06:00', endTime: '20:00' })],
+      { switchMinutes: 30 },
+    );
+    expect(r.blocks[0].spanMinutes).toBe(840);
+    expect(r.longBlocks).toEqual([]);
   });
 });

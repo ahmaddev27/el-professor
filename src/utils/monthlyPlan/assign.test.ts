@@ -6,6 +6,7 @@ import {
   comparePlanQuality,
   planQuality,
   searchAssignments,
+  qualityDelta,
   type PlanDriverInput,
   type AssignResult,
 } from './assign';
@@ -603,5 +604,130 @@ describe('regeneration searches for a different plan (owner, 01.10.2026)', () =>
     const a = assignBlocks(blocks, distinct, availability, { switchMinutes: 30, seed: 9 });
     const b = assignBlocks(blocks, distinct, availability, { switchMinutes: 30, seed: 9 });
     expect(fingerprint(b)).toBe(fingerprint(a));
+  });
+});
+
+// ─── Unlimited retry (owner, 01.10.2026, the second report on this button) ────
+//
+// He pressed "Neu verteilen" a second time and was told "Nothing changed — and
+// that is the correct answer. 13 variants examined." He asked for unlimited
+// retries.
+//
+// The cause was NOT a small search space — measured on a sparse month of 16
+// blocks, 39 distinct plans over 61 seeds. It was the ranking: quality first,
+// with the plan on screen among the candidates, so once a press landed on a local
+// optimum every later press correctly kept it. "Never worse than what it
+// replaces" had become "never anything else".
+//
+// Both halves have to hold, so the answer has three states, and these pin them.
+
+describe('regeneration always offers another plan, and names what it costs', () => {
+  /** A month shaped like the owner's: sparse, with days far apart. */
+  const sparse = [
+    dayBlock('a', 'car-A', '2026-10-05', '08:00', '14:00'),
+    dayBlock('b', 'car-B', '2026-10-05', '09:00', '12:00'),
+    dayBlock('c', 'car-A', '2026-10-07', '06:00', '14:00'),
+    dayBlock('d', 'car-B', '2026-10-09', '14:00', '20:00'),
+    dayBlock('e', 'car-A', '2026-10-12', '06:00', '12:00'),
+    dayBlock('f', 'car-B', '2026-10-14', '10:00', '18:00'),
+    dayBlock('g', 'car-A', '2026-10-16', '07:00', '15:00'),
+    dayBlock('h', 'car-B', '2026-10-19', '08:00', '16:00'),
+  ];
+  const three = [
+    driver({ id: 'ali',   minSalary: 1950, maxSalary: 2100, hourlyRate: 14 }),
+    driver({ id: 'sami',  minSalary: 1200, maxSalary: 1500, hourlyRate: 16 }),
+    driver({ id: 'canan', minSalary: 1700, maxSalary: 2400, hourlyRate: 15 }),
+  ];
+
+  const prepared = () => {
+    const { blocks } = buildBlocks(sparse, { switchMinutes: 30 });
+    const availability = buildAvailability([], blocks, new Set(three.map(d => d.id)));
+    return { blocks, availability };
+  };
+
+  const fingerprint = (r: AssignResult) =>
+    r.assignments.map(a => `${a.blockId}:${a.driverId}`).sort().join(',');
+
+  it('ten presses in a row each produce a different distribution', () => {
+    // The owner's words were "unlimited retry". Ten is not unlimited, but a run
+    // that never repeats its predecessor ten times over is the property he asked
+    // for, and a dead end would show on the second.
+    const { blocks, availability } = prepared();
+    let plan = {
+      seed: 0,
+      result: assignBlocks(blocks, three, availability, { switchMinutes: 30, seed: 0 }),
+    };
+
+    for (let press = 1; press <= 10; press++) {
+      const found = searchAssignments(blocks, three, availability, {
+        switchMinutes: 30, current: plan,
+      });
+      expect(found.differs, `press ${press} returned the same plan`).toBe(true);
+      expect(fingerprint(found.result), `press ${press} did not move`)
+        .not.toBe(fingerprint(plan.result));
+      plan = { seed: found.seed, result: found.result };
+    }
+  });
+
+  it('a worse alternative is offered, and its cost is named rather than hidden', () => {
+    // Walk until a press has to trade something away, then check the trade is
+    // reported. On a month with this many equally good arrangements it may not
+    // happen at all, which is itself fine — what must never happen is a worse
+    // plan with `cost: null`.
+    const { blocks, availability } = prepared();
+    let plan = {
+      seed: 0,
+      result: assignBlocks(blocks, three, availability, { switchMinutes: 30, seed: 0 }),
+    };
+
+    for (let press = 1; press <= 12; press++) {
+      const before = planQuality(plan.result);
+      const found = searchAssignments(blocks, three, availability, {
+        switchMinutes: 30, current: plan,
+      });
+      const worse = comparePlanQuality(found.quality, before) > 0;
+      expect(worse ? found.cost !== null : true,
+        `press ${press} returned a worse plan with no cost reported`).toBe(true);
+      if (found.cost) {
+        expect(found.cost.by, 'a reported cost is a real one').toBeGreaterThan(0);
+        expect(worse, 'a cost is only reported for a plan that is actually worse').toBe(true);
+      }
+      plan = { seed: found.seed, result: found.result };
+    }
+  });
+
+  it('differs: false now means there is genuinely no other plan', () => {
+    // One block, one driver. Nothing can vary, and that is the one case where the
+    // screen may say the constraints allow a single distribution.
+    const { blocks } = buildBlocks(
+      [dayBlock('a', 'car-A', '2026-10-05', '08:00', '12:00')],
+      { switchMinutes: 30 },
+    );
+    const only = [driver({ id: 'ali' })];
+    const availability = buildAvailability([], blocks, new Set(['ali']));
+    const current = assignBlocks(blocks, only, availability, { switchMinutes: 30, seed: 0 });
+
+    const found = searchAssignments(blocks, only, availability, {
+      switchMinutes: 30, current: { seed: 0, result: current },
+    });
+    expect(found.differs).toBe(false);
+    expect(found.cost, 'a plan that did not move costs nothing').toBeNull();
+  });
+
+  it('qualityDelta names the first figure that moved, and nothing when none did', () => {
+    const base = {
+      unassigned: 0, pinConflicts: 0, withoutHours: 0,
+      belowMinimum: 2, shortfallHours: 10, excessHours: 0,
+    };
+    expect(qualityDelta(base, base)).toBeNull();
+    expect(qualityDelta(base, { ...base, unassigned: 1 }))
+      .toEqual({ field: 'unassigned', by: 1 });
+    // Read in order, so the more serious figure wins when two moved.
+    expect(qualityDelta(base, { ...base, unassigned: 1, shortfallHours: 99 }))
+      .toEqual({ field: 'unassigned', by: 1 });
+    // Hours below a tenth are float noise, not a difference.
+    expect(qualityDelta(base, { ...base, shortfallHours: 10.05 })).toBeNull();
+    expect(qualityDelta(base, { ...base, shortfallHours: 10.5 }))
+      .toEqual({ field: 'shortfallHours', by: 0.5 });
   });
 });

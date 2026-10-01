@@ -5861,4 +5861,20 @@ export const de = {
   'mplan.minBlock.label':         'Mindestdauer je Block (Minuten)',
   'mplan.regen.searched':         '{tried} Varianten geprüft, {equal} davon gleich gut.',
   'mplan.regen.searchedNothing':  '{tried} Varianten geprüft — keine war besser oder gleich gut und anders. Die Vorgaben lassen nur diese eine Verteilung zu.',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'mplan.blocks.maximum':         'Höchstdauer je Block: {minutes} Minuten.',
+  'mplan.blocks.stillLong':       '{count} Block/Blöcke sind länger als {minutes} Minuten. Sie werden nicht zerschnitten: innerhalb eines Blocks ist keine Lücke lang genug für einen Fahrer- oder Fahrzeugwechsel, und eine einzelne Fahrt wird nie geteilt.',
+  'mplan.blocks.stillLongTitle':  'Einzelne Blöcke bleiben länger',
+  'mplan.maxBlock.belowMin':      'Die Höchstdauer darf nicht kleiner als die Mindestdauer sein.',
+  'mplan.maxBlock.hint':          'Begrenzt das Zusammenlegen: Blöcke werden nur so weit verbunden, wie diese Dauer erlaubt. Ein Block wird nie zerschnitten. 0 = keine Höchstdauer.',
+  'mplan.maxBlock.invalid':       'Bitte eine ganze Zahl ab 0 eingeben.',
+  'mplan.maxBlock.label':         'Höchstdauer je Block (Minuten)',
+  'mplan.quality.belowMinimum':   'Fahrer unter ihrem Ziel',
+  'mplan.quality.excessHours':    'Stunden über dem Limit',
+  'mplan.quality.pinConflicts':   'Konflikte bei Pflicht-Einsätzen',
+  'mplan.quality.shortfallHours': 'fehlende Stunden insgesamt',
+  'mplan.quality.unassigned':     'Blöcke ohne Fahrer',
+  'mplan.quality.withoutHours':   'Fahrer ohne Stunden',
+  'mplan.regen.cost':             'Diese Verteilung ist etwas schlechter: {field} um {by} höher. Die vorherige Verteilung war die beste gefundene.',
 } as const;

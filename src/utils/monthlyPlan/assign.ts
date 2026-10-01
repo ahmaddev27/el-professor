@@ -275,10 +275,45 @@ export function comparePlanQuality(a: PlanQuality, b: PlanQuality): number {
     || hours(a.excessHours, b.excessHours);
 }
 
+/** The six figures `planQuality` carries, in the order `comparePlanQuality` reads them. */
+export type PlanQualityField = keyof PlanQuality;
+
+const QUALITY_ORDER: PlanQualityField[] = [
+  'unassigned', 'pinConflicts', 'withoutHours', 'belowMinimum',
+  'shortfallHours', 'excessHours',
+];
+
+/**
+ * The first figure on which two plans differ, and by how much.
+ *
+ * Null when they are equal by every figure. It exists so a screen can say *what*
+ * an alternative costs rather than only that it costs something: "one block more
+ * without a driver" and "0,4 hours more below the minimum" are very different
+ * things to be asked to accept.
+ */
+export function qualityDelta(
+  from: PlanQuality,
+  to: PlanQuality,
+): { field: PlanQualityField; by: number } | null {
+  const HOUR_EPSILON = 0.1;
+  for (const field of QUALITY_ORDER) {
+    const difference = to[field] - from[field];
+    const hours = field === 'shortfallHours' || field === 'excessHours';
+    if (hours ? Math.abs(difference) >= HOUR_EPSILON : difference !== 0) {
+      return { field, by: difference };
+    }
+  }
+  return null;
+}
+
 export interface AssignSearchOptions extends AssignOptions {
   /**
    * How many fresh seeds to try. Each is one full assignment pass over the same
    * blocks — cheap, and the screen runs this on a button press, not per render.
+   *
+   * 24 by default. Measured on a sparse month of 16 blocks: 39 distinct plans
+   * over 61 seeds, so two dozen draws reach a wide choice without the press
+   * becoming noticeable.
    */
   attempts?: number;
   /**
@@ -299,6 +334,16 @@ export interface AssignSearchResult {
   equallyGood: number;
   /** True when the chosen plan assigns at least one block differently. */
   differs: boolean;
+  /**
+   * What the chosen plan costs against the one it replaced, or null when it costs
+   * nothing — which includes the case where it is better.
+   *
+   * Non-null means the search found no equally good alternative and took a
+   * slightly worse one rather than refusing to move, because the operator asked
+   * to see another distribution. The screen must print it; a worse plan accepted
+   * in silence is the thing the quality ranking exists to prevent.
+   */
+  cost: { field: PlanQualityField; by: number } | null;
 }
 
 /**
@@ -320,7 +365,7 @@ export function searchAssignments(
   availability: AvailabilityResult,
   options: AssignSearchOptions,
 ): AssignSearchResult {
-  const attempts = Math.max(1, Math.floor(options.attempts ?? 12));
+  const attempts = Math.max(1, Math.floor(options.attempts ?? 24));
   const baseSeed = options.current?.seed ?? options.seed ?? 0;
 
   interface Candidate {
@@ -371,7 +416,23 @@ export function searchAssignments(
     || a.seed - b.seed,
   );
 
-  const winner = ranked[0];
+  // The three-state answer. `ranked[0]` is the best plan there is, and when it is
+  // the one already on screen, the operator who pressed the button would be told
+  // nothing happened — which is what the owner reported on 01.10.2026 after a
+  // second press. So a differing plan is taken anyway, the best of them, and its
+  // cost against the current one is carried out for the screen to print.
+  //
+  // `differs: false` therefore now means what it says: there was NO other plan,
+  // not merely none that was at least as good.
+  const best = ranked[0];
+  const bestDiffering = ranked.find(candidate => candidate.differs) ?? null;
+  const winner = best.differs ? best : (bestDiffering ?? best);
+
+  const currentQuality = current ? planQuality(current.result) : null;
+  const cost = currentQuality && winner.differs
+    ? qualityDelta(currentQuality, winner.quality)
+    : null;
+
   const equallyGood = ranked.filter(c => comparePlanQuality(c.quality, winner.quality) === 0).length;
 
   return {
@@ -381,6 +442,8 @@ export function searchAssignments(
     tried: candidates.length,
     equallyGood,
     differs: winner.differs,
+    // A delta in the plan's FAVOUR is not a cost; only a worse figure is.
+    cost: cost && cost.by > 0 ? cost : null,
   };
 }
 
