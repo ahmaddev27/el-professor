@@ -814,7 +814,7 @@ export default function MonthlyPlanPage() {
   const blockRows: BlockRow[] = useMemo(
     () => (plan?.blocks ?? []).map(b => ({
       id: b.id,
-      vehicle: b.vehicleId,
+      vehicle: b.vehicleIdentifier ?? b.vehicleId,
       startMs: b.startMs,
       endMs: b.endMs,
       spanMinutes: b.spanMinutes,
@@ -854,7 +854,7 @@ export default function MonthlyPlanPage() {
           id: b.id,
           startMs: b.startMs,
           endMs: b.endMs,
-          vehicle: b.vehicleId,
+          vehicle: b.vehicleIdentifier ?? b.vehicleId,
           spanMinutes: b.spanMinutes,
         })),
       };
