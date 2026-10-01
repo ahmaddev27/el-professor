@@ -5787,4 +5787,26 @@ export const de = {
 
   // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
   'mplan.docs.preparing': 'Die Originaldaten des Imports werden geladen …',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'mplan.save.failedTitle':            'Die Planung wurde nicht gespeichert',
+  'mplan.save.keep':                   'Bisherige behalten',
+  'mplan.save.planExistsBody':         'Pro Monat bleibt genau eine Planung aktiv. Die bisherige wird nicht gelöscht, sondern als ersetzt markiert und bleibt lesbar.',
+  'mplan.save.planExistsTitle':        'Für diesen Monat gibt es bereits eine bestätigte Planung',
+  'mplan.save.reason.driverNotInPlan': 'Ein Block ist einem Fahrer zugeteilt, der nicht zur Planung gehört.',
+  'mplan.save.reason.driverOverlap':   'Zwei Blöcke desselben Fahrers überschneiden sich.',
+  'mplan.save.reason.exceedsCap':      'Ein Fahrer überschreitet seinen Stundenrahmen.',
+  'mplan.save.reason.invalidPayload':  'Die Planung konnte nicht übertragen werden. Bitte erneut erzeugen.',
+  'mplan.save.reason.network':         'Die Verbindung zum Server ist fehlgeschlagen. Die Planung liegt weiterhin in dieser Ansicht.',
+  'mplan.save.reason.noCompany':       'Dieses Konto hat derzeit keinen Zugriff auf die Daten eines Unternehmens.',
+  'mplan.save.reason.noUsableRange':   'Einem zugeteilten Fahrer fehlt der Stundenrahmen.',
+  'mplan.save.reason.notADraft':       'Diese Planung ist kein Entwurf mehr und kann nicht erneut bestätigt werden.',
+  'mplan.save.reason.notAuthorized':   'Diese Rolle darf die Seite Dokumente nicht bearbeiten.',
+  'mplan.save.reason.planEmpty':       'Eine Planung ohne Blöcke wird nicht bestätigt.',
+  'mplan.save.reason.planNotFound':    'Der gespeicherte Entwurf wurde nicht gefunden. Bitte erneut bestätigen.',
+  'mplan.save.reason.rowsLost':        'Nicht alle Zeilen der Planung wurden gespeichert; es wurde nichts geschrieben.',
+  'mplan.save.reason.switchGap':       'Zwischen zwei Fahrzeugen liegt weniger als die Wechseldauer.',
+  'mplan.save.reason.unauthenticated': 'Die Sitzung ist abgelaufen. Bitte neu anmelden.',
+  'mplan.save.replace':                'Bisherige ersetzen',
+  'mplan.summary.saving':              'Wird gespeichert …',
 } as const;

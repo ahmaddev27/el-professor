@@ -5731,4 +5731,26 @@ export const en: PartialDictionary = {
 
   // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
   'mplan.docs.preparing': 'Loading the import\'s original data …',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'mplan.save.failedTitle':            'The plan was not saved',
+  'mplan.save.keep':                   'Keep the existing one',
+  'mplan.save.planExistsBody':         'Exactly one plan stays active per month. The previous one is not deleted — it is marked as superseded and stays readable.',
+  'mplan.save.planExistsTitle':        'This month already has a confirmed plan',
+  'mplan.save.reason.driverNotInPlan': 'A block is assigned to a driver who is not part of the plan.',
+  'mplan.save.reason.driverOverlap':   'Two blocks of the same driver overlap.',
+  'mplan.save.reason.exceedsCap':      'A driver exceeds their hours cap.',
+  'mplan.save.reason.invalidPayload':  'The plan could not be transmitted. Please generate it again.',
+  'mplan.save.reason.network':         'The connection to the server failed. The plan is still in this view.',
+  'mplan.save.reason.noCompany':       'This account currently has no access to a company\'s data.',
+  'mplan.save.reason.noUsableRange':   'An assigned driver has no usable hours range.',
+  'mplan.save.reason.notADraft':       'This plan is no longer a draft and cannot be confirmed again.',
+  'mplan.save.reason.notAuthorized':   'This role may not edit the Dokumente page.',
+  'mplan.save.reason.planEmpty':       'A plan with no blocks is not confirmed.',
+  'mplan.save.reason.planNotFound':    'The saved draft was not found. Please confirm again.',
+  'mplan.save.reason.rowsLost':        'Not every row of the plan was stored, so nothing was written.',
+  'mplan.save.reason.switchGap':       'Less than the switch duration lies between two vehicles.',
+  'mplan.save.reason.unauthenticated': 'The session has expired. Please sign in again.',
+  'mplan.save.replace':                'Replace the existing one',
+  'mplan.summary.saving':              'Saving …',
 };
