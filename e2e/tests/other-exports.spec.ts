@@ -48,13 +48,27 @@ test('the Fahrtenanalyse report downloads once the analysis has run', async ({ p
   await page.goto('/fahrtenanalyse');
   await page.waitForTimeout(9000);
 
+  // November, chosen by hand. The screen opens on the month that HAS an import
+  // rather than on the newest file — today is in October and October has one — and
+  // November is the month whose rides carry `original_driver_id`, which is what the
+  // analysis keys every driver on.
+  //
+  // The control is an `<input type="month">`, not a select: an earlier version of
+  // this looked for a `<select>`, found none, and reported "no month picker" over a
+  // screen that had one all along.
+  const month = page.locator('input[type="month"]').first();
+  await month.fill('2026-11');
+  await page.waitForTimeout(14_000);
+
   // The analysis computes nothing without a block threshold, and the company has
   // none: that figure is one of the three settings still waiting on the owner, and
   // the screen stores NULL rather than inventing a default. The test value is the
   // screen's own answer to that, and it is never stored.
+  //
+  // AFTER the month change, not before: changing the month re-runs the analysis and
+  // drops the test value, so pressing it first leaves the report disabled.
   const testValue = page.getByRole('button', { name: /Mit Testwert 30 Min\. ansehen/ }).first();
   if (await testValue.count() > 0) {
-    console.log('  no block threshold is set — using the screen\'s 30-minute test value');
     await testValue.click();
     await page.waitForTimeout(12_000);
   }
