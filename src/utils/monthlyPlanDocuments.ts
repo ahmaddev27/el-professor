@@ -229,6 +229,16 @@ export interface MonthlyPlanDocumentRequest {
    * same date and a test can pin one.
    */
   generatedAt: Date;
+  /**
+   * The company's own name, for the documents that print a letterhead.
+   *
+   * A plan carries `company_id` and no name — the §13 snapshot is about drivers —
+   * so the screen reads it from `CompanySettingsContext` and passes it here.
+   * Absent, the payroll summary prints `Unternehmen: —`, which is what it did
+   * for every plan until now: honest, and useless on a document that goes to a
+   * Steuerberater.
+   */
+  companyName?: string;
 }
 
 /**

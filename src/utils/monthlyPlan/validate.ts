@@ -54,7 +54,9 @@ export interface PlanWarning {
     | 'contested_block'             // §14: two drivers' mandatory claims
     | 'pin_conflict'                // §7 rule 5: pin vs another hard rule
     | 'rejected_trip'               // §14: a ride that could not be blocked
-    | 'source_overlap';             // §14: overlapping rides in the source data
+    | 'source_overlap'              // §14: overlapping rides in the source data
+    | 'driver_without_range'        // §5/§14: a selected driver the plan could not use
+    | 'driver_without_work';        // §14: a selected driver who received no block
   detail: string;
   blockId?: string;
   driverId?: string;
@@ -258,6 +260,51 @@ export function validatePlan(input: ValidateInput): ValidationResult {
       detail: c.brokenRule,
     });
   }
+  /*
+   * §14: a driver the plan could not use, and a driver it simply did not.
+   *
+   * `assignBlocks` refuses a regular driver whose hours range is unusable —
+   * `no_usable_range`, a configuration error, not a scheduling one — and that
+   * refusal stayed inside the assigner. So the summary showed those drivers at
+   * 0 blocks with "Kein Stundenrahmen" on their own row while **"Hinweise zum
+   * Plan" said there were none**, and their rides went to other drivers. The
+   * plan claimed a completeness it did not have. Measured on staging: two of six
+   * drivers, silently.
+   *
+   * They are two warnings and not one because they are two different facts. A
+   * driver with no usable range is a **data** problem the operator can fix in
+   * one screen; a driver with a usable range who still received nothing is a
+   * **planning** outcome, and telling them apart is the difference between
+   * "correct the rate" and "there was not enough work".
+   */
+  const assignedPerDriver = new Map<string, number>();
+  for (const a of result.assignments) {
+    assignedPerDriver.set(a.driverId, (assignedPerDriver.get(a.driverId) ?? 0) + 1);
+  }
+  for (const s of result.driverStates) {
+    if (s.driver.isOwner) continue;           // §8: the owner is a fallback, not a plan
+    if (!drivers.some(d => d.id === s.driver.id)) continue;
+    if ((assignedPerDriver.get(s.driver.id) ?? 0) > 0) continue;
+
+    warnings.push(
+      s.range.usable
+        ? {
+            kind: 'driver_without_work',
+            driverId: s.driver.id,
+            detail: `${s.driver.name} wurde kein Block zugeteilt.`,
+          }
+        : {
+            kind: 'driver_without_range',
+            driverId: s.driver.id,
+            // The range's own problem words, so the operator reads what is
+            // wrong with the data rather than that something is.
+            detail: `${s.driver.name} hat keinen verwendbaren Stundenrahmen`
+                  + `${s.range.problems.length > 0 ? `: ${s.range.problems.join(', ')}` : ''}`
+                  + ' und wurde deshalb nicht eingeplant.',
+          },
+    );
+  }
+
   for (const r of input.rejectedTrips ?? []) {
     warnings.push({ kind: 'rejected_trip', tripId: r.tripId, detail: `${r.problem}: ${r.detail}` });
   }

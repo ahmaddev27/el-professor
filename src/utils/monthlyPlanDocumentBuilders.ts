@@ -83,6 +83,17 @@ const SHIFT_COLUMN_PAIRS = 3;
 const EMPTY = null;
 
 /**
+ * Hours inside a sentence, where a blank is a hole rather than an empty cell.
+ *
+ * `formatPlanHours` answers `''` for zero on purpose: a Stundennachweis's
+ * columns stay blank on an unworked day instead of printing `0,00` thirty times.
+ * That is right for a cell and wrong for prose, so the sentence says `0,00`.
+ */
+function hoursInSentence(minutes: number): string {
+  return formatPlanHours(minutes) || '0,00';
+}
+
+/**
  * `YYYY-MM-DD` as `DD.MM.YYYY`.
  *
  * A re-ordering of the builder's own `dateKey`, never a `Date` and never a
@@ -329,8 +340,24 @@ function stundennachweisSection(sheet: MonthlyPlanStundennachweis): DocumentPrev
  * uncompressed figure. Saying so is the difference between a merged column and a
  * lost shift.
  */
-function stundennachweisFootnotes(sheet: MonthlyPlanStundennachweis): string[] {
+function stundennachweisFootnotes(
+  sheet: MonthlyPlanStundennachweis,
+  set: MonthlyPlanStundennachweisSet,
+): string[] {
   const notes = sheet.problems.map(p => p.detail);
+
+  // Who is NOT in the picker, said on the document rather than left to be
+  // noticed. Filtering a driver out of the list without saying so turns one
+  // false claim (an empty sheet) into another (a month with fewer drivers than
+  // it has), and §14's rule is that every case appears as a named diagnostic.
+  const withoutWork = set.drivers.filter(d => d.assignedBlockCount === 0);
+  if (withoutWork.length > 0) {
+    notes.push(
+      `Für ${withoutWork.length} Fahrer der Planung entsteht kein Stundennachweis, `
+      + 'weil ihnen kein Block zugeteilt wurde: '
+      + `${withoutWork.map(d => d.driverName).join(', ')}.`,
+    );
+  }
 
   const compressed = sheet.days.filter(d => d.compressed).length;
   if (compressed > 0) {
@@ -365,24 +392,36 @@ const stundennachweisBuilder: MonthlyPlanDocumentBuilder = {
   subjects(plan: StoredMonthlyPlan): DocumentSubject[] {
     const set = stundennachweisSet(plan, new Date(0));
     if (set.withheld) return [];
+    // `exportable` answers "are this driver's figures trustworthy", not "does
+    // this driver have any". A driver the plan gave no block is exportable by
+    // that test and was offered a sheet of 31 empty days with a working
+    // download — and **an empty Stundennachweis is a claim that the driver
+    // worked no hours**, which is CLAUDE.md's own rule about an empty list and a
+    // zero total. Measured on staging: two of six drivers, both excluded for a
+    // configuration reason, both with a downloadable PDF.
     return set.drivers
-      .filter(d => d.exportable)
+      .filter(d => d.exportable && d.assignedBlockCount > 0)
       .map(d => ({ id: d.driverId, label: d.driverName }));
   },
 
   preview(request): DocumentPreview {
     const set = stundennachweisSet(request.plan, request.generatedAt);
     const sheet = stundennachweisFor(set, request.subjectId);
-    const footnotes = stundennachweisFootnotes(sheet);
+    const footnotes = stundennachweisFootnotes(sheet, set);
 
     return {
       header: [
         PROPOSAL_NOTICE,
         set.noticeLine,
         `${sheet.driverName} · ${set.monthLabel}`,
+        // `formatPlanHours` answers an empty string for zero — deliberately, so a
+        // sheet's cells stay blank rather than printing `0,00` on every unworked
+        // day. In a sentence that reads as a hole: "0 Block/Blöcke · Std.
+        // geplant, davon Std. Fahrzeit" is what a driver with no blocks got. A
+        // sentence needs a number, so it gets one.
         `${sheet.assignedBlockCount} Block/Blöcke · `
-        + `${formatPlanHours(sheet.planBlockMinutes)} Std. geplant, davon `
-        + `${formatPlanHours(sheet.planRideMinutes)} Std. Fahrzeit`,
+        + `${hoursInSentence(sheet.planBlockMinutes)} Std. geplant, davon `
+        + `${hoursInSentence(sheet.planRideMinutes)} Std. Fahrzeit`,
       ],
       sections: [stundennachweisSection(sheet)],
       footnotes: footnotes.length > 0 ? footnotes : undefined,
@@ -520,12 +559,14 @@ function payrollSummary(request: MonthlyPlanDocumentRequest): PayrollSummary {
   return buildPayrollSummary({
     month: request.plan.month,
     year: request.plan.year,
-    // A plan carries `company_id` and no name, and this adapter may not read the
-    // database for one. The builder prints `Unternehmen: —` for an empty name,
-    // which is what it is for; a uuid in that line would be read as the company's
-    // name by the one recipient least able to tell, exactly as its own
-    // `personalnummer` note says of the employee-number column.
-    companyName: '',
+    // The company's own name, which a plan does not carry — the screen reads it
+    // from `CompanySettingsContext` and passes it in. Without it the builder
+    // printed `Unternehmen: —` on a document that goes to a Steuerberater, which
+    // is honest but useless. It still prints the dash when the name is missing:
+    // a uuid in that line would be read as the company's name by the one
+    // recipient least able to tell, exactly as its own `personalnummer` note
+    // says of the employee-number column.
+    companyName: request.companyName ?? '',
     drivers: toPayrollDrivers(request.plan),
     hoursByDriverId: computePlanDriverHours(toPayrollBlocks(request.plan)),
     generatedAtMs: request.generatedAt.getTime(),

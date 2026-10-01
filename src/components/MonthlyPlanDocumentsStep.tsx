@@ -153,6 +153,15 @@ export interface MonthlyPlanDocumentsStepProps {
   builders?: MonthlyPlanDocumentBuilders;
   /** Injected so a preview and its file carry the same date. */
   generatedAt?: Date;
+  /**
+   * The company's own name, for the payroll summary's letterhead.
+   *
+   * A prop and not a context read inside the builder, for the reason the module
+   * header gives: a document builder reads the stored plan and nothing else, so
+   * the one figure that is not in the plan is handed to it rather than fetched
+   * behind it.
+   */
+  companyName?: string;
 }
 
 export default function MonthlyPlanDocumentsStep({
@@ -162,6 +171,7 @@ export default function MonthlyPlanDocumentsStep({
   onBack,
   builders = MONTHLY_PLAN_DOCUMENT_BUILDERS,
   generatedAt,
+  companyName,
 }: MonthlyPlanDocumentsStepProps) {
   const { t } = useTranslation();
 
@@ -190,7 +200,7 @@ export default function MonthlyPlanDocumentsStep({
       setBusy(busyKey);
       setFailure(prev => ({ ...prev, [documentKind]: undefined }));
       try {
-        const file = await builder.file({ plan, subjectId, generatedAt: stamp }, loaded);
+        const file = await builder.file({ plan, subjectId, generatedAt: stamp, companyName }, loaded);
         // The builder names its own file; this is the fallback for one that does
         // not, and it carries the marker either way.
         triggerDownload(
@@ -258,6 +268,7 @@ export default function MonthlyPlanDocumentsStep({
                   loadFailed={loadFailed}
                   builder={builders[documentKind]}
                   generatedAt={stamp}
+                  companyName={companyName}
                   subjectId={subjectByKind[documentKind]}
                   onSubjectChange={value =>
                     setSubjectByKind(prev => ({ ...prev, [documentKind]: value }))
@@ -288,6 +299,7 @@ interface DocumentTabProps {
   loadFailed: boolean;
   builder: MonthlyPlanDocumentBuilder | undefined;
   generatedAt: Date;
+  companyName: string | undefined;
   subjectId: string | undefined;
   onSubjectChange: (value: string) => void;
   busy: string | null;
@@ -324,6 +336,7 @@ function DocumentTab({
   loadFailed,
   builder,
   generatedAt,
+  companyName,
   subjectId,
   onSubjectChange,
   busy,
@@ -370,7 +383,7 @@ function DocumentTab({
     }
     let cancelled = false;
     setLoaded({ state: 'pending' });
-    load.call(builder, { plan, generatedAt })
+    load.call(builder, { plan, generatedAt, companyName })
       .then(value => { if (!cancelled) setLoaded({ state: 'ready', value }); })
       .catch((error: unknown) => {
         if (cancelled) return;
@@ -380,7 +393,7 @@ function DocumentTab({
         });
       });
     return () => { cancelled = true; };
-  }, [load, builder, plan, generatedAt]);
+  }, [load, builder, plan, generatedAt, companyName]);
 
   const blocked = documentBlockReason({ plan, loadFailed, confirmable, builder, subjects });
 
@@ -405,14 +418,14 @@ function DocumentTab({
     try {
       return {
         document: builder.preview(
-          { plan, subjectId: activeSubject?.id, generatedAt },
+          { plan, subjectId: activeSubject?.id, generatedAt, companyName },
           loaded.state === 'ready' ? loaded.value : undefined,
         ),
       };
     } catch (error) {
       return { error: error instanceof Error ? error.message : String(error) };
     }
-  }, [blocked, builder, plan, activeSubject, generatedAt, loaded]);
+  }, [blocked, builder, plan, activeSubject, generatedAt, companyName, loaded]);
 
   const busyKey = `${documentKind}:${activeSubject?.id ?? 'all'}`;
   const previewError = preview !== null && 'error' in preview ? preview.error : null;

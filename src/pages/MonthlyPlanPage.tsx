@@ -60,6 +60,7 @@ import {
   type PlanRowStatus,
   type PlanSummaryRow,
 } from '../utils/monthlyPlanScreens';
+import { useCompanySettings } from '../contexts/CompanySettingsContext';
 import { storedPlanFromGenerated } from '../utils/monthlyPlanDocuments';
 import {
   savePlanAndConfirm,
@@ -340,6 +341,19 @@ export default function MonthlyPlanPage() {
    * The browser walk on staging was written to catch exactly this, and did.
    */
   const [savedPlanId, setSavedPlanId] = useState<string | null>(null);
+
+  /**
+   * The company's own name for the payroll summary's letterhead.
+   *
+   * `legal_company_name` first: that document goes to a Steuerberater, who needs
+   * the registered name rather than the trading one. The plan itself carries no
+   * name — the §13 snapshot is about drivers — so this is the one figure on
+   * those documents that does not come from it, and it is passed in rather than
+   * fetched inside a builder, which reads the stored plan and nothing else.
+   */
+  const { settings: companySettings } = useCompanySettings();
+  const companyName =
+    companySettings?.legal_company_name?.trim() || companySettings?.company_name?.trim() || undefined;
   const [plan, setPlan] = useState<GeneratedPlan | null>(null);
 
   // ── Screen 1: the imports, and the months they make plannable ─────────────
@@ -1323,6 +1337,7 @@ export default function MonthlyPlanPage() {
       {step === 4 && storedPlan ? (
         <MonthlyPlanDocumentsStep
           plan={storedPlan}
+          companyName={companyName}
           confirmable={plan?.validation.confirmable === true}
           loadFailed={anyReadFailed}
           onBack={() => setStep(3)}
