@@ -231,7 +231,6 @@ function driver(over: {
   minSalary?: number | null;
   maxSalary?: number | null;
   hourlyRate?: number | null;
-  maxMonthlyHours?: number | null;
 }): PlanDriverInput {
   return {
     id: over.id,
@@ -240,7 +239,6 @@ function driver(over: {
     minSalary: over.minSalary === undefined ? 1950 : over.minSalary,
     maxSalary: over.maxSalary === undefined ? 2100 : over.maxSalary,
     hourlyRate: over.hourlyRate === undefined ? 14 : over.hourlyRate,
-    maxMonthlyHours: over.maxMonthlyHours,
   };
 }
 
@@ -249,7 +247,6 @@ function state(d: PlanDriverInput, minutes: number, blocks = 2, trips = 5): Driv
     minSalary: d.minSalary,
     maxSalary: d.maxSalary,
     hourlyRate: d.hourlyRate,
-    maxMonthlyHours: d.maxMonthlyHours,
     isOwner: d.isOwner,
   });
   return {

@@ -108,26 +108,45 @@ describe('computeHoursRange — §14 edge cases', () => {
   });
 });
 
-describe('computeHoursRange — the effective cap (§5)', () => {
-  it('takes the explicit monthly cap when it is the more restrictive', () => {
-    const r = computeHoursRange({ ...base, maxMonthlyHours: 120 });
+describe('computeHoursRange — the cap has one source (§5)', () => {
+  /**
+   * The owner's decision of 01.10.2026: the plan works from **salaries**, not
+   * hours. `max_monthly_hours` is gone, so the cap IS the salary-derived
+   * maximum and there is no second bound to be more restrictive than. These
+   * three assertions replace the three that measured the old two-source rule.
+   */
+  it('caps a usable range at max_salary / hourly_rate, and says so', () => {
+    const r = computeHoursRange(base);
     expect(r.maxHours).toBe(150);
-    expect(r.effectiveMaxHours).toBe(120);
-    expect(r.effectiveMaxSource).toBe('explicit_cap');
-  });
-
-  it('keeps the salary maximum when the explicit cap is looser', () => {
-    const r = computeHoursRange({ ...base, maxMonthlyHours: 200 });
     expect(r.effectiveMaxHours).toBe(150);
     expect(r.effectiveMaxSource).toBe('salary');
   });
 
-  it('ignores an explicit cap of zero rather than capping the driver at nothing', () => {
-    // `max_monthly_hours` is nullable with no CHECK. A stored 0 must not mean
-    // "this driver may work no hours" — that is indistinguishable from unset.
-    const r = computeHoursRange({ ...base, maxMonthlyHours: 0 });
-    expect(r.effectiveMaxHours).toBe(150);
-    expect(r.effectiveMaxSource).toBe('salary');
+  it('is the same figure as maxHours, always, for a usable range', () => {
+    // Above the base's own minimum of 1950, or the range is rightly refused for
+    // `min_salary_above_max` and the assertion would be about that instead.
+    for (const maxSalary of [1950, 2100, 3000, 9999]) {
+      const r = computeHoursRange({ ...base, maxSalary });
+      expect(r.usable).toBe(true);
+      expect(r.effectiveMaxHours).toBe(r.maxHours);
+      expect(r.effectiveMaxSource).toBe('salary');
+    }
+  });
+
+  /**
+   * An unusable range now has **no cap at all** rather than falling back to a
+   * stored ceiling. That is the honest answer: nothing is known about this
+   * driver's bounds, and `usable: false` is what the assigner reads to refuse
+   * them — planning against a bound nobody set would be worse than refusing.
+   */
+  it('reports no ceiling when the range cannot be computed', () => {
+    for (const bad of [{ hourlyRate: 0 }, { hourlyRate: null }, { minSalary: 2200, maxSalary: 1400 }]) {
+      const r = computeHoursRange({ ...base, ...bad });
+      expect(r.usable).toBe(false);
+      expect(r.effectiveMaxHours).toBeNull();
+      expect(r.effectiveMaxSource).toBe('none');
+      expect(r.problems.length).toBeGreaterThan(0);
+    }
   });
 });
 
@@ -145,9 +164,10 @@ describe('computeHoursRange — the owner (§8)', () => {
     expect(r.maxHours).toBe(150);
   });
 
-  it('is not capped by an explicit monthly maximum either', () => {
-    const r = computeHoursRange({ ...base, maxMonthlyHours: 100, isOwner: true });
-    expect(r.effectiveMaxHours).toBeNull();
+  it('has no ceiling whatever the salary says', () => {
+    for (const maxSalary of [1950, 2100, 9999]) {
+      expect(computeHoursRange({ ...base, maxSalary, isOwner: true }).effectiveMaxHours).toBeNull();
+    }
   });
 });
 

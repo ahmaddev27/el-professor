@@ -60,6 +60,7 @@ import {
   type PlanRowStatus,
   type PlanSummaryRow,
 } from '../utils/monthlyPlanScreens';
+import { useCompanySettings } from '../contexts/CompanySettingsContext';
 import { storedPlanFromGenerated } from '../utils/monthlyPlanDocuments';
 import {
   savePlanAndConfirm,
@@ -108,10 +109,13 @@ const SAVE_REASON_KEYS: Partial<Record<MonthlyPlanConfirmReason, TranslationKey>
  *
  * Two consequences worth stating, because they are easy to undo:
  *
- *   - `drivers.target_monthly_hours` is **never read**. §5 forbids it in this
- *     feature as a target, a constraint, a sort key and a displayed figure, and
- *     `PlanDriverInput` has no field for it, so this file cannot pass it even by
- *     accident. There is deliberately no `Monatsziel` column.
+ *   - **The plan works from salaries, not hours** (owner's decision,
+ *     01.10.2026). Neither `drivers.target_monthly_hours` nor
+ *     `drivers.max_monthly_hours` is read: a driver's range is
+ *     `min_salary / hourly_rate` to `max_salary / hourly_rate` and nothing
+ *     narrows it. `PlanDriverInput` has no field for either, so this file cannot
+ *     pass one even by accident, and there is deliberately no `Monatsziel`
+ *     column and no explicit-cap marker.
  *   - **Nothing here writes `fahrtenbuch_trips`.** This plans a month as a
  *     proposal; §2's "create a planning representation and leave the original
  *     data alone" is satisfied by never issuing a write at all. The rides are
@@ -340,6 +344,19 @@ export default function MonthlyPlanPage() {
    * The browser walk on staging was written to catch exactly this, and did.
    */
   const [savedPlanId, setSavedPlanId] = useState<string | null>(null);
+
+  /**
+   * The company's own name for the payroll summary's letterhead.
+   *
+   * `legal_company_name` first: that document goes to a Steuerberater, who needs
+   * the registered name rather than the trading one. The plan itself carries no
+   * name — the §13 snapshot is about drivers — so this is the one figure on
+   * those documents that does not come from it, and it is passed in rather than
+   * fetched inside a builder, which reads the stored plan and nothing else.
+   */
+  const { settings: companySettings } = useCompanySettings();
+  const companyName =
+    companySettings?.legal_company_name?.trim() || companySettings?.company_name?.trim() || undefined;
   const [plan, setPlan] = useState<GeneratedPlan | null>(null);
 
   // ── Screen 1: the imports, and the months they make plannable ─────────────
@@ -578,7 +595,6 @@ export default function MonthlyPlanPage() {
             minSalary: d.planning_min_salary,
             maxSalary: d.planning_max_salary,
             hourlyRate: d.planning_hourly_rate,
-            maxMonthlyHours: d.max_monthly_hours,
             planningPriority: extra?.planning_priority ?? null,
             canCoverOtherDrivers: extra?.can_cover_other_drivers ?? null,
           };
@@ -805,16 +821,10 @@ export default function MonthlyPlanPage() {
         kind: 'number',
         hideBelow: 'md',
         value: row => row.effectiveMaxHours,
-        cell: row => (
-          <span className="tabular-nums">
-            {hoursText(row.effectiveMaxHours)}
-            {row.effectiveMaxSource === 'explicit_cap' ? (
-              <span className="ml-1 text-[12px] text-fg-muted" title={t('mplan.summary.capFromHours')}>
-                *
-              </span>
-            ) : null}
-          </span>
-        ),
+        // The cap has one source now, so there is nothing to mark: it is always
+        // `max_salary / hourly_rate` (owner's decision, 01.10.2026 — the plan
+        // works from salaries, not hours).
+        cell: row => <span className="tabular-nums">{hoursText(row.effectiveMaxHours)}</span>,
       },
       {
         id: 'deviation',
@@ -1323,6 +1333,7 @@ export default function MonthlyPlanPage() {
       {step === 4 && storedPlan ? (
         <MonthlyPlanDocumentsStep
           plan={storedPlan}
+          companyName={companyName}
           confirmable={plan?.validation.confirmable === true}
           loadFailed={anyReadFailed}
           onBack={() => setStep(3)}

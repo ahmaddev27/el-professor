@@ -74,7 +74,6 @@ export interface PlanDriverInput {
   minSalary: number | null;
   maxSalary: number | null;
   hourlyRate: number | null;
-  maxMonthlyHours?: number | null;
   /**
    * `drivers.planning_priority` (default 100). §7: "use the planning priority
    * as a deciding factor". The column has no documented direction anywhere in
@@ -341,7 +340,6 @@ export function assignBlocks(
       minSalary: driver.minSalary,
       maxSalary: driver.maxSalary,
       hourlyRate: driver.hourlyRate,
-      maxMonthlyHours: driver.maxMonthlyHours,
       isOwner: driver.isOwner,
     };
     const range = computeHoursRange(rangeInput);

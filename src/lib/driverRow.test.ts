@@ -36,8 +36,10 @@ describe('mapDriverRow', () => {
       gender: null,
       employment_type: 'employee',
       driver_usage_type: 'regular',
-      target_monthly_hours: null,
-      max_monthly_hours: null,
+      // The two monthly-hours columns are gone from the mapping: the plan works
+      // from salaries since 01.10.2026 and nothing reads them. The assertion is
+      // exact (`toEqual`), so their absence here is what pins the removal — if
+      // one came back, this test would fail and say so.
       planning_target_salary: null,
       planning_min_salary: null,
       planning_max_salary: null,

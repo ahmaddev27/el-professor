@@ -33,7 +33,6 @@ function driver(p: Partial<PlanDriverInput> & { id: string }): PlanDriverInput {
     minSalary: 'minSalary' in p ? p.minSalary! : 1950,
     maxSalary: 'maxSalary' in p ? p.maxSalary! : 2100,
     hourlyRate: 'hourlyRate' in p ? p.hourlyRate! : 14,
-    maxMonthlyHours: p.maxMonthlyHours,
     planningPriority: p.planningPriority,
     canCoverOtherDrivers: p.canCoverOtherDrivers,
   };
@@ -117,13 +116,19 @@ describe('hard rule 3 — the cap prevents assignment, and the owner is exempt (
     expect(r.unassigned[0].refusals[0].refusal).toBe('exceeds_hours_cap');
   });
 
-  it('the explicit monthly cap binds when it is the tighter one', () => {
+  /**
+   * The cap still binds — it just has one source now. Since 01.10.2026 the plan
+   * works from salaries, so a driver's ceiling is `max_salary / hourly_rate` and
+   * `max_monthly_hours` is gone. 140 € at 20 €/h is 7 hours, so the second
+   * four-hour block is one hour too many.
+   */
+  it('the salary-derived cap binds, and the block past it is refused', () => {
     const r = plan(
       [
         dayBlock('a', 'car-A', '2026-10-05', '08:00', '12:00'),
         dayBlock('b', 'car-A', '2026-10-06', '08:00', '12:00'),
       ],
-      [driver({ id: 'ali', maxMonthlyHours: 7 })], // salary cap is 150 h
+      [driver({ id: 'ali', minSalary: 20, maxSalary: 140, hourlyRate: 20 })],
     );
     expect(r.assignments).toHaveLength(1);
     expect(r.unassigned[0].refusals[0].refusal).toBe('exceeds_hours_cap');

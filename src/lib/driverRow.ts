@@ -34,8 +34,6 @@ export interface DriverRow {
   gender?: string | null;
   employment_type?: string | null;
   driver_usage_type?: string | null;
-  target_monthly_hours?: number | null;
-  max_monthly_hours?: number | null;
   planning_target_salary?: number | null;
   planning_min_salary?: number | null;
   planning_max_salary?: number | null;
@@ -64,8 +62,6 @@ export function mapDriverRow(d: DriverRow): Driver {
     employment_type: (d.employment_type ?? 'employee') as 'employee' | 'company_owner',
     // Planning fields
     driver_usage_type:      (d.driver_usage_type ?? 'regular') as 'regular' | 'coverage_only',
-    target_monthly_hours:   d.target_monthly_hours ?? null,
-    max_monthly_hours:      d.max_monthly_hours ?? null,
     planning_target_salary: d.planning_target_salary ?? null,
     planning_min_salary:    d.planning_min_salary ?? null,
     planning_max_salary:    d.planning_max_salary ?? null,
