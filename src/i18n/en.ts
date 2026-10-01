@@ -5795,4 +5795,14 @@ export const en: PartialDictionary = {
 
   // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
   'mplan.unitHours': 'hrs',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'mplan.blocks.minimum':         'Minimum block length: {minutes} minutes.',
+  'mplan.blocks.stillShort':      '{count} block(s) stay under {minutes} minutes: that vehicle has no other block on that day to merge with. The times are never padded.',
+  'mplan.blocks.stillShortTitle': 'Some blocks remain shorter',
+  'mplan.minBlock.hint':          'Shorter blocks are merged with a neighbouring block of the same vehicle on the same day. 0 = no minimum.',
+  'mplan.minBlock.invalid':       'Enter a whole number from 0 upwards.',
+  'mplan.minBlock.label':         'Minimum block length (minutes)',
+  'mplan.regen.searched':         '{tried} variants examined, {equal} of them equally good.',
+  'mplan.regen.searchedNothing':  '{tried} variants examined — none was better, or equally good and different. The constraints allow only this one distribution.',
 };

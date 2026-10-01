@@ -375,7 +375,13 @@ describe('buildBlocks — §14 edge cases, all surfaced', () => {
 
   it('no rides gives no blocks and no problems', () => {
     const r = buildBlocks([], { switchMinutes: 30 });
-    expect(r).toEqual({ blocks: [], rejected: [], overlaps: [], canceledCount: 0 });
+    expect(r).toEqual({
+      blocks: [], rejected: [], overlaps: [], canceledCount: 0,
+      // `shortBlocks` is empty for a build with no minimum asked for, which is
+      // what `switchMinutes` alone means. An exact deep-equal is deliberate here:
+      // it is what catches a key added to the result and left unreported.
+      shortBlocks: [],
+    });
   });
 });
 
@@ -400,5 +406,127 @@ describe('buildBlocks — determinism', () => {
     // §2: the planning copy starts with no driver assigned.
     expect(r.blocks[0].driverId).toBeNull();
     expect(r.blocks[0].driverName).toBeNull();
+  });
+});
+
+// ─── The minimum block length (owner, 01.10.2026) ─────────────────────────
+//
+// The gap rule alone cuts a quiet day into fifteen-minute blocks, and a
+// fifteen-minute block is not a shift. `minBlockMinutes` joins a short block to a
+// neighbour of the SAME VEHICLE on the SAME LOCAL DAY — it never pads, never moves
+// a ride and never mixes vehicles, so no working time is invented.
+//
+// The figure that must survive every one of these: `rideMinutes`. A merge absorbs
+// a gap into `spanMinutes` and the rides are unchanged, which is the distinction
+// §3 keeps the two numbers apart for.
+
+describe('buildBlocks — the minimum block length', () => {
+  /** Total ride minutes across a build, the quantity a merge may never change. */
+  const totalRideMinutes = (blocks: { rideMinutes: number }[]) =>
+    blocks.reduce((sum, b) => sum + b.rideMinutes, 0);
+
+  it('merges a short block into its nearer neighbour, and only the span grows', () => {
+    // 08:00–09:00 (60), gap 40, 09:40–09:50 (10), gap 120, 11:50–13:30 (100).
+    // With a 30-minute switch all three are separate blocks; the middle one is
+    // 10 minutes and its nearer neighbour is the first. The THIRD is 100 minutes
+    // on purpose — the first draft of this test made it 60, which is also under
+    // the minimum, so the pass merged all three and the test proved nothing about
+    // which neighbour was chosen.
+    const rides = [
+      trip({ id: 'a', startTime: '08:00', endTime: '09:00' }),
+      trip({ id: 'b', startTime: '09:40', endTime: '09:50' }),
+      trip({ id: 'c', startTime: '11:50', endTime: '13:30' }),
+    ];
+    const plain = buildBlocks(rides, { switchMinutes: 30 });
+    expect(plain.blocks).toHaveLength(3);
+
+    const r = buildBlocks(rides, { switchMinutes: 30, minBlockMinutes: 90 });
+    expect(r.blocks).toHaveLength(2);
+
+    // 08:00–09:50 is 110 minutes of span holding 70 minutes of rides — the 40
+    // minutes it absorbed are idle, and visibly so.
+    const first = r.blocks[0];
+    expect(first.spanMinutes).toBe(110);
+    expect(first.rideMinutes).toBe(70);
+    expect(first.trips.map(t => t.tripId)).toEqual(['a', 'b']);
+
+    // Nothing was invented and nothing was lost.
+    expect(totalRideMinutes(r.blocks)).toBe(totalRideMinutes(plain.blocks));
+    expect(r.shortBlocks).toEqual([]);
+  });
+
+  it('never merges two vehicles, however short the blocks are', () => {
+    // §3's first rule. Two ten-minute runs an hour apart, different cars.
+    const r = buildBlocks(
+      [
+        trip({ id: 'a', vehicleId: 'car-A', startTime: '08:00', endTime: '08:10' }),
+        trip({ id: 'b', vehicleId: 'car-B', startTime: '09:00', endTime: '09:10' }),
+      ],
+      { switchMinutes: 30, minBlockMinutes: 90 },
+    );
+    expect(r.blocks).toHaveLength(2);
+    expect(r.blocks.map(b => b.vehicleId).sort()).toEqual(['car-A', 'car-B']);
+    // Both stay short, and both are reported rather than padded.
+    expect(r.shortBlocks.map(b => b.spanMinutes)).toEqual([10, 10]);
+  });
+
+  it('never merges across the local day boundary', () => {
+    // Monday's last ten minutes and Tuesday's first, one car, a gap of hours.
+    // Merging them would make a block that is not a shift, and across a DST
+    // boundary the gap in hours would not even be the gap on the clock.
+    const r = buildBlocks(
+      [
+        trip({ id: 'a', tripDate: '2026-10-05', startTime: '22:00', endTime: '22:10' }),
+        trip({ id: 'b', tripDate: '2026-10-06', startTime: '06:00', endTime: '06:10' }),
+      ],
+      { switchMinutes: 30, minBlockMinutes: 90 },
+    );
+    expect(r.blocks).toHaveLength(2);
+    expect(r.shortBlocks).toHaveLength(2);
+  });
+
+  it('leaves a lone short block short, and says so', () => {
+    const r = buildBlocks(
+      [trip({ id: 'a', startTime: '08:00', endTime: '08:12' })],
+      { switchMinutes: 30, minBlockMinutes: 90 },
+    );
+    expect(r.blocks).toHaveLength(1);
+    expect(r.blocks[0].spanMinutes).toBe(12);
+    expect(r.shortBlocks).toEqual([{ blockId: r.blocks[0].id, spanMinutes: 12 }]);
+  });
+
+  it('asks for no minimum when none is given, and reports none', () => {
+    // The negative control for the whole feature: without the option the build is
+    // exactly §3's, which is what keeps every other test in this file meaningful.
+    const rides = [
+      trip({ id: 'a', startTime: '08:00', endTime: '08:10' }),
+      trip({ id: 'b', startTime: '09:00', endTime: '09:10' }),
+    ];
+    for (const options of [
+      { switchMinutes: 30 },
+      { switchMinutes: 30, minBlockMinutes: 0 },
+      { switchMinutes: 30, minBlockMinutes: undefined },
+    ]) {
+      const r = buildBlocks(rides, options);
+      expect(r.blocks).toHaveLength(2);
+      expect(r.shortBlocks).toEqual([]);
+    }
+  });
+
+  it('keeps merging until nothing on the day is short, and terminates', () => {
+    // Four ten-minute runs, twenty minutes apart, one car, one day. Each merge
+    // makes the result longer, so the pass has to run more than once.
+    const rides = ['08:00', '08:30', '09:00', '09:30'].map((from, i) =>
+      trip({
+        id: `r${i}`,
+        startTime: from,
+        endTime: `${from.slice(0, 2)}:${String(Number(from.slice(3)) + 10).padStart(2, '0')}`,
+      }));
+    const r = buildBlocks(rides, { switchMinutes: 20, minBlockMinutes: 90 });
+    expect(r.blocks).toHaveLength(1);
+    expect(r.blocks[0].spanMinutes).toBe(100);   // 08:00 → 09:40
+    expect(r.blocks[0].rideMinutes).toBe(40);    // four ten-minute rides
+    expect(r.blocks[0].trips).toHaveLength(4);
+    expect(r.shortBlocks).toEqual([]);
   });
 });

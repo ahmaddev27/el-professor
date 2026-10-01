@@ -45,6 +45,16 @@
  * "Datum der Fahrt", which the Uber export dates a day early for a ride starting
  * just after midnight.
  */
+import { localDateKey } from '../localDayWindow';
+
+/**
+ * The minimum block length the screen starts with, in minutes.
+ *
+ * 90, which is the figure the owner named on 01.10.2026 ("not shorter than
+ * 1.5 hour"). It is a default and not a rule: the control on screen 2 sets it per
+ * run, and 0 there means no minimum at all.
+ */
+export const DEFAULT_MIN_BLOCK_MINUTES = 90;
 
 /** Where a ride's instants came from, so nothing is silently guessed. */
 export type TripTimeSource = 'instants' | 'date_and_clock' | 'unusable';
@@ -133,6 +143,23 @@ export interface BuildBlocksOptions {
    * value once disabled the gate it was meant to enforce.
    */
   switchMinutes: number;
+  /**
+   * The shortest block the screen may offer a driver, in minutes. Omitted or 0
+   * means no minimum, which is what §3 alone produces.
+   *
+   * The owner asked for this on 01.10.2026: the gap rule alone cuts a quiet day
+   * into fifteen-minute blocks, and a fifteen-minute block is not a shift anybody
+   * can be sent out on. It is a control on screen 1, not a constant, because the
+   * right figure is a fleet's own — the default is 90.
+   *
+   * **It merges; it never pads.** A short block is joined to a neighbouring block
+   * of the SAME VEHICLE on the SAME LOCAL DAY, so no working time is invented and
+   * no ride moves. What grows is the block's `spanMinutes` — the car is booked
+   * across the gap it absorbed — while `rideMinutes` is the same sum it always
+   * was. That is exactly the distinction §3 keeps the two figures apart for, and
+   * the difference shows on screen as idle time.
+   */
+  minBlockMinutes?: number;
 }
 
 export interface BuildBlocksResult {
@@ -141,6 +168,13 @@ export interface BuildBlocksResult {
   overlaps: VehicleOverlap[];
   /** Rides excluded because `is_canceled` — counted, not a problem. */
   canceledCount: number;
+  /**
+   * Blocks still under `minBlockMinutes` after the merge pass, with the length
+   * they have. Surfaced rather than padded or dropped (§14): a car that drove
+   * once for twelve minutes on a day it did nothing else has a twelve-minute
+   * block, and there is nothing on that day to merge it with. The screen says so.
+   */
+  shortBlocks: { blockId: string; spanMinutes: number }[];
 }
 
 const MS_PER_MINUTE = 60_000;
@@ -263,6 +297,13 @@ export function buildBlocks(
 ): BuildBlocksResult {
   const switchMinutes = Number.isFinite(options.switchMinutes) && options.switchMinutes >= 0
     ? Math.floor(options.switchMinutes)
+    : 0;
+  // Same rule as `switchMinutes`: a value is read as given, and only a missing or
+  // nonsensical one falls back — to 0, "no minimum", never to the default 90. A
+  // default written for an omitted value is how a gate gets disabled silently.
+  const minBlockMinutes = Number.isFinite(options.minBlockMinutes ?? NaN)
+    && (options.minBlockMinutes as number) > 0
+    ? Math.floor(options.minBlockMinutes as number)
     : 0;
 
   const rejected: RejectedTrip[] = [];
@@ -389,11 +430,122 @@ export function buildBlocks(
     flush();
   }
 
+  const merged = minBlockMinutes > 0 ? mergeShortBlocks(blocks, minBlockMinutes) : blocks;
+
   // Chronological across vehicles, so the screen reads as a month rather than as
   // a list of cars. Tie-broken on the block id, which already carries the vehicle.
-  blocks.sort((a, b) => a.startMs - b.startMs || a.id.localeCompare(b.id));
+  merged.sort((a, b) => a.startMs - b.startMs || a.id.localeCompare(b.id));
 
-  return { blocks, rejected, overlaps, canceledCount };
+  const shortBlocks = minBlockMinutes > 0
+    ? merged
+        .filter(block => block.spanMinutes < minBlockMinutes)
+        .map(block => ({ blockId: block.id, spanMinutes: block.spanMinutes }))
+    : [];
+
+  return { blocks: merged, rejected, overlaps, canceledCount, shortBlocks };
+}
+
+/**
+ * Joins blocks shorter than `minBlockMinutes` to a neighbour, within one vehicle
+ * and one local day.
+ *
+ * ## What bounds it, and why those bounds
+ *
+ * - **One vehicle.** §3's first rule: two vehicles never share a block. Grouping
+ *   by vehicle is how that stays true by construction rather than by a check.
+ * - **One local day.** Without it the pass would join a car's last ride of Monday
+ *   to its first of Tuesday across a nine-hour gap, which is not a shift, and it
+ *   would do so across a DST boundary where the gap in hours is not the gap in
+ *   clock time. The day is the local calendar day of the block's START, read from
+ *   `localDateKey`, which is the same instant-to-day rule the rest of the engine
+ *   uses. A block that itself crosses midnight belongs to the day it started.
+ * - **The smaller gap first.** The shortest block is merged with whichever
+ *   neighbour it sits closer to, so the absorbed idle time is the least available.
+ *   A tie goes to the earlier neighbour, so the result does not depend on
+ *   iteration order.
+ *
+ * ## No maximum, deliberately
+ *
+ * Merging can produce a long block — a quiet day whose three short runs are
+ * hours apart becomes one long, mostly idle block. That is refused where it
+ * should be: §7's daily maximum and working-time window are checked per driver
+ * at assignment, where a refusal is shown with its reason. Capping it here would
+ * hide the same outcome as a silently short block instead.
+ *
+ * Pure, and it returns new blocks rather than mutating: the ids of merged blocks
+ * disappear, and a caller holding one would otherwise read a block that no longer
+ * describes the month.
+ */
+function mergeShortBlocks(blocks: PlanBlock[], minBlockMinutes: number): PlanBlock[] {
+  const byVehicleDay = new Map<string, PlanBlock[]>();
+  for (const block of blocks) {
+    const key = `${block.vehicleId}|${localDateKey(block.startMs)}`;
+    const group = byVehicleDay.get(key);
+    if (group) group.push(block);
+    else byVehicleDay.set(key, [block]);
+  }
+
+  const out: PlanBlock[] = [];
+
+  for (const group of byVehicleDay.values()) {
+    let current = [...group].sort((a, b) => a.startMs - b.startMs || a.id.localeCompare(b.id));
+
+    // Each pass merges exactly one pair, so the loop cannot run more times than
+    // there are blocks in the group.
+    for (let guard = current.length; guard > 0 && current.length > 1; guard--) {
+      let shortestIndex = -1;
+      for (let i = 0; i < current.length; i++) {
+        if (current[i].spanMinutes >= minBlockMinutes) continue;
+        if (shortestIndex < 0 || current[i].spanMinutes < current[shortestIndex].spanMinutes) {
+          shortestIndex = i;
+        }
+      }
+      if (shortestIndex < 0) break; // nothing left under the minimum
+
+      const before = shortestIndex > 0 ? current[shortestIndex - 1] : null;
+      const after = shortestIndex < current.length - 1 ? current[shortestIndex + 1] : null;
+      const gapBefore = before ? current[shortestIndex].startMs - before.endMs : Infinity;
+      const gapAfter = after ? after.startMs - current[shortestIndex].endMs : Infinity;
+
+      // `<=` so a tie takes the earlier neighbour.
+      const mergeWithBefore = before !== null && gapBefore <= gapAfter;
+      const first = mergeWithBefore ? shortestIndex - 1 : shortestIndex;
+      const second = mergeWithBefore ? shortestIndex : shortestIndex + 1;
+
+      current = [
+        ...current.slice(0, first),
+        joinBlocks(current[first], current[second]),
+        ...current.slice(second + 1),
+      ];
+    }
+
+    out.push(...current);
+  }
+
+  return out;
+}
+
+/**
+ * Two blocks of one vehicle as one.
+ *
+ * The id is the earlier block's, which is `vehicleId|startMs` and still describes
+ * the result. `rideMinutes` is the sum of the member rides and is therefore
+ * unchanged by the join — only `spanMinutes` grows, by the gap absorbed.
+ */
+function joinBlocks(first: PlanBlock, second: PlanBlock): PlanBlock {
+  const startMs = Math.min(first.startMs, second.startMs);
+  const endMs = Math.max(first.endMs, second.endMs);
+  const trips = [...first.trips, ...second.trips].sort((a, b) => a.startMs - b.startMs);
+
+  return {
+    ...first,
+    id: `${first.vehicleId}|${startMs}`,
+    startMs,
+    endMs,
+    spanMinutes: minutesBetween(startMs, endMs),
+    rideMinutes: trips.reduce((sum, trip) => sum + trip.minutes, 0),
+    trips,
+  };
 }
 
 /**

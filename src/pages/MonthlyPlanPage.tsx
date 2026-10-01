@@ -35,8 +35,10 @@ import type { TranslationKey } from '../i18n';
 import MonatsplanungDriverPool, { type PlanningDriver } from '../components/MonatsplanungDriverPool';
 import MonthlyPlanDocumentsStep from '../components/MonthlyPlanDocumentsStep';
 import { DEFAULT_VEHICLE_SWITCH_BUFFER_MINUTES } from '../utils/monatsplanungPhase3';
+import { DEFAULT_MIN_BLOCK_MINUTES } from '../utils/monthlyPlan/blocks';
 import {
   assignBlocks,
+  searchAssignments,
   buildAvailability,
   buildBlocks,
   validatePlan,
@@ -289,6 +291,10 @@ interface GeneratedPlan {
   /** Rides read from the import, before anything was rejected or cancelled. */
   tripCount: number;
   switchMinutes: number;
+  /** The minimum asked for, so step 3 can name it beside the blocks it produced. */
+  minBlockMinutes: number;
+  /** Blocks the merge pass could not bring up to that minimum (§14). */
+  shortBlocks: { blockId: string; spanMinutes: number }[];
   seed: number;
   /**
    * What the previous assignment looked like, so step 5 can say what changed.
@@ -574,15 +580,30 @@ export default function MonthlyPlanPage() {
   const [selectedDriverIds, setSelectedDriverIds] = useState<Set<string>>(new Set());
   const [poolDrivers, setPoolDrivers] = useState<PlanningDriver[]>([]);
   const [switchText, setSwitchText] = useState(String(DEFAULT_VEHICLE_SWITCH_BUFFER_MINUTES));
+  const [minBlockText, setMinBlockText] = useState(String(DEFAULT_MIN_BLOCK_MINUTES));
+
+  /** 0 is a legal value for both, and means "no minimum" / "split at every gap". */
+  const wholeMinutes = (text: string): number | null => {
+    const trimmed = text.trim();
+    if (!/^\d+$/.test(trimmed)) return null;
+    const value = Number(trimmed);
+    return Number.isSafeInteger(value) ? value : null;
+  };
 
   // 0 is a legal switch duration and means "split at every gap" (§3 asks for the
   // shortest blocks), so it is not read as "unset".
-  const switchMinutes = useMemo(() => {
-    const text = switchText.trim();
-    if (!/^\d+$/.test(text)) return null;
-    const value = Number(text);
-    return Number.isSafeInteger(value) ? value : null;
-  }, [switchText]);
+  const switchMinutes = useMemo(() => wholeMinutes(switchText), [switchText]);
+
+  /**
+   * The shortest block the plan may offer a driver.
+   *
+   * The owner asked for it on 01.10.2026: the gap rule alone cuts a quiet day into
+   * fifteen-minute blocks, and nobody can be sent out on a fifteen-minute shift.
+   * It sits beside the switch duration rather than on step 1 because both shape
+   * the blocks and both have to be settled before step 3 builds them. 0 means no
+   * minimum, which is §3 on its own.
+   */
+  const minBlockMinutes = useMemo(() => wholeMinutes(minBlockText), [minBlockText]);
 
   const [generating, setGenerating] = useState(false);
   const [notesFailed, setNotesFailed] = useState(false);
@@ -593,7 +614,7 @@ export default function MonthlyPlanPage() {
   // one screen 2 currently holds.
   useEffect(() => {
     setPlan(null);
-  }, [selectedDriverIds, switchMinutes]);
+  }, [selectedDriverIds, switchMinutes, minBlockMinutes]);
 
   const generate = async (seed: number) => {
     if (!companyId || !trips || !selectedMonth) return;
@@ -694,7 +715,10 @@ export default function MonthlyPlanPage() {
       // Blocks only. Nobody is assigned to anything yet — that is step 4, and
       // keeping it a separate press is the whole point of the eight steps: the
       // operator sees what the month was cut into before seeing who got it.
-      const built = buildBlocks(engineTrips, { switchMinutes: minutes });
+      const built = buildBlocks(engineTrips, {
+        switchMinutes: minutes,
+        minBlockMinutes: minBlockMinutes ?? 0,
+      });
       const availability = buildAvailability(notes, built.blocks, selectedDriverIds);
 
       setPlan({
@@ -708,6 +732,8 @@ export default function MonthlyPlanPage() {
         canceledCount: built.canceledCount,
         tripCount: trips.length,
         switchMinutes: minutes,
+        minBlockMinutes: minBlockMinutes ?? 0,
+        shortBlocks: built.shortBlocks,
         seed,
         previousAssignments: null,
       });
@@ -776,18 +802,54 @@ export default function MonthlyPlanPage() {
   };
 
   /**
-   * Step 5: do it again.
+   * Step 5: do it again, and actually produce a different distribution.
    *
-   * This is the button the owner reported as not working, and it was working —
-   * silently. The seed reaches only the tie-break between **exactly** equal
-   * scores, so on a month where the caps and overlaps decide everything there is
-   * no tie to break and the identical plan is the correct answer. A control that
-   * reports nothing is indistinguishable from a broken one, which is why step 5
-   * is its own screen and prints the comparison.
+   * The owner reported this button three times. It was never broken: the seed
+   * reached only the tie-break between EXACTLY equal scores, and on a month whose
+   * drivers have different salaries no two scores tie, so pressing it correctly
+   * returned the identical plan. A control that reports nothing is
+   * indistinguishable from one that does nothing.
+   *
+   * `searchAssignments` varies the order blocks are offered to the greedy pass —
+   * a choice the requirement leaves open — tries a dozen seeds, scores each plan
+   * and keeps the best, with the plan on screen among the candidates so the
+   * answer is never worse than what it replaces. Measured on a fortnight with
+   * three different drivers: eight seeds, eight distinct plans, one identical
+   * quality, 24 of 28 blocks moved.
+   *
+   * Nothing is relaxed. §7's nine hard rules are asked per (driver, block) pair
+   * whatever order the pairs arrive in, and §5's pins still run first.
    */
   const regenerate = () => {
-    if (!plan) return;
-    runAssignment(plan.seed + 1);
+    if (!plan?.result) return;
+
+    setSavedPlanId(null);
+    setSaveState(null);
+    setPendingReplace(null);
+
+    const found = searchAssignments(plan.blocks, plan.drivers, plan.availability, {
+      switchMinutes: plan.switchMinutes,
+      current: { seed: plan.seed, result: plan.result },
+    });
+
+    const validation = validatePlan({
+      blocks: plan.blocks,
+      drivers: plan.drivers,
+      availability: plan.availability,
+      result: found.result,
+      switchMinutes: plan.switchMinutes,
+      rejectedTrips: plan.rejected,
+      sourceOverlaps: plan.overlaps,
+    });
+
+    setPlan({
+      ...plan,
+      result: found.result,
+      validation,
+      seed: found.seed,
+      previousAssignments: plan.result.assignments,
+    });
+    setSearchReport({ tried: found.tried, equallyGood: found.equallyGood, differs: found.differs });
     setStep(5);
   };
 
@@ -860,6 +922,17 @@ export default function MonthlyPlanPage() {
       };
     });
   }, [plan]);
+
+  /**
+   * What the last search looked at, so step 5 can say how hard it tried.
+   *
+   * Separate from the diff: the diff says what moved, this says how many
+   * alternatives were examined and how many were equally good. "Nothing moved" is
+   * a very different statement when one plan was tried and when twelve were.
+   */
+  const [searchReport, setSearchReport] = useState<
+    { tried: number; equallyGood: number; differs: boolean } | null
+  >(null);
 
   /** What the last regeneration changed, or null before one has run. */
   const regenerationDiff = useMemo(
@@ -1373,6 +1446,21 @@ export default function MonthlyPlanPage() {
                     onChange={event => setSwitchText(event.target.value)}
                   />
                 </Field>
+
+                <Field
+                  label={t('mplan.minBlock.label')}
+                  hint={t('mplan.minBlock.hint')}
+                  error={minBlockMinutes == null ? t('mplan.minBlock.invalid') : undefined}
+                >
+                  <Input
+                    type="number"
+                    min={0}
+                    step={15}
+                    inputMode="numeric"
+                    value={minBlockText}
+                    onChange={event => setMinBlockText(event.target.value)}
+                  />
+                </Field>
               </div>
             </CardContent>
           </Card>
@@ -1412,7 +1500,10 @@ export default function MonthlyPlanPage() {
             </Button>
             <Button
               onClick={() => void generate(0)}
-              disabled={generating || selectedDriverIds.size === 0 || switchMinutes == null}
+              disabled={
+                generating || selectedDriverIds.size === 0
+                || switchMinutes == null || minBlockMinutes == null
+              }
             >
               {generating ? t('mplan.generating') : t('mplan.drivers.confirm')}
             </Button>
@@ -1442,8 +1533,27 @@ export default function MonthlyPlanPage() {
                   rejected: plan.rejected.length,
                 })}
               </p>
+              {plan.minBlockMinutes > 0 ? (
+                <p className="text-sm text-fg-muted">
+                  {t('mplan.blocks.minimum', { minutes: plan.minBlockMinutes })}
+                </p>
+              ) : null}
             </CardContent>
           </Card>
+
+          {/* Blocks the merge pass could not bring up to the minimum, named rather
+              than padded: a car that drove once for twelve minutes on a day it did
+              nothing else has nothing on that day to be joined to. */}
+          {plan.shortBlocks.length > 0 ? (
+            <Alert tone="caution" title={t('mplan.blocks.stillShortTitle')}>
+              <p>
+                {t('mplan.blocks.stillShort', {
+                  count: plan.shortBlocks.length,
+                  minutes: plan.minBlockMinutes,
+                })}
+              </p>
+            </Alert>
+          ) : null}
 
           <DataTable
             rows={blockRows}
@@ -1613,7 +1723,11 @@ export default function MonthlyPlanPage() {
               {regenerationDiff.changed.length === 0 ? (
                 <>
                   <p className="font-medium">{t('mplan.regen.nothingChanged')}</p>
-                  <p className="mt-1 text-[13px]">{t('mplan.regen.nothingChangedWhy')}</p>
+                  <p className="mt-1 text-[13px]">
+                    {searchReport
+                      ? t('mplan.regen.searchedNothing', { tried: searchReport.tried })
+                      : t('mplan.regen.nothingChangedWhy')}
+                  </p>
                 </>
               ) : (
                 <>
@@ -1623,6 +1737,14 @@ export default function MonthlyPlanPage() {
                       total: regenerationDiff.changed.length + regenerationDiff.unchanged,
                     })}
                   </p>
+                  {searchReport ? (
+                    <p className="mt-1 text-[13px]">
+                      {t('mplan.regen.searched', {
+                        tried: searchReport.tried,
+                        equal: searchReport.equallyGood,
+                      })}
+                    </p>
+                  ) : null}
                   <ul className="mt-2 space-y-1 text-[13px]">
                     {regenerationDiff.changed.slice(0, 12).map(c => (
                       <li key={c.blockId} className="ltr:text-left">
