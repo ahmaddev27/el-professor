@@ -5805,4 +5805,20 @@ export const en: PartialDictionary = {
   'mplan.minBlock.label':         'Minimum block length (minutes)',
   'mplan.regen.searched':         '{tried} variants examined, {equal} of them equally good.',
   'mplan.regen.searchedNothing':  '{tried} variants examined — none was better, or equally good and different. The constraints allow only this one distribution.',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'mplan.blocks.maximum':         'Maximum block length: {minutes} minutes.',
+  'mplan.blocks.stillLong':       '{count} block(s) are longer than {minutes} minutes. They are not cut apart: no gap inside a block is long enough for a driver or vehicle change, and a single ride is never split.',
+  'mplan.blocks.stillLongTitle':  'Some blocks remain longer',
+  'mplan.maxBlock.belowMin':      'The maximum cannot be smaller than the minimum.',
+  'mplan.maxBlock.hint':          'Bounds the merging: blocks are joined only as far as this length allows. A block is never cut apart. 0 = no maximum.',
+  'mplan.maxBlock.invalid':       'Enter a whole number from 0 upwards.',
+  'mplan.maxBlock.label':         'Maximum block length (minutes)',
+  'mplan.quality.belowMinimum':   'drivers below their target',
+  'mplan.quality.excessHours':    'hours above the limit',
+  'mplan.quality.pinConflicts':   'mandatory-assignment conflicts',
+  'mplan.quality.shortfallHours': 'total missing hours',
+  'mplan.quality.unassigned':     'blocks without a driver',
+  'mplan.quality.withoutHours':   'drivers with no hours',
+  'mplan.regen.cost':             'This distribution is slightly worse: {field} higher by {by}. The previous one was the best found.',
 };

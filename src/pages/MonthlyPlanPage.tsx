@@ -35,10 +35,14 @@ import type { TranslationKey } from '../i18n';
 import MonatsplanungDriverPool, { type PlanningDriver } from '../components/MonatsplanungDriverPool';
 import MonthlyPlanDocumentsStep from '../components/MonthlyPlanDocumentsStep';
 import { DEFAULT_VEHICLE_SWITCH_BUFFER_MINUTES } from '../utils/monatsplanungPhase3';
-import { DEFAULT_MIN_BLOCK_MINUTES } from '../utils/monthlyPlan/blocks';
+import {
+  DEFAULT_MAX_BLOCK_MINUTES,
+  DEFAULT_MIN_BLOCK_MINUTES,
+} from '../utils/monthlyPlan/blocks';
 import {
   assignBlocks,
   searchAssignments,
+  type PlanQualityField,
   buildAvailability,
   buildBlocks,
   validatePlan,
@@ -293,8 +297,12 @@ interface GeneratedPlan {
   switchMinutes: number;
   /** The minimum asked for, so step 3 can name it beside the blocks it produced. */
   minBlockMinutes: number;
+  /** The maximum asked for, likewise. */
+  maxBlockMinutes: number;
   /** Blocks the merge pass could not bring up to that minimum (§14). */
   shortBlocks: { blockId: string; spanMinutes: number }[];
+  /** Blocks longer than the maximum, which are reported and never split. */
+  longBlocks: { blockId: string; spanMinutes: number }[];
   seed: number;
   /**
    * What the previous assignment looked like, so step 5 can say what changed.
@@ -307,6 +315,36 @@ interface GeneratedPlan {
    * say "nothing changed, and here is why" instead of nothing at all.
    */
   previousAssignments: AssignResult['assignments'] | null;
+}
+
+/**
+ * The six figures a plan is judged on, as dictionary keys.
+ *
+ * Named here and not in the engine: `planQuality` is pure and must not reach the
+ * dictionaries (CLAUDE.md, "the engines carry a key beside their text"). What the
+ * engine returns is the field's NAME, and the screen turns it into words.
+ */
+const QUALITY_FIELD_KEYS: Record<PlanQualityField, TranslationKey> = {
+  unassigned:     'mplan.quality.unassigned',
+  pinConflicts:   'mplan.quality.pinConflicts',
+  withoutHours:   'mplan.quality.withoutHours',
+  belowMinimum:   'mplan.quality.belowMinimum',
+  shortfallHours: 'mplan.quality.shortfallHours',
+  excessHours:    'mplan.quality.excessHours',
+};
+
+/**
+ * A quality difference as a figure a person reads.
+ *
+ * The four counting fields are whole blocks, pins or drivers; the two hour fields
+ * are decimal hours and get the German comma, like every other hour on this
+ * screen.
+ */
+function formatQualityDelta(cost: { field: PlanQualityField; by: number }): string {
+  const hours = cost.field === 'shortfallHours' || cost.field === 'excessHours';
+  return hours
+    ? cost.by.toFixed(2).replace('.', ',')
+    : String(Math.round(cost.by));
 }
 
 /** What regenerating did, measured against the assignment it replaced. */
@@ -581,6 +619,7 @@ export default function MonthlyPlanPage() {
   const [poolDrivers, setPoolDrivers] = useState<PlanningDriver[]>([]);
   const [switchText, setSwitchText] = useState(String(DEFAULT_VEHICLE_SWITCH_BUFFER_MINUTES));
   const [minBlockText, setMinBlockText] = useState(String(DEFAULT_MIN_BLOCK_MINUTES));
+  const [maxBlockText, setMaxBlockText] = useState(String(DEFAULT_MAX_BLOCK_MINUTES));
 
   /** 0 is a legal value for both, and means "no minimum" / "split at every gap". */
   const wholeMinutes = (text: string): number | null => {
@@ -605,6 +644,17 @@ export default function MonthlyPlanPage() {
    */
   const minBlockMinutes = useMemo(() => wholeMinutes(minBlockText), [minBlockText]);
 
+  /**
+   * The longest block the merge may produce.
+   *
+   * The owner asked for it an hour after the minimum, having read the first screen
+   * the minimum produced: a ten-hour block of which six hours were idle, built by
+   * the merge chaining short runs across a quiet day. It bounds that merge; it
+   * never splits a block, because the gap rule has already split at every gap long
+   * enough for a driver to change. 0 means no maximum.
+   */
+  const maxBlockMinutes = useMemo(() => wholeMinutes(maxBlockText), [maxBlockText]);
+
   const [generating, setGenerating] = useState(false);
   const [notesFailed, setNotesFailed] = useState(false);
   const [extrasFailed, setExtrasFailed] = useState(false);
@@ -614,7 +664,7 @@ export default function MonthlyPlanPage() {
   // one screen 2 currently holds.
   useEffect(() => {
     setPlan(null);
-  }, [selectedDriverIds, switchMinutes, minBlockMinutes]);
+  }, [selectedDriverIds, switchMinutes, minBlockMinutes, maxBlockMinutes]);
 
   const generate = async (seed: number) => {
     if (!companyId || !trips || !selectedMonth) return;
@@ -718,6 +768,7 @@ export default function MonthlyPlanPage() {
       const built = buildBlocks(engineTrips, {
         switchMinutes: minutes,
         minBlockMinutes: minBlockMinutes ?? 0,
+        maxBlockMinutes: maxBlockMinutes ?? 0,
       });
       const availability = buildAvailability(notes, built.blocks, selectedDriverIds);
 
@@ -733,7 +784,9 @@ export default function MonthlyPlanPage() {
         tripCount: trips.length,
         switchMinutes: minutes,
         minBlockMinutes: minBlockMinutes ?? 0,
+        maxBlockMinutes: maxBlockMinutes ?? 0,
         shortBlocks: built.shortBlocks,
+        longBlocks: built.longBlocks,
         seed,
         previousAssignments: null,
       });
@@ -849,9 +902,32 @@ export default function MonthlyPlanPage() {
       seed: found.seed,
       previousAssignments: plan.result.assignments,
     });
-    setSearchReport({ tried: found.tried, equallyGood: found.equallyGood, differs: found.differs });
+    setSearchReport({
+      tried: found.tried,
+      equallyGood: found.equallyGood,
+      differs: found.differs,
+      cost: found.cost,
+    });
     setStep(5);
   };
+
+  /**
+   * A block as "B-DEMO-1 · 05.10.2026 08:23", for the lines that name one.
+   *
+   * The id is `vehicleId|startMs` and reads as a uuid beside an epoch, so it is
+   * never shown. The vehicle's own plate comes first where the fleet table has
+   * one — `buildBlocks` sets `vehicleId` to `car_id` when the car is in the fleet
+   * and to `car_identifier` only when it is not, so the identifier is the
+   * readable half whenever both exist.
+   */
+  const blockLabel = useCallback(
+    (blockId: string): string => {
+      const block = plan?.blocks.find(b => b.id === blockId);
+      if (!block) return blockId;
+      return `${block.vehicleIdentifier ?? block.vehicleId} · ${dateTimeText(block.startMs)}`;
+    },
+    [plan],
+  );
 
   /**
    * A driver's name from their id, for the steps that print one.
@@ -931,7 +1007,13 @@ export default function MonthlyPlanPage() {
    * a very different statement when one plan was tried and when twelve were.
    */
   const [searchReport, setSearchReport] = useState<
-    { tried: number; equallyGood: number; differs: boolean } | null
+    {
+      tried: number;
+      equallyGood: number;
+      differs: boolean;
+      /** What the offered alternative costs, or null when it costs nothing. */
+      cost: { field: PlanQualityField; by: number } | null;
+    } | null
   >(null);
 
   /** What the last regeneration changed, or null before one has run. */
@@ -1461,6 +1543,27 @@ export default function MonthlyPlanPage() {
                     onChange={event => setMinBlockText(event.target.value)}
                   />
                 </Field>
+
+                <Field
+                  label={t('mplan.maxBlock.label')}
+                  hint={t('mplan.maxBlock.hint')}
+                  error={
+                    maxBlockMinutes == null ? t('mplan.maxBlock.invalid')
+                      : (maxBlockMinutes > 0 && minBlockMinutes != null
+                         && minBlockMinutes > maxBlockMinutes)
+                        ? t('mplan.maxBlock.belowMin')
+                        : undefined
+                  }
+                >
+                  <Input
+                    type="number"
+                    min={0}
+                    step={30}
+                    inputMode="numeric"
+                    value={maxBlockText}
+                    onChange={event => setMaxBlockText(event.target.value)}
+                  />
+                </Field>
               </div>
             </CardContent>
           </Card>
@@ -1502,7 +1605,9 @@ export default function MonthlyPlanPage() {
               onClick={() => void generate(0)}
               disabled={
                 generating || selectedDriverIds.size === 0
-                || switchMinutes == null || minBlockMinutes == null
+                || switchMinutes == null || minBlockMinutes == null || maxBlockMinutes == null
+                // A minimum above the maximum asks for a block that cannot exist.
+                || (maxBlockMinutes > 0 && minBlockMinutes > maxBlockMinutes)
               }
             >
               {generating ? t('mplan.generating') : t('mplan.drivers.confirm')}
@@ -1533,9 +1638,15 @@ export default function MonthlyPlanPage() {
                   rejected: plan.rejected.length,
                 })}
               </p>
-              {plan.minBlockMinutes > 0 ? (
+              {plan.minBlockMinutes > 0 || plan.maxBlockMinutes > 0 ? (
                 <p className="text-sm text-fg-muted">
-                  {t('mplan.blocks.minimum', { minutes: plan.minBlockMinutes })}
+                  {plan.minBlockMinutes > 0
+                    ? t('mplan.blocks.minimum', { minutes: plan.minBlockMinutes })
+                    : ''}
+                  {plan.minBlockMinutes > 0 && plan.maxBlockMinutes > 0 ? ' ' : ''}
+                  {plan.maxBlockMinutes > 0
+                    ? t('mplan.blocks.maximum', { minutes: plan.maxBlockMinutes })
+                    : ''}
                 </p>
               ) : null}
             </CardContent>
@@ -1550,6 +1661,21 @@ export default function MonthlyPlanPage() {
                 {t('mplan.blocks.stillShort', {
                   count: plan.shortBlocks.length,
                   minutes: plan.minBlockMinutes,
+                })}
+              </p>
+            </Alert>
+          ) : null}
+
+          {/* Blocks over the maximum. They are reported and never split: the gap
+              rule has already split at every gap long enough for a driver to
+              change, so there is no point left inside one where a change could
+              happen, and a single ride is never cut. */}
+          {plan.longBlocks.length > 0 ? (
+            <Alert tone="caution" title={t('mplan.blocks.stillLongTitle')}>
+              <p>
+                {t('mplan.blocks.stillLong', {
+                  count: plan.longBlocks.length,
+                  minutes: plan.maxBlockMinutes,
                 })}
               </p>
             </Alert>
@@ -1716,7 +1842,10 @@ export default function MonthlyPlanPage() {
               why that is correct. */}
           {step === 5 && regenerationDiff ? (
             <Alert
-              tone={regenerationDiff.changed.length > 0 ? 'positive' : 'neutral'}
+              tone={
+                searchReport?.cost ? 'caution'
+                  : regenerationDiff.changed.length > 0 ? 'positive' : 'neutral'
+              }
               title={t('mplan.regen.title')}
               className="mt-3"
             >
@@ -1745,10 +1874,27 @@ export default function MonthlyPlanPage() {
                       })}
                     </p>
                   ) : null}
+                  {/* What this alternative costs, when the search found none that
+                      was at least as good. Never silent: the operator asked to see
+                      another distribution and is shown one, so they have to be
+                      told in which figure it is worse, and by how much. */}
+                  {searchReport?.cost ? (
+                    <p className="mt-2 text-[13px] font-medium">
+                      {t('mplan.regen.cost', {
+                        field: t(QUALITY_FIELD_KEYS[searchReport.cost.field]),
+                        by: formatQualityDelta(searchReport.cost),
+                      })}
+                    </p>
+                  ) : null}
                   <ul className="mt-2 space-y-1 text-[13px]">
                     {regenerationDiff.changed.slice(0, 12).map(c => (
                       <li key={c.blockId} className="ltr:text-left">
-                        <code>{c.blockId}</code>
+                        {/* The block by its vehicle and when it starts, never by
+                            its id: that id is `vehicleId|startMs`, so the line
+                            read "351ca614-…-fb70-d9fbf899bac5|1791664200000",
+                            which names nothing an operator can look up. Found by
+                            walking the eight steps on staging, not by reading. */}
+                        <span className="tabular-nums">{blockLabel(c.blockId)}</span>
                         {': '}
                         {driverNameOf(c.from) ?? t('mplan.regen.unassigned')}
                         {' → '}
