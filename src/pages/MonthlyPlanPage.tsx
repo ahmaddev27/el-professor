@@ -328,6 +328,18 @@ export default function MonthlyPlanPage() {
   const [saving, setSaving] = useState(false);
   const [saveState, setSaveState] = useState<(ConfirmResult & { planId?: string }) | null>(null);
   const [pendingReplace, setPendingReplace] = useState<string | null>(null);
+  /**
+   * The id the database gave this plan, which the documents need.
+   *
+   * `storedPlanFromGenerated` always answers `id: null` and `status: 'draft'`,
+   * and rightly: it projects a plan that exists only in memory and cannot invent
+   * an id. But without carrying the id back, the documents step would receive a
+   * saved plan still claiming to be unsaved, and **§10's Fahrtenbuch would go on
+   * refusing** — it builds from the import's original rows reached through a
+   * saved plan's id, so `null` there is the same refusal as never having saved.
+   * The browser walk on staging was written to catch exactly this, and did.
+   */
+  const [savedPlanId, setSavedPlanId] = useState<string | null>(null);
   const [plan, setPlan] = useState<GeneratedPlan | null>(null);
 
   // ── Screen 1: the imports, and the months they make plannable ─────────────
@@ -617,6 +629,14 @@ export default function MonthlyPlanPage() {
    */
   const regenerate = () => {
     if (!plan) return;
+    // A regenerated plan is a different assignment, so the saved plan's id no
+    // longer describes what is on screen. Clearing it sends the documents back
+    // to reading an unsaved draft until the operator confirms again — without
+    // this they would be built from one assignment and labelled with another's
+    // id, and §10's Fahrtenbuch would silently overlay the wrong drivers.
+    setSavedPlanId(null);
+    setSaveState(null);
+    setPendingReplace(null);
     const seed = plan.seed + 1;
     const result = assignBlocks(plan.blocks, plan.drivers, plan.availability, {
       switchMinutes: plan.switchMinutes,
@@ -673,7 +693,7 @@ export default function MonthlyPlanPage() {
 
   const storedPlan = useMemo(() => {
     if (!plan || !selectedMonth || !companyId) return null;
-    return storedPlanFromGenerated({
+    const projected = storedPlanFromGenerated({
       companyId,
       year: selectedMonth.year,
       month: selectedMonth.month,
@@ -687,7 +707,13 @@ export default function MonthlyPlanPage() {
       selectedDriverIds,
       originalDriverIdByTrip,
     });
-  }, [plan, selectedMonth, companyId, importId, selectedDriverIds, originalDriverIdByTrip]);
+    // Saved and confirmed, or not yet — and the documents must be told which.
+    // A plan with no id is a true draft and every document should see it as one.
+    return savedPlanId
+      ? { ...projected, id: savedPlanId, status: 'confirmed' as const }
+      : projected;
+  }, [plan, selectedMonth, companyId, importId, selectedDriverIds, originalDriverIdByTrip,
+      savedPlanId]);
 
   /**
    * Writes the plan and confirms it, then moves to the documents.
@@ -710,6 +736,7 @@ export default function MonthlyPlanPage() {
       const result = await savePlanAndConfirm(supabase, storedPlan, { replace });
       setSaveState(result);
       if (result.ok) {
+        setSavedPlanId(result.planId);
         setStep(4);
       } else if (result.reason === 'plan_exists' && result.planId) {
         setPendingReplace(result.planId);
