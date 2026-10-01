@@ -61,6 +61,36 @@ import {
   type PlanSummaryRow,
 } from '../utils/monthlyPlanScreens';
 import { storedPlanFromGenerated } from '../utils/monthlyPlanDocuments';
+import {
+  savePlanAndConfirm,
+  type ConfirmResult,
+  type MonthlyPlanConfirmReason,
+} from '../utils/monthlyPlanPersistence';
+
+/**
+ * One sentence per refusal, because each one tells the operator something
+ * different about what to do next: a role that may not edit Dokumente, a company
+ * whose state forbids it, a plan whose data moved under it, a rule it breaks.
+ * Collapsing them into "saving failed" would throw away the only part that is
+ * actionable. `plan_exists` is absent on purpose — it is a choice, not an error,
+ * and it is rendered as one.
+ */
+const SAVE_REASON_KEYS: Partial<Record<MonthlyPlanConfirmReason, TranslationKey>> = {
+  unauthenticated:        'mplan.save.reason.unauthenticated',
+  no_company:             'mplan.save.reason.noCompany',
+  not_authorized:         'mplan.save.reason.notAuthorized',
+  invalid_payload:        'mplan.save.reason.invalidPayload',
+  monthly_plan_rows_lost: 'mplan.save.reason.rowsLost',
+  network:                'mplan.save.reason.network',
+  plan_not_found:         'mplan.save.reason.planNotFound',
+  not_a_draft:            'mplan.save.reason.notADraft',
+  plan_empty:             'mplan.save.reason.planEmpty',
+  driver_not_in_plan:     'mplan.save.reason.driverNotInPlan',
+  driver_overlap:         'mplan.save.reason.driverOverlap',
+  vehicle_switch_gap:     'mplan.save.reason.switchGap',
+  no_usable_range:        'mplan.save.reason.noUsableRange',
+  exceeds_hours_cap:      'mplan.save.reason.exceedsCap',
+};
 
 /**
  * The monthly plan, as the four screens §1 asks for (acceptance criteria 1–4,
@@ -280,6 +310,24 @@ export default function MonthlyPlanPage() {
   const { t } = useTranslation();
 
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
+
+  /*
+   * Saving, which until now did not happen at all.
+   *
+   * `20260930100000` shipped the four tables, both RPCs, the partial unique
+   * index that enforces one confirmed plan per month and an advisory lock — and
+   * nothing called them. So this screen said *Planung fertig* over a
+   * `monthly_plans` table holding zero rows, §10's planned Fahrtenbuch could
+   * never be built (it reads the import's original rows through a saved plan's
+   * id), and the one-plan-per-month rule applied to nothing.
+   *
+   * `saveState` is `null` until the operator confirms. A refusal keeps the draft
+   * id so the replace choice acts on **that** draft rather than writing a second
+   * one, and `pendingReplace` is what the §9 dialog is waiting on.
+   */
+  const [saving, setSaving] = useState(false);
+  const [saveState, setSaveState] = useState<(ConfirmResult & { planId?: string }) | null>(null);
+  const [pendingReplace, setPendingReplace] = useState<string | null>(null);
   const [plan, setPlan] = useState<GeneratedPlan | null>(null);
 
   // ── Screen 1: the imports, and the months they make plannable ─────────────
@@ -640,6 +688,36 @@ export default function MonthlyPlanPage() {
       originalDriverIdByTrip,
     });
   }, [plan, selectedMonth, companyId, importId, selectedDriverIds, originalDriverIdByTrip]);
+
+  /**
+   * Writes the plan and confirms it, then moves to the documents.
+   *
+   * Two RPC calls and not one, because they are two transactions by design: the
+   * save takes the month's advisory lock, writes and releases it, and the
+   * confirm takes it again to re-derive §7's rules against the **stored** rows
+   * rather than against whatever this page still holds. That second check is the
+   * one the confirm button's own comment says still has to happen.
+   *
+   * The screen does not advance on a refusal. `plan_exists` is the one refusal
+   * with a choice behind it (§9's "replace the month's plan?"), so it opens that
+   * dialog instead of reporting an error.
+   */
+  const saveAndConfirm = useCallback(async (replace: boolean) => {
+    if (!storedPlan) return;
+    setSaving(true);
+    setPendingReplace(null);
+    try {
+      const result = await savePlanAndConfirm(supabase, storedPlan, { replace });
+      setSaveState(result);
+      if (result.ok) {
+        setStep(4);
+      } else if (result.reason === 'plan_exists' && result.planId) {
+        setPendingReplace(result.planId);
+      }
+    } finally {
+      setSaving(false);
+    }
+  }, [storedPlan]);
 
   /**
    * Every read a plan depends on. The four are already the condition for a plan
@@ -1170,10 +1248,41 @@ export default function MonthlyPlanPage() {
                 has to happen at the save step is the *other* re-check: that the
                 month's data has not moved in the database since this plan was
                 built, and that only one plan stays active for the month (§9). */}
-            <Button onClick={() => setStep(4)} disabled={!confirmable}>
-              {t('mplan.summary.confirm')}
+            <Button onClick={() => void saveAndConfirm(false)} disabled={!confirmable || saving}>
+              {saving ? t('mplan.summary.saving') : t('mplan.summary.confirm')}
             </Button>
           </div>
+
+          {/* §9's choice, and the only refusal that has one. The draft is
+              already written, so replacing acts on it rather than saving a
+              second draft the save would then discard — which would read as a
+              button that does nothing. */}
+          {pendingReplace ? (
+            <Alert tone="caution" title={t('mplan.save.planExistsTitle')} className="mt-3">
+              <p>{t('mplan.save.planExistsBody')}</p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <Button size="sm" onClick={() => void saveAndConfirm(true)} disabled={saving}>
+                  {t('mplan.save.replace')}
+                </Button>
+                <Button size="sm" variant="secondary" onClick={() => setPendingReplace(null)}
+                        disabled={saving}>
+                  {t('mplan.save.keep')}
+                </Button>
+              </div>
+            </Alert>
+          ) : null}
+
+          {/* Every other refusal is named, never summarised as "failed": the
+              reason codes are the database's own and each one tells the operator
+              something different about what to do next. */}
+          {saveState && !saveState.ok && saveState.reason !== 'plan_exists' ? (
+            <Alert tone="critical" title={t('mplan.save.failedTitle')} className="mt-3">
+              <p>{t(SAVE_REASON_KEYS[saveState.reason] ?? 'mplan.save.reason.network')}</p>
+              {saveState.detail ? (
+                <p className="mt-1 text-[13px] opacity-80">{saveState.detail}</p>
+              ) : null}
+            </Alert>
+          ) : null}
           <p className="mt-2 text-[13px] text-fg-muted">{t('mplan.summary.regenerateHint')}</p>
         </div>
       ) : null}
