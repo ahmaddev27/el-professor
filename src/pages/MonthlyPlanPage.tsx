@@ -161,7 +161,19 @@ const MONTH_KEYS: TranslationKey[] = [
 /** PostgREST caps a request at 1000 rows, so every list read is a batch loop. */
 const BATCH_SIZE = 1000;
 
-const STEP_KEYS: TranslationKey[] = ['mplan.step1', 'mplan.step2', 'mplan.step3', 'mplan.step4'];
+/**
+ * Eight steps, because the owner asked to see the process and not its result
+ * (01.10.2026). Three are new windows onto the same engine: the blocks before
+ * anyone is assigned to them, what regenerating actually changed, and the shifts
+ * each driver ends up with. No planning rule lives in any of them.
+ */
+const STEP_KEYS: TranslationKey[] = [
+  'mplan.step1', 'mplan.step2', 'mplan.step3', 'mplan.step4',
+  'mplan.step5', 'mplan.step6', 'mplan.step7', 'mplan.step8',
+];
+
+/** 1…8, named so a `setStep` cannot drift from the labels above. */
+type PlanStep = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
 
 /** How many violations are listed before the rest are only counted. */
 const VIOLATIONS_SHOWN = 10;
@@ -259,8 +271,17 @@ interface DriverPlanExtras {
 interface GeneratedPlan {
   blocks: PlanBlock[];
   availability: AvailabilityResult;
-  result: AssignResult;
-  validation: ValidationResult;
+  /**
+   * Null until the blocks have been shared out.
+   *
+   * Building the month's blocks and assigning drivers to them were one button
+   * until 01.10.2026, which made the two stages that decide everything the two
+   * nobody could inspect. They are two now: step 3 shows the blocks, step 4
+   * shares them. The engine is unchanged — `buildBlocks` and `assignBlocks` were
+   * already two pure calls — so what moved is when each runs, not what it does.
+   */
+  result: AssignResult | null;
+  validation: ValidationResult | null;
   drivers: PlanDriverInput[];
   rejected: RejectedTrip[];
   overlaps: VehicleOverlap[];
@@ -269,6 +290,49 @@ interface GeneratedPlan {
   tripCount: number;
   switchMinutes: number;
   seed: number;
+  /**
+   * What the previous assignment looked like, so step 5 can say what changed.
+   *
+   * Regenerating only ever reaches the one flexible choice — the seeded
+   * tie-break between drivers whose scores are **exactly** equal (§7 rule 9) —
+   * so on a month with no ties it correctly produces an identical plan and a
+   * button that reports nothing is indistinguishable from a broken one. That is
+   * what the owner saw. Keeping the previous assignment is what lets the screen
+   * say "nothing changed, and here is why" instead of nothing at all.
+   */
+  previousAssignments: AssignResult['assignments'] | null;
+}
+
+/** What regenerating did, measured against the assignment it replaced. */
+interface RegenerationDiff {
+  changed: { blockId: string; from: string | null; to: string | null }[];
+  /** Blocks that were assigned before and after, to the same driver. */
+  unchanged: number;
+}
+
+/**
+ * Compares two assignments block by block.
+ *
+ * Pure, and a function rather than an inline reduce, because the screen's claim
+ * ("nothing changed") is the thing the operator is being asked to believe.
+ */
+function diffAssignments(
+  before: AssignResult['assignments'],
+  after: AssignResult['assignments'],
+): RegenerationDiff {
+  const was = new Map(before.map(a => [a.blockId, a.driverId]));
+  const now = new Map(after.map(a => [a.blockId, a.driverId]));
+  const blockIds = new Set([...was.keys(), ...now.keys()]);
+
+  const changed: RegenerationDiff['changed'] = [];
+  let unchanged = 0;
+  for (const blockId of blockIds) {
+    const from = was.get(blockId) ?? null;
+    const to = now.get(blockId) ?? null;
+    if (from === to) unchanged += 1;
+    else changed.push({ blockId, from, to });
+  }
+  return { changed, unchanged };
 }
 
 /**
@@ -301,6 +365,31 @@ function hoursText(value: number | null | undefined): string {
   return value == null ? '—' : formatNumber(value, 2);
 }
 
+/*
+ * Instants as the operator reads them, and never anything else.
+ *
+ * Local, always: `toISOString` would shift a 00:15 shift onto the previous day,
+ * which is the defect this product has already paid for more than once. Display
+ * only — no figure here is fed back into arithmetic, and every duration on these
+ * screens comes from the block's own stored minutes, not from re-subtracting
+ * these two.
+ */
+function dateText(ms: number): string {
+  const d = new Date(ms);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${d.getFullYear()}`;
+}
+
+function timeText(ms: number): string {
+  const d = new Date(ms);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function dateTimeText(ms: number): string {
+  return `${dateText(ms)} ${timeText(ms)}`;
+}
+
 /** A signed deviation, with the sign spelled out when there is a surplus. */
 function deviationText(value: number | null | undefined): string {
   if (value == null) return '—';
@@ -313,7 +402,7 @@ export default function MonthlyPlanPage() {
   const { can } = useCompanyScope();
   const { t } = useTranslation();
 
-  const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
+  const [step, setStep] = useState<PlanStep>(1);
 
   /*
    * Saving, which until now did not happen at all.
@@ -601,27 +690,18 @@ export default function MonthlyPlanPage() {
         });
 
       const minutes = switchMinutes ?? 0;
+
+      // Blocks only. Nobody is assigned to anything yet — that is step 4, and
+      // keeping it a separate press is the whole point of the eight steps: the
+      // operator sees what the month was cut into before seeing who got it.
       const built = buildBlocks(engineTrips, { switchMinutes: minutes });
       const availability = buildAvailability(notes, built.blocks, selectedDriverIds);
-      const result = assignBlocks(built.blocks, engineDrivers, availability, {
-        switchMinutes: minutes,
-        seed,
-      });
-      const validation = validatePlan({
-        blocks: built.blocks,
-        drivers: engineDrivers,
-        availability,
-        result,
-        switchMinutes: minutes,
-        rejectedTrips: built.rejected,
-        sourceOverlaps: built.overlaps,
-      });
 
       setPlan({
         blocks: built.blocks,
         availability,
-        result,
-        validation,
+        result: null,
+        validation: null,
         drivers: engineDrivers,
         rejected: built.rejected,
         overlaps: built.overlaps,
@@ -629,6 +709,7 @@ export default function MonthlyPlanPage() {
         tripCount: trips.length,
         switchMinutes: minutes,
         seed,
+        previousAssignments: null,
       });
       setStep(3);
     } finally {
@@ -643,17 +724,26 @@ export default function MonthlyPlanPage() {
    * tie-break between candidates that already passed every hard rule, and
    * nothing else (§7 rule 9, criterion 14).
    */
-  const regenerate = () => {
+  /**
+   * One assignment pass over blocks that already exist.
+   *
+   * Shared by step 4 (share them out) and step 5 (do it again with a new seed),
+   * because they are the same computation and splitting them would be two
+   * places for one rule. `seed` is the only difference, and §7 rule 9 bounds
+   * what it may reach: the tie-break between drivers whose scores are exactly
+   * equal, and nothing else.
+   */
+  const runAssignment = (seed: number) => {
     if (!plan) return;
-    // A regenerated plan is a different assignment, so the saved plan's id no
-    // longer describes what is on screen. Clearing it sends the documents back
-    // to reading an unsaved draft until the operator confirms again — without
-    // this they would be built from one assignment and labelled with another's
-    // id, and §10's Fahrtenbuch would silently overlay the wrong drivers.
+    // Any new assignment invalidates the saved plan's id: it described a
+    // different arrangement. Without clearing, the documents would be built from
+    // one assignment and labelled with another's id, and §10's Fahrtenbuch —
+    // which overlays planned drivers onto the imported rows — would silently
+    // overlay the wrong ones.
     setSavedPlanId(null);
     setSaveState(null);
     setPendingReplace(null);
-    const seed = plan.seed + 1;
+
     const result = assignBlocks(plan.blocks, plan.drivers, plan.availability, {
       switchMinutes: plan.switchMinutes,
       seed,
@@ -667,17 +757,134 @@ export default function MonthlyPlanPage() {
       rejectedTrips: plan.rejected,
       sourceOverlaps: plan.overlaps,
     });
-    setPlan({ ...plan, result, validation, seed });
+    setPlan({
+      ...plan,
+      result,
+      validation,
+      seed,
+      // What it replaced, so step 5 can say what moved. Null on the first pass:
+      // there is nothing to compare a first assignment against.
+      previousAssignments: plan.result ? plan.result.assignments : null,
+    });
   };
 
-  const summaryRows = useMemo(
-    () => (plan ? buildPlanSummaryRows(plan.result, plan.validation) : []),
+  /** Step 4: share the blocks out for the first time. */
+  const shareToDrivers = () => {
+    if (!plan) return;
+    runAssignment(plan.seed);
+    setStep(4);
+  };
+
+  /**
+   * Step 5: do it again.
+   *
+   * This is the button the owner reported as not working, and it was working —
+   * silently. The seed reaches only the tie-break between **exactly** equal
+   * scores, so on a month where the caps and overlaps decide everything there is
+   * no tie to break and the identical plan is the correct answer. A control that
+   * reports nothing is indistinguishable from a broken one, which is why step 5
+   * is its own screen and prints the comparison.
+   */
+  const regenerate = () => {
+    if (!plan) return;
+    runAssignment(plan.seed + 1);
+    setStep(5);
+  };
+
+  /**
+   * A driver's name from their id, for the steps that print one.
+   *
+   * The plan's own driver list, never a second read: the summary, the shifts and
+   * the regeneration diff must all name the same person the assigner named.
+   */
+  const driverNameOf = useCallback(
+    (id: string | null): string | null =>
+      (id ? plan?.drivers.find(d => d.id === id)?.name ?? id : null),
     [plan],
   );
-  const warningGroups = useMemo(() => (plan ? groupWarnings(plan.validation) : []), [plan]);
+
+  /**
+   * Step 3's table: the blocks as the engine built them.
+   *
+   * Every figure is the block's own — `spanMinutes` is its wall-clock length and
+   * `rideMinutes` the sum of its rides, and §3 keeps them apart because the
+   * difference is idle time that must never be priced as worked. This screen
+   * shows both and subtracts them for display only.
+   */
+  const blockRows: BlockRow[] = useMemo(
+    () => (plan?.blocks ?? []).map(b => ({
+      id: b.id,
+      vehicle: b.vehicleId,
+      startMs: b.startMs,
+      endMs: b.endMs,
+      spanMinutes: b.spanMinutes,
+      rideMinutes: b.rideMinutes,
+      idleMinutes: Math.max(0, b.spanMinutes - b.rideMinutes),
+      rides: b.trips.length,
+    })),
+    [plan],
+  );
+
+  /**
+   * Step 7: the same assigned blocks, grouped by driver instead of by vehicle.
+   *
+   * A view and not a computation — it reads `result.assignments` and the blocks
+   * they name. Every driver the plan selected appears, including those with no
+   * shift, because a driver missing from this list reads as a driver who is not
+   * in the month.
+   */
+  const driverShifts = useMemo(() => {
+    if (!plan?.result) return [];
+    const blockById = new Map(plan.blocks.map(b => [b.id, b]));
+    const byDriver = new Map<string, typeof plan.blocks>();
+    for (const a of plan.result.assignments) {
+      const block = blockById.get(a.blockId);
+      if (!block) continue;
+      const list = byDriver.get(a.driverId);
+      if (list) list.push(block);
+      else byDriver.set(a.driverId, [block]);
+    }
+    return plan.drivers.map(d => {
+      const blocks = (byDriver.get(d.id) ?? []).slice().sort((x, y) => x.startMs - y.startMs);
+      return {
+        driverId: d.id,
+        driverName: d.name,
+        totalHours: blocks.reduce((n, b) => n + b.spanMinutes, 0) / 60,
+        shifts: blocks.map(b => ({
+          id: b.id,
+          startMs: b.startMs,
+          endMs: b.endMs,
+          vehicle: b.vehicleId,
+          spanMinutes: b.spanMinutes,
+        })),
+      };
+    });
+  }, [plan]);
+
+  /** What the last regeneration changed, or null before one has run. */
+  const regenerationDiff = useMemo(
+    () => (plan?.result && plan.previousAssignments
+      ? diffAssignments(plan.previousAssignments, plan.result.assignments)
+      : null),
+    [plan],
+  );
+
+  // Empty until the blocks have been shared out. Between steps 3 and 4 there is
+  // no assignment, so there are no per-driver rows and no warnings about one —
+  // that is the truth of that moment, not a case to defend against.
+  const summaryRows = useMemo(
+    () => (plan?.result && plan.validation
+      ? buildPlanSummaryRows(plan.result, plan.validation)
+      : []),
+    [plan],
+  );
+  const warningGroups = useMemo(
+    () => (plan?.validation ? groupWarnings(plan.validation) : []),
+    [plan],
+  );
 
   const mayConfirm = can('documents', 'edit');
-  const confirmable = plan?.validation.confirmable === true && mayConfirm;
+  const confirmable = plan?.validation?.confirmable === true && mayConfirm;
 
   const pricedRows = useMemo(
     () => summaryRows.filter(r => r.estimatedSalaryCents != null),
@@ -708,7 +915,10 @@ export default function MonthlyPlanPage() {
   );
 
   const storedPlan = useMemo(() => {
-    if (!plan || !selectedMonth || !companyId) return null;
+    // A plan with no assignment cannot be projected: every document is about who
+    // drives what, and `storedPlanFromGenerated` has no honest answer before
+    // step 4. Null here is what keeps steps 3 and 4 from rendering documents.
+    if (!plan?.result || !plan.validation || !selectedMonth || !companyId) return null;
     const projected = storedPlanFromGenerated({
       companyId,
       year: selectedMonth.year,
@@ -753,7 +963,9 @@ export default function MonthlyPlanPage() {
       setSaveState(result);
       if (result.ok) {
         setSavedPlanId(result.planId);
-        setStep(4);
+        // Step 7: the shifts, which is what the operator reads before handing
+        // anything over. The documents are step 8, one press further.
+        setStep(7);
       } else if (result.reason === 'plan_exists' && result.planId) {
         setPendingReplace(result.planId);
       }
@@ -771,6 +983,54 @@ export default function MonthlyPlanPage() {
   const anyReadFailed = importsFailed || tripsFailed || notesFailed || extrasFailed;
 
   // ── Presentation ──────────────────────────────────────────────────────────
+
+  /** One row of step 3's table. Named so `DataTable`'s column type can bind. */
+  type BlockRow = {
+    id: string; vehicle: string; startMs: number; endMs: number;
+    spanMinutes: number; rideMinutes: number; idleMinutes: number; rides: number;
+  };
+  /** One row of step 7's per-driver table. */
+  type ShiftRow = {
+    id: string; startMs: number; endMs: number; vehicle: string; spanMinutes: number;
+  };
+
+  const blockColumns: DataTableColumn<BlockRow>[] = useMemo(
+    () => [
+      { id: 'vehicle', header: t('mplan.blocks.colVehicle'), value: r => r.vehicle,
+        sortable: true },
+      { id: 'start', header: t('mplan.blocks.colStart'), value: r => r.startMs,
+        sortable: true, cell: r => <span className="tabular-nums">{dateTimeText(r.startMs)}</span> },
+      { id: 'end', header: t('mplan.blocks.colEnd'), value: r => r.endMs,
+        cell: r => <span className="tabular-nums">{dateTimeText(r.endMs)}</span> },
+      { id: 'span', header: t('mplan.blocks.colSpan'), kind: 'number', value: r => r.spanMinutes,
+        cell: r => <span className="tabular-nums">{hoursText(r.spanMinutes / 60)}</span> },
+      { id: 'rides', header: t('mplan.blocks.colRides'), kind: 'number', value: r => r.rides,
+        hideBelow: 'sm' },
+      // Idle time, shown because §3 keeps it apart from worked time and a block
+      // that is mostly waiting is the one an operator wants to see.
+      { id: 'idle', header: t('mplan.blocks.colIdle'), kind: 'number', hideBelow: 'md',
+        value: r => r.idleMinutes,
+        cell: r => <span className="tabular-nums">{hoursText(r.idleMinutes / 60)}</span> },
+    ],
+    [t],
+  );
+
+  const shiftColumns: DataTableColumn<ShiftRow>[] = useMemo(
+    () => [
+      { id: 'date', header: t('mplan.shifts.colDate'), value: r => r.startMs,
+        cell: r => <span className="tabular-nums">{dateText(r.startMs)}</span> },
+      { id: 'from', header: t('mplan.shifts.colFrom'), value: r => r.startMs,
+        cell: r => <span className="tabular-nums">{timeText(r.startMs)}</span> },
+      { id: 'to', header: t('mplan.shifts.colTo'), value: r => r.endMs,
+        cell: r => <span className="tabular-nums">{timeText(r.endMs)}</span> },
+      { id: 'vehicle', header: t('mplan.shifts.colVehicle'), value: r => r.vehicle,
+        hideBelow: 'sm' },
+      { id: 'hours', header: t('mplan.shifts.colHours'), kind: 'number',
+        value: r => r.spanMinutes,
+        cell: r => <span className="tabular-nums">{hoursText(r.spanMinutes / 60)}</span> },
+    ],
+    [t],
+  );
 
   const columns: DataTableColumn<PlanSummaryRow>[] = useMemo(
     () => [
@@ -1160,8 +1420,50 @@ export default function MonthlyPlanPage() {
         </div>
       ) : null}
 
-      {/* ── Screen 3: one row per driver, the findings, and the two buttons ── */}
+      {/* ── Step 3: the blocks, before anyone is assigned to them ─────────── */}
       {step === 3 && plan ? (
+        <div className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>{t('mplan.blocks.title')}</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              <p className="text-sm text-fg-muted">{t('mplan.blocks.lede')}</p>
+              <p className="text-sm">
+                {t('mplan.blocks.summary', {
+                  blocks: plan.blocks.length,
+                  trips: plan.tripCount,
+                  minutes: plan.switchMinutes,
+                })}
+              </p>
+              <p className="text-sm text-fg-muted">
+                {t('mplan.summary.tripCounts', {
+                  canceled: plan.canceledCount,
+                  rejected: plan.rejected.length,
+                })}
+              </p>
+            </CardContent>
+          </Card>
+
+          <DataTable
+            rows={blockRows}
+            columns={blockColumns}
+            getRowId={row => row.id}
+            caption={t('mplan.blocks.title')}
+          />
+
+          <div className="flex flex-wrap items-center gap-2">
+            <Button variant="secondary" onClick={() => setStep(2)}>{t('mplan.back')}</Button>
+            <Button onClick={shareToDrivers}>{t('mplan.blocks.share')}</Button>
+          </div>
+        </div>
+      ) : null}
+
+      {/* ── Steps 4-6: one summary, three different things to do with it ─────
+          The distribution, what regenerating changed, and the confirmation are
+          the same table read three ways. Rendering it three times would be three
+          places for one figure to drift. */}
+      {step >= 4 && step <= 6 && plan?.result && plan.validation ? (
         <div className="space-y-6">
           <Card>
             <CardHeader>
@@ -1269,12 +1571,14 @@ export default function MonthlyPlanPage() {
           ) : null}
 
           <div className="flex flex-wrap items-center gap-2">
-            <Button variant="secondary" onClick={() => setStep(2)}>
+            {/* Back to the blocks, not to the drivers: step 3 is what this
+                distribution was made from, and it is one press away. */}
+            <Button variant="secondary" onClick={() => setStep(3)}>
               {t('mplan.back')}
             </Button>
             <Button variant="secondary" onClick={regenerate}>
               <RotateCw aria-hidden className="size-4" />
-              {t('mplan.summary.regenerate')}
+              {step === 5 ? t('mplan.regen.again') : t('mplan.summary.regenerate')}
             </Button>
             {/* Criterion 15's gate. It reads `validatePlan`'s answer, which is
                 the second, independent check: it re-derives every hard rule from
@@ -1285,10 +1589,57 @@ export default function MonthlyPlanPage() {
                 has to happen at the save step is the *other* re-check: that the
                 month's data has not moved in the database since this plan was
                 built, and that only one plan stays active for the month (§9). */}
-            <Button onClick={() => void saveAndConfirm(false)} disabled={!confirmable || saving}>
-              {saving ? t('mplan.summary.saving') : t('mplan.summary.confirm')}
-            </Button>
+            {step === 6 ? (
+              <Button onClick={() => void saveAndConfirm(false)} disabled={!confirmable || saving}>
+                {saving ? t('mplan.summary.saving') : t('mplan.summary.confirm')}
+              </Button>
+            ) : (
+              <Button onClick={() => setStep(6)} disabled={!confirmable}>
+                {t('mplan.summary.confirm')}
+              </Button>
+            )}
           </div>
+
+          {/* Step 5's answer, and the reason this step exists at all. The owner
+              reported the button as broken; it was working silently, which is
+              worse. Now it says what it did — including that it did nothing, and
+              why that is correct. */}
+          {step === 5 && regenerationDiff ? (
+            <Alert
+              tone={regenerationDiff.changed.length > 0 ? 'positive' : 'neutral'}
+              title={t('mplan.regen.title')}
+              className="mt-3"
+            >
+              {regenerationDiff.changed.length === 0 ? (
+                <>
+                  <p className="font-medium">{t('mplan.regen.nothingChanged')}</p>
+                  <p className="mt-1 text-[13px]">{t('mplan.regen.nothingChangedWhy')}</p>
+                </>
+              ) : (
+                <>
+                  <p>
+                    {t('mplan.regen.changed', {
+                      count: regenerationDiff.changed.length,
+                      total: regenerationDiff.changed.length + regenerationDiff.unchanged,
+                    })}
+                  </p>
+                  <ul className="mt-2 space-y-1 text-[13px]">
+                    {regenerationDiff.changed.slice(0, 12).map(c => (
+                      <li key={c.blockId} className="ltr:text-left">
+                        <code>{c.blockId}</code>
+                        {': '}
+                        {driverNameOf(c.from) ?? t('mplan.regen.unassigned')}
+                        {' → '}
+                        <span className="font-medium">
+                          {driverNameOf(c.to) ?? t('mplan.regen.unassigned')}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              )}
+            </Alert>
+          ) : null}
 
           {/* §9's choice, and the only refusal that has one. The draft is
               already written, so replacing acts on it rather than saving a
@@ -1324,19 +1675,65 @@ export default function MonthlyPlanPage() {
         </div>
       ) : null}
 
-      {/* ── Screen 4: the documents ──────────────────────── */}
+      {/* ── Step 7: the same blocks, read by driver instead of by vehicle ──── */}
+      {step === 7 && plan?.result ? (
+        <div className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>{t('mplan.shifts.title')}</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-sm text-fg-muted">{t('mplan.shifts.lede')}</p>
+            </CardContent>
+          </Card>
+
+          {driverShifts.map(d => (
+            <Card key={d.driverId}>
+              <CardHeader>
+                <CardTitle className="text-base">
+                  {d.driverName}
+                  <span className="ml-2 text-[13px] font-normal text-fg-muted">
+                    {d.shifts.length > 0
+                      ? `${d.shifts.length} · ${hoursText(d.totalHours)} ${t('mplan.unitHours')}`
+                      : ''}
+                  </span>
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                {d.shifts.length === 0 ? (
+                  <p className="text-sm text-fg-muted">{t('mplan.shifts.noShifts')}</p>
+                ) : (
+                  <DataTable
+                    rows={d.shifts}
+                    columns={shiftColumns}
+                    getRowId={row => row.id}
+                    caption={d.driverName}
+                  />
+                )}
+              </CardContent>
+            </Card>
+          ))}
+
+          <div className="flex flex-wrap items-center gap-2">
+            <Button variant="secondary" onClick={() => setStep(6)}>{t('mplan.back')}</Button>
+            <Button onClick={() => setStep(8)}>{t('mplan.toDocuments')}</Button>
+          </div>
+        </div>
+      ) : null}
+
+      {/* ── Step 8: the documents ──────────────────────── */}
       {/* Everything here is drawn by the three document builders from
           `storedPlan`, which is the stored plan column for column. The step
           component holds no planning rule and formats no figure — its own header
           says why that is the point, and `monthlyPlanDocuments.ts` is the
           contract it renders. */}
-      {step === 4 && storedPlan ? (
+      {step === 8 && storedPlan ? (
         <MonthlyPlanDocumentsStep
           plan={storedPlan}
           companyName={companyName}
-          confirmable={plan?.validation.confirmable === true}
+          confirmable={plan?.validation?.confirmable === true}
           loadFailed={anyReadFailed}
-          onBack={() => setStep(3)}
+          onBack={() => setStep(7)}
         />
       ) : null}
     </div>
