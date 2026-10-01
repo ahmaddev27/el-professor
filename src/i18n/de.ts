@@ -5809,4 +5809,7 @@ export const de = {
   'mplan.save.reason.unauthenticated': 'Die Sitzung ist abgelaufen. Bitte neu anmelden.',
   'mplan.save.replace':                'Bisherige ersetzen',
   'mplan.summary.saving':              'Wird gespeichert …',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'mp.pool.missingSalaryRange': 'Gehaltsrahmen oder Stundensatz fehlt',
 } as const;

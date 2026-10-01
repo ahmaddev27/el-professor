@@ -101,8 +101,6 @@ const DriversManagement: React.FC<DriversManagementProps> = ({
         { key: 'planning_min_salary',           label: t('fleet.minSalary'),              width: 16, align: 'right' as const, type: 'money' },
         { key: 'planning_max_salary',           label: t('fleet.maxSalary'),              width: 16, align: 'right' as const, type: 'money' },
         // Both hour columns are plain `numeric`, so a half hour is possible.
-        { key: 'target_monthly_hours',          label: t('fleet.targetHoursShort'),       width: 16, align: 'right' as const, type: 'number' },
-        { key: 'max_monthly_hours',             label: t('fleet.maxHoursShort'),          width: 16, align: 'right' as const, type: 'number' },
         { key: 'driver_usage_type',             label: t('fleet.usageType'),              width: 20, format: v => v === 'regular' ? t('fleet.regular') : v === 'coverage_only' ? t('fleet.coverageOnly') : '' },
         { key: 'can_cover_other_drivers',       label: t('fleet.canCover'),               width: 14, format: yesNo },
         { key: 'planning_priority',             label: t('fleet.priority'),               width: 12, align: 'right' as const, type: 'integer' },

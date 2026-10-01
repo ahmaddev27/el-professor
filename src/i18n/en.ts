@@ -5753,4 +5753,7 @@ export const en: PartialDictionary = {
   'mplan.save.reason.unauthenticated': 'The session has expired. Please sign in again.',
   'mplan.save.replace':                'Replace the existing one',
   'mplan.summary.saving':              'Saving …',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'mp.pool.missingSalaryRange': 'Salary range or hourly rate is missing',
 };

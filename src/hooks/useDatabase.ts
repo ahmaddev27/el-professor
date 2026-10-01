@@ -163,8 +163,11 @@ export const useDatabase = () => {
     return {
       employment_type:        p.employment_type ?? 'employee',
       driver_usage_type:      p.driver_usage_type,
-      target_monthly_hours:   p.target_monthly_hours !== '' ? parseFloat(p.target_monthly_hours) : null,
-      max_monthly_hours:      p.max_monthly_hours !== '' ? parseFloat(p.max_monthly_hours) : null,
+      // `target_monthly_hours` and `max_monthly_hours` are not written any more:
+      // the plan works from salaries (owner's decision, 01.10.2026) and nothing
+      // reads either column. They are left untouched rather than nulled on every
+      // save, so no driver's stored history is rewritten by an unrelated edit;
+      // dropping the columns is a migration of its own.
       planning_target_salary: p.planning_target_salary !== '' ? parseFloat(p.planning_target_salary) : null,
       planning_min_salary:    p.planning_min_salary !== '' ? parseFloat(p.planning_min_salary) : null,
       planning_max_salary:    p.planning_max_salary !== '' ? parseFloat(p.planning_max_salary) : null,

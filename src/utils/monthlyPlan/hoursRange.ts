@@ -57,7 +57,7 @@ export interface HoursRangeInput {
    * `drivers.max_monthly_hours` — an explicit ceiling, when the company sets one.
    * §5: "use the more restrictive of the two as the effective cap".
    */
-  maxMonthlyHours?: number | null;
+
   /**
    * `drivers.employment_type === 'company_owner'`. §8: the owner has no monthly
    * ceiling, so the owner gets a range with no cap at all.
@@ -72,12 +72,20 @@ export interface HoursRange {
   maxHours: number | null;
   /**
    * The ceiling actually enforced: the more restrictive of `maxHours` and
-   * `maxMonthlyHours`. `null` means no ceiling — which for the owner is the
+   * the salary. `null` means no ceiling — which for the owner is the
    * intended state, and for anybody else means the range is unusable.
    */
   effectiveMaxHours: number | null;
-  /** Which of the two produced `effectiveMaxHours`, for the screen to explain it. */
-  effectiveMaxSource: 'salary' | 'explicit_cap' | 'none';
+  /**
+   * What produced `effectiveMaxHours`.
+   *
+   * `explicit_cap` is gone with `max_monthly_hours` (owner's decision,
+   * 01.10.2026: the plan works from salaries, not hours), so a usable range is
+   * always capped by the salary and an unusable one by nothing. The field stays
+   * because the summary screen explains the figure it shows, and because a third
+   * source — were one ever added — would otherwise arrive silently.
+   */
+  effectiveMaxSource: 'salary' | 'none';
   /** Empty when the range is usable. */
   problems: HoursRangeProblem[];
   /** True when both bounds exist and can be compared against worked minutes. */
@@ -129,17 +137,16 @@ export function computeHoursRange(input: HoursRangeInput): HoursRange {
     problems.push('min_salary_above_max');
   }
 
-  const explicitCap = positiveOrNull(input.maxMonthlyHours);
-
   if (problems.length > 0 || rate === null || minSalary == null || maxSalary == null) {
-    // No division happens on this path. The explicit cap is still reported when
-    // there is one, so a driver with a ceiling but no salary is not shown as
-    // entirely unconstrained.
+    // No division happens on this path, and there is no ceiling left to report:
+    // with `max_monthly_hours` gone, a driver whose salary or rate cannot be
+    // read has no cap at all, and `usable: false` is what the assigner reads to
+    // refuse them rather than plan against a bound nobody set.
     return {
       minHours: null,
       maxHours: null,
-      effectiveMaxHours: input.isOwner ? null : explicitCap,
-      effectiveMaxSource: input.isOwner ? 'none' : explicitCap != null ? 'explicit_cap' : 'none',
+      effectiveMaxHours: null,
+      effectiveMaxSource: 'none',
       problems,
       usable: false,
     };
@@ -162,16 +169,13 @@ export function computeHoursRange(input: HoursRangeInput): HoursRange {
     };
   }
 
-  // §5: "use the more restrictive as the effective cap".
-  const effectiveMaxHours = explicitCap != null ? Math.min(maxHours, explicitCap) : maxHours;
-  const effectiveMaxSource: HoursRange['effectiveMaxSource'] =
-    explicitCap != null && explicitCap < maxHours ? 'explicit_cap' : 'salary';
-
+  // §5, now with one source: the cap IS the salary-derived maximum. There is no
+  // second bound to be more restrictive than.
   return {
     minHours,
     maxHours,
-    effectiveMaxHours,
-    effectiveMaxSource,
+    effectiveMaxHours: maxHours,
+    effectiveMaxSource: 'salary',
     problems,
     usable: true,
   };

@@ -102,7 +102,6 @@ export interface StoredPlanDriver {
   planning_min_salary: number | null;
   planning_max_salary: number | null;
   planning_hourly_rate: number | null;
-  max_monthly_hours: number | null;
   planning_priority: number | null;
   /**
    * `drivers.planning_enabled`. The engine's `PlanDriverInput` has no field for
@@ -358,7 +357,6 @@ export function storedPlanFromGenerated(input: StoredPlanProjection): StoredMont
     planning_min_salary: driver.minSalary,
     planning_max_salary: driver.maxSalary,
     planning_hourly_rate: driver.hourlyRate,
-    max_monthly_hours: driver.maxMonthlyHours ?? null,
     planning_priority: driver.planningPriority ?? null,
     // No field on PlanDriverInput; the database's guard fills it on save.
     planning_enabled: null,

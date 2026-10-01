@@ -23,8 +23,6 @@ type Gender = 'male' | 'female' | '';
 export interface DriverPlanningFields {
   employment_type: 'employee' | 'company_owner';
   driver_usage_type: 'regular' | 'coverage_only';
-  target_monthly_hours: string;
-  max_monthly_hours: string;
   planning_target_salary: string;
   planning_min_salary: string;
   planning_max_salary: string;
@@ -70,8 +68,6 @@ interface DriverModalProps {
 const DEFAULT_PLANNING: DriverPlanningFields = {
   employment_type: 'employee',
   driver_usage_type: 'regular',
-  target_monthly_hours: '',
-  max_monthly_hours: '',
   planning_target_salary: '',
   planning_min_salary: '',
   planning_max_salary: '',
@@ -111,8 +107,6 @@ const DriverModal: React.FC<DriverModalProps> = ({
       setPlanning({
         employment_type: driver.employment_type ?? 'employee',
         driver_usage_type: driver.driver_usage_type ?? 'regular',
-        target_monthly_hours: driver.target_monthly_hours != null ? String(driver.target_monthly_hours) : '',
-        max_monthly_hours: driver.max_monthly_hours != null ? String(driver.max_monthly_hours) : '',
         planning_target_salary: driver.planning_target_salary != null ? String(driver.planning_target_salary) : '',
         planning_min_salary: driver.planning_min_salary != null ? String(driver.planning_min_salary)
           : driver.planning_target_salary != null ? String(driver.planning_target_salary) : '',
@@ -281,29 +275,6 @@ const DriverModal: React.FC<DriverModalProps> = ({
                       <option value="coverage_only">{t('fleet.coverageDriver')}</option>
                     </NativeSelect>
                   </Field>
-
-                  <div className="grid grid-cols-2 gap-3">
-                    <Field label={t('fleet.targetHoursMonth')}>
-                      <Input
-                        type="number"
-                        value={planning.target_monthly_hours}
-                        onChange={e => setPlanning(p => ({ ...p, target_monthly_hours: e.target.value }))}
-                        placeholder={t('fleet.targetHoursPlaceholder')}
-                        min="0"
-                        step="0.5"
-                      />
-                    </Field>
-                    <Field label={t('fleet.maxHoursMonth')}>
-                      <Input
-                        type="number"
-                        value={planning.max_monthly_hours}
-                        onChange={e => setPlanning(p => ({ ...p, max_monthly_hours: e.target.value }))}
-                        placeholder={t('fleet.maxHoursPlaceholder')}
-                        min="0"
-                        step="0.5"
-                      />
-                    </Field>
-                  </div>
 
                   <div className="grid grid-cols-2 gap-3">
                     <Field label={t('fleet.minSalary')}>

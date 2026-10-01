@@ -68,7 +68,6 @@ function driver(p: Partial<PlanDriverInput> & { id: string; name: string }): Pla
     minSalary: 'minSalary' in p ? p.minSalary! : 1000,
     maxSalary: 'maxSalary' in p ? p.maxSalary! : 2000,
     hourlyRate: 'hourlyRate' in p ? p.hourlyRate! : 20,
-    maxMonthlyHours: p.maxMonthlyHours,
     planningPriority: p.planningPriority,
     canCoverOtherDrivers: p.canCoverOtherDrivers,
   };

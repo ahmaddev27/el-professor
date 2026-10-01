@@ -15,9 +15,16 @@ export interface PlanningDriver {
   work_window_end: string | null;
   allowed_weekdays: number[] | null;
   max_daily_hours: number | null;
+  planning_target_salary: number | null;
+  /**
+   * Read for the LEGACY pipeline only (`monatsplanungPhase3`), which still
+   * treats both as constraints. The monthly plan works from salaries since
+   * 01.10.2026 and reads neither — and this screen no longer displays them or
+   * warns when they are empty, because §5 forbids `target_monthly_hours` as a
+   * displayed figure and asking for a field nothing reads is worse than silence.
+   */
   target_monthly_hours: number | null;
   max_monthly_hours: number | null;
-  planning_target_salary: number | null;
   planning_min_salary: number | null;
   planning_max_salary: number | null;
   planning_hourly_rate: number | null;
@@ -69,12 +76,12 @@ function mapDriverRow(d: Record<string, unknown>): PlanningDriver {
       get<number>('max_daily_hours') ??
       get<number>('max_daily_work_hours') ??
       null,
-    target_monthly_hours: get<number>('target_monthly_hours'),
-    max_monthly_hours: get<number>('max_monthly_hours'),
     planning_target_salary:
       get<number>('planning_target_salary') ??
       get<number>('wish_salary') ??
       null,
+    target_monthly_hours: get<number>('target_monthly_hours'),
+    max_monthly_hours: get<number>('max_monthly_hours'),
     planning_min_salary:
       get<number>('planning_min_salary') ??
       get<number>('planning_target_salary') ??
@@ -138,7 +145,14 @@ function driverMissing(d: PlanningDriver): TranslationKey[] {
   if (!d.is_full_day_available && (!d.work_window_start || !d.work_window_end)) out.push('mp.pool.missingWorkWindow');
   if (!d.allowed_weekdays || d.allowed_weekdays.length === 0) out.push('mp.pool.missingWorkDays');
   if (d.max_daily_hours == null) out.push('mp.pool.missingMaxDaily');
-  if (d.employment_type !== 'company_owner' && d.target_monthly_hours == null) out.push('mp.pool.missingMonthlyTarget');
+  // No `Monatsziel` warning: the plan works from salaries (owner's decision,
+  // 01.10.2026), and §5 forbids `target_monthly_hours` as a target, a
+  // constraint, a sort key AND a displayed figure. Asking the operator to fill a
+  // field nothing reads is worse than not asking.
+  if (d.employment_type !== 'company_owner'
+      && (d.planning_min_salary == null || d.planning_max_salary == null || d.planning_hourly_rate == null)) {
+    out.push('mp.pool.missingSalaryRange');
+  }
   return out;
 }
 
@@ -356,10 +370,6 @@ export default function MonatsplanungDriverPool({
                         </Field>
                         <Field icon={<Target aria-hidden />} label={t('mp.pool.fieldMaxPerDay')}>
                           {d.max_daily_hours != null ? `${d.max_daily_hours}h` : '—'}
-                        </Field>
-                        <Field icon={<Target aria-hidden />} label={t('mp.pool.fieldMonthlyTarget')}>
-                          {d.target_monthly_hours != null ? `${d.target_monthly_hours}h` : '—'}
-                          {d.max_monthly_hours != null && ` ${t('mp.pool.maxSuffix', { hours: d.max_monthly_hours })}`}
                         </Field>
                         {(d.planning_min_salary != null || d.planning_max_salary != null) && (
                           <Field icon={<Wallet aria-hidden />} label={t('mp.pool.fieldSalaryRange')}>
