@@ -219,6 +219,22 @@ export function DataTable<Row>({
         aria-busy={loading || undefined}
         className={cn(
           'overflow-auto focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-focus',
+          // Paint containment, and only where the caller caps the height.
+          //
+          // Measured in Chrome 141 on the Fahrtenanalyse's 118 findings (8265 px
+          // of table): with the max-height alone, `document.body.scrollHeight`
+          // was the correct 1237 while `document.documentElement.scrollHeight`
+          // was 8592 **and the page really scrolled that far** — seven screens of
+          // empty background under a table that was already clipped, the sticky
+          // header's layout overflow escaping the scroll container. Containment
+          // makes the container a containing block; the root measures 1237 and
+          // the header stays pinned.
+          //
+          // Tied to `scrollClassName` rather than applied always, because that is
+          // exactly the condition the defect needs: a table with no cap does not
+          // scroll, has no sticky overflow to escape, and `contain: paint` would
+          // only risk clipping something at its edge for no gain.
+          scrollClassName ? '[contain:paint]' : undefined,
           scrollClassName,
         )}
       >

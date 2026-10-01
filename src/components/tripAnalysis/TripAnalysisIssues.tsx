@@ -224,21 +224,16 @@ export function TripAnalysisIssues({ issues, driverNames, onShowTrips, singleDri
           them — but the list scrolls inside a pinned header rather than
           making the page ten screens long.
 
-          `contain:paint` is not decoration. Measured in Chrome 141: with the
-          max-height alone, `document.body.scrollHeight` was the correct 1237
-          while `document.documentElement.scrollHeight` was 8592 and the page
-          really scrolled that far, so the reader got seven screens of empty
-          background under a table that was already clipped — the sticky
-          header's layout overflow escaping the scroll container. Containment
-          makes the container a containing block and the root measures 1237,
-          with the sticky header still pinned. The same would happen on any
-          DataTable given `scrollClassName` and enough rows. */}
+          The paint containment this screen used to spell out here is applied by
+          `DataTable` itself now, for every table given a `scrollClassName`. The
+          measurement that found it — Chrome 141, 118 findings, the root
+          reporting 8592 px against a body of 1237 — is written at that line. */}
       <DataTable
         caption={t('ta.issues.title')}
         columns={columns}
         rows={rows}
         getRowId={issue => issue.id}
-        scrollClassName="max-h-[32rem] [contain:paint]"
+        scrollClassName="max-h-[32rem]"
         emptyState={<EmptyState size="sm" icon={Filter} title={t('ta.issues.empty')} />}
       />
     </section>
