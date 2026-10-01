@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Plus, Search, Trash2, CreditCard as Edit2, X, StickyNote, Calendar, ChevronLeft, ChevronRight, Download, Loader2 } from 'lucide-react';
-import * as XLSX from 'xlsx';
 import ConfirmationModal from '../components/ConfirmationModal';
+import { exportSheetsToExcel, type ExportOptions } from '../utils/excelExport';
 import { supabase } from '../lib/supabase';
 import { useToast } from '../contexts/ToastContext';
 import { format } from 'date-fns';
@@ -425,74 +425,121 @@ export function NotesPage() {
       };
       const yesNo = (v?: boolean | null) => v ? t('common.yes') : t('common.no');
 
-      // Sheet 1: Notizen
+      // ── Sheet 1: every note ───────────────────────────────────────────
       // The plate is on this sheet and on no other: it is what a Bußgeldbescheid
       // names, so a record the office cannot get out of the screen would not be a
       // record. Sheet 3 lists planning exclusions, where a car means nothing.
       // This dump carries no statutory form, so its headers follow the UI
       // language like every other label here (CLAUDE.md, "Language").
-      const notizRows = toExport.map(note => ({
-        [t('common.driver')]: getDriverName(note),
-        [t('ta.col.vehicle')]: note.cars?.kennzeichen ?? '',
-        [t('notes.noteType')]: noteTypeLabel(note.note_type),
-        [t('notes.planningBehaviour')]: behaviorLabel(note.note_planning_behavior),
-        [t('notes.noteDate')]: fmtDate(note.note_date),
-        [t('notes.startDate')]: fmtDate(note.start_date),
-        [t('notes.endDate')]: fmtDate(note.end_date),
-        [t('notes.allDay')]: yesNo(note.is_full_day),
-        [t('notes.startTime')]: note.start_time ?? '',
-        [t('notes.endTime')]: note.end_time ?? '',
-        [t('notes.text')]: note.note_text,
-        [t('notes.createdAt')]: fmtDateTime(note.created_at),
-        [t('notes.updatedAt')]: fmtDateTime(note.updated_at),
-        [t('notes.createdBy')]: note.created_by ?? '',
-      }));
+      const noteSheet: ExportOptions = {
+        filename: 'notizen',
+        sheetTitle: t('notes.title'),
+        moduleName: t('notes.title'),
+        columns: [
+          { key: 'driver',    label: t('common.driver'),            width: 24 },
+          { key: 'vehicle',   label: t('ta.col.vehicle'),           width: 14 },
+          { key: 'type',      label: t('notes.noteType'),           width: 18 },
+          { key: 'behaviour', label: t('notes.planningBehaviour'),  width: 22 },
+          { key: 'noteDate',  label: t('notes.noteDate'),           width: 13 },
+          { key: 'startDate', label: t('notes.startDate'),          width: 13 },
+          { key: 'endDate',   label: t('notes.endDate'),            width: 13 },
+          { key: 'allDay',    label: t('notes.allDay'),             width: 11, align: 'center' },
+          { key: 'startTime', label: t('notes.startTime'),          width: 11, align: 'center' },
+          { key: 'endTime',   label: t('notes.endTime'),            width: 11, align: 'center' },
+          { key: 'text',      label: t('notes.text'),               width: 44 },
+          { key: 'createdAt', label: t('notes.createdAt'),          width: 18 },
+          { key: 'updatedAt', label: t('notes.updatedAt'),          width: 18 },
+          { key: 'createdBy', label: t('notes.createdBy'),          width: 20 },
+        ],
+        rows: toExport.map(note => ({
+          driver: getDriverName(note),
+          vehicle: note.cars?.kennzeichen ?? '',
+          type: noteTypeLabel(note.note_type),
+          behaviour: behaviorLabel(note.note_planning_behavior),
+          noteDate: fmtDate(note.note_date),
+          startDate: fmtDate(note.start_date),
+          endDate: fmtDate(note.end_date),
+          allDay: yesNo(note.is_full_day),
+          startTime: note.start_time ?? '',
+          endTime: note.end_time ?? '',
+          text: note.note_text,
+          createdAt: fmtDateTime(note.created_at),
+          updatedAt: fmtDateTime(note.updated_at),
+          createdBy: note.created_by ?? '',
+        })),
+      };
 
-      // Sheet 2: Zusammenfassung
+      // ── Sheet 2: the counts ───────────────────────────────────────────
+      // One integer column, so Excel can sum and sort them. The old sheet put a
+      // timestamp in the same column as the counts, which made every one of them
+      // text; the export date is in each sheet's own meta row anyway.
       const driverIds = new Set(toExport.map(n => n.driver_id));
-      const countBehavior = (b: NotePlanningBehavior) => toExport.filter(n => n.note_planning_behavior === b).length;
-      const countType = (type: string) => toExport.filter(n => n.note_type === type).length;
-      const summaryRows = [
-        { [t('notes.metric')]: t('notes.exportDate'), [t('common.value')]: fmtDateTime(new Date().toISOString()) },
-        { [t('notes.metric')]: t('notes.countTotal'), [t('common.value')]: toExport.length },
-        { [t('notes.metric')]: t('notes.countDrivers'), [t('common.value')]: driverIds.size },
-        { [t('notes.metric')]: t('notes.countExcluded'), [t('common.value')]: countBehavior('exclude_from_plan') },
-        { [t('notes.metric')]: t('notes.countNeutral'), [t('common.value')]: countBehavior('neutral') },
-        { [t('notes.metric')]: t('notes.countRequired'), [t('common.value')]: countBehavior('must_include_in_plan') },
-        { [t('notes.metric')]: t('notes.countSick'), [t('common.value')]: countType('sick') },
-        { [t('notes.metric')]: t('notes.countVacation'), [t('common.value')]: countType('vacation') },
-        { [t('notes.metric')]: t('notes.countUnavailable'), [t('common.value')]: countType('off') },
-        { [t('notes.metric')]: t('notes.countOther'), [t('common.value')]: countType('other') },
-      ];
+      const countBehavior = (b: NotePlanningBehavior) =>
+        toExport.filter(n => n.note_planning_behavior === b).length;
+      const countType = (type: string) =>
+        toExport.filter(n => n.note_type === type).length;
 
-      // Sheet 3: Planungsrelevant
-      const planRows = toExport
-        .filter(n => n.note_planning_behavior === 'exclude_from_plan')
-        .map(note => {
-          const sd = fmtDate(note.start_date);
-          const ed = fmtDate(note.end_date);
-          const timeStr = note.is_full_day ? '' : [note.start_time, note.end_time].filter(Boolean).join('–');
-          return {
-            [t('common.driver')]: getDriverName(note),
-            'Typ': noteTypeLabel(note.note_type),
-            'Von': sd,
-            'Bis': ed,
-            [t('common.time')]: timeStr,
-            [t('notes.allDay')]: yesNo(note.is_full_day),
-            [t('notes.text')]: note.note_text,
-            [t('notes.effect')]: t('notes.exclusion'),
-          };
-        });
+      const summarySheet: ExportOptions = {
+        filename: 'notizen',
+        sheetTitle: t('notes.title'),
+        moduleName: t('common.summary'),
+        columns: [
+          { key: 'metric', label: t('notes.metric'),  width: 30 },
+          { key: 'value',  label: t('common.value'),  width: 14, align: 'right', type: 'integer' },
+        ],
+        rows: [
+          { metric: t('notes.countTotal'),       value: toExport.length },
+          { metric: t('notes.countDrivers'),     value: driverIds.size },
+          { metric: t('notes.countExcluded'),    value: countBehavior('exclude_from_plan') },
+          { metric: t('notes.countNeutral'),     value: countBehavior('neutral') },
+          { metric: t('notes.countRequired'),    value: countBehavior('must_include_in_plan') },
+          { metric: t('notes.countSick'),        value: countType('sick') },
+          { metric: t('notes.countVacation'),    value: countType('vacation') },
+          { metric: t('notes.countUnavailable'), value: countType('off') },
+          { metric: t('notes.countOther'),       value: countType('other') },
+        ],
+      };
 
-      const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(notizRows), t('notes.title'));
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(summaryRows), t('common.summary'));
-      if (planRows.length > 0) {
-        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(planRows), t('notes.planningRelevant'));
-      }
+      // ── Sheet 3: the notes the planner excludes, when there are any ───
+      const excluded = toExport.filter(n => n.note_planning_behavior === 'exclude_from_plan');
+      const planSheet: ExportOptions = {
+        filename: 'notizen',
+        sheetTitle: t('notes.title'),
+        moduleName: t('notes.planningRelevant'),
+        columns: [
+          { key: 'driver', label: t('common.driver'),  width: 24 },
+          { key: 'type',   label: 'Typ',               width: 18 },
+          { key: 'from',   label: 'Von',               width: 13 },
+          { key: 'to',     label: 'Bis',               width: 13 },
+          { key: 'time',   label: t('common.time'),    width: 14, align: 'center' },
+          { key: 'allDay', label: t('notes.allDay'),   width: 11, align: 'center' },
+          { key: 'text',   label: t('notes.text'),     width: 44 },
+          { key: 'effect', label: t('notes.effect'),   width: 20 },
+        ],
+        rows: excluded.map(note => ({
+          driver: getDriverName(note),
+          type: noteTypeLabel(note.note_type),
+          from: fmtDate(note.start_date),
+          to: fmtDate(note.end_date),
+          time: note.is_full_day
+            ? ''
+            : [note.start_time, note.end_time].filter(Boolean).join('–'),
+          allDay: yesNo(note.is_full_day),
+          text: note.note_text,
+          effect: t('notes.exclusion'),
+        })),
+      };
 
       const today = format(new Date(), 'yyyy-MM-dd');
-      XLSX.writeFile(wb, `Notizen_${today}.xlsx`);
+      exportSheetsToExcel(
+        `Notizen_${today}.xlsx`,
+        // The exclusions sheet is dropped when it would be empty, as it always
+        // was: an empty sheet in a workbook reads as "nothing is excluded", which
+        // is a claim, and the summary already carries the count.
+        planSheet.rows.length > 0
+          ? [noteSheet, summarySheet, planSheet]
+          : [noteSheet, summarySheet],
+      );
     } catch (e) {
       console.error('Notizen export error:', e);
       setExportError(t('notes.exportFailed'));

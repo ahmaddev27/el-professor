@@ -20,6 +20,7 @@
  * every trip of the file by id.
  */
 import * as XLSX from 'xlsx';
+import { downloadStyledWorkbook } from './styledWorkbookDownload';
 import { formatCentsForNumeric } from './money';
 import {
   EXCLUSION_KEYS,
@@ -105,9 +106,113 @@ function tripHeader(t: Translate, extra: Cell[] = []): Cell[] {
   ];
 }
 
-function sheet(rows: Cell[][], widths: number[]): XLSX.WorkSheet {
+/**
+ * The report's own palette, in the shape `styledWorkbookDownload` translates.
+ *
+ * Deliberately not `excelExport.ts`'s: that module's `T` is private to it, and
+ * importing a palette across the seam would tie a statutory-adjacent report's look
+ * to a change made for an operational list. These four colours are the same family
+ * — the slate the rest of the product uses — and nothing else is shared.
+ */
+const R = {
+  MARKER_BG: 'FEF3C7',   // amber-100: this is an analysis, not a document
+  MARKER_FG: '92400E',   // amber-800
+  HEAD_BG:   '1E293B',   // slate-800
+  HEAD_FG:   'FFFFFF',
+  BAND_BG:   'F8FAFC',   // slate-50
+  LINE:      'E2E8F0',
+} as const;
+
+const THIN = {
+  top:    { style: 'thin', color: { rgb: R.LINE } },
+  bottom: { style: 'thin', color: { rgb: R.LINE } },
+  left:   { style: 'thin', color: { rgb: R.LINE } },
+  right:  { style: 'thin', color: { rgb: R.LINE } },
+} as const;
+
+/**
+ * One sheet, drawn.
+ *
+ * `headerRow` is the 0-based index of the sheet's column-header row; every sheet
+ * here opens with two marker rows and a blank one, so it is 3 for the three
+ * tabular sheets. The overview sheet is label/value pairs down to its driver
+ * table, so it names that table's own header row instead.
+ *
+ * Nothing about the VALUES or their positions changes here. Before this the four
+ * sheets were bare `aoa_to_sheet` grids and the writer discarded styling anyway,
+ * so the file was a plain grid of 13 columns with no header and no widths that
+ * survived.
+ */
+/**
+ * The column-header row of the three tabular sheets.
+ *
+ * `header(t)` writes the two marker rows and a blank one, so the header is row 3
+ * on each of them. Asserted rather than assumed: `headerOf` below reads it off the
+ * marker block, so adding a line to the marker cannot leave the band painted on
+ * the wrong row.
+ */
+const TABLE_HEADER_ROW = 3;
+
+function sheet(rows: Cell[][], widths: number[], headerRow?: number): XLSX.WorkSheet {
   const ws = XLSX.utils.aoa_to_sheet(rows);
   ws['!cols'] = widths.map(wch => ({ wch }));
+
+  const columns = Math.max(widths.length, ...rows.map(row => row.length));
+  const style = (r: number, c: number, s: object) => {
+    const address = XLSX.utils.encode_cell({ r, c });
+    const existing = ws[address] as XLSX.CellObject | undefined;
+    // A cell the grid left empty is created so the band is continuous; one that
+    // holds a value keeps its value and its type exactly.
+    ws[address] = existing ? { ...existing, s } : { t: 's', v: '', s };
+  };
+
+  // The marker band: the two rows that say this is an analysis and does not
+  // replace the Fahrtenbuch. Coloured because that sentence is the point of it.
+  for (const r of [0, 1]) {
+    for (let c = 0; c < columns; c++) {
+      style(r, c, {
+        font:      { bold: r === 0, sz: r === 0 ? 11 : 9, color: { rgb: R.MARKER_FG } },
+        fill:      { fgColor: { rgb: R.MARKER_BG } },
+        alignment: { horizontal: 'left', vertical: 'center', indent: 1 },
+      });
+    }
+  }
+
+  if (headerRow != null) {
+    for (let c = 0; c < columns; c++) {
+      style(headerRow, c, {
+        font:      { bold: true, sz: 10, color: { rgb: R.HEAD_FG } },
+        fill:      { fgColor: { rgb: R.HEAD_BG } },
+        alignment: { horizontal: 'left', vertical: 'center', wrapText: false, indent: 1 },
+        border:    THIN,
+      });
+    }
+
+    for (let r = headerRow + 1; r < rows.length; r++) {
+      const banded = (r - headerRow) % 2 === 0;
+      for (let c = 0; c < columns; c++) {
+        const address = XLSX.utils.encode_cell({ r, c });
+        if (!ws[address]) continue; // keep the sparse rows sparse
+        (ws[address] as XLSX.CellObject).s = {
+          font:   { sz: 9 },
+          fill:   banded ? { fgColor: { rgb: R.BAND_BG } } : undefined,
+          border: THIN,
+        };
+      }
+    }
+
+    ws['!freeze'] = { xSplit: 0, ySplit: headerRow + 1 };
+    ws['!autofilter'] = {
+      ref: XLSX.utils.encode_range({
+        s: { r: headerRow, c: 0 },
+        e: { r: headerRow, c: columns - 1 },
+      }),
+    };
+  }
+
+  ws['!rows'] = [{ hpt: 20 }, { hpt: 16 }, { hpt: 6 }];
+  if (headerRow != null) ws['!rows'][headerRow] = { hpt: 22 };
+
   return ws;
 }
 
@@ -220,12 +325,22 @@ export function buildTripAnalysisReport(input: TripAnalysisReportInput): XLSX.Wo
       ]),
   ];
 
+  // The overview's driver table starts after a block of label/value pairs, so its
+  // header is not at a fixed offset the way the three tabular sheets' is. It is
+  // DERIVED from the array rather than counted: the first draft of this wrote the
+  // index down as 24, the real row is 19, and the band was painted across a row of
+  // a driver's figures with every value assertion still passing. The row is the one
+  // holding the driver table's first two labels side by side, which no label/value
+  // pair above it can match — those carry a figure in their second cell.
+  const driverHeaderRow = overview.findIndex(row =>
+    row[0] === t('ta.col.driver') && row[1] === t('ta.report.col.driverId'));
+
   const workbook = XLSX.utils.book_new();
   workbook.Props = { Title: `${t('ta.title')} ${monthLabel}`, Subject: t('ta.report.marker') };
-  XLSX.utils.book_append_sheet(workbook, sheet(overview, [34, 38, 18, 14, 14, 12, 14, 14, 12, 12, 14, 12, 14, 14, 22, 10, 10, 12]), t('ta.report.sheet.overview'));
-  XLSX.utils.book_append_sheet(workbook, sheet(findings, [36, 34, 12, 14, 38, 14, 60, 12, 8, 50, 60]), t('ta.report.sheet.findings'));
-  XLSX.utils.book_append_sheet(workbook, sheet(evidence, [36, 34, 14, 38, 8, 20, 20, 24, 38, 14, 14, 12, 10]), t('ta.report.sheet.evidence'));
-  XLSX.utils.book_append_sheet(workbook, sheet(trips, [38, 8, 20, 20, 24, 38, 14, 14, 12, 10, 20, 30, 50]), t('ta.report.sheet.trips'));
+  XLSX.utils.book_append_sheet(workbook, sheet(overview, [34, 38, 18, 14, 14, 12, 14, 14, 12, 12, 14, 12, 14, 14, 22, 10, 10, 12], driverHeaderRow < 0 ? undefined : driverHeaderRow), t('ta.report.sheet.overview'));
+  XLSX.utils.book_append_sheet(workbook, sheet(findings, [36, 34, 12, 14, 38, 14, 60, 12, 8, 50, 60], TABLE_HEADER_ROW), t('ta.report.sheet.findings'));
+  XLSX.utils.book_append_sheet(workbook, sheet(evidence, [36, 34, 14, 38, 8, 20, 20, 24, 38, 14, 14, 12, 10], TABLE_HEADER_ROW), t('ta.report.sheet.evidence'));
+  XLSX.utils.book_append_sheet(workbook, sheet(trips, [38, 8, 20, 20, 24, 38, 14, 14, 12, 10, 20, 30, 50], TABLE_HEADER_ROW), t('ta.report.sheet.trips'));
   return workbook;
 }
 
@@ -251,5 +366,11 @@ export function tripAnalysisReportFileName(year: number, month: number, sourceFi
 
 /** Builds and downloads the report. */
 export function downloadTripAnalysisReport(input: TripAnalysisReportInput): void {
-  XLSX.writeFile(buildTripAnalysisReport(input), tripAnalysisReportFileName(input.year, input.month, input.fileName));
+  // ExcelJS, like every other table in the product since 01.10.2026. `writeFile`
+  // would discard the drawing `sheet()` now describes.
+  const filename = tripAnalysisReportFileName(input.year, input.month, input.fileName);
+  void downloadStyledWorkbook(buildTripAnalysisReport(input), filename)
+    .catch((error: unknown) => {
+      console.error('downloadTripAnalysisReport: writing the workbook failed', error);
+    });
 }

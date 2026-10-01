@@ -36,7 +36,6 @@ const CHROME: ExportChromeText = {
   empty: 'no data',
   filters: 'filters:',
   totals: 'total ({count})',
-  footer: 'footer ({count})',
 };
 
 /** The cell a column writes for a row, as `buildTableWorkbook` resolves it. */
@@ -162,7 +161,6 @@ describe('buildAbrechnungExport', () => {
       emptyState: 'no data',
       activeFilters: 'filters:',
       totalsRow: 'total ({count})',
-      footer: 'footer ({count})',
     });
   });
 });

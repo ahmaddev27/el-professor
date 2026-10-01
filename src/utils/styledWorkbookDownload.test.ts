@@ -111,8 +111,14 @@ const asObject = (value: unknown): Record<string, unknown> => value as Record<st
 //
 // Three columns and a filter line, so every block is present and no merge is
 // degenerate. 0-based sheet rows: 0 accent, 1 title, 2 meta, 3 filter,
-// 4 spacer, 5 column headers, 6 data, 7 totals cap, 8 totals, 9 spacer,
-// 10 footer. ExcelJS counts from 1, so those are rows 1-11.
+// 4 spacer, 5 column headers, 6 data, 7 totals cap, 8 totals. ExcelJS counts
+// from 1, so those are rows 1-9.
+//
+// There used to be two more — a spacer and a footer band saying
+// "El-Professor Verwaltungssystem — N Datensätze exportiert" beside a second copy
+// of the export timestamp. The owner had it removed on 01.10.2026, and the band
+// is drawn now only for a caller that passes `labels.footer` a real note; this
+// fixture passes none, so the sheet ends on its totals row.
 
 const COLUMNS: ExportColumn[] = [
   { key: 'plate', label: 'Kennzeichen', width: 20 },
@@ -125,7 +131,7 @@ const MONEY_FORMAT = '#,##0.00\\ "€"';
 const HEADER_ROW = 6;
 const DATA_ROW = 7;
 const TOTALS_ROW = 9;
-const LAST_ROW = 11;
+const LAST_ROW = 9;
 
 function translate(over: Partial<ExportOptions> = {}): Recorder {
   const options: ExportOptions = {
@@ -256,10 +262,19 @@ describe('the sheet settings reach the writer', () => {
     });
   });
 
-  it('merges the accent, title, meta, filter and footer bands', () => {
+  it('merges the accent, title, meta and filter bands', () => {
     expect(translate().merges.slice().sort()).toEqual(
-      ['1,1,1,3', '2,1,2,3', '3,1,3,2', '4,1,4,3', '11,1,11,2'].sort(),
+      ['1,1,1,3', '2,1,2,3', '3,1,3,2', '4,1,4,3'].sort(),
     );
+  });
+
+  it('merges a footer band across the FULL width, when a caller passes a note', () => {
+    // Unlike the meta row, which keeps its last cell for the timestamp, the
+    // footer band holds a sentence and nothing sits beside it. The note itself is
+    // what one caller needs: the payroll summary's warning that the surcharge
+    // columns must not be added to the hours.
+    const withNote = translate({ labels: { footer: 'Zuschlagsarten nicht addieren.' } });
+    expect(withNote.merges).toContain('11,1,11,3');
   });
 
   it('names the sheet and fills the document properties', () => {
@@ -267,15 +282,18 @@ describe('the sheet settings reach the writer', () => {
     expect(recording.sheet().name).toBe('Test');
     expect(recording.workbook.title).toBe('Titel');
     expect(recording.workbook.subject).toBe('Test');
-    expect(recording.workbook.company).toBe('El-Professor');
-    expect(recording.workbook.creator).toBe('El-Professor Verwaltungssystem');
+    // No company and no creator: `workbookProps` sets neither, and the writer's
+    // own fallback was the product's name until the owner had it removed on
+    // 01.10.2026. A customer's file carries no signature of ours.
+    expect(recording.workbook.company).toBeUndefined();
+    expect(recording.workbook.creator).toBe('');
   });
 
   it('sends no degenerate merge for a single-column table', () => {
-    // With one column the meta and footer bands end one column BEFORE they
-    // start, which xlsx wrote out as a malformed ref and ExcelJS would
-    // normalise into a different rectangle; the others are one cell wide and
-    // draw nothing. None is worth sending.
+    // With one column the meta band ends one column BEFORE it starts, which xlsx
+    // wrote out as a malformed ref and ExcelJS would normalise into a different
+    // rectangle; the others are one cell wide and draw nothing. None is worth
+    // sending.
     const single: ExportColumn[] = [{ key: 'plate', label: 'Kennzeichen' }];
     expect(translate({ columns: single, totals: {} }).merges).toEqual([]);
   });

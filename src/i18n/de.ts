@@ -398,7 +398,6 @@ export const de = {
   'ui.export.chrome.empty':   'Keine Daten vorhanden',
   'ui.export.chrome.filters': 'Aktive Filter:',
   'ui.export.chrome.totals':  'Gesamt  ({count} Einträge)',
-  'ui.export.chrome.footer':  'El-Professor Verwaltungssystem  —  {count} Datensätze exportiert',
   'ui.export.filterLine':     '{label}: {value}',
   'ui.export.failed':         'Der Export konnte nicht erstellt werden',
 
@@ -5852,4 +5851,14 @@ export const de = {
 
   // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
   'mplan.unitHours': 'Std.',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'mplan.blocks.minimum':         'Mindestdauer je Block: {minutes} Minuten.',
+  'mplan.blocks.stillShort':      '{count} Block/Blöcke bleiben unter {minutes} Minuten: an diesem Tag gibt es für dieses Fahrzeug keinen weiteren Block zum Zusammenlegen. Die Zeiten werden nicht aufgefüllt.',
+  'mplan.blocks.stillShortTitle': 'Einzelne Blöcke bleiben kürzer',
+  'mplan.minBlock.hint':          'Kürzere Blöcke werden mit einem Nachbarblock desselben Fahrzeugs am selben Tag zusammengelegt. 0 = keine Mindestdauer.',
+  'mplan.minBlock.invalid':       'Bitte eine ganze Zahl ab 0 eingeben.',
+  'mplan.minBlock.label':         'Mindestdauer je Block (Minuten)',
+  'mplan.regen.searched':         '{tried} Varianten geprüft, {equal} davon gleich gut.',
+  'mplan.regen.searchedNothing':  '{tried} Varianten geprüft — keine war besser oder gleich gut und anders. Die Vorgaben lassen nur diese eine Verteilung zu.',
 } as const;

@@ -25,10 +25,11 @@ import * as XLSX from 'xlsx';
  * `XLSX.writeFile` is mocked at the module boundary, because the real one is a
  * DOM download; mocking it also hands the test the workbook that would have been
  * written. `XLSX.utils` stays real, so the sheet is read back the way Excel would.
- * It is still `exportSalariesToExcel`'s writer — a plain dump with no styling to
- * lose — while `exportTableToExcel` writes through `downloadStyledWorkbook` since
- * the ExcelJS swap, xlsx 0.20.3 having discarded every fill, font and border it
- * was handed. Both are mocked, so "nothing was written" below still means it.
+ * Since 01.10.2026 no export in this module uses it: `exportTableToExcel`,
+ * `exportSheetsToExcel` and so both legacy dumps all write through
+ * `downloadStyledWorkbook`, xlsx 0.20.3 having discarded every fill, font and
+ * border it was handed. Both writers are mocked, so "nothing was written" below
+ * still means it — and §3's last assertion is that `writeFile` stays unused.
  */
 const { writeFile } = vi.hoisted(() => ({ writeFile: vi.fn() }));
 vi.mock('xlsx', async (importOriginal) => {
@@ -52,6 +53,7 @@ import {
   type ExportColumn,
   type ExportOptions,
 } from './excelExport';
+import { buildSalarySheets } from './listExportSheets';
 import type { SalaryCalculation } from '../types/receipt';
 
 const SHEET = 'Test';
@@ -212,98 +214,143 @@ function salary(over: Partial<SalaryCalculation>): SalaryCalculation {
   };
 }
 
-/** The sheet `exportSalariesToExcel` would have written, as rows of raw values. */
-function salarySheet(rows: SalaryCalculation[]): unknown[][] {
-  exportSalariesToExcel(rows, '2026-09-01', '2026-09-30');
-  expect(writeFile).toHaveBeenCalledTimes(1);
-  const wb = writeFile.mock.calls[0][0] as XLSX.WorkBook;
-  return XLSX.utils.sheet_to_json<unknown[]>(wb.Sheets['Gehälter'], { header: 1, raw: true, defval: '' });
+/**
+ * The two sheets the Gehälter export writes, as `ExportOptions`.
+ *
+ * Read off the builder rather than out of a written workbook. Since 01.10.2026
+ * this export is drawn by `exportSheetsToExcel`, so there is no single sheet of
+ * text to parse — and the rule under test is about the FIGURES, which the builder
+ * hands over as numbers. Asserting on a number is what the old `.toFixed(2)`
+ * string comparison was standing in for.
+ */
+function salarySheets(rows: SalaryCalculation[]) {
+  const sheets = buildSalarySheets(rows, '2026-09-01', '2026-09-30');
+  expect(sheets, 'the export is a summary sheet and a per-driver sheet').toHaveLength(2);
+  return { summary: sheets[0], perDriver: sheets[1] };
 }
 
-/** The row whose first cell is `label`. */
-function rowOf(sheet: unknown[][], label: string): unknown[] {
-  const row = sheet.find(r => r[0] === label);
-  expect(row, `no row labelled ${label}`).toBeDefined();
-  return row as unknown[];
+/** The per-driver row for one driver. */
+function driverRow(rows: SalaryCalculation[], name: string): Record<string, unknown> {
+  const row = salarySheets(rows).perDriver.rows.find(r => r.driver === name);
+  expect(row, `no row for ${name}`).toBeDefined();
+  return row as Record<string, unknown>;
+}
+
+/** A metric's figure from the summary sheet, by its label. */
+function metric(rows: SalaryCalculation[], label: string, key: 'amount' | 'count'): unknown {
+  const row = salarySheets(rows).summary.rows.find(r => r.metric === label);
+  expect(row, `no metric ${label}`).toBeDefined();
+  return (row as Record<string, unknown>)[key];
 }
 
 describe('3 — the Gehälter export reads the same due and status as the screen', () => {
-  const DUE_COL = 5;     // 'Fälliger Betrag (€)'
-  const STATUS_COL = 6;  // 'Status'
-
   it('due is netto_salary where it is set, not amount_due', () => {
     // The screen shows 500,00 for this row (salaryBase). The export printed
     // 900,00 — the calculated amount the manual adjustment overrode.
-    const sheet = salarySheet([salary({ driver_name: 'Ali', amount_due: 900, netto_salary: 500, total_paid: 500 })]);
-    expect(rowOf(sheet, 'Ali')[DUE_COL]).toBe('500.00');
+    expect(driverRow(
+      [salary({ driver_name: 'Ali', amount_due: 900, netto_salary: 500, total_paid: 500 })],
+      'Ali',
+    ).due).toBe(500);
   });
 
   it('a netto adjustment to zero is honoured, because the base uses ?? and not ||', () => {
-    const sheet = salarySheet([salary({ driver_name: 'Ali', amount_due: 900, netto_salary: 0 })]);
-    expect(rowOf(sheet, 'Ali')[DUE_COL]).toBe('0.00');
+    expect(driverRow(
+      [salary({ driver_name: 'Ali', amount_due: 900, netto_salary: 0 })],
+      'Ali',
+    ).due).toBe(0);
   });
 
   it('due falls back to amount_due when netto_salary is absent — 51 of 58 production rows', () => {
-    const sheet = salarySheet([salary({ driver_name: 'Ali', amount_due: 1234.5, netto_salary: undefined })]);
-    expect(rowOf(sheet, 'Ali')[DUE_COL]).toBe('1234.50');
+    expect(driverRow(
+      [salary({ driver_name: 'Ali', amount_due: 1234.5, netto_salary: undefined })],
+      'Ali',
+    ).due).toBe(1234.5);
   });
 
   it('the status is derived from the payments, not read off the stored word', () => {
     // Stored 'paid', but only 400 of 1000 was ever paid. The export printed
     // "Bezahlt"; the screen's badge says "Teilweise".
-    const sheet = salarySheet([salary({ driver_name: 'Ali', amount_due: 1000, total_paid: 400, status: 'paid' })]);
-    expect(rowOf(sheet, 'Ali')[STATUS_COL]).toBe('Teilweise bezahlt');
+    expect(driverRow(
+      [salary({ driver_name: 'Ali', amount_due: 1000, total_paid: 400, status: 'paid' })],
+      'Ali',
+    ).status).toBe('Teilweise bezahlt');
   });
 
   it('a row paid in full against its base reads Bezahlt although it is stored unpaid', () => {
-    const sheet = salarySheet([salary({ driver_name: 'Ali', amount_due: 900, netto_salary: 500, total_paid: 500, status: 'unpaid' })]);
-    expect(rowOf(sheet, 'Ali')[STATUS_COL]).toBe('Bezahlt');
+    expect(driverRow(
+      [salary({ driver_name: 'Ali', amount_due: 900, netto_salary: 500, total_paid: 500, status: 'unpaid' })],
+      'Ali',
+    ).status).toBe('Bezahlt');
   });
 
   it('a row with no payment reads Unbezahlt although it is stored paid', () => {
-    const sheet = salarySheet([salary({ driver_name: 'Ali', amount_due: 1000, total_paid: 0, status: 'paid' })]);
-    expect(rowOf(sheet, 'Ali')[STATUS_COL]).toBe('Unbezahlt');
+    expect(driverRow(
+      [salary({ driver_name: 'Ali', amount_due: 1000, total_paid: 0, status: 'paid' })],
+      'Ali',
+    ).status).toBe('Unbezahlt');
   });
 
   it('float noise does not make a fully paid row read as partly paid', () => {
     // 3 × 411,52 sums to 1234.5599999999999 in binary floats. MONEY_EPSILON is
     // what keeps that off a driver's file as a remaining balance.
-    const sheet = salarySheet([salary({ driver_name: 'Ali', amount_due: 411.52 * 3, total_paid: 411.52 + 411.52 + 411.52 })]);
-    expect(rowOf(sheet, 'Ali')[STATUS_COL]).toBe('Bezahlt');
+    expect(driverRow(
+      [salary({ driver_name: 'Ali', amount_due: 411.52 * 3, total_paid: 411.52 + 411.52 + 411.52 })],
+      'Ali',
+    ).status).toBe('Bezahlt');
   });
 
-  it('the GESAMT row and the summary sum the base, not amount_due', () => {
-    const sheet = salarySheet([
-      salary({ driver_name: 'Ali',  amount_due: 900,  netto_salary: 500, total_paid: 500 }),
+  it('the totals row and the summary sum the base, not amount_due', () => {
+    const rows = [
+      salary({ driver_name: 'Ali',   amount_due: 900,  netto_salary: 500, total_paid: 500 }),
       salary({ driver_name: 'Berta', amount_due: 1000, total_paid: 400, status: 'paid' }),
-    ]);
+    ];
     // 500 + 1000, where summing amount_due gave 1900.
-    expect(rowOf(sheet, 'GESAMT')[DUE_COL]).toBe('1500.00');
-    expect(rowOf(sheet, 'Gesamt Fällig')[1]).toBe('1500.00');
+    expect(salarySheets(rows).perDriver.totals?.due).toBe(1500);
+    expect(metric(rows, 'Gesamt Fällig', 'amount')).toBe(1500);
   });
 
   it('the three summary counts are derived and sum to the driver count', () => {
-    const sheet = salarySheet([
-      salary({ driver_name: 'Ali',   amount_due: 500, total_paid: 500 }),               // paid
-      salary({ driver_name: 'Berta', amount_due: 1000, total_paid: 400, status: 'paid' }), // partially
-      salary({ driver_name: 'Cem',   amount_due: 800, total_paid: 0, status: 'paid' }),  // unpaid
-    ]);
-    expect(rowOf(sheet, 'Bezahlt')[1]).toBe('1');
-    expect(rowOf(sheet, 'Teilweise bezahlt')[1]).toBe('1');
-    expect(rowOf(sheet, 'Unbezahlt')[1]).toBe('1');
-    expect(rowOf(sheet, 'Anzahl Fahrer')[1]).toBe('3');
+    const rows = [
+      salary({ driver_name: 'Ali',   amount_due: 500,  total_paid: 500 }),                 // paid
+      salary({ driver_name: 'Berta', amount_due: 1000, total_paid: 400, status: 'paid' }),  // partially
+      salary({ driver_name: 'Cem',   amount_due: 800,  total_paid: 0,   status: 'paid' }),  // unpaid
+    ];
+    expect(metric(rows, 'Bezahlt', 'count')).toBe(1);
+    expect(metric(rows, 'Teilweise bezahlt', 'count')).toBe(1);
+    expect(metric(rows, 'Unbezahlt', 'count')).toBe(1);
+    expect(metric(rows, 'Anzahl Fahrer', 'count')).toBe(3);
   });
 
-  it('the two section bands are merged, and the driver band is one of them', () => {
-    // The literal merge rows were 6 and 17. 6 was right; 17 was the blank row
-    // BELOW the driver band, so that title has never been merged and an empty
-    // row was. Adding the summary's third count line would have shifted it again.
+  /**
+   * What replaced the old merged section bands.
+   *
+   * Until 01.10.2026 both sections were stacked on ONE plain sheet with a merged
+   * title row each, and this test pinned those two merges — because the literal
+   * row numbers the code used had drifted: 6 was right, 17 was the blank row
+   * BELOW the driver band, so that title had never actually been merged. They are
+   * two sheets now, which is why there is nothing left to drift.
+   */
+  it('the two sections are two named sheets, and neither is a band in the other', () => {
+    const { summary, perDriver } = salarySheets([salary({ driver_name: 'Ali' })]);
+    expect(summary.moduleName).toBe('Zusammenfassung');
+    expect(perDriver.moduleName).toBe('Pro Fahrer');
+    expect(perDriver.rows.map(r => r.driver)).toEqual(['Ali']);
+    // The per-driver sheet holds drivers only: no metric row leaked into it.
+    expect(perDriver.rows.some(r => r.metric !== undefined)).toBe(false);
+  });
+
+  /**
+   * And the file is written by the styled writer, not by `xlsx`.
+   *
+   * The whole reason this export was rebuilt: `xlsx@0.20.3` discards every fill,
+   * font and border on write, so the Gehälter file came out an unstyled grid of
+   * strings. A regression to `XLSX.writeFile` would satisfy every assertion above
+   * and still produce that file.
+   */
+  it('writes through the styled writer and never through xlsx', () => {
     exportSalariesToExcel([salary({ driver_name: 'Ali' })], '2026-09-01', '2026-09-30');
-    const wb = writeFile.mock.calls[0][0] as XLSX.WorkBook;
-    const ws = wb.Sheets['Gehälter'];
-    const labels = columnA(ws);
-    const merged = ((ws['!merges'] as XLSX.Range[] | undefined) ?? []).map((m: XLSX.Range) => m.s.r);
-    expect(merged).toContain(labels.indexOf('ZUSAMMENFASSUNG'));
-    expect(merged).toContain(labels.indexOf('GEHALTSÜBERSICHT PRO FAHRER'));
+    expect(downloadStyledWorkbook).toHaveBeenCalledTimes(1);
+    expect(writeFile).not.toHaveBeenCalled();
+    expect(downloadStyledWorkbook.mock.calls[0][1]).toBe('salaries_01-09-2026_to_30-09-2026.xlsx');
   });
 });

@@ -1,4 +1,5 @@
 import * as XLSX from 'xlsx';
+import { downloadStyledWorkbook } from './styledWorkbookDownload';
 // The column list, the hour formatter and the month names are shared with §12's
 // payroll summary (`monthlyPlanPayrollSummary.ts`), which prints the same seven
 // Lohnart columns for the same recipient from a different source. They were
@@ -166,6 +167,7 @@ export function exportFahreruebersichtToExcel(params: {
   r++;
 
   // ── Header row ──
+  const headerRow = r;
   COLUMNS.forEach((col, c) => {
     ws[XLSX.utils.encode_cell({ r, c })] = cell(col.label, S.hdr);
   });
@@ -226,11 +228,25 @@ export function exportFahreruebersichtToExcel(params: {
 
   ws['!merges'] = merges;
 
+  // The header row stays in view, which on a sheet of 25 columns and one row per
+  // driver is the difference between reading it and losing your place. Added with
+  // the writer swap because `XLSX.writeFile` emitted no `<pane>` either — this
+  // key has never had an effect in this file.
+  ws['!freeze'] = { xSplit: 0, ySplit: headerRow + 1 };
+
   const mm = String(month).padStart(2, '0');
   const sheetName = `${mm}_${year}`;
   XLSX.utils.book_append_sheet(wb, ws, sheetName);
 
-  XLSX.writeFile(wb, `Fahreruebersicht_Stundennachweis_${mm}_${year}.xlsx`);
+  // ExcelJS, not `XLSX.writeFile`. Everything above describes a drawn sheet — 22
+  // styles, the merges, the row heights — and xlsx 0.20.3 discards all of it:
+  // `get_cell_style` reads only `cell.z`. This sheet is the payroll summary an
+  // accountant reads, and it was coming out as a bare grid. Not a cell, a style,
+  // a width or a merge changed with the writer; only the freeze above was added.
+  void downloadStyledWorkbook(wb, `Fahreruebersicht_Stundennachweis_${mm}_${year}.xlsx`)
+    .catch((error: unknown) => {
+      console.error('exportFahreruebersichtToExcel: writing the workbook failed', error);
+    });
 }
 
 // ── Fahrerübersicht import-format export ──────────────────────────────────────

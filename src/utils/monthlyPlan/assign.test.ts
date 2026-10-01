@@ -1,7 +1,14 @@
 import { describe, it, expect } from 'vitest';
 import { buildBlocks, type PlanTripInput } from './blocks';
 import { buildAvailability, type PlanNote } from './availability';
-import { assignBlocks, type PlanDriverInput, type AssignResult } from './assign';
+import {
+  assignBlocks,
+  comparePlanQuality,
+  planQuality,
+  searchAssignments,
+  type PlanDriverInput,
+  type AssignResult,
+} from './assign';
 
 /**
  * §7 and §8, with §16's assignment cases written out:
@@ -410,5 +417,191 @@ describe('the driver states the summary screen reads (§1 screen 3)', () => {
     expect(r.driverStates).toHaveLength(2);
     const idle = r.driverStates.find(s => s.assignedBlockIds.length === 0)!;
     expect(idle.assessment.position).toBe('no_hours');
+  });
+});
+
+// ─── Regeneration as a search (owner, 01.10.2026) ─────────────────────────
+//
+// The block above tests regeneration on IDENTICAL TWINS, where every block is a
+// genuine tie and the seeded tie-break alone moves the plan. That is why it
+// passed while the owner reported the button as doing nothing, three times: on a
+// real month the drivers have different salaries, so their scores never tie after
+// the first block and the seed reached no decision at all.
+//
+// `searchAssignments` is the answer. It varies the ORDER blocks are offered to
+// the greedy pass — a choice the requirement leaves open — scores each variant on
+// figures the engine already computes, and keeps the best, with the plan on
+// screen among the candidates so the answer is never worse than what it replaces.
+//
+// §7's nine hard rules are untouched: `refusalFor` is asked per (driver, block)
+// pair whatever order the pairs arrive in. Every assertion below re-checks that.
+
+describe('regeneration searches for a different plan (owner, 01.10.2026)', () => {
+  /** A fortnight on two cars: enough blocks for the order to matter. */
+  const fortnight = Array.from({ length: 14 }, (_, day) => [
+    dayBlock(`a${day}`, 'car-A', `2026-10-${String(day + 5).padStart(2, '0')}`, '06:00', '14:00'),
+    dayBlock(`b${day}`, 'car-B', `2026-10-${String(day + 5).padStart(2, '0')}`, '14:30', '22:00'),
+  ]).flat();
+
+  /**
+   * Drivers who do NOT tie: three different salary ranges, so `scoreCandidate`
+   * separates them on the first block and never produces an equal pair.
+   */
+  const distinct = [
+    driver({ id: 'ali',   minSalary: 1950, maxSalary: 2100, hourlyRate: 14 }),
+    driver({ id: 'sami',  minSalary: 1500, maxSalary: 1800, hourlyRate: 12 }),
+    driver({ id: 'canan', minSalary: 2400, maxSalary: 2800, hourlyRate: 16 }),
+  ];
+
+  const built = () => {
+    const { blocks } = buildBlocks(fortnight, { switchMinutes: 30 });
+    const availability = buildAvailability([], blocks, new Set(distinct.map(d => d.id)));
+    return { blocks, availability };
+  };
+
+  const fingerprint = (r: AssignResult) =>
+    r.assignments.map(a => `${a.blockId}:${a.driverId}`).sort().join(',');
+
+  it('the ordering does the work, not the tie-break — the control for this change', () => {
+    // The first draft of this test asserted that `seeded_tie` NEVER fires on these
+    // drivers. Measured, it fires once in 28 assignments: the scoring bands are
+    // coarse enough that two different drivers can still land on the same figure.
+    // So the control is not "no tie exists" but "the ties cannot account for the
+    // difference" — which is the claim that matters, and it is far from marginal:
+    // 24 of 28 blocks move between seed 0 and seed 1 against one single tie.
+    const { blocks, availability } = built();
+    const withSeed = (seed: number) =>
+      assignBlocks(blocks, distinct, availability, { switchMinutes: 30, seed });
+
+    const base = withSeed(0);
+    const next = withSeed(1);
+    const held = new Map(base.assignments.map(a => [a.blockId, a.driverId]));
+    const moved = next.assignments.filter(a => held.get(a.blockId) !== a.driverId).length;
+    const ties = base.assignments.filter(a => a.reason === 'seeded_tie').length
+               + next.assignments.filter(a => a.reason === 'seeded_tie').length;
+
+    expect(moved).toBeGreaterThan(ties);
+    expect(moved).toBeGreaterThan(base.assignments.length / 2);
+  });
+
+  it('every seed gives a plan of the same quality — they are alternatives, not gambles', () => {
+    // Measured: eight seeds, eight distinct plans, one quality. That is why the
+    // search can always offer a different arrangement without trading anything
+    // away, and it is the property the screen's wording rests on.
+    const { blocks, availability } = built();
+    const qualities = [0, 1, 2, 3, 4, 5, 6, 7].map(seed =>
+      planQuality(assignBlocks(blocks, distinct, availability, { switchMinutes: 30, seed })));
+    for (const quality of qualities) {
+      expect(comparePlanQuality(quality, qualities[0])).toBe(0);
+    }
+  });
+
+  it('finds a genuinely different plan, and every variant obeys every hard rule', () => {
+    const { blocks, availability } = built();
+    const first = assignBlocks(blocks, distinct, availability, { switchMinutes: 30, seed: 0 });
+
+    const found = searchAssignments(blocks, distinct, availability, {
+      switchMinutes: 30,
+      current: { seed: 0, result: first },
+    });
+
+    expect(found.differs).toBe(true);
+    expect(fingerprint(found.result)).not.toBe(fingerprint(first));
+
+    // And it is a legal plan, not merely a different one.
+    expect(found.result.pinConflicts).toHaveLength(0);
+    for (const state of found.result.driverStates) {
+      if (!state.driver.isOwner && state.range.effectiveMaxHours != null) {
+        expect(state.minutes).toBeLessThanOrEqual(state.range.effectiveMaxHours * 60);
+      }
+    }
+    // No driver holds two blocks at once — rule 2, re-checked on the result.
+    for (const state of found.result.driverStates) {
+      const held = state.assignedBlockIds
+        .map(id => blocks.find(b => b.id === id)!)
+        .sort((x, y) => x.startMs - y.startMs);
+      for (let i = 1; i < held.length; i++) {
+        expect(held[i].startMs).toBeGreaterThanOrEqual(held[i - 1].endMs);
+      }
+    }
+  });
+
+  it('never returns a plan worse than the one on screen', () => {
+    const { blocks, availability } = built();
+    const current = assignBlocks(blocks, distinct, availability, { switchMinutes: 30, seed: 0 });
+    const before = planQuality(current);
+
+    // Repeated, because the guarantee is about every reachable seed and not about
+    // one lucky draw: each call starts from the previous winner's seed.
+    let plan = { seed: 0, result: current };
+    for (let round = 0; round < 5; round++) {
+      const found = searchAssignments(blocks, distinct, availability, {
+        switchMinutes: 30, current: plan,
+      });
+      expect(comparePlanQuality(found.quality, before)).toBeLessThanOrEqual(0);
+      plan = { seed: found.seed, result: found.result };
+    }
+  });
+
+  it('reports differs: false rather than pretending, when only one plan exists', () => {
+    // One block, one driver: there is nothing to vary, and saying so is the honest
+    // answer. A button that reports nothing is what looked broken in the first
+    // place, so this case must be distinguishable from a failure.
+    const { blocks } = buildBlocks(
+      [dayBlock('a', 'car-A', '2026-10-05', '08:00', '12:00')],
+      { switchMinutes: 30 },
+    );
+    const only = [driver({ id: 'ali' })];
+    const availability = buildAvailability([], blocks, new Set(['ali']));
+    const current = assignBlocks(blocks, only, availability, { switchMinutes: 30, seed: 0 });
+
+    const found = searchAssignments(blocks, only, availability, {
+      switchMinutes: 30, current: { seed: 0, result: current },
+    });
+    expect(found.differs).toBe(false);
+    expect(found.result.assignments).toEqual(current.assignments);
+    expect(found.tried).toBeGreaterThan(1);
+  });
+
+  it('the search never overrides a pin', () => {
+    const { blocks } = buildBlocks(fortnight, { switchMinutes: 30 });
+    const availability = buildAvailability(
+      [note({
+        driver_id: 'canan',
+        note_planning_behavior: 'must_include_in_plan',
+        start_date: '2026-10-07', end_date: '2026-10-07',
+        start_time: '06:30', end_time: '06:40',
+      })],
+      blocks,
+      new Set(distinct.map(d => d.id)),
+    );
+    const found = searchAssignments(blocks, distinct, availability, { switchMinutes: 30 });
+    const pinned = found.result.assignments.find(a => a.reason === 'mandatory_note');
+    expect(pinned?.driverId).toBe('canan');
+  });
+
+  it('seed 0 is still strictly chronological', () => {
+    // The order at seed 0 must not move, or every month\u2019s first plan changes. A
+    // driver capped at one block takes the EARLIEST one, which is observable.
+    const { blocks } = buildBlocks(
+      [
+        dayBlock('late',  'car-A', '2026-10-20', '06:00', '14:00'),
+        dayBlock('early', 'car-A', '2026-10-05', '06:00', '14:00'),
+      ],
+      { switchMinutes: 30 },
+    );
+    // 120 € at 15 €/h is 8 hours: exactly one of these two blocks.
+    const capped = [driver({ id: 'ali', minSalary: 60, maxSalary: 120, hourlyRate: 15 })];
+    const availability = buildAvailability([], blocks, new Set(['ali']));
+    const r = assignBlocks(blocks, capped, availability, { switchMinutes: 30, seed: 0 });
+    expect(r.assignments).toHaveLength(1);
+    expect(r.assignments[0].blockId).toBe(blocks.find(b => b.startMs === Math.min(...blocks.map(x => x.startMs)))!.id);
+  });
+
+  it('the same seed still reproduces the identical plan, order and all', () => {
+    const { blocks, availability } = built();
+    const a = assignBlocks(blocks, distinct, availability, { switchMinutes: 30, seed: 9 });
+    const b = assignBlocks(blocks, distinct, availability, { switchMinutes: 30, seed: 9 });
+    expect(fingerprint(b)).toBe(fingerprint(a));
   });
 });

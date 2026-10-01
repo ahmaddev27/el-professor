@@ -167,7 +167,9 @@ const BelegePage: React.FC = () => {
   const handleDownloadPdf = (filtered: Receipt[], filterInfo: PdfFilterInfo) => {
     generateReceiptPdf(filtered, {
       ...filterInfo,
-      companyName: settings?.company_name || 'El-Professor'
+      // No fallback to the product's name: the PDF heads itself with the
+      // company's own name or with nothing (owner, 01.10.2026).
+      companyName: settings?.company_name ?? ''
     });
   };
 

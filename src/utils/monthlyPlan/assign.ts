@@ -144,9 +144,20 @@ export interface AssignOptions {
   /** The operator's switch duration in minutes — the same value §3 built with. */
   switchMinutes: number;
   /**
-   * Regeneration counter. 0 is the first plan; each "Neu generieren" passes the
-   * next integer. Identical inputs and seed give an identical plan; a new seed
-   * may swap only candidates whose scores tie (§7 rule 9, acceptance 14).
+   * Regeneration counter. 0 is the first plan; each "Neu verteilen" passes
+   * another integer. Identical inputs and seed always give an identical plan.
+   *
+   * It reaches two choices and no others, and both are choices the requirement
+   * leaves open:
+   *
+   *   1. the tie-break between candidates whose scores are EXACTLY equal
+   *      (§7 rule 9, acceptance 14);
+   *   2. the order in which blocks are offered to the greedy pass, jittered
+   *      within `BLOCK_ORDER_JITTER_MINUTES` of chronological.
+   *
+   * `seed === 0` is exactly chronological, so a month's first plan does not move.
+   * Neither choice can admit an assignment `refusalFor` refuses: §7's nine hard
+   * rules are checked per (driver, block) pair whatever order the pairs arrive in.
    */
   seed?: number;
 }
@@ -159,6 +170,219 @@ export interface AssignResult {
 }
 
 const MS_PER_MINUTE = 60_000;
+
+/**
+ * How far a seeded pass may move a block from its chronological position.
+ *
+ * 36 hours, so the pass stays essentially chronological and only reorders blocks
+ * that are close enough in time to compete for the same drivers — which is the
+ * window §7's own rules work in: one vehicle per day, the daily maximum and the
+ * vehicle-switch buffer all bite within a day and a half. A full shuffle would
+ * also be valid, every block still being checked against every rule, but it
+ * would mostly produce worse plans and so make regeneration look like a gamble.
+ */
+const BLOCK_ORDER_JITTER_MINUTES = 36 * 60;
+
+/**
+ * The order blocks are offered to the greedy pass in.
+ *
+ * `seed === 0` is strictly chronological — the order this engine has always used,
+ * so a month's first plan is unchanged. Any other seed sorts by the start instant
+ * displaced by a bounded, seeded amount, which reorders neighbours in time and
+ * leaves the month's overall shape alone. Deterministic for a given seed, and
+ * tie-broken on the id so it is a total order.
+ */
+function orderForPass(blocks: PlanBlock[], seed: number): PlanBlock[] {
+  const chronological = [...blocks]
+    .sort((a, b) => a.startMs - b.startMs || a.id.localeCompare(b.id));
+  if (seed === 0) return chronological;
+
+  const window = BLOCK_ORDER_JITTER_MINUTES * MS_PER_MINUTE;
+  return chronological
+    .map(block => ({
+      block,
+      // fnv1a is a uint32; mapped to [-1, 1) and scaled to the window.
+      key: block.startMs + ((fnv1a(`${seed}|order|${block.id}`) / 0x1_0000_0000) * 2 - 1) * window,
+    }))
+    .sort((a, b) => a.key - b.key || a.block.id.localeCompare(b.block.id))
+    .map(entry => entry.block);
+}
+
+/**
+ * How good a plan is, in the figures the engine already computed.
+ *
+ * Every field is a count or a sum of hours taken off `AssignResult`; nothing here
+ * re-derives a rule. It exists so that regeneration can be a SEARCH rather than a
+ * gamble: a variant is kept only when it is at least as good as the plan it would
+ * replace, on an order the screen can state.
+ */
+export interface PlanQuality {
+  /** Blocks nobody could take. The first thing an operator counts. */
+  unassigned: number;
+  /** Pins §5 could not honour without breaking another hard rule. */
+  pinConflicts: number;
+  /** Selected drivers left with no hours at all — a coverage problem. */
+  withoutHours: number;
+  /** Drivers under their minimum, the owner excepted (§8 gives them no range). */
+  belowMinimum: number;
+  /** Total hours missing below those minima. */
+  shortfallHours: number;
+  /** Total hours above the effective maxima. */
+  excessHours: number;
+}
+
+export function planQuality(result: AssignResult): PlanQuality {
+  let withoutHours = 0;
+  let belowMinimum = 0;
+  let shortfallHours = 0;
+  let excessHours = 0;
+
+  for (const state of result.driverStates) {
+    const { position, deviationHours } = state.assessment;
+    if (position === 'no_hours') withoutHours++;
+    if (position === 'below') belowMinimum++;
+    if (deviationHours != null && deviationHours < 0) shortfallHours += -deviationHours;
+    if (deviationHours != null && deviationHours > 0) excessHours += deviationHours;
+  }
+
+  return {
+    unassigned: result.unassigned.length,
+    pinConflicts: result.pinConflicts.length,
+    withoutHours,
+    belowMinimum,
+    shortfallHours,
+    excessHours,
+  };
+}
+
+/**
+ * Negative when `a` is the better plan. A total order on the six figures above.
+ *
+ * The order is the operator's: a block nobody covers is worse than a pin that
+ * could not be honoured, which is worse than a driver with no hours, and the two
+ * hour sums only separate plans that are otherwise equal. Hours are compared with
+ * a tolerance of a tenth of an hour, because they are sums of divisions by 60 and
+ * two plans that differ by float noise are the same plan.
+ */
+export function comparePlanQuality(a: PlanQuality, b: PlanQuality): number {
+  const HOUR_EPSILON = 0.1;
+  const hours = (x: number, y: number) => (Math.abs(x - y) < HOUR_EPSILON ? 0 : x - y);
+  return a.unassigned - b.unassigned
+    || a.pinConflicts - b.pinConflicts
+    || a.withoutHours - b.withoutHours
+    || a.belowMinimum - b.belowMinimum
+    || hours(a.shortfallHours, b.shortfallHours)
+    || hours(a.excessHours, b.excessHours);
+}
+
+export interface AssignSearchOptions extends AssignOptions {
+  /**
+   * How many fresh seeds to try. Each is one full assignment pass over the same
+   * blocks — cheap, and the screen runs this on a button press, not per render.
+   */
+  attempts?: number;
+  /**
+   * The plan on screen and the seed that produced it, so it competes as a
+   * candidate. With it the search can never return something worse; without it
+   * the best of the new seeds is taken whatever the current plan was.
+   */
+  current?: { seed: number; result: AssignResult };
+}
+
+export interface AssignSearchResult {
+  seed: number;
+  result: AssignResult;
+  quality: PlanQuality;
+  /** Seeds tried, the current plan included when one was given. */
+  tried: number;
+  /** Candidates that matched the winner's quality exactly. */
+  equallyGood: number;
+  /** True when the chosen plan assigns at least one block differently. */
+  differs: boolean;
+}
+
+/**
+ * Tries several seeds and returns the best plan, preferring a different one.
+ *
+ * This is what "Neu verteilen" calls. Among candidates of equal quality it
+ * prefers one that DIFFERS from the plan on screen — that is the whole point of
+ * the button, and a free choice, since equal quality means equal by every figure
+ * the engine measures. Among equally good differing candidates it takes the
+ * lowest seed, so the answer is reproducible.
+ *
+ * `differs: false` is a real answer and not a failure: it means no reordering of
+ * the pass found another plan this good, which happens when the caps, overlaps
+ * and switch gaps leave only one arrangement. The screen says so in those words.
+ */
+export function searchAssignments(
+  blocks: PlanBlock[],
+  drivers: PlanDriverInput[],
+  availability: AvailabilityResult,
+  options: AssignSearchOptions,
+): AssignSearchResult {
+  const attempts = Math.max(1, Math.floor(options.attempts ?? 12));
+  const baseSeed = options.current?.seed ?? options.seed ?? 0;
+
+  interface Candidate {
+    seed: number;
+    result: AssignResult;
+    quality: PlanQuality;
+    differs: boolean;
+  }
+
+  const current = options.current ?? null;
+  const assignedBy = (result: AssignResult) =>
+    new Map(result.assignments.map(a => [a.blockId, a.driverId]));
+  const currentAssigned = current ? assignedBy(current.result) : null;
+
+  const differsFromCurrent = (result: AssignResult): boolean => {
+    if (!currentAssigned) return true;
+    const mine = assignedBy(result);
+    if (mine.size !== currentAssigned.size) return true;
+    for (const [blockId, driverId] of mine) {
+      if (currentAssigned.get(blockId) !== driverId) return true;
+    }
+    return false;
+  };
+
+  const candidates: Candidate[] = [];
+  if (current) {
+    candidates.push({
+      seed: current.seed,
+      result: current.result,
+      quality: planQuality(current.result),
+      differs: false,
+    });
+  }
+
+  for (let i = 1; i <= attempts; i++) {
+    const seed = baseSeed + i;
+    const result = assignBlocks(blocks, drivers, availability, {
+      switchMinutes: options.switchMinutes,
+      seed,
+    });
+    candidates.push({ seed, result, quality: planQuality(result), differs: differsFromCurrent(result) });
+  }
+
+  // Best quality first; among equals a differing plan first; then the lowest seed.
+  const ranked = [...candidates].sort((a, b) =>
+    comparePlanQuality(a.quality, b.quality)
+    || Number(b.differs) - Number(a.differs)
+    || a.seed - b.seed,
+  );
+
+  const winner = ranked[0];
+  const equallyGood = ranked.filter(c => comparePlanQuality(c.quality, winner.quality) === 0).length;
+
+  return {
+    seed: winner.seed,
+    result: winner.result,
+    quality: winner.quality,
+    tried: candidates.length,
+    equallyGood,
+    differs: winner.differs,
+  };
+}
 
 /**
  * FNV-1a over a string, for the seeded tie-break. A tiny stable hash rather
@@ -394,8 +618,8 @@ export function assignBlocks(
     });
   }
 
-  // ── The ordinary pass: chronological, regulars first, owner as fallback.
-  const ordered = [...blocks].sort((a, b) => a.startMs - b.startMs || a.id.localeCompare(b.id));
+  // ── The ordinary pass: near-chronological, regulars first, owner as fallback.
+  const ordered = orderForPass(blocks, seed);
 
   for (const block of ordered) {
     if (taken.has(block.id)) continue;

@@ -37,7 +37,6 @@ const CHROME: PanelExportChrome = {
   empty: 'No data',
   filters: 'Active filters:',
   totals: 'Total ({count} entries)',
-  footer: 'footer {count}',
 };
 
 const LINE = '{label}: {value}';
