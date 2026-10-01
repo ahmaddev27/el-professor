@@ -99,7 +99,6 @@ export interface PanelExportChrome {
   empty: string;
   filters: string;
   totals: string;
-  footer: string;
 }
 
 function chromeLabels(text: PanelExportChrome): ExportChromeLabels {
@@ -107,7 +106,6 @@ function chromeLabels(text: PanelExportChrome): ExportChromeLabels {
     emptyState: text.empty,
     activeFilters: text.filters,
     totalsRow: text.totals,
-    footer: text.footer,
   };
 }
 

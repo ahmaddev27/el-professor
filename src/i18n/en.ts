@@ -388,7 +388,6 @@ export const en: PartialDictionary = {
   'ui.export.chrome.empty':   'No data',
   'ui.export.chrome.filters': 'Active filters:',
   'ui.export.chrome.totals':  'Total  ({count} entries)',
-  'ui.export.chrome.footer':  'El-Professor management system  —  {count} records exported',
   'ui.export.filterLine':     '{label}: {value}',
   'ui.export.failed':         'The export could not be created',
 

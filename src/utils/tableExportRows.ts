@@ -64,8 +64,6 @@ export interface ExportChromeText {
   filters: string;
   /** Label of the totals row; keeps `{count}` for the exporter to substitute. */
   totals: string;
-  /** Footer line; keeps `{count}` too. */
-  footer: string;
 }
 
 /**
@@ -89,7 +87,6 @@ function chromeLabels(text: ExportChromeText): ExportChromeLabels {
     emptyState: text.empty,
     activeFilters: text.filters,
     totalsRow: text.totals,
-    footer: text.footer,
   };
 }
 

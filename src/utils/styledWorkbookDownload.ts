@@ -312,7 +312,10 @@ export function applyStyledWorkbook(source: XLSX.WorkBook, target: ExcelJsWorkbo
     Company?: string;
     CreatedDate?: Date;
   } = source.Props ?? {};
-  target.creator = props.Author ?? 'El-Professor Verwaltungssystem';
+  // No fallback signature: `workbookProps` deliberately sets no Author, and a
+  // default here would put the product's name back into every file's properties
+  // — which is what the owner had removed on 01.10.2026.
+  target.creator = props.Author ?? '';
   target.lastModifiedBy = target.creator;
   target.company = props.Company;
   target.title = props.Title;

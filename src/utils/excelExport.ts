@@ -9,11 +9,13 @@
  * So the design the generic table exporter below describes drew NOTHING: those
  * files came out plain, however many fills and borders were named.
  *
- * `exportTableToExcel` therefore writes through `exceljs` now, from
- * `./styledWorkbookDownload` — the operational lists a person reads, sorts and
- * filters. Everything else in this file STAYS on `xlsx`, deliberately:
- * `exportIncomeToExcel` and `exportSalariesToExcel` here, and
- * `fahrtenbuchExport.ts` / `historicalWorkingHoursFahrtenbuchExport.ts`, whose
+ * `exportTableToExcel` and `exportSheetsToExcel` therefore write through
+ * `exceljs`, from `./styledWorkbookDownload` — every operational list a person
+ * reads, sorts and filters, Umsätze and Gehälter included since 01.10.2026.
+ *
+ * What STAYS on `xlsx` is the prescribed sheets, deliberately:
+ * `fahrtenbuchExport.ts` / `historicalWorkingHoursFahrtenbuchExport.ts` /
+ * `monatsplanungXlsxExport.ts` / `monthlyPlanFahrtenbuchExport.ts`, whose
  * `'original'` mode must reproduce an imported sheet's headers byte for byte and
  * whose output is a statutory record an accountant reconciles against.
  *
@@ -29,338 +31,46 @@
 import * as XLSX from 'xlsx';
 import { downloadStyledWorkbook } from './styledWorkbookDownload';
 import { Income, SalaryCalculation } from '../types/receipt';
-// `salaryDueState` is `salaryBase` — COALESCE(netto_salary, amount_due) — plus
-// the payment derivation, from the module SalariesManagement imports. Both
-// quantities this export prints come from there and are never spelled here.
-import { salaryDueState } from './salaryDue';
+import {
+  buildIncomeSheets,
+  buildSalarySheets,
+  salaryExportFilename,
+} from './listExportSheets';
 
-export const exportIncomeToExcel = (incomes: Income[], fromDate?: string, toDate?: string) => {
-  const wb = XLSX.utils.book_new();
-  wb.Props = {
-    Title: "El-Professor - Umsätze Report",
-    Subject: "Income and Revenue Analysis",
-    Author: "El-Professor Management System",
-    CreatedDate: new Date()
-  };
-
-  const sortedIncomes = [...incomes].sort((a, b) =>
-    new Date(a.date).getTime() - new Date(b.date).getTime()
-  );
-
-  const totalAmount = incomes.reduce((sum, income) => sum + Number(income.amount), 0);
-  const byType = {
-    bargeld: incomes.filter(i => i.type === 'bargeld').reduce((sum, i) => sum + Number(i.amount), 0),
-    umsatz: incomes.filter(i => i.type === 'umsatz').reduce((sum, i) => sum + Number(i.amount), 0),
-    aktionen: incomes.filter(i => i.type === 'aktionen').reduce((sum, i) => sum + Number(i.amount), 0),
-    trinkgeld: incomes.filter(i => i.type === 'trinkgeld').reduce((sum, i) => sum + Number(i.amount), 0)
-  };
-
-  const drivers = [...new Set(incomes.map(i => i.driver_name))];
-  const byDriver = drivers.map(driver => {
-    const driverIncomes = incomes.filter(i => i.driver_name === driver);
-    return {
-      name: driver,
-      count: driverIncomes.length,
-      bargeld: driverIncomes.filter(i => i.type === 'bargeld').reduce((sum, i) => sum + Number(i.amount), 0),
-      umsatz: driverIncomes.filter(i => i.type === 'umsatz').reduce((sum, i) => sum + Number(i.amount), 0),
-      aktionen: driverIncomes.filter(i => i.type === 'aktionen').reduce((sum, i) => sum + Number(i.amount), 0),
-      trinkgeld: driverIncomes.filter(i => i.type === 'trinkgeld').reduce((sum, i) => sum + Number(i.amount), 0),
-      total: driverIncomes.reduce((sum, i) => sum + Number(i.amount), 0)
-    };
-  });
-
-  const excelData = [
-    ['EL-PROFESSOR - UMSÄTZE BERICHT', '', '', '', '', ''],
-    ['', '', '', '', '', ''],
-    ['Zeitraum', fromDate && toDate ? `${fromDate} bis ${toDate}` : 'Alle Einträge', '', '', '', ''],
-    ['Erstellt am', new Date().toLocaleString('de-DE'), '', '', '', ''],
-    ['Gesamtanzahl', incomes.length.toString(), '', '', '', ''],
-    ['', '', '', '', '', ''],
-
-    ['ZUSAMMENFASSUNG NACH TYP', '', '', '', '', '', ''],
-    ['', '', '', '', '', '', ''],
-    ['Typ', 'Betrag (€)', 'Anteil', '', '', '', ''],
-    ['Bargeld', byType.bargeld.toFixed(2), totalAmount > 0 ? ((byType.bargeld / totalAmount) * 100).toFixed(1) + '%' : '0%', '', '', '', ''],
-    ['Umsatz', byType.umsatz.toFixed(2), totalAmount > 0 ? ((byType.umsatz / totalAmount) * 100).toFixed(1) + '%' : '0%', '', '', '', ''],
-    ['Aktionen', byType.aktionen.toFixed(2), totalAmount > 0 ? ((byType.aktionen / totalAmount) * 100).toFixed(1) + '%' : '0%', '', '', '', ''],
-    ['Trinkgeld', byType.trinkgeld.toFixed(2), totalAmount > 0 ? ((byType.trinkgeld / totalAmount) * 100).toFixed(1) + '%' : '0%', '', '', '', ''],
-    ['GESAMT', totalAmount.toFixed(2), '100%', '', '', '', ''],
-    ['', '', '', '', '', '', ''],
-
-    ['ZUSAMMENFASSUNG NACH FAHRER', '', '', '', '', '', ''],
-    ['', '', '', '', '', '', ''],
-    ['Fahrer', 'Anzahl', 'Bargeld (€)', 'Umsatz (€)', 'Aktionen (€)', 'Trinkgeld (€)', 'Gesamt (€)'],
-    ...byDriver.map(d => [
-      d.name,
-      d.count.toString(),
-      d.bargeld.toFixed(2),
-      d.umsatz.toFixed(2),
-      d.aktionen.toFixed(2),
-      d.trinkgeld.toFixed(2),
-      d.total.toFixed(2)
-    ]),
-    ['', '', '', '', '', ''],
-
-    ['DETAILLIERTE EINTRÄGE', '', '', '', '', '', ''],
-    ['', '', '', '', '', '', ''],
-    ['Datum', 'Fahrer', 'Typ', 'Beschreibung', 'Betrag (€)', 'ID', ''],
-    ...sortedIncomes.map(income => [
-      new Date(income.date).toLocaleDateString('de-DE'),
-      income.driver_name,
-      income.type === 'bargeld' ? 'Bargeld' :
-      income.type === 'umsatz' ? 'Umsatz' :
-      income.type === 'aktionen' ? 'Aktionen' : 'Trinkgeld',
-      income.description,
-      Number(income.amount).toFixed(2),
-      income.id,
-      ''
-    ])
-  ];
-
-  const ws = XLSX.utils.aoa_to_sheet(excelData);
-
-  ws['!cols'] = [
-    { wch: 20 },
-    { wch: 15 },
-    { wch: 15 },
-    { wch: 30 },
-    { wch: 15 },
-    { wch: 36 },
-    { wch: 15 }
-  ];
-
-  const range = XLSX.utils.decode_range(ws['!ref'] || 'A1');
-  for (let R = range.s.r; R <= range.e.r; ++R) {
-    for (let C = range.s.c; C <= range.e.c; ++C) {
-      const cell_address = XLSX.utils.encode_cell({ c: C, r: R });
-      if (!ws[cell_address]) continue;
-
-      const cellValue = ws[cell_address].v;
-
-      if (R === 0) {
-        ws[cell_address].s = {
-          font: { bold: true, size: 18, color: { rgb: "FFFFFF" } },
-          alignment: { horizontal: "center", vertical: "center" },
-          fill: { fgColor: { rgb: "059669" } },
-          border: {
-            top: { style: "thick", color: { rgb: "000000" } },
-            bottom: { style: "thick", color: { rgb: "000000" } },
-            left: { style: "thick", color: { rgb: "000000" } },
-            right: { style: "thick", color: { rgb: "000000" } }
-          }
-        };
-      }
-
-      if (cellValue && typeof cellValue === 'string' &&
-          (cellValue.includes('ZUSAMMENFASSUNG') || cellValue.includes('DETAILLIERTE'))) {
-        ws[cell_address].s = {
-          font: { bold: true, size: 14, color: { rgb: "FFFFFF" } },
-          alignment: { horizontal: "center", vertical: "center" },
-          fill: { fgColor: { rgb: "10B981" } },
-          border: {
-            top: { style: "medium", color: { rgb: "000000" } },
-            bottom: { style: "medium", color: { rgb: "000000" } },
-            left: { style: "medium", color: { rgb: "000000" } },
-            right: { style: "medium", color: { rgb: "000000" } }
-          }
-        };
-      }
-    }
-  }
-
-  ws['!merges'] = [
-    { s: { r: 0, c: 0 }, e: { r: 0, c: 5 } },
-    { s: { r: 6, c: 0 }, e: { r: 6, c: 5 } },
-    { s: { r: 14, c: 0 }, e: { r: 14, c: 5 } },
-    { s: { r: 20, c: 0 }, e: { r: 20, c: 5 } }
-  ];
-
-  XLSX.utils.book_append_sheet(wb, ws, 'Umsätze');
-
-  const filename = `umsaetze_${fromDate || 'all'}_to_${toDate || new Date().toISOString().split('T')[0]}.xlsx`;
-  XLSX.writeFile(wb, filename);
+/**
+ * Umsätze, as three styled sheets.
+ *
+ * This was 145 lines of `aoa_to_sheet` with a styling pass the `xlsx` writer threw
+ * away: a plain grid, every amount a string, a uuid in the widest column and the
+ * words "EL-PROFESSOR - UMSÄTZE BERICHT" across the top. The owner reported it on
+ * 01.10.2026. The content is the same three sections it always had — the entries,
+ * the split by type and the split by driver — in `listExportSheets.ts`, drawn by
+ * the same exporter as every other list in the product.
+ */
+export const exportIncomeToExcel = (
+  incomes: Income[],
+  fromDate?: string,
+  toDate?: string,
+): void => {
+  exportSheetsToExcel('umsaetze', buildIncomeSheets(incomes, fromDate, toDate));
 };
 
-export const exportSalariesToExcel = (salaries: SalaryCalculation[], periodStart: string, periodEnd: string) => {
-  const wb = XLSX.utils.book_new();
-  wb.Props = {
-    Title: "El-Professor - Gehaltsabrechnung",
-    Subject: "Salary Report",
-    Author: "El-Professor Management System",
-    CreatedDate: new Date()
-  };
-
-  /**
-   * ── THE RULE THIS FUNCTION PRESERVES ─────────────────────────────────────
-   * **Due is `COALESCE(netto_salary, amount_due)`, and paid is derived from the
-   * payments — never from the stored status word.**
-   *
-   * It is the rule `confirm_salary_cash_payment` applies when it decides how
-   * much cash a driver may be handed, and since 28.09.2026 the rule
-   * `SalariesManagement` applies on screen. This export was the last reader of
-   * the two quantities that correction discarded — `amount_due` on its own and
-   * `salaries.status` — so the Gehälter screen and the Gehälter file printed
-   * different numbers for the same month, and the file printed the ones the
-   * screen had stopped trusting.
-   *
-   * Both quantities therefore come from `utils/salaryDue.ts`, the same module
-   * the screen imports. Never inline either of them here: a second copy of a
-   * payroll rule is exactly how the screen and the file drifted apart, and what
-   * this file prints reaches a person's pay.
-   */
-  const priced = salaries.map(salary => ({ salary, due: salaryDueState(salary, salary.total_paid) }));
-
-  const totalRevenue = salaries.reduce((sum, s) => sum + s.revenue, 0);
-  const totalTips = salaries.reduce((sum, s) => sum + s.tips, 0);
-  const totalRevenueShare = salaries.reduce((sum, s) => sum + s.revenue_share, 0);
-  const totalDue = priced.reduce((sum, p) => sum + p.due.base, 0);
-  const paidCount = priced.filter(p => p.due.paymentStatus === 'paid').length;
-  const partiallyPaidCount = priced.filter(p => p.due.paymentStatus === 'partially_paid').length;
-  const unpaidCount = priced.filter(p => p.due.paymentStatus === 'unpaid').length;
-
-  // A derived status has three values where the stored word had two, so the
-  // summary carries all three and the three counts still sum to the driver
-  // count. The wording of this dump is German throughout, as it always has
-  // been; it is not one of the statutory documents, so translating it is a
-  // separate change and not this one.
-  const STATUS_LABEL: Record<'paid' | 'partially_paid' | 'unpaid', string> = {
-    paid:           'Bezahlt',
-    partially_paid: 'Teilweise bezahlt',
-    unpaid:         'Unbezahlt',
-  };
-
-  const SUMMARY_SECTION = 'ZUSAMMENFASSUNG';
-  const DRIVER_SECTION  = 'GEHALTSÜBERSICHT PRO FAHRER';
-
-  const excelData = [
-    ['EL-PROFESSOR - GEHALTSABRECHNUNG', '', '', '', '', '', ''],
-    ['', '', '', '', '', '', ''],
-    ['Zeitraum', `${new Date(periodStart).toLocaleDateString('de-DE')} bis ${new Date(periodEnd).toLocaleDateString('de-DE')}`, '', '', '', '', ''],
-    ['Erstellt am', new Date().toLocaleString('de-DE'), '', '', '', '', ''],
-    ['Anzahl Fahrer', salaries.length.toString(), '', '', '', '', ''],
-    ['', '', '', '', '', '', ''],
-
-    [SUMMARY_SECTION, '', '', '', '', '', ''],
-    ['', '', '', '', '', '', ''],
-    ['Metrik', 'Betrag (€)', 'Status', '', '', '', ''],
-    ['Gesamt Umsatz', totalRevenue.toFixed(2), '', '', '', '', ''],
-    ['Gesamt Trinkgeld', totalTips.toFixed(2), '', '', '', '', ''],
-    ['Gesamt Umsatzanteil', totalRevenueShare.toFixed(2), '', '', '', '', ''],
-    ['Gesamt Fällig', totalDue.toFixed(2), '', '', '', '', ''],
-    [STATUS_LABEL.paid, paidCount.toString(), '', '', '', '', ''],
-    [STATUS_LABEL.partially_paid, partiallyPaidCount.toString(), '', '', '', '', ''],
-    [STATUS_LABEL.unpaid, unpaidCount.toString(), '', '', '', '', ''],
-    ['', '', '', '', '', '', ''],
-
-    [DRIVER_SECTION, '', '', '', '', '', ''],
-    ['', '', '', '', '', '', ''],
-    ['Fahrer', 'Umsatz (€)', 'Anteil (%)', 'Umsatzanteil (€)', 'Trinkgeld (€)', 'Fälliger Betrag (€)', 'Status'],
-    // `due.base`, not `amount_due`: a manual netto adjustment wins over the
-    // calculated amount. `due.paymentStatus`, not `salary.status`: the stored
-    // word was computed against whatever the base was when the last payment was
-    // entered, and the screen recomputes the base from the period's income rows
-    // on every load.
-    ...priced.map(({ salary, due }) => [
-      salary.driver_name,
-      salary.revenue.toFixed(2),
-      (salary.salary_ratio * 100).toFixed(1) + '%',
-      salary.revenue_share.toFixed(2),
-      salary.tips.toFixed(2),
-      due.base.toFixed(2),
-      STATUS_LABEL[due.paymentStatus]
-    ]),
-    ['', '', '', '', '', '', ''],
-    ['GESAMT', totalRevenue.toFixed(2), '', totalRevenueShare.toFixed(2), totalTips.toFixed(2), totalDue.toFixed(2), '']
-  ];
-
-  const ws = XLSX.utils.aoa_to_sheet(excelData);
-
-  ws['!cols'] = [
-    { wch: 25 },
-    { wch: 15 },
-    { wch: 15 },
-    { wch: 18 },
-    { wch: 15 },
-    { wch: 18 },
-    { wch: 12 }
-  ];
-
-  const range = XLSX.utils.decode_range(ws['!ref'] || 'A1');
-  for (let R = range.s.r; R <= range.e.r; ++R) {
-    for (let C = range.s.c; C <= range.e.c; ++C) {
-      const cell_address = XLSX.utils.encode_cell({ c: C, r: R });
-      if (!ws[cell_address]) continue;
-
-      const cellValue = ws[cell_address].v;
-
-      if (R === 0) {
-        ws[cell_address].s = {
-          font: { bold: true, size: 18, color: { rgb: "FFFFFF" } },
-          alignment: { horizontal: "center", vertical: "center" },
-          fill: { fgColor: { rgb: "3B82F6" } },
-          border: {
-            top: { style: "thick", color: { rgb: "000000" } },
-            bottom: { style: "thick", color: { rgb: "000000" } },
-            left: { style: "thick", color: { rgb: "000000" } },
-            right: { style: "thick", color: { rgb: "000000" } }
-          }
-        };
-      }
-
-      if (cellValue && typeof cellValue === 'string' &&
-          (cellValue.includes('ZUSAMMENFASSUNG') || cellValue.includes('GEHALTSÜBERSICHT'))) {
-        ws[cell_address].s = {
-          font: { bold: true, size: 14, color: { rgb: "FFFFFF" } },
-          alignment: { horizontal: "center", vertical: "center" },
-          fill: { fgColor: { rgb: "60A5FA" } },
-          border: {
-            top: { style: "medium", color: { rgb: "000000" } },
-            bottom: { style: "medium", color: { rgb: "000000" } },
-            left: { style: "medium", color: { rgb: "000000" } },
-            right: { style: "medium", color: { rgb: "000000" } }
-          }
-        };
-      }
-
-      if (cellValue === 'GESAMT') {
-        ws[cell_address].s = {
-          font: { bold: true, size: 12, color: { rgb: "FFFFFF" } },
-          alignment: { horizontal: "left", vertical: "center" },
-          fill: { fgColor: { rgb: "1E40AF" } },
-          border: {
-            top: { style: "thick", color: { rgb: "000000" } },
-            bottom: { style: "thick", color: { rgb: "000000" } },
-            left: { style: "thick", color: { rgb: "000000" } },
-            right: { style: "thick", color: { rgb: "000000" } }
-          }
-        };
-      }
-    }
-  }
-
-  // The two section bands are found by their own text rather than counted by
-  // hand. The literals were 6 and 17: 6 was right, 17 was the blank row BELOW
-  // the driver band, so the driver section title has never been merged and an
-  // empty row was. Deriving them also keeps the summary's new third count line
-  // from silently shifting the band it merges.
-  const bandRow = (title: string) => excelData.findIndex(row => row[0] === title);
-  const summaryRow = bandRow(SUMMARY_SECTION);
-  const driverRow  = bandRow(DRIVER_SECTION);
-
-  ws['!merges'] = [
-    { s: { r: 0, c: 0 }, e: { r: 0, c: 6 } },
-    ...(summaryRow >= 0 ? [{ s: { r: summaryRow, c: 0 }, e: { r: summaryRow, c: 6 } }] : []),
-    ...(driverRow  >= 0 ? [{ s: { r: driverRow,  c: 0 }, e: { r: driverRow,  c: 6 } }] : []),
-  ];
-
-  XLSX.utils.book_append_sheet(wb, ws, 'Gehälter');
-
-  const periodLabel = periodStart === periodEnd ?
-    new Date(periodStart).toLocaleDateString('de-DE').replace(/\./g, '-') :
-    `${new Date(periodStart).toLocaleDateString('de-DE').replace(/\./g, '-')}_to_${new Date(periodEnd).toLocaleDateString('de-DE').replace(/\./g, '-')}`;
-
-  const filename = `salaries_${periodLabel}.xlsx`;
-  XLSX.writeFile(wb, filename);
+/**
+ * Gehälter, as two styled sheets.
+ *
+ * The same correction as Umsätze above, and the payroll rule it preserves —
+ * `COALESCE(netto_salary, amount_due)` for due, the payments for paid, both read
+ * from `utils/salaryDue.ts` — is written out at `buildSalarySheets`.
+ */
+export const exportSalariesToExcel = (
+  salaries: SalaryCalculation[],
+  periodStart: string,
+  periodEnd: string,
+): void => {
+  exportSheetsToExcel(
+    salaryExportFilename(periodStart, periodEnd),
+    buildSalarySheets(salaries, periodStart, periodEnd),
+  );
 };
 
 // ─── Generic reusable table export ────────────────────────────────────────────
@@ -404,15 +114,23 @@ export interface ExportChromeLabels {
   activeFilters: string;
   /** Label of the totals row; `{count}` is the number of rows. */
   totalsRow: string;
-  /** Footer line; `{count}` is the number of rows. */
-  footer: string;
+  /**
+   * A note printed in a band under the table, or absent for no band at all.
+   *
+   * Absent is the default, and that is the point: the band used to say
+   * "El-Professor Verwaltungssystem — N Datensätze exportiert" beside a second
+   * copy of the export timestamp, which the owner had removed on 01.10.2026.
+   * What it is for is a sentence the sheet needs in order to be read correctly —
+   * the payroll summary's warning that the surcharge columns must not be added
+   * to the hours. `{count}` is substituted if present.
+   */
+  footer?: string;
 }
 
 export const DEFAULT_EXPORT_CHROME: ExportChromeLabels = {
   emptyState:    'Keine Daten vorhanden',
   activeFilters: 'Aktive Filter:',
   totalsRow:     'Gesamt  ({count} Einträge)',
-  footer:        'El-Professor Verwaltungssystem  —  {count} Datensätze exportiert',
 };
 
 function chromeText(template: string, count: number): string {
@@ -496,15 +214,6 @@ function gridBorder() {
   };
 }
 
-function outerBorder(color = T.COL_HEAD_BG) {
-  return {
-    top:    { style: 'medium', color: { rgb: color } },
-    bottom: { style: 'medium', color: { rgb: color } },
-    left:   { style: 'medium', color: { rgb: color } },
-    right:  { style: 'medium', color: { rgb: color } },
-  };
-}
-
 function cell(
   ws: XLSX.WorkSheet,
   r: number,
@@ -560,12 +269,22 @@ function blank(ws: XLSX.WorkSheet, r: number, numCols: number, bg = 'FFFFFF') {
 
 // ─── Main export function ─────────────────────────────────────────────────────
 
+/** A drawn sheet and the name it goes into the workbook under. */
+interface BuiltSheet {
+  name: string;
+  sheet: XLSX.WorkSheet;
+}
+
 /**
- * Builds the workbook `exportTableToExcel` writes. Split out so the sheet can be
- * inspected cell by cell in a test without touching the filesystem —
- * `XLSX.writeFile` is the only part that does.
+ * Draws one sheet: the seven bands, the number formats and the sheet settings.
+ *
+ * Separated from the workbook so a workbook can hold several of them — Notizen,
+ * Umsätze and Gehälter each export a set of related tables. Nothing about the
+ * drawing changed when it was separated; `buildTableWorkbook` below is still one
+ * call to this, which is what keeps the cell-by-cell tests describing what the
+ * product writes.
  */
-export function buildTableWorkbook(opts: ExportOptions): XLSX.WorkBook {
+function buildTableSheet(opts: ExportOptions): BuiltSheet {
   const { sheetTitle, moduleName, columns, rows, filterSummary = [], totals } = opts;
   const labels: ExportChromeLabels = { ...DEFAULT_EXPORT_CHROME, ...(opts.labels ?? {}) };
 
@@ -595,18 +314,8 @@ export function buildTableWorkbook(opts: ExportOptions): XLSX.WorkBook {
   }
 
   const N = columns.length;
-  const exportedAt  = new Date().toLocaleString('de-DE');
   const exportedDate = new Date().toLocaleDateString('de-DE');
   const exportedTime = new Date().toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
-
-  const wb = XLSX.utils.book_new();
-  wb.Props = {
-    Title:       sheetTitle,
-    Subject:     moduleName,
-    Author:      'El-Professor Verwaltungssystem',
-    Company:     'El-Professor',
-    CreatedDate: new Date(),
-  };
 
   const ws: XLSX.WorkSheet = {};
   let R = 0;
@@ -841,39 +550,37 @@ export function buildTableWorkbook(opts: ExportOptions): XLSX.WorkBook {
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // BLOCK 7 — FOOTER BAND
+  // BLOCK 7 — FOOTER BAND, only when the caller passes a note
   // ═══════════════════════════════════════════════════════════════════════════
 
-  R++; // one blank spacer row above footer
+  const footerText = labels.footer ? chromeText(labels.footer, rows.length) : '';
+  let footerRow = -1;
 
-  // Footer line 1: system name + record count
-  for (let c = 0; c < N; c++) {
-    const isFirst = c === 0;
-    const isLast  = c === N - 1;
-    const val = isFirst
-      ? chromeText(labels.footer, rows.length)
-      : isLast
-        ? exportedAt
-        : '';
-    cell(ws, R, c, val, {
-      font:  { sz: 8, color: { rgb: T.FOOTER_FG }, italic: true, name: 'Calibri' },
-      fill:  { fgColor: { rgb: T.FOOTER_BG } },
-      alignment: {
-        horizontal: isLast ? 'right' : 'left',
-        vertical:   'center',
-        indent:     isFirst ? 2 : 0,
-      },
-      border: {
-        top:    { style: 'thin',   color: { rgb: T.FOOTER_LINE } },
-        bottom: { style: 'thin',   color: { rgb: T.FOOTER_LINE } },
-        left:   isFirst ? { style: 'thin', color: { rgb: T.FOOTER_LINE } } : undefined,
-        right:  isLast  ? { style: 'thin', color: { rgb: T.FOOTER_LINE } } : undefined,
-      },
-    });
+  if (footerText) {
+    R++; // one blank spacer row above the band
+
+    for (let c = 0; c < N; c++) {
+      cell(ws, R, c, c === 0 ? footerText : '', {
+        font:  { sz: 9, color: { rgb: T.META_FG }, name: 'Calibri' },
+        fill:  { fgColor: { rgb: T.FOOTER_BG } },
+        alignment: {
+          horizontal: 'left',
+          vertical:   'top',
+          wrapText:   true,
+          indent:     c === 0 ? 1 : 0,
+        },
+        border: {
+          top:    { style: 'thin', color: { rgb: T.FOOTER_LINE } },
+          bottom: { style: 'thin', color: { rgb: T.FOOTER_LINE } },
+          left:   c === 0     ? { style: 'thin', color: { rgb: T.FOOTER_LINE } } : undefined,
+          right:  c === N - 1 ? { style: 'thin', color: { rgb: T.FOOTER_LINE } } : undefined,
+        },
+      });
+    }
+
+    footerRow = R;
+    R++;
   }
-
-  const footerRow = R;
-  R++;
 
   // ═══════════════════════════════════════════════════════════════════════════
   // WORKSHEET SETTINGS
@@ -897,7 +604,15 @@ export function buildTableWorkbook(opts: ExportOptions): XLSX.WorkBook {
   for (let i = colHeaderRow + 1; i < colHeaderRow + 1 + rows.length; i++) {
     rowHeights[i] = { hpt: 18 };
   }
-  rowHeights[footerRow] = { hpt: 14 };
+  if (footerRow >= 0) {
+    // Tall enough for the note to be read. The band is one merged cell across
+    // every column, so the line count is the text length over the summed column
+    // width — about 1.1 characters per width unit at 9pt — and a note of five
+    // lines in a 14pt row, which is what the old band gave it, was unreadable.
+    const widthUnits = columns.reduce((sum, col) => sum + Math.max(col.width ?? 18, 10), 0);
+    const lines = Math.max(1, Math.ceil(footerText.length / Math.max(20, widthUnits * 1.1)));
+    rowHeights[footerRow] = { hpt: Math.min(120, 12 * lines + 4) };
+  }
   ws['!rows'] = Array.from({ length: R }, (_, i) => rowHeights[i] ?? { hpt: 18 });
 
   // Freeze pane: freeze everything above and including the column-header row
@@ -919,9 +634,12 @@ export function buildTableWorkbook(opts: ExportOptions): XLSX.WorkBook {
     { s: { r: 1, c: 0 }, e: { r: 1, c: N - 1 } },
     // Meta row — left part (module name) spans all but last cell
     { s: { r: 2, c: 0 }, e: { r: 2, c: N - 2 } },
-    // Footer — left part spans all but last cell
-    { s: { r: footerRow, c: 0 }, e: { r: footerRow, c: N - 2 } },
   ];
+  // The footer band is one cell across the full width: it holds a sentence, not
+  // a figure, so unlike the meta row it has nothing to right-align beside it.
+  if (footerRow >= 0) {
+    merges.push({ s: { r: footerRow, c: 0 }, e: { r: footerRow, c: N - 1 } });
+  }
   if (filterRow >= 0) {
     merges.push({ s: { r: filterRow, c: 0 }, e: { r: filterRow, c: N - 1 } });
   }
@@ -930,9 +648,78 @@ export function buildTableWorkbook(opts: ExportOptions): XLSX.WorkBook {
   // Print settings
   ws['!margins'] = { left: 0.5, right: 0.5, top: 0.75, bottom: 0.75, header: 0.3, footer: 0.3 };
 
-  XLSX.utils.book_append_sheet(wb, ws, moduleName.slice(0, 31));
+  return { name: moduleName.slice(0, 31), sheet: ws };
+}
 
+/** The document properties every styled workbook carries. */
+function workbookProps(first: ExportOptions): XLSX.FullProperties {
+  return {
+    Title:       first.sheetTitle,
+    Subject:     first.moduleName,
+    // No Author and no Company. Both named the product, and the owner asked on
+    // 01.10.2026 for no signature of ours on a file a customer sends out. The
+    // sheet's own title band says what the file is; who generated it is not the
+    // reader's business and was never the customer's own name.
+    CreatedDate: new Date(),
+  };
+}
+
+/**
+ * Builds the workbook `exportTableToExcel` writes. Split out so the sheet can be
+ * inspected cell by cell in a test without touching the filesystem —
+ * `XLSX.writeFile` is the only part that does.
+ */
+export function buildTableWorkbook(opts: ExportOptions): XLSX.WorkBook {
+  const wb = XLSX.utils.book_new();
+  wb.Props = workbookProps(opts);
+  const built = buildTableSheet(opts);
+  XLSX.utils.book_append_sheet(wb, built.sheet, built.name);
   return wb;
+}
+
+/**
+ * Several styled tables in one workbook, one sheet each, in the order given.
+ *
+ * The properties come from the first sheet, which is the one the screen's own
+ * title names. A sheet name that repeats gets a numeric suffix rather than
+ * throwing, because `book_append_sheet` refuses a duplicate and two sections of
+ * one export can legitimately be called the same thing after the 31-character
+ * truncation Excel imposes.
+ */
+export function buildSheetsWorkbook(sheets: ExportOptions[]): XLSX.WorkBook {
+  if (sheets.length === 0) {
+    throw new Error('buildSheetsWorkbook: a workbook needs at least one sheet');
+  }
+  const wb = XLSX.utils.book_new();
+  wb.Props = workbookProps(sheets[0]);
+
+  const used = new Set<string>();
+  for (const opts of sheets) {
+    const built = buildTableSheet(opts);
+    let name = built.name;
+    for (let n = 2; used.has(name); n++) {
+      const suffix = ` (${n})`;
+      name = `${built.name.slice(0, 31 - suffix.length)}${suffix}`;
+    }
+    used.add(name);
+    XLSX.utils.book_append_sheet(wb, built.sheet, name);
+  }
+  return wb;
+}
+
+/**
+ * Writes a multi-sheet styled workbook.
+ *
+ * Same contract as `exportTableToExcel`, including the `void` signature and the
+ * logged rejection: ExcelJS writes asynchronously and no call site has anywhere
+ * to show a failure.
+ */
+export function exportSheetsToExcel(filename: string, sheets: ExportOptions[]): void {
+  const wb = buildSheetsWorkbook(sheets);
+  const safeFilename = filename.endsWith('.xlsx') ? filename : `${filename}.xlsx`;
+  void downloadStyledWorkbook(wb, safeFilename).catch((error: unknown) => {
+    console.error('exportSheetsToExcel: writing the workbook failed', error);
+  });
 }
 
 export function exportTableToExcel(opts: ExportOptions): void {

@@ -3,8 +3,9 @@ import type { ExportChromeText } from '../utils/tableExportRows';
 
 /**
  * The chrome `exportTableToExcel` writes around a caller's own columns — the
- * empty-state cell, the filter line's prefix, the totals row's label and the
- * footer — in the UI language.
+ * empty-state cell, the filter line's prefix and the totals row's label — in the
+ * UI language. There was a fourth, the footer band naming the system and the row
+ * count; the owner had it removed on 01.10.2026 and the key went with it.
  *
  * It exists because **no existing caller passes `labels`**: #112 made the chrome
  * overridable and translated it nowhere, so all six older exports write German
@@ -25,6 +26,5 @@ export function useExportChrome(): ExportChromeText {
     empty: t('ui.export.chrome.empty'),
     filters: t('ui.export.chrome.filters'),
     totals: t('ui.export.chrome.totals'),
-    footer: t('ui.export.chrome.footer'),
   };
 }

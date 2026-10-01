@@ -398,7 +398,6 @@ export const de = {
   'ui.export.chrome.empty':   'Keine Daten vorhanden',
   'ui.export.chrome.filters': 'Aktive Filter:',
   'ui.export.chrome.totals':  'Gesamt  ({count} Einträge)',
-  'ui.export.chrome.footer':  'El-Professor Verwaltungssystem  —  {count} Datensätze exportiert',
   'ui.export.filterLine':     '{label}: {value}',
   'ui.export.failed':         'Der Export konnte nicht erstellt werden',
 
