@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
-import { Receipt, Driver } from '../types/receipt';
+import { Receipt, Driver, DriverContact } from '../types/receipt';
 import { isSupabaseConfigured } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
@@ -183,7 +183,7 @@ export const useDatabase = () => {
     };
   };
 
-  const addDriver = async (name: string, salaryRatio: number = 0.5, personalnummer?: string, gender?: 'male' | 'female' | null, planning?: DriverPlanningFields): Promise<Driver> => {
+  const addDriver = async (name: string, salaryRatio: number = 0.5, personalnummer?: string, gender?: 'male' | 'female' | null, planning?: DriverPlanningFields, contact?: DriverContact): Promise<Driver> => {
     if (!isConnected) {
       refuseOfflineWrite();
     }
@@ -198,6 +198,11 @@ export const useDatabase = () => {
           salary_ratio: salaryRatio,
           personalnummer: personalnummer || null,
           gender: gender ?? null,
+          // Both already normalised by the form: the address trimmed, the number
+          // in E.164. Written as null when absent, which is what the send path
+          // reads to mean "skip this driver and name them".
+          email: contact?.email ?? null,
+          phone: contact?.phone ?? null,
           user_id: user?.id || null,
           created_by: user?.id || null,
           company_id: companyId,
@@ -221,7 +226,7 @@ export const useDatabase = () => {
     }
   };
 
-  const updateDriver = async (id: string, name: string, salaryRatio: number = 0.5, status?: 'active' | 'inactive', personalnummer?: string, gender?: 'male' | 'female' | null, planning?: DriverPlanningFields): Promise<void> => {
+  const updateDriver = async (id: string, name: string, salaryRatio: number = 0.5, status?: 'active' | 'inactive', personalnummer?: string, gender?: 'male' | 'female' | null, planning?: DriverPlanningFields, contact?: DriverContact): Promise<void> => {
     if (!isConnected) {
       refuseOfflineWrite();
     }
@@ -239,6 +244,13 @@ export const useDatabase = () => {
       }
       if (planning !== undefined) {
         Object.assign(updateData, planningToDb(planning));
+      }
+      // Conditional like every field above it, and that is what keeps the status
+      // toggle from clearing an address: `handleToggleStatus` calls this with four
+      // arguments, so `contact` is undefined and neither column is named at all.
+      if (contact !== undefined) {
+        updateData.email = contact.email;
+        updateData.phone = contact.phone;
       }
 
       const { error } = await supabase

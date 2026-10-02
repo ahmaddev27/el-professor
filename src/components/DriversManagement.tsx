@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Download, Pencil, Plus, Power, PowerOff, Trash2, UserCheck, UserX, Users } from 'lucide-react';
-import { Driver } from '../types/receipt';
+import { Driver, DriverContact } from '../types/receipt';
 import DriverModal, { DriverPlanningFields } from './DriverModal';
 import { exportTableToExcel } from '../utils/excelExport';
 import { usePlan } from '../contexts/PlanContext';
@@ -22,8 +22,10 @@ import {
 
 interface DriversManagementProps {
   drivers: Driver[];
-  onAddDriver: (name: string, salaryRatio: number, personalnummer: string, gender: 'male' | 'female' | null, planning?: DriverPlanningFields) => void;
-  onEditDriver: (id: string, name: string, salaryRatio: number, status?: 'active' | 'inactive', personalnummer?: string, gender?: 'male' | 'female' | null, planning?: DriverPlanningFields) => void;
+  onAddDriver: (name: string, salaryRatio: number, personalnummer: string, gender: 'male' | 'female' | null, planning?: DriverPlanningFields, contact?: DriverContact) => void;
+  // `contact` is optional on purpose: the status toggle calls this with four
+  // arguments and must not rewrite an address nobody touched.
+  onEditDriver: (id: string, name: string, salaryRatio: number, status?: 'active' | 'inactive', personalnummer?: string, gender?: 'male' | 'female' | null, planning?: DriverPlanningFields, contact?: DriverContact) => void;
   onDeleteDriver: (id: string) => void;
   canEdit: (driver: Driver) => boolean;
   canDelete: (driver: Driver) => boolean;
@@ -50,11 +52,18 @@ const DriversManagement: React.FC<DriversManagementProps> = ({
   const driverLimit = planState.carLimit * driversPerCar;
   const driverLimitReached = activeDrivers.length >= driverLimit;
 
-  const handleSave = (name: string, salaryRatio: number, personalnummer: string, gender: 'male' | 'female' | null, planning: DriverPlanningFields) => {
+  const handleSave = (
+    name: string,
+    salaryRatio: number,
+    personalnummer: string,
+    gender: 'male' | 'female' | null,
+    planning: DriverPlanningFields,
+    contact: DriverContact,
+  ) => {
     if (editingDriver) {
-      onEditDriver(editingDriver.id, name, salaryRatio, undefined, personalnummer, gender, planning);
+      onEditDriver(editingDriver.id, name, salaryRatio, undefined, personalnummer, gender, planning, contact);
     } else {
-      onAddDriver(name, salaryRatio, personalnummer, gender, planning);
+      onAddDriver(name, salaryRatio, personalnummer, gender, planning, contact);
     }
     setIsModalOpen(false);
     setEditingDriver(undefined);
@@ -71,6 +80,9 @@ const DriversManagement: React.FC<DriversManagementProps> = ({
 
   const handleToggleStatus = (driver: Driver) => {
     const newStatus = driver.status === 'active' ? 'inactive' : 'active';
+    // No contact argument: this toggles the status and must not rewrite anything
+    // else. `updateDriver` leaves both columns alone when none is passed, which is
+    // what keeps a status change from clearing an address nobody touched.
     onEditDriver(driver.id, driver.name, driver.salaryRatio || 0, newStatus);
   };
 

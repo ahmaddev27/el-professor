@@ -4,7 +4,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useCompanyScope } from '../hooks/useCompanyScope';
 import { useToast } from '../contexts/ToastContext';
 import { useDatabase } from '../hooks/useDatabase';
-import { Driver } from '../types/receipt';
+import { Driver, DriverContact } from '../types/receipt';
 import DriversManagement from '../components/DriversManagement';
 import { DriverPlanningFields } from '../components/DriverModal';
 import { handleDatabaseError } from '../utils/errorHandler';
@@ -47,14 +47,14 @@ const FahrerPage: React.FC = () => {
     }
   };
 
-  const handleAddDriver = async (name: string, salaryRatio: number, personalnummer: string, gender: 'male' | 'female' | null, planning?: DriverPlanningFields) => {
+  const handleAddDriver = async (name: string, salaryRatio: number, personalnummer: string, gender: 'male' | 'female' | null, planning?: DriverPlanningFields, contact?: DriverContact) => {
     if (!canCreate) {
       showError(t('common.noPermission'), t('fahrer.noPermissionAdd'));
       return;
     }
 
     try {
-      await driverActions.add(name, salaryRatio, personalnummer, gender, planning);
+      await driverActions.add(name, salaryRatio, personalnummer, gender, planning, contact);
       await loadData();
       success(t('fahrer.created'), t('fahrer.createdBody'));
     } catch (err) {
@@ -63,9 +63,9 @@ const FahrerPage: React.FC = () => {
     }
   };
 
-  const handleUpdateDriver = async (id: string, name: string, salaryRatio: number, status?: 'active' | 'inactive', personalnummer?: string, gender?: 'male' | 'female' | null, planning?: DriverPlanningFields) => {
+  const handleUpdateDriver = async (id: string, name: string, salaryRatio: number, status?: 'active' | 'inactive', personalnummer?: string, gender?: 'male' | 'female' | null, planning?: DriverPlanningFields, contact?: DriverContact) => {
     try {
-      await driverActions.update(id, name, salaryRatio, status, personalnummer, gender, planning);
+      await driverActions.update(id, name, salaryRatio, status, personalnummer, gender, planning, contact);
       await loadData();
       success(t('fahrer.updated'), t('fahrer.updatedBody'));
     } catch (err) {

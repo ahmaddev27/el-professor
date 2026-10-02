@@ -32,6 +32,8 @@ export interface DriverRow {
   status?: string | null;
   personalnummer?: string | null;
   gender?: string | null;
+  email?: string | null;
+  phone?: string | null;
   employment_type?: string | null;
   driver_usage_type?: string | null;
   planning_target_salary?: number | null;
@@ -59,6 +61,10 @@ export function mapDriverRow(d: DriverRow): Driver {
     status: (d.status || 'active') as 'active' | 'inactive',
     personalnummer: d.personalnummer || undefined,
     gender: (d.gender ?? null) as 'male' | 'female' | null,
+    // `?? null` and not `|| undefined`: an empty string in the column means the
+    // same as no address, and the send path reads null to mean "skip and say so".
+    email: d.email || null,
+    phone: d.phone || null,
     employment_type: (d.employment_type ?? 'employee') as 'employee' | 'company_owner',
     // Planning fields
     driver_usage_type:      (d.driver_usage_type ?? 'regular') as 'regular' | 'coverage_only',

@@ -5877,4 +5877,15 @@ export const de = {
   'mplan.quality.unassigned':     'Blöcke ohne Fahrer',
   'mplan.quality.withoutHours':   'Fahrer ohne Stunden',
   'mplan.regen.cost':             'Diese Verteilung ist etwas schlechter: {field} um {by} höher. Die vorherige Verteilung war die beste gefundene.',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'fleet.email':             'E-Mail',
+  'fleet.emailHint':         'Optional. An diese Adresse wird die Abrechnung gesendet.',
+  'fleet.emailInvalid':      'Diese Adresse sieht nicht wie eine E-Mail-Adresse aus.',
+  'fleet.emailPlaceholder':  'fahrer@beispiel.de',
+  'fleet.phone':             'Telefon',
+  'fleet.phoneHint':         'Optional. 0170 1234567 oder +49 170 1234567 — beides wird akzeptiert.',
+  'fleet.phoneInvalid':      'Diese Nummer kann nicht gelesen werden.',
+  'fleet.phoneNeedsCountry': 'Bitte mit 0 beginnen (0170 …) oder mit Ländervorwahl (+49 …).',
+  'fleet.phonePlaceholder':  '0170 1234567',
 } as const;

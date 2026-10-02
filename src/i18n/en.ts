@@ -5821,4 +5821,15 @@ export const en: PartialDictionary = {
   'mplan.quality.unassigned':     'blocks without a driver',
   'mplan.quality.withoutHours':   'drivers with no hours',
   'mplan.regen.cost':             'This distribution is slightly worse: {field} higher by {by}. The previous one was the best found.',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'fleet.email':             'Email',
+  'fleet.emailHint':         'Optional. The Abrechnung is sent to this address.',
+  'fleet.emailInvalid':      'That does not look like an email address.',
+  'fleet.emailPlaceholder':  'driver@example.com',
+  'fleet.phone':             'Phone',
+  'fleet.phoneHint':         'Optional. 0170 1234567 or +49 170 1234567 — both are accepted.',
+  'fleet.phoneInvalid':      'That number cannot be read.',
+  'fleet.phoneNeedsCountry': 'Start with 0 (0170 …) or with a country code (+49 …).',
+  'fleet.phonePlaceholder':  '0170 1234567',
 };

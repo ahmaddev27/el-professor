@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { ChevronDown, Save, User } from 'lucide-react';
-import { Driver } from '../types/receipt';
+import { Driver, DriverContact } from '../types/receipt';
 import { useTranslation } from '../contexts/LanguageContext';
+import { formatPhone, normalizePhone } from '../utils/phoneNumber';
 import type { TranslationKey } from '../i18n';
 import {
   Button,
@@ -60,6 +61,13 @@ interface DriverModalProps {
     personalnummer: string,
     gender: 'male' | 'female' | null,
     planning: DriverPlanningFields,
+    /**
+     * Both already normalised: the address trimmed, the number in E.164. An
+     * object rather than two more positional arguments, because this call had
+     * five already and the sixth and seventh would be two strings nobody could
+     * tell apart at the call site.
+     */
+    contact: DriverContact,
   ) => void;
   driver?: Driver;
   title: string;
@@ -92,10 +100,37 @@ const DriverModal: React.FC<DriverModalProps> = ({
   const [name, setName] = useState('');
   const [salaryRatio, setSalaryRatio] = useState('50');
   const [personalnummer, setPersonalnummer] = useState('');
+  const [email, setEmail] = useState('');
+  const [phone, setPhone] = useState('');
   const [gender, setGender] = useState<Gender>('');
   const [planning, setPlanning] = useState<DriverPlanningFields>(DEFAULT_PLANNING);
   const [showPlanning, setShowPlanning] = useState(false);
   const [salaryRangeError, setSalaryRangeError] = useState('');
+  const [contactError, setContactError] = useState('');
+
+  /**
+   * What the two contact fields hold, read as the database will store them.
+   *
+   * Derived rather than validated on submit only, so the operator sees a number
+   * they typed wrongly while they are still looking at it. An empty field is not
+   * an error: both columns are nullable and a driver without either is ordinary.
+   */
+  const contact = useMemo(() => {
+    const trimmedEmail = email.trim();
+    // The same shape the database CHECK holds, and no stricter: this decides
+    // where a person's financial summary is sent, so the real guard is the
+    // operator reading the address in the send confirmation, not a regex.
+    const emailOk = trimmedEmail === '' || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail);
+    const parsed = normalizePhone(phone);
+    const phoneOk = parsed.problem === null || parsed.problem === 'empty';
+    return {
+      email: trimmedEmail === '' ? null : trimmedEmail,
+      phone: parsed.e164,
+      emailOk,
+      phoneOk,
+      phoneProblem: parsed.problem,
+    };
+  }, [email, phone]);
   const { t } = useTranslation();
 
   useEffect(() => {
@@ -103,6 +138,9 @@ const DriverModal: React.FC<DriverModalProps> = ({
       setName(driver.name);
       setSalaryRatio(((driver.salary_ratio ?? 0.5) * 100).toString());
       setPersonalnummer(driver.personalnummer || '');
+      setEmail(driver.email || '');
+      // Shown as the operator reads it; `normalizePhone` takes it back either way.
+      setPhone(formatPhone(driver.phone ?? null));
       setGender((driver.gender as Gender) || '');
       setPlanning({
         employment_type: driver.employment_type ?? 'employee',
@@ -128,6 +166,8 @@ const DriverModal: React.FC<DriverModalProps> = ({
       setName('');
       setSalaryRatio('50');
       setPersonalnummer('');
+      setEmail('');
+      setPhone('');
       setGender('');
       setPlanning(DEFAULT_PLANNING);
     }
@@ -144,12 +184,33 @@ const DriverModal: React.FC<DriverModalProps> = ({
         return;
       }
       setSalaryRangeError('');
+
+      // The database refuses both shapes with a CHECK, and a constraint error
+      // reaches the operator as an unexplained failure. This is the same rule,
+      // where it can say which field is wrong.
+      if (!contact.emailOk) {
+        setContactError(t('fleet.emailInvalid'));
+        return;
+      }
+      if (!contact.phoneOk) {
+        setContactError(t(contact.phoneProblem === 'needs_country'
+          ? 'fleet.phoneNeedsCountry'
+          : 'fleet.phoneInvalid'));
+        return;
+      }
+      setContactError('');
+
       const ratio = parseFloat(salaryRatio) / 100;
       const genderValue: 'male' | 'female' | null = gender === '' ? null : gender;
-      onSave(name.trim(), ratio, personalnummer.trim(), genderValue, planning);
+      onSave(name.trim(), ratio, personalnummer.trim(), genderValue, planning, {
+        email: contact.email,
+        phone: contact.phone,
+      });
       setName('');
       setSalaryRatio('50');
       setPersonalnummer('');
+      setEmail('');
+      setPhone('');
       setGender('');
       setPlanning(DEFAULT_PLANNING);
     }
@@ -199,6 +260,38 @@ const DriverModal: React.FC<DriverModalProps> = ({
                 required
               />
             </Field>
+
+            {/* Contact. Both optional: a driver without either is ordinary, and the
+                send path names such a driver rather than guessing an address. */}
+            <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+              <Field
+                label={t('fleet.email')}
+                hint={t('fleet.emailHint')}
+                error={contactError && !contact.emailOk ? contactError : undefined}
+              >
+                <Input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder={t('fleet.emailPlaceholder')}
+                  autoComplete="off"
+                />
+              </Field>
+
+              <Field
+                label={t('fleet.phone')}
+                hint={t('fleet.phoneHint')}
+                error={contactError && !contact.phoneOk ? contactError : undefined}
+              >
+                <Input
+                  type="tel"
+                  value={phone}
+                  onChange={(e) => setPhone(e.target.value)}
+                  placeholder={t('fleet.phonePlaceholder')}
+                  autoComplete="off"
+                />
+              </Field>
+            </div>
 
             <Field label={t('fleet.personalnummer')} hint={t('fleet.personalnummerHint')} required>
               <Input
