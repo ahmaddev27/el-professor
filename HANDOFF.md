@@ -64,6 +64,24 @@ Start here when you pick up this project. Read it together with [CLAUDE.md](CLAU
 
   **Two things that look like defects and are not.** October's 22 trips carry no `original_driver_id`, so the Fahrtenanalyse shows no drivers for that month — measured: 13 959 of staging's 13 981 trips do carry it, and the 22 are that earlier seed. October is left alone because a confirmed monthly plan references its trips and that column is immutable. And the analysis screen opens on the month that **has** an import rather than on the newest file, which is the documented behaviour.
 
+- **The Abrechnung by e-mail — in progress, two parts of three (02.10.2026).**
+
+  The owner's task: every driver gets an e-mail and a phone number, the weekly Abrechnung can be mailed to one driver from its detail dialog, and one button on the week's Total row mails every driver who has an address.
+
+  **Part 1, merged as a PR: the contact columns.** Measured first — `public.drivers` had **33 columns and not one was a contact detail**. Two nullable columns, two CHECKs, **no policy touched and none needed** (all four key on `company_id`), **no `SCHEMA_EPOCH` bump**. The RLS kit was run on the VPS with the migration in the chain and passed.
+
+  **The phone is E.164 and that was decided before anything used it.** The owner's next step for it is WhatsApp, and `wa.me` takes digits with no plus, no trunk zero and no separators — a number stored as an operator types it cannot become a link later without reprocessing thousands of rows. `src/utils/phoneNumber.ts` takes the three forms a German operator writes and **refuses a bare number** with no leading `+`, `00` or `0`: "49170…" could be German written without its plus or a national number elsewhere, and guessing wrong is a message to a stranger. One of its 16 tests runs every accepted output through the database's own CHECK pattern, so the two walls cannot disagree.
+
+  **Part 2, committed: attachments and the wording.** Every mail this product sent was `multipart/alternative` — two **alternatives** of one message. An attachment sits BESIDE the text, so the message becomes `multipart/mixed` with the pair nested inside. **With nothing attached it is byte-for-byte what it was**, which is the first assertion in the new tests and what keeps the five byte-pinned templates and every OTP mail untouched; 481 existing assertions pass unchanged.
+
+  Two refusals worth knowing: **one boundary for both levels is refused**, because the inner terminator would close the outer part and the attachment would vanish with no error anywhere — so `sendMail` mints two distinct UUIDs; and a filename or content type that would break out of its header is **refused rather than stripped**, because a renamed attachment is a surprise and a refused send is actionable.
+
+  The wording is fixed German in `_shared/abrechnung-mail.ts`, **not** a `mail.template.*` key — a new key means restating `app_private.platform_settings_problem` branch for branch, which is a slice of its own, exactly as the notifications decided. Three things it pins: **no figure in the subject** (a subject shows on a lock screen), a negative difference reads **`Guthaben`** rather than `Abzugeben` with the sign dropped because the word carries the direction, and it never calls itself a Lohnabrechnung, a Quittung or a Rechnung.
+
+  **Part 3, not built: the function and the two buttons.** A new `send-document` function (three lines: `FUNCTION_ENV`, `deploy/docker-compose.yml`, and deliberately not public), the mail action in the Abrechnung detail dialog, and the bulk button on the Total row.
+
+  ⚠️ **The owner was asked twice and decided to leave staging as it is.** Staging relays through production's Resend and blocks only `@example.com`, and it runs on a copy of production data — so once part 3 ships, **pressing that button on staging mails real drivers their real figures.** The only guard is the confirmation he approved: it names how many drivers, at which addresses, and which have none and will be skipped. That is a recorded decision, not an oversight.
+
 - **Two corrections the owner found by using it, both on 01.10.2026, after the first fix was already on staging.**
 
   **1. "Neu verteilen" was a dead end on the second press.** It answered *"Nothing changed — and that is the correct answer. 13 variants examined."* The cause was **not** a small search space — measured on a sparse month of 16 blocks, there are **39 distinct plans over 61 seeds**. It was the ranking: quality first, with the plan on screen among the candidates, so once a press landed on a local optimum every later press correctly kept it. *Never worse than what it replaces* had become *never anything else*.
