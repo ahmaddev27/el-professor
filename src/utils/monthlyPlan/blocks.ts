@@ -720,7 +720,7 @@ function splitAtWidestGap(
     if (index < 0) break;
 
     const block = current[index];
-    const result = splitOnce(block, switchMinutes, minBlockMinutes);
+    const result = splitOnce(block, switchMinutes, minBlockMinutes, maxBlockMinutes);
     if (!result) {
       settled.add(block.id);
       continue;
@@ -751,6 +751,7 @@ function splitOnce(
   block: PlanBlock,
   switchMinutes: number,
   minBlockMinutes: number,
+  maxBlockMinutes: number,
 ): { parts: PlanBlock[]; given: PlanBlockTrip[] } | null {
   const trips = [...block.trips].sort((a, b) => a.startMs - b.startMs);
   if (trips.length < 2) return null; // a single ride is never cut
@@ -772,6 +773,34 @@ function splitOnce(
     }
     runningEnd = Math.max(runningEnd, trips[i].endMs);
   }
+  // ── The ceiling cut, the owner's own rule (voice note, 03.10.2026) ──────────
+  //
+  // *"البلوك اللي بيزيد عن الست ساعات، بتقسمه ست ساعات والباقي"* — a block over the
+  // maximum is cut into **the maximum and the remainder**, not only where a gap
+  // happens to be convenient.
+  //
+  // The widest-gap search above is still tried first, because it gives up the
+  // fewest rides. When it finds nothing — no gap inside the middle half — the cut
+  // falls back to the ceiling: the **last ride boundary at or before
+  // `maxBlockMinutes`**. Measured on the owner's August, that is the difference
+  // between 14 long blocks left standing and none.
+  //
+  // It cuts at a ride boundary and never inside a ride, so no ride's time moves
+  // and none is split in two. A block of one long ride still cannot be cut, and
+  // is still reported.
+  if (!best && maxBlockMinutes > 0) {
+    const ceiling = block.startMs + maxBlockMinutes * MS_PER_MINUTE;
+    let end = trips[0].endMs;
+    let atMs: number | null = null;
+    for (let i = 1; i < trips.length; i++) {
+      // The boundary is where the vehicle is free: the latest end so far, which
+      // inside an overlapping block is not the previous ride's end.
+      if (end <= ceiling && trips[i].startMs >= end) atMs = end;
+      end = Math.max(end, trips[i].endMs);
+    }
+    if (atMs !== null) best = { atMs, gap: 0 };
+  }
+
   if (!best) return null;
 
   const handoverEnd = best.atMs + gapMs;

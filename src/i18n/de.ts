@@ -5962,4 +5962,7 @@ export const de = {
   'fleet.fcm.scopeThisMonth':     'Nur dieser Monat',
   'fleet.fcm.scopeThisMonthHint': 'Der folgende Monat behält die bisherigen Kosten und alle weiteren Monate danach ebenfalls.',
   'fleet.fcm.scopeTitle':         'Für welche Monate gilt die Änderung?',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'mplan.blocks.longNotSplitOff': '{count} Block/Blöcke sind länger als {minutes} Minuten. Sie wurden nicht geteilt, weil «Lange Blöcke für einen Fahrerwechsel teilen» in Schritt 2 ausgeschaltet ist. Schalten Sie es ein, wenn diese Blöcke auf zwei Fahrer aufgeteilt werden sollen.',
 } as const;

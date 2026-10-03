@@ -1188,7 +1188,15 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
                                         type="button"
                                         disabled
                                         aria-label={`${t('sal.payment.previewReceipt')}: ${reason}`}
-                                        className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-[13px] font-medium opacity-50"
+                                        // An explicit colour, because this modal is legacy
+                                        // and sets its text colour with inline styles: a
+                                        // button carrying only `opacity-50` inherits
+                                        // whatever the cell has and renders dark on dark —
+                                        // an empty box the size of a button, which is what
+                                        // the owner photographed on 03.10.2026 after the
+                                        // first fix shipped. A disabled control that cannot
+                                        // be read is the defect it was meant to close.
+                                        className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-[13px] font-medium text-[color:var(--text-tertiary)] opacity-70"
                                       >
                                         <Eye size={14} />
                                         {t('sal.payment.previewReceipt')}

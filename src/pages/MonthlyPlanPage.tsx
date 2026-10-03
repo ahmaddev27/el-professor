@@ -1748,8 +1748,15 @@ export default function MonthlyPlanPage() {
 
           {plan.longBlocks.length > 0 ? (
             <Alert tone="caution" title={t('mplan.blocks.stillLongTitle')}>
+              {/* With the split switched OFF, "no gap is long enough" is simply
+                  untrue — nothing was tried. Measured on the owner's August 2026:
+                  11 blocks ran past the ceiling with the switch off and **1** with
+                  it on, so the sentence was blaming the data for a setting. Say
+                  which of the two it is. */}
               <p>
-                {t('mplan.blocks.stillLong', {
+                {t(splitLongBlocks
+                  ? 'mplan.blocks.stillLong'
+                  : 'mplan.blocks.longNotSplitOff', {
                   count: plan.longBlocks.length,
                   minutes: plan.maxBlockMinutes,
                 })}

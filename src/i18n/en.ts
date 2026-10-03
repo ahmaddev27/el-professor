@@ -5906,4 +5906,7 @@ export const en: PartialDictionary = {
   'fleet.fcm.scopeThisMonth':     'This month only',
   'fleet.fcm.scopeThisMonthHint': 'The following month keeps the previous costs, and so do all months after it.',
   'fleet.fcm.scopeTitle':         'Which months does the change apply to?',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'mplan.blocks.longNotSplitOff': '{count} block(s) are longer than {minutes} minutes. They were not split because "Split long blocks for a driver handover" is switched off in step 2. Switch it on if these blocks should be shared between two drivers.',
 };
