@@ -769,3 +769,95 @@ describe('buildBlocks — splitting a long block for a handover', () => {
     }
   });
 });
+
+
+// ─── Conservation: the property a driver's pay rests on ────────────────────
+//
+// The owner put it together himself: the split changes who works which hours, so
+// it changes what each of them earns. Every hour in this plan becomes a line on a
+// Stundennachweis and a figure in a payroll summary.
+//
+// So the rule is not "the split looks right", it is arithmetic: **every ride is in
+// exactly one block, or given up, and never both and never neither.** A ride
+// counted twice pays somebody for work nobody did; a ride that vanishes with no
+// entry anywhere is indistinguishable from a defect, and neither is visible by
+// reading a screen.
+
+describe('buildBlocks — every ride is accounted for exactly once', () => {
+  const months = [
+    {
+      name: 'eight hours back to back with one lull',
+      trips: [
+        trip({ id: 'a', startTime: '06:00', endTime: '08:00' }),
+        trip({ id: 'b', startTime: '08:10', endTime: '10:00' }),
+        trip({ id: 'c', startTime: '10:22', endTime: '12:00' }),
+        trip({ id: 'd', startTime: '12:05', endTime: '14:00' }),
+      ],
+    },
+    {
+      name: 'fourteen hours, several splits',
+      trips: [
+        trip({ id: 'a', startTime: '06:00', endTime: '08:00' }),
+        trip({ id: 'b', startTime: '08:20', endTime: '10:00' }),
+        trip({ id: 'c', startTime: '10:10', endTime: '12:00' }),
+        trip({ id: 'd', startTime: '12:25', endTime: '14:00' }),
+        trip({ id: 'e', startTime: '14:10', endTime: '16:00' }),
+        trip({ id: 'f', startTime: '16:20', endTime: '18:00' }),
+        trip({ id: 'g', startTime: '18:10', endTime: '20:00' }),
+      ],
+    },
+    {
+      name: 'two vehicles on one day',
+      trips: [
+        trip({ id: 'a', vehicleId: 'car-A', startTime: '06:00', endTime: '10:00' }),
+        trip({ id: 'b', vehicleId: 'car-A', startTime: '10:15', endTime: '14:00' }),
+        trip({ id: 'c', vehicleId: 'car-B', startTime: '07:00', endTime: '11:00' }),
+        trip({ id: 'd', vehicleId: 'car-B', startTime: '11:20', endTime: '15:00' }),
+      ],
+    },
+  ];
+
+  for (const month of months) {
+    it(`${month.name}: in one block or given up, never both, never neither`, () => {
+      const r = buildBlocks(month.trips, {
+        switchMinutes: 30, minBlockMinutes: 90, maxBlockMinutes: 360, splitLongBlocks: true,
+      });
+
+      const inBlocks = r.blocks.flatMap(b => b.trips.map(t => t.tripId));
+      const givenUp = r.handoverTrips.map(t => t.tripId);
+      const rejected = r.rejected.map(t => t.tripId);
+
+      // No ride is in two blocks: that would pay two drivers for one journey.
+      expect(new Set(inBlocks).size, 'a ride is in more than one block')
+        .toBe(inBlocks.length);
+      // No ride is both placed and given up.
+      for (const id of givenUp) {
+        expect(inBlocks, `${id} is both in a block and given up`).not.toContain(id);
+      }
+      // And every ride of the month is somewhere.
+      const accounted = new Set([...inBlocks, ...givenUp, ...rejected]);
+      for (const t of month.trips) {
+        expect(accounted.has(t.id), `${t.id} is in no block, not given up and not rejected`)
+          .toBe(true);
+      }
+      expect(accounted.size).toBe(month.trips.length);
+    });
+
+    it(`${month.name}: the ride minutes that stay are the ride minutes that were there`, () => {
+      // `rideMinutes` is what a Stundennachweis reads. The spans change with the
+      // split — that is the point — but the minutes actually driven must be the
+      // imported ones minus exactly what was given up, to the minute.
+      const whole = buildBlocks(month.trips, { switchMinutes: 30 });
+      const split = buildBlocks(month.trips, {
+        switchMinutes: 30, minBlockMinutes: 90, maxBlockMinutes: 360, splitLongBlocks: true,
+      });
+
+      const rideMinutes = (r: ReturnType<typeof buildBlocks>) =>
+        r.blocks.reduce((sum, b) => sum + b.rideMinutes, 0);
+      const givenUpMinutes = split.blocks.length === 0 ? 0 : split.handoverTrips
+        .reduce((sum, t) => sum + Math.round((t.endMs - t.startMs) / 60000), 0);
+
+      expect(rideMinutes(split) + givenUpMinutes).toBe(rideMinutes(whole));
+    });
+  }
+});
