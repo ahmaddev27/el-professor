@@ -141,8 +141,22 @@ export interface StoredPlanBlock {
   /** NULL is an unassigned block (§8), kept with a warning rather than dropped. */
   driver_id: string | null;
   driver_name: string | null;
+  /**
+   * Why this block went to this driver.
+   *
+   * The same six values as the CHECK on `monthly_plan_blocks.assignment_reason`
+   * (`20261003100000`). The two lists are not generated from each other, so a
+   * change that moves only one of them fails when an operator presses Save —
+   * widen both in the same commit.
+   *
+   * `owner_fallback` and `owner_surplus` both end with the owner holding the
+   * block and must stay distinguishable: the first means no regular driver passed
+   * the hard rules, the second that one did and the plan chose the owner anyway
+   * because every regular had already earned their minimum.
+   */
   assignment_reason:
-    | 'mandatory_note' | 'only_candidate' | 'best_fit' | 'seeded_tie' | 'owner_fallback'
+    | 'mandatory_note' | 'only_candidate' | 'best_fit' | 'seeded_tie'
+    | 'owner_fallback' | 'owner_surplus'
     | null;
   assignment_note_id: string | null;
   trips: readonly StoredPlanBlockTrip[];

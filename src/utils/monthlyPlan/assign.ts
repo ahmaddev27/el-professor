@@ -103,7 +103,8 @@ export type AssignmentReason =
   | 'only_candidate'   // exactly one driver passed the hard rules
   | 'best_fit'         // scored choice
   | 'seeded_tie'       // equal scores, the seed decided (the one flexible choice)
-  | 'owner_fallback';  // §8 — no regular driver passed
+  | 'owner_fallback'   // §8 — no regular driver passed
+  | 'owner_surplus';   // `ownerTakesSurplus` — every regular had earned their minimum
 
 export interface BlockAssignment {
   blockId: string;
@@ -160,6 +161,30 @@ export interface AssignOptions {
    * rules are checked per (driver, block) pair whatever order the pairs arrive in.
    */
   seed?: number;
+  /**
+   * Hold a regular driver back, in favour of the owner, once they are over their
+   * minimum by `OWNER_SURPLUS_MARGIN_MINUTES` — the owner's request of
+   * 03.10.2026: *"move blocks to the owner as many as possible so each driver
+   * will have a bit more than the min-hours and the owner will have the rest"*.
+   *
+   * **This is a deliberate change to §8, requested by name, not a tuning knob.**
+   * §8 as written makes the owner a last resort — "no early use, surplus only".
+   * With this on, the owner is tried **before** any regular driver who has
+   * already earned their minimum, and the last-resort branch stays underneath for
+   * drivers who have not. What does not change is the refusal set: the owner
+   * takes a block only when `refusalFor` admits it, at **the block's own times**.
+   * A block that collides with the owner's own work stays unassigned, because the
+   * alternative — moving it to a window where the owner is free — would have the
+   * Fahrtenbuch state that a journey happened at a time it did not. That boundary
+   * is this module's own (see the header, *No repair pass, deliberately*) and the
+   * owner set it on 22.09.2026.
+   *
+   * Off by default, so every existing caller and test keeps §8's shape.
+   * `searchAssignments` tries each seed **both ways** and lets `comparePlanQuality`
+   * decide, which is why nothing has to choose this by hand: it ranks `unassigned`
+   * first, so the variant that places more blocks wins on its own merits.
+   */
+  ownerTakesSurplus?: boolean;
 }
 
 export interface AssignResult {
@@ -170,6 +195,20 @@ export interface AssignResult {
 }
 
 const MS_PER_MINUTE = 60_000;
+
+/**
+ * How far over their minimum a regular driver counts as satisfied, so the owner
+ * may take the next block instead (`ownerTakesSurplus`).
+ *
+ * One hour. The owner asked for "a bit more than the min-hours", and the margin
+ * is what makes it *a bit more* rather than exactly the minimum — at exactly the
+ * minimum a driver who lost a single block to rounding would sit under their
+ * target with no way back, because the owner would already be taking everything.
+ *
+ * A driver whose range is unusable (no salary, no rate — §5) has no minimum to
+ * have earned, so they are never held back and the owner never displaces them.
+ */
+const OWNER_SURPLUS_MARGIN_MINUTES = 60;
 
 /**
  * How far a seeded pass may move a block from its chronological position.
@@ -400,13 +439,24 @@ export function searchAssignments(
     });
   }
 
+  // Each seed is tried BOTH ways — §8's order, and the owner taking everything a
+  // regular has already earned past their minimum (the owner's request of
+  // 03.10.2026, `ownerTakesSurplus`). Nothing chooses between the two by hand:
+  // `comparePlanQuality` ranks `unassigned` first, so whichever places more blocks
+  // wins on the figures, and on a month where the two tie the plain pass keeps §8.
+  //
+  // The seed is shared rather than consumed, so the search still explores
+  // `attempts` distinct block orderings rather than half as many.
   for (let i = 1; i <= attempts; i++) {
     const seed = baseSeed + i;
-    const result = assignBlocks(blocks, drivers, availability, {
-      switchMinutes: options.switchMinutes,
-      seed,
-    });
-    candidates.push({ seed, result, quality: planQuality(result), differs: differsFromCurrent(result) });
+    for (const ownerTakesSurplus of [false, true]) {
+      const result = assignBlocks(blocks, drivers, availability, {
+        switchMinutes: options.switchMinutes,
+        seed,
+        ownerTakesSurplus,
+      });
+      candidates.push({ seed, result, quality: planQuality(result), differs: differsFromCurrent(result) });
+    }
   }
 
   // Best quality first; among equals a differing plan first; then the lowest seed.
@@ -618,6 +668,7 @@ export function assignBlocks(
   const switchMinutes = Number.isFinite(options.switchMinutes) && options.switchMinutes >= 0
     ? Math.floor(options.switchMinutes)
     : 0;
+  const ownerTakesSurplus = options.ownerTakesSurplus === true;
 
   const poolIds = new Set(drivers.map(d => d.id));
 
@@ -684,6 +735,19 @@ export function assignBlocks(
   // ── The ordinary pass: near-chronological, regulars first, owner as fallback.
   const ordered = orderForPass(blocks, seed);
 
+  /**
+   * Has this regular driver already earned their minimum, with the margin?
+   *
+   * False for the owner (§8 gives them no range) and false for a driver whose
+   * range is unusable, so neither is ever the reason a block moves.
+   */
+  const hasEarnedMinimum = (work: DriverWork): boolean => {
+    if (work.state.driver.isOwner) return false;
+    const minHours = work.state.range.minHours;
+    if (minHours === null) return false;
+    return work.state.minutes >= minHours * 60 + OWNER_SURPLUS_MARGIN_MINUTES;
+  };
+
   for (const block of ordered) {
     if (taken.has(block.id)) continue;
 
@@ -706,6 +770,29 @@ export function assignBlocks(
         continue;
       }
       candidates.push({ work, score: scoreCandidate(work, block, poolIds) });
+    }
+
+    // `ownerTakesSurplus`: a regular who has earned their minimum stands aside so
+    // the owner can take this block. "A bit more than the min-hours" is the
+    // owner's own phrase; the margin is what makes it *a bit more* rather than
+    // exactly the minimum, which would leave a driver one block short the moment
+    // any rounding went the other way.
+    //
+    // Only the ORDER changes. A held-back driver is still a candidate — the
+    // branch below falls through to them when the owner cannot take the block —
+    // so this can never leave a block unassigned that the old order would have
+    // placed, and `comparePlanQuality` can compare the two fairly.
+    if (ownerTakesSurplus && owner && !ownerRefusal
+        && candidates.length > 0 && candidates.every(c => hasEarnedMinimum(c.work))) {
+      place(owner, block);
+      taken.add(block.id);
+      assignments.push({
+        blockId: block.id,
+        driverId: owner.state.driver.id,
+        driverName: owner.state.driver.name,
+        reason: 'owner_surplus',
+      });
+      continue;
     }
 
     if (candidates.length > 0) {

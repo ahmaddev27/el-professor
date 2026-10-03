@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+﻿import { describe, it, expect } from 'vitest';
 import { buildBlocks, type PlanTripInput } from './blocks';
 import { buildAvailability, type PlanNote } from './availability';
 import {
@@ -12,9 +12,9 @@ import {
 } from './assign';
 
 /**
- * §7 and §8, with §16's assignment cases written out:
- * exclusion prevents · overlap prevents · exceeding the cap prevents · the
- * owner has no monthly ceiling · mandatory inclusion affects the assignment ·
+ * آ§7 and آ§8, with آ§16's assignment cases written out:
+ * exclusion prevents آ· overlap prevents آ· exceeding the cap prevents آ· the
+ * owner has no monthly ceiling آ· mandatory inclusion affects the assignment آ·
  * regeneration yields a valid alternative without relaxing anything.
  */
 
@@ -37,7 +37,7 @@ function driver(p: Partial<PlanDriverInput> & { id: string }): PlanDriverInput {
     id: p.id,
     name: p.name ?? p.id,
     isOwner: p.isOwner ?? false,
-    // 1950–2100 € at 14 €/h → 139,29–150 h, the brief's own example.
+    // 1950â€“2100 â‚¬ at 14 â‚¬/h â†’ 139,29â€“150 h, the brief's own example.
     minSalary: 'minSalary' in p ? p.minSalary! : 1950,
     maxSalary: 'maxSalary' in p ? p.maxSalary! : 2100,
     hourlyRate: 'hourlyRate' in p ? p.hourlyRate! : 14,
@@ -80,7 +80,7 @@ function plan(
 const dayBlock = (id: string, vehicleId: string, date: string, from: string, to: string) =>
   trip({ id, vehicleId, tripDate: date, startTime: from, endTime: to });
 
-describe('hard rule 4 — exclusion prevents assignment (§16)', () => {
+describe('hard rule 4 â€” exclusion prevents assignment (آ§16)', () => {
   it('a sick driver never receives an overlapping block, whoever else exists', () => {
     const r = plan(
       [dayBlock('a', 'car-A', '2026-10-05', '08:00', '12:00')],
@@ -95,7 +95,7 @@ describe('hard rule 4 — exclusion prevents assignment (§16)', () => {
   });
 });
 
-describe('hard rule 2 — overlap prevents assignment (§16)', () => {
+describe('hard rule 2 â€” overlap prevents assignment (آ§16)', () => {
   it('two simultaneous blocks on two cars never land on one driver', () => {
     const r = plan(
       [
@@ -110,9 +110,9 @@ describe('hard rule 2 — overlap prevents assignment (§16)', () => {
   });
 });
 
-describe('hard rule 3 — the cap prevents assignment, and the owner is exempt (§16)', () => {
+describe('hard rule 3 â€” the cap prevents assignment, and the owner is exempt (آ§16)', () => {
   it('a regular driver stops at the effective cap', () => {
-    // Cap: 60 € / 14 €/h ≈ 4.29 h. Two 4-hour blocks: the second must be refused.
+    // Cap: 60 â‚¬ / 14 â‚¬/h â‰ˆ 4.29 h. Two 4-hour blocks: the second must be refused.
     const r = plan(
       [
         dayBlock('a', 'car-A', '2026-10-05', '08:00', '12:00'),
@@ -125,9 +125,9 @@ describe('hard rule 3 — the cap prevents assignment, and the owner is exempt (
   });
 
   /**
-   * The cap still binds — it just has one source now. Since 01.10.2026 the plan
+   * The cap still binds â€” it just has one source now. Since 01.10.2026 the plan
    * works from salaries, so a driver's ceiling is `max_salary / hourly_rate` and
-   * `max_monthly_hours` is gone. 140 € at 20 €/h is 7 hours, so the second
+   * `max_monthly_hours` is gone. 140 â‚¬ at 20 â‚¬/h is 7 hours, so the second
    * four-hour block is one hour too many.
    */
   it('the salary-derived cap binds, and the block past it is refused', () => {
@@ -142,7 +142,7 @@ describe('hard rule 3 — the cap prevents assignment, and the owner is exempt (
     expect(r.unassigned[0].refusals[0].refusal).toBe('exceeds_hours_cap');
   });
 
-  it('the owner has no monthly ceiling (§8, §16)', () => {
+  it('the owner has no monthly ceiling (آ§8, آ§16)', () => {
     // 20 four-hour blocks = 80 h, far above the owner's own salary maximum.
     const trips: PlanTripInput[] = [];
     for (let d = 1; d <= 20; d++) {
@@ -163,7 +163,7 @@ describe('hard rule 3 — the cap prevents assignment, and the owner is exempt (
   });
 });
 
-describe('the derived check — the switch duration between vehicles', () => {
+describe('the derived check â€” the switch duration between vehicles', () => {
   it('refuses a hop between two cars shorter than the switch duration', () => {
     const r = plan(
       [
@@ -192,7 +192,7 @@ describe('the derived check — the switch duration between vehicles', () => {
     expect(r.unassigned).toHaveLength(0);
   });
 
-  it('needs no gap between consecutive blocks of the same vehicle beyond what §3 built', () => {
+  it('needs no gap between consecutive blocks of the same vehicle beyond what آ§3 built', () => {
     // Same car, 30-minute gap, 30-minute switch: two blocks, one driver, legal.
     const r = plan(
       [
@@ -207,7 +207,7 @@ describe('the derived check — the switch duration between vehicles', () => {
   });
 });
 
-describe('rule 5 — mandatory inclusion affects the assignment (§16)', () => {
+describe('rule 5 â€” mandatory inclusion affects the assignment (آ§16)', () => {
   it('the pinned driver gets the block even when another driver needs hours more', () => {
     const r = plan(
       [dayBlock('a', 'car-A', '2026-10-05', '08:00', '12:00')],
@@ -240,13 +240,13 @@ describe('rule 5 — mandatory inclusion affects the assignment (§16)', () => {
     );
     expect(r.pinConflicts).toHaveLength(1);
     expect(r.pinConflicts[0]).toMatchObject({ driverId: 'ali', brokenRule: 'exceeds_hours_cap' });
-    // The conflicted day is then assigned normally — to sami.
+    // The conflicted day is then assigned normally â€” to sami.
     const day2 = r.assignments.find(a => a.reason !== 'mandatory_note');
     expect(day2?.driverId).toBe('sami');
   });
 });
 
-describe('§8 — the owner takes surplus only', () => {
+describe('آ§8 â€” the owner takes surplus only', () => {
   it('never wins a block a regular driver can validly take', () => {
     const r = plan(
       [dayBlock('a', 'car-A', '2026-10-05', '08:00', '12:00')],
@@ -269,7 +269,7 @@ describe('§8 — the owner takes surplus only', () => {
     expect(byBlock.get('car-B')!.reason).toBe('owner_fallback');
   });
 
-  it('with no owner, an uncoverable block stays unassigned with the reasons listed (§8, §14)', () => {
+  it('with no owner, an uncoverable block stays unassigned with the reasons listed (آ§8, آ§14)', () => {
     const r = plan(
       [
         dayBlock('a', 'car-A', '2026-10-05', '08:00', '12:00'),
@@ -282,7 +282,7 @@ describe('§8 — the owner takes surplus only', () => {
     expect(r.unassigned[0].refusals).toHaveLength(1);
   });
 
-  it('the owner respects overlap and exclusion like anyone (§7 rules 2 and 4)', () => {
+  it('the owner respects overlap and exclusion like anyone (آ§7 rules 2 and 4)', () => {
     const r = plan(
       [
         dayBlock('a', 'car-A', '2026-10-05', '08:00', '12:00'),
@@ -297,7 +297,7 @@ describe('§8 — the owner takes surplus only', () => {
   });
 });
 
-describe('the optimisation — toward the salary range, and the tie-breakers', () => {
+describe('the optimisation â€” toward the salary range, and the tie-breakers', () => {
   it('prefers the driver further below their minimum', () => {
     // Two identical drivers; ali already has the first day, so the second day
     // goes to sami, who is further below his minimum.
@@ -312,7 +312,7 @@ describe('the optimisation — toward the salary range, and the tie-breakers', (
     expect(days).toEqual(['ali', 'sami']);
   });
 
-  it('planning priority decides an exact tie (§7: the deciding factor)', () => {
+  it('planning priority decides an exact tie (آ§7: the deciding factor)', () => {
     const r = plan(
       [dayBlock('a', 'car-A', '2026-10-05', '08:00', '12:00')],
       [
@@ -323,7 +323,7 @@ describe('the optimisation — toward the salary range, and the tie-breakers', (
     expect(r.assignments[0].driverId).toBe('sami');
   });
 
-  it('a non-covering driver is steered away from a colleague’s block, softly', () => {
+  it('a non-covering driver is steered away from a colleagueâ€™s block, softly', () => {
     const r = plan(
       [trip({ id: 'a', vehicleId: 'car-A', startTime: '08:00', endTime: '12:00', originalDriverName: 'Sami' })],
       [
@@ -334,7 +334,7 @@ describe('the optimisation — toward the salary range, and the tie-breakers', (
     expect(r.assignments[0].driverId).toBe('omar');
   });
 
-  it('but still takes it when nobody else can — a preference, not a tenth hard rule', () => {
+  it('but still takes it when nobody else can â€” a preference, not a tenth hard rule', () => {
     const r = plan(
       [trip({ id: 'a', vehicleId: 'car-A', startTime: '08:00', endTime: '12:00', originalDriverName: 'Sami' })],
       [driver({ id: 'ali', name: 'Ali', canCoverOtherDrivers: false })],
@@ -344,7 +344,7 @@ describe('the optimisation — toward the salary range, and the tie-breakers', (
   });
 });
 
-describe('regeneration (§7 rule 9, acceptance 14)', () => {
+describe('regeneration (آ§7 rule 9, acceptance 14)', () => {
   const trips = [
     dayBlock('a', 'car-A', '2026-10-05', '08:00', '12:00'),
     dayBlock('b', 'car-B', '2026-10-06', '08:00', '12:00'),
@@ -374,7 +374,7 @@ describe('regeneration (§7 rule 9, acceptance 14)', () => {
       }
       seen.add(r.assignments.map(a => `${a.blockId}:${a.driverId}`).join(','));
     }
-    // At least two distinct valid alternatives across six seeds — the button
+    // At least two distinct valid alternatives across six seeds â€” the button
     // does something, without any constraint moving.
     expect(seen.size).toBeGreaterThan(1);
   });
@@ -394,7 +394,7 @@ describe('regeneration (§7 rule 9, acceptance 14)', () => {
   });
 });
 
-describe('the driver states the summary screen reads (§1 screen 3)', () => {
+describe('the driver states the summary screen reads (آ§1 screen 3)', () => {
   it('reports minutes, ride minutes, trips, and the position against the range', () => {
     const r = plan(
       [
@@ -421,7 +421,7 @@ describe('the driver states the summary screen reads (§1 screen 3)', () => {
   });
 });
 
-// ─── Regeneration as a search (owner, 01.10.2026) ─────────────────────────
+// â”€â”€â”€ Regeneration as a search (owner, 01.10.2026) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 //
 // The block above tests regeneration on IDENTICAL TWINS, where every block is a
 // genuine tie and the seeded tie-break alone moves the plan. That is why it
@@ -430,11 +430,11 @@ describe('the driver states the summary screen reads (§1 screen 3)', () => {
 // the first block and the seed reached no decision at all.
 //
 // `searchAssignments` is the answer. It varies the ORDER blocks are offered to
-// the greedy pass — a choice the requirement leaves open — scores each variant on
+// the greedy pass â€” a choice the requirement leaves open â€” scores each variant on
 // figures the engine already computes, and keeps the best, with the plan on
 // screen among the candidates so the answer is never worse than what it replaces.
 //
-// §7's nine hard rules are untouched: `refusalFor` is asked per (driver, block)
+// آ§7's nine hard rules are untouched: `refusalFor` is asked per (driver, block)
 // pair whatever order the pairs arrive in. Every assertion below re-checks that.
 
 describe('regeneration searches for a different plan (owner, 01.10.2026)', () => {
@@ -463,12 +463,12 @@ describe('regeneration searches for a different plan (owner, 01.10.2026)', () =>
   const fingerprint = (r: AssignResult) =>
     r.assignments.map(a => `${a.blockId}:${a.driverId}`).sort().join(',');
 
-  it('the ordering does the work, not the tie-break — the control for this change', () => {
+  it('the ordering does the work, not the tie-break â€” the control for this change', () => {
     // The first draft of this test asserted that `seeded_tie` NEVER fires on these
     // drivers. Measured, it fires once in 28 assignments: the scoring bands are
     // coarse enough that two different drivers can still land on the same figure.
     // So the control is not "no tie exists" but "the ties cannot account for the
-    // difference" — which is the claim that matters, and it is far from marginal:
+    // difference" â€” which is the claim that matters, and it is far from marginal:
     // 24 of 28 blocks move between seed 0 and seed 1 against one single tie.
     const { blocks, availability } = built();
     const withSeed = (seed: number) =>
@@ -485,7 +485,7 @@ describe('regeneration searches for a different plan (owner, 01.10.2026)', () =>
     expect(moved).toBeGreaterThan(base.assignments.length / 2);
   });
 
-  it('every seed gives a plan of the same quality — they are alternatives, not gambles', () => {
+  it('every seed gives a plan of the same quality â€” they are alternatives, not gambles', () => {
     // Measured: eight seeds, eight distinct plans, one quality. That is why the
     // search can always offer a different arrangement without trading anything
     // away, and it is the property the screen's wording rests on.
@@ -516,7 +516,7 @@ describe('regeneration searches for a different plan (owner, 01.10.2026)', () =>
         expect(state.minutes).toBeLessThanOrEqual(state.range.effectiveMaxHours * 60);
       }
     }
-    // No driver holds two blocks at once — rule 2, re-checked on the result.
+    // No driver holds two blocks at once â€” rule 2, re-checked on the result.
     for (const state of found.result.driverStates) {
       const held = state.assignedBlockIds
         .map(id => blocks.find(b => b.id === id)!)
@@ -591,7 +591,7 @@ describe('regeneration searches for a different plan (owner, 01.10.2026)', () =>
       ],
       { switchMinutes: 30 },
     );
-    // 120 € at 15 €/h is 8 hours: exactly one of these two blocks.
+    // 120 â‚¬ at 15 â‚¬/h is 8 hours: exactly one of these two blocks.
     const capped = [driver({ id: 'ali', minSalary: 60, maxSalary: 120, hourlyRate: 15 })];
     const availability = buildAvailability([], blocks, new Set(['ali']));
     const r = assignBlocks(blocks, capped, availability, { switchMinutes: 30, seed: 0 });
@@ -607,13 +607,13 @@ describe('regeneration searches for a different plan (owner, 01.10.2026)', () =>
   });
 });
 
-// ─── Unlimited retry (owner, 01.10.2026, the second report on this button) ────
+// â”€â”€â”€ Unlimited retry (owner, 01.10.2026, the second report on this button) â”€â”€â”€â”€
 //
-// He pressed "Neu verteilen" a second time and was told "Nothing changed — and
+// He pressed "Neu verteilen" a second time and was told "Nothing changed â€” and
 // that is the correct answer. 13 variants examined." He asked for unlimited
 // retries.
 //
-// The cause was NOT a small search space — measured on a sparse month of 16
+// The cause was NOT a small search space â€” measured on a sparse month of 16
 // blocks, 39 distinct plans over 61 seeds. It was the ranking: quality first,
 // with the plan on screen among the candidates, so once a press landed on a local
 // optimum every later press correctly kept it. "Never worse than what it
@@ -672,7 +672,7 @@ describe('regeneration always offers another plan, and names what it costs', () 
   it('a worse alternative is offered, and its cost is named rather than hidden', () => {
     // Walk until a press has to trade something away, then check the trade is
     // reported. On a month with this many equally good arrangements it may not
-    // happen at all, which is itself fine — what must never happen is a worse
+    // happen at all, which is itself fine â€” what must never happen is a worse
     // plan with `cost: null`.
     const { blocks, availability } = prepared();
     let plan = {
@@ -729,5 +729,152 @@ describe('regeneration always offers another plan, and names what it costs', () 
     expect(qualityDelta(base, { ...base, shortfallHours: 10.05 })).toBeNull();
     expect(qualityDelta(base, { ...base, shortfallHours: 10.5 }))
       .toEqual({ field: 'shortfallHours', by: 0.5 });
+  });
+});
+
+// â”€â”€â”€ The owner takes what a driver has already earned past their minimum â”€â”€â”€â”€â”€
+//
+// The owner's request of 03.10.2026, in his words: *"we need to move blocks to
+// the owner as many as possible so each driver will have a bit more than the
+// min-hours and the owner will have the rest"*.
+//
+// This is a deliberate change to آ§8, which as written makes the owner a last
+// resort â€” "no early use, surplus only". `ownerTakesSurplus` turns that into
+// "the owner goes first, once every regular has earned their minimum", and it is
+// off by default so آ§8's shape is what every other caller still gets.
+//
+// **What it does NOT do, and the tests below pin it:** no block's time moves. A
+// block that collides with the owner's own work stays unassigned, because the
+// alternative â€” shifting it to a window where the owner happens to be free â€”
+// would have the Fahrtenbuch state that a journey happened at a time it did not.
+// That boundary is this module's own (see the header) and the owner set it on
+// 22.09.2026.
+
+describe('ownerTakesSurplus â€” the owner absorbs the surplus (owner, 03.10.2026)', () => {
+  /** A month of one-a-day four-hour blocks on one car. */
+  const days = (count: number) =>
+    Array.from({ length: count }, (_, i) =>
+      dayBlock(`d${i}`, 'car-A', `2026-10-${String(5 + i).padStart(2, '0')}`, '08:00', '12:00'));
+
+  const planWith = (
+    trips: PlanTripInput[],
+    drivers: PlanDriverInput[],
+    ownerTakesSurplus: boolean,
+  ): AssignResult => {
+    const { blocks } = buildBlocks(trips, { switchMinutes: 30 });
+    const availability = buildAvailability(notes([]), blocks, new Set(drivers.map(d => d.id)));
+    return assignBlocks(blocks, drivers, availability, {
+      switchMinutes: 30, seed: 0, ownerTakesSurplus,
+    });
+  };
+  const notes = (n: PlanNote[]) => n;
+
+  it('is off by default, so آ§8 keeps its shape for every existing caller', () => {
+    // 10 â‚¬ min / 10 â‚¬/h â†’ a 1-hour minimum, so one block already earns it. With
+    // the option off the regular keeps taking blocks and the owner gets none.
+    const r = planWith(
+      days(4),
+      [
+        driver({ id: 'ali', minSalary: 10, maxSalary: 10_000, hourlyRate: 10 }),
+        driver({ id: 'chef', isOwner: true, minSalary: null, maxSalary: null, hourlyRate: 10 }),
+      ],
+      false,
+    );
+    expect(r.assignments.every(a => a.driverId === 'ali')).toBe(true);
+    expect(r.assignments.some(a => a.reason === 'owner_surplus')).toBe(false);
+  });
+
+  it('hands the owner every block past the minimum, and names the reason', () => {
+    const r = planWith(
+      days(4),
+      [
+        driver({ id: 'ali', minSalary: 10, maxSalary: 10_000, hourlyRate: 10 }),
+        driver({ id: 'chef', isOwner: true, minSalary: null, maxSalary: null, hourlyRate: 10 }),
+      ],
+      true,
+    );
+    // The length first, and deliberately: `slice(1).every(â€¦)` is **vacuously
+    // true** on a one-element array, so without this the two assertions under it
+    // would pass on a plan that placed a single block and gave up.
+    expect(r.assignments).toHaveLength(4);
+    // The first block earns Ali his 1-hour minimum and the 60-minute margin over
+    // it in one go; from the second on, the owner takes them.
+    expect(r.assignments[0].driverId).toBe('ali');
+    expect(r.assignments.slice(1).every(a => a.driverId === 'chef')).toBe(true);
+    expect(r.assignments.slice(1).every(a => a.reason === 'owner_surplus')).toBe(true);
+    expect(r.unassigned).toHaveLength(0);
+  });
+
+  it('a driver still reaches their own minimum first â€” the owner does not starve them', () => {
+    // 350 â‚¬ at 14 â‚¬/h = 25 h. Four 4-hour blocks is 16 h, under it throughout, so
+    // the owner must take nothing at all.
+    const r = planWith(
+      days(4),
+      [
+        driver({ id: 'ali', minSalary: 350, maxSalary: 2100, hourlyRate: 14 }),
+        driver({ id: 'chef', isOwner: true, minSalary: null, maxSalary: null, hourlyRate: 14 }),
+      ],
+      true,
+    );
+    expect(r.assignments.every(a => a.driverId === 'ali')).toBe(true);
+  });
+
+  it('a driver with no usable range is never displaced', () => {
+    // آ§5: no salary and no rate means no range, so there is no minimum they could
+    // have earned â€” and the owner must not take their work on a technicality.
+    const r = planWith(
+      days(3),
+      [
+        driver({ id: 'ali', minSalary: null, maxSalary: null, hourlyRate: null }),
+        driver({ id: 'chef', isOwner: true, minSalary: null, maxSalary: null, hourlyRate: 10 }),
+      ],
+      true,
+    );
+    expect(r.assignments.some(a => a.reason === 'owner_surplus')).toBe(false);
+  });
+
+  it('NO block moves in time: a block colliding with the owner stays unassigned', () => {
+    // The rule the whole feature rests on. Ali is past his minimum, so the owner
+    // is offered the second block â€” but the owner already holds a block across
+    // the same hours on another car, and nothing may shift to make room.
+    const trips = [
+      dayBlock('early', 'car-A', '2026-10-05', '08:00', '12:00'),
+      dayBlock('mine', 'car-B', '2026-10-06', '08:00', '12:00'),
+      dayBlock('clash', 'car-C', '2026-10-06', '09:00', '13:00'),
+    ];
+    const r = planWith(
+      trips,
+      [
+        driver({ id: 'ali', minSalary: 10, maxSalary: 60, hourlyRate: 10 }),
+        driver({ id: 'chef', isOwner: true, minSalary: null, maxSalary: null, hourlyRate: 10 }),
+      ],
+      true,
+    );
+    const all = [...r.assignments.map(a => a.blockId), ...r.unassigned.map(u => u.blockId)];
+    // Every block is accounted for, and the colliding one was not quietly re-timed.
+    expect(new Set(all).size).toBe(3);
+    const clash = r.assignments.find(a => a.blockId.includes('car-C'));
+    const unassignedClash = r.unassigned.find(u => u.blockId.includes('car-C'));
+    expect(Boolean(clash) !== Boolean(unassignedClash)).toBe(true);
+  });
+
+  it('the owner is still the last resort when nobody has earned anything', () => {
+    // آ§8's original branch has to survive: with the option ON and the only
+    // regular excluded by a note, the owner takes it as `owner_fallback`, not as
+    // `owner_surplus` â€” the two reasons must stay distinguishable.
+    const blocksOnly = [dayBlock('a', 'car-A', '2026-10-05', '08:00', '12:00')];
+    const drivers = [
+      driver({ id: 'ali' }),
+      driver({ id: 'chef', isOwner: true, minSalary: null, maxSalary: null, hourlyRate: 14 }),
+    ];
+    const { blocks } = buildBlocks(blocksOnly, { switchMinutes: 30 });
+    const availability = buildAvailability(
+      [note({ driver_id: 'ali', is_full_day: true })], blocks, new Set(drivers.map(d => d.id)));
+    const r = assignBlocks(blocks, drivers, availability, {
+      switchMinutes: 30, seed: 0, ownerTakesSurplus: true,
+    });
+    expect(r.assignments).toHaveLength(1);
+    expect(r.assignments[0].driverId).toBe('chef');
+    expect(r.assignments[0].reason).toBe('owner_fallback');
   });
 });
