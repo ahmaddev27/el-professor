@@ -1,4 +1,4 @@
-/**
+﻿/**
  * German dictionary — the source language and the fallback for every other.
  *
  * Keys are namespaced with dots: `nav.*`, `auth.*`, `common.*`. Keep them
@@ -5925,4 +5925,13 @@ export const de = {
 
   // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
   'inc.tripsPartial': 'mindestens, bei {count} Einträgen ohne Fahrtenanzahl',
+  'fleet.fcm.inheritedBaseline': 'Übernommen (bisherige Fixkosten)',
+  'fleet.fcm.inheritedFrom':     'Übernommen aus {month}',
+  'fleet.fcm.inheritedHint':     'Diese Kosten stammen aus einem früheren Monat. Sobald Sie etwas ändern oder hinzufügen, wird dieser Monat mit einer eigenen Kopie gespeichert; frühere Monate bleiben unverändert.',
+  'fleet.fcm.lastRowBody':       'Die letzte Zeile eines Monats kann nicht gelöscht werden, sonst würden wieder die Kosten des Vormonats gelten. Setzen Sie stattdessen den Betrag auf 0.',
+  'fleet.fcm.lastRowTitle':      'Letzte Zeile des Monats',
+  'fleet.fcm.monthCaption':      'Fixkosten {month}',
+  'fleet.fcm.none':              'Keine Fixkosten',
+  'fleet.fcm.note':              'Jeder Monat hat eigene Fixkosten. Ein neuer Monat übernimmt die Kosten des Vormonats; sobald Sie sie ändern, gilt die Änderung nur für diesen Monat und die folgenden, nicht für frühere.',
+  'fleet.fcm.own':               'Eigene Einträge',
 } as const;

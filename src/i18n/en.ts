@@ -1,4 +1,4 @@
-import type { PartialDictionary } from './index';
+﻿import type { PartialDictionary } from './index';
 
 /**
  * English dictionary.
@@ -5869,4 +5869,13 @@ export const en: PartialDictionary = {
 
   // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
   'inc.tripsPartial': 'at least; {count} entries have no trip count',
+  'fleet.fcm.inheritedBaseline': 'Carried over (previous fixed costs)',
+  'fleet.fcm.inheritedFrom':     'Carried over from {month}',
+  'fleet.fcm.inheritedHint':     'These costs come from an earlier month. As soon as you change or add something, this month is saved with a copy of its own; earlier months stay as they are.',
+  'fleet.fcm.lastRowBody':       'The last row of a month cannot be deleted, or the previous month\'s costs would apply again. Set the amount to 0 instead.',
+  'fleet.fcm.lastRowTitle':      'Last row of the month',
+  'fleet.fcm.monthCaption':      'Fixed costs {month}',
+  'fleet.fcm.none':              'No fixed costs',
+  'fleet.fcm.note':              'Each month has its own fixed costs. A new month takes over the previous month\'s costs; once you change them, the change applies to that month and the ones after it, never to earlier months.',
+  'fleet.fcm.own':               'Entered for this month',
 };
