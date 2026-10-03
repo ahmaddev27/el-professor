@@ -11,7 +11,6 @@ import {
   Receipt as ReceiptIcon,
   RotateCw,
   Mail,
-  Share2,
   TrendingDown,
   TrendingUp,
   User,
@@ -696,58 +695,6 @@ export function AbrechnungPage() {
     }
   };
 
-  // Share to WhatsApp with clipboard copy
-  const handleShareToWhatsApp = async () => {
-    if (!detailModalData || isSharing) return;
-
-    try {
-      setIsSharing(true);
-      showToast('info', t('abr.creatingImage'));
-
-      const imageData = await generateSettlementImageBlob();
-      if (!imageData) return;
-
-      const { blob } = imageData;
-
-      let imageCopied = false;
-
-      // Try to copy image to clipboard first
-      if (navigator.clipboard && navigator.clipboard.write) {
-        try {
-          const clipboardItem = new ClipboardItem({
-            'image/png': blob
-          });
-
-          await navigator.clipboard.write([clipboardItem]);
-          imageCopied = true;
-        } catch (clipError) {
-          console.warn('Clipboard copy failed:', clipError);
-        }
-      }
-
-      // Open WhatsApp Web
-      try {
-        const whatsappUrl = 'https://web.whatsapp.com/';
-        window.open(whatsappUrl, '_blank');
-      } catch (openError) {
-        console.error('Failed to open WhatsApp:', openError);
-        showToast('error', t('common.error'), t('abr.whatsappFailed'));
-        return;
-      }
-
-      // Show appropriate message
-      if (imageCopied) {
-        showToast('success', t('abr.copiedPasteHint'));
-      } else {
-        showToast('warning', t('abr.copyUnsupported'), t('abr.copyUnsupportedBody'));
-      }
-    } catch (error: any) {
-      showToast('error', t('abr.shareFailed'), error.message || t('overview.error.unknown'));
-      console.error('Share to WhatsApp error:', error);
-    } finally {
-      setIsSharing(false);
-    }
-  };
 
   // Download image locally
   const handleDownloadImage = async () => {
@@ -1576,15 +1523,16 @@ export function AbrechnungPage() {
               })()}
             </section>
 
-            <DialogFooter className="sm:justify-between">
-              <div className="grid grid-cols-1 gap-2 sm:flex">
+            {/* `min-w-0` on the footer and `flex-wrap` on the button row: a grid
+                item's min-width is `auto`, so a row of buttons wider than the
+                dialog does not shrink — it paints outside the panel, which is
+                what the owner saw. Wrapping is what a narrow dialog needs, and
+                the footer must be allowed to shrink for wrapping to happen. */}
+            <DialogFooter className="min-w-0 sm:justify-between">
+              <div className="grid grid-cols-1 gap-2 sm:flex sm:flex-wrap">
                 <Button onClick={handleSendToDriver} disabled={isSharing}>
                   <Mail aria-hidden />
                   {isSharing ? t('abr.creatingImage') : t('abr.mail.sendToDriver')}
-                </Button>
-                <Button variant="secondary" onClick={handleShareToWhatsApp} disabled={isSharing}>
-                  <Share2 aria-hidden />
-                  {isSharing ? t('abr.creatingImage') : t('common.share')}
                 </Button>
                 <Button variant="secondary" onClick={handleCopyImage} disabled={isSharing}>
                   <Copy aria-hidden />

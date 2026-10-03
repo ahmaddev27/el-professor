@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Build the German, El-Professor-branded GoTrue mail templates.
  *
  *   VITE_APP_URL=https://elprofessor.eu node scripts/build-email-templates.mjs
@@ -6,7 +6,7 @@
  * Runs after `vite build` (see package.json) and writes dist/email-templates/*.html.
  * They ship with the frontend and GoTrue fetches them from the web container
  * (see GOTRUE_MAILER_TEMPLATES_* in deploy/docker-compose.yml). The generated
- * HTML is not committed: edit the copy here — one layout keeps the five
+ * HTML is not committed: edit the copy here â€” one layout keeps the five
  * messages from drifting apart.
  *
  * The layout itself lives in supabase/functions/_shared/email-layout.mjs, because
@@ -26,12 +26,12 @@
  *   The one <style> block only tightens padding on phones; the message is fully
  *   usable where it is dropped, because nothing structural depends on it.
  * - `table-layout:fixed` on the column is what keeps a phone from overflowing.
- *   Without it the table sizes to its widest unbreakable content — the raw
- *   link — and the card runs off the right edge of the screen.
+ *   Without it the table sizes to its widest unbreakable content â€” the raw
+ *   link â€” and the card runs off the right edge of the screen.
  * - No web fonts. A system stack renders everywhere; a webfont falls back
  *   unpredictably and adds a request.
  * - The logo is a PNG on a white ground, never a transparent SVG. Gmail drops
- *   SVG, and clients that force dark mode invert the page — a black mark on a
+ *   SVG, and clients that force dark mode invert the page â€” a black mark on a
  *   transparent background vanishes, a white tile with a black mark does not.
  * - The brand name is also live text next to the logo, because many clients
  *   block images until the reader allows them.
@@ -39,7 +39,7 @@
  *   break buttons and for readers who distrust them.
  *
  * GoTrue renders these with Go's html/template. Keep `{{` out of anything that
- * is not a template action — including CSS and HTML comments.
+ * is not a template action â€” including CSS and HTML comments.
  */
 import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -53,49 +53,49 @@ export const TEMPLATES = {
     eyebrow: 'Einladung',
     heading: 'Sie wurden zu El-Professor eingeladen',
     preheader: 'Legen Sie Ihr Passwort fest und melden Sie sich bei El-Professor an.',
-    body: 'Für Sie wurde ein Konto bei El-Professor angelegt. Legen Sie über den folgenden Link ein Passwort fest, um sich anzumelden.',
+    body: 'Fأ¼r Sie wurde ein Konto bei El-Professor angelegt. Legen Sie أ¼ber den folgenden Link ein Passwort fest, um sich anzumelden.',
     cta: 'Einladung annehmen',
-    note: 'Wenn Sie keine Einladung erwartet haben, können Sie diese E-Mail ignorieren.',
+    note: 'Wenn Sie keine Einladung erwartet haben, kأ¶nnen Sie diese E-Mail ignorieren.',
   },
 
   // Sent in two situations through the same GoTrue template: an admin invited
   // a new employee (manage-users sends a recovery link to an account that has
   // no usable password yet), and someone used "Passwort vergessen". The copy
-  // has to read naturally for both, so it says "festlegen", not "zurücksetzen".
+  // has to read naturally for both, so it says "festlegen", not "zurأ¼cksetzen".
   'recovery.html': {
     eyebrow: 'Passwort',
     heading: 'Passwort festlegen',
-    preheader: 'Legen Sie ein Passwort für Ihr El-Professor-Konto fest.',
-    body: 'Über den folgenden Link legen Sie ein neues Passwort für Ihr <span style="white-space:nowrap;">El-Professor-Konto</span> <strong style="color:#111827;font-weight:600;">{{ .Email }}</strong> fest.',
+    preheader: 'Legen Sie ein Passwort fأ¼r Ihr El-Professor-Konto fest.',
+    body: 'أœber den folgenden Link legen Sie ein neues Passwort fأ¼r Ihr <span style="white-space:nowrap;">El-Professor-Konto</span> <strong style="color:#0A0F1C;font-weight:600;">{{ .Email }}</strong> fest.',
     cta: 'Passwort festlegen',
-    note: 'Wenn Sie diese E-Mail nicht erwartet haben, können Sie sie ignorieren — Ihr Konto bleibt unverändert. Der Link ist aus Sicherheitsgründen nur begrenzt gültig.',
+    note: 'Wenn Sie diese E-Mail nicht erwartet haben, kأ¶nnen Sie sie ignorieren â€” Ihr Konto bleibt unverأ¤ndert. Der Link ist aus Sicherheitsgrأ¼nden nur begrenzt gأ¼ltig.',
   },
 
   'confirmation.html': {
     eyebrow: 'Registrierung',
-    heading: 'E-Mail-Adresse bestätigen',
-    preheader: 'Bestätigen Sie Ihre E-Mail-Adresse, um die Registrierung abzuschließen.',
-    body: 'Bitte bestätigen Sie Ihre E-Mail-Adresse, um die Registrierung bei El-Professor abzuschließen.',
-    cta: 'E-Mail-Adresse bestätigen',
-    note: 'Wenn Sie sich nicht bei El-Professor registriert haben, können Sie diese E-Mail ignorieren.',
+    heading: 'E-Mail-Adresse bestأ¤tigen',
+    preheader: 'Bestأ¤tigen Sie Ihre E-Mail-Adresse, um die Registrierung abzuschlieأںen.',
+    body: 'Bitte bestأ¤tigen Sie Ihre E-Mail-Adresse, um die Registrierung bei El-Professor abzuschlieأںen.',
+    cta: 'E-Mail-Adresse bestأ¤tigen',
+    note: 'Wenn Sie sich nicht bei El-Professor registriert haben, kأ¶nnen Sie diese E-Mail ignorieren.',
   },
 
   'email-change.html': {
-    eyebrow: 'Kontoänderung',
-    heading: 'Neue E-Mail-Adresse bestätigen',
-    preheader: 'Bestätigen Sie die Änderung Ihrer E-Mail-Adresse bei El-Professor.',
-    body: 'Bitte bestätigen Sie, dass Ihre E-Mail-Adresse bei El-Professor von <strong style="color:#111827;font-weight:600;">{{ .Email }}</strong> zu <strong style="color:#111827;font-weight:600;">{{ .NewEmail }}</strong> geändert werden soll.',
-    cta: 'Änderung bestätigen',
-    note: 'Wenn Sie diese Änderung nicht veranlasst haben, ignorieren Sie diese E-Mail und ändern Sie vorsorglich Ihr Passwort.',
+    eyebrow: 'Kontoأ¤nderung',
+    heading: 'Neue E-Mail-Adresse bestأ¤tigen',
+    preheader: 'Bestأ¤tigen Sie die أ„nderung Ihrer E-Mail-Adresse bei El-Professor.',
+    body: 'Bitte bestأ¤tigen Sie, dass Ihre E-Mail-Adresse bei El-Professor von <strong style="color:#0A0F1C;font-weight:600;">{{ .Email }}</strong> zu <strong style="color:#0A0F1C;font-weight:600;">{{ .NewEmail }}</strong> geأ¤ndert werden soll.',
+    cta: 'أ„nderung bestأ¤tigen',
+    note: 'Wenn Sie diese أ„nderung nicht veranlasst haben, ignorieren Sie diese E-Mail und أ¤ndern Sie vorsorglich Ihr Passwort.',
   },
 
   'magic-link.html': {
     eyebrow: 'Anmeldung',
     heading: 'Ihr Anmeldelink',
     preheader: 'Melden Sie sich mit einem Klick bei El-Professor an.',
-    body: 'Über den folgenden Link melden Sie sich bei El-Professor an.',
+    body: 'أœber den folgenden Link melden Sie sich bei El-Professor an.',
     cta: 'Jetzt anmelden',
-    note: 'Wenn Sie keine Anmeldung angefordert haben, können Sie diese E-Mail ignorieren.',
+    note: 'Wenn Sie keine Anmeldung angefordert haben, kأ¶nnen Sie diese E-Mail ignorieren.',
   },
 };
 
@@ -133,7 +133,7 @@ function appUrl() {
     const m = readFileSync(file, 'utf8').match(/^VITE_APP_URL=(.+)$/m);
     if (m) return { url: m[1].trim(), from: '.env.production' };
   }
-  throw new Error('VITE_APP_URL is not set — refusing to build mail templates with a guessed logo URL');
+  throw new Error('VITE_APP_URL is not set â€” refusing to build mail templates with a guessed logo URL');
 }
 
 function main() {
@@ -143,7 +143,7 @@ function main() {
   }
   const logo = `${APP_URL.replace(/\/$/, '')}/email-templates/logo.png`;
   if (!existsSync(path.join(ROOT, 'dist'))) {
-    throw new Error('dist/ does not exist — run this after vite build, not before');
+    throw new Error('dist/ does not exist â€” run this after vite build, not before');
   }
 
   const out = path.join(ROOT, 'dist', 'email-templates');
