@@ -1,7 +1,7 @@
 import React, { useState, useEffect, type FormEvent } from 'react';
 import { X, Plus, CreditCard as Edit2, Trash2, DollarSign, AlertCircle, FileText, CheckSquare, Square, Building2, Banknote, LayoutDashboard, Zap, Lock, Eye, Ban } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { SalaryPayment, SalaryCalculation } from '../types/receipt';
+import { SalaryPayment, SalaryCalculation, Income } from '../types/receipt';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { usePlan } from '../contexts/PlanContext';
@@ -58,6 +58,7 @@ import {
 import type { GehaltsquittungPreselect } from '../hooks/useGehaltsquittungFlow';
 import { generateDriverSalaryPdf } from '../utils/driverSalaryPdf';
 import DriverSalarySummaryCard from './DriverSalarySummaryCard';
+import SalaryRevenueDetails from './SalaryRevenueDetails';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { useTranslation } from '../contexts/LanguageContext';
 
@@ -66,6 +67,8 @@ interface SalaryDetailsModalProps {
   onClose: () => void;
   salary: SalaryCalculation;
   onUpdate: () => void;
+  /** The driver's Umsatz, Aktionen and Trinkgeld rows of the period, for the Zusammenfassung tab. */
+  revenueTransactions?: Income[];
 }
 
 interface PayrollData {
@@ -103,6 +106,7 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
   onClose,
   salary,
   onUpdate,
+  revenueTransactions,
 }) => {
   const { t } = useTranslation();
   const [activeTab, setActiveTab] = useState<'details' | 'summary'>('details');
@@ -731,7 +735,13 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
           <div className="p-6 space-y-6 overflow-y-auto flex-1">
 
             {/* ── Summary tab ── */}
-            {activeTab === 'summary' && (
+            {activeTab === 'summary' && (<>
+              <div className="flex justify-end">
+                <Button variant="secondary" size="sm" onClick={handleExportPdf}>
+                  <FileText aria-hidden />
+                  {t('sal.action.driverSummaryPdf')}
+                </Button>
+              </div>
               <DriverSalarySummaryCard
                 driverName={salary.driver_name}
                 periodStart={salary.period_start || new Date().toISOString().slice(0, 10)}
@@ -749,7 +759,14 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
                 remainingPayout={payrollRemaining(split, totalPaid)}
                 companyName={settings?.company_name}
               />
-            )}
+              {revenueTransactions && (
+                <SalaryRevenueDetails
+                  transactions={revenueTransactions}
+                  periodStart={salary.period_start || new Date().toISOString().slice(0, 10)}
+                  periodEnd={salary.period_end || new Date().toISOString().slice(0, 10)}
+                />
+              )}
+            </>)}
 
             {/* ── Details tab ── */}
             {activeTab === 'details' && (<>

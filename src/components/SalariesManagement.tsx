@@ -730,6 +730,15 @@ const SalariesManagement: React.FC<SalariesManagementProps> = ({ drivers }) => {
           onClose={() => setSalaryDetailsModal({ isOpen: false, salary: null })}
           salary={salaryDetailsModal.salary}
           onUpdate={loadData}
+          // The old eye button's list: this driver's Umsatz, Aktionen and
+          // Trinkgeld inside the screen's period, same filter as before.
+          revenueTransactions={incomes.filter(
+            income =>
+              income.driver_name === salaryDetailsModal.salary?.driver_name &&
+              income.date >= periodStart &&
+              income.date <= periodEnd &&
+              (income.type === 'umsatz' || income.type === 'aktionen' || income.type === 'trinkgeld')
+          )}
         />
       )}
 
