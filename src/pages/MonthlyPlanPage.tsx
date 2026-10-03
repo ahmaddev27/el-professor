@@ -299,8 +299,8 @@ interface GeneratedPlan {
   minBlockMinutes: number;
   /** The maximum asked for, likewise. */
   maxBlockMinutes: number;
-  /** Blocks the merge pass could not bring up to that minimum (§14). */
-  shortBlocks: { blockId: string; spanMinutes: number }[];
+  /** Blocks the merge pass could not bring up to that minimum (§14), with why. */
+  shortBlocks: { blockId: string; spanMinutes: number; reason: 'alone_on_day' | 'ceiling' }[];
   /** Blocks longer than the maximum that could not be split. */
   longBlocks: { blockId: string; spanMinutes: number }[];
   /** Rides given up to a handover, so step 3 can name every one of them. */
@@ -1693,12 +1693,35 @@ export default function MonthlyPlanPage() {
               nothing else has nothing on that day to be joined to. */}
           {plan.shortBlocks.length > 0 ? (
             <Alert tone="caution" title={t('mplan.blocks.stillShortTitle')}>
-              <p>
-                {t('mplan.blocks.stillShort', {
-                  count: plan.shortBlocks.length,
-                  minutes: plan.minBlockMinutes,
-                })}
-              </p>
+              {/* Two reasons, counted separately, because they call for different
+                  things. "Alone on its day" is a fact about the month and nothing
+                  can be done about it. "The ceiling forbids the merge" is the
+                  operator's own maximum pulling against their own minimum, and
+                  the lever is right there on step 2 — but the screen used to
+                  print the first sentence for both, which on the owner's August
+                  was wrong for 39 of 45 blocks and read as a broken pass. */}
+              {(() => {
+                const alone = plan.shortBlocks.filter(b => b.reason === 'alone_on_day').length;
+                const ceiling = plan.shortBlocks.length - alone;
+                return (
+                  <>
+                    {alone > 0 ? (
+                      <p>{t('mplan.blocks.stillShort', {
+                        count: alone, minutes: plan.minBlockMinutes,
+                      })}</p>
+                    ) : null}
+                    {ceiling > 0 ? (
+                      <p className={alone > 0 ? 'mt-2' : undefined}>
+                        {t('mplan.blocks.stillShortCeiling', {
+                          count: ceiling,
+                          minutes: plan.minBlockMinutes,
+                          max: plan.maxBlockMinutes,
+                        })}
+                      </p>
+                    ) : null}
+                  </>
+                );
+              })()}
             </Alert>
           ) : null}
 

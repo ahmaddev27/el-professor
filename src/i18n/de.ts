@@ -5953,4 +5953,7 @@ export const de = {
   'settings.abrSchedule.timeHint':       'Deutsche Zeit (Europe/Berlin).',
   'settings.abrSchedule.title':          'Abrechnung per E-Mail',
   'settings.abrSchedule.weekday':        'Wochentag',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'mplan.blocks.stillShortCeiling': '{count} Block/Blöcke bleiben unter {minutes} Minuten, obwohl das Fahrzeug an diesem Tag einen weiteren Block hat: das Zusammenlegen würde die Höchstdauer von {max} Minuten überschreiten. Erhöhen Sie die Höchstdauer in Schritt 2, wenn diese Blöcke zusammengelegt werden sollen.',
 } as const;

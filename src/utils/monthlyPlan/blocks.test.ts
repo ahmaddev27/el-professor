@@ -494,7 +494,33 @@ describe('buildBlocks — the minimum block length', () => {
     );
     expect(r.blocks).toHaveLength(1);
     expect(r.blocks[0].spanMinutes).toBe(12);
-    expect(r.shortBlocks).toEqual([{ blockId: r.blocks[0].id, spanMinutes: 12 }]);
+    // `alone_on_day` and not `ceiling`: this ride is the vehicle's only one that
+    // day, so there is genuinely nothing to merge with and no maximum is involved.
+    expect(r.shortBlocks).toEqual([
+      { blockId: r.blocks[0].id, spanMinutes: 12, reason: 'alone_on_day' },
+    ]);
+  });
+
+  it('says the CEILING kept a block short when the day had a neighbour', () => {
+    // The distinction the screen used to miss. Measured on the owner's August
+    // 2026: of 45 short blocks, 6 were alone on their day and **39 had a
+    // neighbour** that the 360-minute maximum forbade merging with — and all 45
+    // were reported as "nothing to merge with", which reads as a broken pass.
+    //
+    // Two long blocks on one vehicle and one day, with a short one after them:
+    // joining any pair runs past the maximum, so the short one stays short with a
+    // neighbour sitting right there.
+    const r = buildBlocks(
+      [
+        trip({ id: 'a', startTime: '06:00', endTime: '11:30' }),
+        trip({ id: 'b', startTime: '12:00', endTime: '17:30' }),
+        trip({ id: 'c', startTime: '18:00', endTime: '18:20' }),
+      ],
+      { switchMinutes: 30, minBlockMinutes: 90, maxBlockMinutes: 360 },
+    );
+    const short = r.shortBlocks;
+    expect(short, 'the 20-minute block is reported short').toHaveLength(1);
+    expect(short[0].reason).toBe('ceiling');
   });
 
   it('asks for no minimum when none is given, and reports none', () => {

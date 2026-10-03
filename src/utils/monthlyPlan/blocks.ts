@@ -1,46 +1,46 @@
-/**
- * Monthly plan — building ride blocks per vehicle (requirement §3).
+﻿/**
+ * Monthly plan â€” building ride blocks per vehicle (requirement آ§3).
  *
- * ## The rule, and it is the whole of §3
+ * ## The rule, and it is the whole of آ§3
  *
  * Blocks are built **independently for each vehicle**; two vehicles never share a
  * block. Within a vehicle, rides are ordered by their start and walked once. The
  * gap between one ride's end and the next ride's start decides the boundary:
  *
- *   - gap **>= switchMinutes** → a boundary *may* be created, and §3 also says
+ *   - gap **>= switchMinutes** â†’ a boundary *may* be created, and آ§3 also says
  *     "make the blocks as short as possible", so one *is* created;
- *   - gap **< switchMinutes** → the two rides **must** stay in the same block.
+ *   - gap **< switchMinutes** â†’ the two rides **must** stay in the same block.
  *
  * That is the only splitting criterion. This is deliberately narrower than the
  * existing `monatsplanungPhase1.ts`, which splits on a separate 60-minute
- * `blockSeparatorGap` and then runs a min/max-duration merge pass — three knobs
- * where §3 specifies one. That module keeps its behaviour for its own pipeline;
+ * `blockSeparatorGap` and then runs a min/max-duration merge pass â€” three knobs
+ * where آ§3 specifies one. That module keeps its behaviour for its own pipeline;
  * this one implements the requirement.
  *
- * ## Minutes, and the figure §16 pins
+ * ## Minutes, and the figure آ§16 pins
  *
  * Every duration here is **integer minutes**, computed from absolute
- * milliseconds. §3's own example: 08:23 → 09:44 is 81 minutes, which is 1.35
- * decimal hours — not 1.21. The 1.21 error comes from reading `09:44 - 08:23` as
+ * milliseconds. آ§3's own example: 08:23 â†’ 09:44 is 81 minutes, which is 1.35
+ * decimal hours â€” not 1.21. The 1.21 error comes from reading `09:44 - 08:23` as
  * a decimal subtraction (1.21); nothing in this module can produce it, because
  * nothing here subtracts clock faces.
  *
  * Two durations are stored per block and they are **not** the same number:
  *
- *   - `spanMinutes` — end minus start, the wall-clock length of the block;
- *   - `rideMinutes` — the sum of the actual rides, which §3 asks for explicitly
+ *   - `spanMinutes` â€” end minus start, the wall-clock length of the block;
+ *   - `rideMinutes` â€” the sum of the actual rides, which آ§3 asks for explicitly
  *     and the existing pipeline does not store at all.
  *
  * `spanMinutes - rideMinutes` is the idle time inside the block. Keeping them
  * apart is what lets a later document decide whether idle time is paid without
- * re-deriving it — the ambiguity that currently makes the Stundennachweis and the
+ * re-deriving it â€” the ambiguity that currently makes the Stundennachweis and the
  * on-screen total disagree for 92.5% of driver-days.
  *
  * ## Absolute instants, never clock strings
  *
  * Intervals are built from epoch milliseconds. A ride that starts at 23:40 and
- * ends at 00:20 crosses midnight, and comparing `"00:20" < "23:40"` as strings —
- * or parsing a bare `HH:MM:SS`, which yields 0 — is the defect CLAUDE.md warns
+ * ends at 00:20 crosses midnight, and comparing `"00:20" < "23:40"` as strings â€”
+ * or parsing a bare `HH:MM:SS`, which yields 0 â€” is the defect CLAUDE.md warns
  * about twice. `start_at` is the ride's real start: `trip_date` is the file's
  * "Datum der Fahrt", which the Uber export dates a day early for a ride starting
  * just after midnight.
@@ -59,7 +59,7 @@ export const DEFAULT_MIN_BLOCK_MINUTES = 90;
 /**
  * The longest block the screen offers by default, in minutes.
  *
- * 360 — six hours, the figure the owner named on 01.10.2026. A default and not a
+ * 360 â€” six hours, the figure the owner named on 01.10.2026. A default and not a
  * rule: the control on screen 2 sets it per run, and 0 there means no maximum.
  */
 export const DEFAULT_MAX_BLOCK_MINUTES = 360;
@@ -73,21 +73,21 @@ export interface PlanTripInput {
   /** `car_id`, or `car_identifier` when the car is not in the fleet table. */
   vehicleId: string | null;
   vehicleIdentifier: string | null;
-  /** `start_at` / `end_at` — the ride's real instants. Preferred. */
+  /** `start_at` / `end_at` â€” the ride's real instants. Preferred. */
   startAt?: string | null;
   endAt?: string | null;
   /** `trip_date` (`YYYY-MM-DD`) plus `start_time` / `end_time` (`HH:MM[:SS]`). */
   tripDate?: string | null;
   startTime?: string | null;
   endTime?: string | null;
-  /** `is_canceled`. A cancelled ride is never counted and never blocked (§7). */
+  /** `is_canceled`. A cancelled ride is never counted and never blocked (آ§7). */
   isCanceled?: boolean | null;
-  /** `original_driver_name`, kept for the pre-selection suggestion only (§2). */
+  /** `original_driver_name`, kept for the pre-selection suggestion only (آ§2). */
   originalDriverName?: string | null;
   originalDriverId?: string | null;
 }
 
-/** Why a ride could not be placed. Each is surfaced, never swallowed (§14). */
+/** Why a ride could not be placed. Each is surfaced, never swallowed (آ§14). */
 export type TripProblem =
   | 'missing_vehicle'
   | 'missing_start'
@@ -102,7 +102,7 @@ export interface RejectedTrip {
   detail: string;
 }
 
-/** Two rides of the same vehicle that overlap in the source data (§14). */
+/** Two rides of the same vehicle that overlap in the source data (آ§14). */
 export interface VehicleOverlap {
   vehicleId: string;
   firstTripId: string;
@@ -128,12 +128,12 @@ export interface PlanBlock {
   endMs: number;
   /** End minus start, in integer minutes. The block's wall-clock length. */
   spanMinutes: number;
-  /** Sum of the member rides' own minutes. §3 asks for this explicitly. */
+  /** Sum of the member rides' own minutes. آ§3 asks for this explicitly. */
   rideMinutes: number;
   trips: PlanBlockTrip[];
   /**
-   * Filled by the assignment step, not here. §3 lists it among a block's stored
-   * fields, and keeping it on the block — rather than in a parallel map — is what
+   * Filled by the assignment step, not here. آ§3 lists it among a block's stored
+   * fields, and keeping it on the block â€” rather than in a parallel map â€” is what
    * makes a block self-describing when a document reads it later.
    */
   driverId: string | null;
@@ -142,29 +142,29 @@ export interface PlanBlock {
 
 export interface BuildBlocksOptions {
   /**
-   * The user's switch duration in minutes, from screen 2 (§1). A gap of exactly
+   * The user's switch duration in minutes, from screen 2 (آ§1). A gap of exactly
    * this length may split; anything shorter may not.
    *
    * 0 is legal and means "split at every gap", which is the shortest possible
-   * blocking. It is not treated as "unset" — the existing pipeline's migration
+   * blocking. It is not treated as "unset" â€” the existing pipeline's migration
    * header records why that distinction matters: a default written for an omitted
    * value once disabled the gate it was meant to enforce.
    */
   switchMinutes: number;
   /**
    * The shortest block the screen may offer a driver, in minutes. Omitted or 0
-   * means no minimum, which is what §3 alone produces.
+   * means no minimum, which is what آ§3 alone produces.
    *
    * The owner asked for this on 01.10.2026: the gap rule alone cuts a quiet day
    * into fifteen-minute blocks, and a fifteen-minute block is not a shift anybody
    * can be sent out on. It is a control on screen 1, not a constant, because the
-   * right figure is a fleet's own — the default is 90.
+   * right figure is a fleet's own â€” the default is 90.
    *
    * **It merges; it never pads.** A short block is joined to a neighbouring block
    * of the SAME VEHICLE on the SAME LOCAL DAY, so no working time is invented and
-   * no ride moves. What grows is the block's `spanMinutes` — the car is booked
-   * across the gap it absorbed — while `rideMinutes` is the same sum it always
-   * was. That is exactly the distinction §3 keeps the two figures apart for, and
+   * no ride moves. What grows is the block's `spanMinutes` â€” the car is booked
+   * across the gap it absorbed â€” while `rideMinutes` is the same sum it always
+   * was. That is exactly the distinction آ§3 keeps the two figures apart for, and
    * the difference shows on screen as idle time.
    */
   minBlockMinutes?: number;
@@ -179,7 +179,7 @@ export interface BuildBlocksOptions {
    *
    * **It never splits a block.** The gap rule has already split at every gap of at
    * least `switchMinutes`, so a block longer than this contains only gaps SHORTER
-   * than the switch duration — there is no point in it where a driver or vehicle
+   * than the switch duration â€” there is no point in it where a driver or vehicle
    * could change, and a single ride cannot be cut at all. Such a block is reported
    * in `longBlocks` instead, which is the honest answer rather than a sheet that
    * claims a change of hands that could not happen.
@@ -191,8 +191,8 @@ export interface BuildBlocksOptions {
    *
    * It needs `maxBlockMinutes` to know which blocks are too long and
    * `switchMinutes` to know how wide the gap must be, so it does nothing without
-   * both. The rides that fall inside the widened gap are **given up** — reported
-   * in `handoverTrips`, assigned to nobody — because during a handover nobody is
+   * both. The rides that fall inside the widened gap are **given up** â€” reported
+   * in `handoverTrips`, assigned to nobody â€” because during a handover nobody is
    * driving. Measured on real data: exactly one ride per split, which is the floor
    * rather than a tuning choice.
    *
@@ -206,15 +206,25 @@ export interface BuildBlocksResult {
   blocks: PlanBlock[];
   rejected: RejectedTrip[];
   overlaps: VehicleOverlap[];
-  /** Rides excluded because `is_canceled` — counted, not a problem. */
+  /** Rides excluded because `is_canceled` â€” counted, not a problem. */
   canceledCount: number;
   /**
    * Blocks still under `minBlockMinutes` after the merge pass, with the length
-   * they have. Surfaced rather than padded or dropped (§14): a car that drove
-   * once for twelve minutes on a day it did nothing else has a twelve-minute
-   * block, and there is nothing on that day to merge it with. The screen says so.
+   * they have, **and why each one stayed short**. Surfaced rather than padded or
+   * dropped (آ§14).
+   *
+   * - `alone_on_day` â€” that vehicle has no other block on that day, so there is
+   *   nothing to merge with. A car that drove once for twelve minutes has a
+   *   twelve-minute block, and padding it would invent time.
+   * - `ceiling` â€” there **is** a neighbour, and merging would run past
+   *   `maxBlockMinutes`. The two bounds pull against each other here, and the
+   *   operator's lever is the maximum, not the minimum.
+   *
+   * The distinction exists because the screen reported `alone_on_day` for every
+   * short block, and on a real month that was wrong for 39 of 45 â€” an operator
+   * told the wrong reason has no way to act on it.
    */
-  shortBlocks: { blockId: string; spanMinutes: number }[];
+  shortBlocks: { blockId: string; spanMinutes: number; reason: 'alone_on_day' | 'ceiling' }[];
   /**
    * Blocks longer than `maxBlockMinutes`, with the length they have.
    *
@@ -251,7 +261,7 @@ function minutesBetween(startMs: number, endMs: number): number {
  * Seconds since local midnight for an `HH:MM[:SS]` string, or null.
  *
  * Returns seconds rather than a Date so the caller adds them to a local midnight
- * it computed itself — building the instant from `date-midnight + secondOfDay`
+ * it computed itself â€” building the instant from `date-midnight + secondOfDay`
  * is the pattern CLAUDE.md requires, and it is DST-correct because the midnight
  * is resolved per calendar day.
  */
@@ -289,7 +299,7 @@ interface ResolvedTrip {
  *
  * Prefers `start_at` / `end_at`. Falls back to `trip_date` plus the clock
  * columns, and records which was used. A ride whose end lands before its start
- * on the clock path is read as crossing midnight and moved to the next day —
+ * on the clock path is read as crossing midnight and moved to the next day â€”
  * that is the documented behaviour of this data and the reason absolute
  * instants are used everywhere downstream.
  */
@@ -362,7 +372,7 @@ export function buildBlocks(
     ? Math.floor(options.switchMinutes)
     : 0;
   // Same rule as `switchMinutes`: a value is read as given, and only a missing or
-  // nonsensical one falls back — to 0, "no minimum", never to the default 90. A
+  // nonsensical one falls back â€” to 0, "no minimum", never to the default 90. A
   // default written for an omitted value is how a gate gets disabled silently.
   const minBlockMinutes = Number.isFinite(options.minBlockMinutes ?? NaN)
     && (options.minBlockMinutes as number) > 0
@@ -382,14 +392,14 @@ export function buildBlocks(
   const overlaps: VehicleOverlap[] = [];
   let canceledCount = 0;
 
-  // Group by vehicle. §3: "build the blocks independently for each vehicle" and
+  // Group by vehicle. آ§3: "build the blocks independently for each vehicle" and
   // "do not merge different vehicles into one block". Grouping first makes that
   // true by construction rather than by a later check.
   const byVehicle = new Map<string, ResolvedTrip[]>();
 
   for (const trip of trips) {
     if (trip.isCanceled) {
-      // §7: a cancelled ride is never counted. It is not a problem, so it is
+      // آ§7: a cancelled ride is never counted. It is not a problem, so it is
       // counted separately rather than reported as rejected.
       canceledCount++;
       continue;
@@ -424,13 +434,13 @@ export function buildBlocks(
   for (const vehicleId of [...byVehicle.keys()].sort()) {
     const list = byVehicle.get(vehicleId)!;
 
-    // §3: "order the rides by their start". Ties broken by id, again for
-    // determinism — two rides of one car starting at the same instant is itself
+    // آ§3: "order the rides by their start". Ties broken by id, again for
+    // determinism â€” two rides of one car starting at the same instant is itself
     // an overlap and is reported below.
     list.sort((a, b) => a.startMs - b.startMs || a.trip.id.localeCompare(b.trip.id));
 
-    // §14: overlapping rides of the same vehicle. Reported, and the rides are
-    // still used — they are real data, and dropping them would understate the
+    // آ§14: overlapping rides of the same vehicle. Reported, and the rides are
+    // still used â€” they are real data, and dropping them would understate the
     // month. The block's `rideMinutes` therefore double-counts an overlap, which
     // is why the overlap is surfaced for someone to resolve.
     for (let i = 1; i < list.length; i++) {
@@ -494,7 +504,7 @@ export function buildBlocks(
       const gapMinutes = minutesBetween(blockEndMs, resolved.startMs);
 
       if (gapMinutes >= switchMinutes) {
-        // A boundary is permitted, and §3 asks for the shortest blocks, so take it.
+        // A boundary is permitted, and آ§3 asks for the shortest blocks, so take it.
         flush();
       }
       current.push(resolved);
@@ -510,10 +520,33 @@ export function buildBlocks(
   // a list of cars. Tie-broken on the block id, which already carries the vehicle.
   merged.sort((a, b) => a.startMs - b.startMs || a.id.localeCompare(b.id));
 
+  // **Why** a short block stayed short, not merely that it did.
+  //
+  // The screen said "that vehicle has no other block on that day to merge with"
+  // for every one of them, and on the owner's own August that sentence was wrong
+  // for **39 of 45**: those blocks do have a same-day neighbour, and the merge was
+  // refused because joining them would run past `maxBlockMinutes`. The two bounds
+  // pull against each other â€” the minimum wants a merge, the maximum forbids it â€”
+  // and an operator told the wrong reason reads a working pass as a broken one,
+  // which is exactly what happened on 03.10.2026.
+  //
+  // Measured on 2209 real rides: 6 genuinely alone on their day, 39 blocked by the
+  // ceiling. So the distinction is not hypothetical and it is not rare.
+  const sameVehicleDay = new Map<string, number>();
+  for (const block of merged) {
+    const key = `${block.vehicleId}|${localDateKey(block.startMs)}`;
+    sameVehicleDay.set(key, (sameVehicleDay.get(key) ?? 0) + 1);
+  }
   const shortBlocks = minBlockMinutes > 0
     ? merged
         .filter(block => block.spanMinutes < minBlockMinutes)
-        .map(block => ({ blockId: block.id, spanMinutes: block.spanMinutes }))
+        .map(block => ({
+          blockId: block.id,
+          spanMinutes: block.spanMinutes,
+          reason: (sameVehicleDay.get(`${block.vehicleId}|${localDateKey(block.startMs)}`) ?? 0) > 1
+            ? 'ceiling' as const
+            : 'alone_on_day' as const,
+        }))
     : [];
 
   const split = splitLongBlocks
@@ -547,7 +580,7 @@ export function buildBlocks(
  *
  * ## What bounds it, and why those bounds
  *
- * - **One vehicle.** §3's first rule: two vehicles never share a block. Grouping
+ * - **One vehicle.** آ§3's first rule: two vehicles never share a block. Grouping
  *   by vehicle is how that stays true by construction rather than by a check.
  * - **One local day.** Without it the pass would join a car's last ride of Monday
  *   to its first of Tuesday across a nine-hour gap, which is not a shift, and it
@@ -562,16 +595,16 @@ export function buildBlocks(
  *
  * ## The ceiling, added 01.10.2026
  *
- * This pass shipped with no maximum, on the argument that §7's daily maximum and
+ * This pass shipped with no maximum, on the argument that آ§7's daily maximum and
  * working-time window would refuse an absurd result per driver at assignment. The
  * owner read the first screen it produced and overruled it, rightly: the block
- * was `06:00-16:00, 10,00 h, 4 Fahrten, davon Leerlauf 6,00` — ten hours of which
- * six were waiting, which §7 would happily assign and no operator would send
+ * was `06:00-16:00, 10,00 h, 4 Fahrten, davon Leerlauf 6,00` â€” ten hours of which
+ * six were waiting, which آ§7 would happily assign and no operator would send
  * anybody out on.
  *
  * So `maxBlockMinutes` bounds the join: a merge that would exceed it is not
  * available, and a short block with no neighbour that fits stays short and is
- * reported. The earlier argument was not wrong about §7 — it was wrong that a
+ * reported. The earlier argument was not wrong about آ§7 â€” it was wrong that a
  * refusal at assignment is the same thing as not building the block.
  *
  * Pure, and it returns new blocks rather than mutating: the ids of merged blocks
@@ -599,7 +632,7 @@ function mergeShortBlocks(
     // Blocks that are short and have no neighbour the ceiling allows. They are
     // skipped rather than ending the pass: the first version of the ceiling broke
     // out of the loop on the first stuck block, which left every OTHER short block
-    // on that day unmerged — a correct refusal for one block silently becoming a
+    // on that day unmerged â€” a correct refusal for one block silently becoming a
     // refusal for all of them.
     const stuck = new Set<string>();
 
@@ -712,7 +745,7 @@ function splitAtWidestGap(
  * The gap is chosen from the **middle half**: the widest gap overall could sit ten
  * minutes from the start, and splitting there gives the second driver ten minutes
  * of work. A split that would leave either part under `minBlockMinutes` is refused
- * for the same reason — it would undo what the merge pass just did.
+ * for the same reason â€” it would undo what the merge pass just did.
  */
 function splitOnce(
   block: PlanBlock,
@@ -782,7 +815,7 @@ function blockFrom(source: PlanBlock, trips: PlanBlockTrip[]): PlanBlock {
  *
  * The id is the earlier block's, which is `vehicleId|startMs` and still describes
  * the result. `rideMinutes` is the sum of the member rides and is therefore
- * unchanged by the join — only `spanMinutes` grows, by the gap absorbed.
+ * unchanged by the join â€” only `spanMinutes` grows, by the gap absorbed.
  */
 function joinBlocks(first: PlanBlock, second: PlanBlock): PlanBlock {
   const startMs = Math.min(first.startMs, second.startMs);
@@ -801,10 +834,10 @@ function joinBlocks(first: PlanBlock, second: PlanBlock): PlanBlock {
 }
 
 /**
- * Decimal hours for display only. Never feed this back into arithmetic —
+ * Decimal hours for display only. Never feed this back into arithmetic â€”
  * `spanMinutes` and `rideMinutes` are the figures that add up.
  *
- * 81 minutes is 1.35 hours (§3, §16).
+ * 81 minutes is 1.35 hours (آ§3, آ§16).
  */
 export function minutesToDecimalHours(minutes: number): number {
   return minutes / 60;

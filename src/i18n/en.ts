@@ -5897,4 +5897,7 @@ export const en: PartialDictionary = {
   'settings.abrSchedule.timeHint':       'German time (Europe/Berlin).',
   'settings.abrSchedule.title':          'Abrechnung by email',
   'settings.abrSchedule.weekday':        'Weekday',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'mplan.blocks.stillShortCeiling': '{count} block(s) stay under {minutes} minutes although the vehicle has another block that day: merging them would exceed the maximum of {max} minutes. Raise the maximum in step 2 if these blocks should be merged.',
 };
