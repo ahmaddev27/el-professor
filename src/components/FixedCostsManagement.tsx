@@ -14,8 +14,10 @@ import {
   currentMonth,
   listMonths,
   monthStart,
+  planCostEdit,
   resolveMonth,
   type CostCopy,
+  type EditScope,
   type MonthlyCostRow,
   type ResolvedMonth,
 } from '../utils/fixedCostMonths';
@@ -29,6 +31,12 @@ import {
   CardTitle,
   ConfirmDialog,
   DataTable,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
   EmptyState,
   Field,
   formatEuro,
@@ -77,6 +85,10 @@ const FixedCostsManagement: React.FC = () => {
   const [deleteConfirm, setDeleteConfirm] = useState<{ isOpen: boolean; id: string | null; month: string | null }>({
     isOpen: false, id: null, month: null,
   });
+
+  // An edit waits here for the owner's answer to "this month, or this month and later".
+  const [scopeAsk, setScopeAsk] = useState<{ month: string; id: string; cost: CostCopy } | null>(null);
+  const [scope, setScope] = useState<EditScope>('this_month');
 
   useEffect(() => {
     loadFixedCosts();
@@ -169,15 +181,36 @@ const FixedCostsManagement: React.FC = () => {
     }
   };
 
-  const handleUpdate = async (resolved: ResolvedMonth, id: string) => {
+  // Saving an edit asks about its scope first; nothing is written until then.
+  const handleUpdate = (resolved: ResolvedMonth, id: string) => {
     const cost = parsedForm();
     if (!cost) return;
+    setScope('this_month');
+    setScopeAsk({ month: resolved.month, id, cost });
+  };
+
+  const applyEdit = async () => {
+    if (!scopeAsk) return;
+    const { month, id, cost } = scopeAsk;
+    setScopeAsk(null);
+    const plan = planCostEdit(fixedCosts, month, id, cost, scope);
     try {
-      const { error: writeError } =
-        resolved.source === 'own'
-          ? await supabase.from('fixed_costs').update(cost).eq('id', id)
-          : await insertCopies(resolved.month, copyForMonth(resolved, { replaceId: id, replaceWith: cost }));
-      if (writeError) return reportWrite(writeError, t('common.errorUpdate'));
+      // Inserts first, in one request, so a month is never half written; a
+      // failure on the updates that follow leaves the screen showing the truth.
+      const rowsToInsert = plan.inserts.flatMap(i =>
+        i.copies.map(c => ({ description: c.description, amount: c.amount, company_id: companyId, period_month: monthStart(i.month) })),
+      );
+      if (rowsToInsert.length > 0) {
+        const { error: writeError } = await supabase.from('fixed_costs').insert(rowsToInsert);
+        if (writeError) return reportWrite(writeError, t('common.errorUpdate'));
+      }
+      for (const u of plan.updates) {
+        const { error: writeError } = await supabase.from('fixed_costs').update(u.change).eq('id', u.id);
+        if (writeError) {
+          await loadFixedCosts();
+          return reportWrite(writeError, t('common.errorUpdate'));
+        }
+      }
       setEditingId(null);
       setFormData({ description: '', amount: '' });
       await loadFixedCosts();
@@ -530,6 +563,42 @@ const FixedCostsManagement: React.FC = () => {
           </p>
         )}
       </div>
+
+      <Dialog open={scopeAsk !== null} onOpenChange={open => { if (!open) setScopeAsk(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t('fleet.fcm.scopeTitle')}</DialogTitle>
+            <DialogDescription>
+              {scopeAsk ? t('fleet.fcm.scopeBody', { month: monthLabel(scopeAsk.month) }) : ''}
+            </DialogDescription>
+          </DialogHeader>
+          <fieldset className="grid grid-cols-1 gap-3">
+            <legend className="sr-only">{t('fleet.fcm.scopeTitle')}</legend>
+            {(['this_month', 'this_and_later'] as const).map(value => (
+              <label key={value} className="flex cursor-pointer items-start gap-3 rounded-surface border border-line p-3 [@media(pointer:coarse)]:min-h-11">
+                <input
+                  type="radio"
+                  name="fixed-cost-scope"
+                  className="mt-1"
+                  checked={scope === value}
+                  onChange={() => setScope(value)}
+                />
+                <span>
+                  <span className="block text-[14px] font-semibold">{t(value === 'this_month' ? 'fleet.fcm.scopeThisMonth' : 'fleet.fcm.scopeLater')}</span>
+                  <span className="block text-[13px] text-fg-muted">{t(value === 'this_month' ? 'fleet.fcm.scopeThisMonthHint' : 'fleet.fcm.scopeLaterHint')}</span>
+                </span>
+              </label>
+            ))}
+          </fieldset>
+          <DialogFooter>
+            <Button variant="secondary" onClick={() => setScopeAsk(null)}>{t('common.cancel')}</Button>
+            <Button onClick={applyEdit}>
+              <Save aria-hidden />
+              {t('common.save')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <ConfirmDialog
         open={deleteConfirm.isOpen}

@@ -5900,4 +5900,10 @@ export const en: PartialDictionary = {
 
   // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
   'mplan.blocks.stillShortCeiling': '{count} block(s) stay under {minutes} minutes although the vehicle has another block that day: merging them would exceed the maximum of {max} minutes. Raise the maximum in step 2 if these blocks should be merged.',
+  'fleet.fcm.scopeBody':          'You are changing the fixed costs for {month}. Earlier months stay unchanged either way.',
+  'fleet.fcm.scopeLater':         'This and all later months',
+  'fleet.fcm.scopeLaterHint':     'Later months without entries of their own take the change. Later months with their own entries change only if they hold the same item (same description).',
+  'fleet.fcm.scopeThisMonth':     'This month only',
+  'fleet.fcm.scopeThisMonthHint': 'The following month keeps the previous costs, and so do all months after it.',
+  'fleet.fcm.scopeTitle':         'Which months does the change apply to?',
 };

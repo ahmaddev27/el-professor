@@ -5956,4 +5956,10 @@ export const de = {
 
   // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
   'mplan.blocks.stillShortCeiling': '{count} Block/Blöcke bleiben unter {minutes} Minuten, obwohl das Fahrzeug an diesem Tag einen weiteren Block hat: das Zusammenlegen würde die Höchstdauer von {max} Minuten überschreiten. Erhöhen Sie die Höchstdauer in Schritt 2, wenn diese Blöcke zusammengelegt werden sollen.',
+  'fleet.fcm.scopeBody':          'Sie ändern die Fixkosten für {month}. Frühere Monate bleiben in beiden Fällen unverändert.',
+  'fleet.fcm.scopeLater':         'Dieser und alle folgenden Monate',
+  'fleet.fcm.scopeLaterHint':     'Folgemonate ohne eigene Einträge übernehmen die Änderung. Folgemonate mit eigenen Einträgen ändern sich nur, wenn dort derselbe Posten (gleiche Bezeichnung) steht.',
+  'fleet.fcm.scopeThisMonth':     'Nur dieser Monat',
+  'fleet.fcm.scopeThisMonthHint': 'Der folgende Monat behält die bisherigen Kosten und alle weiteren Monate danach ebenfalls.',
+  'fleet.fcm.scopeTitle':         'Für welche Monate gilt die Änderung?',
 } as const;

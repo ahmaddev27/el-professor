@@ -107,3 +107,66 @@ export function copyForMonth(
   if (change.add) out.push(change.add);
   return out;
 }
+
+export type EditScope = 'this_month' | 'this_and_later';
+
+export interface EditPlan {
+  /** Rows to insert, per month, in one batch. Written BEFORE the updates. */
+  inserts: { month: string; copies: CostCopy[] }[];
+  /** Rows of a month that already has its own rows, changed in place. */
+  updates: { id: string; change: CostCopy }[];
+  /** Later months of their own that receive the change (scope `this_and_later`). */
+  laterMonthsChanged: string[];
+}
+
+/**
+ * What editing one cost row of `month` must write.
+ *
+ * Because a month with no rows inherits from the newest earlier month that has
+ * some, giving `month` rows of its own ALSO changes every later month that has
+ * none, up to the next month of its own. So the two scopes differ in what they
+ * do to those later months, not to this one:
+ *
+ * - `this_month`: the next month is pinned to the rows it showed before, when
+ *   it would otherwise start inheriting the change. Later months follow it.
+ * - `this_and_later`: nothing is pinned, so months without rows inherit the
+ *   change; months of their own that hold a row with the same description get
+ *   that row changed too. Months before `month` are never touched in either
+ *   scope: a closed month is a record.
+ */
+export function planCostEdit(
+  rows: readonly MonthlyCostRow[],
+  month: string,
+  rowId: string,
+  change: CostCopy,
+  scope: EditScope,
+): EditPlan {
+  const resolved = resolveMonth(rows, month);
+  const old = resolved.rows.find(r => r.id === rowId);
+  const plan: EditPlan = { inserts: [], updates: [], laterMonthsChanged: [] };
+  if (!old) return plan;
+
+  if (scope === 'this_month') {
+    const next = nextMonth(month);
+    const after = resolveMonth(rows, next);
+    if (after.source !== 'own' && after.rows.length > 0) {
+      plan.inserts.push({ month: next, copies: copyForMonth(after, {}) });
+    }
+  }
+
+  if (resolved.source === 'own') plan.updates.push({ id: rowId, change });
+  else plan.inserts.push({ month, copies: copyForMonth(resolved, { replaceId: rowId, replaceWith: change }) });
+
+  if (scope === 'this_and_later') {
+    const later = [...new Set(
+      rows.filter(r => r.period_month !== null && monthKey(r.period_month) > month).map(r => monthKey(r.period_month as string)),
+    )].sort();
+    for (const m of later) {
+      const match = rowsOfMonth(rows, m).find(r => r.description === old.description);
+      if (!match) continue;
+      plan.updates.push({ id: match.id, change });
+      plan.laterMonthsChanged.push(m);
+    }
+  }
+  return plan;
+}
