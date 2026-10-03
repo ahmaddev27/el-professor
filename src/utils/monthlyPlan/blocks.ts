@@ -185,6 +185,21 @@ export interface BuildBlocksOptions {
    * claims a change of hands that could not happen.
    */
   maxBlockMinutes?: number;
+  /**
+   * Split a block that exceeds `maxBlockMinutes` by widening a gap it already
+   * has, so two drivers can share it. Off unless asked for.
+   *
+   * It needs `maxBlockMinutes` to know which blocks are too long and
+   * `switchMinutes` to know how wide the gap must be, so it does nothing without
+   * both. The rides that fall inside the widened gap are **given up** — reported
+   * in `handoverTrips`, assigned to nobody — because during a handover nobody is
+   * driving. Measured on real data: exactly one ride per split, which is the floor
+   * rather than a tuning choice.
+   *
+   * Off by default because giving up a ride is a decision about a month's revenue,
+   * and a default that quietly does it is a default that decides for the operator.
+   */
+  splitLongBlocks?: boolean;
 }
 
 export interface BuildBlocksResult {
@@ -208,6 +223,21 @@ export interface BuildBlocksResult {
    * enough to part them.
    */
   longBlocks: { blockId: string; spanMinutes: number }[];
+  /**
+   * Rides given up so a long block could be split, with the block they came from.
+   *
+   * Named rather than silently absent: a ride that leaves the plan without being
+   * accounted for is indistinguishable from a defect, and this is a deliberate
+   * trade the operator agreed to by turning the option on. The screen lists them.
+   */
+  handoverTrips: {
+    tripId: string;
+    /** The block as it was before the split, by its id at that moment. */
+    blockId: string;
+    vehicleId: string;
+    startMs: number;
+    endMs: number;
+  }[];
 }
 
 const MS_PER_MINUTE = 60_000;
@@ -342,6 +372,11 @@ export function buildBlocks(
     && (options.maxBlockMinutes as number) > 0
     ? Math.floor(options.maxBlockMinutes as number)
     : 0;
+  // Needs both bounds to mean anything: the maximum says which block is too long,
+  // the switch duration says how wide the gap has to be. Without either it is off,
+  // whatever the flag says, rather than guessing one of them.
+  const splitLongBlocks = options.splitLongBlocks === true
+    && maxBlockMinutes > 0 && switchMinutes > 0;
 
   const rejected: RejectedTrip[] = [];
   const overlaps: VehicleOverlap[] = [];
@@ -481,13 +516,29 @@ export function buildBlocks(
         .map(block => ({ blockId: block.id, spanMinutes: block.spanMinutes }))
     : [];
 
+  const split = splitLongBlocks
+    ? splitAtWidestGap(merged, maxBlockMinutes, switchMinutes, minBlockMinutes)
+    : { blocks: merged, handoverTrips: [] as BuildBlocksResult['handoverTrips'] };
+
+  split.blocks.sort((a, b) => a.startMs - b.startMs || a.id.localeCompare(b.id));
+
+  // Reported AFTER the split, so a block the split dealt with is not also listed
+  // as a problem. What stays on this list is what could not be split at all.
   const longBlocks = maxBlockMinutes > 0
-    ? merged
+    ? split.blocks
         .filter(block => block.spanMinutes > maxBlockMinutes)
         .map(block => ({ blockId: block.id, spanMinutes: block.spanMinutes }))
     : [];
 
-  return { blocks: merged, rejected, overlaps, canceledCount, shortBlocks, longBlocks };
+  return {
+    blocks: split.blocks,
+    rejected,
+    overlaps,
+    canceledCount,
+    shortBlocks,
+    longBlocks,
+    handoverTrips: split.handoverTrips,
+  };
 }
 
 /**
@@ -609,6 +660,121 @@ function mergeShortBlocks(
   }
 
   return out;
+}
+
+/**
+ * Splits every block that is too long, at the widest gap it already has.
+ *
+ * Repeated until nothing can be split further, so a fourteen-hour block becomes
+ * three shifts rather than one long one and one slightly shorter. The guard bounds
+ * it at the number of blocks: each pass either splits one or marks it finished.
+ */
+function splitAtWidestGap(
+  blocks: PlanBlock[],
+  maxBlockMinutes: number,
+  switchMinutes: number,
+  minBlockMinutes: number,
+): { blocks: PlanBlock[]; handoverTrips: BuildBlocksResult['handoverTrips'] } {
+  let current = [...blocks];
+  const handoverTrips: BuildBlocksResult['handoverTrips'] = [];
+  // Blocks that are too long and cannot be parted. Marked so the loop moves on
+  // rather than retrying them, and so they still reach `longBlocks`.
+  const settled = new Set<string>();
+
+  for (let guard = current.length * 4; guard > 0; guard--) {
+    const index = current.findIndex(block =>
+      block.spanMinutes > maxBlockMinutes && !settled.has(block.id));
+    if (index < 0) break;
+
+    const block = current[index];
+    const result = splitOnce(block, switchMinutes, minBlockMinutes);
+    if (!result) {
+      settled.add(block.id);
+      continue;
+    }
+
+    handoverTrips.push(...result.given.map(trip => ({
+      tripId: trip.tripId,
+      blockId: block.id,
+      vehicleId: block.vehicleId,
+      startMs: trip.startMs,
+      endMs: trip.endMs,
+    })));
+    current = [...current.slice(0, index), ...result.parts, ...current.slice(index + 1)];
+  }
+
+  return { blocks: current, handoverTrips };
+}
+
+/**
+ * One split of one block, or null when it cannot be parted.
+ *
+ * The gap is chosen from the **middle half**: the widest gap overall could sit ten
+ * minutes from the start, and splitting there gives the second driver ten minutes
+ * of work. A split that would leave either part under `minBlockMinutes` is refused
+ * for the same reason — it would undo what the merge pass just did.
+ */
+function splitOnce(
+  block: PlanBlock,
+  switchMinutes: number,
+  minBlockMinutes: number,
+): { parts: PlanBlock[]; given: PlanBlockTrip[] } | null {
+  const trips = [...block.trips].sort((a, b) => a.startMs - b.startMs);
+  if (trips.length < 2) return null; // a single ride is never cut
+
+  const span = block.endMs - block.startMs;
+  const windowStart = block.startMs + span * 0.25;
+  const windowEnd = block.startMs + span * 0.75;
+  const gapMs = switchMinutes * MS_PER_MINUTE;
+
+  let best: { atMs: number; gap: number } | null = null;
+  let runningEnd = trips[0].endMs;
+  for (let i = 1; i < trips.length; i++) {
+    const gap = trips[i].startMs - runningEnd;
+    // `runningEnd` and not the previous ride's end: inside a block with an
+    // overlap an earlier ride can finish later, and the vehicle is not free until
+    // the latest of them is done.
+    if (gap > 0 && runningEnd >= windowStart && runningEnd <= windowEnd) {
+      if (!best || gap > best.gap) best = { atMs: runningEnd, gap };
+    }
+    runningEnd = Math.max(runningEnd, trips[i].endMs);
+  }
+  if (!best) return null;
+
+  const handoverEnd = best.atMs + gapMs;
+  const before = trips.filter(trip => trip.startMs < best!.atMs);
+  const given = trips.filter(trip => trip.startMs >= best!.atMs && trip.startMs < handoverEnd);
+  const after = trips.filter(trip => trip.startMs >= handoverEnd);
+  if (before.length === 0 || after.length === 0) return null;
+
+  const first = blockFrom(block, before);
+  const second = blockFrom(block, after);
+  // Refused rather than done badly: a part under the minimum is the very thing the
+  // merge pass exists to prevent, and producing one here would have the two passes
+  // undoing each other.
+  if (minBlockMinutes > 0
+      && (first.spanMinutes < minBlockMinutes || second.spanMinutes < minBlockMinutes)) {
+    return null;
+  }
+
+  return { parts: [first, second], given };
+}
+
+/** A block over a subset of another's rides. Keeps every rule `flush` applies. */
+function blockFrom(source: PlanBlock, trips: PlanBlockTrip[]): PlanBlock {
+  const startMs = trips[0].startMs;
+  const endMs = trips.reduce((max, trip) => Math.max(max, trip.endMs), trips[0].endMs);
+  return {
+    ...source,
+    id: `${source.vehicleId}|${startMs}`,
+    startMs,
+    endMs,
+    spanMinutes: minutesBetween(startMs, endMs),
+    rideMinutes: trips.reduce((sum, trip) => sum + trip.minutes, 0),
+    trips,
+    driverId: null,
+    driverName: null,
+  };
 }
 
 /**

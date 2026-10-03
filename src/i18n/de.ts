@@ -5915,4 +5915,11 @@ export const de = {
   'abr.mail.skipUnknown':       'nicht in der Fahrerliste',
   'abr.mail.unknown':           '{name} steht nicht in der Fahrerliste dieses Unternehmens.',
   'abr.mail.unknownTitle':      'Fahrer nicht gefunden',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'mplan.split.explain':      'Ein Block über der Höchstdauer wird an seiner größten vorhandenen Lücke geteilt, damit zwei Fahrer ihn übernehmen können. Die Lücke wird auf die Wechseldauer verbreitert — und die Fahrten, die in diese Lücke fallen, entfallen aus dem Plan: während das Fahrzeug übergeben wird, fährt niemand. Gemessen: genau eine Fahrt je Teilung. Keine Fahrzeit wird verschoben.',
+  'mplan.split.givenUp':      '{count} Fahrt(en) fallen in eine Übergabelücke und sind keinem Fahrer zugeteilt. Sie bleiben im Fahrtenbuch unverändert — nur dieser Plan kennt sie nicht.',
+  'mplan.split.givenUpTitle': 'Fahrten, die für den Fahrerwechsel entfallen',
+  'mplan.split.hint':         'Aus: ein zu langer Block bleibt ganz und wird nur gemeldet.',
+  'mplan.split.label':        'Lange Blöcke für einen Fahrerwechsel teilen',
 } as const;
