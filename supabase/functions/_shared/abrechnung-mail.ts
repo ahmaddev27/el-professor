@@ -31,7 +31,7 @@
  * must agree, and they can only agree by coming from one place.
  */
 import { escapeHtml, renderEmailHtml, renderEmailText } from './email-layout.mjs';
-import type { RenderedMail } from './otp-mail.ts';
+import { appOrigin, type RenderedMail } from './otp-mail.ts';
 
 /** The figures the Abrechnung screen shows, as it shows them. */
 export interface AbrechnungFigures {
@@ -47,6 +47,17 @@ export interface AbrechnungFigures {
   tankenquote: number | null;
 }
 
+/**
+ * The footer every one of these carries.
+ *
+ * It names what the mail is for the one reader who did not ask for it: a driver
+ * who gets an unexpected message about their own money needs to know who sent it
+ * and that it is not a demand.
+ */
+const NOTE = 'Diese E-Mail wurde automatisch aus dem Abrechnungssystem Ihres '
+  + 'Unternehmens erstellt. Sie ist eine Übersicht, keine Rechnung und keine '
+  + 'Zahlungsaufforderung.';
+
 export interface AbrechnungMailInput {
   driverName: string;
   companyName: string;
@@ -55,6 +66,14 @@ export interface AbrechnungMailInput {
   /** "31.08.2026 – 06.09.2026". Already German, already formatted. */
   periodRange: string;
   figures: AbrechnungFigures;
+  /**
+   * `APP_URL`, passed in by the function rather than read here.
+   *
+   * This file must stay free of anything the Node test runner cannot load, and
+   * `Deno.env` is exactly that — the same reason `notification-mail.ts` takes it
+   * as an argument. It is used for the logo's absolute URL and nothing else.
+   */
+  appUrl: string;
 }
 
 /**
@@ -97,6 +116,7 @@ function row(label: string, value: string, strong = false): string {
 
 export function renderAbrechnungMail(input: AbrechnungMailInput): RenderedMail {
   const { driverName, companyName, periodLabel, periodRange, figures } = input;
+  const origin = appOrigin(input.appUrl);
 
   // The driver hands money IN when the difference is positive and is owed money
   // when it is negative. Saying "Betrag" for both would make the one case a driver
@@ -150,14 +170,20 @@ export function renderAbrechnungMail(input: AbrechnungMailInput): RenderedMail {
     // whoever is holding the phone.
     subject: `Abrechnung ${periodLabel} – ${companyName}`,
     html: renderEmailHtml({
+      logoUrl: `${origin}/email-templates/logo.png`,
       eyebrow: companyName,
       heading: `Abrechnung ${periodLabel}`,
       preheader: `Deine Abrechnung für ${periodRange}`,
       bodyHtml,
+      // No call to action and no link: this mail asks the driver to do nothing on
+      // a screen, and a link into the app would be one they cannot open — a driver
+      // has no account here.
+      noteHtml: escapeHtml(NOTE),
     }),
     text: renderEmailText({
       heading: `Abrechnung ${periodLabel}`,
       bodyText: textLines.join('\n'),
+      noteText: NOTE,
     }),
   };
 }

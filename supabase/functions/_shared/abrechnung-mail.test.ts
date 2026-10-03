@@ -20,6 +20,7 @@ const input = (over: Partial<AbrechnungMailInput> = {}): AbrechnungMailInput => 
   companyName: 'Y&A Mobility',
   periodLabel: 'Woche 5',
   periodRange: '31.08.2026 – 06.09.2026',
+  appUrl: 'https://app.elprofessor.eu',
   figures: { cash: 506.95, belege: 112, difference: 394.95, belegeCount: 2, tankenquote: 11.3 },
   ...over,
 });
@@ -107,9 +108,21 @@ describe('renderAbrechnungMail', () => {
   it('says what the mail is, and does not claim to be a payslip or a receipt', () => {
     const mail = renderAbrechnungMail(input());
     expect(mail.html).toContain('Bei Fragen wende dich bitte an das Büro');
-    for (const word of ['Lohnabrechnung', 'Quittung', 'Gehaltsabrechnung', 'Rechnung']) {
-      expect(mail.html, `the mail calls itself a ${word}`).not.toContain(word);
+
+    // The heading and the subject are where a claim would be made, so that is
+    // where the words are refused. The BODY is allowed to contain them, and does:
+    // the footer says in so many words "keine Rechnung und keine
+    // Zahlungsaufforderung", and the first version of this test failed on exactly
+    // that sentence — it searched for the word where it meant to search for the
+    // claim. Corrected rather than loosened: a denial is the opposite of a claim.
+    for (const word of ['Lohnabrechnung', 'Quittung', 'Gehaltsabrechnung']) {
+      expect(mail.subject, `the subject calls this a ${word}`).not.toContain(word);
     }
+    expect(mail.subject).not.toMatch(/Rechnung/);
+
+    // And the denial is actually there, in both parts.
+    expect(mail.html).toContain('keine Rechnung');
+    expect(mail.text).toContain('keine Rechnung');
   });
 
   it('tells the reader the image is attached', () => {

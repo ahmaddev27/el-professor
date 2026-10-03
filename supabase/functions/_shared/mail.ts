@@ -37,8 +37,13 @@
  * The whole exchange gets 10 seconds. A MailError names the failing step and
  * the server's reply code; it never contains an address, a header or the body.
  */
-import { buildMimeMessage, isAsciiMailAddress, runSmtpSession, SmtpError, type SmtpConnection
+import {
+  buildMimeMessage,
+  isAsciiMailAddress,
+  runSmtpSession,
+  SmtpError,
   type MimeAttachment,
+  type SmtpConnection,
 } from './smtp-core.ts';
 
 export class MailError extends Error {

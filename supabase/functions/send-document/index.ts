@@ -189,6 +189,7 @@ Deno.serve(async (req: Request) => {
     periodLabel,
     periodRange,
     figures,
+    appUrl: Deno.env.get("APP_URL") ?? "",
   });
 
   try {
