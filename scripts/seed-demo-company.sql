@@ -36,6 +36,14 @@
 --   Emil Normal      a second ordinary driver, so a block has competition
 --   Inhaber Demo     the owner: no range, surplus only (§8)
 --
+-- **This script does not create them.** Every insert below JOINs `drivers` on
+-- `name`, so a driver that is missing yields **zero rows with no error** — the
+-- script reports success and the data it was supposed to add is simply absent.
+-- The six were made by hand on staging. Adding a seventh to exercise a path means
+-- creating the driver first, and checking the counts at the end of this file
+-- rather than trusting the `INSERT 0 n` lines, which count what was skipped as
+-- idempotency either way.
+--
 -- The November rides add an overlap, a Sunday, a cancelled ride, a ride longer
 -- than any six-hour ceiling, and a pair twelve minutes apart so the travel check
 -- has something it can actually judge rather than only gaps it cannot.
