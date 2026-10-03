@@ -9,6 +9,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   renderAbrechnungMail,
+  renderAbrechnungSummaryMail,
   attachmentName,
   euro,
   percent,
@@ -149,5 +150,57 @@ describe('attachmentName', () => {
   it('never produces an empty name', () => {
     expect(attachmentName('—')).toBe('Abrechnung_Uebersicht.png');
     expect(attachmentName('')).toBe('Abrechnung_Uebersicht.png');
+  });
+});
+
+describe('renderAbrechnungMail without the image', () => {
+  it('does not claim an attachment it does not carry', () => {
+    const mail = renderAbrechnungMail(input({ imageAttached: false }));
+    expect(mail.html).not.toContain('als Bild an');
+    expect(mail.text).not.toContain('als Bild an');
+  });
+
+  it('keeps the default: the screens send still says the card is attached', () => {
+    const mail = renderAbrechnungMail(input());
+    expect(mail.html).toContain('als Bild an');
+    expect(mail.text).toContain('als Bild an');
+  });
+});
+
+describe('renderAbrechnungSummaryMail', () => {
+  const rows = [
+    { driverName: 'Ahmed Hemaid', figures: { cash: 506.95, belege: 112, difference: 394.95, belegeCount: 2, tankenquote: 11.3 } },
+    { driverName: 'Max <b>Muster</b>', figures: { cash: 100, belege: 130.5, difference: -30.5, belegeCount: 1, tankenquote: null } },
+  ];
+  const summary = () => renderAbrechnungSummaryMail({
+    companyName: 'Y&A Mobility', periodLabel: 'Woche 5 - August 2026',
+    periodRange: '31.08.2026 – 06.09.2026', rows, appUrl: 'https://app.elprofessor.eu',
+  });
+
+  it('lists every driver with German figures and adds the totals', () => {
+    const mail = summary();
+    expect(mail.text).toContain('Ahmed Hemaid: Bargeld 506,95 €, Belege 112,00 €, Abzugeben 394,95 €');
+    expect(mail.text).toContain('Guthaben 30,50 €');
+    expect(mail.text).toContain('Gesamt: Bargeld 606,95 €, Belege 242,50 €, Saldo 364,45 €');
+  });
+
+  it('carries no figure in the subject', () => {
+    const { subject } = summary();
+    expect(subject).toBe('Abrechnungsübersicht Woche 5 - August 2026 – Y&A Mobility');
+    expect(subject).not.toMatch(/\d,\d\d/);
+  });
+
+  it('escapes a driver name', () => {
+    const mail = summary();
+    expect(mail.html).not.toContain('<b>Muster</b>');
+    expect(mail.html).toContain('&lt;b&gt;Muster&lt;/b&gt;');
+  });
+
+  it('never calls itself an invoice, a receipt or a payslip', () => {
+    const mail = summary();
+    for (const text of [mail.html, mail.text, mail.subject]) {
+      expect(text).not.toMatch(/Quittung|Lohnabrechnung|Gehaltsabrechnung/);
+    }
+    expect(mail.text).toContain('keine Rechnung');
   });
 });

@@ -74,6 +74,13 @@ export interface AbrechnungMailInput {
    * as an argument. It is used for the logo's absolute URL and nothing else.
    */
   appUrl: string;
+  /**
+   * Whether the card is attached as a PNG. The screen's send attaches it; the
+   * scheduled job has no browser to draw it and does not, and the mail must not
+   * claim an attachment it does not carry. Absent means attached, which keeps
+   * every existing caller's bytes unchanged.
+   */
+  imageAttached?: boolean;
 }
 
 /**
@@ -116,6 +123,7 @@ function row(label: string, value: string, strong = false): string {
 
 export function renderAbrechnungMail(input: AbrechnungMailInput): RenderedMail {
   const { driverName, companyName, periodLabel, periodRange, figures } = input;
+  const withImage = input.imageAttached ?? true;
   const origin = appOrigin(input.appUrl);
 
   // The driver hands money IN when the difference is positive and is owed money
@@ -140,7 +148,9 @@ export function renderAbrechnungMail(input: AbrechnungMailInput): RenderedMail {
     + '<table role="presentation" style="width:100%;border-collapse:collapse;margin:0 0 16px;">'
     + lines.join('')
     + '</table>'
-    + '<p style="margin:0 0 16px;">Die Übersicht hängt dieser E-Mail auch als Bild an.</p>'
+    + (withImage
+      ? '<p style="margin:0 0 16px;">Die Übersicht hängt dieser E-Mail auch als Bild an.</p>'
+      : '')
     + '<p style="margin:0;">Die Zahlen stammen aus den Aufzeichnungen von '
     + `${escapeHtml(companyName)}. Bei Fragen wende dich bitte an das Büro.</p>`;
 
@@ -156,9 +166,8 @@ export function renderAbrechnungMail(input: AbrechnungMailInput): RenderedMail {
   if (figures.tankenquote !== null) {
     textLines.push(`Tankenquote: ${percent(figures.tankenquote)}`);
   }
+  if (withImage) textLines.push('', 'Die Übersicht hängt dieser E-Mail auch als Bild an.');
   textLines.push(
-    '',
-    'Die Übersicht hängt dieser E-Mail auch als Bild an.',
     '',
     `Die Zahlen stammen aus den Aufzeichnungen von ${companyName}. `
     + 'Bei Fragen wende dich bitte an das Büro.',
@@ -196,4 +205,121 @@ export function attachmentName(periodLabel: string): string {
     .replace(/^_+|_+$/g, '')
     .slice(0, 60);
   return `Abrechnung_${safe || 'Uebersicht'}.png`;
+}
+
+// ─── The manager's summary ───────────────────────────────────────────────────
+
+/** One driver's line in the manager's summary. */
+export interface SummaryRow {
+  driverName: string;
+  figures: AbrechnungFigures;
+}
+
+export interface AbrechnungSummaryInput {
+  companyName: string;
+  periodLabel: string;
+  periodRange: string;
+  rows: readonly SummaryRow[];
+  appUrl: string;
+}
+
+const SUMMARY_NOTE = 'Diese E-Mail wurde automatisch aus dem Abrechnungssystem Ihres '
+  + 'Unternehmens erstellt. Sie ist eine Übersicht, keine Rechnung und keine '
+  + 'Zahlungsaufforderung. Den automatischen Versand stellen Sie in den '
+  + 'Einstellungen unter „Abrechnung per E-Mail“ ein.';
+
+function cell(text: string, align: 'left' | 'right', strong = false): string {
+  const weight = strong ? 'font-weight:600;' : '';
+  return `<td style="padding:6px 8px 6px 0;text-align:${align};font-size:13px;${weight}`
+    + `${align === 'right' ? 'white-space:nowrap;' : ''}">${escapeHtml(text)}</td>`;
+}
+
+/** "Abzugeben" / "Guthaben" and the amount, as the driver mail says it. */
+function differenceText(difference: number): string {
+  return `${difference >= 0 ? 'Abzugeben' : 'Guthaben'} ${euro(Math.abs(difference))}`;
+}
+
+/**
+ * ONE mail to a company's administrators: every driver of the week and their
+ * Abrechnung, in a table, with the totals below.
+ *
+ * The same four figures the driver's own mail carries, from the same rows. The
+ * subject names the week and the company and no figure, like the driver's mail:
+ * it shows on a lock screen. Rows arrive in the order the caller wants; the
+ * totals are sums of the rows shown, so the table adds up on its face.
+ */
+export function renderAbrechnungSummaryMail(input: AbrechnungSummaryInput): RenderedMail {
+  const { companyName, periodLabel, periodRange, rows } = input;
+  const origin = appOrigin(input.appUrl);
+
+  const totals = rows.reduce(
+    (sum, r) => ({
+      cash: sum.cash + r.figures.cash,
+      belege: sum.belege + r.figures.belege,
+      difference: sum.difference + r.figures.difference,
+    }),
+    { cash: 0, belege: 0, difference: 0 },
+  );
+
+  const head = '<tr>'
+    + ['Fahrer', 'Bargeld', 'Belege', 'Saldo'].map((label, i) =>
+      `<th style="padding:6px 8px 6px 0;text-align:${i === 0 ? 'left' : 'right'};`
+      + `font-size:12px;color:#475569;border-bottom:1px solid #cbd5e1;">${escapeHtml(label)}</th>`).join('')
+    + '</tr>';
+  const body = rows.map((r) => '<tr>'
+    + cell(r.driverName, 'left')
+    + cell(euro(r.figures.cash), 'right')
+    + cell(euro(r.figures.belege), 'right')
+    + cell(euro(r.figures.difference), 'right')
+    + '</tr>').join('');
+  const foot = '<tr>'
+    + cell('Gesamt', 'left', true)
+    + cell(euro(totals.cash), 'right', true)
+    + cell(euro(totals.belege), 'right', true)
+    + cell(euro(totals.difference), 'right', true)
+    + '</tr>';
+
+  const bodyHtml =
+    '<p style="margin:0 0 16px;">Guten Tag,</p>'
+    + `<p style="margin:0 0 16px;">hier ist die Abrechnungsübersicht für ${escapeHtml(periodLabel)} `
+    + `(${escapeHtml(periodRange)}) von ${escapeHtml(companyName)}.</p>`
+    + '<table role="presentation" style="width:100%;border-collapse:collapse;margin:0 0 16px;">'
+    + head + body + foot + '</table>'
+    + '<p style="margin:0 0 8px;font-size:13px;color:#475569;">'
+    + 'Saldo: Bargeld minus Belege. Positiv bedeutet, dass der Fahrer Geld abgibt, negativ, '
+    + 'dass ihm Geld zusteht.</p>'
+    + `<p style="margin:0;font-size:13px;color:#475569;">${rows.length} `
+    + 'Fahrer mit Buchungen in dieser Woche.</p>';
+
+  const textRows = rows.map((r) =>
+    `${r.driverName}: Bargeld ${euro(r.figures.cash)}, Belege ${euro(r.figures.belege)}, `
+    + differenceText(r.figures.difference));
+  const bodyText = [
+    'Guten Tag,',
+    '',
+    `hier ist die Abrechnungsübersicht für ${periodLabel} (${periodRange}) von ${companyName}.`,
+    '',
+    ...textRows,
+    '',
+    `Gesamt: Bargeld ${euro(totals.cash)}, Belege ${euro(totals.belege)}, Saldo ${euro(totals.difference)}`,
+    '',
+    'Saldo: Bargeld minus Belege. Positiv bedeutet, dass der Fahrer Geld abgibt, negativ, dass ihm Geld zusteht.',
+  ].join('\n');
+
+  return {
+    subject: `Abrechnungsübersicht ${periodLabel} – ${companyName}`,
+    html: renderEmailHtml({
+      logoUrl: `${origin}/email-templates/logo.png`,
+      eyebrow: companyName,
+      heading: `Abrechnungsübersicht ${periodLabel}`,
+      preheader: `Alle Fahrer für ${periodRange}`,
+      bodyHtml,
+      noteHtml: escapeHtml(SUMMARY_NOTE),
+    }),
+    text: renderEmailText({
+      heading: `Abrechnungsübersicht ${periodLabel}`,
+      bodyText,
+      noteText: SUMMARY_NOTE,
+    }),
+  };
 }

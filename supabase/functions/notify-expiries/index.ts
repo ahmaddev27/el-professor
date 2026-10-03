@@ -17,6 +17,17 @@
  * functions that skips their own authorization, which is worse than a line in
  * two lists.
  *
+ * ─── Two jobs, one door ──────────────────────────────────────────────────────
+ *
+ * `{"job":"abrechnung"}` runs the scheduled weekly Abrechnung (drivers' mails and
+ * the managers' summary, `_shared/abrechnung-delivery.ts`). It is a second job
+ * here rather than a second function because its caller is the same kind of
+ * caller — a cron line with the service key and no `auth.uid()` — and a new
+ * function costs a line in `FUNCTION_ENV` and one in the compose file. A body
+ * with no `job` is the TÜV / trial job, so the installed notification cron line
+ * is unchanged. The name is the notifications' and stays, because
+ * `PUBLIC_FUNCTIONS`, `FUNCTION_ENV` and the cron line name it.
+ *
  * ─── Who may call it ─────────────────────────────────────────────────────────
  *
  * `main/index.ts` verifies that the bearer token was signed by this stack's
@@ -39,6 +50,7 @@ import { createClient } from 'npm:@supabase/supabase-js@2';
 import { corsFor } from '../_shared/http.ts';
 import { logFailure } from '../_shared/otp-core.ts';
 import { runNotificationJob, type NotificationRunMode } from '../_shared/notification-delivery.ts';
+import { runAbrechnungJob } from '../_shared/abrechnung-delivery.ts';
 
 const FN = 'notify-expiries';
 
@@ -61,15 +73,25 @@ function bearer(req: Request): string | null {
   return token;
 }
 
-/** `dry_run` for anything that is not exactly `send`. */
-async function modeOf(req: Request): Promise<NotificationRunMode> {
+/**
+ * The job and the mode a request asks for.
+ *
+ * `{"job":"abrechnung"}` is the scheduled Abrechnung; anything else, an absent
+ * `job` included, is the TÜV / trial job, so the cron line installed for the
+ * notifications keeps working unchanged. `mode` is `dry_run` for anything that
+ * is not exactly `send`, and an unreadable body is a dry run of the default job.
+ */
+type JobName = 'expiries' | 'abrechnung';
+async function requestOf(req: Request): Promise<{ job: JobName | 'unknown'; mode: NotificationRunMode }> {
   try {
     const body = await req.json();
-    return body && typeof body === 'object' && (body as Record<string, unknown>).mode === 'send'
-      ? 'send'
-      : 'dry_run';
+    const fields = (body && typeof body === 'object' ? body : {}) as Record<string, unknown>;
+    const mode = fields.mode === 'send' ? 'send' : 'dry_run';
+    if (fields.job === undefined) return { job: 'expiries', mode };
+    if (fields.job === 'expiries' || fields.job === 'abrechnung') return { job: fields.job, mode };
+    return { job: 'unknown', mode: 'dry_run' };
   } catch {
-    return 'dry_run';
+    return { job: 'expiries', mode: 'dry_run' };
   }
 }
 
@@ -93,7 +115,9 @@ Deno.serve(async (req: Request) => {
     return respond({ ok: false, reason: 'not_authorized' }, 403);
   }
 
-  const mode = await modeOf(req);
+  const { job, mode } = await requestOf(req);
+  // A job this build does not know sends nothing and says so.
+  if (job === 'unknown') return respond({ ok: false, reason: 'unknown_job' }, 400);
 
   try {
     const admin = createClient(
@@ -101,6 +125,20 @@ Deno.serve(async (req: Request) => {
       serviceKey,
       { auth: { autoRefreshToken: false, persistSession: false } },
     );
+
+    if (job === 'abrechnung') {
+      const report = await runAbrechnungJob(admin, mode);
+      // The run's shape for the cron line's log. No address and no name appears in it.
+      console.log(JSON.stringify({
+        level: 'info', fn: FN, step: 'run', job, mode,
+        companies_scanned: report.companies_scanned, companies_due: report.companies_due,
+        figures_failed: report.figures_failed,
+        driver_mails_sent: report.driver_mails_sent, driver_mails_failed: report.driver_mails_failed,
+        manager_summaries_sent: report.manager_summaries_sent,
+        manager_summaries_failed: report.manager_summaries_failed,
+      }));
+      return respond({ ok: true, job, ...report });
+    }
 
     const report = await runNotificationJob(admin, mode);
     // The run's shape, for the cron line's log. No address appears in it.
@@ -113,7 +151,7 @@ Deno.serve(async (req: Request) => {
     }));
     return respond({ ok: true, ...report });
   } catch (err) {
-    logFailure(FN, 'run', { purpose: 'notifications', mode }, err);
+    logFailure(FN, 'run', { purpose: job, mode }, err);
     return respond({ ok: false, reason: 'run_failed' }, 500);
   }
 });

@@ -559,6 +559,10 @@ export interface LogContext {
   request_id?: string;
   purpose?: string;
   user_id?: string;
+  // The scheduled jobs' own keys (notify-expiries). Counts and ids, never an address.
+  company_id?: string;
+  notification_type?: string;
+  mode?: string;
 }
 
 export function logFailure(fn: string, step: string, context: LogContext, err: unknown): void {

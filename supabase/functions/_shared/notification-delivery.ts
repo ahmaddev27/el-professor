@@ -274,7 +274,7 @@ async function settle(
  * not know, so nothing is claimed and the next run asks again; a transient
  * GoTrue failure must not silently burn a TÜV warning.
  */
-async function loadRecipients(
+export async function loadRecipients(
   admin: SupabaseClient,
   companyId: string,
   now: Date,

@@ -257,6 +257,43 @@ Start here when you pick up this project. Read it together with [CLAUDE.md](CLAU
 
   **The one thing to remember when writing a new kit file:** a probe run after the owner has run the same code path is not a probe. And measure the mechanism — do not read it off the PostgreSQL source. This branch did the latter twice and was wrong both times, in the same direction, which made the wrong answer look confirmed.
 
+- **The Abrechnung on a schedule, and the manager's summary (branch `feat/abrechnung-schedule`, migration `20261003120000`), what to know:**
+
+  **What the owner asked for (03.10.2026).** The administrator picks a weekday and a time per company and the Abrechnung goes to each driver automatically ("Monday 8:00"), and one more mail goes to the manager with every driver and their Abrechnung. Both are switches on one card, **Einstellungen -> Abrechnung per E-Mail** (`src/components/AbrechnungScheduleCard.tsx`), its own save, outside the settings form.
+
+  **What ships.** `public.abrechnung_schedules` (one row per company: `driver_mail_enabled`, `manager_summary_enabled`, `weekday` 0-6 with **0 = Sunday**, `send_time` Europe/Berlin, `armed_at`) and `public.abrechnung_deliveries` (the record and the dedupe rule); four `service_role`-only RPCs (`abrechnung_schedule_candidates`, `abrechnung_week_figures`, `abrechnung_delivery_claim`, `abrechnung_delivery_settle`); the pure decision in `supabase/functions/_shared/abrechnung-schedule-core.ts`; two renderers in `_shared/abrechnung-mail.ts` (the driver mail gained `imageAttached`, default true, so the screen's send is byte-identical; the summary is new); the Deno I/O in `_shared/abrechnung-delivery.ts`. **It is a second job of `notify-expiries`, not a new function:** the same caller (a cron line holding the service key), so no line in `PUBLIC_FUNCTIONS`/`FUNCTION_ENV` or the compose file. `{"job":"abrechnung"}` selects it; a body with no `job` is the TUEV / trial job, so the installed notification line is unchanged; an unknown `job` answers 400 and sends nothing.
+
+  **Rules that are easy to break.**
+  - **The week mailed is the most recently completed one**, named by its Monday, whatever weekday is chosen (a Sunday-evening schedule does not mail the week still running). That Monday is the dedupe key: `UNIQUE (company_id, kind, target_id, period_key)`, claimed **before** the send and never retried, so a crash loses a mail and never repeats one, and two overlapping runs or a line installed twice are safe.
+  - **An occurrence is sent only inside 12 hours after its moment** (`GRACE_MINUTES`), never later. A cron that was down for a day sends nothing late. So the line may run every ten minutes and need not be exact.
+  - **`armed_at` is stamped by a trigger whenever a switch, the weekday or the time changes**, and only an occurrence after it is sent. Switching the schedule on at Tuesday noon for "Monday 08:00" does not send last Monday's mail.
+  - **A driver's address is read in SQL from `drivers`**, matched to the Abrechnung row's name like `driverRecipients.ts` (case and inner spacing only). A name two drivers share is **skipped, never guessed**; a driver who is not `active` or has no address is skipped; the report carries counts, never a name or an address.
+  - **The managers are `selectActivationCodeRecipients`' company branch** (`loadRecipients` in `notification-delivery.ts`, now exported), the same rule the notifications use.
+  - **The figures are computed a second time** (`abrechnung_week_figures`), because the screen reads `abrechnung_weekly` under the caller's RLS and a cron line has no caller. The parity with the screen is stated in the migration header, not proved by a kit file: **before arming, compare one week's dry run with the Abrechnung screen for the same week on staging.**
+  - **The scheduled driver mail does not say the card is attached**, because the PNG is drawn in the browser. No figure is in either subject, and neither mail calls itself a Rechnung, Quittung or Lohnabrechnung.
+  - A company whose subscription is not live and whose trial is not running is not mailed (the boundary of `subscriptionIsActive()`), and `approval_status` / `status` are the notification job's.
+
+  **The dry run, to take first. Nothing is claimed, sent or written.**
+
+  ```bash
+  ssh elprofessor 'cd /srv/PRO-staging/deploy && curl -fsS -X POST \
+    -H "Authorization: Bearer $(tr -d "\r" < .env | sed -n "s/^SERVICE_ROLE_KEY=//p")" \
+    -H "Content-Type: application/json" -d "{\"job\":\"abrechnung\",\"mode\":\"dry_run\"}" \
+    https://api-staging.elprofessor.eu/functions/v1/notify-expiries' | python3 -m json.tool
+  ```
+
+  A dry run is empty outside a schedule's window (`companies_due: 0`), which is correct. To see it plan something, an administrator on an `@example.com` test company switches both boxes on for a time a few minutes ahead, and the dry run is taken inside the window. Read `companies_due` and the `items`: per company the week (`week_monday`), `driver_rows`, the driver counts (`planned`, `no_address`, `ambiguous`, `already_claimed`) and the manager summary outcome (`planned`, `no_rows`, `no_recipients`, ...). No address and no name appears in it.
+
+  **The host line, to add only after the owner has read a dry run and said yes. Staging first.** A new file `/etc/cron.d/el-professor-abrechnung` (root, mode 0644), modelled on `el-professor-notifications`. Every ten minutes; the job itself decides in Europe/Berlin time whether anything is due, so the host's time zone does not matter.
+
+  ```
+  */10 * * * *  root cd /srv/PRO-staging/deploy && tr -d '\r' < .env | grep -qx 'PROJECT_NAME=ya-mobility-staging' && flock -n /run/lock/el-professor-abrechnung-staging.lock curl -fsS -m 300 -X POST -H "Authorization: Bearer $(tr -d '\r' < /srv/PRO-staging/deploy/.env | sed -n 's/^SERVICE_ROLE_KEY=//p')" -H 'Content-Type: application/json' -d '{"job":"abrechnung","mode":"send"}' https://api-staging.elprofessor.eu/functions/v1/notify-expiries 2>&1 | logger -t el-professor-abrechnung
+  ```
+
+  The production line is the same with `/srv/PRO`, `PROJECT_NAME=ya-mobility`, `el-professor-abrechnung-production.lock` and `https://api.elprofessor.eu`. **A body that does not parse is a dry run**, so a mistyped line mails nobody. Read the runs with `journalctl -t el-professor-abrechnung`. **Staging mail reaches real people** (Mailpit relays all but `@example.com` through production's Resend): a staging company that switches this on mails its real drivers and administrators, and staging holds a copy of production's data. Do not arm the staging line without the owner's explicit yes on that point. Nothing is sent until a line is installed; this is a host step like the notifications.
+
+  **What was not run.** The migration and the RLS kit (VPS, yours): `tests/rls/matrix.sql` will report `abrechnung_schedules` and `abrechnung_deliveries` as UNCOVERED (a warning) and the four RPCs; their lines are not added because `tests/rls/` was outside this slice. The two tables carry both context triggers, so `platform-contexts.sql` section 14 and `support-write-audit.sql` section 1 should pass. A kit file for the parity of `abrechnung_week_figures` with `abrechnung_weekly` is the follow-up worth writing.
+
 - **Notifications — the feature the settings screen never had (branch `feat/notifications`, migration `20260924100000`), what to know:**
 
   **What was missing.** `NotificationsPage` let a company switch four types on and off and wrote them to `notification_settings`, and **no other code in the repository read that table**. No scheduler, no sender, no template: a TÜV expiry produced nothing. CLAUDE.md carried it under *Known defects*; that bullet is rewritten in this PR.

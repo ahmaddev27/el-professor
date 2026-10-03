@@ -22,6 +22,7 @@ import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { useTranslation } from '../contexts/LanguageContext';
 import { Alert, Button, Card, CardContent, CardHeader, CardTitle, Field, Input, NativeSelect, PageHeader, buttonVariants, cn } from '../components/ui';
 import { controlFrameClass } from '../components/ui/Input';
+import AbrechnungScheduleCard from '../components/AbrechnungScheduleCard';
 
 const SettingsPage: React.FC = () => {
   const { t } = useTranslation();
@@ -791,6 +792,9 @@ const SettingsPage: React.FC = () => {
           </div>
         </fieldset>
       </form>
+
+      {/* Its own row and its own save, so it sits beside the form, not in it. */}
+      <AbrechnungScheduleCard readOnly={companyScope.readOnly} />
     </div>
   );
 };
