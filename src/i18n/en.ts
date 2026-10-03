@@ -5859,4 +5859,11 @@ export const en: PartialDictionary = {
   'abr.mail.skipUnknown':       'not in the driver list',
   'abr.mail.unknown':           '{name} is not in this company\'s driver list.',
   'abr.mail.unknownTitle':      'Driver not found',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'mplan.split.explain':      'A block over the maximum is split at the largest gap it already has, so two drivers can take it. The gap is widened to the switch duration — and the rides falling inside it drop out of the plan: while the car changes hands, nobody is driving. Measured: exactly one ride per split. No ride time is moved.',
+  'mplan.split.givenUp':      '{count} ride(s) fall inside a handover gap and are assigned to nobody. They stay unchanged in the Fahrtenbuch — only this plan does not carry them.',
+  'mplan.split.givenUpTitle': 'Rides given up for the handover',
+  'mplan.split.hint':         'Off: a block that is too long stays whole and is only reported.',
+  'mplan.split.label':        'Split long blocks for a driver handover',
 };

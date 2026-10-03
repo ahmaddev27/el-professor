@@ -382,6 +382,7 @@ describe('buildBlocks — §14 edge cases, all surfaced', () => {
       // it is what catches a key added to the result and left unreported.
       shortBlocks: [],
       longBlocks: [],
+      handoverTrips: [],
     });
   });
 });
@@ -618,5 +619,153 @@ describe('buildBlocks — the maximum block length', () => {
     );
     expect(r.blocks[0].spanMinutes).toBe(840);
     expect(r.longBlocks).toEqual([]);
+  });
+});
+
+
+// ─── Splitting a long block at the gap it already has (owner, 02.10.2026) ────
+//
+// His problem, in his words: a driver works eight hours, ride after ride, with no
+// gap anywhere long enough to part two blocks — so the eight hours is one block
+// and one driver's, and he wants two drivers.
+//
+// The gap this creates is exactly the switch duration, which is the rule §3
+// already holds: parting two blocks takes that long because **changing driver or
+// car takes that long**. The rides inside the gap are the ones nobody can drive
+// while the car is handed over, so they are given up and named — never moved.
+//
+// Measured on the owner's own data before this was written: 79 blocks over six
+// hours with no natural break; splitting each at its midpoint gives up 94 rides,
+// widening the gap already inside gives up 79 — one per block, which is the floor
+// and not a tuning choice.
+
+describe('buildBlocks — splitting a long block for a handover', () => {
+  /** Eight hours of back-to-back rides, with one 22-minute lull in the middle. */
+  const eightHours = () => [
+    trip({ id: 'a', startTime: '06:00', endTime: '08:00' }),
+    trip({ id: 'b', startTime: '08:10', endTime: '10:00' }),
+    // The lull: 10:00 to 10:22. The widest gap, and in the middle half.
+    trip({ id: 'c', startTime: '10:22', endTime: '12:00' }),
+    trip({ id: 'd', startTime: '12:05', endTime: '14:00' }),
+  ];
+
+  it('does nothing unless it is asked for', () => {
+    // Giving up a ride is a decision about a month's revenue, so it is never a
+    // default. Off, the block stays whole and is merely reported as long.
+    const r = buildBlocks(eightHours(), { switchMinutes: 30, maxBlockMinutes: 360 });
+    expect(r.blocks).toHaveLength(1);
+    expect(r.handoverTrips).toEqual([]);
+    expect(r.longBlocks).toHaveLength(1);
+  });
+
+  it('splits at the widest gap and gives up the rides inside the handover', () => {
+    const r = buildBlocks(eightHours(), {
+      switchMinutes: 30, maxBlockMinutes: 360, splitLongBlocks: true,
+    });
+
+    expect(r.blocks).toHaveLength(2);
+    // The handover runs 10:00 to 10:30, and 'c' starts at 10:22 — inside it, so it
+    // is given up. 'd' at 12:05 is after it.
+    expect(r.blocks[0].trips.map(t => t.tripId)).toEqual(['a', 'b']);
+    expect(r.blocks[1].trips.map(t => t.tripId)).toEqual(['d']);
+    expect(r.handoverTrips.map(t => t.tripId)).toEqual(['c']);
+  });
+
+  it('gives up exactly one ride — the floor, and it is arithmetic not tuning', () => {
+    // A gap ends at the instant the next ride begins, so widening it must swallow
+    // that ride. No arrangement gives up none without moving a ride to a time it
+    // did not happen, which is the option the owner weighed and set aside.
+    const r = buildBlocks(eightHours(), {
+      switchMinutes: 30, maxBlockMinutes: 360, splitLongBlocks: true,
+    });
+    expect(r.handoverTrips).toHaveLength(1);
+  });
+
+  it('never moves a ride: every remaining time is the one that was imported', () => {
+    // The assertion the whole design rests on. The owner's other option shifted
+    // every later ride by half an hour; this one moves nothing.
+    const before = buildBlocks(eightHours(), { switchMinutes: 30 });
+    const after = buildBlocks(eightHours(), {
+      switchMinutes: 30, maxBlockMinutes: 360, splitLongBlocks: true,
+    });
+
+    const stamp = (r: ReturnType<typeof buildBlocks>) =>
+      r.blocks.flatMap(b => b.trips).map(t => `${t.tripId}:${t.startMs}-${t.endMs}`);
+    const kept = new Set(after.blocks.flatMap(b => b.trips).map(t => t.tripId));
+    const afterStamps = stamp(after);
+
+    for (const entry of stamp(before)) {
+      if (!kept.has(entry.split(':')[0])) continue;
+      expect(afterStamps, `${entry} was moved`).toContain(entry);
+    }
+  });
+
+  it('names what it gave up, with the block and the vehicle it came from', () => {
+    // A ride that leaves the plan unaccounted for is indistinguishable from a
+    // defect, so the trade the operator agreed to is written down.
+    const r = buildBlocks(eightHours(), {
+      switchMinutes: 30, maxBlockMinutes: 360, splitLongBlocks: true,
+    });
+    const given = r.handoverTrips[0];
+    expect(given.vehicleId).toBe('car-A');
+    expect(given.blockId).toContain('car-A|');
+    expect(given.endMs).toBeGreaterThan(given.startMs);
+  });
+
+  it('never cuts a single ride, however long it runs', () => {
+    // Nine hours in one ride. There is no gap at all, and a ride is never parted.
+    const r = buildBlocks(
+      [trip({ id: 'a', startTime: '06:00', endTime: '15:00' })],
+      { switchMinutes: 30, maxBlockMinutes: 360, splitLongBlocks: true },
+    );
+    expect(r.blocks).toHaveLength(1);
+    expect(r.blocks[0].trips).toHaveLength(1);
+    expect(r.handoverTrips).toEqual([]);
+    // And it is still reported, so the screen can say why it stayed long.
+    expect(r.longBlocks).toHaveLength(1);
+  });
+
+  it('refuses a split that would leave a part under the minimum', () => {
+    // Otherwise this pass and the merge pass undo each other.
+    const r = buildBlocks(eightHours(), {
+      switchMinutes: 30, maxBlockMinutes: 360, minBlockMinutes: 300, splitLongBlocks: true,
+    });
+    expect(r.blocks).toHaveLength(1);
+    expect(r.handoverTrips).toEqual([]);
+  });
+
+  it('does nothing without a maximum or without a switch duration', () => {
+    // Both are needed to mean anything: one says which block is too long, the
+    // other how wide the gap must be. Neither is ever guessed.
+    expect(buildBlocks(eightHours(), { switchMinutes: 30, splitLongBlocks: true })
+      .handoverTrips).toEqual([]);
+    expect(buildBlocks(eightHours(), {
+      switchMinutes: 0, maxBlockMinutes: 360, splitLongBlocks: true,
+    }).handoverTrips).toEqual([]);
+  });
+
+  it('splits again when a part is still too long', () => {
+    // Fourteen hours becomes three shifts rather than one long and one slightly
+    // shorter.
+    // Seven rides, not five: the first draft of this fixture had too few, and the
+    // second split was refused because giving up the one ride after the gap left
+    // nothing on the far side. That refusal is correct — a split that empties one
+    // half is not a split — so the fixture was corrected rather than the rule.
+    const long = [
+      trip({ id: 'a', startTime: '06:00', endTime: '08:00' }),
+      trip({ id: 'b', startTime: '08:20', endTime: '10:00' }),
+      trip({ id: 'c', startTime: '10:10', endTime: '12:00' }),
+      trip({ id: 'd', startTime: '12:25', endTime: '14:00' }),
+      trip({ id: 'e', startTime: '14:10', endTime: '16:00' }),
+      trip({ id: 'f', startTime: '16:20', endTime: '18:00' }),
+      trip({ id: 'g', startTime: '18:10', endTime: '20:00' }),
+    ];
+    const r = buildBlocks(long, {
+      switchMinutes: 30, maxBlockMinutes: 300, splitLongBlocks: true,
+    });
+    expect(r.blocks.length).toBeGreaterThan(2);
+    for (const block of r.blocks) {
+      expect(block.spanMinutes).toBeLessThanOrEqual(300);
+    }
   });
 });

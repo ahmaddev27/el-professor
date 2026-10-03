@@ -301,8 +301,12 @@ interface GeneratedPlan {
   maxBlockMinutes: number;
   /** Blocks the merge pass could not bring up to that minimum (§14). */
   shortBlocks: { blockId: string; spanMinutes: number }[];
-  /** Blocks longer than the maximum, which are reported and never split. */
+  /** Blocks longer than the maximum that could not be split. */
   longBlocks: { blockId: string; spanMinutes: number }[];
+  /** Rides given up to a handover, so step 3 can name every one of them. */
+  handoverTrips: {
+    tripId: string; blockId: string; vehicleId: string; startMs: number; endMs: number;
+  }[];
   seed: number;
   /**
    * What the previous assignment looked like, so step 5 can say what changed.
@@ -621,6 +625,18 @@ export default function MonthlyPlanPage() {
   const [minBlockText, setMinBlockText] = useState(String(DEFAULT_MIN_BLOCK_MINUTES));
   const [maxBlockText, setMaxBlockText] = useState(String(DEFAULT_MAX_BLOCK_MINUTES));
 
+  /**
+   * Split a block that is too long by widening a gap it already has, so two
+   * drivers can share it.
+   *
+   * **Off by default, and that is the decision not the default.** The split gives
+   * up the rides that fall inside the handover — nobody is driving while the car
+   * changes hands — and giving up a ride is a decision about a month's revenue.
+   * Measured on real data: exactly one ride per split, which is the floor rather
+   * than a figure that can be tuned down.
+   */
+  const [splitLongBlocks, setSplitLongBlocks] = useState(false);
+
   /** 0 is a legal value for both, and means "no minimum" / "split at every gap". */
   const wholeMinutes = (text: string): number | null => {
     const trimmed = text.trim();
@@ -664,7 +680,7 @@ export default function MonthlyPlanPage() {
   // one screen 2 currently holds.
   useEffect(() => {
     setPlan(null);
-  }, [selectedDriverIds, switchMinutes, minBlockMinutes, maxBlockMinutes]);
+  }, [selectedDriverIds, switchMinutes, minBlockMinutes, maxBlockMinutes, splitLongBlocks]);
 
   const generate = async (seed: number) => {
     if (!companyId || !trips || !selectedMonth) return;
@@ -769,6 +785,7 @@ export default function MonthlyPlanPage() {
         switchMinutes: minutes,
         minBlockMinutes: minBlockMinutes ?? 0,
         maxBlockMinutes: maxBlockMinutes ?? 0,
+        splitLongBlocks,
       });
       const availability = buildAvailability(notes, built.blocks, selectedDriverIds);
 
@@ -787,6 +804,7 @@ export default function MonthlyPlanPage() {
         maxBlockMinutes: maxBlockMinutes ?? 0,
         shortBlocks: built.shortBlocks,
         longBlocks: built.longBlocks,
+        handoverTrips: built.handoverTrips,
         seed,
         previousAssignments: null,
       });
@@ -1544,6 +1562,24 @@ export default function MonthlyPlanPage() {
                   />
                 </Field>
 
+                {/* A switch and not a number: it is on or off, and what it costs
+                    is shown on the next step rather than guessed at here. */}
+                <Field
+                  label={t('mplan.split.label')}
+                  hint={t('mplan.split.hint')}
+                  className="sm:col-span-2"
+                >
+                  <label className="flex items-start gap-3 text-sm">
+                    <input
+                      type="checkbox"
+                      className="mt-1 size-4 shrink-0 accent-[rgb(var(--brand))]"
+                      checked={splitLongBlocks}
+                      onChange={event => setSplitLongBlocks(event.target.checked)}
+                    />
+                    <span className="text-fg-muted">{t('mplan.split.explain')}</span>
+                  </label>
+                </Field>
+
                 <Field
                   label={t('mplan.maxBlock.label')}
                   hint={t('mplan.maxBlock.hint')}
@@ -1670,6 +1706,23 @@ export default function MonthlyPlanPage() {
               rule has already split at every gap long enough for a driver to
               change, so there is no point left inside one where a change could
               happen, and a single ride is never cut. */}
+          {/* What the split cost, ride by ride. The owner agreed to give these up;
+              what he did not agree to is their disappearing without a name. A ride
+              that leaves the plan unaccounted for is indistinguishable from a
+              defect. */}
+          {plan.handoverTrips.length > 0 ? (
+            <Alert tone="caution" title={t('mplan.split.givenUpTitle')}>
+              <p>{t('mplan.split.givenUp', { count: plan.handoverTrips.length })}</p>
+              <ul className="mt-2 space-y-1 text-[13px]">
+                {plan.handoverTrips.slice(0, 12).map(given => (
+                  <li key={given.tripId} className="tabular-nums">
+                    {given.vehicleId} · {dateTimeText(given.startMs)} – {timeText(given.endMs)}
+                  </li>
+                ))}
+              </ul>
+            </Alert>
+          ) : null}
+
           {plan.longBlocks.length > 0 ? (
             <Alert tone="caution" title={t('mplan.blocks.stillLongTitle')}>
               <p>

@@ -64,6 +64,20 @@ Start here when you pick up this project. Read it together with [CLAUDE.md](CLAU
 
   **Two things that look like defects and are not.** October's 22 trips carry no `original_driver_id`, so the Fahrtenanalyse shows no drivers for that month — measured: 13 959 of staging's 13 981 trips do carry it, and the 22 are that earlier seed. October is left alone because a confirmed monthly plan references its trips and that column is immutable. And the analysis screen opens on the month that **has** an import rather than on the newest file, which is the documented behaviour.
 
+- **A long block can be split for a driver handover (02.10.2026), and it is off by default.**
+
+  The owner's problem, in his words: a driver works eight hours, ride after ride, with no gap anywhere long enough to part two blocks — so the eight hours is one block and one driver's, and he wants two drivers. His first idea was to split at the midpoint and **shift every later ride by half an hour**.
+
+  **Measured on his own data before anything was built** (Y&A Mobility, every imported month): 79 blocks run over six hours with no natural break, 1 532 rides between them. Splitting each at its midpoint gives up **94 rides**; widening the largest gap already inside the block gives up **79** — and 79 over 79 blocks is not a coincidence, it is the floor. A gap ends at the instant the next ride begins, so widening it must always swallow that ride. **No arrangement gives up none without moving a ride to a time it did not happen.**
+
+  He chose the no-shift option on that number. What it buys: not one ride time moves, §10's planned Fahrtenbuch stays a verbatim copy of the import, and no minute slides into a night band to change an estimated salary.
+
+  **The rule it preserves rather than breaks:** §3 keeps two rides in one block when the gap is shorter than the switch duration **because changing driver or car takes that long**. The gap this creates is exactly `switchMinutes`, so the rides inside it are the ones nobody can drive while the car is handed over. They are set aside and **named on screen, ride by ride** — a ride that leaves the plan unaccounted for is indistinguishable from a defect.
+
+  **Off by default on purpose:** giving up a ride is a decision about a month's revenue, and a default that quietly makes it is a default that decides for the operator. The split also refuses to leave a part under `minBlockMinutes`, or this pass and the merge pass would undo each other, and it never cuts a single ride however long it runs.
+
+  Two fixtures in its tests were wrong and were corrected rather than the rule: a five-ride month where the second split was refused **because giving up the one ride after the gap left nothing on the far side** — that refusal is correct, a split that empties one half is not a split.
+
 - **The Abrechnung by e-mail — in progress, two parts of three (02.10.2026).**
 
   The owner's task: every driver gets an e-mail and a phone number, the weekly Abrechnung can be mailed to one driver from its detail dialog, and one button on the week's Total row mails every driver who has an address.
