@@ -68,7 +68,17 @@ function run(args: string[], stdin = ''): { output: string; status: number | nul
     input: stdin,
     timeout: 20_000,
   });
-  return { output: `${result.stdout}${result.stderr}`.trim(), status: result.status };
+  // `\r` is stripped because `kong_parse_inputs` prints through `python3`, and
+  // Python's text-mode stdout translates `\n` to `\r\n` **on Windows only**. The
+  // two assertions that compare a multi-line answer therefore failed on a Windows
+  // dev machine and passed in CI, which made `npm run build` unrunnable locally —
+  // and a gate nobody can run is worse than one that ignores a carriage return.
+  // `deploy.sh` runs on Linux and nowhere else, so there is no production case
+  // where a `\r` here would be real.
+  return {
+    output: `${result.stdout}${result.stderr}`.replace(/\r/g, '').trim(),
+    status: result.status,
+  };
 }
 
 const CLIENT = '123456789012-abcdefghijklmnopqrstuvwxyz012345.apps.googleusercontent.com';
@@ -327,7 +337,11 @@ describe.skipIf(!hasPython)('kong_parse_inputs', () => {
   it('writes the kong environment, sorted and nothing else, to a mode 600 env file, and prints only the image', () => {
     const envFile = freshPath();
     expect(run(['kong_parse_inputs', envFile], composeAnswer(KONG))).toEqual({ output: 'kong:2.8.1\nPASSED', status: 0 });
-    expect(readFileSync(envFile, 'utf8')).toBe(
+    // `\r` stripped for the same reason as in `run()` above: the file is written by
+    // `python3`, whose text-mode output is CRLF on Windows and LF on the Linux host
+    // this script runs on. What the assertion is about is which keys are there and
+    // in which order, and that is unaffected.
+    expect(readFileSync(envFile, 'utf8').replace(/\r/g, '')).toBe(
       [
         'ANON_KEY=anon.key.value',
         'APP_URL=https://app.example.test',
