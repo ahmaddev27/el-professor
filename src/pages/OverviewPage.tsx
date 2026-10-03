@@ -341,7 +341,11 @@ const OverviewPage: React.FC = () => {
     setFixedCosts(await fetchAllPaginated<any>(
       (from, to) => supabase
         .from('fixed_costs')
-        .select('id, description, amount')
+        // `period_month` and `created_at` are what make a fixed cost belong to a
+        // month (`20261003110000`). Without them every row reads as the baseline
+        // and the Overview sums every month the company has ever recorded into
+        // one Gewinn figure.
+        .select('id, description, amount, period_month, created_at')
         .eq('company_id', companyId)
         .order('id', { ascending: true })
         .range(from, to),

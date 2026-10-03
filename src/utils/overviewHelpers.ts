@@ -10,6 +10,7 @@ import {
   type CashMovementRow,
 } from './cashLedger';
 import { salaryDueState } from './salaryDue';
+import { resolveMonth, sumEuro } from './fixedCostMonths';
 
 // Type-only: this module names a dictionary key beside its German text.
 import type { EngineMessageKey, EngineMessageVars } from '../i18n/engineMessageTypes';
@@ -37,6 +38,19 @@ export interface FixedCostItem {
   id: string;
   description: string;
   amount: number;
+  /**
+   * The month this cost belongs to, `YYYY-MM-DD` on the first (`20261003110000`),
+   * or null for a **baseline** row — one entered before fixed costs became
+   * monthly, which applies to every month until that month has rows of its own.
+   *
+   * **Required, deliberately.** Making it optional would let a screen that forgot
+   * to select the column compile and then read every row as baseline, which is
+   * exactly the double-count this field exists to stop — and it would do it
+   * silently. Required, the compiler names the screen instead.
+   */
+  period_month: string | null;
+  /** Used to date a baseline row when listing which months exist. */
+  created_at?: string | null;
 }
 
 export interface SalaryRecord {
@@ -107,6 +121,26 @@ export interface PeriodMetrics {
   profitMargin: number;  // profit / umsatz * 100
 }
 
+/**
+ * The fixed costs that apply to the month a period starts in.
+ *
+ * **Not a sum of every row.** Since `20261003110000` fixed costs are per month:
+ * a month carries its own rows, or inherits the newest earlier month's, or falls
+ * back to the baseline rows that carry no month at all. Summing the table — which
+ * is what this did until 03.10.2026 — adds every month the company has ever
+ * recorded together, so the Gewinn figure on the Overview would drop by a whole
+ * month's rent for every month that passes. Harmless today only because no
+ * company has a second month yet; armed by the first operator who edits one.
+ *
+ * The period's **start** decides the month, not its end: a period that straddles
+ * two months belongs to the one it opens in, which is the same rule the rest of
+ * this module applies to a salary (`period_start`).
+ */
+function fixedCostsForPeriod(fixedCosts: FixedCostItem[], start: Date): number {
+  const month = `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, '0')}`;
+  return sumEuro(resolveMonth(fixedCosts, month).rows);
+}
+
 export function calcPeriodMetrics(
   incomes: Income[],
   salaries: SalaryRecord[],
@@ -141,7 +175,7 @@ export function calcPeriodMetrics(
   const totalIncome = umsatz + bargeld + trinkgeld;
   const salaryTotal = periodSalaries.reduce((s, sal) => s + Number(sal.amount_due), 0);
   const expenses = periodReceipts.reduce((s, r) => s + r.expense, 0);
-  const fixedTotal = fixedCosts.reduce((s, c) => s + Number(c.amount), 0);
+  const fixedTotal = fixedCostsForPeriod(fixedCosts, start);
   const totalCosts = expenses + fixedTotal;
   const profit = umsatz - salaryTotal - totalCosts;
   const profitMargin = umsatz > 0 ? (profit / umsatz) * 100 : 0;
