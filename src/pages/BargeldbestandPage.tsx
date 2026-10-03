@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { AlertTriangle, Banknote, Download, Filter, Receipt as ReceiptIcon, RotateCcw, TrendingDown, TrendingUp, Wallet } from 'lucide-react';
+import { AlertTriangle, Banknote, Download, Filter, Minus, PiggyBank, Plus, Receipt as ReceiptIcon, RotateCcw, TrendingDown, TrendingUp, Wallet } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
@@ -9,6 +9,8 @@ import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { useTranslation } from '../contexts/LanguageContext';
 import { cashLedgerInScope } from '../utils/salaryCashReceiptFlow';
 import { fetchAllPaginated } from '../utils/fetchAllPaginated';
+import CashEntryDialog from '../components/CashEntryDialog';
+import type { CashEntryDirection } from '../utils/cashEntry';
 import {
   bargeldIncomeEntries,
   belegEntries,
@@ -104,6 +106,8 @@ const EMPTY_TOTALS: CashLedgerTotals = {
   bargeldIncomeCents: 0,
   belegExpenseCents: 0,
   salaryPayoutCents: 0,
+  manualInCents: 0,
+  manualOutCents: 0,
 };
 
 /** PostgREST puts the whole `.in()` list in the URL, so ask in chunks. */
@@ -122,7 +126,8 @@ export default function BargeldbestandPage() {
   const [endDate, setEndDate] = useState('');
   const [drivers, setDrivers] = useState<string[]>([]);
   const [loadFailed, setLoadFailed] = useState(false);
-  const { user, loading: authLoading, companyId: ownCompanyId } = useAuth();
+  const { user, loading: authLoading, companyId: ownCompanyId, can } = useAuth();
+  const [entryDirection, setEntryDirection] = useState<CashEntryDirection | null>(null);
   const {
     effectiveCompanyId: companyId, isViewingAsCompany, platformReadsCompanyData, ownCompanyReadable,
   } = useSuperAdmin();
@@ -150,6 +155,8 @@ export default function BargeldbestandPage() {
     beleg: t('bargeld.beleg'),
     gehaltsquittung: t('bargeld.gehaltsquittung'),
     gehaltsquittungStorno: t('bargeld.gehaltsquittungStorno'),
+    manualIn: t('bargeld.manualIn'),
+    manualOut: t('bargeld.manualOut'),
     other: t('bargeld.cashMovement'),
   };
 
@@ -367,6 +374,11 @@ export default function BargeldbestandPage() {
   // formatted once through utils/money.ts (formatEuroCents): no arithmetic here.
   // euro() above still writes the Excel export exactly as it always did.
 
+  // Booking is the company's own act: the database refuses a platform context
+  // outright (platform_session_not_allowed), so the buttons are not offered
+  // there, nor where the ledger is not even readable.
+  const canBook = ledgerInScope && !!ownCompanyId && ownCompanyId === companyId && can('cash-balance', 'edit');
+  const hasManualEntries = totals.manualInCents + totals.manualOutCents > 0;
   const filtersActive = selectedDriver !== 'all' || selectedType !== 'all' || startDate || endDate;
   const balancePositive = totals.balanceCents >= 0;
 
@@ -419,7 +431,11 @@ export default function BargeldbestandPage() {
     },
   ];
 
-  const kpiGrid = cn('grid grid-cols-1 gap-4 sm:grid-cols-2', ledgerInScope ? 'xl:grid-cols-4' : 'xl:grid-cols-3');
+  const showManualCard = ledgerInScope && hasManualEntries;
+  const kpiGrid = cn(
+    'grid grid-cols-1 gap-4 sm:grid-cols-2',
+    !ledgerInScope ? 'xl:grid-cols-3' : showManualCard ? 'xl:grid-cols-5' : 'xl:grid-cols-4',
+  );
 
   const cards = isLoading ? (
     <div className={kpiGrid}>
@@ -455,13 +471,27 @@ export default function BargeldbestandPage() {
           caption={t('bargeld.salaryPayoutsHint')}
         />
       )}
+      {showManualCard && (
+        <KpiCard
+          label={t('bargeld.manualCard')}
+          value={formatEuroCents(totals.manualInCents - totals.manualOutCents)}
+          icon={PiggyBank}
+          caption={t('bargeld.manualCardHint')}
+        />
+      )}
       <KpiCard
         label={t('bargeld.currentBalance')}
         value={
           <span className={balancePositive ? undefined : 'text-caution'}>{formatEuroCents(totals.balanceCents)}</span>
         }
         icon={balancePositive ? Wallet : AlertTriangle}
-        caption={ledgerInScope ? t('bargeld.balanceFormula') : t('bargeld.balanceFormulaNoLedger')}
+        caption={
+          !ledgerInScope
+            ? t('bargeld.balanceFormulaNoLedger')
+            : showManualCard
+              ? t('bargeld.balanceFormulaManual')
+              : t('bargeld.balanceFormula')
+        }
       />
     </div>
   );
@@ -472,6 +502,18 @@ export default function BargeldbestandPage() {
         title={t('nav.bargeldbestand')}
         actions={
           <>
+            {canBook && (
+              <>
+                <Button onClick={() => setEntryDirection('in')} disabled={isLoading || loadFailed}>
+                  <Plus aria-hidden />
+                  {t('bargeld.addIn')}
+                </Button>
+                <Button variant="secondary" onClick={() => setEntryDirection('out')} disabled={isLoading || loadFailed}>
+                  <Minus aria-hidden />
+                  {t('bargeld.addOut')}
+                </Button>
+              </>
+            )}
             <Input
               type="month"
               value={selectedMonth}
@@ -562,6 +604,7 @@ export default function BargeldbestandPage() {
           />
         </section>
       </div>
+      <CashEntryDialog direction={entryDirection} onClose={() => setEntryDirection(null)} onBooked={() => loadCashData()} />
     </div>
   );
 }

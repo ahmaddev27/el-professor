@@ -9,6 +9,8 @@ import { toCents } from './money';
  * out is what leaves the till: a Beleg (`receipts.expense`) and, since
  * 20260914140000, a Gehaltsquittung — the cash salary payment
  * `confirm_salary_cash_payment` books as `cash_movements(direction = 'out')`.
+ * Manual entries (`manual_in`, `manual_out`, written by `record_cash_movement`)
+ * move the till by their direction like any other movement.
  * Voiding one books the cash back on the day of the void
  * (`gehaltsquittung_storno`, `direction = 'in'`), the way a cash book corrects
  * an entry rather than rewriting the day it was paid. So a receipt paid in
@@ -55,6 +57,10 @@ export type CashLedgerSource =
   | 'beleg'
   | 'gehaltsquittung'
   | 'gehaltsquittung_storno'
+  /** Cash an owner put into the till by hand (record_cash_movement). */
+  | 'manual_in'
+  /** Cash taken out of the till by hand that is neither a Beleg nor a salary. */
+  | 'manual_out'
   /** A `cash_movements.source_type` this module does not know yet. */
   | 'other';
 
@@ -84,6 +90,10 @@ export interface CashLedgerTotals {
   belegExpenseCents: number;
   /** Gehaltsquittungen minus their Stornos: the cash salaries took out of the till. */
   salaryPayoutCents: number;
+  /** Cash added by hand (`manual_in`). Part of cashIn and of the balance. */
+  manualInCents: number;
+  /** Cash paid out by hand (`manual_out`). Part of cashOut and of the balance. */
+  manualOutCents: number;
 }
 
 // ── Source rows, as the tables return them ───────────────────────────────────
@@ -127,6 +137,8 @@ export interface CashLedgerLabels {
   beleg: string;
   gehaltsquittung: string;
   gehaltsquittungStorno: string;
+  manualIn: string;
+  manualOut: string;
   /** A movement whose `source_type` this module does not know yet. */
   other: string;
 }
@@ -242,6 +254,7 @@ export function cashMovementEntries(
 
 function cashMovementSource(sourceType: string): CashLedgerSource {
   return sourceType === 'gehaltsquittung' || sourceType === 'gehaltsquittung_storno'
+    || sourceType === 'manual_in' || sourceType === 'manual_out'
     ? sourceType
     : 'other';
 }
@@ -252,6 +265,10 @@ function sourceLabel(source: CashLedgerSource, labels: CashLedgerLabels): string
       return labels.gehaltsquittung;
     case 'gehaltsquittung_storno':
       return labels.gehaltsquittungStorno;
+    case 'manual_in':
+      return labels.manualIn;
+    case 'manual_out':
+      return labels.manualOut;
     default:
       return labels.other;
   }
@@ -265,6 +282,8 @@ export function summarizeCashLedger(entries: readonly CashLedgerEntry[]): CashLe
   let bargeldIncomeCents = 0;
   let belegExpenseCents = 0;
   let salaryPayoutCents = 0;
+  let manualInCents = 0;
+  let manualOutCents = 0;
 
   for (const entry of entries) {
     if (entry.direction === 'in') cashInCents += entry.amountCents;
@@ -283,6 +302,12 @@ export function summarizeCashLedger(entries: readonly CashLedgerEntry[]): CashLe
       case 'gehaltsquittung_storno':
         salaryPayoutCents -= entry.amountCents;
         break;
+      case 'manual_in':
+        manualInCents += entry.amountCents;
+        break;
+      case 'manual_out':
+        manualOutCents += entry.amountCents;
+        break;
       case 'other':
         // Already counted in cashIn/cashOut above, so the balance holds it;
         // no category claims it, because nothing here knows what it is.
@@ -297,6 +322,8 @@ export function summarizeCashLedger(entries: readonly CashLedgerEntry[]): CashLe
     bargeldIncomeCents,
     belegExpenseCents,
     salaryPayoutCents,
+    manualInCents,
+    manualOutCents,
   };
 }
 

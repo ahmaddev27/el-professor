@@ -17,6 +17,8 @@ const labels: CashLedgerLabels = {
   beleg: 'Beleg',
   gehaltsquittung: 'Gehaltsquittung',
   gehaltsquittungStorno: 'Storno Gehaltsquittung',
+  manualIn: 'Bargeld eingelegt',
+  manualOut: 'Barzahlung',
   other: 'Bargeldbewegung',
 };
 
@@ -295,5 +297,25 @@ describe('filtering and ordering', () => {
 
   it('offers every driver the ledger knows, once, sorted', () => {
     expect(cashLedgerDriverNames(entries)).toEqual(['Ali', 'Bea']);
+  });
+});
+
+
+describe('manual till entries (record_cash_movement)', () => {
+  it('count by direction, in their own totals, and never touch the salary figure', () => {
+    const entries = cashMovementEntries(
+      [
+        { id: 'a', direction: 'in', amount: '500.00', movement_date: '2026-04-02', source_type: 'manual_in', source_id: 'r1', description: null },
+        { id: 'b', direction: 'out', amount: '120.50', movement_date: '2026-04-03', source_type: 'manual_out', source_id: 'r2', description: 'Reinigung' },
+      ],
+      labels,
+    );
+    const totals = summarizeCashLedger(entries);
+    expect(entries.map(e => e.source)).toEqual(['manual_in', 'manual_out']);
+    expect(entries[0].description).toBe('Bargeld eingelegt');
+    expect(totals.manualInCents).toBe(50000);
+    expect(totals.manualOutCents).toBe(12050);
+    expect(totals.balanceCents).toBe(50000 - 12050);
+    expect(totals.salaryPayoutCents).toBe(0);
   });
 });
