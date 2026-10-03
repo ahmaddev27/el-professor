@@ -78,6 +78,20 @@ Start here when you pick up this project. Read it together with [CLAUDE.md](CLAU
 
   Two fixtures in its tests were wrong and were corrected rather than the rule: a five-ride month where the second split was refused **because giving up the one ride after the gap left nothing on the far side** — that refusal is correct, a split that empties one half is not a split.
 
+- **The salary advance (سلفة) was never built, nobody deleted it, and four columns on `salaries` are orphans (03.10.2026).**
+
+  Asked as *"لسلفة في الراتب مش موجودة ليش؟ حذفتها تاني؟؟"*. **The owner is waiting on the customer to say what they mean by سلفة; nothing is to be built until that reply comes.**
+
+  **Nothing was removed, and it is provable.** `git log --all -S` over `Vorschuss`, `advance`, `Darlehen`, `salary_advance` and `سلفة`: no commit in the repository's whole history ever removed such code. The one `Vorschuss` in the entire history is a **test fixture** in `tests/rls/support-write-audit.sql`, a sample `notes` value proving the audit log redacts pay-related notes. No column in the public schema is named for a deduction, advance or loan.
+
+  **`additional_net_payment_amount` is a renamed column, not a lost feature.** `20260531133858_add_payroll_split_columns_to_salaries.sql` (31.05.2026, already inside the baseline commit, so it predates this git history) added a payroll-gross / additional-net split; that column is the **old name** of what the UI writes today as `payroll_net_amount` / `bank_salary_amount`. The single row carrying it — Y&A Mobility, period 06.04.2026 — holds the two figures **identical at 1.568,63 €**, 19 later rows use only the new column, and its arithmetic reproduces today's `payrollSplit` exactly: `3563,07 − 1944,01 = 1619,06` cash, `+ 1568,63` bank `= 3187,69` payout.
+
+  **Three sibling columns are orphans no code reads, and two were never used at all**, measured on production: `additional_payment_category` once ever (`Sonderzahlung`), `additional_payment_note` **0 rows**, `show_additional_note_in_pdf` **0 rows**. So "restore the old behaviour" for those cannot mean restoring something observed — there is nothing to observe. `payroll_gross_amount`, `payroll_net_amount` and `tax_review_confirmed`, added by the same migration, **are** live in `SalaryDetailsModal`.
+
+  **What was being done instead:** production's `salary_payments.description` values are `Gehalt teil 1`, `Gehalt Teil 1`, `Gehalt teil 2` — salaries paid in parts, labelled by hand. That still works.
+
+  **The path that already exists** if the customer means cash now against a later salary: a Gehaltsquittung for a partial amount, which records the payment, **moves the cash out of the till** (a manual payment row does not — the ledger is `Bargeld − Belege − (Gehaltsquittungen − Stornos)`) and prints a receipt the driver signs. Its limits are that the salary row must exist and the amount may not exceed the balance read under lock. A real سلفة would have to touch the till, the salary and a signed receipt — which is why it is a feature and not a field.
+
 - **The Abrechnung by e-mail — in progress, two parts of three (02.10.2026).**
 
   The owner's task: every driver gets an e-mail and a phone number, the weekly Abrechnung can be mailed to one driver from its detail dialog, and one button on the week's Total row mails every driver who has an address.
