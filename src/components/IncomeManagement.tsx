@@ -8,6 +8,7 @@ import { useToast } from '../contexts/ToastContext';
 import { format, startOfWeek, endOfWeek, startOfMonth, endOfMonth, startOfYear, endOfYear, subMonths, getMonth, getYear } from 'date-fns';
 import { handleDatabaseError } from '../utils/errorHandler';
 import { exportIncomeToExcel } from '../utils/excelExport';
+import { tallyTrips } from '../utils/incomeTrips';
 import { getWeeksOfMonth, getWeekNumberForDate, WeekOfMonth, getBusinessMonthRange, getBusinessWeekRange } from '../utils/weekCalculations';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { useTranslation } from '../contexts/LanguageContext';
@@ -26,6 +27,7 @@ import {
   formatDate,
   Field,
   formatEuro,
+  formatNumber,
   Input,
   KpiCard,
   NativeSelect,
@@ -513,7 +515,7 @@ const IncomeManagement: React.FC<IncomeManagementProps> = ({ drivers }) => {
     // Summe = Netto-Fahrpreis + Aktionen
     const summe = nettoFahrpreis + aktionen;
 
-    return { bargeld, nettoFahrpreis, trinkgeld, aktionen, summe };
+    return { bargeld, nettoFahrpreis, trinkgeld, aktionen, summe, ...tallyTrips(weeklyIncomes) };
   };
 
   const activeDrivers = drivers.filter(driver => driver.status !== 'inactive');
@@ -669,6 +671,9 @@ const IncomeManagement: React.FC<IncomeManagementProps> = ({ drivers }) => {
             <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[13px] text-fg-muted md:hidden">
               <span className="tabular-nums">{formatDate(income.date)}</span>
               {typeBadge(income)}
+              {income.trip_count != null && (
+                <span className="tabular-nums">{t('inc.tripsSuffix', { count: income.trip_count })}</span>
+              )}
             </span>
             {income.description ? <span className="text-[13px] text-fg-subtle md:hidden">{income.description}</span> : null}
           </span>
@@ -691,6 +696,15 @@ const IncomeManagement: React.FC<IncomeManagementProps> = ({ drivers }) => {
       cell: income => (editingId === income.id ? editDescription() : income.description),
       hideBelow: 'md',
       className: 'min-w-[10rem]',
+    },
+    {
+      id: 'trips',
+      header: t('inc.tripCount'),
+      kind: 'number',
+      // null renders as the table's em dash: no count was recorded, which is not 0.
+      value: income => income.trip_count ?? null,
+      sortable: true,
+      hideBelow: 'md',
     },
     {
       id: 'amount',
@@ -799,6 +813,28 @@ const IncomeManagement: React.FC<IncomeManagementProps> = ({ drivers }) => {
     { id: 'aktionen', header: t('inc.typeAktionen'), kind: 'currency', value: row => row.aktionen, sortable: true, hideBelow: 'md' },
     { id: 'trinkgeld', header: t('inc.typeTrinkgeld'), kind: 'currency', value: row => row.trinkgeld, sortable: true, hideBelow: 'md' },
     { id: 'bargeld', header: t('inc.typeBargeld'), kind: 'currency', value: row => row.bargeld, sortable: true, hideBelow: 'sm' },
+    {
+      id: 'trips',
+      header: t('inc.tripCount'),
+      kind: 'number',
+      value: row => row.trips,
+      sortable: true,
+      hideBelow: 'sm',
+      cell: row =>
+        row.trips == null ? (
+          <>
+            <span aria-hidden>{'—'}</span>
+            <span className="sr-only">{t('ui.table.noValue')}</span>
+          </>
+        ) : row.missing > 0 ? (
+          <span title={t('inc.tripsPartial', { count: row.missing })}>
+            {'≥ '}{formatNumber(row.trips)}
+            <span className="sr-only"> {t('inc.tripsPartial', { count: row.missing })}</span>
+          </span>
+        ) : (
+          formatNumber(row.trips)
+        ),
+    },
     {
       id: 'summe',
       header: t('inc.sum'),

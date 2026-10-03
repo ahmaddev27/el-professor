@@ -5866,4 +5866,7 @@ export const en: PartialDictionary = {
   'mplan.split.givenUpTitle': 'Rides given up for the handover',
   'mplan.split.hint':         'Off: a block that is too long stays whole and is only reported.',
   'mplan.split.label':        'Split long blocks for a driver handover',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'inc.tripsPartial': 'at least; {count} entries have no trip count',
 };

@@ -5922,4 +5922,7 @@ export const de = {
   'mplan.split.givenUpTitle': 'Fahrten, die für den Fahrerwechsel entfallen',
   'mplan.split.hint':         'Aus: ein zu langer Block bleibt ganz und wird nur gemeldet.',
   'mplan.split.label':        'Lange Blöcke für einen Fahrerwechsel teilen',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'inc.tripsPartial': 'mindestens, bei {count} Einträgen ohne Fahrtenanzahl',
 } as const;
