@@ -138,7 +138,36 @@ rides(row_index, driver, plate, day, from_local, to_local, price, status) AS (VA
   -- own now, so the analysis refuses their budget over real work rather than over
   -- absence.
   (21, 'Clara Nullsatz',  'B-DEMO-3', DATE '2026-11-12', TIME '09:00', TIME '13:00',  50.00, 'completed'),
-  (22, 'Dieter Verdreht', 'B-DEMO-3', DATE '2026-11-13', TIME '09:00', TIME '13:00',  50.00, 'completed')
+  (22, 'Dieter Verdreht', 'B-DEMO-3', DATE '2026-11-13', TIME '09:00', TIME '13:00',  50.00, 'completed'),
+  -- ── The owner's own case, and nothing above it was this case ──────────────
+  --
+  -- In his words: a driver works eight hours, ride after ride, with no gap
+  -- anywhere long enough to part two blocks — so the whole eight hours is one
+  -- block and one driver's, and he wants two drivers.
+  --
+  -- Every ride above is alone in its block, and a single ride is never cut, so the
+  -- split refused on all of them and the feature was untestable here. These two
+  -- days are the shape it was built for: rides close enough to chain into one
+  -- block, with one lull in the MIDDLE HALF wide enough to widen into a handover.
+  --
+  -- The arithmetic, so a later edit can tell whether it still holds:
+  --   gaps of 10, 25 and 5 minutes are all under the 30-minute switch duration,
+  --   so §3 chains the four rides into one block of 06:00–14:00 — eight hours,
+  --   over the six-hour ceiling. The widest gap inside the middle half (08:00 to
+  --   12:00) is 10:00→10:25. Widened to 30 minutes the handover runs 10:00–10:30,
+  --   which swallows the 10:25 ride — one ride, the floor — and leaves
+  --   06:00–10:00 (4 h) and 12:05–14:00 (1 h 55), both over the 90-minute minimum.
+  (23, 'Anna Beispiel',   'B-DEMO-1', DATE '2026-11-30', TIME '06:00', TIME '08:00',  38.00, 'completed'),
+  (24, 'Anna Beispiel',   'B-DEMO-1', DATE '2026-11-30', TIME '08:10', TIME '10:00',  34.50, 'completed'),
+  (25, 'Anna Beispiel',   'B-DEMO-1', DATE '2026-11-30', TIME '10:25', TIME '12:00',  29.80, 'completed'),
+  (26, 'Anna Beispiel',   'B-DEMO-1', DATE '2026-11-30', TIME '12:05', TIME '14:00',  36.20, 'completed'),
+  -- The same shape on a Sunday (2026-11-29), so the split is also exercised on a
+  -- day that carries a premium: 07:00–15:30 is eight and a half hours, the lull is
+  -- 11:30→11:55, and the handover gives up the 11:55 ride.
+  (27, 'Emil Normal',     'B-DEMO-2', DATE '2026-11-29', TIME '07:00', TIME '09:30',  44.00, 'completed'),
+  (28, 'Emil Normal',     'B-DEMO-2', DATE '2026-11-29', TIME '09:40', TIME '11:30',  33.10, 'completed'),
+  (29, 'Emil Normal',     'B-DEMO-2', DATE '2026-11-29', TIME '11:55', TIME '13:30',  28.90, 'completed'),
+  (30, 'Emil Normal',     'B-DEMO-2', DATE '2026-11-29', TIME '13:35', TIME '15:30',  37.40, 'completed')
 )
 INSERT INTO fahrtenbuch_trips (
   company_id, import_id, trip_date, start_time, end_time,
@@ -313,6 +342,21 @@ SELECT ctx.company_id, d.id, DATE '2026-11-01', DATE '2026-11-30',
      SELECT 1 FROM salaries x
       WHERE x.company_id = ctx.company_id AND x.driver_id = d.id
         AND x.period_start = DATE '2026-11-01');
+
+-- `row_count` is printed beside the file name on step 1 ("· 22 Fahrten"), so
+-- adding rides without it would make the screen state a number that contradicts
+-- the rows under it. It is **derived from the rows themselves**, not written as a
+-- literal, so it cannot drift again the next time this list grows.
+--
+-- This is the one UPDATE in a script that is otherwise additive by rule. The rule
+-- exists so the seed can never destroy demo data somebody is working on; setting
+-- one fixture import's own count to the true count of its own trips destroys
+-- nothing. It is pinned to that import's id, so it can reach nothing else — not
+-- another import of this company, and not another company at all.
+UPDATE fahrtenbuch_imports i
+   SET row_count = (SELECT count(*) FROM fahrtenbuch_trips t WHERE t.import_id = i.id)
+ WHERE i.id = 'b1c2d3e4-0000-4000-8000-00000000f001'::uuid
+   AND i.row_count <> (SELECT count(*) FROM fahrtenbuch_trips t WHERE t.import_id = i.id);
 
 COMMIT;
 
