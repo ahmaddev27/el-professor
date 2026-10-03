@@ -51,6 +51,15 @@ export interface DataTableProps<Row> {
   rowActionsLabel?: string;
   /** Values for a summary row, keyed by column id. */
   totals?: Partial<Record<string, ReactNode>>;
+  /**
+   * What goes in the totals row's own actions cell — the one under the per-row
+   * actions. That cell already existed and was always empty; this fills it.
+   *
+   * For an action about the whole table rather than one row: the Abrechnung's
+   * "mail this week to every driver" sits there, which is where the owner asked
+   * for it and is also where a reader looks for a total's own control.
+   */
+  totalsActions?: ReactNode;
   density?: 'comfortable' | 'compact';
   className?: string;
   /** Give the scroll area a max height (e.g. `max-h-[28rem]`) to pin the header. */
@@ -96,6 +105,7 @@ export function DataTable<Row>({
   rowActions,
   rowActionsLabel,
   totals,
+  totalsActions,
   density = 'comfortable',
   className,
   scrollClassName,
@@ -304,7 +314,9 @@ export function DataTable<Row>({
                     {totals?.[column.id] ?? (index === 0 ? t('ui.table.total') : null)}
                   </td>
                 ))}
-                {rowActions ? <td className="bg-sunken/60" /> : null}
+                {rowActions ? (
+                  <td className="bg-sunken/60 px-2 text-right">{totalsActions}</td>
+                ) : null}
               </tr>
             </tfoot>
           ) : null}
