@@ -714,15 +714,6 @@ const DocumentsPage: React.FC = () => {
               badges={[t('doc.badgeImport'), 'Excel / CSV']}
               onClick={() => setSubView('fahrtenbuch')}
             />
-            {/* The Fahrtenanalyse explains an imported Fahrtenbuch; it writes no
-                trip, which is why it is a separate screen and not a tab here. */}
-            <ToolCard
-              icon={FileSearch}
-              title={t('ta.title')}
-              description={t('ta.description')}
-              badges={[t('ta.badgeAnalysis'), t('ta.badgeExcel')]}
-              onClick={() => navigate('/fahrtenanalyse')}
-            />
           </div>
         </section>
 

@@ -40,6 +40,7 @@
  */
 import type { ExportColumn, ExportOptions } from './excelExport';
 import type { Income, SalaryCalculation } from '../types/receipt';
+import { tallyTrips } from './incomeTrips';
 import { salaryDueState } from './salaryDue';
 
 type ExportRow = Record<string, unknown>;
@@ -112,6 +113,10 @@ export function buildIncomeSheets(
       { key: 'type',        label: 'Typ',          width: 14 },
       { key: 'description', label: 'Beschreibung', width: 38 },
       { key: 'amount',      label: 'Betrag',       width: 16, align: 'right', type: 'money' },
+      // A count, not money. Blank where nobody recorded one (NULL is not 0), and
+      // no total: the form copies one count onto every row of a batch, so a
+      // column total would count each trip up to four times.
+      { key: 'trips',       label: 'Fahrten',      width: 10, align: 'right', type: 'integer' },
     ],
     rows: sorted.map((income): ExportRow => ({
       date: germanDate(income.date),
@@ -119,6 +124,7 @@ export function buildIncomeSheets(
       type: INCOME_TYPE_LABEL[income.type],
       description: income.description,
       amount: amountOf(income),
+      trips: income.trip_count ?? null,
     })),
     // The uuid column the old sheet wrote last is gone: it is not a figure, not a
     // label and not readable, and it was the widest column in the file.
@@ -164,11 +170,20 @@ export function buildIncomeSheets(
       { key: 'driver', label: 'Fahrer', width: 26 },
       { key: 'count',  label: 'Anzahl', width: 10, align: 'right', type: 'integer' },
       ...typeColumns,
+      // Trips are summed over the net-fare entries only (see incomeTrips.ts);
+      // `tripsMissing` is how many of those carry no count, so a blank or a
+      // low figure is explained instead of looking like a total.
+      { key: 'trips',        label: 'Fahrten',            width: 10, align: 'right', type: 'integer' },
+      { key: 'tripsMissing', label: 'Ohne Fahrtenanzahl', width: 18, align: 'right', type: 'integer' },
       { key: 'total',  label: 'Gesamt', width: 16, align: 'right', type: 'money' },
     ],
     rows: drivers.map((name): ExportRow => {
       const mine = incomes.filter(income => income.driver_name === name);
-      const row: ExportRow = { driver: name, count: mine.length, total: sumOf(mine) };
+      const tally = tallyTrips(mine);
+      const row: ExportRow = {
+        driver: name, count: mine.length, total: sumOf(mine),
+        trips: tally.trips, tripsMissing: tally.missing,
+      };
       for (const type of INCOME_TYPES) {
         row[type] = sumOf(mine.filter(income => income.type === type));
       }

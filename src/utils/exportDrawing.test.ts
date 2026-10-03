@@ -147,7 +147,7 @@ const EXPORTS: [name: string, build: () => XLSX.WorkBook][] = [
   ['a generic list',            () => buildTableWorkbook(GENERIC_LIST)],
   ['a list with a footer note', () => buildTableWorkbook(LIST_WITH_NOTE)],
   ['Umsätze (3 sheets)', () => buildSheetsWorkbook(buildIncomeSheets(
-    [income({}), income({ type: 'trinkgeld', amount: 20, driver_name: 'Berta' })],
+    [income({ trip_count: 12 }), income({ type: 'trinkgeld', amount: 20, driver_name: 'Berta', trip_count: null })],
     '2026-10-01', '2026-10-31',
   ))],
   ['Gehälter (2 sheets)', () => buildSheetsWorkbook(buildSalarySheets(
