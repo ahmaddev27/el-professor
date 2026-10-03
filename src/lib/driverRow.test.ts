@@ -34,6 +34,13 @@ describe('mapDriverRow', () => {
       status: 'active',
       personalnummer: undefined,
       gender: null,
+      // Contact, added 02.10.2026 so the Abrechnung can be mailed. **null, not
+      // undefined**, and the difference is load-bearing: the send path reads null
+      // to mean "this driver has no address, skip them and say so", and an empty
+      // string in the column must read the same way rather than as an address of
+      // nothing. The mapper uses `|| null` for exactly that.
+      email: null,
+      phone: null,
       employment_type: 'employee',
       driver_usage_type: 'regular',
       // The two monthly-hours columns are gone from the mapping: the plan works

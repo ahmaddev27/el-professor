@@ -37,7 +37,9 @@
  * The whole exchange gets 10 seconds. A MailError names the failing step and
  * the server's reply code; it never contains an address, a header or the body.
  */
-import { buildMimeMessage, isAsciiMailAddress, runSmtpSession, SmtpError, type SmtpConnection } from './smtp-core.ts';
+import { buildMimeMessage, isAsciiMailAddress, runSmtpSession, SmtpError, type SmtpConnection
+  type MimeAttachment,
+} from './smtp-core.ts';
 
 export class MailError extends Error {
   readonly step: string;
@@ -62,6 +64,12 @@ export interface OutgoingMail {
    * before. The address is never a setting — it stays `SMTP_SENDER`.
    */
   fromName?: string | null;
+  /**
+   * Files sent beside the message, already base64. Absent for every mail this
+   * product sent before 02.10.2026, and the MIME builder is byte-for-byte
+   * unchanged without them.
+   */
+  attachments?: readonly MimeAttachment[];
 }
 
 const SEND_TIMEOUT_MS = 10_000;
@@ -150,6 +158,13 @@ export async function sendMail(mail: OutgoingMail): Promise<void> {
       date: new Date(),
       messageId: `${crypto.randomUUID()}@${senderDomain}`,
       boundary: `ep_${crypto.randomUUID().replaceAll('-', '')}`,
+      // A second, distinct boundary for the outer `multipart/mixed` level. Two
+      // UUIDs rather than one with a suffix: the builder refuses a mixed boundary
+      // equal to the inner one, because one boundary for both levels lets the
+      // inner terminator close the outer part and the attachment disappears
+      // silently.
+      mixedBoundary: `epx_${crypto.randomUUID().replaceAll('-', '')}`,
+      attachments: mail.attachments,
     });
   } catch (err) {
     throw toMailError(err, 'build');
