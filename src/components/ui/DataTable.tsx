@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from 'react';
+import { useMemo, useState, type MouseEvent, type ReactNode } from 'react';
 import { AlertTriangle, ArrowDown, ArrowUp, ChevronsUpDown, Inbox, RotateCw } from 'lucide-react';
 import { useTranslation } from '../../contexts/LanguageContext';
 import { Button } from './Button';
@@ -49,6 +49,12 @@ export interface DataTableProps<Row> {
   initialSort?: DataTableSort;
   rowActions?: (row: Row) => ReactNode;
   rowActionsLabel?: string;
+  /**
+   * Makes the whole row the control: a click, or Enter / Space on the focused
+   * row, calls it. Clicks that start on a control inside the row (a button, a
+   * link, a field) are left to that control. Leave it out and the row is inert.
+   */
+  onRowClick?: (row: Row) => void;
   /** Values for a summary row, keyed by column id. */
   totals?: Partial<Record<string, ReactNode>>;
   /**
@@ -92,6 +98,14 @@ function formatValue(kind: DataTableColumnKind | undefined, value: Exclude<SortV
   }
 }
 
+const INNER_CONTROL = 'a, button, input, select, textarea, label, [role="button"]';
+
+/** True when the click began on a control that sits inside the row. */
+function startsOnInnerControl(event: MouseEvent<HTMLTableRowElement>): boolean {
+  const control = (event.target as HTMLElement).closest(INNER_CONTROL);
+  return control !== null && event.currentTarget.contains(control);
+}
+
 export function DataTable<Row>({
   columns,
   rows,
@@ -104,6 +118,7 @@ export function DataTable<Row>({
   initialSort,
   rowActions,
   rowActionsLabel,
+  onRowClick,
   totals,
   totalsActions,
   density = 'comfortable',
@@ -192,7 +207,28 @@ export function DataTable<Row>({
     }
 
     return sortedRows.map(row => (
-      <tr key={getRowId(row)} className="transition-colors hover:bg-sunken/50">
+      <tr
+        key={getRowId(row)}
+        className={cn(
+          'transition-colors hover:bg-sunken/50',
+          onRowClick &&
+            'cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-focus',
+        )}
+        tabIndex={onRowClick ? 0 : undefined}
+        onClick={onRowClick ? event => { if (!startsOnInnerControl(event)) onRowClick(row); } : undefined}
+        onKeyDown={
+          onRowClick
+            ? event => {
+                // Only the row itself: Enter on a button inside it is that button's.
+                if (event.target !== event.currentTarget) return;
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault();
+                  onRowClick(row);
+                }
+              }
+            : undefined
+        }
+      >
         {columns.map(column => (
           <td
             key={column.id}

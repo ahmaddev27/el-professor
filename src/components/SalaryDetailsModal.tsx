@@ -28,6 +28,7 @@ import {
   findOverlappingSalary,
   outcomeIsUnknown,
   receiptScope,
+  scopeRefusal,
   type ReceiptActionRefusal,
 } from '../utils/salaryCashReceiptFlow';
 import { derivePaymentStatus, remainingDue } from '../utils/salaryDue';
@@ -1149,6 +1150,35 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
                                     {t('sal.payment.previewReceipt')}
                                   </button>
                                 )}
+                                {!rowActions.preview && (() => {
+                                  // The preview is withheld for one of three reasons, and a
+                                  // control that says nothing reads as broken: name the one
+                                  // that applies, in the place the button would be.
+                                  const reasonKey = !payment.source_reference?.trim()
+                                    ? 'sal.payment.previewUnavailableNoReceipt'
+                                    : !planIncludes('dokumente')
+                                      ? 'sal.payment.previewUnavailablePlan'
+                                      : null;
+                                  const refusal = scopeRefusal(receiptsScope);
+                                  const reason = reasonKey
+                                    ? t(reasonKey)
+                                    : refusal
+                                      ? t(REFUSAL_MESSAGE_KEYS[refusal])
+                                      : '';
+                                  return (
+                                    <span title={reason} className="inline-flex">
+                                      <button
+                                        type="button"
+                                        disabled
+                                        aria-label={`${t('sal.payment.previewReceipt')}: ${reason}`}
+                                        className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-[13px] font-medium opacity-50"
+                                      >
+                                        <Eye size={14} />
+                                        {t('sal.payment.previewReceipt')}
+                                      </button>
+                                    </span>
+                                  );
+                                })()}
                                 {storno.kind === 'offered' && (
                                   // Classes rather than an inline style, so the screen's
                                   // style-ratchet count does not move; the colours are the

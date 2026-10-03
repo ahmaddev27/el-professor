@@ -5878,4 +5878,6 @@ export const en: PartialDictionary = {
   'fleet.fcm.none':              'No fixed costs',
   'fleet.fcm.note':              'Each month has its own fixed costs. A new month takes over the previous month\'s costs; once you change them, the change applies to that month and the ones after it, never to earlier months.',
   'fleet.fcm.own':               'Entered for this month',
+  'sal.payment.previewUnavailableNoReceipt': 'No Gehaltsquittung is stored for this payment.',
+  'sal.payment.previewUnavailablePlan':    'Viewing the receipt is part of the Documents feature, which your plan does not include.',
 };

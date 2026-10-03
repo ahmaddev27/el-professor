@@ -52,11 +52,12 @@ describe('DataTable contains its paint when it is capped', () => {
     }
   });
 
-  it('and all four still cap their height, so all four are covered', () => {
+  // SalariesManagement is not here: its only capped table was the revenue-details
+  // dialog, removed when the row's four buttons went; its own list is uncapped.
+  it('and the three that cap their height still do, so they stay covered', () => {
     for (const file of [
       'src/components/tripAnalysis/TripAnalysisIssues.tsx',
       'src/components/GehaltsquittungList.tsx',
-      'src/components/SalariesManagement.tsx',
       'src/components/MonthlyPlanDocumentsStep.tsx',
     ]) {
       expect(read(file), `${file} no longer passes scrollClassName`)

@@ -5934,4 +5934,6 @@ export const de = {
   'fleet.fcm.none':              'Keine Fixkosten',
   'fleet.fcm.note':              'Jeder Monat hat eigene Fixkosten. Ein neuer Monat übernimmt die Kosten des Vormonats; sobald Sie sie ändern, gilt die Änderung nur für diesen Monat und die folgenden, nicht für frühere.',
   'fleet.fcm.own':               'Eigene Einträge',
+  'sal.payment.previewUnavailableNoReceipt': 'Zu dieser Zahlung ist keine Gehaltsquittung hinterlegt.',
+  'sal.payment.previewUnavailablePlan':    'Die Quittungsansicht gehört zum Dokumente-Paket, das in Ihrem Tarif nicht enthalten ist.',
 } as const;
