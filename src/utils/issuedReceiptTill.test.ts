@@ -13,7 +13,7 @@ import {
 
 /**
  * THE RULE: a Gehaltsquittung issued for a cash payment that already exists
- * (`issue_salary_cash_receipt`, 20261004100000) must not move the Bargeldbestand.
+ * (`issue_salary_cash_receipt`, 20261004110000) must not move the Bargeldbestand.
  *
  * The cash ledger is Bargeld - Belege - (Gehaltsquittungen - Stornos), and its
  * third term is read from `cash_movements` and nowhere else. So the guarantee
@@ -26,7 +26,7 @@ import {
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const read = (relative: string): string => readFileSync(path.join(ROOT, relative), 'utf8');
 
-const MIGRATION = read('supabase/migrations/20261004100000_issue_receipt_for_existing_cash_payment.sql');
+const MIGRATION = read('supabase/migrations/20261004110000_issue_receipt_for_existing_cash_payment.sql');
 
 const labels: CashLedgerLabels = {
   bargeldIncome: 'Bargeld Einnahme',
