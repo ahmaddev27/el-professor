@@ -5998,7 +5998,7 @@ export const de = {
 
   // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
   'mplan.ownerFree.more':    '… und {count} weitere Zeitfenster.',
-  'mplan.ownerFree.summary': 'Der Inhaber hat {assigned} Stunden übernommen und ist in diesem Monat {hours} Stunden frei, verteilt auf {windows} Zeitfenster. Die Blöcke werden hier nicht verschoben: ein Block, der zeitlich nicht passt, bleibt unzugeteilt.',
+  'mplan.ownerFree.summary': 'Der Inhaber hat {assigned} Stunden übernommen und ist an den {days} Tagen, an denen gefahren wurde, {hours} Stunden frei — verteilt auf {windows} Zeitfenster. Tage ohne Fahrten sind nicht mitgezählt. Die Blöcke werden hier nicht verschoben: ein Block, der zeitlich nicht passt, bleibt unzugeteilt.',
   'mplan.ownerFree.title':   'Freie Zeit des Inhabers',
   'sal.payment.viewCash':       'Zahlung ansehen',
   'sal.payment.viewCashAria':   'Barzahlung vom {date} ansehen',

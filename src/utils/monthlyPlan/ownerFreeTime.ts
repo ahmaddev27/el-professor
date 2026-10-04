@@ -49,6 +49,15 @@ export interface OwnerFreeTime {
    * length — the figure that answers "could the leftovers fit at all?".
    */
   longestWindowMinutes: number;
+  /**
+   * How many days were walked at all: the days the fleet drove, not the days in
+   * the calendar month.
+   *
+   * The screen said "free this month" over a figure that covered 21 days of a
+   * 30-day November — true of what was counted, and an overstatement of what the
+   * sentence claimed. The count travels with the figure so the two cannot drift.
+   */
+  daysCounted: number;
 }
 
 const localDay = (ms: number): string => {
@@ -76,11 +85,14 @@ export function ownerFreeTime(
 ): OwnerFreeTime {
   const assignedMinutes = ownerBlocks.reduce((sum, b) => sum + b.spanMinutes, 0);
   if (allBlocks.length === 0) {
-    return { windows: [], totalMinutes: 0, assignedMinutes, longestWindowMinutes: 0 };
+    return {
+      windows: [], totalMinutes: 0, assignedMinutes, longestWindowMinutes: 0, daysCounted: 0,
+    };
   }
 
   const floor = switchMinutes > 0 ? switchMinutes : 0;
   const days = new Set(allBlocks.map(b => localDay(b.startMs)));
+  const daysCounted = days.size;
 
   // The owner's work, per local day, so a day with none yields one whole-day
   // window and a day with several yields the gaps between them.
@@ -116,6 +128,7 @@ export function ownerFreeTime(
     totalMinutes: usable.reduce((sum, w) => sum + w.minutes, 0),
     assignedMinutes,
     longestWindowMinutes: usable.reduce((max, w) => Math.max(max, w.minutes), 0),
+    daysCounted,
   };
 }
 

@@ -87,3 +87,31 @@ describe('ownerFreeTime', () => {
     expect(third.every(w => w.endMs <= night.startMs)).toBe(true);
   });
 });
+
+describe('what the view reports about its own extent', () => {
+  it('says how many days it counted, so the screen cannot claim the month', () => {
+    // The sentence read "free this month" over a figure covering 21 days of a
+    // 30-day November — true of what was counted, an overstatement of what was
+    // claimed. Found by walking it in a browser, not by reading it.
+    const all = [block('2026-11-02', '08:00', '12:00'), block('2026-11-05', '08:00', '12:00')];
+    const free = ownerFreeTime(all, [], 30);
+    expect(free.daysCounted, 'only the days the fleet drove').toBe(2);
+  });
+
+  it('counts no days when the month holds no blocks', () => {
+    expect(ownerFreeTime([], [], 30).daysCounted).toBe(0);
+  });
+
+  it('a whole free day is one window of exactly 24 hours, ending at the next midnight', () => {
+    // The screen printed "02.11.2026 00:00 – 00:00 · 24,0 h", because the end
+    // carried no date. The window itself was always right; the line was not. This
+    // pins the shape the line has to render.
+    const all = [block('2026-11-02', '08:00', '12:00')];
+    const free = ownerFreeTime(all, [], 30);
+    const whole = free.windows.find(w => w.minutes === 24 * 60);
+    expect(whole, 'a day with none of the owner\'s work is one 24-hour window').toBeDefined();
+    expect(new Date(whole!.endMs).getDate(), 'the end falls on the NEXT day')
+      .toBe(new Date(whole!.startMs).getDate() + 1);
+    expect(new Date(whole!.endMs).getHours()).toBe(0);
+  });
+});

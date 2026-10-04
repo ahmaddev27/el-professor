@@ -5942,7 +5942,7 @@ export const en: PartialDictionary = {
 
   // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
   'mplan.ownerFree.more':    '… and {count} more windows.',
-  'mplan.ownerFree.summary': 'The owner has taken {assigned} hours and is free for {hours} hours this month, across {windows} windows. No block is moved here: one that does not fit in time stays unassigned.',
+  'mplan.ownerFree.summary': 'The owner has taken {assigned} hours and is free for {hours} hours across the {days} days the fleet drove, in {windows} windows. Days with no rides are not counted. No block is moved here: one that does not fit in time stays unassigned.',
   'mplan.ownerFree.title':   'The owner\'s free time',
   'sal.payment.viewCash':       'View payment',
   'sal.payment.viewCashAria':   'View the cash payment of {date}',

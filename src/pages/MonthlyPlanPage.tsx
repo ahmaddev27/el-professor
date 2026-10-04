@@ -429,6 +429,25 @@ function dateText(ms: number): string {
   return `${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${d.getFullYear()}`;
 }
 
+/**
+ * The end of a free window, with its date when that is not the start's.
+ *
+ * A window ending at the next local midnight prints **24:00**, because `00:00`
+ * beside a start of `00:00` reads as a window of no length — which is exactly how
+ * a whole free day appeared on screen until 04.10.2026. Any other end on a later
+ * date carries that date.
+ */
+function windowEndText(startMs: number, endMs: number): string {
+  const sameDay = new Date(startMs).toDateString() === new Date(endMs).toDateString();
+  if (sameDay) return timeText(endMs);
+  const atMidnight = new Date(endMs).getHours() === 0 && new Date(endMs).getMinutes() === 0;
+  // One minute back lands on the previous day, which is the day the window belongs
+  // to — so "24:00" is written against the start's date rather than the next one's.
+  return atMidnight && new Date(endMs - 60_000).toDateString() === new Date(startMs).toDateString()
+    ? '24:00'
+    : dateTimeText(endMs);
+}
+
 /** Decimal hours with a German comma, for a figure a person reads rather than sums. */
 function formatHours(hours: number): string {
   return hours.toFixed(1).replace('.', ',');
@@ -2038,12 +2057,17 @@ export default function MonthlyPlanPage() {
                   hours: formatHours(ownerFree.totalMinutes / 60),
                   windows: ownerFree.windows.length,
                   assigned: formatHours(ownerFree.assignedMinutes / 60),
+                  days: ownerFree.daysCounted,
                 })}
               </p>
               <ul className="mt-2 space-y-1 text-[13px]">
                 {ownerFree.windows.slice(0, 14).map(w => (
                   <li key={`${w.day}-${w.startMs}`} className="tabular-nums">
-                    {dateTimeText(w.startMs)} – {timeText(w.endMs)}
+                    {/* The end carries its own date whenever it is not the start's.
+                        Without it a whole day printed "02.11.2026 00:00 – 00:00",
+                        which reads as a window of zero length — found by walking
+                        it in a browser, not by reading the line. */}
+                    {dateTimeText(w.startMs)} – {windowEndText(w.startMs, w.endMs)}
                     {'  ·  '}
                     {formatHours(w.minutes / 60)} h
                   </li>
