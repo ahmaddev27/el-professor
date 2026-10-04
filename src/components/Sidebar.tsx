@@ -4,12 +4,13 @@ import {
   LayoutDashboard, FileText, Users, DollarSign, Plus,
   Menu, X, UserCog, Receipt, Wallet, LogOut, Calculator,
   StickyNote, Car, Wrench, Shield, Settings, Bell, CalendarDays, CreditCard, ArrowLeft,
-  Database,
+  Database, ListChecks,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import BrandLogo from './BrandLogo';
 import { useCompanySettings } from '../contexts/CompanySettingsContext';
 import { usePlan, FeatureKey } from '../contexts/PlanContext';
+import { monthlyPlanInNav } from './navVisibility';
 import { useTranslation } from '../contexts/LanguageContext';
 import type { TranslationKey } from '../i18n';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
@@ -43,22 +44,11 @@ const NAV_ITEMS: NavItem[] = [
   { path: '/salaries',           icon: Wallet,      labelKey: 'nav.salaries',       feature: 'gehaelter' },
   { path: '/dokumente',       icon: FileText,       labelKey: 'nav.documents',      feature: 'dokumente' },
   { path: '/company-planner', icon: CalendarDays,   labelKey: 'nav.planner',        feature: 'dokumente' },
-  // ── `/monatsplan` is deliberately NOT listed (owner's decision, 04.10.2026) ──
-  //
-  // *"في السايدبار بدي نخفي البلان مبدئياً لحد ما نتفق عليها"* — the eight-step
-  // Monatsplan is hidden from the navigation until he and the customer have
-  // agreed on how it distributes a month.
-  //
-  // **The route is untouched** (`App.tsx` still registers it behind the same
-  // `dokumente` plan gate), so it stays reachable at `/monatsplan` for testing and
-  // nothing about the feature, its tables or its documents is disabled. Restoring
-  // it is putting this one line back:
-  //
-  //   { path: '/monatsplan', icon: ListChecks, labelKey: 'nav.monthlyPlan', feature: 'dokumente' },
-  //
-  // Restoring it also needs `ListChecks` back in the lucide import: `noUnusedLocals`
-  // is on, so an icon kept "for later" fails the build. `nav.monthlyPlan` stays in
-  // both dictionaries, which costs nothing and keeps the wording decided.
+  // `/monatsplan` is listed only where it is meant to be seen — see
+  // `monthlyPlanInNav`. The route is registered in every environment regardless.
+  ...(monthlyPlanInNav(import.meta.env.VITE_DEPLOY_ENV, import.meta.env.DEV)
+    ? [{ path: '/monatsplan', icon: ListChecks, labelKey: 'nav.monthlyPlan' as const, feature: 'dokumente' as const }]
+    : []),
 ];
 
 // `feature: 'overview'` is this file's existing spelling for "on every plan":
