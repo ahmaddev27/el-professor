@@ -18,6 +18,7 @@ import {
   type ArchiveExportLabels,
 } from '../utils/stundennachweisArchiveExport';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
+import { tripAnalysisLinkShown } from '../components/navVisibility';
 import { useTranslation } from '../contexts/LanguageContext';
 import type { TranslationKey } from '../i18n';
 import {
@@ -426,10 +427,14 @@ const DocumentsPage: React.FC = () => {
           title={t('doc.fahrtenbuch')}
           description={t('doc.fahrtenbuchSubtitle')}
           actions={
-            <Button variant="secondary" onClick={() => navigate('/fahrtenanalyse')}>
-              <FileSearch aria-hidden />
-              {t('ta.link.open')}
-            </Button>
+            // Offered only where the Fahrtenanalyse is meant to be seen. The route
+            // stays registered everywhere, so the screen is reachable by address.
+            tripAnalysisLinkShown(import.meta.env.VITE_DEPLOY_ENV, import.meta.env.DEV) ? (
+              <Button variant="secondary" onClick={() => navigate('/fahrtenanalyse')}>
+                <FileSearch aria-hidden />
+                {t('ta.link.open')}
+              </Button>
+            ) : undefined
           }
         />
         <FahrtenbuchTripsView drivers={drivers} cars={cars} />

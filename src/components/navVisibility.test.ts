@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { monthlyPlanInNav } from './navVisibility';
+import { monthlyPlanInNav, tripAnalysisLinkShown } from './navVisibility';
 
 /**
  * The rule that keeps the Monatsplan out of production's sidebar while leaving it
@@ -34,5 +34,34 @@ describe('monthlyPlanInNav', () => {
     // Otherwise working on the screen locally would mean editing the sidebar
     // first, which is how a temporary hide becomes permanent.
     expect(monthlyPlanInNav(undefined, true)).toBe(true);
+  });
+});
+
+describe('tripAnalysisLinkShown', () => {
+  // The owner's decision of 23.09.2026, restated before the release of
+  // 04.10.2026: the Fahrtenbuch **analysis** stays on staging. It is not the
+  // Fahrtenbuch itself, which is `/dokumente` and has been on production for
+  // months — this hides two links to a separate read-only screen.
+  it('is off for production and for a build with no variable set', () => {
+    expect(tripAnalysisLinkShown('production', false)).toBe(false);
+    expect(tripAnalysisLinkShown(undefined, false)).toBe(false);
+    expect(tripAnalysisLinkShown('', false)).toBe(false);
+  });
+
+  it('is on for staging and for a dev server', () => {
+    expect(tripAnalysisLinkShown('staging', false)).toBe(true);
+    expect(tripAnalysisLinkShown(undefined, true)).toBe(true);
+  });
+
+  it('answers exactly as the Monatsplan does, so the two cannot drift apart', () => {
+    // They are one rule behind two names on purpose. If they ever need to
+    // differ, that is a decision to write down, not something to discover from a
+    // screen behaving unlike its twin.
+    for (const env of [undefined, '', '  ', 'production', 'Production', 'staging', 'other']) {
+      for (const dev of [true, false]) {
+        expect(tripAnalysisLinkShown(env, dev), `${String(env)} / dev=${dev}`)
+          .toBe(monthlyPlanInNav(env, dev));
+      }
+    }
   });
 });
