@@ -10,12 +10,14 @@ import { useCompanySettings } from '../contexts/CompanySettingsContext';
 import { format } from 'date-fns';
 import SalaryPaymentModal from './SalaryPaymentModal';
 import SalaryPaymentReceiptPreview from './SalaryPaymentReceiptPreview';
+import SalaryPaymentCashView, { type CashPaymentViewTarget } from './SalaryPaymentCashView';
 import GehaltsquittungModal from './GehaltsquittungModal';
 import ConfirmationModal from './ConfirmationModal';
 import {
   currentLoadState,
   loadReceiptForPreview,
   paymentRowActions,
+  paymentRowOffersView,
   paymentRowStorno,
   stornoStep,
   voidReasonProblem,
@@ -28,7 +30,6 @@ import {
   findOverlappingSalary,
   outcomeIsUnknown,
   receiptScope,
-  scopeRefusal,
   type ReceiptActionRefusal,
 } from '../utils/salaryCashReceiptFlow';
 import { derivePaymentStatus, remainingDue } from '../utils/salaryDue';
@@ -119,6 +120,8 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
   const [paymentToDelete, setPaymentToDelete] = useState<SalaryPayment | null>(null);
   /** The Gehaltsquittung shown over this screen; null while none is open. */
   const [receiptPreviewId, setReceiptPreviewId] = useState<string | null>(null);
+  /** The cash payment shown as a read-only view when no stored receipt can be opened. */
+  const [cashView, setCashView] = useState<CashPaymentViewTarget | null>(null);
   /**
    * The Gehaltsquittung this screen is about to void; null while none is.
    *
@@ -1068,6 +1071,29 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
                           storno.kind === 'blocked'
                             ? `${t('sal.payment.receiptLocked')} ${t(REFUSAL_MESSAGE_KEYS[storno.refusal])}`
                             : t('sal.payment.receiptLocked');
+                        // Every cash payment can be viewed (owner, 03.10.2026): a stored
+                        // receipt opens in place, any other one opens a read-only sheet
+                        // drawn from the payment. See paymentRowOffersView.
+                        const viewOffered = paymentRowOffersView(payment, rowActions);
+                        const viewButton = (
+                          <button
+                            type="button"
+                            onClick={() => setCashView({
+                              amount: payment.amount,
+                              paymentDate: payment.payment_date,
+                              periodStart: salary.period_start ?? '',
+                              periodEnd: salary.period_end ?? '',
+                              driverName: salary.driver_name,
+                            })}
+                            aria-label={t('sal.payment.viewCashAria', {
+                              date: format(new Date(payment.payment_date), 'dd.MM.yyyy'),
+                            })}
+                            className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-[13px] font-medium text-[color:var(--accent)] hover:bg-[color:var(--accent-subtle)]"
+                          >
+                            <Eye size={14} />
+                            {t('sal.payment.viewCash')}
+                          </button>
+                        );
                         return (
                         <tr
                           key={payment.id}
@@ -1167,43 +1193,7 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
                                     {t('sal.payment.previewReceipt')}
                                   </button>
                                 )}
-                                {!rowActions.preview && (() => {
-                                  // The preview is withheld for one of three reasons, and a
-                                  // control that says nothing reads as broken: name the one
-                                  // that applies, in the place the button would be.
-                                  const reasonKey = !payment.source_reference?.trim()
-                                    ? 'sal.payment.previewUnavailableNoReceipt'
-                                    : !planIncludes('dokumente')
-                                      ? 'sal.payment.previewUnavailablePlan'
-                                      : null;
-                                  const refusal = scopeRefusal(receiptsScope);
-                                  const reason = reasonKey
-                                    ? t(reasonKey)
-                                    : refusal
-                                      ? t(REFUSAL_MESSAGE_KEYS[refusal])
-                                      : '';
-                                  return (
-                                    <span title={reason} className="inline-flex">
-                                      <button
-                                        type="button"
-                                        disabled
-                                        aria-label={`${t('sal.payment.previewReceipt')}: ${reason}`}
-                                        // An explicit colour, because this modal is legacy
-                                        // and sets its text colour with inline styles: a
-                                        // button carrying only `opacity-50` inherits
-                                        // whatever the cell has and renders dark on dark —
-                                        // an empty box the size of a button, which is what
-                                        // the owner photographed on 03.10.2026 after the
-                                        // first fix shipped. A disabled control that cannot
-                                        // be read is the defect it was meant to close.
-                                        className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-[13px] font-medium text-[color:var(--text-tertiary)] opacity-70"
-                                      >
-                                        <Eye size={14} />
-                                        {t('sal.payment.previewReceipt')}
-                                      </button>
-                                    </span>
-                                  );
-                                })()}
+                                {viewOffered && viewButton}
                                 {storno.kind === 'offered' && (
                                   // Classes rather than an inline style, so the screen's
                                   // style-ratchet count does not move; the colours are the
@@ -1223,6 +1213,7 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
                               </div>
                             ) : (
                             <div className="flex items-center justify-end space-x-2">
+                              {viewOffered && viewButton}
                               <button
                                 onClick={() => { setSelectedPayment(payment); setIsPaymentModalOpen(true); }}
                                 style={{ color: 'var(--accent)', borderRadius: '0.25rem', padding: '0.25rem' }}
@@ -1278,6 +1269,8 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
         payment={selectedPayment}
         cashBlockedMessage={cashBlockedMessage}
       />
+
+      <SalaryPaymentCashView target={cashView} onClose={() => setCashView(null)} />
 
       <SalaryPaymentReceiptPreview
         receiptId={receiptPreviewId}

@@ -6,6 +6,7 @@ import {
   businessMonthOfPeriod,
   germanBusinessMonth,
   germanDate,
+  paymentViewDocumentInput,
   receiptCompany,
   receiptDocumentProblem,
   storedReceiptDocumentInput,
@@ -350,5 +351,34 @@ describe('a receipt without names is not printed', () => {
       { name: ' ', addressLines: [] },
     );
     expect(() => buildReceiptDocumentText(stored)).toThrow(/missing_company_name/);
+  });
+});
+
+describe('paymentViewDocumentInput — a view of a payment, not a receipt', () => {
+  const payment = { amount: 300, paymentDate: '2026-09-15', periodStart: '2026-09-07', periodEnd: '2026-09-13' };
+  const driver = { name: 'Max Muster', gender: 'male' as const };
+  const company = { name: 'Muster GmbH', addressLines: ['Weg 1'] };
+
+  it('draws no number, says what it is, and prints the amount from the payment', () => {
+    const input = paymentViewDocumentInput(payment, driver, company);
+    expect(input.receiptNumber).toBeNull();
+    expect(input.status).toBe('payment_view');
+    const text = buildReceiptDocumentText(input);
+    expect(text.number).toBe('Ohne Quittungsnummer');
+    expect(text.banner).toContain('keine Gehaltsquittung');
+    expect(text.amount.figures).toBe('300,00 EUR');
+    expect(text.fileName).toBe('Gehaltsquittung_Zahlungsansicht_Max_Muster');
+  });
+
+  it('does not claim the employee confirmed receipt', () => {
+    const text = buildReceiptDocumentText(paymentViewDocumentInput(payment, driver, company));
+    expect(text.confirmation).not.toContain('bestätigt hiermit');
+    expect(text.confirmation).toContain('15.09.2026');
+    expect(text.placeAndDate.value).toBe('den 15.09.2026');
+  });
+
+  it('refuses an unreadable date or amount instead of printing it', () => {
+    expect(() => paymentViewDocumentInput({ ...payment, periodStart: 'x' }, driver, company)).toThrow(RangeError);
+    expect(() => paymentViewDocumentInput({ ...payment, amount: 'abc' }, driver, company)).toThrow();
   });
 });

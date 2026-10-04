@@ -38,8 +38,11 @@ export interface PaymentRowInput {
 
 /** What the row's actions depend on besides the payment itself. */
 export interface PaymentRowContext {
-  /** usePlan().can('dokumente'): the feature the Gehaltsquittung belongs to. */
-  planIncludesDokumente: boolean;
+  /**
+   * Not read since 03.10.2026: the owner dropped the plan from the conditions
+   * for viewing a cash payment. Kept so callers and tests keep one shape.
+   */
+  planIncludesDokumente?: boolean;
   /** Whose receipts this screen may act on, from receiptScope(). */
   scope: ReceiptScope;
 }
@@ -79,9 +82,33 @@ export function paymentRowActions(payment: PaymentRowInput, context: PaymentRowC
   if (payment.source_type !== 'gehaltsquittung') return { kind: 'editable' };
   const receiptId = payment.source_reference?.trim();
   if (!receiptId) return { kind: 'receipt', preview: false };
-  if (!context.planIncludesDokumente) return { kind: 'receipt', preview: false };
   if (scopeRefusal(context.scope) !== null) return { kind: 'receipt', preview: false };
   return { kind: 'receipt', preview: true, receiptId };
+}
+
+/**
+ * Whether a row offers the **payment view**: the read-only sheet drawn from the
+ * payment itself (owner decision 03.10.2026, "each payment in the salary with
+ * type cash must be able to be viewed").
+ *
+ * Offered for every cash payment that does not open a stored receipt:
+ * a manual one, and a Gehaltsquittung row whose receipt cannot be opened (no
+ * id stored, or a caller outside the owning company). **Never offered in place
+ * of a stored receipt that can be opened** — a real, numbered receipt is never
+ * replaced by a derived sheet.
+ *
+ * "Bar zurück" (`weekly_cash_difference`) is excluded: it is paid in the
+ * salary's books but the till never saw it, so a sheet headed "Barzahlung" would
+ * state a cash handover that did not happen.
+ *
+ * It reads nothing from salary_cash_receipts and writes nothing, so it needs
+ * neither the plan nor the caller's own company: platform staff inside a
+ * support session may view it (a view is not issuing, voiding or signing).
+ */
+export function paymentRowOffersView(payment: PaymentRowInput, actions: PaymentRowActions): boolean {
+  if (payment.payment_type !== 'cash') return false;
+  if (payment.source_type === 'weekly_cash_difference') return false;
+  return !(actions.kind === 'receipt' && actions.preview);
 }
 
 // ─── Loading the receipt behind one row ─────────────────────────────────────

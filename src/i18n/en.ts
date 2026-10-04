@@ -5944,4 +5944,10 @@ export const en: PartialDictionary = {
   'mplan.ownerFree.more':    '… and {count} more windows.',
   'mplan.ownerFree.summary': 'The owner has taken {assigned} hours and is free for {hours} hours this month, across {windows} windows. No block is moved here: one that does not fit in time stays unassigned.',
   'mplan.ownerFree.title':   'The owner\'s free time',
+  'sal.payment.viewCash':       'View payment',
+  'sal.payment.viewCashAria':   'View the cash payment of {date}',
+  'sal.payment.viewCashBroken': 'This payment cannot be shown: its date or amount is unreadable.',
+  'sal.payment.viewCashIntro':  'A view of this cash payment. No Gehaltsquittung is stored for it; this view assigns no number and changes nothing.',
+  'sal.payment.viewCashLabel':  'Cash payment view',
+  'sal.payment.viewCashTitle':  'Cash payment',
 };

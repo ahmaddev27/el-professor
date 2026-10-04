@@ -3,6 +3,7 @@ import {
   currentLoadState,
   loadReceiptForPreview,
   paymentRowActions,
+  paymentRowOffersView,
   paymentRowStorno,
   receiptPreviewView,
   receiptSheet,
@@ -71,10 +72,11 @@ describe('paymentRowActions', () => {
     });
   });
 
-  it('locks the row without a preview when the plan does not include Dokumente', () => {
+  it('no longer asks the plan: the owner dropped it from the conditions on 03.10.2026', () => {
     expect(paymentRowActions(receiptPayment, { ...inOwnCompany, planIncludesDokumente: false })).toEqual({
       kind: 'receipt',
-      preview: false,
+      preview: true,
+      receiptId: RECEIPT_A,
     });
   });
 
@@ -466,7 +468,7 @@ describe('paymentRowStorno', () => {
     // that can be neither edited, nor deleted, nor voided. The preview does go
     // dark in that case, and that difference is deliberate.
     const planOff: PaymentRowContext = { planIncludesDokumente: false, scope: 'own_company' };
-    expect(paymentRowActions(receiptPayment, planOff)).toEqual({ kind: 'receipt', preview: false });
+    expect(paymentRowActions(receiptPayment, planOff).kind).toBe('receipt');
     expect(paymentRowStorno(receiptPayment, mayVoid)).toEqual({ kind: 'offered', receiptId: RECEIPT_A });
   });
 });
@@ -531,5 +533,36 @@ describe('voidReasonProblem', () => {
   it('accepts a reason, and judges it the way the RPC trims it', () => {
     expect(voidReasonProblem('Falscher Betrag')).toBeNull();
     expect(voidReasonProblem('  Falscher Betrag  ')).toBeNull();
+  });
+});
+
+describe('paymentRowOffersView — every cash payment can be viewed', () => {
+  const view = (p: PaymentRowInput, ctx: PaymentRowContext = inOwnCompany) =>
+    paymentRowOffersView(p, paymentRowActions(p, ctx));
+
+  it('offers it for a manual cash payment, which has no stored receipt', () => {
+    expect(view({ payment_type: 'cash', source_type: 'manual' })).toBe(true);
+    expect(view({ payment_type: 'cash' })).toBe(true);
+  });
+
+  it('offers it for a cash payment inside a support session, which reads and writes nothing', () => {
+    expect(view({ payment_type: 'cash', source_type: 'manual' }, { scope: 'other_company' })).toBe(true);
+  });
+
+  it('does not offer it for a bank payment', () => {
+    expect(view({ payment_type: 'bank', source_type: 'manual' })).toBe(false);
+  });
+
+  it('does not offer it for "Bar zurück", which the till never saw', () => {
+    expect(view({ payment_type: 'cash', source_type: 'weekly_cash_difference' })).toBe(false);
+  });
+
+  it('never replaces a stored receipt that can be opened', () => {
+    expect(view(receiptPayment)).toBe(false);
+  });
+
+  it('falls back to it for a Gehaltsquittung row whose receipt cannot be opened', () => {
+    expect(view({ ...receiptPayment, source_reference: null })).toBe(true);
+    expect(view(receiptPayment, { scope: 'other_company' })).toBe(true);
   });
 });

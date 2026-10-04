@@ -6000,4 +6000,10 @@ export const de = {
   'mplan.ownerFree.more':    '… und {count} weitere Zeitfenster.',
   'mplan.ownerFree.summary': 'Der Inhaber hat {assigned} Stunden übernommen und ist in diesem Monat {hours} Stunden frei, verteilt auf {windows} Zeitfenster. Die Blöcke werden hier nicht verschoben: ein Block, der zeitlich nicht passt, bleibt unzugeteilt.',
   'mplan.ownerFree.title':   'Freie Zeit des Inhabers',
+  'sal.payment.viewCash':       'Zahlung ansehen',
+  'sal.payment.viewCashAria':   'Barzahlung vom {date} ansehen',
+  'sal.payment.viewCashBroken': 'Diese Zahlung kann nicht angezeigt werden: Datum oder Betrag sind nicht lesbar.',
+  'sal.payment.viewCashIntro':  'Ansicht dieser Barzahlung. Es ist keine Gehaltsquittung gespeichert; diese Ansicht vergibt keine Nummer und ändert nichts.',
+  'sal.payment.viewCashLabel':  'Ansicht der Barzahlung',
+  'sal.payment.viewCashTitle':  'Barzahlung',
 } as const;
