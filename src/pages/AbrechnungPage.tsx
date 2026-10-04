@@ -23,7 +23,7 @@ import { format } from 'date-fns';
 import { getWeeksOfMonth, getBusinessMonthRange, getBusinessWeeksForMonth } from '../utils/weekCalculations';
 import html2canvas from 'html2canvas';
 import { exportTableToExcel } from '../utils/excelExport';
-import { blobToBase64, sendAbrechnungMail } from '../lib/sendDocumentClient';
+import { sendAbrechnungMail } from '../lib/sendDocumentClient';
 import {
   nothingToSend,
   planRecipients,
@@ -605,8 +605,10 @@ export function AbrechnungPage() {
     const recipient = plan.sendable[0];
     try {
       setIsSharing(true);
-      showToast('info', t('abr.creatingImage'));
-      const image = await generateSettlementImageBlob();
+      // No image (owner, 04.10.2026): *"no need to create the photo and send it
+      // to the driver in the email, it is enough to send the data as text"*. The
+      // figures are in the mail's own body, so the card added a rendering step, a
+      // 450 ms wait per driver and a megabyte of attachment for nothing.
       const period = periodOf(detailModalData);
 
       const result = await sendAbrechnungMail({
@@ -614,7 +616,7 @@ export function AbrechnungPage() {
         periodLabel: period.label,
         periodRange: period.range,
         figures: figuresOf(detailModalData),
-        imageBase64: image ? await blobToBase64(image.blob) : '',
+        imageBase64: '',
       });
 
       if (result.ok) {
@@ -662,10 +664,9 @@ export function AbrechnungPage() {
         const detail = await buildDetail(row);
         if (!detail) { failed.push(recipient.driverName); continue; }
 
-        setDetailModalData(detail);
-        // The off-screen card has to render this driver before it is captured.
-        await new Promise(resolve => setTimeout(resolve, 450));
-        const image = await generateSettlementImageBlob();
+        // No card is captured any more, so this driver's detail is not rendered
+        // off screen and the 450 ms wait that let it paint is gone with it. The
+        // whole week therefore sends in a fraction of the time it used to.
         const period = periodOf(detail);
 
         const result = await sendAbrechnungMail({
@@ -673,7 +674,7 @@ export function AbrechnungPage() {
           periodLabel: period.label,
           periodRange: period.range,
           figures: figuresOf(detail),
-          imageBase64: image ? await blobToBase64(image.blob) : '',
+          imageBase64: '',
         });
 
         if (result.ok) sent++;

@@ -5950,4 +5950,8 @@ export const en: PartialDictionary = {
   'sal.payment.viewCashIntro':  'A view of this cash payment. No Gehaltsquittung is stored for it; this view assigns no number and changes nothing.',
   'sal.payment.viewCashLabel':  'Cash payment view',
   'sal.payment.viewCashTitle':  'Cash payment',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'common.print':        'Print',
+  'gq.action.preparing': 'Preparing …',
 };

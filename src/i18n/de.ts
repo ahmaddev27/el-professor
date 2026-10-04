@@ -6006,4 +6006,8 @@ export const de = {
   'sal.payment.viewCashIntro':  'Ansicht dieser Barzahlung. Es ist keine Gehaltsquittung gespeichert; diese Ansicht vergibt keine Nummer und ändert nichts.',
   'sal.payment.viewCashLabel':  'Ansicht der Barzahlung',
   'sal.payment.viewCashTitle':  'Barzahlung',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'common.print':        'Drucken',
+  'gq.action.preparing': 'Wird vorbereitet …',
 } as const;

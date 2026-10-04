@@ -190,6 +190,12 @@ Deno.serve(async (req: Request) => {
     periodRange,
     figures,
     appUrl: Deno.env.get("APP_URL") ?? "",
+    // Passed rather than left to default: `imageAttached` defaults to true, so a
+    // mail sent with no image would have told the driver the overview was
+    // attached when nothing was. Since 04.10.2026 the browser sends no image at
+    // all — the figures are in the body — and this is what keeps the sentence
+    // honest for whichever caller sends one and whichever does not.
+    imageAttached: image !== "",
   });
 
   try {

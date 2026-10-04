@@ -364,8 +364,16 @@ describe('paymentViewDocumentInput — a view of a payment, not a receipt', () =
     expect(input.receiptNumber).toBeNull();
     expect(input.status).toBe('payment_view');
     const text = buildReceiptDocumentText(input);
-    expect(text.number).toBe('Ohne Quittungsnummer');
-    expect(text.banner).toContain('keine Gehaltsquittung');
+    // **No number line at all**, and no banner either (owner's decision,
+    // 04.10.2026: *remove both*). It printed "Ohne Quittungsnummer" and carried a
+    // "ZAHLUNGSANSICHT – keine Gehaltsquittung …" banner until then.
+    //
+    // What that costs is recorded rather than asserted away: a printed sheet is
+    // now indistinguishable from a confirmed Gehaltsquittung except for having no
+    // number. `receiptNumber` stays null and nothing draws one, which is the part
+    // a test can still hold.
+    expect(text.number).toBeNull();
+    expect(text.banner).toBeNull();
     expect(text.amount.figures).toBe('300,00 EUR');
     expect(text.fileName).toBe('Gehaltsquittung_Zahlungsansicht_Max_Muster');
   });

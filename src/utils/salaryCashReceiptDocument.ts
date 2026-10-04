@@ -97,7 +97,8 @@ export interface ReceiptDocumentRow {
 export interface ReceiptDocumentText {
   title: string;
   subtitle: string;
-  number: string;
+  /** The receipt number line, or null where the sheet prints none at all. */
+  number: string | null;
   /** A notice across the top: the preview is not valid, a voided receipt is void. */
   banner: string | null;
   company: { name: string; addressLines: string[] };
@@ -190,12 +191,18 @@ function fileNamePart(text: string): string {
   return text.trim().replace(/[\\/:*?"<>|]+/g, '').replace(/\s+/g, '_');
 }
 
-const PAYMENT_VIEW_BANNER =
-  'ZAHLUNGSANSICHT – keine Gehaltsquittung: ohne Quittungsnummer, ohne Unterschrift, nicht als Beleg gültig';
-
 function banner(input: ReceiptDocumentInput): string | null {
   if (input.status === 'preview') return 'VORSCHAU – noch nicht bestätigt und nicht gültig';
-  if (input.status === 'payment_view') return PAYMENT_VIEW_BANNER;
+  // `payment_view` carries **no banner** (owner's decision, 04.10.2026). It used
+  // to print "ZAHLUNGSANSICHT – keine Gehaltsquittung …", and he had it removed
+  // along with the "Ohne Quittungsnummer" line, so the sheet he prints for a
+  // driver reads as the document rather than as a caveat about it.
+  //
+  // What that costs, recorded because the code can no longer say it: the sheet is
+  // now indistinguishable from a confirmed Gehaltsquittung except that it carries
+  // no number, and nothing on it says a receipt was never stored. `preview` and
+  // `voided` keep their banners — only this one state lost it.
+  if (input.status === 'payment_view') return null;
   if (input.status === 'voided') {
     const when = input.voided ? ` am ${germanDate(input.voided.date)}` : '';
     const why = input.voided?.reason.trim() ? ` – Grund: ${input.voided.reason.trim()}` : '';
@@ -361,10 +368,12 @@ export function buildReceiptDocumentText(input: ReceiptDocumentInput): ReceiptDo
   return {
     title: 'Gehaltsquittung',
     subtitle: 'Barzahlung des Gehalts',
+    // A `payment_view` prints no number line at all rather than saying it has
+    // none — the owner asked for both markers gone on 04.10.2026.
     number: input.receiptNumber
       ? `Nr. ${input.receiptNumber}`
       : input.status === 'payment_view'
-        ? 'Ohne Quittungsnummer'
+        ? null
         : 'Nr. wird bei der Bestätigung vergeben',
     banner: banner(input),
     company: { name: input.company.name, addressLines: [...input.company.addressLines] },
