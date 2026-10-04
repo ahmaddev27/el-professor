@@ -68,6 +68,7 @@ import {
 } from '../utils/monthlyPlanScreens';
 import { useCompanySettings } from '../contexts/CompanySettingsContext';
 import { storedPlanFromGenerated } from '../utils/monthlyPlanDocuments';
+import { ownerFreeTime } from '../utils/monthlyPlan/ownerFreeTime';
 import {
   savePlanAndConfirm,
   type ConfirmResult,
@@ -426,6 +427,11 @@ function dateText(ms: number): string {
   const d = new Date(ms);
   const pad = (n: number) => String(n).padStart(2, '0');
   return `${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${d.getFullYear()}`;
+}
+
+/** Decimal hours with a German comma, for a figure a person reads rather than sums. */
+function formatHours(hours: number): string {
+  return hours.toFixed(1).replace('.', ',');
 }
 
 function timeText(ms: number): string {
@@ -1041,6 +1047,27 @@ export default function MonthlyPlanPage() {
       : null),
     [plan],
   );
+
+  /**
+   * When the owner is free, over the whole month (the owner's request,
+   * 03.10.2026). A view only: it assigns nothing and moves nothing.
+   *
+   * Null until the blocks have been shared out and while the company has no
+   * owner — a "free time" panel for nobody is noise, and `isOwner` comes from
+   * `employment_type`, which many companies never set.
+   */
+  const ownerFree = useMemo(() => {
+    if (!plan?.result) return null;
+    const owner = plan.result.driverStates.find(s => s.driver.isOwner);
+    if (!owner) return null;
+    const mine = new Set(plan.result.assignments
+      .filter(a => a.driverId === owner.driver.id)
+      .map(a => a.blockId));
+    // `switchMinutes ?? 0`: with no switch duration set there is no floor, so
+    // every gap counts as free — which is what "the operator has not told us how
+    // long a change takes" honestly means, rather than inventing a default.
+    return ownerFreeTime(plan.blocks, plan.blocks.filter(b => mine.has(b.id)), switchMinutes ?? 0);
+  }, [plan, switchMinutes]);
 
   // Empty until the blocks have been shared out. Between steps 3 and 4 there is
   // no assignment, so there are no per-driver rows and no warnings about one —
@@ -1989,6 +2016,44 @@ export default function MonthlyPlanPage() {
                   </ul>
                 </>
               )}
+            </Alert>
+          ) : null}
+
+          {/* The owner's free time, which is what an operator looking at
+              unassigned blocks actually wants to know (his request of
+              03.10.2026). Measured on his own August the day it was built: the
+              owner held 156 h and was free for 596 h in 70 windows, the longest a
+              whole day, against 56 unassigned blocks totalling 184 h — all 56 of
+              which would fit in some window.
+
+              It is a VIEW and assigns nothing. The blocks do not fit at their own
+              times, and moving one into a window would make the Fahrtenbuch state
+              that a journey happened at a time it did not — this module's recorded
+              boundary. So the screen shows the room and leaves the decision to a
+              person. */}
+          {ownerFree && ownerFree.windows.length > 0 ? (
+            <Alert tone="neutral" title={t('mplan.ownerFree.title')} className="mt-3">
+              <p>
+                {t('mplan.ownerFree.summary', {
+                  hours: formatHours(ownerFree.totalMinutes / 60),
+                  windows: ownerFree.windows.length,
+                  assigned: formatHours(ownerFree.assignedMinutes / 60),
+                })}
+              </p>
+              <ul className="mt-2 space-y-1 text-[13px]">
+                {ownerFree.windows.slice(0, 14).map(w => (
+                  <li key={`${w.day}-${w.startMs}`} className="tabular-nums">
+                    {dateTimeText(w.startMs)} – {timeText(w.endMs)}
+                    {'  ·  '}
+                    {formatHours(w.minutes / 60)} h
+                  </li>
+                ))}
+              </ul>
+              {ownerFree.windows.length > 14 ? (
+                <p className="mt-1 text-[13px] text-fg-muted">
+                  {t('mplan.ownerFree.more', { count: ownerFree.windows.length - 14 })}
+                </p>
+              ) : null}
             </Alert>
           ) : null}
 

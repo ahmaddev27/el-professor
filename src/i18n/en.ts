@@ -5939,4 +5939,9 @@ export const en: PartialDictionary = {
   'bargeld.manualCardHint':                'Added less paid out',
   'bargeld.manualIn':                      'Cash added',
   'bargeld.manualOut':                     'Cash payment',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'mplan.ownerFree.more':    '… and {count} more windows.',
+  'mplan.ownerFree.summary': 'The owner has taken {assigned} hours and is free for {hours} hours this month, across {windows} windows. No block is moved here: one that does not fit in time stays unassigned.',
+  'mplan.ownerFree.title':   'The owner\'s free time',
 };

@@ -5995,4 +5995,9 @@ export const de = {
   'bargeld.manualCardHint':                'Eingelegt abzüglich Barzahlungen',
   'bargeld.manualIn':                      'Bargeld eingelegt',
   'bargeld.manualOut':                     'Barzahlung',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'mplan.ownerFree.more':    '… und {count} weitere Zeitfenster.',
+  'mplan.ownerFree.summary': 'Der Inhaber hat {assigned} Stunden übernommen und ist in diesem Monat {hours} Stunden frei, verteilt auf {windows} Zeitfenster. Die Blöcke werden hier nicht verschoben: ein Block, der zeitlich nicht passt, bleibt unzugeteilt.',
+  'mplan.ownerFree.title':   'Freie Zeit des Inhabers',
 } as const;
