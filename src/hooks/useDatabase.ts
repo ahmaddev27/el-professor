@@ -1,15 +1,17 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
-import { Receipt, Driver } from '../types/receipt';
+import { Receipt, Driver, DriverContact } from '../types/receipt';
 import { isSupabaseConfigured } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
+import { useTranslation } from '../contexts/LanguageContext';
 import { withTimeout } from './useTimeout';
 import { DriverPlanningFields } from '../components/DriverModal';
 import { mapDriverRow } from '../lib/driverRow';
 
 export const useDatabase = () => {
   const { user, profile } = useAuth();
+  const { t } = useTranslation();
   /*
     The company the session is in (plan 3.4b), not the account's membership.
 
@@ -45,7 +47,7 @@ export const useDatabase = () => {
         addDebugInfo('❌ Supabase environment variables not found');
         addDebugInfo(`VITE_SUPABASE_URL: ${import.meta.env.VITE_SUPABASE_URL ? 'SET' : 'NOT SET'}`);
         addDebugInfo(`VITE_SUPABASE_ANON_KEY: ${import.meta.env.VITE_SUPABASE_ANON_KEY ? 'SET' : 'NOT SET'}`);
-        setError('Supabase ist nicht konfiguriert. Bitte überprüfen Sie die Umgebungsvariablen.');
+        setError(t('db.notConfigured'));
         setIsConnected(false); // Force localStorage mode
         setIsLoading(false);
         return;
@@ -85,6 +87,29 @@ export const useDatabase = () => {
     } finally {
       setIsLoading(false);
     }
+  };
+
+  /**
+   * A write attempted while the hook is not connected reaches nothing, so it
+   * must fail rather than resolve.
+   *
+   * The read branches below fall back to `localStorage`, which CLAUDE.md records
+   * as a legacy quirk of this hook. The *write* half of that fallback was never
+   * built: every use of it in this file is a `getItem`. Six write branches
+   * nevertheless resolved — `updateDriver`, `deleteDriver`, `updateReceipt` and
+   * `deleteReceipt` with a bare `return`, and `addDriver` and `addReceipt` by
+   * handing the caller a fabricated row with a `Date.now()` id. Every one of the
+   * six call sites then showed its success toast and reloaded a list that could
+   * not contain the row.
+   *
+   * This does not build the missing fallback — CLAUDE.md is explicit that this
+   * hook is not a pattern to extend. It makes the discarded write say so. Each
+   * caller already wraps the call in `try`/`catch` and renders
+   * `handleDatabaseError(err)`, which passes an `Error`'s own message through,
+   * so the sentence below is what the screen shows.
+   */
+  const refuseOfflineWrite = (): never => {
+    throw new Error(t('db.offlineWrite'));
   };
 
   // Driver operations
@@ -138,8 +163,11 @@ export const useDatabase = () => {
     return {
       employment_type:        p.employment_type ?? 'employee',
       driver_usage_type:      p.driver_usage_type,
-      target_monthly_hours:   p.target_monthly_hours !== '' ? parseFloat(p.target_monthly_hours) : null,
-      max_monthly_hours:      p.max_monthly_hours !== '' ? parseFloat(p.max_monthly_hours) : null,
+      // `target_monthly_hours` and `max_monthly_hours` are not written any more:
+      // the plan works from salaries (owner's decision, 01.10.2026) and nothing
+      // reads either column. They are left untouched rather than nulled on every
+      // save, so no driver's stored history is rewritten by an unrelated edit;
+      // dropping the columns is a migration of its own.
       planning_target_salary: p.planning_target_salary !== '' ? parseFloat(p.planning_target_salary) : null,
       planning_min_salary:    p.planning_min_salary !== '' ? parseFloat(p.planning_min_salary) : null,
       planning_max_salary:    p.planning_max_salary !== '' ? parseFloat(p.planning_max_salary) : null,
@@ -155,10 +183,9 @@ export const useDatabase = () => {
     };
   };
 
-  const addDriver = async (name: string, salaryRatio: number = 0.5, personalnummer?: string, gender?: 'male' | 'female' | null, planning?: DriverPlanningFields): Promise<Driver> => {
+  const addDriver = async (name: string, salaryRatio: number = 0.5, personalnummer?: string, gender?: 'male' | 'female' | null, planning?: DriverPlanningFields, contact?: DriverContact): Promise<Driver> => {
     if (!isConnected) {
-      const newDriver: Driver = { id: Date.now().toString(), name, salary_ratio: salaryRatio, personalnummer, gender: gender ?? null };
-      return newDriver;
+      refuseOfflineWrite();
     }
 
     try {
@@ -171,6 +198,11 @@ export const useDatabase = () => {
           salary_ratio: salaryRatio,
           personalnummer: personalnummer || null,
           gender: gender ?? null,
+          // Both already normalised by the form: the address trimmed, the number
+          // in E.164. Written as null when absent, which is what the send path
+          // reads to mean "skip this driver and name them".
+          email: contact?.email ?? null,
+          phone: contact?.phone ?? null,
           user_id: user?.id || null,
           created_by: user?.id || null,
           company_id: companyId,
@@ -194,9 +226,9 @@ export const useDatabase = () => {
     }
   };
 
-  const updateDriver = async (id: string, name: string, salaryRatio: number = 0.5, status?: 'active' | 'inactive', personalnummer?: string, gender?: 'male' | 'female' | null, planning?: DriverPlanningFields): Promise<void> => {
+  const updateDriver = async (id: string, name: string, salaryRatio: number = 0.5, status?: 'active' | 'inactive', personalnummer?: string, gender?: 'male' | 'female' | null, planning?: DriverPlanningFields, contact?: DriverContact): Promise<void> => {
     if (!isConnected) {
-      return;
+      refuseOfflineWrite();
     }
 
     try {
@@ -212,6 +244,13 @@ export const useDatabase = () => {
       }
       if (planning !== undefined) {
         Object.assign(updateData, planningToDb(planning));
+      }
+      // Conditional like every field above it, and that is what keeps the status
+      // toggle from clearing an address: `handleToggleStatus` calls this with four
+      // arguments, so `contact` is undefined and neither column is named at all.
+      if (contact !== undefined) {
+        updateData.email = contact.email;
+        updateData.phone = contact.phone;
       }
 
       const { error } = await supabase
@@ -231,7 +270,7 @@ export const useDatabase = () => {
 
   const deleteDriver = async (id: string): Promise<void> => {
     if (!isConnected) {
-      return;
+      refuseOfflineWrite();
     }
 
     try {
@@ -327,9 +366,7 @@ export const useDatabase = () => {
 
   const addReceipt = async (receipt: Omit<Receipt, 'id'>): Promise<Receipt> => {
     if (!isConnected) {
-      addDebugInfo('📱 Adding receipt to localStorage');
-      const newReceipt: Receipt = { ...receipt, id: Date.now().toString() };
-      return newReceipt;
+      refuseOfflineWrite();
     }
 
     try {
@@ -382,7 +419,7 @@ export const useDatabase = () => {
 
   const updateReceipt = async (id: string, receipt: Partial<Receipt>): Promise<void> => {
     if (!isConnected) {
-      return;
+      refuseOfflineWrite();
     }
 
     try {
@@ -412,7 +449,7 @@ export const useDatabase = () => {
 
   const deleteReceipt = async (id: string): Promise<void> => {
     if (!isConnected) {
-      return;
+      refuseOfflineWrite();
     }
 
     try {

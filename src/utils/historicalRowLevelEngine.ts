@@ -15,6 +15,8 @@
  */
 
 import type { FahrtenbuchTrip } from '../hooks/useFahrtenbuch';
+// Type-only: the engine names a dictionary key beside its German text.
+import type { EngineMessageKey, EngineMessageVars } from '../i18n/engineMessageTypes';
 import {
   buildVehicleBlocksForHistoricalWorkingHours,
   assignRegularDriversToVehicleBlocks,
@@ -232,7 +234,10 @@ export interface ArbeitsstundenEngineResult {
   phase1: BuildVehicleBlocksResult;
 
   isExportReady: boolean;
+  /** German, as the engine has always written it. The screen's fallback. */
   exportBlockedReason: string | null;
+  exportBlockedReasonKey?: EngineMessageKey;
+  exportBlockedReasonVars?: EngineMessageVars;
 }
 
 // ── Occupancy map helpers ─────────────────────────────────────────────────────
@@ -1097,12 +1102,23 @@ export function runHistoricalArbeitsstundenRowLevelEngine(
   const invalidOriginalRows = finalRows.filter(r => r.assignmentType === 'invalid_original').length;
 
   let exportBlockedReason: string | null = null;
+  let exportBlockedReasonKey: EngineMessageKey | undefined;
+  let exportBlockedReasonVars: EngineMessageVars | undefined;
   if (!overlapValidation.isClean) {
     exportBlockedReason = `Export blockiert: ${overlapValidation.driverOverlapCount} Fahrerüberschneidung(en), ${overlapValidation.vehicleOverlapCount} Fahrzeugüberschneidung(en) im erzeugten Fahrtenbuch gefunden.`;
+    exportBlockedReasonKey = 'engine.rowLevel.exportBlocked.overlaps';
+    exportBlockedReasonVars = {
+      driverOverlaps: overlapValidation.driverOverlapCount,
+      vehicleOverlaps: overlapValidation.vehicleOverlapCount,
+    };
   } else if (noSlotCount > 0) {
     exportBlockedReason = `Export blockiert: ${noSlotCount} Inhaber-Block(s) konnten nicht sauber verschoben werden (kein freier Slot).`;
+    exportBlockedReasonKey = 'engine.rowLevel.exportBlocked.noFreeSlot';
+    exportBlockedReasonVars = { blocks: noSlotCount };
   } else if (unassignedRows > 0) {
     exportBlockedReason = `Export blockiert: ${unassignedRows} abgeschlossene Fahrt(en) sind nicht zugewiesen.`;
+    exportBlockedReasonKey = 'engine.rowLevel.exportBlocked.unassignedRows';
+    exportBlockedReasonVars = { rows: unassignedRows };
   }
 
   const isExportReady = exportBlockedReason === null;
@@ -1142,6 +1158,8 @@ export function runHistoricalArbeitsstundenRowLevelEngine(
     phase1,
     isExportReady,
     exportBlockedReason,
+    exportBlockedReasonKey,
+    exportBlockedReasonVars,
   };
 }
 

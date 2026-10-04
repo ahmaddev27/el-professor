@@ -216,6 +216,21 @@ export async function runSmtpSession(connection: SmtpConnection, options: SmtpSe
 
 // ── Message ──────────────────────────────────────────────────────────────────
 
+/**
+ * A file sent beside the message.
+ *
+ * `content` is **already base64** and is never decoded here: the browser produced
+ * the PNG, encoded it, and this only has to place it. Decoding it to check it
+ * would mean holding the image twice in a worker's memory for no gain, and a
+ * corrupt attachment is the sender's defect rather than the transport's.
+ */
+export interface MimeAttachment {
+  filename: string;
+  contentType: string;
+  /** Base64, unwrapped. `wrapBase64` folds it to the line length SMTP wants. */
+  content: string;
+}
+
 export interface MimeMessageInput {
   fromName: string;
   fromAddress: string;
@@ -227,6 +242,13 @@ export interface MimeMessageInput {
   /** Without angle brackets: `uuid@domain`. */
   messageId: string;
   boundary: string;
+  /**
+   * The outer boundary, required only when something is attached. Must differ
+   * from `boundary`: one boundary for both levels makes the inner part's
+   * terminator close the outer one, and the attachment silently disappears.
+   */
+  mixedBoundary?: string;
+  attachments?: readonly MimeAttachment[];
 }
 
 export function base64Utf8(text: string): string {
@@ -313,7 +335,9 @@ export function buildMimeMessage(input: MimeMessageInput): string {
   if (!isAsciiMailAddress(input.to)) throw new SmtpError('invalid_address');
 
   const b = input.boundary;
-  return [
+  const attachments = input.attachments ?? [];
+
+  const headers = [
     `From: ${formatMailbox(input.fromName, input.fromAddress)}`,
     `To: <${input.to}>`,
     `Subject: ${encodeHeaderValue(input.subject)}`,
@@ -322,15 +346,74 @@ export function buildMimeMessage(input: MimeMessageInput): string {
     'MIME-Version: 1.0',
     // RFC 3834: tells out-of-office responders not to answer a machine.
     'Auto-Submitted: auto-generated',
-    // Folded: with the 35-character boundary mail.ts uses, one line would pass 78.
-    'Content-Type: multipart/alternative;',
-    ` boundary="${b}"`,
-    '',
+  ];
+
+  // The text and the HTML are two ALTERNATIVES of one message; a reader picks
+  // one. This pair is unchanged whether or not anything is attached.
+  const alternative = [
     `--${b}`,
     ...base64Part('text/plain', input.text),
     `--${b}`,
     ...base64Part('text/html', input.html),
     `--${b}--`,
+  ];
+
+  if (attachments.length === 0) {
+    return [
+      ...headers,
+      // Folded: with the 35-character boundary mail.ts uses, one line would pass 78.
+      'Content-Type: multipart/alternative;',
+      ` boundary="${b}"`,
+      '',
+      ...alternative,
+      '',
+    ].join('\r\n');
+  }
+
+  // An attachment is not an alternative to the text — it sits BESIDE it — so the
+  // message becomes `multipart/mixed` with the alternative pair nested inside.
+  const mixed = input.mixedBoundary;
+  if (!mixed || !/^[A-Za-z0-9_]{1,70}$/.test(mixed)) throw new SmtpError('invalid_boundary');
+  // One boundary for both levels would let the inner terminator close the outer
+  // part, and the attachment would vanish with no error anywhere.
+  if (mixed === b) throw new SmtpError('invalid_boundary');
+
+  const parts: string[] = [
+    ...headers,
+    'Content-Type: multipart/mixed;',
+    ` boundary="${mixed}"`,
     '',
-  ].join('\r\n');
+    `--${mixed}`,
+    'Content-Type: multipart/alternative;',
+    ` boundary="${b}"`,
+    '',
+    ...alternative,
+  ];
+
+  for (const attachment of attachments) {
+    // A quote or a line break in a filename breaks out of the header. Rejected
+    // rather than stripped: a renamed attachment is a surprise, a refused send is
+    // a message the caller can act on.
+    rejectLineBreaks(attachment.filename);
+    if (!/^[A-Za-z0-9 ._-]{1,120}$/.test(attachment.filename)) {
+      throw new SmtpError('invalid_attachment_name');
+    }
+    if (!/^[A-Za-z0-9!#$&^_.+-]+\/[A-Za-z0-9!#$&^_.+-]+$/.test(attachment.contentType)) {
+      throw new SmtpError('invalid_attachment_type');
+    }
+    if (!/^[A-Za-z0-9+/]*={0,2}$/.test(attachment.content.replace(/\s+/g, ''))) {
+      throw new SmtpError('invalid_attachment_content');
+    }
+    parts.push(
+      `--${mixed}`,
+      `Content-Type: ${attachment.contentType}; name="${attachment.filename}"`,
+      `Content-Disposition: attachment; filename="${attachment.filename}"`,
+      'Content-Transfer-Encoding: base64',
+      '',
+      wrapBase64(attachment.content.replace(/\s+/g, '')),
+    );
+  }
+
+  parts.push(`--${mixed}--`, '');
+  return parts.join('\r\n');
 }

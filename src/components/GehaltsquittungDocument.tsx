@@ -70,7 +70,9 @@ export function GehaltsquittungSheet({ text }: { text: ReceiptDocumentText }) {
             </div>
           ))}
         </div>
-        <div style={{ fontSize: '12px', fontWeight: 700, color: '#111', whiteSpace: 'nowrap' }}>{text.number}</div>
+        {text.number ? (
+          <div style={{ fontSize: '12px', fontWeight: 700, color: '#111', whiteSpace: 'nowrap' }}>{text.number}</div>
+        ) : null}
       </div>
 
       <div style={rule('1.5px', '#222', '20px 0 24px')} />
@@ -109,31 +111,10 @@ export function GehaltsquittungSheet({ text }: { text: ReceiptDocumentText }) {
         ))}
       </div>
 
-      <div style={{ ...caption, marginBottom: '6px' }}>{text.balanceHeading}</div>
-      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px', marginBottom: '10px' }}>
-        <tbody>
-          {text.balance.map(row => (
-            <tr key={row.label} style={{ borderBottom: '1px solid #eee' }}>
-              <td style={{ padding: '4px 0', color: row.emphasis ? '#111' : '#444', fontWeight: row.emphasis ? 700 : 400 }}>
-                {row.label}
-              </td>
-              <td
-                style={{
-                  padding: '4px 0',
-                  textAlign: 'right',
-                  whiteSpace: 'nowrap',
-                  color: '#111',
-                  fontWeight: row.emphasis ? 700 : 400,
-                  fontVariantNumeric: 'tabular-nums',
-                }}
-              >
-                {row.value}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      <p style={{ fontSize: '11px', color: '#333', margin: 0 }}>{text.settlement}</p>
+      {/* The salary-status table and the Teilzahlung sentence stood here until the
+          owner's decision of 28.09.2026. The sheet now states the amount, the
+          Abrechnungsmonat and the date of payment, and no balances at all — see
+          the note in utils/salaryCashReceiptDocument.ts for what that costs. */}
 
       <div style={{ flex: 1, minHeight: '28px' }} />
 
@@ -192,6 +173,55 @@ export function GehaltsquittungPreview({ text, label }: { text: ReceiptDocumentT
   );
 }
 
+/**
+ * Prints the sheet from the browser, on its own A4 page.
+ *
+ * It renders into a hidden iframe rather than calling `window.print()` on the
+ * page: printing the page would print the dialog, the sidebar and whatever else
+ * is behind it. The iframe holds the sheet and nothing else, so what comes out of
+ * the printer is the document.
+ *
+ * The styles are inlined into the iframe because the sheet draws itself with
+ * inline styles already (it is the legacy document path, deliberately), so no
+ * stylesheet has to be carried across.
+ */
+export async function printGehaltsquittung(text: ReceiptDocumentText): Promise<void> {
+  const frame = document.createElement('iframe');
+  frame.setAttribute('aria-hidden', 'true');
+  frame.style.cssText = 'position:fixed;left:-10000px;top:0;width:1px;height:1px;border:0;';
+  document.body.appendChild(frame);
+
+  const doc = frame.contentDocument;
+  const win = frame.contentWindow;
+  if (!doc || !win) { frame.remove(); throw new Error('the print frame did not open'); }
+
+  const { createRoot } = await import('react-dom/client');
+  doc.open();
+  doc.write(`<!doctype html><html lang="de"><head><meta charset="utf-8">`
+    + `<title>${text.title}</title>`
+    + `<style>@page{size:A4;margin:0}body{margin:0}</style></head><body><div id="s"></div></body></html>`);
+  doc.close();
+
+  const mount = doc.getElementById('s');
+  if (!mount) { frame.remove(); throw new Error('the print frame has no mount'); }
+  const root = createRoot(mount);
+
+  try {
+    await new Promise<void>(resolve => {
+      root.render(<GehaltsquittungSheet text={text} />);
+      // Two frames, as the PDF path does: one for React to commit, one for the
+      // browser to lay the sheet out before it is captured or printed.
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+    });
+    win.focus();
+    win.print();
+  } finally {
+    // Late enough that the print dialog has taken its snapshot. Removing the
+    // frame immediately cancels the print in Chrome.
+    window.setTimeout(() => { root.unmount(); frame.remove(); }, 1000);
+  }
+}
+
 /** Renders the sheet off screen, captures it and saves it as a one-page A4 PDF. */
 export async function exportGehaltsquittungPdf(text: ReceiptDocumentText): Promise<void> {
   const container = document.createElement('div');
@@ -227,7 +257,7 @@ export async function exportGehaltsquittungPdf(text: ReceiptDocumentText): Promi
     const height = Math.min(fullWidthHeight, pageHeight);
 
     const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
-    pdf.setProperties({ title: `${text.title} ${text.number}` });
+    pdf.setProperties({ title: text.number ? `${text.title} ${text.number}` : text.title });
     pdf.addImage(canvas.toDataURL('image/jpeg', 0.97), 'JPEG', (pageWidth - width) / 2, 0, width, height);
     pdf.save(`${text.fileName}.pdf`);
   } finally {

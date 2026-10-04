@@ -679,10 +679,21 @@ DECLARE
   v_n     bigint;
   r       app_private.platform_audit_log%ROWTYPE;
 BEGIN
-  -- No context: an owner holding every capability writes neither table.
-  PERFORM _sw_ok('shell, no context: an owner edits no company''s settings, although it reads them',
+  /*
+    No context: an owner holding every capability writes neither table — and
+    since 20260923100000 (plan 3.13b) does not read company_settings either.
+
+    The read half of this line used to answer 1: company_settings_select carried
+    `OR platform_can('companies.read')`, which all four staff roles hold, so
+    every platform account read every customer's legal name, managing director,
+    VAT and tax number, bank name, IBAN, BIC and account holder with no context
+    and no audit row. 3.13a had already moved the writes onto the support
+    session, which is what the rest of this line measures; 3.13b took the
+    capability out of the read, so both halves are now zero.
+  */
+  PERFORM _sw_ok('shell, no context: an owner neither edits nor reads a company''s settings (3.13b)',
     _sw_try(u_super, NULL, format('UPDATE company_settings SET company_name = %L WHERE company_id = %L', 'SW no', co_x)) = 'rows 0'
-    AND _sw_try(u_super, NULL, format('SELECT count(*)::text FROM company_settings WHERE company_id = %L', co_x)) = '1');
+    AND _sw_try(u_super, NULL, format('SELECT count(*)::text FROM company_settings WHERE company_id = %L', co_x)) = '0');
   PERFORM _sw_ok('shell, no context: …deletes none and inserts none',
     _sw_try(u_super, NULL, format('DELETE FROM company_settings WHERE company_id = %L', co_y)) = 'rows 0'
     AND _sw_try(u_super, NULL, format('INSERT INTO company_settings (company_id, company_name) VALUES (%L, %L)', co_y, 'SW no'))

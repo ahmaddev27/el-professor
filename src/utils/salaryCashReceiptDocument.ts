@@ -1,5 +1,5 @@
 import { amountInWordsFromCents } from './germanAmountInWords';
-import { formatCentsDe } from './money';
+import { formatCentsDe, toCents } from './money';
 import {
   berlinToday,
   snapshotFromReceiptRow,
@@ -25,7 +25,14 @@ import { getBusinessMonth } from './weekCalculations';
  * wording of the confirmation follows the Trinkgeld-Quittung.
  */
 
-export type ReceiptDocumentStatus = 'preview' | 'confirmed' | 'voided';
+/**
+ * `payment_view` is a read-only view of a cash payment that has no stored
+ * Gehaltsquittung behind it (owner decision 03.10.2026: every cash payment in a
+ * salary can be viewed). It is **not** a receipt: it carries no number, claims
+ * no signature and is drawn from the payment row alone — see
+ * paymentViewDocumentInput.
+ */
+export type ReceiptDocumentStatus = 'preview' | 'confirmed' | 'voided' | 'payment_view';
 
 /**
  * A salary's business month — the month that owns the Monday of its period's
@@ -90,7 +97,8 @@ export interface ReceiptDocumentRow {
 export interface ReceiptDocumentText {
   title: string;
   subtitle: string;
-  number: string;
+  /** The receipt number line, or null where the sheet prints none at all. */
+  number: string | null;
   /** A notice across the top: the preview is not valid, a voided receipt is void. */
   banner: string | null;
   company: { name: string; addressLines: string[] };
@@ -105,9 +113,6 @@ export interface ReceiptDocumentText {
   confirmation: string;
   amount: { label: string; figures: string; words: string };
   facts: ReceiptDocumentRow[];
-  balanceHeading: string;
-  balance: ReceiptDocumentRow[];
-  settlement: string;
   placeAndDate: { label: string; value: string };
   signatures: {
     employee: { caption: string; name: string };
@@ -188,6 +193,16 @@ function fileNamePart(text: string): string {
 
 function banner(input: ReceiptDocumentInput): string | null {
   if (input.status === 'preview') return 'VORSCHAU – noch nicht bestätigt und nicht gültig';
+  // `payment_view` carries **no banner** (owner's decision, 04.10.2026). It used
+  // to print "ZAHLUNGSANSICHT – keine Gehaltsquittung …", and he had it removed
+  // along with the "Ohne Quittungsnummer" line, so the sheet he prints for a
+  // driver reads as the document rather than as a caveat about it.
+  //
+  // What that costs, recorded because the code can no longer say it: the sheet is
+  // now indistinguishable from a confirmed Gehaltsquittung except that it carries
+  // no number, and nothing on it says a receipt was never stored. `preview` and
+  // `voided` keep their banners — only this one state lost it.
+  if (input.status === 'payment_view') return null;
   if (input.status === 'voided') {
     const when = input.voided ? ` am ${germanDate(input.voided.date)}` : '';
     const why = input.voided?.reason.trim() ? ` – Grund: ${input.voided.reason.trim()}` : '';
@@ -256,6 +271,62 @@ export function storedReceiptDocumentInput(
   };
 }
 
+/** The part of a salary_payments row, and its salary, a payment view prints from. */
+export interface PaymentViewFields {
+  /** Euros, as the salary_payments column stores it. */
+  amount: number | string;
+  /** YYYY-MM-DD */
+  paymentDate: string;
+  /** YYYY-MM-DD */
+  periodStart: string;
+  /** YYYY-MM-DD */
+  periodEnd: string;
+}
+
+/**
+ * The document for a cash payment that has no stored receipt.
+ *
+ * It draws a number from nothing and writes nothing: receiptNumber is null and
+ * stays null (the GQ-YYYY-NNNN sequence belongs to confirm_salary_cash_payment
+ * alone), the status says what the sheet is, and the Abrechnungsmonat is
+ * derived from the period exactly as the preview derives it, since no stored
+ * row exists to read it from. Only the amount is printed from the payment; the
+ * balance figures are not printed by any status, and are zero here rather than
+ * invented.
+ *
+ * @throws RangeError for a date that is not YYYY-MM-DD or an amount toCents refuses.
+ */
+export function paymentViewDocumentInput(
+  payment: PaymentViewFields,
+  driver: ReceiptDocumentInput['driver'],
+  company: ReceiptDocumentInput['company'],
+): ReceiptDocumentInput {
+  const amountCents = toCents(payment.amount);
+  return {
+    status: 'payment_view',
+    receiptNumber: null,
+    company,
+    driver,
+    periodStart: payment.periodStart,
+    periodEnd: payment.periodEnd,
+    businessMonth: businessMonthOfPeriod(payment.periodStart),
+    paymentDate: payment.paymentDate,
+    place: '',
+    figures: {
+      dueCents: 0,
+      paidBankCents: 0,
+      paidCashManualCents: 0,
+      paidCashWeeklyCents: 0,
+      paidCashReceiptsCents: 0,
+      remainingBeforeCents: 0,
+      amountCents,
+      remainingAfterCents: 0,
+      isPartial: false,
+    },
+    voided: null,
+  };
+}
+
 export type ReceiptDocumentProblem = 'missing_driver_name' | 'missing_company_name';
 
 /**
@@ -288,7 +359,6 @@ export function buildReceiptDocumentText(input: ReceiptDocumentInput): ReceiptDo
   const problem = receiptDocumentProblem(input);
   if (problem) throw new ReceiptDocumentError(problem);
   const { figures } = input;
-  const period = `${germanDate(input.periodStart)} – ${germanDate(input.periodEnd)}`;
   const businessMonth = germanBusinessMonth(input.businessMonth);
   const paymentDate = germanDate(input.paymentDate);
   const amountFigures = euro(figures.amountCents);
@@ -298,7 +368,13 @@ export function buildReceiptDocumentText(input: ReceiptDocumentInput): ReceiptDo
   return {
     title: 'Gehaltsquittung',
     subtitle: 'Barzahlung des Gehalts',
-    number: input.receiptNumber ? `Nr. ${input.receiptNumber}` : 'Nr. wird bei der Bestätigung vergeben',
+    // A `payment_view` prints no number line at all rather than saying it has
+    // none — the owner asked for both markers gone on 04.10.2026.
+    number: input.receiptNumber
+      ? `Nr. ${input.receiptNumber}`
+      : input.status === 'payment_view'
+        ? null
+        : 'Nr. wird bei der Bestätigung vergeben',
     banner: banner(input),
     company: { name: input.company.name, addressLines: [...input.company.addressLines] },
     parties: {
@@ -309,41 +385,50 @@ export function buildReceiptDocumentText(input: ReceiptDocumentInput): ReceiptDo
       employer: `der Firma ${input.company.name}`,
       employerNote: '(nachfolgend Arbeitgeber genannt)',
     },
-    confirmation:
-      `Der Arbeitnehmer bestätigt hiermit, am ${paymentDate} als Barzahlung auf das Gehalt für den Zeitraum ` +
-      `${period} den Betrag von ${amountFigures} (in Worten: ${amountWords}) vom Arbeitgeber erhalten zu haben. ` +
-      'Mit seiner Unterschrift bestätigt der Arbeitnehmer den Erhalt des oben genannten Betrages.',
+    // The sheet names the Abrechnungsmonat and nothing else about the period.
+    //
+    // Owner's decision, 28.09.2026, marked on a printed receipt. It replaces the
+    // half of the 18.09.2026 decision that put the Abrechnungsmonat *beside* the
+    // Zeitraum: the month alone identifies the salary, and it is still the one
+    // fact that explains the GQ-YYYY in the number, since a January period can
+    // carry December's year.
+    confirmation: input.status === 'payment_view'
+      ? `Für das Gehalt für ${businessMonth} ist am ${paymentDate} eine Barzahlung von ${amountFigures} ` +
+        `(in Worten: ${amountWords}) erfasst. Diese Ansicht wurde aus der erfassten Zahlung erstellt; ` +
+        'eine Empfangsbestätigung des Arbeitnehmers liegt hier nicht vor.'
+      : `Der Arbeitnehmer bestätigt hiermit, am ${paymentDate} als Barzahlung auf das Gehalt für ` +
+      `${businessMonth} den Betrag von ${amountFigures} (in Worten: ${amountWords}) vom Arbeitgeber ` +
+      'erhalten zu haben. Mit seiner Unterschrift bestätigt der Arbeitnehmer den Erhalt des oben ' +
+      'genannten Betrages.',
     amount: { label: 'Betrag (EUR)', figures: amountFigures, words: amountWords },
-    // Abrechnungsmonat sits between the two dates it is derived from and paid
-    // against, because it is the one fact on the sheet that explains the
-    // GQ-YYYY in the number: a January period can carry December's year.
     facts: [
-      { label: 'Zeitraum', value: period, emphasis: false },
       { label: 'Abrechnungsmonat', value: businessMonth, emphasis: false },
       { label: 'Zahlungsdatum', value: paymentDate, emphasis: false },
     ],
-    balanceHeading: 'Stand des Gehalts bei dieser Zahlung',
-    balance: [
-      { label: 'Fälliges Nettogehalt', value: euro(figures.dueCents), emphasis: false },
-      { label: 'Bereits überwiesen', value: euro(figures.paidBankCents), emphasis: false },
-      { label: 'Bereits bar gezahlt', value: euro(figures.paidCashManualCents), emphasis: false },
-      { label: 'Bar zurück aus der Wochenabrechnung', value: euro(figures.paidCashWeeklyCents), emphasis: false },
-      { label: 'Frühere Gehaltsquittungen', value: euro(figures.paidCashReceiptsCents), emphasis: false },
-      { label: 'Offen vor dieser Zahlung', value: euro(figures.remainingBeforeCents), emphasis: true },
-      { label: 'Diese Barzahlung', value: amountFigures, emphasis: false },
-      { label: 'Offen nach dieser Zahlung', value: euro(figures.remainingAfterCents), emphasis: true },
-    ],
-    settlement: figures.isPartial
-      ? `Teilzahlung: Nach dieser Zahlung bleiben ${euro(figures.remainingAfterCents)} offen.`
-      : 'Mit dieser Zahlung ist das Gehalt für den Zeitraum vollständig bezahlt.',
-    placeAndDate: { label: 'Ort, Datum', value: `${input.place.trim()}, den ${paymentDate}` },
+    // The salary-status table and the Teilzahlung sentence are gone, by the same
+    // decision, and deliberately with nothing in their place: the sheet states the
+    // amount, the month and the date of payment, and no balances at all.
+    //
+    // What that costs, said plainly because the owner chose it knowing: the signed
+    // paper no longer distinguishes a part payment from a full one. Two receipts
+    // for the same month read identically apart from their amount and number. The
+    // distinction lives on the screen — GehaltsquittungModal still shows the full
+    // balance before the payment is confirmed — and in the ledger, which keeps
+    // every figure that used to be printed here.
+    //
+    // `figures` is still computed and still governs the refusal to pay more than
+    // the balance; it simply is not printed.
+    placeAndDate: {
+      label: 'Ort, Datum',
+      value: input.place.trim() ? `${input.place.trim()}, den ${paymentDate}` : `den ${paymentDate}`,
+    },
     signatures: {
       employee: { caption: 'Unterschrift Arbeitnehmer', name: input.driver.name },
       employer: { caption: 'Unterschrift Arbeitgeber', name: input.company.name },
     },
     fileName: [
       'Gehaltsquittung',
-      input.receiptNumber ?? 'Vorschau',
+      input.receiptNumber ?? (input.status === 'payment_view' ? 'Zahlungsansicht' : 'Vorschau'),
       fileNamePart(input.driver.name),
       ...(input.status === 'voided' ? ['STORNIERT'] : []),
     ].join('_'),

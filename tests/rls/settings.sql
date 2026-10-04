@@ -210,10 +210,32 @@ BEGIN
 
   -- generate_invoice_number still builds the number those two describe, so the
   -- seeded values are not a guess about the format.
+  --
+  -- Asked as the seeded owner, and that is not incidental. D14 made the function
+  -- SECURITY DEFINER gated on billing.manage: as an invoker it read the MAX over
+  -- the rows the caller could see, and once the billing tables moved behind the
+  -- audited read models a platform account saw none of them, so the MAX would
+  -- have been taken over nothing and every company reported "skipped" with no
+  -- invoice created and no error anywhere. The definer keeps the global MAX for
+  -- the one caller that can use it. What changed is that a caller holding no
+  -- billing.manage now gets NULL, which is what the next assertion pins — this
+  -- block used to run sessionless, so it was reading that NULL and _st_ok
+  -- refused it. The NULL refusal is the reason that surfaced; do not relax it.
+  PERFORM _st_become('3c000000-0000-4000-8000-000000000001');
   PERFORM _st_ok('invoice: the seed describes the number generate_invoice_number actually builds',
     public.generate_invoice_number(2026) =
       (v_invoice ->> 'number_prefix') || '-2026-'
       || lpad('1', (v_invoice ->> 'number_digits')::integer, '0'));
+
+  -- The other half of the same change, recorded where it surprised us rather
+  -- than only in the migration header. An invoice number is a legal artefact,
+  -- so who may draw one is part of its contract: support holds no
+  -- billing.manage and gets NULL, not a number it could then write.
+  PERFORM _st_become('3c000000-0000-4000-8000-000000000002');
+  PERFORM _st_ok('invoice: a caller without billing.manage draws no number at all',
+    public.generate_invoice_number(2026) IS NULL);
+
+  PERFORM _st_reset();
 END $$;
 
 -- ─── 2. reading ─────────────────────────────────────────────────────────────

@@ -5,3 +5,10 @@
 *.sh            text eol=lf
 deploy/**       text eol=lf
 supabase/**.sql text eol=lf
+
+# vitest rewrites a snapshot with the platform's line endings, so on a fresh
+# Windows checkout the golden masters appear modified with **no content change** —
+# which reads as "the payroll snapshots moved" and is the one false alarm a
+# characterization test cannot afford. Pinned to LF so the alarm only ever means
+# what it says.
+*.snap          text eol=lf

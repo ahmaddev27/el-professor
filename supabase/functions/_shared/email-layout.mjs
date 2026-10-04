@@ -25,14 +25,33 @@
 
 export const EMAIL_FONT = "-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif";
 
+/**
+ * The brand palette, as a mail client can render it.
+ *
+ * `ink` and `link` moved onto the identity on 03.10.2026, when the mark on the
+ * tile became the current one: both comments beside them had gone stale, because
+ * the mark is navy-and-blue and `#111827` is neither. The two values are the
+ * brand's own: the board's **night** and **blue** as `src/index.css:15` names them,
+ * carried by the tokens `--fg` / `--canvas` (10 15 28) and `--brand` (20 107 255).
+ *
+ * **`link` is the one that needed checking rather than picking.** `#146BFF` on
+ * the white card is **4.63:1**, which clears AA for body text; the `#2563eb` it
+ * replaces was 5.17:1. Nothing measures this automatically — `tokens.contrast.test.ts`
+ * parses `src/index.css` and has never seen this file — so a future change here
+ * is a contrast decision somebody has to make by hand.
+ *
+ * `canvas`, `card`, `border`, `body` and `muted` are deliberately unchanged: they
+ * are paper, not identity, and moving them would restyle five byte-pinned
+ * templates for nothing.
+ */
 export const EMAIL_COLORS = Object.freeze({
   canvas: '#F7F6F3',
   card: '#FFFFFF',
   border: '#EAEAEA',
-  ink: '#111827',     // the app's --text-primary, and the colour of the logo mark
+  ink: '#0A0F1C',     // the board's night: the dark of the mark and of the app frame
   body: '#2F3437',
   muted: '#787774',
-  link: '#2563eb',    // the app's --accent
+  link: '#146BFF',    // the board's blue: the mark's glasses and the wordmark
 });
 
 const FONT = EMAIL_FONT;

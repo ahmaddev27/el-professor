@@ -22,6 +22,7 @@ import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { useTranslation } from '../contexts/LanguageContext';
 import { Alert, Button, Card, CardContent, CardHeader, CardTitle, Field, Input, NativeSelect, PageHeader, buttonVariants, cn } from '../components/ui';
 import { controlFrameClass } from '../components/ui/Input';
+import AbrechnungScheduleCard from '../components/AbrechnungScheduleCard';
 
 const SettingsPage: React.FC = () => {
   const { t } = useTranslation();
@@ -126,21 +127,32 @@ const SettingsPage: React.FC = () => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    // Validate file type
-    const validTypes = ['image/png', 'image/jpeg', 'image/jpg', 'image/svg+xml', 'image/webp'];
+    // Validate file type.
+    //
+    // `image/svg+xml` was here and is gone on purpose. An SVG is a document, not
+    // a picture: served inline with that content type it runs whatever script it
+    // carries, and `company-logos` is a public bucket on the API origin. Uploading
+    // is gated on is_company_admin(), so this list was the only thing between a
+    // company administrator and a script executing on api.elprofessor.eu.
+    //
+    // This is the browser's half. The bucket refuses it too since
+    // 20260928100000 — that is the wall, this is the message.
+    const validTypes = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp'];
     if (!validTypes.includes(file.type)) {
       showError(t('settings.badFileType'), t('settings.badFileTypeBody'));
       return;
     }
 
-    // Validate file size (max 5MB)
-    if (file.size > 5 * 1024 * 1024) {
+    // Validate file size. The bucket's own limit is 2 MiB since 20260928100000,
+    // so a larger file is refused by storage with a message nobody wrote; this
+    // check is what explains it. The largest logo on production is 233 KiB.
+    if (file.size > 2 * 1024 * 1024) {
       showError(t('settings.fileTooLarge'), t('settings.fileTooLargeBody'));
       return;
     }
 
     if (!companyId) {
-      showError('Fehler', t('settings.noCompanyId'));
+      showError(t('common.error'), t('settings.noCompanyId'));
       return;
     }
 
@@ -170,7 +182,7 @@ const SettingsPage: React.FC = () => {
       if (uploadError) {
         throw new Error(companyScope.isPlatformSession && companyScope.readOnly
           ? t('support.storage.readOnly')
-          : `Speicher-Upload fehlgeschlagen: ${uploadError.message}`);
+          : t('settings.uploadFailedWith', { message: uploadError.message }));
       }
 
       // Step 2: Get the public URL
@@ -196,7 +208,7 @@ const SettingsPage: React.FC = () => {
         const reason = dbError.code === '42501'
           ? t('settings.noWritePermission')
           : dbError.message;
-        throw new Error(`Datenbank-Fehler: ${reason}`);
+        throw new Error(t('settings.dbErrorWith', { message: reason }));
       }
       if (!savedRow) {
         throw new Error(t('settings.logoUrlSaveFailed'));
@@ -250,7 +262,7 @@ const SettingsPage: React.FC = () => {
           { onConflict: 'company_id', ignoreDuplicates: false }
         );
 
-      if (dbError) throw new Error(`Datenbank-Fehler: ${dbError.message}`);
+      if (dbError) throw new Error(t('settings.dbErrorWith', { message: dbError.message }));
 
       await refreshSettings();
       setLogoPreview(null);
@@ -780,6 +792,9 @@ const SettingsPage: React.FC = () => {
           </div>
         </fieldset>
       </form>
+
+      {/* Its own row and its own save, so it sits beside the form, not in it. */}
+      <AbrechnungScheduleCard readOnly={companyScope.readOnly} />
     </div>
   );
 };

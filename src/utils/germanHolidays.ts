@@ -128,10 +128,22 @@ export function getHolidaysForYear(year: number, bundesland?: string | null): Se
   }
 
   if (bl === 'SN' || bl === 'TH') {
-    // Buß- und Bettag — Wednesday before 23 November
+    // Buß- und Bettag — the Wednesday STRICTLY before 23 November, so it always
+    // falls between the 16th and the 22nd and never on the 23rd itself.
+    //
+    // The old offset was `(getUTCDay() + 4) % 7`, which is 0 when 23 November is
+    // itself a Wednesday — and then it added 23 November instead of the 16th.
+    // Measured over 2020..2035 that is wrong in 2022 and 2033, and right in the
+    // other fourteen years, which is why the golden snapshot (2024..2027) never
+    // saw it. `buss-und-bettag.test.ts` covers both broken years.
+    //
+    // StundennachweisPage.tsx has a second copy of this date, and it was wrong in
+    // every year; the two are now the same formula. They remain two copies — the
+    // duplicate holiday tables are a known hazard and merging them is not this
+    // change.
     const nov23 = new Date(Date.UTC(year, 10, 23));
-    const bbt = new Date(nov23.getTime() - ((nov23.getUTCDay() + 4) % 7) * 86400000);
-    set.add(utcDateStr(bbt));
+    const daysBack = ((nov23.getUTCDay() - 3) + 7) % 7 || 7;
+    set.add(utcDateStr(new Date(nov23.getTime() - daysBack * 86400000)));
   }
 
   return set;

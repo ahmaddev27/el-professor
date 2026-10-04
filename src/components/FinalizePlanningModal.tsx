@@ -43,6 +43,8 @@ import {
 import MonatsplanungStundennachweisPreview from './MonatsplanungStundennachweisPreview';
 import { useTranslation } from '../contexts/LanguageContext';
 import type { TranslationKey } from '../i18n';
+import { assessDay, formatShiftDuration, type DayWindow } from '../utils/shiftDayLimits';
+import { localHourMs, localMidnightMs, nextLocalMidnightMs, splitAtLocalMidnight } from '../utils/localDayWindow';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -74,7 +76,7 @@ type CheckId =
   | 'driverAssigned'
   | 'blockIdPresent'
   | 'timesPresent'
-  | 'maxThreeShifts'
+  | 'shiftCompression'
   | 'vehicleSwitchGap'
   | 'driverOverlap'
   | 'vehicleOverlap'
@@ -152,7 +154,7 @@ const CHECK_LABEL_KEYS: Record<CheckId, TranslationKey> = {
   driverAssigned:          'fin.check.driverAssigned',
   blockIdPresent:          'fin.check.blockIdPresent',
   timesPresent:            'fin.check.timesPresent',
-  maxThreeShifts:          'fin.check.maxThreeShifts',
+  shiftCompression:        'fin.check.shiftCompression',
   vehicleSwitchGap:        'fin.check.vehicleSwitchGap',
   driverOverlap:           'fin.check.driverOverlap',
   vehicleOverlap:          'fin.check.vehicleOverlap',
@@ -181,12 +183,6 @@ const CHECK_SUGGESTIONS: Partial<Record<CheckId, readonly TranslationKey[]>> = {
     'fin.suggest.vehicleOverlap.2',
     'fin.suggest.vehicleOverlap.3',
     'fin.suggest.vehicleOverlap.4',
-  ],
-  maxThreeShifts: [
-    'fin.suggest.maxThreeShifts.1',
-    'fin.suggest.maxThreeShifts.2',
-    'fin.suggest.maxThreeShifts.3',
-    'fin.suggest.maxThreeShifts.4',
   ],
   driverAssigned: [
     'fin.suggest.driverAssigned.1',
@@ -389,66 +385,68 @@ export default function FinalizePlanningModal({ run, companyId, userId, onClose,
         detail: missingTime === 0 ? DETAIL_OK : tr('fin.detail.withoutTimes', { count: missingTime }),
       });
 
-      // 8. Max-3-Schichten-Regel per driver per day (compressed view)
-      const MAX_SHIFT = 270; // 4:30
-      const MAX_DAY = 510;   // 8:30
-      function toMins(time: string): number {
-        const [h, m] = time.split(':').map(Number);
-        return h * 60 + m;
-      }
-      function segDur(s: string, e: string): number {
-        const f = toMins(s), t2 = toMins(e);
-        return t2 >= f ? t2 - f : 1440 - f + t2;
-      }
-      type DayKey = string; // "driverId_date"
-      const dayShifts = new Map<DayKey, Array<{ s: number; e: number }>>();
+      // 8. Schicht compression, and a warning about the Stundennachweis duration
+      //    limits. This row reports; it does not gate. Three reasons, measured:
+      //
+      //    · The count of three is not a limit. CLAUDE.md: "Schicht compression
+      //      (max 3 shifts/day) is display- and export-only." Measured on staging
+      //      26.09.2026: 1090 of 1178 driver-days (92.5%) compress, so gating on
+      //      it would stop almost every month from being finalized. The condition
+      //      that used to sit here — `merged.length > 3` after a loop that exits
+      //      at `<= 3` — was unreachable, so this check has always voted "pass".
+      //      A gate that always passes is worse than no gate, hence the label
+      //      change: this row is a note now, and says so.
+      //
+      //    · The two duration limits ARE enforced, but downstream and not here:
+      //      validateRowDurations in StundennachweisPage blocks save and PDF
+      //      export for a Schicht over 4:30 or a day over 8:30 (:3562, :3584,
+      //      :3718, :3727). It measures the three built Stundennachweis rows;
+      //      this screen has the raw merged windows. Those are not the same
+      //      number, so failing here on this one would risk refusing a month the
+      //      Stundennachweis would have accepted. It warns instead, and names the
+      //      day, so the operator is not left to discover it two screens later.
+      //
+      //    · The arithmetic is now absolute instants, per CLAUDE.md: "Build
+      //      intervals from date-midnight-ms + secondOfDay * 1000, never from a
+      //      bare HH:MM:SS string." The old toMins() gave end < start for a ride
+      //      over midnight, so two overlapping night shifts merged to two rows
+      //      where the same overlap in daylight merged to one — which made the
+      //      compressed-day count itself wrong. See utils/shiftDayLimits.ts.
+      const dayShifts = new Map<string, DayWindow[]>();
       for (const trip of nonCanceled) {
         if (!trip.start_time || !trip.end_time || !trip.assigned_driver_id) continue;
-        const key: DayKey = `${trip.assigned_driver_id}_${trip.trip_date}`;
+        const startMs = parseTsMs(trip.trip_date, trip.start_time);
+        let endMs = parseTsMs(trip.trip_date, trip.end_time);
+        if (endMs <= startMs) endMs += 86400000; // the ride ended after midnight
+        const key = `${trip.assigned_driver_id}_${trip.trip_date}`;
         const arr = dayShifts.get(key) ?? [];
-        arr.push({ s: toMins(trip.start_time.slice(0, 5)), e: toMins(trip.end_time.slice(0, 5)) });
+        arr.push({ startMs, endMs });
         dayShifts.set(key, arr);
       }
       let compressedDayCount = 0;
-      let max3HardViolations = 0;
-      const max3ViolationDetails: string[] = [];
+      const durationWarnings: string[] = [];
       for (const [dayKey, windows] of dayShifts) {
-        windows.sort((a, b) => a.s - b.s);
-        // Step 1: merge overlapping windows
-        const merged: Array<{ s: number; e: number }> = [];
-        for (const w of windows) {
-          const last = merged[merged.length - 1];
-          if (!last || w.s > last.e) merged.push({ ...w });
-          else last.e = Math.max(last.e, w.e);
-        }
-        // Step 2: smallest-gap compression — keep merging the closest adjacent pair until ≤3
-        const hadMore = merged.length > 3;
-        while (merged.length > 3) {
-          let minGap = Infinity, minIdx = 0;
-          for (let i = 0; i < merged.length - 1; i++) {
-            const gap = merged[i + 1].s - merged[i].e;
-            if (gap < minGap) { minGap = gap; minIdx = i; }
-          }
-          merged[minIdx] = { s: merged[minIdx].s, e: Math.max(merged[minIdx].e, merged[minIdx + 1].e) };
-          merged.splice(minIdx + 1, 1);
-        }
-        if (hadMore) compressedDayCount++;
-        // After compression merged.length is always ≤3; flag only if somehow still above (safety net)
-        if (merged.length > 3) {
-          max3HardViolations++;
-          const [dId, date] = dayKey.split('_');
-          const dName = nonCanceled.find(trip => trip.assigned_driver_id === dId)?.assigned_driver_name ?? dId;
-          max3ViolationDetails.push(tr('fin.detail.shiftViolationLine', { driver: dName, date, count: merged.length }));
-        }
+        const day = assessDay(windows);
+        if (day.needsCompression) compressedDayCount++;
+        if (!day.exceedsDayLimit && !day.exceedsShiftLimit) continue;
+        const [dId, date] = dayKey.split('_');
+        const dName = nonCanceled.find(trip => trip.assigned_driver_id === dId)?.assigned_driver_name ?? dId;
+        durationWarnings.push(tr('fin.detail.durationWarningLine', {
+          driver: dName,
+          date,
+          day: formatShiftDuration(day.dayMinutes),
+          shift: formatShiftDuration(day.longestShiftMinutes),
+        }));
       }
+      const compressionNote = compressedDayCount > 0
+        ? trPlural({ one: 'fin.detail.compressedDays.one', other: 'fin.detail.compressedDays.other' }, compressedDayCount)
+        : DETAIL_OK;
       results.push({
-        id: 'maxThreeShifts',
-        ok: max3HardViolations === 0,
-        detail: max3HardViolations === 0
-          ? compressedDayCount > 0
-            ? trPlural({ one: 'fin.detail.compressedDays.one', other: 'fin.detail.compressedDays.other' }, compressedDayCount)
-            : DETAIL_OK
-          : `${tr('fin.detail.shiftCompressionFailed', { count: max3HardViolations })}\n${max3ViolationDetails.slice(0, 10).join('\n')}${max3ViolationDetails.length > 10 ? `\n${tr('fin.detail.andMore', { count: max3ViolationDetails.length - 10 })}` : ''}`,
+        id: 'shiftCompression',
+        ok: true, // a note, never a gate — see the three reasons above
+        detail: durationWarnings.length === 0
+          ? compressionNote
+          : `${compressionNote}\n${tr('fin.detail.durationWarning', { count: durationWarnings.length })}\n${durationWarnings.slice(0, 10).join('\n')}${durationWarnings.length > 10 ? `\n${tr('fin.detail.andMore', { count: durationWarnings.length - 10 })}` : ''}`,
       });
 
       // ── Inner helpers: full-timestamp math (avoids HH:MM wrap-around) ────
@@ -463,16 +461,35 @@ export default function FinalizePlanningModal({ run, companyId, userId, onClose,
         const lo = Math.max(sMs, rS), hi = Math.min(eMs, rE);
         return lo < hi ? hi - lo : 0;
       }
+      /*
+       * The bands are LOCAL wall-clock hours on LOCAL calendar days, and this
+       * function measured neither.
+       *
+       * `Math.floor(sMs / 86400000) * 86400000` is midnight **UTC**. In
+       * Europe/Berlin that boundary is local 01:00 in winter and local 02:00 in
+       * summer, so `day + 4 * 3600000` was local 05:00 or 06:00 and the band
+       * labelled 00:00-04:00 actually measured 01:00-05:00 or 02:00-06:00 —
+       * **every day of the year**, not only on a transition day. The 23:00-24:00
+       * band measured 00:00-01:00 or 01:00-02:00, which is inside the 00:00-04:00
+       * band, so the two stopped being the mutually exclusive split the comment
+       * below claims and the same minute could be paid twice.
+       *
+       * `day += 86400000` is the smaller, DST-only half of the same mistake, and
+       * it does not recover: once the walk is an hour off it stays off for every
+       * later day of the shift.
+       *
+       * The band hours are unchanged. This file's Nachtarbeit opens at 23:00
+       * while `historicalWorkingHoursCleanEngine` opens at 20:00, and choosing
+       * between the two is a decision about §3b EStG, not about timezones.
+       */
       function computeBlockNight(sMs: number, eMs: number): { nacht: number; n04: number } {
-        const sDay = Math.floor(sMs / 86400000) * 86400000;
-        const eDay = Math.floor((eMs - 1) / 86400000) * 86400000;
         let nacht = 0, n04 = 0;
-        for (let day = sDay; day <= eDay; day += 86400000) {
+        for (let day = localMidnightMs(sMs); day < eMs; day = nextLocalMidnightMs(day)) {
           // 04:00–06:00 and 23:00–00:00 are Nachtarbeit (mutually exclusive with 0–4)
-          nacht += Math.floor(overlapMs(sMs, eMs, day + 4 * 3600000, day + 6 * 3600000) / 60000);
-          nacht += Math.floor(overlapMs(sMs, eMs, day + 23 * 3600000, day + 24 * 3600000) / 60000);
+          nacht += Math.floor(overlapMs(sMs, eMs, localHourMs(day, 4), localHourMs(day, 6)) / 60000);
+          nacht += Math.floor(overlapMs(sMs, eMs, localHourMs(day, 23), localHourMs(day, 24)) / 60000);
           // 00:00–04:00 is Nacht 0–4 exclusively
-          n04   += Math.floor(overlapMs(sMs, eMs, day, day + 4 * 3600000) / 60000);
+          n04   += Math.floor(overlapMs(sMs, eMs, day, localHourMs(day, 4)) / 60000);
         }
         return { nacht, n04 };
       }
@@ -747,6 +764,61 @@ export default function FinalizePlanningModal({ run, companyId, userId, onClose,
           ? tr('fin.detail.coverageOk', { count: nonCanceled.length })
           : coverageLines.join('\n'),
       });
+
+      /*
+       * Cut every block at LOCAL midnight, so a day's figures are that day's.
+       *
+       * `service_date` was `trip.trip_date` — the date the imported file gives the
+       * ride — and a block inherits it from the first ride in it. So a block from
+       * 23:30 Saturday to 01:15 Sunday was filed wholly under **Saturday**: its 75
+       * Sunday minutes earned no Sonntag premium, while the mirror case, 23:30
+       * Sunday to 01:15 Monday, gave the Sonntag premium to Monday's minutes.
+       * The Uber export makes this worse than it sounds, because it dates a ride
+       * starting just after midnight to the *previous* day (CLAUDE.md says so of
+       * `trip_date`), so the two errors do not cancel out.
+       *
+       * **Measured LIVE: 33 trips / 401 minutes across 19 driver-month documents
+       * in the four finalized months (May-Aug 2026).**
+       *
+       * Three properties this keeps, and each is a reason the split is here and
+       * not somewhere easier:
+       *
+       *   - **It is minute-preserving.** The pieces tile the block, so every
+       *     driver's Grundlohn total, work minutes and night minutes are
+       *     byte-identical to before; only the day each minute is attributed to
+       *     moves. `computeBlockNight` already walks local days, so summing it per
+       *     piece equals calling it once on the whole block.
+       *   - **It runs after the coverage check**, which asserts that one block
+       *     contains each whole trip (`b.sMs <= tSMs && b.eMs >= tEMs`). Splitting
+       *     first would make every cross-midnight trip read as uncovered and fail
+       *     a blocking pre-flight check — the finalization gate has no override.
+       *   - **It runs before the compression loop**, so the max-three rule is
+       *     applied to the day's real pieces. A driver-day may therefore gain a
+       *     piece and start compressing where it did not before; that is correct,
+       *     and compression stays display-only either way.
+       */
+      const finDayBlocks: FinBlock[] = finBlocks.flatMap(b =>
+        splitAtLocalMidnight(b.block_start_ms, b.block_end_ms).map((piece, i) => {
+          const night = computeBlockNight(piece.startMs, piece.endMs);
+          return {
+            block_id: i === 0 ? b.block_id : `${b.block_id}_d${i}`,
+            driver_id: b.driver_id,
+            driver_name: b.driver_name,
+            // The piece's own local calendar day, never the file's date.
+            service_date: piece.dateKey,
+            block_start_ms: piece.startMs,
+            block_end_ms: piece.endMs,
+            // Apportioned, not floored per piece — see `splitAtLocalMidnight`.
+            // The night buckets need no such care: `computeBlockNight` already
+            // floors per local day inside its own loop, so calling it per piece
+            // floors exactly the same overlaps as calling it on the whole block.
+            duration_minutes: piece.minutes,
+            nachtarbeit: night.nacht,
+            nacht04: night.n04,
+          };
+        }),
+      );
+
       const driverMap = new Map<string, DriverSummary & { blockSet: Set<string> }>();
       for (const trip of nonCanceled) {
         const name = trip.assigned_driver_name ?? tr('fin.unknownDriver');
@@ -758,8 +830,12 @@ export default function FinalizePlanningModal({ run, companyId, userId, onClose,
         d.trips++;
         if (trip.assignment_block_id) d.blockSet.add(trip.assignment_block_id);
       }
-      // Accumulate block-level time data (uses ms arithmetic, handles overnight correctly)
-      for (const b of finBlocks) {
+      // Accumulate block-level time data from the day-split pieces: `workMinutes`
+      // and `nightMinutes` are unchanged by the split (it tiles the block), and
+      // `sundayMinutes` is the figure it corrects — it now counts the minutes that
+      // are actually on a Sunday rather than every minute of a block whose file
+      // date happened to be one.
+      for (const b of finDayBlocks) {
         const d = driverMap.get(b.driver_id);
         if (!d) continue;
         d.workMinutes  += b.duration_minutes;
@@ -770,7 +846,7 @@ export default function FinalizePlanningModal({ run, companyId, userId, onClose,
 
       // Build per-driver per-day PDF rows (used for Stundennachweis download in done state)
       const driverDateBlocks = new Map<string, Map<string, FinBlock[]>>();
-      for (const b of finBlocks) {
+      for (const b of finDayBlocks) {
         if (!driverDateBlocks.has(b.driver_id)) driverDateBlocks.set(b.driver_id, new Map());
         const dateMap = driverDateBlocks.get(b.driver_id)!;
         const arr = dateMap.get(b.service_date) ?? [];
@@ -808,6 +884,19 @@ export default function FinalizePlanningModal({ run, companyId, userId, onClose,
           const [sy, sm, sd] = serviceDate.split('-').map(Number);
           const date = new Date(sy, sm - 1, sd);
           const dow = date.getDay();
+          /*
+           * A piece that runs to local midnight prints its end as `23:59`, which
+           * is `MonatsplanungStundennachweisPreview`'s own convention for the same
+           * column and not a new one invented here: before the day split a
+           * cross-midnight block was one row whose Bis read *earlier* than its
+           * Von, and after it a row reading `23:30 - 00:00` says the shift ended
+           * as the day began. Display only — every figure in the row comes from
+           * `duration_minutes`, never from these strings.
+           */
+          const endLabel = (b2: FinBlock) =>
+            b2.block_end_ms === nextLocalMidnightMs(localMidnightMs(b2.block_start_ms))
+              ? '23:59'
+              : msToHHMM(b2.block_end_ms);
           const isSun = dow === 0;
           const dayGrund = dayBlocks.reduce((s, b2) => s + b2.duration_minutes, 0);
           const dayNacht = dayBlocks.reduce((s, b2) => s + b2.nachtarbeit, 0);
@@ -817,11 +906,11 @@ export default function FinalizePlanningModal({ run, companyId, userId, onClose,
             date, weekday: WDAY_SHORT[dow],
             isSat: dow === 6, isSun, isHol: false,
             von1: dayBlocks[0] ? msToHHMM(dayBlocks[0].block_start_ms) : '',
-            bis1: dayBlocks[0] ? msToHHMM(dayBlocks[0].block_end_ms)   : '',
+            bis1: dayBlocks[0] ? endLabel(dayBlocks[0])                : '',
             von2: dayBlocks[1] ? msToHHMM(dayBlocks[1].block_start_ms) : '',
-            bis2: dayBlocks[1] ? msToHHMM(dayBlocks[1].block_end_ms)   : '',
+            bis2: dayBlocks[1] ? endLabel(dayBlocks[1])                : '',
             von3: dayBlocks[2] ? msToHHMM(dayBlocks[2].block_start_ms) : '',
-            bis3: dayBlocks[2] ? msToHHMM(dayBlocks[2].block_end_ms)   : '',
+            bis3: dayBlocks[2] ? endLabel(dayBlocks[2])                : '',
             grundlohn:     minsToDecStr(dayGrund),
             nachtarbeit:   minsToDecStr(dayNacht),
             nachtarbeit04: minsToDecStr(dayN04),

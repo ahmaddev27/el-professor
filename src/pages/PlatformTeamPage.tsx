@@ -1,13 +1,17 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
-  RefreshCw, ShieldAlert, Info, UserPlus, Mail, Ban, CheckCircle, Users, Lock, AlertTriangle,
+  RefreshCw, ShieldAlert, Info, UserPlus, Mail, Ban, CheckCircle, Users, Lock, AlertTriangle, UserCog, Download,
 } from 'lucide-react';
+import { useAuth } from '../contexts/AuthContext';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { useToast } from '../contexts/ToastContext';
 import { useTranslation } from '../contexts/LanguageContext';
 import type { TranslationKey, TranslationVars } from '../i18n';
+import {
+  Button, ConfirmDialog, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+} from '../components/ui';
 import { PlatformRpcError } from '../lib/platformRpc';
-import { PLATFORM_ROLES } from '../lib/platformAccess';
+import { PLATFORM_ROLES, type PlatformRole } from '../lib/platformAccess';
 import { platformReadRefusalKey, type PlatformStaffRow } from '../lib/platformReadModels';
 import {
   addStaffMember,
@@ -16,17 +20,25 @@ import {
   inviteStaffMember,
   loadStaffRoster,
   resendStaffInvite,
+  setStaffRole,
 } from '../lib/platformStaffClient';
 import {
   activeOwnerCount,
+  DEFAULT_STAFF_ROLE,
   grantedBy,
+  isStaffRole,
   isUserId,
-  mayReEnable,
+  mayChangeRole,
   offersResend,
   staffRefusalHintKey,
+  STAFF_ROLE_OPTIONS,
   wouldRemoveLastOwner,
 } from '../lib/platformStaffRoster';
 import { deDate, shortId } from '../lib/platformFormat';
+import { exportTableToExcel } from '../utils/excelExport';
+import { buildStaffExport } from '../lib/panelExports';
+import { useExportChrome } from '../hooks/useExportChrome';
+import { berlinToday } from '../utils/salaryCashReceiptFlow';
 
 /**
  * Team — the platform staff (plan 3.5 / 3.12).
@@ -40,22 +52,48 @@ import { deDate, shortId } from '../lib/platformFormat';
  * audit retention (decision D4) cannot make a member with full access vanish
  * from it.
  *
- * ## Only owner
+ * ## The four roles
  *
- * `platform_staff_add` and `platform_staff_enable` refuse every other role with
- * reason `role_requires_3_3`. The other roles are not enabled yet — enabling
- * them decides which accounts read every customer's data, and ships as a change
- * of its own. Where a role picker would go, the forms show the one role there is
- * and say so; a disabled member of another role is told it cannot be
- * re-enabled rather than offered a click the database refuses.
+ * All four are grantable since migration 20260923110000 (owner's decision,
+ * 23.09.2026); until then `platform_staff_add` and `platform_staff_enable`
+ * refused every role but `owner` with reason `role_requires_3_3`. Both forms
+ * therefore carry a picker, and it names under each choice what that role may
+ * read — `support` and `read_only` hold `business.read`, which is every
+ * customer's business data, and that is the decision being taken at the moment
+ * of the click.
+ *
+ * ## Changing a member's role
+ *
+ * `platform_staff_set_role` (migration 20260923140000) moves an existing member
+ * between the four, keeping `created_by`, `created_at` and the note — before it,
+ * the only way was to disable the row and add it again, which lost all three and
+ * wrote a removal and a fresh grant into the audit log for what was one change.
+ *
+ * The control is offered for an **active** member who is not the last active
+ * owner (`mayChangeRole`), and it is two steps: the same `RoleField` as the two
+ * add forms, then a confirmation naming the member and both roles. An authority
+ * change is worth a sentence before it happens, and a picker that applies on
+ * change would make one an accident of a keystroke.
+ *
+ * Changing your **own** row is allowed while another owner remains — the
+ * migration's header has the reasoning, in short: `staff.manage` is the owner's
+ * capability alone, so every self-change this page can send takes power away,
+ * and the case that would lock the platform out is the last active owner's,
+ * which is refused for anybody. The confirmation says plainly what is lost and
+ * that only another owner can undo it.
+ *
+ * No choice here can leave the platform without an active owner: the two forms
+ * only ever *add* a row, and the role change is kept off the last active owner.
  *
  * ## The last active owner
  *
- * `platform_staff_disable` refuses it with `last_owner`, and the table's trigger
- * `platform_staff_keep_owner` raises underneath. The page shows that member as
- * the last active owner instead of a disable button, and says so above the
- * list — but only when it read the whole roster; from a partial one it draws no
- * conclusion and leaves the decision to the database.
+ * `platform_staff_disable` refuses disabling it with `last_owner`, and
+ * `platform_staff_set_role` refuses demoting it with the same reason; the
+ * table's trigger `platform_staff_keep_owner` raises underneath either. The page
+ * shows that member as the last active owner instead of the disable and
+ * role-change buttons, and says so above the list — but only when it read the
+ * whole roster; from a partial one it draws no conclusion and leaves the
+ * decision to the database.
  */
 
 const cardStyle: React.CSSProperties = {
@@ -89,6 +127,14 @@ type Translate = (key: TranslationKey, vars?: TranslationVars) => string;
 const roleLabel = (t: Translate, role: string): string =>
   (PLATFORM_ROLES as readonly string[]).includes(role) ? t(`admin.role.${role}` as TranslationKey) : role;
 
+/** What each role may do, said where it is picked rather than only in the docs. */
+const ROLE_HINT_KEYS: Record<PlatformRole, TranslationKey> = {
+  owner:     'admin.team.role.hint.owner',
+  support:   'admin.team.role.hint.support',
+  billing:   'admin.team.role.hint.billing',
+  read_only: 'admin.team.role.hint.read_only',
+};
+
 interface MemberView {
   member: PlatformStaffRow;
   /** Disabling would be refused as last_owner; known only from a complete roster. */
@@ -101,12 +147,21 @@ interface MemberActionsProps extends MemberView {
   onResend: (userId: string) => void;
   onDisable: (userId: string) => void;
   onEnable: (userId: string) => void;
+  onChangeRole: (member: PlatformStaffRow) => void;
+}
+
+/** The member whose role is being changed, and the role picked so far. */
+interface RoleEdit {
+  member: PlatformStaffRow;
+  role: PlatformRole;
 }
 
 const PlatformTeamPage: React.FC = () => {
+  const { user } = useAuth();
   const { platformCan } = useSuperAdmin();
   const { showToast } = useToast();
   const { t } = useTranslation();
+  const exportChrome = useExportChrome();
 
   const mayManage = platformCan('staff.manage');
 
@@ -119,12 +174,19 @@ const PlatformTeamPage: React.FC = () => {
 
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteName, setInviteName] = useState('');
+  const [inviteRole, setInviteRole] = useState<PlatformRole>(DEFAULT_STAFF_ROLE);
   const [inviteNote, setInviteNote] = useState('');
   const [inviting, setInviting] = useState(false);
 
   const [addUserId, setAddUserId] = useState('');
+  const [addRole, setAddRole] = useState<PlatformRole>(DEFAULT_STAFF_ROLE);
   const [addNote, setAddNote] = useState('');
   const [adding, setAdding] = useState(false);
+
+  // Two pieces of state, not one: cancelling the confirmation goes back to the
+  // picker with the chosen role, rather than throwing the choice away.
+  const [roleEdit, setRoleEdit] = useState<RoleEdit | null>(null);
+  const [confirmingRole, setConfirmingRole] = useState(false);
 
   const load = useCallback(async () => {
     if (!mayManage) return;
@@ -175,10 +237,11 @@ const PlatformTeamPage: React.FC = () => {
     event.preventDefault();
     setInviting(true);
     try {
-      await inviteStaffMember(inviteEmail, inviteName, inviteNote || null);
+      await inviteStaffMember(inviteEmail, inviteName, inviteRole, inviteNote || null);
       showToast('success', t('admin.team.invite.success'));
       setInviteEmail('');
       setInviteName('');
+      setInviteRole(DEFAULT_STAFF_ROLE);
       setInviteNote('');
       await load();
     } catch (err) {
@@ -186,6 +249,30 @@ const PlatformTeamPage: React.FC = () => {
     } finally {
       setInviting(false);
     }
+  };
+
+  /** Opens the picker on the role the member holds, so nothing is preselected. */
+  const beginRoleChange = (member: PlatformStaffRow) => {
+    setRoleEdit({ member, role: isStaffRole(member.role) ? member.role : DEFAULT_STAFF_ROLE });
+    setConfirmingRole(false);
+  };
+
+  const closeRoleChange = () => {
+    setRoleEdit(null);
+    setConfirmingRole(false);
+  };
+
+  const applyRoleChange = () => {
+    if (!roleEdit) return;
+    const { member, role } = roleEdit;
+    closeRoleChange();
+    // The note is left alone: the RPC treats NULL as "unchanged", so a role
+    // change never erases what somebody wrote about a member.
+    void runOnMember(
+      member.user_id,
+      () => setStaffRole(member.user_id, role, null),
+      'admin.team.role.change.success',
+    );
   };
 
   const add = async (event: React.FormEvent) => {
@@ -196,15 +283,72 @@ const PlatformTeamPage: React.FC = () => {
     }
     setAdding(true);
     try {
-      await addStaffMember(addUserId, addNote || null);
+      await addStaffMember(addUserId, addRole, addNote || null);
       showToast('success', t('admin.team.add.success'));
       setAddUserId('');
+      setAddRole(DEFAULT_STAFF_ROLE);
       setAddNote('');
       await load();
     } catch (err) {
       reportFailure(err);
     } finally {
       setAdding(false);
+    }
+  };
+
+  /**
+   * The roster as a workbook — the access-review artefact, and the platform's
+   * counterpart to the Rollen matrix a company exports. It answers "who could
+   * read every customer's data" in a form that can be attached to a review; the
+   * screen answers it only by being looked at.
+   *
+   * **The rule being preserved: a file says what it holds.** `collectStaffRoster`
+   * pages `platform_staff_list` to the end, so unlike every other panel export
+   * this one is the whole list — and the band says so only when `complete` is
+   * true. When the paging stopped early the band says the roster is partial
+   * rather than the file implying a complete team; it is not withheld, because a
+   * partial roster is still a fact once it is labelled as one.
+   *
+   * It carries the full `user_id`, which no other export here does: the screen
+   * already shows it (shortened, with the whole value in the cell's title) and
+   * "Vorhandenes Konto hinzufügen" takes exactly that id, so a roster without it
+   * cannot be acted on. These are platform accounts, never a customer's.
+   */
+  const handleExport = () => {
+    try {
+      exportTableToExcel(buildStaffExport({
+        rows: members,
+        complete,
+        today: berlinToday(),
+        labels: {
+          sheetTitle: t('admin.team.title'),
+          member: t('admin.team.col.member'),
+          userId: t('admin.team.export.userId'),
+          role: t('admin.team.col.role'),
+          status: t('admin.team.col.status'),
+          disabledOn: t('admin.team.export.disabledOn'),
+          invitationPending: t('admin.team.export.invitationPending'),
+          grantedBy: t('admin.team.col.grantedBy'),
+          since: t('admin.team.export.since'),
+          note: t('admin.team.col.note'),
+          // The four roles, named as the picker names them. A fifth value the
+          // database might hold is written verbatim by the builder.
+          roleNames: Object.fromEntries(
+            PLATFORM_ROLES.map((role): [string, string] => [role, roleLabel(t, role)]),
+          ),
+          statusActive: t('admin.dir.status.active'),
+          statusDisabled: t('admin.team.status.disabled'),
+          yes: t('common.yes'),
+          no: t('common.no'),
+          noAddress: t('admin.team.noAddress'),
+          grantedByUnrecorded: t('admin.team.grantedBy.unrecorded'),
+          scopeComplete: t('admin.team.export.scopeComplete'),
+          scopeIncomplete: t('admin.team.export.scopeIncomplete'),
+          chrome: exportChrome,
+        },
+      }));
+    } catch (error: any) {
+      showToast('error', t('ui.export.failed'), error?.message);
     }
   };
 
@@ -228,6 +372,7 @@ const PlatformTeamPage: React.FC = () => {
     onResend: (userId: string) => void runOnMember(userId, () => resendStaffInvite(userId), 'admin.team.invite.resent'),
     onDisable: (userId: string) => void runOnMember(userId, () => disableStaffMember(userId), 'admin.team.disabled'),
     onEnable: (userId: string) => void runOnMember(userId, () => enableStaffMember(userId), 'admin.team.enabled'),
+    onChangeRole: beginRoleChange,
   };
 
   return (
@@ -237,13 +382,27 @@ const PlatformTeamPage: React.FC = () => {
           <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>{t('admin.team.title')}</h1>
           <p className="text-sm mt-0.5" style={{ color: 'var(--text-secondary)' }}>{t('admin.team.subtitle')}</p>
         </div>
-        <button
-          onClick={() => void load()}
-          className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium"
-          style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
-        >
-          <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />{t('admin.common.refresh')}
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Withheld while the read failed or is running, and on an empty
+              roster: a file saying nobody holds platform rights would be the
+              most misleading artefact this screen could produce. An *incomplete*
+              roster is exported and labelled, which is a different case. */}
+          <Button
+            variant="secondary"
+            disabled={loading || problem !== null || members.length === 0}
+            onClick={handleExport}
+            title={t('common.exportExcel')}
+          >
+            <Download size={14} aria-hidden />{t('admin.export.download')}
+          </Button>
+          <button
+            onClick={() => void load()}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium"
+            style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
+          >
+            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />{t('admin.common.refresh')}
+          </button>
+        </div>
       </div>
 
       {/* The roster */}
@@ -351,7 +510,7 @@ const PlatformTeamPage: React.FC = () => {
       {/* Adding somebody */}
       <section className="space-y-3">
         <h2 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>{t('admin.team.addSection')}</h2>
-        <Note icon="lock" text={t('admin.team.roleNote')} />
+        <Note text={t('admin.team.roleNote')} />
         <div className="grid gap-4 lg:grid-cols-2">
           <form onSubmit={invite} className="rounded-2xl p-5 space-y-3" style={cardStyle}>
             <h3 className="font-bold flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
@@ -366,7 +525,7 @@ const PlatformTeamPage: React.FC = () => {
               <span className="block text-xs font-semibold mb-1.5" style={labelStyle}>{t('admin.team.invite.fullName')}</span>
               <input required value={inviteName} onChange={e => setInviteName(e.target.value)} style={controlStyle} />
             </label>
-            <RoleField t={t} />
+            <RoleField t={t} value={inviteRole} onChange={setInviteRole} />
             <label className="block">
               <span className="block text-xs font-semibold mb-1.5" style={labelStyle}>{t('admin.team.note')}</span>
               <input value={inviteNote} maxLength={500} onChange={e => setInviteNote(e.target.value)} style={controlStyle} />
@@ -388,7 +547,7 @@ const PlatformTeamPage: React.FC = () => {
               <input required value={addUserId} onChange={e => setAddUserId(e.target.value)}
                 placeholder="00000000-0000-0000-0000-000000000000" style={controlStyle} />
             </label>
-            <RoleField t={t} />
+            <RoleField t={t} value={addRole} onChange={setAddRole} />
             <label className="block">
               <span className="block text-xs font-semibold mb-1.5" style={labelStyle}>{t('admin.team.note')}</span>
               <input value={addNote} maxLength={500} onChange={e => setAddNote(e.target.value)} style={controlStyle} />
@@ -401,7 +560,82 @@ const PlatformTeamPage: React.FC = () => {
           </form>
         </div>
       </section>
+
+      <RoleChangeFlow
+        t={t}
+        edit={roleEdit}
+        confirming={confirmingRole}
+        isSelf={roleEdit?.member.user_id === user?.id}
+        onPick={role => setRoleEdit(prev => (prev ? { ...prev, role } : prev))}
+        onContinue={() => setConfirmingRole(true)}
+        onBack={() => setConfirmingRole(false)}
+        onCancel={closeRoleChange}
+        onConfirm={applyRoleChange}
+      />
     </div>
+  );
+};
+
+/**
+ * Picking the new role, then confirming it.
+ *
+ * The picker is the page's own `RoleField`, so the four choices and the sentence
+ * under each are written once. The confirmation is the design system's
+ * `ConfirmDialog`: it names the member and both roles, because this is a change
+ * of authority and not of a detail. Its tone is `danger` only for the caller's
+ * own row — the one change nobody at this screen can undo.
+ */
+const RoleChangeFlow: React.FC<{
+  t: Translate;
+  edit: RoleEdit | null;
+  confirming: boolean;
+  isSelf: boolean;
+  onPick: (role: PlatformRole) => void;
+  onContinue: () => void;
+  onBack: () => void;
+  onCancel: () => void;
+  onConfirm: () => void;
+}> = ({ t, edit, confirming, isSelf, onPick, onContinue, onBack, onCancel, onConfirm }) => {
+  if (!edit) return null;
+
+  const member = edit.member.email ?? t('admin.team.noAddress');
+  const from = roleLabel(t, edit.member.role);
+  const to = roleLabel(t, edit.role);
+  const unchanged = edit.role === edit.member.role;
+
+  return (
+    <>
+      <Dialog open={!confirming} onOpenChange={next => { if (!next) onCancel(); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t('admin.team.role.change.title')}</DialogTitle>
+            <DialogDescription>{t('admin.team.role.change.subtitle', { member, role: from })}</DialogDescription>
+          </DialogHeader>
+          <RoleField t={t} value={edit.role} onChange={onPick} />
+          {unchanged && <p className="text-xs text-fg-muted">{t('admin.team.role.change.same')}</p>}
+          <DialogFooter>
+            <Button variant="secondary" onClick={onCancel}>{t('common.cancel')}</Button>
+            <Button onClick={onContinue} disabled={unchanged}>{t('admin.team.role.change.submit')}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <ConfirmDialog
+        open={confirming}
+        onClose={onBack}
+        onConfirm={onConfirm}
+        tone={isSelf ? 'danger' : 'primary'}
+        icon={UserCog}
+        title={t('admin.team.role.change.confirmTitle')}
+        confirmLabel={t('admin.team.role.change.confirmSubmit')}
+        description={
+          <>
+            {t('admin.team.role.change.confirmBody', { member, from, to })}
+            {isSelf && <span className="mt-2 block font-semibold">{t('admin.team.role.change.confirmSelf')}</span>}
+          </>
+        }
+      />
+    </>
   );
 };
 
@@ -419,9 +653,12 @@ const MemberIdentity: React.FC<{ member: PlatformStaffRow; t: Translate }> = ({ 
   </div>
 );
 
+/** Owner stands out: it is the only role that can change the team itself. */
 const RoleBadge: React.FC<{ role: string; t: Translate }> = ({ role, t }) => (
   <span className="inline-block px-2 py-0.5 rounded-lg text-[11px] font-semibold whitespace-nowrap"
-    style={{ background: 'var(--warning-subtle)', color: 'var(--warning)' }}>
+    style={role === 'owner'
+      ? { background: 'var(--warning-subtle)', color: 'var(--warning)' }
+      : { background: 'var(--bg-subtle)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}>
     {roleLabel(t, role)}
   </span>
 );
@@ -473,10 +710,23 @@ const GrantedBy: React.FC<{ member: PlatformStaffRow; t: Translate }> = ({ membe
   );
 };
 
-const MemberActions: React.FC<MemberActionsProps> = ({ member, isLastOwner, working, t, onResend, onDisable, onEnable }) => {
+const MemberActions: React.FC<MemberActionsProps> = ({
+  member, isLastOwner, working, t, onResend, onDisable, onEnable, onChangeRole,
+}) => {
   const active = member.status === 'active';
   return (
     <>
+      {/* An active member who is not the last active owner; a disabled row keeps
+          the role it was paused with, and re-enabling restores exactly that. */}
+      {mayChangeRole(member, isLastOwner) && (
+        <button
+          onClick={() => onChangeRole(member)}
+          disabled={working}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap border border-[var(--border)] text-[var(--text-secondary)] disabled:opacity-60"
+        >
+          <UserCog size={13} />{t('admin.team.role.change')}
+        </button>
+      )}
       {offersResend(member) && (
         <button
           onClick={() => onResend(member.user_id)}
@@ -503,7 +753,9 @@ const MemberActions: React.FC<MemberActionsProps> = ({ member, isLastOwner, work
           <Ban size={13} />{t('admin.team.disable')}
         </button>
       )}
-      {!active && mayReEnable(member) && (
+      {/* Every disabled member can be re-enabled since 20260923110000: enabling
+          restores the role the row already carries and cannot remove an owner. */}
+      {!active && (
         <button
           onClick={() => onEnable(member.user_id)}
           disabled={working}
@@ -513,34 +765,44 @@ const MemberActions: React.FC<MemberActionsProps> = ({ member, isLastOwner, work
           <CheckCircle size={13} />{t('admin.team.enable')}
         </button>
       )}
-      {!active && !mayReEnable(member) && (
-        <span className="flex items-start gap-1.5 text-xs max-w-[12rem]" style={{ color: 'var(--text-secondary)' }}
-          title={t('admin.team.hint.roleRequires33')}>
-          <Lock size={13} className="flex-shrink-0 mt-0.5" />{t('admin.team.reEnableOwnerOnly')}
-        </span>
-      )}
     </>
   );
 };
 
 /**
- * Where a role picker would go: the one role the database accepts today, shown
- * as a fact rather than as a control it would refuse.
+ * The role a member gets — new, or changed — with what it may do said underneath.
+ *
+ * One picker for all three forms: the two that add a member and the one that
+ * moves an existing one, so the four choices and the sentence under each are
+ * written once. The four are `STAFF_ROLE_OPTIONS`, the same list the database's
+ * CHECK constraint and capability matrix hold. Nothing offered here can leave
+ * the platform without an active owner — see the module header — so this picker
+ * needs no guard of its own; `isStaffRole` only keeps a value the browser did
+ * not put there from reaching the RPC as a role.
  */
-const RoleField: React.FC<{ t: Translate }> = ({ t }) => (
-  <div>
+const RoleField: React.FC<{
+  t: Translate;
+  value: PlatformRole;
+  onChange: (role: PlatformRole) => void;
+}> = ({ t, value, onChange }) => (
+  <label className="block">
     <span className="block text-xs font-semibold mb-1.5" style={labelStyle}>{t('admin.team.role.label')}</span>
-    <div className="flex items-center gap-2" style={{ ...controlStyle, background: 'var(--bg-muted)' }}>
-      <Lock size={13} style={{ color: 'var(--text-secondary)' }} />
-      <span>{t('admin.role.owner')}</span>
-    </div>
-    <p className="text-[11px] mt-1" style={{ color: 'var(--text-secondary)' }}>{t('admin.team.role.locked')}</p>
-  </div>
+    <select
+      value={value}
+      onChange={e => onChange(isStaffRole(e.target.value) ? e.target.value : DEFAULT_STAFF_ROLE)}
+      style={controlStyle}
+    >
+      {STAFF_ROLE_OPTIONS.map(role => (
+        <option key={role} value={role}>{roleLabel(t, role)}</option>
+      ))}
+    </select>
+    <p className="text-[11px] mt-1" style={{ color: 'var(--text-secondary)' }}>{t(ROLE_HINT_KEYS[value])}</p>
+  </label>
 );
 
 /** Takes the finished sentence, so a note may carry interpolated values. */
-const Note: React.FC<{ text: string; tone?: 'info' | 'warning'; icon?: 'info' | 'lock' }> = ({ text, tone = 'info', icon = 'info' }) => {
-  const Icon = tone === 'warning' ? AlertTriangle : icon === 'lock' ? Lock : Info;
+const Note: React.FC<{ text: string; tone?: 'info' | 'warning' }> = ({ text, tone = 'info' }) => {
+  const Icon = tone === 'warning' ? AlertTriangle : Info;
   return (
     <div className="flex items-start gap-2 rounded-xl p-3 text-xs"
       style={tone === 'warning'

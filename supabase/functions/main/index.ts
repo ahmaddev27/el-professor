@@ -97,9 +97,21 @@ const FUNCTION_ENV: ReadonlyMap<string, readonly string[]> = new Map<string, rea
   ['platform-staff', [...BASE_ENV, ...SERVICE_ENV, ...OTP_MAIL_ENV]],
   // Mails the generated code to its target address or its company's admins.
   ['generate-activation-code', [...BASE_ENV, ...SERVICE_ENV, ...SMTP_ENV]],
+  // The nightly TÜV / trial notifications. Called by a host cron line with the
+  // service key, never by the browser; it is deliberately not public, and it
+  // compares the bearer against SUPABASE_SERVICE_ROLE_KEY itself, because the
+  // check above admits any signed-in customer's token.
+  ['notify-expiries', [...BASE_ENV, ...SERVICE_ENV, ...SMTP_ENV]],
   // Google sign-in: calls the oauth_* RPCs as service_role for the signed-in
   // caller. Needs a session, so it is deliberately not in PUBLIC_FUNCTIONS.
   ['oauth-account', [...BASE_ENV, ...SERVICE_ENV]],
+  // Mails a document this product produced to the person it is about — today the
+  // weekly Abrechnung to its driver. Needs a session, so it is deliberately not
+  // in PUBLIC_FUNCTIONS: the router's check proves only that the caller holds a
+  // token this stack signed, and the function checks the driver's company itself.
+  // SMTP to send, the service role to read the driver's address — which it never
+  // takes from the request body.
+  ['send-document', [...BASE_ENV, ...SERVICE_ENV, ...SMTP_ENV]],
   ['validate-discount-code', [...BASE_ENV, ...SERVICE_ENV]],
   ['update-income-weeks', [...BASE_ENV]],
   ['extract-receipt', [...BASE_ENV, 'ANTHROPIC_API_KEY']],

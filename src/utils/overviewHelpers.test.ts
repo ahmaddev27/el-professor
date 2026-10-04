@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { calcCashSummary, getMonthRange } from './overviewHelpers';
+import { calcCashSummary, calcPeriodMetrics, getMonthRange } from './overviewHelpers';
 import type { CashMovementRow } from './cashLedger';
 import type { Income, Receipt } from '../types/receipt';
 
@@ -123,5 +123,47 @@ describe('calcCashSummary', () => {
     expect(april.cashIncome).toBe(0);
     expect(april.cashOut).toBe(0);
     expect(april.cashBalance).toBe(300);
+  });
+});
+
+// ─── Fixed costs are per month, so the Overview must not sum the table ───────
+//
+// Since `20261003110000` a fixed cost belongs to a month. `calcPeriodMetrics`
+// summed every row it was given, which is correct only while a company has one
+// month of them — and wrong by a whole month's rent for every month after that.
+// The agent that built the per-month feature flagged it; these pin the fix.
+describe('calcPeriodMetrics — fixed costs resolve to the period month', () => {
+  const cost = (id: string, amount: number, period_month: string | null) =>
+    ({ id, description: id, amount, period_month, created_at: '2026-01-01' });
+  const inJanuary = { start: new Date(2026, 0, 1), end: new Date(2026, 0, 31) };
+
+  it('takes only the period month, not every month in the table', () => {
+    const m = calcPeriodMetrics([], [], [],
+      [cost('jan', 350, '2026-01-01'), cost('feb', 400, '2026-02-01')],
+      inJanuary.start, inJanuary.end);
+    // 750 would be the old behaviour: January plus February, in January.
+    expect(m.fixedCosts).toBe(350);
+  });
+
+  it('inherits the newest earlier month when the period has none of its own', () => {
+    const m = calcPeriodMetrics([], [], [],
+      [cost('nov', 300, '2025-11-01'), cost('dec', 350, '2025-12-01')],
+      inJanuary.start, inJanuary.end);
+    expect(m.fixedCosts).toBe(350);
+  });
+
+  it('falls back to the rows that carry no month at all', () => {
+    // The baseline: everything entered before fixed costs became monthly.
+    const m = calcPeriodMetrics([], [], [],
+      [cost('old-a', 100, null), cost('old-b', 250, null)],
+      inJanuary.start, inJanuary.end);
+    expect(m.fixedCosts).toBe(350);
+  });
+
+  it('never reaches forward into a later month', () => {
+    const m = calcPeriodMetrics([], [], [],
+      [cost('feb', 400, '2026-02-01')],
+      inJanuary.start, inJanuary.end);
+    expect(m.fixedCosts).toBe(0);
   });
 });

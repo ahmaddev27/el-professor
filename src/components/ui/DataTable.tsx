@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from 'react';
+import { useMemo, useState, type MouseEvent, type ReactNode } from 'react';
 import { AlertTriangle, ArrowDown, ArrowUp, ChevronsUpDown, Inbox, RotateCw } from 'lucide-react';
 import { useTranslation } from '../../contexts/LanguageContext';
 import { Button } from './Button';
@@ -49,8 +49,23 @@ export interface DataTableProps<Row> {
   initialSort?: DataTableSort;
   rowActions?: (row: Row) => ReactNode;
   rowActionsLabel?: string;
+  /**
+   * Makes the whole row the control: a click, or Enter / Space on the focused
+   * row, calls it. Clicks that start on a control inside the row (a button, a
+   * link, a field) are left to that control. Leave it out and the row is inert.
+   */
+  onRowClick?: (row: Row) => void;
   /** Values for a summary row, keyed by column id. */
   totals?: Partial<Record<string, ReactNode>>;
+  /**
+   * What goes in the totals row's own actions cell — the one under the per-row
+   * actions. That cell already existed and was always empty; this fills it.
+   *
+   * For an action about the whole table rather than one row: the Abrechnung's
+   * "mail this week to every driver" sits there, which is where the owner asked
+   * for it and is also where a reader looks for a total's own control.
+   */
+  totalsActions?: ReactNode;
   density?: 'comfortable' | 'compact';
   className?: string;
   /** Give the scroll area a max height (e.g. `max-h-[28rem]`) to pin the header. */
@@ -83,6 +98,14 @@ function formatValue(kind: DataTableColumnKind | undefined, value: Exclude<SortV
   }
 }
 
+const INNER_CONTROL = 'a, button, input, select, textarea, label, [role="button"]';
+
+/** True when the click began on a control that sits inside the row. */
+function startsOnInnerControl(event: MouseEvent<HTMLTableRowElement>): boolean {
+  const control = (event.target as HTMLElement).closest(INNER_CONTROL);
+  return control !== null && event.currentTarget.contains(control);
+}
+
 export function DataTable<Row>({
   columns,
   rows,
@@ -95,7 +118,9 @@ export function DataTable<Row>({
   initialSort,
   rowActions,
   rowActionsLabel,
+  onRowClick,
   totals,
+  totalsActions,
   density = 'comfortable',
   className,
   scrollClassName,
@@ -182,7 +207,28 @@ export function DataTable<Row>({
     }
 
     return sortedRows.map(row => (
-      <tr key={getRowId(row)} className="transition-colors hover:bg-sunken/50">
+      <tr
+        key={getRowId(row)}
+        className={cn(
+          'transition-colors hover:bg-sunken/50',
+          onRowClick &&
+            'cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-focus',
+        )}
+        tabIndex={onRowClick ? 0 : undefined}
+        onClick={onRowClick ? event => { if (!startsOnInnerControl(event)) onRowClick(row); } : undefined}
+        onKeyDown={
+          onRowClick
+            ? event => {
+                // Only the row itself: Enter on a button inside it is that button's.
+                if (event.target !== event.currentTarget) return;
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault();
+                  onRowClick(row);
+                }
+              }
+            : undefined
+        }
+      >
         {columns.map(column => (
           <td
             key={column.id}
@@ -219,6 +265,22 @@ export function DataTable<Row>({
         aria-busy={loading || undefined}
         className={cn(
           'overflow-auto focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-focus',
+          // Paint containment, and only where the caller caps the height.
+          //
+          // Measured in Chrome 141 on the Fahrtenanalyse's 118 findings (8265 px
+          // of table): with the max-height alone, `document.body.scrollHeight`
+          // was the correct 1237 while `document.documentElement.scrollHeight`
+          // was 8592 **and the page really scrolled that far** — seven screens of
+          // empty background under a table that was already clipped, the sticky
+          // header's layout overflow escaping the scroll container. Containment
+          // makes the container a containing block; the root measures 1237 and
+          // the header stays pinned.
+          //
+          // Tied to `scrollClassName` rather than applied always, because that is
+          // exactly the condition the defect needs: a table with no cap does not
+          // scroll, has no sticky overflow to escape, and `contain: paint` would
+          // only risk clipping something at its edge for no gain.
+          scrollClassName ? '[contain:paint]' : undefined,
           scrollClassName,
         )}
       >
@@ -288,7 +350,9 @@ export function DataTable<Row>({
                     {totals?.[column.id] ?? (index === 0 ? t('ui.table.total') : null)}
                   </td>
                 ))}
-                {rowActions ? <td className="bg-sunken/60" /> : null}
+                {rowActions ? (
+                  <td className="bg-sunken/60 px-2 text-right">{totalsActions}</td>
+                ) : null}
               </tr>
             </tfoot>
           ) : null}

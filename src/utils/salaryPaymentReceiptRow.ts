@@ -7,7 +7,13 @@ import {
   type ReceiptDocumentText,
   type StoredReceiptFields,
 } from './salaryCashReceiptDocument';
-import { receiptScope, scopeRefusal, type ReceiptActionRefusal, type ReceiptScope } from './salaryCashReceiptFlow';
+import {
+  confirmationBlock,
+  receiptScope,
+  scopeRefusal,
+  type ReceiptActionRefusal,
+  type ReceiptScope,
+} from './salaryCashReceiptFlow';
 
 /**
  * What a salary payment row offers, which receipt its Gehaltsquittung preview
@@ -28,12 +34,22 @@ export interface PaymentRowInput {
   payment_type: 'cash' | 'bank';
   source_type?: 'manual' | 'weekly_cash_difference' | 'gehaltsquittung' | string | null;
   source_reference?: string | null;
+  /**
+   * The live receipt issued for this payment after the fact
+   * (`issue_salary_cash_receipt`, 20261004110000), or null/absent. A payment
+   * written by a Gehaltsquittung names its receipt in `source_reference`
+   * instead; the two never coexist.
+   */
+  issued_receipt_id?: string | null;
 }
 
 /** What the row's actions depend on besides the payment itself. */
 export interface PaymentRowContext {
-  /** usePlan().can('dokumente'): the feature the Gehaltsquittung belongs to. */
-  planIncludesDokumente: boolean;
+  /**
+   * Not read since 03.10.2026: the owner dropped the plan from the conditions
+   * for viewing a cash payment. Kept so callers and tests keep one shape.
+   */
+  planIncludesDokumente?: boolean;
   /** Whose receipts this screen may act on, from receiptScope(). */
   scope: ReceiptScope;
 }
@@ -70,12 +86,50 @@ export type PaymentRowActions =
  * button that can only end in company_mismatch.
  */
 export function paymentRowActions(payment: PaymentRowInput, context: PaymentRowContext): PaymentRowActions {
-  if (payment.source_type !== 'gehaltsquittung') return { kind: 'editable' };
-  const receiptId = payment.source_reference?.trim();
+  const issuedId = payment.issued_receipt_id?.trim();
+  if (payment.source_type !== 'gehaltsquittung' && !issuedId) return { kind: 'editable' };
+  const receiptId = payment.source_type === 'gehaltsquittung' ? payment.source_reference?.trim() : issuedId;
   if (!receiptId) return { kind: 'receipt', preview: false };
-  if (!context.planIncludesDokumente) return { kind: 'receipt', preview: false };
   if (scopeRefusal(context.scope) !== null) return { kind: 'receipt', preview: false };
   return { kind: 'receipt', preview: true, receiptId };
+}
+
+/**
+ * Whether a payment can be issued a numbered Gehaltsquittung after the fact:
+ * a cash payment that is neither "Bar zurück" nor already behind a receipt.
+ * The same condition `issue_salary_cash_receipt` refuses with
+ * `payment_not_issuable` and `already_issued`; the database decides, this only
+ * keeps the button off rows it would refuse.
+ */
+export function paymentRowCanBeIssued(payment: PaymentRowInput): boolean {
+  if (payment.payment_type !== 'cash') return false;
+  if (payment.source_type === 'weekly_cash_difference' || payment.source_type === 'gehaltsquittung') return false;
+  return !payment.issued_receipt_id?.trim();
+}
+
+/**
+ * Whether a row offers the **payment view**: the read-only sheet drawn from the
+ * payment itself (owner decision 03.10.2026, "each payment in the salary with
+ * type cash must be able to be viewed").
+ *
+ * Offered for every cash payment that does not open a stored receipt:
+ * a manual one, and a Gehaltsquittung row whose receipt cannot be opened (no
+ * id stored, or a caller outside the owning company). **Never offered in place
+ * of a stored receipt that can be opened** — a real, numbered receipt is never
+ * replaced by a derived sheet.
+ *
+ * "Bar zurück" (`weekly_cash_difference`) is excluded: it is paid in the
+ * salary's books but the till never saw it, so a sheet headed "Barzahlung" would
+ * state a cash handover that did not happen.
+ *
+ * It reads nothing from salary_cash_receipts and writes nothing, so it needs
+ * neither the plan nor the caller's own company: platform staff inside a
+ * support session may view it (a view is not issuing, voiding or signing).
+ */
+export function paymentRowOffersView(payment: PaymentRowInput, actions: PaymentRowActions): boolean {
+  if (payment.payment_type !== 'cash') return false;
+  if (payment.source_type === 'weekly_cash_difference') return false;
+  return !(actions.kind === 'receipt' && actions.preview);
 }
 
 // ─── Loading the receipt behind one row ─────────────────────────────────────
@@ -221,4 +275,132 @@ export function receiptSheet(
   } catch {
     return { kind: 'broken' };
   }
+}
+
+// ─── Voiding one payment row's receipt ──────────────────────────────────────
+
+/**
+ * THE RULE THESE THREE FUNCTIONS PRESERVE, stated before the code because it is
+ * a money rule: **a payment written by confirm_salary_cash_payment is undone
+ * only by voiding its receipt, never by deleting the row.**
+ * `void_salary_cash_receipt` does four things in one transaction
+ * (20260914140000:560) — it marks the receipt `voided` with its reason and
+ * actor, deletes the `salary_payments` row, books the amount back into the till
+ * as an incoming `cash_movements` row dated the day of the void, and points the
+ * receipt at that movement. A bare delete of the payment would do the second of
+ * those only: the salary would show the money unpaid, the till would still be
+ * short, the receipt would still read `confirmed`, and nothing would record
+ * why. So nothing here deletes, recomputes or rounds anything — these functions
+ * only decide whether that one RPC may be offered, and the screen calls it
+ * through the same `voidReceipt` helper the Gehaltsquittung list uses.
+ *
+ * Why the operation is offered on the payment row at all: the row is where
+ * someone who wants the payment gone looks for it, and the only thing there
+ * today is a lock. The lock stays — `paymentRowActions` still answers
+ * `{ kind: 'receipt' }`, and the row is still not editable.
+ */
+
+/** What the Storno needs to know besides the payment row itself. */
+export interface PaymentRowStornoContext {
+  /** Whose receipts this screen may act on, from receiptScope(). */
+  scope: ReceiptScope;
+  /** can('salaries', 'edit'): the right the RPC checks as current_role_permits('salaries', true). */
+  mayEditSalaries: boolean;
+}
+
+/**
+ * `hidden` on a row that is not a Gehaltsquittung — such a row has a real
+ * delete button and needs no Storno. `blocked` carries the sentence the row
+ * shows instead of the button, so the reason sits where the action would be
+ * rather than inside a dialog that opens only to refuse.
+ */
+export type PaymentRowStorno =
+  | { kind: 'hidden' }
+  | { kind: 'blocked'; refusal: ReceiptActionRefusal }
+  | { kind: 'offered'; receiptId: string };
+
+/**
+ * Whether the row may offer the Storno, and the reason when it may not.
+ *
+ * The two conditions are the RPC's own. `void_salary_cash_receipt` opens with
+ * `v_caller IS NULL OR v_company IS NULL OR NOT current_role_permits('salaries',
+ * true)` — the identical block `confirm_salary_cash_payment` opens with, which
+ * is why `confirmationBlock` answers for both and nothing is copied here.
+ * (20260921110010 spliced its platform-context refusal in front of that one
+ * anchor in all three Gehaltsquittung functions, which is what proves the block
+ * is identical in each.)
+ *
+ * Ahead of it stands that refusal, `platform_session_not_allowed`, and
+ * `receiptScope` is this screen's first wall for it: **a platform support
+ * session issues, voids and signs nothing here, permanently** (owner's
+ * decision, 18.09.2026, reasoned on `receiptScope` itself — attestation, not
+ * traceability). `scopeRefusal` answers it with `company_mismatch`, which maps
+ * to the same sentence as the database's own reason.
+ *
+ * **The plan is deliberately not a condition.** Issuing is gated on the
+ * `dokumente` feature, because a company that cannot open a receipt should not
+ * create one; voiding is the *undo*, and `plan_features` is writable, so gating
+ * it would leave a company whose tier changed holding a cash payment it can
+ * neither edit, nor delete, nor void — the very state the gate on issuing
+ * exists to prevent. The RPC asks for no feature either.
+ *
+ * A Gehaltsquittung row whose `source_reference` holds no receipt id is
+ * `receipt_not_found`: the trigger refuses to change or delete it and there is
+ * no receipt to void, so the row says so rather than offering a button with
+ * nothing to act on. `confirm_salary_cash_payment` always writes the id
+ * (20260914140000:528, `v_receipt.id::text`), so that is the shape of a row
+ * written some other way.
+ */
+export function paymentRowStorno(payment: PaymentRowInput, context: PaymentRowStornoContext): PaymentRowStorno {
+  const issuedId = payment.issued_receipt_id?.trim();
+  if (payment.source_type !== 'gehaltsquittung' && !issuedId) return { kind: 'hidden' };
+  const receiptId = payment.source_type === 'gehaltsquittung' ? payment.source_reference?.trim() : issuedId;
+  if (!receiptId) return { kind: 'blocked', refusal: 'receipt_not_found' };
+  const blocked = confirmationBlock(context.scope, context.mayEditSalaries);
+  if (blocked) return { kind: 'blocked', refusal: blocked };
+  return { kind: 'offered', receiptId };
+}
+
+/**
+ * What the Storno dialog shows while and after it loads the receipt it is about
+ * to void.
+ *
+ * `voided` is a state of its own rather than a refusal, because it is not an
+ * error: the receipt was voided elsewhere since this payment list loaded, the
+ * row on screen no longer exists, and the dialog says so and offers nothing.
+ * The RPC would answer a second call by returning the voided receipt unchanged
+ * (20260914140000:611) instead of raising, so without this the Storno would
+ * report success, write nothing, book no cash back, and drop the reason the
+ * user typed.
+ */
+export type StornoStep =
+  | { kind: 'loading' }
+  | { kind: 'refusal'; refusal: ReceiptActionRefusal }
+  | { kind: 'voided' }
+  | { kind: 'ready' };
+
+/**
+ * The dialog's step for the receipt it is open on. Give it currentLoadState's
+ * answer, never the raw state, so an answer held for the receipt opened before
+ * cannot make this dialog offer a Storno of that one — voiding the wrong
+ * receipt moves cash and consumes the wrong document.
+ */
+export function stornoStep(state: ReceiptLoadState): StornoStep {
+  const view = receiptPreviewView(state);
+  if (view.kind === 'loading') return { kind: 'loading' };
+  if (view.kind === 'refusal') return { kind: 'refusal', refusal: view.refusal };
+  return view.voided ? { kind: 'voided' } : { kind: 'ready' };
+}
+
+/**
+ * Why the typed reason cannot be sent; null when it can.
+ *
+ * `void_salary_cash_receipt` refuses a NULL or blank reason with
+ * `invalid_reason` and stores `btrim(p_reason)`, so the same trim decides here
+ * and the user is told before a request goes out. A length is not checked: the
+ * column is `text` and the RPC sets no bound, so the field caps its own input
+ * instead of this naming a refusal the database would never make.
+ */
+export function voidReasonProblem(reason: string): ReceiptActionRefusal | null {
+  return reason.trim() ? null : 'invalid_reason';
 }

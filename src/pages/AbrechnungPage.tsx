@@ -10,7 +10,7 @@ import {
   Fuel,
   Receipt as ReceiptIcon,
   RotateCw,
-  Share2,
+  Mail,
   TrendingDown,
   TrendingUp,
   User,
@@ -22,6 +22,16 @@ import { useTheme } from '../contexts/ThemeContext';
 import { format } from 'date-fns';
 import { getWeeksOfMonth, getBusinessMonthRange, getBusinessWeeksForMonth } from '../utils/weekCalculations';
 import html2canvas from 'html2canvas';
+import { exportTableToExcel } from '../utils/excelExport';
+import { sendAbrechnungMail } from '../lib/sendDocumentClient';
+import {
+  nothingToSend,
+  planRecipients,
+  type RecipientDriver,
+  type RecipientPlan,
+} from '../utils/driverRecipients';
+import { buildAbrechnungExport } from '../utils/tableExportRows';
+import { useExportChrome } from '../hooks/useExportChrome';
 import { useTranslation } from '../contexts/LanguageContext';
 import {
   Alert,
@@ -100,6 +110,7 @@ const MONTH_NAMES = [
 
 export function AbrechnungPage() {
   const { t } = useTranslation();
+  const exportChrome = useExportChrome();
   const [viewMode, setViewMode] = useState<ViewMode>('weekly');
   const [weeklyData, setWeeklyData] = useState<WeeklyAbrechnung[]>([]);
   const [monthlyData, setMonthlyData] = useState<MonthlyAbrechnung[]>([]);
@@ -116,6 +127,22 @@ export function AbrechnungPage() {
   const { isDark } = useTheme();
   const shareableCardRef = useRef<HTMLDivElement>(null);
   const [isSharing, setIsSharing] = useState(false);
+
+  /**
+   * The company's drivers with their ids and addresses.
+   *
+   * The Abrechnung itself carries **no driver id** — its rows name a driver and
+   * nothing else — so mailing one means matching a name against this list.
+   * `planRecipients` does that matching and refuses an ambiguous name rather than
+   * picking a match, because two drivers can share a name and the cost of
+   * guessing is one driver's figures in another person's inbox.
+   */
+  const [driverRecords, setDriverRecords] = useState<RecipientDriver[]>([]);
+
+  /** The confirmation the owner asked for: who receives, and who is skipped. */
+  const [sendPlan, setSendPlan] = useState<{ plan: RecipientPlan; weekNumber: number } | null>(null);
+  const [sending, setSending] = useState(false);
+  const [sendProgress, setSendProgress] = useState<{ done: number; total: number } | null>(null);
 
   useEffect(() => {
     if (viewMode === 'weekly') {
@@ -172,6 +199,26 @@ export function AbrechnungPage() {
     }
   };
 
+  /**
+   * Tankenquote's two reads.
+   *
+   * The rule being preserved: Tankenquote counts only receipts whose Kategorie
+   * is `Tanken` for that driver and period, over Netto-Fahrpreis plus
+   * Aktionen, and only the percentage is shown. Neither term changes here.
+   *
+   * What changes is that a failed read no longer answers zero. `data` is null
+   * on an error, so `?? []` turned a refusal into "this driver bought no
+   * fuel": with the receipts read failed and the income read fine, the quote
+   * computed as 0 / umsatz and the card printed **Tankenquote 0,00 %** — on
+   * the card html2canvas renders and the driver is sent. CLAUDE.md: a figure
+   * whose load failed is not shown.
+   *
+   * Throwing puts it on the failure path the two callers already have: their
+   * catch shows `abr.detailsFailed` and never sets `detailModalData`, so no
+   * card is drawn and no image can be exported from it. Deliberately *not*
+   * `loadFailed` — that flag blanks the whole Abrechnung table, whose own RPC
+   * read succeeded, and its retry button re-runs that RPC and not this.
+   */
   const fetchTankenAndUmsatz = async (
     driverName: string,
     startIso: string,
@@ -192,6 +239,9 @@ export function AbrechnungPage() {
         .lte('date', endIso)
         .in('type', ['umsatz', 'aktionen']),
     ]);
+
+    if (receiptsRes.error) throw receiptsRes.error;
+    if (incomeRes.error) throw incomeRes.error;
 
     const tankenBrutto = (receiptsRes.data ?? [])
       .filter(r => /^tanken$/i.test((r.description ?? '').trim()))
@@ -230,7 +280,7 @@ export function AbrechnungPage() {
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
       }}>
         <span style={{ fontSize: 13, fontWeight: 600, color: isDark ? '#fb923c' : '#c2410c' }}>
-          Tankenquote
+          {t('abr.tankenquote')}
         </span>
         <span style={{ fontSize: 18, fontWeight: 900, color: isDark ? '#fb923c' : '#c2410c', letterSpacing: '-0.01em' }}>
           {quote !== null ? formatPercent(quote) : '—'}
@@ -240,7 +290,63 @@ export function AbrechnungPage() {
   };
 
   const getWeekLabel = (weekNumber: number) => {
-    return `Woche ${weekNumber}`;
+    return t('common.weekNumber', { number: weekNumber });
+  };
+
+  // Loaded once per company. A failure leaves the list empty, which makes the
+  // mail buttons report "no recipients" rather than silently sending to nobody.
+  //
+  // No company filter, deliberately: this screen names no company anywhere and
+  // every query on it is scoped by RLS, which answers `get_active_company_id()` —
+  // the opened company inside a support session and the member's own otherwise.
+  // Adding a filter here would introduce a second source for a question the
+  // policy already answers, and the two could disagree.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const { data, error } = await supabase
+        .from('drivers')
+        .select('id, name, email')
+        .order('name');
+      if (cancelled) return;
+      if (error) {
+        console.error('Abrechnung: loading drivers for the mail buttons failed', error);
+        setDriverRecords([]);
+        return;
+      }
+      setDriverRecords((data ?? []) as RecipientDriver[]);
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  /**
+   * The detail a driver's card and mail are built from, for one table row.
+   *
+   * Extracted from `handleRowClick` unchanged so the bulk send builds exactly what
+   * the dialog shows. A second way to compute these figures is how a mail and the
+   * image attached to it would come to disagree.
+   */
+  const buildDetail = async (item: WeeklyAbrechnung): Promise<DetailedAbrechnungData | null> => {
+    const weeks = getBusinessWeeksForMonth(selectedMonth - 1, selectedYear);
+    const weekInfo = weeks.find(w => w.weekNumber === item.week_number);
+    if (!weekInfo) return null;
+
+    const startIso = format(weekInfo.firstDay, 'yyyy-MM-dd');
+    const endIso = format(weekInfo.lastDay, 'yyyy-MM-dd');
+    const { tankenBrutto, umsatzNetto } = await fetchTankenAndUmsatz(item.driver_name, startIso, endIso);
+
+    return {
+      driverName: item.driver_name,
+      weekNumber: item.week_number,
+      weekStartDate: format(weekInfo.firstDay, 'dd.MM.yyyy'),
+      weekEndDate: format(weekInfo.lastDay, 'dd.MM.yyyy'),
+      totalCash: Number(item.bargeld),
+      anzahlBelege: item.anzahl_belege,
+      sumBelege: Number(item.ausgegebene_bargeld),
+      difference: Number(item.bar_zuruck),
+      tankenBrutto,
+      umsatzNetto,
+    };
   };
 
   const handleRowClick = async (item: WeeklyAbrechnung) => {
@@ -272,6 +378,10 @@ export function AbrechnungPage() {
 
       setDetailModalData(detailData);
     } catch (error: any) {
+      // Nothing half-loaded stays on screen. Not a proven-reachable path — the
+      // open modal covers the rows — but the invariant is cheaper to hold
+      // unconditionally than to re-derive from the overlay's geometry.
+      setDetailModalData(null);
       showToast('error', t('abr.detailsFailed'), error.message);
     }
   };
@@ -299,6 +409,10 @@ export function AbrechnungPage() {
 
       setDetailModalData(detailData);
     } catch (error: any) {
+      // Nothing half-loaded stays on screen. Not a proven-reachable path — the
+      // open modal covers the rows — but the invariant is cheaper to hold
+      // unconditionally than to re-derive from the overlay's geometry.
+      setDetailModalData(null);
       showToast('error', t('abr.detailsFailed'), error.message);
     }
   };
@@ -341,12 +455,12 @@ export function AbrechnungPage() {
   // Reusable function to generate settlement image blob
   const generateSettlementImageBlob = async (): Promise<{ blob: Blob; fileName: string } | null> => {
     if (!detailModalData) {
-      showToast('error', 'Fehler', t('abr.noData'));
+      showToast('error', t('common.error'), t('abr.noData'));
       return null;
     }
 
     if (!shareableCardRef.current) {
-      showToast('error', 'Fehler', t('abr.noContentArea'));
+      showToast('error', t('common.error'), t('abr.noContentArea'));
       return null;
     }
 
@@ -359,7 +473,7 @@ export function AbrechnungPage() {
 
       // Defensive check before accessing properties
       if (!element) {
-        showToast('error', 'Fehler', t('abr.elementUnavailable'));
+        showToast('error', t('common.error'), t('abr.elementUnavailable'));
         return null;
       }
 
@@ -437,58 +551,151 @@ export function AbrechnungPage() {
     }
   };
 
-  // Share to WhatsApp with clipboard copy
-  const handleShareToWhatsApp = async () => {
-    if (!detailModalData || isSharing) return;
+  /**
+   * The figures a mail carries, from the detail the card was drawn from.
+   *
+   * One reading for both, so the numbers in the mail and the numbers in the
+   * attached image cannot differ. That is the whole reason the browser sends them
+   * rather than the function computing its own.
+   */
+  const figuresOf = (detail: DetailedAbrechnungData) => ({
+    cash: detail.totalCash,
+    belege: detail.sumBelege,
+    difference: detail.difference,
+    belegeCount: detail.anzahlBelege,
+    // The screen shows the quota only when there is revenue to divide by, and the
+    // mail leaves the line out entirely rather than printing a nought that reads
+    // as "they fuelled nothing".
+    tankenquote: detail.umsatzNetto > 0
+      ? (detail.tankenBrutto / detail.umsatzNetto) * 100
+      : null,
+  });
 
+  const periodOf = (detail: DetailedAbrechnungData) => ({
+    label: detail.weekNumber === 0
+      ? `${MONTH_NAMES[selectedMonth - 1]} ${selectedYear}`
+      : `${getWeekLabel(detail.weekNumber)} - ${MONTH_NAMES[selectedMonth - 1]} ${selectedYear}`,
+    range: `${detail.weekStartDate} – ${detail.weekEndDate}`,
+  });
+
+  /**
+   * Mails the Abrechnung on screen to the driver it is about.
+   *
+   * The address is not passed: the function reads it from the database, scoped to
+   * this company. All this sends is which driver, which period, the figures and
+   * the image.
+   */
+  const handleSendToDriver = async () => {
+    if (!detailModalData || isSharing) return;
+    const plan = planRecipients([detailModalData.driverName], driverRecords);
+
+    if (plan.ambiguous.length > 0) {
+      showToast('error', t('abr.mail.ambiguousTitle'), t('abr.mail.ambiguous', { name: detailModalData.driverName }));
+      return;
+    }
+    if (plan.unknown.length > 0) {
+      showToast('error', t('abr.mail.unknownTitle'), t('abr.mail.unknown', { name: detailModalData.driverName }));
+      return;
+    }
+    if (plan.noEmail.length > 0) {
+      showToast('warning', t('abr.mail.noEmailTitle'), t('abr.mail.noEmailOne', { name: detailModalData.driverName }));
+      return;
+    }
+
+    const recipient = plan.sendable[0];
     try {
       setIsSharing(true);
-      showToast('info', t('abr.creatingImage'));
+      // No image (owner, 04.10.2026): *"no need to create the photo and send it
+      // to the driver in the email, it is enough to send the data as text"*. The
+      // figures are in the mail's own body, so the card added a rendering step, a
+      // 450 ms wait per driver and a megabyte of attachment for nothing.
+      const period = periodOf(detailModalData);
 
-      const imageData = await generateSettlementImageBlob();
-      if (!imageData) return;
+      const result = await sendAbrechnungMail({
+        driverId: recipient.driverId,
+        periodLabel: period.label,
+        periodRange: period.range,
+        figures: figuresOf(detailModalData),
+        imageBase64: '',
+      });
 
-      const { blob } = imageData;
-
-      let imageCopied = false;
-
-      // Try to copy image to clipboard first
-      if (navigator.clipboard && navigator.clipboard.write) {
-        try {
-          const clipboardItem = new ClipboardItem({
-            'image/png': blob
-          });
-
-          await navigator.clipboard.write([clipboardItem]);
-          imageCopied = true;
-        } catch (clipError) {
-          console.warn('Clipboard copy failed:', clipError);
-        }
-      }
-
-      // Open WhatsApp Web
-      try {
-        const whatsappUrl = 'https://web.whatsapp.com/';
-        window.open(whatsappUrl, '_blank');
-      } catch (openError) {
-        console.error('Failed to open WhatsApp:', openError);
-        showToast('error', 'Fehler', t('abr.whatsappFailed'));
-        return;
-      }
-
-      // Show appropriate message
-      if (imageCopied) {
-        showToast('success', t('abr.copiedPasteHint'));
+      if (result.ok) {
+        showToast('success', t('abr.mail.sentTitle'), t('abr.mail.sentOne', { email: recipient.email }));
       } else {
-        showToast('warning', t('abr.copyUnsupported'), t('abr.copyUnsupportedBody'));
+        showToast('error', t('abr.mail.failedTitle'), t('abr.mail.failedOne', { name: recipient.driverName }));
       }
-    } catch (error: any) {
-      showToast('error', t('abr.shareFailed'), error.message || t('overview.error.unknown'));
-      console.error('Share to WhatsApp error:', error);
+    } catch (error) {
+      showToast('error', t('abr.mail.failedTitle'), (error as Error).message);
     } finally {
       setIsSharing(false);
     }
   };
+
+  /** Opens the confirmation for a week. Nothing is sent until it is accepted. */
+  const openWeekSend = (weekData: WeeklyAbrechnung[], weekNumber: number) => {
+    const plan = planRecipients(weekData.map(row => row.driver_name), driverRecords);
+    setSendPlan({ plan, weekNumber });
+  };
+
+  /**
+   * Sends one week to every driver the plan found an address for.
+   *
+   * One request per driver, so one answer per driver. The image is rebuilt for
+   * each: the off-screen card renders from `detailModalData`, so the loop sets it,
+   * waits for the DOM to catch up — the same wait the single send already makes —
+   * and screenshots. Slower than sending figures alone, and it is what the owner
+   * asked for: the numbers and the picture.
+   */
+  const confirmWeekSend = async () => {
+    if (!sendPlan || sending) return;
+    const { plan, weekNumber } = sendPlan;
+    const rows = groupByWeek()[weekNumber] ?? [];
+
+    setSending(true);
+    setSendProgress({ done: 0, total: plan.sendable.length });
+    let sent = 0;
+    const failed: string[] = [];
+
+    try {
+      for (const [index, recipient] of plan.sendable.entries()) {
+        const row = rows.find(r => r.driver_name === recipient.rowName);
+        if (!row) { failed.push(recipient.driverName); continue; }
+
+        const detail = await buildDetail(row);
+        if (!detail) { failed.push(recipient.driverName); continue; }
+
+        // No card is captured any more, so this driver's detail is not rendered
+        // off screen and the 450 ms wait that let it paint is gone with it. The
+        // whole week therefore sends in a fraction of the time it used to.
+        const period = periodOf(detail);
+
+        const result = await sendAbrechnungMail({
+          driverId: recipient.driverId,
+          periodLabel: period.label,
+          periodRange: period.range,
+          figures: figuresOf(detail),
+          imageBase64: '',
+        });
+
+        if (result.ok) sent++;
+        else failed.push(recipient.driverName);
+        setSendProgress({ done: index + 1, total: plan.sendable.length });
+      }
+    } finally {
+      setDetailModalData(null);
+      setSending(false);
+      setSendProgress(null);
+      setSendPlan(null);
+    }
+
+    if (failed.length === 0) {
+      showToast('success', t('abr.mail.sentTitle'), t('abr.mail.sentMany', { count: sent }));
+    } else {
+      showToast('warning', t('abr.mail.partialTitle'),
+        t('abr.mail.partial', { sent, failed: failed.length, names: failed.join(', ') }));
+    }
+  };
+
 
   // Download image locally
   const handleDownloadImage = async () => {
@@ -541,9 +748,76 @@ export function AbrechnungPage() {
     }), { anzahl_belege: 0, ausgegebene_bargeld: 0, bargeld: 0, bar_zuruck: 0 });
   };
 
+  /**
+   * The Abrechnung as a workbook — the screen's first output that is not a
+   * picture. Until now its only export was an html2canvas PNG of one driver's
+   * card, reachable from the row-detail dialog alone, so a month of some thirty
+   * amounts was retyped into the Steuerberater's figures by hand.
+   *
+   * **The rule being preserved: the weekly balance is cash collected minus cash
+   * expenses, and positive means the driver owes the company.** `bar_zuruck`
+   * reaches the file with its sign unchanged — the same number `barZurueck()`
+   * prints below, which colours a negative red and does not flip it.
+   *
+   * Nothing is recomputed. The rows are `getFilteredData()` /
+   * `getFilteredMonthlyData()`, and the totals are this screen's own
+   * `calculateWeekTotals` / `calculateMonthlyTotals` over exactly that set, so
+   * the file and the table cannot disagree. The screen prints one totals row per
+   * week and the workbook has one, so the file's is the sum over the whole
+   * filtered set.
+   *
+   * The off-screen html2canvas card and `generateSettlementImageBlob` are
+   * untouched: a picture's look is its content, and this adds a second output
+   * beside it. The filter band names the period, the view, the driver and the
+   * week, because a saved file is read without these controls beside it.
+   */
+  const handleExport = () => {
+    const weekly = viewMode === 'weekly';
+    const rows = weekly ? getFilteredData() : getFilteredMonthlyData();
+    const totals = weekly ? calculateWeekTotals(getFilteredData()) : calculateMonthlyTotals(getFilteredMonthlyData());
+    const filterLine = (label: string, value: string) => t('ui.export.filterLine', { label, value });
+    const filterSummary = [
+      // MONTH_NAMES, not a dictionary key: the headings above the tables print
+      // the same array, so the file names the period exactly as the screen does.
+      filterLine(t('common.period'), `${MONTH_NAMES[selectedMonth - 1]} ${selectedYear}`),
+      filterLine(t('abr.viewMode'), weekly ? t('abr.weekly') : t('abr.monthly')),
+      filterLine(t('common.driver'), selectedDriver === 'all' ? t('common.allDrivers') : selectedDriver),
+    ];
+    if (weekly) {
+      filterSummary.push(filterLine(t('common.week'), selectedWeek === 'all' ? t('abr.allWeeks') : getWeekLabel(selectedWeek)));
+    }
+
+    try {
+      exportTableToExcel(buildAbrechnungExport({
+        mode: viewMode,
+        rows,
+        totals,
+        year: selectedYear,
+        month: selectedMonth,
+        filterSummary,
+        labels: {
+          sheetTitle: t('nav.abrechnung'),
+          week: t('common.week'),
+          weeks: t('common.weeks'),
+          driver: t('common.driver'),
+          belege: t('abr.belegCount'),
+          spent: t('abr.col.spentCash'),
+          cash: t('abr.col.cash'),
+          barZurueck: t('abr.col.barZurueck'),
+          chrome: exportChrome,
+        },
+      }));
+    } catch (error: any) {
+      // A throw in an onClick with no error boundary produces no file and no
+      // message, which is the silent refusal #154 had to fix elsewhere.
+      showToast('error', t('ui.export.failed'), error?.message);
+    }
+  };
+
   // ── Presentation (phase 5) ────────────────────────────────────────────────
   // Everything above is the screen's logic and is unchanged, but for the five
-  // `loadFailed` lines; everything below only draws it. The tables show the
+  // `loadFailed` lines and `handleExport`, which only reads what is already
+  // there; everything below only draws it. The tables show the
   // RPC's rows and the sums calculateWeekTotals and calculateMonthlyTotals
   // return, formatted through utils/money.ts (formatEuro): this block adds no
   // arithmetic. Bar zurück is the RPC's bar_zuruck, cash collected minus cash
@@ -563,6 +837,10 @@ export function AbrechnungPage() {
       {euro(amount)}
     </span>
   );
+
+  // How many rows the export would write, so the button is offered for neither an
+  // empty month nor a filter that matches nothing.
+  const exportableRows = viewMode === 'weekly' ? getFilteredData().length : getFilteredMonthlyData().length;
 
   type AbrechnungTotals = { anzahl_belege: number; ausgegebene_bargeld: number; bargeld: number; bar_zuruck: number };
 
@@ -648,6 +926,22 @@ export function AbrechnungPage() {
                 rowActions={item => detailsButton(item.driver_name, () => handleRowClick(item))}
                 rowActionsLabel={t('abr.details')}
                 totals={totalsRow(totals)}
+                totalsActions={
+                  // Same shape as the per-row details button directly above it, so
+                  // the column reads as one column rather than two controls that
+                  // happen to share a cell.
+                  <Tooltip content={t('abr.mail.sendWeek')}>
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label={t('abr.mail.sendWeek')}
+                      onClick={() => openWeekSend(weekData, weekNumber)}
+                      disabled={sending || driverRecords.length === 0}
+                    >
+                      <Mail aria-hidden />
+                    </Button>
+                  </Tooltip>
+                }
               />
             </section>
           );
@@ -805,7 +1099,7 @@ export function AbrechnungPage() {
                     <SelectItem value="all">{t('abr.allWeeks')}</SelectItem>
                     {availableWeeks.map(week => (
                       <SelectItem key={week} value={String(week)}>
-                        Woche {week}
+                        {getWeekLabel(week)}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -840,6 +1134,18 @@ export function AbrechnungPage() {
                 </SelectContent>
               </Select>
             </Field>
+            {/* Withheld while the read failed or is still running: an empty
+                sheet and a total of 0,00 € are claims about the month, and this
+                one is reconciled against the Steuerberater's figures. */}
+            <Button
+              variant="secondary"
+              className="col-span-2 sm:col-span-1"
+              disabled={loading || loadFailed || exportableRows === 0}
+              onClick={handleExport}
+            >
+              <Download aria-hidden />
+              {t('common.exportExcelShort')}
+            </Button>
           </div>
         </Card>
 
@@ -850,6 +1156,96 @@ export function AbrechnungPage() {
           html2canvas renders it into the PNG that is shared, copied or
           downloaded, so its look is the document a driver receives. The dialog
           after it is the screen's view of the same figures. */}
+      {/* ── The bulk send's confirmation ────────────────────────────────────
+          A `Dialog` and not a `ConfirmDialog`, by the rule batch 3 wrote down: it
+          stays open while it works and reports its own progress and failures, and
+          `ConfirmDialog` closes on confirm.
+
+          It names **every** recipient and **every** driver who will be skipped,
+          with the reason. The owner asked for both: the count and the addresses
+          before sending, and the drivers without an address named rather than
+          passed over in silence. On this product's staging that is not ceremony —
+          staging relays real mail to real people, by the owner's own decision, so
+          this screen is the last thing between a stray click and a customer's
+          drivers. */}
+      <Dialog
+        open={sendPlan !== null}
+        onOpenChange={open => { if (!open && !sending) setSendPlan(null); }}
+      >
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>{t('abr.mail.confirmTitle')}</DialogTitle>
+            <DialogDescription>
+              {sendPlan && !nothingToSend(sendPlan.plan)
+                ? t('abr.mail.confirmLede', {
+                    count: sendPlan.plan.sendable.length,
+                    period: `${getWeekLabel(sendPlan.weekNumber)} - ${MONTH_NAMES[selectedMonth - 1]} ${selectedYear}`,
+                  })
+                : t('abr.mail.nobody')}
+            </DialogDescription>
+          </DialogHeader>
+
+          {sendPlan ? (
+            <div className="grid grid-cols-1 gap-4 text-sm">
+              {sendPlan.plan.sendable.length > 0 ? (
+                <div>
+                  <p className="mb-1 font-semibold text-fg">{t('abr.mail.confirmRecipients')}</p>
+                  <ul className="grid grid-cols-1 gap-1">
+                    {sendPlan.plan.sendable.map(recipient => (
+                      <li key={recipient.driverId} className="flex flex-wrap justify-between gap-2">
+                        <span>{recipient.driverName}</span>
+                        {/* The address itself, because a wrong one is the whole
+                            risk and nobody can check what they cannot see. */}
+                        <span className="text-fg-muted">{recipient.email}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+
+              {sendPlan.plan.noEmail.length + sendPlan.plan.ambiguous.length
+                + sendPlan.plan.unknown.length > 0 ? (
+                <div>
+                  <p className="mb-1 font-semibold text-fg">{t('abr.mail.confirmSkipped')}</p>
+                  <ul className="grid grid-cols-1 gap-1 text-fg-muted">
+                    {sendPlan.plan.noEmail.map(name => (
+                      <li key={`n-${name}`} className="flex flex-wrap justify-between gap-2">
+                        <span>{name}</span><span>{t('abr.mail.skipNoEmail')}</span>
+                      </li>
+                    ))}
+                    {sendPlan.plan.ambiguous.map(name => (
+                      <li key={`a-${name}`} className="flex flex-wrap justify-between gap-2">
+                        <span>{name}</span><span>{t('abr.mail.skipAmbiguous')}</span>
+                      </li>
+                    ))}
+                    {sendPlan.plan.unknown.map(name => (
+                      <li key={`u-${name}`} className="flex flex-wrap justify-between gap-2">
+                        <span>{name}</span><span>{t('abr.mail.skipUnknown')}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+
+          <DialogFooter className="sm:justify-between">
+            <DialogClose asChild>
+              <Button variant="secondary" disabled={sending}>{t('common.cancel')}</Button>
+            </DialogClose>
+            <Button
+              onClick={() => void confirmWeekSend()}
+              disabled={sending || !sendPlan || nothingToSend(sendPlan.plan)}
+            >
+              <Mail aria-hidden />
+              {sending && sendProgress
+                ? t('abr.mail.sendingProgress', { done: sendProgress.done, total: sendProgress.total })
+                : t('abr.mail.confirmSend')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* ── Off-screen shareable card — mirrors the visible modal, fully theme-aware ── */}
       {detailModalData && (
         <div
@@ -905,7 +1301,7 @@ export function AbrechnungPage() {
                   </p>
                 </div>
                 <p style={{ fontSize: 17, fontWeight: 800, color: isDark ? '#f1f5f9' : '#0f172a' }}>
-                  {detailModalData.weekNumber === 0 ? `${MONTH_NAMES[selectedMonth - 1]} ${selectedYear}` : `Woche ${detailModalData.weekNumber}`}
+                  {detailModalData.weekNumber === 0 ? `${MONTH_NAMES[selectedMonth - 1]} ${selectedYear}` : getWeekLabel(detailModalData.weekNumber)}
                 </p>
               </div>
             </div>
@@ -956,7 +1352,7 @@ export function AbrechnungPage() {
                     </div>
                     <div>
                       <p style={{ fontSize: 13, fontWeight: 600, color: isDark ? '#4ade80' : '#15803d' }}>
-                        Gesamt Bargeld ({detailModalData.weekNumber === 0 ? t('common.month') : t('abr.thisWeek')})
+                        {t('abr.totalCashLabel', { period: detailModalData.weekNumber === 0 ? t('common.month') : t('abr.thisWeek') })}
                       </p>
                       <p style={{ fontSize: 11, color: isDark ? '#166534' : '#86efac', marginTop: 1 }}>{t('bargeld.cashIncome')}</p>
                     </div>
@@ -984,7 +1380,7 @@ export function AbrechnungPage() {
                     </div>
                     <div>
                       <p style={{ fontSize: 13, fontWeight: 600, color: isDark ? '#f87171' : '#b91c1c' }}>{t('abr.belegCount')}</p>
-                      <p style={{ fontSize: 11, color: isDark ? '#991b1b' : '#f87171', marginTop: 1 }}>{detailModalData.anzahlBelege} Belege</p>
+                      <p style={{ fontSize: 11, color: isDark ? '#991b1b' : '#f87171', marginTop: 1 }}>{t('abr.belegeCount', { count: detailModalData.anzahlBelege })}</p>
                     </div>
                   </div>
                   <p style={{ fontSize: 22, fontWeight: 900, color: isDark ? '#f87171' : '#b91c1c', letterSpacing: '-0.02em' }}>
@@ -1024,10 +1420,10 @@ export function AbrechnungPage() {
                         </div>
                         <div>
                           <p style={{ fontSize: 13, fontWeight: 600, color: isDark ? (pos ? '#38bdf8' : '#fbbf24') : (pos ? '#0369a1' : '#b45309') }}>
-                            Differenz (Bargeld – Belege)
+                            {t('abr.difference')}
                           </p>
                           <p style={{ fontSize: 11, color: isDark ? (pos ? '#0c4a6e' : '#78350f') : (pos ? '#38bdf8' : '#fbbf24'), marginTop: 1 }}>
-                            Der Betrag den Sie abgeben müssen
+                            {t('abr.differenceHint')}
                           </p>
                         </div>
                       </div>
@@ -1054,7 +1450,7 @@ export function AbrechnungPage() {
               <DialogDescription>
                 {detailModalData.driverName} · {detailModalData.weekNumber === 0
                   ? `${MONTH_NAMES[selectedMonth - 1]} ${selectedYear}`
-                  : `Woche ${detailModalData.weekNumber}`}
+                  : getWeekLabel(detailModalData.weekNumber)}
               </DialogDescription>
             </DialogHeader>
 
@@ -1074,7 +1470,7 @@ export function AbrechnungPage() {
                 <dd className="mt-1 font-semibold text-fg">
                   {detailModalData.weekNumber === 0
                     ? `${MONTH_NAMES[selectedMonth - 1]} ${selectedYear}`
-                    : `Woche ${detailModalData.weekNumber}`}
+                    : getWeekLabel(detailModalData.weekNumber)}
                 </dd>
               </div>
               <div className="rounded-surface border border-line bg-sunken px-4 py-3 sm:col-span-2">
@@ -1128,11 +1524,16 @@ export function AbrechnungPage() {
               })()}
             </section>
 
-            <DialogFooter className="sm:justify-between">
-              <div className="grid grid-cols-1 gap-2 sm:flex">
-                <Button variant="secondary" onClick={handleShareToWhatsApp} disabled={isSharing}>
-                  <Share2 aria-hidden />
-                  {isSharing ? t('abr.creatingImage') : t('common.share')}
+            {/* `min-w-0` on the footer and `flex-wrap` on the button row: a grid
+                item's min-width is `auto`, so a row of buttons wider than the
+                dialog does not shrink — it paints outside the panel, which is
+                what the owner saw. Wrapping is what a narrow dialog needs, and
+                the footer must be allowed to shrink for wrapping to happen. */}
+            <DialogFooter className="min-w-0 sm:justify-between">
+              <div className="grid grid-cols-1 gap-2 sm:flex sm:flex-wrap">
+                <Button onClick={handleSendToDriver} disabled={isSharing}>
+                  <Mail aria-hidden />
+                  {isSharing ? t('abr.creatingImage') : t('abr.mail.sendToDriver')}
                 </Button>
                 <Button variant="secondary" onClick={handleCopyImage} disabled={isSharing}>
                   <Copy aria-hidden />

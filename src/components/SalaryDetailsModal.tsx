@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react';
-import { X, Plus, CreditCard as Edit2, Trash2, DollarSign, AlertCircle, FileText, CheckSquare, Square, Building2, Banknote, LayoutDashboard, Zap, Lock, Eye } from 'lucide-react';
+import React, { useState, useEffect, type FormEvent } from 'react';
+import { X, Plus, CreditCard as Edit2, Trash2, DollarSign, AlertCircle, FileText, CheckSquare, Square, Building2, Banknote, LayoutDashboard, Zap, Lock, Eye, Ban, CalendarRange } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { SalaryPayment, SalaryCalculation } from '../types/receipt';
+import { SalaryPayment, SalaryCalculation, Income } from '../types/receipt';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { usePlan } from '../contexts/PlanContext';
@@ -10,21 +10,56 @@ import { useCompanySettings } from '../contexts/CompanySettingsContext';
 import { format } from 'date-fns';
 import SalaryPaymentModal from './SalaryPaymentModal';
 import SalaryPaymentReceiptPreview from './SalaryPaymentReceiptPreview';
-import GehaltsquittungModal from './GehaltsquittungModal';
+import SalaryPaymentCashView, { type CashPaymentViewTarget } from './SalaryPaymentCashView';
 import ConfirmationModal from './ConfirmationModal';
-import { paymentRowActions } from '../utils/salaryPaymentReceiptRow';
+import {
+  currentLoadState,
+  loadReceiptForPreview,
+  paymentRowActions,
+  paymentRowCanBeIssued,
+  paymentRowOffersView,
+  paymentRowStorno,
+  stornoStep,
+  voidReasonProblem,
+  type ReceiptLoadState,
+} from '../utils/salaryPaymentReceiptRow';
 import { PAYMENT_WRITE_REFUSAL_KEYS, decidePaymentWrite } from '../utils/salaryPaymentWrite';
 import {
   REFUSAL_MESSAGE_KEYS,
   confirmationBlock,
   findOverlappingSalary,
+  outcomeIsUnknown,
   receiptScope,
+  type ReceiptActionRefusal,
 } from '../utils/salaryCashReceiptFlow';
+import { derivePaymentStatus, remainingDue } from '../utils/salaryDue';
+import { payrollRemaining, payrollSplit } from '../utils/payrollSplit';
+import {
+  loadIssuedReceiptIds,
+  loadReceiptById,
+  voidReceipt,
+  type SalaryCashReceipt,
+  type SalaryCashReceiptWithDriver,
+} from '../lib/salaryCashReceipts';
+import { ReceiptAlert, useRefusalMessage } from './GehaltsquittungParts';
 import { toCents } from '../utils/money';
-import { formatEuroCents } from './ui';
-import type { GehaltsquittungPreselect } from '../hooks/useGehaltsquittungFlow';
+import {
+  Button,
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  Field,
+  Input,
+  formatDate,
+  formatEuroCents,
+} from './ui';
 import { generateDriverSalaryPdf } from '../utils/driverSalaryPdf';
 import DriverSalarySummaryCard from './DriverSalarySummaryCard';
+import SalaryRevenueDetails from './SalaryRevenueDetails';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { useTranslation } from '../contexts/LanguageContext';
 
@@ -33,6 +68,10 @@ interface SalaryDetailsModalProps {
   onClose: () => void;
   salary: SalaryCalculation;
   onUpdate: () => void;
+  /** The driver's Umsatz, Aktionen and Trinkgeld rows of the period, for the Zusammenfassung tab. */
+  revenueTransactions?: Income[];
+  /** Opens the dialog that merges this driver's overlapping salary periods. */
+  onOpenPeriods?: () => void;
 }
 
 interface PayrollData {
@@ -70,6 +109,8 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
   onClose,
   salary,
   onUpdate,
+  revenueTransactions,
+  onOpenPeriods,
 }) => {
   const { t } = useTranslation();
   const [activeTab, setActiveTab] = useState<'details' | 'summary'>('details');
@@ -82,19 +123,34 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
   const [paymentToDelete, setPaymentToDelete] = useState<SalaryPayment | null>(null);
   /** The Gehaltsquittung shown over this screen; null while none is open. */
   const [receiptPreviewId, setReceiptPreviewId] = useState<string | null>(null);
-  /** The cash payment handed to the Gehaltsquittung flow; null while none is being issued. */
-  const [receiptDraft, setReceiptDraft] = useState<GehaltsquittungPreselect | null>(null);
+  /** The cash payment shown as a read-only view when no stored receipt can be opened. */
+  const [cashView, setCashView] = useState<CashPaymentViewTarget | null>(null);
+  /**
+   * payment id -> id of the live receipt issued for it after the fact
+   * (issue_salary_cash_receipt). A payment written by a Gehaltsquittung names its
+   * receipt in source_reference and is not in here.
+   */
+  const [issuedReceipts, setIssuedReceipts] = useState<Record<string, string>>({});
+  /**
+   * The Gehaltsquittung this screen is about to void; null while none is.
+   *
+   * Voiding is the only way a payment written by confirm_salary_cash_payment
+   * leaves the salary, and it is one RPC: the receipt is marked voided with its
+   * reason, the payment row is deleted, and the amount is booked back into the
+   * till on the day of the void. The dialog below asks for that reason.
+   */
+  const [stornoReceiptId, setStornoReceiptId] = useState<string | null>(null);
   /**
    * Another salary row of this driver whose period overlaps this one, or null.
    *
-   * `confirm_salary_cash_payment` refuses such a salary (`overlapping_salary`),
-   * and since a cash payment is now always a Gehaltsquittung that refusal
-   * reaches the payment form. The owner's rule, 17.09.2026: he merges the two
-   * rows by hand and the system keeps refusing until he has — so the row is
-   * looked up here to be *named* in the refusal, not to route around it. One
-   * staging company holds 16 such pairs and another 25 rows in one company, so
-   * "these rows overlap" without saying which is not something anyone can act
-   * on.
+   * `issue_salary_cash_receipt` refuses such a salary (`overlapping_salary`), so
+   * the refusal reaches the issue button on a cash payment's view — not the
+   * payment form, which since 04.10.2026 writes a plain row and asks none of
+   * this. The owner's rule, 17.09.2026: he merges the two rows by hand and the
+   * system keeps refusing until he has — so the row is looked up here to be
+   * *named* in the refusal, not to route around it. One staging company holds 16
+   * such pairs and another 25 rows in one company, so "these rows overlap"
+   * without saying which is not something anyone can act on.
    */
   const [overlappingSalary, setOverlappingSalary] = useState<OverlappingSalaryRow | null>(null);
   const [payrollData, setPayrollData] = useState<PayrollData>({
@@ -119,21 +175,26 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
   // The system-calculated total salary
   const calculatedSalaryTotal = salary.netto_salary ?? salary.amount_due ?? 0;
 
-  // Derived payroll split values
-  const payrollGross = payrollData.payroll_gross_amount ?? 0;
-  const payrollNet = payrollData.payroll_net_amount ?? 0;
-  const cashSalary = calculatedSalaryTotal - payrollGross;
-  const bankSalary = payrollNet;
-  const totalNetPayout = cashSalary + bankSalary;
+  /**
+   * The payroll split: cash = total − Brutto, bank = Netto, payout = cash + bank.
+   *
+   * `payrollSplit` states no cash figure while the Brutto is unknown. Before it,
+   * `payrollGross = gross ?? 0` made a row with only the Steuerberater's Netto
+   * report the *whole* salary as cash and the Netto on top — a payout larger
+   * than the salary. 0 of 53 staging rows are in that state, so no document
+   * already issued changes.
+   */
+  const split = payrollSplit({
+    total: calculatedSalaryTotal,
+    gross: payrollData.payroll_gross_amount,
+    net: payrollData.payroll_net_amount,
+  });
 
-  const hasPayrollData = payrollData.payroll_gross_amount != null || payrollData.payroll_net_amount != null;
-  const grossExceedsTotal = payrollGross > calculatedSalaryTotal + 0.01;
-  const cashIsNegative = cashSalary < -0.01;
-
-  // Payment tracking
+  // Payment tracking: the status follows the payments against the base, and is
+  // never read off `salaries.payment_status` — utils/salaryDue.ts holds the rule.
   const totalPaid = payments.reduce((sum, p) => sum + Number(p.amount), 0);
-  const remainingBalance = Math.max(0, calculatedSalaryTotal - totalPaid);
-  const paymentStatus = totalPaid === 0 ? 'unpaid' : totalPaid >= calculatedSalaryTotal ? 'paid' : 'partially_paid';
+  const remainingBalance = remainingDue(calculatedSalaryTotal, totalPaid);
+  const paymentStatus = derivePaymentStatus(calculatedSalaryTotal, totalPaid);
 
   useEffect(() => {
     if (isOpen && salary.salary_id) {
@@ -220,7 +281,14 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
         .eq('salary_id', salary.salary_id)
         .order('payment_date', { ascending: false });
       if (error) throw error;
-      setPayments(data || []);
+      const rows = data || [];
+      // Read before the rows are shown, so a payment behind a receipt never
+      // appears as editable for a frame.
+      const issued = companyId
+        ? await loadIssuedReceiptIds(companyId, rows.map((row: { id: string }) => row.id))
+        : {};
+      setIssuedReceipts(issued);
+      setPayments(rows);
     } catch {
       showToast('error', t('sal.error.loadPayments'));
     } finally {
@@ -417,15 +485,14 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
   };
 
   /**
-   * Why a cash payment cannot be recorded for this salary at all, ready to
-   * show; null when it can.
+   * Why a **numbered receipt** cannot be issued for a cash payment of this
+   * salary, ready to show; null when it can.
    *
-   * Every cash payment is now a Gehaltsquittung, so the Gehaltsquittung's own
-   * conditions decide, and they are answered **before** the payment form
-   * closes: the form is where the user can still choose a bank transfer
-   * instead. Computed once and used twice — for the notice beside the type
-   * select and as the guard in startGehaltsquittung — so the sentence shown and
-   * the reason the write is refused cannot differ.
+   * These are `issue_salary_cash_receipt`'s own conditions, answered before the
+   * view offers its issue button rather than after the RPC refuses. It is no
+   * longer asked of the payment form: since 04.10.2026 recording a cash payment
+   * writes a plain row and needs none of them — the receipt is a separate act,
+   * taken later from the payment's own view.
    *
    * The order is the order in which they stop being fixable by this user:
    * scope and role, then the plan, then the overlapping salary rows the owner
@@ -448,45 +515,13 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
     return null;
   })();
 
-  /**
-   * Hands a cash payment the user just entered to the Gehaltsquittung flow, or
-   * names why it cannot go there. Nothing is written here: the receipt, the
-   * salary_payments row and the outgoing cash_movements row are one transaction
-   * inside confirm_salary_cash_payment, and the browser has no write on any of
-   * the three.
-   *
-   * The refusal is thrown so the payment form shows it in its own error box.
-   * The form already disables its submit for the same reasons; this is the
-   * second wall, because the form is told what to show and this is what acts.
-   */
-  const startGehaltsquittung = (paymentData: Pick<SalaryPayment, 'amount' | 'payment_date'>) => {
-    if (cashBlockedMessage) throw new Error(cashBlockedMessage);
-    if (!salary.salary_id) throw new Error(t('gq.refusal.salaryNotFound'));
-
-    // toCents refuses anything that is not a finite decimal amount rather than
-    // rounding it to a silent 0, so the form says so instead of throwing.
-    let amountCents: number;
-    try {
-      amountCents = toCents(paymentData.amount);
-    } catch {
-      throw new Error(t('gq.refusal.invalidAmount'));
-    }
-
-    setIsPaymentModalOpen(false);
-    setSelectedPayment(undefined);
-    setReceiptDraft({
-      driverId: salary.driver_id,
-      salaryId: salary.salary_id,
-      amountCents,
-      paymentDate: paymentData.payment_date,
-    });
-  };
-
   const handleSavePayment = async (paymentData: Omit<SalaryPayment, 'id' | 'created_by' | 'created_at' | 'updated_at'>) => {
-    // Owner decision, 17.09.2026: a cash payment added here is a Gehaltsquittung.
-    // The rule is keyed on this deliberate action and on the stored row, never
-    // on payment_type alone — the weekly "Bar zurück" is also cash and must not
-    // book a payout from the till. See utils/salaryPaymentWrite.ts.
+    // Owner decision, 04.10.2026, reversing 17.09.2026: a cash payment added
+    // here is a plain row again, saved and closed, with no Gehaltsquittung step
+    // in between. The rule is still keyed on the origin and on the stored row,
+    // never on payment_type alone — the weekly "Bar zurück" is also cash, and a
+    // row behind a receipt is frozen by a database trigger either way. See
+    // utils/salaryPaymentWrite.ts for what this costs the till.
     const decision = decidePaymentWrite({
       origin: selectedPayment ? 'edit' : 'add',
       paymentType: paymentData.payment_type,
@@ -496,15 +531,14 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
             payment_type: selectedPayment.payment_type,
             source_type: selectedPayment.source_type ?? null,
             amount: selectedPayment.amount,
+            // Not a column on salary_payments: the live receipt issued for a
+            // payment after the fact is looked up into `issuedReceipts` by id.
+            issued_receipt_id: issuedReceipts[selectedPayment.id] ?? null,
           }
         : null,
     });
 
     if (decision.kind === 'refused') throw new Error(t(PAYMENT_WRITE_REFUSAL_KEYS[decision.refusal]));
-    if (decision.kind === 'gehaltsquittung') {
-      startGehaltsquittung(paymentData);
-      return;
-    }
 
     const { data: { user: authUser } } = await supabase.auth.getUser();
     if (!authUser) throw new Error(t('sal.notSignedIn'));
@@ -542,6 +576,21 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
     await onUpdate();
   };
 
+  /**
+   * The screen after a Storno. `void_salary_cash_receipt` deleted the payment
+   * inside its own transaction and booked the cash back, so this row disappears
+   * and the salary's paid figures change: both are re-read from the database
+   * rather than adjusted here.
+   *
+   * Also called when the outcome is unknown — no answer, or one that names no
+   * reason — because the void may have gone through. Then nothing is claimed;
+   * the list is simply re-read, and the dialog keeps showing what it knows.
+   */
+  const reloadAfterStorno = async () => {
+    await fetchPayments();
+    await onUpdate();
+  };
+
   const handleDeletePayment = async () => {
     if (!paymentToDelete) return;
     try {
@@ -565,9 +614,10 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
       settings,
       payrollGrossAmount: payrollData.payroll_gross_amount,
       payrollNetAmount: payrollData.payroll_net_amount,
-      cashSalaryAmount: hasPayrollData ? cashSalary : undefined,
-      bankSalaryAmount: hasPayrollData ? bankSalary : undefined,
-      totalNetPayout: hasPayrollData ? totalNetPayout : undefined,
+      // Only a split whose Brutto is known carries figures into the PDF.
+      cashSalaryAmount: split.cash ?? undefined,
+      bankSalaryAmount: split.established ? split.bank : undefined,
+      totalNetPayout: split.payout ?? undefined,
     });
   };
 
@@ -668,7 +718,19 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
           <div className="p-6 space-y-6 overflow-y-auto flex-1">
 
             {/* ── Summary tab ── */}
-            {activeTab === 'summary' && (
+            {activeTab === 'summary' && (<>
+              <div className="flex flex-wrap justify-end gap-2">
+                {onOpenPeriods && (
+                  <Button variant="secondary" size="sm" onClick={onOpenPeriods}>
+                    <CalendarRange aria-hidden />
+                    {t('sal.periods.openFor', { name: salary.driver_name })}
+                  </Button>
+                )}
+                <Button variant="secondary" size="sm" onClick={handleExportPdf}>
+                  <FileText aria-hidden />
+                  {t('sal.action.driverSummaryPdf')}
+                </Button>
+              </div>
               <DriverSalarySummaryCard
                 driverName={salary.driver_name}
                 periodStart={salary.period_start || new Date().toISOString().slice(0, 10)}
@@ -681,10 +743,19 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
                 remainingSalary={remainingBalance}
                 brutto={payrollData.payroll_gross_amount}
                 nettoBank={payrollData.payroll_net_amount}
-                cashSalary={hasPayrollData ? cashSalary : null}
+                cashSalary={split.cash}
+                totalNetPayout={split.payout}
+                remainingPayout={payrollRemaining(split, totalPaid)}
                 companyName={settings?.company_name}
               />
-            )}
+              {revenueTransactions && (
+                <SalaryRevenueDetails
+                  transactions={revenueTransactions}
+                  periodStart={salary.period_start || new Date().toISOString().slice(0, 10)}
+                  periodEnd={salary.period_end || new Date().toISOString().slice(0, 10)}
+                />
+              )}
+            </>)}
 
             {/* ── Details tab ── */}
             {activeTab === 'details' && (<>
@@ -781,7 +852,7 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
                 </div>
 
                 {/* Warning: gross > calculated total */}
-                {grossExceedsTotal && (
+                {split.grossExceedsTotal && (
                   <div style={{ background: 'var(--danger-subtle)', border: '1px solid var(--danger)', borderRadius: '0.375rem', padding: '0.625rem 0.875rem' }} className="flex items-center gap-2">
                     <AlertCircle size={16} style={{ color: 'var(--danger)', flexShrink: 0 }} />
                     <span style={{ fontSize: '0.875rem', color: 'var(--danger)' }}>
@@ -790,8 +861,27 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
                   </div>
                 )}
 
-                {/* Computed breakdown — shown once at least one field is filled */}
-                {hasPayrollData && (
+                {/* The Brutto is what the cash remainder is measured against, so
+                    without it the payout is not computed at all. Saying so is the
+                    whole change: the block used to show the full salary as cash. */}
+                {split.problem === 'gross_missing' && (
+                  <div
+                    style={{ background: 'var(--warning-subtle)', border: '1px solid var(--warning)', color: 'var(--warning)' }}
+                    className="flex items-center gap-2 rounded-md px-3.5 py-2.5"
+                  >
+                    {/* The colour is set once here and inherited: lucide draws in
+                        currentColor, so the icon and the sentence need none of
+                        their own. Three inline styles become one, which is what
+                        keeps this file under the style ratchet. */}
+                    <AlertCircle size={16} className="shrink-0" />
+                    <span className="text-sm">
+                      {t('sal.payroll.grossLabel')} — {t('sal.summary.grossNotEntered')}
+                    </span>
+                  </div>
+                )}
+
+                {/* Computed breakdown — shown once the split is established */}
+                {split.established && (
                   <div style={{ background: 'var(--bg-subtle)', borderRadius: '0.5rem', padding: '1rem', border: '1px solid var(--border)' }} className="space-y-0">
                     <p style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-tertiary)', marginBottom: '0.625rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                       {t('sal.payroll.computedPayout')}
@@ -803,15 +893,15 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
                         <Banknote size={15} style={{ color: 'var(--success)' }} />
                         <span style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>{t('sal.payroll.cashSalary')}</span>
                         <span style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)' }}>
-                          ({fmtEur(calculatedSalaryTotal)} − {fmtEur(payrollGross)})
+                          ({fmtEur(calculatedSalaryTotal)} − {fmtEur(split.gross)})
                         </span>
                       </div>
                       <span style={{
                         fontWeight: 700,
-                        color: cashIsNegative ? 'var(--danger)' : 'var(--text-primary)',
+                        color: split.cashIsNegative ? 'var(--danger)' : 'var(--text-primary)',
                       }}>
-                        {fmtEur(cashSalary)}
-                        {cashIsNegative && <span style={{ fontSize: '0.75rem', marginLeft: '0.25rem' }}>⚠</span>}
+                        {fmtEur(split.cash)}
+                        {split.cashIsNegative && <span className="ml-1 text-xs">⚠</span>}
                       </span>
                     </div>
 
@@ -821,7 +911,7 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
                         <Building2 size={15} style={{ color: 'var(--accent)' }} />
                         <span style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>{t('sal.payroll.bankSalary')}</span>
                       </div>
-                      <span style={{ fontWeight: 700, color: 'var(--text-primary)' }}>{fmtEur(bankSalary)}</span>
+                      <span style={{ fontWeight: 700, color: 'var(--text-primary)' }}>{fmtEur(split.bank)}</span>
                     </div>
 
                     {/* Total net payout */}
@@ -832,10 +922,10 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
                       <span style={{
                         fontSize: '1.125rem',
                         fontWeight: 700,
-                        color: cashIsNegative ? 'var(--warning)' : 'var(--success)',
+                        color: split.cashIsNegative ? 'var(--warning)' : 'var(--success)',
                       }}>
-                        {fmtEur(totalNetPayout)}
-                        {cashIsNegative && (
+                        {fmtEur(split.payout)}
+                        {split.cashIsNegative && (
                           <span style={{ fontSize: '0.75rem', color: 'var(--warning)', marginLeft: '0.5rem', fontWeight: 400 }}>
                             {t('sal.payroll.cashNegative')}
                           </span>
@@ -946,11 +1036,58 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
                       </tr>
                     </thead>
                     <tbody>
-                      {payments.map((payment, idx) => {
+                      {payments.map((paymentRow, idx) => {
+                        // The row plus the receipt issued for it after the fact, if any.
+                        const payment = { ...paymentRow, issued_receipt_id: issuedReceipts[paymentRow.id] ?? null };
                         const rowActions = paymentRowActions(payment, {
                           planIncludesDokumente: planIncludes('dokumente'),
                           scope: receiptsScope,
                         });
+                        // The Storno is the row's only way out of a Gehaltsquittung
+                        // payment, and it asks what the RPC asks: the caller's own
+                        // company (never a platform support session) and edit rights
+                        // on salaries. It is not gated on the plan — see
+                        // paymentRowStorno.
+                        const storno = paymentRowStorno(payment, {
+                          scope: receiptsScope,
+                          mayEditSalaries: rolePermits('salaries', 'edit'),
+                        });
+                        // Why the row cannot be voided belongs on the lock itself,
+                        // next to where the button would be, rather than inside a
+                        // dialog that opens only to refuse.
+                        const lockedLabel =
+                          storno.kind === 'blocked'
+                            ? `${t('sal.payment.receiptLocked')} ${t(REFUSAL_MESSAGE_KEYS[storno.refusal])}`
+                            : t('sal.payment.receiptLocked');
+                        // Every cash payment can be viewed (owner, 03.10.2026): a stored
+                        // receipt opens in place, any other one opens a read-only sheet
+                        // drawn from the payment. See paymentRowOffersView.
+                        const viewOffered = paymentRowOffersView(payment, rowActions);
+                        const viewButton = (
+                          <button
+                            type="button"
+                            onClick={() => setCashView({
+                              amount: payment.amount,
+                              paymentDate: payment.payment_date,
+                              periodStart: salary.period_start ?? '',
+                              periodEnd: salary.period_end ?? '',
+                              driverName: salary.driver_name,
+                              // A numbered receipt can be issued from the view for a payment
+                              // that has none: what blocks it is the same as for a new cash
+                              // payment (scope and role, plan, overlapping salary rows).
+                              issue: paymentRowCanBeIssued(payment)
+                                ? { paymentId: payment.id, blockedMessage: cashBlockedMessage }
+                                : undefined,
+                            })}
+                            aria-label={t('sal.payment.viewCashAria', {
+                              date: format(new Date(payment.payment_date), 'dd.MM.yyyy'),
+                            })}
+                            className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-[13px] font-medium text-[color:var(--accent)] hover:bg-[color:var(--accent-subtle)]"
+                          >
+                            <Eye size={14} />
+                            {t('sal.payment.viewCash')}
+                          </button>
+                        );
                         return (
                         <tr
                           key={payment.id}
@@ -995,7 +1132,7 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
                                   <Zap size={10} />{t('sal.weekly.badge')}
                                 </span>
                               )}
-                              {payment.source_type === 'gehaltsquittung' && (
+                              {(payment.source_type === 'gehaltsquittung' || payment.issued_receipt_id) && (
                                 <span style={{
                                   background: 'var(--bg-muted)',
                                   color: 'var(--text-secondary)',
@@ -1023,13 +1160,14 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
                             {rowActions.kind === 'receipt' ? (
                               // Written by confirm_salary_cash_payment; a trigger refuses any edit or
                               // delete, so the row changes only by voiding its receipt. The preview
-                              // shows the stored receipt in place; the Documents page is reachable
-                              // from inside it, where a copy is uploaded or the receipt voided.
+                              // shows the stored receipt in place, and the Storno beside it runs the
+                              // one RPC that removes the payment, books the cash back and keeps the
+                              // receipt on record as voided.
                               <div className="flex items-center justify-end gap-2">
                                 <span
                                   role="img"
-                                  aria-label={t('sal.payment.receiptLocked')}
-                                  title={t('sal.payment.receiptLocked')}
+                                  aria-label={lockedLabel}
+                                  title={lockedLabel}
                                   style={{ color: 'var(--text-tertiary)', display: 'inline-flex' }}
                                 >
                                   <Lock size={16} />
@@ -1049,11 +1187,29 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
                                     {t('sal.payment.previewReceipt')}
                                   </button>
                                 )}
+                                {viewOffered && viewButton}
+                                {storno.kind === 'offered' && (
+                                  // Classes rather than an inline style, so the screen's
+                                  // style-ratchet count does not move; the colours are the
+                                  // legacy ones the delete button beside it uses.
+                                  <button
+                                    type="button"
+                                    onClick={() => setStornoReceiptId(storno.receiptId)}
+                                    aria-label={t('sal.payment.voidAria', {
+                                      date: format(new Date(payment.payment_date), 'dd.MM.yyyy'),
+                                    })}
+                                    className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-[13px] font-medium text-[color:var(--danger)] hover:bg-[color:var(--danger-subtle)]"
+                                  >
+                                    <Ban size={14} />
+                                    {t('gq.action.void')}
+                                  </button>
+                                )}
                               </div>
                             ) : (
                             <div className="flex items-center justify-end space-x-2">
+                              {viewOffered && viewButton}
                               <button
-                                onClick={() => { setSelectedPayment(payment); setIsPaymentModalOpen(true); }}
+                                onClick={() => { setSelectedPayment(paymentRow); setIsPaymentModalOpen(true); }}
                                 style={{ color: 'var(--accent)', borderRadius: '0.25rem', padding: '0.25rem' }}
                                 onMouseEnter={e => (e.currentTarget.style.background = 'var(--accent-subtle)')}
                                 onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
@@ -1062,7 +1218,7 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
                                 <Edit2 size={16} />
                               </button>
                               <button
-                                onClick={() => setPaymentToDelete(payment)}
+                                onClick={() => setPaymentToDelete(paymentRow)}
                                 style={{ color: 'var(--danger)', borderRadius: '0.25rem', padding: '0.25rem' }}
                                 onMouseEnter={e => (e.currentTarget.style.background = 'var(--danger-subtle)')}
                                 onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
@@ -1105,25 +1261,39 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
         salaryId={salary.salary_id!}
         remainingBalance={remainingBalance}
         payment={selectedPayment}
-        cashBlockedMessage={cashBlockedMessage}
+        issuedReceiptId={selectedPayment ? issuedReceipts[selectedPayment.id] ?? null : null}
+      />
+
+      <SalaryPaymentCashView
+        target={cashView}
+        onClose={() => setCashView(null)}
+        onIssued={receipt => {
+          // The row now opens the stored receipt; show it straight away.
+          setCashView(null);
+          showToast('success', t('sal.payment.issueDone', { number: receipt.receipt_number }));
+          void fetchPayments();
+          setReceiptPreviewId(receipt.id);
+        }}
       />
 
       <SalaryPaymentReceiptPreview
         receiptId={receiptPreviewId}
         onClose={() => setReceiptPreviewId(null)}
-        onOpenDocuments={id => navigate('/dokumente', { state: { focusReceiptId: id } })}
+        onOpenDocuments={id => navigate('/salaries', { state: { focusReceiptId: id } })}
       />
 
-      {/* The cash payment entered above, continued as a Gehaltsquittung: the
-          balance, the place of payment, the German receipt and its one
-          confirmation. Once it is issued the new row carries
-          source_type = 'gehaltsquittung', so paymentRowActions gives it the
-          preview button and its lock by itself. */}
-      <GehaltsquittungModal
-        open={receiptDraft !== null}
-        onOpenChange={next => { if (!next) setReceiptDraft(null); }}
-        preselect={receiptDraft}
-        onChanged={() => { void fetchPayments(); void onUpdate(); }}
+      {/* The row's Storno: the one operation that removes a Gehaltsquittung
+          payment. It runs void_salary_cash_receipt through the same voidReceipt
+          helper the Gehaltsquittung list uses — there is no second path. */}
+      <PaymentStornoDialog
+        receiptId={stornoReceiptId}
+        onClose={() => setStornoReceiptId(null)}
+        onVoided={receipt => {
+          setStornoReceiptId(null);
+          showToast('success', t('gq.void.done', { number: receipt.receipt_number }));
+          void reloadAfterStorno();
+        }}
+        onUnknownOutcome={() => void reloadAfterStorno()}
       />
 
       <ConfirmationModal
@@ -1138,5 +1308,195 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
     </>
   );
 };
+
+/**
+ * A stored amount, ready to print. `toCents` refuses anything that is not a
+ * finite decimal by throwing, and this dialog renders inside a screen that sits
+ * under no error boundary, so an unreadable figure becomes "—" instead of
+ * unmounting the application — the same rule `overlappingSalaryAmount` above
+ * follows.
+ */
+function storedAmountText(amount: number | string): string {
+  try {
+    return formatEuroCents(toCents(amount));
+  } catch {
+    return '—';
+  }
+}
+
+/**
+ * The Storno of one Gehaltsquittung, opened from its own payment row.
+ *
+ * THE RULE IT PRESERVES: a payment written by `confirm_salary_cash_payment` is
+ * removed only by `void_salary_cash_receipt`, which in one transaction marks the
+ * receipt voided with the typed reason, deletes the payment, and books the
+ * amount back into the till dated the day of the void. Nothing here deletes a
+ * row or computes a figure; the one call goes through `voidReceipt`, the same
+ * helper the Gehaltsquittung list uses, so there is no second path.
+ *
+ * A `Dialog` and not a `ConfirmDialog`, because it must stay open while the RPC
+ * runs and show a refusal in place: the reason is typed here, and closing on a
+ * refusal would lose it.
+ *
+ * It loads the receipt before offering anything, and that is not decoration.
+ * Voiding is idempotent in the database — an already voided receipt comes back
+ * unchanged rather than raising — so a payment row that was voided in another
+ * tab would report a successful Storno while writing nothing, booking no cash
+ * back and dropping the reason. The load also puts the receipt's number, amount
+ * and payment date in front of whoever is about to void it, read from the stored
+ * row. It goes through `loadReceiptForPreview` with the caller's **own**
+ * company, the path the preview takes, so a platform support session is refused
+ * by name before any query goes out: it issues, voids and signs nothing here
+ * (owner's decision, 18.09.2026), and since 20260921110010 the RPC refuses it
+ * too.
+ */
+function PaymentStornoDialog({
+  receiptId,
+  onClose,
+  onVoided,
+  onUnknownOutcome,
+}: {
+  receiptId: string | null;
+  onClose: () => void;
+  onVoided: (receipt: SalaryCashReceipt) => void;
+  onUnknownOutcome: () => void;
+}) {
+  const { t } = useTranslation();
+  const refusalMessage = useRefusalMessage();
+  const { companyId } = useAuth();
+  const { effectiveCompanyId, isViewingAsCompany } = useSuperAdmin();
+
+  const [state, setState] = useState<ReceiptLoadState<SalaryCashReceiptWithDriver>>({
+    status: 'loading',
+    receiptId: null,
+  });
+  const [reason, setReason] = useState('');
+  const [touched, setTouched] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [refusal, setRefusal] = useState<ReceiptActionRefusal | null>(null);
+
+  useEffect(() => {
+    if (!receiptId) return undefined;
+    setReason('');
+    setTouched(false);
+    setRefusal(null);
+    setState({ status: 'loading', receiptId });
+
+    let active = true;
+    void loadReceiptForPreview(
+      { receiptId, companyId, effectiveCompanyId, isViewingAsCompany },
+      loadReceiptById,
+    ).then(next => {
+      if (active) setState(next);
+    });
+    return () => {
+      active = false;
+    };
+  }, [receiptId, companyId, effectiveCompanyId, isViewingAsCompany]);
+
+  // React paints the newly opened receiptId a frame before the effect above
+  // runs, so anything this state still holds for the receipt opened before
+  // counts as loading. Voiding the receipt shown a frame earlier would move cash
+  // and mark the wrong document.
+  const current = currentLoadState(state, receiptId);
+  const receipt = current.status === 'loaded' ? current.receipt : null;
+  const step = stornoStep(current);
+  const reasonProblem = voidReasonProblem(reason);
+
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!receiptId || busy || step.kind !== 'ready') return;
+    setTouched(true);
+    if (reasonProblem) return;
+    setBusy(true);
+    setRefusal(null);
+    try {
+      const result = await voidReceipt(receiptId, reason.trim());
+      if (result.ok) {
+        onVoided(result.receipt);
+        return;
+      }
+      setRefusal(result.refusal);
+      // No answer, or one that names no reason: the Storno may have gone
+      // through, so the payment list is re-read and nothing is claimed here.
+      if (outcomeIsUnknown(result.refusal)) onUnknownOutcome();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Dialog
+      open={receiptId !== null}
+      onOpenChange={open => {
+        if (!open && !busy) onClose();
+      }}
+    >
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{t('sal.payment.voidTitle')}</DialogTitle>
+          {/* A receipt issued for an existing payment booked nothing, so its
+              Storno removes no payment and moves no cash: say so instead of the
+              text that describes the other kind. */}
+          <DialogDescription>
+            {receipt && !receipt.books_cash ? t('sal.payment.voidIntroIssued') : t('sal.payment.voidIntro')}
+          </DialogDescription>
+        </DialogHeader>
+
+        {step.kind === 'loading' ? (
+          <p role="status" className="py-4 text-center text-sm text-fg-muted">
+            {t('sal.payment.receiptLoading')}
+          </p>
+        ) : null}
+        {step.kind === 'refusal' ? <ReceiptAlert tone="caution">{refusalMessage(step.refusal)}</ReceiptAlert> : null}
+        {/* Voiding deletes the payment, so a receipt reached from a payment row
+            and found voided was voided elsewhere since this list loaded. */}
+        {step.kind === 'voided' ? (
+          <ReceiptAlert tone="caution">{t('sal.payment.receiptVoidedNotice')}</ReceiptAlert>
+        ) : null}
+
+        {step.kind === 'ready' && receipt ? (
+          <form onSubmit={event => void submit(event)} className="grid gap-4" noValidate>
+            <p className="text-sm text-fg">
+              {t('sal.payment.voidReceiptLine', {
+                number: receipt.receipt_number,
+                amount: storedAmountText(receipt.amount),
+                date: formatDate(receipt.payment_date),
+              })}
+            </p>
+            {/* There is no "edit": the path is a Storno and then a new payment.
+                Saying so here is cheaper than letting someone look for it. */}
+            {receipt.books_cash ? <p className="text-[13px] text-fg-muted">{t('sal.payment.voidThenReenter')}</p> : null}
+            <Field
+              label={t('gq.void.reason')}
+              hint={t('gq.void.reasonHint')}
+              error={touched && reasonProblem ? refusalMessage(reasonProblem) : undefined}
+              required
+            >
+              <Input value={reason} onChange={event => setReason(event.target.value)} maxLength={500} />
+            </Field>
+            {refusal ? <ReceiptAlert tone="critical">{refusalMessage(refusal)}</ReceiptAlert> : null}
+            <DialogFooter>
+              <DialogClose asChild>
+                <Button variant="secondary" disabled={busy}>
+                  {t('common.cancel')}
+                </Button>
+              </DialogClose>
+              <Button type="submit" variant="danger" loading={busy}>
+                {t('gq.action.void')}
+              </Button>
+            </DialogFooter>
+          </form>
+        ) : (
+          <DialogFooter>
+            <DialogClose asChild>
+              <Button variant="secondary">{t('common.close')}</Button>
+            </DialogClose>
+          </DialogFooter>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
 
 export default SalaryDetailsModal;

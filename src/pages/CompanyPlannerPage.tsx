@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Play, AlertTriangle, CheckCircle2, Car as CarIcon, Clock, Info, ChevronRight, ChevronDown, ArrowLeft, CalendarDays, History, Euro, ListChecks, type LucideIcon } from 'lucide-react';
+import { Play, AlertTriangle, CheckCircle2, Car as CarIcon, Clock, FileSearch, Info, ChevronRight, ChevronDown, ArrowLeft, CalendarDays, History, Euro, ListChecks, type LucideIcon } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { Alert, Badge, Button, Card, CardContent, CardTitle, Field, Input, NativeSelect, PageHeader } from '../components/ui';
 import { supabase } from '../lib/supabase';
 import { useFahrtenbuch, type FahrtenbuchTrip } from '../hooks/useFahrtenbuch';
@@ -21,6 +22,7 @@ import MonatsplanungAppliedRuns from '../components/MonatsplanungAppliedRuns';
 import HistoricalReconciliationWizard from '../components/HistoricalReconciliationWizard';
 import HistoricalWorkingHoursWizard from '../components/HistoricalWorkingHoursWizard';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
+import { tripAnalysisLinkShown } from '../components/navVisibility';
 import { useTranslation } from '../contexts/LanguageContext';
 import type { TranslationKey } from '../i18n';
 
@@ -241,7 +243,24 @@ export default function CompanyPlannerPage() {
 
   return (
     <div className="mx-auto max-w-7xl">
-      <PageHeader className="font-ui" title={t('mp.title')} description={subtitle} />
+      <PageHeader
+        className="font-ui"
+        title={t('mp.title')}
+        description={subtitle}
+        actions={
+          /* The Fahrtenanalyse explains the month's imported rides. It plans
+             nothing and writes no trip, so it is a link out of the planner
+             rather than a step in it. */
+          tripAnalysisLinkShown(import.meta.env.VITE_DEPLOY_ENV, import.meta.env.DEV) ? (
+            <Button variant="secondary" asChild>
+              <Link to="/fahrtenanalyse">
+                <FileSearch aria-hidden />
+                {t('ta.link.open')}
+              </Link>
+            </Button>
+          ) : null
+        }
+      />
 
       {/* ── Mode selection ── */}
       {planningMode === 'selection' && (

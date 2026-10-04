@@ -2,10 +2,11 @@ import React, { useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import {
   BarChart3, Building2, Receipt, Stethoscope,
-  Menu, X, LogOut, ShieldCheck, UserCog,
+  Menu, X, LogOut, UserCog,
   Library, ScrollText, SlidersHorizontal, Users,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
+import BrandLogo from './BrandLogo';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { useTranslation } from '../contexts/LanguageContext';
 import type { TranslationKey } from '../i18n';
@@ -28,7 +29,11 @@ interface AdminNavItem {
 const ADMIN_NAV_ITEMS: AdminNavItem[] = [
   { path: '/admin',                  icon: BarChart3,   labelKey: 'admin.nav.platform',    requires: 'companies.read', end: true },
   { path: '/admin/companies',        icon: Building2,   labelKey: 'admin.nav.companies',   requires: 'companies.read' },
-  { path: '/admin/billing',          icon: Receipt,     labelKey: 'admin.nav.billing',     requires: 'companies.read' },
+  // Decision D14 (24.09.2026): the invoices, the subscriptions and the payment
+  // trail are behind two audited read models that ask for billing.manage, so
+  // the entry follows that capability. A support or read_only account keeps
+  // /admin/companies, where every company's own subscription state is shown.
+  { path: '/admin/billing',          icon: Receipt,     labelKey: 'admin.nav.billing',     requires: 'billing.manage' },
   // The diagnosis reads a company's Fahrtenbuch and planning data.
   { path: '/admin/abnahme-diagnose', icon: Stethoscope, labelKey: 'admin.nav.diagnostics', requires: 'business.read' },
   // The directories read every company's vehicles, drivers and users through
@@ -96,10 +101,15 @@ const AdminSidebar: React.FC = () => {
           obvious which context is being operated in. */}
       <div className="px-4 py-4 border-b flex items-center gap-3" style={{ borderColor: 'var(--border)' }}>
         <div
-          className="w-8 h-8 flex-shrink-0 flex items-center justify-center rounded-lg"
+          className="w-8 h-8 flex-shrink-0 flex items-center justify-center rounded-lg overflow-hidden"
           style={{ background: 'var(--warning-subtle)', border: '1px solid var(--warning)' }}
         >
-          <ShieldCheck size={16} style={{ color: 'var(--warning)' }} />
+          {/* The El-Professor mark, as the owner asked on 28.09.2026. The warning
+              tint, the border and the warning-coloured subtitle below all stay:
+              the comment above this block says the panel's identity is
+              deliberately distinct from the company shell, and asking for the
+              logo was not asking to give that up. */}
+          <BrandLogo className="h-6 w-6 object-contain" />
         </div>
         <div className="min-w-0">
           <p className="text-sm font-bold truncate" style={{ color: 'var(--text-primary)' }}>

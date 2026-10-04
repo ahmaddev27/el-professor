@@ -364,6 +364,15 @@ const UserManagement: React.FC = () => {
   const canManageUsers = companyScope.kind === 'own' ? isAdmin : companyScope.kind === 'support';
   const [users, setUsers] = useState<UserData[]>([]);
   const [loading, setLoading] = useState(true);
+  /*
+    The rule: a total row saying the company has 0 users is a claim about its
+    data, and after a read that failed the screen has made no such observation.
+    `loadUsers`' catch only opened an error dialog, so `users` stayed `[]` and
+    the Excel export wrote that nought into a file that leaves the browser. One
+    failure state per screen (CLAUDE.md's batch-2 rule), cleared where the load
+    starts and set in the existing catch.
+  */
+  const [loadFailed, setLoadFailed] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<UserData | undefined>();
   const [resetPasswordUser, setResetPasswordUser] = useState<UserData | null>(null);
@@ -396,6 +405,7 @@ const UserManagement: React.FC = () => {
 
   const loadUsers = async () => {
     setLoading(true);
+    setLoadFailed(false);
     try {
       // Use edge function to list users
       const { data: { session } } = await supabase.auth.getSession();
@@ -446,6 +456,7 @@ const UserManagement: React.FC = () => {
         onConfirm: () => {},
         type: 'error' as const
       });
+      setLoadFailed(true);
     } finally {
       setLoading(false);
     }
@@ -775,7 +786,11 @@ const UserManagement: React.FC = () => {
         { key: 'created_at',  label: t('users.export.createdAt'),  width: 16, format: v => v ? new Date(v as string).toLocaleDateString('de-DE') : '' },
       ],
       rows: users as unknown as Record<string, unknown>[],
-      totals: { full_name: t('users.export.totalRow', { count: users.length }) },
+      // The totals row's LABEL, not a figure in the name column: keyed on the
+      // first column it was discarded unrendered, so the file said
+      // "Gesamt (N Einträge)" instead. `totals: {}` keeps the row.
+      labels: { totalsRow: t('users.export.totalRow', { count: users.length }) },
+      totals: {},
     });
   };
 
@@ -970,7 +985,7 @@ const UserManagement: React.FC = () => {
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <p className="text-sm text-fg-muted">{t('users.subtitle')}</p>
         <div className="flex flex-wrap items-center gap-2">
-          <Button variant="secondary" onClick={handleExport}>
+          <Button variant="secondary" onClick={handleExport} disabled={loadFailed}>
             <Download aria-hidden />
             {t('common.exportExcelShort')}
           </Button>

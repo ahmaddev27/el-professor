@@ -91,7 +91,10 @@ function addPage(doc: jsPDF) {
 function addPageNumber(doc: jsPDF, pageNum: number, totalPages: number) {
   const label = `Seite ${pageNum} / ${totalPages}`;
   text(doc, label, PAGE_W / 2, PAGE_H - 8, C.textDim, 7.5, false, 'center');
-  text(doc, 'El-Professor Verwaltungssystem', MARGIN, PAGE_H - 8, C.textDim, 7, false, 'left');
+  // No signature on the left. It said "El-Professor Verwaltungssystem" on every
+  // page of a document a customer hands to their own accountant, and the owner
+  // asked on 01.10.2026 for no mark of ours on a generated file. The filter note
+  // stays: it tells the reader the list is a selection and not the whole month.
   text(doc, 'Diese Übersicht wurde anhand der aktuell gesetzten Filter erstellt.', PAGE_W - MARGIN, PAGE_H - 8, C.textDim, 7, false, 'right');
 }
 
@@ -109,9 +112,14 @@ export function generateReceiptPdf(receipts: Receipt[], info: PdfFilterInfo): vo
   let y = 24;
 
   // Logo area / company header
-  const company = info.companyName || 'El-Professor';
-  text(doc, company.toUpperCase(), PAGE_W / 2, y, C.accent, 10, true, 'center');
-  y += 7;
+  // The company's own name heads its own document, and nothing stands in for it:
+  // the fallback used to be 'El-Professor', so a company that had not filled in
+  // its settings sent out a summary headed with our name.
+  const company = info.companyName?.trim() ?? '';
+  if (company) {
+    text(doc, company.toUpperCase(), PAGE_W / 2, y, C.accent, 10, true, 'center');
+    y += 7;
+  }
 
   // Main title
   text(doc, 'BELEGE ZUSAMMENFASSUNG', PAGE_W / 2, y, C.textPrime, 18, true, 'center');

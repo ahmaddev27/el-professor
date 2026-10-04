@@ -1,15 +1,24 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef, useId } from 'react';
-import { Clock, ChevronRight, ChevronDown, Receipt, Car, MapPin, ArrowLeft, Trash2, ExternalLink, FileDown, Download, Banknote, type LucideIcon } from 'lucide-react';
+import { Clock, ChevronRight, ChevronDown, Receipt, Car, MapPin, ArrowLeft, Trash2, ExternalLink, FileDown, FileSearch, FileSpreadsheet, RotateCw, Download, type LucideIcon } from 'lucide-react';
 import TrinkgeldQuittungModal from '../components/TrinkgeldQuittungModal';
 import MietwagenauftragModal from '../components/MietwagenauftragModal';
-import GehaltsquittungModal from '../components/GehaltsquittungModal';
-import GehaltsquittungList from '../components/GehaltsquittungList';
 import FahrtenbuchTripsView from '../components/FahrtenbuchTripsView';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import type { DriverOption, CarOption } from '../components/FahrtenbuchImportModal';
 import { exportStundennachweisAsPdf, toPdfDayRow } from '../utils/stundennachweisPdfExport';
+// minsToDecimal and totalMins were declared in this file. They moved into the
+// export module so that the spreadsheet's hours and the screen's hours are one
+// function and cannot drift apart; both bodies are unchanged and every call
+// site below still reads exactly as it did.
+import {
+  exportArchiveMonthToExcel,
+  minsToDecimal,
+  totalMins,
+  type ArchiveExportLabels,
+} from '../utils/stundennachweisArchiveExport';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
+import { tripAnalysisLinkShown } from '../components/navVisibility';
 import { useTranslation } from '../contexts/LanguageContext';
 import type { TranslationKey } from '../i18n';
 import {
@@ -92,10 +101,6 @@ const MONTH_NAME_KEYS: TranslationKey[] = [
   'doc.month.september', 'doc.month.october', 'doc.month.november', 'doc.month.december',
 ];
 
-function minsToDecimal(mins: number): number {
-  return Math.round((mins / 60) * 100) / 100;
-}
-
 function fmtDec(v: number): string {
   return v.toFixed(2).replace('.', ',');
 }
@@ -124,11 +129,6 @@ function exportSavedPDF(rec: SavedRecord): void {
   );
 }
 
-function totalMins(rec: SavedRecord): number {
-  return rec.grundlohn_min + rec.nachtarbeit_min + rec.nacht04_min +
-    rec.samstag_min + rec.sonntag_min + rec.feiertag_min + rec.weihnachten_min;
-}
-
 // ── Component ─────────────────────────────────────────────────────────────────
 
 const DocumentsPage: React.FC = () => {
@@ -137,15 +137,10 @@ const DocumentsPage: React.FC = () => {
   const { t, tPlural } = useTranslation();
   const [isTrinkgeldModalOpen, setIsTrinkgeldModalOpen] = useState(false);
   const [isMietwagenModalOpen, setIsMietwagenModalOpen] = useState(false);
-  const [isGehaltsquittungModalOpen, setIsGehaltsquittungModalOpen] = useState(false);
   // Bumped when the dialog issues a receipt or attaches a signed copy, so the list reloads.
-  const [receiptsVersion, setReceiptsVersion] = useState(0);
   const [subView, setSubView] = useState<SubView>('main');
 
   // SalaryDetailsModal links a locked payment to its receipt through router state.
-  const location = useLocation();
-  const focusReceiptState = (location.state as { focusReceiptId?: unknown } | null)?.focusReceiptId;
-  const focusReceiptId = typeof focusReceiptState === 'string' ? focusReceiptState : null;
 
   // Drivers and cars for Fahrtenbuch matching
   const [drivers, setDrivers] = useState<DriverOption[]>([]);
@@ -154,6 +149,12 @@ const DocumentsPage: React.FC = () => {
   // Saved Stundennachweise archive
   const [savedRecords, setSavedRecords] = useState<SavedRecord[]>([]);
   const [loadingArchive, setLoadingArchive] = useState(true);
+  // THE RULE: a figure whose load failed is not shown, and not exported. An
+  // empty archive and a total of 0,00 € are claims; a refused read is not
+  // evidence for either, and this is the screen an operator opens looking for a
+  // document they know they saved. Named for the archive alone because the page
+  // has three reads and only this one is covered.
+  const [archiveFailed, setArchiveFailed] = useState(false);
 
   // Single-row delete
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
@@ -195,13 +196,24 @@ const DocumentsPage: React.FC = () => {
   const loadArchive = useCallback(async () => {
     if (!companyId) return;
     setLoadingArchive(true);
-    const { data } = await supabase
+    setArchiveFailed(false);
+    const { data, error } = await supabase
       .from('saved_stundennachweise')
       .select('*')
       .eq('company_id', companyId)
       .order('year', { ascending: false })
       .order('month', { ascending: false })
       .order('driver_name');
+    if (error) {
+      // `data` is null on a refused read, so the old `(data || [])` turned every
+      // refusal into an empty archive and the screen said "nothing saved".
+      // Clearing the list as well matters on a change of company: a previous
+      // company's records must not stay on screen under this one's name.
+      setArchiveFailed(true);
+      setSavedRecords([]);
+      setLoadingArchive(false);
+      return;
+    }
     setSavedRecords((data || []) as SavedRecord[]);
     setLoadingArchive(false);
   }, [companyId]);
@@ -332,6 +344,61 @@ const DocumentsPage: React.FC = () => {
     loadArchive();
   };
 
+  /**
+   * One month of the archive as a spreadsheet, for the Steuerberater.
+   *
+   * THE RULE: the file carries the screen's own figures. The month's hour total
+   * and its gross total are the ones `monthGroups` computed for the header above
+   * the table, and a row's hours are the same `minsToDecimal(totalMins(rec))`
+   * the cell prints — there is no second source for a figure here.
+   *
+   * It withholds the file while `archiveFailed` is set: a spreadsheet handed to
+   * an accountant is a claim, and a refused read is not evidence for one.
+   *
+   * The seven bucket headers stay German in both UI languages — they are Lohnart
+   * names, which `src/i18n/index.ts` puts on the closed domain-vocabulary list,
+   * and this sheet has to reconcile with the Stundennachweis PDF beside it. The
+   * rest of the headers follow the UI language, because an `exportTableToExcel`
+   * dump of a working list satisfies no statutory form. The PDF itself is not
+   * touched by any of this.
+   */
+  const handleExportMonth = (group: MonthGroup) => {
+    if (archiveFailed) return;
+    const labels: ArchiveExportLabels = {
+      sheetTitle:          t('doc.archiveExportSheetTitle', { label: group.label }),
+      moduleName:          t('doc.archiveHeading'),
+      driver:              t('common.driver'),
+      personalnummer:      t('doc.personalnummer'),
+      workingDays:         t('doc.workingDays'),
+      grundlohn:           t('doc.col.grundlohn'),
+      nachtarbeit:         t('doc.col.nachtarbeit'),
+      nacht04:             t('doc.col.nacht04'),
+      samstag:             t('doc.col.samstag'),
+      sonntag:             t('doc.col.sonntag'),
+      feiertag:            t('doc.col.feiertag'),
+      weihnachten:         t('doc.col.weihnachten'),
+      totalHours:          t('doc.totalHours'),
+      hourlyRate:          t('fleet.hourlyRate'),
+      gross:               t('doc.grossExpected'),
+      source:              t('doc.source'),
+      sourceFahrtenbuch:   t('doc.fahrtenbuch'),
+      sourceMonatsplanung: t('doc.badgePlanning'),
+      savedAt:             t('doc.savedAt'),
+      updatedAt:           t('doc.updatedAt'),
+      // The totals row's own label. A figure keyed to the first column throws
+      // since #152, because that cell is the row's label and nothing else.
+      totalsRow:           t('doc.archiveExportTotalsLine', { count: group.records.length }),
+    };
+    exportArchiveMonthToExcel({
+      month: group.month,
+      year: group.year,
+      records: group.records,
+      totalMinutes: group.totalMins,
+      totalGross: group.totalGross,
+      labels,
+    });
+  };
+
   // ── Presentation (phase 5) ────────────────────────────────────────────────
   // Everything above is the screen's logic and is unchanged; everything below
   // only draws it. It adds no arithmetic: a record's hours are the same
@@ -356,7 +423,20 @@ const DocumentsPage: React.FC = () => {
           <ArrowLeft aria-hidden />
           {t('nav.documents')}
         </Button>
-        <PageHeader title={t('doc.fahrtenbuch')} description={t('doc.fahrtenbuchSubtitle')} />
+        <PageHeader
+          title={t('doc.fahrtenbuch')}
+          description={t('doc.fahrtenbuchSubtitle')}
+          actions={
+            // Offered only where the Fahrtenanalyse is meant to be seen. The route
+            // stays registered everywhere, so the screen is reachable by address.
+            tripAnalysisLinkShown(import.meta.env.VITE_DEPLOY_ENV, import.meta.env.DEV) ? (
+              <Button variant="secondary" onClick={() => navigate('/fahrtenanalyse')}>
+                <FileSearch aria-hidden />
+                {t('ta.link.open')}
+              </Button>
+            ) : undefined
+          }
+        />
         <FahrtenbuchTripsView drivers={drivers} cars={cars} />
       </div>
     );
@@ -484,6 +564,26 @@ const DocumentsPage: React.FC = () => {
         </Card>
       );
     }
+    // Ahead of the empty state on purpose: a refused read reached it before and
+    // was drawn as "nothing saved", which is the defect. The retry calls the
+    // same loader rather than reloading the page, so an expanded group and the
+    // rest of the screen survive a transient failure.
+    if (archiveFailed) {
+      return (
+        <Alert
+          tone="critical"
+          title={t('doc.archiveLoadFailed')}
+          action={
+            <Button variant="secondary" size="sm" onClick={() => loadArchive()}>
+              <RotateCw aria-hidden />
+              {t('ui.table.retry')}
+            </Button>
+          }
+        >
+          {t('doc.archiveLoadFailedBody')}
+        </Alert>
+      );
+    }
     if (monthGroups.length === 0) {
       return (
         <Card>
@@ -525,6 +625,24 @@ const DocumentsPage: React.FC = () => {
                     <Button variant="secondary" size="sm" onClick={() => handleDownloadGroup(group)}>
                       <Download aria-hidden />
                       {t('doc.downloadAll')}
+                      <span className="sr-only"> – {group.label}</span>
+                    </Button>
+                  </Tooltip>
+                  {/* `disabled` is the second wall, not the first: the Alert above
+                      replaces the whole list, so no group header renders while the
+                      read has failed. It is kept because a later edit that moves
+                      this button into the section heading, or draws the groups
+                      beside the alert, must not be able to produce a file that
+                      claims a month is empty. */}
+                  <Tooltip content={t('doc.exportExcelTitle', { label: group.label })}>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      disabled={archiveFailed}
+                      onClick={() => handleExportMonth(group)}
+                    >
+                      <FileSpreadsheet aria-hidden />
+                      {t('doc.exportExcel')}
                       <span className="sr-only"> – {group.label}</span>
                     </Button>
                   </Tooltip>
@@ -588,13 +706,6 @@ const DocumentsPage: React.FC = () => {
               onClick={() => setIsTrinkgeldModalOpen(true)}
             />
             <ToolCard
-              icon={Banknote}
-              title={t('doc.gehaltsquittung')}
-              description={t('doc.gehaltsquittungDesc')}
-              badges={[t('doc.badgeTemplate'), t('doc.badgePdfExport')]}
-              onClick={() => setIsGehaltsquittungModalOpen(true)}
-            />
-            <ToolCard
               icon={Car}
               title={t('doc.mietwagenauftrag')}
               description={t('doc.mietwagenauftragDesc')}
@@ -611,12 +722,10 @@ const DocumentsPage: React.FC = () => {
           </div>
         </section>
 
-        {/* ── Gehaltsquittungen ─────────────────────────────────────────────────── */}
-        <GehaltsquittungList
-          refreshKey={receiptsVersion}
-          focusReceiptId={focusReceiptId}
-          onCreate={() => setIsGehaltsquittungModalOpen(true)}
-        />
+        {/* The Gehaltsquittung — its tool card, its archive and its dialog — moved
+            to the Gehalter screen on 28.09.2026 at the owner's request, so the
+            whole feature lives where a salary is paid. Nothing of it is reachable
+            from here any more. */}
 
         {/* ── Saved Stundennachweise archive ─────────────────────────────────────── */}
         <section aria-labelledby="documents-archive-heading" className="grid grid-cols-1 gap-3 font-ui">
@@ -710,11 +819,6 @@ const DocumentsPage: React.FC = () => {
 
       <TrinkgeldQuittungModal isOpen={isTrinkgeldModalOpen} onClose={() => setIsTrinkgeldModalOpen(false)} />
       <MietwagenauftragModal  isOpen={isMietwagenModalOpen} onClose={() => setIsMietwagenModalOpen(false)} />
-      <GehaltsquittungModal
-        open={isGehaltsquittungModalOpen}
-        onOpenChange={setIsGehaltsquittungModalOpen}
-        onChanged={() => setReceiptsVersion(version => version + 1)}
-      />
     </div>
   );
 };

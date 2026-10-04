@@ -5,6 +5,8 @@
 import type { FahrtenbuchTrip } from '../hooks/useFahrtenbuch';
 import type { PlanningDriver } from '../components/MonatsplanungDriverPool';
 import type { AssignedBlock, Phase3Result } from './monatsplanungPhase3';
+// Type-only: the engine names a dictionary key beside its German text.
+import type { EngineMessageKey, EngineMessageVars } from '../i18n/engineMessageTypes';
 
 export type AssignmentSource = 'auto' | 'repair' | 'manual_exception';
 
@@ -78,7 +80,10 @@ export interface Phase4ConsistencyIssue {
     | 'non_selected_driver_on_change_row'
     | 'manual_exception_missing_flag'
     | 'abgeschlossen_not_in_changeset';
+  /** German, as the engine has always written it. The screen's fallback. */
   detail: string;
+  messageKey?: EngineMessageKey;
+  messageVars?: EngineMessageVars;
 }
 
 export interface Phase4Result {
@@ -122,6 +127,8 @@ export function buildChangeSet(
         issues.push({
           type: 'duplicate_trip_in_changeset',
           detail: `Trip ${row.trip_id} bereits einem anderen Block zugewiesen`,
+          messageKey: 'engine.phase4.issue.duplicateTrip',
+          messageVars: { tripId: row.trip_id },
         });
       }
       seenTripIds.add(row.trip_id);
@@ -131,21 +138,32 @@ export function buildChangeSet(
         issues.push({
           type: 'canceled_trip_in_changeset',
           detail: `Stornierte Fahrt ${row.trip_id} in Change Set`,
+          messageKey: 'engine.phase4.issue.canceledTrip',
+          messageVars: { tripId: row.trip_id },
         });
       }
       if (!ab.driver_id) {
-        issues.push({ type: 'missing_driver_on_change_row', detail: `Block ${ab.block_id} ohne Fahrer` });
+        issues.push({
+          type: 'missing_driver_on_change_row',
+          detail: `Block ${ab.block_id} ohne Fahrer`,
+          messageKey: 'engine.phase4.issue.missingDriver',
+          messageVars: { blockId: ab.block_id },
+        });
       }
       if (ab.driver_id && !selectedSet.has(ab.driver_id)) {
         issues.push({
           type: 'non_selected_driver_on_change_row',
           detail: `Fahrer ${ab.driver_name} nicht in Auswahl`,
+          messageKey: 'engine.phase4.issue.driverNotInPool',
+          messageVars: { driver: ab.driver_name },
         });
       }
       if (source === 'manual_exception' && !dienstzeit && !tageslimit && !monatslimit) {
         issues.push({
           type: 'manual_exception_missing_flag',
           detail: `Manuelle Ausnahme bei Block ${ab.block_id} ohne Ausnahme-Flag`,
+          messageKey: 'engine.phase4.issue.manualExceptionMissingFlag',
+          messageVars: { blockId: ab.block_id },
         });
       }
 
@@ -252,6 +270,8 @@ export function buildChangeSet(
       issues.push({
         type: 'abgeschlossen_not_in_changeset',
         detail: `Abgeschlossene Fahrt ${t.id} fehlt im Change Set`,
+        messageKey: 'engine.phase4.issue.completedTripMissing',
+        messageVars: { tripId: t.id },
       });
     }
   }
@@ -262,6 +282,8 @@ export function buildChangeSet(
     issues.push({
       type: 'change_count_mismatch',
       detail: `Change Rows ${change_rows.length} ≠ resolved Trips ${resolvedTripsFromBlocks}`,
+      messageKey: 'engine.phase4.issue.changeCountMismatch',
+      messageVars: { changeRows: change_rows.length, resolvedTrips: resolvedTripsFromBlocks },
     });
   }
 

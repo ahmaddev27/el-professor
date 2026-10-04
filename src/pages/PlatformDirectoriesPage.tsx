@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Car, Users, User, RefreshCw, Search, ShieldAlert, ChevronLeft, ChevronRight, Info } from 'lucide-react';
+import { Car, Users, User, RefreshCw, Search, ShieldAlert, ChevronLeft, ChevronRight, Info, Download } from 'lucide-react';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { useTranslation } from '../contexts/LanguageContext';
 import type { TranslationKey } from '../i18n';
@@ -20,6 +20,16 @@ import {
 } from '../lib/platformReadModels';
 import { fetchCompanies, fetchDrivers, fetchUsers, fetchVehicles } from '../lib/platformDirectoryClient';
 import { EMPTY_CELL, deCount, deDate } from '../lib/platformFormat';
+import { exportTableToExcel } from '../utils/excelExport';
+import {
+  buildDirectoryExport,
+  type DirectoryExportLabels,
+  type FilterEntry,
+  type PageScope,
+} from '../lib/panelExports';
+import { useExportChrome } from '../hooks/useExportChrome';
+import { useToast } from '../contexts/ToastContext';
+import { Button } from '../components/ui';
 
 /**
  * Verzeichnisse — vehicles, drivers and users across every company (plan 3.G).
@@ -142,6 +152,8 @@ type AnyRow = PlatformVehicleRow | PlatformDriverRow | PlatformUserRow;
 const PlatformDirectoriesPage: React.FC = () => {
   const { platformCan } = useSuperAdmin();
   const { t } = useTranslation();
+  const { showToast } = useToast();
+  const exportChrome = useExportChrome();
   const canRead = platformCan('business.read');
 
   const [tab, setTab] = useState<Tab>('vehicles');
@@ -222,6 +234,90 @@ const PlatformDirectoriesPage: React.FC = () => {
     change({ search: searchInput });
   };
 
+  /**
+   * The tab on screen as a workbook — one file per tab, because the three carry
+   * different columns.
+   *
+   * **The rule being preserved: an export adds no column the read model
+   * withholds.** These three models return deliberately reduced rows — no
+   * salary, no bank data, no personal identifier beyond the name, and no account
+   * that has a `platform_staff` row — and the builder can only reach what the row
+   * types carry. `admin.dir.reducedNote`, the sentence already shown above the
+   * tabs, travels into the file's filter band so a spreadsheet read away from the
+   * panel says why a column is missing.
+   *
+   * **And a file says what it holds.** The read models cap a page at 100 rows and
+   * write one audited `read` row per call, so this writes the page on screen and
+   * says "Seite N von M" in the band and `_seite-N` in the filename (decision
+   * D-C). Reading every page to fill one file would put one audit row per page
+   * into an append-only log for a convenience.
+   */
+  const exportLabels = (): DirectoryExportLabels => ({
+    sheetTitle: t(TABS.find(entry => entry.id === tab)?.labelKey ?? 'admin.dir.title'),
+    company: t('admin.dir.col.company'),
+    status: t('admin.dir.col.status'),
+    created: t('admin.dir.col.created'),
+    kennzeichen: t('admin.dir.col.kennzeichen'),
+    tuev: t('admin.dir.col.tuev'),
+    lastHu: t('admin.dir.col.lastHu'),
+    name: t('admin.dir.col.name'),
+    usage: t('admin.dir.col.usage'),
+    email: t('admin.dir.col.email'),
+    fullName: t('admin.dir.col.fullName'),
+    role: t('admin.dir.col.role'),
+    confirmed: t('admin.dir.col.confirmed'),
+    lastSignIn: t('admin.dir.col.lastSignIn'),
+    // Every status the three tabs offer, so a row of one tab is named on any
+    // file. A stored value none of them lists is written verbatim by the
+    // builder, exactly as `StatusPill` prints it.
+    statusNames: Object.fromEntries(
+      Object.values(STATUS_OPTIONS)
+        .flat()
+        .map((option): [string, string] => [option.value, t(option.labelKey)]),
+    ),
+    scope: { whole: t('admin.export.scope.whole'), page: t('admin.export.scope.page') },
+    reducedNote: t('admin.dir.reducedNote'),
+    chrome: exportChrome,
+  });
+
+  const exportFilters = (): FilterEntry[] => {
+    // Only the filters actually applied are listed; `filterBand` drops a null.
+    const statusOption = STATUS_OPTIONS[tab].find(option => option.value === query.status);
+    return [
+      { label: t('admin.dir.export.filterSearch'), value: query.search || null },
+      {
+        label: t('admin.dir.col.company'),
+        value: query.companyId
+          ? companies.find(company => company.id === query.companyId)?.name ?? query.companyId
+          : null,
+      },
+      {
+        label: t('admin.dir.export.filterStatus'),
+        value: query.status ? (statusOption ? t(statusOption.labelKey) : query.status) : null,
+      },
+      { label: t('admin.dir.export.filterSort'), value: t(SORT_LABELS[query.sort]) },
+    ];
+  };
+
+  const handleExport = () => {
+    try {
+      const scope: PageScope = { pageIndex: query.pageIndex, total, rowCount: rows.length };
+      const shared = { scope, filters: exportFilters(), filterLineTemplate: t('ui.export.filterLine'), labels: exportLabels() };
+      // Three explicit calls: the builder's input is a discriminated union, and
+      // widening it to pass `tab` as a variable would need the one cast this
+      // whole seam is written without.
+      exportTableToExcel(
+        tab === 'vehicles'
+          ? buildDirectoryExport({ ...shared, tab: 'vehicles', rows: rows as PlatformVehicleRow[] })
+          : tab === 'drivers'
+            ? buildDirectoryExport({ ...shared, tab: 'drivers', rows: rows as PlatformDriverRow[] })
+            : buildDirectoryExport({ ...shared, tab: 'users', rows: rows as PlatformUserRow[] }),
+      );
+    } catch (error: any) {
+      showToast('error', t('ui.export.failed'), error?.message);
+    }
+  };
+
   if (!canRead) {
     return (
       <div className="flex flex-col items-center justify-center py-20 rounded-2xl text-center"
@@ -246,13 +342,27 @@ const PlatformDirectoriesPage: React.FC = () => {
           <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>{t('admin.dir.title')}</h1>
           <p className="text-sm mt-0.5" style={{ color: 'var(--text-secondary)' }}>{t('admin.dir.subtitle')}</p>
         </div>
-        <button
-          onClick={() => void load(tab, query)}
-          className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium"
-          style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
-        >
-          <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />{t('admin.common.refresh')}
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Withheld while the read failed or is running, and while the page is
+              empty: a directory file of nought rows is a claim about a customer's
+              fleet. Drawn with the design system — a new inline style in a legacy
+              file is what the style ratchet stops. */}
+          <Button
+            variant="secondary"
+            disabled={loading || problem !== null || rows.length === 0}
+            onClick={handleExport}
+            title={t('common.exportExcel')}
+          >
+            <Download size={14} />{t('admin.export.download')}
+          </Button>
+          <button
+            onClick={() => void load(tab, query)}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium"
+            style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
+          >
+            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />{t('admin.common.refresh')}
+          </button>
+        </div>
       </div>
 
       {/* Why these columns and no others. */}

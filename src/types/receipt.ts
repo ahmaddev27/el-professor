@@ -51,9 +51,15 @@ export interface Driver {
   salary_ratio?: number;
   salaryRatio?: number;
   createdBy?: string;
+  /** `drivers.created_at`, carried by `mapDriverRow` for the Fahrer export. */
+  createdAt?: string;
   status?: 'active' | 'inactive';
   personalnummer?: string;
   gender?: 'male' | 'female' | null;
+  /** Where this driver's Abrechnung is sent. Absent is ordinary, not an error. */
+  email?: string | null;
+  /** E.164 (`+4917012345678`), so a wa.me link can be built without reprocessing. */
+  phone?: string | null;
   // Planning fields
   driver_usage_type?: 'regular' | 'coverage_only';
   target_monthly_hours?: number | null;
@@ -71,6 +77,20 @@ export interface Driver {
   allow_outside_shift_exceptions?: boolean;
   is_full_day_available?: boolean;
   employment_type?: 'employee' | 'company_owner';
+}
+
+/**
+ * A driver's contact details as the form produces them: the address trimmed, the
+ * number already in E.164.
+ *
+ * One object through the write path rather than two more positional arguments at
+ * each of four hops. `onEditDriver` already takes seven parameters of which three
+ * are optional, and an eighth and ninth string there is how a caller ends up
+ * passing a phone number where a Personalnummer belongs with nothing to catch it.
+ */
+export interface DriverContact {
+  email: string | null;
+  phone: string | null;
 }
 
 export interface Salary {

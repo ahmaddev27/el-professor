@@ -182,3 +182,104 @@ export function decideCreateCompany(scopeCompanyId: string, requested: unknown):
     ? { ok: true, companyId: scopeCompanyId }
     : { ok: false, refusal: 'other_company' };
 }
+
+// ─── Resolving a company's accounts against GoTrue ──────────────────────────
+
+/**
+ * How many auth accounts one `listUsers` page asks for.
+ *
+ * GoTrue's own default is 50, which is the whole defect this exists to fix:
+ * `list` called `auth.admin.listUsers()` with no arguments, took the first 50
+ * accounts **of the entire project**, and only then narrowed them to the
+ * caller's company. So on any installation with more than 50 accounts a
+ * company's own users could be missing from its Benutzer screen — silently,
+ * with a 200 and a short array, and with the truncated count written into the
+ * audit row as if it were the whole answer.
+ */
+export const GOTRUE_PAGE_SIZE = 200;
+
+/**
+ * The page ceiling. A loop over a remote list needs one, or a server that keeps
+ * answering a full page forever is an infinite request loop inside an edge
+ * function. At 200 a page this reaches 40 000 accounts; past that the answer is
+ * reported as incomplete rather than quietly cut short again.
+ */
+export const GOTRUE_MAX_PAGES = 200;
+
+export interface AuthAccountLike {
+  id: string;
+}
+
+export interface ResolvedAuthAccounts<T extends AuthAccountLike> {
+  /** The accounts asked for, in the order the ids were given. */
+  found: T[];
+  /** Ids with no auth account on any page read — an orphaned profile. */
+  missing: string[];
+  /** Every id was resolved, or the pages ran out first. */
+  complete: boolean;
+  /** How many pages were asked for; one for the common case. */
+  pagesRead: number;
+}
+
+/**
+ * Resolves a known set of account ids against GoTrue's paged admin list.
+ *
+ * The driving order is the fix. The company's own profiles decide **which**
+ * accounts the answer contains — one scoped query — and this only fills in the
+ * two fields that live in `auth.users` and nowhere else. It stops as soon as
+ * every id is found, so the ordinary installation reads exactly one page, and
+ * it never issues one request per account: at 200 ids that would be 200 round
+ * trips inside a function with a request timeout.
+ *
+ * `listPage` is injected, because the real one comes from a `npm:` import this
+ * module may not have (CLAUDE.md: the shared modules Node has to load import
+ * nothing from Deno, npm: or jsr:).
+ *
+ * A page that comes back empty ends the walk: GoTrue answers a page past the
+ * end with `[]`, and treating that as "keep going" is how the loop would run to
+ * the ceiling on every call.
+ */
+export async function resolveAuthAccounts<T extends AuthAccountLike>(
+  userIds: readonly string[],
+  listPage: (page: number, perPage: number) => Promise<readonly T[]>,
+  options: { perPage?: number; maxPages?: number } = {},
+): Promise<ResolvedAuthAccounts<T>> {
+  const perPage = options.perPage ?? GOTRUE_PAGE_SIZE;
+  const maxPages = options.maxPages ?? GOTRUE_MAX_PAGES;
+
+  const wanted = new Set(userIds);
+  const byId = new Map<string, T>();
+  let pagesRead = 0;
+
+  // No ids: a company with no profiles. Asking GoTrue anything would read
+  // every account of every other company to find nothing.
+  if (wanted.size > 0) {
+    for (let page = 1; page <= maxPages; page += 1) {
+      const batch = await listPage(page, perPage);
+      pagesRead += 1;
+      for (const account of batch) {
+        if (wanted.has(account.id) && !byId.has(account.id)) byId.set(account.id, account);
+      }
+      if (byId.size === wanted.size) break;
+      // GoTrue answers past the end with an empty page, and a short page is
+      // the last one — either way there is nothing further to read.
+      if (batch.length < perPage) break;
+    }
+  }
+
+  // The caller's order, which is the profile query's order, so the screen's
+  // sorting is decided by the database and not by GoTrue's paging. Walked over
+  // the deduplicated set, so a repeated id cannot produce a repeated row.
+  const found: T[] = [];
+  const missing: string[] = [];
+  const emitted = new Set<string>();
+  for (const id of userIds) {
+    if (emitted.has(id)) continue;
+    emitted.add(id);
+    const account = byId.get(id);
+    if (account) found.push(account);
+    else missing.push(id);
+  }
+
+  return { found, missing, complete: missing.length === 0, pagesRead };
+}

@@ -136,7 +136,18 @@ try {
 
   teardown();
   step(`starting a throwaway postgres (${NAME})…`);
-  sh(['run', '-d', '--name', NAME, '--cpus', '1', '--memory', '1g',
+  // 2 GiB, not 1. At 1 GiB the throwaway postgres was OOM-killed partway
+  // through matrix.sql — measured, in the host's own kernel log:
+  //   "Memory cgroup out of memory: Killed process … (.postgres-wrapp)
+  //    anon-rss:971088kB"
+  // three times, at the same probe each run. The symptom is
+  // "server closed the connection unexpectedly", which reads exactly like a
+  // crash caused by the SQL under test, and cost most of a debugging session
+  // before the kernel log was read. The limit is the thing to raise when the
+  // matrix grows: it probes every public table, so each new table costs memory.
+  // `RLS_TEST_MEMORY` overrides it on a host with less to spare.
+  const MEMORY = process.env.RLS_TEST_MEMORY || '2g';
+  sh(['run', '-d', '--name', NAME, '--cpus', '1', '--memory', MEMORY,
       '-e', `POSTGRES_PASSWORD=${PW}`, IMAGE]);
   await waitReady();
 

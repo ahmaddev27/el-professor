@@ -368,3 +368,136 @@ describe('header and body helpers', () => {
     expect(formatSmtpDate(new Date('2026-01-10T23:30:00Z'))).toBe('Sat, 10 Jan 2026 23:30:00 +0000');
   });
 });
+
+// ─── Attachments (02.10.2026) ────────────────────────────────────────────────
+//
+// Added so the weekly Abrechnung can carry its card as a PNG. Every mail before
+// this was `multipart/alternative` — a text part and an HTML part, two
+// alternatives of one message. An attachment is a different relationship: it sits
+// BESIDE the text rather than instead of it, so the message becomes
+// `multipart/mixed` with the alternative pair nested inside.
+//
+// The first assertion is the one that matters most: **with no attachment the
+// message is byte-for-byte what it was**, which is what keeps the five templates
+// `email-layout.test.ts` pins and every OTP mail untouched.
+
+describe('buildMimeMessage — attachments', () => {
+  const base = {
+    fromName: 'El-Professor',
+    fromAddress: 'noreply@example.com',
+    to: 'fahrer@example.com',
+    subject: 'Abrechnung',
+    text: 'Zusammenfassung',
+    html: '<p>Zusammenfassung</p>',
+    date: new Date('2026-10-02T12:00:00Z'),
+    messageId: 'abc@example.com',
+    boundary: 'INNER_0123456789',
+  };
+
+  it('with nothing attached, the message is exactly what it always was', () => {
+    const withoutKey = buildMimeMessage(base);
+    const withEmptyList = buildMimeMessage({ ...base, attachments: [] });
+    // An empty list is not an attachment, and an unused mixedBoundary must not
+    // change the output either.
+    const withUnusedBoundary = buildMimeMessage({
+      ...base, attachments: [], mixedBoundary: 'OUTER_0123456789',
+    });
+
+    expect(withEmptyList).toBe(withoutKey);
+    expect(withUnusedBoundary).toBe(withoutKey);
+    expect(withoutKey).toContain('Content-Type: multipart/alternative;');
+    expect(withoutKey).not.toContain('multipart/mixed');
+  });
+
+  it('nests the alternative pair inside mixed, and closes both', () => {
+    const message = buildMimeMessage({
+      ...base,
+      mixedBoundary: 'OUTER_0123456789',
+      attachments: [{ filename: 'abrechnung.png', contentType: 'image/png', content: 'AAAA' }],
+    });
+
+    expect(message).toContain('Content-Type: multipart/mixed;');
+    expect(message).toContain(' boundary="OUTER_0123456789"');
+    expect(message).toContain('Content-Type: multipart/alternative;');
+    // The inner pair still closes with its own terminator, inside the outer part.
+    expect(message).toContain('--INNER_0123456789--');
+    expect(message).toContain('--OUTER_0123456789--');
+    // And the inner terminator comes BEFORE the outer one, or the attachment
+    // would sit outside the message.
+    expect(message.indexOf('--INNER_0123456789--'))
+      .toBeLessThan(message.indexOf('--OUTER_0123456789--'));
+
+    expect(message).toContain('Content-Type: image/png; name="abrechnung.png"');
+    expect(message).toContain('Content-Disposition: attachment; filename="abrechnung.png"');
+  });
+
+  it('refuses one boundary for both levels, which would swallow the attachment', () => {
+    // The inner terminator would close the outer part and the file would vanish
+    // with no error anywhere — the worst possible failure for a send.
+    expect(() => buildMimeMessage({
+      ...base,
+      mixedBoundary: base.boundary,
+      attachments: [{ filename: 'a.png', contentType: 'image/png', content: 'AAAA' }],
+    })).toThrow(/invalid_boundary/);
+  });
+
+  it('refuses an attachment with no outer boundary at all', () => {
+    expect(() => buildMimeMessage({
+      ...base,
+      attachments: [{ filename: 'a.png', contentType: 'image/png', content: 'AAAA' }],
+    })).toThrow(/invalid_boundary/);
+  });
+
+  it('refuses a filename or a type that would break out of its header', () => {
+    const attach = (over: Record<string, string>) => () => buildMimeMessage({
+      ...base,
+      mixedBoundary: 'OUTER_0123456789',
+      attachments: [{
+        filename: 'a.png', contentType: 'image/png', content: 'AAAA', ...over,
+      }],
+    });
+
+    // A quote closes the header's own quoting; a newline starts a new header.
+    expect(attach({ filename: 'a".png' })).toThrow(/invalid_attachment_name/);
+    expect(attach({ filename: 'a\r\nBcc: someone@example.com' })).toThrow();
+    expect(attach({ filename: '' })).toThrow(/invalid_attachment_name/);
+    expect(attach({ contentType: 'image/png; x="y"' })).toThrow(/invalid_attachment_type/);
+  });
+
+  it('refuses content that is not base64, rather than sending a corrupt file', () => {
+    expect(() => buildMimeMessage({
+      ...base,
+      mixedBoundary: 'OUTER_0123456789',
+      attachments: [{ filename: 'a.png', contentType: 'image/png', content: 'not base64!' }],
+    })).toThrow(/invalid_attachment_content/);
+  });
+
+  it('folds the base64 to SMTP line length, as the body parts are folded', () => {
+    const long = 'A'.repeat(500);
+    const message = buildMimeMessage({
+      ...base,
+      mixedBoundary: 'OUTER_0123456789',
+      attachments: [{ filename: 'a.png', contentType: 'image/png', content: long }],
+    });
+    // No line of the message may exceed what SMTP accepts; the 998-octet limit is
+    // the hard one and `wrapBase64` folds well inside it.
+    for (const line of message.split('\r\n')) {
+      expect(line.length).toBeLessThanOrEqual(998);
+    }
+    expect(message).not.toContain(long);
+  });
+
+  it('carries more than one attachment, each in its own part', () => {
+    const message = buildMimeMessage({
+      ...base,
+      mixedBoundary: 'OUTER_0123456789',
+      attachments: [
+        { filename: 'one.png', contentType: 'image/png', content: 'AAAA' },
+        { filename: 'two.pdf', contentType: 'application/pdf', content: 'BBBB' },
+      ],
+    });
+    expect(message).toContain('filename="one.png"');
+    expect(message).toContain('filename="two.pdf"');
+    expect(message.split('--OUTER_0123456789').length - 1).toBe(4); // open, 3 parts
+  });
+});

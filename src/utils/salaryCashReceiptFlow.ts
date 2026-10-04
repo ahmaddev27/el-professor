@@ -113,6 +113,10 @@ const DATABASE_REFUSALS = [
   'invalid_path',
   'receipt_voided',
   'receipt_payment_locked',
+  // 20261004110000: issue_salary_cash_receipt, for a payment that already exists.
+  'payment_not_found',
+  'payment_not_issuable',
+  'already_issued',
   // 20260921110010: a platform account inside a context, in either mode. The
   // screens refuse first (receiptScope), so this reaches one only when that
   // check was bypassed.
@@ -212,6 +216,9 @@ export const REFUSAL_MESSAGE_KEYS: Record<ReceiptActionRefusal, TranslationKey> 
   invalid_path: 'gq.refusal.invalidPath',
   receipt_voided: 'gq.refusal.receiptVoided',
   receipt_payment_locked: 'gq.refusal.receiptPaymentLocked',
+  payment_not_found: 'gq.refusal.paymentNotFound',
+  payment_not_issuable: 'gq.refusal.paymentNotIssuable',
+  already_issued: 'gq.refusal.alreadyIssued',
   // The database's own copy of company_mismatch, so the same sentence.
   platform_session_not_allowed: 'gq.refusal.companyMismatch',
   company_mismatch: 'gq.refusal.companyMismatch',

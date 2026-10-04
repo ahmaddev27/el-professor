@@ -9,6 +9,8 @@ import { toCents } from './money';
  * out is what leaves the till: a Beleg (`receipts.expense`) and, since
  * 20260914140000, a Gehaltsquittung — the cash salary payment
  * `confirm_salary_cash_payment` books as `cash_movements(direction = 'out')`.
+ * Manual entries (`manual_in`, `manual_out`, written by `record_cash_movement`)
+ * move the till by their direction like any other movement.
  * Voiding one books the cash back on the day of the void
  * (`gehaltsquittung_storno`, `direction = 'in'`), the way a cash book corrects
  * an entry rather than rewriting the day it was paid. So a receipt paid in
@@ -21,6 +23,16 @@ import { toCents } from './money';
  *
  * and until a company issues its first Gehaltsquittung the last term is 0,
  * which is exactly the figure the screen showed before this module existed.
+ *
+ * **Only a Beleg paid in cash leaves the till.** `receipts.payment_method` is
+ * `'bar'` or `'uberweisung'` (CHECK, default `'bar'`), and a bank transfer
+ * never touched the till — the money left the account, not the cash box. The
+ * database has always read it that way: `abrechnung_weekly`
+ * (20260402065740:120) and `get_current_cash_balance`
+ * (20260607124839:138) both restrict to `payment_method = 'bar'`, so a screen
+ * that counts every Beleg contradicts the weekly Abrechnung the same company
+ * reads one menu item away. `cashBelegRows()` is that restriction, applied by
+ * the caller that asked for the column.
  *
  * **"Bar zurück" counts as paid and moves no cash.** The weekly settlement
  * writes a `salary_payments` row with `source_type = 'weekly_cash_difference'`
@@ -45,6 +57,10 @@ export type CashLedgerSource =
   | 'beleg'
   | 'gehaltsquittung'
   | 'gehaltsquittung_storno'
+  /** Cash an owner put into the till by hand (record_cash_movement). */
+  | 'manual_in'
+  /** Cash taken out of the till by hand that is neither a Beleg nor a salary. */
+  | 'manual_out'
   /** A `cash_movements.source_type` this module does not know yet. */
   | 'other';
 
@@ -74,6 +90,10 @@ export interface CashLedgerTotals {
   belegExpenseCents: number;
   /** Gehaltsquittungen minus their Stornos: the cash salaries took out of the till. */
   salaryPayoutCents: number;
+  /** Cash added by hand (`manual_in`). Part of cashIn and of the balance. */
+  manualInCents: number;
+  /** Cash paid out by hand (`manual_out`). Part of cashOut and of the balance. */
+  manualOutCents: number;
 }
 
 // ── Source rows, as the tables return them ───────────────────────────────────
@@ -92,6 +112,13 @@ export interface BelegRow {
   description?: string | null;
   driver_name?: string | null;
   date: string;
+  /**
+   * `'bar'` or `'uberweisung'`, as `receipts.payment_method` stores it.
+   * Optional because a caller that reads the receipt through another shape
+   * (`utils/overviewHelpers.ts` maps a `Receipt`) does not carry it — see
+   * `cashBelegRows`, which is where the column is required.
+   */
+  payment_method?: string | null;
 }
 
 export interface CashMovementRow {
@@ -110,6 +137,8 @@ export interface CashLedgerLabels {
   beleg: string;
   gehaltsquittung: string;
   gehaltsquittungStorno: string;
+  manualIn: string;
+  manualOut: string;
   /** A movement whose `source_type` this module does not know yet. */
   other: string;
 }
@@ -142,6 +171,33 @@ export function bargeldIncomeEntries(
   }));
 }
 
+/**
+ * The Belege that left the till, out of the Belege of a period.
+ *
+ * `payment_method = 'bar'` is the database's own rule, kept character for
+ * character: `abrechnung_weekly` and `get_current_cash_balance` both write it
+ * that way, so a NULL is excluded here exactly as SQL excludes it. The column
+ * defaults to `'bar'`, so a NULL is an explicit act rather than an unset
+ * value, and staging's copy of production holds none (853 `bar`, 4
+ * `uberweisung`, 0 NULL on 28.09.2026).
+ *
+ * A caller that never selected the column gets nothing back, which shows up as
+ * a total of 0,00 € — loud, not silent. That is deliberate: the rule belongs
+ * next to the query that asks for the column, and a caller working from a row
+ * shape without it must not be given a quietly plausible figure.
+ */
+export function cashBelegRows<Row extends { payment_method?: string | null }>(
+  rows: readonly Row[],
+): Row[] {
+  return rows.filter(row => row.payment_method === 'bar');
+}
+
+/**
+ * Every row given here is counted as cash out. Pass Belege through
+ * `cashBelegRows` first when the rows carry `payment_method`: a bank-paid
+ * Beleg never left the till, and counting it understates the cash a company
+ * holds.
+ */
 export function belegEntries(
   rows: readonly BelegRow[],
   labels: CashLedgerLabels,
@@ -198,6 +254,7 @@ export function cashMovementEntries(
 
 function cashMovementSource(sourceType: string): CashLedgerSource {
   return sourceType === 'gehaltsquittung' || sourceType === 'gehaltsquittung_storno'
+    || sourceType === 'manual_in' || sourceType === 'manual_out'
     ? sourceType
     : 'other';
 }
@@ -208,6 +265,10 @@ function sourceLabel(source: CashLedgerSource, labels: CashLedgerLabels): string
       return labels.gehaltsquittung;
     case 'gehaltsquittung_storno':
       return labels.gehaltsquittungStorno;
+    case 'manual_in':
+      return labels.manualIn;
+    case 'manual_out':
+      return labels.manualOut;
     default:
       return labels.other;
   }
@@ -221,6 +282,8 @@ export function summarizeCashLedger(entries: readonly CashLedgerEntry[]): CashLe
   let bargeldIncomeCents = 0;
   let belegExpenseCents = 0;
   let salaryPayoutCents = 0;
+  let manualInCents = 0;
+  let manualOutCents = 0;
 
   for (const entry of entries) {
     if (entry.direction === 'in') cashInCents += entry.amountCents;
@@ -239,6 +302,12 @@ export function summarizeCashLedger(entries: readonly CashLedgerEntry[]): CashLe
       case 'gehaltsquittung_storno':
         salaryPayoutCents -= entry.amountCents;
         break;
+      case 'manual_in':
+        manualInCents += entry.amountCents;
+        break;
+      case 'manual_out':
+        manualOutCents += entry.amountCents;
+        break;
       case 'other':
         // Already counted in cashIn/cashOut above, so the balance holds it;
         // no category claims it, because nothing here knows what it is.
@@ -253,6 +322,8 @@ export function summarizeCashLedger(entries: readonly CashLedgerEntry[]): CashLe
     bargeldIncomeCents,
     belegExpenseCents,
     salaryPayoutCents,
+    manualInCents,
+    manualOutCents,
   };
 }
 

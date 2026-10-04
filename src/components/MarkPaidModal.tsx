@@ -7,13 +7,19 @@ import { useToast } from '../contexts/ToastContext';
 import { useTranslation } from '../contexts/LanguageContext';
 import { format } from 'date-fns';
 
+/**
+ * What this dialog needs of one `platform_invoices_list` row (migration
+ * 20260924110000, decision D14). The company's name used to arrive as an
+ * embedded `companies(name)`; the read model answers it as a flat column,
+ * because the invoice table is no longer readable across companies.
+ */
 interface Invoice {
   id: string;
   company_id: string;
   amount: number;
   status: string;
   invoice_number: string;
-  companies?: { name: string } | null;
+  company_name?: string | null;
 }
 
 interface Props {
@@ -86,7 +92,7 @@ export default function MarkPaidModal({ invoice, onClose, onConfirm }: Props) {
             <div>
               <h2 className="font-bold" style={{ color: 'var(--text-primary)' }}>{t('bill.markPaid.title')}</h2>
               <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
-                {invoice.companies?.name || ''} &middot; {invoice.invoice_number}
+                {invoice.company_name || ''} &middot; {invoice.invoice_number}
               </p>
             </div>
           </div>

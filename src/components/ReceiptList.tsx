@@ -1,8 +1,9 @@
 import React, { useState, useMemo } from 'react';
-import { ArrowDown, ArrowUp, Calendar, ChevronsUpDown, FileDown, Filter, Pencil, Receipt as ReceiptIcon, Search, Trash2, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, Calendar, ChevronsUpDown, Download, FileDown, Filter, Pencil, Receipt as ReceiptIcon, Search, Trash2, X } from 'lucide-react';
 import { Receipt, Driver } from '../types/receipt';
 import { format, getMonth, getYear } from 'date-fns';
 import { getBusinessMonthRange, getBusinessWeeksForMonth, WeekOfMonth } from '../utils/weekCalculations';
+import type { ReceiptExportFilters } from '../utils/belegeExport';
 import { useTranslation } from '../contexts/LanguageContext';
 import type { TranslationKey } from '../i18n';
 import {
@@ -28,11 +29,28 @@ interface ReceiptListProps {
   drivers: Driver[];
   onEdit: (receipt: Receipt) => void;
   onDelete: (id: string) => void;
-  onExportFiltered: (filteredReceipts: Receipt[]) => void;
+  /**
+   * Write the Excel file for the rows given, described by the filter that
+   * produced them.
+   *
+   * This replaces `onExportFiltered`, which asked the parent to *remember* the
+   * filtered rows so that a button in the page header could export them later.
+   * Nothing ever called it, so the header's button exported the whole company
+   * while the PDF button beside the filters exported the filtered list. The
+   * export now takes its rows as an argument, like the PDF already did, so
+   * there is no copy to fall out of step.
+   */
+  onExportExcel: (rows: Receipt[], filters: ReceiptExportFilters) => void;
   onDownloadPdf: (filteredReceipts: Receipt[], filterInfo: PdfFilterInfo) => void;
   canEdit: (receipt: Receipt) => boolean;
   canDelete: (receipt: Receipt) => boolean;
   userDisplayNames?: Map<string, string>;
+  /**
+   * The parent's read failed, so no file may be written: an empty list and a
+   * total of 0,00 € are claims (CLAUDE.md, "A figure whose load failed is not
+   * shown"). The parent owns the read, so it owns this.
+   */
+  exportDisabled?: boolean;
 }
 
 export interface PdfFilterInfo {
@@ -68,11 +86,12 @@ const ReceiptList: React.FC<ReceiptListProps> = ({
   drivers,
   onEdit,
   onDelete,
-  onExportFiltered,
+  onExportExcel,
   onDownloadPdf,
   canEdit,
   canDelete,
   userDisplayNames = new Map(),
+  exportDisabled = false,
 }) => {
   const { t, tPlural } = useTranslation();
 
@@ -127,6 +146,36 @@ const ReceiptList: React.FC<ReceiptListProps> = ({
     return getBusinessMonthRange(month0, year);
   }, [filters.selectedMonth, filters.selectedWeek, filters.customDateFrom, filters.customDateTo, weeksForMonth]);
 
+  /**
+   * The same range as `activeDateRange`, as two `YYYY-MM-DD` keys, because the
+   * comparison has to be made on calendar days and not on instants.
+   *
+   * The two paths above build Dates that mean different things, and that is what
+   * dropped receipts. A custom range parses `YYYY-MM-DD` with `new Date(...)`,
+   * which ECMAScript reads as **UTC** midnight; a week or business month comes
+   * from `new Date(year, month, day)`, which is **local** midnight. A receipt's
+   * `date` is a bare `YYYY-MM-DD` too, so it was a UTC midnight — later than a
+   * local-midnight end bound in any zone east of UTC. In Berlin that is one or
+   * two hours, and it was enough: **every receipt dated on the last day of the
+   * selected week or business month failed `<= end`** and vanished from the list,
+   * from the total, from the Excel export and from the summary PDF the
+   * Steuerberater receives. Measured on production 27.09.2026: 93 of 915 receipts
+   * fall on a Sunday — a business week's last day — and 31 on a month's last day.
+   *
+   * Each bound is read with the getters that match how it was built, so no
+   * timezone is assumed: the custom bounds are already the strings the user
+   * picked, and the week and month bounds are read with local getters.
+   */
+  const activeDateKeys = useMemo((): { start: string; end: string } | null => {
+    if (filters.customDateFrom && filters.customDateTo) {
+      return { start: filters.customDateFrom.slice(0, 10), end: filters.customDateTo.slice(0, 10) };
+    }
+    if (!activeDateRange) return null;
+    const localKey = (d: Date) =>
+      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    return { start: localKey(activeDateRange.start), end: localKey(activeDateRange.end) };
+  }, [activeDateRange, filters.customDateFrom, filters.customDateTo]);
+
   const filteredReceipts = useMemo(() => {
     return receipts.filter(receipt => {
       const matchesSearch = !searchTerm || (
@@ -136,19 +185,19 @@ const ReceiptList: React.FC<ReceiptListProps> = ({
         receipt.driverName.toLowerCase().includes(searchTerm.toLowerCase())
       );
 
-      const receiptDate = new Date(receipt.date);
       let matchesDate = true;
-      if (activeDateRange) {
-        matchesDate =
-          receiptDate >= activeDateRange.start &&
-          receiptDate <= activeDateRange.end;
+      if (activeDateKeys) {
+        // ISO dates compare lexicographically in calendar order, so this needs no
+        // Date at all and both ends are inclusive.
+        const day = receipt.date.slice(0, 10);
+        matchesDate = day >= activeDateKeys.start && day <= activeDateKeys.end;
       }
 
       const matchesDriver = !filters.driver || receipt.driverName === filters.driver;
 
       return matchesSearch && matchesDate && matchesDriver;
     });
-  }, [receipts, searchTerm, activeDateRange, filters.driver]);
+  }, [receipts, searchTerm, activeDateKeys, filters.driver]);
 
   const sortedReceipts = useMemo(() => {
     return [...filteredReceipts].sort((a, b) => {
@@ -204,6 +253,34 @@ const ReceiptList: React.FC<ReceiptListProps> = ({
   const hasActiveFilters = !!(filters.driver || filters.customDateFrom || filters.customDateTo || filters.selectedWeek > 0);
   const activeFilterCount = [filters.driver, filters.customDateFrom, filters.customDateTo, filters.selectedWeek > 0 ? 'week' : ''].filter(Boolean).length;
 
+  /**
+   * THE ONE ROW SET BOTH EXPORT BUTTONS WRITE.
+   *
+   * Every export in this component reads this binding and nothing else. It is
+   * the whole fix: the Excel button used to read a copy of the filtered list
+   * that the parent held and that nothing kept current, so the two buttons on
+   * this screen produced different files from one screen state — and the wrong
+   * one was the file that left the building. Do not reintroduce a second
+   * expression for "the rows the user is looking at"; add a term to the filter
+   * memo instead, and add its field to `exportFilters` below.
+   */
+  const exportRows = sortedReceipts;
+
+  /**
+   * The same four terms `filteredReceipts` narrows by, as facts rather than as
+   * words, so the workbook's filter band states the filter that was actually
+   * applied instead of a fixed "Gefilterte Auswahl".
+   *
+   * `activeDateKeys` is the calendar-day range the list itself compares against,
+   * so the band cannot name a period other than the one that was applied.
+   */
+  const exportFilters: ReceiptExportFilters = {
+    dateRange: activeDateKeys,
+    week: filters.selectedWeek > 0 ? filters.selectedWeek : null,
+    driver: filters.driver,
+    search: searchTerm,
+  };
+
   const handlePdfClick = () => {
     const filterInfo: PdfFilterInfo = {
       selectedMonth: filters.selectedMonth,
@@ -212,7 +289,11 @@ const ReceiptList: React.FC<ReceiptListProps> = ({
       driver: filters.driver,
       companyName: ''
     };
-    onDownloadPdf(sortedReceipts, filterInfo);
+    onDownloadPdf(exportRows, filterInfo);
+  };
+
+  const handleExcelClick = () => {
+    onExportExcel(exportRows, exportFilters);
   };
 
   // ── Presentation (phase 5) ────────────────────────────────────────────────
@@ -377,7 +458,12 @@ const ReceiptList: React.FC<ReceiptListProps> = ({
     // grid-cols-1 is minmax(0, 1fr): a bare grid sizes its column to the widest
     // child's content, and the table alone would push the page past 375 px.
     <div className="grid grid-cols-1 gap-4">
-      {/* Search, month, week, filters, PDF */}
+      {/* Search, month, week, filters, and both exports — which sit here, next to
+          the filters that decide what they hold. The Excel button used to be in
+          the page header, two components away from the filter it was supposed to
+          honour, which is how it came to honour none of them. The grid's five
+          tracks are unchanged: the two export buttons share the last one and
+          wrap inside it, so the row narrows instead of pushing the page wider. */}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_11rem_15rem_auto_auto] lg:items-end">
         <Field label={t('common.search')} className="sm:col-span-2 lg:col-span-1">
           <div className="relative">
@@ -434,15 +520,37 @@ const ReceiptList: React.FC<ReceiptListProps> = ({
           )}
         </Button>
 
-        <Button
-          variant="secondary"
-          onClick={handlePdfClick}
-          disabled={sortedReceipts.length === 0}
-          title={sortedReceipts.length === 0 ? t('rec.noneForFilters') : t('rec.downloadSummaryPdf')}
-        >
-          <FileDown aria-hidden />
-          {t('rec.summaryPdf')}
-        </Button>
+        {/* One cell, two files, one row set. flex-wrap is what keeps the row from
+            growing: the cell's min-content is the wider button alone, so a narrow
+            viewport puts them on two lines instead of pushing the page past its
+            width — an `auto` grid track holding two unwrapped buttons would. */}
+        <div className="flex flex-wrap items-end gap-3">
+          <Button
+            variant="secondary"
+            onClick={handlePdfClick}
+            disabled={exportRows.length === 0}
+            title={exportRows.length === 0 ? t('rec.noneForFilters') : t('rec.downloadSummaryPdf')}
+          >
+            <FileDown aria-hidden />
+            {t('rec.summaryPdf')}
+          </Button>
+
+          {/* Withheld on a failed read as well as on an empty selection: a
+              workbook whose totals row says 0,00 € for a read that never landed
+              is a claim, not a report. */}
+          <Button
+            variant="secondary"
+            onClick={handleExcelClick}
+            disabled={exportDisabled || exportRows.length === 0}
+            aria-disabled={exportDisabled || exportRows.length === 0}
+            title={exportDisabled
+              ? t('belege.loadFailedTitle')
+              : exportRows.length === 0 ? t('rec.noneForFilters') : t('common.exportExcelShort')}
+          >
+            <Download aria-hidden />
+            {t('common.exportExcelShort')}
+          </Button>
+        </div>
       </div>
 
       {activeWeek && (

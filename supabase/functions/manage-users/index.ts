@@ -18,7 +18,9 @@ import {
 import {
   decideAccountTarget,
   decideCreateCompany,
+  GOTRUE_PAGE_SIZE,
   MANAGE_USERS_SCOPE_MESSAGES,
+  resolveAuthAccounts,
   resolveManageUsersRoute,
   resolveManageUsersScope,
 } from '../_shared/manage-users-routes.ts'
@@ -224,33 +226,58 @@ Deno.serve(async (req: Request) => {
     // LIST USERS
     // =========================================================================
     if (route?.name === 'list') {
-      const usersWithProfiles = await platformRead(async () => {
-        const { data: users, error } = await supabaseAdmin.auth.admin.listUsers()
-        if (error) throw error
+      /*
+        The company's profiles decide who is in the answer; GoTrue only fills
+        in the two fields that live in auth.users alone.
 
-        const userIds = users.users.map(u => u.id)
+        It used to run the other way round: `auth.admin.listUsers()` with no
+        arguments, which is GoTrue's first page of **50 accounts of the whole
+        project**, and the company filter was applied to that page. Above 50
+        accounts on the installation a company's own users simply were not in
+        it — a 200, a short array, no warning, and the truncated length written
+        into the audit row as if it were the whole answer. Driving from
+        user_profiles makes the scoped query the authority and removes the
+        coupling entirely; resolveAuthAccounts then pages GoTrue and stops as
+        soon as every id is resolved, so the ordinary installation still reads
+        one page and no call issues one request per account.
 
-        // Every caller sees the accounts of its scope's company and no other:
-        // a company admin its own company's, a platform account those of the
-        // company its support session is open on. Before 3.13a a platform
-        // account was answered with every account of every company.
-        const { data: profiles } = await supabaseAdmin
+        A profile whose auth account is not found is kept rather than dropped.
+        Its address is on the profile (sync_user_profile_email copies it,
+        whatever changed it), and an account row that has gone missing is a
+        state worth seeing on the Benutzer screen — silently omitting it is the
+        failure this route already had.
+      */
+      const { list, incomplete } = await platformRead(async () => {
+        const { data: profiles, error: profileError } = await supabaseAdmin
           .from('user_profiles')
           .select('*, roles:role_id(id, name, description)')
-          .in('user_id', userIds)
           .eq('company_id', scopeCompanyId)
+          .order('created_at', { ascending: true })
+        if (profileError) throw profileError
 
-        // Filter auth users to match the profiles visible to this caller
-        const visibleUserIds = new Set(profiles?.map(p => p.user_id) ?? [])
+        const rows = profiles ?? []
+        const resolved = await resolveAuthAccounts(
+          rows.map(p => p.user_id as string),
+          async (page, perPage) => {
+            const { data, error } = await supabaseAdmin.auth.admin.listUsers({ page, perPage })
+            if (error) throw error
+            return data.users
+          },
+          { perPage: GOTRUE_PAGE_SIZE },
+        )
+        const authById = new Map(resolved.found.map(u => [u.id, u] as const))
 
-        return users.users
-          .filter(u => visibleUserIds.has(u.id))
-          .map(authUser => {
-            const profile = profiles?.find(p => p.user_id === authUser.id)
+        return {
+          incomplete: !resolved.complete,
+          list: rows.map(profile => {
+            const authUser = authById.get(profile.user_id as string)
             return {
-              id: authUser.id,
-              email: authUser.email,
-              full_name: profile?.full_name || authUser.user_metadata?.full_name || '',
+              id: profile.user_id,
+              // user_profiles.email is NOT NULL and the sync_user_profile_email
+              // trigger keeps it equal to auth.users.email, so a profile whose
+              // account could not be resolved still carries its address.
+              email: authUser?.email ?? profile.email ?? '',
+              full_name: profile?.full_name || authUser?.user_metadata?.full_name || '',
               role: profile?.role || 'viewer',
               role_id: profile?.role_id || null,
               role_name: profile?.roles?.name || profile?.role || 'viewer',
@@ -262,13 +289,25 @@ Deno.serve(async (req: Request) => {
               invited_at: profile?.invited_at || null,
               activated_at: profile?.activated_at || null,
               must_change_password: profile?.must_change_password ?? false,
-              created_at: authUser.created_at,
-              email_confirmed_at: authUser.email_confirmed_at
+              created_at: authUser?.created_at ?? profile?.created_at ?? null,
+              email_confirmed_at: authUser?.email_confirmed_at ?? null
             }
-          })
-      }, (list) => ({ after: { count: list.length } }))
+          }),
+        }
+      }, (answer) => ({ after: { count: answer.list.length, incomplete: answer.incomplete } }))
 
-      return json(req, 200, usersWithProfiles)
+      if (incomplete) {
+        // Not an error for the caller: the rows are the company's own and they
+        // are all here. What could not be completed is the auth half of some of
+        // them, and the log is where an operator learns that rather than the
+        // screen. The audit row carries the same flag.
+        logFailure('manage-users', 'list-auth-accounts-unresolved', {},
+          new Error('some profiles of the company have no auth account on the pages read'))
+      }
+
+      // A bare array, as it has always been: UserManagement.tsx reads
+      // `await response.json()` as the list itself.
+      return json(req, 200, list)
     }
 
     // =========================================================================

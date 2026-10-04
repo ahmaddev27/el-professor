@@ -36,6 +36,15 @@
                       permission row into the company it is supporting
    14. the shape      every table with the tenant shape carries the refusal
                       trigger, whichever migration wrote it
+   15. the settings   the company's own legal and bank details follow the
+                      context and not `companies.read` (20260923100000, plan
+                      3.13b): four roles × {no context, view, support, another
+                      company's context}
+   16. the money      the four billing tables follow the context and not
+                      `companies.read` (20260924110000, decision D14) — and the
+                      inverse pair only this file can state: `billing` reads them
+                      through the audited call and can open no context, while
+                      `read_only` can open a context and is refused the call
 
   What is deliberately not here: the storage policies, which are
   tests/rls/storage.sql's (20260920100000, the file half of plan 3.C), and the
@@ -400,13 +409,17 @@ DECLARE
   u_o  constant uuid := _pc_id('user:owner');
   s_o  constant uuid := _pc_id('session:owner');
 BEGIN
-  PERFORM _pc_ok('view: the role gates are false, so the ten role-gated tables refuse it',
+  PERFORM _pc_ok('view: the role gates are false, so every role-gated table refuses it',
     _pc_try(u_o, s_o, 'SELECT current_role_permits(''drivers'', true)::text') = 'false'
     AND _pc_try(u_o, s_o, 'SELECT current_role_permits(''salaries'', true)::text') = 'false'
     AND _pc_try(u_o, s_o, 'SELECT is_company_admin()::text') = 'false');
 
-  -- drivers is role-gated; car_driver_assignments is one of the twenty-two
-  -- tables with no role gate at all, where the trigger is the only refusal.
+  -- drivers is role-gated on its own page; car_driver_assignments was one of
+  -- the twenty-two tables with no role gate at all, where the trigger was the
+  -- only refusal. Since 20260923130000 (slice C) it carries the `cars` page, so
+  -- both refusals now apply — and the statement trigger is still the one that
+  -- speaks, because it runs before any row is checked. That is what keeps this
+  -- assertion reading P0001 rather than 42501.
   PERFORM _pc_ok('view: inserting a driver is refused',
     _pc_try(u_o, s_o, format('INSERT INTO drivers (company_id, name) VALUES (%L, ''PC view'')', co_x))
       LIKE 'ERR P0001%');
@@ -465,7 +478,12 @@ BEGIN
   -- `rows 1`, tagged residual for 3.4c/3.13. Now the platform branch is the
   -- support session's company, so a view context's UPDATE finds no row it may
   -- change, and its INSERT fails the WITH CHECK.
-  PERFORM _pc_ok('view: …and it edits no company''s settings either, although it can read them (3.13a)',
+  --
+  -- The read half still answers 1, and since 20260923100000 (3.13b) for a
+  -- different reason: it is the context's company, not `companies.read`. That
+  -- is the shape a view context is supposed to have — it reads the company it
+  -- opened and writes nothing — and section 15 states it as a rule.
+  PERFORM _pc_ok('view: …and it edits no company''s settings either, although its context lets it read them',
     _pc_try(u_o, s_o, format('UPDATE company_settings SET company_name = ''PC view'' WHERE company_id = %L', co_x))
       = 'rows 0'
     AND _pc_try(u_o, s_o, format('SELECT count(*)::text FROM company_settings WHERE company_id = %L', co_x)) = '1');
@@ -554,10 +572,30 @@ BEGIN
       = 'rows 1'
     AND _pc_try(u_o, s_o, format('INSERT INTO roles (name, description, company_id, is_system) VALUES (''PC no'', ''pc'', %L, false)', co_y))
       LIKE 'ERR 42501%row-level security%');
-  PERFORM _pc_ok('support: …and not the other company''s settings, which it can read but not write (3.13a)',
+  /*
+    …and nothing of the other company's settings, which it can no longer even
+    read.
+
+    The read half moved with 20260923100000 (3.13b) and this line records it.
+    Under 3.13a the write matched no row while the SELECT still showed it —
+    `companies.read` answered the read, and the assertion said so: "which it
+    can read but not write". That capability is gone from company_settings_select,
+    so company Y's row is now invisible to a session open on company X, and
+    both halves of the answer are the same zero.
+
+    The distinction the old line drew still exists on the one table that kept a
+    capability: `companies`. Decision D14 (24.09.2026, 20260924110000) took the
+    other four — company_subscriptions, subscription_invoices,
+    subscription_payment_audit and subscription_coverage — behind two audited
+    read models on billing.manage, so a session open on company X reads none of
+    company Y's money either. `companies` stays open by the same decision,
+    because that list is how a company is chosen to open a context on. Section 15
+    covers the new rule across all four staff roles and every context state.
+  */
+  PERFORM _pc_ok('support: …and nothing of the other company''s settings, which it no longer reads either (3.13b)',
     _pc_try(u_o, s_o, format('UPDATE company_settings SET company_name = ''PC support'' WHERE company_id = %L', co_y))
       = 'rows 0'
-    AND _pc_try(u_o, s_o, format('SELECT count(*)::text FROM company_settings WHERE company_id = %L', co_y)) = '1');
+    AND _pc_try(u_o, s_o, format('SELECT count(*)::text FROM company_settings WHERE company_id = %L', co_y)) = '0');
   PERFORM _pc_ok('support: a profile of the company being supported can be written',
     _pc_try(u_o, s_o, format('UPDATE user_profiles SET role_id = %L WHERE user_id = %L',
                              _pc_id('role:x'), _pc_id('user:admin-x'))) = 'rows 1');
@@ -920,6 +958,335 @@ BEGIN
                  WHERE g.tgrelid = to_regclass('public.company_settings')
                    AND g.tgname = 'refuse_read_only_context_write'
                    AND NOT g.tgisinternal));
+END $$;
+
+-- ─── 15. the company's own settings follow the context, not a capability ────
+--
+-- Slice 3.13b, migration 20260923100000. `company_settings_select` read
+-- `company_id = get_user_company_id() OR platform_can('companies.read')`, and
+-- all four staff roles hold that capability (plan 3.A) — so every platform
+-- account read every customer's legal name, managing director, VAT and tax
+-- number, commercial register, bank name, IBAN, BIC and account holder with no
+-- context, no reason and no audit row. 20260921110000 had already moved this
+-- table's writes onto the support session and left the read where it was.
+--
+-- The whole grid, because the claim is about the *predicate* and not about one
+-- principal: four roles × {no context, view on X, support on X, a context on
+-- Y}. The matrix probes the owner alone, and `billing` is the case that would
+-- have gone unnoticed — it holds companies.read and cannot open a context at
+-- all, so before this migration it read every company's bank details and now
+-- reads none.
+--
+-- Contexts are opened at top level (not through _pc_try, which rolls back) and
+-- closed again, so the file's own state is what it was.
+
+DO $$
+DECLARE
+  co_x constant uuid := _pc_id('company:x');
+  co_y constant uuid := _pc_id('company:y');
+  v      record;
+  v_qual text;
+BEGIN
+  /*
+    The grid needs its own starting state, and says so rather than assuming
+    the file's:
+
+    - Whatever the sections above left open is closed. The "no context" column
+      has to mean no context, and section 13 leaves the owner inside a support
+      session.
+    - The four staff rows are put back at one role each. Section 9 ends with
+      `user:support` demoted to `read_only` on purpose — that is its subject —
+      so without this the "support session" column would be asked of an account
+      that cannot open one, and the failure would look like the rule rather
+      than like the fixture.
+  */
+  FOR v IN SELECT * FROM (VALUES ('owner'), ('support'), ('readonly'), ('billing')) AS r(who) LOOP
+    PERFORM _pc_as(_pc_id('user:' || v.who), _pc_id('session:' || v.who));
+    PERFORM public.platform_context_close();
+  END LOOP;
+  PERFORM _pc_reset();
+  PERFORM _pc_ok('settings: nothing is open before the no-context column is read',
+    (SELECT count(*) FROM app_private.platform_company_contexts WHERE closed_at IS NULL) = 0);
+
+  UPDATE app_private.platform_staff s SET disabled_at = NULL, role = r.role
+    FROM (VALUES ('owner', 'owner'), ('support', 'support'),
+                 ('readonly', 'read_only'), ('billing', 'billing')) AS r(who, role)
+   WHERE s.user_id = _pc_id('user:' || r.who);
+  PERFORM _pc_ok('settings: one active staff row per role to ask the grid of',
+    (SELECT count(DISTINCT s.role) FROM app_private.platform_staff s
+      WHERE s.disabled_at IS NULL
+        AND s.user_id IN (_pc_id('user:owner'), _pc_id('user:support'),
+                          _pc_id('user:readonly'), _pc_id('user:billing'))) = 4);
+
+  -- 15a. The predicate itself: no capability, no seam, the tenant term alone.
+  SELECT coalesce(p.qual, '') INTO v_qual
+    FROM pg_policies p
+   WHERE p.schemaname = 'public' AND p.tablename = 'company_settings'
+     AND p.policyname = 'company_settings_select';
+  PERFORM _pc_ok('settings: the SELECT predicate names no platform capability and no read seam',
+    v_qual ~ 'get_user_company_id' AND v_qual !~ 'platform_can' AND v_qual !~ 'platform_reads_company_data');
+
+  -- 15b. With nothing open, no staff role reads either company's settings —
+  -- and every one of them still holds companies.read, which is the point: the
+  -- capability is no longer what answers here.
+  FOR v IN SELECT * FROM (VALUES ('owner'), ('support'), ('readonly'), ('billing')) AS r(who) LOOP
+    PERFORM _pc_ok(format('settings: %s holds companies.read…', v.who),
+      _pc_try(_pc_id('user:' || v.who), _pc_id('session:' || v.who),
+              'SELECT platform_can(''companies.read'')::text') = 'true');
+    PERFORM _pc_ok(format('settings: …and with no context open %s reads neither company''s row', v.who),
+      _pc_try(_pc_id('user:' || v.who), _pc_id('session:' || v.who),
+              format('SELECT count(*)::text FROM company_settings WHERE company_id IN (%L, %L)', co_x, co_y)) = '0');
+  END LOOP;
+
+  -- 15c. billing and read_only cannot open a context at all (platform_context_open
+  -- needs business.read for a view and support.session for a session), so for
+  -- them this table is now unreachable in every state. That is the narrowing.
+  PERFORM _pc_ok('settings: billing cannot open a view context, so no state reaches the table',
+    _pc_field(_pc_try(_pc_id('user:billing'), _pc_id('session:billing'),
+                      format('SELECT platform_context_open(%L, ''view'')::text', co_x)), 'reason')
+      = 'denied');
+  PERFORM _pc_ok('settings: read_only cannot open a support session either',
+    _pc_field(_pc_try(_pc_id('user:readonly'), _pc_id('session:readonly'),
+                      format('SELECT platform_context_open(%L, ''support'', ''pc'')::text', co_y)), 'reason')
+      = 'denied');
+END $$;
+
+DO $$
+DECLARE
+  co_x constant uuid := _pc_id('company:x');
+  co_y constant uuid := _pc_id('company:y');
+  v_open jsonb;
+BEGIN
+  /*
+    Opened the way section 3 and section 6 do — inside this block, not through
+    _pc_try, which rolls its subtransaction back and would leave nothing open.
+
+    read_only holds business.read, so it opens a *view* context; support and
+    owner open a support session. Each is on its own account, so the "one
+    context at a time" rule is never in play between them. The owner opens
+    company Y on purpose: that is the "another company's context" column.
+  */
+  PERFORM _pc_as(_pc_id('user:readonly'), _pc_id('session:readonly'));
+  v_open := public.platform_context_open(co_x, 'view');
+  PERFORM _pc_reset();
+  PERFORM _pc_ok('settings: read_only opened a view context on X', (v_open ->> 'success') = 'true');
+
+  PERFORM _pc_as(_pc_id('user:support'), _pc_id('session:support'));
+  v_open := public.platform_context_open(co_x, 'support', 'PC 3.13b');
+  PERFORM _pc_reset();
+  PERFORM _pc_ok('settings: support opened a session on X', (v_open ->> 'success') = 'true');
+
+  PERFORM _pc_as(_pc_id('user:owner'), _pc_id('session:owner'));
+  PERFORM public.platform_context_close();
+  v_open := public.platform_context_open(co_y, 'support', 'PC 3.13b other');
+  PERFORM _pc_reset();
+  PERFORM _pc_ok('settings: the owner opened a session on Y', (v_open ->> 'success') = 'true');
+
+  -- 15d. A view context reads the company it opened. Reading the legal details
+  -- is what a view context is for, so this must stay allowed — the rule is
+  -- "inside a context", not "inside a support session".
+  PERFORM _pc_ok('settings: a view context on X reads X''s row',
+    _pc_try(_pc_id('user:readonly'), _pc_id('session:readonly'),
+            format('SELECT count(*)::text FROM company_settings WHERE company_id = %L', co_x)) = '1');
+  PERFORM _pc_ok('settings: …and not Y''s',
+    _pc_try(_pc_id('user:readonly'), _pc_id('session:readonly'),
+            format('SELECT count(*)::text FROM company_settings WHERE company_id = %L', co_y)) = '0');
+
+  -- 15e. A support session likewise, and only its own company.
+  PERFORM _pc_ok('settings: a support session on X reads X''s row and not Y''s',
+    _pc_try(_pc_id('user:support'), _pc_id('session:support'),
+            format('SELECT count(*)::text FROM company_settings WHERE company_id = %L', co_x)) = '1'
+    AND _pc_try(_pc_id('user:support'), _pc_id('session:support'),
+            format('SELECT count(*)::text FROM company_settings WHERE company_id = %L', co_y)) = '0');
+
+  -- 15f. Another company's context is the case a capability could never
+  -- express: the owner is inside Y, so X's row is invisible to it although it
+  -- holds every capability there is.
+  PERFORM _pc_ok('settings: an owner inside company Y reads Y''s row and not X''s',
+    _pc_try(_pc_id('user:owner'), _pc_id('session:owner'),
+            format('SELECT count(*)::text FROM company_settings WHERE company_id = %L', co_y)) = '1'
+    AND _pc_try(_pc_id('user:owner'), _pc_id('session:owner'),
+            format('SELECT count(*)::text FROM company_settings WHERE company_id = %L', co_x)) = '0');
+
+  -- 15g. The context is answered to the sign-in session that opened it, so the
+  -- same account without the claim is outside every context — including here.
+  PERFORM _pc_ok('settings: the same owner without its session claim reads neither',
+    _pc_try(_pc_id('user:owner'), NULL,
+            format('SELECT count(*)::text FROM company_settings WHERE company_id IN (%L, %L)', co_x, co_y)) = '0');
+
+  -- 15h. A company's own members are untouched: the term that answers them is
+  -- the one that was always there.
+  PERFORM _pc_ok('settings: company X''s administrator still reads X''s row and not Y''s',
+    _pc_try(_pc_id('user:admin-x'), _pc_id('session:admin-x'),
+            format('SELECT count(*)::text FROM company_settings WHERE company_id = %L', co_x)) = '1'
+    AND _pc_try(_pc_id('user:admin-x'), _pc_id('session:admin-x'),
+            format('SELECT count(*)::text FROM company_settings WHERE company_id = %L', co_y)) = '0');
+
+  -- 15i. The figure the panel lost is in the audited read model instead, where
+  -- it is one `read` row per call. companies.read is what that model asks, so
+  -- every staff role still gets it — without the bank and tax columns beside it.
+  PERFORM _pc_ok('settings: the driver allowance is a key of platform_companies_list',
+    app_private.platform_companies_list_statement() LIKE '%drivers_per_car_limit%');
+  PERFORM _pc_ok('settings: …and that model reads no other column of the table',
+    (SELECT count(*) FROM regexp_matches(app_private.platform_companies_list_statement(),
+                                         '\mcs\.([a-z_]+)', 'g') AS m(ref)
+      WHERE m.ref[1] NOT IN ('company_id', 'drivers_per_car_limit')) = 0);
+
+  -- The file leaves nothing open behind it.
+  PERFORM _pc_as(_pc_id('user:readonly'), _pc_id('session:readonly'));
+  PERFORM public.platform_context_close();
+  PERFORM _pc_as(_pc_id('user:support'), _pc_id('session:support'));
+  PERFORM public.platform_context_close();
+  PERFORM _pc_as(_pc_id('user:owner'), _pc_id('session:owner'));
+  PERFORM public.platform_context_close();
+  PERFORM _pc_reset();
+
+  PERFORM _pc_ok('settings: every context this section opened is closed again',
+    (SELECT count(*) FROM app_private.platform_company_contexts WHERE closed_at IS NULL) = 0);
+END $$;
+
+-- ─── 16. the money: the context or the audited call, and the two do not meet ─
+--
+-- Decision D14 (24.09.2026, migration 20260924110000). `company_subscriptions`,
+-- `subscription_invoices`, `subscription_payment_audit` and
+-- `subscription_coverage` lost the `companies.read` branch every staff role
+-- holds, so what is left is the tenant term — the open context's company for a
+-- company-less staff account — plus two audited read models on
+-- **billing.manage**.
+--
+-- The pair those two halves make is the whole shape of the decision, and neither
+-- file alone can see it. tests/rls/platform-readmodels.sql section 12 takes the
+-- roles through the read models; tests/rls/matrix.sql probes an owner with a
+-- context. What only this file can state is the **inverse**:
+--
+--   billing    holds billing.manage, so it reads every customer's money through
+--              the audited call — and cannot open a context at all (15c), so the
+--              audited call is the only way it ever reaches an invoice
+--   read_only  cannot make the audited call, and can open a *view* context — so
+--              it reads the money of the one company it opened, recorded as a
+--              context rather than as a read row
+--
+-- Nothing is open when this section starts: section 15 closes the three contexts
+-- it opened and asserts it.
+
+DO $$
+DECLARE
+  co_x  constant uuid := _pc_id('company:x');
+  co_y  constant uuid := _pc_id('company:y');
+  u_ro  constant uuid := _pc_id('user:readonly');
+  s_ro  constant uuid := _pc_id('session:readonly');
+  u_bi  constant uuid := _pc_id('user:billing');
+  s_bi  constant uuid := _pc_id('session:billing');
+  v      record;
+  v_open jsonb;
+  v_qual text;
+BEGIN
+  -- One subscription, one invoice, one payment-trail row and one coverage period
+  -- per company: enough for each table's predicate to have something to answer
+  -- about on both sides.
+  INSERT INTO subscription_plans (id, name, monthly_price, included_cars)
+  VALUES (_pc_id('plan:pc'), 'PC Plan', 49, 5)
+  ON CONFLICT (id) DO NOTHING;
+
+  INSERT INTO company_subscriptions (id, company_id, plan_id, monthly_price) VALUES
+    (_pc_id('sub:x'), co_x, _pc_id('plan:pc'), 49),
+    (_pc_id('sub:y'), co_y, _pc_id('plan:pc'), 49)
+  ON CONFLICT (id) DO NOTHING;
+
+  INSERT INTO subscription_invoices (id, company_id, subscription_id, invoice_month, invoice_year,
+                                     invoice_number, amount, status, due_date) VALUES
+    (_pc_id('inv:x'), co_x, _pc_id('sub:x'), 1, 2026, 'PC-2026-0001', 49, 'open', '2026-01-31'),
+    (_pc_id('inv:y'), co_y, _pc_id('sub:y'), 1, 2026, 'PC-2026-0002', 49, 'open', '2026-01-31')
+  ON CONFLICT (id) DO NOTHING;
+
+  INSERT INTO subscription_payment_audit (id, invoice_id, company_id, action, changed_by) VALUES
+    (_pc_id('pay:x'), _pc_id('inv:x'), co_x, 'pc', _pc_id('user:owner')),
+    (_pc_id('pay:y'), _pc_id('inv:y'), co_y, 'pc', _pc_id('user:owner'))
+  ON CONFLICT (id) DO NOTHING;
+
+  INSERT INTO subscription_coverage (id, company_id, source, period_start, period_end) VALUES
+    (_pc_id('cov:x'), co_x, 'manual', now(), now() + interval '30 days'),
+    (_pc_id('cov:y'), co_y, 'manual', now(), now() + interval '30 days')
+  ON CONFLICT (id) DO NOTHING;
+
+  -- 16a. The predicates themselves: the tenant term, no capability, no seam.
+  FOR v IN SELECT * FROM (VALUES
+    ('company_subscriptions',      'company_subscriptions_select'),
+    ('subscription_invoices',      'subscription_invoices_select'),
+    ('subscription_payment_audit', 'subscription_payment_audit_select'),
+    ('subscription_coverage',      'subscription_coverage_select')
+  ) AS t(tbl, pol) LOOP
+    SELECT coalesce(p.qual, '') INTO v_qual
+      FROM pg_policies p
+     WHERE p.schemaname = 'public' AND p.tablename = v.tbl AND p.policyname = v.pol;
+    PERFORM _pc_ok(format('money: %s names the tenant term and no platform capability', v.pol),
+      v_qual ~ 'get_user_company_id' AND v_qual !~ 'platform_can'
+      AND v_qual !~ 'platform_reads_company_data');
+  END LOOP;
+
+  -- 16b. With nothing open, no staff role reads any of the four — whatever
+  -- capability it holds. Before D14 every one of them read both companies.
+  FOR v IN SELECT * FROM (VALUES ('owner'), ('support'), ('readonly'), ('billing')) AS r(who) LOOP
+    PERFORM _pc_ok(format('money: with no context open %s reads none of the four tables', v.who),
+      _pc_try(_pc_id('user:' || v.who), _pc_id('session:' || v.who), format(
+        $q$SELECT ((SELECT count(*) FROM company_subscriptions      WHERE company_id IN (%1$L, %2$L))
+                 + (SELECT count(*) FROM subscription_invoices      WHERE company_id IN (%1$L, %2$L))
+                 + (SELECT count(*) FROM subscription_payment_audit WHERE company_id IN (%1$L, %2$L))
+                 + (SELECT count(*) FROM subscription_coverage      WHERE company_id IN (%1$L, %2$L)))::text$q$,
+        co_x, co_y)) = '0');
+  END LOOP;
+
+  -- 16c. billing is the account the decision hands the money to, and 15c has
+  -- already shown it can open no context: so for billing the audited call is the
+  -- only way to an invoice, and it answers both companies.
+  PERFORM _pc_ok('money: billing reads every company''s invoices and subscriptions through the audited models',
+    _pc_field(_pc_try(u_bi, s_bi, 'SELECT platform_invoices_list()::text'), 'ok') = 'true'
+    AND _pc_field(_pc_try(u_bi, s_bi, 'SELECT platform_subscriptions_list()::text'), 'ok') = 'true');
+  PERFORM _pc_ok('money: …and read_only, which can open a context, is refused both of them',
+    _pc_field(_pc_try(u_ro, s_ro, 'SELECT platform_invoices_list()::text'), 'reason') = 'not_authorized'
+    AND _pc_field(_pc_try(u_ro, s_ro, 'SELECT platform_subscriptions_list()::text'), 'reason') = 'not_authorized');
+
+  -- 16d. read_only opens a view context on X. Opened here and not through
+  -- _pc_try, which rolls its subtransaction back.
+  PERFORM _pc_as(u_ro, s_ro);
+  v_open := public.platform_context_open(co_x, 'view');
+  PERFORM _pc_reset();
+  PERFORM _pc_ok('money: read_only opened a view context on X', (v_open ->> 'success') = 'true');
+
+  PERFORM _pc_ok('money: inside that context it reads X''s subscription, invoice, trail and coverage',
+    _pc_try(u_ro, s_ro, format(
+      $q$SELECT ((SELECT count(*) FROM company_subscriptions      WHERE company_id = %1$L)
+               + (SELECT count(*) FROM subscription_invoices      WHERE company_id = %1$L)
+               + (SELECT count(*) FROM subscription_payment_audit WHERE company_id = %1$L)
+               + (SELECT count(*) FROM subscription_coverage      WHERE company_id = %1$L))::text$q$,
+      co_x)) = '4');
+  PERFORM _pc_ok('money: …and none of company Y''s',
+    _pc_try(u_ro, s_ro, format(
+      $q$SELECT ((SELECT count(*) FROM company_subscriptions      WHERE company_id = %1$L)
+               + (SELECT count(*) FROM subscription_invoices      WHERE company_id = %1$L)
+               + (SELECT count(*) FROM subscription_payment_audit WHERE company_id = %1$L)
+               + (SELECT count(*) FROM subscription_coverage      WHERE company_id = %1$L))::text$q$,
+      co_y)) = '0');
+  -- The context does not hand it the read model either: one is a capability and
+  -- the other is a company, and neither stands in for the other.
+  PERFORM _pc_ok('money: a context does not make the audited call permitted',
+    _pc_field(_pc_try(u_ro, s_ro, 'SELECT platform_invoices_list()::text'), 'reason') = 'not_authorized');
+
+  -- 16e. A company's own members are untouched: the term that answers them is
+  -- the one that was always there, and it is the *shell* helper, so a company
+  -- whose subscription lapsed still reads its own invoices — which is the whole
+  -- reason /abo-aktivieren and /billing are reachable in that state.
+  PERFORM _pc_ok('money: company X''s administrator still reads X''s invoice and not Y''s',
+    _pc_try(_pc_id('user:admin-x'), _pc_id('session:admin-x'), format(
+      'SELECT count(*)::text FROM subscription_invoices WHERE company_id = %L', co_x)) = '1'
+    AND _pc_try(_pc_id('user:admin-x'), _pc_id('session:admin-x'), format(
+      'SELECT count(*)::text FROM subscription_invoices WHERE company_id = %L', co_y)) = '0');
+
+  PERFORM _pc_as(u_ro, s_ro);
+  PERFORM public.platform_context_close();
+  PERFORM _pc_reset();
+  PERFORM _pc_ok('money: the context this section opened is closed again',
+    (SELECT count(*) FROM app_private.platform_company_contexts WHERE closed_at IS NULL) = 0);
 END $$;
 
 DO $$ BEGIN RAISE NOTICE '── platform contexts: all checks passed ──'; END $$;

@@ -1,4 +1,14 @@
 import * as XLSX from 'xlsx';
+import { downloadStyledWorkbook } from './styledWorkbookDownload';
+// The column list, the hour formatter and the month names are shared with §12's
+// payroll summary (`monthlyPlanPayrollSummary.ts`), which prints the same seven
+// Lohnart columns for the same recipient from a different source. They were
+// moved out of this file unchanged; see that module's header for why.
+import {
+  FAHRERUEBERSICHT_COLUMNS,
+  MONTHS_DE,
+  fmtHours,
+} from './fahreruebersichtColumns';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -26,22 +36,6 @@ export interface DriverSummary {
   personalnummer: string | null;
   saved: SavedStundennachweis | null;
 }
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-function minsToDecHours(mins: number): number {
-  return Math.round((mins / 60) * 100) / 100;
-}
-
-function fmtHours(mins: number): string {
-  if (!mins) return '';
-  return minsToDecHours(mins).toFixed(2).replace('.', ',');
-}
-
-const MONTHS_DE = [
-  'Januar', 'Februar', 'März', 'April', 'Mai', 'Juni',
-  'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember',
-];
 
 // ── Cell style helpers ─────────────────────────────────────────────────────────
 
@@ -124,34 +118,11 @@ const S = {
 };
 
 // ── Column definitions ────────────────────────────────────────────────────────
+// The list itself is `FAHRERUEBERSICHT_COLUMNS` in `fahreruebersichtColumns.ts`,
+// shared with §12's payroll summary so the two sheets cannot drift apart. The
+// local alias keeps every use below character-identical.
 
-const COLUMNS = [
-  { label: 'Nr.',               width: 5  },
-  { label: 'Personalnr.',       width: 13 },
-  { label: 'Fahrername',        width: 22 },
-  { label: 'Arbeitstage',       width: 12 },
-  { label: 'Std. Grundlohn',    width: 14 },
-  { label: 'Std. Nacht\n(20-06)',   width: 14 },
-  { label: 'Std. Nacht\n(00-04)',   width: 14 },
-  { label: 'Std. Samstag',      width: 13 },
-  { label: 'Std. Sonntag',      width: 13 },
-  { label: 'Std. Feiertag',     width: 13 },
-  { label: 'Std. Weihnachten',  width: 16 },
-  { label: 'Annahmequote %',    width: 14 },
-  { label: 'Bewertung',         width: 12 },
-  { label: 'Fahrpreise',        width: 13 },
-  { label: 'Gesamtumsatz €',    width: 14 },
-  { label: 'Trinkgeld €',       width: 12 },
-  { label: 'Bargeld €',         width: 12 },
-  { label: 'Online €',          width: 12 },
-  { label: 'Bonus €',           width: 11 },
-  { label: 'QPP',               width: 10 },
-  { label: 'Zielerfüllung %',   width: 14 },
-  { label: 'Kranktage',         width: 11 },
-  { label: 'Urlaubstage',       width: 12 },
-  { label: 'Sonderurlaub',      width: 13 },
-  { label: 'Bemerkung',         width: 20 },
-];
+const COLUMNS = FAHRERUEBERSICHT_COLUMNS;
 
 const NUM_COLS = COLUMNS.length;
 
@@ -196,6 +167,7 @@ export function exportFahreruebersichtToExcel(params: {
   r++;
 
   // ── Header row ──
+  const headerRow = r;
   COLUMNS.forEach((col, c) => {
     ws[XLSX.utils.encode_cell({ r, c })] = cell(col.label, S.hdr);
   });
@@ -256,11 +228,25 @@ export function exportFahreruebersichtToExcel(params: {
 
   ws['!merges'] = merges;
 
+  // The header row stays in view, which on a sheet of 25 columns and one row per
+  // driver is the difference between reading it and losing your place. Added with
+  // the writer swap because `XLSX.writeFile` emitted no `<pane>` either — this
+  // key has never had an effect in this file.
+  ws['!freeze'] = { xSplit: 0, ySplit: headerRow + 1 };
+
   const mm = String(month).padStart(2, '0');
   const sheetName = `${mm}_${year}`;
   XLSX.utils.book_append_sheet(wb, ws, sheetName);
 
-  XLSX.writeFile(wb, `Fahreruebersicht_Stundennachweis_${mm}_${year}.xlsx`);
+  // ExcelJS, not `XLSX.writeFile`. Everything above describes a drawn sheet — 22
+  // styles, the merges, the row heights — and xlsx 0.20.3 discards all of it:
+  // `get_cell_style` reads only `cell.z`. This sheet is the payroll summary an
+  // accountant reads, and it was coming out as a bare grid. Not a cell, a style,
+  // a width or a merge changed with the writer; only the freeze above was added.
+  void downloadStyledWorkbook(wb, `Fahreruebersicht_Stundennachweis_${mm}_${year}.xlsx`)
+    .catch((error: unknown) => {
+      console.error('exportFahreruebersichtToExcel: writing the workbook failed', error);
+    });
 }
 
 // ── Fahrerübersicht import-format export ──────────────────────────────────────

@@ -1,0 +1,229 @@
+/**
+ * The scheduled Abrechnung's decisions, tested without a database or a clock.
+ *
+ * abrechnung-schedule-core.ts imports nothing from Deno, npm: or jsr:, so Node
+ * runs it unchanged. The cases that matter most: an occurrence is sent once and
+ * only inside its grace window, a schedule just switched on never fires for the
+ * past, the week mailed is the last COMPLETED one, and a name two drivers share
+ * is never resolved by picking one.
+ */
+import { describe, expect, it } from 'vitest';
+import {
+  GRACE_MINUTES,
+  addDays,
+  berlinParts,
+  dueOccurrence,
+  figuresOfRow,
+  parseSendTime,
+  planCompany,
+  planDriverMails,
+  weekPeriod,
+  type ScheduleCompany,
+  type WeekFigureRow,
+} from './abrechnung-schedule-core.ts';
+
+const COMPANY = 'c0000000-0000-4000-8000-00000000000a';
+const DRIVER_A = 'd0000000-0000-4000-8000-00000000000a';
+const DRIVER_B = 'd0000000-0000-4000-8000-00000000000b';
+
+// Monday 2026-09-28, 08:00 Berlin (CEST, UTC+2) = 06:00 UTC.
+const MONDAY_8 = new Date('2026-09-28T06:00:00.000Z');
+const LONG_AGO = '2026-01-01T00:00:00.000Z';
+
+function schedule(patch: Partial<ScheduleCompany> = {}): ScheduleCompany {
+  return {
+    company_id: COMPANY, company_name: 'Test A',
+    driver_mail_enabled: true, manager_summary_enabled: true,
+    weekday: 1, send_time: '08:00', armed_at: LONG_AGO, sent: [],
+    ...patch,
+  };
+}
+
+function row(patch: Partial<WeekFigureRow> = {}): WeekFigureRow {
+  return {
+    driver_name: 'Ahmed Hemaid', anzahl_belege: 2, ausgegebene_bargeld: '112.00',
+    bargeld: '506.95', bar_zuruck: '394.95', tanken_brutto: '40', umsatz_netto: '400',
+    match_count: 1, driver_id: DRIVER_A, driver_email: 'a@example.com', ...patch,
+  };
+}
+
+describe('berlinParts', () => {
+  it('reads the Berlin day, weekday and minute, summer and winter', () => {
+    expect(berlinParts(MONDAY_8)).toEqual({ day: '2026-09-28', dow: 1, minutes: 480 });
+    // 2026-12-07 07:00 UTC is 08:00 CET.
+    expect(berlinParts(new Date('2026-12-07T07:00:00.000Z'))).toEqual({ day: '2026-12-07', dow: 1, minutes: 480 });
+  });
+
+  it('is the next day in Berlin while it is still the evening in UTC', () => {
+    expect(berlinParts(new Date('2026-09-27T22:30:00.000Z'))).toEqual({ day: '2026-09-28', dow: 1, minutes: 30 });
+  });
+});
+
+describe('parseSendTime', () => {
+  it('reads HH:MM and refuses anything else', () => {
+    expect(parseSendTime('08:00')).toBe(480);
+    expect(parseSendTime('08:00:00')).toBe(480);
+    expect(parseSendTime('23:59')).toBe(1439);
+    expect(parseSendTime('24:00')).toBeNull();
+    expect(parseSendTime('8:00')).toBeNull();
+    expect(parseSendTime('')).toBeNull();
+  });
+});
+
+describe('dueOccurrence', () => {
+  it('is due at the moment, for the week that ended the day before', () => {
+    const result = dueOccurrence(schedule(), MONDAY_8);
+    expect(result).toEqual({ due: { occurrenceDay: '2026-09-28', weekMonday: '2026-09-21' } });
+  });
+
+  it('is not due a minute before: that is last week, long past its window', () => {
+    const result = dueOccurrence(schedule(), new Date(MONDAY_8.getTime() - 60_000));
+    expect(result).toEqual({ due: null, reason: 'missed' });
+  });
+
+  it('is still due at the end of the grace window and not after it', () => {
+    const edge = new Date(MONDAY_8.getTime() + GRACE_MINUTES * 60_000);
+    expect(dueOccurrence(schedule(), edge).due).not.toBeNull();
+    expect(dueOccurrence(schedule(), new Date(edge.getTime() + 60_000)))
+      .toEqual({ due: null, reason: 'missed' });
+  });
+
+  it('never revives an earlier occurrence: Wednesday after a missed Monday sends nothing', () => {
+    const wednesday = new Date('2026-09-30T10:00:00.000Z');
+    expect(dueOccurrence(schedule(), wednesday)).toEqual({ due: null, reason: 'missed' });
+  });
+
+  it('names the same week for every run inside the window', () => {
+    const early = dueOccurrence(schedule(), MONDAY_8);
+    const late = dueOccurrence(schedule(), new Date(MONDAY_8.getTime() + 5 * 3_600_000));
+    expect(late).toEqual(early);
+  });
+
+  it('on a Sunday schedule mails the week before, not the one still running', () => {
+    // Sunday 2026-09-27 20:00 Berlin = 18:00 UTC. The week 21.-27.09 ends at midnight.
+    const sunday = new Date('2026-09-27T18:00:00.000Z');
+    const result = dueOccurrence(schedule({ weekday: 0, send_time: '20:00' }), sunday);
+    expect(result).toEqual({ due: { occurrenceDay: '2026-09-27', weekMonday: '2026-09-14' } });
+  });
+
+  it('on a Friday schedule mails the week before', () => {
+    const friday = new Date('2026-10-02T08:00:00.000Z'); // 10:00 Berlin
+    const result = dueOccurrence(schedule({ weekday: 5, send_time: '09:30' }), friday);
+    expect(result).toEqual({ due: { occurrenceDay: '2026-10-02', weekMonday: '2026-09-21' } });
+  });
+
+  it('does not fire for an occurrence that fell before the schedule was armed', () => {
+    // Armed at 07:00 Berlin, an hour before the moment: the occurrence is after it.
+    const armedAfter = '2026-09-28T05:00:00.000Z';
+    expect(dueOccurrence(schedule({ armed_at: armedAfter }), MONDAY_8).due).not.toBeNull();
+    // Armed at 08:30 Berlin, after the moment: this Monday is the past.
+    const armedLater = '2026-09-28T06:30:00.000Z';
+    expect(dueOccurrence(schedule({ armed_at: armedLater }), new Date('2026-09-28T07:00:00.000Z')))
+      .toEqual({ due: null, reason: 'before_armed' });
+  });
+
+  it('treats a schedule it cannot read as not due, never as due', () => {
+    expect(dueOccurrence(schedule({ send_time: 'soon' }), MONDAY_8)).toEqual({ due: null, reason: 'invalid_schedule' });
+    expect(dueOccurrence(schedule({ weekday: 7 }), MONDAY_8)).toEqual({ due: null, reason: 'invalid_schedule' });
+    expect(dueOccurrence(schedule({ armed_at: 'never' }), MONDAY_8)).toEqual({ due: null, reason: 'invalid_schedule' });
+  });
+});
+
+describe('weekPeriod', () => {
+  it('labels a week as the screen does, by the month of its Monday', () => {
+    expect(weekPeriod('2026-08-31')).toEqual({
+      label: 'Woche 5 - August 2026', range: '31.08.2026 – 06.09.2026',
+    });
+    expect(weekPeriod('2026-09-07').label).toBe('Woche 1 - September 2026');
+    expect(weekPeriod('2026-09-21').label).toBe('Woche 3 - September 2026');
+  });
+
+  it('writes German dates, never US', () => {
+    expect(weekPeriod('2026-09-21').range).toBe('21.09.2026 – 27.09.2026');
+  });
+});
+
+describe('addDays', () => {
+  it('crosses month ends and the clock change without drifting', () => {
+    expect(addDays('2026-09-28', 3)).toBe('2026-10-01');
+    expect(addDays('2026-10-25', 1)).toBe('2026-10-26');
+    expect(addDays('2026-03-29', -1)).toBe('2026-03-28');
+  });
+});
+
+describe('planCompany', () => {
+  it('plans both mails for a due company', () => {
+    const plan = planCompany(schedule(), MONDAY_8);
+    expect(plan).toMatchObject({
+      companyId: COMPANY, weekMonday: '2026-09-21', driverMail: true, managerSummary: true,
+    });
+  });
+
+  it('plans nothing when nothing is due', () => {
+    expect(planCompany(schedule(), new Date('2026-09-29T10:00:00.000Z'))).toBeNull();
+  });
+
+  it('does not plan a summary already claimed for that week, and keeps the claimed drivers', () => {
+    const plan = planCompany(schedule({
+      sent: [
+        { kind: 'manager_summary', target_id: COMPANY, period_key: '2026-09-21' },
+        { kind: 'driver_abrechnung', target_id: DRIVER_A, period_key: '2026-09-21' },
+        // Another week's claim means nothing for this one.
+        { kind: 'driver_abrechnung', target_id: DRIVER_B, period_key: '2026-09-14' },
+      ],
+    }), MONDAY_8);
+    expect(plan?.managerSummary).toBe(false);
+    expect([...(plan?.claimedDriverIds ?? [])]).toEqual([DRIVER_A]);
+  });
+
+  it('respects the two switches independently', () => {
+    expect(planCompany(schedule({ manager_summary_enabled: false }), MONDAY_8))
+      .toMatchObject({ driverMail: true, managerSummary: false });
+    expect(planCompany(schedule({ driver_mail_enabled: false }), MONDAY_8))
+      .toMatchObject({ driverMail: false, managerSummary: true });
+  });
+});
+
+describe('figuresOfRow', () => {
+  it('reads the screen\'s four figures and the Tankenquote', () => {
+    expect(figuresOfRow(row())).toEqual({
+      cash: 506.95, belege: 112, difference: 394.95, belegeCount: 2, tankenquote: 10,
+    });
+  });
+
+  it('leaves the Tankenquote out when there is no revenue to divide by', () => {
+    expect(figuresOfRow(row({ umsatz_netto: 0 })).tankenquote).toBeNull();
+  });
+
+  it('keeps a negative difference negative', () => {
+    expect(figuresOfRow(row({ bar_zuruck: '-12.50' })).difference).toBe(-12.5);
+  });
+});
+
+describe('planDriverMails', () => {
+  it('sends to a driver with exactly one match and an address', () => {
+    const plan = planDriverMails([row()], new Set());
+    expect(plan.sendable).toHaveLength(1);
+    expect(plan.sendable[0]).toMatchObject({ driverId: DRIVER_A, email: 'a@example.com' });
+  });
+
+  it('never resolves a shared name by picking one', () => {
+    const plan = planDriverMails([row({ match_count: 2, driver_id: null, driver_email: null })], new Set());
+    expect(plan.sendable).toEqual([]);
+    expect(plan.ambiguous).toEqual(['Ahmed Hemaid']);
+  });
+
+  it('reports a driver with no address, or no active match, rather than skipping silently', () => {
+    const plan = planDriverMails([
+      row({ driver_email: null }),
+      row({ driver_name: 'Fremd', match_count: 0, driver_id: null, driver_email: null }),
+    ], new Set());
+    expect(plan.noAddress).toEqual(['Ahmed Hemaid', 'Fremd']);
+  });
+
+  it('does not mail a driver already claimed for the week', () => {
+    const plan = planDriverMails([row()], new Set([DRIVER_A]));
+    expect(plan.sendable).toEqual([]);
+    expect(plan.alreadyClaimed).toEqual(['Ahmed Hemaid']);
+  });
+});

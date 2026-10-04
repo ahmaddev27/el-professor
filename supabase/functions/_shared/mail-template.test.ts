@@ -18,6 +18,8 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { buildOtpMail } from './otp-mail.ts';
+// @ts-expect-error -- a plain .mjs module shared with the Node build script
+import { EMAIL_COLORS } from './email-layout.mjs';
 import {
   loadMailDeliverySettings,
   MAIL_BUTTON_MAX,
@@ -106,7 +108,13 @@ describe('a customised template', () => {
 
   it('escapes the text and sets each value in bold, as the default bodies set an address', () => {
     const mail = buildOtpMail('signup_verify', vars, template);
-    expect(mail.html).toContain('Hallo <strong style="color:#111827;font-weight:600;">anna@example.com</strong>, Sie sind fast fertig.');
+    // The ink comes from `EMAIL_COLORS` rather than being written out: this line
+    // held `#111827` as a literal and broke on 03.10.2026 when the mails took the
+    // current identity, which is a test failing for the palette's reason rather
+    // than its own. What it is really asserting is that the address is set in
+    // bold **in the body ink**, whatever that ink is.
+    expect(mail.html).toContain(
+      `Hallo <strong style="color:${EMAIL_COLORS.ink};font-weight:600;">anna@example.com</strong>, Sie sind fast fertig.`);
     expect(mail.html).toContain('Zweiter Absatz &lt;b&gt;ohne&lt;/b&gt; Markup &amp; mit Zeichen.');
     expect(mail.html).not.toContain('<b>ohne</b>');
   });

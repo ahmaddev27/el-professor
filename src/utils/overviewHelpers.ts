@@ -9,8 +9,17 @@ import {
   type CashLedgerLabels,
   type CashMovementRow,
 } from './cashLedger';
+import { salaryDueState } from './salaryDue';
+import { resolveMonth, sumEuro } from './fixedCostMonths';
+
+// Type-only: this module names a dictionary key beside its German text.
+import type { EngineMessageKey, EngineMessageVars } from '../i18n/engineMessageTypes';
+import type { TranslationKey, TranslationVars } from '../i18n';
 
 export type { CashMovementRow };
+
+/** Signature of the `t` from useTranslation(), for helpers that take it. */
+type Translate = (key: TranslationKey, vars?: TranslationVars) => string;
 
 /**
  * calcCashSummary totals and never renders an entry, so these fallbacks reach
@@ -22,6 +31,8 @@ const LEDGER_LABELS: CashLedgerLabels = {
   beleg: 'Beleg',
   gehaltsquittung: 'Gehaltsquittung',
   gehaltsquittungStorno: 'Storno Gehaltsquittung',
+  manualIn: 'Bargeld eingelegt',
+  manualOut: 'Barzahlung',
   other: 'Bargeldbewegung',
 };
 
@@ -29,6 +40,19 @@ export interface FixedCostItem {
   id: string;
   description: string;
   amount: number;
+  /**
+   * The month this cost belongs to, `YYYY-MM-DD` on the first (`20261003110000`),
+   * or null for a **baseline** row — one entered before fixed costs became
+   * monthly, which applies to every month until that month has rows of its own.
+   *
+   * **Required, deliberately.** Making it optional would let a screen that forgot
+   * to select the column compile and then read every row as baseline, which is
+   * exactly the double-count this field exists to stop — and it would do it
+   * silently. Required, the compiler names the screen instead.
+   */
+  period_month: string | null;
+  /** Used to date a baseline row when listing which months exist. */
+  created_at?: string | null;
 }
 
 export interface SalaryRecord {
@@ -99,6 +123,26 @@ export interface PeriodMetrics {
   profitMargin: number;  // profit / umsatz * 100
 }
 
+/**
+ * The fixed costs that apply to the month a period starts in.
+ *
+ * **Not a sum of every row.** Since `20261003110000` fixed costs are per month:
+ * a month carries its own rows, or inherits the newest earlier month's, or falls
+ * back to the baseline rows that carry no month at all. Summing the table — which
+ * is what this did until 03.10.2026 — adds every month the company has ever
+ * recorded together, so the Gewinn figure on the Overview would drop by a whole
+ * month's rent for every month that passes. Harmless today only because no
+ * company has a second month yet; armed by the first operator who edits one.
+ *
+ * The period's **start** decides the month, not its end: a period that straddles
+ * two months belongs to the one it opens in, which is the same rule the rest of
+ * this module applies to a salary (`period_start`).
+ */
+function fixedCostsForPeriod(fixedCosts: FixedCostItem[], start: Date): number {
+  const month = `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, '0')}`;
+  return sumEuro(resolveMonth(fixedCosts, month).rows);
+}
+
 export function calcPeriodMetrics(
   incomes: Income[],
   salaries: SalaryRecord[],
@@ -133,7 +177,7 @@ export function calcPeriodMetrics(
   const totalIncome = umsatz + bargeld + trinkgeld;
   const salaryTotal = periodSalaries.reduce((s, sal) => s + Number(sal.amount_due), 0);
   const expenses = periodReceipts.reduce((s, r) => s + r.expense, 0);
-  const fixedTotal = fixedCosts.reduce((s, c) => s + Number(c.amount), 0);
+  const fixedTotal = fixedCostsForPeriod(fixedCosts, start);
   const totalCosts = expenses + fixedTotal;
   const profit = umsatz - salaryTotal - totalCosts;
   const profitMargin = umsatz > 0 ? (profit / umsatz) * 100 : 0;
@@ -257,17 +301,44 @@ export function calcSalaryAlerts(
 ): SalaryAlert[] {
   const driverMap = new Map(drivers.map(d => [d.id, d.name]));
 
+  /**
+   * Which rows still owe money is derived from the row's own figures, not from
+   * the stored `payment_status`, and the figure owed is the base —
+   * `COALESCE(netto_salary, amount_due)` — not `amount_due` alone.
+   *
+   * Three things were wrong here, and each of them makes this panel claim a
+   * number:
+   *
+   *  · the filter trusted the stored word, so a row whose status was written
+   *    against an older base was listed or hidden on that basis. The Gehälter
+   *    screen now derives the same status, so a stored word would have put the
+   *    two screens in open disagreement.
+   *  · `amountDue` ignored `netto_salary` altogether, so a manually adjusted
+   *    salary was alerted at its calculated amount. Measured on staging
+   *    28.09.2026: 1 row, wrong by 558,80 €.
+   *  · `remaining_balance || amount_due` fell through to the full salary
+   *    whenever the stored remainder was exactly 0 — latent today (0 staging
+   *    rows), and wrong by the whole amount when it fires.
+   *
+   * This function is given no income rows, so it cannot recompute the base the
+   * way the Gehälter screen does; it derives from the stored figures, which is
+   * at least self-consistent. `calcPeriodMetrics` and `calcDriverPerformance`
+   * deliberately keep reading the stored `amount_due`: there the salary is a
+   * cost in a profit figure, not a claim about what is owed, and restating a
+   * month's salary cost is a different decision from refusing a stale status.
+   */
   return salaries
-    .filter(s => s.payment_status === 'unpaid' || s.payment_status === 'partially_paid')
-    .map(s => ({
-      id: s.id,
-      driverName: s.driver_name || driverMap.get(s.driver_id) || 'Unbekannt',
-      amountDue: Number(s.amount_due),
-      amountPaid: Number(s.total_paid || 0),
-      remaining: Number(s.remaining_balance || s.amount_due),
-      status: (s.payment_status as 'unpaid' | 'partially_paid'),
-      periodStart: s.period_start,
-      periodEnd: s.period_end,
+    .map(s => ({ row: s, due: salaryDueState(s, s.total_paid) }))
+    .filter(({ due }) => due.paymentStatus !== 'paid')
+    .map(({ row, due }) => ({
+      id: row.id,
+      driverName: row.driver_name || driverMap.get(row.driver_id) || 'Unbekannt',
+      amountDue: due.base,
+      amountPaid: due.totalPaid,
+      remaining: due.remaining,
+      status: (due.paymentStatus as 'unpaid' | 'partially_paid'),
+      periodStart: row.period_start,
+      periodEnd: row.period_end,
     }));
 }
 
@@ -347,20 +418,36 @@ export function calcCashSummary(
 
 // ── 6-month trend data ────────────────────────────────────────────────────────
 
+/**
+ * A series key is also the label Recharts prints in its legend and tooltip, so
+ * the key on the datum and the `dataKey` on the <Area> have to be the same
+ * string. The chart already passed translated `dataKey`s while these were
+ * hard-coded German, so in the English UI every series resolved to a key no
+ * datum had and the chart drew nothing. Both sides read TREND_SERIES now.
+ *
+ * Unlike the engine messages beside it, this string has no second life outside
+ * the chart — nothing matches, classifies or audits it — so it is a plain
+ * `t(...)` rather than a German text carrying a key.
+ */
 export interface TrendDataPoint {
   monat: string;
-  Umsatz: number;
-  Kosten: number;
-  Gewinn: number;
-  Gehälter: number;
+  [series: string]: string | number;
 }
+
+export const TREND_SERIES = {
+  umsatz:    'overview.kpi.umsatz',
+  kosten:    'overview.chart.kosten',
+  gewinn:    'overview.chart.gewinn',
+  gehaelter: 'overview.load.gehaelter',
+} as const satisfies Record<string, TranslationKey>;
 
 export function buildTrendData(
   selectedMonth: string,
   incomes: Income[],
   salaries: SalaryRecord[],
   receipts: Receipt[],
-  fixedCosts: FixedCostItem[]
+  fixedCosts: FixedCostItem[],
+  t: Translate,
 ): TrendDataPoint[] {
   return Array.from({ length: 6 }, (_, i) => {
     const d = subMonths(parseISO(selectedMonth + '-01'), 5 - i);
@@ -369,10 +456,10 @@ export function buildTrendData(
     const metrics = calcPeriodMetrics(incomes, salaries, receipts, fixedCosts, mStart, mEnd);
     return {
       monat: format(d, 'MMM', { locale: de }),
-      Umsatz: metrics.umsatz,
-      Kosten: metrics.totalCosts,
-      Gewinn: metrics.profit,
-      Gehälter: metrics.salaries,
+      [t(TREND_SERIES.umsatz)]:    metrics.umsatz,
+      [t(TREND_SERIES.kosten)]:    metrics.totalCosts,
+      [t(TREND_SERIES.gewinn)]:    metrics.profit,
+      [t(TREND_SERIES.gehaelter)]: metrics.salaries,
     };
   });
 }
@@ -421,8 +508,13 @@ export function getTopExpenses(
 
 export interface SmartInsight {
   type: 'success' | 'warning' | 'info' | 'danger';
+  /** German, as this module has always written it. The screen's fallback. */
   title: string;
+  titleKey?: EngineMessageKey;
+  titleVars?: EngineMessageVars;
   body: string;
+  bodyKey?: EngineMessageKey;
+  bodyVars?: EngineMessageVars;
 }
 
 export function generateInsights(
@@ -441,13 +533,19 @@ export function generateInsights(
       insights.push({
         type: 'success',
         title: 'Umsatz gestiegen',
+        titleKey: 'engine.insight.revenueUp.title',
         body: `+${umsatzDelta.toFixed(1)}% im Vergleich zum Vormonat`,
+        bodyKey: 'engine.insight.revenueUp.body',
+        bodyVars: { pct: umsatzDelta.toFixed(1) },
       });
     } else if (umsatzDelta <= -5) {
       insights.push({
         type: 'warning',
         title: 'Umsatz gesunken',
+        titleKey: 'engine.insight.revenueDown.title',
         body: `${umsatzDelta.toFixed(1)}% im Vergleich zum Vormonat`,
+        bodyKey: 'engine.insight.revenueDown.body',
+        bodyVars: { pct: umsatzDelta.toFixed(1) },
       });
     }
   }
@@ -457,13 +555,19 @@ export function generateInsights(
     insights.push({
       type: 'danger',
       title: 'Verlust im aktuellen Monat',
+      titleKey: 'engine.insight.loss.title',
       body: `Firmengewinn: ${current.profit.toLocaleString('de-DE', { minimumFractionDigits: 2 })} €`,
+      bodyKey: 'engine.insight.loss.body',
+      bodyVars: { amount: current.profit.toLocaleString('de-DE', { minimumFractionDigits: 2 }) },
     });
   } else if (current.profitMargin > 30) {
     insights.push({
       type: 'success',
       title: 'Starke Gewinnmarge',
+      titleKey: 'engine.insight.strongMargin.title',
       body: `${current.profitMargin.toFixed(1)}% Rentabilität diesen Monat`,
+      bodyKey: 'engine.insight.strongMargin.body',
+      bodyVars: { pct: current.profitMargin.toFixed(1) },
     });
   }
 
@@ -473,7 +577,11 @@ export function generateInsights(
     insights.push({
       type: 'info',
       title: `Top-Fahrer: ${topDriver.name}`,
+      titleKey: 'engine.insight.topDriver.title',
+      titleVars: { driver: topDriver.name },
       body: `Nettoertrag: +${topDriver.netContribution.toLocaleString('de-DE', { minimumFractionDigits: 2 })} €`,
+      bodyKey: 'engine.insight.netContributionPositive',
+      bodyVars: { amount: topDriver.netContribution.toLocaleString('de-DE', { minimumFractionDigits: 2 }) },
     });
   }
 
@@ -483,7 +591,11 @@ export function generateInsights(
     insights.push({
       type: 'warning',
       title: `Negativer Ertrag: ${worst.name}`,
+      titleKey: 'engine.insight.worstDriver.title',
+      titleVars: { driver: worst.name },
       body: `Nettoertrag: ${worst.netContribution.toLocaleString('de-DE', { minimumFractionDigits: 2 })} €`,
+      bodyKey: 'engine.insight.netContribution',
+      bodyVars: { amount: worst.netContribution.toLocaleString('de-DE', { minimumFractionDigits: 2 }) },
     });
   }
 
@@ -495,13 +607,21 @@ export function generateInsights(
     insights.push({
       type: 'warning',
       title: `${unpaidCount} unbezahlte Gehälter`,
+      titleKey: 'engine.insight.unpaidSalaries.title',
+      titleVars: { count: unpaidCount },
       body: `Offen: ${unpaidTotal.toLocaleString('de-DE', { minimumFractionDigits: 2 })} €`,
+      bodyKey: 'engine.insight.unpaidSalaries.body',
+      bodyVars: { amount: unpaidTotal.toLocaleString('de-DE', { minimumFractionDigits: 2 }) },
     });
   } else if (partialCount > 0) {
     insights.push({
       type: 'info',
       title: `${partialCount} teilweise bezahlte Gehälter`,
+      titleKey: 'engine.insight.partialSalaries.title',
+      titleVars: { count: partialCount },
       body: `Restbetrag: ${unpaidTotal.toLocaleString('de-DE', { minimumFractionDigits: 2 })} €`,
+      bodyKey: 'engine.insight.partialSalaries.body',
+      bodyVars: { amount: unpaidTotal.toLocaleString('de-DE', { minimumFractionDigits: 2 }) },
     });
   }
 
@@ -511,7 +631,14 @@ export function generateInsights(
     insights.push({
       type: 'danger',
       title: `${negativeChecks} Fahrzeug${negativeChecks > 1 ? 'e' : ''} mit Problemen`,
+      // One key per number: German and English inflect the noun itself, not a
+      // suffix the engine could splice on.
+      titleKey: negativeChecks > 1
+        ? 'engine.insight.fleetIssues.title.other'
+        : 'engine.insight.fleetIssues.title.one',
+      titleVars: { count: negativeChecks },
       body: 'Werkstatt-Checks zeigen negative Befunde',
+      bodyKey: 'engine.insight.fleetIssues.body',
     });
   }
 
@@ -521,16 +648,18 @@ export function generateInsights(
 // ── Revenue composition ───────────────────────────────────────────────────────
 
 export interface RevenueCompositionItem {
+  /** German, as this module has always written it. The chart's fallback. */
   name: string;
+  nameKey: EngineMessageKey;
   value: number;
   color: string;
 }
 
 export function buildRevenueComposition(metrics: PeriodMetrics): RevenueCompositionItem[] {
   return [
-    { name: 'Netto-Fahrpreis', value: metrics.nettoFahrpreis, color: '#3b82f6' },
-    { name: 'Aktionen', value: metrics.aktionen, color: '#f59e0b' },
-    { name: 'Trinkgeld', value: metrics.trinkgeld, color: '#8b5cf6' },
-    { name: 'Bargeld', value: metrics.bargeld, color: '#10b981' },
+    { name: 'Netto-Fahrpreis', nameKey: 'engine.revenue.nettoFahrpreis', value: metrics.nettoFahrpreis, color: '#3b82f6' },
+    { name: 'Aktionen', nameKey: 'engine.revenue.aktionen', value: metrics.aktionen, color: '#f59e0b' },
+    { name: 'Trinkgeld', nameKey: 'engine.revenue.trinkgeld', value: metrics.trinkgeld, color: '#8b5cf6' },
+    { name: 'Bargeld', nameKey: 'engine.revenue.bargeld', value: metrics.bargeld, color: '#10b981' },
   ].filter(i => i.value > 0);
 }

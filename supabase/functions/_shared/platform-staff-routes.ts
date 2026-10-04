@@ -10,7 +10,7 @@
  */
 import type { AuditCategory, PlatformCapability } from './platform-access.ts';
 
-export type PlatformStaffRouteName = 'invite' | 'resend-invite';
+export type PlatformStaffRouteName = 'invite' | 'resend-invite' | 'set-role';
 
 export interface PlatformStaffRoute {
   name: PlatformStaffRouteName;
@@ -24,6 +24,12 @@ export interface PlatformStaffRoute {
 export const PLATFORM_STAFF_ROUTES: readonly PlatformStaffRoute[] = [
   { name: 'invite',        method: 'POST', segment: '/invite',        capability: 'staff.manage', category: 'write', action: 'platform_staff_invite.create' },
   { name: 'resend-invite', method: 'POST', segment: '/resend-invite', capability: 'staff.manage', category: 'write', action: 'platform_staff_invite.resend' },
+  // 20260923140000: an existing member's role, through
+  // `public.platform_staff_set_role`, which applies every rule and writes its
+  // own audit row in the same transaction as the change. The action is not in
+  // the `platform_staff.` namespace: `platform_audit_record` refuses that one
+  // because the database writes it itself.
+  { name: 'set-role',      method: 'POST', segment: '/set-role',      capability: 'staff.manage', category: 'write', action: 'platform_staff_role.set' },
 ];
 
 /**
@@ -37,20 +43,64 @@ export function resolvePlatformStaffRoute(method: string, pathname: string): Pla
 }
 
 /**
- * The only role a staff row may be created with before plan step 3.3.
+ * The four roles a staff row may carry, as `app_private.platform_staff`'s CHECK
+ * constraint and `app_private.platform_capability_matrix()` define them.
  *
- * Every policy still built on is_user_super_admin() gives *any* active staff
- * row an owner's writes on the tenant tables, so a "support" or "read_only" row
- * would hold more than its name says until 3.3 moves those policies onto
- * capabilities. `platform_staff_add` refuses the others in the database as
- * well; this is the same rule at the door, so the account is never created.
+ * All four have been enabled since migration 20260923110000 (owner's decision,
+ * 23.09.2026). Until then `platform_staff_add` refused every role but `owner`
+ * with reason `role_requires_3_3` — originally because every tenant policy was
+ * built on `is_user_super_admin()` and would have given a "support" row an
+ * owner's writes, and after 20260917130000 fixed that, because enabling the
+ * other roles decides which accounts read every customer's data and was the
+ * owner's to approve on its own.
+ *
+ * The database decides regardless: `platform_staff_add` validates the role
+ * against the same four and answers `invalid` for anything else. This is the
+ * same rule at the door, so an invitation with a bad role never creates an
+ * account it would then have to delete.
  */
-export const STAFF_ROLE_UNTIL_3_3 = 'owner';
+export const PLATFORM_STAFF_ROLES = ['owner', 'support', 'billing', 'read_only'] as const;
+export type PlatformStaffRole = typeof PLATFORM_STAFF_ROLES[number];
+
+/** What a request that names no role gets, and what the RPC's own default is. */
+export const DEFAULT_STAFF_ROLE: PlatformStaffRole = 'owner';
 
 export const STAFF_ROLE_REFUSAL_DE =
-  'Andere Rollen als „owner" sind erst ab Plan-Schritt 3.3 möglich.';
+  'Unbekannte Plattform-Rolle. Erlaubt sind: owner, support, billing, read_only.';
+
+/**
+ * The role to write, or null when the request named one that is not a role.
+ *
+ * One function rather than a "check" and a separate "read": a value that decides
+ * how much of every customer's data an account may reach must not be able to
+ * *fall back* to a role. `owner` is returned only where the request named
+ * nothing at all, which is the RPC's own default and how the previous release
+ * called it; anything unrecognised is null, and the route refuses.
+ */
+export function parseStaffRole(role: unknown): PlatformStaffRole | null {
+  if (role === undefined || role === null) return DEFAULT_STAFF_ROLE;
+  return (PLATFORM_STAFF_ROLES as readonly unknown[]).includes(role)
+    ? role as PlatformStaffRole
+    : null;
+}
 
 /** Whether this request may create a staff row with the role it asked for. */
 export function staffRoleIsAllowed(role: unknown): boolean {
-  return role === undefined || role === null || role === STAFF_ROLE_UNTIL_3_3;
+  return parseStaffRole(role) !== null;
+}
+
+/**
+ * The role a **change** asks for, or null — including for a request that named
+ * none (20260923140000).
+ *
+ * `parseStaffRole`'s `owner` default is right where a row is *created*: that is
+ * the RPC's own default and what the release before the four roles sent. It is
+ * wrong where a row already exists, because a body that forgot its `role` would
+ * then read as "make this member an owner" — a promotion nobody asked for, of
+ * an account that already holds some other role. So the set-role route asks
+ * this one, and a missing role is refused like an unknown one.
+ */
+export function parseStaffRoleChange(role: unknown): PlatformStaffRole | null {
+  if (role === undefined || role === null) return null;
+  return parseStaffRole(role);
 }

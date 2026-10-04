@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, Save, AlertCircle, DollarSign, Calendar, FileText, ChevronRight, Lock } from 'lucide-react';
+import { X, Save, AlertCircle, DollarSign, Calendar, FileText, Lock } from 'lucide-react';
 import { SalaryPayment } from '../types/receipt';
 import { format } from 'date-fns';
 import { useTranslation } from '../contexts/LanguageContext';
@@ -9,8 +9,17 @@ import {
   decidePaymentWrite,
   paymentFieldLock,
 } from '../utils/salaryPaymentWrite';
-import { berlinToday } from '../utils/salaryCashReceiptFlow';
 
+/**
+ * Add or edit one salary payment.
+ *
+ * **Owner, 04.10.2026: this form saves and closes.** A cash payment used to
+ * hand itself to the Gehaltsquittung wizard from here, which is what he
+ * photographed and asked to be gone — the warning above the amount, the
+ * "Weiter zur Gehaltsquittung" button, and the three-step dialog that opened
+ * instead of saving. A numbered receipt is issued afterwards from the payment's
+ * own row (`issue_salary_cash_receipt`), and it books nothing into the till.
+ */
 interface SalaryPaymentModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -19,14 +28,13 @@ interface SalaryPaymentModalProps {
   remainingBalance: number;
   payment?: SalaryPayment;
   /**
-   * Why a cash payment cannot be recorded for this salary at all, ready to
-   * show; null when it can. A cash payment is now a Gehaltsquittung, so the
-   * Gehaltsquittung's own conditions decide — an overlapping salary row, a plan
-   * without Dokumente, a caller outside their own company. It is shown beside
-   * the type select while that select is still open, so the payment can be
-   * recorded as a bank transfer instead of the form closing onto a dead end.
+   * The live receipt issued for `payment` after the fact, or null. Not a column
+   * on `salary_payments` — the salary screen looks it up by payment id — so it
+   * arrives beside the row rather than on it. It is the second wall behind
+   * `paymentRowActions`, which already hides such a row's pencil, and behind
+   * `salary_payments_issued_receipt_guard`, which refuses the UPDATE.
    */
-  cashBlockedMessage?: string | null;
+  issuedReceiptId?: string | null;
 }
 
 const inputStyle: React.CSSProperties = {
@@ -47,7 +55,7 @@ const SalaryPaymentModal: React.FC<SalaryPaymentModalProps> = ({
   salaryId,
   remainingBalance,
   payment,
-  cashBlockedMessage = null,
+  issuedReceiptId = null,
 }) => {
   const { t } = useTranslation();
   const [formData, setFormData] = useState({
@@ -81,30 +89,31 @@ const SalaryPaymentModal: React.FC<SalaryPaymentModalProps> = ({
   }, [isOpen, payment]);
 
   const existing = payment
-    ? { payment_type: payment.payment_type, source_type: payment.source_type ?? null, amount: payment.amount }
+    ? {
+        payment_type: payment.payment_type,
+        source_type: payment.source_type ?? null,
+        amount: payment.amount,
+        issued_receipt_id: issuedReceiptId,
+      }
     : null;
 
   // What this form's current selection will do. The same function decides the
-  // write itself in SalaryDetailsModal, so the notice below and the button's
-  // label cannot promise something the save does differently.
+  // write itself in SalaryDetailsModal, so what the form offers and what the
+  // save does cannot drift.
   const decision = decidePaymentWrite({
     origin: payment ? 'edit' : 'add',
     paymentType: formData.payment_type,
     amount: formData.amount,
     existing,
   });
-  const makesReceipt = decision.kind === 'gehaltsquittung';
-  const refused = decision.kind === 'refused' ? t(PAYMENT_WRITE_REFUSAL_KEYS[decision.refusal]) : null;
+  const blocked = decision.kind === 'refused' ? t(PAYMENT_WRITE_REFUSAL_KEYS[decision.refusal]) : null;
 
-  // A stored cash row asserts how much cash left the till, and no ledger row
-  // backs it. Those two fields are disabled rather than refused on submit: a
-  // field that takes a value and then rejects it teaches that the change is
-  // possible and merely disallowed today.
+  // A row behind a receipt is frozen whole — both database triggers refuse the
+  // statement, not a column. The fields are disabled rather than refused on
+  // submit: a field that takes a value and then rejects it teaches that the
+  // change is possible and merely disallowed today.
   const fieldLock = paymentFieldLock(existing);
   const lockMessage = fieldLock === 'none' ? null : t(PAYMENT_FIELD_LOCK_KEYS[fieldLock]);
-  const cashBlocked = makesReceipt ? cashBlockedMessage : null;
-  const today = berlinToday();
-  const blocked = refused ?? cashBlocked;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -119,13 +128,6 @@ const SalaryPaymentModal: React.FC<SalaryPaymentModalProps> = ({
 
     if (isNaN(amount) || amount <= 0) {
       setError(t('sal.payment.invalidAmount'));
-      return;
-    }
-
-    // confirm_salary_cash_payment refuses a future payment date, and the form
-    // closes before the Gehaltsquittung step could say so.
-    if (makesReceipt && formData.payment_date > today) {
-      setError(t('gq.date.future'));
       return;
     }
 
@@ -199,16 +201,7 @@ const SalaryPaymentModal: React.FC<SalaryPaymentModalProps> = ({
               <option value="bank">{t('sal.payment.bankTransfer')}</option>
             </select>
 
-            {/* Said before the payment is committed, not after a refusal. */}
-            {makesReceipt && !cashBlocked && (
-              <div
-                style={{ background: 'var(--warning-subtle)', border: '1px solid var(--warning)', borderRadius: '0.5rem', padding: '0.75rem', marginTop: '0.75rem', display: 'flex', alignItems: 'flex-start', gap: '0.5rem' }}
-              >
-                <Lock size={16} style={{ color: 'var(--warning)', flexShrink: 0, marginTop: '0.125rem' }} />
-                <span style={{ color: 'var(--warning)', fontSize: '0.8125rem' }}>{t('sal.payment.cashReceiptNotice')}</span>
-              </div>
-            )}
-            {/* Why the amount and the type are read-only on this stored row. */}
+            {/* Why this stored row is read-only. */}
             {lockMessage && (
               <div
                 style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)', borderRadius: '0.5rem', padding: '0.75rem', marginTop: '0.75rem', display: 'flex', alignItems: 'flex-start', gap: '0.5rem' }}
@@ -217,7 +210,7 @@ const SalaryPaymentModal: React.FC<SalaryPaymentModalProps> = ({
                 <span style={{ color: 'var(--text-secondary)', fontSize: '0.8125rem' }}>{lockMessage}</span>
               </div>
             )}
-            {/* Shown while the select is still open, so a bank transfer is one click away. */}
+            {/* Shown beside the select rather than after a failed submit. */}
             {blocked && (
               <div
                 role="alert"
@@ -270,12 +263,8 @@ const SalaryPaymentModal: React.FC<SalaryPaymentModalProps> = ({
             </label>
             <div className="relative">
               <Calendar style={{ color: 'var(--text-tertiary)', position: 'absolute', left: '0.75rem', top: '50%', transform: 'translateY(-50%)' }} size={18} />
-              {/* A Gehaltsquittung is refused a future payment date, and this form
-                  closes before the step that would say so. Bank transfers are
-                  unaffected and may still be dated ahead. */}
               <input
                 type="date"
-                max={makesReceipt ? today : undefined}
                 value={formData.payment_date}
                 onChange={(e) => setFormData({ ...formData, payment_date: e.target.value })}
                 style={{ ...inputStyle, paddingLeft: '2.25rem' }}
@@ -285,26 +274,25 @@ const SalaryPaymentModal: React.FC<SalaryPaymentModalProps> = ({
             </div>
           </div>
 
-          {/* A Gehaltsquittung writes its own description ("Gehaltsquittung GQ-…"),
-              so the field is not offered on that path rather than silently dropped. */}
-          {!makesReceipt && (
-            <div>
-              <label style={{ color: 'var(--text-secondary)' }} className="block text-sm font-medium mb-2">
-                {t('common.description')}
-              </label>
-              <div className="relative">
-                <FileText style={{ color: 'var(--text-tertiary)', position: 'absolute', left: '0.75rem', top: '0.75rem' }} size={18} />
-                <textarea
-                  value={formData.description}
-                  onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                  style={{ ...inputStyle, paddingLeft: '2.25rem', resize: 'vertical' }}
-                  placeholder={t('sal.payment.descriptionPlaceholder')}
-                  rows={3}
-                  disabled={loading}
-                />
-              </div>
+          {/* Offered on every path again: the Gehaltsquittung step that wrote its
+              own description ("Gehaltsquittung GQ-…") is gone, and the owner named
+              the missing note as one of the things it cost him. */}
+          <div>
+            <label style={{ color: 'var(--text-secondary)' }} className="block text-sm font-medium mb-2">
+              {t('common.description')}
+            </label>
+            <div className="relative">
+              <FileText style={{ color: 'var(--text-tertiary)', position: 'absolute', left: '0.75rem', top: '0.75rem' }} size={18} />
+              <textarea
+                value={formData.description}
+                onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                style={{ ...inputStyle, paddingLeft: '2.25rem', resize: 'vertical' }}
+                placeholder={t('sal.payment.descriptionPlaceholder')}
+                rows={3}
+                disabled={loading}
+              />
             </div>
-          )}
+          </div>
 
           <div className="flex justify-end space-x-3 pt-4">
             <button
@@ -325,14 +313,8 @@ const SalaryPaymentModal: React.FC<SalaryPaymentModalProps> = ({
               onMouseLeave={e => (e.currentTarget.style.background = 'var(--accent)')}
               className="flex items-center space-x-2 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {makesReceipt ? <ChevronRight size={20} /> : <Save size={20} />}
-              <span>
-                {loading
-                  ? t('common.saving')
-                  : makesReceipt
-                    ? t('sal.payment.cashReceiptContinue')
-                    : t('common.save')}
-              </span>
+              <Save size={20} />
+              <span>{loading ? t('common.saving') : t('common.save')}</span>
             </button>
           </div>
         </form>

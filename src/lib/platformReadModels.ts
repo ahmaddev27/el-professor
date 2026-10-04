@@ -128,6 +128,8 @@ const str = (value: unknown): string => (typeof value === 'string' ? value : '')
 const nullableStr = (value: unknown): string | null => (typeof value === 'string' ? value : null);
 const int = (value: unknown, fallback: number): number =>
   typeof value === 'number' && Number.isFinite(value) ? Math.trunc(value) : fallback;
+const nullableInt = (value: unknown): number | null =>
+  typeof value === 'number' && Number.isFinite(value) ? Math.trunc(value) : null;
 
 /**
  * Reads one page out of a read model's answer. Anything that is not the shape
@@ -236,6 +238,16 @@ export interface PlatformCompanyRow {
   user_count: number;
   active_driver_count: number;
   active_vehicle_count: number;
+  /**
+   * The company's `company_settings.drivers_per_car_limit`, or null where it
+   * has no settings row (migration 20260923100000, plan 3.13b). It is the one
+   * column of that table this model carries: the dashboard multiplies it by the
+   * car limit to show the driver allowance, and since 3.13b a platform account
+   * reads company_settings only inside an open context, so the figure has to
+   * come from here or not at all. Adding a second column of that table is a
+   * data protection decision — it holds the company's bank and tax data.
+   */
+  drivers_per_car_limit: number | null;
 }
 
 export function parseVehicleRow(raw: Record<string, unknown>): PlatformVehicleRow {
@@ -323,6 +335,10 @@ export function parseCompanyRow(raw: Record<string, unknown>): PlatformCompanyRo
     user_count: int(raw.user_count, 0),
     active_driver_count: int(raw.active_driver_count, 0),
     active_vehicle_count: int(raw.active_vehicle_count, 0),
+    // No fallback to a number here: a company with no settings row and a
+    // company whose limit this build could not read are both "unknown", and
+    // the screen decides what to show. A 0 would read as "no drivers allowed".
+    drivers_per_car_limit: nullableInt(raw.drivers_per_car_limit),
   };
 }
 
@@ -332,12 +348,20 @@ export function parseCompanyRow(raw: Record<string, unknown>): PlatformCompanyRo
  * Users, active drivers and active vehicles per company id, or `known: false`.
  * Unknown is a state the screens show as a dash, never as zero: a zero here
  * would say a customer has no users.
+ *
+ * `driversPerCar` rides along because it comes from the same call: since
+ * migration 20260923100000 a platform account reads `company_settings` only
+ * inside an open context, so `platform_companies_list` is the panel's only
+ * source for the driver allowance. A company missing from that map has no
+ * settings row (or none this build could read) and the screen applies its own
+ * default — it is not part of `known`, which is about the counts.
  */
 export interface CompanyCounts {
   known: boolean;
   users: Record<string, number>;
   drivers: Record<string, number>;
   vehicles: Record<string, number>;
+  driversPerCar: Record<string, number>;
 }
 
 export const UNKNOWN_COMPANY_COUNTS: CompanyCounts = Object.freeze({
@@ -345,6 +369,7 @@ export const UNKNOWN_COMPANY_COUNTS: CompanyCounts = Object.freeze({
   users: Object.freeze({}),
   drivers: Object.freeze({}),
   vehicles: Object.freeze({}),
+  driversPerCar: Object.freeze({}),
 }) as CompanyCounts;
 
 /**
@@ -366,7 +391,7 @@ export const UNKNOWN_COMPANY_COUNTS: CompanyCounts = Object.freeze({
 export async function collectCompanyCounts(
   fetchPage: (pageIndex: number) => Promise<PlatformReadResult<PlatformCompanyRow>>,
 ): Promise<CompanyCounts> {
-  const counts: CompanyCounts = { known: false, users: {}, drivers: {}, vehicles: {} };
+  const counts: CompanyCounts = { known: false, users: {}, drivers: {}, vehicles: {}, driversPerCar: {} };
   for (let pageIndex = 0; ; pageIndex += 1) {
     let page: PlatformReadResult<PlatformCompanyRow>;
     try {
@@ -380,6 +405,7 @@ export async function collectCompanyCounts(
       counts.users[row.id] = row.user_count;
       counts.drivers[row.id] = row.active_driver_count;
       counts.vehicles[row.id] = row.active_vehicle_count;
+      if (row.drivers_per_car_limit !== null) counts.driversPerCar[row.id] = row.drivers_per_car_limit;
     }
 
     if (!directoryHasNextPage(pageIndex, page.total)) {

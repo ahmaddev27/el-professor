@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useCallback } from 'react';
 import { CheckCircle, XCircle, Info, AlertTriangle, X } from 'lucide-react';
+import { useTranslation } from './LanguageContext';
 
 export type ToastType = 'success' | 'error' | 'info' | 'warning';
 
@@ -95,6 +96,9 @@ const ToastItem: React.FC<{ toast: Toast; onRemove: (id: string) => void }> = ({
   toast,
   onRemove,
 }) => {
+  // LanguageProvider is the outermost provider in main.tsx, so this reads the
+  // chosen language and not the context default.
+  const { t } = useTranslation();
   const icons: Record<ToastType, React.ElementType> = {
     success: CheckCircle,
     error: XCircle,
@@ -132,7 +136,7 @@ const ToastItem: React.FC<{ toast: Toast; onRemove: (id: string) => void }> = ({
         onClick={() => onRemove(toast.id)}
         className="flex-shrink-0 transition-colors"
         style={{ color: 'var(--text-tertiary)' }}
-        aria-label="Schließen"
+        aria-label={t('common.close')}
       >
         <X className="w-4 h-4" />
       </button>

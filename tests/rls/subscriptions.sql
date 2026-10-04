@@ -57,8 +57,10 @@
                        end standing, and a second row for the same source is
                        refused by the unique index rather than counted twice
     7. the shape       one SELECT policy, no write policy, no write grant, a
-                       member reads its own company only, a coverage row cannot
-                       be re-pointed at another company
+                       member reads its own company only — and since decision
+                       D14 (20260924110000) a platform role with no context reads
+                       neither company's periods — and a coverage row cannot be
+                       re-pointed at another company
     8. the wall        U3. A request PostgREST serves — the platform owner
                        through the companies policies, the service role past
                        them — cannot change any of the five subscription
@@ -1422,10 +1424,20 @@ BEGIN
   PERFORM _sub_ok('shape: …and not another company''s',
     _sub_try('a0000000-0000-4000-8000-000000000003',
              format('SELECT count(*) FROM subscription_coverage WHERE id = %L', _sub_id('cov:b'))) = '0');
-  PERFORM _sub_ok('shape: an active platform role reads both, through companies.read',
+  /*
+    Decision D14 (24.09.2026, migration 20260924110000): the coverage periods
+    lost their `companies.read` branch. An active platform role read both rows
+    until then — `companies.read` is held by all four roles by plan 3.A — and
+    now reads neither outside an open context. No read model carries this table:
+    nothing in the product reads a coverage period across companies, and one no
+    screen shows would be code with no caller. The context side of the same rule
+    is `subscription_coverage S` in tests/rls/matrix.sql, which reads 'Y.' for
+    both context principals.
+  */
+  PERFORM _sub_ok('shape: a platform role with no context reads neither company''s coverage (D14)',
     _sub_try('50000000-0000-4000-8000-000000000001',
              'SELECT count(*) FROM subscription_coverage WHERE id IN ('
-             || quote_literal(_sub_id('cov:a')) || ', ' || quote_literal(_sub_id('cov:b')) || ')') = '2');
+             || quote_literal(_sub_id('cov:a')) || ', ' || quote_literal(_sub_id('cov:b')) || ')') = '0');
   PERFORM _sub_ok('shape: anon reads nothing at all — it holds no grant',
     _sub_try(NULL, format('SELECT count(*) FROM subscription_coverage WHERE id = %L', _sub_id('cov:a')))
       LIKE 'ERR 42501%');

@@ -612,13 +612,15 @@ const ReceiptModal: React.FC<ReceiptModalProps> = ({
                 // dateReason is OCR diagnostics produced in German by receiptOcr.ts.
                 hint={ocrResult?.dateReason ? <>OCR: {ocrResult.dateReason}</> : undefined}
               >
-                {/* The date mask stays German (TT/MM/JJJJ): displayToIso parses
-                    DD.MM.YYYY / DD/MM/YYYY only, and the figure matches the Beleg. */}
+                {/* The mask is day-first in both languages, because displayToIso
+                    parses DD.MM.YYYY / DD/MM/YYYY only and the figure matches the
+                    Beleg. Only the letters naming the fields follow the UI
+                    language (TT/MM/JJJJ → DD/MM/YYYY); the order never does. */}
                 <Input
                   ref={dateInputRef}
                   type="text"
                   inputMode="numeric"
-                  placeholder="TT/MM/JJJJ"
+                  placeholder={t('rec.datePlaceholder')}
                   value={displayDate}
                   onChange={e => {
                     const raw = e.target.value;

@@ -266,13 +266,66 @@ function parseTimeUnchecked(raw: CellValue): string | null {
   return null;
 }
 
-/** A euro amount, German decimal comma accepted. Unchanged from the modal. */
+/**
+ * A euro amount, in any of the shapes a Fahrtenbuch export writes.
+ *
+ * **The rule this preserves**, because it decides what every trip's Preis and
+ * Trinkgeld are stored as, and from them the Abrechnung, the Umsatz and the
+ * driver's revenue share: **every shape present in today's data must parse to
+ * exactly the same number as before.** Measured on staging 27.09.2026 across all
+ * 251262 key/value pairs in `raw_data_json`: 27273 values are `123.45` — a dot
+ * decimal — and there are **zero** with a German thousands separator, zero with a
+ * single decimal digit after a comma, and zero with a two-digit comma decimal.
+ * The highest stored `price_amount` is 323.22. So no stored amount changes.
+ *
+ * What was wrong, and what it would have cost on the next export that differs:
+ * the old body was `replace(/[^\d,.-]/g, '').replace(/,(\d{2})$/, '.$1')` then
+ * `parseFloat`. A German amount kept its thousands dot and gained a second one,
+ * and parseFloat stops at it:
+ *
+ *   '1.234,56' -> '1.234.56' -> 1.234 -> **1.23**      (a factor of 1000)
+ *   '1.000,00' -> '1.000.00' -> 1.000 -> **1**
+ *   '2.480,00' -> '2.480.00' -> 2.480 -> **2.48**
+ *   '5,5'      -> no match, parseFloat('5,5') -> **5**  (the half is dropped)
+ *
+ * The rule now: the **last** separator is the decimal one when both appear;
+ * repeated separators of one kind are thousands separators; a single separator is
+ * the decimal point. That leaves `123.45` and `12,50` exactly as they were, which
+ * is why the 27273 rows are untouched.
+ *
+ * `1.234` stays ambiguous and stays as it was — one dot reads as a decimal point,
+ * so it is 1.23 here as before. Deciding it means guessing whether the file means
+ * one thousand or one and a bit, and the data gives no reason to.
+ */
 export function parseMoney(raw: CellValue): number {
   if (raw === null || raw === undefined) return 0;
   if (typeof raw === 'number') return Math.round(raw * 100) / 100;
   const s = String(raw).trim();
   if (!s || s === '\\N') return 0;
-  const cleaned = s.replace(/[^\d,.-]/g, '').replace(/,(\d{2})$/, '.$1');
+
+  const stripped = s.replace(/[^\d,.-]/g, '');
+  const lastDot = stripped.lastIndexOf('.');
+  const lastComma = stripped.lastIndexOf(',');
+
+  let cleaned: string;
+  if (lastDot >= 0 && lastComma >= 0) {
+    // Both present: the rightmost is the decimal separator, the other groups.
+    const decimalAt = Math.max(lastDot, lastComma);
+    const grouping = decimalAt === lastDot ? ',' : '.';
+    cleaned = `${stripped.slice(0, decimalAt).split(grouping).join('')}.${stripped.slice(decimalAt + 1)}`;
+  } else if (lastComma >= 0) {
+    // Commas only: one is German decimal, several are grouping.
+    cleaned = stripped.indexOf(',') === lastComma
+      ? stripped.replace(',', '.')
+      : stripped.split(',').join('');
+  } else if (lastDot >= 0 && stripped.indexOf('.') !== lastDot) {
+    // Several dots: grouping, as in 1.234.567.
+    cleaned = stripped.split('.').join('');
+  } else {
+    // A single dot, or none at all — exactly what today's data carries.
+    cleaned = stripped;
+  }
+
   const n = parseFloat(cleaned);
   return isNaN(n) ? 0 : Math.round(n * 100) / 100;
 }
@@ -658,6 +711,91 @@ export async function sha256HexOfText(text: string): Promise<string> {
 
 export interface DriverMatchInfo { matchedDriverId: string | null; matchedDriverName: string }
 export interface CarMatchInfo { matchedCarId: string | null }
+
+/** A driver the company has, as step 2 of the wizard offers them. */
+export interface DriverCandidate { id: string; name: string }
+
+/** Which driver an imported name means — see `matchDriverName`. */
+export type DriverNameMatch =
+  /** One driver carries that name. Safe to offer as already settled. */
+  | { kind: 'exact'; driverId: string; driverName: string }
+  /** Exactly one driver could be meant. Offered, but the user confirms it. */
+  | { kind: 'suggestion'; driverId: string; driverName: string }
+  /** Two or more drivers could be meant, so none is offered. */
+  | { kind: 'ambiguous' }
+  /** No driver could be meant. */
+  | { kind: 'none' };
+
+/**
+ * Which driver an imported name means, and how sure that is.
+ *
+ * The comparison is the importer's own `normalise` (lowercase, [a-z0-9] only),
+ * which is what this matcher has always used. It is **not**
+ * `normaliseDriverName` and must never become it: that one feeds
+ * `source_row_key`, unique per company, so changing it would make every ride
+ * already stored look like a different ride and break re-import detection.
+ *
+ * Why a substring hit is never `exact`: `normalise` keeps letters and digits
+ * only, so "Ali" is a substring of both "Ali Hassan" and "Alia Demir". The
+ * matcher took whichever of the two happened to come first in the company's
+ * driver list and marked the pair confirmed, which let step 2 through without a
+ * glance — and a month of rides, and so a month of salary, was attributed to a
+ * driver nobody had chosen. Two or more candidates therefore offer none: a name
+ * the file spells differently is the user's to resolve, not ours to guess.
+ *
+ * Two drivers whose names normalise alike are `ambiguous` for the same reason.
+ *
+ * What a wrong answer costs: `buildTripRows` writes this match into
+ * `original_driver_id` as well as `assigned_driver_id`, and
+ * protect_fahrtenbuch_immutable_fields refuses every later change to
+ * `original_driver_*`. So a ride assigned to the wrong driver here can be
+ * reassigned, but the record of who originally drove it cannot be corrected at
+ * all — the import would have to be deleted and read in again.
+ */
+export function matchDriverName(
+  importedName: string,
+  drivers: readonly DriverCandidate[],
+): DriverNameMatch {
+  const norm = normalise(importedName);
+  // An empty key is a substring of every name and every name is a substring of
+  // it, so it would match the whole driver list.
+  if (norm === '') return { kind: 'none' };
+  const candidates = drivers
+    .map(driver => ({ driver, norm: normalise(driver.name) }))
+    .filter(c => c.norm !== '');
+
+  const exact = candidates.filter(c => c.norm === norm);
+  if (exact.length === 1) {
+    return { kind: 'exact', driverId: exact[0].driver.id, driverName: exact[0].driver.name };
+  }
+  if (exact.length > 1) return { kind: 'ambiguous' };
+
+  const partial = candidates.filter(c => c.norm.includes(norm) || norm.includes(c.norm));
+  if (partial.length === 1) {
+    return { kind: 'suggestion', driverId: partial[0].driver.id, driverName: partial[0].driver.name };
+  }
+  if (partial.length > 1) return { kind: 'ambiguous' };
+  return { kind: 'none' };
+}
+
+/**
+ * The same answer in the shape step 2 of the wizard keeps it in: the driver it
+ * offers, and whether that offer still needs a person. Only an `exact` match is
+ * confirmed; a `suggestion` is pre-selected and waits. It lives here rather than
+ * in the modal so the rule is stated once and can be tested.
+ */
+export function driverMatchInfo(
+  importedName: string,
+  drivers: readonly DriverCandidate[],
+): DriverMatchInfo & { confirmed: boolean } {
+  const match = matchDriverName(importedName, drivers);
+  const offered = match.kind === 'exact' || match.kind === 'suggestion' ? match : null;
+  return {
+    matchedDriverId: offered?.driverId ?? null,
+    matchedDriverName: offered?.driverName ?? importedName,
+    confirmed: match.kind === 'exact',
+  };
+}
 
 export interface BuildContext {
   rows: readonly RawRow[];

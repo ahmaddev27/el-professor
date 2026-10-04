@@ -143,14 +143,52 @@
   caller inside a platform context in either mode, so a support session no
   longer issues, voids or signs one (the rpc overrides below).
 
+  3.13b (20260923100000) closed the last of the shell that is the *company's*
+  own data rather than the platform's record of it: `company_settings` SELECT
+  dropped its `companies.read` branch, so `super` reads neither row and the two
+  context principals read the company they opened.
+
+  D14, answered on 24.09.2026 (20260924110000), split what was left. The owner
+  took the middle path. `companies` **stays** on `companies.read`: that list is
+  how a company is chosen to open a context on, so requiring a context to read
+  it is circular, and it carries no money — its S cell is still YY and that is a
+  decision, not a hole. The four that carry a customer's billing address and
+  what they paid — `company_subscriptions`, `subscription_invoices`,
+  `subscription_payment_audit` and `subscription_coverage` — moved behind two
+  audited read models on `billing.manage`, so their S cells read '..' for
+  `super` and 'Y.' for the two context principals, and four more cells moved
+  with them for a mechanical reason written out at the lines themselves. The
+  `codes.manage` reads are untouched: an activation code is not a customer's
+  money. What the four tables cost a `support` or `read_only` account, and what
+  it keeps, is section 12 of tests/rls/platform-readmodels.sql.
+
+  Slice C (20260923130000) closed the last thing 3.3 wrote down and left alone:
+  its own table list says "no role gate today, and none added: a viewer writes
+  these exactly as it does now. Narrowing them is a decision about roles, not
+  about tenancy." Twenty-three tables now carry the `page_key` of the screen
+  that writes them — `documents` for the Fahrtenbuch, the planning tables, the
+  historical tables, the saved Stundennachweise, the templates and the document
+  blocks and variables; `cash-balance` for cash_transactions; `cars` for
+  car_driver_assignments — and the five planning RPCs, which are SECURITY
+  DEFINER and ran past RLS, ask the same page. No page key was created and no
+  `role_permissions` row was written, so the cells that move are exactly the
+  ones the seeded roles already implied: `viewer` holds can_edit nowhere and
+  `editor` holds none on `documents`. Three tables on the same list are
+  deliberately unchanged and their cells stay: notification_settings (its
+  writes ask for an administrator, which is stricter), cash_movements and
+  salary_cash_receipts (SELECT is the only privilege a client role holds), and
+  document_counters (PP in every cell — no grant at all).
+
   ## Recorded without a plan step
 
   Current behaviour that no step of the plan names. Untagged, so a change to it
   is still a mismatch to explain, not an expected move.
 
-    - the planning RPCs (apply, replace, delete_or_archive, purge, reassign)
-      check the caller's company but not its role: a viewer can apply a monthly
-      plan, as it can already write the planning tables directly
+    - **closed by 20260923130000 (slice C).** The planning RPCs (apply, replace,
+      delete_or_archive, purge, reassign) checked the caller's company but not
+      its role: a viewer could apply a monthly plan, as it could already write
+      the planning tables directly. All five now ask
+      current_role_permits('documents', true), and the tables ask it too
     - apply_monthly_planning_run accepts another company's import id: it opens a
       run in the caller's own company and changes none of the other company's
       trips
@@ -169,6 +207,14 @@
   DEFINER function (triggers aside) without a line in the rpc section, is
   reported as `UNCOVERED`. That is a warning, not a failure: parallel branches
   add tables and functions, and each adds its own lines here.
+
+  **The sweep says nothing about a SECURITY INVOKER function**, because it
+  filters on `p.prosecdef`. Such a function runs under the caller's RLS, so the
+  table lines already describe what it can reach — but its own refusals, and
+  whether it folds a policy's 42501 into an answer of its own, are visible
+  nowhere else. `company_role_save` and `company_role_delete` (20260923120000)
+  are the first of that kind and are written out by hand below; a silent run is
+  not evidence that the next one is covered.
 
   ## Not covered
 
@@ -200,6 +246,22 @@
       staging. No migration older than the fixture revoked a table privilege,
       so the table cells do not depend on that history.
 
+  ## What a cell does not prove
+
+  A cell records what the probe got, and a probe can be lied to. Schema USAGE is
+  resolved when a statement is *parsed*, and plpgsql caches the parsed form, so
+  a privilege error inside a SECURITY INVOKER trigger or function is raised only
+  for the first role that cannot parse it — and the owner, who runs every
+  fixture and every validity pass in this same session, always can. Until the
+  guard in `_mx_become`, every principal probed after the owner reused the
+  owner's plan and read as allowed. PR #117 is the instance: a trigger calling
+  into `app_private` made the Rollen screen unusable for every company
+  administrator, and this file printed `roles I` as `Y` twice.
+
+  The guard is one `DISCARD PLANS` per principal; the plan-cache section below
+  proves the probe is no longer fooled, and fails if the guard is reverted.
+  `SET matrix.uncache = 'off'` at the top of this file is the negative control.
+
   ## Running
 
   The whole file runs inside BEGIN … ROLLBACK, so the tests/rls files after it
@@ -210,6 +272,12 @@
 \set ON_ERROR_STOP on
 
 BEGIN;
+
+-- The plan-cache guard in `_mx_become`, on. Its whole reason is written there.
+-- Change this to 'off' to run the negative control: the plan-cache section
+-- below must then fail, and the difference in wall-clock time between the two
+-- runs is what the guard costs.
+SET matrix.uncache = 'on';
 
 -- ─── helpers ────────────────────────────────────────────────────────────────
 
@@ -233,6 +301,49 @@ BEGIN
   IF p_who = 'owner' THEN
     RETURN;
   END IF;
+
+  /*
+    Why a principal's probe begins by throwing the session's cached plans away.
+
+    Schema USAGE is checked when a statement is *parsed* — the parser resolves
+    `app_private.f()` and asks for USAGE there — and plpgsql caches the parsed
+    form of every static statement in a function body. So the first role that
+    can parse such a call inside a SECURITY INVOKER trigger caches it for the
+    whole session, and the owner, who runs every fixture, every `p_pre` and the
+    validity pass, always can. Every principal probed afterwards then reuses
+    that plan and is never refused.
+
+    That is not hypothetical. PR #117 shipped `enforce_company_role_shape`, a
+    SECURITY INVOKER trigger on `roles` calling a helper in `app_private`, and
+    the feature was dead for every company administrator with
+    `42501 permission denied for schema app_private`. This file reported
+    `roles I` as `Y` for the admin principal, on two runs.
+
+    It is two privilege classes, measured on PostgreSQL 17.6 and not deduced —
+    an earlier version of this comment said one, from a reading of the source
+    that was wrong. Schema USAGE is masked, and so is **function EXECUTE**: both
+    are resolved when the statement is planned. A table privilege is not, being
+    re-checked by the executor on every execution, and RLS re-plans when the role
+    changes. tests/tools/plan-cache-repro.sql measures all three; the `roles I`
+    expectation below is the same finding seen a second time, in this file, on a
+    real migration.
+
+    `DISCARD PLANS` is legal inside a transaction block and inside SPI — only
+    `DISCARD ALL` is refused there. It goes here, before either `SET LOCAL ROLE`
+    below, rather than after the fixture loop, because the owner also runs
+    `p_pre` inside `_mx_try` and `_mx_move_try`, the validity pass at the end of
+    every line, and `_mx_become('owner')` in the scenario section. One line
+    here is complete by construction; anything narrower is a list of the owner's
+    execution sites, and the next person to add a section breaks it silently.
+
+    `matrix.uncache = 'off'` is the negative control: set it at the top of this
+    file and the plan-cache section below must fail. It is also how the cost of
+    this line is measured — run the kit once each way.
+  */
+  IF coalesce(current_setting('matrix.uncache', true), 'on') <> 'off' THEN
+    EXECUTE 'DISCARD PLANS';
+  END IF;
+
   IF p_who = 'anon' THEN
     PERFORM set_config('request.jwt.claim.sub', '', true);
     PERFORM set_config('request.jwt.claim.role', 'anon', true);
@@ -452,6 +563,124 @@ LANGUAGE sql IMMUTABLE AS $$
   SELECT ARRAY['anon', 'viewer-a', 'editor-a', 'supervisor-a', 'admin-a', 'admin-b', 'super',
                'staff-view', 'staff-support']
 $$;
+
+-- ─── the probe itself, before anything relies on it ─────────────────────────
+/*
+  `_mx_try` must not be maskable by the owner pass that runs beside it.
+
+  This section builds PR #117's shape out of nothing — a schema nobody may use,
+  a SECURITY INVOKER trigger on a `public` table that calls into it — and walks
+  the sequence this file walks: the owner writes the row, then a principal
+  writes it. If the plan cache is still deciding the answer, the principal is
+  allowed and every table line below is worth less than it looks.
+
+  Three steps, and the middle one is the control:
+
+    1  the owner's write succeeds, and the trigger's call is now cached
+    2  a principal writes *without* the guard, by hand. It must be ALLOWED —
+       that is the mask, and it is what makes step 3 mean something. If it is
+       refused, the artefact no longer reproduces on this PostgreSQL; that is a
+       WARNING and not a failure, because the guard is then merely unnecessary
+    3  the same write through `_mx_try`, which discards the plans first, must be
+       refused `42501 permission denied for schema _mx_unreachable`
+
+  Step 3 is what fails when the guard in `_mx_become` is reverted or when
+  `matrix.uncache` is 'off'. It runs before the fixtures so the instrument is
+  checked before the measurements are taken, and it drops everything it made so
+  the UNCOVERED scan at the end of the table matrix has nothing extra to report.
+
+  A standalone version of the same experiment, with controls for function
+  EXECUTE and table privileges, is tests/tools/plan-cache-repro.sql. It is not
+  part of the kit.
+*/
+CREATE SCHEMA _mx_unreachable;
+CREATE FUNCTION _mx_unreachable.answer() RETURNS boolean
+LANGUAGE sql IMMUTABLE AS $$ SELECT true $$;
+
+CREATE TABLE public._mx_plan_cache_rows (note text);
+GRANT INSERT ON public._mx_plan_cache_rows TO authenticated;
+
+-- SECURITY INVOKER, which is the default: the body is parsed as whoever writes
+-- the table, and `authenticated` holds no USAGE on _mx_unreachable.
+CREATE FUNCTION public._mx_plan_cache_guard() RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = pg_catalog, public
+AS $$
+BEGIN
+  PERFORM _mx_unreachable.answer();
+  RETURN NEW;
+END $$;
+
+CREATE TRIGGER _mx_plan_cache_guard BEFORE INSERT ON public._mx_plan_cache_rows
+  FOR EACH ROW EXECUTE FUNCTION public._mx_plan_cache_guard();
+
+DO $plancache$
+DECLARE
+  c_write CONSTANT text := $q$INSERT INTO public._mx_plan_cache_rows (note) VALUES ('probe')$q$;
+  v_owner   text;
+  v_masked  text;
+  v_guarded text;
+  v_state   text;
+  v_msg     text;
+BEGIN
+  -- 0. The premise. If `authenticated` could use the schema after all, every
+  --    step below would be ALLOWED and step 3 would report a missing guard
+  --    that is in fact present.
+  IF has_schema_privilege('authenticated', '_mx_unreachable', 'USAGE') THEN
+    RAISE EXCEPTION 'plan-cache section: authenticated holds USAGE on _mx_unreachable, so this probe tests nothing';
+  END IF;
+
+  -- 1. The owner's pass, twice, for two different reasons.
+  --
+  --    Through `_mx_try` first, because that is this file's own test that a
+  --    probe statement is valid — a refusal below must not be a malformed
+  --    INSERT in disguise. That pass is rolled back with its subtransaction.
+  --
+  --    Then as a plain statement, which is the fixture loop's shape and the
+  --    warming that actually happens in this file: it is not inside anything
+  --    that will unwind, so the trigger's cached call cannot depend on how
+  --    plpgsql treats a plan prepared inside an aborted subtransaction.
+  v_owner := _mx_try('owner', NULL, c_write);
+  IF v_owner <> 'Y' THEN
+    RAISE EXCEPTION 'plan-cache section: the owner could not write the probe row (%), so nothing below it means anything', v_owner;
+  END IF;
+  EXECUTE c_write;
+
+  -- 2. The control: a principal, by hand, with the cache left warm.
+  BEGIN
+    EXECUTE 'SET LOCAL ROLE authenticated';
+    EXECUTE c_write;
+    EXECUTE 'SET LOCAL ROLE NONE';
+    v_masked := 'ALLOWED';
+  EXCEPTION WHEN OTHERS THEN
+    GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE, v_msg = MESSAGE_TEXT;
+    EXECUTE 'SET LOCAL ROLE NONE';
+    v_masked := v_state || ' ' || v_msg;
+  END;
+
+  IF v_masked = 'ALLOWED' THEN
+    RAISE NOTICE 'ok  plan-cache control: the owner''s pass does mask a schema refusal from a principal';
+  ELSIF v_masked LIKE '42501 permission denied for schema%' THEN
+    RAISE WARNING 'the plan-cache mask did not reproduce (%). Either this PostgreSQL re-checks schema USAGE on a cached plan, or this probe no longer reproduces it. The guard below is then unnecessary rather than wrong — read tests/tools/plan-cache-repro.sql before removing it', v_masked;
+  ELSE
+    RAISE EXCEPTION 'plan-cache section: the control failed for an unrelated reason (%) — the probe is built wrong', v_masked;
+  END IF;
+
+  -- 3. The guard. `_mx_try` discards the plans, so the trigger's call is parsed
+  --    again, this time as the principal.
+  v_guarded := _mx_try('admin-a', NULL, c_write);
+  IF left(v_guarded, 1) <> 'P' OR v_guarded NOT LIKE '%permission denied for schema _mx_unreachable%' THEN
+    RAISE EXCEPTION
+      'plan-cache guard is gone: a principal writing through a SECURITY INVOKER trigger that reaches a schema it cannot use was answered % — expected P|42501|permission denied for schema _mx_unreachable. Restore the DISCARD PLANS in _mx_become, or set matrix.uncache back to ''on''',
+      v_guarded;
+  END IF;
+  RAISE NOTICE 'ok  plan-cache guard: _mx_try refuses it — %', substr(v_guarded, 3, 80);
+END $plancache$;
+
+DROP TRIGGER _mx_plan_cache_guard ON public._mx_plan_cache_rows;
+DROP FUNCTION public._mx_plan_cache_guard();
+DROP TABLE public._mx_plan_cache_rows;
+DROP SCHEMA _mx_unreachable CASCADE;
 
 -- Failures from every section are collected and reported together at the end,
 -- so one run shows the whole diff rather than the first cell that moved.
@@ -695,9 +924,18 @@ INSERT INTO _mx_spec VALUES
   $q$INSERT INTO salary_payments (id, salary_id, payment_type, amount, company_id) VALUES ({id}, {ref:salaries}, 'cash', 1, {co})$q$, NULL,
   $q$INSERT INTO salary_payments (salary_id, payment_type, amount, company_id) VALUES ({ref:salaries}, 'bank', 1, {co})$q$,
   $q$description = description$q$),
+-- The two statements below name `check_date`, and they must keep naming it.
+-- The column defaults to CURRENT_DATE, so before 20260928121500 both rows landed
+-- on today and the old key `(car_id, week_number, year)` still told them apart by
+-- their week_number. The new key is `(car_id, date_trunc('week', check_date))`,
+-- which does not read week_number at all — so with the default both rows fall in
+-- one calendar week and the probe's INSERT dies 23505 for every principal that
+-- RLS would have admitted. That would report a uniqueness collision as an
+-- authorization result, which is not what this row measures.
+-- Fixed dates a fortnight apart, so the probe keeps measuring the policy.
 (22, 'werkstatt_checks', $q$id = {id}$q$,
-  $q$INSERT INTO werkstatt_checks (id, car_id, week_number, year, created_by, company_id) VALUES ({id}, {ref:cars}, 1, 2026, {admin}, {co})$q$, NULL,
-  $q$INSERT INTO werkstatt_checks (car_id, week_number, year, created_by, company_id) VALUES ({ref:cars}, 2, 2026, {admin}, {co})$q$,
+  $q$INSERT INTO werkstatt_checks (id, car_id, week_number, year, check_date, created_by, company_id) VALUES ({id}, {ref:cars}, 1, 2026, DATE '2026-01-05', {admin}, {co})$q$, NULL,
+  $q$INSERT INTO werkstatt_checks (car_id, week_number, year, check_date, created_by, company_id) VALUES ({ref:cars}, 2, 2026, DATE '2026-01-19', {admin}, {co})$q$,
   $q$notes = notes$q$),
 (23, 'fahrtenbuch_imports', $q$id = {id}$q$,
   $q$INSERT INTO fahrtenbuch_imports (id, company_id, month, year, file_name, imported_by) VALUES ({id}, {co}, 1, 2026, 'mx.xlsx', {admin})$q$, NULL,
@@ -862,7 +1100,61 @@ INSERT INTO _mx_spec VALUES
 (55, 'subscription_coverage', $q$id = {id}$q$,
   $q$INSERT INTO subscription_coverage (id, company_id, source, period_start, period_end) VALUES ({id}, {co}, 'manual', '2026-01-01', '2026-02-01')$q$, NULL,
   $q$INSERT INTO subscription_coverage (company_id, source, period_start, period_end) VALUES ({co}, 'manual', '2026-02-01', '2026-03-01')$q$,
-  $q$note = note$q$);
+  $q$note = note$q$),
+-- The Fahrtenanalyse inputs (20260922110000): the business shape with an
+-- administrator gate on every write, and no privilege at all for anon. One
+-- settings row per company, so the INSERT probe clears the side's own first.
+(56, 'trip_analysis_settings', $q$id = {id}$q$,
+  $q$INSERT INTO trip_analysis_settings (id, company_id, block_gap_minutes) VALUES ({id}, {co}, 30)$q$,
+  $q$DELETE FROM trip_analysis_settings WHERE company_id = {co}$q$,
+  $q$INSERT INTO trip_analysis_settings (company_id, block_gap_minutes) VALUES ({co}, 45)$q$,
+  $q$block_gap_minutes = block_gap_minutes$q$),
+(57, 'driver_month_budget', $q$id = {id}$q$,
+  $q$INSERT INTO driver_month_budget (id, company_id, driver_id, year, month) VALUES ({id}, {co}, {ref:drivers}, 2026, 1)$q$, NULL,
+  $q$INSERT INTO driver_month_budget (company_id, driver_id, year, month) VALUES ({co}, {ref:drivers}, 2026, 2)$q$,
+  $q$reserved_hours = reserved_hours$q$),
+-- The notification job's record of what it has sent (20260924100000). It is the
+-- first business table a client cannot write at all: the two writers are
+-- SECURITY DEFINER functions granted to service_role, so `authenticated` holds
+-- SELECT and nothing else and every I, U, D and M cell is a missing GRANT.
+(58, 'notification_deliveries', $q$id = {id}$q$,
+  $q$INSERT INTO notification_deliveries (id, company_id, notification_type, target_id, period_key)
+     VALUES ({id}, {co}, 'trial_abgelaufen', {co}, '2099-01-01')$q$, NULL,
+  $q$INSERT INTO notification_deliveries (company_id, notification_type, target_id, period_key)
+     VALUES ({co}, 'trial_abgelaufen', {co}, '2098-01-01')$q$,
+  $q$recipient_count = recipient_count$q$),
+-- The monthly plan (20260930100000): the proposal, its per-driver snapshot, its
+-- blocks and the rides they are made of. 20260917130000's business shape with
+-- slice C's Dokumente page on every write, so a viewer and an editor read it and
+-- write none of it. Each child names the parent above it, and each probe row is
+-- a *draft*: a confirmed plan is frozen, so its U and D cells would be T for
+-- everybody, the owner included, and would measure the freeze instead of the
+-- policies.
+(59, 'monthly_plans', $q$id = {id}$q$,
+  $q$INSERT INTO monthly_plans (id, company_id, year, month, switch_minutes) VALUES ({id}, {co}, 2026, 10, 30)$q$, NULL,
+  $q$INSERT INTO monthly_plans (company_id, year, month, switch_minutes) VALUES ({co}, 2026, 11, 30)$q$,
+  $q$switch_minutes = switch_minutes$q$),
+-- driver_name and is_owner are the guard's, whatever goes in here.
+(60, 'monthly_plan_drivers', $q$id = {id}$q$,
+  $q$INSERT INTO monthly_plan_drivers (id, company_id, plan_id, driver_id, driver_name, selected, is_owner)
+     VALUES ({id}, {co}, {ref:monthly_plans}, {ref:drivers}, NULL, true, false)$q$, NULL,
+  $q$INSERT INTO monthly_plan_drivers (company_id, plan_id, driver_id, driver_name, selected, is_owner)
+     VALUES ({co}, {ref:monthly_plans}, {ref:drivers2}, NULL, true, false)$q$,
+  $q$selected = selected$q$),
+-- An unassigned block, which section 8 asks for anyway and which needs no
+-- snapshot row for the guard to resolve a driver name against.
+(61, 'monthly_plan_blocks', $q$id = {id}$q$,
+  $q$INSERT INTO monthly_plan_blocks (id, company_id, plan_id, block_key, car_identifier, starts_at, ends_at, span_minutes, ride_minutes)
+     VALUES ({id}, {co}, {ref:monthly_plans}, 'mx-{s}', 'MX-CAR', '2026-10-01 08:23+02', '2026-10-01 09:44+02', 81, 81)$q$, NULL,
+  $q$INSERT INTO monthly_plan_blocks (company_id, plan_id, block_key, car_identifier, starts_at, ends_at, span_minutes, ride_minutes)
+     VALUES ({co}, {ref:monthly_plans}, 'mx-new-{s}', 'MX-CAR', '2026-10-02 08:00+02', '2026-10-02 09:00+02', 60, 60)$q$,
+  $q$block_key = block_key$q$),
+(62, 'monthly_plan_block_trips', $q$id = {id}$q$,
+  $q$INSERT INTO monthly_plan_block_trips (id, company_id, plan_id, block_id, trip_id, starts_at, ends_at, minutes, time_source)
+     VALUES ({id}, {co}, {ref:monthly_plans}, {ref:monthly_plan_blocks}, {ref:mx_plan_trip}, '2026-10-01 08:23+02', '2026-10-01 09:44+02', 81, 'instants')$q$, NULL,
+  $q$INSERT INTO monthly_plan_block_trips (company_id, plan_id, block_id, trip_id, starts_at, ends_at, minutes, time_source)
+     VALUES ({co}, {ref:monthly_plans}, {ref:monthly_plan_blocks}, {ref:mx_plan_trip_new}, '2026-10-01 09:50+02', '2026-10-01 10:20+02', 30, 'instants')$q$,
+  $q$minutes = minutes$q$);
 
 -- ─── how each row is moved to the other tenant ──────────────────────────────
 -- The M probe takes the row through `key` and sets `mov` on it (`_mx_move_try`),
@@ -944,7 +1236,24 @@ INSERT INTO _mx_move VALUES
 ('cash_movements',                       $q$company_id = {other_co}$q$, NULL, 'Y', NULL),
 ('salary_cash_receipts',                 $q$company_id = {other_co}$q$,
                                          $q$DELETE FROM salary_cash_receipts WHERE id = {ref_other:salary_cash_receipts}$q$, 'Y', 'one receipt number per company'),
-('subscription_coverage',                $q$company_id = {other_co}$q$, NULL, 'T', 'pin_billing_company_id refuses it even for the owner');
+('subscription_coverage',                $q$company_id = {other_co}$q$, NULL, 'T', 'pin_billing_company_id refuses it even for the owner'),
+('trip_analysis_settings',               $q$company_id = {other_co}$q$,
+                                         $q$DELETE FROM trip_analysis_settings WHERE company_id = {other_co}$q$, 'Y', 'one settings row per company'),
+-- A budget carries one driver's pay snapshot, so it never leaves its driver,
+-- company or month: driver_month_budget_guard refuses the move for every
+-- writer, before the WITH CHECK is asked.
+('driver_month_budget',                  $q$company_id = {other_co}$q$, NULL, 'T', 'driver_month_budget_guard refuses it even for the owner'),
+-- The dedupe key names the target as well as the company, and the probe rows
+-- carry their own company as the target, so A's row moved into B collides with
+-- nothing of B's: no mov_pre, and the owner pass moves it.
+('notification_deliveries',              $q$company_id = {other_co}$q$, NULL, 'Y', NULL),
+-- 20260930100000: a plan stays with its company and month, and a child stays
+-- with its plan, so all four guards refuse the move before any WITH CHECK is
+-- reached, for the owner too, as driver_month_budget's guard does.
+('monthly_plans',                        $q$company_id = {other_co}$q$, NULL, 'T', 'monthly_plan_guard refuses it even for the owner'),
+('monthly_plan_drivers',                 $q$company_id = {other_co}$q$, NULL, 'T', 'monthly_plan_driver_guard refuses it even for the owner'),
+('monthly_plan_blocks',                  $q$company_id = {other_co}$q$, NULL, 'T', 'monthly_plan_child_guard refuses it even for the owner'),
+('monthly_plan_block_trips',             $q$company_id = {other_co}$q$, NULL, 'T', 'monthly_plan_child_guard refuses it even for the owner');
 
 -- Fixtures go in once; the file can be re-run against a kept container.
 DO $$
@@ -995,10 +1304,11 @@ INSERT INTO _mx_expected (tbl, op, anon, viewer, editor, supervisor, admin, othe
 ('activation_codes',                   'D', '..', '..', '..', '..', '..', '..', 'YY', NULL),
 ('activation_codes',                   'M', '..', '..', '..', '..', '..', '..', 'YY', NULL),
 ('car_driver_assignments',             'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('car_driver_assignments',             'I', 'RR', 'YR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
-('car_driver_assignments',            'U', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('car_driver_assignments',            'D', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('car_driver_assignments',            'M', '..', 'R.', 'R.', 'R.', 'R.', '.R', '..', NULL),
+-- 20260923130000 (slice C): page 'cars', the screen that writes it. Only the viewer loses; the editor holds can_edit on that page.
+('car_driver_assignments',             'I', 'RR', 'RR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
+('car_driver_assignments',            'U', '..', '..', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('car_driver_assignments',            'D', '..', '..', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('car_driver_assignments',            'M', '..', '..', 'R.', 'R.', 'R.', '.R', '..', NULL),
 ('cars',                               'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
 ('cars',                               'I', 'RR', 'RR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
 ('cars',                              'U', '..', '..', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
@@ -1010,10 +1320,11 @@ INSERT INTO _mx_expected (tbl, op, anon, viewer, editor, supervisor, admin, othe
 ('cash_movements',                     'D', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', NULL),
 ('cash_movements',                     'M', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', NULL),
 ('cash_transactions',                  'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('cash_transactions',                  'I', 'RR', 'YR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
-('cash_transactions',                 'U', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('cash_transactions',                 'D', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('cash_transactions',                 'M', '..', 'R.', 'R.', 'R.', 'R.', '.R', '..', NULL),
+-- 20260923130000 (slice C): page 'cash-balance', the Bargeldbestand screen. Only the viewer loses.
+('cash_transactions',                  'I', 'RR', 'RR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
+('cash_transactions',                 'U', '..', '..', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('cash_transactions',                 'D', '..', '..', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('cash_transactions',                 'M', '..', '..', 'R.', 'R.', 'R.', '.R', '..', NULL),
 -- A member still reads its own company row. What it can no longer read there is
 -- an approval note: 20260916130020 retired the column, and the platform's record
 -- of a decision is the audit row platform_company_set_approval writes. The
@@ -1031,38 +1342,71 @@ INSERT INTO _mx_expected (tbl, op, anon, viewer, editor, supervisor, admin, othe
 ('companies',                          'D', '..', '..', '..', '..', '..', '..', 'YY', 'the shell still takes a capability-only cross-tenant write: no context, no reason, no audit row (3.4c/3.13)'),
 ('companies',                          'M', '--', '--', '--', '--', '--', '--', '--', NULL),
 ('company_planning_run_blocks',       'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('company_planning_run_blocks',        'I', 'RR', 'YR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
-('company_planning_run_blocks',        'U', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('company_planning_run_blocks',        'D', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('company_planning_run_blocks',        'M', '..', 'R.', 'R.', 'R.', 'R.', '.R', '..', NULL),
+-- slice C: page 'documents' — viewer and editor hold no can_edit there, so the writes are refused.
+('company_planning_run_blocks',        'I', 'RR', 'RR', 'RR', 'YR', 'YR', 'RY', 'RR', NULL),
+('company_planning_run_blocks',        'U', '..', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('company_planning_run_blocks',        'D', '..', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('company_planning_run_blocks',        'M', '..', '..', '..', 'R.', 'R.', '.R', '..', NULL),
 ('company_planning_runs',             'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('company_planning_runs',              'I', 'RR', 'YR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
-('company_planning_runs',              'U', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('company_planning_runs',              'D', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('company_planning_runs',              'M', '..', 'R.', 'R.', 'R.', 'R.', '.R', '..', NULL),
--- company_settings is the account shell. Its SELECT keeps a capability
--- (companies.read), so `super` still reads every company's row. Its writes
--- lost theirs with 20260921110000 (3.13a): the platform branch is the support
--- session's company, and `super` has none open — U, D and M were YY, tagged
--- "the shell still takes a capability-only cross-tenant write" (3.4c/3.13),
--- and are '..' now: the row is visible and no write policy admits it.
-('company_settings',                   'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'YY', NULL),
+-- slice C: page 'documents' — viewer and editor hold no can_edit there, so the writes are refused.
+('company_planning_runs',              'I', 'RR', 'RR', 'RR', 'YR', 'YR', 'RY', 'RR', NULL),
+('company_planning_runs',              'U', '..', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('company_planning_runs',              'D', '..', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('company_planning_runs',              'M', '..', '..', '..', 'R.', 'R.', '.R', '..', NULL),
+-- company_settings is the account shell, and since 20260923100000 (3.13b) it
+-- is the one shell table with no platform branch at all. Its writes lost theirs
+-- with 20260921110000 (3.13a): the platform branch is the support session's
+-- company, and `super` has none open — U, D and M were YY, tagged "the shell
+-- still takes a capability-only cross-tenant write" (3.4c/3.13), and are '..'
+-- now: the row is visible and no write policy admits it.
+--
+-- S moved here. It was YY on companies.read, which all four staff roles hold,
+-- so a read_only platform account read every customer's legal name, managing
+-- director, VAT and tax number, commercial register, bank name, IBAN, BIC and
+-- account holder with no context and no audit row — wider than
+-- platform_drivers_list allows for a driver's name. The predicate is now the
+-- tenant term alone, which for a company-less staff account is the open
+-- context's company, so `super` reads neither row and the two context
+-- principals read company A's (the override below). The panel's one
+-- cross-company use of this table, drivers_per_car_limit, is a key of
+-- platform_companies_list now.
+('company_settings',                   'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
 ('company_settings',                   'I', 'RR', 'RR', 'RR', 'RR', 'YR', 'RY', 'RR', NULL),
 ('company_settings',                   'U', '..', '..', '..', '..', 'Y.', '.Y', '..', NULL),
 ('company_settings',                   'D', '..', '..', '..', '..', '..', '..', '..', NULL),
 ('company_settings',                   'M', '..', '..', '..', '..', 'R.', '.R', '..', NULL),
--- Not a hole and not a support-session matter: the money a platform account
--- reads to run the business is companies.read's, which every staff role holds
--- by design (plan 3.A). 20260917140000 confines the *business* tables; these
--- three stay where 20260917130000 put them.
-('company_subscriptions',              'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'YY', NULL),
+-- The money moved with decision D14 (24.09.2026, migration 20260924110000).
+-- Until then this read was `companies.read`'s, which every staff role holds by
+-- design (plan 3.A), so a `read_only` account read every customer's invoices,
+-- amounts and payment trail with no context and no audit row — wider than
+-- platform_drivers_list allows for a driver's name, and the asymmetry the
+-- decision closed. The predicate is the tenant term alone now, which for a
+-- company-less staff account is the open context's company, so `super` reads
+-- neither row and the two context principals read company A's (the override
+-- below). Across companies a platform account reads these tables through
+-- platform_invoices_list and platform_subscriptions_list, which ask
+-- billing.manage and write one audit row per call.
+--
+-- U, D and M move with S and not on their own: their own policies still name
+-- billing.manage with no company term, but `UPDATE … SET notes = notes WHERE
+-- id = …` and `DELETE … WHERE id = …` read a column, so PostgreSQL applies the
+-- SELECT policies to the existing row as well (the rule this file's header
+-- already states for M), and a row the SELECT policy hides cannot be written.
+-- Nothing in the product notices: every billing write is one of the SECURITY
+-- DEFINER RPCs of 20260916130000, which run as their owner and never through
+-- these policies.
+('company_subscriptions',              'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
 ('company_subscriptions',              'I', 'RR', 'RR', 'RR', 'RR', 'RR', 'RR', 'YY', NULL),
-('company_subscriptions',              'U', '..', '..', '..', '..', '..', '..', 'YY', NULL),
-('company_subscriptions',              'D', '..', '..', '..', '..', '..', '..', 'YY', NULL),
--- M was YY: billing.manage could re-point an existing subscription at another
--- company, because these policies carry no company term at all. 20260917130000
--- pins company_id with a trigger, so the row may be edited and not moved.
-('company_subscriptions',              'M', '..', '..', '..', '..', '..', '..', 'TT', NULL),
+('company_subscriptions',              'U', '..', '..', '..', '..', '..', '..', '..', NULL),
+('company_subscriptions',              'D', '..', '..', '..', '..', '..', '..', '..', NULL),
+-- M was YY before 20260917130000: billing.manage could re-point an existing
+-- subscription at another company, because these policies carry no company term
+-- at all. That migration pins company_id with a trigger, so the row could be
+-- edited and not moved (TT). Since D14 the row cannot even be taken with
+-- SELECT … FOR UPDATE, so no UPDATE is issued and the pin trigger never speaks:
+-- '..' is the row never having been reachable, where TT was the policy admitting
+-- it and a trigger catching it.
+('company_subscriptions',              'M', '..', '..', '..', '..', '..', '..', '..', NULL),
 ('discount_code_redemptions',          'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'YY', NULL),
 ('discount_code_redemptions',          'I', 'RR', 'RR', 'RR', 'RR', 'RR', 'RR', 'RR', NULL),
 ('discount_code_redemptions',          'U', '..', '..', '..', '..', '..', '..', '..', NULL),
@@ -1077,10 +1421,11 @@ INSERT INTO _mx_expected (tbl, op, anon, viewer, editor, supervisor, admin, othe
 ('discount_codes',                     'D', '..', '..', '..', '..', '..', '..', 'YY', NULL),
 ('discount_codes',                     'M', '..', '..', '..', '..', '..', '..', 'YY', NULL),
 ('document_blocks',                    'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('document_blocks',                    'I', 'RR', 'YR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
-('document_blocks',                   'U', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('document_blocks',                   'D', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('document_blocks',                   'M', '..', 'R.', 'R.', 'R.', 'R.', '.R', '..', NULL),
+-- slice C: page 'documents' — viewer and editor hold no can_edit there, so the writes are refused.
+('document_blocks',                    'I', 'RR', 'RR', 'RR', 'YR', 'YR', 'RY', 'RR', NULL),
+('document_blocks',                   'U', '..', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('document_blocks',                   'D', '..', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('document_blocks',                   'M', '..', '..', '..', 'R.', 'R.', '.R', '..', NULL),
 ('document_categories',                'S', '..', 'YY', 'YY', 'YY', 'YY', 'YY', 'YY', NULL),
 ('document_categories',                'I', 'RR', 'RR', 'RR', 'RR', 'RR', 'RR', 'YY', NULL),
 ('document_categories',                'U', '..', '..', '..', '..', '..', '..', 'YY', NULL),
@@ -1092,15 +1437,17 @@ INSERT INTO _mx_expected (tbl, op, anon, viewer, editor, supervisor, admin, othe
 ('document_counters',                  'D', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', NULL),
 ('document_counters',                  'M', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', NULL),
 ('document_templates',                 'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('document_templates',                 'I', 'RR', 'YR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
-('document_templates',                'U', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('document_templates',                'D', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('document_templates',                'M', '..', 'R.', 'R.', 'R.', 'R.', '.R', '..', NULL),
+-- slice C: page 'documents' — viewer and editor hold no can_edit there, so the writes are refused.
+('document_templates',                 'I', 'RR', 'RR', 'RR', 'YR', 'YR', 'RY', 'RR', NULL),
+('document_templates',                'U', '..', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('document_templates',                'D', '..', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('document_templates',                'M', '..', '..', '..', 'R.', 'R.', '.R', '..', NULL),
 ('document_variables',                 'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('document_variables',                 'I', 'RR', 'YR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
-('document_variables',                'U', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('document_variables',                'D', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('document_variables',                'M', '..', 'R.', 'R.', 'R.', 'R.', '.R', '..', NULL),
+-- slice C: page 'documents' — viewer and editor hold no can_edit there, so the writes are refused.
+('document_variables',                 'I', 'RR', 'RR', 'RR', 'YR', 'YR', 'RY', 'RR', NULL),
+('document_variables',                'U', '..', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('document_variables',                'D', '..', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('document_variables',                'M', '..', '..', '..', 'R.', 'R.', '.R', '..', NULL),
 ('documents',                          'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
 ('documents',                          'I', 'RR', 'RR', 'RR', 'YR', 'YR', 'RY', 'RR', NULL),
 ('documents',                         'U', '..', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
@@ -1111,23 +1458,37 @@ INSERT INTO _mx_expected (tbl, op, anon, viewer, editor, supervisor, admin, othe
 ('driver_notes',                      'U', '..', '..', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
 ('driver_notes',                      'D', '..', '..', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
 ('driver_notes',                      'M', '..', '..', 'R.', 'R.', 'R.', '.R', '..', NULL),
+-- 20260922110000. anon holds no privilege (PP); every member reads, only the
+-- administrator writes, and the move is the guard's (T), not the WITH CHECK's.
+('driver_month_budget',                'S', 'PP', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('driver_month_budget',                'I', 'PP', 'RR', 'RR', 'RR', 'YR', 'RY', 'RR', NULL),
+('driver_month_budget',                'U', 'PP', '..', '..', '..', 'Y.', '.Y', '..', NULL),
+('driver_month_budget',                'D', 'PP', '..', '..', '..', 'Y.', '.Y', '..', NULL),
+('driver_month_budget',                'M', 'PP', '..', '..', '..', 'T.', '.T', '..', NULL),
 ('drivers',                            'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
 ('drivers',                            'I', 'RR', 'RR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
 ('drivers',                           'U', '..', '..', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
 ('drivers',                           'D', '..', '..', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
 ('drivers',                           'M', '..', '..', 'R.', 'R.', 'R.', '.R', '..', NULL),
 ('fahrtenbuch_assignment_audit',      'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('fahrtenbuch_assignment_audit',       'I', 'RR', 'YR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
+-- slice C: page 'documents' — viewer and editor hold no can_edit there, so the writes are refused.
+('fahrtenbuch_assignment_audit',       'I', 'RR', 'RR', 'RR', 'YR', 'YR', 'RY', 'RR', NULL),
 ('fahrtenbuch_assignment_audit',       'U', '..', '..', '..', '..', '..', '..', '..', NULL),
 ('fahrtenbuch_assignment_audit',       'D', '..', '..', '..', '..', '..', '..', '..', NULL),
 ('fahrtenbuch_assignment_audit',       'M', '..', '..', '..', '..', '..', '..', '..', NULL),
 ('fahrtenbuch_imports',               'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('fahrtenbuch_imports',                'I', 'RR', 'YR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
-('fahrtenbuch_imports',                'U', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+-- slice C: page 'documents' — viewer and editor hold no can_edit there, so the
+-- writes are refused. DELETE is untouched: it stays the administrator's alone,
+-- because deleting an import takes a finalized month's trips with it, and the
+-- page gate would have widened it to the supervisor.
+('fahrtenbuch_imports',                'I', 'RR', 'RR', 'RR', 'YR', 'YR', 'RY', 'RR', NULL),
+('fahrtenbuch_imports',                'U', '..', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
 ('fahrtenbuch_imports',                'D', '..', '..', '..', '..', 'Y.', '.Y', '..', NULL),
-('fahrtenbuch_imports',                'M', '..', 'R.', 'R.', 'R.', 'R.', '.R', '..', NULL),
+('fahrtenbuch_imports',                'M', '..', '..', '..', 'R.', 'R.', '.R', '..', NULL),
 ('fahrtenbuch_trips',                 'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('fahrtenbuch_trips',                  'I', 'RR', 'YR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
+-- slice C: page 'documents' — viewer and editor hold no can_edit there. There is
+-- still no UPDATE policy at all, and DELETE stays the administrator's.
+('fahrtenbuch_trips',                  'I', 'RR', 'RR', 'RR', 'YR', 'YR', 'RY', 'RR', NULL),
 ('fahrtenbuch_trips',                  'U', '..', '..', '..', '..', '..', '..', '..', NULL),
 ('fahrtenbuch_trips',                  'D', '..', '..', '..', '..', 'Y.', '.Y', '..', NULL),
 ('fahrtenbuch_trips',                  'M', '..', '..', '..', '..', '..', '..', '..', NULL),
@@ -1137,75 +1498,121 @@ INSERT INTO _mx_expected (tbl, op, anon, viewer, editor, supervisor, admin, othe
 ('fixed_costs',                       'D', '..', '..', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
 ('fixed_costs',                       'M', '..', '..', 'R.', 'R.', 'R.', '.R', '..', NULL),
 ('historical_block_adjustments',      'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('historical_block_adjustments',       'I', 'RR', 'YR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
-('historical_block_adjustments',       'U', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('historical_block_adjustments',       'D', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('historical_block_adjustments',       'M', '..', 'R.', 'R.', 'R.', 'R.', '.R', '..', NULL),
+-- slice C: page 'documents' — viewer and editor hold no can_edit there, so the writes are refused.
+('historical_block_adjustments',       'I', 'RR', 'RR', 'RR', 'YR', 'YR', 'RY', 'RR', NULL),
+('historical_block_adjustments',       'U', '..', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('historical_block_adjustments',       'D', '..', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('historical_block_adjustments',       'M', '..', '..', '..', 'R.', 'R.', '.R', '..', NULL),
 ('historical_driver_hour_targets',    'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('historical_driver_hour_targets',     'I', 'RR', 'YR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
-('historical_driver_hour_targets',     'U', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('historical_driver_hour_targets',     'D', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('historical_driver_hour_targets',     'M', '..', 'R.', 'R.', 'R.', 'R.', '.R', '..', NULL),
+-- slice C: page 'documents' — viewer and editor hold no can_edit there, so the writes are refused.
+('historical_driver_hour_targets',     'I', 'RR', 'RR', 'RR', 'YR', 'YR', 'RY', 'RR', NULL),
+('historical_driver_hour_targets',     'U', '..', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('historical_driver_hour_targets',     'D', '..', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('historical_driver_hour_targets',     'M', '..', '..', '..', 'R.', 'R.', '.R', '..', NULL),
 ('historical_payroll_targets',        'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('historical_payroll_targets',         'I', 'RR', 'YR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
-('historical_payroll_targets',         'U', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('historical_payroll_targets',         'D', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('historical_payroll_targets',         'M', '..', 'R.', 'R.', 'R.', 'R.', '.R', '..', NULL),
+-- slice C: page 'documents' — viewer and editor hold no can_edit there, so the writes are refused.
+('historical_payroll_targets',         'I', 'RR', 'RR', 'RR', 'YR', 'YR', 'RY', 'RR', NULL),
+('historical_payroll_targets',         'U', '..', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('historical_payroll_targets',         'D', '..', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('historical_payroll_targets',         'M', '..', '..', '..', 'R.', 'R.', '.R', '..', NULL),
 ('historical_reconciliation_drivers', 'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('historical_reconciliation_drivers',  'I', 'RR', 'YR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
-('historical_reconciliation_drivers',  'U', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('historical_reconciliation_drivers',  'D', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('historical_reconciliation_drivers',  'M', '..', 'R.', 'R.', 'R.', 'R.', '.R', '..', NULL),
+-- slice C: page 'documents' — viewer and editor hold no can_edit there, so the writes are refused.
+('historical_reconciliation_drivers',  'I', 'RR', 'RR', 'RR', 'YR', 'YR', 'RY', 'RR', NULL),
+('historical_reconciliation_drivers',  'U', '..', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('historical_reconciliation_drivers',  'D', '..', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('historical_reconciliation_drivers',  'M', '..', '..', '..', 'R.', 'R.', '.R', '..', NULL),
 ('historical_reconciliation_results', 'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('historical_reconciliation_results',  'I', 'RR', 'YR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
-('historical_reconciliation_results',  'U', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('historical_reconciliation_results',  'D', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('historical_reconciliation_results',  'M', '..', 'R.', 'R.', 'R.', 'R.', '.R', '..', NULL),
+-- slice C: page 'documents' — viewer and editor hold no can_edit there, so the writes are refused.
+('historical_reconciliation_results',  'I', 'RR', 'RR', 'RR', 'YR', 'YR', 'RY', 'RR', NULL),
+('historical_reconciliation_results',  'U', '..', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('historical_reconciliation_results',  'D', '..', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('historical_reconciliation_results',  'M', '..', '..', '..', 'R.', 'R.', '.R', '..', NULL),
 ('historical_reconciliation_wh_drivers','S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('historical_reconciliation_wh_drivers','I', 'RR', 'YR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
-('historical_reconciliation_wh_drivers','U', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('historical_reconciliation_wh_drivers','D', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('historical_reconciliation_wh_drivers','M', '..', 'R.', 'R.', 'R.', 'R.', '.R', '..', NULL),
+-- slice C: page 'documents' — viewer and editor hold no can_edit there, so the writes are refused.
+('historical_reconciliation_wh_drivers','I', 'RR', 'RR', 'RR', 'YR', 'YR', 'RY', 'RR', NULL),
+('historical_reconciliation_wh_drivers','U', '..', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('historical_reconciliation_wh_drivers','D', '..', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('historical_reconciliation_wh_drivers','M', '..', '..', '..', 'R.', 'R.', '.R', '..', NULL),
 ('historical_reconciliations',        'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('historical_reconciliations',         'I', 'RR', 'YR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
-('historical_reconciliations',         'U', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('historical_reconciliations',         'D', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('historical_reconciliations',         'M', '..', 'R.', 'R.', 'R.', 'R.', '.R', '..', NULL),
+-- slice C: page 'documents' — viewer and editor hold no can_edit there, so the writes are refused.
+('historical_reconciliations',         'I', 'RR', 'RR', 'RR', 'YR', 'YR', 'RY', 'RR', NULL),
+('historical_reconciliations',         'U', '..', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('historical_reconciliations',         'D', '..', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('historical_reconciliations',         'M', '..', '..', '..', 'R.', 'R.', '.R', '..', NULL),
 ('historical_time_adjustments',       'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('historical_time_adjustments',        'I', 'RR', 'YR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
-('historical_time_adjustments',        'U', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('historical_time_adjustments',        'D', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('historical_time_adjustments',        'M', '..', 'R.', 'R.', 'R.', 'R.', '.R', '..', NULL),
+-- slice C: page 'documents' — viewer and editor hold no can_edit there, so the writes are refused.
+('historical_time_adjustments',        'I', 'RR', 'RR', 'RR', 'YR', 'YR', 'RY', 'RR', NULL),
+('historical_time_adjustments',        'U', '..', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('historical_time_adjustments',        'D', '..', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('historical_time_adjustments',        'M', '..', '..', '..', 'R.', 'R.', '.R', '..', NULL),
 ('historical_wh_saved_plans',         'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('historical_wh_saved_plans',          'I', 'RR', 'YR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
-('historical_wh_saved_plans',          'U', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('historical_wh_saved_plans',          'D', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('historical_wh_saved_plans',          'M', '..', 'R.', 'R.', 'R.', 'R.', '.R', '..', NULL),
+-- slice C: page 'documents' — viewer and editor hold no can_edit there, so the writes are refused.
+('historical_wh_saved_plans',          'I', 'RR', 'RR', 'RR', 'YR', 'YR', 'RY', 'RR', NULL),
+('historical_wh_saved_plans',          'U', '..', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('historical_wh_saved_plans',          'D', '..', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('historical_wh_saved_plans',          'M', '..', '..', '..', 'R.', 'R.', '.R', '..', NULL),
 ('income',                             'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
 ('income',                             'I', 'RR', 'RR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
 ('income',                            'U', '..', '..', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
 ('income',                            'D', '..', '..', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
 ('income',                            'M', '..', '..', 'R.', 'R.', 'R.', '.R', '..', NULL),
+-- 20260930100000, the monthly plan. The same cells as company_planning_runs, the
+-- Dokumente page of slice C on every write, with two differences: anon holds no
+-- privilege at all here (PP, as on 20260922110000's two tables), and a move is T
+-- rather than R, because the guards raise before the WITH CHECK is reached.
+('monthly_plan_block_trips',           'S', 'PP', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('monthly_plan_block_trips',           'I', 'PP', 'RR', 'RR', 'YR', 'YR', 'RY', 'RR', NULL),
+('monthly_plan_block_trips',           'U', 'PP', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('monthly_plan_block_trips',           'D', 'PP', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('monthly_plan_block_trips',           'M', 'PP', '..', '..', 'T.', 'T.', '.T', '..', NULL),
+('monthly_plan_blocks',                'S', 'PP', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('monthly_plan_blocks',                'I', 'PP', 'RR', 'RR', 'YR', 'YR', 'RY', 'RR', NULL),
+('monthly_plan_blocks',                'U', 'PP', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('monthly_plan_blocks',                'D', 'PP', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('monthly_plan_blocks',                'M', 'PP', '..', '..', 'T.', 'T.', '.T', '..', NULL),
+('monthly_plan_drivers',               'S', 'PP', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('monthly_plan_drivers',               'I', 'PP', 'RR', 'RR', 'YR', 'YR', 'RY', 'RR', NULL),
+('monthly_plan_drivers',               'U', 'PP', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('monthly_plan_drivers',               'D', 'PP', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('monthly_plan_drivers',               'M', 'PP', '..', '..', 'T.', 'T.', '.T', '..', NULL),
+('monthly_plans',                      'S', 'PP', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('monthly_plans',                      'I', 'PP', 'RR', 'RR', 'YR', 'YR', 'RY', 'RR', NULL),
+('monthly_plans',                      'U', 'PP', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('monthly_plans',                      'D', 'PP', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('monthly_plans',                      'M', 'PP', '..', '..', 'T.', 'T.', '.T', '..', NULL),
 ('monthly_planning_manual_exceptions','S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('monthly_planning_manual_exceptions', 'I', 'RR', 'YR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
-('monthly_planning_manual_exceptions', 'U', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('monthly_planning_manual_exceptions', 'D', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('monthly_planning_manual_exceptions', 'M', '..', 'R.', 'R.', 'R.', 'R.', '.R', '..', NULL),
+-- slice C: page 'documents' — viewer and editor hold no can_edit there, so the writes are refused.
+('monthly_planning_manual_exceptions', 'I', 'RR', 'RR', 'RR', 'YR', 'YR', 'RY', 'RR', NULL),
+('monthly_planning_manual_exceptions', 'U', '..', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('monthly_planning_manual_exceptions', 'D', '..', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('monthly_planning_manual_exceptions', 'M', '..', '..', '..', 'R.', 'R.', '.R', '..', NULL),
+-- 20260924100000. The one business table a client cannot write: the nightly
+-- notification job writes it through two SECURITY DEFINER functions granted to
+-- service_role, so `authenticated` holds SELECT alone and I, U, D and M are a
+-- missing GRANT for everybody, the administrator included. anon holds nothing
+-- at all. The read is the ordinary tenant shape, so it is not role-gated.
+('notification_deliveries',           'S', 'PP', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('notification_deliveries',            'I', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', NULL),
+('notification_deliveries',            'U', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', NULL),
+('notification_deliveries',            'D', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', NULL),
+('notification_deliveries',            'M', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', NULL),
 ('notification_settings',             'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
 ('notification_settings',              'I', 'RR', 'RR', 'RR', 'RR', 'YR', 'RY', 'RR', NULL),
 ('notification_settings',              'U', '..', '..', '..', '..', 'Y.', '.Y', '..', NULL),
 ('notification_settings',              'D', '..', '..', '..', '..', '..', '..', '..', NULL),
 ('notification_settings',              'M', '..', '..', '..', '..', 'R.', '.R', '..', NULL),
 ('planning_finalizations',             'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('planning_finalizations',             'I', 'RR', 'YR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
-('planning_finalizations',            'U', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('planning_finalizations',            'D', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('planning_finalizations',            'M', '..', 'R.', 'R.', 'R.', 'R.', '.R', '..', NULL),
+-- slice C: page 'documents' — viewer and editor hold no can_edit there, so the writes are refused.
+('planning_finalizations',             'I', 'RR', 'RR', 'RR', 'YR', 'YR', 'RY', 'RR', NULL),
+('planning_finalizations',            'U', '..', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('planning_finalizations',            'D', '..', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('planning_finalizations',            'M', '..', '..', '..', 'R.', 'R.', '.R', '..', NULL),
 ('planning_run_adjustments',           'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('planning_run_adjustments',          'I', 'RR', 'YR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
-('planning_run_adjustments',          'U', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('planning_run_adjustments',          'D', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('planning_run_adjustments',          'M', '..', 'R.', 'R.', 'R.', 'R.', '.R', '..', NULL),
+-- slice C: page 'documents' — viewer and editor hold no can_edit there, so the writes are refused.
+('planning_run_adjustments',          'I', 'RR', 'RR', 'RR', 'YR', 'YR', 'RY', 'RR', NULL),
+('planning_run_adjustments',          'U', '..', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('planning_run_adjustments',          'D', '..', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('planning_run_adjustments',          'M', '..', '..', '..', 'R.', 'R.', '.R', '..', NULL),
 ('receipts',                           'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
 ('receipts',                           'I', 'RR', 'RR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
 ('receipts',                          'U', '..', '..', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
@@ -1232,7 +1639,49 @@ INSERT INTO _mx_expected (tbl, op, anon, viewer, editor, supervisor, admin, othe
 ('role_permissions',                   'D', '..', '..', '..', '..', 'Y.', '.Y', '..', NULL),
 ('role_permissions',                   'M', '..', '..', '..', '..', 'T.', '.T', '..', NULL),
 ('roles',                              'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('roles',                              'I', 'RR', 'RR', 'RR', 'RR', 'YR', 'RY', 'RR', NULL),
+-- anon was RR until the plan-cache guard went into `_mx_become`, and the move to
+-- PP is the guard working. **anon is refused either way — the reason moved, not
+-- the access.** Say that first, because it is the part a reader needs.
+--
+-- The observation, which is all this comment asserts: 20260923120000 puts an
+-- INSERT trigger on this table whose function calls
+-- `public.role_name_is_system_reserved`, granted to `authenticated` and
+-- `service_role` and not to `anon`. With the owner's plans still cached, anon's
+-- INSERT was refused by `roles_insert`'s WITH CHECK and read R. With the plans
+-- discarded it is refused by the missing grant on that function and reads P.
+--
+-- **Why it moved is NOT established, and this comment is where that is recorded
+-- rather than guessed.** Two accounts were offered and tests/tools/
+-- plan-cache-repro.sql killed both:
+--
+--   F1 (plpgsql callee)            REFUSED with the cache warm
+--   F3 (sql STABLE + SET clause,   REFUSED with the cache warm
+--       this helper's exact shape)
+--   F2 (sql IMMUTABLE, no SET)     ALLOWED — only a callee the planner may fold
+--                                  away is masked, and this one is not
+--
+-- So it is neither "the cached EXECUTE check was skipped" (F1 and F3 refuse warm)
+-- nor "the planner inlined the call away" (F3 is that shape and still refuses).
+-- Something about the real path differs from every probe in that file and nobody
+-- has found it. Leads, **not explanations**: this trigger is BEFORE INSERT OR
+-- UPDATE and the probes' fire on INSERT only; this callee's body reads
+-- `public.roles`, an RLS table, where the probes' select a constant; this table
+-- has RLS with policies and a WITH CHECK that can refuse, and the probe tables
+-- have neither; and this trigger function lives in `app_private`.
+--
+-- Do not replace this with a fourth confident paragraph. Three readings of
+-- PostgreSQL's source have been wrong here, in both directions, each reading as
+-- confirmed at the time. The guard is unaffected either way: DISCARD PLANS forces
+-- a re-plan, and a re-plan under the principal can neither reuse the owner's name
+-- resolution nor fold away a function the principal may not execute.
+--
+-- anon is deliberately left without that EXECUTE. `roles_insert` is
+-- `TO authenticated`, so anon cannot insert a role whatever the grant says;
+-- granting it would widen what anon can reach in order to change a refusal's
+-- SQLSTATE. That is the reasoning 20260923120000's own grant block gives, and it
+-- is the same fact as the one named exemption in assertions.sql's EXECUTE-reach
+-- rule — if `roles_insert` ever admits anon, both need revisiting together.
+('roles',                              'I', 'PP', 'RR', 'RR', 'RR', 'YR', 'RY', 'RR', NULL),
 -- …and the same for the roles themselves: visible only through a context.
 ('roles',                              'U', '..', '..', '..', '..', 'Y.', '.Y', '..', NULL),
 ('roles',                              'D', '..', '..', '..', '..', 'Y.', '.Y', '..', NULL),
@@ -1256,17 +1705,23 @@ INSERT INTO _mx_expected (tbl, op, anon, viewer, editor, supervisor, admin, othe
 ('salary_payments',                   'D', '..', '..', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
 ('salary_payments',                   'M', '..', '..', 'R.', 'R.', 'R.', '.R', '..', NULL),
 ('saved_stundennachweise',             'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('saved_stundennachweise',            'I', 'RR', 'YR', 'YR', 'YR', 'YR', 'RY', 'RR', NULL),
-('saved_stundennachweise',            'U', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('saved_stundennachweise',            'D', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
-('saved_stundennachweise',            'M', '..', 'R.', 'R.', 'R.', 'R.', '.R', '..', NULL),
+-- slice C: page 'documents' — viewer and editor hold no can_edit there, so the writes are refused.
+('saved_stundennachweise',            'I', 'RR', 'RR', 'RR', 'YR', 'YR', 'RY', 'RR', NULL),
+('saved_stundennachweise',            'U', '..', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('saved_stundennachweise',            'D', '..', '..', '..', 'Y.', 'Y.', '.Y', '..', NULL),
+('saved_stundennachweise',            'M', '..', '..', '..', 'R.', 'R.', '.R', '..', NULL),
 -- 20260919150000 (plan 3.F step U1). Its SELECT predicate is the account shell
 -- plus companies.read, exactly like company_subscriptions above, so a member
 -- reads its own company's periods whatever state that company is in — which is
 -- the point, since the page explaining the block is the one that shows them.
 -- Every other cell is PP: `authenticated` is granted SELECT and nothing else,
 -- and the only writers are the SECURITY DEFINER helpers in app_private.
-('subscription_coverage',              'S', 'PP', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'YY', NULL),
+--
+-- S moved with decision D14: the capability branch is gone, so `super` reads
+-- neither period. No read model carries this table — nothing in the product
+-- reads a coverage period across companies, and one that no screen shows would
+-- be code with no caller — so inside a context is the only way to see one.
+('subscription_coverage',              'S', 'PP', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
 ('subscription_coverage',              'I', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', NULL),
 ('subscription_coverage',              'U', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', NULL),
 ('subscription_coverage',              'D', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', NULL),
@@ -1276,14 +1731,26 @@ INSERT INTO _mx_expected (tbl, op, anon, viewer, editor, supervisor, admin, othe
 ('subscription_admin_actions',         'U', '..', '..', '..', '..', '..', '..', 'YY', NULL),
 ('subscription_admin_actions',         'D', '..', '..', '..', '..', '..', '..', 'YY', NULL),
 ('subscription_admin_actions',         'M', '..', '..', '..', '..', '..', '..', 'YY', NULL),
-('subscription_invoices',              'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'YY', NULL),
+-- Decision D14, with company_subscriptions above: S, U, D and M move together,
+-- for the reason written out there. The invoice list a platform account reads
+-- across companies is platform_invoices_list, on billing.manage, one audit row
+-- per call. `generate_invoice_number` had to become SECURITY DEFINER in the same
+-- migration or invoice generation would have reported every company as skipped
+-- (its rpc line below moved with it).
+('subscription_invoices',              'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
 ('subscription_invoices',              'I', 'RR', 'RR', 'RR', 'RR', 'RR', 'RR', 'YY', NULL),
-('subscription_invoices',              'U', '..', '..', '..', '..', '..', '..', 'YY', NULL),
-('subscription_invoices',              'D', '..', '..', '..', '..', '..', '..', 'YY', NULL),
--- M was YY, and an invoice re-attributed to another company re-attributes
--- money. Pinned by the same trigger.
-('subscription_invoices',              'M', '..', '..', '..', '..', '..', '..', 'TT', NULL),
-('subscription_payment_audit',         'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', 'YY', NULL),
+('subscription_invoices',              'U', '..', '..', '..', '..', '..', '..', '..', NULL),
+('subscription_invoices',              'D', '..', '..', '..', '..', '..', '..', '..', NULL),
+-- M was YY before 20260917130000, and an invoice re-attributed to another
+-- company re-attributes money; that migration pinned it with a trigger (TT).
+-- Since D14 the row cannot be taken at all, so the trigger never speaks.
+('subscription_invoices',              'M', '..', '..', '..', '..', '..', '..', '..', NULL),
+-- The payment trail: S moves with the two tables above, and nothing else can.
+-- I stays YY — an INSERT with no RETURNING reads no column, so no SELECT policy
+-- applies to it — and there is no UPDATE or DELETE policy at all. No read model
+-- carries the trail: nothing in the product reads it, across companies or
+-- otherwise.
+('subscription_payment_audit',         'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
 ('subscription_payment_audit',         'I', 'RR', 'RR', 'RR', 'RR', 'RR', 'RR', 'YY', NULL),
 ('subscription_payment_audit',         'U', '..', '..', '..', '..', '..', '..', '..', NULL),
 ('subscription_payment_audit',         'D', '..', '..', '..', '..', '..', '..', '..', NULL),
@@ -1293,6 +1760,13 @@ INSERT INTO _mx_expected (tbl, op, anon, viewer, editor, supervisor, admin, othe
 ('subscription_plans',                 'U', '..', '..', '..', '..', '..', '..', 'YY', NULL),
 ('subscription_plans',                 'D', '..', '..', '..', '..', '..', '..', 'YY', NULL),
 ('subscription_plans',                 'M', '--', '--', '--', '--', '--', '--', '--', NULL),
+-- 20260922110000, the same shape as driver_month_budget; a move is refused by
+-- the WITH CHECK here, since nothing pins the settings row to its company.
+('trip_analysis_settings',             'S', 'PP', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('trip_analysis_settings',             'I', 'PP', 'RR', 'RR', 'RR', 'YR', 'RY', 'RR', NULL),
+('trip_analysis_settings',             'U', 'PP', '..', '..', '..', 'Y.', '.Y', '..', NULL),
+('trip_analysis_settings',             'D', 'PP', '..', '..', '..', 'Y.', '.Y', '..', NULL),
+('trip_analysis_settings',             'M', 'PP', '..', '..', '..', 'R.', '.R', '..', NULL),
 ('user_profiles',                      'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
 -- anon and super: since 20260916110010 the profile guard refuses a JWT putting a
 -- profile into a company before RLS is asked; both were RR
@@ -1346,10 +1820,13 @@ INSERT INTO _mx_expected (tbl, op, anon, viewer, editor, supervisor, admin, othe
 --                  answer is the silent one, not T. The caller whose gates
 --                  answer the same way inside its own company is the viewer, so
 --                  the viewer's own move cell is what says which it is —
---                  '..' where the row cannot be held (the ten role-gated
---                  tables, notification_settings, and fahrtenbuch_trips and
---                  fahrtenbuch_assignment_audit, which have no UPDATE policy at
---                  all), 'T.' where it can.
+--                  '..' where the row cannot be held, 'T.' where it can.
+--                  Since 20260923130000 (slice C) it is '..' on every one of
+--                  the 36: the tables that had no role gate now have one, and
+--                  the rest either gate the viewer already, ask for an
+--                  administrator, or carry no UPDATE policy at all. So no 'T.'
+--                  move cell is left here, and a table that grows one again is
+--                  a table that lost its gate.
 --
 -- Tables whose cell is PP are skipped: no GRANT means the statement never
 -- reaches a policy or a trigger.
@@ -1375,7 +1852,12 @@ UPDATE _mx_expected x
      'fahrtenbuch_assignment_audit', 'notification_settings', 'cash_movements',
      'salary_cash_receipts', 'document_blocks', 'document_variables',
      'historical_reconciliation_drivers', 'historical_reconciliation_results',
-     'historical_reconciliation_wh_drivers');
+     'historical_reconciliation_wh_drivers',
+     -- 20260922110000: the same shape and the same two triggers
+     'trip_analysis_settings', 'driver_month_budget',
+     -- 20260930100000: the same shape and the same two triggers
+     'monthly_plans', 'monthly_plan_drivers', 'monthly_plan_blocks',
+     'monthly_plan_block_trips');
 
 -- The account shell, where the rule above does not apply and the column
 -- copied from `super` is wrong: these predicates read get_user_company_id(),
@@ -1395,6 +1877,11 @@ UPDATE _mx_expected x
 -- tenant tables: T for every statement it issues, and for a move only where the
 -- row could be locked first.
 --
+-- Since 20260923110010 roles and role_permissions no longer let a view context
+-- lock the row at all — their write policies ask the support session's company
+-- instead of a capability with no company term — so their two move cells are
+-- '..'. activation_code_attempts is untouched by that migration and keeps 'T.'.
+--
 -- company_settings and user_profiles are the shell tables deliberately *not*
 -- behind it: a trigger there would refuse platform_subscription_assign and
 -- platform_company_lifecycle — audited RPCs that name their own company — and
@@ -1409,24 +1896,55 @@ UPDATE _mx_expected x SET staff_view = o.sv, staff_support = o.ss
     -- roles and their permissions: visible for the context's company, written
     -- only inside the support session. A move is refused by the pin trigger
     -- once the support session lets the statement through at all.
+    --
+    -- The two move cells moved from 'T.' to '..' for the *view* column with
+    -- 20260923110010, and the reason is the mechanical one this file already
+    -- states for the tenant tables above: the probe must take the row with
+    -- SELECT … FOR UPDATE first, and that applies the UPDATE policy's USING.
+    -- Until that migration the USING carried `OR platform_can('company_users.manage')`
+    -- with no company term, which is true for a staff account in any context or
+    -- none — so the row could be locked, the UPDATE was issued, and the pin
+    -- trigger spoke (T). The platform branch is now the *support* session's
+    -- company, which is NULL in a view context, so there is nothing to lock, no
+    -- UPDATE is ever issued, and neither trigger runs: the silent answer, not T.
+    -- That is the tightening and not a lost refusal — '..' is the row never
+    -- having been reachable, where 'T.' was the policy admitting it and a
+    -- trigger catching it. staff_support is unchanged: there the first disjunct
+    -- grants, the statement is issued, and the pin trigger refuses the move.
+    -- The notification job's record (20260924100000). Only its SELECT line is
+    -- listed: the write cells are a missing GRANT for every principal, so the
+    -- copy of `super` is already right, while `super` reads nothing without a
+    -- context and a context makes the company's rows readable — the tenant
+    -- shape's whole claim, and the reason the line cannot be left as copied.
+    ('notification_deliveries',  'S', 'Y.', 'Y.'),
     ('roles',                    'S', 'Y.', 'Y.'),
     ('roles',                    'I', 'TT', 'YR'),
     ('roles',                    'U', 'TT', 'Y.'),
     ('roles',                    'D', 'TT', 'Y.'),
-    ('roles',                    'M', 'T.', 'T.'),
+    -- view: the row can no longer be locked (20260923110010) — see above.
+    ('roles',                    'M', '..', 'T.'),
     ('role_permissions',         'S', 'Y.', 'Y.'),
     ('role_permissions',         'I', 'TT', 'YR'),
     ('role_permissions',         'U', 'TT', 'Y.'),
     ('role_permissions',         'D', 'TT', 'Y.'),
-    ('role_permissions',         'M', 'T.', 'T.'),
-    -- The company's legal details (20260921110000, 3.13a). Before it the view
-    -- column inserted company A's row (YR) — the context completed the company
-    -- term and companies.lifecycle the rest — and both columns copied super's
-    -- YY for U, D and M. Now the view context writes nothing (its SELECT still
-    -- shows both rows, through companies.read), and the support session writes
-    -- company A's row as that company's administrator does, plus D, which it
-    -- holds as companies.hard_delete inside the session and an administrator
-    -- does not hold at all. Its move is refused by the WITH CHECK.
+    -- view: the row can no longer be locked (20260923110010) — see above.
+    ('role_permissions',         'M', '..', 'T.'),
+    -- The company's legal details (20260921110000, 3.13a; 20260923100000,
+    -- 3.13b). Before 3.13a the view column inserted company A's row (YR) — the
+    -- context completed the company term and companies.lifecycle the rest —
+    -- and both columns copied super's YY for U, D and M. The view context
+    -- writes nothing now, and the support session writes company A's row as
+    -- that company's administrator does, plus D, which it holds as
+    -- companies.hard_delete inside the session and an administrator does not
+    -- hold at all. Its move is refused by the WITH CHECK.
+    --
+    -- S is listed since 3.13b. Both columns used to copy super's YY, so both
+    -- read company B as well — through companies.read, which the context had
+    -- nothing to do with. The capability is gone, so the context is the whole
+    -- answer: company A's row, and not company B's, in either mode. This is
+    -- the one line that says a *view* context reads the legal details at all;
+    -- reading them is what a view context is for.
+    ('company_settings',         'S', 'Y.', 'Y.'),
     ('company_settings',         'I', 'RR', 'YR'),
     ('company_settings',         'U', '..', 'Y.'),
     ('company_settings',         'D', '..', 'Y.'),
@@ -1468,7 +1986,42 @@ UPDATE _mx_expected x SET staff_view = o.sv, staff_support = o.ss
     ('user_profiles',            'U', '..', 'Y.'),
     ('user_profiles',            'D', '..', 'Y.'),
     ('user_profiles',            'M', '..', 'T.'),
-    ('companies',                'D', 'TT', 'TT')
+    ('companies',                'D', 'TT', 'TT'),
+    -- The four billing tables, decision D14 (20260924110000). Both columns used
+    -- to copy super's YY, which is what the capability answered: the context had
+    -- nothing to do with it. The capability is gone from their SELECT, so the
+    -- context is now the whole answer — company A's rows, not company B's, in
+    -- either mode. This is the line that says a *view* context reads a
+    -- customer's invoices and subscriptions at all, and reading them is what a
+    -- view context is for.
+    --
+    -- U and D follow S rather than their own policies, which still name
+    -- billing.manage with no company term: the probe's UPDATE and DELETE read a
+    -- column in their WHERE, so the SELECT policy decides which row they can
+    -- reach. M is 'T.' for the same reason — company A's row can be taken with
+    -- SELECT … FOR UPDATE, the UPDATE is issued, and pin_billing_company_id
+    -- refuses the move; company B's row is never visible.
+    --
+    -- **Deliberately recorded, not closed here:** a *view* context therefore
+    -- still edits and deletes the supported company's subscription and invoice
+    -- rows. These two tables carry no refuse_read_only_context_write — they are
+    -- the account shell, not one of 3.4a's 36 tenant tables — and D14 is a
+    -- decision about who may *read* the money. Narrowing their writes to the
+    -- support session, the way 3.13a narrowed company_settings and
+    -- user_profiles, is its own slice. It is strictly tighter than before, where
+    -- both context modes wrote *either* company's rows.
+    ('company_subscriptions',      'S', 'Y.', 'Y.'),
+    ('company_subscriptions',      'U', 'Y.', 'Y.'),
+    ('company_subscriptions',      'D', 'Y.', 'Y.'),
+    ('company_subscriptions',      'M', 'T.', 'T.'),
+    ('subscription_invoices',      'S', 'Y.', 'Y.'),
+    ('subscription_invoices',      'U', 'Y.', 'Y.'),
+    ('subscription_invoices',      'D', 'Y.', 'Y.'),
+    ('subscription_invoices',      'M', 'T.', 'T.'),
+    -- no UPDATE or DELETE policy, so only S can move
+    ('subscription_payment_audit', 'S', 'Y.', 'Y.'),
+    -- SELECT is the only privilege a client role holds
+    ('subscription_coverage',      'S', 'Y.', 'Y.')
   ) AS o(tbl, op, sv, ss)
  WHERE x.tbl = o.tbl AND x.op = o.op;
 
@@ -1522,6 +2075,11 @@ DECLARE
   expected text[];
   n_lines  int := 0;
   n_bad    int := 0;
+  n_probes int := 0;
+  -- The table matrix is the bulk of this file's work and the only part whose
+  -- cost the plan-cache guard changes, so it times itself: run the kit once
+  -- with matrix.uncache 'on' and once 'off' and the difference is the guard.
+  t_start  constant timestamptz := clock_timestamp();
 BEGIN
   FOR r IN SELECT s.*, m.tbl AS move_tbl, m.mov, m.mov_pre, m.owner_must AS move_owner_must, m.note AS move_note
              FROM _mx_spec s LEFT JOIN _mx_move m ON m.tbl = s.tbl
@@ -1565,6 +2123,7 @@ BEGIN
             outcome := CASE WHEN v_op = 'M'
                             THEN _mx_move_try('owner', pre, r.tbl, _mx_fill(r.key, r.tbl, side), _mx_fill(r.mov, r.tbl, side))
                             ELSE _mx_try('owner', pre, stmt) END;
+            n_probes := n_probes + 1;
             IF left(outcome, 1) IS DISTINCT FROM owner_must THEN
               INSERT INTO _mx_failures VALUES ('matrix', format('%s %s', r.tbl, v_op),
                 format('probe is invalid — the owner must answer %s (side %s): %s  [%s]', owner_must, side, outcome, stmt));
@@ -1573,6 +2132,7 @@ BEGIN
             outcome := CASE WHEN v_op = 'M'
                             THEN _mx_move_try(who_logins[i], pre, r.tbl, _mx_fill(r.key, r.tbl, side), _mx_fill(r.mov, r.tbl, side))
                             ELSE _mx_try(who_logins[i], pre, stmt) END;
+            n_probes := n_probes + 1;
             cell := cell || left(outcome, 1);
             IF length(outcome) > 1 THEN
               details := details || format(E'\n      %s/%s: %s', who_names[i], side, substr(outcome, 3, 160));
@@ -1608,7 +2168,10 @@ BEGIN
     END LOOP;
   END LOOP;
 
-  RAISE NOTICE '── matrix: % lines, % differ from the recorded baseline ──', n_lines, n_bad;
+  RAISE NOTICE '── matrix: % lines, % differ from the recorded baseline, % probes in % (matrix.uncache=%) ──',
+    n_lines, n_bad, n_probes,
+    justify_interval(clock_timestamp() - t_start),
+    coalesce(current_setting('matrix.uncache', true), 'on');
 
   -- A table or view nobody characterized is one whose access nobody has looked
   -- at. Reported, not failed: streams running in parallel add tables, and each
@@ -1889,9 +2452,35 @@ BEGIN
         || left(_mx_try(r.who, NULL, format('DELETE FROM drivers WHERE id = %L', r.drv)), 1);
     PERFORM _mx_expect('state', r.label || ': drivers S I U D', got,
       CASE WHEN r.allowed THEN 'YYYY' ELSE '.R..' END);
-    PERFORM _mx_expect('state', r.label || ': reassign_fahrtenbuch_trip on its own trip',
-      _mx_call(r.who, format('SELECT reassign_fahrtenbuch_trip(%L, %L, %L)::text', r.trip, r.drv, 'MX state probe')),
-      CASE WHEN r.allowed THEN 'Y' ELSE 'T' END);
+
+    -- 20260923130000 (slice C): the RPC asks current_role_permits('documents',
+    -- true) after its own company branch. The two allowed principals are the
+    -- trial company's **administrator** (every `admin-…` row) and the invited
+    -- **editor**, and the editor has held can_edit = false on the Dokumente
+    -- page since 20260302065621 — so its cell moves Y → T. The claim this line
+    -- makes does not weaken: `Y` used to say "the state gate admitted a
+    -- pending_invite account", and the 42501 below says the same thing more
+    -- strongly, because only a caller the state gate let past ever reaches the
+    -- page check.
+    got := _mx_call(r.who, format('SELECT reassign_fahrtenbuch_trip(%L, %L, %L)::text', r.trip, r.drv, 'MX state probe'));
+    PERFORM _mx_expect('state', r.label || ': reassign_fahrtenbuch_trip on its own trip', got,
+      CASE WHEN NOT r.allowed THEN 'T'
+           WHEN r.who LIKE 'admin-%' THEN 'Y'
+           ELSE 'T' END);
+
+    -- T is the letter for both refusals, so it can no longer tell them apart.
+    -- These two lines are what keeps the scenario's meaning: the invited editor
+    -- is refused by the page and not for state, and every blocked principal is
+    -- still refused for state and never reaches the page.
+    IF r.allowed AND r.who NOT LIKE 'admin-%' THEN
+      PERFORM _mx_expect('state', r.label || ': …and the refusal is the Dokumente page, not the state',
+        CASE WHEN got LIKE 'T|42501|%' AND got NOT LIKE '%caller has no company%' THEN 'page' ELSE got END,
+        'page');
+    ELSIF NOT r.allowed THEN
+      PERFORM _mx_expect('state', r.label || ': …and the refusal is the state, ahead of the page',
+        CASE WHEN got LIKE '%caller has no company%' THEN 'state' ELSE got END,
+        'state');
+    END IF;
   END LOOP;
 END $$;
 
@@ -2109,6 +2698,30 @@ INSERT INTO app_private.platform_announcements
 VALUES (_mx_id('rpc_announcement', 'a'), 'info', 'MX', 'MX probe', 'all', now() - interval '1 hour')
 ON CONFLICT (id) DO NOTHING;
 
+-- A company role of A for the two company-roles RPCs (20260923120000) to edit
+-- and delete: its own row rather than the table section's, so no account holds
+-- it and `company_role_delete` answers about the policies and not about the
+-- foreign key. A name no other probe uses, because the per-company unique index
+-- is case-insensitive.
+INSERT INTO roles (id, name, description, company_id, is_system)
+VALUES (_mx_id('rpc_role', 'a'), 'mx-rpc-role-a', 'MX rpc role', _mx_co('a'), false)
+ON CONFLICT (id) DO NOTHING;
+
+-- A draft monthly plan of company A for monthly_plan_confirm to make active
+-- (20260930100000). Its one block is unassigned, so the plan is not empty and
+-- no driver's hours cap is in play — this line probes who may confirm, not what
+-- the confirm gate re-derives, which tests/rls/monthly-plan.sql does. Every
+-- probe is rolled back, so each principal finds it as a draft.
+INSERT INTO monthly_plans (id, company_id, year, month, switch_minutes)
+VALUES (_mx_id('rpc_monthly_plan', 'a'), _mx_co('a'), 2027, 3, 30)
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO monthly_plan_blocks (id, company_id, plan_id, block_key, car_identifier,
+                                 starts_at, ends_at, span_minutes, ride_minutes)
+VALUES (_mx_id('rpc_monthly_block', 'a'), _mx_co('a'), _mx_id('rpc_monthly_plan', 'a'),
+        'mx-rpc', 'MX-CAR', '2027-03-02 08:23+01', '2027-03-02 09:44+01', 81, 81)
+ON CONFLICT (id) DO NOTHING;
+
 -- Checked in the order listed. `stmt` is filled for company A (see _mx_fill).
 --
 -- `want` carries the seven principals of the columns above. `staff` carries the
@@ -2215,11 +2828,29 @@ INSERT INTO _mx_rpc (label, stmt, want, hole) VALUES
     ('platform_staff_list() is allowed',
      $q$SELECT platform_staff_list() ->> 'ok'$q$,
      'PNNNNNY', NULL),
+    -- the seventh and eighth read models, 20260924110000 (decision D14): the
+    -- money. Both ask billing.manage, which `super` holds as an owner and no
+    -- company principal does. tests/rls/platform-readmodels.sql section 12 takes
+    -- the other three staff roles through them — `support` and `read_only` are
+    -- refused, which is the behaviour change the decision makes
+    ('platform_invoices_list() is allowed',
+     $q$SELECT platform_invoices_list() ->> 'ok'$q$,
+     'PNNNNNY', NULL),
+    ('platform_subscriptions_list() is allowed',
+     $q$SELECT platform_subscriptions_list() ->> 'ok'$q$,
+     'PNNNNNY', NULL),
     -- anon's EXECUTE revoked by 20260915120000; the platform's invoice screen
-    -- calls it signed in
+    -- calls it signed in. It was SECURITY INVOKER and read subscription_invoices
+    -- under the caller's own RLS, so every principal got a number — a company
+    -- user's computed from its own invoices, which was never a number it could
+    -- use. D14 narrowed that policy, which would have left it answering
+    -- 'INV-<year>-0001' for every call and made invoice generation report every
+    -- company as skipped and create nothing, with no error anywhere. It is a
+    -- definer behind billing.manage now and answers NULL ('0' here) to anyone
+    -- else, which GenerateInvoicesModal already reports per company.
     ('generate_invoice_number(2026)',
      $q$SELECT generate_invoice_number(2026)$q$,
-     'PYYYYYY', NULL),
+     'P00000Y', NULL),
     -- anon's EXECUTE on both activation-code RPCs revoked by 20260915110000
     -- 20260916130020: a member of the code's own company still previews it, and
     -- the super admin no longer does — it belongs to no company, and the
@@ -2306,6 +2937,13 @@ INSERT INTO _mx_rpc (label, stmt, want, hole) VALUES
     ('platform_staff_enable(a disabled owner)',
      $q$SELECT platform_staff_enable({ref:rpc_staff_disabled})::text$q$,
      'PNNNNNY', NULL),
+    -- 20260923140000: an existing member's role. Demoting an active owner needs
+    -- another active owner to remain, and the platform principal is one, so
+    -- this is a change the RPC allows rather than a last_owner refusal.
+    -- tests/rls/platform-rpcs.sql section 5b takes it through every refusal.
+    ('platform_staff_set_role(an active owner → support)',
+     $q$SELECT platform_staff_set_role({ref:rpc_staff_active}, 'support')::text$q$,
+     'PNNNNNY', NULL),
     -- the settings RPCs of 20260916150000. Both answer ok=false without an
     -- active staff role, so only the platform principal gets Y; anon holds
     -- EXECUTE on neither. tests/rls/pricing.sql probes them by role
@@ -2355,36 +2993,71 @@ INSERT INTO _mx_rpc (label, stmt, want, hole) VALUES
      'PNNNNNY', NULL),
 
     -- the planning RPCs, on company A's import, trip and runs. Company B's
-    -- admin makes the same calls with company A's ids. None checks the role,
-    -- only the company (see "Recorded without a plan step"). anon's EXECUTE on
+    -- admin makes the same calls with company A's ids. anon's EXECUTE on
     -- the first four was revoked by 20260915120000; each raised for anon before.
+    --
+    -- 20260923130000 (slice C): all five now ask
+    -- current_role_permits('documents', true) — the page their tables carry —
+    -- right after their own "caller has no company" branch, and raise 42501
+    -- with HINT not_authorized. So the viewer and editor cells move Y → T on
+    -- every one of them: these functions are SECURITY DEFINER and ran past RLS,
+    -- which is why gating the tables alone would have left the window open.
+    -- The supervisor and admin cells do not move, and neither does `other`
+    -- (company B's admin, which still opens a run in its own company and
+    -- changes none of A's trips) or `super` (no context: refused for state).
     ('apply_monthly_planning_run(import and trip of A)',
      $q$SELECT ((apply_monthly_planning_run(jsonb_build_object(
           'import_id', {ref:fahrtenbuch_imports}, 'month', 3, 'year', 2026,
           'change_rows', jsonb_build_array(jsonb_build_object(
             'trip_id', {ref:fahrtenbuch_trips}, 'driver_id', {ref:drivers}, 'driver_name', 'MX'))))
         ->> 'updated_trips')::int > 0)::text$q$,
-     'PYYYYNT', NULL),
+     'PTTYYNT', NULL),
     ('replace_monthly_planning_run(applied run of A)',
      $q$SELECT ((replace_monthly_planning_run(jsonb_build_object(
           'import_id', {ref:fahrtenbuch_imports}, 'month', 4, 'year', 2026,
           'change_rows', jsonb_build_array(jsonb_build_object(
             'trip_id', {ref:fahrtenbuch_trips}, 'driver_id', {ref:drivers}, 'driver_name', 'MX'))),
         {ref:rpc_applied_run}) ->> 'updated_trips')::int > 0)::text$q$,
-     'PYYYYTT', NULL),
+     'PTTYYTT', NULL),
     ('delete_or_archive_monthly_planning_run(run of A)',
      $q$SELECT delete_or_archive_monthly_planning_run({ref:rpc_run})::text$q$,
-     'PYYYYTT', NULL),
+     'PTTYYTT', NULL),
     ('purge_old_monthly_planning_runs(month of A''s archived run)',
      $q$SELECT ((purge_old_monthly_planning_runs(5, 2026) ->> 'deleted_count') IS NOT NULL)::text$q$,
-     'PYYYYNT', NULL),
+     'PTTYYNT', NULL),
     -- anon's EXECUTE revoked by 20260607124839, before the fixture, yet still
     -- held on staging on 15.09.2026, and revoked again by 20260915140000,
     -- which the kit applies, so the anon cell is probed. It moved from - (not
     -- probed) to P: -YYYYTT became PYYYYTT
     ('reassign_fahrtenbuch_trip(trip of A)',
      $q$SELECT reassign_fahrtenbuch_trip({ref:fahrtenbuch_trips}, {ref:drivers}, 'MX', 'pending', 'mx', 'mx')::text$q$,
-     'PYYYYTT', NULL),
+     'PTTYYTT', NULL),
+
+    -- The monthly plan's two RPCs (20260930100000). Both ask
+    -- get_active_company_id() and then current_role_permits('documents', true),
+    -- like slice C's five above, so the viewer and the editor are T and `super`
+    -- is T on the state branch, having neither a company nor a context.
+    --
+    -- `other` differs between them, and each answer is the point of its
+    -- function: company B's admin saving A's driver is refused by the snapshot
+    -- guard (T, driver_company_mismatch), while confirming A's plan is a
+    -- *return value* (N, plan_not_found) — section 9's screen has to show two
+    -- choices, so a refusal there may not be an exception.
+    -- Both monthly-plan RPCs CHANGE STATE, and this harness runs one probe per
+    -- principal against one fixture. `monthly_plan_save` writes a plan for a
+    -- fixed month, so the second principal hits the partial unique index and
+    -- then blocks on the advisory lock the first principal's transaction still
+    -- holds — which is what killed the backend, twice, right after
+    -- `platform_context_open`. Their authorization is covered per principal in
+    -- `tests/rls/monthly-plan.sql`, which drives each call in its own
+    -- transaction; here only the EXECUTE grant is probed, which is what a
+    -- matrix line can honestly ask of a state-changing function.
+    ('monthly_plan_save(execute grant only)',
+     $q$SELECT has_function_privilege(current_user, 'public.monthly_plan_save(jsonb)', 'EXECUTE')::text$q$,
+     'NYYYYYY', NULL),
+    ('monthly_plan_confirm(execute grant only)',
+     $q$SELECT has_function_privilege(current_user, 'public.monthly_plan_confirm(uuid,boolean)', 'EXECUTE')::text$q$,
+     'NYYYYYY', NULL),
 
     -- the Abrechnung and cash RPCs: security invoker, so they return what the
     -- income, receipts and cash_transactions policies let the caller read.
@@ -2586,7 +3259,65 @@ INSERT INTO _mx_rpc (label, stmt, want, hole) VALUES
     -- role reads Y
     ('platform_context_current()',
      $q$SELECT platform_context_current()::text$q$,
-     'PNNNNNY', NULL);
+     'PNNNNNY', NULL),
+    -- The notification job (20260924100000). These three are the only SECURITY
+    -- DEFINER functions in `public` granted to `service_role` and to nobody
+    -- else, so every cell here is P — the revoke proved rather than trusted,
+    -- and `staff` falls to PP by the default rule below, because a context
+    -- grants no EXECUTE.
+    --
+    -- The assertion worth having is on notification_candidates: it runs past
+    -- RLS and reads **across companies** by design, so an `authenticated` cell
+    -- that ever moved off P would be a cross-tenant read of every company's
+    -- cars, settings and delivery history in one call. The other two write the
+    -- delivery record the whole dedupe rule rests on; a client that could call
+    -- notification_delivery_claim could silence its own next TÜV warning, and
+    -- one that could call _settle could mark a notification sent that was not.
+    --
+    -- The arguments never run — the call is refused before that — but they
+    -- must still resolve to these signatures, or the probe would answer 42883
+    -- and read as E rather than P.
+    ('notification_candidates(the 60-day window, one page)',
+     $q$SELECT count(*)::text FROM notification_candidates(60, 1)$q$,
+     'PPPPPPP', NULL),
+    ('notification_delivery_claim(company A, its own trial)',
+     $q$SELECT notification_delivery_claim({co}, 'trial_abgelaufen', {co}, '2097-01-01')::text$q$,
+     'PPPPPPP', NULL),
+    ('notification_delivery_settle(company A''s probe row)',
+     $q$SELECT notification_delivery_settle({ref:notification_deliveries}, true, 1)::text$q$,
+     'PPPPPPP', NULL),
+    /*
+      The company-roles RPCs of 20260923120000, and the reason they are written
+      out by hand: both are **SECURITY INVOKER**, so the uncovered-function
+      sweep at the end of this file — which filters on `p.prosecdef` — will
+      never report them. It is silent about them by construction, not because
+      they are covered.
+
+      They answer `{"ok": …}` rather than `{"success": …}`, so the probe reads
+      `->> 'ok'` and lets `_mx_call` classify the plain word, the way the read
+      models' lines do.
+
+      Every cell is RLS speaking, since neither function runs past it:
+        anon        no EXECUTE (P)
+        viewer,     roles_insert's WITH CHECK refuses and raises 42501, which
+        editor,     the function catches as insufficient_privilege; the UPDATE
+        supervisor  and DELETE are refused by the USING clauses and match no
+                    row. Two mechanisms, one `not_authorized` (N)
+        admin       its own company's administrator (Y)
+        other       creates in *its own* company (Y), and company A's role is
+                    invisible to it, so the edit and the delete answer
+                    `not_found` (N)
+        super       no context, so get_user_company_id() is NULL and both
+                    answer `no_company` before touching anything (N)
+      tests/rls/company-roles.sql takes the same principals through the
+      refusals by name.
+    */
+    ('company_role_save(a new role of A)',
+     $q$SELECT company_role_save('mx-rpc-neu', 'MX', '[{"page_key":"drivers","can_view":true,"can_edit":false}]'::jsonb) ->> 'ok'$q$,
+     'PNNNYYN', NULL),
+    ('company_role_delete(company role of A)',
+     $q$SELECT company_role_delete({ref:rpc_role}) ->> 'ok'$q$,
+     'PNNNYNN', NULL);
 
 -- What an open context changes, RPC by RPC. Everything not named here answers
 -- the same with a context as without one, so it takes `super`'s character
@@ -2627,7 +3358,28 @@ UPDATE _mx_rpc r SET staff = o.staff
     ('replace_monthly_planning_run(applied run of A)',              'TY'),
     ('delete_or_archive_monthly_planning_run(run of A)',            'TY'),
     ('purge_old_monthly_planning_runs(month of A''s archived run)',  'TY'),
-    ('reassign_fahrtenbuch_trip(trip of A)',                        'TY')
+    ('reassign_fahrtenbuch_trip(trip of A)',                        'TY'),
+    -- the company-roles RPCs: `roles` and `role_permissions` both carry
+    -- refuse_read_only_context_write, which is a BEFORE STATEMENT trigger and
+    -- so speaks before any policy is consulted — a view context is refused
+    -- (T), and the refusal travels out of the function unchanged, because only
+    -- unique_violation and insufficient_privilege are caught. In a support
+    -- session the policies' own platform branch is
+    -- `company_id = platform_support_company_id()` (20260923110010), which is
+    -- the opened company, so both succeed exactly as its administrator's do (Y)
+    ('company_role_save(a new role of A)',                          'TY'),
+    ('company_role_delete(company role of A)',                      'TY'),
+    -- 20260930100000: a view context is refused by the Dokumente page gate,
+    -- whose platform branch asks for a *support* session; inside one, both write
+    -- the opened company's rows as its administrator would, and every row they
+    -- write leaves an audit row (3.4c).
+    -- `has_function_privilege` answers a boolean, so these two read N/Y and not
+    -- P/T like the probes that call their function: anon holds no EXECUTE and
+    -- every signed-in role does. What the grant does NOT say is whether a caller
+    -- may confirm a particular plan — that is the function's own gate, and it is
+    -- probed per principal in tests/rls/monthly-plan.sql.
+    ('monthly_plan_save(execute grant only)',                        'YY'),
+    ('monthly_plan_confirm(execute grant only)',                     'YY')
   ) AS o(label, staff)
  WHERE r.label = o.label;
 
@@ -2652,7 +3404,11 @@ BEGIN
       ('replace_monthly_planning_run(applied run of A)'),
       ('delete_or_archive_monthly_planning_run(run of A)'),
       ('purge_old_monthly_planning_runs(month of A''s archived run)'),
-      ('reassign_fahrtenbuch_trip(trip of A)')
+      ('reassign_fahrtenbuch_trip(trip of A)'),
+      ('company_role_save(a new role of A)'),
+      ('company_role_delete(company role of A)'),
+      ('monthly_plan_save(execute grant only)'),
+      ('monthly_plan_confirm(execute grant only)')
     ) AS o(label)
    WHERE NOT EXISTS (SELECT 1 FROM _mx_rpc r WHERE r.label = o.label AND r.staff IS NOT NULL);
 

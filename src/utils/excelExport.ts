@@ -1,1062 +1,140 @@
+/**
+ * TWO LIBRARIES LIVE HERE, AND THAT SPLIT IS THE DESIGN — NOT AN ACCIDENT.
+ *
+ * `xlsx@0.20.3` (the community build) discards every cell style on write:
+ * `get_cell_style` reads exactly one property, `cell.z`, and writes `fontId:0,
+ * fillId:0, borderId:0`, while `write_sty_xml` emits one hard-coded font, two
+ * fills and one empty border for the whole file. `ws['!freeze']` is not a key
+ * the library reads at all — its `write_ws_xml_sheetviews` emits no `<pane>`.
+ * So the design the generic table exporter below describes drew NOTHING: those
+ * files came out plain, however many fills and borders were named.
+ *
+ * `exportTableToExcel` and `exportSheetsToExcel` therefore write through
+ * `exceljs`, from `./styledWorkbookDownload` — every operational list a person
+ * reads, sorts and filters, Umsätze and Gehälter included since 01.10.2026.
+ *
+ * What STAYS on `xlsx` is the prescribed sheets, deliberately:
+ * `fahrtenbuchExport.ts` / `historicalWorkingHoursFahrtenbuchExport.ts` /
+ * `monatsplanungXlsxExport.ts` / `monthlyPlanFahrtenbuchExport.ts`, whose
+ * `'original'` mode must reproduce an imported sheet's headers byte for byte and
+ * whose output is a statutory record an accountant reconciles against.
+ *
+ * Do not "unify" them. One library reproduces a prescribed sheet exactly; the
+ * other paints a readable one.
+ *
+ * `buildTableWorkbook` is unchanged by that swap and still returns an
+ * `XLSX.WorkBook`: it is the description of the file — values, `z` formats, `s`
+ * styles and the `!` sheet settings — which the new writer translates. Keeping
+ * it is what keeps the number formats, the `asFiniteNumber` rule and the
+ * column-0 totals guard the exact code they were, still asserted cell by cell.
+ */
 import * as XLSX from 'xlsx';
-import { Receipt, Income, SalaryCalculation } from '../types/receipt';
+import { downloadStyledWorkbook } from './styledWorkbookDownload';
+import { Income, SalaryCalculation } from '../types/receipt';
+import {
+  buildIncomeSheets,
+  buildSalarySheets,
+  salaryExportFilename,
+} from './listExportSheets';
 
-export const exportToExcel = (receipts: Receipt[], initialBalance: number = 0, isFiltered: boolean = false) => {
-  // Create workbook with enhanced properties
-  const wb = XLSX.utils.book_new();
-  wb.Props = {
-    Title: "El-Professor - Professional Financial Report",
-    Subject: "Comprehensive Financial Analysis and Receipt Management",
-    Author: "El-Professor Management System",
-    CreatedDate: new Date(),
-    Company: "El-Professor Solutions"
-  };
-  
-  // Calculate comprehensive statistics
-  const totalIncome = receipts.reduce((sum, receipt) => sum + receipt.income, 0);
-  const totalExpense = receipts.reduce((sum, receipt) => sum + receipt.expense, 0);
-  const netResult = totalIncome - totalExpense;
-  const finalBalance = receipts.length > 0 ? receipts[receipts.length - 1].balance : initialBalance;
-  
-  // Sort receipts chronologically
-  const sortedReceipts = [...receipts].sort((a, b) => 
-    new Date(a.date).getTime() - new Date(b.date).getTime()
-  );
-  
-  // Get unique drivers for statistics
-  const uniqueDrivers = [...new Set(receipts.map(r => r.driverName))];
-  const avgTransactionValue = receipts.length > 0 ? (totalIncome + totalExpense) / receipts.length : 0;
-  
-  // Create professional data structure with proper table formatting
-  const excelData = [
-    // MAIN HEADER SECTION
-    ['EL-PROFESSOR', '', '', 'PROFESSIONAL FINANCIAL REPORT', '', '', '', '', '', '', ''],
-    ['', '', '', '', '', '', '', '', '', '', ''],
-
-    // EXECUTIVE SUMMARY TABLE
-    ['EXECUTIVE SUMMARY', '', '', '', '', '', '', '', '', '', ''],
-    ['', '', '', '', '', '', '', '', '', '', ''],
-    ['Metric', 'Value', 'Status', '', 'Period Info', 'Details', '', '', '', '', ''],
-    ['Report Date', new Date().toLocaleDateString('de-DE'), 'Current', '', 'Total Receipts', sortedReceipts.length.toString(), '', '', '', '', ''],
-    ['Period Range', sortedReceipts.length > 0 ? `${new Date(sortedReceipts[0].date).toLocaleDateString('de-DE')} - ${new Date(sortedReceipts[sortedReceipts.length - 1].date).toLocaleDateString('de-DE')}` : 'No Data', 'Active', '', 'Active Drivers', uniqueDrivers.length.toString(), '', '', '', '', ''],
-    ['Filter Applied', isFiltered ? 'YES' : 'NO', isFiltered ? 'Filtered' : 'Complete', '', 'Avg Transaction', avgTransactionValue.toFixed(2) + ' EUR', '', '', '', '', ''],
-    ['', '', '', '', '', '', '', '', '', '', ''],
-    
-    // FINANCIAL DASHBOARD TABLE
-    ['FINANCIAL DASHBOARD', '', '', '', '', '', '', '', '', '', ''],
-    ['', '', '', '', '', '', '', '', '', '', ''],
-    ['Financial Position', 'Amount (EUR)', 'Status', 'Trend', '', 'Key Metrics', 'Value', 'Performance', '', '', ''],
-    ['Opening Balance', initialBalance.toFixed(2), initialBalance >= 0 ? 'POSITIVE' : 'NEGATIVE', initialBalance >= 0 ? 'STABLE' : 'RISK', '', 'Total Volume', (totalIncome + totalExpense).toFixed(2), 'EUR', '', '', ''],
-    ['Total Income', totalIncome.toFixed(2), totalIncome > 0 ? 'REVENUE' : 'NONE', totalIncome > 0 ? 'ACTIVE' : 'INACTIVE', '', 'Net Result', netResult.toFixed(2), netResult >= 0 ? 'PROFIT' : 'LOSS', '', '', ''],
-    ['Total Expenses', totalExpense.toFixed(2), totalExpense > 0 ? 'COSTS' : 'NONE', totalExpense > 0 ? 'ACTIVE' : 'INACTIVE', '', 'ROI Percentage', totalExpense > 0 ? ((netResult / totalExpense) * 100).toFixed(1) + '%' : 'N/A', '', '', '', ''],
-    ['Net Position', netResult.toFixed(2), netResult >= 0 ? 'PROFIT' : 'LOSS', netResult >= 0 ? 'GROWTH' : 'DECLINE', '', 'Liquidity Status', finalBalance >= 0 ? 'HEALTHY' : 'CRITICAL', finalBalance >= 0 ? 'SECURE' : 'ALERT', '', '', ''],
-    ['Closing Balance', finalBalance.toFixed(2), finalBalance >= 0 ? 'POSITIVE' : 'NEGATIVE', finalBalance >= 0 ? 'STRONG' : 'WEAK', '', 'Business Trend', netResult >= 0 ? 'UPWARD' : 'DOWNWARD', netResult >= 0 ? 'EXPANDING' : 'CONTRACTING', '', '', ''],
-    ['', '', '', '', '', '', '', '', '', '', ''],
-    
-    // DRIVER PERFORMANCE TABLE
-    ['DRIVER PERFORMANCE ANALYSIS', '', '', '', '', '', '', '', '', '', ''],
-    ['', '', '', '', '', '', '', '', '', '', ''],
-    ['Driver Name', 'Receipt Count', 'Income (EUR)', 'Expenses (EUR)', 'Net Amount (EUR)', 'Performance', 'Efficiency', '', '', '', ''],
-    
-    // Driver statistics with enhanced metrics
-    ...uniqueDrivers.map(driver => {
-      const driverReceipts = receipts.filter(r => r.driverName === driver);
-      const driverIncome = driverReceipts.reduce((sum, r) => sum + r.income, 0);
-      const driverExpense = driverReceipts.reduce((sum, r) => sum + r.expense, 0);
-      const driverNet = driverIncome - driverExpense;
-      const efficiency = driverReceipts.length > 0 ? (driverNet / driverReceipts.length).toFixed(2) : '0.00';
-      return [driver, driverReceipts.length.toString(), driverIncome.toFixed(2), driverExpense.toFixed(2), driverNet.toFixed(2), driverNet >= 0 ? 'PROFITABLE' : 'LOSS', efficiency + ' EUR/Receipt', '', '', '', ''];
-    }),
-    
-    ['', '', '', '', '', '', '', '', '', '', ''],
-    ['DRIVER TOTALS', uniqueDrivers.length.toString() + ' Drivers', totalIncome.toFixed(2), totalExpense.toFixed(2), netResult.toFixed(2), netResult >= 0 ? 'OVERALL PROFIT' : 'OVERALL LOSS', avgTransactionValue.toFixed(2) + ' EUR Avg', '', '', '', ''],
-    ['', '', '', '', '', '', '', '', '', '', ''],
-    
-    // DETAILED TRANSACTIONS TABLE
-    ['DETAILED TRANSACTION RECORDS', '', '', '', '', '', '', '', '', '', ''],
-    ['', '', '', '', '', '', '', '', '', '', ''],
-    ['Receipt No.', 'Date', 'Driver', 'Description', 'Postal Code', 'City', 'Income (EUR)', 'Expenses (EUR)', 'Balance (EUR)', 'Type', 'Status'],
-
-    // Transaction data with enhanced formatting
-    ...sortedReceipts.map((receipt, index) => {
-      const type = receipt.income > 0 ? 'INCOME' :
-                   receipt.expense > 0 ? 'EXPENSE' : 'NEUTRAL';
-      const status = receipt.balance >= 0 ? 'POSITIVE' : 'NEGATIVE';
-      return [
-        receipt.receiptNumber,
-        new Date(receipt.date).toLocaleDateString('de-DE'),
-        receipt.driverName,
-        receipt.description,
-        receipt.postalCode || '',
-        receipt.city || '',
-        receipt.income > 0 ? receipt.income.toFixed(2) : '',
-        receipt.expense > 0 ? receipt.expense.toFixed(2) : '',
-        receipt.balance.toFixed(2),
-        type,
-        status
-      ];
-    }),
-    
-    // SUMMARY AND TOTALS TABLE
-    ['', '', '', '', '', '', '', '', '', '', ''],
-    ['PERIOD SUMMARY', '', '', '', '', '', '', '', '', '', ''],
-    ['', '', '', '', '', '', '', '', '', '', ''],
-    ['Summary Item', 'Count', 'Amount (EUR)', 'Percentage', '', 'Final Status', 'Assessment', '', '', '', ''],
-    ['Income Transactions', receipts.filter(r => r.income > 0).length.toString(), totalIncome.toFixed(2), totalIncome > 0 ? ((totalIncome / (totalIncome + totalExpense)) * 100).toFixed(1) + '%' : '0%', '', 'Revenue Stream', totalIncome > 0 ? 'ACTIVE' : 'INACTIVE', '', '', '', ''],
-    ['Expense Transactions', receipts.filter(r => r.expense > 0).length.toString(), totalExpense.toFixed(2), totalExpense > 0 ? ((totalExpense / (totalIncome + totalExpense)) * 100).toFixed(1) + '%' : '0%', '', 'Cost Management', totalExpense > 0 ? 'ACTIVE' : 'INACTIVE', '', '', '', ''],
-    ['Net Business Result', receipts.length.toString(), netResult.toFixed(2), '100%', '', 'Overall Performance', netResult >= 0 ? 'SUCCESSFUL' : 'NEEDS ATTENTION', '', '', '', ''],
-    ['Final Balance Position', '1', finalBalance.toFixed(2), finalBalance >= 0 ? 'POSITIVE' : 'NEGATIVE', '', 'Financial Health', finalBalance >= 0 ? 'EXCELLENT' : 'REQUIRES REVIEW', '', '', '', ''],
-    ['', '', '', '', '', '', '', '', '', '', ''],
-    
-    // FOOTER SECTION
-    ['', '', '', '', '', '', '', '', '', '', ''],
-    ['El-Professor Professional Financial Report', '', '', `Generated: ${new Date().toLocaleString('de-DE')}`, '', '', '', '', '', '', ''],
-    ['This document contains confidential financial information', '', '', 'Authorized Personnel Only', '', '', '', '', '', '', '']
-  ];
-
-  // Create worksheet
-  const ws = XLSX.utils.aoa_to_sheet(excelData);
-  
-  // ENHANCED COLUMN CONFIGURATION
-  ws['!cols'] = [
-    { wch: 20 },  // Column A - Labels/Names
-    { wch: 15 },  // Column B - Values/Counts
-    { wch: 15 },  // Column C - Amounts
-    { wch: 25 },  // Column D - Descriptions/Status
-    { wch: 12 },  // Column E - Postal Code
-    { wch: 20 },  // Column F - City
-    { wch: 15 },  // Column G - Income
-    { wch: 15 },  // Column H - Expenses
-    { wch: 15 },  // Column I - Balance
-    { wch: 12 },  // Column J - Type
-    { wch: 12 }   // Column K - Status
-  ];
-
-  // Calculate dynamic section positions
-  const executiveSummaryStart = 2;
-  const executiveSummaryHeaderRow = 4;
-  const executiveSummaryDataStart = 5;
-  const executiveSummaryDataEnd = 7;
-  
-  const financialDashboardStart = executiveSummaryDataEnd + 3;
-  const financialDashboardHeaderRow = financialDashboardStart + 2;
-  const financialDashboardDataStart = financialDashboardHeaderRow + 1;
-  const financialDashboardDataEnd = financialDashboardDataStart + 4;
-  
-  const driverPerformanceStart = financialDashboardDataEnd + 3;
-  const driverPerformanceHeaderRow = driverPerformanceStart + 2;
-  const driverPerformanceDataStart = driverPerformanceHeaderRow + 1;
-  const driverPerformanceDataEnd = driverPerformanceDataStart + uniqueDrivers.length;
-  const driverTotalsRow = driverPerformanceDataEnd + 1;
-  
-  const transactionTableStart = driverTotalsRow + 4;
-  const transactionTableHeaderRow = transactionTableStart + 2;
-  const transactionTableDataStart = transactionTableHeaderRow + 1;
-  const transactionTableDataEnd = transactionTableDataStart + sortedReceipts.length - 1;
-  
-  const summaryTableStart = transactionTableDataEnd + 4;
-  const summaryTableHeaderRow = summaryTableStart + 2;
-  const summaryTableDataStart = summaryTableHeaderRow + 1;
-  const summaryTableDataEnd = summaryTableDataStart + 3;
-
-  // Get worksheet range
-  const range = XLSX.utils.decode_range(ws['!ref'] || 'A1');
-  
-  // PROFESSIONAL STYLING WITH COMPREHENSIVE BORDERS AND TABLE FORMATTING
-  for (let R = range.s.r; R <= range.e.r; ++R) {
-    for (let C = range.s.c; C <= range.e.c; ++C) {
-      const cell_address = XLSX.utils.encode_cell({ c: C, r: R });
-      if (!ws[cell_address]) continue;
-      
-      const cellValue = ws[cell_address].v;
-      
-      // MAIN HEADER STYLING
-      if (R === 0) {
-        ws[cell_address].s = {
-          font: { 
-            bold: true, 
-            size: 24, 
-            color: { rgb: "FFFFFF" },
-            name: "Calibri"
-          },
-          alignment: { horizontal: "center", vertical: "center" },
-          fill: { fgColor: { rgb: "1E3A8A" } },
-          border: {
-            top: { style: "thick", color: { rgb: "000000" } },
-            bottom: { style: "thick", color: { rgb: "000000" } },
-            left: { style: "thick", color: { rgb: "000000" } },
-            right: { style: "thick", color: { rgb: "000000" } }
-          }
-        };
-      }
-      
-      // SECTION HEADERS
-      if (cellValue && typeof cellValue === 'string' && 
-          (cellValue.includes('EXECUTIVE SUMMARY') || 
-           cellValue.includes('FINANCIAL DASHBOARD') || 
-           cellValue.includes('DRIVER PERFORMANCE ANALYSIS') ||
-           cellValue.includes('DETAILED TRANSACTION RECORDS') ||
-           cellValue.includes('PERIOD SUMMARY'))) {
-        ws[cell_address].s = {
-          font: { 
-            bold: true, 
-            size: 16, 
-            color: { rgb: "FFFFFF" },
-            name: "Calibri"
-          },
-          alignment: { horizontal: "center", vertical: "center" },
-          fill: { fgColor: { rgb: "059669" } },
-          border: {
-            top: { style: "thick", color: { rgb: "000000" } },
-            bottom: { style: "thick", color: { rgb: "000000" } },
-            left: { style: "thick", color: { rgb: "000000" } },
-            right: { style: "thick", color: { rgb: "000000" } }
-          }
-        };
-      }
-      
-      // EXECUTIVE SUMMARY TABLE
-      if (R >= executiveSummaryHeaderRow && R <= executiveSummaryDataEnd && C <= 8) {
-        const isHeaderRow = R === executiveSummaryHeaderRow;
-        const isDataRow = R >= executiveSummaryDataStart && R <= executiveSummaryDataEnd;
-        
-        if (isHeaderRow) {
-          ws[cell_address].s = {
-            font: { bold: true, size: 12, color: { rgb: "FFFFFF" }, name: "Calibri" },
-            alignment: { horizontal: "center", vertical: "center" },
-            fill: { fgColor: { rgb: "1E40AF" } },
-            border: {
-              top: { style: "thick", color: { rgb: "000000" } },
-              bottom: { style: "thick", color: { rgb: "000000" } },
-              left: { style: "medium", color: { rgb: "000000" } },
-              right: { style: "medium", color: { rgb: "000000" } }
-            }
-          };
-        }
-        
-        if (isDataRow) {
-          const isEvenRow = (R - executiveSummaryDataStart) % 2 === 0;
-          ws[cell_address].s = {
-            font: { size: 11, name: "Calibri" },
-            alignment: { horizontal: "left", vertical: "center" },
-            fill: { fgColor: { rgb: isEvenRow ? "EBF8FF" : "F0F9FF" } },
-            border: {
-              top: { style: "thin", color: { rgb: "000000" } },
-              bottom: { style: "thin", color: { rgb: "000000" } },
-              left: { style: "thin", color: { rgb: "000000" } },
-              right: { style: "thin", color: { rgb: "000000" } }
-            }
-          };
-        }
-      }
-      
-      // FINANCIAL DASHBOARD TABLE
-      if (R >= financialDashboardHeaderRow && R <= financialDashboardDataEnd && C <= 8) {
-        const isHeaderRow = R === financialDashboardHeaderRow;
-        const isDataRow = R >= financialDashboardDataStart && R <= financialDashboardDataEnd;
-        
-        if (isHeaderRow) {
-          ws[cell_address].s = {
-            font: { bold: true, size: 12, color: { rgb: "FFFFFF" }, name: "Calibri" },
-            alignment: { horizontal: "center", vertical: "center" },
-            fill: { fgColor: { rgb: "7C3AED" } },
-            border: {
-              top: { style: "thick", color: { rgb: "000000" } },
-              bottom: { style: "thick", color: { rgb: "000000" } },
-              left: { style: "medium", color: { rgb: "000000" } },
-              right: { style: "medium", color: { rgb: "000000" } }
-            }
-          };
-        }
-        
-        if (isDataRow) {
-          const isEvenRow = (R - financialDashboardDataStart) % 2 === 0;
-          ws[cell_address].s = {
-            font: { size: 11, name: "Calibri" },
-            alignment: { horizontal: "center", vertical: "center" },
-            fill: { fgColor: { rgb: isEvenRow ? "F3E8FF" : "FAF5FF" } },
-            border: {
-              top: { style: "thin", color: { rgb: "000000" } },
-              bottom: { style: "thin", color: { rgb: "000000" } },
-              left: { style: "thin", color: { rgb: "000000" } },
-              right: { style: "thin", color: { rgb: "000000" } }
-            }
-          };
-          
-          // Color coding for financial values
-          if ((C === 1 || C === 6) && cellValue && typeof cellValue === 'string') {
-            const value = parseFloat(cellValue.replace(',', '.'));
-            if (!isNaN(value)) {
-              ws[cell_address].s.font.color = { rgb: value >= 0 ? "059669" : "DC2626" };
-              ws[cell_address].s.font.bold = true;
-            }
-          }
-          
-          // Status column styling
-          if ((C === 2 || C === 3 || C === 7) && cellValue && typeof cellValue === 'string') {
-            if (cellValue.includes('POSITIVE') || cellValue.includes('PROFIT') || cellValue.includes('REVENUE') || cellValue.includes('HEALTHY') || cellValue.includes('GROWTH')) {
-              ws[cell_address].s.font.color = { rgb: "059669" };
-              ws[cell_address].s.font.bold = true;
-            } else if (cellValue.includes('NEGATIVE') || cellValue.includes('LOSS') || cellValue.includes('COSTS') || cellValue.includes('CRITICAL') || cellValue.includes('DECLINE')) {
-              ws[cell_address].s.font.color = { rgb: "DC2626" };
-              ws[cell_address].s.font.bold = true;
-            }
-          }
-        }
-      }
-      
-      // DRIVER PERFORMANCE TABLE
-      if (R >= driverPerformanceHeaderRow && R <= driverTotalsRow && C <= 8) {
-        const isHeaderRow = R === driverPerformanceHeaderRow;
-        const isDataRow = R >= driverPerformanceDataStart && R <= driverPerformanceDataEnd;
-        const isTotalsRow = R === driverTotalsRow;
-        
-        if (isHeaderRow) {
-          ws[cell_address].s = {
-            font: { bold: true, size: 12, color: { rgb: "FFFFFF" }, name: "Calibri" },
-            alignment: { horizontal: "center", vertical: "center" },
-            fill: { fgColor: { rgb: "F59E0B" } },
-            border: {
-              top: { style: "thick", color: { rgb: "000000" } },
-              bottom: { style: "thick", color: { rgb: "000000" } },
-              left: { style: "medium", color: { rgb: "000000" } },
-              right: { style: "medium", color: { rgb: "000000" } }
-            }
-          };
-        }
-        
-        if (isDataRow) {
-          const isEvenRow = (R - driverPerformanceDataStart) % 2 === 0;
-          ws[cell_address].s = {
-            font: { size: 11, name: "Calibri" },
-            alignment: { horizontal: "center", vertical: "center" },
-            fill: { fgColor: { rgb: isEvenRow ? "FEF3C7" : "FFFBEB" } },
-            border: {
-              top: { style: "thin", color: { rgb: "000000" } },
-              bottom: { style: "thin", color: { rgb: "000000" } },
-              left: { style: "thin", color: { rgb: "000000" } },
-              right: { style: "thin", color: { rgb: "000000" } }
-            }
-          };
-          
-          // Color code driver performance
-          if (C === 4 && cellValue) { // Net amount
-            const value = parseFloat(cellValue.toString());
-            ws[cell_address].s.font.color = { rgb: value >= 0 ? "059669" : "DC2626" };
-            ws[cell_address].s.font.bold = true;
-          }
-          
-          if (C === 5 && cellValue && typeof cellValue === 'string') { // Performance status
-            ws[cell_address].s.font.color = { rgb: cellValue.includes('PROFITABLE') ? "059669" : "DC2626" };
-            ws[cell_address].s.font.bold = true;
-          }
-        }
-        
-        if (isTotalsRow) {
-          ws[cell_address].s = {
-            font: { bold: true, size: 12, color: { rgb: "FFFFFF" }, name: "Calibri" },
-            alignment: { horizontal: "center", vertical: "center" },
-            fill: { fgColor: { rgb: "D97706" } },
-            border: {
-              top: { style: "thick", color: { rgb: "000000" } },
-              bottom: { style: "thick", color: { rgb: "000000" } },
-              left: { style: "medium", color: { rgb: "000000" } },
-              right: { style: "medium", color: { rgb: "000000" } }
-            }
-          };
-        }
-      }
-      
-      // TRANSACTION TABLE
-      if (R >= transactionTableHeaderRow && R <= transactionTableDataEnd && C <= 10) {
-        const isHeaderRow = R === transactionTableHeaderRow;
-        const isDataRow = R >= transactionTableDataStart && R <= transactionTableDataEnd;
-        
-        if (isHeaderRow) {
-          ws[cell_address].s = {
-            font: { bold: true, size: 12, color: { rgb: "FFFFFF" }, name: "Calibri" },
-            alignment: { horizontal: "center", vertical: "center" },
-            fill: { fgColor: { rgb: "1E40AF" } },
-            border: {
-              top: { style: "thick", color: { rgb: "000000" } },
-              bottom: { style: "thick", color: { rgb: "000000" } },
-              left: { style: "medium", color: { rgb: "000000" } },
-              right: { style: "medium", color: { rgb: "000000" } }
-            }
-          };
-        }
-        
-        if (isDataRow) {
-          const isEvenRow = (R - transactionTableDataStart) % 2 === 0;
-          ws[cell_address].s = {
-            font: { size: 10, name: "Calibri" },
-            alignment: { 
-              horizontal: C === 3 ? "left" : "center", 
-              vertical: "center" 
-            },
-            fill: { fgColor: { rgb: isEvenRow ? "F1F5F9" : "FFFFFF" } },
-            border: {
-              top: { style: "thin", color: { rgb: "000000" } },
-              bottom: { style: "thin", color: { rgb: "000000" } },
-              left: { style: "thin", color: { rgb: "000000" } },
-              right: { style: "thin", color: { rgb: "000000" } }
-            }
-          };
-          
-          // Financial columns coloring
-          if (C === 6 && cellValue) { // Income
-            ws[cell_address].s.font = { color: { rgb: "059669" }, bold: true, size: 10 };
-          }
-          if (C === 7 && cellValue) { // Expense
-            ws[cell_address].s.font = { color: { rgb: "DC2626" }, bold: true, size: 10 };
-          }
-          if (C === 8) { // Balance
-            const balance = parseFloat(cellValue?.toString() || '0');
-            ws[cell_address].s.font = {
-              color: { rgb: balance >= 0 ? "059669" : "DC2626" },
-              bold: true,
-              size: 10
-            };
-          }
-          if (C === 9 && cellValue && typeof cellValue === 'string') { // Type
-            if (cellValue.includes('INCOME')) {
-              ws[cell_address].s.font.color = { rgb: "059669" };
-            } else if (cellValue.includes('EXPENSE')) {
-              ws[cell_address].s.font.color = { rgb: "DC2626" };
-            }
-            ws[cell_address].s.font.bold = true;
-          }
-          if (C === 10 && cellValue && typeof cellValue === 'string') { // Status
-            ws[cell_address].s.font.color = { rgb: cellValue.includes('POSITIVE') ? "059669" : "DC2626" };
-            ws[cell_address].s.font.bold = true;
-          }
-        }
-      }
-      
-      // SUMMARY TABLE
-      if (R >= summaryTableHeaderRow && R <= summaryTableDataEnd && C <= 8) {
-        const isHeaderRow = R === summaryTableHeaderRow;
-        const isDataRow = R >= summaryTableDataStart && R <= summaryTableDataEnd;
-        
-        if (isHeaderRow) {
-          ws[cell_address].s = {
-            font: { bold: true, size: 12, color: { rgb: "FFFFFF" }, name: "Calibri" },
-            alignment: { horizontal: "center", vertical: "center" },
-            fill: { fgColor: { rgb: "059669" } },
-            border: {
-              top: { style: "thick", color: { rgb: "000000" } },
-              bottom: { style: "thick", color: { rgb: "000000" } },
-              left: { style: "medium", color: { rgb: "000000" } },
-              right: { style: "medium", color: { rgb: "000000" } }
-            }
-          };
-        }
-        
-        if (isDataRow) {
-          const isEvenRow = (R - summaryTableDataStart) % 2 === 0;
-          ws[cell_address].s = {
-            font: { size: 11, name: "Calibri", bold: true },
-            alignment: { horizontal: "center", vertical: "center" },
-            fill: { fgColor: { rgb: isEvenRow ? "ECFDF5" : "F0FDF4" } },
-            border: {
-              top: { style: "thin", color: { rgb: "000000" } },
-              bottom: { style: "thin", color: { rgb: "000000" } },
-              left: { style: "thin", color: { rgb: "000000" } },
-              right: { style: "thin", color: { rgb: "000000" } }
-            }
-          };
-          
-          // Color code summary values
-          if (C === 2 && cellValue) { // Amount
-            const value = parseFloat(cellValue.toString());
-            ws[cell_address].s.font.color = { rgb: value >= 0 ? "059669" : "DC2626" };
-          }
-          
-          if ((C === 5 || C === 6) && cellValue && typeof cellValue === 'string') { // Status columns
-            if (cellValue.includes('EXCELLENT') || cellValue.includes('SUCCESSFUL') || cellValue.includes('ACTIVE')) {
-              ws[cell_address].s.font.color = { rgb: "059669" };
-            } else if (cellValue.includes('ATTENTION') || cellValue.includes('REVIEW') || cellValue.includes('INACTIVE')) {
-              ws[cell_address].s.font.color = { rgb: "DC2626" };
-            }
-          }
-        }
-      }
-      
-      // FOOTER STYLING
-      const footerStart = summaryTableDataEnd + 3;
-      if (R >= footerStart && C <= 10) {
-        ws[cell_address].s = {
-          font: { size: 10, color: { rgb: "6B7280" }, italic: true, name: "Calibri" },
-          alignment: { horizontal: "center", vertical: "center" },
-          fill: { fgColor: { rgb: "F9FAFB" } },
-          border: {
-            top: { style: "thin", color: { rgb: "000000" } },
-            bottom: { style: "thin", color: { rgb: "000000" } },
-            left: { style: "thin", color: { rgb: "000000" } },
-            right: { style: "thin", color: { rgb: "000000" } }
-          }
-        };
-      }
-    }
-  }
-
-  // COMPREHENSIVE MERGE CONFIGURATIONS FOR TABLE STRUCTURE
-  ws['!merges'] = [
-    // Main header
-    { s: { r: 0, c: 0 }, e: { r: 0, c: 2 } }, // Company name
-    { s: { r: 0, c: 3 }, e: { r: 0, c: 10 } }, // Report title
-
-    // Section headers (full width)
-    { s: { r: executiveSummaryStart, c: 0 }, e: { r: executiveSummaryStart, c: 10 } },
-    { s: { r: financialDashboardStart, c: 0 }, e: { r: financialDashboardStart, c: 10 } },
-    { s: { r: driverPerformanceStart, c: 0 }, e: { r: driverPerformanceStart, c: 10 } },
-    { s: { r: transactionTableStart, c: 0 }, e: { r: transactionTableStart, c: 10 } },
-    { s: { r: summaryTableStart, c: 0 }, e: { r: summaryTableStart, c: 10 } },
-
-    // Footer merges
-    { s: { r: range.e.r - 1, c: 0 }, e: { r: range.e.r - 1, c: 3 } },
-    { s: { r: range.e.r - 1, c: 4 }, e: { r: range.e.r - 1, c: 10 } },
-    { s: { r: range.e.r, c: 0 }, e: { r: range.e.r, c: 4 } },
-    { s: { r: range.e.r, c: 5 }, e: { r: range.e.r, c: 10 } }
-  ];
-
-  // ENHANCED PRINT SETUP
-  ws['!margins'] = { 
-    left: 0.5, 
-    right: 0.5, 
-    top: 0.8, 
-    bottom: 0.8, 
-    header: 0.3, 
-    footer: 0.3 
-  };
-  
-  ws['!printSetup'] = {
-    paperSize: 9, // A4
-    orientation: 'landscape',
-    scale: 80,
-    fitToWidth: 1,
-    fitToHeight: 0,
-    blackAndWhite: false,
-    draft: false,
-    cellComments: 'None',
-    useFirstPageNumber: true,
-    horizontalDpi: 600,
-    verticalDpi: 600,
-    copies: 1
-  };
-
-  // Add freeze panes for better navigation
-  ws['!freeze'] = { xSplit: 1, ySplit: transactionTableHeaderRow + 1 };
-
-  // Add worksheet to workbook
-  XLSX.utils.book_append_sheet(wb, ws, 'Financial Report');
-
-  // CREATE CHARTS SHEET
-  const chartsData = [
-    // Title
-    ['EL-PROFESSOR - VISUAL ANALYTICS DASHBOARD', '', '', '', '', '', '', '', '', ''],
-    ['', '', '', '', '', '', '', '', '', ''],
-
-    // Income vs Expenses Chart Data
-    ['INCOME VS EXPENSES COMPARISON', '', '', '', '', '', '', '', '', ''],
-    ['', '', '', '', '', '', '', '', '', ''],
-    ['Category', 'Amount (EUR)', '', '', '', '', '', '', '', ''],
-    ['Total Income', totalIncome.toFixed(2), '', '', '', '', '', '', '', ''],
-    ['Total Expenses', totalExpense.toFixed(2), '', '', '', '', '', '', '', ''],
-    ['Net Result', netResult.toFixed(2), '', '', '', '', '', '', '', ''],
-    ['', '', '', '', '', '', '', '', '', ''],
-    ['', '', '', '', '', '', '', '', '', ''],
-
-    // Monthly Trend Data
-    ['MONTHLY FINANCIAL TREND', '', '', '', '', '', '', '', '', ''],
-    ['', '', '', '', '', '', '', '', '', ''],
-    ['Month', 'Income', 'Expenses', 'Net', '', '', '', '', '', ''],
-
-    // Calculate monthly data
-    ...(() => {
-      const monthlyData = new Map<string, { income: number; expense: number }>();
-      sortedReceipts.forEach(receipt => {
-        const month = new Date(receipt.date).toLocaleDateString('de-DE', { year: 'numeric', month: 'short' });
-        const existing = monthlyData.get(month) || { income: 0, expense: 0 };
-        monthlyData.set(month, {
-          income: existing.income + receipt.income,
-          expense: existing.expense + receipt.expense
-        });
-      });
-
-      return Array.from(monthlyData.entries()).map(([month, data]) => [
-        month,
-        data.income.toFixed(2),
-        data.expense.toFixed(2),
-        (data.income - data.expense).toFixed(2),
-        '', '', '', '', '', ''
-      ]);
-    })(),
-
-    ['', '', '', '', '', '', '', '', '', ''],
-    ['', '', '', '', '', '', '', '', '', ''],
-
-    // Driver Performance Chart Data
-    ['DRIVER PERFORMANCE COMPARISON', '', '', '', '', '', '', '', '', ''],
-    ['', '', '', '', '', '', '', '', '', ''],
-    ['Driver', 'Income (EUR)', 'Expenses (EUR)', 'Net (EUR)', '', '', '', '', '', ''],
-
-    ...uniqueDrivers.map(driver => {
-      const driverReceipts = receipts.filter(r => r.driverName === driver);
-      const driverIncome = driverReceipts.reduce((sum, r) => sum + r.income, 0);
-      const driverExpense = driverReceipts.reduce((sum, r) => sum + r.expense, 0);
-      return [
-        driver,
-        driverIncome.toFixed(2),
-        driverExpense.toFixed(2),
-        (driverIncome - driverExpense).toFixed(2),
-        '', '', '', '', '', ''
-      ];
-    }),
-
-    ['', '', '', '', '', '', '', '', '', ''],
-    ['', '', '', '', '', '', '', '', '', ''],
-
-    // Transaction Type Distribution
-    ['TRANSACTION TYPE DISTRIBUTION', '', '', '', '', '', '', '', '', ''],
-    ['', '', '', '', '', '', '', '', '', ''],
-    ['Type', 'Count', 'Percentage', '', '', '', '', '', '', ''],
-    ['Income Transactions', receipts.filter(r => r.income > 0).length.toString(), ((receipts.filter(r => r.income > 0).length / receipts.length) * 100).toFixed(1) + '%', '', '', '', '', '', '', ''],
-    ['Expense Transactions', receipts.filter(r => r.expense > 0).length.toString(), ((receipts.filter(r => r.expense > 0).length / receipts.length) * 100).toFixed(1) + '%', '', '', '', '', '', '', ''],
-    ['', '', '', '', '', '', '', '', '', ''],
-    ['', '', '', '', '', '', '', '', '', ''],
-
-    // Balance Evolution
-    ['BALANCE EVOLUTION OVER TIME', '', '', '', '', '', '', '', '', ''],
-    ['', '', '', '', '', '', '', '', '', ''],
-    ['Date', 'Balance (EUR)', '', '', '', '', '', '', '', ''],
-
-    ...sortedReceipts.map(receipt => [
-      new Date(receipt.date).toLocaleDateString('de-DE'),
-      receipt.balance.toFixed(2),
-      '', '', '', '', '', '', '', ''
-    ]),
-
-    ['', '', '', '', '', '', '', '', '', ''],
-    ['', '', '', '', '', '', '', '', '', ''],
-
-    // Key Performance Indicators
-    ['KEY PERFORMANCE INDICATORS (KPIs)', '', '', '', '', '', '', '', '', ''],
-    ['', '', '', '', '', '', '', '', '', ''],
-    ['KPI', 'Value', 'Status', '', '', '', '', '', '', ''],
-    ['Average Transaction Value', avgTransactionValue.toFixed(2) + ' EUR', avgTransactionValue > 100 ? 'HIGH' : 'MODERATE', '', '', '', '', '', '', ''],
-    ['Income/Expense Ratio', totalExpense > 0 ? (totalIncome / totalExpense).toFixed(2) : 'N/A', totalIncome > totalExpense ? 'HEALTHY' : 'CRITICAL', '', '', '', '', '', '', ''],
-    ['Profit Margin', totalIncome > 0 ? ((netResult / totalIncome) * 100).toFixed(1) + '%' : '0%', netResult >= 0 ? 'POSITIVE' : 'NEGATIVE', '', '', '', '', '', '', ''],
-    ['Active Drivers', uniqueDrivers.length.toString(), uniqueDrivers.length > 5 ? 'EXCELLENT' : 'GOOD', '', '', '', '', '', '', ''],
-    ['Transaction Volume', receipts.length.toString(), receipts.length > 50 ? 'HIGH' : 'MODERATE', '', '', '', '', '', '', '']
-  ];
-
-  const chartsWs = XLSX.utils.aoa_to_sheet(chartsData);
-
-  // Style charts sheet
-  chartsWs['!cols'] = Array(10).fill({ wch: 18 });
-
-  const chartsRange = XLSX.utils.decode_range(chartsWs['!ref'] || 'A1');
-  for (let R = chartsRange.s.r; R <= chartsRange.e.r; ++R) {
-    for (let C = chartsRange.s.c; C <= chartsRange.e.c; ++C) {
-      const cell_address = XLSX.utils.encode_cell({ c: C, r: R });
-      if (!chartsWs[cell_address]) continue;
-
-      const cellValue = chartsWs[cell_address].v;
-
-      // Main title
-      if (R === 0) {
-        chartsWs[cell_address].s = {
-          font: { bold: true, size: 24, color: { rgb: "FFFFFF" }, name: "Calibri" },
-          alignment: { horizontal: "center", vertical: "center" },
-          fill: { fgColor: { rgb: "1E3A8A" } },
-          border: {
-            top: { style: "thick", color: { rgb: "000000" } },
-            bottom: { style: "thick", color: { rgb: "000000" } },
-            left: { style: "thick", color: { rgb: "000000" } },
-            right: { style: "thick", color: { rgb: "000000" } }
-          }
-        };
-      }
-
-      // Section headers
-      if (cellValue && typeof cellValue === 'string' && cellValue.includes('COMPARISON') ||
-          cellValue && typeof cellValue === 'string' && cellValue.includes('TREND') ||
-          cellValue && typeof cellValue === 'string' && cellValue.includes('DISTRIBUTION') ||
-          cellValue && typeof cellValue === 'string' && cellValue.includes('EVOLUTION') ||
-          cellValue && typeof cellValue === 'string' && cellValue.includes('KPI')) {
-        chartsWs[cell_address].s = {
-          font: { bold: true, size: 14, color: { rgb: "FFFFFF" }, name: "Calibri" },
-          alignment: { horizontal: "center", vertical: "center" },
-          fill: { fgColor: { rgb: "059669" } },
-          border: {
-            top: { style: "thick", color: { rgb: "000000" } },
-            bottom: { style: "thick", color: { rgb: "000000" } },
-            left: { style: "medium", color: { rgb: "000000" } },
-            right: { style: "medium", color: { rgb: "000000" } }
-          }
-        };
-      }
-
-      // Data cells with borders
-      if (cellValue && cellValue !== '') {
-        if (!chartsWs[cell_address].s) {
-          chartsWs[cell_address].s = {};
-        }
-        if (!chartsWs[cell_address].s.border) {
-          chartsWs[cell_address].s.border = {
-            top: { style: "thin", color: { rgb: "000000" } },
-            bottom: { style: "thin", color: { rgb: "000000" } },
-            left: { style: "thin", color: { rgb: "000000" } },
-            right: { style: "thin", color: { rgb: "000000" } }
-          };
-        }
-
-        // Number formatting
-        if (typeof cellValue === 'string' && cellValue.includes('.')) {
-          const numValue = parseFloat(cellValue);
-          if (!isNaN(numValue) && chartsWs[cell_address].s) {
-            chartsWs[cell_address].s.font = {
-              ...chartsWs[cell_address].s.font,
-              color: { rgb: numValue >= 0 ? "059669" : "DC2626" },
-              bold: true
-            };
-          }
-        }
-
-        // Status coloring
-        if (typeof cellValue === 'string' &&
-            (cellValue.includes('HIGH') || cellValue.includes('HEALTHY') || cellValue.includes('POSITIVE') ||
-             cellValue.includes('EXCELLENT') || cellValue.includes('GOOD'))) {
-          if (chartsWs[cell_address].s) {
-            chartsWs[cell_address].s.font = {
-              ...chartsWs[cell_address].s.font,
-              color: { rgb: "059669" },
-              bold: true
-            };
-          }
-        } else if (typeof cellValue === 'string' &&
-                   (cellValue.includes('CRITICAL') || cellValue.includes('NEGATIVE') || cellValue.includes('LOW'))) {
-          if (chartsWs[cell_address].s) {
-            chartsWs[cell_address].s.font = {
-              ...chartsWs[cell_address].s.font,
-              color: { rgb: "DC2626" },
-              bold: true
-            };
-          }
-        }
-      }
-    }
-  }
-
-  // Merge title cells
-  chartsWs['!merges'] = [
-    { s: { r: 0, c: 0 }, e: { r: 0, c: 9 } }
-  ];
-
-  XLSX.utils.book_append_sheet(wb, chartsWs, 'Charts & Analytics');
-
-  // FILENAME GENERATION
-  const today = new Date().toISOString().split('T')[0];
-  const filterSuffix = isFiltered ? '_Filtered' : '';
-  const periodSuffix = receipts.length > 0 ? 
-    `_${new Date(sortedReceipts[0].date).toLocaleDateString('de-DE').replace(/\./g, '-')}_to_${new Date(sortedReceipts[sortedReceipts.length - 1].date).toLocaleDateString('de-DE').replace(/\./g, '-')}` : 
-    '';
-  const filename = `El-Professor_Professional_Report_${today}${periodSuffix}${filterSuffix}.xlsx`;
-  
-  // SAVE FILE
-  XLSX.writeFile(wb, filename);
-
-  console.log(`Professional Excel report created successfully: ${filename}`);
+/**
+ * Umsätze, as three styled sheets.
+ *
+ * This was 145 lines of `aoa_to_sheet` with a styling pass the `xlsx` writer threw
+ * away: a plain grid, every amount a string, a uuid in the widest column and the
+ * words "EL-PROFESSOR - UMSÄTZE BERICHT" across the top. The owner reported it on
+ * 01.10.2026. The content is the same three sections it always had — the entries,
+ * the split by type and the split by driver — in `listExportSheets.ts`, drawn by
+ * the same exporter as every other list in the product.
+ */
+export const exportIncomeToExcel = (
+  incomes: Income[],
+  fromDate?: string,
+  toDate?: string,
+): void => {
+  exportSheetsToExcel('umsaetze', buildIncomeSheets(incomes, fromDate, toDate));
 };
 
-export const exportIncomeToExcel = (incomes: Income[], fromDate?: string, toDate?: string) => {
-  const wb = XLSX.utils.book_new();
-  wb.Props = {
-    Title: "El-Professor - Umsätze Report",
-    Subject: "Income and Revenue Analysis",
-    Author: "El-Professor Management System",
-    CreatedDate: new Date()
-  };
-
-  const sortedIncomes = [...incomes].sort((a, b) =>
-    new Date(a.date).getTime() - new Date(b.date).getTime()
+/**
+ * Gehälter, as two styled sheets.
+ *
+ * The same correction as Umsätze above, and the payroll rule it preserves —
+ * `COALESCE(netto_salary, amount_due)` for due, the payments for paid, both read
+ * from `utils/salaryDue.ts` — is written out at `buildSalarySheets`.
+ */
+export const exportSalariesToExcel = (
+  salaries: SalaryCalculation[],
+  periodStart: string,
+  periodEnd: string,
+): void => {
+  exportSheetsToExcel(
+    salaryExportFilename(periodStart, periodEnd),
+    buildSalarySheets(salaries, periodStart, periodEnd),
   );
-
-  const totalAmount = incomes.reduce((sum, income) => sum + Number(income.amount), 0);
-  const byType = {
-    bargeld: incomes.filter(i => i.type === 'bargeld').reduce((sum, i) => sum + Number(i.amount), 0),
-    umsatz: incomes.filter(i => i.type === 'umsatz').reduce((sum, i) => sum + Number(i.amount), 0),
-    aktionen: incomes.filter(i => i.type === 'aktionen').reduce((sum, i) => sum + Number(i.amount), 0),
-    trinkgeld: incomes.filter(i => i.type === 'trinkgeld').reduce((sum, i) => sum + Number(i.amount), 0)
-  };
-
-  const drivers = [...new Set(incomes.map(i => i.driver_name))];
-  const byDriver = drivers.map(driver => {
-    const driverIncomes = incomes.filter(i => i.driver_name === driver);
-    return {
-      name: driver,
-      count: driverIncomes.length,
-      bargeld: driverIncomes.filter(i => i.type === 'bargeld').reduce((sum, i) => sum + Number(i.amount), 0),
-      umsatz: driverIncomes.filter(i => i.type === 'umsatz').reduce((sum, i) => sum + Number(i.amount), 0),
-      aktionen: driverIncomes.filter(i => i.type === 'aktionen').reduce((sum, i) => sum + Number(i.amount), 0),
-      trinkgeld: driverIncomes.filter(i => i.type === 'trinkgeld').reduce((sum, i) => sum + Number(i.amount), 0),
-      total: driverIncomes.reduce((sum, i) => sum + Number(i.amount), 0)
-    };
-  });
-
-  const excelData = [
-    ['EL-PROFESSOR - UMSÄTZE BERICHT', '', '', '', '', ''],
-    ['', '', '', '', '', ''],
-    ['Zeitraum', fromDate && toDate ? `${fromDate} bis ${toDate}` : 'Alle Einträge', '', '', '', ''],
-    ['Erstellt am', new Date().toLocaleString('de-DE'), '', '', '', ''],
-    ['Gesamtanzahl', incomes.length.toString(), '', '', '', ''],
-    ['', '', '', '', '', ''],
-
-    ['ZUSAMMENFASSUNG NACH TYP', '', '', '', '', '', ''],
-    ['', '', '', '', '', '', ''],
-    ['Typ', 'Betrag (€)', 'Anteil', '', '', '', ''],
-    ['Bargeld', byType.bargeld.toFixed(2), totalAmount > 0 ? ((byType.bargeld / totalAmount) * 100).toFixed(1) + '%' : '0%', '', '', '', ''],
-    ['Umsatz', byType.umsatz.toFixed(2), totalAmount > 0 ? ((byType.umsatz / totalAmount) * 100).toFixed(1) + '%' : '0%', '', '', '', ''],
-    ['Aktionen', byType.aktionen.toFixed(2), totalAmount > 0 ? ((byType.aktionen / totalAmount) * 100).toFixed(1) + '%' : '0%', '', '', '', ''],
-    ['Trinkgeld', byType.trinkgeld.toFixed(2), totalAmount > 0 ? ((byType.trinkgeld / totalAmount) * 100).toFixed(1) + '%' : '0%', '', '', '', ''],
-    ['GESAMT', totalAmount.toFixed(2), '100%', '', '', '', ''],
-    ['', '', '', '', '', '', ''],
-
-    ['ZUSAMMENFASSUNG NACH FAHRER', '', '', '', '', '', ''],
-    ['', '', '', '', '', '', ''],
-    ['Fahrer', 'Anzahl', 'Bargeld (€)', 'Umsatz (€)', 'Aktionen (€)', 'Trinkgeld (€)', 'Gesamt (€)'],
-    ...byDriver.map(d => [
-      d.name,
-      d.count.toString(),
-      d.bargeld.toFixed(2),
-      d.umsatz.toFixed(2),
-      d.aktionen.toFixed(2),
-      d.trinkgeld.toFixed(2),
-      d.total.toFixed(2)
-    ]),
-    ['', '', '', '', '', ''],
-
-    ['DETAILLIERTE EINTRÄGE', '', '', '', '', '', ''],
-    ['', '', '', '', '', '', ''],
-    ['Datum', 'Fahrer', 'Typ', 'Beschreibung', 'Betrag (€)', 'ID', ''],
-    ...sortedIncomes.map(income => [
-      new Date(income.date).toLocaleDateString('de-DE'),
-      income.driver_name,
-      income.type === 'bargeld' ? 'Bargeld' :
-      income.type === 'umsatz' ? 'Umsatz' :
-      income.type === 'aktionen' ? 'Aktionen' : 'Trinkgeld',
-      income.description,
-      Number(income.amount).toFixed(2),
-      income.id,
-      ''
-    ])
-  ];
-
-  const ws = XLSX.utils.aoa_to_sheet(excelData);
-
-  ws['!cols'] = [
-    { wch: 20 },
-    { wch: 15 },
-    { wch: 15 },
-    { wch: 30 },
-    { wch: 15 },
-    { wch: 36 },
-    { wch: 15 }
-  ];
-
-  const range = XLSX.utils.decode_range(ws['!ref'] || 'A1');
-  for (let R = range.s.r; R <= range.e.r; ++R) {
-    for (let C = range.s.c; C <= range.e.c; ++C) {
-      const cell_address = XLSX.utils.encode_cell({ c: C, r: R });
-      if (!ws[cell_address]) continue;
-
-      const cellValue = ws[cell_address].v;
-
-      if (R === 0) {
-        ws[cell_address].s = {
-          font: { bold: true, size: 18, color: { rgb: "FFFFFF" } },
-          alignment: { horizontal: "center", vertical: "center" },
-          fill: { fgColor: { rgb: "059669" } },
-          border: {
-            top: { style: "thick", color: { rgb: "000000" } },
-            bottom: { style: "thick", color: { rgb: "000000" } },
-            left: { style: "thick", color: { rgb: "000000" } },
-            right: { style: "thick", color: { rgb: "000000" } }
-          }
-        };
-      }
-
-      if (cellValue && typeof cellValue === 'string' &&
-          (cellValue.includes('ZUSAMMENFASSUNG') || cellValue.includes('DETAILLIERTE'))) {
-        ws[cell_address].s = {
-          font: { bold: true, size: 14, color: { rgb: "FFFFFF" } },
-          alignment: { horizontal: "center", vertical: "center" },
-          fill: { fgColor: { rgb: "10B981" } },
-          border: {
-            top: { style: "medium", color: { rgb: "000000" } },
-            bottom: { style: "medium", color: { rgb: "000000" } },
-            left: { style: "medium", color: { rgb: "000000" } },
-            right: { style: "medium", color: { rgb: "000000" } }
-          }
-        };
-      }
-    }
-  }
-
-  ws['!merges'] = [
-    { s: { r: 0, c: 0 }, e: { r: 0, c: 5 } },
-    { s: { r: 6, c: 0 }, e: { r: 6, c: 5 } },
-    { s: { r: 14, c: 0 }, e: { r: 14, c: 5 } },
-    { s: { r: 20, c: 0 }, e: { r: 20, c: 5 } }
-  ];
-
-  XLSX.utils.book_append_sheet(wb, ws, 'Umsätze');
-
-  const filename = `umsaetze_${fromDate || 'all'}_to_${toDate || new Date().toISOString().split('T')[0]}.xlsx`;
-  XLSX.writeFile(wb, filename);
-};
-
-export const exportSalariesToExcel = (salaries: SalaryCalculation[], periodStart: string, periodEnd: string) => {
-  const wb = XLSX.utils.book_new();
-  wb.Props = {
-    Title: "El-Professor - Gehaltsabrechnung",
-    Subject: "Salary Report",
-    Author: "El-Professor Management System",
-    CreatedDate: new Date()
-  };
-
-  const totalRevenue = salaries.reduce((sum, s) => sum + s.revenue, 0);
-  const totalTips = salaries.reduce((sum, s) => sum + s.tips, 0);
-  const totalRevenueShare = salaries.reduce((sum, s) => sum + s.revenue_share, 0);
-  const totalDue = salaries.reduce((sum, s) => sum + s.amount_due, 0);
-  const paidCount = salaries.filter(s => s.status === 'paid').length;
-  const unpaidCount = salaries.filter(s => s.status === 'unpaid').length;
-
-  const excelData = [
-    ['EL-PROFESSOR - GEHALTSABRECHNUNG', '', '', '', '', '', ''],
-    ['', '', '', '', '', '', ''],
-    ['Zeitraum', `${new Date(periodStart).toLocaleDateString('de-DE')} bis ${new Date(periodEnd).toLocaleDateString('de-DE')}`, '', '', '', '', ''],
-    ['Erstellt am', new Date().toLocaleString('de-DE'), '', '', '', '', ''],
-    ['Anzahl Fahrer', salaries.length.toString(), '', '', '', '', ''],
-    ['', '', '', '', '', '', ''],
-
-    ['ZUSAMMENFASSUNG', '', '', '', '', '', ''],
-    ['', '', '', '', '', '', ''],
-    ['Metrik', 'Betrag (€)', 'Status', '', '', '', ''],
-    ['Gesamt Umsatz', totalRevenue.toFixed(2), '', '', '', '', ''],
-    ['Gesamt Trinkgeld', totalTips.toFixed(2), '', '', '', '', ''],
-    ['Gesamt Umsatzanteil', totalRevenueShare.toFixed(2), '', '', '', '', ''],
-    ['Gesamt Fällig', totalDue.toFixed(2), '', '', '', '', ''],
-    ['Bezahlt', paidCount.toString(), '', '', '', '', ''],
-    ['Unbezahlt', unpaidCount.toString(), '', '', '', '', ''],
-    ['', '', '', '', '', '', ''],
-
-    ['GEHALTSÜBERSICHT PRO FAHRER', '', '', '', '', '', ''],
-    ['', '', '', '', '', '', ''],
-    ['Fahrer', 'Umsatz (€)', 'Anteil (%)', 'Umsatzanteil (€)', 'Trinkgeld (€)', 'Fälliger Betrag (€)', 'Status'],
-    ...salaries.map(salary => [
-      salary.driver_name,
-      salary.revenue.toFixed(2),
-      (salary.salary_ratio * 100).toFixed(1) + '%',
-      salary.revenue_share.toFixed(2),
-      salary.tips.toFixed(2),
-      salary.amount_due.toFixed(2),
-      salary.status === 'paid' ? 'Bezahlt' : 'Unbezahlt'
-    ]),
-    ['', '', '', '', '', '', ''],
-    ['GESAMT', totalRevenue.toFixed(2), '', totalRevenueShare.toFixed(2), totalTips.toFixed(2), totalDue.toFixed(2), '']
-  ];
-
-  const ws = XLSX.utils.aoa_to_sheet(excelData);
-
-  ws['!cols'] = [
-    { wch: 25 },
-    { wch: 15 },
-    { wch: 15 },
-    { wch: 18 },
-    { wch: 15 },
-    { wch: 18 },
-    { wch: 12 }
-  ];
-
-  const range = XLSX.utils.decode_range(ws['!ref'] || 'A1');
-  for (let R = range.s.r; R <= range.e.r; ++R) {
-    for (let C = range.s.c; C <= range.e.c; ++C) {
-      const cell_address = XLSX.utils.encode_cell({ c: C, r: R });
-      if (!ws[cell_address]) continue;
-
-      const cellValue = ws[cell_address].v;
-
-      if (R === 0) {
-        ws[cell_address].s = {
-          font: { bold: true, size: 18, color: { rgb: "FFFFFF" } },
-          alignment: { horizontal: "center", vertical: "center" },
-          fill: { fgColor: { rgb: "3B82F6" } },
-          border: {
-            top: { style: "thick", color: { rgb: "000000" } },
-            bottom: { style: "thick", color: { rgb: "000000" } },
-            left: { style: "thick", color: { rgb: "000000" } },
-            right: { style: "thick", color: { rgb: "000000" } }
-          }
-        };
-      }
-
-      if (cellValue && typeof cellValue === 'string' &&
-          (cellValue.includes('ZUSAMMENFASSUNG') || cellValue.includes('GEHALTSÜBERSICHT'))) {
-        ws[cell_address].s = {
-          font: { bold: true, size: 14, color: { rgb: "FFFFFF" } },
-          alignment: { horizontal: "center", vertical: "center" },
-          fill: { fgColor: { rgb: "60A5FA" } },
-          border: {
-            top: { style: "medium", color: { rgb: "000000" } },
-            bottom: { style: "medium", color: { rgb: "000000" } },
-            left: { style: "medium", color: { rgb: "000000" } },
-            right: { style: "medium", color: { rgb: "000000" } }
-          }
-        };
-      }
-
-      if (cellValue === 'GESAMT') {
-        ws[cell_address].s = {
-          font: { bold: true, size: 12, color: { rgb: "FFFFFF" } },
-          alignment: { horizontal: "left", vertical: "center" },
-          fill: { fgColor: { rgb: "1E40AF" } },
-          border: {
-            top: { style: "thick", color: { rgb: "000000" } },
-            bottom: { style: "thick", color: { rgb: "000000" } },
-            left: { style: "thick", color: { rgb: "000000" } },
-            right: { style: "thick", color: { rgb: "000000" } }
-          }
-        };
-      }
-    }
-  }
-
-  ws['!merges'] = [
-    { s: { r: 0, c: 0 }, e: { r: 0, c: 6 } },
-    { s: { r: 6, c: 0 }, e: { r: 6, c: 6 } },
-    { s: { r: 17, c: 0 }, e: { r: 17, c: 6 } }
-  ];
-
-  XLSX.utils.book_append_sheet(wb, ws, 'Gehälter');
-
-  const periodLabel = periodStart === periodEnd ?
-    new Date(periodStart).toLocaleDateString('de-DE').replace(/\./g, '-') :
-    `${new Date(periodStart).toLocaleDateString('de-DE').replace(/\./g, '-')}_to_${new Date(periodEnd).toLocaleDateString('de-DE').replace(/\./g, '-')}`;
-
-  const filename = `salaries_${periodLabel}.xlsx`;
-  XLSX.writeFile(wb, filename);
 };
 
 // ─── Generic reusable table export ────────────────────────────────────────────
+
+export type ExportColumnType = 'text' | 'number' | 'integer' | 'money' | 'percent' | 'kilometres';
 
 export interface ExportColumn {
   key: string;
   label: string;
   width?: number;
   align?: 'left' | 'center' | 'right';
+  /**
+   * The display of a TEXT column. A numeric column is displayed by its number
+   * format instead, so `format` is ignored there — pass one or the other, never
+   * both, or the cell reads as text again by accident.
+   */
   format?: (value: unknown) => string;
+  /**
+   * Write the cell as a typed value with a German display format, so Excel can
+   * sum, sort and compute with it. Default: 'text'.
+   *
+   * THE INVARIANT: a column that does not opt in renders byte-identically to
+   * before this existed — same `t`, same `v`, no `z` key at all.
+   */
+  type?: ExportColumnType;
+}
+
+/**
+ * The chrome `exportTableToExcel` writes around the caller's own columns.
+ *
+ * This dump satisfies no statutory form — it is a convenience export of an
+ * operational list — so its wording follows the UI language, unlike the
+ * Fahrtenbuch XLSX and the Stundennachweis PDF, whose German is prescribed.
+ * The module stays pure: a screen passes its own translated labels, and the
+ * German defaults below keep every existing caller byte-identical.
+ */
+export interface ExportChromeLabels {
+  /** Printed in the first cell when there are no rows. */
+  emptyState: string;
+  /** Prefix of the filter line; the summary follows it. */
+  activeFilters: string;
+  /** Label of the totals row; `{count}` is the number of rows. */
+  totalsRow: string;
+  /**
+   * A note printed in a band under the table, or absent for no band at all.
+   *
+   * Absent is the default, and that is the point: the band used to say
+   * "El-Professor Verwaltungssystem — N Datensätze exportiert" beside a second
+   * copy of the export timestamp, which the owner had removed on 01.10.2026.
+   * What it is for is a sentence the sheet needs in order to be read correctly —
+   * the payroll summary's warning that the surcharge columns must not be added
+   * to the hours. `{count}` is substituted if present.
+   */
+  footer?: string;
+}
+
+export const DEFAULT_EXPORT_CHROME: ExportChromeLabels = {
+  emptyState:    'Keine Daten vorhanden',
+  activeFilters: 'Aktive Filter:',
+  totalsRow:     'Gesamt  ({count} Einträge)',
+};
+
+function chromeText(template: string, count: number): string {
+  return template.replace('{count}', String(count));
 }
 
 export interface ExportOptions {
@@ -1066,7 +144,17 @@ export interface ExportOptions {
   columns: ExportColumn[];
   rows: Record<string, unknown>[];
   filterSummary?: string[];
-  totals?: Record<string, string>;
+  /**
+   * The totals row's figures, by column key. A number is written as a number
+   * cell in its column's format; a string as text.
+   *
+   * THE CONTRACT: the row's FIRST cell is its label and carries no figure, so
+   * naming `columns[0].key` here throws — that wording goes in
+   * `labels.totalsRow`. Pass `{}` for a totals row that carries only its label.
+   */
+  totals?: Record<string, string | number>;
+  /** Defaults to the German wording this export has always had. */
+  labels?: Partial<ExportChromeLabels>;
 }
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
@@ -1094,6 +182,27 @@ const T = {
   FOOTER_LINE:  'CBD5E1',
 } as const;
 
+// ─── Number formats ───────────────────────────────────────────────────────────
+// An xlsx number format is stored in EN-US convention and Excel renders it with
+// the viewer's locale. So German 1.234,56 is written '#,##0.00' — NOT
+// '#.##0,00', which would produce a file that looks right to nobody.
+//
+// 'percent' multiplies by 100 on display, so a column using it must hold the
+// FRACTION (0.4147 for 41,47 %). A column whose raw value is already multiplied
+// uses 'number' and keeps the % in its label.
+//
+// 'kilometres' is an integer with its unit in the cell's format rather than in
+// the value, which is what keeps an odometer reading summable and sortable while
+// it still reads as "123.456 km". The unit symbol is the same word in German and
+// English, so it carries no language and stays out of the dictionaries.
+const NUMBER_FORMATS: Record<Exclude<ExportColumnType, 'text'>, string> = {
+  number:     '#,##0.00',
+  integer:    '#,##0',
+  money:      '#,##0.00\\ "€"',
+  percent:    '0.0%',
+  kilometres: '#,##0\\ "km"',
+} as const;
+
 // ─── Style helpers ────────────────────────────────────────────────────────────
 
 function gridBorder() {
@@ -1105,24 +214,50 @@ function gridBorder() {
   };
 }
 
-function outerBorder(color = T.COL_HEAD_BG) {
-  return {
-    top:    { style: 'medium', color: { rgb: color } },
-    bottom: { style: 'medium', color: { rgb: color } },
-    left:   { style: 'medium', color: { rgb: color } },
-    right:  { style: 'medium', color: { rgb: color } },
-  };
-}
-
 function cell(
   ws: XLSX.WorkSheet,
   r: number,
   c: number,
   value: string | number,
   style: object,
+  numberFormat?: string,
 ) {
   const addr = XLSX.utils.encode_cell({ r, c });
   ws[addr] = { t: typeof value === 'number' ? 'n' : 's', v: value, s: style };
+  // Set only for a column that opted in, so every other cell keeps exactly the
+  // three keys it has always had.
+  if (numberFormat) ws[addr].z = numberFormat;
+}
+
+/**
+ * The finite number a raw value stands for, or null when it stands for none.
+ *
+ * Null is never coerced to 0: a 0,00 € where the datum is missing is a wrong
+ * figure, and this product's figures reconcile against an accountant's. The
+ * caller falls back to the text path instead.
+ */
+function asFiniteNumber(raw: unknown): number | null {
+  if (typeof raw === 'number') return Number.isFinite(raw) ? raw : null;
+  if (typeof raw === 'string') {
+    // Number('   ') is 0, so an all-whitespace string must be refused by hand.
+    const trimmed = raw.trim();
+    if (trimmed === '') return null;
+    const parsed = Number(trimmed);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+/**
+ * The number cell a column asks for, or null to leave the value on the text path
+ * — because the column did not opt in, or because its value cannot be read.
+ * Returns an object rather than a number so that a legitimate 0 stays truthy.
+ */
+function numericCell(col: ExportColumn, raw: unknown): { value: number; z: string } | null {
+  if (!col.type || col.type === 'text') return null;
+  const value = asFiniteNumber(raw);
+  if (value === null) return null;
+  return { value, z: NUMBER_FORMATS[col.type] };
 }
 
 function blank(ws: XLSX.WorkSheet, r: number, numCols: number, bg = 'FFFFFF') {
@@ -1134,21 +269,53 @@ function blank(ws: XLSX.WorkSheet, r: number, numCols: number, bg = 'FFFFFF') {
 
 // ─── Main export function ─────────────────────────────────────────────────────
 
-export function exportTableToExcel(opts: ExportOptions): void {
-  const { filename, sheetTitle, moduleName, columns, rows, filterSummary = [], totals } = opts;
+/** A drawn sheet and the name it goes into the workbook under. */
+interface BuiltSheet {
+  name: string;
+  sheet: XLSX.WorkSheet;
+}
+
+/**
+ * Draws one sheet: the seven bands, the number formats and the sheet settings.
+ *
+ * Separated from the workbook so a workbook can hold several of them — Notizen,
+ * Umsätze and Gehälter each export a set of related tables. Nothing about the
+ * drawing changed when it was separated; `buildTableWorkbook` below is still one
+ * call to this, which is what keeps the cell-by-cell tests describing what the
+ * product writes.
+ */
+function buildTableSheet(opts: ExportOptions): BuiltSheet {
+  const { sheetTitle, moduleName, columns, rows, filterSummary = [], totals } = opts;
+  const labels: ExportChromeLabels = { ...DEFAULT_EXPORT_CHROME, ...(opts.labels ?? {}) };
+
+  // ── The totals row's first cell is its label, and there is only one cell ───
+  // THE RULE: `totals` names the columns that carry a figure; column 0 carries
+  // the row's label. Block 6 below writes that label unconditionally, so a
+  // `totals` entry keyed to the first column could never be rendered — and was
+  // dropped with no warning, which is what this refuses.
+  //
+  // It refuses rather than moving the label, because the label in the first cell
+  // is the one piece of chrome every file this export has ever produced carries,
+  // and a count sentence in the Kennzeichen or Fahrername column would be
+  // sorted and filtered as data. Three callers were tripping over this —
+  // Fahrzeuge, Fahrer and Benutzer — and every one of them was passing its own
+  // WORDING and not a figure, so `labels.totalsRow` is where they belong. No
+  // figure was ever lost; wording was.
+  //
+  // Loud, not a console warning: every call site is in this repository, so this
+  // is a wrong program rather than wrong data, and it is meant to fail the first
+  // click and the test rather than reach a customer's file.
+  if (totals && columns.length > 0 && Object.prototype.hasOwnProperty.call(totals, columns[0].key)) {
+    throw new Error(
+      `exportTableToExcel: totals['${columns[0].key}'] can never be rendered — the first ` +
+      `column of the totals row is that row's label. Pass wording as labels.totalsRow, ` +
+      `and put a figure in any column but the first.`,
+    );
+  }
+
   const N = columns.length;
-  const exportedAt  = new Date().toLocaleString('de-DE');
   const exportedDate = new Date().toLocaleDateString('de-DE');
   const exportedTime = new Date().toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
-
-  const wb = XLSX.utils.book_new();
-  wb.Props = {
-    Title:       sheetTitle,
-    Subject:     moduleName,
-    Author:      'El-Professor Verwaltungssystem',
-    Company:     'El-Professor',
-    CreatedDate: new Date(),
-  };
 
   const ws: XLSX.WorkSheet = {};
   let R = 0;
@@ -1213,7 +380,7 @@ export function exportTableToExcel(opts: ExportOptions): void {
   let filterRow = -1;
   if (filterSummary.length > 0) {
     filterRow = R;
-    const filterText = `Aktive Filter:  ${filterSummary.join('   |   ')}`;
+    const filterText = `${labels.activeFilters}  ${filterSummary.join('   |   ')}`;
     for (let c = 0; c < N; c++) {
       cell(ws, R, c, c === 0 ? filterText : '', {
         font:      { sz: 9, color: { rgb: T.FILTER_FG }, italic: true, name: 'Calibri' },
@@ -1267,9 +434,14 @@ export function exportTableToExcel(opts: ExportOptions): void {
 
     columns.forEach((col, c) => {
       const rawVal   = dataRow[col.key];
-      const formatted = col.format
-        ? col.format(rawVal)
-        : rawVal == null ? '' : String(rawVal);
+      const numeric  = numericCell(col, rawVal);
+      // A numeric column is displayed by its `z`; a text column by its `format`.
+      // With no number to write, the text path below is exactly what it always was.
+      const formatted = numeric
+        ? numeric.value
+        : col.format
+          ? col.format(rawVal)
+          : rawVal == null ? '' : String(rawVal);
 
       cell(ws, R, c, formatted, {
         font:      { sz: 10, name: 'Calibri', color: { rgb: '1E293B' } },
@@ -1290,14 +462,14 @@ export function exportTableToExcel(opts: ExportOptions): void {
             ? { style: 'medium', color: { rgb: T.COL_HEAD_BG } }
             : { style: 'thin',   color: { rgb: T.ROW_BORDER_V } },
         },
-      });
+      }, numeric?.z);
     });
     R++;
   });
 
   // Empty-state placeholder
   if (rows.length === 0) {
-    const msg = 'Keine Daten vorhanden';
+    const msg = labels.emptyState;
     for (let c = 0; c < N; c++) {
       cell(ws, R, c, c === 0 ? msg : '', {
         font:      { sz: 10, italic: true, color: { rgb: '94A3B8' }, name: 'Calibri' },
@@ -1332,7 +504,15 @@ export function exportTableToExcel(opts: ExportOptions): void {
 
     columns.forEach((col, c) => {
       const isLabel = c === 0;
-      const val     = isLabel ? `Gesamt  (${rows.length} Einträge)` : (totals[col.key] ?? '');
+      // The first cell is always the label, as it always was — never a figure,
+      // which the guard at the top of this function now enforces instead of
+      // silently discarding one. The label follows the UI language since #112;
+      // only the figures are ours.
+      const rawTotal = totals[col.key];
+      const numeric  = isLabel ? null : numericCell(col, rawTotal);
+      const val      = isLabel
+        ? chromeText(labels.totalsRow, rows.length)
+        : numeric ? numeric.value : (rawTotal ?? '');
       cell(ws, R, c, val, {
         font: {
           bold:  true,
@@ -1352,7 +532,7 @@ export function exportTableToExcel(opts: ExportOptions): void {
           left:   c === 0     ? { style: 'medium', color: { rgb: T.COL_HEAD_BG } } : { style: 'thin', color: { rgb: T.ROW_BORDER_V } },
           right:  c === N - 1 ? { style: 'medium', color: { rgb: T.COL_HEAD_BG } } : { style: 'thin', color: { rgb: T.ROW_BORDER_V } },
         },
-      });
+      }, numeric?.z);
     });
     R++;
   } else {
@@ -1370,39 +550,37 @@ export function exportTableToExcel(opts: ExportOptions): void {
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // BLOCK 7 — FOOTER BAND
+  // BLOCK 7 — FOOTER BAND, only when the caller passes a note
   // ═══════════════════════════════════════════════════════════════════════════
 
-  R++; // one blank spacer row above footer
+  const footerText = labels.footer ? chromeText(labels.footer, rows.length) : '';
+  let footerRow = -1;
 
-  // Footer line 1: system name + record count
-  for (let c = 0; c < N; c++) {
-    const isFirst = c === 0;
-    const isLast  = c === N - 1;
-    const val = isFirst
-      ? `El-Professor Verwaltungssystem  —  ${rows.length} Datensätze exportiert`
-      : isLast
-        ? exportedAt
-        : '';
-    cell(ws, R, c, val, {
-      font:  { sz: 8, color: { rgb: T.FOOTER_FG }, italic: true, name: 'Calibri' },
-      fill:  { fgColor: { rgb: T.FOOTER_BG } },
-      alignment: {
-        horizontal: isLast ? 'right' : 'left',
-        vertical:   'center',
-        indent:     isFirst ? 2 : 0,
-      },
-      border: {
-        top:    { style: 'thin',   color: { rgb: T.FOOTER_LINE } },
-        bottom: { style: 'thin',   color: { rgb: T.FOOTER_LINE } },
-        left:   isFirst ? { style: 'thin', color: { rgb: T.FOOTER_LINE } } : undefined,
-        right:  isLast  ? { style: 'thin', color: { rgb: T.FOOTER_LINE } } : undefined,
-      },
-    });
+  if (footerText) {
+    R++; // one blank spacer row above the band
+
+    for (let c = 0; c < N; c++) {
+      cell(ws, R, c, c === 0 ? footerText : '', {
+        font:  { sz: 9, color: { rgb: T.META_FG }, name: 'Calibri' },
+        fill:  { fgColor: { rgb: T.FOOTER_BG } },
+        alignment: {
+          horizontal: 'left',
+          vertical:   'top',
+          wrapText:   true,
+          indent:     c === 0 ? 1 : 0,
+        },
+        border: {
+          top:    { style: 'thin', color: { rgb: T.FOOTER_LINE } },
+          bottom: { style: 'thin', color: { rgb: T.FOOTER_LINE } },
+          left:   c === 0     ? { style: 'thin', color: { rgb: T.FOOTER_LINE } } : undefined,
+          right:  c === N - 1 ? { style: 'thin', color: { rgb: T.FOOTER_LINE } } : undefined,
+        },
+      });
+    }
+
+    footerRow = R;
+    R++;
   }
-
-  const footerRow = R;
-  R++;
 
   // ═══════════════════════════════════════════════════════════════════════════
   // WORKSHEET SETTINGS
@@ -1426,7 +604,15 @@ export function exportTableToExcel(opts: ExportOptions): void {
   for (let i = colHeaderRow + 1; i < colHeaderRow + 1 + rows.length; i++) {
     rowHeights[i] = { hpt: 18 };
   }
-  rowHeights[footerRow] = { hpt: 14 };
+  if (footerRow >= 0) {
+    // Tall enough for the note to be read. The band is one merged cell across
+    // every column, so the line count is the text length over the summed column
+    // width — about 1.1 characters per width unit at 9pt — and a note of five
+    // lines in a 14pt row, which is what the old band gave it, was unreadable.
+    const widthUnits = columns.reduce((sum, col) => sum + Math.max(col.width ?? 18, 10), 0);
+    const lines = Math.max(1, Math.ceil(footerText.length / Math.max(20, widthUnits * 1.1)));
+    rowHeights[footerRow] = { hpt: Math.min(120, 12 * lines + 4) };
+  }
   ws['!rows'] = Array.from({ length: R }, (_, i) => rowHeights[i] ?? { hpt: 18 });
 
   // Freeze pane: freeze everything above and including the column-header row
@@ -1448,9 +634,12 @@ export function exportTableToExcel(opts: ExportOptions): void {
     { s: { r: 1, c: 0 }, e: { r: 1, c: N - 1 } },
     // Meta row — left part (module name) spans all but last cell
     { s: { r: 2, c: 0 }, e: { r: 2, c: N - 2 } },
-    // Footer — left part spans all but last cell
-    { s: { r: footerRow, c: 0 }, e: { r: footerRow, c: N - 2 } },
   ];
+  // The footer band is one cell across the full width: it holds a sentence, not
+  // a figure, so unlike the meta row it has nothing to right-align beside it.
+  if (footerRow >= 0) {
+    merges.push({ s: { r: footerRow, c: 0 }, e: { r: footerRow, c: N - 1 } });
+  }
   if (filterRow >= 0) {
     merges.push({ s: { r: filterRow, c: 0 }, e: { r: filterRow, c: N - 1 } });
   }
@@ -1459,8 +648,91 @@ export function exportTableToExcel(opts: ExportOptions): void {
   // Print settings
   ws['!margins'] = { left: 0.5, right: 0.5, top: 0.75, bottom: 0.75, header: 0.3, footer: 0.3 };
 
-  XLSX.utils.book_append_sheet(wb, ws, moduleName.slice(0, 31));
+  return { name: moduleName.slice(0, 31), sheet: ws };
+}
 
+/** The document properties every styled workbook carries. */
+function workbookProps(first: ExportOptions): XLSX.FullProperties {
+  return {
+    Title:       first.sheetTitle,
+    Subject:     first.moduleName,
+    // No Author and no Company. Both named the product, and the owner asked on
+    // 01.10.2026 for no signature of ours on a file a customer sends out. The
+    // sheet's own title band says what the file is; who generated it is not the
+    // reader's business and was never the customer's own name.
+    CreatedDate: new Date(),
+  };
+}
+
+/**
+ * Builds the workbook `exportTableToExcel` writes. Split out so the sheet can be
+ * inspected cell by cell in a test without touching the filesystem —
+ * `XLSX.writeFile` is the only part that does.
+ */
+export function buildTableWorkbook(opts: ExportOptions): XLSX.WorkBook {
+  const wb = XLSX.utils.book_new();
+  wb.Props = workbookProps(opts);
+  const built = buildTableSheet(opts);
+  XLSX.utils.book_append_sheet(wb, built.sheet, built.name);
+  return wb;
+}
+
+/**
+ * Several styled tables in one workbook, one sheet each, in the order given.
+ *
+ * The properties come from the first sheet, which is the one the screen's own
+ * title names. A sheet name that repeats gets a numeric suffix rather than
+ * throwing, because `book_append_sheet` refuses a duplicate and two sections of
+ * one export can legitimately be called the same thing after the 31-character
+ * truncation Excel imposes.
+ */
+export function buildSheetsWorkbook(sheets: ExportOptions[]): XLSX.WorkBook {
+  if (sheets.length === 0) {
+    throw new Error('buildSheetsWorkbook: a workbook needs at least one sheet');
+  }
+  const wb = XLSX.utils.book_new();
+  wb.Props = workbookProps(sheets[0]);
+
+  const used = new Set<string>();
+  for (const opts of sheets) {
+    const built = buildTableSheet(opts);
+    let name = built.name;
+    for (let n = 2; used.has(name); n++) {
+      const suffix = ` (${n})`;
+      name = `${built.name.slice(0, 31 - suffix.length)}${suffix}`;
+    }
+    used.add(name);
+    XLSX.utils.book_append_sheet(wb, built.sheet, name);
+  }
+  return wb;
+}
+
+/**
+ * Writes a multi-sheet styled workbook.
+ *
+ * Same contract as `exportTableToExcel`, including the `void` signature and the
+ * logged rejection: ExcelJS writes asynchronously and no call site has anywhere
+ * to show a failure.
+ */
+export function exportSheetsToExcel(filename: string, sheets: ExportOptions[]): void {
+  const wb = buildSheetsWorkbook(sheets);
   const safeFilename = filename.endsWith('.xlsx') ? filename : `${filename}.xlsx`;
-  XLSX.writeFile(wb, safeFilename);
+  void downloadStyledWorkbook(wb, safeFilename).catch((error: unknown) => {
+    console.error('exportSheetsToExcel: writing the workbook failed', error);
+  });
+}
+
+export function exportTableToExcel(opts: ExportOptions): void {
+  const wb = buildTableWorkbook(opts);
+  const safeFilename = opts.filename.endsWith('.xlsx') ? opts.filename : `${opts.filename}.xlsx`;
+  // ExcelJS produces a buffer, so writing is asynchronous where `XLSX.writeFile`
+  // was synchronous — and this function's `void` signature, which every call
+  // site is written against, has nowhere to hand a failure. A rejection is
+  // logged rather than left unhandled; a real message on the button would mean
+  // changing that signature, which is a change of its own. The guard against a
+  // file that claims nought after a failed read stays at the call site either
+  // way: this still writes a workbook for whatever rows it is handed.
+  void downloadStyledWorkbook(wb, safeFilename).catch((error: unknown) => {
+    console.error('exportTableToExcel: writing the workbook failed', error);
+  });
 }

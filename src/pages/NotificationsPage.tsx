@@ -232,7 +232,7 @@ export default function NotificationsPage() {
       setDirty(false);
       showToast('success', t('notif.saved'));
     } catch (err: any) {
-      showToast('error', 'Fehler beim Speichern: ' + err.message);
+      showToast('error', t('notif.saveFailedWith', { message: err.message }));
     } finally {
       setSaving(false);
     }
@@ -260,10 +260,10 @@ export default function NotificationsPage() {
       {/* Page header */}
       <div>
         <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>
-          Benachrichtigungen
+          {t('notif.title')}
         </h1>
         <p className="mt-1 text-sm" style={{ color: 'var(--text-secondary)' }}>
-          Verwalten Sie welche E-Mail-Benachrichtigungen Sie erhalten möchten.
+          {t('notif.subtitle')}
         </p>
       </div>
 
@@ -287,11 +287,11 @@ export default function NotificationsPage() {
             </div>
             <div>
               <p className="font-semibold text-sm" style={{ color: 'var(--text-primary)' }}>
-                E-Mail-Benachrichtigungen
+                {t('notif.emailNotifications')}
               </p>
               <p className="text-xs mt-0.5" style={{ color: 'var(--text-secondary)' }}>
                 {globalEnabled
-                  ? `${enabledCount} von ${totalCount} Benachrichtigungen aktiv`
+                  ? t('notif.activeCount', { enabled: enabledCount, total: totalCount })
                   : t('notif.allDisabled')
                 }
               </p>
@@ -311,7 +311,7 @@ export default function NotificationsPage() {
             onMouseLeave={e => (e.currentTarget.style.opacity = '1')}
           >
             <CheckCircle className="w-3.5 h-3.5" />
-            Alle aktivieren
+            {t('notif.enableAll')}
           </button>
           <button
             type="button"
@@ -322,7 +322,7 @@ export default function NotificationsPage() {
             onMouseLeave={e => (e.currentTarget.style.opacity = '1')}
           >
             <BellOff className="w-3.5 h-3.5" />
-            Alle deaktivieren
+            {t('notif.disableAll')}
           </button>
         </div>
       </div>
@@ -408,7 +408,7 @@ export default function NotificationsPage() {
               onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
             >
               <RotateCcw className="w-3.5 h-3.5" />
-              Zurücksetzen
+              {t('notif.reset')}
             </button>
           )}
           <button
@@ -435,8 +435,7 @@ export default function NotificationsPage() {
           color: 'var(--text-tertiary)',
         }}
       >
-        E-Mail-Benachrichtigungen werden an die E-Mail-Adresse des Unternehmens gesendet.
-        Für TÜV-Benachrichtigungen wird täglich geprüft ob Fahrzeuge betroffen sind.
+        {t('notif.infoNote')}
       </div>
     </div>
   );

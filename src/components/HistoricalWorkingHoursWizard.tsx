@@ -35,7 +35,9 @@ import {
   formatBlockDatetime,
   formatBlockHours,
   blockStatusLabel,
+  blockStatusLabelKey,
   blockWarningLabels,
+  blockWarningLabelKeys,
   blockSourceRowRange,
   type VehicleBlock,
   type BuildVehicleBlocksResult,
@@ -53,6 +55,8 @@ import {
   type DriverPlanningExclusion,
   computeLohnartSeconds,
   getGermanNationalHolidays,
+  resolveFullDatetime,
+  parseFullDatetimeMs,
 } from '../utils/historicalWorkingHoursCleanEngine';
 import {
   exportHistoricalWorkingHoursFahrtenbuch,
@@ -74,6 +78,7 @@ import { type StructuredNote } from '../utils/monatsplanungPhase3';
 import { fetchAllPaginated } from '../utils/fetchAllPaginated';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { useTranslation } from '../contexts/LanguageContext';
+import { engineText } from '../i18n/engineMessage';
 import type { TranslationKey, TranslationVars } from '../i18n';
 
 /** Signature of the `t` from useTranslation(), for helpers that take it. */
@@ -953,8 +958,8 @@ function VehicleBlocksView({ result, month, year, onRecompute, onAssign }: Vehic
             </div>
 
             {/* Detail rows */}
-            {/* blockStatusLabel / blockWarningLabels come from the clean engine and
-                return German; translating them belongs with that module. */}
+            {/* The clean engine returns German and names a key beside it; the
+                status and warning codes stay its own discriminators. */}
             <div className="rounded-xl overflow-hidden" style={{ border: '1px solid var(--border)' }}>
               {[
                 [t('hwh.colVehicle'),  modalBlock.vehicle],
@@ -963,8 +968,10 @@ function VehicleBlocksView({ result, month, year, onRecompute, onAssign }: Vehic
                 [t('hwh.colDuration'), formatBlockDuration(modalBlock.blockDurationSec)],
                 [t('hwh.colRides'),    String(modalBlock.rides?.length ?? 0)],
                 [t('hwh.colRows'),     blockSourceRowRange(modalBlock)],
-                [t('common.status'),   blockStatusLabel(modalBlock)],
-                [t('hwh.colWarnings'), blockWarningLabels(modalBlock).join(', ') || '—'],
+                [t('common.status'),   engineText(t, blockStatusLabel(modalBlock), blockStatusLabelKey(modalBlock))],
+                [t('hwh.colWarnings'), blockWarningLabels(modalBlock)
+                  .map((label, i) => engineText(t, label, blockWarningLabelKeys(modalBlock)[i]))
+                  .join(', ') || '—'],
               ].map(([k, v], i) => (
                 <div
                   key={k}
@@ -1114,8 +1121,8 @@ function RegularDriverAssignmentView({
 
   /** Just the reason, without the "not assigned" prefix. */
   function unassignedReason(block: VehicleBlock): string {
-    // blockStatusLabel is the clean engine's German status text.
-    if (block.status !== 'valid') return blockStatusLabel(block);
+    // The clean engine's German status text, rendered through its key.
+    if (block.status !== 'valid') return engineText(t, blockStatusLabel(block), blockStatusLabelKey(block));
     const reasons = rejectionMap.get(block.blockId);
     if (!reasons?.length) return t('hwh.rejectNoSuitableDriver');
     const r = reasons[0];
@@ -1793,8 +1800,10 @@ function RegularDriverAssignmentView({
                   [t('hwh.colDuration'),    formatBlockDuration(modalBlock.blockDurationSec)],
                   [t('hwh.colRides'),       String(modalBlock.rides?.length ?? 0)],
                   [t('hwh.colRows'),        blockSourceRowRange(modalBlock)],
-                  [t('hwh.colBlockStatus'), blockStatusLabel(modalBlock)],
-                  [t('hwh.colWarnings'),    blockWarningLabels(modalBlock).join(', ') || '—'],
+                  [t('hwh.colBlockStatus'), engineText(t, blockStatusLabel(modalBlock), blockStatusLabelKey(modalBlock))],
+                  [t('hwh.colWarnings'),    blockWarningLabels(modalBlock)
+                    .map((label, i) => engineText(t, label, blockWarningLabelKeys(modalBlock)[i]))
+                    .join(', ') || '—'],
                   ['1000',                  lk ? secToHShort(lk.baseSec) : '—'],
                   ['1500 N25%',             lk ? secToHShort(lk.night25Sec) : '—'],
                   ['1501 N40%',             lk ? secToHShort(lk.night40Sec) : '—'],
@@ -3879,6 +3888,17 @@ function InhaberFreeWindowSearchView({
           vehicle: block.vehicle,
           oldDriver: trip ? (trip.assigned_driver_name || trip.original_driver_name || '') : '',
           newDriver: resolvedOwnerName ?? inhaberName,
+          // These three were omitted, and the compiler had been saying so all
+          // along — TS2345 at this line, one of the 207 errors the ratchet
+          // carries. Four checks below read newStartMs off these rows, and
+          // `undefined < number` is false, so every one of them reported nothing:
+          // the Inhaber's own overlaps, the per-vehicle overlaps, the conflicts
+          // against trips that did not move, and the driver-exclusion check.
+          // CLAUDE.md: "Only overlaps the app itself created are blocking errors"
+          // — these are exactly those, and they were all silent.
+          origStartMs: ride.originalStartMs,
+          origEndMs: ride.originalEndMs,
+          newStartMs,
           newEndMs,
           durSec: ride.durationSec,
           offsetMs,
@@ -9041,26 +9061,27 @@ function buildDriverHourSummary(
     }
 
     const noteDriver = noteReassignments.get(trip.id);
-    // Resolve timestamps
-    const raw = trip.raw_data_json as Record<string, unknown> | null;
-    let startMs = 0, endMs = 0;
-    if (raw) {
-      const datetimeLike: string[] = [];
-      for (const k of Object.keys(raw)) {
-        const v = String(raw[k] ?? '');
-        if (/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/.test(v)) datetimeLike.push(v);
-      }
-      if (datetimeLike.length >= 1) startMs = Date.parse(datetimeLike[0].replace(' ', 'T')) || 0;
-      if (datetimeLike.length >= 2) endMs   = Date.parse(datetimeLike[1].replace(' ', 'T')) || 0;
-    }
-    if (!startMs && trip.trip_date && trip.start_time) {
-      startMs = Date.parse(`${trip.trip_date}T${trip.start_time.length === 5 ? trip.start_time + ':00' : trip.start_time}`) || 0;
-    }
-    if (!endMs && trip.trip_date && trip.end_time) {
-      let ms = Date.parse(`${trip.trip_date}T${trip.end_time.length === 5 ? trip.end_time + ':00' : trip.end_time}`) || 0;
-      if (ms > 0 && startMs > 0 && ms < startMs) ms += 86400000;
-      endMs = ms;
-    }
+    // Resolve timestamps by COLUMN NAME, through the clean engine's own reader.
+    //
+    // This used to collect every ISO-shaped value in raw_data_json by iterating
+    // Object.keys() and take the first as the start and the second as the end.
+    // Measured on staging 27.09.2026 over all 13959 imported rides: for 13513 of
+    // them (96.8%) the first ISO value is "Uhrzeit des Fahrtendes" — the ride's
+    // END — and the second is "Uhrzeit des Fahrtbeginns". So start and end were
+    // swapped, `endMs <= startMs` held, and addLohnart's guard returned without
+    // accumulating. Nearly every ride was silently dropped from this summary,
+    // which is both rendered (DriverHourSummaryTable) and stored
+    // (driver_hour_summary_json), so a driver's hours read as almost nothing.
+    //
+    // resolveFullDatetime asks for the named column, accepts the German
+    // DD.MM.YYYY form as well as ISO, and falls back to trip_date + start_time /
+    // end_time — the same resolution the block engine uses for the same rides,
+    // so the summary and the blocks can no longer disagree about a ride's hours.
+    let startMs = parseFullDatetimeMs(resolveFullDatetime(trip, 'start'));
+    let endMs   = parseFullDatetimeMs(resolveFullDatetime(trip, 'end'));
+    // A ride that ends past midnight carries the same trip_date on both columns
+    // only in the fallback; keep the day roll the old code applied there.
+    if (endMs > 0 && startMs > 0 && endMs < startMs) endMs += 86400000;
     if (!startMs) continue;
 
     const driverRaw = noteDriver
@@ -10083,8 +10104,9 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
         .eq('is_canceled', false)
         .order('id', { ascending: true })
         .range(from, to),
-      // Interpolated into fetchAllPaginated's own German error text.
-      { label: 'Fahrer' },
+      // Interpolated into fetchAllPaginated's error text. A caller's label
+      // arrives already translated; the sentence around it carries its own key.
+      { label: t('common.driver') },
     )
       .then((data) => {
         const seen = new Map<string, string>();
@@ -10281,8 +10303,9 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
           .order('source_row_index', { ascending: true, nullsFirst: false })
           .order('id', { ascending: true })
           .range(from, to),
-        // Interpolated into fetchAllPaginated's own German error text.
-        { label: 'Fahrten' },
+        // Interpolated into fetchAllPaginated's error text. A caller's label
+        // arrives already translated; the sentence around it carries its own key.
+        { label: t('hwh.colRides') },
       );
 
       // Resolve owner driver name from saved driver_configs_json
@@ -10558,7 +10581,7 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
       setPhase1Result(result);
       setStep(3);
     } catch (e) {
-      setComputeError(e instanceof Error ? e.message : 'Berechnungsfehler');
+      setComputeError(e instanceof Error ? e.message : t('hwh.computeError'));
     } finally {
       setComputing(false);
       setComputePhase('');
@@ -10653,7 +10676,7 @@ export default function HistoricalWorkingHoursWizard({ onBack }: Props) {
       setAssignmentResult(result);
       setStep(4);
     } catch (e) {
-      setAssignError(e instanceof Error ? e.message : 'Zuweisungsfehler');
+      setAssignError(e instanceof Error ? e.message : t('hwh.assignError'));
     } finally {
       setAssigning(false);
     }

@@ -307,7 +307,7 @@ export function useFahrtenbuch() {
 
     // XLSX bytes are mandatory — no import without the original file in storage
     if (!params.xlsxBytes || params.xlsxBytes.length === 0) {
-      throw new Error('Import blockiert: Original-XLSX-Datei konnte nicht gelesen werden.');
+      throw new Error(t('imp.blockedFileUnreadable'));
     }
 
     // The same file once per company. Asked before the upload so a refused file
@@ -362,7 +362,7 @@ export function useFahrtenbuch() {
       if (isReadOnlyPlatformSession) {
         throw new Error(t('support.storage.readOnly'));
       }
-      throw new Error(`Import blockiert: Original-XLSX-Datei konnte nicht gespeichert werden. Bitte Storage-Konfiguration prüfen. (${uploadErr.message})`);
+      throw new Error(t('imp.blockedFileNotStored', { message: uploadErr.message }));
     }
 
     if (import.meta.env.DEV) {
@@ -407,7 +407,7 @@ export function useFahrtenbuch() {
     if (!importRow.storage_path) {
       await supabase.storage.from('fahrtenbuch-files').remove([storagePath]);
       await supabase.from('fahrtenbuch_imports').delete().eq('id', importId);
-      throw new Error('Import blockiert: Originaldatei wurde nicht mit dem Import gespeichert.');
+      throw new Error(t('imp.blockedFileMissing'));
     }
 
     if (import.meta.env.DEV) {
@@ -444,18 +444,52 @@ export function useFahrtenbuch() {
       const written = insertedBatches * batchSize;
       // Best effort — if any of this also fails, the throw below still tells the
       // user the import did not succeed.
-      await supabase.from('fahrtenbuch_trips').delete().eq('import_id', importId);
-      await supabase.from('fahrtenbuch_imports').delete().eq('id', importId);
-      await supabase.storage.from('fahrtenbuch-files').remove([storagePath]);
+      //
+      // But "best effort" has to be measured, not assumed. Both DELETE policies
+      // ask is_company_admin() (20260923130000), and a row a policy hides is
+      // simply not in the statement's scope: PostgREST answers 200 with no error
+      // and nothing deleted. Without `.select('id')` this unwind looked like it
+      // had succeeded for an editor who is not an administrator, the message
+      // below claimed the import was taken back in full, and the import row —
+      // with its file_sha256 — stayed on record, so findImportByFileHash refused
+      // the same file for ever.
+      //
+      // The import row is what to judge by: fahrtenbuch_trips.import_id is
+      // ON DELETE CASCADE (20260605082340), so a deleted import row takes its
+      // trips with it whatever the first statement removed.
+      await supabase.from('fahrtenbuch_trips').delete().eq('import_id', importId).select('id');
+      const { data: removedImport, error: unwindErr } = await supabase
+        .from('fahrtenbuch_imports')
+        .delete()
+        .eq('id', importId)
+        .select('id');
+      const unwound = !unwindErr && (removedImport?.length ?? 0) > 0;
+      // The uploaded file goes only when the row that points at it went. Removing
+      // it while the row survives destroys the only copy of the source and leaves
+      // storage_path dangling.
+      if (unwound) {
+        await supabase.storage.from('fahrtenbuch-files').remove([storagePath]);
+      }
       await fetchImports();
+      const cause = (tripErr as { message?: string } | null)?.message ?? t('imp.error.unknown');
+      if (!unwound) {
+        // Nothing here may be more than is known. An error names itself; nothing
+        // deleted and nothing refused out loud is the policy, since the row was
+        // written a moment ago and certainly exists. Then: the import failed, the
+        // rows are still there, and the file cannot be read in again until the
+        // import is deleted — which only an administrator can do. Neither
+        // imp.rolledBack nor imp.error.rowRace may be used here, because both of
+        // them state that the import was taken back in full.
+        const refusal = unwindErr?.message ?? t('common.noPermission');
+        throw new Error(
+          `${t('imp.toast.failedTitle')}: ${cause} — ${refusal}. ${t('imp.duplicateFile.hint')}`,
+        );
+      }
       if (isUniqueViolation(tripErr, ROW_KEY_INDEX)) {
         throw new Error(t('imp.error.rowRace'));
       }
-      const cause = (tripErr as { message?: string } | null)?.message ?? 'Unbekannter Fehler';
       throw new Error(
-        `Import fehlgeschlagen nach ${written} von ${trips.length} Fahrten. ` +
-        'Der unvollständige Import wurde vollständig zurückgenommen. ' +
-        `Ursache: ${cause}`,
+        t('imp.rolledBack', { written, total: trips.length, cause }),
       );
     }
 
@@ -486,16 +520,41 @@ export function useFahrtenbuch() {
 
     // A BEFORE DELETE trigger refuses this when a finalization exists for the
     // month, so the German message it raises reaches the user as-is.
-    const { error } = await supabase
+    //
+    // A policy refusal is silent, though: fahrtenbuch_imports_delete asks
+    // is_company_admin() (20260923130000), so for an editor who is not an
+    // administrator the row is not in the statement's scope at all — 200, no
+    // error, nothing deleted. Without `.select('id')` this function resolved as
+    // if it had deleted the import, the replace flow reported success and went on
+    // to write the new one, and the old row (with its file_sha256 and its trips)
+    // stayed.
+    const { data: removedImport, error } = await supabase
       .from('fahrtenbuch_imports')
       .delete()
       .eq('id', importId)
-      .eq('company_id', companyId);
+      .eq('company_id', companyId)
+      .select('id');
     if (error) throw error;
+
+    if ((removedImport?.length ?? 0) === 0) {
+      // Nothing was removed and nothing was refused out loud. Either the import
+      // is already gone (another tab, a colleague) or this account may not delete
+      // it — ask, rather than report a refusal that may not be one.
+      const { data: stillThere, error: probeErr } = await supabase
+        .from('fahrtenbuch_imports')
+        .select('id')
+        .eq('id', importId)
+        .eq('company_id', companyId)
+        .maybeSingle();
+      // A failed probe is not a deletion either: report it rather than fall
+      // through into the silence this whole branch exists to end.
+      if (probeErr) throw probeErr;
+      if (stillThere) throw new Error(t('common.noPermission'));
+    }
 
     await fetchImports();
     setTrips(prev => prev.filter(t => t.import_id !== importId));
-  }, [companyId, fetchImports]);
+  }, [companyId, fetchImports, t]);
 
   return {
     imports,

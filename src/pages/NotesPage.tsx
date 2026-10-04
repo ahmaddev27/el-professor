@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Plus, Search, Trash2, CreditCard as Edit2, X, StickyNote, Calendar, ChevronLeft, ChevronRight, Download, Loader2 } from 'lucide-react';
-import * as XLSX from 'xlsx';
 import ConfirmationModal from '../components/ConfirmationModal';
+import { exportSheetsToExcel, type ExportOptions } from '../utils/excelExport';
 import { supabase } from '../lib/supabase';
 import { useToast } from '../contexts/ToastContext';
 import { format } from 'date-fns';
@@ -13,6 +13,17 @@ import type { TranslationKey } from '../i18n';
 interface Driver {
   id: string;
   name: string;
+}
+
+/**
+ * A company car, as this screen needs it: the plate it is known by and whether
+ * it is still in the fleet. `cars` carries no model or type column, so the plate
+ * is the whole description — the owner's choice when told (28.09.2026).
+ */
+interface Car {
+  id: string;
+  kennzeichen: string;
+  status: string;
 }
 
 type NotePlanningBehavior = 'neutral' | 'exclude_from_plan' | 'must_include_in_plan';
@@ -32,7 +43,60 @@ interface Note {
   end_time?: string | null;
   start_date?: string | null;
   end_date?: string | null;
+  /**
+   * Optional: which car the incident happened on, so a Blitzer photo or a
+   * Bußgeldbescheid addressed to a plate can be tied back to the Fahrtenbuch.
+   * A key into `cars`, never free text — `B-XX 1234` and `B-XX-1234` would
+   * otherwise become two vehicles. It records; nothing looks anything up with
+   * it, and no planning code ever sees it (see `loadNotes`).
+   */
+  car_id?: string | null;
   drivers?: { name: string };
+  cars?: { kennzeichen: string } | null;
+}
+
+/** One entry of the car picker: the id that is stored, and what it reads as. */
+interface CarOption {
+  id: string;
+  label: string;
+}
+
+/**
+ * The cars the picker offers for a note.
+ *
+ * Every car of the company, in the order they were loaded (by plate), including
+ * the retired ones — an incident note records something that already happened,
+ * and a ticket arriving for a car the fleet has since sold is exactly the case
+ * this field exists for. A retired car is therefore labelled, not hidden.
+ *
+ * `selected` is the note being edited. Its car is normally in `cars` already;
+ * the extra entry exists for the one case where it is not — the car list failed
+ * to load — because a `<select>` whose value matches no option falls back to the
+ * first one, and saving the form would then silently drop the note's car.
+ *
+ * Takes its inactive label as a function: this is module scope, where t() is not
+ * a value, the same way `noteDisplayLabel` below does it.
+ *
+ * Pure, and deliberately not exported: no page in this repository exports a
+ * helper, and doing so turns off React Fast Refresh for the whole file
+ * (`react-refresh/only-export-components`). Moving it to `src/utils/` with a
+ * vitest file of its own is the right home for it, and is a change of its own.
+ */
+function carPickerOptions(
+  cars: Car[],
+  selected: { id: string; plate: string | null } | null,
+  labelInactive: (plate: string) => string,
+): CarOption[] {
+  const options = cars.map(car => ({
+    id: car.id,
+    label: car.status === 'active' ? car.kennzeichen : labelInactive(car.kennzeichen),
+  }));
+
+  if (selected && selected.id && !cars.some(car => car.id === selected.id)) {
+    options.push({ id: selected.id, label: selected.plate ?? selected.id });
+  }
+
+  return options;
 }
 
 // `label` holds a TranslationKey: this list is module-level and t() is a
@@ -73,6 +137,7 @@ const inputStyle: React.CSSProperties = {
 
 interface FormData {
   driver_id: string;
+  car_id: string;             // '' means no car: the field is optional
   note_date: string;          // datetime-local — kept for backward compat / must_include times
   start_date: string;         // date only (YYYY-MM-DD)
   end_date: string;           // date only (YYYY-MM-DD)
@@ -87,6 +152,7 @@ interface FormData {
 
 const DEFAULT_FORM: FormData = {
   driver_id:              '',
+  car_id:                 '',
   note_date:              format(new Date(), "yyyy-MM-dd'T'HH:mm"),
   start_date:             format(new Date(), 'yyyy-MM-dd'),
   end_date:               format(new Date(), 'yyyy-MM-dd'),
@@ -107,14 +173,14 @@ function noteDisplayLabel(note: Note, t: (k: TranslationKey) => string): string 
   return nt ? t(nt.label) : t('notes.one');
 }
 
-function noteDateLabel(note: Note): string {
+function noteDateLabel(note: Note, t: (k: TranslationKey, vars?: Record<string, string | number>) => string): string {
   const sd = note.start_date;
   const ed = note.end_date;
   if (sd && ed && sd !== ed) {
     return `${format(new Date(sd), 'dd.MM.yyyy')} – ${format(new Date(ed), 'dd.MM.yyyy')}`;
   }
   const base = sd ? format(new Date(sd), 'dd.MM.yyyy') : format(new Date(note.note_date), 'dd.MM.yyyy');
-  if (note.is_full_day) return `${base} (Ganzer Tag)`;
+  if (note.is_full_day) return t('notes.fullDaySuffix', { date: base });
   if (note.start_time) return `${base} · ${note.start_time}${note.end_time ? '–'+note.end_time : ''}`;
   return base;
 }
@@ -123,6 +189,7 @@ export function NotesPage() {
   const { t } = useTranslation();
   const [notes, setNotes]           = useState<Note[]>([]);
   const [drivers, setDrivers]       = useState<Driver[]>([]);
+  const [cars, setCars]             = useState<Car[]>([]);
   const [loading, setLoading]       = useState(true);
   const [showModal, setShowModal]   = useState(false);
   const [editingNote, setEditingNote] = useState<Note | null>(null);
@@ -150,13 +217,14 @@ export function NotesPage() {
     setSelectedDriver('');
     setNotes([]);
     setDrivers([]);
+    setCars([]);
     if (companyId) loadData();
   }, [companyId]);
 
   const loadData = async () => {
     try {
       setLoading(true);
-      await Promise.all([loadNotes(), loadDrivers()]);
+      await Promise.all([loadNotes(), loadDrivers(), loadCars()]);
     } catch (error: any) {
       showToast('error', error.message || t('salaries.loadFailed'));
     } finally {
@@ -165,9 +233,21 @@ export function NotesPage() {
   };
 
   const loadNotes = async () => {
+    // The plate travels with the note, the way `drivers(name)` already does, so it
+    // is shown from the note's own row and does not depend on the separate car
+    // list below. The embed names its foreign key rather than the table alone:
+    // PostgREST answers 300 for an embed it finds more than one path for, and that
+    // would fail the whole list rather than one field. The constraint is created in
+    // 20260928120000.
+    //
+    // This is the only query in the product that reads `car_id`. Every consumer
+    // that feeds the planning engine names its columns explicitly
+    // (MonatsplanungAssignmentPreview, MonatsplanungStundennachweisPreview,
+    // StundennachweisPage, HistoricalWorkingHoursWizard), so no engine input can
+    // carry the car.
     const { data, error } = await supabase
       .from('driver_notes')
-      .select('*, drivers(name)')
+      .select('*, drivers(name), cars!driver_notes_car_id_fkey(kennzeichen)')
       .eq('company_id', companyId)
       .order('note_date', { ascending: false });
     if (error) throw error;
@@ -183,6 +263,17 @@ export function NotesPage() {
       .order('name');
     if (error) throw error;
     setDrivers(data || []);
+  };
+
+  // Every car of the company, retired ones included: see carPickerOptions.
+  const loadCars = async () => {
+    const { data, error } = await supabase
+      .from('cars')
+      .select('id, kennzeichen, status')
+      .eq('company_id', companyId)
+      .order('kennzeichen');
+    if (error) throw error;
+    setCars(data || []);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -207,6 +298,9 @@ export function NotesPage() {
 
       const noteData = {
         driver_id:              formData.driver_id,
+        // Optional by design: '' is stored as NULL, not as an empty string, so
+        // "no car" stays one value and the foreign key has nothing to resolve.
+        car_id:                 formData.car_id || null,
         note_date:              canonicalDate,
         note_text:              formData.note_text.trim(),
         created_by:             user.id,
@@ -249,6 +343,7 @@ export function NotesPage() {
     const ed = note.end_date   ?? sd;
     setFormData({
       driver_id:              note.driver_id,
+      car_id:                 note.car_id ?? '',
       note_date:              format(new Date(note.note_date), "yyyy-MM-dd'T'HH:mm"),
       start_date:             sd,
       end_date:               ed,
@@ -328,70 +423,123 @@ export function NotesPage() {
         if (!d) return '';
         try { return format(new Date(d), 'dd.MM.yyyy HH:mm'); } catch { return d; }
       };
-      const yesNo = (v?: boolean | null) => v ? 'Ja' : 'Nein';
+      const yesNo = (v?: boolean | null) => v ? t('common.yes') : t('common.no');
 
-      // Sheet 1: Notizen
-      const notizRows = toExport.map(note => ({
-        [t('common.driver')]: getDriverName(note),
-        [t('notes.noteType')]: noteTypeLabel(note.note_type),
-        [t('notes.planningBehaviour')]: behaviorLabel(note.note_planning_behavior),
-        [t('notes.noteDate')]: fmtDate(note.note_date),
-        [t('notes.startDate')]: fmtDate(note.start_date),
-        [t('notes.endDate')]: fmtDate(note.end_date),
-        [t('notes.allDay')]: yesNo(note.is_full_day),
-        [t('notes.startTime')]: note.start_time ?? '',
-        [t('notes.endTime')]: note.end_time ?? '',
-        [t('notes.text')]: note.note_text,
-        [t('notes.createdAt')]: fmtDateTime(note.created_at),
-        [t('notes.updatedAt')]: fmtDateTime(note.updated_at),
-        [t('notes.createdBy')]: note.created_by ?? '',
-      }));
+      // ── Sheet 1: every note ───────────────────────────────────────────
+      // The plate is on this sheet and on no other: it is what a Bußgeldbescheid
+      // names, so a record the office cannot get out of the screen would not be a
+      // record. Sheet 3 lists planning exclusions, where a car means nothing.
+      // This dump carries no statutory form, so its headers follow the UI
+      // language like every other label here (CLAUDE.md, "Language").
+      const noteSheet: ExportOptions = {
+        filename: 'notizen',
+        sheetTitle: t('notes.title'),
+        moduleName: t('notes.title'),
+        columns: [
+          { key: 'driver',    label: t('common.driver'),            width: 24 },
+          { key: 'vehicle',   label: t('ta.col.vehicle'),           width: 14 },
+          { key: 'type',      label: t('notes.noteType'),           width: 18 },
+          { key: 'behaviour', label: t('notes.planningBehaviour'),  width: 22 },
+          { key: 'noteDate',  label: t('notes.noteDate'),           width: 13 },
+          { key: 'startDate', label: t('notes.startDate'),          width: 13 },
+          { key: 'endDate',   label: t('notes.endDate'),            width: 13 },
+          { key: 'allDay',    label: t('notes.allDay'),             width: 11, align: 'center' },
+          { key: 'startTime', label: t('notes.startTime'),          width: 11, align: 'center' },
+          { key: 'endTime',   label: t('notes.endTime'),            width: 11, align: 'center' },
+          { key: 'text',      label: t('notes.text'),               width: 44 },
+          { key: 'createdAt', label: t('notes.createdAt'),          width: 18 },
+          { key: 'updatedAt', label: t('notes.updatedAt'),          width: 18 },
+          { key: 'createdBy', label: t('notes.createdBy'),          width: 20 },
+        ],
+        rows: toExport.map(note => ({
+          driver: getDriverName(note),
+          vehicle: note.cars?.kennzeichen ?? '',
+          type: noteTypeLabel(note.note_type),
+          behaviour: behaviorLabel(note.note_planning_behavior),
+          noteDate: fmtDate(note.note_date),
+          startDate: fmtDate(note.start_date),
+          endDate: fmtDate(note.end_date),
+          allDay: yesNo(note.is_full_day),
+          startTime: note.start_time ?? '',
+          endTime: note.end_time ?? '',
+          text: note.note_text,
+          createdAt: fmtDateTime(note.created_at),
+          updatedAt: fmtDateTime(note.updated_at),
+          createdBy: note.created_by ?? '',
+        })),
+      };
 
-      // Sheet 2: Zusammenfassung
+      // ── Sheet 2: the counts ───────────────────────────────────────────
+      // One integer column, so Excel can sum and sort them. The old sheet put a
+      // timestamp in the same column as the counts, which made every one of them
+      // text; the export date is in each sheet's own meta row anyway.
       const driverIds = new Set(toExport.map(n => n.driver_id));
-      const countBehavior = (b: NotePlanningBehavior) => toExport.filter(n => n.note_planning_behavior === b).length;
-      const countType = (type: string) => toExport.filter(n => n.note_type === type).length;
-      const summaryRows = [
-        { [t('notes.metric')]: t('notes.exportDate'), [t('common.value')]: fmtDateTime(new Date().toISOString()) },
-        { [t('notes.metric')]: t('notes.countTotal'), [t('common.value')]: toExport.length },
-        { [t('notes.metric')]: t('notes.countDrivers'), [t('common.value')]: driverIds.size },
-        { [t('notes.metric')]: t('notes.countExcluded'), [t('common.value')]: countBehavior('exclude_from_plan') },
-        { [t('notes.metric')]: t('notes.countNeutral'), [t('common.value')]: countBehavior('neutral') },
-        { [t('notes.metric')]: t('notes.countRequired'), [t('common.value')]: countBehavior('must_include_in_plan') },
-        { [t('notes.metric')]: t('notes.countSick'), [t('common.value')]: countType('sick') },
-        { [t('notes.metric')]: t('notes.countVacation'), [t('common.value')]: countType('vacation') },
-        { [t('notes.metric')]: t('notes.countUnavailable'), [t('common.value')]: countType('off') },
-        { [t('notes.metric')]: t('notes.countOther'), [t('common.value')]: countType('other') },
-      ];
+      const countBehavior = (b: NotePlanningBehavior) =>
+        toExport.filter(n => n.note_planning_behavior === b).length;
+      const countType = (type: string) =>
+        toExport.filter(n => n.note_type === type).length;
 
-      // Sheet 3: Planungsrelevant
-      const planRows = toExport
-        .filter(n => n.note_planning_behavior === 'exclude_from_plan')
-        .map(note => {
-          const sd = fmtDate(note.start_date);
-          const ed = fmtDate(note.end_date);
-          const timeStr = note.is_full_day ? '' : [note.start_time, note.end_time].filter(Boolean).join('–');
-          return {
-            [t('common.driver')]: getDriverName(note),
-            'Typ': noteTypeLabel(note.note_type),
-            'Von': sd,
-            'Bis': ed,
-            [t('common.time')]: timeStr,
-            [t('notes.allDay')]: yesNo(note.is_full_day),
-            [t('notes.text')]: note.note_text,
-            [t('notes.effect')]: t('notes.exclusion'),
-          };
-        });
+      const summarySheet: ExportOptions = {
+        filename: 'notizen',
+        sheetTitle: t('notes.title'),
+        moduleName: t('common.summary'),
+        columns: [
+          { key: 'metric', label: t('notes.metric'),  width: 30 },
+          { key: 'value',  label: t('common.value'),  width: 14, align: 'right', type: 'integer' },
+        ],
+        rows: [
+          { metric: t('notes.countTotal'),       value: toExport.length },
+          { metric: t('notes.countDrivers'),     value: driverIds.size },
+          { metric: t('notes.countExcluded'),    value: countBehavior('exclude_from_plan') },
+          { metric: t('notes.countNeutral'),     value: countBehavior('neutral') },
+          { metric: t('notes.countRequired'),    value: countBehavior('must_include_in_plan') },
+          { metric: t('notes.countSick'),        value: countType('sick') },
+          { metric: t('notes.countVacation'),    value: countType('vacation') },
+          { metric: t('notes.countUnavailable'), value: countType('off') },
+          { metric: t('notes.countOther'),       value: countType('other') },
+        ],
+      };
 
-      const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(notizRows), 'Notizen');
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(summaryRows), t('common.summary'));
-      if (planRows.length > 0) {
-        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(planRows), t('notes.planningRelevant'));
-      }
+      // ── Sheet 3: the notes the planner excludes, when there are any ───
+      const excluded = toExport.filter(n => n.note_planning_behavior === 'exclude_from_plan');
+      const planSheet: ExportOptions = {
+        filename: 'notizen',
+        sheetTitle: t('notes.title'),
+        moduleName: t('notes.planningRelevant'),
+        columns: [
+          { key: 'driver', label: t('common.driver'),  width: 24 },
+          { key: 'type',   label: 'Typ',               width: 18 },
+          { key: 'from',   label: 'Von',               width: 13 },
+          { key: 'to',     label: 'Bis',               width: 13 },
+          { key: 'time',   label: t('common.time'),    width: 14, align: 'center' },
+          { key: 'allDay', label: t('notes.allDay'),   width: 11, align: 'center' },
+          { key: 'text',   label: t('notes.text'),     width: 44 },
+          { key: 'effect', label: t('notes.effect'),   width: 20 },
+        ],
+        rows: excluded.map(note => ({
+          driver: getDriverName(note),
+          type: noteTypeLabel(note.note_type),
+          from: fmtDate(note.start_date),
+          to: fmtDate(note.end_date),
+          time: note.is_full_day
+            ? ''
+            : [note.start_time, note.end_time].filter(Boolean).join('–'),
+          allDay: yesNo(note.is_full_day),
+          text: note.note_text,
+          effect: t('notes.exclusion'),
+        })),
+      };
 
       const today = format(new Date(), 'yyyy-MM-dd');
-      XLSX.writeFile(wb, `Notizen_${today}.xlsx`);
+      exportSheetsToExcel(
+        `Notizen_${today}.xlsx`,
+        // The exclusions sheet is dropped when it would be empty, as it always
+        // was: an empty sheet in a workbook reads as "nothing is excluded", which
+        // is a claim, and the summary already carries the count.
+        planSheet.rows.length > 0
+          ? [noteSheet, summarySheet, planSheet]
+          : [noteSheet, summarySheet],
+      );
     } catch (e) {
       console.error('Notizen export error:', e);
       setExportError(t('notes.exportFailed'));
@@ -399,6 +547,23 @@ export function NotesPage() {
       setExporting(false);
     }
   };
+
+  /*
+    The picker's entries. The note being edited is passed in so its own car stays
+    selectable when the fleet has retired it, or when the car list failed to load
+    — a `<select>` whose value matches no option silently falls back to the first,
+    which here would drop the car on the next save.
+
+    `gq.driver.inactive` is '{name} (inaktiv)' / '{name} (inactive)' in both
+    dictionaries and is reused as-is because src/i18n belongs to another change;
+    a `notes.carInactive` of its own would read better and is worth adding.
+  */
+  const editingCarId = editingNote?.car_id ?? '';
+  const carOptions = carPickerOptions(
+    cars,
+    editingCarId ? { id: editingCarId, plate: editingNote?.cars?.kennzeichen ?? null } : null,
+    plate => t('gq.driver.inactive', { name: plate }),
+  );
 
   const filteredNotes = notes.filter(note => {
     const matchesSearch =
@@ -428,9 +593,9 @@ export function NotesPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>Notizen</h1>
+          <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>{t('notes.title')}</h1>
           <p className="text-sm mt-1" style={{ color: 'var(--text-tertiary)' }}>
-            Fahrer-Notizen verwalten und durchsuchen
+            {t('notes.subtitle')}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -451,7 +616,7 @@ export function NotesPage() {
             )}
             {!exportError && filteredNotes.length > 0 && (
               <span className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
-                Exportiert die aktuell gefilterten Notizen.
+                {t('notes.exportHint')}
               </span>
             )}
           </div>
@@ -580,8 +745,21 @@ export function NotesPage() {
                         {(k => k ? t(k) : note.note_type)(NOTE_TYPES.find(nt => nt.value === note.note_type)?.label)}
                       </span>
                     )}
+                    {/*
+                      The plate, when the note names a car. The classes carry the
+                      legacy variables instead of an inline style object because
+                      this screen is not converted yet and the style ratchet is at
+                      its baseline (PlatformTeamPage does the same).
+                      Shown from the note's own joined row, so a plate is never
+                      guessed: no car, or a plate that did not load, shows nothing.
+                    */}
+                    {note.cars?.kennzeichen && (
+                      <span className="px-1.5 py-0.5 rounded text-xs font-medium bg-[var(--bg-muted)] text-[var(--text-secondary)]">
+                        {note.cars.kennzeichen}
+                      </span>
+                    )}
                   </div>
-                  <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>{noteDateLabel(note)}</p>
+                  <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>{noteDateLabel(note, t)}</p>
                   {note.note_planning_behavior && note.note_planning_behavior !== 'neutral' && (
                     <span className="inline-block mt-1 px-2 py-0.5 rounded-full text-xs font-medium"
                       style={note.note_planning_behavior === 'exclude_from_plan'
@@ -638,7 +816,7 @@ export function NotesPage() {
               {/* Driver */}
               <div>
                 <label className="block text-sm font-medium mb-2" style={{ color: 'var(--text-secondary)' }}>
-                  Fahrer *
+                  {t('notes.driverRequired')}
                 </label>
                 <select value={formData.driver_id}
                   onChange={e => setFormData(p => ({ ...p, driver_id: e.target.value }))}
@@ -652,7 +830,7 @@ export function NotesPage() {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-sm font-medium mb-2" style={{ color: 'var(--text-secondary)' }}>
-                    Notiztyp
+                    {t('notes.noteTypeLabel')}
                   </label>
                   <select value={formData.note_type} onChange={e => handleNoteTypeChange(e.target.value)}
                     className="w-full" style={inputStyle}>
@@ -671,13 +849,42 @@ export function NotesPage() {
                 </div>
               </div>
 
+              {/*
+                Car — optional. It records which vehicle an incident happened on,
+                so a ticket addressed to a plate can be tied back to the
+                Fahrtenbuch. A picker over the company's own cars, never free
+                text, so the stored value is a key and not two spellings of one
+                plate. The plain `<select>` matches the four already on this
+                screen — it is not converted to the design system, and its inline
+                styles sit exactly at the ratchet's baseline, so the legacy look is
+                carried in classes here. Never the Radix `Select`, whose
+                `onValueChange` would rewrite this handler.
+              */}
+              <div>
+                <label htmlFor="note-car" className="block text-sm font-medium mb-2 text-[var(--text-secondary)]">
+                  {t('ta.col.vehicle')}{' '}
+                  <span className="font-normal text-[var(--text-tertiary)]">{t('notes.descriptionOptional')}</span>
+                </label>
+                <select
+                  id="note-car"
+                  value={formData.car_id}
+                  onChange={e => setFormData(p => ({ ...p, car_id: e.target.value }))}
+                  className="w-full rounded-lg border border-[var(--border)] bg-[var(--bg-subtle)] px-3 py-2 text-sm text-[var(--text-primary)] outline-none"
+                >
+                  <option value="">{t('imp.optionNoCar')}</option>
+                  {carOptions.map(option => (
+                    <option key={option.id} value={option.id}>{option.label}</option>
+                  ))}
+                </select>
+              </div>
+
               {/* Date range toggle */}
               <div>
                 <label className="flex items-center gap-2 cursor-pointer text-sm mb-3" style={{ color: 'var(--text-secondary)' }}>
                   <input type="checkbox" checked={formData.use_date_range}
                     onChange={e => setFormData(p => ({ ...p, use_date_range: e.target.checked }))}
                     className="w-4 h-4" />
-                  Zeitraum (mehrere Tage)
+                  {t('notes.dateRange')}
                 </label>
 
                 {formData.use_date_range ? (
@@ -713,18 +920,18 @@ export function NotesPage() {
                     <input type="checkbox" checked={formData.is_full_day}
                       onChange={e => setFormData(p => ({ ...p, is_full_day: e.target.checked, start_time: '', end_time: '' }))}
                       className="w-4 h-4" />
-                    Ganzer Tag
+                    {t('notes.fullDay')}
                   </label>
                   {!formData.is_full_day && (
                     <div className="flex items-center gap-2 flex-1">
                       <div className="flex-1">
-                        <label className="block text-xs mb-1" style={{ color: 'var(--text-tertiary)' }}>Von</label>
+                        <label className="block text-xs mb-1" style={{ color: 'var(--text-tertiary)' }}>{t('notes.from')}</label>
                         <input type="time" value={formData.start_time}
                           onChange={e => setFormData(p => ({ ...p, start_time: e.target.value }))}
                           style={inputStyle} className="w-full" />
                       </div>
                       <div className="flex-1">
-                        <label className="block text-xs mb-1" style={{ color: 'var(--text-tertiary)' }}>Bis</label>
+                        <label className="block text-xs mb-1" style={{ color: 'var(--text-tertiary)' }}>{t('notes.to')}</label>
                         <input type="time" value={formData.end_time}
                           onChange={e => setFormData(p => ({ ...p, end_time: e.target.value }))}
                           style={inputStyle} className="w-full" />
@@ -741,7 +948,7 @@ export function NotesPage() {
                     <input type="checkbox" checked={formData.is_full_day}
                       onChange={e => setFormData(p => ({ ...p, is_full_day: e.target.checked }))}
                       className="w-4 h-4" />
-                    Ganzer Tag (gilt für jeden Tag im Zeitraum)
+                    {t('notes.fullDayEachDay')}
                   </label>
                 </div>
               )}
@@ -749,7 +956,7 @@ export function NotesPage() {
               {/* Description — optional */}
               <div>
                 <label className="block text-sm font-medium mb-2" style={{ color: 'var(--text-secondary)' }}>
-                  Beschreibung <span style={{ color: 'var(--text-tertiary)', fontWeight: 400 }}>(optional)</span>
+                  {t('common.description')} <span style={{ color: 'var(--text-tertiary)', fontWeight: 400 }}>{t('notes.descriptionOptional')}</span>
                 </label>
                 <textarea
                   value={formData.note_text}

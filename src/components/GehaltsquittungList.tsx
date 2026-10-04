@@ -41,6 +41,9 @@ import {
   type SalaryCashReceiptWithDriver,
 } from '../lib/salaryCashReceipts';
 import { toCents } from '../utils/money';
+import { exportTableToExcel } from '../utils/excelExport';
+import { buildGehaltsquittungExport } from '../utils/tableExportRows';
+import { useExportChrome } from '../hooks/useExportChrome';
 import {
   buildReceiptDocumentText,
   receiptCompany,
@@ -84,6 +87,7 @@ export interface GehaltsquittungListProps {
 
 export default function GehaltsquittungList({ refreshKey, focusReceiptId, onCreate }: GehaltsquittungListProps) {
   const { t } = useTranslation();
+  const exportChrome = useExportChrome();
   const refusalMessage = useRefusalMessage();
   const { success } = useToast();
   const { companyId, can } = useAuth();
@@ -147,6 +151,62 @@ export default function GehaltsquittungList({ refreshKey, focusReceiptId, onCrea
         (row.driver?.name ?? '').toLocaleLowerCase('de').includes(needle),
     );
   }, [state, query]);
+
+  /**
+   * The ledger as a workbook. "Every Gehaltsquittung for business year 2025,
+   * including the voided ones" is a question an accountant asks and the screen
+   * answers only by scrolling a 32-rem box.
+   *
+   * **The rule being preserved: a receipt's year is the stored `business_year`,
+   * never the GQ-YYYY in its number.** That number is the salary's business year
+   * since 20260919160000 and the payment's year before it, both conventions exist
+   * in one company's history, and no receipt is ever renumbered — so the file
+   * groups and sorts by `business_year` / `business_month`, nothing parses a
+   * number, and nothing derives a business month. Voided receipts are present and
+   * marked; there is no totals row, because a payout sum that includes Stornos is
+   * wrong by every one of them.
+   *
+   * It exports `rows`, the memo the table draws, so the file carries the search
+   * filter exactly as the screen does — and only while the read succeeded.
+   */
+  const handleExport = () => {
+    const needle = query.trim();
+    try {
+      exportTableToExcel(buildGehaltsquittungExport({
+        rows,
+        filterSummary: needle
+          ? [t('ui.export.filterLine', { label: t('common.search'), value: needle }), t('gq.export.filterAll')]
+          : [t('gq.export.filterAll')],
+        today: berlinToday(),
+        labels: {
+          sheetTitle: t('gq.list.heading'),
+          number: t('gq.col.number'),
+          driver: t('common.driver'),
+          businessYear: t('gq.export.businessYear'),
+          businessMonth: t('gq.col.businessMonth'),
+          periodFrom: t('gq.export.periodFrom'),
+          periodTo: t('gq.export.periodTo'),
+          paymentDate: t('gq.col.paymentDate'),
+          amount: t('common.amount'),
+          status: t('common.status'),
+          voidedOn: t('gq.export.voidedOn'),
+          signed: t('gq.col.signedCopy'),
+          statusConfirmed: t('gq.status.confirmed'),
+          statusVoided: t('gq.status.voided'),
+          signedPresent: t('gq.signed.present'),
+          signedMissing: t('gq.signed.missing'),
+          monthNames: MONTH_KEYS.map(key => t(key)),
+          chrome: exportChrome,
+        },
+      }));
+    } catch {
+      // toCents throws on an amount it cannot read. The table's own cell already
+      // calls it on every row, so this is unreachable in practice — but a throw
+      // in an onClick produces no file and no message, and the list has a place
+      // to say so.
+      setNotice(t('ui.export.failed'));
+    }
+  };
 
   const runRowAction = async (row: Row, action: RowAction, work: () => Promise<string | null>) => {
     setBusy({ id: row.id, action });
@@ -401,11 +461,26 @@ export default function GehaltsquittungList({ refreshKey, focusReceiptId, onCrea
             </CardTitle>
             <CardDescription>{t('gq.list.description')}</CardDescription>
           </div>
-          {sameCompany && mayEdit ? (
-            <Button onClick={onCreate}>
-              <Plus aria-hidden />
-              {t('gq.action.new')}
-            </Button>
+          {sameCompany ? (
+            <div className="flex flex-wrap items-center gap-2">
+              {/* Reading the ledger needs no edit right, so the export is not
+                  behind mayEdit — and it is withheld until the read succeeded,
+                  because an empty sheet would read as "no receipts". */}
+              <Button
+                variant="secondary"
+                disabled={state.status !== 'ready' || rows.length === 0}
+                onClick={handleExport}
+              >
+                <Download aria-hidden />
+                {t('common.exportExcelShort')}
+              </Button>
+              {mayEdit ? (
+                <Button onClick={onCreate}>
+                  <Plus aria-hidden />
+                  {t('gq.action.new')}
+                </Button>
+              ) : null}
+            </div>
           ) : null}
         </CardHeader>
         <CardContent className="grid gap-4">
@@ -516,7 +591,9 @@ function VoidReceiptDialog({
         <DialogHeader>
           <DialogTitle>{t('gq.void.title', { number: receipt?.receipt_number ?? '' })}</DialogTitle>
           <DialogDescription>
-            {t('gq.void.body', { amount: receipt ? formatEuroCents(toCents(receipt.amount)) : '' })}
+            {receipt && !receipt.books_cash
+              ? t('gq.void.bodyIssued', { amount: formatEuroCents(toCents(receipt.amount)) })
+              : t('gq.void.body', { amount: receipt ? formatEuroCents(toCents(receipt.amount)) : '' })}
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={event => void submit(event)} className="grid gap-4" noValidate>

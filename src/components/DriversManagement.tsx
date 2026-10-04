@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Download, Pencil, Plus, Power, PowerOff, Trash2, UserCheck, UserX, Users } from 'lucide-react';
-import { Driver } from '../types/receipt';
+import { Driver, DriverContact } from '../types/receipt';
 import DriverModal, { DriverPlanningFields } from './DriverModal';
 import { exportTableToExcel } from '../utils/excelExport';
 import { usePlan } from '../contexts/PlanContext';
@@ -22,8 +22,10 @@ import {
 
 interface DriversManagementProps {
   drivers: Driver[];
-  onAddDriver: (name: string, salaryRatio: number, personalnummer: string, gender: 'male' | 'female' | null, planning?: DriverPlanningFields) => void;
-  onEditDriver: (id: string, name: string, salaryRatio: number, status?: 'active' | 'inactive', personalnummer?: string, gender?: 'male' | 'female' | null, planning?: DriverPlanningFields) => void;
+  onAddDriver: (name: string, salaryRatio: number, personalnummer: string, gender: 'male' | 'female' | null, planning?: DriverPlanningFields, contact?: DriverContact) => void;
+  // `contact` is optional on purpose: the status toggle calls this with four
+  // arguments and must not rewrite an address nobody touched.
+  onEditDriver: (id: string, name: string, salaryRatio: number, status?: 'active' | 'inactive', personalnummer?: string, gender?: 'male' | 'female' | null, planning?: DriverPlanningFields, contact?: DriverContact) => void;
   onDeleteDriver: (id: string) => void;
   canEdit: (driver: Driver) => boolean;
   canDelete: (driver: Driver) => boolean;
@@ -50,11 +52,18 @@ const DriversManagement: React.FC<DriversManagementProps> = ({
   const driverLimit = planState.carLimit * driversPerCar;
   const driverLimitReached = activeDrivers.length >= driverLimit;
 
-  const handleSave = (name: string, salaryRatio: number, personalnummer: string, gender: 'male' | 'female' | null, planning: DriverPlanningFields) => {
+  const handleSave = (
+    name: string,
+    salaryRatio: number,
+    personalnummer: string,
+    gender: 'male' | 'female' | null,
+    planning: DriverPlanningFields,
+    contact: DriverContact,
+  ) => {
     if (editingDriver) {
-      onEditDriver(editingDriver.id, name, salaryRatio, undefined, personalnummer, gender, planning);
+      onEditDriver(editingDriver.id, name, salaryRatio, undefined, personalnummer, gender, planning, contact);
     } else {
-      onAddDriver(name, salaryRatio, personalnummer, gender, planning);
+      onAddDriver(name, salaryRatio, personalnummer, gender, planning, contact);
     }
     setIsModalOpen(false);
     setEditingDriver(undefined);
@@ -71,6 +80,9 @@ const DriversManagement: React.FC<DriversManagementProps> = ({
 
   const handleToggleStatus = (driver: Driver) => {
     const newStatus = driver.status === 'active' ? 'inactive' : 'active';
+    // No contact argument: this toggles the status and must not rewrite anything
+    // else. `updateDriver` leaves both columns alone when none is passed, which is
+    // what keeps a status change from clearing an address nobody touched.
     onEditDriver(driver.id, driver.name, driver.salaryRatio || 0, newStatus);
   };
 
@@ -91,30 +103,45 @@ const DriversManagement: React.FC<DriversManagementProps> = ({
         { key: 'status',                        label: t('common.status'),                width: 12, format: v => v === 'active' ? t('overview.status.active') : t('overview.status.inactive') },
         { key: 'gender',                        label: t('fleet.salutation'),             width: 10, format: v => v === 'male' ? t('fleet.salutationMr') : v === 'female' ? t('fleet.salutationMrs') : '' },
         { key: 'employment_type',               label: t('fleet.employmentType'),         width: 22, format: v => v === 'company_owner' ? t('fleet.companyOwner') : v === 'employee' ? t('fleet.employed') : '' },
-        { key: 'salaryRatio',                   label: t('fleet.salaryShare'),            width: 16, align: 'right' as const, format: v => v != null ? `${((v as number) * 100).toFixed(0)} %` : '' },
+        // drivers.salary_ratio is numeric(5,4) between 0 and 1 — the fraction
+        // Excel's percent format expects, since it multiplies by 100 itself.
+        { key: 'salaryRatio',                   label: t('fleet.salaryShare'),            width: 16, align: 'right' as const, type: 'percent' },
         { key: 'planning_enabled',              label: t('fleet.planningActive'),         width: 14, format: yesNo },
-        { key: 'planning_hourly_rate',          label: t('fleet.hourlyRate'),             width: 16, align: 'right' as const, format: v => v != null ? `${(v as number).toFixed(2)} €` : '' },
-        { key: 'planning_min_salary',           label: t('fleet.minSalary'),              width: 16, align: 'right' as const, format: v => v != null ? `${(v as number).toFixed(2)} €` : '' },
-        { key: 'planning_max_salary',           label: t('fleet.maxSalary'),              width: 16, align: 'right' as const, format: v => v != null ? `${(v as number).toFixed(2)} €` : '' },
-        { key: 'target_monthly_hours',          label: t('fleet.targetHoursShort'),       width: 16, align: 'right' as const, format: v => v != null ? String(v) : '' },
-        { key: 'max_monthly_hours',             label: t('fleet.maxHoursShort'),          width: 16, align: 'right' as const, format: v => v != null ? String(v) : '' },
+        // Euros, not cents: planning_hourly_rate is numeric and both salary
+        // bounds are numeric(10,2), all of them stored as euro amounts.
+        { key: 'planning_hourly_rate',          label: t('fleet.hourlyRate'),             width: 16, align: 'right' as const, type: 'money' },
+        { key: 'planning_min_salary',           label: t('fleet.minSalary'),              width: 16, align: 'right' as const, type: 'money' },
+        { key: 'planning_max_salary',           label: t('fleet.maxSalary'),              width: 16, align: 'right' as const, type: 'money' },
+        // Both hour columns are plain `numeric`, so a half hour is possible.
         { key: 'driver_usage_type',             label: t('fleet.usageType'),              width: 20, format: v => v === 'regular' ? t('fleet.regular') : v === 'coverage_only' ? t('fleet.coverageOnly') : '' },
         { key: 'can_cover_other_drivers',       label: t('fleet.canCover'),               width: 14, format: yesNo },
-        { key: 'planning_priority',             label: t('fleet.priority'),               width: 12, align: 'right' as const, format: v => v != null ? String(v) : '' },
+        { key: 'planning_priority',             label: t('fleet.priority'),               width: 12, align: 'right' as const, type: 'integer' },
         { key: 'allowed_weekdays',              label: t('fleet.allowedWeekdaysColumn'),  width: 28, format: v => Array.isArray(v) ? (v as number[]).map(n => WEEKDAYS[n] ?? n).join(', ') : v == null ? t('common.all') : '' },
         { key: 'work_window_start',             label: t('fleet.workWindowFrom'),         width: 18, format: v => v != null ? String(v) : '' },
         { key: 'work_window_end',               label: t('fleet.workWindowTo'),           width: 18, format: v => v != null ? String(v) : '' },
         { key: 'is_full_day_available',         label: t('fleet.fullDayAvailableShort'),  width: 18, format: yesNo },
         { key: 'allow_outside_shift_exceptions',label: t('fleet.exceptionsAllowed'),      width: 18, format: yesNo },
+        // These two keys are camelCase because the rows below are the objects
+        // `mapDriverRow` builds, not raw `drivers` rows — its explicit key list
+        // is what every key here has to appear in. `createdAt` was missing from
+        // it, and because `rows` is cast to Record<string, unknown> the type
+        // system could not see it: the column exported 40 blank cells under
+        // "Erstellt am" for a fleet of 40. `driverRow.test.ts` reads these keys
+        // out of this file and fails when the mapper stops emitting one.
         { key: 'createdBy',                     label: t('fleet.createdBy'),              width: 28 },
         { key: 'createdAt',                     label: t('fleet.createdAt'),              width: 16, format: v => v ? new Date(v as string).toLocaleDateString('de-DE') : '' },
       ],
       rows: drivers as unknown as Record<string, unknown>[],
-      totals: {
-        name: t('fleet.driversTotalsLine', {
+      // The totals row's LABEL, not a figure in the Fahrername column: keyed on
+      // the first column it was discarded unrendered, so the file said
+      // "Gesamt (N Einträge)" instead. `totals: {}` keeps the row — none of the
+      // per-driver figures below is a column this list sums.
+      labels: {
+        totalsRow: t('fleet.driversTotalsLine', {
           total: drivers.length, active: activeDrivers.length, inactive: inactiveDrivers.length,
         }),
       },
+      totals: {},
     });
   };
 

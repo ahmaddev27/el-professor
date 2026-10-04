@@ -11,6 +11,7 @@ import {
   SOURCE_TIME_ZONE,
   applySourceRowKeys,
   buildTripRows as buildTripRowsFrom,
+  driverMatchInfo,
   findOrderTransmissionColumn,
   isMissingCell,
   isValidKennzeichen,
@@ -450,20 +451,15 @@ const FahrtenbuchImportModal: React.FC<Props> = ({
         .filter(r => !isMissingCell(r[colMap.driver_name]))
         .map(r => String(r[colMap.driver_name]).trim())
     )];
-    const matches: DriverMatch[] = names.map(name => {
-      const norm = normalise(name);
-      const found = drivers.find(d =>
-        normalise(d.name) === norm ||
-        normalise(d.name).includes(norm) ||
-        norm.includes(normalise(d.name))
-      );
-      return {
-        importedName: name,
-        matchedDriverId: found?.id || null,
-        matchedDriverName: found?.name || name,
-        confirmed: !!found,
-      };
-    });
+    // Only a name a driver actually carries is confirmed for the user. A single
+    // near-match is offered but stays unconfirmed, and two or more offer nothing:
+    // canGoNext blocks Weiter while any row is unconfirmed and the amber note
+    // below names them, so the choice reaches a person instead of being guessed.
+    // matchDriverName says why.
+    const matches: DriverMatch[] = names.map(name => ({
+      importedName: name,
+      ...driverMatchInfo(name, drivers),
+    }));
     setDriverMatches(matches);
   };
 

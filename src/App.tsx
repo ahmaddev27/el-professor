@@ -1,7 +1,7 @@
 import React, { Suspense, lazy } from 'react';
 import { AlertCircle } from 'lucide-react';
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
-import { useAuth } from './contexts/AuthContext';
+import { useAuth, type BlockReason } from './contexts/AuthContext';
 import { CompanySettingsProvider } from './contexts/CompanySettingsContext';
 import { SuperAdminProvider, useSuperAdmin } from './contexts/SuperAdminContext';
 import { PlanProvider, usePlan, FeatureKey } from './contexts/PlanContext';
@@ -29,14 +29,17 @@ import WerkstattPage from './pages/WerkstattPage';
 import { AbrechnungPage } from './pages/AbrechnungPage';
 import { NotesPage } from './pages/NotesPage';
 import UsersPage from './pages/UsersPage';
+import BackupPage from './pages/BackupPage';
 import RolesPage from './pages/RolesPage';
 import DocumentsPage from './pages/DocumentsPage';
 import StundennachweisPage from './pages/StundennachweisPage';
+import TripAnalysisPage from './pages/TripAnalysisPage';
 import SettingsPage from './pages/SettingsPage';
 import CompaniesPage from './pages/CompaniesPage';
 import SuperAdminDashboard from './pages/SuperAdminDashboard';
 import NotificationsPage from './pages/NotificationsPage';
 import CompanyPlannerPage from './pages/CompanyPlannerPage';
+import MonthlyPlanPage from './pages/MonthlyPlanPage';
 import SubscriptionBillingPage from './pages/SubscriptionBillingPage';
 import CompanyBillingPage from './pages/CompanyBillingPage';
 import AbnahmeDiagnosticPage from './pages/AbnahmeDiagnosticPage';
@@ -68,6 +71,8 @@ import {
   platformEntry,
   platformEntryPath,
   rememberedPanelPath,
+  tenantAccessGate,
+  type TenantAccessGate,
 } from './lib/adminGate';
 
 // ─── Design preview (Phase 2 prototype) ──────────────────────────────────────
@@ -268,14 +273,17 @@ const CompanyAdminRoute: React.FC<{ children: React.ReactNode }> = ({ children }
 };
 
 /** The full-page spinner shown while the session, or its profile, is still being read. */
-const AuthLoadingScreen: React.FC = () => (
-  <div className="min-h-screen bg-[#060a0f] flex items-center justify-center">
-    <div className="text-center">
-      <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-cyan-400 mx-auto mb-4" />
-      <p className="text-white/40 text-sm">Wird geladen...</p>
+const AuthLoadingScreen: React.FC = () => {
+  const { t } = useTranslation();
+  return (
+    <div className="min-h-screen bg-[#060a0f] flex items-center justify-center">
+      <div className="text-center">
+        <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-cyan-400 mx-auto mb-4" />
+        <p className="text-white/40 text-sm">{t('app.loading')}</p>
+      </div>
     </div>
-  </div>
-);
+  );
+};
 
 /**
  * `/login` — the one sign-in screen (the owner's decision of 17.09.2026).
@@ -340,13 +348,19 @@ const AdminLoginRedirect: React.FC = () => {
 };
 
 /**
- * `/super-admin/*` — the panel's previous entry, until plan slice 3.13.
+ * `/super-admin/*` — the panel's previous entry.
+ *
+ * Slice 3.13b removed the last in-app link to it: the company sidebar, the user
+ * menu, the overview card and the platform dashboard's own links all name
+ * ADMIN_BASE now, so nothing in the product produces one of these paths any
+ * more. **The redirect itself stays**, and on purpose — a bookmark, a browser's
+ * autocomplete and a link in somebody's notes outlive the release that stopped
+ * writing the path, and an operator following one should land on the panel
+ * rather than on the marketing page through the public catch-all.
  *
  * The panel is registered once, under `/admin`, and every old path is rewritten
- * onto it here. So a bookmark, and the in-app links that still say
- * `/super-admin` (the company sidebar, the user menu, the overview card and the
- * platform dashboard's own links), reach exactly the screen they always did,
- * and there is no second copy of the routes that could drift from the first.
+ * onto it here, so there is no second copy of the routes that could drift from
+ * the first.
  */
 const LegacyAdminRedirect: React.FC = () => {
   const location = useLocation();
@@ -410,6 +424,32 @@ const ProfileUnavailableScreen: React.FC<{ onRetry: () => void; onSignOut: () =>
       </div>
     </div>
   );
+};
+
+/**
+ * The sentence each refused company state shows, as an existing `BlockReason`.
+ *
+ * `AccountBlockedPage` renders `BLOCK_MESSAGE_KEYS[reason]`, and both that map
+ * and the reason union live in `AuthContext`, with their German and English
+ * sentences in the two dictionaries. So these are the nearest true sentences
+ * already written, not the ones this gate would word for itself:
+ *
+ * - `noCompany` → *Ihr Unternehmenskonto ist nicht mehr aktiv. Bitte
+ *   kontaktieren Sie den Support.* The account is attached to no company and no
+ *   platform role, and support — not "your administrator", which it no longer
+ *   has — is who can restore either. A sentence of its own ("dieses Konto ist
+ *   keinem Unternehmen zugeordnet") would need a new reason in `AuthContext` and
+ *   a key in both dictionaries; those files belong to other work in flight.
+ * - `companyUnusable` → the same sentence, which is exactly what `inactive`
+ *   means and the honest wording for a state this build has never seen.
+ * - `companyDeleted` → *Ihr Unternehmenskonto wurde gelöscht.* — `deleted` and
+ *   `archived`, the pair `AuthContext.checkProfileAccess` already maps to it, so
+ *   the sign-in path and this one say the same thing.
+ */
+const TENANT_GATE_BLOCK_REASONS: Record<Exclude<TenantAccessGate, 'allow' | 'companySuspended'>, BlockReason> = {
+  noCompany:       'company_inactive',
+  companyUnusable: 'company_inactive',
+  companyDeleted:  'company_deleted',
 };
 
 // ─── App ──────────────────────────────────────────────────────────────────────
@@ -513,10 +553,13 @@ function App() {
     return <RejectedPage />;
   }
   /*
-    Suspension, from the one column that records it.
+    Suspension — and every other company state a session may not work in, and
+    the account that has no company at all. One decision, `tenantAccessGate`,
+    kept pure and tested beside the other routing rules; read it for why each
+    branch answers the way it does, and for what was measured on staging.
 
-    `companyStatus` is the test since 20260919150000 (plan 3.F step U1), which
-    moved every suspended flag onto `companies.status` and stopped
+    `companyStatus` is the suspension test since 20260919150000 (plan 3.F step
+    U1), which moved every suspended flag onto `companies.status` and stopped
     `approval_status` and `subscription_status` from carrying the value at all.
     Before that this gate read `companyApprovalStatus`, and only
     `platform_company_set_approval('suspend')` ever set it — a suspension from
@@ -528,9 +571,23 @@ function App() {
     `companyApprovalStatus` is kept in the test so that a rollback to the
     previous release, which leaves this database as it is, still blocks a
     company that was suspended before the migration ran and never re-read.
+
+    The approval gates stay above this one, so a company that is both suspended
+    and unapproved keeps showing the waiting page it shows today — measured on
+    staging: 2 companies are in exactly that pair of states.
   */
-  if (!isSuperAdmin && (companyStatus === 'suspended' || companyApprovalStatus === 'suspended')) {
+  const tenantGate = tenantAccessGate({
+    isSuperAdmin,
+    hasCompany: !!profile?.company_id,
+    profileStatus: profile?.status,
+    companyStatus,
+    companyApprovalStatus,
+  });
+  if (tenantGate === 'companySuspended') {
     return <CompanySuspendedPage />;
+  }
+  if (tenantGate !== 'allow') {
+    return <AccountBlockedPage reason={TENANT_GATE_BLOCK_REASONS[tenantGate]} />;
   }
 
   /*
@@ -595,6 +652,20 @@ function App() {
                 <Route path="dokumente/:id/bearbeiten" element={<PlanGate feature="dokumente"><DocumentsPage /></PlanGate>} />
                 <Route path="stundennachweis" element={<PlanGate feature="dokumente"><StundennachweisPage /></PlanGate>} />
                 <Route path="company-planner" element={<PlanGate feature="dokumente"><CompanyPlannerPage /></PlanGate>} />
+                {/* The monthly plan of the §1 requirement: four screens over the
+                    engine in src/utils/monthlyPlan/. Gated on `dokumente`, the
+                    same feature as the planner it sits beside and the same
+                    `page_key` slice C gave the planning tables — a FeatureKey of
+                    its own would need a migration seeding `plan_features`, and a
+                    feature the stored map does not name reads as premium for
+                    every plan. */}
+                <Route path="monatsplan" element={<PlanGate feature="dokumente"><MonthlyPlanPage /></PlanGate>} />
+                {/* Fahrtenanalyse reads the Fahrtenbuch a company imported under
+                    Dokumente, so it is gated on the same feature rather than on
+                    a key of its own: a new FeatureKey would need a migration
+                    seeding `plan_features`, and a feature the stored map does
+                    not name reads as premium for every plan. */}
+                <Route path="fahrtenanalyse" element={<PlanGate feature="dokumente"><TripAnalysisPage /></PlanGate>} />
                 {/* An administrator of this company — or a platform account
                     inside it (3.4b). Registered unconditionally and decided in
                     CompanyAdminRoute, because the answer needs the session's
@@ -604,6 +675,20 @@ function App() {
                 <Route path="roles"    element={<CompanyAdminRoute><PlanGate feature="rollen_nutzer"><RolesPage /></PlanGate></CompanyAdminRoute>} />
                 <Route path="billing"  element={<CompanyAdminRoute><CompanyBillingPage /></CompanyAdminRoute>} />
                 <Route path="settings" element={<CompanyAdminRoute><SettingsPage /></CompanyAdminRoute>} />
+                {/* Datensicherung was a tab on Benutzer, which is gated on
+                    `rollen_nutzer` — advanced. The Basic plan is sold with a
+                    backup (LandingPage.tsx:543), so a Basic administrator could
+                    not reach the feature they had paid for. It is administrator-
+                    only and deliberately NOT plan-gated, the shape /billing and
+                    /settings already use for "every plan, admins only".
+                    A FeatureKey of its own would need a migration seeding
+                    `plan_features`, and a feature the stored map does not name
+                    reads as premium for every plan — the same reason given for
+                    /fahrtenanalyse above. A gate at `basic` and no gate are
+                    behaviourally identical anyway, `basic` being the lowest
+                    rank, so the key would buy nothing and risk locking every
+                    gated screen if the map and the build ever disagreed. */}
+                <Route path="datensicherung" element={<CompanyAdminRoute><BackupPage /></CompanyAdminRoute>} />
                 <Route path="*" element={<Navigate to="/overview" replace />} />
               </Route>
 
@@ -637,8 +722,9 @@ function App() {
 
               {/* The panel's previous entry. One panel and not two: every
                   /super-admin path is rewritten onto /admin, for a platform
-                  account and a company user alike. Plan slice 3.13 removes this
-                  together with the links that still point at it. */}
+                  account and a company user alike. Slice 3.13b removed the
+                  links that pointed at it; this stays for the bookmarks that
+                  already exist. */}
               <Route path={`${LEGACY_ADMIN_BASE}/*`} element={<LegacyAdminRedirect />} />
             </Routes>
           </BrowserRouter>

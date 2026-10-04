@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { AlertTriangle, Banknote, Download, Filter, Receipt as ReceiptIcon, RotateCcw, TrendingDown, TrendingUp, Wallet } from 'lucide-react';
+import { AlertTriangle, Banknote, Download, Filter, Minus, PiggyBank, Plus, Receipt as ReceiptIcon, RotateCcw, TrendingDown, TrendingUp, Wallet } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
@@ -9,9 +9,12 @@ import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { useTranslation } from '../contexts/LanguageContext';
 import { cashLedgerInScope } from '../utils/salaryCashReceiptFlow';
 import { fetchAllPaginated } from '../utils/fetchAllPaginated';
+import CashEntryDialog from '../components/CashEntryDialog';
+import type { CashEntryDirection } from '../utils/cashEntry';
 import {
   bargeldIncomeEntries,
   belegEntries,
+  cashBelegRows,
   cashLedgerDriverNames,
   cashMovementEntries,
   filterCashEntries,
@@ -49,10 +52,20 @@ import {
  * Bargeldbestand reads one ledger.
  *
  * The money rule: cash in is the Bargeld a driver hands over; cash out is a
- * Beleg and a Gehaltsquittung, the cash salary payment
+ * Beleg *paid in cash* and a Gehaltsquittung, the cash salary payment
  * confirm_salary_cash_payment books into public.cash_movements. Voiding one
  * books the cash back on the day of the void. The weekly "Bar zurück" counts
  * as paid and writes no movement, so it never leaves the till here.
+ *
+ * `receipts.payment_method` decides the first of those: `'uberweisung'` money
+ * left the bank account, not the cash box, and `abrechnung_weekly` and
+ * `get_current_cash_balance` have always restricted to `'bar'`. This screen
+ * did not ask for the column at all, so it charged every Beleg to the till and
+ * read lower than the till was — by 110,00 € in 04/2026 and 79,91 € in
+ * 05/2026 for the one company on staging that has bank-paid Belege (4 of 857
+ * rows, measured 28.09.2026). The select below asks for it and
+ * cashBelegRows() applies the rule, so the balance, the cards, the table and
+ * the Excel dump all now say what the weekly Abrechnung says.
  *
  * Before this the screen summed Bargeld minus Belege and knew nothing of the
  * third term, so a salary paid out of the till left the balance untouched.
@@ -93,6 +106,8 @@ const EMPTY_TOTALS: CashLedgerTotals = {
   bargeldIncomeCents: 0,
   belegExpenseCents: 0,
   salaryPayoutCents: 0,
+  manualInCents: 0,
+  manualOutCents: 0,
 };
 
 /** PostgREST puts the whole `.in()` list in the URL, so ask in chunks. */
@@ -111,7 +126,8 @@ export default function BargeldbestandPage() {
   const [endDate, setEndDate] = useState('');
   const [drivers, setDrivers] = useState<string[]>([]);
   const [loadFailed, setLoadFailed] = useState(false);
-  const { user, loading: authLoading, companyId: ownCompanyId } = useAuth();
+  const { user, loading: authLoading, companyId: ownCompanyId, can } = useAuth();
+  const [entryDirection, setEntryDirection] = useState<CashEntryDirection | null>(null);
   const {
     effectiveCompanyId: companyId, isViewingAsCompany, platformReadsCompanyData, ownCompanyReadable,
   } = useSuperAdmin();
@@ -139,6 +155,8 @@ export default function BargeldbestandPage() {
     beleg: t('bargeld.beleg'),
     gehaltsquittung: t('bargeld.gehaltsquittung'),
     gehaltsquittungStorno: t('bargeld.gehaltsquittungStorno'),
+    manualIn: t('bargeld.manualIn'),
+    manualOut: t('bargeld.manualOut'),
     other: t('bargeld.cashMovement'),
   };
 
@@ -239,7 +257,10 @@ export default function BargeldbestandPage() {
         fetchAllPaginated<BelegRow>(
           (from, to) => supabase
             .from('receipts')
-            .select('id, expense, description, driver_name, date')
+            // payment_method is load-bearing, not decoration: without it
+            // cashBelegRows() below keeps nothing and the Belege total reads
+            // 0,00 €. src/utils/moneyScreenFailures.test.ts pins it.
+            .select('id, expense, description, driver_name, date, payment_method')
             .eq('company_id', companyId)
             .gte('date', monthStart)
             .lte('date', monthEnd)
@@ -259,7 +280,8 @@ export default function BargeldbestandPage() {
 
       const allEntries = sortCashEntriesByDateDesc([
         ...bargeldIncomeEntries(incomeRows, ledgerLabels),
-        ...belegEntries(receiptRows, ledgerLabels),
+        // Only the cash ones: a bank transfer never passed through the till.
+        ...belegEntries(cashBelegRows(receiptRows), ledgerLabels),
         ...cashMovementEntries(movementRows, ledgerLabels, payoutDrivers),
       ]);
 
@@ -307,11 +329,11 @@ export default function BargeldbestandPage() {
   }
 
   function handleExport() {
-    const filters: string[] = [`Monat: ${selectedMonth}`];
-    if (selectedDriver !== 'all') filters.push(`Fahrer: ${selectedDriver}`);
-    if (selectedType !== 'all') filters.push(`Typ: ${selectedType === 'income' ? t('common.income') : t('common.expenses')}`);
-    if (startDate) filters.push(`Von: ${new Date(startDate).toLocaleDateString('de-DE')}`);
-    if (endDate) filters.push(`Bis: ${new Date(endDate).toLocaleDateString('de-DE')}`);
+    const filters: string[] = [t('bargeld.filterMonth', { value: selectedMonth })];
+    if (selectedDriver !== 'all') filters.push(t('bargeld.filterDriver', { value: selectedDriver }));
+    if (selectedType !== 'all') filters.push(t('bargeld.filterType', { value: selectedType === 'income' ? t('common.income') : t('common.expenses') }));
+    if (startDate) filters.push(t('bargeld.filterFrom', { value: new Date(startDate).toLocaleDateString('de-DE') }));
+    if (endDate) filters.push(t('bargeld.filterTo', { value: new Date(endDate).toLocaleDateString('de-DE') }));
     // The dump carries the screen's caveat, so a file saved from a platform
     // view cannot later be read as a complete till.
     if (!ledgerInScope) filters.push(t('bargeld.ledgerUnavailable'));
@@ -320,15 +342,17 @@ export default function BargeldbestandPage() {
 
     exportTableToExcel({
       filename: `bargeldbestand_${selectedMonth}`,
-      sheetTitle: 'Bargeldbestand',
-      moduleName: 'Bargeldbestand',
+      sheetTitle: t('nav.bargeldbestand'),
+      moduleName: t('nav.bargeldbestand'),
       filterSummary: filters,
       columns: [
         { key: 'date',        label: t('common.date'),        width: 14, format: v => new Date(v as string).toLocaleDateString('de-DE') },
         { key: 'type',        label: t('fleet.typeColumn'),    width: 14, format: v => v === 'income' ? t('bargeld.incomeCol') : t('bargeld.expenseCol') },
         { key: 'driver_name', label: t('common.driver'),        width: 22 },
         { key: 'description', label: t('common.description'),  width: 36 },
-        { key: 'amount',      label: t('bargeld.amountEuro'),    width: 16, align: 'right', format: v => (v as number).toFixed(2) },
+        // The row below divides the ledger's integer cents by 100, so what
+        // reaches this column is euros — the unit the money format prints.
+        { key: 'amount',      label: t('bargeld.amountEuro'),    width: 16, align: 'right', type: 'money' },
       ],
       rows: filteredEntries.map(entry => ({
         date: entry.date,
@@ -350,6 +374,11 @@ export default function BargeldbestandPage() {
   // formatted once through utils/money.ts (formatEuroCents): no arithmetic here.
   // euro() above still writes the Excel export exactly as it always did.
 
+  // Booking is the company's own act: the database refuses a platform context
+  // outright (platform_session_not_allowed), so the buttons are not offered
+  // there, nor where the ledger is not even readable.
+  const canBook = ledgerInScope && !!ownCompanyId && ownCompanyId === companyId && can('cash-balance', 'edit');
+  const hasManualEntries = totals.manualInCents + totals.manualOutCents > 0;
   const filtersActive = selectedDriver !== 'all' || selectedType !== 'all' || startDate || endDate;
   const balancePositive = totals.balanceCents >= 0;
 
@@ -402,7 +431,11 @@ export default function BargeldbestandPage() {
     },
   ];
 
-  const kpiGrid = cn('grid grid-cols-1 gap-4 sm:grid-cols-2', ledgerInScope ? 'xl:grid-cols-4' : 'xl:grid-cols-3');
+  const showManualCard = ledgerInScope && hasManualEntries;
+  const kpiGrid = cn(
+    'grid grid-cols-1 gap-4 sm:grid-cols-2',
+    !ledgerInScope ? 'xl:grid-cols-3' : showManualCard ? 'xl:grid-cols-5' : 'xl:grid-cols-4',
+  );
 
   const cards = isLoading ? (
     <div className={kpiGrid}>
@@ -438,13 +471,27 @@ export default function BargeldbestandPage() {
           caption={t('bargeld.salaryPayoutsHint')}
         />
       )}
+      {showManualCard && (
+        <KpiCard
+          label={t('bargeld.manualCard')}
+          value={formatEuroCents(totals.manualInCents - totals.manualOutCents)}
+          icon={PiggyBank}
+          caption={t('bargeld.manualCardHint')}
+        />
+      )}
       <KpiCard
         label={t('bargeld.currentBalance')}
         value={
           <span className={balancePositive ? undefined : 'text-caution'}>{formatEuroCents(totals.balanceCents)}</span>
         }
         icon={balancePositive ? Wallet : AlertTriangle}
-        caption={ledgerInScope ? t('bargeld.balanceFormula') : t('bargeld.balanceFormulaNoLedger')}
+        caption={
+          !ledgerInScope
+            ? t('bargeld.balanceFormulaNoLedger')
+            : showManualCard
+              ? t('bargeld.balanceFormulaManual')
+              : t('bargeld.balanceFormula')
+        }
       />
     </div>
   );
@@ -455,6 +502,18 @@ export default function BargeldbestandPage() {
         title={t('nav.bargeldbestand')}
         actions={
           <>
+            {canBook && (
+              <>
+                <Button onClick={() => setEntryDirection('in')} disabled={isLoading || loadFailed}>
+                  <Plus aria-hidden />
+                  {t('bargeld.addIn')}
+                </Button>
+                <Button variant="secondary" onClick={() => setEntryDirection('out')} disabled={isLoading || loadFailed}>
+                  <Minus aria-hidden />
+                  {t('bargeld.addOut')}
+                </Button>
+              </>
+            )}
             <Input
               type="month"
               value={selectedMonth}
@@ -545,6 +604,7 @@ export default function BargeldbestandPage() {
           />
         </section>
       </div>
+      <CashEntryDialog direction={entryDirection} onClose={() => setEntryDirection(null)} onBooked={() => loadCashData()} />
     </div>
   );
 }
