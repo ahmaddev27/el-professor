@@ -63,6 +63,13 @@ export interface SalaryCashReceipt extends ReceiptSnapshotRow {
   payment_date: string;
   place: string;
   status: 'confirmed' | 'voided';
+  /**
+   * false: issued for a payment that already existed (issue_salary_cash_receipt)
+   * and booked nothing into the till; voiding it deletes no payment.
+   */
+  books_cash: boolean;
+  /** The payment this receipt documents; null on receipts older than the column's use. */
+  salary_payment_id: string | null;
   signed_copy_path: string | null;
   confirmed_at: string;
   voided_at: string | null;
@@ -80,7 +87,7 @@ const RECEIPT_COLUMNS = [
   'id, company_id, receipt_number, salary_id, driver_id, period_start, period_end',
   'business_month, business_year, payment_date, place',
   'amount, is_partial, due_amount, paid_bank_before, paid_cash_manual_before, paid_cash_weekly_before',
-  'paid_cash_receipts_before, remaining_before, remaining_after, status, signed_copy_path',
+  'paid_cash_receipts_before, remaining_before, remaining_after, status, books_cash, salary_payment_id, signed_copy_path',
   'confirmed_at, voided_at, void_reason, driver:drivers(name, gender)',
 ].join(', ');
 
@@ -232,6 +239,45 @@ export async function confirmCashPayment(request: ConfirmCashPaymentRequest): Pr
     p_place: request.place,
   });
   return fromRpc(data, error);
+}
+
+/**
+ * Issues a numbered receipt for a cash payment that already exists. Writes the
+ * receipt only: no payment and nothing in the till (20261004100000).
+ */
+export async function issueReceiptForPayment(request: {
+  requestId: string;
+  paymentId: string;
+  place: string;
+}): Promise<ReceiptWriteResult> {
+  const { data, error } = await supabase.rpc('issue_salary_cash_receipt', {
+    p_request_id: request.requestId,
+    p_payment_id: request.paymentId,
+    p_place: request.place,
+  });
+  return fromRpc(data, error);
+}
+
+/**
+ * The live (confirmed) receipt behind each payment that has one, as
+ * payment id -> receipt id. Issued receipts only: a payment written by
+ * confirm_salary_cash_payment already carries its receipt id in source_reference.
+ */
+export async function loadIssuedReceiptIds(companyId: string, paymentIds: string[]): Promise<Record<string, string>> {
+  if (paymentIds.length === 0) return {};
+  const { data, error } = await supabase
+    .from('salary_cash_receipts')
+    .select('id, salary_payment_id')
+    .eq('company_id', companyId)
+    .eq('status', 'confirmed')
+    .eq('books_cash', false)
+    .in('salary_payment_id', paymentIds);
+  if (error) throw new Error(error.message);
+  const byPayment: Record<string, string> = {};
+  for (const row of data ?? []) {
+    if (row.salary_payment_id) byPayment[row.salary_payment_id as string] = row.id as string;
+  }
+  return byPayment;
 }
 
 export async function voidReceipt(receiptId: string, reason: string): Promise<ReceiptWriteResult> {

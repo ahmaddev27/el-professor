@@ -34,6 +34,13 @@ export interface PaymentRowInput {
   payment_type: 'cash' | 'bank';
   source_type?: 'manual' | 'weekly_cash_difference' | 'gehaltsquittung' | string | null;
   source_reference?: string | null;
+  /**
+   * The live receipt issued for this payment after the fact
+   * (`issue_salary_cash_receipt`, 20261004100000), or null/absent. A payment
+   * written by a Gehaltsquittung names its receipt in `source_reference`
+   * instead; the two never coexist.
+   */
+  issued_receipt_id?: string | null;
 }
 
 /** What the row's actions depend on besides the payment itself. */
@@ -79,11 +86,25 @@ export type PaymentRowActions =
  * button that can only end in company_mismatch.
  */
 export function paymentRowActions(payment: PaymentRowInput, context: PaymentRowContext): PaymentRowActions {
-  if (payment.source_type !== 'gehaltsquittung') return { kind: 'editable' };
-  const receiptId = payment.source_reference?.trim();
+  const issuedId = payment.issued_receipt_id?.trim();
+  if (payment.source_type !== 'gehaltsquittung' && !issuedId) return { kind: 'editable' };
+  const receiptId = payment.source_type === 'gehaltsquittung' ? payment.source_reference?.trim() : issuedId;
   if (!receiptId) return { kind: 'receipt', preview: false };
   if (scopeRefusal(context.scope) !== null) return { kind: 'receipt', preview: false };
   return { kind: 'receipt', preview: true, receiptId };
+}
+
+/**
+ * Whether a payment can be issued a numbered Gehaltsquittung after the fact:
+ * a cash payment that is neither "Bar zurück" nor already behind a receipt.
+ * The same condition `issue_salary_cash_receipt` refuses with
+ * `payment_not_issuable` and `already_issued`; the database decides, this only
+ * keeps the button off rows it would refuse.
+ */
+export function paymentRowCanBeIssued(payment: PaymentRowInput): boolean {
+  if (payment.payment_type !== 'cash') return false;
+  if (payment.source_type === 'weekly_cash_difference' || payment.source_type === 'gehaltsquittung') return false;
+  return !payment.issued_receipt_id?.trim();
 }
 
 /**
@@ -331,8 +352,9 @@ export type PaymentRowStorno =
  * written some other way.
  */
 export function paymentRowStorno(payment: PaymentRowInput, context: PaymentRowStornoContext): PaymentRowStorno {
-  if (payment.source_type !== 'gehaltsquittung') return { kind: 'hidden' };
-  const receiptId = payment.source_reference?.trim();
+  const issuedId = payment.issued_receipt_id?.trim();
+  if (payment.source_type !== 'gehaltsquittung' && !issuedId) return { kind: 'hidden' };
+  const receiptId = payment.source_type === 'gehaltsquittung' ? payment.source_reference?.trim() : issuedId;
   if (!receiptId) return { kind: 'blocked', refusal: 'receipt_not_found' };
   const blocked = confirmationBlock(context.scope, context.mayEditSalaries);
   if (blocked) return { kind: 'blocked', refusal: blocked };

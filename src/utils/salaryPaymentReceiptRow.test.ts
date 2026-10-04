@@ -3,6 +3,7 @@ import {
   currentLoadState,
   loadReceiptForPreview,
   paymentRowActions,
+  paymentRowCanBeIssued,
   paymentRowOffersView,
   paymentRowStorno,
   receiptPreviewView,
@@ -564,5 +565,39 @@ describe('paymentRowOffersView — every cash payment can be viewed', () => {
   it('falls back to it for a Gehaltsquittung row whose receipt cannot be opened', () => {
     expect(view({ ...receiptPayment, source_reference: null })).toBe(true);
     expect(view(receiptPayment, { scope: 'other_company' })).toBe(true);
+  });
+});
+
+describe('a payment issued a receipt after the fact (issue_salary_cash_receipt)', () => {
+  const issued: PaymentRowInput = { payment_type: 'cash', source_type: 'manual', issued_receipt_id: RECEIPT_B };
+
+  it('locks the row and opens the stored receipt, like a Gehaltsquittung payment', () => {
+    expect(paymentRowActions(issued, inOwnCompany)).toEqual({ kind: 'receipt', preview: true, receiptId: RECEIPT_B });
+  });
+
+  it('offers no read-only view in place of the stored receipt', () => {
+    expect(paymentRowOffersView(issued, paymentRowActions(issued, inOwnCompany))).toBe(false);
+  });
+
+  it('offers the Storno, which voids only the receipt', () => {
+    expect(paymentRowStorno(issued, { scope: 'own_company', mayEditSalaries: true })).toEqual({
+      kind: 'offered',
+      receiptId: RECEIPT_B,
+    });
+  });
+
+  it('keeps the row editable while no live receipt exists, which is also the state after a void', () => {
+    expect(
+      paymentRowActions({ payment_type: 'cash', source_type: 'manual', issued_receipt_id: null }, inOwnCompany),
+    ).toEqual({ kind: 'editable' });
+  });
+
+  it('can be issued only while it is a manual cash payment with no live receipt', () => {
+    expect(paymentRowCanBeIssued({ payment_type: 'cash', source_type: 'manual' })).toBe(true);
+    expect(paymentRowCanBeIssued({ payment_type: 'cash', source_type: null })).toBe(true);
+    expect(paymentRowCanBeIssued(issued)).toBe(false);
+    expect(paymentRowCanBeIssued({ payment_type: 'bank', source_type: 'manual' })).toBe(false);
+    expect(paymentRowCanBeIssued({ payment_type: 'cash', source_type: 'weekly_cash_difference' })).toBe(false);
+    expect(paymentRowCanBeIssued(receiptPayment)).toBe(false);
   });
 });

@@ -591,7 +591,9 @@ function VoidReceiptDialog({
         <DialogHeader>
           <DialogTitle>{t('gq.void.title', { number: receipt?.receipt_number ?? '' })}</DialogTitle>
           <DialogDescription>
-            {t('gq.void.body', { amount: receipt ? formatEuroCents(toCents(receipt.amount)) : '' })}
+            {receipt && !receipt.books_cash
+              ? t('gq.void.bodyIssued', { amount: formatEuroCents(toCents(receipt.amount)) })
+              : t('gq.void.body', { amount: receipt ? formatEuroCents(toCents(receipt.amount)) : '' })}
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={event => void submit(event)} className="grid gap-4" noValidate>

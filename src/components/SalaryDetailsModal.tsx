@@ -17,6 +17,7 @@ import {
   currentLoadState,
   loadReceiptForPreview,
   paymentRowActions,
+  paymentRowCanBeIssued,
   paymentRowOffersView,
   paymentRowStorno,
   stornoStep,
@@ -35,6 +36,7 @@ import {
 import { derivePaymentStatus, remainingDue } from '../utils/salaryDue';
 import { payrollRemaining, payrollSplit } from '../utils/payrollSplit';
 import {
+  loadIssuedReceiptIds,
   loadReceiptById,
   voidReceipt,
   type SalaryCashReceipt,
@@ -125,6 +127,12 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
   const [receiptPreviewId, setReceiptPreviewId] = useState<string | null>(null);
   /** The cash payment shown as a read-only view when no stored receipt can be opened. */
   const [cashView, setCashView] = useState<CashPaymentViewTarget | null>(null);
+  /**
+   * payment id -> id of the live receipt issued for it after the fact
+   * (issue_salary_cash_receipt). A payment written by a Gehaltsquittung names its
+   * receipt in source_reference and is not in here.
+   */
+  const [issuedReceipts, setIssuedReceipts] = useState<Record<string, string>>({});
   /**
    * The Gehaltsquittung this screen is about to void; null while none is.
    *
@@ -277,7 +285,14 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
         .eq('salary_id', salary.salary_id)
         .order('payment_date', { ascending: false });
       if (error) throw error;
-      setPayments(data || []);
+      const rows = data || [];
+      // Read before the rows are shown, so a payment behind a receipt never
+      // appears as editable for a frame.
+      const issued = companyId
+        ? await loadIssuedReceiptIds(companyId, rows.map((row: { id: string }) => row.id))
+        : {};
+      setIssuedReceipts(issued);
+      setPayments(rows);
     } catch {
       showToast('error', t('sal.error.loadPayments'));
     } finally {
@@ -1059,7 +1074,9 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
                       </tr>
                     </thead>
                     <tbody>
-                      {payments.map((payment, idx) => {
+                      {payments.map((paymentRow, idx) => {
+                        // The row plus the receipt issued for it after the fact, if any.
+                        const payment = { ...paymentRow, issued_receipt_id: issuedReceipts[paymentRow.id] ?? null };
                         const rowActions = paymentRowActions(payment, {
                           planIncludesDokumente: planIncludes('dokumente'),
                           scope: receiptsScope,
@@ -1093,6 +1110,12 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
                               periodStart: salary.period_start ?? '',
                               periodEnd: salary.period_end ?? '',
                               driverName: salary.driver_name,
+                              // A numbered receipt can be issued from the view for a payment
+                              // that has none: what blocks it is the same as for a new cash
+                              // payment (scope and role, plan, overlapping salary rows).
+                              issue: paymentRowCanBeIssued(payment)
+                                ? { paymentId: payment.id, blockedMessage: cashBlockedMessage }
+                                : undefined,
                             })}
                             aria-label={t('sal.payment.viewCashAria', {
                               date: format(new Date(payment.payment_date), 'dd.MM.yyyy'),
@@ -1147,7 +1170,7 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
                                   <Zap size={10} />{t('sal.weekly.badge')}
                                 </span>
                               )}
-                              {payment.source_type === 'gehaltsquittung' && (
+                              {(payment.source_type === 'gehaltsquittung' || payment.issued_receipt_id) && (
                                 <span style={{
                                   background: 'var(--bg-muted)',
                                   color: 'var(--text-secondary)',
@@ -1224,7 +1247,7 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
                             <div className="flex items-center justify-end space-x-2">
                               {viewOffered && viewButton}
                               <button
-                                onClick={() => { setSelectedPayment(payment); setIsPaymentModalOpen(true); }}
+                                onClick={() => { setSelectedPayment(paymentRow); setIsPaymentModalOpen(true); }}
                                 style={{ color: 'var(--accent)', borderRadius: '0.25rem', padding: '0.25rem' }}
                                 onMouseEnter={e => (e.currentTarget.style.background = 'var(--accent-subtle)')}
                                 onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
@@ -1233,7 +1256,7 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
                                 <Edit2 size={16} />
                               </button>
                               <button
-                                onClick={() => setPaymentToDelete(payment)}
+                                onClick={() => setPaymentToDelete(paymentRow)}
                                 style={{ color: 'var(--danger)', borderRadius: '0.25rem', padding: '0.25rem' }}
                                 onMouseEnter={e => (e.currentTarget.style.background = 'var(--danger-subtle)')}
                                 onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
@@ -1279,7 +1302,17 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
         cashBlockedMessage={cashBlockedMessage}
       />
 
-      <SalaryPaymentCashView target={cashView} onClose={() => setCashView(null)} />
+      <SalaryPaymentCashView
+        target={cashView}
+        onClose={() => setCashView(null)}
+        onIssued={receipt => {
+          // The row now opens the stored receipt; show it straight away.
+          setCashView(null);
+          showToast('success', t('sal.payment.issueDone', { number: receipt.receipt_number }));
+          void fetchPayments();
+          setReceiptPreviewId(receipt.id);
+        }}
+      />
 
       <SalaryPaymentReceiptPreview
         receiptId={receiptPreviewId}
@@ -1452,7 +1485,12 @@ function PaymentStornoDialog({
       <DialogContent>
         <DialogHeader>
           <DialogTitle>{t('sal.payment.voidTitle')}</DialogTitle>
-          <DialogDescription>{t('sal.payment.voidIntro')}</DialogDescription>
+          {/* A receipt issued for an existing payment booked nothing, so its
+              Storno removes no payment and moves no cash: say so instead of the
+              text that describes the other kind. */}
+          <DialogDescription>
+            {receipt && !receipt.books_cash ? t('sal.payment.voidIntroIssued') : t('sal.payment.voidIntro')}
+          </DialogDescription>
         </DialogHeader>
 
         {step.kind === 'loading' ? (
@@ -1478,7 +1516,7 @@ function PaymentStornoDialog({
             </p>
             {/* There is no "edit": the path is a Storno and then a new payment.
                 Saying so here is cheaper than letting someone look for it. */}
-            <p className="text-[13px] text-fg-muted">{t('sal.payment.voidThenReenter')}</p>
+            {receipt.books_cash ? <p className="text-[13px] text-fg-muted">{t('sal.payment.voidThenReenter')}</p> : null}
             <Field
               label={t('gq.void.reason')}
               hint={t('gq.void.reasonHint')}
