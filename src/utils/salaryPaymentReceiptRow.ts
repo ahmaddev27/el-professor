@@ -36,7 +36,7 @@ export interface PaymentRowInput {
   source_reference?: string | null;
   /**
    * The live receipt issued for this payment after the fact
-   * (`issue_salary_cash_receipt`, 20261004100000), or null/absent. A payment
+   * (`issue_salary_cash_receipt`, 20261004110000), or null/absent. A payment
    * written by a Gehaltsquittung names its receipt in `source_reference`
    * instead; the two never coexist.
    */

@@ -46,7 +46,7 @@ import {
  * day): it calls `issue_salary_cash_receipt`, which draws a real GQ number from
  * the same series and writes the receipt row — and nothing else. It books no
  * cash into the till, because the payment it documents already exists
- * (20261004100000). Once issued, the row opens the stored receipt, not this view.
+ * (20261004110000). Once issued, the row opens the stored receipt, not this view.
  *
  * Its text is German in both UI languages, like the Gehaltsquittung it imitates.
  */

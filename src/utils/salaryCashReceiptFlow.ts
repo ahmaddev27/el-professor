@@ -113,7 +113,7 @@ const DATABASE_REFUSALS = [
   'invalid_path',
   'receipt_voided',
   'receipt_payment_locked',
-  // 20261004100000: issue_salary_cash_receipt, for a payment that already exists.
+  // 20261004110000: issue_salary_cash_receipt, for a payment that already exists.
   'payment_not_found',
   'payment_not_issuable',
   'already_issued',

@@ -243,7 +243,7 @@ export async function confirmCashPayment(request: ConfirmCashPaymentRequest): Pr
 
 /**
  * Issues a numbered receipt for a cash payment that already exists. Writes the
- * receipt only: no payment and nothing in the till (20261004100000).
+ * receipt only: no payment and nothing in the till (20261004110000).
  */
 export async function issueReceiptForPayment(request: {
   requestId: string;

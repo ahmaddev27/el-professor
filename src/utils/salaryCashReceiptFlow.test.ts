@@ -121,7 +121,7 @@ describe('refusalFromRpcError', () => {
     expect(refusalFromRpcError({ code: 'P0001', hint: 'receipt_voided' })).toBe('receipt_voided');
     expect(refusalFromRpcError({ code: '22023', hint: 'invalid_payment_date' })).toBe('invalid_payment_date');
     expect(refusalFromRpcError({ code: '42501', hint: 'receipt_payment_locked' })).toBe('receipt_payment_locked');
-    // 20261004100000: issue_salary_cash_receipt.
+    // 20261004110000: issue_salary_cash_receipt.
     expect(refusalFromRpcError({ code: 'P0002', hint: 'payment_not_found' })).toBe('payment_not_found');
     expect(refusalFromRpcError({ code: 'P0001', hint: 'payment_not_issuable' })).toBe('payment_not_issuable');
     expect(refusalFromRpcError({ code: 'P0001', hint: 'already_issued' })).toBe('already_issued');

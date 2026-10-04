@@ -20,7 +20,7 @@ import type { TranslationKey } from '../i18n';
  *
  * That is not a new state and it is not an accident. 34 cash payments totalling
  * 19.665,68 EUR on staging were already recorded that way before 17.09.2026 and
- * carry no movement, and `issue_salary_cash_receipt` (20261004100000) was built
+ * carry no movement, and `issue_salary_cash_receipt` (20261004110000) was built
  * on 04.10.2026 for exactly those rows: it issues the numbered receipt
  * afterwards and **books nothing into the till**, because booking them would
  * have dropped one company's Bargeldbestand by 19.573,32 EUR at once. So the
