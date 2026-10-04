@@ -730,6 +730,14 @@ const SalariesManagement: React.FC<SalariesManagementProps> = ({ drivers }) => {
           onClose={() => setSalaryDetailsModal({ isOpen: false, salary: null })}
           salary={salaryDetailsModal.salary}
           onUpdate={loadData}
+          // The calendar button went with the row buttons; the dialog it
+          // opened is reachable from here for every driver, overlap or not.
+          // This dialog closes first so the two never stack.
+          onOpenPeriods={() => {
+            const driverId = salaryDetailsModal.salary?.driver_id ?? null;
+            setSalaryDetailsModal({ isOpen: false, salary: null });
+            setPeriodsDriverId(driverId);
+          }}
           // The old eye button's list: this driver's Umsatz, Aktionen and
           // Trinkgeld inside the screen's period, same filter as before.
           revenueTransactions={incomes.filter(

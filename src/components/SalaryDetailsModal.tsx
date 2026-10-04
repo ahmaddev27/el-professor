@@ -1,5 +1,5 @@
 import React, { useState, useEffect, type FormEvent } from 'react';
-import { X, Plus, CreditCard as Edit2, Trash2, DollarSign, AlertCircle, FileText, CheckSquare, Square, Building2, Banknote, LayoutDashboard, Zap, Lock, Eye, Ban } from 'lucide-react';
+import { X, Plus, CreditCard as Edit2, Trash2, DollarSign, AlertCircle, FileText, CheckSquare, Square, Building2, Banknote, LayoutDashboard, Zap, Lock, Eye, Ban, CalendarRange } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { SalaryPayment, SalaryCalculation, Income } from '../types/receipt';
 import { supabase } from '../lib/supabase';
@@ -70,6 +70,8 @@ interface SalaryDetailsModalProps {
   onUpdate: () => void;
   /** The driver's Umsatz, Aktionen and Trinkgeld rows of the period, for the Zusammenfassung tab. */
   revenueTransactions?: Income[];
+  /** Opens the dialog that merges this driver's overlapping salary periods. */
+  onOpenPeriods?: () => void;
 }
 
 interface PayrollData {
@@ -108,6 +110,7 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
   salary,
   onUpdate,
   revenueTransactions,
+  onOpenPeriods,
 }) => {
   const { t } = useTranslation();
   const [activeTab, setActiveTab] = useState<'details' | 'summary'>('details');
@@ -739,7 +742,13 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
 
             {/* ── Summary tab ── */}
             {activeTab === 'summary' && (<>
-              <div className="flex justify-end">
+              <div className="flex flex-wrap justify-end gap-2">
+                {onOpenPeriods && (
+                  <Button variant="secondary" size="sm" onClick={onOpenPeriods}>
+                    <CalendarRange aria-hidden />
+                    {t('sal.periods.openFor', { name: salary.driver_name })}
+                  </Button>
+                )}
                 <Button variant="secondary" size="sm" onClick={handleExportPdf}>
                   <FileText aria-hidden />
                   {t('sal.action.driverSummaryPdf')}
