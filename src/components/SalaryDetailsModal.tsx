@@ -11,7 +11,6 @@ import { format } from 'date-fns';
 import SalaryPaymentModal from './SalaryPaymentModal';
 import SalaryPaymentReceiptPreview from './SalaryPaymentReceiptPreview';
 import SalaryPaymentCashView, { type CashPaymentViewTarget } from './SalaryPaymentCashView';
-import GehaltsquittungModal from './GehaltsquittungModal';
 import ConfirmationModal from './ConfirmationModal';
 import {
   currentLoadState,
@@ -58,7 +57,6 @@ import {
   formatDate,
   formatEuroCents,
 } from './ui';
-import type { GehaltsquittungPreselect } from '../hooks/useGehaltsquittungFlow';
 import { generateDriverSalaryPdf } from '../utils/driverSalaryPdf';
 import DriverSalarySummaryCard from './DriverSalarySummaryCard';
 import SalaryRevenueDetails from './SalaryRevenueDetails';
@@ -142,19 +140,17 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
    * till on the day of the void. The dialog below asks for that reason.
    */
   const [stornoReceiptId, setStornoReceiptId] = useState<string | null>(null);
-  /** The cash payment handed to the Gehaltsquittung flow; null while none is being issued. */
-  const [receiptDraft, setReceiptDraft] = useState<GehaltsquittungPreselect | null>(null);
   /**
    * Another salary row of this driver whose period overlaps this one, or null.
    *
-   * `confirm_salary_cash_payment` refuses such a salary (`overlapping_salary`),
-   * and since a cash payment is now always a Gehaltsquittung that refusal
-   * reaches the payment form. The owner's rule, 17.09.2026: he merges the two
-   * rows by hand and the system keeps refusing until he has — so the row is
-   * looked up here to be *named* in the refusal, not to route around it. One
-   * staging company holds 16 such pairs and another 25 rows in one company, so
-   * "these rows overlap" without saying which is not something anyone can act
-   * on.
+   * `issue_salary_cash_receipt` refuses such a salary (`overlapping_salary`), so
+   * the refusal reaches the issue button on a cash payment's view — not the
+   * payment form, which since 04.10.2026 writes a plain row and asks none of
+   * this. The owner's rule, 17.09.2026: he merges the two rows by hand and the
+   * system keeps refusing until he has — so the row is looked up here to be
+   * *named* in the refusal, not to route around it. One staging company holds 16
+   * such pairs and another 25 rows in one company, so "these rows overlap"
+   * without saying which is not something anyone can act on.
    */
   const [overlappingSalary, setOverlappingSalary] = useState<OverlappingSalaryRow | null>(null);
   const [payrollData, setPayrollData] = useState<PayrollData>({
@@ -489,15 +485,14 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
   };
 
   /**
-   * Why a cash payment cannot be recorded for this salary at all, ready to
-   * show; null when it can.
+   * Why a **numbered receipt** cannot be issued for a cash payment of this
+   * salary, ready to show; null when it can.
    *
-   * Every cash payment is now a Gehaltsquittung, so the Gehaltsquittung's own
-   * conditions decide, and they are answered **before** the payment form
-   * closes: the form is where the user can still choose a bank transfer
-   * instead. Computed once and used twice — for the notice beside the type
-   * select and as the guard in startGehaltsquittung — so the sentence shown and
-   * the reason the write is refused cannot differ.
+   * These are `issue_salary_cash_receipt`'s own conditions, answered before the
+   * view offers its issue button rather than after the RPC refuses. It is no
+   * longer asked of the payment form: since 04.10.2026 recording a cash payment
+   * writes a plain row and needs none of them — the receipt is a separate act,
+   * taken later from the payment's own view.
    *
    * The order is the order in which they stop being fixable by this user:
    * scope and role, then the plan, then the overlapping salary rows the owner
@@ -520,45 +515,13 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
     return null;
   })();
 
-  /**
-   * Hands a cash payment the user just entered to the Gehaltsquittung flow, or
-   * names why it cannot go there. Nothing is written here: the receipt, the
-   * salary_payments row and the outgoing cash_movements row are one transaction
-   * inside confirm_salary_cash_payment, and the browser has no write on any of
-   * the three.
-   *
-   * The refusal is thrown so the payment form shows it in its own error box.
-   * The form already disables its submit for the same reasons; this is the
-   * second wall, because the form is told what to show and this is what acts.
-   */
-  const startGehaltsquittung = (paymentData: Pick<SalaryPayment, 'amount' | 'payment_date'>) => {
-    if (cashBlockedMessage) throw new Error(cashBlockedMessage);
-    if (!salary.salary_id) throw new Error(t('gq.refusal.salaryNotFound'));
-
-    // toCents refuses anything that is not a finite decimal amount rather than
-    // rounding it to a silent 0, so the form says so instead of throwing.
-    let amountCents: number;
-    try {
-      amountCents = toCents(paymentData.amount);
-    } catch {
-      throw new Error(t('gq.refusal.invalidAmount'));
-    }
-
-    setIsPaymentModalOpen(false);
-    setSelectedPayment(undefined);
-    setReceiptDraft({
-      driverId: salary.driver_id,
-      salaryId: salary.salary_id,
-      amountCents,
-      paymentDate: paymentData.payment_date,
-    });
-  };
-
   const handleSavePayment = async (paymentData: Omit<SalaryPayment, 'id' | 'created_by' | 'created_at' | 'updated_at'>) => {
-    // Owner decision, 17.09.2026: a cash payment added here is a Gehaltsquittung.
-    // The rule is keyed on this deliberate action and on the stored row, never
-    // on payment_type alone — the weekly "Bar zurück" is also cash and must not
-    // book a payout from the till. See utils/salaryPaymentWrite.ts.
+    // Owner decision, 04.10.2026, reversing 17.09.2026: a cash payment added
+    // here is a plain row again, saved and closed, with no Gehaltsquittung step
+    // in between. The rule is still keyed on the origin and on the stored row,
+    // never on payment_type alone — the weekly "Bar zurück" is also cash, and a
+    // row behind a receipt is frozen by a database trigger either way. See
+    // utils/salaryPaymentWrite.ts for what this costs the till.
     const decision = decidePaymentWrite({
       origin: selectedPayment ? 'edit' : 'add',
       paymentType: paymentData.payment_type,
@@ -568,15 +531,14 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
             payment_type: selectedPayment.payment_type,
             source_type: selectedPayment.source_type ?? null,
             amount: selectedPayment.amount,
+            // Not a column on salary_payments: the live receipt issued for a
+            // payment after the fact is looked up into `issuedReceipts` by id.
+            issued_receipt_id: issuedReceipts[selectedPayment.id] ?? null,
           }
         : null,
     });
 
     if (decision.kind === 'refused') throw new Error(t(PAYMENT_WRITE_REFUSAL_KEYS[decision.refusal]));
-    if (decision.kind === 'gehaltsquittung') {
-      startGehaltsquittung(paymentData);
-      return;
-    }
 
     const { data: { user: authUser } } = await supabase.auth.getUser();
     if (!authUser) throw new Error(t('sal.notSignedIn'));
@@ -1299,7 +1261,7 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
         salaryId={salary.salary_id!}
         remainingBalance={remainingBalance}
         payment={selectedPayment}
-        cashBlockedMessage={cashBlockedMessage}
+        issuedReceiptId={selectedPayment ? issuedReceipts[selectedPayment.id] ?? null : null}
       />
 
       <SalaryPaymentCashView
@@ -1332,18 +1294,6 @@ const SalaryDetailsModal: React.FC<SalaryDetailsModalProps> = ({
           void reloadAfterStorno();
         }}
         onUnknownOutcome={() => void reloadAfterStorno()}
-      />
-
-      {/* The cash payment entered above, continued as a Gehaltsquittung: the
-          balance, the place of payment, the German receipt and its one
-          confirmation. Once it is issued the new row carries
-          source_type = 'gehaltsquittung', so paymentRowActions gives it the
-          preview button and its lock by itself. */}
-      <GehaltsquittungModal
-        open={receiptDraft !== null}
-        onOpenChange={next => { if (!next) setReceiptDraft(null); }}
-        preselect={receiptDraft}
-        onChanged={() => { void fetchPayments(); void onUpdate(); }}
       />
 
       <ConfirmationModal
