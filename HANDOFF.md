@@ -1,6 +1,6 @@
 # Handoff
 
-Last updated: **01.10.2026**
+Last updated: **04.10.2026**
 
 Start here when you pick up this project. Read it together with [CLAUDE.md](CLAUDE.md), which holds the rules and how every mechanism works, and [PROGRESS.md](PROGRESS.md), which records what is done and what was verified. The owner-facing plan is [el-professor-plan.html](el-professor-plan.html). The older developer reference, moved out of the README in PR #18, is [Docs/TECHNICAL_REFERENCE.md](Docs/TECHNICAL_REFERENCE.md); where it disagrees with CLAUDE.md or the code, they win.
 
@@ -77,6 +77,16 @@ Start here when you pick up this project. Read it together with [CLAUDE.md](CLAU
   **Off by default on purpose:** giving up a ride is a decision about a month's revenue, and a default that quietly makes it is a default that decides for the operator. The split also refuses to leave a part under `minBlockMinutes`, or this pass and the merge pass would undo each other, and it never cuts a single ride however long it runs.
 
   Two fixtures in its tests were wrong and were corrected rather than the rule: a five-ride month where the second split was refused **because giving up the one ride after the gap left nothing on the far side** — that refusal is correct, a split that empties one half is not a split.
+
+- **A cash payment is a plain row again (04.10.2026), and what that costs the till is stated rather than left to be found.**
+
+  The owner's rule of this day — *we do not work anymore with Gehaltsquittung* — is implemented, and the photograph he sent is the specification: adding a cash payment handed itself to the three-step receipt wizard instead of saving. *"Once I click continue it must be saved, so this popup must not be shown."* `decidePaymentWrite` answers `insert` for every added payment now, and an **ordinary stored cash row is editable again** — the freeze told the user to delete and re-record it *"because the new cash payment creates a Gehaltsquittung and books the amount out of the cash box"*, which stopped being true the moment the add path stopped doing it, so the sentence went with it rather than being left to mislead.
+
+  **What the reversal gives up, precisely:** a cash payment recorded here **does not lower the Bargeldbestand**. The till is `cash_movements` and only the three Gehaltsquittung RPCs write it — nothing in this path writes a receipt or a movement. That is not a new state: **34 such payments totalling 19.665,68 EUR** already sat on staging from before 17.09.2026 with no movement behind any of them, and `issue_salary_cash_receipt` (`20261004100000`) was built on 04.10 for exactly those rows — it issues the numbered receipt afterwards and **books nothing**, because booking them would have dropped one company's Bargeldbestand by 19.573,32 EUR at once. Whether the till is overstated by those payments is the owner's question and is not answered here.
+
+  **Two rows stay frozen, each in front of a database trigger that refuses the statement rather than a column:** one written by `confirm_salary_cash_payment` (`source_type = 'gehaltsquittung'`, the trigger in `20260914140000`), and one **issued** a live receipt after the fact (`salary_payments_issued_receipt_guard`, `20261004110000`). The second reads `issuedReceipts[payment.id]` from the salary screen, **not a column** — `salary_payments` has none, and the first attempt at this compiled against an invented `payment.issued_receipt_id` and failed the typecheck. `paymentFieldLock` and `decidePaymentWrite` are tested to agree on every row shape, so the form cannot disable what it would have saved.
+
+  The weekly *Bar zurück* is untouched and is still checked first, before any branch can reach it through the payment type: it is cash by type but money the driver kept out of a settlement, and a receipt for it would book a payout that never happened.
 
 - **A day of the owner's own notes, 03.–04.10.2026 — and four times the measurement contradicted the reading.**
 
