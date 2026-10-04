@@ -4,6 +4,11 @@ import { supabase } from '../lib/supabase';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { useToast } from '../contexts/ToastContext';
 import { useTranslation } from '../contexts/LanguageContext';
+import {
+  judgePreview, nextOccurrence, parsePreviewAnswer,
+  type ChannelState, type NextOccurrence, type SchedulePreviewAnswer,
+} from '../utils/abrechnungSchedulePreview';
+import { germanDay } from '../../supabase/functions/_shared/abrechnung-schedule-core';
 import { Alert, Button, Card, CardContent, CardHeader, CardTitle, Field, Input, NativeSelect } from './ui';
 
 /**
@@ -38,6 +43,12 @@ interface ScheduleForm {
 
 const DEFAULTS: ScheduleForm = { driverMail: false, managerSummary: false, weekday: 1, time: '08:00' };
 
+type PreviewState =
+  | { status: 'idle' }
+  | { status: 'loading' }
+  | { status: 'failed' }
+  | { status: 'ready'; next: NextOccurrence; answer: SchedulePreviewAnswer };
+
 const checkboxClass = 'mt-1 size-4 shrink-0 cursor-pointer accent-brand disabled:cursor-not-allowed';
 
 const AbrechnungScheduleCard: React.FC<{ readOnly: boolean }> = ({ readOnly }) => {
@@ -48,6 +59,9 @@ const AbrechnungScheduleCard: React.FC<{ readOnly: boolean }> = ({ readOnly }) =
   const [loading, setLoading] = useState(true);
   const [loadFailed, setLoadFailed] = useState(false);
   const [saving, setSaving] = useState(false);
+  /** The stored row: null when the company has none. The preview describes this, not the form. */
+  const [saved, setSaved] = useState<ScheduleForm | null>(null);
+  const [preview, setPreview] = useState<PreviewState>({ status: 'idle' });
 
   const load = useCallback(async () => {
     if (!companyId) return;
@@ -61,19 +75,37 @@ const AbrechnungScheduleCard: React.FC<{ readOnly: boolean }> = ({ readOnly }) =
     if (error) {
       setLoadFailed(true);
     } else if (data) {
-      setForm({
+      const stored: ScheduleForm = {
         driverMail: data.driver_mail_enabled,
         managerSummary: data.manager_summary_enabled,
         weekday: data.weekday,
         time: String(data.send_time).slice(0, 5),
-      });
+      };
+      setForm(stored);
+      setSaved(stored);
     } else {
       setForm(DEFAULTS);
+      setSaved(null);
     }
     setLoading(false);
   }, [companyId]);
 
   useEffect(() => { load(); }, [load]);
+
+  // What the next send would do, from the same SQL the job reads. Only for a
+  // saved schedule with a switch on: otherwise the answer is known without asking.
+  const loadPreview = useCallback(async () => {
+    const next = saved && (saved.driverMail || saved.managerSummary)
+      ? nextOccurrence(saved.weekday, saved.time, new Date())
+      : null;
+    if (!next) { setPreview({ status: 'idle' }); return; }
+    setPreview({ status: 'loading' });
+    const { data, error } = await supabase.rpc('abrechnung_schedule_preview', { p_week_monday: next.weekMonday });
+    const answer = error ? null : parsePreviewAnswer(data);
+    setPreview(answer ? { status: 'ready', next, answer } : { status: 'failed' });
+  }, [saved]);
+
+  useEffect(() => { loadPreview(); }, [loadPreview]);
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -94,6 +126,7 @@ const AbrechnungScheduleCard: React.FC<{ readOnly: boolean }> = ({ readOnly }) =
       return;
     }
     success(t('settings.abrSchedule.saved'), t('settings.abrSchedule.savedBody'));
+    await load();
   };
 
   // A failed read is not "everything off": the form would show switches that
@@ -156,6 +189,14 @@ const AbrechnungScheduleCard: React.FC<{ readOnly: boolean }> = ({ readOnly }) =
           </Field>
         </div>
 
+        <SchedulePreview
+          saved={saved}
+          loading={loading}
+          preview={preview}
+          dirty={JSON.stringify(form) !== JSON.stringify(saved ?? DEFAULTS)}
+          onRetry={loadPreview}
+        />
+
         {!form.driverMail && !form.managerSummary && (
           <p className="text-sm text-fg-subtle">{t('settings.abrSchedule.nothingOn')}</p>
         )}
@@ -179,6 +220,118 @@ const AbrechnungScheduleCard: React.FC<{ readOnly: boolean }> = ({ readOnly }) =
       </CardHeader>
       <CardContent>{body}</CardContent>
     </Card>
+  );
+};
+
+interface SchedulePreviewProps {
+  saved: ScheduleForm | null;
+  loading: boolean;
+  preview: PreviewState;
+  dirty: boolean;
+  onRetry: () => void;
+}
+
+/**
+ * The statement of what the next send does. An empty preview and a confident
+ * "0 drivers" are different claims: a failed load shows the failure and no figure.
+ */
+const SchedulePreview: React.FC<SchedulePreviewProps> = ({ saved, loading, preview, dirty, onRetry }) => {
+  const { t } = useTranslation();
+  if (loading) return null;
+
+  let body: React.ReactNode;
+  if (saved === null) {
+    body = <p>{t('settings.abrSchedule.preview.notScheduled')}</p>;
+  } else if (!saved.driverMail && !saved.managerSummary) {
+    body = <p>{t('settings.abrSchedule.preview.bothOff')}</p>;
+  } else if (preview.status === 'loading' || preview.status === 'idle') {
+    body = <p>{t('settings.abrSchedule.preview.loading')}</p>;
+  } else if (preview.status === 'failed') {
+    body = (
+      <Alert tone="critical" title={t('settings.abrSchedule.preview.loadFailed')}>
+        <Button type="button" variant="secondary" onClick={onRetry}>{t('settings.abrSchedule.retry')}</Button>
+      </Alert>
+    );
+  } else {
+    body = <PreviewBody next={preview.next} answer={preview.answer} saved={saved} />;
+  }
+
+  return (
+    <section aria-live="polite" className="grid grid-cols-1 gap-2 rounded-md border border-border bg-canvas p-4 text-sm text-fg">
+      <h3 className="font-medium">{t('settings.abrSchedule.preview.title')}</h3>
+      {body}
+      {dirty && <p className="text-xs text-fg-subtle">{t('settings.abrSchedule.preview.savedNote')}</p>}
+    </section>
+  );
+};
+
+const SKIP_KEYS = {
+  noEmail: 'settings.abrSchedule.preview.skip.noEmail',
+  ambiguous: 'settings.abrSchedule.preview.skip.ambiguous',
+  inactive: 'settings.abrSchedule.preview.skip.inactive',
+  noDriver: 'settings.abrSchedule.preview.skip.noDriver',
+  claimed: 'settings.abrSchedule.preview.skip.claimed',
+} as const;
+
+const PreviewBody: React.FC<{ next: NextOccurrence; answer: SchedulePreviewAnswer; saved: ScheduleForm }> = ({ next, answer, saved }) => {
+  const { t, tPlural } = useTranslation();
+  const verdict = judgePreview(answer, saved.driverMail, saved.managerSummary);
+  const skips: Array<[keyof typeof SKIP_KEYS, number]> = [
+    ['noEmail', answer.drivers.no_email],
+    ['ambiguous', answer.drivers.ambiguous],
+    ['inactive', answer.drivers.inactive],
+    ['noDriver', answer.drivers.no_driver],
+    ['claimed', answer.drivers.already_claimed],
+  ];
+  const skipText = skips
+    .filter(([, n]) => n > 0)
+    .map(([key, n]) => t(SKIP_KEYS[key], { count: n }))
+    .join(', ');
+
+  const driverLine = (state: ChannelState) => {
+    if (state.kind === 'off') return t('settings.abrSchedule.preview.drivers.off');
+    if (state.kind === 'no_one') return t('settings.abrSchedule.preview.drivers.noOne');
+    return tPlural({
+      one: 'settings.abrSchedule.preview.drivers.goesOne',
+      other: 'settings.abrSchedule.preview.drivers.goesOther',
+    }, state.count);
+  };
+  const managerLine = (state: ChannelState) => {
+    if (state.kind === 'off') return t('settings.abrSchedule.preview.manager.off');
+    if (state.kind === 'no_one') {
+      return answer.manager_claimed && answer.manager_recipients > 0
+        ? t('settings.abrSchedule.preview.manager.claimed')
+        : t('settings.abrSchedule.preview.manager.noOne');
+    }
+    return tPlural({
+      one: 'settings.abrSchedule.preview.manager.goesOne',
+      other: 'settings.abrSchedule.preview.manager.goesOther',
+    }, state.count);
+  };
+
+  return (
+    <>
+      <p>
+        {t('settings.abrSchedule.preview.next', {
+          weekday: t(WEEKDAY_KEYS[next.weekday]),
+          date: germanDay(next.day),
+          time: next.time,
+        })}
+      </p>
+      <p>{t('settings.abrSchedule.preview.week', { range: next.weekRange })}</p>
+      {verdict.noBookings ? (
+        <p className="font-medium">{t('settings.abrSchedule.preview.noBookings')}</p>
+      ) : (
+        <>
+          <p>{driverLine(verdict.drivers)}</p>
+          {saved.driverMail && skipText && (
+            <p className="text-fg-subtle">{t('settings.abrSchedule.preview.skipped', { list: skipText })}</p>
+          )}
+          <p>{managerLine(verdict.manager)}</p>
+          {verdict.nothingGoes && <p className="font-medium">{t('settings.abrSchedule.preview.nothing')}</p>}
+        </>
+      )}
+    </>
   );
 };
 
