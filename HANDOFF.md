@@ -78,6 +78,26 @@ Start here when you pick up this project. Read it together with [CLAUDE.md](CLAU
 
   Two fixtures in its tests were wrong and were corrected rather than the rule: a five-ride month where the second split was refused **because giving up the one ride after the gap left nothing on the far side** — that refusal is correct, a split that empties one half is not a split.
 
+- **A day of the owner's own notes, 03.–04.10.2026 — and four times the measurement contradicted the reading.**
+
+  Thirteen requests, all merged to staging. The list is in `PROGRESS.md`; what belongs here is the part a reading of the code would have got wrong.
+
+  **1. "The plan failed" was a switch, not a defect.** Measured on his August (2209 rides): blocks over the ceiling fall from **11 to 1** with the split on, the longest from 11,7 h to 7,4 h. The screen said *no gap is long enough* — untrue, because with the split off nothing is tried. `splitOnce` also gained his own rule from the voice note, *six hours and the remainder*: the widest-gap search runs first because it gives up the fewest rides, and the **last ride boundary before the ceiling** is the fallback. It cuts at a boundary, never inside a ride.
+
+  **2. A short block was told the wrong reason, on 39 of 45.** The screen said *that vehicle has no other block on that day to merge with* for every one. True for 6; for **39** the neighbour exists and the **maximum** forbids the merge. The minimum and the maximum pull against each other, and the operator was told about neither. `shortBlocks` carries `alone_on_day` or `ceiling` now.
+
+  **3. The owner's room was never the obstacle.** He asked why leftovers cannot go to the owner. Measured: the owner holds **156 h over 48 blocks** and is free **596 h across 70 windows**, the longest a whole day, against **56 unassigned blocks totalling 184 h** — and **all 56 would fit**. `ownerFreeTime` shows it on step 5 as a **view**: it assigns nothing and moves nothing, because moving a block would have the Fahrtenbuch state a journey at a time it did not happen.
+
+  **4. The 56 leftovers are the salary ranges, not the engine and not the people.** Peak concurrency is **4** blocks and there are 7 drivers, so overlap is not the constraint. 975 h of work against **636 h** of combined employee ceilings; the engine assigned **635** — every driver to their exact cap — and the owner absorbed 156. `exceeds_hours_cap` is 331 of the refusals. The owner notes staging's data may be incomplete, and it looks it: one driver's range is 180–200 € a month, which is **13 hours**.
+
+  **The defect caught before it shipped:** fixed costs became per month, and `calcPeriodMetrics` still summed every row — so the Overview's Gewinn would have dropped by a whole month's rent for every month that passed, silently, from the first operator who edited a second month. `FixedCostItem.period_month` is **required, not optional**, so the next screen that forgets the column fails to compile rather than double-counting.
+
+  **Two rules the owner changed this day**, both recorded because the code still carries the old shape in places: the Gehaltsquittung is no longer how cash payments are receipted (*we do not work anymore with gehaltsquittung*; **every** cash payment must be viewable), and §8's owner-as-last-resort becomes owner-takes-the-surplus under `ownerTakesSurplus`, off by default and chosen by the quality ranking rather than by hand.
+
+  **Measured facts worth keeping:** staging holds **0 rows in `salary_cash_receipts`** and 51 of 55 payments are `manual`, so the receipt preview had never been reachable for anybody; Y&A Mobility has **2 drivers with an address and both are real**, and its one active admin's address is real too, so the first week with bookings mails three real people from staging.
+
+  **Mistakes made, recorded so the next person does not repeat them:** removing worktrees with `--force` deleted **through junctions** into the shared `node_modules` and wiped it (`npm install` restored it; no code lost) — copy dependencies into a worktree, never junction them. And the e-mail palette moved without running the full suite, so a second test pinning the old hex as a literal broke; it reads the palette now.
+
 - **The salary advance (سلفة) was never built, nobody deleted it, and four columns on `salaries` are orphans (03.10.2026).**
 
   Asked as *"لسلفة في الراتب مش موجودة ليش؟ حذفتها تاني؟؟"*. **The owner is waiting on the customer to say what they mean by سلفة; nothing is to be built until that reply comes.**
