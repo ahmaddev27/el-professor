@@ -1,6 +1,6 @@
 # Handoff
 
-Last updated: **04.10.2026**
+Last updated: **05.10.2026**
 
 Start here when you pick up this project. Read it together with [CLAUDE.md](CLAUDE.md), which holds the rules and how every mechanism works, and [PROGRESS.md](PROGRESS.md), which records what is done and what was verified. The owner-facing plan is [el-professor-plan.html](el-professor-plan.html). The older developer reference, moved out of the README in PR #18, is [Docs/TECHNICAL_REFERENCE.md](Docs/TECHNICAL_REFERENCE.md); where it disagrees with CLAUDE.md or the code, they win.
 
@@ -19,6 +19,14 @@ Start here when you pick up this project. Read it together with [CLAUDE.md](CLAU
   ```
 
   Empty output is the pass. The DEFAULT PRIVILEGES themselves were deliberately left alone — they are a global setting on a schema the images own, and changing them could break a future image's boot.
+
+- **A number an operator types is not a promise the engine made — PR #186, open against `staging`.** The owner reported that the monthly plan still produces blocks shorter and longer than the short and long limits he entered. Measured: the engine is right and the screen was lying. `buildBlocks` merges a short block only with a neighbour **of the same vehicle on the same day** and only as far as the long limit allows (`fits()`), and it splits a long block only when `splitLongBlocks` is on, which is off by default. `blocks.test.ts:608-624` pins `[20, 80]` under a minimum of 90 as the **correct** answer, and `blocks.ts:180-185` states the design in words.
+
+  So both numbers are **thresholds that classify**, and the fields called them `Mindestdauer` and `Höchstdauer`. They are `Schwelle für kurze/lange Blöcke` now, in both dictionaries, with the step-3 captions and the split explainer on the same vocabulary. One hint had gone from optimistic to **false** — `maxBlock.hint` still read *"Ein Block wird nie zerschnitten"* directly above the switch that cuts blocks — and two code comments said the same.
+
+  **The rule this is an instance of:** a control that reports a problem and names a lever in another step reads as broken. Each banner now carries its lever. `Teilen einschalten` ticks the box and returns to step 2 and deliberately does **not** rebuild in place: `generate` closes over `splitLongBlocks`, so a rebuild in the same handler would use the old value, and the invalidating effect sets `plan` to null on that change, which would empty step 3 mid-flight. `Schwelle anpassen` only navigates and sets no number, because how long a block may run is the operator's judgement.
+
+  No engine file is touched and no figure in any plan changes.
 
 ## Where things stand
 
