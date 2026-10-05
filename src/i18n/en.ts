@@ -5794,23 +5794,23 @@ export const en: PartialDictionary = {
   'mplan.unitHours': 'hrs',
 
   // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
-  'mplan.blocks.minimum':         'Minimum block length: {minutes} minutes.',
+  'mplan.blocks.minimum':         'Short-block threshold: {minutes} minutes.',
   'mplan.blocks.stillShort':      '{count} block(s) stay under {minutes} minutes: that vehicle has no other block on that day to merge with. The times are never padded.',
   'mplan.blocks.stillShortTitle': 'Some blocks remain shorter',
-  'mplan.minBlock.hint':          'Shorter blocks are merged with a neighbouring block of the same vehicle on the same day. 0 = no minimum.',
+  'mplan.minBlock.hint':          'A block under this length is merged with a neighbouring block of the same vehicle on the same day. Where that is not possible the block stays shorter and is reported. 0 = off.',
   'mplan.minBlock.invalid':       'Enter a whole number from 0 upwards.',
-  'mplan.minBlock.label':         'Minimum block length (minutes)',
+  'mplan.minBlock.label':         'Short-block threshold (minutes)',
   'mplan.regen.searched':         '{tried} variants examined, {equal} of them equally good.',
   'mplan.regen.searchedNothing':  '{tried} variants examined — none was better, or equally good and different. The constraints allow only this one distribution.',
 
   // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
-  'mplan.blocks.maximum':         'Maximum block length: {minutes} minutes.',
+  'mplan.blocks.maximum':         'Long-block threshold: {minutes} minutes.',
   'mplan.blocks.stillLong':       '{count} block(s) are longer than {minutes} minutes. They are not cut apart: no gap inside a block is long enough for a driver or vehicle change, and a single ride is never split.',
   'mplan.blocks.stillLongTitle':  'Some blocks remain longer',
-  'mplan.maxBlock.belowMin':      'The maximum cannot be smaller than the minimum.',
-  'mplan.maxBlock.hint':          'Bounds the merging: blocks are joined only as far as this length allows. A block is never cut apart. 0 = no maximum.',
+  'mplan.maxBlock.belowMin':      'The long-block threshold cannot be smaller than the short-block one.',
+  'mplan.maxBlock.hint':          'Blocks are joined only as far as this length allows. A longer block is split only when the switch below is on — otherwise it stays whole and is reported. 0 = off.',
   'mplan.maxBlock.invalid':       'Enter a whole number from 0 upwards.',
-  'mplan.maxBlock.label':         'Maximum block length (minutes)',
+  'mplan.maxBlock.label':         'Long-block threshold (minutes)',
   'mplan.quality.belowMinimum':   'drivers below their target',
   'mplan.quality.excessHours':    'hours above the limit',
   'mplan.quality.pinConflicts':   'mandatory-assignment conflicts',
@@ -5858,7 +5858,7 @@ export const en: PartialDictionary = {
   'abr.mail.unknownTitle':      'Driver not found',
 
   // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
-  'mplan.split.explain':      'A block over the maximum is split at the largest gap it already has, so two drivers can take it. The gap is widened to the switch duration — and the rides falling inside it drop out of the plan: while the car changes hands, nobody is driving. Measured: exactly one ride per split. No ride time is moved.',
+  'mplan.split.explain':      'A block over the long-block threshold is split at the largest gap it already has, so two drivers can take it. The gap is widened to the switch duration — and the rides falling inside it drop out of the plan: while the car changes hands, nobody is driving. Measured: exactly one ride per split. No ride time is moved.',
   'mplan.split.givenUp':      '{count} ride(s) fall inside a handover gap and are assigned to nobody. They stay unchanged in the Fahrtenbuch — only this plan does not carry them.',
   'mplan.split.givenUpTitle': 'Rides given up for the handover',
   'mplan.split.hint':         'Off: a block that is too long stays whole and is only reported.',
@@ -5896,7 +5896,7 @@ export const en: PartialDictionary = {
   'settings.abrSchedule.weekday':        'Weekday',
 
   // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
-  'mplan.blocks.stillShortCeiling': '{count} block(s) stay under {minutes} minutes although the vehicle has another block that day: merging them would exceed the maximum of {max} minutes. Raise the maximum in step 2 if these blocks should be merged.',
+  'mplan.blocks.stillShortCeiling': '{count} block(s) stay under {minutes} minutes although the vehicle has another block that day: merging them would exceed the long-block threshold of {max} minutes.',
   'fleet.fcm.scopeBody':          'You are changing the fixed costs for {month}. Earlier months stay unchanged either way.',
   'fleet.fcm.scopeLater':         'This and all later months',
   'fleet.fcm.scopeLaterHint':     'Later months without entries of their own take the change. Later months with their own entries change only if they hold the same item (same description).',
@@ -5905,7 +5905,7 @@ export const en: PartialDictionary = {
   'fleet.fcm.scopeTitle':         'Which months does the change apply to?',
 
   // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
-  'mplan.blocks.longNotSplitOff': '{count} block(s) are longer than {minutes} minutes. They were not split because "Split long blocks for a driver handover" is switched off in step 2. Switch it on if these blocks should be shared between two drivers.',
+  'mplan.blocks.longNotSplitOff': '{count} block(s) are longer than {minutes} minutes. They were not split because "Split long blocks for a driver handover" is switched off in step 2.',
   'bargeld.add.amount':                    'Amount (€)',
   'bargeld.add.amountHint':                'With a decimal comma, for example 120,50',
   'bargeld.add.date':                      'Date',
@@ -5988,4 +5988,8 @@ export const en: PartialDictionary = {
   'sal.payment.issueTitle':            'Issue a numbered receipt',
   'sal.payment.viewCashIntroIssuable': 'View of this cash payment. No Gehaltsquittung is stored yet; this view itself assigns no number. You can issue a numbered receipt below; this does not change the till.',
   'sal.payment.voidIntroIssued':       'This receipt was issued afterwards for an existing payment. Voiding it only declares the receipt void: the payment stays on the salary, the till is not changed, and the receipt stays on record as voided with its number.',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'mplan.blocks.adjustThreshold': 'Adjust the threshold',
+  'mplan.blocks.enableSplit':     'Turn splitting on',
 };
