@@ -1,0 +1,734 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reidey Driver — Belege &amp; Notizen</title>
+<!--
+  PROTOTYPE ONLY — nothing here runs, nothing is wired, no network call.
+
+  The driver-facing flow for submitting a Beleg, a document or a Notiz from the
+  Reidey Driver app, in Reidey's own design language — not El-Professor's,
+  because the screen lives in the driver's app.
+
+  Read from the app itself, read-only (no file changed, no container touched):
+    palette + radii   /root/ridy/driver-app/src/lib/theme.ts
+    screens           /root/ridy/desing/screens/*.png  (incl. the RTL set)
+    stack             React Native + Expo (expo-router), Manrope + Tajawal,
+                      lucide-react-native · tabs: Start · Angebote · Profil
+
+  Three languages, because the app already ships them: German (default),
+  English, Arabic with a full RTL mirror — the register follows Reidey's own
+  Arabic screens (الملف الشخصي · الإعدادات · الحساب · تسجيل الخروج).
+
+  Values that cross to El-Professor are the real stored values and are shown
+  untranslated in the payload panel, because they are identifiers, not labels:
+    categories   ReceiptModal.tsx:38-44   ('Other' is a sentinel, never stored)
+    note types   NotesPage.tsx:104-115 + driverNoteValidation.ts:109-120
+    range types  NotesPage.tsx:124        (sick | vacation | off)
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Tajawal:wght@400;500;700;800&display=swap" rel="stylesheet">
+<style>
+/* ── REIDEY palette — verbatim from driver-app/src/lib/theme.ts ──────────── */
+:root{
+  --canvas:#f4f4f3; --surface:#ffffff; --surface2:#efefed; --raised:#fafaf9;
+  --ink:#0a0b0b; --inkMuted:#45484a; --inkSubtle:#74777a; --inkFaint:#a2a5a8;
+  --line:#e6e6e3; --borderStrong:#d2d3d1;
+  --primary:#0a0b0b; --primaryInk:#ffffff; --accent:#059669;
+  --pending:#b8860b; --completed:#059669; --rejected:#74777a; --canceled:#c4413d;
+  --danger:#c4413d; --warning:#b8860b;
+  --completedBg:#e2f2ea; --pendingBg:#f7edd6; --canceledBg:#f7e2e1; --rejectedBg:#eceded;
+  --bezel:#dcdcd8; --shadow:0 4px 14px rgb(0 0 0 / .06);
+}
+:root[data-theme="dark"]{
+  --canvas:#14171a; --surface:#1e2226; --surface2:#1a1e21; --raised:#252a2e;
+  --ink:#ffffff; --inkMuted:#b5b7b8; --inkSubtle:#777a7c; --inkFaint:#4e5152;
+  --line:#333940; --borderStrong:#454b50;
+  --primary:#ffffff; --primaryInk:#14171a; --accent:#10b981;
+  --pending:#e4a11b; --completed:#10b981; --rejected:#777a7c; --canceled:#d9534f;
+  --danger:#d9534f; --warning:#e4a11b;
+  --completedBg:#173328; --pendingBg:#3a3123; --canceledBg:#2a2020; --rejectedBg:#252a2e;
+  --bezel:#2a2f33; --shadow:none; /* theme.ts: a shadow barely reads on dark */
+}
+*,*::before,*::after{box-sizing:border-box}
+html,body{margin:0}
+body{font-family:Manrope,-apple-system,"Segoe UI",Roboto,sans-serif;
+  background:var(--canvas);color:var(--ink);-webkit-font-smoothing:antialiased;padding:24px 16px 60px}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+/* Tajawal is the app's Arabic face; Manrope has no Arabic */
+[dir=rtl]{font-family:Tajawal,Manrope,sans-serif}
+.ltr{direction:ltr;unicode-bidi:isolate}
+
+.page{max-width:1180px;margin:0 auto}
+.head{display:flex;flex-wrap:wrap;gap:14px;justify-content:space-between;align-items:flex-start}
+h1{margin:0;font-size:1.5rem;font-weight:800;letter-spacing:-.02em}
+.lede{margin:.35rem 0 0;max-width:66ch;font-size:.875rem;line-height:1.55;color:var(--inkMuted)}
+.lede b{color:var(--ink);font-weight:700}
+.ctl{display:flex;gap:8px;flex-wrap:wrap}
+.ctl button{appearance:none;font:inherit;font-size:.8125rem;font-weight:700;cursor:pointer;
+  background:var(--surface);color:var(--inkSubtle);border:1px solid var(--borderStrong);
+  border-radius:12px;min-height:40px;padding:0 14px}
+.ctl button[aria-pressed=true]{background:var(--primary);color:var(--primaryInk);border-color:var(--primary)}
+.layout{display:grid;grid-template-columns:1fr;gap:30px;align-items:start;margin-top:26px}
+@media(min-width:1040px){.layout{grid-template-columns:390px 1fr}}
+
+/* ── phone ───────────────────────────────────────────────────────────────── */
+.phone{width:390px;max-width:100%;margin:0 auto;background:var(--bezel);
+  border-radius:44px;padding:11px;box-shadow:0 24px 60px rgb(0 0 0 / .18)}
+.scr{background:var(--canvas);border-radius:34px;overflow:hidden;display:flex;flex-direction:column;height:760px}
+.sbar{display:flex;justify-content:space-between;align-items:center;padding:14px 26px 6px;font-size:.8125rem;font-weight:700}
+.bat{width:26px;height:13px;border:1.6px solid var(--ink);border-radius:4px;opacity:.85}
+.body{flex:1;overflow-y:auto;padding:4px 20px 18px}
+.body::-webkit-scrollbar{width:0}
+
+.ttl{font-size:2rem;font-weight:800;letter-spacing:-.025em;margin:6px 0 16px}
+.ttl-row{display:flex;align-items:center;gap:10px;margin:6px 0 16px}
+.ttl-row .ttl{margin:0;font-size:1.5rem}
+.back{appearance:none;border:0;background:transparent;color:var(--ink);font:inherit;
+  font-size:1.5rem;cursor:pointer;padding:6px 10px;line-height:1}
+[dir=rtl] .back{transform:scaleX(-1)}
+
+.sect{font-size:.75rem;font-weight:600;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--inkSubtle);margin:22px 0 9px}
+[dir=rtl] .sect{letter-spacing:0}
+
+.card{background:var(--surface);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow)}
+.rows{overflow:hidden}
+
+.seg{display:grid;grid-template-columns:1fr 1fr;gap:4px;background:var(--surface2);
+  border-radius:14px;padding:4px;margin-bottom:18px}
+.seg button{appearance:none;font:inherit;font-size:.9375rem;font-weight:700;cursor:pointer;
+  border:0;border-radius:11px;min-height:42px;background:transparent;color:var(--inkSubtle)}
+.seg button[aria-pressed=true]{background:var(--surface);color:var(--ink);box-shadow:var(--shadow)}
+
+/* field — label INSIDE, as on Reidey's sign-in screen */
+.fld{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:11px 16px 12px;margin-bottom:12px}
+.fld:focus-within{border-color:var(--ink);border-width:1.6px;padding:10px 15px 11px}
+.fld .lb{display:block;font-size:.6875rem;font-weight:600;letter-spacing:.09em;
+  text-transform:uppercase;color:var(--inkSubtle);margin-bottom:3px}
+[dir=rtl] .fld .lb{letter-spacing:0}
+.fld input,.fld textarea,.fld select{width:100%;font:inherit;font-size:1rem;font-weight:600;
+  background:transparent;color:var(--ink);border:0;padding:0;outline:0}
+.fld textarea{font-weight:500;resize:vertical;min-height:62px;line-height:1.5}
+.fld input::placeholder,.fld textarea::placeholder{color:var(--inkFaint);font-weight:500}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.hint{font-size:.75rem;line-height:1.5;color:var(--inkSubtle);margin:-4px 0 14px;padding:0 4px}
+.hint code,.pnl code{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.7rem;
+  background:var(--surface2);padding:1px 5px;border-radius:5px;color:var(--inkMuted);direction:ltr;unicode-bidi:isolate}
+
+.btn{appearance:none;font:inherit;font-size:1rem;font-weight:700;cursor:pointer;width:100%;
+  min-height:54px;border-radius:14px;border:1px solid transparent;
+  display:inline-flex;align-items:center;justify-content:center;gap:8px}
+.btn-p{background:var(--primary);color:var(--primaryInk)}
+.btn-s{background:var(--surface);color:var(--ink);border-color:var(--line);box-shadow:var(--shadow)}
+
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px}
+.chip{appearance:none;font:inherit;font-size:.875rem;font-weight:600;cursor:pointer;
+  background:var(--surface);color:var(--inkMuted);border:1px solid var(--line);
+  border-radius:999px;min-height:42px;padding:0 15px;box-shadow:var(--shadow)}
+.chip[aria-pressed=true]{background:var(--primary);color:var(--primaryInk);border-color:var(--primary)}
+
+.bdg{display:inline-flex;align-items:center;font-size:.75rem;font-weight:700;padding:5px 11px;border-radius:6px;white-space:nowrap}
+.bdg-ok{background:var(--completedBg);color:var(--completed)}
+.bdg-wait{background:var(--pendingBg);color:var(--pending)}
+.bdg-no{background:var(--canceledBg);color:var(--canceled)}
+
+.notice{border-radius:14px;padding:13px 15px;font-size:.8125rem;line-height:1.55;margin-bottom:16px}
+.n-wait{background:var(--pendingBg);color:var(--pending)}
+.n-ok{background:var(--completedBg);color:var(--completed)}
+.n-info{background:var(--surface2);color:var(--inkMuted)}
+.notice b{font-weight:800}
+
+.sub{display:flex;gap:13px;align-items:flex-start;padding:15px 16px;border-top:1px solid var(--line)}
+.sub:first-child{border-top:0}
+.sub .th{width:42px;height:42px;flex:none;border-radius:10px;background:var(--surface2);display:grid;place-items:center}
+.sub .m{flex:1;min-width:0}
+.sub .t{font-size:1rem;font-weight:700}
+.sub .s{font-size:.8125rem;color:var(--inkSubtle);margin-top:2px}
+.sub .a{font-size:1rem;font-weight:800;white-space:nowrap}
+
+.nt{display:flex;gap:12px;align-items:flex-start;width:100%;text-align:start;appearance:none;
+  font:inherit;cursor:pointer;background:var(--surface);border:1px solid var(--line);
+  border-radius:14px;padding:13px 14px;margin-bottom:8px;color:var(--ink);box-shadow:var(--shadow)}
+.nt[aria-pressed=true]{border-color:var(--ink);border-width:1.6px;padding:12px 13px}
+.nt .d{width:9px;height:9px;border-radius:999px;margin-top:6px;flex:none}
+.d-x{background:var(--canceled)} .d-i{background:var(--warning)} .d-n{background:var(--inkFaint)}
+.nt .n{display:block;font-size:1rem;font-weight:700}
+.nt .e{display:block;font-size:.75rem;color:var(--inkSubtle);margin-top:2px;line-height:1.45}
+
+.drop{border:1.5px dashed var(--borderStrong);border-radius:14px;padding:26px 16px;text-align:center;cursor:pointer;background:var(--surface)}
+.drop:hover{border-color:var(--ink)}
+.drop .t{font-weight:700;font-size:1rem;margin-top:8px}
+.drop .s{font-size:.8125rem;color:var(--inkSubtle);margin-top:4px}
+.prev{display:flex;gap:12px;align-items:center;background:var(--surface);
+  border:1px solid var(--line);border-radius:14px;padding:12px;box-shadow:var(--shadow)}
+.prev .px{width:52px;height:52px;border-radius:10px;background:var(--surface2);display:grid;place-items:center;flex:none}
+.prev .n{font-size:.9375rem;font-weight:700;word-break:break-all}
+.prev .s{font-size:.75rem;color:var(--inkSubtle);margin-top:2px}
+.x{appearance:none;border:0;background:transparent;color:var(--danger);font:inherit;font-size:1.125rem;font-weight:800;cursor:pointer;padding:10px;min-width:42px}
+
+.tabs{display:grid;grid-template-columns:repeat(4,1fr);border-top:1px solid var(--line);background:var(--surface);padding:9px 4px 14px}
+.tab{appearance:none;border:0;background:transparent;font:inherit;cursor:pointer;
+  display:grid;justify-items:center;gap:4px;color:var(--inkSubtle);padding:4px 0}
+.tab .i{width:23px;height:23px}
+svg.i,svg.gl{fill:none;stroke:currentColor;stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round}
+.tab .l{font-size:.6875rem;font-weight:600}
+.tab[aria-selected=true]{color:var(--ink)}
+.tab[aria-selected=true] .l{font-weight:800}
+.tab .new{position:absolute;margin:-4px 0 0 16px;width:7px;height:7px;border-radius:999px;background:var(--accent)}
+
+/* ── side panel ──────────────────────────────────────────────────────────── */
+.side{display:grid;gap:16px}
+.pnl{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:18px;box-shadow:var(--shadow)}
+.pnl h3{margin:0 0 5px;font-size:1rem;font-weight:800}
+.pnl p{margin:0 0 13px;font-size:.8125rem;line-height:1.6;color:var(--inkMuted)}
+.pnl p:last-child{margin-bottom:0}
+pre{margin:0;background:var(--surface2);border:1px solid var(--line);border-radius:12px;padding:14px;
+  overflow:auto;font-family:ui-monospace,"Cascadia Mono",Menlo,Consolas,monospace;
+  font-size:.75rem;line-height:1.65;color:var(--ink);direction:ltr;text-align:left}
+.k{color:var(--inkSubtle)} .v{color:var(--accent)} .c{color:var(--inkFaint)}
+table.t{width:100%;border-collapse:collapse;font-size:.8125rem}
+table.t th,table.t td{text-align:start;padding:8px;border-bottom:1px solid var(--line);vertical-align:top}
+table.t th{font-size:.6875rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--inkSubtle)}
+table.t code{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.75rem;background:var(--surface2);padding:2px 6px;border-radius:5px;direction:ltr;unicode-bidi:isolate}
+.opt{border:1px solid var(--line);border-radius:12px;padding:13px;margin-bottom:10px;background:var(--canvas)}
+.opt h4{margin:0 0 4px;font-size:.875rem;font-weight:800}
+.opt p{margin:0;font-size:.8125rem;line-height:1.55;color:var(--inkMuted)}
+.foot{font-size:.75rem;line-height:1.7;color:var(--inkSubtle);margin-top:22px;max-width:76ch}
+</style>
+</head>
+<body>
+<div class="page">
+
+  <div class="head">
+    <div>
+      <h1 id="h1"></h1>
+      <p class="lede" id="lede"></p>
+    </div>
+    <div class="ctl">
+      <button type="button" data-lang="de" aria-pressed="true">Deutsch</button>
+      <button type="button" data-lang="en" aria-pressed="false">English</button>
+      <button type="button" data-lang="ar" aria-pressed="false">العربية</button>
+      <button type="button" id="theme">◐</button>
+    </div>
+  </div>
+
+  <div class="layout">
+
+    <!-- ══════════════ PHONE ══════════════ -->
+    <div class="phone"><div class="scr" id="scr">
+      <div class="sbar"><span>14:32</span><span class="bat"></span></div>
+      <div class="body">
+
+        <!-- list -->
+        <section class="sc" id="s-list">
+          <div class="ttl" data-t="navReceipts"></div>
+          <div class="seg" id="tabseg">
+            <button type="button" aria-pressed="true" data-t="segOpen"></button>
+            <button type="button" aria-pressed="false" data-t="segAll"></button>
+          </div>
+          <div style="display:grid;gap:10px;margin-bottom:6px">
+            <button class="btn btn-p" type="button" data-go="rec" data-t="ctaReceipt"></button>
+            <button class="btn btn-s" type="button" data-go="note" data-t="ctaNote"></button>
+          </div>
+          <div class="sect" data-t="secSubmitted"></div>
+          <div class="card rows" id="sublist"></div>
+          <div class="notice n-info" style="margin-top:16px" data-t="reviewNotice"></div>
+        </section>
+
+        <!-- receipt step 1: a photo, and nothing else -->
+        <section class="sc" id="s-rec" hidden>
+          <div class="ttl-row"><button class="back" data-go="list" type="button">&lsaquo;</button><div class="ttl" data-t="ttlReceipt"></div></div>
+          <div class="notice n-info" data-t="photoOnly"></div>
+          <div class="drop" id="drop" style="padding:46px 16px">
+            <svg class="gl" style="width:40px;height:40px;color:var(--ink)" viewBox="0 0 24 24"><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3Z"/><circle cx="12" cy="13" r="3.2"/></svg>
+            <div class="t" data-t="takePhoto"></div><div class="s" data-t="photoHint"></div>
+          </div>
+        </section>
+
+        <!-- receipt step 2: the agent reads it -->
+        <section class="sc" id="s-read" hidden>
+          <div class="ttl-row"><div class="ttl" data-t="ttlReading"></div></div>
+          <div class="card" style="padding:18px;display:flex;gap:14px;align-items:center">
+            <div style="width:64px;height:64px;border-radius:12px;background:var(--surface2);display:grid;place-items:center;flex:none">
+              <svg class="gl" style="width:24px;height:24px;color:var(--inkMuted)" viewBox="0 0 24 24"><path d="M5 3v18l2-1.2L9 21l2-1.2L13 21l2-1.2L17 21l2-1.2V3l-2 1.2L15 3l-2 1.2L11 3 9 4.2 7 3Z"/><path d="M9 8h6M9 12h6"/></svg>
+            </div>
+            <div style="flex:1">
+              <div style="font-weight:700;font-size:1rem" data-t="reading"></div>
+              <div style="font-size:.8125rem;color:var(--inkSubtle);margin-top:3px" data-t="readingSub"></div>
+              <div style="height:4px;border-radius:999px;background:var(--surface2);margin-top:12px;overflow:hidden">
+                <div id="bar" style="height:100%;width:8%;background:var(--ink);border-radius:999px;transition:width .6s"></div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- receipt step 3: preview what it read, correct it, confirm -->
+        <section class="sc" id="s-prev" hidden>
+          <div class="ttl-row"><button class="back" data-go="rec" type="button">&lsaquo;</button><div class="ttl" data-t="ttlPreview"></div></div>
+          <div class="notice n-info" data-t="previewIntro"></div>
+
+          <div class="card" style="padding:12px;display:flex;gap:12px;align-items:center;margin-bottom:14px">
+            <div style="width:56px;height:56px;border-radius:10px;background:var(--surface2);display:grid;place-items:center;flex:none">
+              <svg class="gl" style="width:20px;height:20px;color:var(--inkMuted)" viewBox="0 0 24 24"><path d="M5 3v18l2-1.2L9 21l2-1.2L13 21l2-1.2L17 21l2-1.2V3l-2 1.2L15 3l-2 1.2L11 3 9 4.2 7 3Z"/><path d="M9 8h6M9 12h6"/></svg>
+            </div>
+            <div style="flex:1;min-width:0">
+              <div style="font-weight:700;font-size:.9375rem">Clean Car Solingen</div>
+              <div class="ltr" style="font-size:.75rem;color:var(--inkSubtle);margin-top:2px">beleg-04102026.jpg &middot; 1.8 MB</div>
+            </div>
+            <button class="x" data-go="rec" type="button" style="color:var(--inkSubtle);font-size:.8125rem;font-weight:700" data-t="retake"></button>
+          </div>
+
+          <div class="sect" data-t="secRead"></div>
+          <div class="fld"><label class="lb" for="date" data-t="fDate"></label><input id="date" type="date" value="2026-10-04"></div>
+          <div class="fld" style="border-color:var(--warning);border-width:1.6px;padding:10px 15px 11px">
+            <label class="lb" for="amt" style="color:var(--warning)"><span data-t="fAmount"></span> &mdash; <span data-t="checkThis"></span></label>
+            <input id="amt" type="text" inputmode="decimal" value="14,90">
+          </div>
+          <p class="hint" id="amthint"></p>
+
+          <div class="sect" data-t="secType"></div>
+          <div class="chips" id="cats"></div>
+          <p class="hint" id="cathint"></p>
+          <div class="fld" id="freewrap" hidden><label class="lb" for="free" data-t="fDesc"></label><input id="free" type="text"></div>
+
+          <div class="two">
+            <div class="fld"><label class="lb" for="pay" data-t="fPay"></label>
+              <select id="pay"><option value="bar"></option><option value="uberweisung"></option></select></div>
+            <div class="fld"><label class="lb" for="plz" data-t="fPlz"></label>
+              <input id="plz" type="text" inputmode="numeric" maxlength="5" value="42651"></div>
+          </div>
+          <p class="hint" id="payhint"></p>
+
+          <div class="notice n-info" style="margin-top:6px"><span data-t="savedWith"></span> <b class="ltr">05.10.2026, 14:32</b></div>
+          <button class="btn btn-p" type="button" data-go="done" data-t="confirmSubmit"></button>
+          <p class="hint" style="text-align:center;margin-top:10px" data-t="goesToFleet"></p>
+        </section>
+
+        <!-- note -->
+        <section class="sc" id="s-note" hidden>
+          <div class="ttl-row"><button class="back" data-go="list" type="button">‹</button><div class="ttl" data-t="ttlNote"></div></div>
+          <div class="sect" data-t="secNoteType"></div>
+          <div id="ntypes"></div>
+          <div id="warn" hidden><div class="notice n-wait" id="warntext"></div></div>
+          <div id="range" hidden>
+            <div class="sect" data-t="secPeriod"></div>
+            <div class="two">
+              <div class="fld"><label class="lb" for="from" data-t="fFrom"></label><input id="from" type="date" value="2026-10-06"></div>
+              <div class="fld"><label class="lb" for="to" data-t="fTo"></label><input id="to" type="date" value="2026-10-08"></div>
+            </div>
+            <p class="hint" data-t="rangeHint"></p>
+          </div>
+          <div id="single">
+            <div class="sect" data-t="secWhen"></div>
+            <div class="fld"><label class="lb" for="day" data-t="fDay"></label><input id="day" type="date" value="2026-10-05"></div>
+            <div class="card" style="padding:14px 16px;margin-bottom:12px;display:flex;align-items:center;gap:12px">
+              <span style="flex:1;font-size:1rem;font-weight:600" data-t="allDay"></span>
+              <input id="full" type="checkbox" style="width:22px;height:22px;accent-color:var(--accent)">
+            </div>
+            <div class="two" id="times">
+              <div class="fld"><label class="lb" for="t1" data-t="fFrom"></label><input id="t1" type="time" value="08:00"></div>
+              <div class="fld"><label class="lb" for="t2" data-t="fTo"></label><input id="t2" type="time" value="12:30"></div>
+            </div>
+            <p class="hint" id="mid" hidden data-t="midnightHint"></p>
+          </div>
+          <div class="sect" data-t="secNote"></div>
+          <div class="fld"><label class="lb" for="txt" data-t="fDesc"></label><textarea id="txt"></textarea></div>
+          <div style="margin-top:14px"><button class="btn btn-p" type="button" data-go="done" data-t="submit"></button></div>
+        </section>
+
+        <!-- done -->
+        <section class="sc" id="s-done" hidden>
+          <div style="text-align:center;padding:52px 10px 28px">
+            <svg class="gl" style="width:52px;height:52px;color:var(--pending)" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+            <div style="font-size:1.5rem;font-weight:800;margin:16px 0 10px;letter-spacing:-.02em" data-t="doneTitle"></div>
+            <p style="margin:0 auto;max-width:32ch;font-size:.9375rem;line-height:1.6;color:var(--inkMuted)" data-t="doneBody"></p>
+          </div>
+          <div class="notice n-ok" data-t="doneNotice"></div>
+          <button class="btn btn-s" type="button" data-go="list" data-t="toMyReceipts"></button>
+        </section>
+      </div>
+
+      <!-- The real bar, verbatim from driver-app/app/(tabs)/_layout.tsx:107-110.
+           It is already FULL at four, so the Belege screens are pushed routes
+           under Profil rather than a fifth tab. -->
+      <div class="tabs">
+        <button class="tab" type="button" aria-selected="false">
+          <svg class="i" viewBox="0 0 24 24"><path d="M3 9.5 12 3l9 6.5V20a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 20Z"/><path d="M9 21.5V13h6v8.5"/></svg>
+          <span class="l" data-t="navHome"></span></button>
+        <button class="tab" type="button" aria-selected="false">
+          <svg class="i" viewBox="0 0 24 24"><path d="M7 14l3-3 3 3 4-5"/><path d="M4 20h16"/><path d="M4 4v16"/></svg>
+          <span class="l" data-t="navStats"></span></button>
+        <button class="tab" type="button" aria-selected="false">
+          <svg class="i" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h10"/></svg>
+          <span class="l" data-t="navOffers"></span></button>
+        <button class="tab" type="button" aria-selected="true" data-go="list">
+          <svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M20 21v-1.5A5.5 5.5 0 0 0 14.5 14h-5A5.5 5.5 0 0 0 4 19.5V21"/></svg>
+          <span class="new"></span><span class="l" data-t="navProfile"></span></button>
+      </div>
+    </div></div>
+
+    <!-- ══════════════ NOTES ══════════════ -->
+    <div class="side">
+      <div class="pnl">
+        <h3 id="pl1h"></h3><p id="pl1p"></p>
+        <div class="opt"><h4 id="optAh"></h4><p id="optAp"></p></div>
+        <div class="opt"><h4 id="optBh"></h4><p id="optBp"></p></div>
+      </div>
+      <div class="pnl">
+        <h3 id="pl2h"></h3><p id="pl2p"></p>
+        <pre id="json"></pre>
+        <p style="margin-top:12px" id="moneyNote"></p>
+      </div>
+      <div class="pnl">
+        <h3 id="pl3h"></h3><p id="pl3p"></p>
+        <table class="t"><thead><tr><th id="thStored"></th><th id="thShown"></th><th id="thReader"></th></tr></thead><tbody id="ctab"></tbody></table>
+      </div>
+      <div class="pnl">
+        <h3 id="pl4h"></h3><p id="pl4p"></p>
+        <table class="t"><thead><tr><th id="thType"></th><th id="thShown2"></th><th id="thBehavior"></th></tr></thead><tbody id="ntab"></tbody></table>
+      </div>
+    </div>
+  </div>
+  <p class="foot" id="foot"></p>
+</div>
+
+<script>
+/* ── categories: the stored value never changes; only the label does ─────── */
+const CATS = [
+  { v:'Tanken',      de:'Tanken',      en:'Tanken',          ar:'وقود',            reader:{de:'Tankenquote',en:'Tankenquote',ar:'نسبة الوقود'} },
+  { v:'Autowäsche',  de:'Autowäsche',  en:'Car wash',        ar:'غسيل السيارة',    reader:null },
+  { v:'Autozubehör', de:'Autozubehör', en:'Car accessories', ar:'قطع وإكسسوارات',  reader:null },
+  { v:'Öl wechseln', de:'Öl wechseln', en:'Oil change',      ar:'تغيير الزيت',     reader:null },
+  { v:'Other',       de:'Sonstiges',   en:'Other',           ar:'أخرى',            reader:{de:'Sentinel — nie gespeichert',en:'Sentinel — never stored',ar:'قيمة دالّة — لا تُخزَّن أبداً'} },
+];
+const NOTES = [
+  { v:'general',   de:'Allgemeine Notiz',       en:'General note',      ar:'ملاحظة عامة',  b:'neutral' },
+  { v:'sick',      de:'Krank',                  en:'Sick',              ar:'مرض',          b:'exclude_from_plan' },
+  { v:'vacation',  de:'Urlaub',                 en:'Holiday',           ar:'إجازة',        b:'exclude_from_plan' },
+  { v:'off',       de:'Frei / Nicht verfügbar', en:'Off / unavailable', ar:'غير متاح',     b:'exclude_from_plan' },
+  { v:'blitzer',   de:'Blitzer',                en:'Speed camera',      ar:'رادار',        b:'must_include_in_plan' },
+  { v:'accident',  de:'Unfall',                 en:'Accident',          ar:'حادث',         b:'must_include_in_plan' },
+  { v:'kontrolle', de:'Kontrolle',              en:'Inspection',        ar:'تفتيش',        b:'must_include_in_plan' },
+  { v:'breakdown', de:'Panne',                  en:'Breakdown',         ar:'عطل',          b:'must_include_in_plan' },
+  { v:'wait',      de:'Wartezeit',              en:'Waiting time',      ar:'وقت انتظار',   b:'must_include_in_plan' },
+  { v:'other',     de:'Sonstiges',              en:'Other',             ar:'أخرى',         b:'neutral' },
+];
+const RANGE = new Set(['sick','vacation','off']);
+
+const T = {
+de:{ h1:'Reidey Driver — Belege & Notizen',
+ lede:'Wie ein Fahrer einen <b>Beleg</b>, ein <b>Dokument</b> oder eine <b>Notiz</b> einreicht. In Reideys eigener Designsprache — Palette und Radien aus <code>driver-app/src/lib/theme.ts</code>. <b>Nur Ablauf und Aussehen</b>: kein Netzwerkaufruf, nichts angeschlossen.',
+ navHome:'Startseite', navStats:'Statistiken', navOffers:'Angebote', navReceipts:'Belege', navProfile:'Profil',
+ segOpen:'Offen', segAll:'Alle',
+ ctaReceipt:'Beleg einreichen', ctaNote:'Notiz einreichen',
+ secSubmitted:'Eingereicht', secType:'Belegart', secDetails:'Angaben', secPhoto:'Beleg-Foto',
+ secNoteType:'Art der Notiz', secPeriod:'Zeitraum', secWhen:'Wann', secNote:'Notiz',
+ ttlReceipt:'Beleg einreichen', ttlNote:'Notiz einreichen',
+ fDate:'Datum', fAmount:'Betrag', fPay:'Zahlungsart', fPlz:'PLZ · optional',
+ fDesc:'Beschreibung', fFrom:'Von', fTo:'Bis', fDay:'Tag', allDay:'Ganzer Tag',
+ payBar:'Bar', payBank:'Überweisung',
+ takePhoto:'Foto aufnehmen', photoHint:'oder Datei wählen · JPG, PNG, PDF · bis 10 MB',
+ photoOnly:'Ein Beleg wird <b>nur als Foto</b> erfasst. Ein KI-Agent liest ihn und zeigt dir das Ergebnis zur Bestätigung.', takePhoto:'Beleg fotografieren', photoHint:'Halte den ganzen Beleg ins Bild · JPG, PNG · bis 10 MB', ttlReading:'Beleg wird gelesen', reading:'Beleg wird gelesen…', readingSub:'Ein KI-Agent liest Datum, Betrag und Art.', ttlPreview:'Prüfen und bestätigen', previewIntro:'Das hat der Agent gelesen. <b>Prüfe es und korrigiere, was nicht stimmt</b> — erst dein Bestätigen speichert es.', secRead:'Gelesene Angaben', checkThis:'bitte prüfen', retake:'Neu', savedWith:'Wird gespeichert mit Datum und Uhrzeit:', confirmSubmit:'Bestätigen und einreichen', submit:'Einreichen', goesToFleet:'Geht zur Prüfung an deine Flotte.',
+ reviewNotice:'Deine Flotte prüft jede Einreichung, bevor sie in die Abrechnung eingeht.',
+ rangeHint:'Der letzte Tag zählt mit. Höchstens 366 Tage.',
+ midnightHint:'Endzeit vor oder gleich der Startzeit — wird als über Mitternacht gelesen.',
+ warn:'<b>Das nimmt dich aus der Planung.</b> Für diesen Zeitraum wirst du keinen Fahrten zugeteilt — sobald deine Flotte es bestätigt.',
+ doneTitle:'Eingereicht', doneBody:'Deine Flotte prüft die Einreichung. Du siehst hier, sobald sie übernommen oder abgelehnt wurde.',
+ doneNotice:'Noch ist nichts verbucht. Erst die Prüfung übernimmt den Beleg — bis dahin ändert sich keine Zahl.',
+ toMyReceipts:'Zu meinen Belegen',
+ stWait:'In Prüfung', stOk:'Übernommen', stNo:'Abgelehnt',
+ rejReason:'Foto unlesbar — bitte neu einreichen.',
+ amtOk:'Eingabe mit Komma. Gesendet wird <code>{w}</code> — Punkt, genau zwei Stellen.',
+ amtBad:'Kein lesbarer Betrag.',
+ payHintBar:'Bar wirkt auf die wöchentliche Abrechnung — darum wird jeder Beleg geprüft.',
+ payHintBank:'Überweisung berührt die Bargeld-Abrechnung nicht.',
+ effX:'Nimmt dich für den Zeitraum aus der Planung.',
+ effI:'Wird vermerkt. Die Planung liest es heute nicht.',
+ effN:'Nur ein Vermerk. Keine Wirkung auf die Planung.',
+ pl1h:'Wo die Belege hingehören — zwei Möglichkeiten',
+ pl1p:'Die App hat heute vier Tabs: <b>Start · Angebote · Profil</b>. Das ist die eigentliche Designfrage.',
+ optAh:'A — ein fünfter Tab „Belege“ (nicht gezeigt)',
+ optAp:'Ein eigener Tab wäre ein Griff und könnte den Punkt für „geprüft / abgelehnt“ tragen. Aber die Leiste ist mit Startseite · Statistiken · Angebote · Profil bereits voll — ein fünfter Platz hieße, einen bestehenden zu verdrängen.',
+ optBh:'B — unter Profil (hier gezeigt)',
+ optBp:'Ein Abschnitt BELEGE neben „Name ändern“ / „Sprache“, der auf diese Screens führt. Ändert die Leiste nicht. Der Preis: zwei Griffe statt einem, und eine Ablehnung braucht den Punkt auf dem Profil-Tab, damit sie nicht unsichtbar bleibt.',
+ pl2h:'Was an El-Professor geht', pl2p:'Live aus dem Formular. Der Vertrag, nicht die Anzeige — die beiden unterscheiden sich mit Absicht.',
+ moneyNote:'<b>Der Betrag reist als Maschinenwert.</b> Reidey zeigt <code>14,90 €</code>, El-Professor schreibt <code>14,90 €</code> — gesendet wird <code>"14.90"</code>, Punkt und genau zwei Stellen. Jede Seite formatiert selbst.',
+ pl3h:'Belegart — die geschlossene Liste', pl3p:'Links der gespeicherte Bezeichner, der byte-identisch bleiben muss. Er ändert sich nie mit der Sprache.',
+ pl4h:'Notiztypen und ihre Wirkung', pl4p:'Zehn Typen, drei Verhalten. Nur <code>exclude_from_plan</code> liest die Planung — als harte, nicht übergehbare Bedingung.',
+ thStored:'gespeichert', thShown:'Anzeige', thReader:'zweiter Leser', thType:'Typ', thShown2:'Anzeige', thBehavior:'Verhalten',
+ foot:'<b>Prototyp.</b> Kein Netzwerkaufruf, keine Schreiboperation, nicht angeschlossen. Liegt unter <code>design-harness/prototype/</code> und damit außerhalb von <code>src/</code> — keine Ratchet und kein Test wird davon berührt. Reidey selbst wurde nur gelesen: keine Datei geändert, kein Container angefasst.'},
+
+en:{ h1:'Reidey Driver — receipts & notes',
+ lede:'How a driver submits a <b>receipt</b>, a <b>document</b> or a <b>note</b>. In Reidey\'s own design language — palette and radii from <code>driver-app/src/lib/theme.ts</code>. <b>Flow and look only</b>: no network call, nothing wired.',
+ navHome:'Home', navStats:'Statistics', navOffers:'Offers', navReceipts:'Receipts', navProfile:'Profile',
+ segOpen:'Open', segAll:'All',
+ ctaReceipt:'Submit a receipt', ctaNote:'Submit a note',
+ secSubmitted:'Submitted', secType:'Receipt type', secDetails:'Details', secPhoto:'Receipt photo',
+ secNoteType:'Note type', secPeriod:'Period', secWhen:'When', secNote:'Note',
+ ttlReceipt:'Submit a receipt', ttlNote:'Submit a note',
+ fDate:'Date', fAmount:'Amount', fPay:'Payment', fPlz:'Postcode · optional',
+ fDesc:'Description', fFrom:'From', fTo:'To', fDay:'Day', allDay:'All day',
+ payBar:'Cash', payBank:'Bank transfer',
+ takePhoto:'Take a photo', photoHint:'or choose a file · JPG, PNG, PDF · up to 10 MB',
+ photoOnly:'A receipt is captured <b>as a photo only</b>. An AI agent reads it and shows you the result to confirm.', takePhoto:'Photograph the receipt', photoHint:'Fit the whole receipt in frame · JPG, PNG · up to 10 MB', ttlReading:'Reading the receipt', reading:'Reading the receipt…', readingSub:'An AI agent is reading the date, the amount and the type.', ttlPreview:'Check and confirm', previewIntro:'This is what the agent read. <b>Check it and correct anything wrong</b> — only your confirmation saves it.', secRead:'What was read', checkThis:'please check', retake:'Retake', savedWith:'Saved with date and time:', confirmSubmit:'Confirm and submit', submit:'Submit', goesToFleet:'Goes to your fleet for review.',
+ reviewNotice:'Your fleet reviews every submission before it enters the settlement.',
+ rangeHint:'The last day counts. 366 days at most.',
+ midnightHint:'End at or before the start — read as crossing midnight.',
+ warn:'<b>This takes you out of planning.</b> You will not be given trips for this period — once your fleet confirms it.',
+ doneTitle:'Submitted', doneBody:'Your fleet is reviewing it. You will see here as soon as it is accepted or rejected.',
+ doneNotice:'Nothing is booked yet. Only the review takes the receipt into the settlement — until then no figure moves.',
+ toMyReceipts:'To my receipts',
+ stWait:'In review', stOk:'Accepted', stNo:'Rejected',
+ rejReason:'Photo unreadable — please submit it again.',
+ amtOk:'Typed with a comma. Sent as <code>{w}</code> — a dot and exactly two decimals.',
+ amtBad:'Not a readable amount.',
+ payHintBar:'Cash moves the weekly settlement — which is why every receipt is reviewed.',
+ payHintBank:'A bank transfer does not touch the cash settlement.',
+ effX:'Takes you out of planning for that period.',
+ effI:'Recorded. Planning does not read it today.',
+ effN:'Just a note. No effect on planning.',
+ pl1h:'Where the receipts belong — two options',
+ pl1p:'The app has four tabs today: <b>Home · Statistics · Offers · Profile</b>. That is the real design question.',
+ optAh:'A — a fifth tab "Receipts" (not shown)',
+ optAp:'Its own tab would be one tap and could carry the dot for "accepted / rejected". But the bar is already full at Home · Statistics · Offers · Profile — a fifth slot means displacing an existing one.',
+ optBh:'B — under Profile (shown here)',
+ optBp:'A RECEIPTS section beside "Change name" / "Language", leading to these screens. It leaves the bar alone. The price: two taps instead of one, and a rejection needs the dot on the Profile tab so it does not stay invisible.',
+ pl2h:'What goes to El-Professor', pl2p:'Live from the form. The contract, not the display — the two differ on purpose.',
+ moneyNote:'<b>The amount travels as a machine value.</b> Reidey shows <code>14,90 €</code>, El-Professor writes <code>14,90 €</code> — what is sent is <code>"14.90"</code>, a dot and exactly two decimals. Each side formats its own way.',
+ pl3h:'Receipt type — the closed list', pl3p:'On the left the stored identifier, which must stay byte-identical. It never changes with the language.',
+ pl4h:'Note types and their effect', pl4p:'Ten types, three behaviours. Only <code>exclude_from_plan</code> is read by planning — as a hard, non-overridable condition.',
+ thStored:'stored', thShown:'shown', thReader:'second reader', thType:'type', thShown2:'shown', thBehavior:'behaviour',
+ foot:'<b>Prototype.</b> No network call, no write, nothing wired. It sits under <code>design-harness/prototype/</code> and so outside <code>src/</code> — no ratchet and no test is touched by it. Reidey itself was only read: no file changed, no container touched.'},
+
+ar:{ h1:'Reidey Driver — الإيصالات والملاحظات',
+ lede:'كيف يُرسل السائق <b>إيصالاً</b> أو <b>مستنداً</b> أو <b>ملاحظة</b>. بلغة تصميم Reidey نفسها — الألوان والزوايا من <code>driver-app/src/lib/theme.ts</code>. <b>العرض والمسار فقط</b>: بلا أي اتصال بالشبكة، وغير موصول بشيء.',
+ navHome:'الرئيسية', navStats:'الإحصائيات', navOffers:'العروض', navReceipts:'الإيصالات', navProfile:'البروفايل',
+ segOpen:'مفتوحة', segAll:'الكل',
+ ctaReceipt:'إرسال إيصال', ctaNote:'إرسال ملاحظة',
+ secSubmitted:'المُرسَلة', secType:'نوع الإيصال', secDetails:'التفاصيل', secPhoto:'صورة الإيصال',
+ secNoteType:'نوع الملاحظة', secPeriod:'الفترة', secWhen:'الوقت', secNote:'الملاحظة',
+ ttlReceipt:'إرسال إيصال', ttlNote:'إرسال ملاحظة',
+ fDate:'التاريخ', fAmount:'المبلغ', fPay:'طريقة الدفع', fPlz:'الرمز البريدي · اختياري',
+ fDesc:'الوصف', fFrom:'من', fTo:'إلى', fDay:'اليوم', allDay:'يوم كامل',
+ payBar:'نقداً', payBank:'تحويل بنكي',
+ takePhoto:'التقاط صورة', photoHint:'أو اختيار ملف · JPG أو PNG أو PDF · حتى ١٠ ميغابايت',
+ photoOnly:'يُلتقط الإيصال <b>كصورة فقط</b>. يقرأه وكيل ذكاء اصطناعي ثم يعرض عليك النتيجة لتؤكّدها.', takePhoto:'صوّر الإيصال', photoHint:'اجعل الإيصال كاملاً داخل الإطار · JPG أو PNG · حتى ١٠ ميغابايت', ttlReading:'جارٍ قراءة الإيصال', reading:'جارٍ قراءة الإيصال…', readingSub:'وكيل ذكاء اصطناعي يقرأ التاريخ والمبلغ والنوع.', ttlPreview:'راجِع وأكّد', previewIntro:'هذا ما قرأه الوكيل. <b>راجِعه وصحّح ما ليس صحيحاً</b> — وتأكيدك وحده هو ما يحفظه.', secRead:'البيانات المقروءة', checkThis:'يُرجى التحقق', retake:'إعادة', savedWith:'يُحفظ مع التاريخ والوقت:', confirmSubmit:'تأكيد وإرسال', submit:'إرسال', goesToFleet:'يذهب إلى أسطولك للمراجعة.',
+ reviewNotice:'أسطولك يراجع كل إرسال قبل أن يدخل في الحساب الأسبوعي.',
+ rangeHint:'اليوم الأخير محسوب. ٣٦٦ يوماً كحد أقصى.',
+ midnightHint:'وقت النهاية قبل البداية أو مساوٍ لها — يُقرأ على أنه يتجاوز منتصف الليل.',
+ warn:'<b>هذا يستثنيك من التخطيط.</b> لن تُسنَد إليك رحلات في هذه الفترة — بمجرد أن يؤكّدها أسطولك.',
+ doneTitle:'تم الإرسال', doneBody:'أسطولك يراجع الإرسال. سترى هنا فور قبوله أو رفضه.',
+ doneNotice:'لم يُسجَّل شيء بعد. المراجعة وحدها تُدخل الإيصال في الحساب — وحتى ذلك الحين لا يتغيّر أي رقم.',
+ toMyReceipts:'إلى إيصالاتي',
+ stWait:'قيد المراجعة', stOk:'مقبول', stNo:'مرفوض',
+ rejReason:'الصورة غير واضحة — يُرجى الإرسال من جديد.',
+ amtOk:'يُكتب بفاصلة. ويُرسَل <code>{w}</code> — بنقطة وبمنزلتين عشريتين بالضبط.',
+ amtBad:'المبلغ غير مقروء.',
+ payHintBar:'النقد يؤثّر على الحساب الأسبوعي — ولهذا يُراجَع كل إيصال.',
+ payHintBank:'التحويل البنكي لا يمسّ الحساب النقدي.',
+ effX:'يستثنيك من التخطيط في تلك الفترة.',
+ effI:'يُسجَّل فقط. التخطيط لا يقرأه حالياً.',
+ effN:'مجرد ملاحظة. بلا أثر على التخطيط.',
+ pl1h:'أين توضع الإيصالات — خياران',
+ pl1p:'التطبيق اليوم فيه أربعة تبويبات: <b>الرئيسية · الإحصائيات · العروض · البروفايل</b>. وهذا هو سؤال التصميم الحقيقي.',
+ optAh:'أ — تبويب خامس «الإيصالات» (غير معروض)',
+ optAp:'تبويب خاص يجعله ضغطة واحدة ويحمل النقطة الدالّة على «قُبل / رُفض». لكن الشريط ممتلئ أصلاً: الرئيسية · الإحصائيات · العروض · البروفايل — فمكان خامس يعني إزاحة واحد قائم.',
+ optBh:'ب — داخل البروفايل (المعروض هنا)',
+ optBp:'قسم «الإيصالات» بجانب «تغيير الاسم» و«اللغة»، يقود إلى هذه الشاشات. لا يغيّر الشريط. والثمن: ضغطتان بدل واحدة، والرفض يحتاج النقطة على تبويب البروفايل كي لا يبقى غير مرئي.',
+ pl2h:'ما يذهب إلى El-Professor', pl2p:'مباشرة من النموذج. هذا هو العقد لا العرض — والاثنان مختلفان عن قصد.',
+ moneyNote:'<b>المبلغ ينتقل كقيمة آلية.</b> Reidey يعرض <code>14,90 €</code>، وEl-Professor يكتب <code>14,90 €</code> — والمُرسَل هو <code>"14.90"</code>، بنقطة وبمنزلتين. كل طرف يصوغه بطريقته.',
+ pl3h:'نوع الإيصال — القائمة المغلقة', pl3p:'على اليمين القيمة المخزَّنة التي يجب أن تبقى مطابقة حرفاً بحرف. وهي لا تتغيّر مع اللغة أبداً.',
+ pl4h:'أنواع الملاحظات وأثرها', pl4p:'عشرة أنواع وثلاثة سلوكيات. التخطيط يقرأ <code>exclude_from_plan</code> وحده — كشرط صارم غير قابل للتجاوز.',
+ thStored:'المخزَّن', thShown:'المعروض', thReader:'قارئ ثانٍ', thType:'النوع', thShown2:'المعروض', thBehavior:'السلوك',
+ foot:'<b>نموذج أولي.</b> بلا اتصال بالشبكة، وبلا أي كتابة، وغير موصول. يقع تحت <code>design-harness/prototype/</code> أي خارج <code>src/</code> — فلا يمسّ أي فحص أو عدّاد. وReidey نفسه لم يُقرأ إلا قراءة: لم يتغيّر ملف، ولم تُلمس حاوية.'},
+};
+
+const SUBS = [
+  { kind:'rec',  cat:'Autowäsche',  date:'04.10.2026', amt:'14,90 €', st:'wait' },
+  { kind:'note', note:'sick',       date:'06.10. – 08.10.2026',      st:'wait' },
+  { kind:'rec',  cat:'Tanken',      date:'02.10.2026', amt:'68,40 €', st:'ok' },
+  { kind:'rec',  cat:'Öl wechseln', date:'28.09.2026', amt:'89,00 €', st:'no' },
+];
+const ICON_REC='<svg class="gl" style="width:20px;height:20px;color:var(--inkMuted)" viewBox="0 0 24 24"><path d="M5 3v18l2-1.2L9 21l2-1.2L13 21l2-1.2L17 21l2-1.2V3l-2 1.2L15 3l-2 1.2L11 3 9 4.2 7 3Z"/><path d="M9 8h6M9 12h6"/></svg>';
+const ICON_NOTE='<svg class="gl" style="width:20px;height:20px;color:var(--inkMuted)" viewBox="0 0 24 24"><path d="M17 3a2.8 2.8 0 0 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>';
+
+let lang='de';
+const st={ sc:'list', cat:'Autowäsche', note:'sick', file:false };
+const t = k => T[lang][k];
+const label = (o) => o[lang] ?? o.de;
+
+// parseDisplayAmount reads "1.234" as 1.23 — a factor of 1000. The wire format
+// is a dot with exactly two decimals: the one shape every El-Professor reader
+// agrees on.
+function wire(s){
+  const c=String(s).trim().replace(/[^\d,.-]/g,''); if(!c) return null;
+  let n;
+  if(c.includes(',')) n=parseFloat(c.replace(/\./g,'').replace(',','.'));
+  else if((c.match(/\./g)||[]).length>1) n=parseFloat(c.replace(/\./g,''));
+  else n=parseFloat(c);
+  return isFinite(n)?(Math.round(n*100)/100).toFixed(2):null;
+}
+const esc = s => String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+
+function paintChrome(){
+  document.documentElement.lang = lang;
+  const rtl = lang==='ar';
+  document.getElementById('scr').dir = rtl?'rtl':'ltr';
+  document.body.dir = rtl?'rtl':'ltr';
+  document.getElementById('h1').textContent = t('h1');
+  document.getElementById('lede').innerHTML = t('lede');
+  document.getElementById('foot').innerHTML = t('foot');
+  document.querySelectorAll('[data-t]').forEach(el=>{ el.innerHTML = t(el.dataset.t); });
+  const pay=document.getElementById('pay');
+  pay.options[0].textContent=t('payBar'); pay.options[1].textContent=t('payBank');
+  document.getElementById('warntext').innerHTML = t('warn');
+  ['pl1h','pl1p','optAh','optAp','optBh','optBp','pl2h','pl2p','moneyNote',
+   'pl3h','pl3p','pl4h','pl4p','thStored','thShown','thReader','thType','thShown2','thBehavior']
+   .forEach(id=>{ document.getElementById(id).innerHTML = t(id); });
+  document.getElementById('free').placeholder = lang==='de'?'z. B. Parkgebühr':lang==='en'?'e.g. parking fee':'مثلاً: رسوم موقف';
+  document.getElementById('txt').placeholder  = lang==='de'?'Was ist passiert?':lang==='en'?'What happened?':'ماذا حدث؟';
+  document.getElementById('amt').placeholder  = lang==='de'?'0,00':lang==='en'?'0.00':'٠٫٠٠';
+}
+
+function paintList(){
+  document.getElementById('sublist').innerHTML = SUBS.map(s=>{
+    const title = s.kind==='rec' ? label(CATS.find(c=>c.v===s.cat)) : label(NOTES.find(n=>n.v===s.note));
+    const sub = s.kind==='rec' ? s.date+' · '+t('payBar') : s.date;
+    const bdg = s.st==='ok'?'<span class="bdg bdg-ok">'+t('stOk')+'</span>'
+              : s.st==='no'?'<span class="bdg bdg-no">'+t('stNo')+'</span>'
+              : '<span class="bdg bdg-wait">'+t('stWait')+'</span>';
+    const rej = s.st==='no' ? '<div class="s" style="color:var(--canceled);margin-top:5px">'+t('rejReason')+'</div>' : '';
+    const amt = s.amt ? '<div class="a ltr">'+s.amt+'</div>' : '';
+    return '<div class="sub"><div class="th">'+(s.kind==='rec'?ICON_REC:ICON_NOTE)+'</div>'+
+      '<div class="m"><div class="t">'+esc(title)+'</div><div class="s ltr">'+esc(sub)+'</div>'+
+      '<div style="margin-top:7px">'+bdg+'</div>'+rej+'</div>'+amt+'</div>';
+  }).join('');
+}
+
+function paintCats(){
+  const box=document.getElementById('cats'); box.innerHTML='';
+  CATS.forEach(c=>{ const b=document.createElement('button'); b.className='chip'; b.type='button';
+    b.textContent=label(c); b.setAttribute('aria-pressed',String(c.v===st.cat));
+    b.onclick=()=>{st.cat=c.v;paintCats();render();}; box.appendChild(b); });
+  const c=CATS.find(x=>x.v===st.cat);
+  document.getElementById('cathint').textContent = c.v==='Other'
+    ? (lang==='de'?'„Other“ wird nie gespeichert — stattdessen dein freier Text.'
+      :lang==='en'?'"Other" is never stored — your own text takes its place.'
+      :'«Other» لا تُخزَّن أبداً — بل يحلّ نصّك الحر محلّها.')
+    : (c.v==='Tanken' ? (lang==='de'?'Wählt die Belege, die in die Tankenquote eingehen.'
+      :lang==='en'?'Selects the receipts that feed the Tankenquote.'
+      :'يحدّد الإيصالات الداخلة في نسبة الوقود.') : '');
+  document.getElementById('freewrap').hidden = st.cat!=='Other';
+  document.getElementById('ctab').innerHTML = CATS.map(x=>
+    '<tr><td><code>'+x.v+'</code></td><td>'+esc(label(x))+'</td><td>'+(x.reader?esc(x.reader[lang]):'—')+'</td></tr>').join('');
+}
+
+function paintNotes(){
+  const box=document.getElementById('ntypes'); box.innerHTML='';
+  const EFF={exclude_from_plan:t('effX'),must_include_in_plan:t('effI'),neutral:t('effN')};
+  const DOT={exclude_from_plan:'d-x',must_include_in_plan:'d-i',neutral:'d-n'};
+  NOTES.forEach(n=>{ const b=document.createElement('button'); b.className='nt'; b.type='button';
+    b.setAttribute('aria-pressed',String(n.v===st.note));
+    b.innerHTML='<span class="d '+DOT[n.b]+'"></span><span style="flex:1"><span class="n">'+esc(label(n))+
+      '</span><span class="e">'+esc(EFF[n.b])+'</span></span>';
+    b.onclick=()=>{st.note=n.v;paintNotes();render();}; box.appendChild(b); });
+  const n=NOTES.find(x=>x.v===st.note), r=RANGE.has(n.v);
+  document.getElementById('range').hidden=!r;
+  document.getElementById('single').hidden=r;
+  document.getElementById('warn').hidden=n.b!=='exclude_from_plan';
+  document.getElementById('ntab').innerHTML = NOTES.map(x=>
+    '<tr><td><code>'+x.v+'</code></td><td>'+esc(label(x))+'</td><td><code>'+x.b+'</code></td></tr>').join('');
+}
+
+function paintFile(){ /* the capture screen is always offered; nothing to toggle */ }
+
+function render(){
+  const w=wire(document.getElementById('amt').value);
+  document.getElementById('amthint').innerHTML = w
+    ? t('amtOk').replace('{w}',w)
+    : '<span style="color:var(--canceled)">'+t('amtBad')+'</span>';
+  const pay=document.getElementById('pay').value;
+  document.getElementById('payhint').textContent = pay==='bar'?t('payHintBar'):t('payHintBank');
+  const t1=document.getElementById('t1').value,t2=document.getElementById('t2').value;
+  document.getElementById('mid').hidden=!(t1&&t2&&t2<=t1);
+
+  let p;
+  if(st.sc==='note'){
+    const n=NOTES.find(x=>x.v===st.note), r=RANGE.has(n.v), f=document.getElementById('full').checked;
+    p={ external_submission_id:'c1a7…e904', external_driver_id:'rdy_drv_55213', kind:'note',
+        note_type:n.v, note_text:document.getElementById('txt').value||null,
+        start_date:r?document.getElementById('from').value:document.getElementById('day').value,
+        end_date:  r?document.getElementById('to').value  :document.getElementById('day').value,
+        is_full_day:r?true:f, start_time:(r||f)?null:(t1||null), end_time:(r||f)?null:(t2||null) };
+  } else {
+    p={ external_submission_id:'9f2b…a011', external_driver_id:'rdy_drv_55213', kind:'receipt',
+        date:document.getElementById('date').value,
+        category: st.cat==='Other'?null:st.cat,
+        description: st.cat==='Other'?(document.getElementById('free').value||null):null,
+        amount:w, payment_method:pay,
+        postal_code:document.getElementById('plz').value||null,
+        document: st.file?{mime:'image/jpeg',bytes:1887436,content:'<base64>'}:null,
+        read_by:'agent', confirmed_by_driver:true,
+        captured_at:'2026-10-05T14:32:00+02:00' };
+  }
+  const lines=Object.entries(p).map(([k,v])=>{
+    let s;
+    if(v===null) s='<span class="c">null</span>';
+    else if(typeof v==='object') s='<span class="c">{ '+Object.entries(v).map(([a,b])=>a+': '+(typeof b==='number'?b:'"'+esc(b)+'"')).join(', ')+' }</span>';
+    else if(typeof v==='boolean') s='<span class="v">'+v+'</span>';
+    else if(k.startsWith('external')) s='<span class="c">"'+v+'"</span>';
+    else s='<span class="v">"'+esc(v)+'"</span>';
+    return '  <span class="k">"'+k+'"</span>: '+s;
+  });
+  document.getElementById('json').innerHTML='{\n'+lines.join(',\n')+'\n}';
+}
+
+let readTimer=null;
+function go(s){
+  st.sc=s;
+  document.querySelectorAll('.sc').forEach(x=>{x.hidden = x.id!=='s-'+s;});
+  document.querySelector('.body').scrollTop=0;
+  clearTimeout(readTimer);
+  if(s==='read'){
+    // Stand-in for the agent's round trip. Nothing is read and nothing is sent;
+    // the point is that the driver waits for a reading, then confirms it.
+    const bar=document.getElementById('bar');
+    bar.style.width='8%';
+    requestAnimationFrame(()=>{ bar.style.width='100%'; });
+    readTimer=setTimeout(()=>go('prev'), 1700);
+  }
+  render();
+}
+function setLang(l){
+  lang=l;
+  document.querySelectorAll('[data-lang]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.lang===l)));
+  paintChrome(); paintList(); paintCats(); paintNotes(); render();
+}
+
+document.addEventListener('click',e=>{
+  const g=e.target.closest('[data-go]'); if(g){ go(g.dataset.go); return; }
+  const l=e.target.closest('[data-lang]'); if(l) setLang(l.dataset.lang);
+});
+document.getElementById('tabseg').onclick=e=>{
+  const b=e.target.closest('button'); if(!b) return;
+  [...e.currentTarget.children].forEach(x=>x.setAttribute('aria-pressed',String(x===b)));
+};
+// A receipt is a photo and nothing else: the camera is the only way in, and the
+// agent's reading is shown for confirmation before anything is saved.
+document.getElementById('drop').onclick=()=>{ st.file=true; go('read'); };
+['amt','date','plz','free','from','to','day','t1','t2','txt','pay'].forEach(id=>{
+  const el=document.getElementById(id); if(el) el.addEventListener('input',render);
+});
+document.getElementById('full').addEventListener('change',e=>{
+  document.getElementById('times').style.display=e.target.checked?'none':'';render();});
+document.getElementById('theme').onclick=()=>{
+  const r=document.documentElement; r.dataset.theme = r.dataset.theme==='dark'?'':'dark';
+};
+
+setLang('de'); paintFile(); go('list');
+</script>
+</body>
+</html>
