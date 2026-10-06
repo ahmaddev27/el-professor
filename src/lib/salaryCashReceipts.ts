@@ -2,6 +2,7 @@ import { supabase } from './supabase';
 import { fetchAllPaginated } from '../utils/fetchAllPaginated';
 import { formatCentsForNumeric } from '../utils/money';
 import type { SalaryPaymentInput } from '../utils/salaryCashReceipt';
+import type { ReceiptAttests } from '../utils/salaryCashReceiptDocument';
 import {
   checkSignedCopyFile,
   refusalFromRpcError,
@@ -68,6 +69,12 @@ export interface SalaryCashReceipt extends ReceiptSnapshotRow {
    * and booked nothing into the till; voiding it deletes no payment.
    */
   books_cash: boolean;
+  /**
+   * Which of the two sentences the signed sheet carries (20261006100000).
+   * `cash_retained` is the weekly "Bar zuruck": the employee kept the amount out
+   * of the week's own takings and no payout from the till took place.
+   */
+  attests: ReceiptAttests;
   /** The payment this receipt documents; null on receipts older than the column's use. */
   salary_payment_id: string | null;
   signed_copy_path: string | null;
@@ -87,7 +94,7 @@ const RECEIPT_COLUMNS = [
   'id, company_id, receipt_number, salary_id, driver_id, period_start, period_end',
   'business_month, business_year, payment_date, place',
   'amount, is_partial, due_amount, paid_bank_before, paid_cash_manual_before, paid_cash_weekly_before',
-  'paid_cash_receipts_before, remaining_before, remaining_after, status, books_cash, salary_payment_id, signed_copy_path',
+  'paid_cash_receipts_before, remaining_before, remaining_after, status, books_cash, attests, salary_payment_id, signed_copy_path',
   'confirmed_at, voided_at, void_reason, driver:drivers(name, gender)',
 ].join(', ');
 

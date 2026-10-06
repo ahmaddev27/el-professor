@@ -555,6 +555,9 @@ function PreviewStep({ flow, company }: { flow: GehaltsquittungFlow; company: Co
       businessMonth,
       paymentDate: pending.input.paymentDate,
       place: pending.input.place,
+      // confirm_salary_cash_payment hands the cash over and books it out of
+      // the till, so this flow can only ever attest a handover.
+      attests: 'cash_handover',
       figures: pending.shown,
     };
   } else if (figures && salary && driver && businessMonth) {
@@ -568,6 +571,7 @@ function PreviewStep({ flow, company }: { flow: GehaltsquittungFlow; company: Co
       businessMonth,
       paymentDate,
       place,
+      attests: 'cash_handover',
       figures: snapshotFromFigures(figures),
     };
   }
