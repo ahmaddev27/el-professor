@@ -49,6 +49,34 @@ export interface ReceiptBusinessMonth {
   year: number;
 }
 
+/**
+ * What the signed sheet states, as the database stored it on the receipt
+ * (`salary_cash_receipts.attests`, 20261006100000).
+ *
+ * `cash_handover` — the employee received the amount in cash from the employer.
+ *
+ * `cash_retained` — the employee kept the amount out of the week's own cash
+ * takings and no payout from the till took place. That is the weekly
+ * "Bar zurück": there is no `cash_movements` row, and not because the money
+ * never left the till but because it never entered it.
+ *
+ * **Read from the row, never recomputed when the sheet is printed.** A
+ * confirmed receipt must reprint exactly what was signed — the rule
+ * `businessMonth` below already follows, and for the same reason: a later
+ * change to a payment's `source_type`, or to the mapping, would otherwise
+ * reprint a signed sheet under a different attestation.
+ */
+export type ReceiptAttests = 'cash_handover' | 'cash_retained';
+
+/**
+ * The kind for a payment that has no stored receipt yet. The database derives
+ * it the same way inside `issue_salary_cash_receipt`; this is for the preview
+ * and the payment view, which have no row to read it from.
+ */
+export function attestsForPaymentSource(sourceType: string | null | undefined): ReceiptAttests {
+  return sourceType === 'weekly_cash_difference' ? 'cash_retained' : 'cash_handover';
+}
+
 export interface ReceiptDocumentInput {
   status: ReceiptDocumentStatus;
   /**
@@ -83,6 +111,8 @@ export interface ReceiptDocumentInput {
   /** YYYY-MM-DD */
   paymentDate: string;
   place: string;
+  /** Which of the two sentences the sheet carries. See ReceiptAttests. */
+  attests: ReceiptAttests;
   figures: ReceiptSnapshot;
   /** For a voided receipt: the day it was voided (YYYY-MM-DD) and why. */
   voided?: { date: string; reason: string } | null;
@@ -239,6 +269,7 @@ export interface StoredReceiptFields extends ReceiptSnapshotRow {
   business_year: number;
   payment_date: string;
   place: string;
+  attests: ReceiptAttests;
   voided_at: string | null;
   void_reason: string | null;
 }
@@ -263,6 +294,7 @@ export function storedReceiptDocumentInput(
     businessMonth: { month: receipt.business_month, year: receipt.business_year },
     paymentDate: receipt.payment_date,
     place: receipt.place,
+    attests: receipt.attests,
     figures: snapshotFromReceiptRow(receipt),
     voided:
       receipt.status === 'voided' && receipt.voided_at
@@ -281,6 +313,8 @@ export interface PaymentViewFields {
   periodStart: string;
   /** YYYY-MM-DD */
   periodEnd: string;
+  /** The payment's `source_type`, which decides the sentence. */
+  sourceType?: string | null;
 }
 
 /**
@@ -312,6 +346,7 @@ export function paymentViewDocumentInput(
     businessMonth: businessMonthOfPeriod(payment.periodStart),
     paymentDate: payment.paymentDate,
     place: '',
+    attests: attestsForPaymentSource(payment.sourceType),
     figures: {
       dueCents: 0,
       paidBankCents: 0,
@@ -364,10 +399,16 @@ export function buildReceiptDocumentText(input: ReceiptDocumentInput): ReceiptDo
   const amountFigures = euro(figures.amountCents);
   const amountWords = amountInWordsFromCents(figures.amountCents);
   const employee = `${salutation(input.driver.gender)}${input.driver.name}`;
+  const retained = input.attests === 'cash_retained';
 
   return {
     title: 'Gehaltsquittung',
-    subtitle: 'Barzahlung des Gehalts',
+    // The title stays whatever the sheet attests, so it agrees with its own
+    // GQ- number: one numbered series, two things it can describe. The subtitle
+    // is what says which.
+    subtitle: retained
+      ? 'Barlohn aus der Wochenabrechnung – keine Auszahlung aus der Kasse'
+      : 'Barzahlung des Gehalts',
     // A `payment_view` prints no number line at all rather than saying it has
     // none — the owner asked for both markers gone on 04.10.2026.
     number: input.receiptNumber
@@ -392,11 +433,35 @@ export function buildReceiptDocumentText(input: ReceiptDocumentInput): ReceiptDo
     // Zeitraum: the month alone identifies the salary, and it is still the one
     // fact that explains the GQ-YYYY in the number, since a January period can
     // carry December's year.
+    //
+    // The handover wording is unchanged, byte for byte: it is on sheets that
+    // have already been signed. The retention wording is 20261006100000's, and
+    // it is what made issuing one possible at all — the handover sentence says
+    // the amount was received *from the employer*, which on a "Bar zurück" row
+    // is false twice, and a signed statement about an event that did not happen
+    // is worse than no document.
+    //
+    // It names no week. `salary_payments.week_start`/`week_end` on such a row
+    // carry the SALARY'S period, not a calendar week (`SalaryDetailsModal`
+    // writes `salary.period_start`/`period_end` into them), so "die Woche vom X
+    // bis Y" would have been a third false statement. The Abrechnungsmonat and
+    // the date are printed as facts below and are enough.
     confirmation: input.status === 'payment_view'
-      ? `Für das Gehalt für ${businessMonth} ist am ${paymentDate} eine Barzahlung von ${amountFigures} ` +
-        `(in Worten: ${amountWords}) erfasst. Diese Ansicht wurde aus der erfassten Zahlung erstellt; ` +
-        'eine Empfangsbestätigung des Arbeitnehmers liegt hier nicht vor.'
-      : `Der Arbeitnehmer bestätigt hiermit, am ${paymentDate} als Barzahlung auf das Gehalt für ` +
+      ? retained
+        ? `Für das Gehalt für ${businessMonth} ist zum ${paymentDate} ein Barlohn von ${amountFigures} ` +
+          `(in Worten: ${amountWords}) aus der Wochenabrechnung erfasst, den der Arbeitnehmer aus den von ` +
+          'ihm vereinnahmten Bareinnahmen behalten hat; eine Auszahlung aus der Kasse des Arbeitgebers ' +
+          'hat nicht stattgefunden. Diese Ansicht wurde aus der erfassten Zahlung erstellt; eine ' +
+          'Empfangsbestätigung des Arbeitnehmers liegt hier nicht vor.'
+        : `Für das Gehalt für ${businessMonth} ist am ${paymentDate} eine Barzahlung von ${amountFigures} ` +
+          `(in Worten: ${amountWords}) erfasst. Diese Ansicht wurde aus der erfassten Zahlung erstellt; ` +
+          'eine Empfangsbestätigung des Arbeitnehmers liegt hier nicht vor.'
+      : retained
+        ? `Der Arbeitnehmer bestätigt hiermit, den Betrag von ${amountFigures} (in Worten: ${amountWords}) ` +
+          `als Barlohn auf das Gehalt für ${businessMonth} aus den von ihm vereinnahmten Bareinnahmen ` +
+          'behalten zu haben. Eine Barauszahlung aus der Kasse des Arbeitgebers hat nicht stattgefunden. ' +
+          'Mit seiner Unterschrift bestätigt der Arbeitnehmer, diesen Betrag als Lohn erhalten zu haben.'
+        : `Der Arbeitnehmer bestätigt hiermit, am ${paymentDate} als Barzahlung auf das Gehalt für ` +
       `${businessMonth} den Betrag von ${amountFigures} (in Worten: ${amountWords}) vom Arbeitgeber ` +
       'erhalten zu haben. Mit seiner Unterschrift bestätigt der Arbeitnehmer den Erhalt des oben ' +
       'genannten Betrages.',

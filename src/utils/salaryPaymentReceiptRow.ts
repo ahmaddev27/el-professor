@@ -95,15 +95,33 @@ export function paymentRowActions(payment: PaymentRowInput, context: PaymentRowC
 }
 
 /**
- * Whether a payment can be issued a numbered Gehaltsquittung after the fact:
- * a cash payment that is neither "Bar zurück" nor already behind a receipt.
+ * The two `source_type` values a receipt can describe, mirroring the allow-list
+ * in `issue_salary_cash_receipt` (20261006100000). An allow-list rather than a
+ * deny-list for the database's own reason: `salary_payments.source_type` is
+ * `text DEFAULT 'manual'` with no CHECK, so a value added later must be
+ * classified on purpose instead of inheriting "handover" by default.
+ */
+const ISSUABLE_SOURCES: ReadonlySet<string> = new Set(['manual', 'weekly_cash_difference']);
+
+/**
+ * Whether a payment can be issued a numbered Gehaltsquittung after the fact: a
+ * cash payment from a source the sheet has a sentence for, not already behind a
+ * receipt.
+ *
+ * **"Bar zurück" is one of them since 20261006100000** (owner decision
+ * 06.10.2026). It was refused before, and the reason was sound — the handover
+ * sentence claims the amount was received from the employer, which on a
+ * retention is false. What changed is the document: the sheet now states that
+ * the employee kept the amount out of the week's own takings and that no payout
+ * took place. The till is untouched either way.
+ *
  * The same condition `issue_salary_cash_receipt` refuses with
  * `payment_not_issuable` and `already_issued`; the database decides, this only
  * keeps the button off rows it would refuse.
  */
 export function paymentRowCanBeIssued(payment: PaymentRowInput): boolean {
   if (payment.payment_type !== 'cash') return false;
-  if (payment.source_type === 'weekly_cash_difference' || payment.source_type === 'gehaltsquittung') return false;
+  if (!ISSUABLE_SOURCES.has(payment.source_type ?? 'manual')) return false;
   return !payment.issued_receipt_id?.trim();
 }
 

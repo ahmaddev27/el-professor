@@ -1,10 +1,16 @@
 /*
   Gehaltsquittung issued for a cash payment that already exists
-  (issue_salary_cash_receipt, 20261004100000).
+  (issue_salary_cash_receipt, 20261004110000 and 20261006100000).
 
-  NOT YET RUN. Written on a machine without Docker, so it has not met a
-  database: the first run on the VPS is its first test, and a failure in it
-  may be the test's own. Read the failing line before blaming the migration.
+  It has met a database since: it runs green on the VPS. The migration number
+  in the line above was 20261004100000 and no such file exists -- the same
+  stale number that was corrected in six source comments and CLAUDE.md.
+
+  Section 4 is 20261006100000's, and it MOVED A RECORDED CELL: a "Bar zurück"
+  payment was refused with `payment_not_issuable` and is now issuable, with the
+  receipt stating that the employee kept the amount rather than received it.
+  The kit failed on exactly that line, which is what it is for; the expectation
+  changed in the same commit as the migration.
 
   The rule it exists for: issuing books NOTHING into the till. Everything else
   here (number, idempotency, refusals, the payment lock, void) is the function
@@ -106,6 +112,7 @@ BEGIN
 
   PERFORM _ir_eq('number is GQ-<business year of the salary>-NNNN', r.receipt_number ~ '^GQ-2024-[0-9]{4,}$', true);
   PERFORM _ir_eq('marked as booking no cash', r.books_cash, false);
+  PERFORM _ir_eq('a manual cash payment attests a handover', r.attests, 'cash_handover');
   PERFORM _ir_eq('no till movement id on the receipt', r.cash_movement_id IS NULL, true);
   PERFORM _ir_eq('names the payment it documents', r.salary_payment_id, p1);
   PERFORM _ir_eq('amount is the payment''s', r.amount, 300.00::numeric);
@@ -133,8 +140,6 @@ BEGIN
     _ir_try(admin_a, _ir_issue_sql(req2, p1)), 'already_issued');
   PERFORM _ir_eq('a bank payment: payment_not_issuable',
     _ir_try(admin_a, _ir_issue_sql(gen_random_uuid(), p2)), 'payment_not_issuable');
-  PERFORM _ir_eq('"Bar zurück": payment_not_issuable',
-    _ir_try(admin_a, _ir_issue_sql(gen_random_uuid(), p3)), 'payment_not_issuable');
   PERFORM _ir_eq('another company''s payment: payment_not_found',
     _ir_try(admin_b, _ir_issue_sql(gen_random_uuid(), p1)), 'payment_not_found');
   PERFORM _ir_eq('a blank place: invalid_place',
@@ -168,6 +173,87 @@ BEGIN
   PERFORM _ir_eq('the next number follows, the voided one is not reused',
     substring(r_again.receipt_number FROM '[0-9]+$')::integer, n1 + 1);
   PERFORM _ir_eq('still no till row', (SELECT count(*) FROM cash_movements)::integer, moves);
+END $$;
+
+-- ─── 4. a retention: issuable since 20261006100000, and the sheet says which ──
+-- THE MOVED CELL. Until this migration a "Bar zurück" payment was refused with
+-- `payment_not_issuable`, and the reason was sound: the document's sentence says
+-- the amount was received from the employer, which on a retention is false
+-- twice. What changed is the document, not the rule -- `attests` carries which
+-- of the two sentences the sheet will print, and the till is still named
+-- nowhere.
+
+DO $$
+DECLARE
+  admin_a uuid := 'a0000000-0000-4000-8000-000000000001';
+  p3 uuid := '9a1a0000-0000-4000-8000-0000000000e3';  -- cash 50, weekly_cash_difference
+  p4 uuid := '9a1a0000-0000-4000-8000-0000000000e4';  -- a forged one, refused
+  p5 uuid := '9a1a0000-0000-4000-8000-0000000000e5';  -- cash 50, a source nothing knows
+  moves integer := (SELECT v::integer FROM _ir_state WHERE k = 'movements');
+  payments_before integer := (SELECT count(*) FROM salary_payments);
+  r salary_cash_receipts;
+BEGIN
+  PERFORM _ir_as(admin_a);
+  r := issue_salary_cash_receipt('e0000000-0000-4000-8000-000000000003', p3, 'Berlin');
+  RESET ROLE;
+
+  PERFORM _ir_eq('a retention is issuable', r.id IS NOT NULL, true);
+  PERFORM _ir_eq('and the sheet attests a retention', r.attests, 'cash_retained');
+  PERFORM _ir_eq('same GQ series and the salary''s business year',
+    r.receipt_number ~ '^GQ-2024-[0-9]{4,}$', true);
+  PERFORM _ir_eq('it books nothing', r.books_cash, false);
+  PERFORM _ir_eq('no till movement id', r.cash_movement_id IS NULL, true);
+  PERFORM _ir_eq('it names the payment it documents', r.salary_payment_id, p3);
+  PERFORM _ir_eq('the amount is the payment''s', r.amount, 50.00::numeric);
+
+  -- THE RULE, again and for the kind that was never in the till at all.
+  PERFORM _ir_eq('the till ledger gained no row', (SELECT count(*) FROM cash_movements)::integer, moves);
+  PERFORM _ir_eq('no payment was created', (SELECT count(*) FROM salary_payments)::integer, payments_before);
+
+  -- The CHECK: a retention cannot be a receipt that booked cash.
+  PERFORM _ir_eq('a retention that booked cash is refused by the table',
+    _ir_try(admin_a, format(
+      'UPDATE salary_cash_receipts SET books_cash = true WHERE id = %L', r.id)) <> 'ok', true);
+
+  -- A receipt's own payment needs no issuability probe here, and this is why:
+  -- 20260914140000's guard refuses a FORGED one outright, so the row cannot be
+  -- made by hand, and a genuine one always carries a live receipt, which
+  -- `already_issued` in section 1 already covers. The first version of this
+  -- section tried to insert one as a fixture and the guard refused it -- which
+  -- is the stronger fact, so it is asserted instead of worked around.
+  PERFORM _ir_eq('a forged gehaltsquittung payment is still refused by the older guard',
+    _ir_try(admin_a, format(
+      'INSERT INTO salary_payments (id, salary_id, company_id, payment_type, amount, '
+      'payment_date, description, payment_category, source_type, created_by) VALUES '
+      '(%L, %L, %L, ''cash'', 50.00, ''2024-03-02'', ''Aus Quittung'', ''Bargehalt'', '
+      '''gehaltsquittung'', %L)',
+      p4, '5a1a0000-0000-4000-8000-0000000000e1',
+      'c0000000-0000-4000-8000-00000000000a', admin_a)),
+    'receipt_payment_locked');
+  PERFORM _ir_eq('and it was not written', (SELECT count(*) FROM salary_payments WHERE id = p4)::integer, 0);
+
+  -- The allow-list, on the case that is reachable. `salary_payments.source_type`
+  -- has no CHECK at all -- it is `text DEFAULT 'manual'` -- so an unknown value
+  -- is storable, which is exactly why the deny-list had to go: it would have
+  -- admitted this row and printed it as a handover that never happened.
+  INSERT INTO salary_payments (id, salary_id, company_id, payment_type, amount, payment_date,
+                               description, payment_category, source_type, created_by)
+  VALUES
+    (p5, '5a1a0000-0000-4000-8000-0000000000e1', 'c0000000-0000-4000-8000-00000000000a',
+     'cash', 50.00, '2024-03-02', 'Unbekannte Quelle', 'Bargehalt', 'kommt_von_woanders', admin_a);
+
+  PERFORM _ir_eq('a source_type nothing classifies is refused, not printed as a handover',
+    _ir_try(admin_a, _ir_issue_sql(gen_random_uuid(), p5)), 'payment_not_issuable');
+
+  -- Voiding a retention: the receipt only. It created no payment and moved no
+  -- cash, so there is nothing to undo but the paper.
+  PERFORM _ir_as(admin_a);
+  r := void_salary_cash_receipt(r.id, 'Falsche Woche');
+  RESET ROLE;
+  PERFORM _ir_eq('a voided retention is voided', r.status, 'voided');
+  PERFORM _ir_eq('and booked no cash back', r.void_cash_movement_id IS NULL, true);
+  PERFORM _ir_eq('and kept its payment', (SELECT count(*) FROM salary_payments WHERE id = p3)::integer, 1);
+  PERFORM _ir_eq('and left the till alone', (SELECT count(*) FROM cash_movements)::integer, moves);
 END $$;
 
 ROLLBACK;
