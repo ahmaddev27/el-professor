@@ -147,6 +147,11 @@
         <tr><td class="n">06.10</td><td><strong>برانشات فقط · ولا رفع على <code>main</code> · ولا شغل على السيرفر</strong></td><td>ريبو Reidey مفتوح محلياً على برانش. حاوياته ومضيفه و<code>main</code> ممنوعين.</td></tr>
         <tr><td class="n">06.10</td><td><strong>ولا بيئة اختبار لـReidey</strong></td><td>قرارك. الأثر كامل تحت.</td></tr>
         <tr><td class="n">05.10</td><td><strong>الأرباح مؤجّلة</strong></td><td>«انسى الارباح ركز ع الكونيكت». مؤجّلة بقرارك — انظر «خارج النطاق».</td></tr>
+        <tr><td class="n">06.10</td><td><strong>ملاحظات المرض/العطلة/عدم التوفّر يدخّلها المشغّل</strong></td><td>بيانات Art. 9 <strong>بتطلع من التحويل كاملاً</strong>. استثناء التخطيط قرار المشغّل أصلاً فما بنخسر إشي. تضييق لقرار «كل العشرة أنواع» بمعلومة ما كانت موجودة وقتها. <span class="ref">[33] [41]</span></td></tr>
+        <tr><td class="n">06.10</td><td><strong>سحبة الروستر بزرّ، مش cron</strong></td><td>ولا تغيير على المضيف، وبوتيرة المشغّل. الـcron لما يثبت إنه بدّه تكرار. <span class="ref">[26]</span></td></tr>
+        <tr><td class="n">06.10</td><td><strong>اختبارات Reidey تنشغّل محلياً</strong></td><td>مش بيئة اختبار — هي الاختبارات نفسها. بلاها كل ضمانة بـM1–M4 مجرّد قراءة.</td></tr>
+        <tr><td class="n">06.10</td><td><strong>نص الملاحظة ما يعبر</strong></td><td>النوع والمدى بيكفّوا لتشغيل قيد التخطيط. النص الحر يوقف عند Reidey. <span class="ref">[41]</span></td></tr>
+        <tr><td class="n">06.10</td><td><strong>التطبيق منشور وشغّال</strong></td><td>مسار الإصدار شغّال (v1.0.5، وexpo-updates مربوط). فالكاميرا كلفة إصدار مش حيط — انظر 2.4.</td></tr>
       </tbody>
     </table>
   </div>
@@ -167,8 +172,11 @@
   <h3><span class="step-no">2.3</span>ما عندنا scheduler <span class="pill warn">بنية</span></h3>
   <p>ستاكنا SPA + Supabase. ولا scheduler بالستاك؛ كل مهمة متكرّرة هي سطر cron على المضيف بينتركّب <strong>باليد وبقرارك</strong>. وReidey عندهم scheduler ناضج (حاوية، نبضة كل دقيقة، ~٢٠ أمر). <strong>فاللي بيتكرّر، هم يعملوه.</strong> <span class="ref">[26]</span></p>
 
-  <h3><span class="step-no">2.4</span>الكاميرا = إصدار متجر <span class="pill warn">ما إلها طريق حول</span></h3>
-  <p>ولا مكتبة كاميرا أو اختيار صور مثبّتة بالتطبيق، وسياسة <code>runtimeVersion</code> عندهم <code>fingerprint</code> فما بتنزل OTA. و iOS موقوف «Cannot Sell» بألمانيا على تحقق DSA من آبل. <strong>أندرويد أول.</strong></p>
+  <h3><span class="step-no">2.4</span>الكاميرا = إصدار متجر <span class="pill info">كلفة، مش حيط</span></h3>
+  <p>ولا مكتبة كاميرا أو اختيار صور مثبّتة بالتطبيق، وسياسة <code>runtimeVersion</code> عندهم <code>fingerprint</code> — فإضافة موديول native <strong>ما بتنزل OTA</strong> ولازمها بناء وتسليم للمتجر. هذا قياس ثابت.</p>
+  <div class="why">
+    <strong>تصحيح، 06.10.2026.</strong> كنت كاتب هون إنه M5 «محجوز» و«iOS موقوف على تحقق DSA من آبل، أندرويد أول». المصدر كان توثيق Reidey نفسه — <code>README.md:50</code> («Blocked (external) — Apple's DSA trader verification in review») و<code>ROADMAP.md:14</code>. <strong>والمالك قال إنه التطبيق منشور على المتاجر وشغّال</strong> — وقياس الريبو بيتفق: <code>version 1.0.5</code>، bundle id للمنصّتين، و<code>expo-updates</code> مربوط، يعني <strong>تغيير JS بحت بينزل OTA فعلاً</strong> (فقناة الإشعارات بـM5 ما بتنتظر متجر؛ الكاميرا وحدها اللي بتنتظر). فالوصف الصحيح: <strong>مسار الإصدار شغّال، والكاميرا كلفة إصدار تنجدول مش حيط ننتظره</strong>. اللي ضايل غير محسوم هو <strong>iOS تحديداً</strong> — حقيقة خارجية ما بتنحل بقراءة الريبو، وملفاتهم ممكن تكون قديمة.
+  </div>
 
   <h3><span class="step-no">2.5</span>الكيت هي بوابة SQL الوحيدة عندنا</h3>
   <p><code>npm run test:rls</code> بتشتغل بحاوية مرمية على الـVPS. و«CI أخضر» ما بيقول ولا إشي عن SQL ما انقرأ. واختبارات الطرفين اليوم <strong>مكتوبة ومش مشغّلة</strong> — ما في قاعدة بيانات محلياً.</p>
@@ -200,7 +208,7 @@
         <tr><td class="n">M2</td><td><strong>ربط السائقين</strong></td><td><span class="pill warn">الجداول مبنية</span></td><td>إنسان يأكّد اقتراح، والتأكيد مدقّق، ومصير السائق الراحل محدّد</td></tr>
         <tr><td class="n">M3</td><td><strong>الملاحظة تعبر وترجع</strong></td><td><span class="pill">لسا</span></td><td>ملاحظة بتمشي من التطبيق للمراجعة للقبول وترجع حالتها — <strong>بلا صورة</strong></td></tr>
         <tr><td class="n">M4</td><td><strong>الفاتورة وصورتها</strong></td><td><span class="pill">لسا</span></td><td>الصورة بتوصل تخزيننا، والمراجع بيقراها بمتصفحه، والقبول يكتب <code>receipts</code></td></tr>
-        <tr><td class="n">M5</td><td><strong>تطبيق السائق</strong></td><td><span class="pill warn">محجوز على المتجر</span></td><td>إصدار أندرويد فيه الشاشات</td></tr>
+        <tr><td class="n">M5</td><td><strong>تطبيق السائق</strong></td><td><span class="pill info">بدّه إصدار</span></td><td>إصدار فيه الشاشات، على المنصّات اللي بينشر عليها</td></tr>
         <tr><td class="n">M6</td><td><strong>لايف</strong></td><td><span class="pill">لسا</span></td><td>رهيرسل كامل، وسطور الـcron بإذنك، وإنتاج الطرفين</td></tr>
       </tbody>
     </table>
@@ -355,8 +363,8 @@
   <p>الصور محفوظة <strong>على الطرفين</strong>، على VPS واحد قرصه الجذري انقاس عند ٢١ GB فاضي ومشارَك مع قواعد ونسخ المنتجين. قاعدة احتفاظ تنتحدّد هون: الكائن عندنا بينمحى بعد N يوم من القبول أو الرفض، ونسخة Reidey بتنمحى لما سحب الحالة يرجع حالة نهائية. <span class="ref">[45]</span></p>
 </section>
 
-<section class="phase blocked" id="m5">
-  <header class="phase-head"><span class="phase-num">M5</span><h2>تطبيق السائق <span class="pill warn">محجوز على المتجر</span></h2></header>
+<section class="phase" id="m5">
+  <header class="phase-head"><span class="phase-num">M5</span><h2>تطبيق السائق <span class="pill info">بدّه إصدار</span></h2></header>
   <p><strong>شكل الشاشة انتحدّد من قياس:</strong> التابات الأربعة ثابتة وكلها بتظهر دايماً، فالقسم <strong>شاشة stack مدفوعة من Profil</strong> بشكل <code>app/settings.tsx</code> — مش تاب خامس يغيّر شكل الشريط لسائق وسائق.</p>
   <ul class="list">
     <li>سطر «Belege &amp; Notizen» بـProfil، بيظهر بس لما <code>documents_enabled</code>.</li>
@@ -364,7 +372,8 @@
     <li><strong>الصورة إلزامية والحقول اختيارية</strong> — واللي السائق يكتبه إشارة ثانية المراجع يقارنها مع قراءة الـOCR.</li>
     <li>قناة إشعارات <code>documents</code> بـ<code>push.ts</code> — <strong>هذي بتنزل OTA</strong> وما بتنتظر المتجر. <span class="ref">[39]</span></li>
   </ul>
-  <div class="gate"><strong>المحجوز هو الكاميرا فقط:</strong> موديول native، و<code>fingerprint</code> بتمنع OTA، و iOS على تحقق DSA. <strong>أندرويد أول.</strong> وكل اللي فوق — M1 لـM4 — بينتحقق بلا هذا الإصدار.</div>
+  <div class="gate"><strong>الكلفة هي الكاميرا فقط:</strong> موديول native، و<code>fingerprint</code> بتمنع OTA — فبدّه بناء وتسليم للمتجر. <strong>مسار الإصدار شغّال</strong> (التطبيق منشور)، فهذا بند بينجدول مش بينتنظر. وكل اللي فوق — M1 لـM4 — بينتحقق بلا هذا الإصدار، وقناة الإشعارات بتنزل OTA.</div>
+  <div class="why"><strong>سؤال واحد بيحدّد نصّ هذا المايلستون:</strong> هل iOS نازل كمان، ولا أندرويد لحاله؟ لأنه لو أندرويد لحاله، فالفيتشر بيوصل نص السائقين — وهذا <strong>قرار منتج</strong> (نشغّلها لنص الأسطول؟) مش مسألة توقيت. وتوثيق Reidey بيقول iOS لسا بالمراجعة؛ لو بطّل صحيح، <strong>ملفّاتهم هي اللي لازم تتحدّث</strong>.</div>
 </section>
 
 <section class="phase" id="m6">
@@ -379,10 +388,11 @@
 </section>
 
 <section class="block" id="open">
-  <h2>٥ · قرارات مستنياك</h2>
+  <h2>٥ · القرارات الأربعة — انجابوا <span class="pill ok">06.10.2026</span></h2>
+  <p class="muted">المالك وافق على التوصيات الأربعة كلها. مسجّلة فوق بجدول القرارات الثابتة؛ هذا الجدول محفوظ لأنه بيوثّق <strong>شو انسأل وليش</strong>، مش بس شو انتقرر.</p>
   <div class="table-wrap">
     <table>
-      <thead><tr><th>#</th><th>القرار</th><th>توصيتي</th></tr></thead>
+      <thead><tr><th>#</th><th>السؤال</th><th>اللي انتقرر <span class="pill ok">موافَق</span></th></tr></thead>
       <tbody>
         <tr><td class="n">١</td><td><strong>ملاحظات المرض/العطلة/عدم التوفّر</strong> — بيانات Art. 9. يرفعها السائق، أو يدخّلها المشغّل؟</td><td><strong>المشغّل.</strong> استثناء التخطيط قراره هو أصلاً، فما بنخسر إشي وبنطلّع بيانات صحية من التحويل كاملاً. <span class="ref">[33] [41]</span></td></tr>
         <tr><td class="n">٢</td><td><strong>مين بيشغّل سحبة الروستر</strong> — زرّ، أو سطر cron؟</td><td><strong>زرّ أول.</strong> ولا تغيير على المضيف، وبوتيرتك. الـcron لما يثبت إنه بدّه تكرار. <span class="ref">[26]</span></td></tr>
