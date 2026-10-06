@@ -5850,23 +5850,23 @@ export const de = {
   'mplan.unitHours': 'Std.',
 
   // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
-  'mplan.blocks.minimum':         'Mindestdauer je Block: {minutes} Minuten.',
+  'mplan.blocks.minimum':         'Schwelle für kurze Blöcke: {minutes} Minuten.',
   'mplan.blocks.stillShort':      '{count} Block/Blöcke bleiben unter {minutes} Minuten: an diesem Tag gibt es für dieses Fahrzeug keinen weiteren Block zum Zusammenlegen. Die Zeiten werden nicht aufgefüllt.',
   'mplan.blocks.stillShortTitle': 'Einzelne Blöcke bleiben kürzer',
-  'mplan.minBlock.hint':          'Kürzere Blöcke werden mit einem Nachbarblock desselben Fahrzeugs am selben Tag zusammengelegt. 0 = keine Mindestdauer.',
+  'mplan.minBlock.hint':          'Blöcke unter dieser Dauer werden mit einem Nachbarblock desselben Fahrzeugs am selben Tag zusammengelegt. Gelingt das nicht, bleibt der Block kürzer und wird gemeldet. 0 = aus.',
   'mplan.minBlock.invalid':       'Bitte eine ganze Zahl ab 0 eingeben.',
-  'mplan.minBlock.label':         'Mindestdauer je Block (Minuten)',
+  'mplan.minBlock.label':         'Schwelle für kurze Blöcke (Minuten)',
   'mplan.regen.searched':         '{tried} Varianten geprüft, {equal} davon gleich gut.',
   'mplan.regen.searchedNothing':  '{tried} Varianten geprüft — keine war besser oder gleich gut und anders. Die Vorgaben lassen nur diese eine Verteilung zu.',
 
   // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
-  'mplan.blocks.maximum':         'Höchstdauer je Block: {minutes} Minuten.',
+  'mplan.blocks.maximum':         'Schwelle für lange Blöcke: {minutes} Minuten.',
   'mplan.blocks.stillLong':       '{count} Block/Blöcke sind länger als {minutes} Minuten. Sie werden nicht zerschnitten: innerhalb eines Blocks ist keine Lücke lang genug für einen Fahrer- oder Fahrzeugwechsel, und eine einzelne Fahrt wird nie geteilt.',
   'mplan.blocks.stillLongTitle':  'Einzelne Blöcke bleiben länger',
-  'mplan.maxBlock.belowMin':      'Die Höchstdauer darf nicht kleiner als die Mindestdauer sein.',
-  'mplan.maxBlock.hint':          'Begrenzt das Zusammenlegen: Blöcke werden nur so weit verbunden, wie diese Dauer erlaubt. Ein Block wird nie zerschnitten. 0 = keine Höchstdauer.',
+  'mplan.maxBlock.belowMin':      'Die Schwelle für lange Blöcke darf nicht kleiner sein als die für kurze.',
+  'mplan.maxBlock.hint':          'Blöcke werden nur so weit verbunden, wie diese Dauer erlaubt. Ein längerer Block wird nur geteilt, wenn der Schalter darunter eingeschaltet ist — sonst bleibt er ganz und wird gemeldet. 0 = aus.',
   'mplan.maxBlock.invalid':       'Bitte eine ganze Zahl ab 0 eingeben.',
-  'mplan.maxBlock.label':         'Höchstdauer je Block (Minuten)',
+  'mplan.maxBlock.label':         'Schwelle für lange Blöcke (Minuten)',
   'mplan.quality.belowMinimum':   'Fahrer unter ihrem Ziel',
   'mplan.quality.excessHours':    'Stunden über dem Limit',
   'mplan.quality.pinConflicts':   'Konflikte bei Pflicht-Einsätzen',
@@ -5914,7 +5914,7 @@ export const de = {
   'abr.mail.unknownTitle':      'Fahrer nicht gefunden',
 
   // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
-  'mplan.split.explain':      'Ein Block über der Höchstdauer wird an seiner größten vorhandenen Lücke geteilt, damit zwei Fahrer ihn übernehmen können. Die Lücke wird auf die Wechseldauer verbreitert — und die Fahrten, die in diese Lücke fallen, entfallen aus dem Plan: während das Fahrzeug übergeben wird, fährt niemand. Gemessen: genau eine Fahrt je Teilung. Keine Fahrzeit wird verschoben.',
+  'mplan.split.explain':      'Ein Block über der Schwelle für lange Blöcke wird an seiner größten vorhandenen Lücke geteilt, damit zwei Fahrer ihn übernehmen können. Die Lücke wird auf die Wechseldauer verbreitert — und die Fahrten, die in diese Lücke fallen, entfallen aus dem Plan: während das Fahrzeug übergeben wird, fährt niemand. Gemessen: genau eine Fahrt je Teilung. Keine Fahrzeit wird verschoben.',
   'mplan.split.givenUp':      '{count} Fahrt(en) fallen in eine Übergabelücke und sind keinem Fahrer zugeteilt. Sie bleiben im Fahrtenbuch unverändert — nur dieser Plan kennt sie nicht.',
   'mplan.split.givenUpTitle': 'Fahrten, die für den Fahrerwechsel entfallen',
   'mplan.split.hint':         'Aus: ein zu langer Block bleibt ganz und wird nur gemeldet.',
@@ -5952,7 +5952,7 @@ export const de = {
   'settings.abrSchedule.weekday':        'Wochentag',
 
   // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
-  'mplan.blocks.stillShortCeiling': '{count} Block/Blöcke bleiben unter {minutes} Minuten, obwohl das Fahrzeug an diesem Tag einen weiteren Block hat: das Zusammenlegen würde die Höchstdauer von {max} Minuten überschreiten. Erhöhen Sie die Höchstdauer in Schritt 2, wenn diese Blöcke zusammengelegt werden sollen.',
+  'mplan.blocks.stillShortCeiling': '{count} Block/Blöcke bleiben unter {minutes} Minuten, obwohl das Fahrzeug an diesem Tag einen weiteren Block hat: das Zusammenlegen würde die Schwelle für lange Blöcke von {max} Minuten überschreiten.',
   'fleet.fcm.scopeBody':          'Sie ändern die Fixkosten für {month}. Frühere Monate bleiben in beiden Fällen unverändert.',
   'fleet.fcm.scopeLater':         'Dieser und alle folgenden Monate',
   'fleet.fcm.scopeLaterHint':     'Folgemonate ohne eigene Einträge übernehmen die Änderung. Folgemonate mit eigenen Einträgen ändern sich nur, wenn dort derselbe Posten (gleiche Bezeichnung) steht.',
@@ -5961,7 +5961,7 @@ export const de = {
   'fleet.fcm.scopeTitle':         'Für welche Monate gilt die Änderung?',
 
   // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
-  'mplan.blocks.longNotSplitOff': '{count} Block/Blöcke sind länger als {minutes} Minuten. Sie wurden nicht geteilt, weil «Lange Blöcke für einen Fahrerwechsel teilen» in Schritt 2 ausgeschaltet ist. Schalten Sie es ein, wenn diese Blöcke auf zwei Fahrer aufgeteilt werden sollen.',
+  'mplan.blocks.longNotSplitOff': '{count} Block/Blöcke sind länger als {minutes} Minuten. Sie wurden nicht geteilt, weil «Lange Blöcke für einen Fahrerwechsel teilen» in Schritt 2 ausgeschaltet ist.',
   'bargeld.add.amount':                    'Betrag (€)',
   'bargeld.add.amountHint':                'Mit Komma, zum Beispiel 120,50',
   'bargeld.add.date':                      'Datum',
@@ -6044,4 +6044,8 @@ export const de = {
   'sal.payment.issueTitle':            'Quittung mit Nummer ausstellen',
   'sal.payment.viewCashIntroIssuable': 'Ansicht dieser Barzahlung. Es ist noch keine Gehaltsquittung gespeichert; diese Ansicht selbst vergibt keine Nummer. Eine nummerierte Quittung stellen Sie unten aus; die Kasse wird dadurch nicht verändert.',
   'sal.payment.voidIntroIssued':       'Diese Quittung wurde nachträglich für eine bestehende Zahlung ausgestellt. Das Stornieren erklärt nur die Quittung für ungültig: die Zahlung bleibt im Gehalt, die Kasse wird nicht verändert, und die Quittung bleibt mit ihrer Nummer als storniert erhalten.',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'mplan.blocks.adjustThreshold': 'Schwelle anpassen',
+  'mplan.blocks.enableSplit':     'Teilen einschalten',
 } as const;
