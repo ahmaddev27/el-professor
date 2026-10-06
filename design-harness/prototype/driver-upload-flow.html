@@ -11,11 +11,34 @@
   Reidey Driver app, in Reidey's own design language — not El-Professor's,
   because the screen lives in the driver's app.
 
-  Read from the app itself, read-only (no file changed, no container touched):
-    palette + radii   /root/ridy/driver-app/src/lib/theme.ts
-    screens           /root/ridy/desing/screens/*.png  (incl. the RTL set)
-    stack             React Native + Expo (expo-router), Manrope + Tajawal,
-                      lucide-react-native · tabs: Start · Angebote · Profil
+  Drawn from the app itself (SDK 57, expo-router, Manrope + Tajawal,
+  lucide-react-native; palette and radii from driver-app/src/lib/theme.ts,
+  screens from desing/screens including the RTL set). The app has FOUR tabs --
+  Start, Statistiken, Angebote, Profil -- they are fixed and all four always
+  render, so this flow is a STACK screen pushed from Profil (the
+  app/settings.tsx shape), not a fifth tab.
+
+  THREE OWNER DECISIONS OF 06.10.2026 THAT THIS FILE NOW FOLLOWS:
+
+  1. NO AI READS A RECEIPT. The driver sends a photo; the fleet's own review
+     screen in El-Professor reads it with the free library already live there
+     (src/utils/receiptOcr.ts -- tesseract.js deu+eng, with the whole
+     extraction layer over it: date, amount, Belegnummer, PLZ, city, category,
+     merchant, each with its own confidence score). So the driver's fields are
+     OPTIONAL rather than read back to him: what he types is a second signal
+     the reviewer compares against the reading. An earlier version of this
+     file promised a "KI-Agent" preview in all three languages. It does not
+     exist, and that wording is gone.
+
+  2. RECEIPTS **AND NOTES** ARE THE PUSH. Everything else El-Professor pulls,
+     through a Connect the company starts. These two cannot be pulled, because
+     we never learn they happened.
+
+  3. THE SECTION APPEARS ONLY FOR A CONNECTED FLEET. The app shows this entry
+     only when the driver's tenant has an El-Professor connection that has
+     actually been used. Measured: DriverProfile carries no tenant id and the
+     app has no feature-flag mechanism at all, so this needs one new boolean
+     on GET /api/v1/driver/me.
 
   Three languages, because the app already ships them: German (default),
   English, Arabic with a full RTL mirror — the register follows Reidey's own
@@ -248,7 +271,7 @@ table.t code{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.75rem;
           </div>
         </section>
 
-        <!-- receipt step 2: the agent reads it -->
+        <!-- receipt step 2: the photo is sent. Nothing is read here -- see the header. -->
         <section class="sc" id="s-read" hidden>
           <div class="ttl-row"><div class="ttl" data-t="ttlReading"></div></div>
           <div class="card" style="padding:18px;display:flex;gap:14px;align-items:center">
@@ -265,7 +288,7 @@ table.t code{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.75rem;
           </div>
         </section>
 
-        <!-- receipt step 3: preview what it read, correct it, confirm -->
+        <!-- receipt step 3: check what is being submitted, then confirm -->
         <section class="sc" id="s-prev" hidden>
           <div class="ttl-row"><button class="back" data-go="rec" type="button">&lsaquo;</button><div class="ttl" data-t="ttlPreview"></div></div>
           <div class="notice n-info" data-t="previewIntro"></div>
@@ -431,7 +454,7 @@ de:{ h1:'Reidey Driver — Belege & Notizen',
  fDesc:'Beschreibung', fFrom:'Von', fTo:'Bis', fDay:'Tag', allDay:'Ganzer Tag',
  payBar:'Bar', payBank:'Überweisung',
  takePhoto:'Foto aufnehmen', photoHint:'oder Datei wählen · JPG, PNG, PDF · bis 10 MB',
- photoOnly:'Ein Beleg wird <b>nur als Foto</b> erfasst. Ein KI-Agent liest ihn und zeigt dir das Ergebnis zur Bestätigung.', takePhoto:'Beleg fotografieren', photoHint:'Halte den ganzen Beleg ins Bild · JPG, PNG · bis 10 MB', ttlReading:'Beleg wird gelesen', reading:'Beleg wird gelesen…', readingSub:'Ein KI-Agent liest Datum, Betrag und Art.', ttlPreview:'Prüfen und bestätigen', previewIntro:'Das hat der Agent gelesen. <b>Prüfe es und korrigiere, was nicht stimmt</b> — erst dein Bestätigen speichert es.', secRead:'Gelesene Angaben', checkThis:'bitte prüfen', retake:'Neu', savedWith:'Wird gespeichert mit Datum und Uhrzeit:', confirmSubmit:'Bestätigen und einreichen', submit:'Einreichen', goesToFleet:'Geht zur Prüfung an deine Flotte.',
+ photoOnly:'Ein Beleg braucht <b>ein Foto</b>. Die Angaben darunter sind freiwillig — deine Flotte liest den Beleg beim Prüfen aus.', takePhoto:'Beleg fotografieren', photoHint:'Halte den ganzen Beleg ins Bild · JPG, PNG · bis 10 MB', ttlReading:'Beleg wird übertragen', reading:'Beleg wird übertragen…', readingSub:'Das Foto geht an deine Flotte. Ausgelesen wird es dort beim Prüfen.', ttlPreview:'Prüfen und bestätigen', previewIntro:'Das reichst du ein. <b>Prüfe es</b> — erst dein Bestätigen sendet es. Was du offen lässt, ergänzt deine Flotte beim Prüfen.', secRead:'Deine Angaben', checkThis:'bitte prüfen', retake:'Neu', savedWith:'Wird gespeichert mit Datum und Uhrzeit:', confirmSubmit:'Bestätigen und einreichen', submit:'Einreichen', goesToFleet:'Geht zur Prüfung an deine Flotte.',
  reviewNotice:'Deine Flotte prüft jede Einreichung, bevor sie in die Abrechnung eingeht.',
  rangeHint:'Der letzte Tag zählt mit. Höchstens 366 Tage.',
  midnightHint:'Endzeit vor oder gleich der Startzeit — wird als über Mitternacht gelesen.',
@@ -473,7 +496,7 @@ en:{ h1:'Reidey Driver — receipts & notes',
  fDesc:'Description', fFrom:'From', fTo:'To', fDay:'Day', allDay:'All day',
  payBar:'Cash', payBank:'Bank transfer',
  takePhoto:'Take a photo', photoHint:'or choose a file · JPG, PNG, PDF · up to 10 MB',
- photoOnly:'A receipt is captured <b>as a photo only</b>. An AI agent reads it and shows you the result to confirm.', takePhoto:'Photograph the receipt', photoHint:'Fit the whole receipt in frame · JPG, PNG · up to 10 MB', ttlReading:'Reading the receipt', reading:'Reading the receipt…', readingSub:'An AI agent is reading the date, the amount and the type.', ttlPreview:'Check and confirm', previewIntro:'This is what the agent read. <b>Check it and correct anything wrong</b> — only your confirmation saves it.', secRead:'What was read', checkThis:'please check', retake:'Retake', savedWith:'Saved with date and time:', confirmSubmit:'Confirm and submit', submit:'Submit', goesToFleet:'Goes to your fleet for review.',
+ photoOnly:'A receipt needs <b>a photo</b>. The details below are optional — your fleet reads the receipt when it reviews it.', takePhoto:'Photograph the receipt', photoHint:'Fit the whole receipt in frame · JPG, PNG · up to 10 MB', ttlReading:'Sending the receipt', reading:'Sending the receipt…', readingSub:'The photo goes to your fleet. It is read there, during the review.', ttlPreview:'Check and confirm', previewIntro:'This is what you are submitting. <b>Check it</b> — only your confirmation sends it. Anything you leave blank, your fleet fills in during the review.', secRead:'Your details', checkThis:'please check', retake:'Retake', savedWith:'Saved with date and time:', confirmSubmit:'Confirm and submit', submit:'Submit', goesToFleet:'Goes to your fleet for review.',
  reviewNotice:'Your fleet reviews every submission before it enters the settlement.',
  rangeHint:'The last day counts. 366 days at most.',
  midnightHint:'End at or before the start — read as crossing midnight.',
@@ -515,7 +538,7 @@ ar:{ h1:'Reidey Driver — الإيصالات والملاحظات',
  fDesc:'الوصف', fFrom:'من', fTo:'إلى', fDay:'اليوم', allDay:'يوم كامل',
  payBar:'نقداً', payBank:'تحويل بنكي',
  takePhoto:'التقاط صورة', photoHint:'أو اختيار ملف · JPG أو PNG أو PDF · حتى ١٠ ميغابايت',
- photoOnly:'يُلتقط الإيصال <b>كصورة فقط</b>. يقرأه وكيل ذكاء اصطناعي ثم يعرض عليك النتيجة لتؤكّدها.', takePhoto:'صوّر الإيصال', photoHint:'اجعل الإيصال كاملاً داخل الإطار · JPG أو PNG · حتى ١٠ ميغابايت', ttlReading:'جارٍ قراءة الإيصال', reading:'جارٍ قراءة الإيصال…', readingSub:'وكيل ذكاء اصطناعي يقرأ التاريخ والمبلغ والنوع.', ttlPreview:'راجِع وأكّد', previewIntro:'هذا ما قرأه الوكيل. <b>راجِعه وصحّح ما ليس صحيحاً</b> — وتأكيدك وحده هو ما يحفظه.', secRead:'البيانات المقروءة', checkThis:'يُرجى التحقق', retake:'إعادة', savedWith:'يُحفظ مع التاريخ والوقت:', confirmSubmit:'تأكيد وإرسال', submit:'إرسال', goesToFleet:'يذهب إلى أسطولك للمراجعة.',
+ photoOnly:'الإيصال بدّو <b>صورة</b>. والحقول تحت اختيارية — شركتك بتقرا الإيصال وقت المراجعة.', takePhoto:'صوّر الإيصال', photoHint:'اجعل الإيصال كاملاً داخل الإطار · JPG أو PNG · حتى ١٠ ميغابايت', ttlReading:'جارٍ إرسال الإيصال', reading:'جارٍ إرسال الإيصال…', readingSub:'الصورة بتروح لشركتك، وهي بتقراها وقت المراجعة.', ttlPreview:'راجِع وأكّد', previewIntro:'هاد اللي رح ترسله. <b>راجعه</b> — وتأكيدك وحده بيبعته. واللي تتركه فاضي شركتك بتكمّله وقت المراجعة.', secRead:'بياناتك', checkThis:'يُرجى التحقق', retake:'إعادة', savedWith:'يُحفظ مع التاريخ والوقت:', confirmSubmit:'تأكيد وإرسال', submit:'إرسال', goesToFleet:'يذهب إلى أسطولك للمراجعة.',
  reviewNotice:'أسطولك يراجع كل إرسال قبل أن يدخل في الحساب الأسبوعي.',
  rangeHint:'اليوم الأخير محسوب. ٣٦٦ يوماً كحد أقصى.',
  midnightHint:'وقت النهاية قبل البداية أو مساوٍ لها — يُقرأ على أنه يتجاوز منتصف الليل.',
