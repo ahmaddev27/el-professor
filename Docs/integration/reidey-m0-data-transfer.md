@@ -286,8 +286,38 @@ The only two deletions in the kit use drivers with no trips, which is why nothin
 driver should be undeletable; and an accepted `partner_receipt_submissions` row has the same shape
 against its `receipt_id`, so an accepted submission should pin its Beleg.
 
-**Three tests to write before anything is designed on top of this.** Each is small and each
-answers a question that is currently a guess.
+### 5.4b They are written and run — `tests/rls/driver-deletion.sql` **[MEASURED 06.10.2026]**
+
+Fifteen probes, one run, in the kit. Ten of the eleven original readings held; **one did not, and
+it was wrong in the dangerous direction.**
+
+| | reading | measured |
+|---|---|---|
+| the cascade destroys a salary and a note | yes | **yes** |
+| a name on a Beleg survives it | yes | **yes** — `receipts.driver_name` unchanged |
+| `original_driver_id` refuses the delete | yes | **yes** — `P0001 fahrtenbuch_trips: immutable fields cannot be modified after insert.` |
+| a confirmed partner link refuses it | yes | **yes** — `23514 partner_driver_links_linked_has_driver` |
+| an accepted **note** submission refuses it | yes | **NO — the delete succeeds** |
+| an accepted **receipt** submission pins its Beleg | yes | **yes** — `23514 partner_receipt_submissions_accepted_has_receipt` |
+
+**The one that was wrong.** I expected the note submission to refuse the delete the way its
+receipt sibling does. What happens is that the delete **succeeds**, `driver_notes` cascades away,
+and the submission is left with `status = 'accepted'` pointing at a `driver_notes` row that no
+longer exists. Read out of the catalogue by probes 14 and 15:
+**`partner_note_submissions.driver_note_id` carries no foreign key, while
+`partner_receipt_submissions.receipt_id` does.** The two tables of one migration — mine, committed
+on 05.10 — disagree, and the `CHECK` that was meant to protect the row only tests that the column
+is non-null, which a dangling uuid satisfies.
+
+So an accepted note submission is not a record of anything once its driver is deleted. **M3 adds
+the missing foreign key** (or the migration states why the asymmetry is deliberate, which it
+currently does not), and probe 14 flips in the same commit.
+
+**And the headline of §5.4 is now measured rather than inferred: a real driver is undeletable
+today.** Any driver who is the original driver of a trip, or behind a confirmed link, cannot be
+deleted at all — and on staging that is 13,959 of 13,981 trips. The erasure rule of §5.5 therefore
+cannot be "delete the driver"; it has to be a function that handles each pinned reference on
+purpose.
 
 ### 5.5 The rule the integration needs
 
@@ -349,10 +379,12 @@ what fills it.
 | 3 | The statutory-retention answer of §2.4 | lawyer |
 | 4 | §6.1 and §6.2 reviewed and live on Reidey, with a new `Stand` | owner |
 | 5 | §6.3 reviewed and live in `legal.privacy`, which also stops being `{}` | owner |
-| 6 | The three deletion tests of §5.4 written and run | engineering |
+| 6 | ~~The three deletion tests of §5.4 written and run~~ — **done**, `tests/rls/driver-deletion.sql`, 15 probes, kit green. One reading was wrong and it found a missing foreign key of mine. | engineering ✓ |
 | 7 | The owner's answer on §3.2 — does the note text cross for the seven types? | owner |
 | 8 | A decision on §2.2: what makes the 30-day promise true, for both copies | owner |
 
-Items 2, 3, 4, 5, 7 and 8 are not engineering work and will not be done by writing code. Items 1
-and 6 are, and 6 is the one that should start immediately — it needs no lawyer and it answers three
-questions that are currently guesses.
+Items 1 and 6 are engineering and both are **done**. Items 2, 3, 4, 5, 7 and 8 are not engineering
+work and will not be done by writing code — they are the gate, and M1 waits on them.
+
+The one new engineering item that came out of item 6 belongs to M3, not here: add the missing
+foreign key on `partner_note_submissions.driver_note_id`.
