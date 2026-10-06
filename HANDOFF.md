@@ -1,6 +1,6 @@
 # Handoff
 
-Last updated: **04.10.2026**
+Last updated: **05.10.2026**
 
 Start here when you pick up this project. Read it together with [CLAUDE.md](CLAUDE.md), which holds the rules and how every mechanism works, and [PROGRESS.md](PROGRESS.md), which records what is done and what was verified. The owner-facing plan is [el-professor-plan.html](el-professor-plan.html). The older developer reference, moved out of the README in PR #18, is [Docs/TECHNICAL_REFERENCE.md](Docs/TECHNICAL_REFERENCE.md); where it disagrees with CLAUDE.md or the code, they win.
 
@@ -25,6 +25,25 @@ Start here when you pick up this project. Read it together with [CLAUDE.md](CLAU
   **Two of those findings are blockers and one is in code committed the same day.** `GET elprofessor/fleet/drivers` returns drivers and `meta` and no fleet identity, and the endpoint that does return `tenant_id` is outside the confined list — so pasting fleet A's token into company B's Connect succeeds and company B begins ingesting fleet A's drivers. Measured, and not hypothetical for this customer: one address in the partner migration's own measurement owns two companies. The second: **no milestone transported the Beleg photo** — `document_path` appears exactly once in the whole repository, its own column definition — and the verification gate could not see it, because the only subject constraint accepts a row with a category or a description and no photo at all.
 
   **The ordering changed because of the audit, not around it.** M0 is the legal paper with no code in it, because personal data moves at M1 and there is no Reidey staging, so the first roster pull is real drivers. M3 is **notes with no image at all** — it proves the transport, the idempotency, the claim-on-link-confirm, the review shape and the status round trip without a line of storage work, which is a better first proof than a receipt row with a null photo. The whole image chain is isolated in M4.
+- **A receipt can attest a retention, not only a handover — `20261006100000`, open against `staging`.** The owner asked why the weekly "Bar zurück" row has no receipt button. It was absent by design and the design was right: the sheet says the amount was received *from the employer*, and on that row the driver collected fares in cash and **kept** part of it as wages. There is no till movement, and not because the money left the till but because it never entered it.
+
+  So the document changed, not the rule. `salary_cash_receipts.attests` is `cash_handover` or `cash_retained`; the retention sheet says *behalten* and that no payout from the till took place; the `GQ-YYYY-NNNN` series, counter, business-year rule and `books_cash = false` are unchanged.
+
+  **Why it was worth doing rather than leaving:** an ordinary cash payment has a ledger row corroborating it. A retention has none — no movement, no receipt, only a `salary_payments` row asserting "paid" — so the signature is the only evidence obtainable that those wages were received.
+
+  **Four things not to undo**, each with a reason that is not style: `attests` is **stored** and never derived when printing, so a later change to a payment's `source_type` cannot reword a signed sheet; the issuability check is an **allow-list** (`manual`, `weekly_cash_difference`), because `salary_payments.source_type` is `text DEFAULT 'manual'` with no CHECK and a deny-list would have printed an unknown value as a handover; the sheet **names no week**, because `week_start`/`week_end` on such a row hold the *salary's* period, not a calendar week; and the handover wording is **byte-identical**, being on sheets already signed.
+
+  **A moved kit cell, named as the kit requires.** `tests/rls/salary-issued-receipt.sql` recorded the refusal and failed on exactly that line; section 4 is the new expectation, in the same commit. Its first version tried to insert a forged `gehaltsquittung` payment as a fixture and `20260914140000`'s guard refused it — the stronger fact, so it is asserted instead of worked around.
+
+  **The cost, stated:** the weekly settlement writes one row per week, so a month can yield up to five numbered receipts for one driver, and the GQ series grows faster. One receipt covering a month's retentions needs a receipt over several payments; the live guard is one per payment row, so that is a separate slice.
+
+- **A number an operator types is not a promise the engine made — PR #186, open against `staging`.** The owner reported that the monthly plan still produces blocks shorter and longer than the short and long limits he entered. Measured: the engine is right and the screen was lying. `buildBlocks` merges a short block only with a neighbour **of the same vehicle on the same day** and only as far as the long limit allows (`fits()`), and it splits a long block only when `splitLongBlocks` is on, which is off by default. `blocks.test.ts:608-624` pins `[20, 80]` under a minimum of 90 as the **correct** answer, and `blocks.ts:180-185` states the design in words.
+
+  So both numbers are **thresholds that classify**, and the fields called them `Mindestdauer` and `Höchstdauer`. They are `Schwelle für kurze/lange Blöcke` now, in both dictionaries, with the step-3 captions and the split explainer on the same vocabulary. One hint had gone from optimistic to **false** — `maxBlock.hint` still read *"Ein Block wird nie zerschnitten"* directly above the switch that cuts blocks — and two code comments said the same.
+
+  **The rule this is an instance of:** a control that reports a problem and names a lever in another step reads as broken. Each banner now carries its lever. `Teilen einschalten` ticks the box and returns to step 2 and deliberately does **not** rebuild in place: `generate` closes over `splitLongBlocks`, so a rebuild in the same handler would use the old value, and the invalidating effect sets `plan` to null on that change, which would empty step 3 mid-flight. `Schwelle anpassen` only navigates and sets no number, because how long a block may run is the operator's judgement.
+
+  No engine file is touched and no figure in any plan changes.
 
 ## Where things stand
 

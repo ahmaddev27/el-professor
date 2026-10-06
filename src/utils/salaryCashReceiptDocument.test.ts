@@ -29,6 +29,7 @@ const partial: ReceiptDocumentInput = {
   businessMonth: { month: 8, year: 2026 },
   paymentDate: '2026-09-14',
   place: ' Berlin ',
+  attests: 'cash_handover',
   figures: {
     dueCents: 250000,
     paidBankCents: 100000,
@@ -212,6 +213,7 @@ describe('storedReceiptDocumentInput — a stored receipt prints its own snapsho
   const stored = {
     receipt_number: 'GQ-2026-0012',
     status: 'voided' as const,
+    attests: 'cash_handover' as const,
     period_start: '2026-08-03',
     period_end: '2026-08-30',
     business_month: 8,
@@ -341,7 +343,7 @@ describe('a receipt without names is not printed', () => {
     const stored = storedReceiptDocumentInput(
       {
         receipt_number: 'GQ-2026-0012', status: 'confirmed', period_start: '2026-08-03', period_end: '2026-08-30',
-        business_month: 8, business_year: 2026,
+        business_month: 8, business_year: 2026, attests: 'cash_handover',
         payment_date: '2026-09-14', place: 'Berlin', due_amount: '2500.00', paid_bank_before: '1000.00',
         paid_cash_manual_before: '20.00', paid_cash_weekly_before: '50.00', paid_cash_receipts_before: '0.00',
         remaining_before: '1430.00', amount: '1234.56', remaining_after: '195.44', is_partial: true,
@@ -388,5 +390,80 @@ describe('paymentViewDocumentInput — a view of a payment, not a receipt', () =
   it('refuses an unreadable date or amount instead of printing it', () => {
     expect(() => paymentViewDocumentInput({ ...payment, periodStart: 'x' }, driver, company)).toThrow(RangeError);
     expect(() => paymentViewDocumentInput({ ...payment, amount: 'abc' }, driver, company)).toThrow();
+  });
+});
+
+/**
+ * The retention sheet (20261006100000). German in both UI languages and
+ * asserted byte for byte like the handover above: a changed word here is a
+ * changed statutory document.
+ */
+describe('a retention: the sheet states that the employee kept the cash', () => {
+  const retained: ReceiptDocumentInput = { ...partial, attests: 'cash_retained' };
+
+  it('says so in the subtitle, and keeps the title so the GQ- number agrees', () => {
+    const text = buildReceiptDocumentText(retained);
+    expect(text.title).toBe('Gehaltsquittung');
+    expect(text.subtitle).toBe('Barlohn aus der Wochenabrechnung – keine Auszahlung aus der Kasse');
+  });
+
+  it('never says the amount was received from the employer', () => {
+    const text = buildReceiptDocumentText(retained);
+    expect(text.confirmation).not.toContain('vom Arbeitgeber');
+    expect(text.confirmation).not.toContain('den Erhalt des oben genannten Betrages');
+    expect(text.confirmation).toContain('behalten zu haben');
+    expect(text.confirmation).toContain(
+      'Eine Barauszahlung aus der Kasse des Arbeitgebers hat nicht stattgefunden.');
+    // The wages WERE received -- by retention rather than by handover -- and the
+    // signature has to say so, or the sheet attests nothing a payroll audit can use.
+    expect(text.confirmation).toContain('diesen Betrag als Lohn erhalten zu haben');
+  });
+
+  it('names no week, because the stored week columns hold the salary period', () => {
+    // `SalaryDetailsModal` writes salary.period_start/period_end into
+    // week_start/week_end, so "die Woche vom X bis Y" would be a third false
+    // statement. The Abrechnungsmonat and the date carry the facts instead.
+    const text = buildReceiptDocumentText(retained);
+    expect(text.confirmation).not.toMatch(/Woche vom/);
+    expect(text.facts).toContainEqual({ label: 'Abrechnungsmonat', value: 'August 2026', emphasis: false });
+  });
+
+  it('leaves the handover wording untouched', () => {
+    const text = buildReceiptDocumentText(partial);
+    expect(text.subtitle).toBe('Barzahlung des Gehalts');
+    expect(text.confirmation).toContain('vom Arbeitgeber');
+    expect(text.confirmation).toContain('erhalten zu haben');
+  });
+
+  it('a payment view of a retention says no receipt confirmation exists either', () => {
+    const text = buildReceiptDocumentText(paymentViewDocumentInput(
+      { amount: '50.00', paymentDate: '2026-08-30', periodStart: '2026-08-03', periodEnd: '2026-08-30',
+        sourceType: 'weekly_cash_difference' },
+      partial.driver, partial.company,
+    ));
+    expect(text.subtitle).toBe('Barlohn aus der Wochenabrechnung – keine Auszahlung aus der Kasse');
+    expect(text.confirmation).toContain('aus der Wochenabrechnung erfasst');
+    expect(text.confirmation).toContain('Empfangsbestätigung des Arbeitnehmers liegt hier nicht vor');
+    expect(text.number).toBeNull();
+  });
+
+  it('a stored receipt prints the kind the row stored, never one recomputed here', () => {
+    // The same rule businessMonth follows: a confirmed receipt reprints exactly
+    // what was signed, so a later change to the payment's source_type cannot
+    // reword an issued sheet.
+    const input = storedReceiptDocumentInput(
+      {
+        receipt_number: 'GQ-2026-0013', status: 'confirmed', period_start: '2026-08-03', period_end: '2026-08-30',
+        business_month: 8, business_year: 2026, attests: 'cash_retained',
+        payment_date: '2026-08-30', place: 'Berlin',
+        due_amount: '250000', paid_bank_before: '0', paid_cash_manual_before: '0',
+        paid_cash_weekly_before: '0', paid_cash_receipts_before: '0', remaining_before: '250000',
+        amount: '50.00', remaining_after: '249950', is_partial: true,
+        voided_at: null, void_reason: null,
+      },
+      partial.driver, partial.company,
+    );
+    expect(input.attests).toBe('cash_retained');
+    expect(buildReceiptDocumentText(input).confirmation).toContain('behalten zu haben');
   });
 });
