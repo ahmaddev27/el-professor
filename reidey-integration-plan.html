@@ -220,6 +220,7 @@
 
 <section class="phase gate0" id="m0">
   <header class="phase-head"><span class="phase-num">M0</span><h2>الورق القانوني — بلا كود <span class="pill crit">بوابة لكل اللي بعده</span></h2></header>
+  <p><strong>السجل الكامل لـM0 هون: <a href="Docs/integration/reidey-m0-data-transfer.md">Docs/integration/reidey-m0-data-transfer.md</a></strong> — خريطة البيانات حقل بحقل، والنصوص الألمانية الجاهزة، وقاعدة المحو، وجدول البوابة. وهاد القسم ملخّصه.</p>
   <p>التدقيق لقى إنه الخطة كانت بتحرّك بيانات سائقين حقيقيين بـM1 والأساس القانوني بآخر مايلستون. وبما إنه ما في بيئة اختبار، هذا ما بقي ترتيب سيّئ — صار <strong>ما إله حل غير إنه يتقدّم</strong>. <span class="ref">[19] [20]</span></p>
 
   <h3><span class="step-no">M0.1</span>مين المتحكّم ومين المعالج، لكل مسار</h3>
@@ -228,7 +229,8 @@
   <h3><span class="step-no">M0.2</span>تعديل AVV أو تفويض Art. 28(2)</h3>
 
   <h3><span class="step-no">M0.3</span>صفحة الخصوصية عند الطرفين</h3>
-  <p>قائمة المستلمين عند Reidey <strong>حصرية</strong> وEl-Professor مش عليها، <strong>وتطبيق السائق بيوصّل لنفس الصفحة</strong>. لازم تنضاف Belege (صور) وملاحظات الغياب/التشغيل بغرضها، وتاريخ «Stand» يتحدّث. <span class="ref">[7]</span></p>
+  <p><strong>قياس 06.10.2026:</strong> قائمة المستلمين بـ§٥ من <code>datenschutz/page.tsx</code> فيها <strong>ست جهات</strong> وEl-Professor مش عليها، <strong>وتطبيق السائق بيوصّل لنفس الصفحة</strong> من تلات أماكن، واحد منهم <strong>قبل تسجيل الدخول</strong>. فإضافة مستلم سابع بدّها بند جديد وتحديث ـ<code>Stand: 24.09.2026</code>.</p>
+  <div class="why"><strong>تصحيح لنصّي.</strong> كنت كاتب هون إنه القائمة «<strong>حصرية</strong>». القياس بيقول <strong>لا هي مقفلة ولا مفتوحة صراحة</strong>: ولا <code>nur</code> ولا <code>ausschließlich</code> ولا <code>abschließend</code>، وولا <code>insbesondere</code> ولا <code>u. a.</code> مربوطة بالقائمة. فالصحيح: هي <strong>بتقدّم الستة كالمزوّدين المستعملين</strong>، فزيادة سابع تضلّ مطلوبة — بس ما بصحّ أسمّيها حصرية وهي ما بتقول هيك. <strong>وأسوأ منها لقينا إشي تاني:</strong> الـFAQ على الصفحة الرئيسية بتقول <code>«Keine Weitergabe an Dritte»</code> — وهاد <strong>بيناقض ـ§٥ تبعهم أصلاً</strong>، قبل ما نضيف إحنا أي إشي. <span class="ref">[7]</span></div>
   <div class="gate">وعندنا: <code>legal.privacy</code> و<code>legal.impressum</code> لسا <code>{}</code> على الإنتاج — Google sign-in فتح قبلهم وهنّ كانوا شرطه المعلن. لازم يوقفوا فاضيين بنفس الإصدار.</div>
 
   <h3><span class="step-no">M0.4</span>بيانات Art. 9 — قرار منفصل</h3>
@@ -236,7 +238,9 @@
   <div class="why"><strong>هذا قرارك</strong> — وهو تضييق لقرارك السابق («كل العشرة أنواع مسموحة»)، بمعلومة ما كانت موجودة وقتها. انظر «قرارات مستنياك».</div>
 
   <h3><span class="step-no">M0.5</span>المحو والاحتفاظ — القاعدة قبل الكود</h3>
-  <p>Reidey عندها آلية محو ووعد ٣٠ يوم. محو عند Reidey <strong>ما بيوصل</strong> El-Professor، وتمريره بسذاجة <strong>بيدمّر سجلات الشركة ملزومة تحفظها قانوناً</strong> (§147 AO، §17 MiLoG). فالقاعدة لازم تفرّق صنفين: الهوية والصورة والـ<code>raw_payload</code> <strong>تنمحي</strong>، والسجل القانوني <strong>ينحصر</strong> بسببه مكتوب على الصف. <span class="ref">[17] [34]</span></p>
+  <p><strong>قيست، والنتيجة أسوأ من اللي كنت كاتبه.</strong> عند Reidey في <code>DriverEraser</code> شغّال وشامل، بس <strong>وعد الـ٣٠ يوم منشور بالتطبيق بالتلات لغات وولا إشي بينفّذه</strong> — ولا job ولا جدولة، والمحو فعل بشري، وكل فترات الاحتفاظ <strong>مطفية بالافتراضي</strong>. <strong>وعنا أسوأ:</strong> ما في محو سائق إطلاقاً — في زرّ سلة <strong>بلا تأكيد</strong>، والـCASCADE بيودّيه لـ<code>salaries</code> و<code>salary_payments</code> و<code>salary_cash_receipts</code> و<code>saved_stundennachweise</code> — <strong>يعني بيدمّر بالزبط السجلات اللي الشركة ملزومة تحفظها</strong> (واختبارات الكيت بتثبّت هاد)، <strong>وبنفس الوقت ما بيمحي</strong>: الأسماء بتضل بـ<code>receipts.driver_name</code> و<code>income.driver_name</code> و<code>assigned_driver_name</code> والـjson، <strong>وكل كائنات التخزين بتضل</strong>. <span class="ref">[17] [34]</span></p>
+  <div class="crit-box"><strong>وأغلب الظن إنه ما بيشتغل أصلاً لسائق حقيقي</strong> — <code>original_driver_id</code> عليه <code>ON DELETE SET NULL</code> والـtrigger بيرفض أي تغيير على هالعمود، والـSET NULL بينفّذ كـUPDATE. وعلى الستيج <strong>13,959 من 13,981 رحلة</strong> حاملة العمود — يعني الحالة العادية مش النادرة. <strong>وهاد استنتاج ما انتفحص</strong> — تلات اختبارات صغيرة بتحسمه وما بدها ولا محامي، وهي أول إشي بـM0.</div>
+  <div class="why"><strong>تصحيح لنصّي:</strong> كنت كاتب هون <code>§147 AO</code> و<code>§17 MiLoG</code> كـ«الأساس». القياس: <strong>ولا سطر بالريبوهين بيستشهد بهم ولا بيسمّي أي مدة احتفاظ</strong> — المرة الوحيدة هي سطري أنا. فهمّ <strong>افتراضي مش متحقّق</strong>، والسجل بيحملهم كـ<strong>سؤال للمحامي</strong>. وقاعدة المحو ما بتنتكتب بلا جوابه.</div>
 </section>
 
 <section class="phase" id="m1">
