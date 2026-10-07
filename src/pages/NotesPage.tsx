@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Plus, Search, Trash2, CreditCard as Edit2, X, StickyNote, Calendar, ChevronLeft, ChevronRight, Download, Loader2 } from 'lucide-react';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui';
+import { PartnerNoteInbox } from '../components/partner/PartnerNoteInbox';
 import ConfirmationModal from '../components/ConfirmationModal';
 import { exportSheetsToExcel, type ExportOptions } from '../utils/excelExport';
 import { supabase } from '../lib/supabase';
@@ -207,6 +209,10 @@ export function NotesPage() {
   const [exportError, setExportError] = useState('');
 
   const [formData, setFormData] = useState<FormData>(DEFAULT_FORM);
+  // Which half of the screen is showing. The tab is the only thing this slice
+  // adds to this file: the existing markup below is wrapped, not re-indented,
+  // so every line of it stays byte-identical.
+  const [tab, setTab] = useState<'own' | 'inbox'>('own');
 
   useEffect(() => {
     const w = getWeeksOfMonth(selectedMonth);
@@ -631,6 +637,14 @@ export function NotesPage() {
         </div>
       </div>
 
+      <Tabs value={tab} onValueChange={value => setTab(value as 'own' | 'inbox')} className="space-y-6">
+        <TabsList aria-label={t('notes.title')}>
+          <TabsTrigger value="own">{t('notes.tab.own')}</TabsTrigger>
+          <TabsTrigger value="inbox">{t('notes.tab.inbox')}</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="own" className="space-y-6">
+
       {/* Filters */}
       <div className="rounded-lg p-4 space-y-4" style={{ background: 'var(--bg-surface)', boxShadow: 'var(--shadow-sm)', border: '1px solid var(--border)' }}>
         <div className="flex flex-col sm:flex-row gap-4">
@@ -797,6 +811,13 @@ export function NotesPage() {
       )}
 
       {/* Modal */}
+        </TabsContent>
+
+        <TabsContent value="inbox">
+          <PartnerNoteInbox companyId={companyId} />
+        </TabsContent>
+      </Tabs>
+
       {showModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
           <div className="rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto"

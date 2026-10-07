@@ -359,6 +359,15 @@ services:
   # with no cron line it is never called, and a call with no body reports and
   # sends nothing.
   #
+  # partner-intake receives what a partner's driver app submits — notes since
+  # M3, and the Beleg as a `kind` on the same function in M4. It is not public:
+  # the partner presents the anon key, which the router admits because it is a
+  # token this stack signed, so the authority is the X-Partner-Key header,
+  # hashed with OTP_PEPPER and resolved to one company by a service-role RPC.
+  # It receives the pepper and NOT the SMTP settings: it sends no mail. Nothing
+  # is submitted until a company presses Connect and a token exists, so
+  # deploying it starts nothing.
+  #
   # extract-receipt and update-income-weeks are deployed but unreachable in
   # practice: nothing in src/ calls either, and extract-receipt performs no auth
   # check while spending ANTHROPIC_API_KEY, so it is left without an API key

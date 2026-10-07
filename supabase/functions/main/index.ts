@@ -84,6 +84,10 @@ const BASE_ENV = ['SUPABASE_URL', 'SUPABASE_ANON_KEY', 'APP_URL', 'EXTRA_CORS_OR
 const SERVICE_ENV = ['SUPABASE_SERVICE_ROLE_KEY'] as const
 const SMTP_ENV = ['SMTP_HOST', 'SMTP_PORT', 'SMTP_USER', 'SMTP_PASS', 'SMTP_SENDER', 'SMTP_SENDER_NAME'] as const
 const OTP_MAIL_ENV = ['OTP_PEPPER', ...SMTP_ENV] as const
+// The pepper without the mail credentials. `partner-intake` hashes a partner's
+// key with it and sends nothing, so bundling it with SMTP as OTP_MAIL_ENV does
+// would hand a function the means to send mail it has no reason to.
+const PARTNER_ENV = ['OTP_PEPPER'] as const
 
 /** Exactly the variables each worker may see. JWT_SECRET and SUPABASE_DB_URL are never passed. */
 const FUNCTION_ENV: ReadonlyMap<string, readonly string[]> = new Map<string, readonly string[]>([
@@ -112,6 +116,13 @@ const FUNCTION_ENV: ReadonlyMap<string, readonly string[]> = new Map<string, rea
   // SMTP to send, the service role to read the driver's address — which it never
   // takes from the request body.
   ['send-document', [...BASE_ENV, ...SERVICE_ENV, ...SMTP_ENV]],
+  // What a partner's driver app submits — M3 carries notes, M4 adds the receipt
+  // as a `kind` here rather than another function. Deliberately NOT public: the
+  // partner presents the anon key, which this router admits because it is a
+  // token this stack signed, and that is precisely why it is not the authority.
+  // The X-Partner-Key header is, hashed with the pepper and resolved to one
+  // company by a service-role RPC over a table in app_private. No SMTP.
+  ['partner-intake', [...BASE_ENV, ...SERVICE_ENV, ...PARTNER_ENV]],
   ['validate-discount-code', [...BASE_ENV, ...SERVICE_ENV]],
   ['update-income-weeks', [...BASE_ENV]],
   ['extract-receipt', [...BASE_ENV, 'ANTHROPIC_API_KEY']],
