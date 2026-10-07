@@ -21,8 +21,8 @@
 
   THE FOUR READINGS. Each was a column with `ON DELETE SET NULL` expected to sit
   under a constraint or a trigger that refuses the resulting UPDATE, so the
-  delete would fail rather than the row being orphaned. Three were right and
-  one was not:
+  delete would fail rather than the row being orphaned. Three were right, one
+  was right only once a migration fixed the schema it had assumed:
 
     2. `fahrtenbuch_trips.original_driver_id` -- SET NULL against
        `protect_fahrtenbuch_immutable_fields`, which lists that column. On
@@ -30,11 +30,15 @@
        not an edge: a real driver is probably undeletable today.
     3. `partner_driver_links.driver_id` -- SET NULL against
        `partner_driver_links_linked_has_driver`.
-    4. `partner_note_submissions.driver_note_id` -- WHICH TURNED OUT NOT TO
-       REFUSE AT ALL. It carries no foreign key, so the delete succeeds and the
-       accepted submission is left pointing at a deleted note. Section 4 and
-       section 6 record that; it is the one reading of the five that was wrong,
-       and it was wrong in the dangerous direction.
+    4. `partner_note_submissions.driver_note_id` -- which did NOT refuse when
+       this file was written, because the column carried no foreign key at
+       all. The reading was right about the mechanism and wrong about the
+       schema, and it was wrong in the dangerous direction: the delete
+       succeeded and left the accepted submission pointing at a deleted
+       note. `20261007100000` added the missing key, so it refuses now like
+       its sibling, and probes 9 to 12 and 14 moved with it. Both sides of
+       that cell are in section 4, because a cell that moves silently is how
+       a gate stops gating.
     5. `partner_receipt_submissions.receipt_id` -- SET NULL against
        `partner_receipt_submissions_accepted_has_receipt`. This one refuses
        deleting the BELEG rather than the driver, and it was not in the list I
@@ -185,30 +189,26 @@ BEGIN
 END
 $$;
 
--- ─── 4. an accepted note submission does NOT refuse the delete ─────────────
--- MEASURED, 06.10.2026, and it contradicts the reading this file was written
--- to confirm. I expected the same refusal as section 5: `driver_notes.driver_id`
--- is CASCADE, so deleting the driver deletes the note, which should SET NULL
--- the submission's `driver_note_id` under a status of 'accepted' and trip the
--- CHECK.
+-- ───────── 4. an accepted note submission refuses the delete, since 20261007100000
+-- THE CELL MOVED, and this file records both sides of it.
 --
--- What actually happens is worse. The delete SUCCEEDS, the note is gone, and
--- the submission is left pointing at a `driver_notes` row that no longer
--- exists -- because `partner_note_submissions.driver_note_id` carries NO
--- FOREIGN KEY, while its sibling `partner_receipt_submissions.receipt_id`
--- does. The two tables of one migration disagree, and section 6 reads that
--- asymmetry out of the catalogue rather than trusting this comment.
+-- MEASURED 06.10.2026, when this file was written: the delete SUCCEEDED. I
+-- had expected the refusal and asserted it; the kit refused the expectation.
+-- `partner_note_submissions.driver_note_id` carried NO FOREIGN KEY while its
+-- sibling `partner_receipt_submissions.receipt_id` carried one, so nothing
+-- fired: the note cascaded away and the submission was left `accepted`
+-- pointing at a row that no longer existed. The CHECK cannot catch that,
+-- because a dangling uuid is still non-null.
 --
--- So an accepted note submission is not a record of anything after its
--- driver is deleted: `status = 'accepted'` with a `driver_note_id` that
--- resolves to nothing. The CHECK that was supposed to protect it only tests
--- that the column is non-null, which a dangling uuid satisfies.
+-- `20261007100000` adds the missing key with the same `ON DELETE SET NULL`,
+-- so the behaviour is now what section 5 has always done for receipts, and
+-- probe 14 flipped with it. The original reading was right about the
+-- mechanism and wrong about the schema.
 --
--- The fix belongs to M3, which is the slice that gives these tables a writer:
--- either `driver_note_id` gains `REFERENCES public.driver_notes(id)` with the
--- same `ON DELETE SET NULL` as its sibling -- and then this section flips to
--- the refusal it was written for -- or the asymmetry is deliberate and the
--- migration has to say why. It currently says nothing.
+-- The chain is one step longer than the others: `driver_notes.driver_id` is
+-- CASCADE, so deleting the driver deletes the note, which SET NULLs the
+-- submission's `driver_note_id` while its status is still 'accepted', and
+-- the CHECK then refuses the whole delete.
 
 INSERT INTO driver_notes (id, created_by, driver_id, note_text, company_id)
 VALUES ('dd200000-0000-4000-8000-000000000002', 'a0000000-0000-4000-8000-000000000001',
@@ -224,25 +224,21 @@ VALUES ('dd700000-0000-4000-8000-000000000001', 'c0000000-0000-4000-8000-0000000
 
 DO $$
 BEGIN
-  -- Recorded as measured, not as hoped: it is allowed.
-  PERFORM _dd_rec(9, 'a driver whose note backs an accepted submission IS deleted',
+  PERFORM _dd_rec(9, 'a driver whose note backs an accepted submission cannot be deleted',
     _dd_try($q$DELETE FROM drivers WHERE id = 'dd000000-0000-4000-8000-000000000004'$q$),
-    'ok');
+    'ERR 23514 %partner_note_submissions_accepted_has_note%', true);
 
-  PERFORM _dd_rec(10, 'and the note went with it',
+  PERFORM _dd_rec(10, 'so the driver is still there',
+    (SELECT count(*)::text FROM drivers WHERE id = 'dd000000-0000-4000-8000-000000000004'), '1');
+
+  PERFORM _dd_rec(11, 'and the note it depends on is still there',
     (SELECT count(*)::text FROM driver_notes WHERE id = 'dd200000-0000-4000-8000-000000000002'),
-    '0');
+    '1');
 
-  -- The consequence, stated as its own probe so it cannot be read as a detail
-  -- of the one above: an accepted submission now points at nothing.
-  PERFORM _dd_rec(11, 'leaving the accepted submission pointing at a deleted note',
+  PERFORM _dd_rec(12, 'and the submission still names it',
     (SELECT driver_note_id::text FROM partner_note_submissions
       WHERE id = 'dd700000-0000-4000-8000-000000000001'),
     'dd200000-0000-4000-8000-000000000002');
-
-  PERFORM _dd_rec(12, 'and still calling itself accepted',
-    (SELECT status FROM partner_note_submissions
-      WHERE id = 'dd700000-0000-4000-8000-000000000001'), 'accepted');
 END
 $$;
 
@@ -268,11 +264,13 @@ BEGIN
 END
 $$;
 
--- ─── 6. the asymmetry, read out of the catalogue ───────────────────────────
--- Section 4's behaviour has one cause, and a comment claiming it is not
--- evidence. These two probes are: one sibling column has a foreign key and the
--- other does not, in the same migration. When M3 adds the missing one, probe
--- 14 flips and section 4 must be rewritten in the same commit.
+-- ───────── 6. the two siblings agree, read out of the catalogue
+-- Until 20261007100000 probe 14 expected ZERO: `driver_note_id` had no
+-- foreign key while `receipt_id` had one, and that asymmetry was the whole
+-- cause of section 4's old behaviour. The migration closed it, so both
+-- probes expect one now, and a migration that drops either key fails here
+-- rather than in a customer's data. A comment claiming the shape is not
+-- evidence; these two probes are.
 
 DO $$
 DECLARE
@@ -283,14 +281,14 @@ BEGIN
     JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = ANY (c.conkey)
    WHERE c.conrelid = 'public.partner_note_submissions'::regclass
      AND c.contype = 'f' AND a.attname = 'driver_note_id';
-  PERFORM _dd_rec(14, 'partner_note_submissions.driver_note_id has no foreign key', v_fk_count, '0');
+  PERFORM _dd_rec(14, 'partner_note_submissions.driver_note_id has its foreign key', v_fk_count, '1');
 
   SELECT count(*)::text INTO v_fk_count
     FROM pg_constraint c
     JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = ANY (c.conkey)
    WHERE c.conrelid = 'public.partner_receipt_submissions'::regclass
      AND c.contype = 'f' AND a.attname = 'receipt_id';
-  PERFORM _dd_rec(15, 'while its sibling receipt_id has one', v_fk_count, '1');
+  PERFORM _dd_rec(15, 'and so does its sibling receipt_id', v_fk_count, '1');
 END
 $$;
 
