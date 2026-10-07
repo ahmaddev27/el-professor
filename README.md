@@ -102,5 +102,6 @@ End-to-end tests run against staging: `cd e2e && npm install && npm run setup &&
 
 - [CLAUDE.md](CLAUDE.md) — rules and mechanisms: architecture, deployment, domain rules, sharp edges. Authoritative; read it before changing code.
 - [CONTRIBUTING.md](CONTRIBUTING.md) — branch model, commit messages, and the rules that must not be traded away.
+- [Docs/operating-rules.md](Docs/operating-rules.md) — the fifteen rules that lived only in one machine's memory until 07.10.2026: who may promote and touch the host, the Fahrtenbuch boundary, the host-only scripts, the RLS kit's sharp edges, and how to measure before reporting a defect.
 - [Docs/audit/](Docs/audit/) — the code audit: verified findings and the phased remediation plan.
 - [Docs/TECHNICAL_REFERENCE.md](Docs/TECHNICAL_REFERENCE.md) — the older developer reference; it predates the self-hosted stack in places, and CLAUDE.md and the code win.
