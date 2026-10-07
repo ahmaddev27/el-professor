@@ -2766,6 +2766,18 @@ VALUES (_mx_id('rpc_partner_link', 'a'), 'c0000000-0000-4000-8000-00000000000a',
         'mx', 'mx-rpc', _mx_id('drivers2', 'a'), 'linked', now())
 ON CONFLICT (id) DO NOTHING;
 
+-- A pending note submission of company A whose driver IS linked, for
+-- partner_note_accept and partner_note_reject. The table section's row has
+-- driver_id NULL -- the state the accept refuses, because driver_notes.driver_id
+-- is NOT NULL -- so an accept probed on it would read T for every principal and
+-- measure nothing, which is the fault partner_submission_claim_driver had above.
+INSERT INTO partner_note_submissions
+       (id, company_id, partner, external_submission_id, external_driver_id,
+        driver_id, note_type, note_text)
+VALUES (_mx_id('rpc_note_submission', 'a'), 'c0000000-0000-4000-8000-00000000000a',
+        'mx', 'mx-rpc-note', 'mx-rpc', _mx_id('drivers2', 'a'), 'general', 'mx')
+ON CONFLICT (id) DO NOTHING;
+
 -- Plan 3.5's write RPCs need a target each: a trial to extend, an active plan
 -- to assign, an invoice that is already paid (so "mark unpaid" has something to
 -- undo), and three company-less accounts for the staff functions — one free,
@@ -3469,7 +3481,27 @@ INSERT INTO _mx_rpc (label, stmt, want, hole) VALUES
     -- inside this file's rollback.
     ('receipt_ocr_allow()',
      $q$SELECT receipt_ocr_allow() ->> 'ok'$q$,
-     'PNYYYYN', NULL);
+     'PNYYYYN', NULL),
+
+    -- M3's three (20261007110000). The door is service_role's alone, like the
+    -- other partner write functions, and its probe passes a NULL company so a
+    -- widened grant would move the cell from P to the 22023 its argument
+    -- contract raises rather than recording a note.
+    ('partner_note_submission_record(no company)',
+     $q$SELECT partner_note_submission_record(NULL, 'mx', 'mx-probe', 'mx-rpc', 'general')::text$q$,
+     'PPPPPPP', NULL),
+    -- The reviewer's two, on company A's pending submission whose driver is
+    -- linked. Both ask get_active_company_id() and the `notes` page themselves,
+    -- being SECURITY DEFINER: a viewer holds can_edit nowhere and is refused,
+    -- company B's admin finds no such submission, and the platform account with
+    -- no company is refused for want of one. Each probe is rolled back, so the
+    -- pending row is still pending for the principal after it.
+    ('partner_note_accept(pending submission of A)',
+     $q$SELECT partner_note_accept({ref:rpc_note_submission}) ->> 'ok'$q$,
+     'PTYYYTT', NULL),
+    ('partner_note_reject(pending submission of A)',
+     $q$SELECT partner_note_reject({ref:rpc_note_submission}, 'mx') ->> 'ok'$q$,
+     'PTYYYTT', NULL);
 
 -- What an open context changes, RPC by RPC. Everything not named here answers
 -- the same with a context as without one, so it takes `super`'s character
@@ -3541,7 +3573,13 @@ UPDATE _mx_rpc r SET staff = o.staff
     -- where the function answers by return value instead of raising.
     ('partner_submission_claim_driver(confirmed link of A)',         'TY'),
     ('receipt_number_next(my own company)',                          'TY'),
-    ('receipt_ocr_allow()',                                          'NY')
+    ('receipt_ocr_allow()',                                          'NY'),
+    -- The reviewer's two: the same platform branch of current_role_permits()
+    -- that lets a support session draw a Belegnummer lets it review a note, and
+    -- the view context is refused by the gate before driver_notes' statement
+    -- trigger is ever reached.
+    ('partner_note_accept(pending submission of A)',                 'TY'),
+    ('partner_note_reject(pending submission of A)',                 'TY')
   ) AS o(label, staff)
  WHERE r.label = o.label;
 
@@ -3572,7 +3610,9 @@ BEGIN
       ('monthly_plan_save(execute grant only)'),
       ('monthly_plan_confirm(execute grant only)'),
       ('partner_submission_claim_driver(confirmed link of A)'),
-      ('receipt_number_next(my own company)'), ('receipt_ocr_allow()')
+      ('receipt_number_next(my own company)'), ('receipt_ocr_allow()'),
+      ('partner_note_accept(pending submission of A)'),
+      ('partner_note_reject(pending submission of A)')
     ) AS o(label)
    WHERE NOT EXISTS (SELECT 1 FROM _mx_rpc r WHERE r.label = o.label AND r.staff IS NOT NULL);
 
