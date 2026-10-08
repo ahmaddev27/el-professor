@@ -1,6 +1,7 @@
-import React, { useState, useEffect, type ReactNode } from 'react';
+import React, { useCallback, useState, useEffect, type ReactNode } from 'react';
 import { Plus, RotateCw, Trash2 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
+import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { useCompanyScope } from '../hooks/useCompanyScope';
 import { useToast } from '../contexts/ToastContext';
 import { useDatabase } from '../hooks/useDatabase';
@@ -8,7 +9,20 @@ import { useCompanySettings } from '../contexts/CompanySettingsContext';
 import { Receipt, Driver } from '../types/receipt';
 import ReceiptList, { PdfFilterInfo } from '../components/ReceiptList';
 import ReceiptModal from '../components/ReceiptModal';
-import { Alert, Button, ConfirmDialog, DataTable, KpiCard, PageHeader } from '../components/ui';
+import {
+  Alert,
+  Badge,
+  Button,
+  ConfirmDialog,
+  DataTable,
+  KpiCard,
+  PageHeader,
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from '../components/ui';
+import { PartnerReceiptInbox } from '../components/partner/PartnerReceiptInbox';
 import { exportTableToExcel } from '../utils/excelExport';
 import { buildBelegeExportOptions, type ReceiptExportFilters } from '../utils/belegeExport';
 import { handleDatabaseError } from '../utils/errorHandler';
@@ -27,6 +41,9 @@ interface ConfirmModalState {
 const BelegePage: React.FC = () => {
   const { t } = useTranslation();
   const { user } = useAuth();
+  // The company whose data this screen queries, which is the opened one
+  // inside a platform context and the membership otherwise (plan 3.4b).
+  const { effectiveCompanyId } = useSuperAdmin();
   // The rights of the company the session is in: a read context writes nothing
   // (plan 3.4b), and the database refuses these three the same way.
   const { canEdit, canDelete, canCreate } = useCompanyScope();
@@ -44,6 +61,10 @@ const BelegePage: React.FC = () => {
   // while it is set. Without it a failed read wrote a workbook whose totals row
   // claimed 0,00 € for a company that has Belege.
   const [loadFailed, setLoadFailed] = useState(false);
+  const [tab, setTab] = useState<'own' | 'inbox'>('own');
+  // null means "not known": a count whose read failed must not be drawn as
+  // 0, which would tell a reviewer there is nothing waiting for them.
+  const [pendingCount, setPendingCount] = useState<number | null>(null);
   const [confirmModal, setConfirmModal] = useState<ConfirmModalState>({
     isOpen: false,
     title: '',
@@ -58,6 +79,21 @@ const BelegePage: React.FC = () => {
   useEffect(() => {
     if (!dbLoading) loadData();
   }, [dbLoading]);
+
+  const loadPendingCount = useCallback(async () => {
+    if (!effectiveCompanyId) {
+      setPendingCount(null);
+      return;
+    }
+    const { count, error } = await supabase
+      .from('partner_receipt_submissions')
+      .select('id', { count: 'exact', head: true })
+      .eq('company_id', effectiveCompanyId)
+      .eq('status', 'pending');
+    setPendingCount(error ? null : count ?? 0);
+  }, [effectiveCompanyId]);
+
+  useEffect(() => { void loadPendingCount(); }, [loadPendingCount]);
 
   const loadData = async () => {
     setLoading(true);
@@ -255,18 +291,49 @@ const BelegePage: React.FC = () => {
         ) : undefined,
       )}
 
-      <ReceiptList
-        receipts={receipts}
-        drivers={drivers}
-        onEdit={handleEditReceipt}
-        onDelete={handleDeleteReceipt}
-        onExportExcel={handleExportExcel}
-        onDownloadPdf={handleDownloadPdf}
-        canEdit={canEditReceipt}
-        canDelete={canDeleteReceipt}
-        userDisplayNames={userDisplayNames}
-        exportDisabled={loadFailed}
-      />
+      {/* Two tabs since M4: the company's own Belege, and what drivers
+          photographed in the partner app and nobody has judged yet. The
+          inbox is a component of its own — see its header for why. */}
+      <Tabs value={tab} onValueChange={value => setTab(value as 'own' | 'inbox')} className="space-y-4">
+        <TabsList aria-label={t('nav.belege')}>
+          <TabsTrigger value="own">{t('partner.belege.tabOwn')}</TabsTrigger>
+          <TabsTrigger value="inbox">
+            {t('partner.belege.tab')}
+            {/* Only when the count is known. An unread count drawn as 0 says
+                "nothing is waiting", which is the claim this avoids. */}
+            {pendingCount !== null && pendingCount > 0 && (
+              <Badge tone="brand" className="ml-2">{pendingCount}</Badge>
+            )}
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="own">
+          <ReceiptList
+            receipts={receipts}
+            drivers={drivers}
+            onEdit={handleEditReceipt}
+            onDelete={handleDeleteReceipt}
+            onExportExcel={handleExportExcel}
+            onDownloadPdf={handleDownloadPdf}
+            canEdit={canEditReceipt}
+            canDelete={canDeleteReceipt}
+            userDisplayNames={userDisplayNames}
+            exportDisabled={loadFailed}
+          />
+        </TabsContent>
+
+        <TabsContent value="inbox">
+          <PartnerReceiptInbox
+            companyId={effectiveCompanyId}
+            onDecided={() => {
+              // An accepted Beleg becomes a row in the list beside it, and the
+              // badge has to stop counting it.
+              void loadData();
+              void loadPendingCount();
+            }}
+          />
+        </TabsContent>
+      </Tabs>
 
       {isReceiptModalOpen && (
         <ReceiptModal

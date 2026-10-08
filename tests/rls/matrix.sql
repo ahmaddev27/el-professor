@@ -1853,16 +1853,25 @@ INSERT INTO _mx_expected (tbl, op, anon, viewer, editor, supervisor, admin, othe
 ('partner_driver_links',           'U', '..', '..', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
 ('partner_driver_links',           'D', '..', '..', '..', '..', '..', '..', '..', NULL),
 ('partner_driver_links',           'M', '..', '..', 'R.', 'R.', 'R.', '.R', '..', NULL),
+-- 20261008160000 dropped both submission tables' UPDATE policy: it admitted no
+-- caller (every judging path is a SECURITY DEFINER RPC) and it let a reviewer
+-- mark a submission accepted with no Beleg written, rewrite the words the driver
+-- was already told, and -- once 20261008150000 added the column -- stamp a
+-- delivery that never happened. So U and M read '.' for everyone: with no
+-- policy the statement matches no row and reports success, fahrtenbuch_trips'
+-- own shape. The view context still reads T on U, because
+-- refuse_read_only_context_write is a BEFORE STATEMENT trigger and fires before
+-- a policy is consulted.
 ('partner_receipt_submissions',    'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
 ('partner_receipt_submissions',    'I', 'RR', 'RR', 'RR', 'RR', 'RR', 'RR', 'RR', NULL),
-('partner_receipt_submissions',    'U', '..', '..', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('partner_receipt_submissions',    'U', '..', '..', '..', '..', '..', '..', '..', NULL),
 ('partner_receipt_submissions',    'D', '..', '..', '..', '..', '..', '..', '..', NULL),
-('partner_receipt_submissions',    'M', '..', '..', 'R.', 'R.', 'R.', '.R', '..', NULL),
+('partner_receipt_submissions',    'M', '..', '..', '..', '..', '..', '..', '..', NULL),
 ('partner_note_submissions',       'S', '..', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
 ('partner_note_submissions',       'I', 'RR', 'RR', 'RR', 'RR', 'RR', 'RR', 'RR', NULL),
-('partner_note_submissions',       'U', '..', '..', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('partner_note_submissions',       'U', '..', '..', '..', '..', '..', '..', '..', NULL),
 ('partner_note_submissions',       'D', '..', '..', '..', '..', '..', '..', '..', NULL),
-('partner_note_submissions',       'M', '..', '..', 'R.', 'R.', 'R.', '.R', '..', NULL);
+('partner_note_submissions',       'M', '..', '..', '..', '..', '..', '..', '..', NULL);
 
 -- ─── what a context changes, as a rule ──────────────────────────────────────
 --
@@ -2008,14 +2017,14 @@ UPDATE _mx_expected x SET staff_view = o.sv, staff_support = o.ss
     ('partner_driver_links',         'M', '..', 'R.'),
     ('partner_receipt_submissions',  'S', 'Y.', 'Y.'),
     ('partner_receipt_submissions',  'I', 'TT', 'RR'),
-    ('partner_receipt_submissions',  'U', 'TT', 'Y.'),
+    ('partner_receipt_submissions',  'U', 'TT', '..'),
     ('partner_receipt_submissions',  'D', 'TT', '..'),
-    ('partner_receipt_submissions',  'M', '..', 'R.'),
+    ('partner_receipt_submissions',  'M', '..', '..'),
     ('partner_note_submissions',     'S', 'Y.', 'Y.'),
     ('partner_note_submissions',     'I', 'TT', 'RR'),
-    ('partner_note_submissions',     'U', 'TT', 'Y.'),
+    ('partner_note_submissions',     'U', 'TT', '..'),
     ('partner_note_submissions',     'D', 'TT', '..'),
-    ('partner_note_submissions',     'M', '..', 'R.'),
+    ('partner_note_submissions',     'M', '..', '..'),
     ('roles',                    'S', 'Y.', 'Y.'),
     ('roles',                    'I', 'TT', 'YR'),
     ('roles',                    'U', 'TT', 'Y.'),
@@ -2776,6 +2785,22 @@ INSERT INTO partner_note_submissions
         driver_id, note_type, note_text)
 VALUES (_mx_id('rpc_note_submission', 'a'), 'c0000000-0000-4000-8000-00000000000a',
         'mx', 'mx-rpc-note', 'mx-rpc', _mx_id('drivers2', 'a'), 'general', 'mx')
+ON CONFLICT (id) DO NOTHING;
+
+-- A pending RECEIPT submission of company A with a linked driver AND a
+-- document_path, for partner_receipt_accept and partner_receipt_reject. The
+-- table section's row has neither, and each absence is a refusal of its own
+-- (`driver_not_linked`, `document_missing`) that raises exactly as the role
+-- gate does — so probed on that row the accept read T for every principal and
+-- measured nothing. Third time in this slice: the fixture is the fix, and
+-- partner-receipt-accept.sql is what tests the two refusals on purpose.
+INSERT INTO partner_receipt_submissions
+       (id, company_id, partner, external_submission_id, external_driver_id,
+        driver_id, receipt_date, category, amount, payment_method, document_path)
+VALUES (_mx_id('rpc_receipt_submission', 'a'), 'c0000000-0000-4000-8000-00000000000a',
+        'mx', 'mx-rpc-beleg', 'mx-rpc', _mx_id('drivers2', 'a'),
+        '2026-09-15', 'Tanken', 41.47, 'bar',
+        'c0000000-0000-4000-8000-00000000000a/partner/mx-rpc-beleg.jpg')
 ON CONFLICT (id) DO NOTHING;
 
 -- Plan 3.5's write RPCs need a target each: a trial to extend, an active plan
@@ -3550,7 +3575,23 @@ INSERT INTO _mx_rpc (label, stmt, want, hole) VALUES
      'PPPPPPP', NULL),
     ('partner_submission_push_record(submission of A)',
      $q$SELECT partner_submission_push_record({ref:rpc_note_submission}) ->> 'ok'$q$,
-     'PPPPPPP', NULL);
+     'PPPPPPP', NULL),
+
+    -- M4's three (20261008140000). The door is service_role's; the two
+    -- decisions are the reviewer's, behind the `receipts` page, and both are
+    -- probed on the fixture above — a Beleg with a linked driver and a photo,
+    -- so an authorised caller COMPLETES the accept and the cell separates the
+    -- gate from the Beleg's own refusals. Each probe is rolled back, so the
+    -- row is still pending for the principal after it.
+    ('partner_receipt_submission_record(no company)',
+     $q$SELECT partner_receipt_submission_record(NULL, 'mx', 'x', 'y', '2026-10-07')::text$q$,
+     'PPPPPPP', NULL),
+    ('partner_receipt_accept(pending Beleg of A)',
+     $q$SELECT partner_receipt_accept({ref:rpc_receipt_submission}) ->> 'ok'$q$,
+     'PTYYYTT', NULL),
+    ('partner_receipt_reject(pending Beleg of A)',
+     $q$SELECT partner_receipt_reject({ref:rpc_receipt_submission}, 'mx') ->> 'ok'$q$,
+     'PTYYYTT', NULL);
 
 -- What an open context changes, RPC by RPC. Everything not named here answers
 -- the same with a context as without one, so it takes `super`'s character
@@ -3633,7 +3674,13 @@ UPDATE _mx_rpc r SET staff = o.staff
     -- session review a note lets it decide a link; a view context is refused by
     -- the gate before the tenant tables' statement trigger is reached.
     ('partner_driver_link_confirm(pending link of A)',               'TY'),
-    ('partner_driver_link_reject(pending link of A)',                'TY')
+    ('partner_driver_link_reject(pending link of A)',                'TY'),
+    -- The same platform branch of current_role_permits() that lets a support
+    -- session draw a Belegnummer lets it accept a Beleg, which is one call
+    -- writing two rows, both recorded by 3.4c's triggers. A view context is
+    -- refused by that branch before either is written.
+    ('partner_receipt_accept(pending Beleg of A)',                   'TY'),
+    ('partner_receipt_reject(pending Beleg of A)',                   'TY')
   ) AS o(label, staff)
  WHERE r.label = o.label;
 
@@ -3668,7 +3715,9 @@ BEGIN
       ('partner_note_accept(pending submission of A)'),
       ('partner_note_reject(pending submission of A)'),
       ('partner_driver_link_confirm(pending link of A)'),
-      ('partner_driver_link_reject(pending link of A)')
+      ('partner_driver_link_reject(pending link of A)'),
+      ('partner_receipt_accept(pending Beleg of A)'),
+      ('partner_receipt_reject(pending Beleg of A)')
     ) AS o(label)
    WHERE NOT EXISTS (SELECT 1 FROM _mx_rpc r WHERE r.label = o.label AND r.staff IS NOT NULL);
 

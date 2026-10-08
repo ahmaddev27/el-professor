@@ -207,7 +207,7 @@
         <tr><td class="n">M1</td><td><strong>الكونيكت</strong></td><td><span class="pill ok">مبني · 08.10 · مع السحبة</span></td><td>توكن أسطول (أ) ما بيقدر يتصل كشركة (ب)، والسحب والسحب-للخلف محكومين</td></tr>
         <tr><td class="n">M2</td><td><strong>ربط السائقين</strong></td><td><span class="pill ok">مبني · 08.10</span></td><td>إنسان يأكّد اقتراح، والتأكيد مدقّق، ومصير السائق الراحل محدّد</td></tr>
         <tr><td class="n">M3</td><td><strong>الملاحظة تعبر وترجع</strong></td><td><span class="pill ok">مبني · 08.10 · مع المُرسل</span></td><td>ملاحظة بتمشي من التطبيق للمراجعة للقبول وترجع حالتها — <strong>بلا صورة</strong></td></tr>
-        <tr><td class="n">M4</td><td><strong>الفاتورة وصورتها</strong></td><td><span class="pill">لسا</span></td><td>الصورة بتوصل تخزيننا، والمراجع بيقراها بمتصفحه، والقبول يكتب <code>receipts</code></td></tr>
+        <tr><td class="n">M4</td><td><strong>الفاتورة وصورتها</strong></td><td><span class="pill ok">مبني · 08.10 · مع عارض الصورة</span></td><td>الصورة بتوصل تخزيننا، والمراجع بيقراها بمتصفحه، والقبول يكتب <code>receipts</code></td></tr>
         <tr><td class="n">M5</td><td><strong>تطبيق السائق</strong></td><td><span class="pill info">بدّه إصدار</span></td><td>إصدار فيه الشاشات، على المنصّات اللي بينشر عليها</td></tr>
         <tr><td class="n">M6</td><td><strong>لايف</strong></td><td><span class="pill">لسا</span></td><td>رهيرسل كامل، وسطور الـcron بإذنك، وإنتاج الطرفين</td></tr>
       </tbody>
@@ -354,6 +354,10 @@
     <p style="margin:.5em 0 .2em">و<code>extractReceiptData(file: File | Blob)</code> بدها <strong>بايتات حقيقية بمتصفح المراجع</strong> — فقرارك «القراءة بمتصفح الشركة» <strong>كان بينهار</strong>.</p>
     <p style="margin:.5em 0 .2em">وأذكى جزء: <strong>الفحص كان بينجح وهو فاضي.</strong> القيد الوحيد <code>CHECK (category IS NOT NULL OR description &lt;&gt; '')</code> — فصف بلا صورة بيمرق. يعني بوابة التحقق اللي الترتيب مبني عليها <strong>ما بتكشف أكبر نقص فيه</strong>. <span class="ref">[2] [13] [38]</span></p>
   </div>
+
+  <div class="why"><strong>مبني 08.10.2026:</strong> ثلاث migrations (<code>20261008140000</code> الباب والقبول والرفض بـ٩ self-checks، <code>20261008150000</code> الرفض يوصل للسائق عن البيليج كمان، <code>20261008160000</code> الوارد ما حدا يعدّله)، و<code>_shared/partner-receipt-core.ts</code> بـ٤٦ اختبار، و<code>tests/rls/partner-receipt-accept.sql</code> بـ٢٩ مسبار، وتبويب مراجعة بشاشة البيليجات <strong>بعارض صورة</strong>. و<strong>زرّ القبول بينسحب لما الصورة مش معروضة</strong> — بيليج بينقبل أعمى هو بالظبط اللي رفض <code>document_missing</code> موجود عشانه.
+  <br><strong>وانحراف واحد عن M4.2:</strong> استعملت <code>documents</code> مش bucket خاص — الـ15 سياسة تبعه معتمدة من قياس البرودكشين و<code>20260920100000</code> فيه self-check بيفشّل أي سياسة جديدة على الأربعة. الكلفة: <code>documents</code> بلا بوابة دور على القراءة، فأي عضو بالشركة يقرا الصورة — متسق مع إنّ صفّ <code>receipts</code> نفسه بيقراه أي عضو، بس هو <strong>قرارك</strong> إذا بدك bucket خاص.
+  <br><strong>واللي لسا:</strong> حدّ الحجم على Caddy (تغيير هوست)، والتصغير وشيل EXIF (M5)، وقاعدة الاحتفاظ (M4.5).</div>
 
   <h3><span class="step-no">M4.1</span>الصورة تصير تسليم مسمّى</h3>
   <ul class="list">

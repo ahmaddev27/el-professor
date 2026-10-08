@@ -31,6 +31,17 @@
  * semantic type + structured params, NOT pre-rendered text, so the frontend
  * renders the title/body/icon in each user's own language".
  *
+ * ## It carries two kinds, and naming the kind is not a nicety
+ *
+ * A note and a Beleg are rejected on different screens and mean different
+ * things to a driver — "your absence was not accepted" against "your receipt
+ * was not accepted" — and Reidey renders the sentence from the `kind` in the
+ * notification's params. Its validator DEFAULTS an absent kind to `note`, so a
+ * Beleg sent without one is announced to the driver as a note. The kind comes
+ * out of `partner_submission_push_target`, which looks in both submission
+ * tables (`20261008150000`), and it also decides which page the caller must
+ * hold: this asked for `notes` whatever the subject was.
+ *
  * ## A failure is recorded, never retried here
  *
  * There is no scheduler in this stack, so this function does not pretend to be
@@ -46,7 +57,7 @@ import { corsFor } from '../_shared/http.ts'
 import { PARTNER_ENDPOINT_VAR, partnerEndpoint } from '../_shared/partner-endpoint.ts'
 import { openPartnerToken } from '../_shared/partner-token-seal.ts'
 
-/** One way a note is rejected: a person decided. A kind of event, not a list. */
+/** One way a submission is rejected: a person decided. An event, not a list. */
 const REASON_CODE = 'review_rejected'
 const PUSH_TIMEOUT_MS = 10_000
 
@@ -92,15 +103,6 @@ Deno.serve(async (req: Request) => {
   const companyId = company.data as string | null
   if (!companyId) return respond({ ok: false, reason: 'not_authorized' }, 403)
 
-  // The reviewer's own page: telling a driver about a note decision belongs to
-  // whoever may make that decision.
-  const permitted = await asCaller.rpc('current_role_permits', {
-    p_page: 'notes', p_need_edit: true,
-  })
-  if (permitted.error || permitted.data !== true) {
-    return respond({ ok: false, reason: 'not_authorized' }, 403)
-  }
-
   const admin = createClient(supabaseUrl, serviceKey, {
     auth: { autoRefreshToken: false, persistSession: false },
   })
@@ -112,6 +114,7 @@ Deno.serve(async (req: Request) => {
   const plan = target.data as {
     ok?: boolean
     reason?: string
+    kind?: 'note' | 'receipt'
     company_id?: string
     partner?: string
     external_submission_id?: string
@@ -125,6 +128,20 @@ Deno.serve(async (req: Request) => {
   // describe another company's submission to anyone who knows its id.
   if (plan.company_id !== companyId) {
     return respond({ ok: false, reason: 'submission_not_found' }, 200)
+  }
+
+  // The reviewer's own page, and WHICH page depends on what was decided:
+  // telling a driver about a decision belongs to whoever may make it. This
+  // asked for `notes` whatever the subject was, so a role holding Notizen and
+  // not Belege could announce a Beleg rejection. The check sits after the
+  // lookup for that reason, and after the company comparison so a submission of
+  // another company is `submission_not_found` to everyone, gate or no gate.
+  const page = plan.kind === 'receipt' ? 'receipts' : 'notes'
+  const permitted = await asCaller.rpc('current_role_permits', {
+    p_page: page, p_need_edit: true,
+  })
+  if (permitted.error || permitted.data !== true) {
+    return respond({ ok: false, reason: 'not_authorized' }, 403)
   }
 
   const sealed = await admin.rpc('partner_sealed_token', {
@@ -164,7 +181,10 @@ Deno.serve(async (req: Request) => {
           Accept: 'application/json',
         },
         body: JSON.stringify({
-          kind: 'note',
+          // Reidey's validator takes `kind` in `note,receipt` and DEFAULTS an
+          // absent one to `note`, so sending nothing is not neutral: it would
+          // have the driver's app announce a rejected Beleg as a note.
+          kind: plan.kind ?? 'note',
           external_submission_id: plan.external_submission_id,
           external_driver_id: plan.external_driver_id,
           status: 'rejected',

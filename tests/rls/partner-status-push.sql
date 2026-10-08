@@ -15,6 +15,13 @@
 --    §2  the target carries the reviewer's words and NOT the note's text. A
 --        driver is told why their submission was refused, not sent their own
 --        note back with the company's internal record attached.
+--    §5  a rejected BELEG travels too, and travels AS a Beleg
+--        (`20261008150000`). The sender named the note table in both functions,
+--        so a rejected Beleg answered `submission_not_found` and the driver kept
+--        a photo of a receipt nobody would pay. And because Reidey DEFAULTS an
+--        absent `kind` to `note`, a Beleg travelling without one would be
+--        announced to the driver as a note — so the kind is asserted, not the
+--        delivery alone.
 
 BEGIN;
 
@@ -206,6 +213,146 @@ BEGIN
      AND cmd IN ('INSERT', 'DELETE');
   PERFORM _sp_rec(19, 'the submission table still has no INSERT and no DELETE policy',
     v_n::text, '0');
+END $$;
+
+-- ─── 5. the Beleg travels too, and as a Beleg (20261008150000) ─────────────
+
+INSERT INTO partner_receipt_submissions
+       (id, company_id, partner, external_submission_id, external_driver_id,
+        driver_id, receipt_date, category, amount, payment_method, document_path,
+        status, rejected_reason)
+VALUES ('3d000000-0000-4000-8000-000000000001', 'c0000000-0000-4000-8000-00000000000a',
+        'reidey', 'sp-beleg-rejected', 'sp-1', '3a000000-0000-4000-8000-000000000001',
+        '2026-10-07', 'Tanken', 41.47, 'bar',
+        'c0000000-0000-4000-8000-00000000000a/partner/sp-beleg-rejected.jpg',
+        'rejected', 'Foto unleserlich');
+
+-- An accepted submission must name the Beleg it became: the table's own CHECK
+-- `partner_receipt_submissions_accepted_has_receipt` ties the two, which is
+-- measured here rather than assumed -- the first version of this fixture left
+-- receipt_id NULL and the kit refused the insert.
+-- `receipts.date`, not `receipt_date`: the column has carried that name since
+-- the baseline, and the accept function writes it correctly. The fixture did
+-- not, and the kit said so.
+INSERT INTO receipts (id, company_id, receipt_number, date, description,
+                      expense, payment_method, driver_name)
+VALUES ('3e000000-0000-4000-8000-000000000001', 'c0000000-0000-4000-8000-00000000000a',
+        'BEL-SP-0001', '2026-10-07', 'Tanken', 10.00, 'bar', 'Push Driver');
+
+INSERT INTO partner_receipt_submissions
+       (id, company_id, partner, external_submission_id, external_driver_id,
+        driver_id, receipt_date, category, amount, payment_method, document_path,
+        status, receipt_id)
+VALUES ('3d000000-0000-4000-8000-000000000002', 'c0000000-0000-4000-8000-00000000000a',
+        'reidey', 'sp-beleg-accepted', 'sp-1', '3a000000-0000-4000-8000-000000000001',
+        '2026-10-07', 'Tanken', 10.00, 'bar',
+        'c0000000-0000-4000-8000-00000000000a/partner/sp-beleg-accepted.jpg',
+        'accepted', '3e000000-0000-4000-8000-000000000001');
+
+-- A second rejected NOTE, still owed. The first one is delivered by then
+-- (section 3 stamps it), so asking it for a kind answers `already_pushed` with
+-- no kind in it -- which is what probe 22 measured on the first attempt. The
+-- probe was wrong, not the function, and a consumed fixture is the same class of
+-- fault as a probe built on a row the function refuses for its own reasons.
+INSERT INTO partner_note_submissions
+       (id, company_id, partner, external_submission_id, external_driver_id,
+        driver_id, note_type, note_text, status, rejected_reason)
+VALUES ('3c000000-0000-4000-8000-000000000004', 'c0000000-0000-4000-8000-00000000000a',
+        'reidey', 'sp-rejected-2', 'sp-1', '3a000000-0000-4000-8000-000000000001',
+        'kontrolle', 'Kontrolle', 'rejected', 'Doppelt eingereicht');
+
+DO $$
+DECLARE v_target jsonb;
+BEGIN
+  PERFORM _sp_rec(20, 'a rejected BELEG is pushable at all',
+    _sp_call($q$SELECT partner_submission_push_target('3d000000-0000-4000-8000-000000000001') ->> 'ok'$q$),
+    'true');
+
+  -- The partner defaults an absent kind to `note`, so this is the assertion
+  -- that stops a Beleg rejection reaching the driver with the wrong sentence.
+  PERFORM _sp_rec(21, 'and it names itself a receipt',
+    _sp_call($q$SELECT partner_submission_push_target('3d000000-0000-4000-8000-000000000001') ->> 'kind'$q$),
+    'receipt');
+
+  PERFORM _sp_rec(22, 'while a note still names itself a note',
+    _sp_call($q$SELECT partner_submission_push_target('3c000000-0000-4000-8000-000000000004') ->> 'kind'$q$),
+    'note');
+
+  PERFORM _sp_rec(23, 'the Beleg target carries the reviewer own words',
+    _sp_call($q$SELECT partner_submission_push_target('3d000000-0000-4000-8000-000000000001') ->> 'reason_text'$q$),
+    'Foto unleserlich');
+
+  -- A driver is told why their Beleg was refused. Not what they claimed, not
+  -- where the photo is, not the Beleg the company wrote from it.
+  SELECT partner_submission_push_target('3d000000-0000-4000-8000-000000000001') INTO v_target;
+  PERFORM _sp_rec(24, 'and carries no amount, no photo key and no Beleg id',
+    (SELECT coalesce(string_agg(k, ',' ORDER BY k), 'none')
+       FROM jsonb_object_keys(v_target) AS k
+      WHERE k IN ('amount', 'document_path', 'receipt_id', 'category', 'description')),
+    'none');
+
+  PERFORM _sp_rec(25, 'an ACCEPTED Beleg is never pushed',
+    _sp_call($q$SELECT partner_submission_push_target('3d000000-0000-4000-8000-000000000002') ->> 'reason'$q$),
+    'not_pushable');
+END $$;
+
+DO $$
+BEGIN
+  -- The failure path on the other table, because the record function has two
+  -- UPDATEs now and only one of them was ever exercised.
+  PERFORM _sp_call($q$SELECT partner_submission_push_record('3d000000-0000-4000-8000-000000000001', 'HTTP 502')::text$q$);
+  PERFORM _sp_rec(26, 'a failed Beleg delivery leaves the stamp NULL and keeps the reason',
+    (SELECT CASE WHEN status_pushed_at IS NULL THEN 'null' ELSE 'stamped' END
+            || ' / ' || coalesce(status_push_error, 'none')
+       FROM partner_receipt_submissions WHERE id = '3d000000-0000-4000-8000-000000000001'),
+    'null / HTTP 502');
+
+  PERFORM _sp_rec(27, 'so it is still owed',
+    _sp_call($q$SELECT partner_submission_push_target('3d000000-0000-4000-8000-000000000001') ->> 'ok'$q$),
+    'true');
+
+  PERFORM _sp_call($q$SELECT partner_submission_push_record('3d000000-0000-4000-8000-000000000001')::text$q$);
+  PERFORM _sp_rec(28, 'a success stamps it and clears the reason',
+    (SELECT CASE WHEN status_pushed_at IS NULL THEN 'null' ELSE 'stamped' END
+            || ' / ' || coalesce(status_push_error, 'none')
+       FROM partner_receipt_submissions WHERE id = '3d000000-0000-4000-8000-000000000001'),
+    'stamped / none');
+
+  PERFORM _sp_rec(29, 'and it is not pushed twice',
+    _sp_call($q$SELECT partner_submission_push_target('3d000000-0000-4000-8000-000000000001') ->> 'reason'$q$),
+    'already_pushed');
+
+  -- The note rows must be untouched by all of that: two tables, one id space,
+  -- and a record function that now tries both.
+  PERFORM _sp_rec(30, 'the pending note submission of the same company is untouched',
+    (SELECT CASE WHEN status_pushed_at IS NULL THEN 'null' ELSE 'stamped' END
+       FROM partner_note_submissions WHERE id = '3c000000-0000-4000-8000-000000000003'),
+    'null');
+END $$;
+
+-- ─── 6. no client edits a submission any more (20261008160000) ─────────────
+
+DO $$
+DECLARE v_n int;
+BEGIN
+  -- The UPDATE policy admitted no caller -- every judging path is a SECURITY
+  -- DEFINER RPC -- and it let a reviewer stamp a delivery that never happened,
+  -- which is the one signal sections 3 and 5 exist to protect. What it did NOT
+  -- allow, measured above: marking a submission accepted with no Beleg, which
+  -- the table's own CHECK refuses whoever writes it.
+  SELECT count(*) INTO v_n FROM pg_policies
+   WHERE schemaname = 'public'
+     AND tablename IN ('partner_note_submissions', 'partner_receipt_submissions')
+     AND cmd IN ('INSERT', 'UPDATE', 'DELETE');
+  PERFORM _sp_rec(31, 'neither submission table has a client write policy',
+    v_n::text, '0');
+
+  SELECT count(*) INTO v_n FROM pg_policies
+   WHERE schemaname = 'public'
+     AND tablename IN ('partner_note_submissions', 'partner_receipt_submissions')
+     AND cmd = 'SELECT';
+  PERFORM _sp_rec(32, 'and both are still readable, or the review screens go blank',
+    v_n::text, '2');
 END $$;
 
 -- ─── the verdict ────────────────────────────────────────────────────────────
