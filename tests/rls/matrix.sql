@@ -3591,7 +3591,16 @@ INSERT INTO _mx_rpc (label, stmt, want, hole) VALUES
      'PTYYYTT', NULL),
     ('partner_receipt_reject(pending Beleg of A)',
      $q$SELECT partner_receipt_reject({ref:rpc_receipt_submission}, 'mx') ->> 'ok'$q$,
-     'PTYYYTT', NULL);
+     'PTYYYTT', NULL),
+
+    -- The doorbell's resolver (20261008170000). A ring carries NO credential
+    -- by the owner's decision of 08.10.2026, so this function and its rate
+    -- limits are the whole boundary: a client cell moving off P would hand
+    -- anyone with the anon key the company behind a fleet id, and a counter
+    -- they could reset. tests/rls/partner-doorbell.sql probes the limits.
+    ('partner_doorbell_resolve(unknown fleet)',
+     $q$SELECT partner_doorbell_resolve('mx', 'mx-fleet') ->> 'reason'$q$,
+     'PPPPPPP', NULL);
 
 -- What an open context changes, RPC by RPC. Everything not named here answers
 -- the same with a context as without one, so it takes `super`'s character

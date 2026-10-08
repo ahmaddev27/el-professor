@@ -39,7 +39,7 @@
  * refuses it again either way.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Check, FileText, Inbox, Receipt as ReceiptIcon, Send, X } from 'lucide-react';
+import { Check, DownloadCloud, FileText, Inbox, Receipt as ReceiptIcon, Send, X } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useToast } from '../../contexts/ToastContext';
 import { useTranslation } from '../../contexts/LanguageContext';
@@ -142,8 +142,31 @@ const NOTIFY_REASON_KEYS: Record<string, TranslationKey> = {
   endpoint_has_path: 'partner.inbox.error.notConfigured',
 };
 
+/**
+ * The catch-up's reasons. Its own map: a ring that never arrived is not the
+ * reviewer's mistake, and most of these send the operator to the Connect card
+ * rather than back to a row.
+ */
+const CATCHUP_REASON_KEYS: Record<string, TranslationKey> = {
+  rate_limited: 'partner.catchup.error.rateLimited',
+  not_connected: 'partner.inbox.error.notConnected',
+  seal_unreadable: 'partner.inbox.error.sealUnreadable',
+  token_rejected: 'partner.inbox.error.tokenRejected',
+  partner_unavailable: 'partner.inbox.error.partnerUnavailable',
+  seal_key_missing: 'partner.inbox.error.notConfigured',
+  endpoint_missing: 'partner.inbox.error.notConfigured',
+  endpoint_unparsable: 'partner.inbox.error.notConfigured',
+  endpoint_not_https: 'partner.inbox.error.notConfigured',
+  endpoint_has_credentials: 'partner.inbox.error.notConfigured',
+  endpoint_private_host: 'partner.inbox.error.notConfigured',
+  endpoint_unexpected_port: 'partner.inbox.error.notConfigured',
+  endpoint_has_path: 'partner.inbox.error.notConfigured',
+};
+
 interface PartnerReceiptInboxProps {
   companyId: string | null;
+  /** The partner and its fleet id, from the company's connection. */
+  connection?: { partner: string; fleet: string } | null;
   /** Called after a decision, so the page's own Beleg list picks up the new row. */
   onDecided?: () => void;
 }
@@ -154,7 +177,7 @@ type DocumentState =
   | { kind: 'failed' }
   | { kind: 'absent' };
 
-export function PartnerReceiptInbox({ companyId, onDecided }: PartnerReceiptInboxProps) {
+export function PartnerReceiptInbox({ companyId, connection, onDecided }: PartnerReceiptInboxProps) {
   const { t } = useTranslation();
   const { showToast } = useToast();
   const { canEdit } = useCompanyScope();
@@ -171,6 +194,7 @@ export function PartnerReceiptInbox({ companyId, onDecided }: PartnerReceiptInbo
   const [rejecting, setRejecting] = useState(false);
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);
+  const [fetching, setFetching] = useState(false);
 
   const load = useCallback(async () => {
     if (!companyId) {
@@ -245,6 +269,59 @@ export function PartnerReceiptInbox({ companyId, onDecided }: PartnerReceiptInbo
     })();
     return () => { cancelled = true; };
   }, [open, companyId]);
+
+  /**
+   * Ask the partner what is waiting and ingest it.
+   *
+   * This exists because there is no scheduler in this stack. A submission
+   * reaches us when the partner RINGS (owner's decision, 08.10.2026: Reidey
+   * cannot replay the token it issued, so it rings and we fetch with the token
+   * we hold sealed). A ring that never arrives — their queue died, we were
+   * down, the gateway dropped it — is a receipt that silently never came, and
+   * nothing can retry it on its own. So the retry is a person, and this is the
+   * button. It is safe to press twice: every submission is idempotent on the
+   * partner's own id.
+   */
+  const catchUp = async () => {
+    if (!connection) return;
+    setFetching(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('partner-intake', {
+        body: { kind: 'catchup', partner: connection.partner, fleet: connection.fleet },
+      });
+      if (error) throw error;
+      const answer = data as {
+        ok?: boolean; reason?: string; waiting?: number;
+        ingested?: number; failed?: number; more?: boolean;
+      };
+      if (!answer?.ok) {
+        const key = answer?.reason ? CATCHUP_REASON_KEYS[answer.reason] : undefined;
+        showToast('error', key ? t(key) : t('partner.catchup.failed'));
+        return;
+      }
+      // Four outcomes, and they must not look alike: nothing was waiting,
+      // everything came, some came, and none of what was waiting could be
+      // ingested. "Fetched 0" beside "0 waiting" is the only one that is good
+      // news, and the only one the old draft of this said in both cases.
+      const ingested = answer.ingested ?? 0;
+      const failed = answer.failed ?? 0;
+      if (ingested === 0 && failed === 0) {
+        showToast('success', t('partner.catchup.nothing'));
+      } else if (failed === 0) {
+        showToast('success', t('partner.catchup.done', { count: String(ingested) }));
+      } else {
+        showToast('error', t('partner.catchup.partial', {
+          count: String(ingested), failed: String(failed),
+        }));
+      }
+      await load();
+      onDecided?.();
+    } catch {
+      showToast('error', t('partner.catchup.failed'));
+    } finally {
+      setFetching(false);
+    }
+  };
 
   const reasonMessage = (hint: unknown): string => {
     const key = typeof hint === 'string' ? REASON_KEYS[hint] : undefined;
@@ -440,13 +517,31 @@ export function PartnerReceiptInbox({ companyId, onDecided }: PartnerReceiptInbo
         {t('partner.belege.note.body')}
       </Alert>
 
-      <Tabs value={status} onValueChange={value => setStatus(value as SubmissionStatus)}>
-        <TabsList variant="segmented" aria-label={t('partner.belege.filterLabel')}>
-          <TabsTrigger value="pending">{t('partner.inbox.status.pending')}</TabsTrigger>
-          <TabsTrigger value="accepted">{t('partner.inbox.status.accepted')}</TabsTrigger>
-          <TabsTrigger value="rejected">{t('partner.inbox.status.rejected')}</TabsTrigger>
-        </TabsList>
-      </Tabs>
+      <div className="grid grid-cols-1 gap-2 sm:flex sm:items-center sm:justify-between">
+        <Tabs value={status} onValueChange={value => setStatus(value as SubmissionStatus)}>
+          <TabsList variant="segmented" aria-label={t('partner.belege.filterLabel')}>
+            <TabsTrigger value="pending">{t('partner.inbox.status.pending')}</TabsTrigger>
+            <TabsTrigger value="accepted">{t('partner.inbox.status.accepted')}</TabsTrigger>
+            <TabsTrigger value="rejected">{t('partner.inbox.status.rejected')}</TabsTrigger>
+          </TabsList>
+        </Tabs>
+
+        {/* Only with a connection to ask. Without one there is nothing to
+            fetch from, and a button that cannot work is worse than none. */}
+        {connection && (
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => void catchUp()}
+            disabled={fetching}
+            loading={fetching}
+            title={t('partner.catchup.hint')}
+          >
+            <DownloadCloud aria-hidden />
+            {t('partner.catchup.action')}
+          </Button>
+        )}
+      </div>
 
       <DataTable
         columns={columns}

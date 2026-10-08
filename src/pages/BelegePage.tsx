@@ -65,6 +65,10 @@ const BelegePage: React.FC = () => {
   // null means "not known": a count whose read failed must not be drawn as
   // 0, which would tell a reviewer there is nothing waiting for them.
   const [pendingCount, setPendingCount] = useState<number | null>(null);
+  // The fleet the catch-up asks. Null means "no connection to ask", which is
+  // also what a failed read leaves — and then the button is not drawn, which is
+  // the honest outcome either way: there is nothing this screen can fetch.
+  const [connection, setConnection] = useState<{ partner: string; fleet: string } | null>(null);
   const [confirmModal, setConfirmModal] = useState<ConfirmModalState>({
     isOpen: false,
     title: '',
@@ -92,6 +96,28 @@ const BelegePage: React.FC = () => {
       .eq('status', 'pending');
     setPendingCount(error ? null : count ?? 0);
   }, [effectiveCompanyId]);
+
+  const loadConnection = useCallback(async () => {
+    if (!effectiveCompanyId) {
+      setConnection(null);
+      return;
+    }
+    const { data } = await supabase
+      .from('partner_connections')
+      .select('partner, external_company_id')
+      .eq('company_id', effectiveCompanyId)
+      .neq('status', 'revoked')
+      .limit(1)
+      .maybeSingle();
+    const fleet = (data?.external_company_id as string | null)?.trim() ?? '';
+    // A connection recorded before the partner answered with an identity has
+    // no fleet id, and there is nothing to fetch by — so it is not one.
+    setConnection(data?.partner && fleet !== ''
+      ? { partner: data.partner as string, fleet }
+      : null);
+  }, [effectiveCompanyId]);
+
+  useEffect(() => { void loadConnection(); }, [loadConnection]);
 
   useEffect(() => { void loadPendingCount(); }, [loadPendingCount]);
 
@@ -325,6 +351,7 @@ const BelegePage: React.FC = () => {
         <TabsContent value="inbox">
           <PartnerReceiptInbox
             companyId={effectiveCompanyId}
+            connection={connection}
             onDecided={() => {
               // An accepted Beleg becomes a row in the list beside it, and the
               // badge has to stop counting it.

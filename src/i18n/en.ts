@@ -6178,4 +6178,13 @@ export const en: PartialDictionary = {
 
   // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
   'partner.belege.error.driverGone': 'The linked driver no longer exists in the company. The submission can be accepted once it is linked to a driver that does.',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'partner.catchup.action':            'Fetch submissions',
+  'partner.catchup.done':              '{count} submission(s) fetched.',
+  'partner.catchup.error.rateLimited': 'Too many fetches in a short time. Please try again in a minute.',
+  'partner.catchup.failed':            'The submissions could not be fetched.',
+  'partner.catchup.hint':              'Asks the partner app what is still waiting. Safe to press twice: each submission is taken over only once.',
+  'partner.catchup.nothing':           'Nothing is waiting in the partner app.',
+  'partner.catchup.partial':           '{count} fetched, {failed} not — please try again.',
 };

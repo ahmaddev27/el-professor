@@ -6234,4 +6234,13 @@ export const de = {
 
   // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
   'partner.belege.error.driverGone': 'Der zugeordnete Fahrer existiert im Betrieb nicht mehr. Der Eingang kann erst übernommen werden, wenn er einem vorhandenen Fahrer zugeordnet ist.',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'partner.catchup.action':            'Eingänge abrufen',
+  'partner.catchup.done':              '{count} Eingang/Eingänge abgerufen.',
+  'partner.catchup.error.rateLimited': 'Zu viele Abrufe in kurzer Zeit. Bitte in einer Minute erneut versuchen.',
+  'partner.catchup.failed':            'Die Eingänge konnten nicht abgerufen werden.',
+  'partner.catchup.hint':              'Fragt die Partner-App, was dort noch wartet. Gefahrlos mehrfach: jeder Eingang wird nur einmal übernommen.',
+  'partner.catchup.nothing':           'Es wartet nichts in der Partner-App.',
+  'partner.catchup.partial':           '{count} abgerufen, {failed} nicht — bitte erneut versuchen.',
 } as const;
