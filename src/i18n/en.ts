@@ -6112,4 +6112,24 @@ export const en: PartialDictionary = {
   'partner.pull.error.tokenRejected':      'Reidey rejected the token. It was revoked or replaced — connect again under Settings.',
   'partner.pull.hint':                     'Fetches the partner\'s current driver list and creates a proposal for each one. Nothing is linked — a person decides that.',
   'partner.pull.truncated':                'The list was longer than was fetched. Fetch again.',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'partner.inbox.action.notify':           'Send the rejection',
+  'partner.inbox.error.alreadyPushed':     'The driver has already been notified about this submission.',
+  'partner.inbox.error.driverUnknownAtPartner': 'The partner no longer knows this driver. The rejection cannot be delivered to them.',
+  'partner.inbox.error.notConfigured':     'The partner connection is not set up on this server yet.',
+  'partner.inbox.error.notConnected':      'There is no connection to the partner. Connect it under Settings first.',
+  'partner.inbox.error.notPushable':       'No notification is sent for this submission.',
+  'partner.inbox.error.partnerUnavailable': 'The partner could not be reached. Send it again later.',
+  'partner.inbox.error.sealUnreadable':    'The stored token can no longer be read. Please connect again under Settings.',
+  'partner.inbox.error.tokenRejected':     'The partner rejected the token. Please connect again under Settings.',
+  'partner.inbox.notified':                'Driver notified',
+  'partner.inbox.notifyAlready':           'The driver had already been told.',
+  'partner.inbox.notifySent':              'The driver was told about the rejection.',
+  'partner.inbox.rejectedNotSent':         'Rejected. The driver could not be notified — the rejection can be sent again from the list.',
+  'partner.inbox.undelivered':             'Driver not notified',
+  'partner.inbox.undeliveredHint':         'The rejection has not reached the driver yet. There is no background service here to catch that up — send it again.',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'partner.inbox.col.delivery': 'Delivery',
 };

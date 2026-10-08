@@ -31,7 +31,7 @@
  * change outside this slice and could take away something a user does today.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Check, Inbox, X } from 'lucide-react';
+import { Check, Inbox, Send, X } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useToast } from '../../contexts/ToastContext';
 import { useTranslation } from '../../contexts/LanguageContext';
@@ -72,6 +72,7 @@ interface Submission {
   end_time: string | null;
   status: SubmissionStatus;
   rejected_reason: string | null;
+  status_pushed_at: string | null;
   submitted_at: string;
   drivers: { name: string } | null;
 }
@@ -102,9 +103,31 @@ const REASON_KEYS: Record<string, TranslationKey> = {
   unknown_note_type: 'partner.inbox.error.unknownType',
 };
 
+/** The sender's reasons. Its own map, because the repairs differ: several
+ *  of these send the operator to Settings rather than back to the row. */
+const NOTIFY_REASON_KEYS: Record<string, TranslationKey> = {
+  not_pushable: 'partner.inbox.error.notPushable',
+  already_pushed: 'partner.inbox.error.alreadyPushed',
+  driver_unknown_at_partner: 'partner.inbox.error.driverUnknownAtPartner',
+  not_connected: 'partner.inbox.error.notConnected',
+  seal_unreadable: 'partner.inbox.error.sealUnreadable',
+  token_rejected: 'partner.inbox.error.tokenRejected',
+  partner_unavailable: 'partner.inbox.error.partnerUnavailable',
+  submission_not_found: 'partner.inbox.error.notFound',
+  not_authorized: 'partner.inbox.error.notAuthorized',
+  seal_key_missing: 'partner.inbox.error.notConfigured',
+  endpoint_missing: 'partner.inbox.error.notConfigured',
+  endpoint_unparsable: 'partner.inbox.error.notConfigured',
+  endpoint_not_https: 'partner.inbox.error.notConfigured',
+  endpoint_has_credentials: 'partner.inbox.error.notConfigured',
+  endpoint_private_host: 'partner.inbox.error.notConfigured',
+  endpoint_unexpected_port: 'partner.inbox.error.notConfigured',
+  endpoint_has_path: 'partner.inbox.error.notConfigured',
+};
+
 const COLUMNS = 'id, external_submission_id, driver_id, note_type, note_text, '
   + 'start_date, end_date, is_full_day, start_time, end_time, status, '
-  + 'rejected_reason, submitted_at, drivers(name)';
+  + 'rejected_reason, status_pushed_at, submitted_at, drivers(name)';
 
 interface PartnerNoteInboxProps {
   companyId: string | null;
@@ -177,6 +200,41 @@ export function PartnerNoteInbox({ companyId }: PartnerNoteInboxProps) {
     }
   };
 
+  /**
+   * Tell the driver. Returns whether it went, because the reject flow reports
+   * a different sentence when it did not — a rejection the driver never hears
+   * is not a finished rejection.
+   *
+   * `already_pushed` counts as delivered: the driver knows, and reporting it
+   * as a failure would have the operator pressing for ever.
+   */
+  const notify = async (id: string, quiet = false): Promise<boolean> => {
+    try {
+      const { data, error } = await supabase.functions.invoke('partner-notify', {
+        body: { submission_id: id },
+      });
+      if (error) throw error;
+      const answer = data as { ok?: boolean; reason?: string; duplicate?: boolean };
+      if (answer?.ok) {
+        if (!quiet) {
+          showToast('success', answer.duplicate
+            ? t('partner.inbox.notifyAlready')
+            : t('partner.inbox.notifySent'));
+        }
+        return true;
+      }
+      if (answer?.reason === 'already_pushed') return true;
+      if (!quiet) {
+        const key = answer?.reason ? NOTIFY_REASON_KEYS[answer.reason] : undefined;
+        showToast('error', key ? t(key) : t('partner.inbox.error.generic'));
+      }
+      return false;
+    } catch {
+      if (!quiet) showToast('error', t('partner.inbox.error.generic'));
+      return false;
+    }
+  };
+
   const reject = async () => {
     if (!rejecting) return;
     setBusy(true);
@@ -186,7 +244,13 @@ export function PartnerNoteInbox({ companyId }: PartnerNoteInboxProps) {
         p_reason: reason.trim(),
       });
       if (error) throw error;
-      showToast('success', t('partner.inbox.rejected'));
+      // The rejection is the decision; telling the driver is what makes it
+      // useful. Sent quietly so one action produces one sentence, and the
+      // sentence says whether the driver heard.
+      const delivered = await notify(rejecting.id, true);
+      showToast(delivered ? 'success' : 'error', delivered
+        ? t('partner.inbox.rejected')
+        : t('partner.inbox.rejectedNotSent'));
       setRejecting(null);
       setReason('');
       await load();
@@ -260,6 +324,22 @@ export function PartnerNoteInbox({ companyId }: PartnerNoteInboxProps) {
           header: t('partner.inbox.col.reason'),
           value: (row: Submission) => row.rejected_reason ?? '',
           cell: (row: Submission) => <span>{row.rejected_reason || '—'}</span>,
+        } satisfies DataTableColumn<Submission>,
+        {
+          // There is no scheduler here, so an undelivered rejection is made
+          // visible rather than retried silently. The tooltip says exactly
+          // that, because "not notified" without a reason reads as a bug.
+          id: 'delivery',
+          header: t('partner.inbox.col.delivery'),
+          value: (row: Submission) => (row.status_pushed_at ? 1 : 0),
+          sortable: true,
+          cell: (row: Submission) => (row.status_pushed_at
+            ? <Badge tone="positive">{t('partner.inbox.notified')}</Badge>
+            : (
+              <Badge tone="caution" title={t('partner.inbox.undeliveredHint')}>
+                {t('partner.inbox.undelivered')}
+              </Badge>
+            )),
         } satisfies DataTableColumn<Submission>]
       : []),
   ], [status, t]);
@@ -294,7 +374,23 @@ export function PartnerNoteInbox({ companyId }: PartnerNoteInboxProps) {
           </div>
         )}
         rowActionsLabel={t('partner.inbox.actionsLabel')}
-        rowActions={status === 'pending' && mayDecide
+        rowActions={status === 'rejected' && mayDecide
+          ? row => (row.status_pushed_at ? null : (
+              <Button
+                size="icon"
+                variant="ghost"
+                disabled={busy}
+                aria-label={t('partner.inbox.action.notify')}
+                title={t('partner.inbox.action.notify')}
+                onClick={() => { void (async () => {
+                  setBusy(true);
+                  try { await notify(row.id); await load(); } finally { setBusy(false); }
+                })(); }}
+              >
+                <Send className="h-4 w-4" aria-hidden />
+              </Button>
+            ))
+          : status === 'pending' && mayDecide
           ? row => (
               <div className="grid grid-cols-[auto_auto] gap-1">
                 <Button

@@ -139,6 +139,12 @@ const FUNCTION_ENV: ReadonlyMap<string, readonly string[]> = new Map<string, rea
   // place a sealed token is opened. By a button and not a schedule (the
   // owner's decision of 06.10.2026), so it needs a session like Connect.
   ['partner-pull', [...BASE_ENV, ...SERVICE_ENV, ...PARTNER_ENV]],
+  // Telling one driver about one decision. A third function rather than an
+  // action on the pull because they share a direction and nothing else: the
+  // pull reads a whole roster when an operator asks, this is triggered by a
+  // rejection. A name that describes half of what a function does is the
+  // thing the Connect/intake split already avoided once here.
+  ['partner-notify', [...BASE_ENV, ...SERVICE_ENV, ...PARTNER_ENV]],
   ['validate-discount-code', [...BASE_ENV, ...SERVICE_ENV]],
   ['update-income-weeks', [...BASE_ENV]],
   ['extract-receipt', [...BASE_ENV, 'ANTHROPIC_API_KEY']],

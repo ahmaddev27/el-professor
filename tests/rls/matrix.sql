@@ -3539,6 +3539,17 @@ INSERT INTO _mx_rpc (label, stmt, want, hole) VALUES
      'PPPPPPP', NULL),
     ('partner_pull_record(company A)',
      $q$SELECT partner_pull_record('c0000000-0000-4000-8000-00000000000a', 'mx') ->> 'ok'$q$,
+     'PPPPPPP', NULL),
+
+    -- M3's sender (20261008130000). The target function describes a
+    -- submission to whoever can call it, so a client cell moving off P here
+    -- would hand one company a driver's identifier at the partner and
+    -- another reviewer's words.
+    ('partner_submission_push_target(submission of A)',
+     $q$SELECT partner_submission_push_target({ref:rpc_note_submission}) ->> 'ok'$q$,
+     'PPPPPPP', NULL),
+    ('partner_submission_push_record(submission of A)',
+     $q$SELECT partner_submission_push_record({ref:rpc_note_submission}) ->> 'ok'$q$,
      'PPPPPPP', NULL);
 
 -- What an open context changes, RPC by RPC. Everything not named here answers

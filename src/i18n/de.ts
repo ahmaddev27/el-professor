@@ -6168,4 +6168,24 @@ export const de = {
   'partner.pull.error.tokenRejected':      'Reidey hat den Token abgelehnt. Er wurde widerrufen oder ersetzt — bitte unter Einstellungen neu verbinden.',
   'partner.pull.hint':                     'Holt die aktuelle Fahrerliste beim Partner und legt für jeden Fahrer einen Vorschlag an. Es wird nichts verknüpft — das entscheidet eine Person.',
   'partner.pull.truncated':                'Die Liste war länger als abgerufen wurde. Bitte erneut abrufen.',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'partner.inbox.action.notify':           'Ablehnung senden',
+  'partner.inbox.error.alreadyPushed':     'Der Fahrer wurde für diesen Eingang schon benachrichtigt.',
+  'partner.inbox.error.driverUnknownAtPartner': 'Der Partner kennt diesen Fahrer nicht mehr. Die Ablehnung kann ihm nicht zugestellt werden.',
+  'partner.inbox.error.notConfigured':     'Die Partner-Anbindung ist auf diesem Server noch nicht eingerichtet.',
+  'partner.inbox.error.notConnected':      'Es besteht keine Verbindung zum Partner. Zuerst unter Einstellungen verbinden.',
+  'partner.inbox.error.notPushable':       'Für diesen Eingang wird keine Benachrichtigung gesendet.',
+  'partner.inbox.error.partnerUnavailable': 'Der Partner war nicht erreichbar. Bitte später erneut senden.',
+  'partner.inbox.error.sealUnreadable':    'Der gespeicherte Token kann nicht mehr gelesen werden. Bitte unter Einstellungen neu verbinden.',
+  'partner.inbox.error.tokenRejected':     'Der Partner hat den Token abgelehnt. Bitte unter Einstellungen neu verbinden.',
+  'partner.inbox.notified':                'Fahrer benachrichtigt',
+  'partner.inbox.notifyAlready':           'Der Fahrer war bereits informiert.',
+  'partner.inbox.notifySent':              'Der Fahrer wurde über die Ablehnung informiert.',
+  'partner.inbox.rejectedNotSent':         'Abgelehnt. Der Fahrer konnte nicht benachrichtigt werden — die Ablehnung lässt sich in der Liste erneut senden.',
+  'partner.inbox.undelivered':             'Fahrer nicht benachrichtigt',
+  'partner.inbox.undeliveredHint':         'Die Ablehnung wurde dem Fahrer noch nicht zugestellt. Es gibt hier keinen Hintergrunddienst, der das nachholt — bitte erneut senden.',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'partner.inbox.col.delivery': 'Zustellung',
 } as const;
