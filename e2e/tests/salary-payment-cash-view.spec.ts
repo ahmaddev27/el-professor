@@ -9,17 +9,22 @@
  *    sits), click Emil Normal's row, and read the dialog: title, the three
  *    figures, the payment status and the payment history. Writes nothing.
  *
- * 2. THE VIEW. Open a cash payment's "Zahlung ansehen" and check that its banner
- *    says it is not a Gehaltsquittung, that it shows no GQ number, and that it
- *    offers no PDF. This needs a cash payment with no stored receipt, and the
- *    demo company has none: it has no salary payment at all. The screen cannot
- *    make one - with a plan that includes Dokumente every "Barzahlung" entered
- *    in the payment form goes through confirm_salary_cash_payment and so gets a
- *    receipt, and the row then opens that receipt, never the view - so the
- *    fixture can only come from a row inserted directly into salary_payments
- *    (payment_type 'cash', source_type NULL). Without it the test FAILS and says
- *    so; it does not skip, because a skipped spec reads as a pass. Once such a
- *    row exists on the demo company (1,00 € is enough), it runs through.
+ * 2. THE VIEW. Open a cash payment's "Zahlung ansehen" and check that the dialog
+ *    says no Gehaltsquittung is stored and that it shows no GQ number. This needs
+ *    a cash payment with no stored receipt. The fixture is a 1,00 € row inserted
+ *    into salary_payments for Emil Normal's November salary on 08.10.2026 (with
+ *    the owner's yes), description "E2E-Fixture (08.10.2026) …". Without it the
+ *    test FAILS and says so; it does not skip, because a skipped spec reads as a
+ *    pass.
+ *
+ *    What the view offers changed on 04.–06.10.2026, by the owner's decisions,
+ *    and this test asserted the earlier view until 08.10.2026: the printed sheet
+ *    lost its "ZAHLUNGSANSICHT – keine Gehaltsquittung" banner (he had it
+ *    removed), the view gained Download and Drucken, and it offers to issue a
+ *    numbered receipt for the payment (`issue_salary_cash_receipt`). So the
+ *    dialog's own sentence is now what says no receipt exists, and the buttons
+ *    allowed are those four — never one that would write while the view is
+ *    merely opened and closed.
  *
  * ## What this writes
  *
@@ -92,15 +97,14 @@ test('a cash payment without a receipt opens a view that is not a Gehaltsquittun
   const text = (await view.innerText()).replace(/\s+/g, ' ');
   console.log('view:', text.slice(0, 900));
 
-  expect(text, 'the banner says it is not a Gehaltsquittung').toContain('ZAHLUNGSANSICHT – keine Gehaltsquittung');
-  expect(text).toContain('ohne Quittungsnummer');
+  expect(text, 'the dialog says no Gehaltsquittung is stored').toContain('Es ist noch keine Gehaltsquittung gespeichert');
+  expect(text, 'and that the view itself assigns no number').toContain('diese Ansicht selbst vergibt keine Nummer');
   expect(text, 'no GQ number is shown').not.toMatch(/GQ-\d{4}-\d{4}/);
   expect(text, 'no "Nr." receipt number is shown').not.toMatch(/Nr\. ?GQ/);
-  await expect(view.getByRole('button', { name: /PDF|Herunterladen|Drucken|Download/i }), 'no PDF button').toHaveCount(0);
-  await expect(view.getByRole('link', { name: /PDF/i })).toHaveCount(0);
   const buttons = (await view.getByRole('button').allInnerTexts()).map(b => b.trim()).filter(Boolean);
   console.log('buttons in the view:', JSON.stringify(buttons));
-  expect(buttons.every(b => /Schließen|Close/.test(b)), `the view offers only Schließen, not: ${buttons}`).toBe(true);
+  const allowed = /^(Download|Herunterladen|Drucken|Schließen|Close|Quittung mit Nummer ausstellen)$/;
+  expect(buttons.every(b => allowed.test(b)), `the view offers only download, print, close and issuing a receipt, not: ${buttons}`).toBe(true);
 
   await view.getByRole('button', { name: 'Schließen' }).first().click();
   await expect(view).toHaveCount(0);
