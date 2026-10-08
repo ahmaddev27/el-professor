@@ -46,6 +46,12 @@ test('the Rückkehrpflicht tab opens, reads as a list to review, and writes noth
   writes.length = 0;
 
   await page.goto('/fahrtenanalyse');
+  // The demo company has not decided its analysis settings, and the page computes
+  // nothing until it has — or until someone chooses to look with the test value,
+  // which is held in the page and stored nowhere.
+  const testValue = page.getByRole('button', { name: /Mit Testwert 30 Min\. ansehen/ });
+  await expect(testValue.or(page.getByRole('tab').first())).toBeVisible({ timeout: 60_000 });
+  if (await testValue.isVisible()) await testValue.click();
   const tab = page.getByRole('tab', { name: 'Rückkehrpflicht & Adressen' });
   await expect(tab).toBeVisible({ timeout: 60_000 });
   await tab.click();
