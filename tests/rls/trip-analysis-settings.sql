@@ -356,6 +356,7 @@ BEGIN
   FOREACH who IN ARRAY ARRAY['viewer-a', 'editor-a'] LOOP
     PERFORM _ta_ok(format('admin gate: %s updates and deletes nothing', who),
       _ta_try(_ta_u(who), NULL, format('UPDATE trip_analysis_settings SET block_gap_minutes = 5 WHERE id = %L', _ta_id('settings:a'))) = 'rows 0'
+      AND _ta_try(_ta_u(who), NULL, format('UPDATE trip_analysis_settings SET base_latitude = 51.2, base_longitude = 7.1 WHERE id = %L', _ta_id('settings:a'))) = 'rows 0'
       AND _ta_try(_ta_u(who), NULL, format('UPDATE driver_month_budget SET reserved_hours = 1 WHERE id = %L', _ta_id('budget:a'))) = 'rows 0'
       AND _ta_try(_ta_u(who), NULL, format('DELETE FROM driver_month_budget WHERE id = %L', _ta_id('budget:a'))) = 'rows 0'
       AND _ta_try(_ta_u(who), NULL, format('DELETE FROM trip_analysis_settings WHERE id = %L', _ta_id('settings:a'))) = 'rows 0');
@@ -502,6 +503,24 @@ BEGIN
     AND _ta_try(u_a, NULL, format('UPDATE trip_analysis_settings SET block_gap_minutes = 0 WHERE id = %L', _ta_id('settings:a'))) LIKE 'ERR 23514%');
   PERFORM _ta_ok('settings: "not set" is a value the administrator may store',
     _ta_try(u_a, NULL, format('UPDATE trip_analysis_settings SET block_gap_minutes = NULL, travel_margin_minutes = NULL WHERE id = %L',
+                              _ta_id('settings:a'))) = 'rows 1');
+
+  -- 20261008200000: the Betriebssitz. Stored by the administrator, in Germany, both coordinates or neither.
+  PERFORM _ta_ok('base: the administrator stores a Betriebssitz in Germany with a radius',
+    _ta_try(u_a, NULL, format('UPDATE trip_analysis_settings SET base_latitude = 51.1713, base_longitude = 7.0832, base_radius_km = 2 WHERE id = %L',
+                              _ta_id('settings:a'))) = 'rows 1');
+  PERFORM _ta_ok('base: a position outside Germany is refused (swapped coordinates land at sea)',
+    _ta_try(u_a, NULL, format('UPDATE trip_analysis_settings SET base_latitude = 7.0832, base_longitude = 51.1713 WHERE id = %L',
+                              _ta_id('settings:a'))) LIKE 'ERR 23514%');
+  -- Each probe is rolled back, so the row is "not set" here: a latitude alone is half a pair.
+  PERFORM _ta_ok('base: one coordinate without the other is refused',
+    _ta_try(u_a, NULL, format('UPDATE trip_analysis_settings SET base_latitude = 51.2 WHERE id = %L',
+                              _ta_id('settings:a'))) LIKE 'ERR 23514%');
+  PERFORM _ta_ok('base: a radius of 0 is refused',
+    _ta_try(u_a, NULL, format('UPDATE trip_analysis_settings SET base_radius_km = 0 WHERE id = %L',
+                              _ta_id('settings:a'))) LIKE 'ERR 23514%');
+  PERFORM _ta_ok('base: "not set" is a value the administrator may store',
+    _ta_try(u_a, NULL, format('UPDATE trip_analysis_settings SET base_latitude = NULL, base_longitude = NULL, base_radius_km = NULL WHERE id = %L',
                               _ta_id('settings:a'))) = 'rows 1');
 
   -- A confirmation on insert takes the snapshot at once.

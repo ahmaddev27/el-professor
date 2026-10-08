@@ -4,6 +4,76 @@ Last updated: **08.10.2026**
 
 Start here when you pick up this project. Read it together with [CLAUDE.md](CLAUDE.md), which holds the rules and how every mechanism works, and [PROGRESS.md](PROGRESS.md), which records what is done and what was verified. The owner-facing plan is [el-professor-plan.html](el-professor-plan.html). The older developer reference, moved out of the README in PR #18, is [Docs/TECHNICAL_REFERENCE.md](Docs/TECHNICAL_REFERENCE.md); where it disagrees with CLAUDE.md or the code, they win.
 
+- **The whole e2e suite was run on staging after #188 and #189 merged (`b4796f8`).** 19 files, 35 tests. The first pass was 28 passed and 7 failed, and each failure was diagnosed:
+  - Four were the local network: `page.goto: net::ERR_TIMED_OUT` and Node's `fetch failed` against Mailpit. They are abrechnung-dialog-fits 1440, abrechnung-mail-all, forgot-password and the second monthly-plan-save test, and all four passed on a rerun.
+  - `return-check` failed because the DEMO company has no analysis settings. The page computes nothing until "Mit Testwert 30 Min. ansehen" is pressed, so the spec now presses it. The test value is held in the page and stored nowhere.
+  - `abrechnung-mail` asserted a PNG attachment that the owner removed on 04.10.2026 (8b2e208). It now asserts that there is no attachment, so an image coming back unasked fails it.
+  - `salary-payment-cash-view` 2 is a **missing fixture**: it needs a cash salary payment with no stored receipt on the DEMO company. It fails rather than skips by design.
+  - `google-signin`'s "provider off" test skips itself, correctly, because Google is on.
+
+  **The two staging data changes, after the owner's yes (08.10.2026):**
+  1. **The cash-view fixture is in.** It is `salary_payments` `3176e062-8a2a-43ff-9621-f006dcdc1468`: 1,00 € cash, `source_type` NULL, on Emil Normal's salary `b41dfa7d-…` (02.11.–06.12.2026), with a description starting "E2E-Fixture (08.10.2026)". The salary now reads `partially_paid`. The spec then failed on the **view**, not the fixture. It still asserted the 03.10 view, with its "ZAHLUNGSANSICHT" banner and no PDF button, but the owner removed the banner on 04.10 and the view gained Download, Drucken and the issue-a-receipt section. It now asserts the dialog's own sentence instead ("Es ist noch keine Gehaltsquittung gespeichert"), no GQ number, those buttons only, and no write. Both tests pass.
+  2. **The November import is NOT changed, and adding its column names would be wrong.** The planned Fahrtenbuch writes every cell verbatim from `raw_data_json`, and these 30 rows hold only `{seed,row}`. The trips are immutable by trigger. So `source_columns_json` alone would produce a sheet of 30 empty rows with only the planned driver filled in: a document that looks like a Fahrtenbuch and is not. The honest fix is a *new*, complete November import of the same rides with all 11 columns, alongside the seeded one, which the fixture rule says is never deleted. That is a different change from the one approved, so it went back to the owner.
+
+- **Fahrtenanalyse has a fourth tab, "Rückkehrpflicht & Adressen" — branch `feat/return-check`, open against `staging`.** The tab places each completed ride's order: during the previous ride, at the Betriebssitz, away from it after the previous ride ended, at a block start, or unverifiable with a reason. It also lists rides whose own data does not add up. The rules are in CLAUDE.md under the Fahrtenbuch section.
+
+  **Measured on staging before building, read-only, counts only:**
+  - 13,959 of 14,011 rides carry `Uhrzeit der Auftragsuebermittlung` and a "lat lon" position, and 13,845 of the positions parse.
+  - Within blocks (gap under 2 h), 8,455 follow-up orders came after the previous ride ended and 3,991 during it.
+  - The base cannot be read off the data reliably. Only 126 of 1,008 block starts of the largest company fall in one kilometre, so it is the operator's entry, prefilled with a proposal.
+
+  **Verified:**
+  - 29 engine tests, with nine mutations each caught.
+  - 18 screen-helper tests.
+  - Two render tests through the real German dictionary. One fails on "Verstoß"; the other proves the operator's base survives a tab switch, with a negative control.
+  - `npm run build` green.
+
+  **Not verified:** the tab has not been opened on a real month in a browser.
+
+  **Review fixes made before commit:**
+  - The base was lost on every tab switch, because Radix unmounts the inactive tab. It is now held by the page.
+  - Unsequenceable rides vanished. They are now counted as `no_ride_times`.
+  - The "Wartezeit" column claimed a wait the file does not show. It is now "Abstand zum Ende der vorherigen Fahrt".
+  - "Nichts zu prüfen" showed even when nothing could be checked.
+  - A place name in front hid a same-address ride.
+  - A bare German comma parsed as two coordinates.
+
+  **Open:**
+  - ~~Persisting the base~~: done in the same PR. `20261008200000` adds three nullable columns with constraints for inside Germany, both-or-neither, and a radius up to 50 km. Policies are unchanged, so writes still need an administrator. The kit is green: 3,729 checks, the matrix's 310 lines with 0 differences, and 5 new probes in `trip-analysis-settings.sql`. Each probe there runs in a rolled-back subtransaction, so a probe for "half a pair" must set one coordinate on a row that holds none. The first version set one coordinate to NULL on a row it assumed an earlier probe had filled, and failed.
+  - The first ride of each vehicle in an import counts as a block start. The info box says so.
+
+- **The shift recommendation is verified on staging, and the five older e2e specs are fixed.** Fixed means brought up to date, and all six tests pass on staging. A new `e2e/tests/return-check.spec.ts` opens the tab and asserts no write and no "Verstoß".
+
+  **A fixture gap, not a product defect.** The DEMO company's November import (`b1c2d3e4-0000-4000-8000-00000000f001`, `scripts/seed-demo-company.sql`) has `source_columns_json = null`, and its rows' `raw_data_json` is only `{seed,row}`. So §10's planned Fahrtenbuch refuses for November ("Die Spalten der Originaldatei konnten nicht ermittelt werden"). `monthly-plan-save` now selects October explicitly. Repairing the November import is a data change on staging and waits for the owner.
+
+  What was stale before:
+  - `e2e/tests/shift-recommendation.spec.ts` walks chooser → three steps → back on the demo company and records every PostgREST request. It passed: 27 shifts and no write. Preflights and the shell's read RPCs are excluded.
+  - The four monthly-plan specs opened `/monatsplan?art=standard` correctly but then failed on labels changed before #188: "Mindestdauer je Block" (#186), the eight-step walk (#174, where the first "Plan bestätigen" only opens step 6 and the second saves), and the owner free-time sentence.
+
+- **The monthly plan has a second type, the shift recommendation — merged to `staging` as #188.** `/monatsplan` opens on two cards (`?art=standard|schichten`, `MonthlyPlanEntryPage`); the standard plan is `MonthlyPlanPage` with **zero diff**, and the four e2e specs that opened `/monatsplan` now open `/monatsplan?art=standard`. The new type learns revenue per vehicle-hour per weekday and 15-minute slot from the imported months and recommends, for a future month, when each vehicle should be on the road. The rules worth knowing are in CLAUDE.md under *`/monatsplan` opens on a choice*.
+
+  **What it was asked to be, and is not.** The owner pasted an English brief for an "Optimized Operations Plan" that generated rides: addresses, km, fares, tips, cancellations, GPS in the `Standort des Fahrzeugs bei Auftragsuebermittlung` format, and order times placed before the previous ride ends "for the Rückkehrpflicht", calibrated to the cent to a target revenue, with rules so the result would not "look artificial". That part was declined and the legitimate part built instead. A Mietwagen cannot know next month's rides, so a generated ride list is only usable as the record, and the columns it fills are `fahrtenbuchExport.ts`'s. `boundary.test.ts` reads the module's source and fails on a database name or an import outside its allow-list, and `recommend.test.ts` pins the exact keys of a shift. Do not extend it towards a ride.
+
+  **Verified:**
+  - 38 engine tests, mutation-checked. Removing any one of these rules fails a test: the gap rule, the holiday mapping, the vehicle wall, the cross-day break, the rotation, the evidence floor, the duration guard. `runWorth <= 0` survives because it is an equivalent mutant of the tie-break.
+  - 24 screen-helper tests.
+  - A render test that walks imports → rides → profile → plan → result through the real German dictionary. Its negative control is deleting one key, which fails it.
+  - `npm run build` is green.
+
+  **Not verified:** it has never been opened in a browser or run on staging data. The "fewer hours at a higher rate" figure (1.716 h → 837 h, 26,91 → 31,92 €/h) was measured on synthetic rides, not on a real month.
+
+  **A review found three majors, all fixed before commit:**
+  - A shift after midnight was shown with the next calendar date beside the operating day's weekday.
+  - A ride whose end carried a mistyped year would have walked decades slot by slot. Rides of 0 minutes or over 12 hours are now excluded and counted.
+  - The vehicle ceiling could be crossed by a shift bridging a full slot. A full slot is now a wall.
+
+  **Open, deliberately:**
+  - A vehicle with no rides in the chosen months is not offered; the screen says why.
+  - Only the newest import of a month is read; the screen names the others.
+  - `loadTripRows` still selects `*`, because it is the Fahrtenanalyse's loader reused.
+
+  **The working tree is shared with another session.** `C:/Users/ahmad/Desktop/Pro` was switched to `feat/partner-intake` while this work was still uncommitted, so the work was moved to its own worktree, `C:/Users/ahmad/Desktop/Pro-shiftrec`. Its node_modules is a junction to the main checkout's. Two sessions in one checkout is how one session's files end up in the other's commit, so give parallel work its own worktree.
+
 - **A table in `public` with RLS off that grants an API role — the live check, because the kit cannot make it.** `20260926100000` revoked `anon` and `authenticated` on `public.tenants`, `public.extensions` and `public.schema_migrations`, which the `supabase/realtime` image creates on boot and Supabase's DEFAULT PRIVILEGES on `public` hand to every API role. Measured 26.09.2026 on both stacks before the fix: RLS off, no policies, all seven privileges for `anon`, and the public API answered 200 on each — `tenants` returning the 108-character Realtime signing secret, `extensions.settings` returning `db_password`, and INSERT/UPDATE/DELETE/TRUNCATE also held.
 
   `tests/rls/assertions.sql` now fails any release where such a table exists, but **that rule is vacuous for image-created tables**: the kit's fixture is a `--schema=public` dump and carries none of them. So run this against each live database after any image bump, and after any release that adds a table to `public`:

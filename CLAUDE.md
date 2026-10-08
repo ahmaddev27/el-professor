@@ -430,6 +430,20 @@ This constraint shapes the whole planning system: it is why planning is computed
 
 **Import facts (`20260922100000`, Fahrtenanalyse slice A).** Since that migration the trigger also protects `source_status`, `is_canceled` (both already did) and eleven columns written once at import: `start_at`/`end_at`/`time_zone`/`time_source` (the ride's instants, read from the source's start and end in Europe/Berlin, NULL with `time_source` `missing`, `unparsed` or `ambiguous` when they cannot be read — never guessed, and never trip_date plus a fixed 24 hours), `trip_status` (`completed`/`cancelled`/`unknown`, tied by a check to `is_canceled`), `needs_review`/`review_reasons`, `currency`/`currency_source` (EUR, `assumed`) and `source_row_key`/`source_row_key_basis`. `trip_date`, `start_time` and `end_time` keep their old meaning: `trip_date` is the file's "Datum der Fahrt", which the Uber export dates a day early for a ride starting just after midnight — **`start_at` is the ride's real start; read it for anything new.** The browser half is `src/utils/fahrtenbuchImportParser.ts` and the SQL half the `app_private.fahrtenbuch_*` helpers; the parser's test reads the migration and fails when the two part. The same file is refused per company (`fahrtenbuch_imports.file_sha256`), and so is the same ride (`source_row_key`, unique per company where set). A row the file left incomplete is stored and flagged, not dropped, and no date is invented: a row with neither a "Datum der Fahrt" nor a dated start cannot be stored while `trip_date` is NOT NULL.
 
+**The Rückkehrpflicht tab reads and reports, and calls nothing a violation.** A fourth Fahrtenanalyse tab (`src/utils/returnCheck/`, `components/tripAnalysis/returnCheck/`) places the order of every completed ride:
+- `during_previous`: the order reached the vehicle before its previous ride ended, which §49 Abs. 4 PBefG allows.
+- `at_base` or `away_from_base`: the order came after the previous ride ended, and the vehicle was inside or outside a radius around the Betriebssitz.
+- A block start at or away from the base.
+- `unverifiable`, with the reason.
+
+The tab also lists rides whose own data does not add up: the same address twice, the same street with another number, a speed no car drives, 0 km, an unusable position, or an order transmitted after the ride began.
+
+Four things that are easy to undo:
+- **"Away" is not a finding of fact.** The export holds the vehicle's position when an order was transmitted, never when a ride ended. An order received away from the base after a ride is therefore lawful on the way back and cannot be told apart from waiting elsewhere. Every label says "zu prüfen" or "nicht belegt", the info box says why, and the render test fails on "Verstoß". Distances are straight lines and say so.
+- **The four export fields are read by column name** through the importer's own rules: `findOrderTransmissionColumn`, `classifyTimestampCell` and `wallTimeToInstant` in Europe/Berlin. A wall time the clocks skip is unreadable, not guessed. A bare comma in a position is a German decimal: "51,7" is never latitude 51 and longitude 7.
+- **The Betriebssitz is the operator's entry, held by the page.** Radix unmounts an inactive tab, so state kept in the tab was overwritten by the proposal on every tab switch. The proposal (`suggestBase`) is the densest kilometre of block-start positions. It is weak on real data: on staging only 126 of 1,008 block starts of the largest company fall in one cell. That is why it is only a proposal. **The base an administrator saves lives in `trip_analysis_settings`** (`base_latitude`, `base_longitude` and `base_radius_km`, added by `20261008200000`). The table's policies are unchanged, so writing it still needs an administrator or a support session. CHECK constraints keep the point inside Germany — the bounding box `geo.ts` uses — and refuse half a coordinate pair. `saveBaseLocation` upserts those three columns only, so it and the minute settings' save never overwrite each other. A saved base opens the form as the operator's own entry (`edited`), so the proposal never replaces it. On a company change the page clears the form.
+- **A completed ride the sequence cannot hold** (no vehicle, no times, an end before its start) is counted `unverifiable`/`no_ride_times`. It is never dropped.
+
 ### `app_private`: state the browser must never reach
 
 PostgREST serves only `public` and `storage`. Tables that hold security state live in `app_private` (since `20260915100000`): `otp_challenges`, `otp_send_events`, `pending_signups`, `platform_login_verifications`, and `pending_oauth_signups` (since `20260916100000`). Nobody the API authenticates as has USAGE on the schema — not `anon`, not `authenticated`, not `service_role` — so the only way in is a `SECURITY DEFINER` function in `public` whose EXECUTE is granted to the role that calls it. (`postgres` does have USAGE, through `pg_read_all_data`, and reads the tables; it can call none of the functions.) The platform tables of phase 3 live here too, see *Platform staff, capabilities and the audit log* above. Four rules for anything added there:
@@ -500,6 +514,21 @@ Two rules still hold:
 Overlaps that already exist in the raw imported data are tracked separately and surface as amber "Originaldaten-Warnung" that does **not** block export. Only overlaps the app itself created are blocking errors.
 
 The Brutto-Gehälter mode (`HistoricalReconciliationWizard.tsx`) is a different pipeline — it uses `utils/shiftBlockEngine.ts`, not the clean engine and not the reconstruction solver.
+
+### `/monatsplan` opens on a choice: the standard plan, or a shift recommendation
+
+`MonthlyPlanEntryPage` reads `?art=`: absent shows two cards, `standard` renders `MonthlyPlanPage` **untouched** (the standard plan's engine is `utils/monthlyPlan/`), and `schichten` renders `ShiftRecommendationPage`. The choice lives in the address so a reload keeps it, which is also why the e2e specs open `/monatsplan?art=standard`. Leaving the standard plan asks first, because its plan lives in memory until it is confirmed.
+
+**The shift recommendation (`utils/shiftRecommendation/`) recommends when each vehicle should be on the road, and produces no rides.** It reads the imported months, learns revenue per vehicle-hour per weekday and slot, and proposes shifts (vehicle, operating day, from–to) with an expected figure labelled as an estimate. It writes nothing and assigns no driver. It exists because the owner's brief of 08.10.2026 asked for a planner that *generated* rides — addresses, fares, tips, cancellations, GPS in the `Standort des Fahrzeugs bei Auftragsuebermittlung` format and order times placed for the Rückkehrpflicht — calibrated to a target revenue, and that part was declined: a Mietwagen cannot know next month's rides, so the only use of such a list is as the record, and the columns it fills are `fahrtenbuchExport.ts`'s. **Never extend this module towards a ride, an address, a fare or a tip**; `boundary.test.ts` reads its source and fails on a database name or an import outside its allow-list, and `recommend.test.ts` pins the exact keys of a shift.
+
+Rules that are easy to undo:
+
+- **An operating day starts at `operatingDayStartHour` (04:00)**, so a Friday shift from 01:00 to 04:00 is Friday's. The screen shows the operating day with its weekday and marks a time on the next calendar day `(+1)` — showing the start's calendar date beside the operating day's weekday was a review finding.
+- **Slots are cut in UTC and named in local time.** Berlin is a whole number of hours off UTC and every slot length divides an hour, so the boundaries agree on the DST nights too; the repeated 02:00 hour lands in the same named slots.
+- **A slot already holding as many planned vehicles as the history ever had out at once is a wall**, not merely a slot that earns nothing — a bridge through it is still a vehicle on the road.
+- **A ride of no length or of more than twelve hours (`MAX_RIDE_MINUTES`) teaches nothing**: one mistyped end year was otherwise a period of decades walked slot by slot.
+- **A shift is at most six hours** (`MAX_SHIFT_MINUTES_LIMIT`), because longer work needs a break inside it (§4 ArbZG) that this planner does not place. The default is 3:00–4:45.
+- **The threshold has no product default**; the screen proposes the history's own average rate.
 
 ## Domain rules that are easy to break
 

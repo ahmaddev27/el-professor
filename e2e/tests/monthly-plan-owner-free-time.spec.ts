@@ -52,7 +52,7 @@ test('the owner free-time panel shows windows and hours, and assigns nothing', a
   await assertDemoAccount(page);
 
   // Steps 1 to 4, as monthly-plan-walk.spec.ts does them.
-  await page.goto('/monatsplan');
+  await page.goto('/monatsplan?art=standard');
   await page.waitForTimeout(8000);
   await page.getByRole('button', { name: /^Weiter$/ }).click();
   await page.waitForTimeout(5000);
@@ -76,8 +76,8 @@ test('the owner free-time panel shows windows and hours, and assigns nothing', a
   const text = (await panel.innerText()).replace(/\s+/g, ' ');
   console.log('panel:', text.slice(0, 900));
 
-  // Summary: "Der Inhaber hat X Stunden übernommen und ist in diesem Monat Y Stunden frei, verteilt auf N Zeitfenster. ..."
-  const summary = /Der Inhaber hat ([\d.]+,\d) Stunden übernommen und ist in diesem Monat ([\d.]+,\d) Stunden frei, verteilt auf (\d+) Zeitfenster/
+  // Summary (mplan.ownerFree.summary): "Der Inhaber hat X Stunden übernommen und ist an den D Tagen, an denen gefahren wurde, Y Stunden frei — verteilt auf N Zeitfenster. Tage ohne Fahrten sind nicht mitgezählt. ..."
+  const summary = /Der Inhaber hat ([\d.]+,\d) Stunden übernommen und ist an den \d+ Tagen, an denen gefahren wurde, ([\d.]+,\d) Stunden frei — verteilt auf (\d+) Zeitfenster/
     .exec(text);
   expect(summary, `the summary sentence is not as specified:\n${text.slice(0, 500)}`).not.toBeNull();
   const num = (s: string) => Number(s.replace(/\./g, '').replace(',', '.'));

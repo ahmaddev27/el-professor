@@ -38,6 +38,10 @@ export interface SettingsRow {
   block_gap_minutes: number | null;
   travel_margin_minutes: number | null;
   updated_at: string | null;
+  /** The Betriebssitz (20261008200000). Optional so a row from before that migration still types. */
+  base_latitude?: number | string | null;
+  base_longitude?: number | string | null;
+  base_radius_km?: number | string | null;
 }
 
 export type SettingSource = 'stored' | 'test_default' | 'missing';
