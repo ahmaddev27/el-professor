@@ -412,6 +412,12 @@ services:
       # mandatory would refuse every release until it is written on both
       # hosts, which is a decision for the owner and not for this file.
       PARTNER_SEAL_KEY: ${PARTNER_SEAL_KEY:-}
+      # Where an outbound partner call may go. Not a secret and still not
+      # optional in spirit: it is the one thing standing between a request
+      # body and our own Docker network, so it is configuration and the
+      # function validates it (https, public host, no credentials, 443, no
+      # path) before using it.
+      PARTNER_REIDEY_BASE_URL: ${PARTNER_REIDEY_BASE_URL:-}
       # The functions mail the codes themselves (_shared/mail.ts), through the
       # server GoTrue uses: Mailpit on staging, Resend on 2587 in production.
       # Port 465 is TLS from the first byte, any other port must offer STARTTLS,

@@ -57,11 +57,18 @@ function base64url(bytes: Uint8Array): string {
   return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
 }
 
-function fromBase64url(value: string): Uint8Array {
+/**
+ * No return annotation on purpose. Declaring `Uint8Array` widens the inferred
+ * `Uint8Array<ArrayBuffer>` back to `Uint8Array<ArrayBufferLike>`, which Deno's
+ * lib refuses as a `BufferSource` because a `SharedArrayBuffer` cannot be one —
+ * and `deno check` is where that showed up, not the typechecker vitest runs.
+ * The view is built over an explicit `ArrayBuffer` for the same reason.
+ */
+function fromBase64url(value: string) {
   const padded = value.replace(/-/g, '+').replace(/_/g, '/')
     + '='.repeat((4 - (value.length % 4)) % 4)
   const binary = atob(padded)
-  const bytes = new Uint8Array(binary.length)
+  const bytes = new Uint8Array(new ArrayBuffer(binary.length))
   for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i)
   return bytes
 }

@@ -92,7 +92,7 @@ const OTP_MAIL_ENV = ['OTP_PEPPER', ...SMTP_ENV] as const
 // they rotate for different reasons: the pepper is shared with every
 // one-time code, and re-keying it must not force every partner token to be
 // re-sealed.
-const PARTNER_ENV = ['OTP_PEPPER', 'PARTNER_SEAL_KEY'] as const
+const PARTNER_ENV = ['OTP_PEPPER', 'PARTNER_SEAL_KEY', 'PARTNER_REIDEY_BASE_URL'] as const
 
 /** Exactly the variables each worker may see. JWT_SECRET and SUPABASE_DB_URL are never passed. */
 const FUNCTION_ENV: ReadonlyMap<string, readonly string[]> = new Map<string, readonly string[]>([
@@ -128,6 +128,13 @@ const FUNCTION_ENV: ReadonlyMap<string, readonly string[]> = new Map<string, rea
   // The X-Partner-Key header is, hashed with the pepper and resolved to one
   // company by a service-role RPC over a table in app_private. No SMTP.
   ['partner-intake', [...BASE_ENV, ...SERVICE_ENV, ...PARTNER_ENV]],
+  // Connect: a company administrator pastes the token Reidey showed once.
+  // A function rather than a route on partner-intake, because that one's
+  // authority is an X-Partner-Key header and its bearer proves nothing,
+  // while here the session is the authority and the bearer is everything.
+  // Deliberately NOT public: it needs a session, and the tenancy and role
+  // checks inside it are the authorization.
+  ['partner-connect', [...BASE_ENV, ...SERVICE_ENV, ...PARTNER_ENV]],
   ['validate-discount-code', [...BASE_ENV, ...SERVICE_ENV]],
   ['update-income-weeks', [...BASE_ENV]],
   ['extract-receipt', [...BASE_ENV, 'ANTHROPIC_API_KEY']],
