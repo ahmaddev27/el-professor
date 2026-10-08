@@ -51,6 +51,8 @@ import { TripAnalysisOverview } from '../components/tripAnalysis/TripAnalysisOve
 import { TripAnalysisIssues } from '../components/tripAnalysis/TripAnalysisIssues';
 import { TripAnalysisSettingsCard } from '../components/tripAnalysis/TripAnalysisSettingsCard';
 import { TripAnalysisDriverView } from '../components/tripAnalysis/TripAnalysisDriverView';
+import { ReturnCheckPanel } from '../components/tripAnalysis/returnCheck/ReturnCheckPanel';
+import { EMPTY_BASE_FORM, type BaseForm } from '../utils/returnCheckScreens';
 import { TripEvidenceSheet, type TripEvidence } from '../components/tripAnalysis/TripEvidenceSheet';
 
 /**
@@ -114,6 +116,9 @@ export default function TripAnalysisPage() {
   const [monthKey, setMonthKey] = useState(currentMonthKey);
   const [importId, setImportId] = useState<string | null>(null);
   const [tab, setTab] = useState('overview');
+  // The Rückkehrpflicht tab's Betriebssitz lives here: an inactive tab is unmounted, and the operator's entry must survive that.
+  const [returnBase, setReturnBase] = useState<BaseForm>(EMPTY_BASE_FORM);
+  const patchReturnBase = useCallback((patch: Partial<BaseForm>) => setReturnBase(current => ({ ...current, ...patch })), []);
   const [selectedDriverId, setSelectedDriverId] = useState<string | null>(null);
   const [evidence, setEvidence] = useState<TripEvidence | null>(null);
   const [useTestDefault, setUseTestDefault] = useState(false);
@@ -437,6 +442,7 @@ export default function TripAnalysisPage() {
           <TabsTrigger value="overview">{t('ta.tab.overview')}</TabsTrigger>
           <TabsTrigger value="driver">{t('ta.tab.driver')}</TabsTrigger>
           <TabsTrigger value="issues">{t('ta.tab.issues')}</TabsTrigger>
+          <TabsTrigger value="returncheck">{t('returncheck.tab')}</TabsTrigger>
         </TabsList>
         <TabsContent value="overview">
           <TripAnalysisOverview
@@ -465,6 +471,14 @@ export default function TripAnalysisPage() {
         </TabsContent>
         <TabsContent value="issues">
           <TripAnalysisIssues issues={result.issues} driverNames={driverNames} onShowTrips={setEvidence} />
+        </TabsContent>
+        <TabsContent value="returncheck">
+          <ReturnCheckPanel
+            tripRows={tripRows}
+            blockGapMinutes={effective.settings.blockGapMinutes}
+            baseForm={returnBase}
+            onBaseForm={patchReturnBase}
+          />
         </TabsContent>
       </Tabs>
     );
