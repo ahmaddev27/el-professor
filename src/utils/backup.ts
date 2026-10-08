@@ -40,6 +40,7 @@
  * when a backup is actually opened), and a warning toast instead of a success
  * one. Do not drop any of the three on the grounds that the other two cover it.
  */
+import { UUID_LOOKUP_CHUNK } from './postgrestLookup';
 // `supabase` is imported lazily, inside the two functions that need the live
 // client. A static import pulls in `src/lib/supabase.ts`, which reads
 // `window.location.origin` at module scope — so merely importing this file threw
@@ -55,12 +56,12 @@
 export const BACKUP_PAGE_SIZE = 1000;
 
 /**
- * How many parent ids go into one `.in(...)` for a child table. 200 uuids of 36
- * characters keeps the request line near 8 KB; the repo's precedent for a
- * bounded request line is `KEY_LOOKUP_CHUNK = 100` for 64-character keys in
- * `useFahrtenbuch.ts`.
+ * How many parent ids go into one `.in(...)` for a child table. It was 200, on
+ * the belief that an 8 KB request line was fine; the gateway refuses an answer
+ * once the echoed query passes about 95 uuids (postgrestLookup.ts, measured
+ * 08.10.2026), so a company with that many parent rows got no backup.
  */
-export const BACKUP_PARENT_ID_CHUNK = 200;
+export const BACKUP_PARENT_ID_CHUNK = UUID_LOOKUP_CHUNK;
 
 /** The shape changed: reports, per-table completeness, the company it is of. */
 export const BACKUP_VERSION = '2.0';
