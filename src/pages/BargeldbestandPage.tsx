@@ -47,6 +47,7 @@ import {
   SelectValue,
   type DataTableColumn,
 } from '../components/ui';
+import { UUID_LOOKUP_CHUNK } from '../utils/postgrestLookup';
 
 /**
  * Bargeldbestand reads one ledger.
@@ -110,8 +111,8 @@ const EMPTY_TOTALS: CashLedgerTotals = {
   manualOutCents: 0,
 };
 
-/** PostgREST puts the whole `.in()` list in the URL, so ask in chunks. */
-const RECEIPT_LOOKUP_CHUNK = 200;
+/** PostgREST puts the whole `.in()` list in the URL, so ask in chunks — see postgrestLookup.ts for the bound. */
+const RECEIPT_LOOKUP_CHUNK = UUID_LOOKUP_CHUNK;
 
 export default function BargeldbestandPage() {
   const { t } = useTranslation();

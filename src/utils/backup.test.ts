@@ -353,7 +353,7 @@ describe('every table is read to its end', () => {
 
 describe('a child table is scoped by its parent, never by company_id', () => {
   it('chunks the parent ids and asks by the foreign key', async () => {
-    const parentCount = BACKUP_PARENT_ID_CHUNK + 50;
+    const parentCount = BACKUP_PARENT_ID_CHUNK + 10;
     const { client, queries } = makeClient({
       documents: () => ({ data: rows(parentCount), error: null }),
     });
@@ -364,7 +364,7 @@ describe('a child table is scoped by its parent, never by company_id', () => {
     expect(blockQueries).toHaveLength(2);
     expect(blockQueries[0].in?.[0]).toBe('document_id');
     expect(blockQueries[0].in?.[1]).toHaveLength(BACKUP_PARENT_ID_CHUNK);
-    expect(blockQueries[1].in?.[1]).toHaveLength(50);
+    expect(blockQueries[1].in?.[1]).toHaveLength(10);
     // No company_id term: the column does not exist on these tables.
     expect(blockQueries[0].eq).toBeUndefined();
     expect(blockQueries[0].order).toEqual(['id', { ascending: true }]);
