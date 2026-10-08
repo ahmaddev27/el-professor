@@ -4,6 +4,16 @@ Last updated: **08.10.2026**
 
 Start here when you pick up this project. Read it together with [CLAUDE.md](CLAUDE.md), which holds the rules and how every mechanism works, and [PROGRESS.md](PROGRESS.md), which records what is done and what was verified. The owner-facing plan is [el-professor-plan.html](el-professor-plan.html). The older developer reference, moved out of the README in PR #18, is [Docs/TECHNICAL_REFERENCE.md](Docs/TECHNICAL_REFERENCE.md); where it disagrees with CLAUDE.md or the code, they win.
 
+- **DEMO has a complete December 2026, imported through the UI on 08.10.2026 after #192 and #193.**
+  - **The import.** 297 rides, 294 completed and 3 cancelled, carrying all 18 Uber columns including the order transmission time and the position. `fahrtenbuch_imports.source_columns_json` holds 18 columns and the original XLSX is in `fahrtenbuch-files`. That file is the first storage object written since 10.09.2026. The screen reported 0 duplicates.
+  - **The data.** It is synthetic and built by the deterministic `scripts/demo/december-2026.mjs`:
+    - Anna Beispiel: 103 rides.
+    - Emil Normal: 101 rides.
+    - Bert Nachtfahrt: 90 rides, Friday and Saturday nights, including rides after midnight.
+  - **What the Rückkehrpflicht engine finds in it** (block gap 30): 215 `during_previous`, 21 `at_base`, 6 `away_from_base` and 52 `block_start_at_base`, plus one each of `same_address`, `same_street`, `implausible_speed` and `zero_distance`.
+  - **Why a new month.** November's seeded rows cannot carry original columns: they are immutable, and re-importing them is refused as duplicates, correctly.
+  - **The specs.** December is now the newest month. `monthly-plan-walk`, `-split-salary` and `-owner-free-time` select November 2026 explicitly; `monthly-plan-save` keeps October.
+
 - **A second live defect, fixed on `fix/storage-cors`: no browser upload has reached storage on either stack since 12.09.2026.**
   - **Symptom.** With the lookup fixed, the December import failed at its last step: "Import blockiert: Original-XLSX-Datei konnte nicht gespeichert werden … (Failed to fetch)". The console showed `blocked by CORS policy: Request header field cache-control is not allowed by Access-Control-Allow-Headers in preflight response`.
   - **Cause.** storage-js adds `cache-control` and `x-upsert` to every upload, and `x-metadata` when metadata is given. The storage route's cors `headers` list in `deploy/kong.yml` named none of the three. That list was written on 12.09.2026 (d8e6172, then bf3bded, which added `X-Supabase-Api-Version` for auth and not these).
