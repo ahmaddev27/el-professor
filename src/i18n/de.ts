@@ -6254,7 +6254,6 @@ export const de = {
   'returncheck.base.lonInvalid':           'Längengrad zwischen -180 und 180, z. B. 13,4050',
   'returncheck.base.missing':              'Ohne Betriebssitz lässt sich nicht beurteilen, wo ein Auftrag das Fahrzeug erreicht hat. Tragen Sie die Koordinaten ein.',
   'returncheck.base.noSuggestion':         'Kein Vorschlag möglich.',
-  'returncheck.base.notSaved':             'Der Betriebssitz wird noch nicht gespeichert; er gilt nur, solange diese Seite offen ist.',
   'returncheck.base.radius':               'Radius um den Betriebssitz',
   'returncheck.base.radiusOption':         '{km} km',
   'returncheck.base.suggestion':           'Vorschlag aus Ihren Daten: an {count} von {total} Blockanfängen lag die Position hier — bitte prüfen.',
@@ -6313,4 +6312,13 @@ export const de = {
 
   // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
   'returncheck.review.emptyButUnverifiable': 'Keine Fahrt zu prüfen – aber {count} Fahrten konnten nicht geprüft werden (siehe „Nicht prüfbar“).',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'returncheck.base.adminOnly':      'Nur Administratoren können den Betriebssitz speichern. Ihre Eingabe gilt nur, solange diese Seite offen ist.',
+  'returncheck.base.outsideGermany': 'Diese Koordinaten liegen nicht in Deutschland. Sind Breiten- und Längengrad vertauscht?',
+  'returncheck.base.save':           'Betriebssitz speichern',
+  'returncheck.base.saveFailed':     'Der Betriebssitz konnte nicht gespeichert werden.',
+  'returncheck.base.saveSucceeded':  'Betriebssitz gespeichert.',
+  'returncheck.base.savedState':     'Gespeichert – gilt für alle in Ihrem Unternehmen.',
+  'returncheck.base.unsaved':        'Noch nicht gespeichert.',
 } as const;

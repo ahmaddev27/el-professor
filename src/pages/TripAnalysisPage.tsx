@@ -31,6 +31,7 @@ import {
   loadSavedStundennachweise,
   loadSettings,
   loadTripRows,
+  saveBaseLocation,
   saveReserve,
   saveSettings,
   type ImportSummary,
@@ -52,7 +53,7 @@ import { TripAnalysisIssues } from '../components/tripAnalysis/TripAnalysisIssue
 import { TripAnalysisSettingsCard } from '../components/tripAnalysis/TripAnalysisSettingsCard';
 import { TripAnalysisDriverView } from '../components/tripAnalysis/TripAnalysisDriverView';
 import { ReturnCheckPanel } from '../components/tripAnalysis/returnCheck/ReturnCheckPanel';
-import { EMPTY_BASE_FORM, type BaseForm } from '../utils/returnCheckScreens';
+import { EMPTY_BASE_FORM, baseFormFromSaved, savedBaseFrom, type BaseForm } from '../utils/returnCheckScreens';
 import { TripEvidenceSheet, type TripEvidence } from '../components/tripAnalysis/TripEvidenceSheet';
 
 /**
@@ -119,6 +120,10 @@ export default function TripAnalysisPage() {
   // The Rückkehrpflicht tab's Betriebssitz lives here: an inactive tab is unmounted, and the operator's entry must survive that.
   const [returnBase, setReturnBase] = useState<BaseForm>(EMPTY_BASE_FORM);
   const patchReturnBase = useCallback((patch: Partial<BaseForm>) => setReturnBase(current => ({ ...current, ...patch })), []);
+  // Another company is another Betriebssitz: nothing typed for the previous one may carry over.
+  useEffect(() => {
+    setReturnBase(EMPTY_BASE_FORM);
+  }, [companyId]);
   const [selectedDriverId, setSelectedDriverId] = useState<string | null>(null);
   const [evidence, setEvidence] = useState<TripEvidence | null>(null);
   const [useTestDefault, setUseTestDefault] = useState(false);
@@ -256,6 +261,11 @@ export default function TripAnalysisPage() {
   const analysisTrips: AnalysisTrip[] = useMemo(() => tripRows.map(analysisTripFromRow), [tripRows]);
   const conversion = useMemo(() => shiftsFromSavedStundennachweise(savedRecords), [savedRecords]);
   const effective = useMemo(() => effectiveSettings(settingsRow, useTestDefault), [settingsRow, useTestDefault]);
+  const savedReturnBase = useMemo(() => savedBaseFrom(settingsRow), [settingsRow]);
+  // The saved base opens the form, unless the operator has already typed one in this visit.
+  useEffect(() => {
+    if (savedReturnBase) setReturnBase(current => (current.edited ? current : baseFormFromSaved(savedReturnBase)));
+  }, [savedReturnBase]);
 
   const analysis = useMemo<{ result: TripAnalysisResult | null; failed: boolean }>(() => {
     if (!effective.settings || tripRows.length === 0) return { result: null, failed: false };
@@ -301,7 +311,7 @@ export default function TripAnalysisPage() {
     setTab('driver');
   }, []);
 
-  // ── The three writes ───────────────────────────────────────────────────────
+  // ── The four writes ────────────────────────────────────────────────────────
 
   const handleSaveSettings = useCallback(
     async (values: { blockGapMinutes: number | null; travelMarginMinutes: number | null }) => {
@@ -313,6 +323,22 @@ export default function TripAnalysisPage() {
       } catch (error) {
         console.error('Fahrtenanalyse: saving the settings failed', error);
         showToast('error', t('ta.settings.saveFailed'));
+        return false;
+      }
+    },
+    [companyId, showToast, t],
+  );
+
+  const handleSaveBase = useCallback(
+    async (base: { lat: number; lon: number }, radiusKm: number) => {
+      if (!companyId) return false;
+      try {
+        setSettingsRow(await saveBaseLocation(companyId, base, radiusKm));
+        showToast('success', t('returncheck.base.saveSucceeded'));
+        return true;
+      } catch (error) {
+        console.error('Fahrtenanalyse: saving the Betriebssitz failed', error);
+        showToast('error', t('returncheck.base.saveFailed'));
         return false;
       }
     },
@@ -478,6 +504,9 @@ export default function TripAnalysisPage() {
             blockGapMinutes={effective.settings.blockGapMinutes}
             baseForm={returnBase}
             onBaseForm={patchReturnBase}
+            savedBase={savedReturnBase}
+            canSave={canEdit}
+            onSaveBase={handleSaveBase}
           />
         </TabsContent>
       </Tabs>

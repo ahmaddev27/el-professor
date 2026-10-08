@@ -6,10 +6,12 @@ import { exportTableToExcel } from '../../../utils/excelExport';
 import {
   DEFAULT_RETURN_CHECK_SETTINGS,
   checkRideFromRow,
+  isInGermany,
   runReturnCheck,
   suggestBase,
   type BaseSuggestion,
   type CheckRide,
+  type LatLon,
   type ReturnCheckResult,
 } from '../../../utils/returnCheck';
 import type { TripRowForAnalysis } from '../../../utils/tripAnalysis/types';
@@ -25,8 +27,10 @@ import {
   unverifiableCounts,
   PLACEMENT_KEYS,
   UNVERIFIABLE_KEYS,
+  baseFormDiffers,
   type BaseForm,
   type ReviewPlacement,
+  type SavedBase,
 } from '../../../utils/returnCheckScreens';
 import { ReturnCheckSummary } from './ReturnCheckSummary';
 import { AnomalyTable, ReviewTable } from './ReturnCheckTables';
@@ -38,6 +42,11 @@ interface Props {
   /** Held by the page, so it survives a switch to another tab (an inactive tab is unmounted). */
   baseForm: BaseForm;
   onBaseForm: (patch: Partial<BaseForm>) => void;
+  /** What the company saved, or null. */
+  savedBase: SavedBase | null;
+  /** Whether this account may save it: the table's write policy asks for an administrator or a support session. */
+  canSave: boolean;
+  onSaveBase: (base: LatLon, radiusKm: number) => Promise<boolean>;
 }
 
 function guard<T>(label: string, run: () => T): { value: T | null; failed: boolean } {
@@ -50,11 +59,12 @@ function guard<T>(label: string, run: () => T): { value: T | null; failed: boole
 }
 
 /** The fourth Fahrtenanalyse tab. A list to review, never a verdict; nothing is stored. */
-export function ReturnCheckPanel({ tripRows, blockGapMinutes, baseForm, onBaseForm }: Props) {
+export function ReturnCheckPanel({ tripRows, blockGapMinutes, baseForm, onBaseForm, savedBase, canSave, onSaveBase }: Props) {
   const { t } = useTranslation();
   const { latText, lonText, radiusKm, edited } = baseForm;
   const [vehicle, setVehicle] = useState('');
   const [placement, setPlacement] = useState<'' | ReviewPlacement>('');
+  const [saving, setSaving] = useState(false);
 
   const mapped = useMemo(() => guard<CheckRide[]>('reading the rides', () => tripRows.map(checkRideFromRow)), [tripRows]);
   const rides = mapped.value;
@@ -73,6 +83,19 @@ export function ReturnCheckPanel({ tripRows, blockGapMinutes, baseForm, onBaseFo
   }, [suggestion, edited, latText, lonText, onBaseForm]);
 
   const parsed = useMemo(() => parseBase(latText, lonText), [latText, lonText]);
+  // The database stores a base in Germany only; say so before the save is refused.
+  const outsideGermany = parsed.base !== null && !isInGermany(parsed.base);
+  const dirty = baseFormDiffers(baseForm, savedBase);
+
+  const save = async () => {
+    if (!parsed.base || outsideGermany) return;
+    setSaving(true);
+    try {
+      await onSaveBase(parsed.base, radiusKm);
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const run = useMemo(
     () =>
@@ -220,7 +243,21 @@ export function ReturnCheckPanel({ tripRows, blockGapMinutes, baseForm, onBaseFo
               <Button variant="secondary" size="sm" onClick={useSuggestion}>{t('returncheck.base.useSuggestion')}</Button>
             </div>
           ) : null}
-          <p className="text-[13px] text-fg-subtle">{t('returncheck.base.notSaved')}</p>
+          {outsideGermany ? <p className="text-[13px] text-critical">{t('returncheck.base.outsideGermany')}</p> : null}
+          {canSave ? (
+            <div className="flex flex-wrap items-center gap-3">
+              <Button size="sm" onClick={() => void save()} disabled={!parsed.base || outsideGermany || !dirty || saving}>
+                {t('returncheck.base.save')}
+              </Button>
+              <span className="text-[13px] text-fg-subtle">
+                {dirty ? t('returncheck.base.unsaved') : savedBase ? t('returncheck.base.savedState') : null}
+              </span>
+            </div>
+          ) : (
+            <p className="text-[13px] text-fg-subtle">
+              {savedBase && !dirty ? t('returncheck.base.savedState') : t('returncheck.base.adminOnly')}
+            </p>
+          )}
         </CardContent>
       </Card>
       {body}

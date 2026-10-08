@@ -24,18 +24,27 @@ vi.mock('../../../contexts/LanguageContext', async () => {
 });
 
 const { ReturnCheckPanel } = await import('./ReturnCheckPanel');
-const { EMPTY_BASE_FORM } = await import('../../../utils/returnCheckScreens');
+const { EMPTY_BASE_FORM, baseFormFromSaved } = await import('../../../utils/returnCheckScreens');
 type BaseForm = typeof EMPTY_BASE_FORM;
+type Saved = { base: { lat: number; lon: number }; radiusKm: number | null };
+
+const saves: Array<{ base: { lat: number; lon: number }; radiusKm: number }> = [];
 
 /** The page's part: it holds the Betriebssitz form, and shows or hides the tab. */
-function Host({ shown }: { shown: boolean }) {
-  const [form, setForm] = useState<BaseForm>(EMPTY_BASE_FORM);
+function Host({ shown, saved = null, canSave = true }: { shown: boolean; saved?: Saved | null; canSave?: boolean }) {
+  const [form, setForm] = useState<BaseForm>(saved ? baseFormFromSaved(saved) : EMPTY_BASE_FORM);
   if (!shown) return null;
   return createElement(ReturnCheckPanel, {
     tripRows: ROWS,
     blockGapMinutes: 30,
     baseForm: form,
     onBaseForm: (patch: Partial<BaseForm>) => setForm(current => ({ ...current, ...patch })),
+    savedBase: saved,
+    canSave,
+    onSaveBase: async (base: { lat: number; lon: number }, radiusKm: number) => {
+      saves.push({ base, radiusKm });
+      return true;
+    },
   });
 }
 
@@ -118,5 +127,40 @@ describe('ReturnCheckPanel', () => {
     await act(async () => { renderer.update(createElement(Host, { shown: true })); });
     await act(async () => { await Promise.resolve(); });
     expect(latitude().props.value).toBe('51,2000');
+  });
+
+  it('opens on the saved base rather than the proposal, and saves only what changed', async () => {
+    const saved = { base: { lat: 51.1, lon: 7.2 }, radiusKm: 3 };
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(createElement(Host, { shown: true, saved }));
+    });
+    await act(async () => { await Promise.resolve(); });
+    const inputs = () => renderer.root.findAll(node => node.type === 'input');
+    expect(inputs()[0].props.value).toBe('51,10000');
+    expect(collect(renderer.root)).toContain('Gespeichert');
+    const saveButton = () => renderer.root.findAll(node => node.type === 'button').find(b => collect(b).includes('Betriebssitz speichern'));
+    expect(saveButton()?.props.disabled).toBe(true);
+
+    await act(async () => { inputs()[0].props.onChange({ target: { value: '51,2' } }); });
+    expect(collect(renderer.root)).toContain('Noch nicht gespeichert');
+    saves.length = 0;
+    await act(async () => { saveButton()?.props.onClick(); });
+    expect(saves).toEqual([{ base: { lat: 51.2, lon: 7.2 }, radiusKm: 3 }]);
+  });
+
+  it('refuses to save a base outside Germany, and tells a non-administrator why there is no button', async () => {
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(createElement(Host, { shown: true, saved: { base: { lat: 7.2, lon: 51.1 }, radiusKm: 2 } }));
+    });
+    expect(collect(renderer.root)).toContain('nicht in Deutschland');
+
+    await act(async () => {
+      renderer = create(createElement(Host, { shown: true, canSave: false }));
+    });
+    await act(async () => { await Promise.resolve(); });
+    expect(collect(renderer.root)).toContain('Nur Administratoren');
+    expect(renderer.root.findAll(node => node.type === 'button').some(b => collect(b).includes('Betriebssitz speichern'))).toBe(false);
   });
 });

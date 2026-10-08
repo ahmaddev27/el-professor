@@ -338,3 +338,51 @@ export const EMPTY_BASE_FORM: BaseForm = {
   radiusKm: DEFAULT_RETURN_CHECK_SETTINGS.baseRadiusKm,
   edited: false,
 };
+
+/** The Betriebssitz the company saved, or null when it saved none (or half of one). */
+export interface SavedBase {
+  readonly base: LatLon;
+  readonly radiusKm: number | null;
+}
+
+function numberOrNull(value: number | string | null | undefined): number | null {
+  if (value === null || value === undefined || value === '') return null;
+  const n = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+/** PostgREST may answer a numeric column as a string; both read the same. */
+export function savedBaseFrom(row: {
+  base_latitude?: number | string | null;
+  base_longitude?: number | string | null;
+  base_radius_km?: number | string | null;
+} | null): SavedBase | null {
+  if (!row) return null;
+  const lat = numberOrNull(row.base_latitude);
+  const lon = numberOrNull(row.base_longitude);
+  if (lat === null || lon === null) return null;
+  return { base: { lat, lon }, radiusKm: numberOrNull(row.base_radius_km) };
+}
+
+/** The form a saved base opens with. It counts as the operator's entry, so no proposal is written over it. */
+export function baseFormFromSaved(saved: SavedBase): BaseForm {
+  return {
+    latText: formatCoordinate(saved.base.lat),
+    lonText: formatCoordinate(saved.base.lon),
+    radiusKm: saved.radiusKm ?? DEFAULT_RETURN_CHECK_SETTINGS.baseRadiusKm,
+    edited: true,
+  };
+}
+
+/** Whether the form says something other than what is saved — what the save button is for. */
+export function baseFormDiffers(form: BaseForm, saved: SavedBase | null): boolean {
+  const parsed = parseBase(form.latText, form.lonText);
+  if (!parsed.base) return false;
+  if (!saved) return true;
+  const same = (a: number, b: number, places: number) => Math.round(a * 10 ** places) === Math.round(b * 10 ** places);
+  return !(
+    same(parsed.base.lat, saved.base.lat, 5) &&
+    same(parsed.base.lon, saved.base.lon, 5) &&
+    same(form.radiusKm, saved.radiusKm ?? DEFAULT_RETURN_CHECK_SETTINGS.baseRadiusKm, 1)
+  );
+}

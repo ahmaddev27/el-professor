@@ -28,12 +28,16 @@ Start here when you pick up this project. Read it together with [CLAUDE.md](CLAU
   - A bare German comma parsed as two coordinates.
 
   **Open:**
-  - Persisting the base needs a column on `trip_analysis_settings`, so a migration and a kit run.
+  - ~~Persisting the base~~: done in the same PR. `20261008200000` adds three nullable columns with constraints for inside Germany, both-or-neither, and a radius up to 50 km. Policies are unchanged, so writes still need an administrator. The kit is green: 3,729 checks, the matrix's 310 lines with 0 differences, and 5 new probes in `trip-analysis-settings.sql`. Each probe there runs in a rolled-back subtransaction, so a probe for "half a pair" must set one coordinate on a row that holds none. The first version set one coordinate to NULL on a row it assumed an earlier probe had filled, and failed.
   - The first ride of each vehicle in an import counts as a block start. The info box says so.
 
-- **The shift recommendation is verified on staging**, and five older e2e specs are stale.
+- **The shift recommendation is verified on staging, and the five older e2e specs are fixed.** Fixed means brought up to date, and all six tests pass on staging. A new `e2e/tests/return-check.spec.ts` opens the tab and asserts no write and no "Verstoß".
+
+  **A fixture gap, not a product defect.** The DEMO company's November import (`b1c2d3e4-0000-4000-8000-00000000f001`, `scripts/seed-demo-company.sql`) has `source_columns_json = null`, and its rows' `raw_data_json` is only `{seed,row}`. So §10's planned Fahrtenbuch refuses for November ("Die Spalten der Originaldatei konnten nicht ermittelt werden"). `monthly-plan-save` now selects October explicitly. Repairing the November import is a data change on staging and waits for the owner.
+
+  What was stale before:
   - `e2e/tests/shift-recommendation.spec.ts` walks chooser → three steps → back on the demo company and records every PostgREST request. It passed: 27 shifts and no write. Preflights and the shell's read RPCs are excluded.
-  - The four monthly-plan specs open `/monatsplan?art=standard` correctly but then fail on labels changed before #188: "Mindestdauer je Block" (#186), the eight-step walk (#174), and the owner free-time sentence. `monthly-plan-save` and `-walk`, `-split-salary` and `-owner-free-time` need their selectors brought up to date. That is a test-only change nobody has made yet.
+  - The four monthly-plan specs opened `/monatsplan?art=standard` correctly but then failed on labels changed before #188: "Mindestdauer je Block" (#186), the eight-step walk (#174, where the first "Plan bestätigen" only opens step 6 and the second saves), and the owner free-time sentence.
 
 - **The monthly plan has a second type, the shift recommendation — merged to `staging` as #188.** `/monatsplan` opens on two cards (`?art=standard|schichten`, `MonthlyPlanEntryPage`); the standard plan is `MonthlyPlanPage` with **zero diff**, and the four e2e specs that opened `/monatsplan` now open `/monatsplan?art=standard`. The new type learns revenue per vehicle-hour per weekday and 15-minute slot from the imported months and recommends, for a future month, when each vehicle should be on the road. The rules worth knowing are in CLAUDE.md under *`/monatsplan` opens on a choice*.
 

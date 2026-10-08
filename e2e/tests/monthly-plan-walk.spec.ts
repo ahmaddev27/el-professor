@@ -64,19 +64,19 @@ test('the eight steps, the minimum block length, and Neu verteilen', async ({ pa
   const step2 = await screen(page);
   console.log('\n── step 2 ──\n' + step2.slice(0, 900));
 
-  const minField = page.locator('label').filter({ hasText: /Mindestdauer je Block/ }).first();
+  const minField = page.locator('label').filter({ hasText: /Schwelle für kurze Blöcke \(Minuten\)/ }).first();
   await expect(minField, 'step 2 offers the minimum block length').toHaveCount(1);
   const minId = await minField.getAttribute('for');
   expect(minId, 'the field is wired to a control').toBeTruthy();
   const minValue = await page.locator(`#${minId}`).inputValue();
-  console.log(`  Mindestdauer je Block = ${minValue}`);
+  console.log(`  Schwelle für kurze Blöcke = ${minValue}`);
   expect(minValue, 'it defaults to 90 minutes').toBe('90');
 
-  const maxField = page.locator('label').filter({ hasText: /Höchstdauer je Block/ }).first();
+  const maxField = page.locator('label').filter({ hasText: /Schwelle für lange Blöcke \(Minuten\)/ }).first();
   await expect(maxField, 'step 2 offers the maximum block length').toHaveCount(1);
   const maxId = await maxField.getAttribute('for');
   const maxValue = await page.locator(`#${maxId}`).inputValue();
-  console.log(`  Höchstdauer je Block = ${maxValue}`);
+  console.log(`  Schwelle für lange Blöcke = ${maxValue}`);
   expect(maxValue, 'it defaults to 360 minutes (six hours)').toBe('360');
 
   await page.getByRole('button', { name: /Bestätigen und Plan erzeugen/ }).click();
@@ -85,7 +85,7 @@ test('the eight steps, the minimum block length, and Neu verteilen', async ({ pa
   // ── Step 3: the blocks ────────────────────────────────────────────────────
   const step3 = await screen(page);
   console.log('\n── step 3 ──\n' + step3.slice(0, 1400));
-  expect(step3, 'step 3 names the minimum it built with').toMatch(/Mindestdauer je Block: 90/);
+  expect(step3, 'step 3 names the threshold it built with (PR #186: a threshold that classifies blocks, not a guaranteed floor)').toMatch(/Schwelle für kurze Blöcke: 90 Minuten/);
 
   // Every block in the table, read from its own hours column, against the
   // minimum — the claim the feature makes, checked on the rendered figures.

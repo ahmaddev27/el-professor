@@ -6198,7 +6198,6 @@ export const en: PartialDictionary = {
   'returncheck.base.lonInvalid':           'Longitude between -180 and 180, e.g. 13.4050',
   'returncheck.base.missing':              'Without a Betriebssitz there is no way to tell where an order reached the vehicle. Enter the coordinates.',
   'returncheck.base.noSuggestion':         'No suggestion possible.',
-  'returncheck.base.notSaved':             'The Betriebssitz is not saved yet; it only applies while this page is open.',
   'returncheck.base.radius':               'Radius around the Betriebssitz',
   'returncheck.base.radiusOption':         '{km} km',
   'returncheck.base.suggestion':           'Suggestion from your data: at {count} of {total} block starts the position was here — please check.',
@@ -6257,4 +6256,13 @@ export const en: PartialDictionary = {
 
   // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
   'returncheck.review.emptyButUnverifiable': 'No ride to review – but {count} rides could not be checked (see "Not verifiable").',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'returncheck.base.adminOnly':      'Only administrators can save the Betriebssitz. Your entry applies only while this page is open.',
+  'returncheck.base.outsideGermany': 'These coordinates are not in Germany. Are latitude and longitude swapped?',
+  'returncheck.base.save':           'Save the Betriebssitz',
+  'returncheck.base.saveFailed':     'The Betriebssitz could not be saved.',
+  'returncheck.base.saveSucceeded':  'Betriebssitz saved.',
+  'returncheck.base.savedState':     'Saved – applies to everyone in your company.',
+  'returncheck.base.unsaved':        'Not saved yet.',
 };

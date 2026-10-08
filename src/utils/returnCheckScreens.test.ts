@@ -13,6 +13,10 @@ import {
   reviewVehicles,
   sortReviewRows,
   unverifiableCounts,
+  EMPTY_BASE_FORM,
+  baseFormDiffers,
+  baseFormFromSaved,
+  savedBaseFrom,
 } from './returnCheckScreens';
 
 const ride = (id: string, over: Partial<CheckRide> = {}): CheckRide => ({
@@ -166,5 +170,33 @@ describe('reviewExportOptions', () => {
     const options = reviewExportOptions(rows, labels);
     expect(options.rows[0]).toMatchObject({ date: '01.09.2026', wait: 40, distance: 2.3, placement: 'Weg', note: 'vorbestellt' });
     expect(options.columns.map(c => c.key)).toContain('note');
+  });
+});
+
+describe('the saved Betriebssitz', () => {
+  it('reads a saved base, from numbers or from the strings PostgREST may send, and nothing from half a pair', () => {
+    expect(savedBaseFrom({ base_latitude: 51.1713, base_longitude: 7.0832, base_radius_km: 2 }))
+      .toEqual({ base: { lat: 51.1713, lon: 7.0832 }, radiusKm: 2 });
+    expect(savedBaseFrom({ base_latitude: '51.171300', base_longitude: '7.083200', base_radius_km: null }))
+      .toEqual({ base: { lat: 51.1713, lon: 7.0832 }, radiusKm: null });
+    expect(savedBaseFrom({ base_latitude: 51.1, base_longitude: null })).toBeNull();
+    expect(savedBaseFrom(null)).toBeNull();
+  });
+
+  it('opens the form with it as the operator’s own entry, so no proposal is written over it', () => {
+    expect(baseFormFromSaved({ base: { lat: 51.1713, lon: 7.0832 }, radiusKm: null })).toEqual({
+      latText: '51,17130', lonText: '7,08320', radiusKm: 2, edited: true,
+    });
+  });
+
+  it('says the form differs only when it holds a base other than the saved one', () => {
+    const saved = { base: { lat: 51.1713, lon: 7.0832 }, radiusKm: 2 };
+    const same = baseFormFromSaved(saved);
+    expect(baseFormDiffers(same, saved)).toBe(false);
+    expect(baseFormDiffers({ ...same, radiusKm: 3 }, saved)).toBe(true);
+    expect(baseFormDiffers({ ...same, latText: '51,18' }, saved)).toBe(true);
+    expect(baseFormDiffers(same, null)).toBe(true);
+    // An empty or unreadable form is not something to save.
+    expect(baseFormDiffers(EMPTY_BASE_FORM, saved)).toBe(false);
   });
 });
