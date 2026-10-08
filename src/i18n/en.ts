@@ -6096,4 +6096,20 @@ export const en: PartialDictionary = {
   'partner.connect.tokenHint':             'The token is encrypted when it is saved. It is not readable by us afterwards either — only the pull itself can use it.',
   'partner.connect.tokenLabel':            'Token from Reidey',
   'partner.connect.tokenPlaceholder':      'Paste it here',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'partner.links.departedBadge':           'Removed at the partner',
+  'partner.links.departedHint':            'This driver is no longer on the partner\'s list. The link stays in place — submissions and notes already attributed to them still belong to this driver.',
+  'partner.pull.action':                   'Fetch drivers from Reidey',
+  'partner.pull.done':                     '{seen} drivers fetched, {created} new.',
+  'partner.pull.doneWithDepartures':       '{seen} drivers fetched, {created} new. {departed} are no longer on the partner\'s list and are marked below — their link stays in place.',
+  'partner.pull.error.generic':            'The driver list could not be fetched.',
+  'partner.pull.error.notAuthorized':      'You are not permitted to fetch the driver list.',
+  'partner.pull.error.notConfigured':      'The partner connection is not set up on this server yet.',
+  'partner.pull.error.notConnected':       'There is no connection to Reidey. Connect it under Settings first.',
+  'partner.pull.error.partnerUnavailable': 'Reidey could not be reached. Nothing was changed — try again later.',
+  'partner.pull.error.sealUnreadable':     'The stored token can no longer be read. Please connect again under Settings.',
+  'partner.pull.error.tokenRejected':      'Reidey rejected the token. It was revoked or replaced — connect again under Settings.',
+  'partner.pull.hint':                     'Fetches the partner\'s current driver list and creates a proposal for each one. Nothing is linked — a person decides that.',
+  'partner.pull.truncated':                'The list was longer than was fetched. Fetch again.',
 };

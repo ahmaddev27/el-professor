@@ -6152,4 +6152,20 @@ export const de = {
   'partner.connect.tokenHint':             'Der Token wird beim Speichern verschlüsselt. Danach ist er auch für uns nicht mehr lesbar — nur der Abruf selbst kann ihn verwenden.',
   'partner.connect.tokenLabel':            'Token aus Reidey',
   'partner.connect.tokenPlaceholder':      'Hier einfügen',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'partner.links.departedBadge':           'Beim Partner abgemeldet',
+  'partner.links.departedHint':            'Dieser Fahrer steht beim Partner nicht mehr auf der Liste. Die Verknüpfung bleibt bestehen — bereits zugeordnete Eingänge und Notizen gehören weiterhin zu diesem Fahrer.',
+  'partner.pull.action':                   'Fahrer von Reidey abrufen',
+  'partner.pull.done':                     '{seen} Fahrer abgerufen, {created} neu.',
+  'partner.pull.doneWithDepartures':       '{seen} Fahrer abgerufen, {created} neu. {departed} sind beim Partner nicht mehr auf der Liste und sind unten markiert — die Verknüpfung bleibt bestehen.',
+  'partner.pull.error.generic':            'Die Fahrerliste konnte nicht abgerufen werden.',
+  'partner.pull.error.notAuthorized':      'Keine Berechtigung, die Fahrerliste abzurufen.',
+  'partner.pull.error.notConfigured':      'Die Partner-Anbindung ist auf diesem Server noch nicht eingerichtet.',
+  'partner.pull.error.notConnected':       'Es besteht keine Verbindung zu Reidey. Zuerst unter Einstellungen verbinden.',
+  'partner.pull.error.partnerUnavailable': 'Reidey war nicht erreichbar. Es wurde nichts geändert — bitte später erneut versuchen.',
+  'partner.pull.error.sealUnreadable':     'Der gespeicherte Token kann nicht mehr gelesen werden. Bitte unter Einstellungen neu verbinden.',
+  'partner.pull.error.tokenRejected':      'Reidey hat den Token abgelehnt. Er wurde widerrufen oder ersetzt — bitte unter Einstellungen neu verbinden.',
+  'partner.pull.hint':                     'Holt die aktuelle Fahrerliste beim Partner und legt für jeden Fahrer einen Vorschlag an. Es wird nichts verknüpft — das entscheidet eine Person.',
+  'partner.pull.truncated':                'Die Liste war länger als abgerufen wurde. Bitte erneut abrufen.',
 } as const;

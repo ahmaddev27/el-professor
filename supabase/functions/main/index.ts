@@ -135,6 +135,10 @@ const FUNCTION_ENV: ReadonlyMap<string, readonly string[]> = new Map<string, rea
   // Deliberately NOT public: it needs a session, and the tenancy and role
   // checks inside it are the authorization.
   ['partner-connect', [...BASE_ENV, ...SERVICE_ENV, ...PARTNER_ENV]],
+  // The roster pull: the only caller of partner_sealed_token, and the only
+  // place a sealed token is opened. By a button and not a schedule (the
+  // owner's decision of 06.10.2026), so it needs a session like Connect.
+  ['partner-pull', [...BASE_ENV, ...SERVICE_ENV, ...PARTNER_ENV]],
   ['validate-discount-code', [...BASE_ENV, ...SERVICE_ENV]],
   ['update-income-weeks', [...BASE_ENV]],
   ['extract-receipt', [...BASE_ENV, 'ANTHROPIC_API_KEY']],

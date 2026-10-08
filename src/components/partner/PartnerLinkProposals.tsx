@@ -32,7 +32,7 @@
  * `current_role_permits('drivers', true)` asks inside both RPCs.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Check, Link2, X } from 'lucide-react';
+import { Check, Link2, RefreshCw, X } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useToast } from '../../contexts/ToastContext';
 import { useTranslation } from '../../contexts/LanguageContext';
@@ -69,6 +69,7 @@ interface Proposal {
   proposed_phone: string | null;
   status: LinkStatus;
   driver_id: string | null;
+  partner_removed_at: string | null;
   created_at: string;
   drivers: { name: string } | null;
 }
@@ -82,8 +83,26 @@ const REASON_KEYS: Record<string, TranslationKey> = {
   not_authorized: 'partner.links.error.notAuthorized',
 };
 
+/** The pull function's reasons. Separate from the decisions' above: the
+ *  repairs are different — most of these send the operator to Settings. */
+const PULL_REASON_KEYS: Record<string, TranslationKey> = {
+  not_connected: 'partner.pull.error.notConnected',
+  seal_unreadable: 'partner.pull.error.sealUnreadable',
+  token_rejected: 'partner.pull.error.tokenRejected',
+  partner_unavailable: 'partner.pull.error.partnerUnavailable',
+  not_authorized: 'partner.pull.error.notAuthorized',
+  seal_key_missing: 'partner.pull.error.notConfigured',
+  endpoint_missing: 'partner.pull.error.notConfigured',
+  endpoint_unparsable: 'partner.pull.error.notConfigured',
+  endpoint_not_https: 'partner.pull.error.notConfigured',
+  endpoint_has_credentials: 'partner.pull.error.notConfigured',
+  endpoint_private_host: 'partner.pull.error.notConfigured',
+  endpoint_unexpected_port: 'partner.pull.error.notConfigured',
+  endpoint_has_path: 'partner.pull.error.notConfigured',
+};
+
 const COLUMNS = 'id, partner, external_driver_id, proposed_name, proposed_email, '
-  + 'proposed_phone, status, driver_id, created_at, drivers(name)';
+  + 'proposed_phone, status, driver_id, partner_removed_at, created_at, drivers(name)';
 
 /** Past this the waiting count is reported as a bound, not a number. */
 const WAITING_SCAN_LIMIT = 1000;
@@ -109,6 +128,7 @@ export function PartnerLinkProposals({ companyId, drivers }: PartnerLinkProposal
   const [rejecting, setRejecting] = useState<Proposal | null>(null);
   const [chosenDriver, setChosenDriver] = useState('');
   const [busy, setBusy] = useState(false);
+  const [pulling, setPulling] = useState(false);
 
   const load = useCallback(async () => {
     if (!companyId) {
@@ -168,6 +188,44 @@ export function PartnerLinkProposals({ companyId, drivers }: PartnerLinkProposal
   }, [companyId, status]);
 
   useEffect(() => { void load(); }, [load]);
+
+  // By a button and not a schedule — the owner's decision of 06.10.2026. The
+  // function needs a session for exactly that reason.
+  const pull = async () => {
+    setPulling(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('partner-pull', { body: {} });
+      if (error) throw error;
+      const answer = data as {
+        ok?: boolean; reason?: string;
+        seen?: number; new?: number; departed?: number; truncated?: boolean;
+      };
+      if (!answer?.ok) {
+        const key = answer?.reason ? PULL_REASON_KEYS[answer.reason] : undefined;
+        showToast('error', key ? t(key) : t('partner.pull.error.generic'));
+        return;
+      }
+      const departed = answer.departed ?? 0;
+      showToast('success', departed > 0
+        ? t('partner.pull.doneWithDepartures', {
+            seen: String(answer.seen ?? 0),
+            created: String(answer.new ?? 0),
+            departed: String(departed),
+          })
+        : t('partner.pull.done', {
+            seen: String(answer.seen ?? 0),
+            created: String(answer.new ?? 0),
+          }));
+      // A roster longer than one walk is said out loud rather than left as a
+      // short list the operator would read as complete.
+      if (answer.truncated) showToast('error', t('partner.pull.truncated'));
+      await load();
+    } catch {
+      showToast('error', t('partner.pull.error.generic'));
+    } finally {
+      setPulling(false);
+    }
+  };
 
   const reasonMessage = (hint: unknown): string => {
     const key = typeof hint === 'string' ? REASON_KEYS[hint] : undefined;
@@ -256,9 +314,21 @@ export function PartnerLinkProposals({ companyId, drivers }: PartnerLinkProposal
       header: t('partner.links.col.driver'),
       value: row => row.drivers?.name ?? '',
       sortable: true,
-      cell: row => (row.drivers?.name
-        ? <span>{row.drivers.name}</span>
-        : <Badge tone="caution">{t('partner.links.notLinked')}</Badge>),
+      cell: row => (
+        <div className="flex flex-col gap-1">
+          {row.drivers?.name
+            ? <span>{row.drivers.name}</span>
+            : <Badge tone="caution">{t('partner.links.notLinked')}</Badge>}
+          {/* The owner's decision of 08.10.2026: a departed driver is badged
+              and the link stays. The tooltip says why, because "removed at the
+              partner" beside a live link reads as a contradiction otherwise. */}
+          {row.partner_removed_at ? (
+            <Badge tone="neutral" title={t('partner.links.departedHint')}>
+              {t('partner.links.departedBadge')}
+            </Badge>
+          ) : null}
+        </div>
+      ),
     },
     ...(status === 'pending'
       ? [{
@@ -291,13 +361,27 @@ export function PartnerLinkProposals({ companyId, drivers }: PartnerLinkProposal
         {t('partner.links.confirm.description')}
       </Alert>
 
-      <Tabs value={status} onValueChange={value => setStatus(value as LinkStatus)}>
-        <TabsList variant="segmented" aria-label={t('partner.links.filterLabel')}>
-          <TabsTrigger value="pending">{t('partner.links.status.pending')}</TabsTrigger>
-          <TabsTrigger value="linked">{t('partner.links.status.linked')}</TabsTrigger>
-          <TabsTrigger value="rejected">{t('partner.links.status.rejected')}</TabsTrigger>
-        </TabsList>
-      </Tabs>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <Tabs value={status} onValueChange={value => setStatus(value as LinkStatus)}>
+          <TabsList variant="segmented" aria-label={t('partner.links.filterLabel')}>
+            <TabsTrigger value="pending">{t('partner.links.status.pending')}</TabsTrigger>
+            <TabsTrigger value="linked">{t('partner.links.status.linked')}</TabsTrigger>
+            <TabsTrigger value="rejected">{t('partner.links.status.rejected')}</TabsTrigger>
+          </TabsList>
+        </Tabs>
+        {mayDecide ? (
+          <Button
+            variant="secondary"
+            onClick={() => void pull()}
+            loading={pulling}
+            disabled={pulling || busy}
+            title={t('partner.pull.hint')}
+          >
+            <RefreshCw className="size-4" aria-hidden />
+            {t('partner.pull.action')}
+          </Button>
+        ) : null}
+      </div>
 
       <DataTable
         columns={columns}
