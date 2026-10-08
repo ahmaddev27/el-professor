@@ -4,7 +4,42 @@ Last updated: **08.10.2026**
 
 Start here when you pick up this project. Read it together with [CLAUDE.md](CLAUDE.md), which holds the rules and how every mechanism works, and [PROGRESS.md](PROGRESS.md), which records what is done and what was verified. The owner-facing plan is [el-professor-plan.html](el-professor-plan.html). The older developer reference, moved out of the README in PR #18, is [Docs/TECHNICAL_REFERENCE.md](Docs/TECHNICAL_REFERENCE.md); where it disagrees with CLAUDE.md or the code, they win.
 
-- **The monthly plan has a second type, the shift recommendation — branch `feat/shift-recommendation`, open against `staging`.** `/monatsplan` opens on two cards (`?art=standard|schichten`, `MonthlyPlanEntryPage`); the standard plan is `MonthlyPlanPage` with **zero diff**, and the four e2e specs that opened `/monatsplan` now open `/monatsplan?art=standard`. The new type learns revenue per vehicle-hour per weekday and 15-minute slot from the imported months and recommends, for a future month, when each vehicle should be on the road. The rules worth knowing are in CLAUDE.md under *`/monatsplan` opens on a choice*.
+- **Fahrtenanalyse has a fourth tab, "Rückkehrpflicht & Adressen" — branch `feat/return-check`, open against `staging`.** The tab places each completed ride's order: during the previous ride, at the Betriebssitz, away from it after the previous ride ended, at a block start, or unverifiable with a reason. It also lists rides whose own data does not add up. The rules are in CLAUDE.md under the Fahrtenbuch section.
+
+  **Measured on staging before building, read-only, counts only:**
+  - 13,959 of 14,011 rides carry `Uhrzeit der Auftragsuebermittlung` and a "lat lon" position, and 13,845 of the positions parse.
+  - Within blocks (gap under 2 h), 8,455 follow-up orders came after the previous ride ended and 3,991 during it.
+  - The base cannot be read off the data reliably. Only 126 of 1,008 block starts of the largest company fall in one kilometre, so it is the operator's entry, prefilled with a proposal.
+
+  **Verified:**
+  - 29 engine tests, with nine mutations each caught.
+  - 18 screen-helper tests.
+  - Two render tests through the real German dictionary. One fails on "Verstoß"; the other proves the operator's base survives a tab switch, with a negative control.
+  - `npm run build` green.
+
+  **Not verified:** the tab has not been opened on a real month in a browser.
+
+  **Review fixes made before commit:**
+  - The base was lost on every tab switch, because Radix unmounts the inactive tab. It is now held by the page.
+  - Unsequenceable rides vanished. They are now counted as `no_ride_times`.
+  - The "Wartezeit" column claimed a wait the file does not show. It is now "Abstand zum Ende der vorherigen Fahrt".
+  - "Nichts zu prüfen" showed even when nothing could be checked.
+  - A place name in front hid a same-address ride.
+  - A bare German comma parsed as two coordinates.
+
+  **Open:**
+  - ~~Persisting the base~~: done in the same PR. `20261008200000` adds three nullable columns with constraints for inside Germany, both-or-neither, and a radius up to 50 km. Policies are unchanged, so writes still need an administrator. The kit is green: 3,729 checks, the matrix's 310 lines with 0 differences, and 5 new probes in `trip-analysis-settings.sql`. Each probe there runs in a rolled-back subtransaction, so a probe for "half a pair" must set one coordinate on a row that holds none. The first version set one coordinate to NULL on a row it assumed an earlier probe had filled, and failed.
+  - The first ride of each vehicle in an import counts as a block start. The info box says so.
+
+- **The shift recommendation is verified on staging, and the five older e2e specs are fixed.** Fixed means brought up to date, and all six tests pass on staging. A new `e2e/tests/return-check.spec.ts` opens the tab and asserts no write and no "Verstoß".
+
+  **A fixture gap, not a product defect.** The DEMO company's November import (`b1c2d3e4-0000-4000-8000-00000000f001`, `scripts/seed-demo-company.sql`) has `source_columns_json = null`, and its rows' `raw_data_json` is only `{seed,row}`. So §10's planned Fahrtenbuch refuses for November ("Die Spalten der Originaldatei konnten nicht ermittelt werden"). `monthly-plan-save` now selects October explicitly. Repairing the November import is a data change on staging and waits for the owner.
+
+  What was stale before:
+  - `e2e/tests/shift-recommendation.spec.ts` walks chooser → three steps → back on the demo company and records every PostgREST request. It passed: 27 shifts and no write. Preflights and the shell's read RPCs are excluded.
+  - The four monthly-plan specs opened `/monatsplan?art=standard` correctly but then failed on labels changed before #188: "Mindestdauer je Block" (#186), the eight-step walk (#174, where the first "Plan bestätigen" only opens step 6 and the second saves), and the owner free-time sentence.
+
+- **The monthly plan has a second type, the shift recommendation — merged to `staging` as #188.** `/monatsplan` opens on two cards (`?art=standard|schichten`, `MonthlyPlanEntryPage`); the standard plan is `MonthlyPlanPage` with **zero diff**, and the four e2e specs that opened `/monatsplan` now open `/monatsplan?art=standard`. The new type learns revenue per vehicle-hour per weekday and 15-minute slot from the imported months and recommends, for a future month, when each vehicle should be on the road. The rules worth knowing are in CLAUDE.md under *`/monatsplan` opens on a choice*.
 
   **What it was asked to be, and is not.** The owner pasted an English brief for an "Optimized Operations Plan" that generated rides: addresses, km, fares, tips, cancellations, GPS in the `Standort des Fahrzeugs bei Auftragsuebermittlung` format, and order times placed before the previous ride ends "for the Rückkehrpflicht", calibrated to the cent to a target revenue, with rules so the result would not "look artificial". That part was declined and the legitimate part built instead. A Mietwagen cannot know next month's rides, so a generated ride list is only usable as the record, and the columns it fills are `fahrtenbuchExport.ts`'s. `boundary.test.ts` reads the module's source and fails on a database name or an import outside its allow-list, and `recommend.test.ts` pins the exact keys of a shift. Do not extend it towards a ride.
 

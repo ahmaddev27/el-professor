@@ -1,10 +1,11 @@
 /**
- * The Fahrtenanalyse screen's reads and its three writes.
+ * The Fahrtenanalyse screen's reads and its four writes.
  *
  * Reads: the company's Fahrtenbuch imports, one import's trips, the company's
  * drivers, the month's saved Stundennachweise, and the two tables of
- * 20260922110000. Writes: the settings, a driver's reserve, and the
- * confirmation of a month's budget — nothing else, and never a trip.
+ * 20260922110000. Writes: the settings, the Betriebssitz (20261008200000), a
+ * driver's reserve, and the confirmation of a month's budget — nothing else,
+ * and never a trip.
  *
  * Every call names the company the session is in (`effectiveCompanyId`) and
  * throws on a failed request, so the screen can say the read failed instead of
@@ -34,7 +35,8 @@ export interface ImportSummary {
   status: string;
 }
 
-const SETTINGS_COLUMNS = 'id, block_gap_minutes, travel_margin_minutes, updated_at';
+const SETTINGS_COLUMNS =
+  'id, block_gap_minutes, travel_margin_minutes, updated_at, base_latitude, base_longitude, base_radius_km';
 const BUDGET_COLUMNS =
   'id, driver_id, year, month, reserved_hours, planning_min_salary, planning_max_salary, planning_hourly_rate, confirmed_at, confirmed_by, recompute_log';
 
@@ -119,6 +121,34 @@ export async function saveSettings(
     .from('trip_analysis_settings')
     .upsert(
       { company_id: companyId, block_gap_minutes: values.blockGapMinutes, travel_margin_minutes: values.travelMarginMinutes },
+      { onConflict: 'company_id' },
+    )
+    .select(SETTINGS_COLUMNS)
+    .single();
+  fail(error);
+  return data as SettingsRow;
+}
+
+/**
+ * Stores the Betriebssitz for the Rückkehrpflicht tab, or clears it with null.
+ * Only these three columns are sent, so an upsert never touches the minute
+ * settings beside them — and the minute settings' own save never touches these.
+ * The database refuses a position outside Germany or half a coordinate pair.
+ */
+export async function saveBaseLocation(
+  companyId: string,
+  base: { lat: number; lon: number } | null,
+  radiusKm: number | null,
+): Promise<SettingsRow> {
+  const { data, error } = await supabase
+    .from('trip_analysis_settings')
+    .upsert(
+      {
+        company_id: companyId,
+        base_latitude: base ? Math.round(base.lat * 1e6) / 1e6 : null,
+        base_longitude: base ? Math.round(base.lon * 1e6) / 1e6 : null,
+        base_radius_km: radiusKm,
+      },
       { onConflict: 'company_id' },
     )
     .select(SETTINGS_COLUMNS)
