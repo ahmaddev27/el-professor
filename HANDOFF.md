@@ -4,6 +4,17 @@ Last updated: **08.10.2026**
 
 Start here when you pick up this project. Read it together with [CLAUDE.md](CLAUDE.md), which holds the rules and how every mechanism works, and [PROGRESS.md](PROGRESS.md), which records what is done and what was verified. The owner-facing plan is [el-professor-plan.html](el-professor-plan.html). The older developer reference, moved out of the README in PR #18, is [Docs/TECHNICAL_REFERENCE.md](Docs/TECHNICAL_REFERENCE.md); where it disagrees with CLAUDE.md or the code, they win.
 
+- **The whole e2e suite was run on staging after #188 and #189 merged (`b4796f8`).** 19 files, 35 tests. The first pass was 28 passed and 7 failed, and each failure was diagnosed:
+  - Four were the local network: `page.goto: net::ERR_TIMED_OUT` and Node's `fetch failed` against Mailpit. They are abrechnung-dialog-fits 1440, abrechnung-mail-all, forgot-password and the second monthly-plan-save test, and all four passed on a rerun.
+  - `return-check` failed because the DEMO company has no analysis settings. The page computes nothing until "Mit Testwert 30 Min. ansehen" is pressed, so the spec now presses it. The test value is held in the page and stored nowhere.
+  - `abrechnung-mail` asserted a PNG attachment that the owner removed on 04.10.2026 (8b2e208). It now asserts that there is no attachment, so an image coming back unasked fails it.
+  - `salary-payment-cash-view` 2 is a **missing fixture**: it needs a cash salary payment with no stored receipt on the DEMO company. It fails rather than skips by design.
+  - `google-signin`'s "provider off" test skips itself, correctly, because Google is on.
+
+  **Two staging data changes wait for the owner.** Neither is made, because they write to staging:
+  1. The DEMO November import (`b1c2d3e4-0000-4000-8000-00000000f001`) has no `source_columns_json`.
+  2. A 1,00 € cash payment with no receipt for Emil Normal, November 2026, is the cash-view fixture.
+
 - **Fahrtenanalyse has a fourth tab, "Rückkehrpflicht & Adressen" — branch `feat/return-check`, open against `staging`.** The tab places each completed ride's order: during the previous ride, at the Betriebssitz, away from it after the previous ride ended, at a block start, or unverifiable with a reason. It also lists rides whose own data does not add up. The rules are in CLAUDE.md under the Fahrtenbuch section.
 
   **Measured on staging before building, read-only, counts only:**

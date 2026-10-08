@@ -8,8 +8,8 @@
  * way — so a send on staging to any other address **reaches a real person**.
  *
  * Every driver of DEMO Monatsplanung GmbH has an `@example.com` address, so this
- * exercises the whole path — the browser, the function, SMTP, the attachment — and
- * nothing leaves the building. It never signs in as any other company, and the
+ * exercises the whole path — the browser, the function, SMTP — and nothing leaves
+ * the building. It never signs in as any other company, and the
  * confirmation it reads lists the addresses so a wrong one would be visible in the
  * log rather than only in somebody's inbox.
  *
@@ -17,8 +17,16 @@
  *
  * A toast saying "sent" is what the screen believes. Mailpit holds what was
  * actually accepted, with its parts, so that is where the assertions are: the
- * message exists, it is addressed to the driver, it carries the figures, and the
- * PNG is attached.
+ * message exists, it is addressed to the driver, and it carries the figures.
+ *
+ * ## No attachment, by the owner's decision of 04.10.2026
+ *
+ * The mail used to carry the card as a PNG. The owner dropped it (*"no need to
+ * create the photo and send it to the driver in the email, it is enough to send
+ * the data as text"*, 8b2e208): the figures are in the body, and the image only
+ * added a rendering step and a megabyte per driver. This walk asserted the PNG
+ * until 08.10.2026 and failed on the decision; it now asserts its absence, so an
+ * image coming back unasked fails here too.
  */
 import { test, expect, type Page } from '@playwright/test';
 
@@ -65,7 +73,7 @@ async function findMessage(to: string, since: number): Promise<MailSummary | nul
   return null;
 }
 
-test('a week is mailed to one driver, with its figures and the card attached', async ({ page }) => {
+test('a week is mailed to one driver, with its figures in the body and no attachment', async ({ page }) => {
   test.setTimeout(600_000);
   const errors: string[] = [];
   page.on('pageerror', e => errors.push(`UNCAUGHT ${e.message}`));
@@ -132,12 +140,10 @@ test('a week is mailed to one driver, with its figures and the card attached', a
   expect(message.Text ?? '', 'the mail carries no figures').toMatch(/\d+,\d{2}\s*€/);
   expect(message.Text ?? '').toMatch(/Abzugeben|Guthaben/);
 
-  // And the card is attached, as the owner asked.
+  // And nothing is attached: the owner dropped the card on 04.10.2026.
   const attachments = message.Attachments ?? [];
   console.log('  attachments: ' + JSON.stringify(attachments.map(a => `${a.FileName} (${a.ContentType})`)));
-  expect(attachments.length, 'nothing was attached').toBeGreaterThan(0);
-  expect(attachments[0].ContentType).toContain('image/png');
-  expect(attachments[0].FileName).toMatch(/^Abrechnung_.*\.png$/);
+  expect(attachments, 'the mail carries the figures as text and no image (owner, 04.10.2026)').toEqual([]);
 
   expect(errors, `the browser logged errors:\n${errors.join('\n')}`).toEqual([]);
 });
