@@ -54,7 +54,7 @@ test('the eight steps, the minimum block length, and Neu verteilen', async ({ pa
   await signIn(page);
 
   // ── Step 1: the month ─────────────────────────────────────────────────────
-  await page.goto('/monatsplan');
+  await page.goto('/monatsplan?art=standard');
   await page.waitForTimeout(8000);
   console.log('\n── step 1 ──\n' + (await screen(page)).slice(0, 700));
   await page.getByRole('button', { name: /^Weiter$/ }).click();

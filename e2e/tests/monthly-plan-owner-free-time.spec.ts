@@ -52,7 +52,7 @@ test('the owner free-time panel shows windows and hours, and assigns nothing', a
   await assertDemoAccount(page);
 
   // Steps 1 to 4, as monthly-plan-walk.spec.ts does them.
-  await page.goto('/monatsplan');
+  await page.goto('/monatsplan?art=standard');
   await page.waitForTimeout(8000);
   await page.getByRole('button', { name: /^Weiter$/ }).click();
   await page.waitForTimeout(5000);

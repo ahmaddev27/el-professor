@@ -41,7 +41,7 @@ async function signIn(page: Page) {
 
 /** Screens 1 to 3, leaving the summary with its confirm button. */
 async function walkToSummary(page: Page) {
-  await page.goto('/monatsplan');
+  await page.goto('/monatsplan?art=standard');
   await page.waitForTimeout(6000);
   await page.getByRole('button', { name: /^Weiter$/ }).click();
   await page.waitForTimeout(4000);

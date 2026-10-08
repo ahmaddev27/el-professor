@@ -65,7 +65,7 @@ test('the split conserves the hours, and the salaries follow them', async ({ pag
   page.on('pageerror', e => errors.push(`UNCAUGHT ${e.message}`));
 
   await signIn(page);
-  await page.goto('/monatsplan');
+  await page.goto('/monatsplan?art=standard');
   await page.waitForTimeout(8000);
   await page.getByRole('button', { name: /^Weiter$/ }).click();
   await page.waitForTimeout(5000);
