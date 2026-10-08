@@ -501,6 +501,21 @@ Overlaps that already exist in the raw imported data are tracked separately and 
 
 The Brutto-Gehälter mode (`HistoricalReconciliationWizard.tsx`) is a different pipeline — it uses `utils/shiftBlockEngine.ts`, not the clean engine and not the reconstruction solver.
 
+### `/monatsplan` opens on a choice: the standard plan, or a shift recommendation
+
+`MonthlyPlanEntryPage` reads `?art=`: absent shows two cards, `standard` renders `MonthlyPlanPage` **untouched** (the standard plan's engine is `utils/monthlyPlan/`), and `schichten` renders `ShiftRecommendationPage`. The choice lives in the address so a reload keeps it, which is also why the e2e specs open `/monatsplan?art=standard`. Leaving the standard plan asks first, because its plan lives in memory until it is confirmed.
+
+**The shift recommendation (`utils/shiftRecommendation/`) recommends when each vehicle should be on the road, and produces no rides.** It reads the imported months, learns revenue per vehicle-hour per weekday and slot, and proposes shifts (vehicle, operating day, from–to) with an expected figure labelled as an estimate. It writes nothing and assigns no driver. It exists because the owner's brief of 08.10.2026 asked for a planner that *generated* rides — addresses, fares, tips, cancellations, GPS in the `Standort des Fahrzeugs bei Auftragsuebermittlung` format and order times placed for the Rückkehrpflicht — calibrated to a target revenue, and that part was declined: a Mietwagen cannot know next month's rides, so the only use of such a list is as the record, and the columns it fills are `fahrtenbuchExport.ts`'s. **Never extend this module towards a ride, an address, a fare or a tip**; `boundary.test.ts` reads its source and fails on a database name or an import outside its allow-list, and `recommend.test.ts` pins the exact keys of a shift.
+
+Rules that are easy to undo:
+
+- **An operating day starts at `operatingDayStartHour` (04:00)**, so a Friday shift from 01:00 to 04:00 is Friday's. The screen shows the operating day with its weekday and marks a time on the next calendar day `(+1)` — showing the start's calendar date beside the operating day's weekday was a review finding.
+- **Slots are cut in UTC and named in local time.** Berlin is a whole number of hours off UTC and every slot length divides an hour, so the boundaries agree on the DST nights too; the repeated 02:00 hour lands in the same named slots.
+- **A slot already holding as many planned vehicles as the history ever had out at once is a wall**, not merely a slot that earns nothing — a bridge through it is still a vehicle on the road.
+- **A ride of no length or of more than twelve hours (`MAX_RIDE_MINUTES`) teaches nothing**: one mistyped end year was otherwise a period of decades walked slot by slot.
+- **A shift is at most six hours** (`MAX_SHIFT_MINUTES_LIMIT`), because longer work needs a break inside it (§4 ArbZG) that this planner does not place. The default is 3:00–4:45.
+- **The threshold has no product default**; the screen proposes the history's own average rate.
+
 ## Domain rules that are easy to break
 
 - **Business week ownership** (`utils/weekCalculations.ts`): a week belongs to the month containing its **Monday**. April 1st falling on a Tuesday belongs to March. Every monthly aggregation depends on this.

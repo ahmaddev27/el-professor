@@ -39,7 +39,7 @@ import CompaniesPage from './pages/CompaniesPage';
 import SuperAdminDashboard from './pages/SuperAdminDashboard';
 import NotificationsPage from './pages/NotificationsPage';
 import CompanyPlannerPage from './pages/CompanyPlannerPage';
-import MonthlyPlanPage from './pages/MonthlyPlanPage';
+import MonthlyPlanEntryPage from './pages/MonthlyPlanEntryPage';
 import SubscriptionBillingPage from './pages/SubscriptionBillingPage';
 import CompanyBillingPage from './pages/CompanyBillingPage';
 import AbnahmeDiagnosticPage from './pages/AbnahmeDiagnosticPage';
@@ -659,7 +659,7 @@ function App() {
                     its own would need a migration seeding `plan_features`, and a
                     feature the stored map does not name reads as premium for
                     every plan. */}
-                <Route path="monatsplan" element={<PlanGate feature="dokumente"><MonthlyPlanPage /></PlanGate>} />
+                <Route path="monatsplan" element={<PlanGate feature="dokumente"><MonthlyPlanEntryPage /></PlanGate>} />
                 {/* Fahrtenanalyse reads the Fahrtenbuch a company imported under
                     Dokumente, so it is gated on the same feature rather than on
                     a key of its own: a new FeatureKey would need a migration

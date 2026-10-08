@@ -1,8 +1,32 @@
 # Handoff
 
-Last updated: **05.10.2026**
+Last updated: **08.10.2026**
 
 Start here when you pick up this project. Read it together with [CLAUDE.md](CLAUDE.md), which holds the rules and how every mechanism works, and [PROGRESS.md](PROGRESS.md), which records what is done and what was verified. The owner-facing plan is [el-professor-plan.html](el-professor-plan.html). The older developer reference, moved out of the README in PR #18, is [Docs/TECHNICAL_REFERENCE.md](Docs/TECHNICAL_REFERENCE.md); where it disagrees with CLAUDE.md or the code, they win.
+
+- **The monthly plan has a second type, the shift recommendation — branch `feat/shift-recommendation`, open against `staging`.** `/monatsplan` opens on two cards (`?art=standard|schichten`, `MonthlyPlanEntryPage`); the standard plan is `MonthlyPlanPage` with **zero diff**, and the four e2e specs that opened `/monatsplan` now open `/monatsplan?art=standard`. The new type learns revenue per vehicle-hour per weekday and 15-minute slot from the imported months and recommends, for a future month, when each vehicle should be on the road. The rules worth knowing are in CLAUDE.md under *`/monatsplan` opens on a choice*.
+
+  **What it was asked to be, and is not.** The owner pasted an English brief for an "Optimized Operations Plan" that generated rides: addresses, km, fares, tips, cancellations, GPS in the `Standort des Fahrzeugs bei Auftragsuebermittlung` format, and order times placed before the previous ride ends "for the Rückkehrpflicht", calibrated to the cent to a target revenue, with rules so the result would not "look artificial". That part was declined and the legitimate part built instead. A Mietwagen cannot know next month's rides, so a generated ride list is only usable as the record, and the columns it fills are `fahrtenbuchExport.ts`'s. `boundary.test.ts` reads the module's source and fails on a database name or an import outside its allow-list, and `recommend.test.ts` pins the exact keys of a shift. Do not extend it towards a ride.
+
+  **Verified:**
+  - 38 engine tests, mutation-checked. Removing any one of these rules fails a test: the gap rule, the holiday mapping, the vehicle wall, the cross-day break, the rotation, the evidence floor, the duration guard. `runWorth <= 0` survives because it is an equivalent mutant of the tie-break.
+  - 24 screen-helper tests.
+  - A render test that walks imports → rides → profile → plan → result through the real German dictionary. Its negative control is deleting one key, which fails it.
+  - `npm run build` is green.
+
+  **Not verified:** it has never been opened in a browser or run on staging data. The "fewer hours at a higher rate" figure (1.716 h → 837 h, 26,91 → 31,92 €/h) was measured on synthetic rides, not on a real month.
+
+  **A review found three majors, all fixed before commit:**
+  - A shift after midnight was shown with the next calendar date beside the operating day's weekday.
+  - A ride whose end carried a mistyped year would have walked decades slot by slot. Rides of 0 minutes or over 12 hours are now excluded and counted.
+  - The vehicle ceiling could be crossed by a shift bridging a full slot. A full slot is now a wall.
+
+  **Open, deliberately:**
+  - A vehicle with no rides in the chosen months is not offered; the screen says why.
+  - Only the newest import of a month is read; the screen names the others.
+  - `loadTripRows` still selects `*`, because it is the Fahrtenanalyse's loader reused.
+
+  **The working tree is shared with another session.** `C:/Users/ahmad/Desktop/Pro` was switched to `feat/partner-intake` while this work was still uncommitted, so the work was moved to its own worktree, `C:/Users/ahmad/Desktop/Pro-shiftrec`. Its node_modules is a junction to the main checkout's. Two sessions in one checkout is how one session's files end up in the other's commit, so give parallel work its own worktree.
 
 - **A table in `public` with RLS off that grants an API role — the live check, because the kit cannot make it.** `20260926100000` revoked `anon` and `authenticated` on `public.tenants`, `public.extensions` and `public.schema_migrations`, which the `supabase/realtime` image creates on boot and Supabase's DEFAULT PRIVILEGES on `public` hand to every API role. Measured 26.09.2026 on both stacks before the fix: RLS off, no policies, all seven privileges for `anon`, and the public API answered 200 on each — `tenants` returning the 108-character Realtime signing secret, `extensions.settings` returning `db_password`, and INSERT/UPDATE/DELETE/TRUNCATE also held.
 
