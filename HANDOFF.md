@@ -11,9 +11,9 @@ Start here when you pick up this project. Read it together with [CLAUDE.md](CLAU
   - `salary-payment-cash-view` 2 is a **missing fixture**: it needs a cash salary payment with no stored receipt on the DEMO company. It fails rather than skips by design.
   - `google-signin`'s "provider off" test skips itself, correctly, because Google is on.
 
-  **Two staging data changes wait for the owner.** Neither is made, because they write to staging:
-  1. The DEMO November import (`b1c2d3e4-0000-4000-8000-00000000f001`) has no `source_columns_json`.
-  2. A 1,00 € cash payment with no receipt for Emil Normal, November 2026, is the cash-view fixture.
+  **The two staging data changes, after the owner's yes (08.10.2026):**
+  1. **The cash-view fixture is in.** It is `salary_payments` `3176e062-8a2a-43ff-9621-f006dcdc1468`: 1,00 € cash, `source_type` NULL, on Emil Normal's salary `b41dfa7d-…` (02.11.–06.12.2026), with a description starting "E2E-Fixture (08.10.2026)". The salary now reads `partially_paid`. The spec then failed on the **view**, not the fixture. It still asserted the 03.10 view, with its "ZAHLUNGSANSICHT" banner and no PDF button, but the owner removed the banner on 04.10 and the view gained Download, Drucken and the issue-a-receipt section. It now asserts the dialog's own sentence instead ("Es ist noch keine Gehaltsquittung gespeichert"), no GQ number, those buttons only, and no write. Both tests pass.
+  2. **The November import is NOT changed, and adding its column names would be wrong.** The planned Fahrtenbuch writes every cell verbatim from `raw_data_json`, and these 30 rows hold only `{seed,row}`. The trips are immutable by trigger. So `source_columns_json` alone would produce a sheet of 30 empty rows with only the planned driver filled in: a document that looks like a Fahrtenbuch and is not. The honest fix is a *new*, complete November import of the same rides with all 11 columns, alongside the seeded one, which the fixture rule says is never deleted. That is a different change from the one approved, so it went back to the owner.
 
 - **Fahrtenanalyse has a fourth tab, "Rückkehrpflicht & Adressen" — branch `feat/return-check`, open against `staging`.** The tab places each completed ride's order: during the previous ride, at the Betriebssitz, away from it after the previous ride ended, at a block start, or unverifiable with a reason. It also lists rides whose own data does not add up. The rules are in CLAUDE.md under the Fahrtenbuch section.
 
