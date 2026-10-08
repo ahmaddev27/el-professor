@@ -189,6 +189,19 @@ services:
             # no error the user can act on, just a login that does nothing.
             # X-Supabase-Api-Version is the one that bit: the client sends it on
             # every auth call and it was missing from this list.
+            #
+            # Cache-Control, x-upsert and x-metadata are what storage-js adds to
+            # every upload. They were missing from this service's list from
+            # 12.09.2026, when the origin list was tightened, until 08.10.2026:
+            # every upload from a browser failed its preflight, so not one object
+            # was written to storage on either stack in that time, and every
+            # Fahrtenbuch import was refused at its last step with Original-XLSX-
+            # Datei konnte nicht gespeichert werden. No double quotes in this
+            # comment on purpose: the file is rendered by an eval of an echo in
+            # double quotes, so a quote here unbalances the rest of the file.
+            # src/utils/kongStorageCors.test.ts
+            # reads the installed storage-js and fails when it sends a header this
+            # list does not name.
             - Content-Type
             - Authorization
             - X-Client-Info
@@ -200,6 +213,9 @@ services:
             - X-Requested-With
             - Accept-Profile
             - Content-Profile
+            - Cache-Control
+            - x-upsert
+            - x-metadata
           exposed_headers:
             - Content-Range
             - Content-Profile
