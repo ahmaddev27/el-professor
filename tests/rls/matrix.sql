@@ -3529,6 +3529,16 @@ INSERT INTO _mx_rpc (label, stmt, want, hole) VALUES
     -- whole exposure, not a detail.
     ('partner_sealed_token(company A)',
      $q$SELECT coalesce(partner_sealed_token('c0000000-0000-4000-8000-00000000000a', 'mx'), 'none')$q$,
+     'PPPPPPP', NULL),
+
+    -- M1.5's two (20261008120000). The pull writes through them, so they are
+    -- service_role's alone: a client that could call the roster apply would
+    -- invent a partner driver and then confirm it as one of its own.
+    ('partner_roster_apply(empty page)',
+     $q$SELECT partner_roster_apply('c0000000-0000-4000-8000-00000000000a', 'mx', '[]'::jsonb) ->> 'seen'$q$,
+     'PPPPPPP', NULL),
+    ('partner_pull_record(company A)',
+     $q$SELECT partner_pull_record('c0000000-0000-4000-8000-00000000000a', 'mx') ->> 'ok'$q$,
      'PPPPPPP', NULL);
 
 -- What an open context changes, RPC by RPC. Everything not named here answers
