@@ -3501,6 +3501,21 @@ INSERT INTO _mx_rpc (label, stmt, want, hole) VALUES
      'PTYYYTT', NULL),
     ('partner_note_reject(pending submission of A)',
      $q$SELECT partner_note_reject({ref:rpc_note_submission}, 'mx') ->> 'ok'$q$,
+     'PTYYYTT', NULL),
+
+    -- M2's two (20261008100000): the human decision about a partner driver.
+    -- Both ask get_active_company_id() and the `drivers` page themselves. The
+    -- confirm is probed on the table section's PENDING link and names a driver
+    -- no other fixture has linked, so an authorised caller succeeds and the
+    -- cell measures the gate rather than a collision; company B's admin finds
+    -- no such proposal. The confirm also claims the waiting submissions inside
+    -- the same call, which this probe exercises and `partner-link-review.sql`
+    -- asserts.
+    ('partner_driver_link_confirm(pending link of A)',
+     $q$SELECT partner_driver_link_confirm({ref:partner_driver_links}, {ref:drivers}) ->> 'ok'$q$,
+     'PTYYYTT', NULL),
+    ('partner_driver_link_reject(pending link of A)',
+     $q$SELECT partner_driver_link_reject({ref:partner_driver_links}) ->> 'ok'$q$,
      'PTYYYTT', NULL);
 
 -- What an open context changes, RPC by RPC. Everything not named here answers
@@ -3579,7 +3594,12 @@ UPDATE _mx_rpc r SET staff = o.staff
     -- the view context is refused by the gate before driver_notes' statement
     -- trigger is ever reached.
     ('partner_note_accept(pending submission of A)',                 'TY'),
-    ('partner_note_reject(pending submission of A)',                 'TY')
+    ('partner_note_reject(pending submission of A)',                 'TY'),
+    -- The same platform branch of current_role_permits() that lets a support
+    -- session review a note lets it decide a link; a view context is refused by
+    -- the gate before the tenant tables' statement trigger is reached.
+    ('partner_driver_link_confirm(pending link of A)',               'TY'),
+    ('partner_driver_link_reject(pending link of A)',                'TY')
   ) AS o(label, staff)
  WHERE r.label = o.label;
 
@@ -3612,7 +3632,9 @@ BEGIN
       ('partner_submission_claim_driver(confirmed link of A)'),
       ('receipt_number_next(my own company)'), ('receipt_ocr_allow()'),
       ('partner_note_accept(pending submission of A)'),
-      ('partner_note_reject(pending submission of A)')
+      ('partner_note_reject(pending submission of A)'),
+      ('partner_driver_link_confirm(pending link of A)'),
+      ('partner_driver_link_reject(pending link of A)')
     ) AS o(label)
    WHERE NOT EXISTS (SELECT 1 FROM _mx_rpc r WHERE r.label = o.label AND r.staff IS NOT NULL);
 
