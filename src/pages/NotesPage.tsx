@@ -204,6 +204,10 @@ export function NotesPage() {
   const [weeks, setWeeks] = useState<any[]>([]);
   const { showToast } = useToast();
   const { effectiveCompanyId: companyId } = useSuperAdmin();
+  // The fleet the catch-up asks. Null means "nothing to fetch from", which is
+  // also what a failed read leaves — and then the button is not drawn, which is
+  // the honest outcome either way.
+  const [partnerConnection, setPartnerConnection] = useState<{ partner: string; fleet: string } | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<{ open: boolean; noteId: string }>({ open: false, noteId: '' });
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState('');
@@ -225,6 +229,28 @@ export function NotesPage() {
     setDrivers([]);
     setCars([]);
     if (companyId) loadData();
+  }, [companyId]);
+
+  useEffect(() => {
+    if (!companyId) {
+      setPartnerConnection(null);
+      return;
+    }
+    void (async () => {
+      const { data } = await supabase
+        .from('partner_connections')
+        .select('partner, external_company_id')
+        .eq('company_id', companyId)
+        .neq('status', 'revoked')
+        .limit(1)
+        .maybeSingle();
+      const fleet = (data?.external_company_id as string | null)?.trim() ?? '';
+      // A connection recorded before the partner answered with an identity has
+      // no fleet id, and there is nothing to fetch by — so it is not one.
+      setPartnerConnection(data?.partner && fleet !== ''
+        ? { partner: data.partner as string, fleet }
+        : null);
+    })();
   }, [companyId]);
 
   const loadData = async () => {
@@ -814,7 +840,7 @@ export function NotesPage() {
         </TabsContent>
 
         <TabsContent value="inbox">
-          <PartnerNoteInbox companyId={companyId} />
+          <PartnerNoteInbox companyId={companyId} connection={partnerConnection} />
         </TabsContent>
       </Tabs>
 

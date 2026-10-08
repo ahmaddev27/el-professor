@@ -31,11 +31,12 @@
  * change outside this slice and could take away something a user does today.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Check, Inbox, Send, X } from 'lucide-react';
+import { Check, DownloadCloud, Inbox, Send, X } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useToast } from '../../contexts/ToastContext';
 import { useTranslation } from '../../contexts/LanguageContext';
 import { useCompanyScope } from '../../hooks/useCompanyScope';
+import { usePartnerCatchUp, type PartnerConnectionRef } from '../../hooks/usePartnerCatchUp';
 import type { TranslationKey } from '../../i18n';
 import {
   Alert,
@@ -131,9 +132,15 @@ const COLUMNS = 'id, external_submission_id, driver_id, note_type, note_text, '
 
 interface PartnerNoteInboxProps {
   companyId: string | null;
+  /**
+   * The partner and its fleet id, for the catch-up. Optional because this tab
+   * renders for a company with no connection too, and then there is nothing to
+   * fetch from — the button is not drawn rather than drawn and refused.
+   */
+  connection?: PartnerConnectionRef | null;
 }
 
-export function PartnerNoteInbox({ companyId }: PartnerNoteInboxProps) {
+export function PartnerNoteInbox({ companyId, connection }: PartnerNoteInboxProps) {
   const { t } = useTranslation();
   const { showToast } = useToast();
   const { canEdit } = useCompanyScope();
@@ -150,6 +157,10 @@ export function PartnerNoteInbox({ companyId }: PartnerNoteInboxProps) {
   const [rejecting, setRejecting] = useState<Submission | null>(null);
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);
+  // The same hook as the Belege tab: one catch-up ingests both kinds, so a
+  // reviewer here must not be the one left without the recovery for a ring
+  // that never arrived.
+  const { catchUp, fetching } = usePartnerCatchUp(connection);
 
   const load = useCallback(async () => {
     if (!companyId) {
@@ -350,13 +361,31 @@ export function PartnerNoteInbox({ companyId }: PartnerNoteInboxProps) {
         {t('partner.inbox.absence.body')}
       </Alert>
 
-      <Tabs value={status} onValueChange={value => setStatus(value as SubmissionStatus)}>
-        <TabsList variant="segmented" aria-label={t('partner.inbox.filterLabel')}>
-          <TabsTrigger value="pending">{t('partner.inbox.status.pending')}</TabsTrigger>
-          <TabsTrigger value="accepted">{t('partner.inbox.status.accepted')}</TabsTrigger>
-          <TabsTrigger value="rejected">{t('partner.inbox.status.rejected')}</TabsTrigger>
-        </TabsList>
-      </Tabs>
+      <div className="grid grid-cols-1 gap-2 sm:flex sm:items-center sm:justify-between">
+        <Tabs value={status} onValueChange={value => setStatus(value as SubmissionStatus)}>
+          <TabsList variant="segmented" aria-label={t('partner.inbox.filterLabel')}>
+            <TabsTrigger value="pending">{t('partner.inbox.status.pending')}</TabsTrigger>
+            <TabsTrigger value="accepted">{t('partner.inbox.status.accepted')}</TabsTrigger>
+            <TabsTrigger value="rejected">{t('partner.inbox.status.rejected')}</TabsTrigger>
+          </TabsList>
+        </Tabs>
+
+        {connection && (
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => { void (async () => {
+              if (await catchUp()) await load();
+            })(); }}
+            disabled={fetching}
+            loading={fetching}
+            title={t('partner.catchup.hint')}
+          >
+            <DownloadCloud aria-hidden />
+            {t('partner.catchup.action')}
+          </Button>
+        )}
+      </div>
 
       <DataTable
         columns={columns}

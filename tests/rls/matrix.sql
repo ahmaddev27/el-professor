@@ -1190,7 +1190,27 @@ INSERT INTO _mx_spec VALUES
      VALUES ({id}, {co}, 'mx', 'mx-sub-1', 'mx-4711', 'general')$q$, NULL,
   $q$INSERT INTO partner_note_submissions (company_id, partner, external_submission_id, external_driver_id, note_type)
      VALUES ({co}, 'mx', 'mx-sub-2', 'mx-4711', 'general')$q$,
-  $q$note_text = note_text$q$);
+  $q$note_text = note_text$q$),
+-- The weekly Abrechnung's schedule and its record of what was mailed
+-- (20261003120000), uncovered since the day they were written. The schedule is
+-- one row per company and its writes ask for an ADMINISTRATOR, so it is
+-- company_settings' shape with a DELETE policy added; `ins_pre` drops the row
+-- the unique constraint would collide with, and the whole probe is rolled back
+-- so the fixture survives for the next principal. The deliveries are
+-- notification_deliveries' shape: SELECT for the company, and the two SECURITY
+-- DEFINER job functions as the only writers, so every other cell is a missing
+-- GRANT -- including anon's SELECT, which this migration revoked.
+(67, 'abrechnung_schedules', $q$company_id = {co}$q$,
+  $q$INSERT INTO abrechnung_schedules (company_id, weekday, send_time) VALUES ({co}, 1, '08:00')$q$,
+  $q$DELETE FROM abrechnung_schedules WHERE company_id = {co}$q$,
+  $q$INSERT INTO abrechnung_schedules (company_id, weekday, send_time) VALUES ({co}, 1, '08:00')$q$,
+  $q$weekday = weekday$q$),
+(68, 'abrechnung_deliveries', $q$id = {id}$q$,
+  $q$INSERT INTO abrechnung_deliveries (id, company_id, kind, target_id, period_key)
+     VALUES ({id}, {co}, 'manager_summary', {co}, '2099-01-04')$q$, NULL,
+  $q$INSERT INTO abrechnung_deliveries (company_id, kind, target_id, period_key)
+     VALUES ({co}, 'manager_summary', {co}, '2098-01-06')$q$,
+  $q$recipient_count = recipient_count$q$);
 
 -- ─── how each row is moved to the other tenant ──────────────────────────────
 -- The M probe takes the row through `key` and sets `mov` on it (`_mx_move_try`),
@@ -1243,6 +1263,13 @@ INSERT INTO _mx_move VALUES
                                          $q$DELETE FROM partner_driver_links WHERE company_id = {other_co} AND partner = 'mx' AND external_driver_id = 'mx-4711'$q$, 'Y', 'one link per company, partner and external driver'),
 ('partner_receipt_submissions',          $q$company_id = {other_co}$q$,
                                          $q$DELETE FROM partner_receipt_submissions WHERE company_id = {other_co} AND partner = 'mx' AND external_submission_id = 'mx-sub-1'$q$, 'Y', 'the idempotency key names the company'),
+-- One schedule per company, so B's own row is dropped first, as
+-- company_settings' is. The deliveries' dedupe key names the company and the
+-- probe rows carry their own company as the target, so A's row collides with
+-- nothing of B's.
+('abrechnung_schedules',                 $q$company_id = {other_co}$q$,
+                                         $q$DELETE FROM abrechnung_schedules WHERE company_id = {other_co}$q$, 'Y', 'one schedule per company'),
+('abrechnung_deliveries',                $q$company_id = {other_co}$q$, NULL, 'Y', NULL),
 ('partner_note_submissions',             $q$company_id = {other_co}$q$,
                                          $q$DELETE FROM partner_note_submissions WHERE company_id = {other_co} AND partner = 'mx' AND external_submission_id = 'mx-sub-1'$q$, 'Y', 'the idempotency key names the company'),
 ('fahrtenbuch_imports',                  $q$company_id = {other_co}$q$, NULL, 'Y', NULL),
@@ -1871,7 +1898,25 @@ INSERT INTO _mx_expected (tbl, op, anon, viewer, editor, supervisor, admin, othe
 ('partner_note_submissions',       'I', 'RR', 'RR', 'RR', 'RR', 'RR', 'RR', 'RR', NULL),
 ('partner_note_submissions',       'U', '..', '..', '..', '..', '..', '..', '..', NULL),
 ('partner_note_submissions',       'D', '..', '..', '..', '..', '..', '..', '..', NULL),
-('partner_note_submissions',       'M', '..', '..', '..', '..', '..', '..', '..', NULL);
+('partner_note_submissions',       'M', '..', '..', '..', '..', '..', '..', '..', NULL),
+-- 20261003120000. The schedule: read by the company, written only by its
+-- administrator -- company_settings' cells plus a DELETE the administrator
+-- holds. anon reads nothing at all, this migration having revoked it, so its
+-- column is a missing GRANT and not a filtered read.
+('abrechnung_schedules',           'S', 'PP', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('abrechnung_schedules',           'I', 'PP', 'RR', 'RR', 'RR', 'YR', 'RY', 'RR', NULL),
+('abrechnung_schedules',           'U', 'PP', '..', '..', '..', 'Y.', '.Y', '..', NULL),
+('abrechnung_schedules',           'D', 'PP', '..', '..', '..', 'Y.', '.Y', '..', NULL),
+('abrechnung_schedules',           'M', 'PP', '..', '..', '..', 'R.', '.R', '..', NULL),
+-- The deliveries: the job's own record. `authenticated` holds SELECT and
+-- nothing else and anon holds nothing, so every write cell is a missing GRANT
+-- for everyone -- notification_deliveries' shape, and the second table in this
+-- product a client cannot write at all.
+('abrechnung_deliveries',          'S', 'PP', 'Y.', 'Y.', 'Y.', 'Y.', '.Y', '..', NULL),
+('abrechnung_deliveries',          'I', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', NULL),
+('abrechnung_deliveries',          'U', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', NULL),
+('abrechnung_deliveries',          'D', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', NULL),
+('abrechnung_deliveries',          'M', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', 'PP', NULL);
 
 -- ─── what a context changes, as a rule ──────────────────────────────────────
 --
@@ -1939,7 +1984,13 @@ UPDATE _mx_expected x
      'trip_analysis_settings', 'driver_month_budget',
      -- 20260930100000: the same shape and the same two triggers
      'monthly_plans', 'monthly_plan_drivers', 'monthly_plan_blocks',
-     'monthly_plan_block_trips');
+     'monthly_plan_block_trips',
+     -- 20261003120000: the same shape and the same two triggers. The
+     -- deliveries' write cells are PP and are skipped by the WHERE above, so
+     -- what this adds for them is the SELECT line -- which cannot be left as
+     -- copied from `super`, because a context is exactly what makes the
+     -- company's rows readable.
+     'abrechnung_schedules', 'abrechnung_deliveries');
 
 -- The account shell, where the rule above does not apply and the column
 -- copied from `super` is wrong: these predicates read get_user_company_id(),
@@ -3600,7 +3651,49 @@ INSERT INTO _mx_rpc (label, stmt, want, hole) VALUES
     -- they could reset. tests/rls/partner-doorbell.sql probes the limits.
     ('partner_doorbell_resolve(unknown fleet)',
      $q$SELECT partner_doorbell_resolve('mx', 'mx-fleet') ->> 'reason'$q$,
-     'PPPPPPP', NULL);
+     'PPPPPPP', NULL),
+
+    -- The weekly Abrechnung mail (20261003120000, 20261004100000), uncovered
+    -- since it was written. Four of the five are the job's own and are
+    -- service_role's alone: a client that could call the claim would mark a
+    -- company's mail as sent without sending it, and one that could call
+    -- `week_figures` would read any company's settlement figures by id.
+    ('abrechnung_schedule_candidates(any company)',
+     $q$SELECT abrechnung_schedule_candidates(1, NULL)::text$q$,
+     'PPPPPPP', NULL),
+    ('abrechnung_week_figures(company A)',
+     $q$SELECT abrechnung_week_figures({co}, '2026-09-28')::text$q$,
+     'PPPPPPP', NULL),
+    ('abrechnung_delivery_claim(company A)',
+     $q$SELECT abrechnung_delivery_claim({co}, 'manager_summary', {co}, '2097-01-07')::text$q$,
+     'PPPPPPP', NULL),
+    ('abrechnung_delivery_settle(a delivery of A)',
+     $q$SELECT abrechnung_delivery_settle({ref:abrechnung_deliveries}, true, 1)::text$q$,
+     'PPPPPPP', NULL),
+    -- The fifth is the screen's, so `authenticated` holds EXECUTE: it is
+    -- STABLE and reads only through get_active_company_id(), so a caller with
+    -- no company reads nothing rather than being refused. The platform account
+    -- with no context is that caller, which is why its cell is not P.
+    ('abrechnung_schedule_preview(a week)',
+     $q$SELECT coalesce(abrechnung_schedule_preview('2026-09-28') ->> 'ok', 'none')$q$,
+     'PNNNYYN', NULL),
+
+    -- The two cash writers that were uncovered with them. Both are the
+    -- screen's, both resolve the caller's company themselves, and both refuse
+    -- a caller without one -- so every client principal reaches the function
+    -- and is refused by its own gate rather than by a privilege.
+    -- Measured, and it corrected a guess: the till is NOT an administrator's
+    -- alone. `record_cash_movement` asks current_role_permits('cash-balance',
+    -- true), which an editor and a supervisor hold, so three roles book it and
+    -- only the viewer is refused. A platform session is refused in either mode
+    -- with its own sentence -- the Gehaltsquittung rule of 3.13a, applied to
+    -- the till: a cash movement is witnessed by somebody in the company.
+    ('record_cash_movement(company A)',
+     $q$SELECT (record_cash_movement(gen_random_uuid(), 'in', 10.00, '2026-09-28', 'mx')).id::text$q$,
+     'PTYYYYT', NULL),
+    ('issue_salary_cash_receipt(no payment)',
+     $q$SELECT issue_salary_cash_receipt(gen_random_uuid(), gen_random_uuid(), 'mx')::text$q$,
+     'PTTTTTT', NULL);
 
 -- What an open context changes, RPC by RPC. Everything not named here answers
 -- the same with a context as without one, so it takes `super`'s character
@@ -3689,7 +3782,18 @@ UPDATE _mx_rpc r SET staff = o.staff
     -- writing two rows, both recorded by 3.4c's triggers. A view context is
     -- refused by that branch before either is written.
     ('partner_receipt_accept(pending Beleg of A)',                   'TY'),
-    ('partner_receipt_reject(pending Beleg of A)',                   'TY')
+    ('partner_receipt_reject(pending Beleg of A)',                   'TY'),
+    -- The till and the Gehaltsquittung: refused in BOTH context modes, by the
+    -- functions themselves and with their own sentence. A cash movement and a
+    -- receipt attest to a physical handover that no platform agent witnessed,
+    -- which is a question of attestation and not of traceability -- so 3.4c's
+    -- write-audit triggers do not reopen it.
+    ('record_cash_movement(company A)',                              'TT'),
+    ('issue_salary_cash_receipt(no payment)',                        'TT'),
+    -- The preview is the screen's and STABLE: a view context reads the opened
+    -- company through get_active_company_id() like any other read, and a
+    -- support session is that company's administrator.
+    ('abrechnung_schedule_preview(a week)',                          'NY')
   ) AS o(label, staff)
  WHERE r.label = o.label;
 
@@ -3726,7 +3830,10 @@ BEGIN
       ('partner_driver_link_confirm(pending link of A)'),
       ('partner_driver_link_reject(pending link of A)'),
       ('partner_receipt_accept(pending Beleg of A)'),
-      ('partner_receipt_reject(pending Beleg of A)')
+      ('partner_receipt_reject(pending Beleg of A)'),
+      ('record_cash_movement(company A)'),
+      ('issue_salary_cash_receipt(no payment)'),
+      ('abrechnung_schedule_preview(a week)')
     ) AS o(label)
    WHERE NOT EXISTS (SELECT 1 FROM _mx_rpc r WHERE r.label = o.label AND r.staff IS NOT NULL);
 
