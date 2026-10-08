@@ -87,7 +87,12 @@ const OTP_MAIL_ENV = ['OTP_PEPPER', ...SMTP_ENV] as const
 // The pepper without the mail credentials. `partner-intake` hashes a partner's
 // key with it and sends nothing, so bundling it with SMTP as OTP_MAIL_ENV does
 // would hand a function the means to send mail it has no reason to.
-const PARTNER_ENV = ['OTP_PEPPER'] as const
+// `OTP_PEPPER` hashes an inbound partner key; `PARTNER_SEAL_KEY` seals the
+// partner's own token so an outbound pull can replay it. Two secrets because
+// they rotate for different reasons: the pepper is shared with every
+// one-time code, and re-keying it must not force every partner token to be
+// re-sealed.
+const PARTNER_ENV = ['OTP_PEPPER', 'PARTNER_SEAL_KEY'] as const
 
 /** Exactly the variables each worker may see. JWT_SECRET and SUPABASE_DB_URL are never passed. */
 const FUNCTION_ENV: ReadonlyMap<string, readonly string[]> = new Map<string, readonly string[]>([

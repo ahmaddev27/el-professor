@@ -405,6 +405,13 @@ services:
       # characters and different in each environment; deploy.sh refuses a
       # release otherwise.
       OTP_PEPPER: ${OTP_PEPPER:?set OTP_PEPPER}
+      # Seals a partner's bearer token for the outbound pull. Deliberately
+      # `:-` and not `:?`: the pepper is load-bearing — without it nobody can
+      # sign up, reset a password or accept an invitation — while this key is
+      # read by nothing until a company connects a partner fleet. Making it
+      # mandatory would refuse every release until it is written on both
+      # hosts, which is a decision for the owner and not for this file.
+      PARTNER_SEAL_KEY: ${PARTNER_SEAL_KEY:-}
       # The functions mail the codes themselves (_shared/mail.ts), through the
       # server GoTrue uses: Mailpit on staging, Resend on 2587 in production.
       # Port 465 is TLS from the first byte, any other port must offer STARTTLS,

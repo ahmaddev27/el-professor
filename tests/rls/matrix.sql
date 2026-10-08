@@ -3455,8 +3455,13 @@ INSERT INTO _mx_rpc (label, stmt, want, hole) VALUES
     ('partner_driver_resolve(no company)',
      $q$SELECT partner_driver_resolve(NULL, 'mx', 'mx-4711')::text$q$,
      'PPPPPPP', NULL),
+    -- 20261008110000 made the seal a mandatory fourth argument, and this probe
+    -- called the five-argument form: every principal read 42883 `function does
+    -- not exist` instead of the permission denial, and the matrix is what
+    -- caught it. Nothing else in the project would have — a signature change
+    -- is invisible to a typechecker on the other side of PostgREST.
     ('partner_connection_record(no company)',
-     $q$SELECT partner_connection_record(NULL, 'mx', 'not-a-hash')::text$q$,
+     $q$SELECT partner_connection_record(NULL, 'mx', 'not-a-hash', NULL)::text$q$,
      'PPPPPPP', NULL),
     -- Granted to authenticated, and it asks get_active_company_id() and
     -- current_role_permits('drivers', true) itself. It is probed on company A's
@@ -3516,7 +3521,15 @@ INSERT INTO _mx_rpc (label, stmt, want, hole) VALUES
      'PTYYYTT', NULL),
     ('partner_driver_link_reject(pending link of A)',
      $q$SELECT partner_driver_link_reject({ref:partner_driver_links}) ->> 'ok'$q$,
-     'PTYYYTT', NULL);
+     'PTYYYTT', NULL),
+
+    -- M1.2's reader (20261008110000). The one function in this schema that
+    -- hands back a REPLAYABLE secret, so it is service_role's alone and every
+    -- client principal must read P. A cell that ever moves off P here is the
+    -- whole exposure, not a detail.
+    ('partner_sealed_token(company A)',
+     $q$SELECT coalesce(partner_sealed_token('c0000000-0000-4000-8000-00000000000a', 'mx'), 'none')$q$,
+     'PPPPPPP', NULL);
 
 -- What an open context changes, RPC by RPC. Everything not named here answers
 -- the same with a context as without one, so it takes `super`'s character
