@@ -13,12 +13,14 @@ import {
   AlertCircle,
   Users,
   Lock,
+  Link2,
 } from 'lucide-react';
 import { useCompanySettings, resolveLogoUrl } from '../contexts/CompanySettingsContext';
 import { useToast } from '../contexts/ToastContext';
 import { CompanySettingsFormData } from '../types/settings';
 import { supabase } from '../lib/supabase';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
+import { PartnerConnectCard } from '../components/partner/PartnerConnectCard';
 import { useTranslation } from '../contexts/LanguageContext';
 import { Alert, Button, Card, CardContent, CardHeader, CardTitle, Field, Input, NativeSelect, PageHeader, buttonVariants, cn } from '../components/ui';
 import { controlFrameClass } from '../components/ui/Input';
@@ -661,6 +663,12 @@ const SettingsPage: React.FC = () => {
                     />
                   </Field>
                 </div>
+              ))}
+
+              {/* Reidey (M1). Its own file, so this page keeps its 2 inline
+                  styles and 6 colours in the ratchet's baseline. */}
+              {section(Link2, t('partner.connect.title'), (
+                <PartnerConnectCard companyId={companyId} />
               ))}
 
               {/* Document Defaults */}

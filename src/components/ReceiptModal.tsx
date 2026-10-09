@@ -5,6 +5,7 @@ import { getCityFromPostalCode, isValidGermanPostalCode } from '../utils/germanP
 import { useToast } from '../contexts/ToastContext';
 import { extractReceiptData, OcrResult, formatAmountDE } from '../utils/receiptOcr';
 import { useTranslation } from '../contexts/LanguageContext';
+import { localReceiptNumber, nextReceiptNumber } from '../lib/receiptNumber';
 import type { TranslationKey } from '../i18n';
 import {
   Badge,
@@ -131,16 +132,13 @@ const ReceiptModal: React.FC<ReceiptModalProps> = ({
     return `${year}-${month}-${day}`;
   };
 
-  const generateUniqueReceiptNumber = () => {
-    const existingNumbers = new Set(existingReceipts.map(r => r.receiptNumber));
-    let receiptNumber: string;
-    do {
-      const timestamp = Date.now();
-      const random = Math.floor(Math.random() * 10000).toString().padStart(4, '0');
-      receiptNumber = `BEL-${timestamp}-${random}`;
-    } while (existingNumbers.has(receiptNumber));
-    return receiptNumber;
-  };
+  // The provisional number, so the field is never empty while the server
+  // answers. `20261005100000` moved the authoritative draw to
+  // `receipt_number_next()`, under a partial unique index on this shape — the
+  // browser cannot see another tab's or the partner intake path's numbers, and
+  // this check never could.
+  const generateUniqueReceiptNumber = () =>
+    localReceiptNumber(existingReceipts.map(r => r.receiptNumber));
 
   useEffect(() => {
     if (!isOpen) return;
@@ -164,7 +162,19 @@ const ReceiptModal: React.FC<ReceiptModalProps> = ({
         setCustomDescription(receipt.description);
       }
     } else {
-      resetForm();
+      const provisional = generateUniqueReceiptNumber();
+      resetForm(false, provisional);
+      // Then replace it with the number the server drew, which is the only one
+      // checked against every writer. A failure leaves the provisional one in
+      // place rather than blocking the entry, and the partial unique index still
+      // refuses a real collision on write. A number the user has already edited
+      // is never overwritten — that is what comparing against `provisional` is.
+      void nextReceiptNumber().then(drawn => {
+        if (!drawn) return;
+        setFormData(prev =>
+          prev.receiptNumber === provisional ? { ...prev, receiptNumber: drawn } : prev,
+        );
+      });
     }
     // Reset scan state when modal opens
     setScanState('idle');
@@ -199,10 +209,10 @@ const ReceiptModal: React.FC<ReceiptModalProps> = ({
     return () => window.removeEventListener('paste', handlePaste);
   }, [isOpen]);
 
-  const resetForm = (keepDriver = false) => {
+  const resetForm = (keepDriver = false, receiptNumber?: string) => {
     const today = new Date().toISOString().split('T')[0];
     setFormData(prev => ({
-      receiptNumber: generateUniqueReceiptNumber(),
+      receiptNumber: receiptNumber ?? generateUniqueReceiptNumber(),
       date: today,
       description: 'Tanken',
       driverName: keepDriver ? prev.driverName : '',

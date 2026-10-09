@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Plus, Search, Trash2, CreditCard as Edit2, X, StickyNote, Calendar, ChevronLeft, ChevronRight, Download, Loader2 } from 'lucide-react';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui';
+import { PartnerNoteInbox } from '../components/partner/PartnerNoteInbox';
 import ConfirmationModal from '../components/ConfirmationModal';
 import { exportSheetsToExcel, type ExportOptions } from '../utils/excelExport';
 import { supabase } from '../lib/supabase';
@@ -202,11 +204,19 @@ export function NotesPage() {
   const [weeks, setWeeks] = useState<any[]>([]);
   const { showToast } = useToast();
   const { effectiveCompanyId: companyId } = useSuperAdmin();
+  // The fleet the catch-up asks. Null means "nothing to fetch from", which is
+  // also what a failed read leaves — and then the button is not drawn, which is
+  // the honest outcome either way.
+  const [partnerConnection, setPartnerConnection] = useState<{ partner: string; fleet: string } | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<{ open: boolean; noteId: string }>({ open: false, noteId: '' });
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState('');
 
   const [formData, setFormData] = useState<FormData>(DEFAULT_FORM);
+  // Which half of the screen is showing. The tab is the only thing this slice
+  // adds to this file: the existing markup below is wrapped, not re-indented,
+  // so every line of it stays byte-identical.
+  const [tab, setTab] = useState<'own' | 'inbox'>('own');
 
   useEffect(() => {
     const w = getWeeksOfMonth(selectedMonth);
@@ -219,6 +229,28 @@ export function NotesPage() {
     setDrivers([]);
     setCars([]);
     if (companyId) loadData();
+  }, [companyId]);
+
+  useEffect(() => {
+    if (!companyId) {
+      setPartnerConnection(null);
+      return;
+    }
+    void (async () => {
+      const { data } = await supabase
+        .from('partner_connections')
+        .select('partner, external_company_id')
+        .eq('company_id', companyId)
+        .neq('status', 'revoked')
+        .limit(1)
+        .maybeSingle();
+      const fleet = (data?.external_company_id as string | null)?.trim() ?? '';
+      // A connection recorded before the partner answered with an identity has
+      // no fleet id, and there is nothing to fetch by — so it is not one.
+      setPartnerConnection(data?.partner && fleet !== ''
+        ? { partner: data.partner as string, fleet }
+        : null);
+    })();
   }, [companyId]);
 
   const loadData = async () => {
@@ -631,6 +663,14 @@ export function NotesPage() {
         </div>
       </div>
 
+      <Tabs value={tab} onValueChange={value => setTab(value as 'own' | 'inbox')} className="space-y-6">
+        <TabsList aria-label={t('notes.title')}>
+          <TabsTrigger value="own">{t('notes.tab.own')}</TabsTrigger>
+          <TabsTrigger value="inbox">{t('notes.tab.inbox')}</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="own" className="space-y-6">
+
       {/* Filters */}
       <div className="rounded-lg p-4 space-y-4" style={{ background: 'var(--bg-surface)', boxShadow: 'var(--shadow-sm)', border: '1px solid var(--border)' }}>
         <div className="flex flex-col sm:flex-row gap-4">
@@ -797,6 +837,13 @@ export function NotesPage() {
       )}
 
       {/* Modal */}
+        </TabsContent>
+
+        <TabsContent value="inbox">
+          <PartnerNoteInbox companyId={companyId} connection={partnerConnection} />
+        </TabsContent>
+      </Tabs>
+
       {showModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
           <div className="rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto"

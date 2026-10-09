@@ -359,6 +359,15 @@ services:
   # with no cron line it is never called, and a call with no body reports and
   # sends nothing.
   #
+  # partner-intake receives what a partner's driver app submits — notes since
+  # M3, and the Beleg as a `kind` on the same function in M4. It is not public:
+  # the partner presents the anon key, which the router admits because it is a
+  # token this stack signed, so the authority is the X-Partner-Key header,
+  # hashed with OTP_PEPPER and resolved to one company by a service-role RPC.
+  # It receives the pepper and NOT the SMTP settings: it sends no mail. Nothing
+  # is submitted until a company presses Connect and a token exists, so
+  # deploying it starts nothing.
+  #
   # extract-receipt and update-income-weeks are deployed but unreachable in
   # practice: nothing in src/ calls either, and extract-receipt performs no auth
   # check while spending ANTHROPIC_API_KEY, so it is left without an API key
@@ -396,6 +405,19 @@ services:
       # characters and different in each environment; deploy.sh refuses a
       # release otherwise.
       OTP_PEPPER: ${OTP_PEPPER:?set OTP_PEPPER}
+      # Seals a partner's bearer token for the outbound pull. Deliberately
+      # `:-` and not `:?`: the pepper is load-bearing — without it nobody can
+      # sign up, reset a password or accept an invitation — while this key is
+      # read by nothing until a company connects a partner fleet. Making it
+      # mandatory would refuse every release until it is written on both
+      # hosts, which is a decision for the owner and not for this file.
+      PARTNER_SEAL_KEY: ${PARTNER_SEAL_KEY:-}
+      # Where an outbound partner call may go. Not a secret and still not
+      # optional in spirit: it is the one thing standing between a request
+      # body and our own Docker network, so it is configuration and the
+      # function validates it (https, public host, no credentials, 443, no
+      # path) before using it.
+      PARTNER_REIDEY_BASE_URL: ${PARTNER_REIDEY_BASE_URL:-}
       # The functions mail the codes themselves (_shared/mail.ts), through the
       # server GoTrue uses: Mailpit on staging, Resend on 2587 in production.
       # Port 465 is TLS from the first byte, any other port must offer STARTTLS,

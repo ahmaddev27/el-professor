@@ -13,6 +13,23 @@
 -- auth.uid() returns the `sub` claim. The column list is kept to id + email
 -- because the fixture was dumped with --schema=public, so auth.users carries
 -- only what the foreign keys needed.
+/*
+  Three columns the real `auth.users` has and the fixture's did not, measured
+  read-only on production 08.10.2026: `deleted_at`, `banned_until` and
+  `email_confirmed_at`. The dump is `--schema=public`, so what stands in for
+  GoTrue's table here carries only what the foreign keys needed — and a probe of
+  any function that filters on an account's state therefore measured the FIXTURE
+  and not the product. `abrechnung_schedule_preview` is how this surfaced: it
+  answered 42703 for exactly the principal that uses it, which reads as a defect
+  in a function that is fine.
+
+  Added here rather than per file so every probe sees the same table, and
+  `IF NOT EXISTS` so a future image that ships them changes nothing.
+*/
+ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS deleted_at         timestamptz;
+ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS banned_until       timestamptz;
+ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS email_confirmed_at timestamptz;
+
 INSERT INTO auth.users (id, email)
 VALUES
   ('a0000000-0000-4000-8000-000000000001', 'admin-a@test.invalid'),

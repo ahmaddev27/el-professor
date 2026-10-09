@@ -9,7 +9,9 @@ import DriversManagement from '../components/DriversManagement';
 import { DriverPlanningFields } from '../components/DriverModal';
 import { handleDatabaseError } from '../utils/errorHandler';
 import { useTranslation } from '../contexts/LanguageContext';
-import { Alert, Button, DataTable, KpiCard, PageHeader } from '../components/ui';
+import { Alert, Button, DataTable, KpiCard, PageHeader, Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui';
+import { useSuperAdmin } from '../contexts/SuperAdminContext';
+import { PartnerLinkProposals } from '../components/partner/PartnerLinkProposals';
 
 const FahrerPage: React.FC = () => {
   const { t } = useTranslation();
@@ -20,6 +22,13 @@ const FahrerPage: React.FC = () => {
   const { drivers: driverActions, isLoading: dbLoading, isConnected: dbConnected } = useDatabase();
   const [drivers, setDrivers] = useState<Driver[]>([]);
   const [loading, setLoading] = useState(false);
+  // The company whose rows a screen must query, not the membership — the rule
+  // every tenant query in this codebase follows. `useDatabase` already resolves
+  // it internally; the proposals tab queries directly, so it needs the value.
+  const { effectiveCompanyId: companyId } = useSuperAdmin();
+  // Which half of the screen is showing. The only thing this slice adds to this
+  // file besides the wrapper below.
+  const [tab, setTab] = useState<'own' | 'links'>('own');
 
   const canEditDriver = (driver: Driver): boolean => {
     return canEdit(driver.createdBy);
@@ -138,6 +147,13 @@ const FahrerPage: React.FC = () => {
   }
 
   return (
+    <Tabs value={tab} onValueChange={value => setTab(value as 'own' | 'links')} className="space-y-6">
+      <TabsList aria-label={t('nav.fahrer')}>
+        <TabsTrigger value="own">{t('drivers.tab.own')}</TabsTrigger>
+        <TabsTrigger value="links">{t('drivers.tab.links')}</TabsTrigger>
+      </TabsList>
+
+      <TabsContent value="own">
     <DriversManagement
       drivers={drivers}
       onAddDriver={handleAddDriver}
@@ -146,6 +162,14 @@ const FahrerPage: React.FC = () => {
       canEdit={canEditDriver}
       canDelete={canDeleteDriver}
     />
+      </TabsContent>
+
+      {/* The drivers come from this page rather than a second query, so the
+          picker and the list beside it cannot disagree. */}
+      <TabsContent value="links">
+        <PartnerLinkProposals companyId={companyId} drivers={drivers} />
+      </TabsContent>
+    </Tabs>
   );
 };
 
