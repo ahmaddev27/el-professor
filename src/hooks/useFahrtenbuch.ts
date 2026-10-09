@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
+import { inGroups, sourceRowKeyChunks } from '../utils/postgrestLookup';
 import { useAuth } from '../contexts/AuthContext';
 import { useSuperAdmin } from '../contexts/SuperAdminContext';
 import { useTranslation } from '../contexts/LanguageContext';
@@ -142,12 +143,6 @@ async function fetchAllRows<T>(
 const FILE_HASH_CONSTRAINT = 'fahrtenbuch_imports_company_file_sha256_key';
 /** The unique index that refuses the same ride twice in one company. */
 const ROW_KEY_INDEX = 'fahrtenbuch_trips_company_source_row_key';
-/**
- * Keys per lookup. A key is 64 characters, so 100 keep the request line near
- * 7 KB, well inside what Kong and PostgREST accept; each key names at most one
- * stored row, so an answer stays far below the 1000-row cap.
- */
-const KEY_LOOKUP_CHUNK = 100;
 
 /** The company already imported this exact file. `existing` is that import. */
 export class DuplicateImportFileError extends Error {
@@ -268,12 +263,8 @@ export function useFahrtenbuch() {
   ): Promise<Set<string>> => {
     const stored = new Set<string>();
     if (!companyId) return stored;
-    const unique = [...new Set(keys)];
-    const chunks: string[][] = [];
-    for (let i = 0; i < unique.length; i += KEY_LOOKUP_CHUNK) {
-      chunks.push(unique.slice(i, i + KEY_LOOKUP_CHUNK));
-    }
-    const answers = await Promise.all(chunks.map(chunk => {
+    // Small chunks, a few at a time: the gateway refuses a long query (postgrestLookup.ts).
+    const answers = await inGroups(sourceRowKeyChunks(keys), chunk => {
       let q = supabase
         .from('fahrtenbuch_trips')
         .select('source_row_key')
@@ -281,7 +272,7 @@ export function useFahrtenbuch() {
         .in('source_row_key', chunk);
       if (excludeImportId) q = q.neq('import_id', excludeImportId);
       return q;
-    }));
+    });
     for (const { data, error } of answers) {
       if (error) throw error;
       for (const row of (data ?? []) as { source_row_key: string | null }[]) {

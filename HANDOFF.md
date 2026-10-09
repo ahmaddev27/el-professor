@@ -4,6 +4,37 @@ Last updated: **08.10.2026**
 
 Start here when you pick up this project. Read it together with [CLAUDE.md](CLAUDE.md), which holds the rules and how every mechanism works, and [PROGRESS.md](PROGRESS.md), which records what is done and what was verified. The owner-facing plan is [el-professor-plan.html](el-professor-plan.html). The older developer reference, moved out of the README in PR #18, is [Docs/TECHNICAL_REFERENCE.md](Docs/TECHNICAL_REFERENCE.md); where it disagrees with CLAUDE.md or the code, they win.
 
+- **A second live defect, fixed on `fix/storage-cors`: no browser upload has reached storage on either stack since 12.09.2026.**
+  - **Symptom.** With the lookup fixed, the December import failed at its last step: "Import blockiert: Original-XLSX-Datei konnte nicht gespeichert werden … (Failed to fetch)". The console showed `blocked by CORS policy: Request header field cache-control is not allowed by Access-Control-Allow-Headers in preflight response`.
+  - **Cause.** storage-js adds `cache-control` and `x-upsert` to every upload, and `x-metadata` when metadata is given. The storage route's cors `headers` list in `deploy/kong.yml` named none of the three. That list was written on 12.09.2026 (d8e6172, then bf3bded, which added `X-Supabase-Api-Version` for auth and not these).
+  - **Measured read-only.** `storage.objects` holds **no object created after 10.09.2026** on production or staging, and no object at all in `fahrtenbuch-files` or `salary-receipts`. So for four weeks the following all failed in the browser with no server log:
+    - every Fahrtenbuch import;
+    - every logo upload;
+    - every signed Gehaltsquittung copy.
+  - **The fix and its guard.** The three headers are added to the storage route. `src/utils/kongStorageCors.test.ts` reads the installed storage-js build and fails when it sends a header the list does not name. Checked against the old `kong.yml`: it fails, listing all three.
+  - **Rendering verified locally.** The file was rendered the way the container renders it, by an eval of an echo in double quotes. The only non-comment difference from staging's file is the three header lines.
+  - **A trap recorded in the comment itself.** A double quote in a kong.yml comment unbalances that eval for the rest of the file. The first draft of this comment had one, and it was removed before commit.
+  - **Production needs this release before anyone can import.**
+
+- **A live defect, fixed on `fix/import-key-lookup`: every Fahrtenbuch import of more than about 50 rides failed, on staging and on production.** It surfaced while importing a 297-ride December into DEMO. The preview step said "Die Vorschau konnte nicht erstellt werden: [object Object]", and the import button then read "0 Fahrten importieren".
+
+  **Mechanism.** The importer's duplicate-ride lookup (`findStoredSourceRowKeys`, `eb68a7f`) asked for 100 64-character keys per GET. **PostgREST echoes the query in its `Content-Location` response header**, and Kong's nginx refuses a response whose headers pass its 4 KB buffer: `upstream sent too big header while reading response header from upstream`, which shows as a 502. Staging's Kong log held 16 such lines from the attempts.
+
+  **Measured through staging's gateway from inside the host, read-only:**
+  - 64-character keys: 50–56 pass with the service key. The browser's query, which carries one filter more, failed at 56.
+  - uuids: 95 pass and 100 fail.
+
+  **Two more lookups had the same shape at 200 uuids:**
+  - the Bargeldbestand's receipt names, which failed for a month with more than about 95 Gehaltsquittungen;
+  - the backup's child tables, which failed for a company with that many parent rows.
+
+  **The fix.** All three now take their bound from `src/utils/postgrestLookup.ts`:
+  - 25 keys or 40 uuids per lookup, half the measured limits;
+  - the key lookups run at most four at a time;
+  - its test fails if the old sizes come back (mutation-checked).
+
+  **Production is exposed and unaffected so far:** it has had no import since 20.09.2026. **This must reach production before the next customer import.** Kong's `proxy_buffer_size` was deliberately not raised, because that is a host change and the client fix is enough. The other `.in(…)` lists in `src/` were read one by one. Each is bounded by a small set (one driver's payments, one month's Stundennachweise, a company's drivers), so they were left alone.
+
 - **The whole e2e suite was run on staging after #188 and #189 merged (`b4796f8`).** 19 files, 35 tests. The first pass was 28 passed and 7 failed, and each failure was diagnosed:
   - Four were the local network: `page.goto: net::ERR_TIMED_OUT` and Node's `fetch failed` against Mailpit. They are abrechnung-dialog-fits 1440, abrechnung-mail-all, forgot-password and the second monthly-plan-save test, and all four passed on a rerun.
   - `return-check` failed because the DEMO company has no analysis settings. The page computes nothing until "Mit Testwert 30 Min. ansehen" is pressed, so the spec now presses it. The test value is held in the page and stored nowhere.
