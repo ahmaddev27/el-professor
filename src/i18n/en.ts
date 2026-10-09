@@ -6091,7 +6091,7 @@ export const en: PartialDictionary = {
   'partner.connect.error.partnerUnavailable': 'Reidey could not be reached. Nothing was saved — try again later.',
   'partner.connect.error.tokenRejected':   'Reidey rejected the token. It has expired, been revoked, or is not the one issued for El-Professor. Issue a new one in Reidey.',
   'partner.connect.error.tokenRequired':   'Please paste the token from Reidey.',
-  'partner.connect.howBody':               'In Reidey, under "Connections", issue a token for El-Professor and paste it here. Reidey shows the token only once, and issuing a new one invalidates the old one immediately.',
+  'partner.connect.howBody':               'In Reidey, open the "El-Professor" page, issue a token there and paste it here. Reidey shows the token only once, and issuing a new one invalidates the old one immediately. If that page is missing in Reidey, the operator has not opened the link for this company yet.',
   'partner.connect.howTitle':              'How to connect',
   'partner.connect.lastErrorTitle':        'Last error on a pull',
   'partner.connect.loadFailedBody':        '"Not connected" is therefore not shown — whether a connection exists is unknown. Load again before pasting a token.',
