@@ -6147,7 +6147,7 @@ export const de = {
   'partner.connect.error.partnerUnavailable': 'Reidey war nicht erreichbar. Es wurde nichts gespeichert — bitte später erneut versuchen.',
   'partner.connect.error.tokenRejected':   'Reidey hat den Token abgelehnt. Er ist abgelaufen, widerrufen oder nicht der für El-Professor erzeugte. Bitte in Reidey einen neuen erzeugen.',
   'partner.connect.error.tokenRequired':   'Bitte den Token aus Reidey einfügen.',
-  'partner.connect.howBody':               'In Reidey unter „Verbindungen" einen Token für El-Professor erzeugen und hier einfügen. Reidey zeigt den Token nur einmal an — wird er neu erzeugt, verliert der alte sofort seine Gültigkeit.',
+  'partner.connect.howBody':               'In Reidey die Seite „El-Professor" öffnen, dort einen Token erzeugen und hier einfügen. Reidey zeigt den Token nur einmal an — wird er neu erzeugt, verliert der alte sofort seine Gültigkeit. Fehlt die Seite in Reidey, hat der Betreiber die Verbindung für diese Firma noch nicht geöffnet.',
   'partner.connect.howTitle':              'So wird verbunden',
   'partner.connect.lastErrorTitle':        'Letzter Fehler beim Abruf',
   'partner.connect.loadFailedBody':        '„Nicht verbunden" wird deshalb nicht angezeigt — es ist nicht bekannt, ob eine Verbindung besteht. Bitte erneut laden, bevor ein Token eingefügt wird.',
