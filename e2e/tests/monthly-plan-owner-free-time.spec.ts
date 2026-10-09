@@ -54,6 +54,11 @@ test('the owner free-time panel shows windows and hours, and assigns nothing', a
   // Steps 1 to 4, as monthly-plan-walk.spec.ts does them.
   await page.goto('/monatsplan?art=standard');
   await page.waitForTimeout(8000);
+  // Pin the month: the list opens on the newest import, which moves when a later month is added.
+  const monthSelect = page.locator('select').first();
+  const november = await monthSelect.locator('option').filter({ hasText: /November 2026/ }).first().getAttribute('value');
+  await monthSelect.selectOption(november!);
+  await page.waitForTimeout(3000);
   await page.getByRole('button', { name: /^Weiter$/ }).click();
   await page.waitForTimeout(5000);
 
