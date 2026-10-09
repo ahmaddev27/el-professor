@@ -56,6 +56,11 @@ test('the eight steps, the minimum block length, and Neu verteilen', async ({ pa
   // ── Step 1: the month ─────────────────────────────────────────────────────
   await page.goto('/monatsplan?art=standard');
   await page.waitForTimeout(8000);
+  // Pin the month: the list opens on the newest import, which moves when a later month is added.
+  const monthSelect = page.locator('select').first();
+  const november = await monthSelect.locator('option').filter({ hasText: /November 2026/ }).first().getAttribute('value');
+  await monthSelect.selectOption(november!);
+  await page.waitForTimeout(3000);
   console.log('\n── step 1 ──\n' + (await screen(page)).slice(0, 700));
   await page.getByRole('button', { name: /^Weiter$/ }).click();
   await page.waitForTimeout(5000);
