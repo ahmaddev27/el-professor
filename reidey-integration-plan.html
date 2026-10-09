@@ -150,6 +150,9 @@
         <tr><td class="n">06.10</td><td><strong>ملاحظات المرض/العطلة/عدم التوفّر يدخّلها المشغّل</strong></td><td>بيانات Art. 9 <strong>بتطلع من التحويل كاملاً</strong>. استثناء التخطيط قرار المشغّل أصلاً فما بنخسر إشي. تضييق لقرار «كل العشرة أنواع» بمعلومة ما كانت موجودة وقتها. <span class="ref">[33] [41]</span></td></tr>
         <tr><td class="n">06.10</td><td><strong>سحبة الروستر بزرّ، مش cron</strong></td><td>ولا تغيير على المضيف، وبوتيرة المشغّل. الـcron لما يثبت إنه بدّه تكرار. <span class="ref">[26]</span></td></tr>
         <tr><td class="n">06.10</td><td><strong>اختبارات Reidey تنشغّل محلياً</strong></td><td>مش بيئة اختبار — هي الاختبارات نفسها. بلاها كل ضمانة بـM1–M4 مجرّد قراءة.</td></tr>
+        <tr><td class="n">08.10</td><td><strong>الشريك يرنّ وإحنا نسحب</strong></td><td>رايدي ما بتقدر تعيد إرسال توكنها (Sanctum بتخزّن الهاش)، فالدفع كان بدّه سرّاً ما حدا بيحمله. الجرس بلا حمولة وبلا بيانات اعتماد.</td></tr>
+        <tr><td class="n">09.10</td><td><strong>الصورة تضلّ دائماً</strong></td><td>ولا قاعدة احتفاظ. القرص يحتمل؛ النسخة الاحتياطية للـvolume لسا مفتوحة.</td></tr>
+        <tr><td class="n">09.10</td><td><strong>M0 ملغى</strong></td><td>ولا نص قانوني ولا محامي. قرار المالك، مسجّل هون لأنّ بيانات سائقين ألمان بتعبر بين منتجين.</td></tr>
         <tr><td class="n">06.10</td><td><strong>نص الملاحظة ما يعبر</strong></td><td>النوع والمدى بيكفّوا لتشغيل قيد التخطيط. النص الحر يوقف عند Reidey. <span class="ref">[41]</span></td></tr>
         <tr><td class="n">06.10</td><td><strong>التطبيق منشور وشغّال</strong></td><td>مسار الإصدار شغّال (v1.0.5، وexpo-updates مربوط). فالكاميرا كلفة إصدار مش حيط — انظر 2.4.</td></tr>
       </tbody>
@@ -219,29 +222,13 @@
 </section>
 
 <section class="phase gate0" id="m0">
-  <header class="phase-head"><span class="phase-num">M0</span><h2>الورق القانوني — بلا كود <span class="pill crit">بوابة لكل اللي بعده</span></h2></header>
-  <p><strong>السجل الكامل لـM0 هون: <a href="Docs/integration/reidey-m0-data-transfer.md">Docs/integration/reidey-m0-data-transfer.md</a></strong> — خريطة البيانات حقل بحقل، والنصوص الألمانية الجاهزة، وقاعدة المحو، وجدول البوابة. وهاد القسم ملخّصه.</p>
-  <p>التدقيق لقى إنه الخطة كانت بتحرّك بيانات سائقين حقيقيين بـM1 والأساس القانوني بآخر مايلستون. وبما إنه ما في بيئة اختبار، هذا ما بقي ترتيب سيّئ — صار <strong>ما إله حل غير إنه يتقدّم</strong>. <span class="ref">[19] [20]</span></p>
-
-  <h3><span class="step-no">M0.1</span>مين المتحكّم ومين المعالج، لكل مسار</h3>
-  <p>سياسة Reidey نفسها (§2) بتقول إنه <strong>مشغّل الأسطول</strong> هو المتحكّم ببيانات السائقين. فالاتنين — Reidey وEl-Professor — معالجين، والتحويل <strong>معالج↔معالج بتعليمة المتحكّم</strong>، مش سلسلة معالج فرعي. لازم ينكتب هيك، لأنه الشكل بيحدّد الورق المطلوب.</p>
-
-  <h3><span class="step-no">M0.2</span>تعديل AVV أو تفويض Art. 28(2)</h3>
-
-  <h3><span class="step-no">M0.3</span>صفحة الخصوصية عند الطرفين</h3>
-  <p><strong>قياس 06.10.2026:</strong> قائمة المستلمين بـ§٥ من <code>datenschutz/page.tsx</code> فيها <strong>ست جهات</strong> وEl-Professor مش عليها، <strong>وتطبيق السائق بيوصّل لنفس الصفحة</strong> من تلات أماكن، واحد منهم <strong>قبل تسجيل الدخول</strong>. فإضافة مستلم سابع بدّها بند جديد وتحديث ـ<code>Stand: 24.09.2026</code>.</p>
-  <div class="why"><strong>تصحيح لنصّي.</strong> كنت كاتب هون إنه القائمة «<strong>حصرية</strong>». القياس بيقول <strong>لا هي مقفلة ولا مفتوحة صراحة</strong>: ولا <code>nur</code> ولا <code>ausschließlich</code> ولا <code>abschließend</code>، وولا <code>insbesondere</code> ولا <code>u. a.</code> مربوطة بالقائمة. فالصحيح: هي <strong>بتقدّم الستة كالمزوّدين المستعملين</strong>، فزيادة سابع تضلّ مطلوبة — بس ما بصحّ أسمّيها حصرية وهي ما بتقول هيك. <strong>وأسوأ منها لقينا إشي تاني:</strong> الـFAQ على الصفحة الرئيسية بتقول <code>«Keine Weitergabe an Dritte»</code> — وهاد <strong>بيناقض ـ§٥ تبعهم أصلاً</strong>، قبل ما نضيف إحنا أي إشي. <span class="ref">[7]</span></div>
-  <div class="gate">وعندنا: <code>legal.privacy</code> و<code>legal.impressum</code> لسا <code>{}</code> على الإنتاج — Google sign-in فتح قبلهم وهنّ كانوا شرطه المعلن. لازم يوقفوا فاضيين بنفس الإصدار.</div>
-
-  <h3><span class="step-no">M0.4</span>بيانات Art. 9 — قرار منفصل</h3>
-  <p><strong>ملاحظة «مرض» بيانات صحية فئة خاصة.</strong> ولا منتج من الاتنين معلن إلها أساس. والأرخص والأصح: <strong>تطلع <code>sick</code>/<code>vacation</code>/<code>off</code> من اللي السائق يقدر يرفعه</strong> ويدخّلها المشغّل — لأنه استثناء التخطيط قراره هو أصلاً، فما بنخسر إشي ونطلّع بيانات صحية من التحويل كاملاً. وإذا لازم تكون من السائق: Art. 9(2)(b) مع §26(3) BDSG بالإعلانين، ومراجعتها تنحصر بـ<code>is_company_admin()</code>، والنص الحر يوقف برا. <span class="ref">[33] [41]</span></p>
-  <div class="why"><strong>هذا قرارك</strong> — وهو تضييق لقرارك السابق («كل العشرة أنواع مسموحة»)، بمعلومة ما كانت موجودة وقتها. انظر «قرارات مستنياك».</div>
-
-  <h3><span class="step-no">M0.5</span>المحو والاحتفاظ — القاعدة قبل الكود</h3>
-  <p><strong>قيست، والنتيجة أسوأ من اللي كنت كاتبه.</strong> عند Reidey في <code>DriverEraser</code> شغّال وشامل، بس <strong>وعد الـ٣٠ يوم منشور بالتطبيق بالتلات لغات وولا إشي بينفّذه</strong> — ولا job ولا جدولة، والمحو فعل بشري، وكل فترات الاحتفاظ <strong>مطفية بالافتراضي</strong>. <strong>وعنا أسوأ:</strong> ما في محو سائق إطلاقاً — في زرّ سلة <strong>بلا تأكيد</strong>، والـCASCADE بيودّيه لـ<code>salaries</code> و<code>salary_payments</code> و<code>salary_cash_receipts</code> و<code>saved_stundennachweise</code> — <strong>يعني بيدمّر بالزبط السجلات اللي الشركة ملزومة تحفظها</strong> (واختبارات الكيت بتثبّت هاد)، <strong>وبنفس الوقت ما بيمحي</strong>: الأسماء بتضل بـ<code>receipts.driver_name</code> و<code>income.driver_name</code> و<code>assigned_driver_name</code> والـjson، <strong>وكل كائنات التخزين بتضل</strong>. <span class="ref">[17] [34]</span></p>
-  <div class="crit-box"><strong>وأغلب الظن إنه ما بيشتغل أصلاً لسائق حقيقي</strong> — <code>original_driver_id</code> عليه <code>ON DELETE SET NULL</code> والـtrigger بيرفض أي تغيير على هالعمود، والـSET NULL بينفّذ كـUPDATE. وعلى الستيج <strong>13,959 من 13,981 رحلة</strong> حاملة العمود — يعني الحالة العادية مش النادرة. <strong>وهاد استنتاج ما انتفحص</strong> — تلات اختبارات صغيرة بتحسمه وما بدها ولا محامي، وهي أول إشي بـM0.</div>
-  <div class="why"><strong>تصحيح لنصّي:</strong> كنت كاتب هون <code>§147 AO</code> و<code>§17 MiLoG</code> كـ«الأساس». القياس: <strong>ولا سطر بالريبوهين بيستشهد بهم ولا بيسمّي أي مدة احتفاظ</strong> — المرة الوحيدة هي سطري أنا. فهمّ <strong>افتراضي مش متحقّق</strong>، والسجل بيحملهم كـ<strong>سؤال للمحامي</strong>. وقاعدة المحو ما بتنتكتب بلا جوابه.</div>
+  <header class="phase-head"><span class="phase-num">M0</span><h2>الورق القانوني <span class="pill crit">ملغى بقرار المالك · 09.10.2026</span></h2></header>
+  <div class="crit-box">
+    <p style="margin:.2em 0"><strong>قرار المالك 09.10.2026: ولا نص قانوني ولا محامي.</strong> M0 ما عاد بوابة، والمايلستونات اللي بعده ما بتستناه.</p>
+    <p style="margin:.5em 0 .2em">مسجّل هون لأنه قرار وُخذ بعد ما انعرض: بيانات سائقين ألمان (اسم، إيميل، تلفون، وصورة بيليج فيها مكان وتاريخ) بتعبر بين منتجين مختلفين لهم قاعدتا بيانات منفصلتان، <strong>والصورة بتضلّ دائماً</strong> (نفس اليوم). التفاصيل اللي انكتبت — خريطة البيانات حقل بحقل، وشكل العلاقة معالج↔معالج، والنصوص الألمانية — ضلّت بـ<a href="Docs/integration/reidey-m0-data-transfer.md">Docs/integration/reidey-m0-data-transfer.md</a> كمرجع، بلا أي بوابة عليها.</p>
+  </div>
 </section>
+
 
 <section class="phase" id="m1">
   <header class="phase-head"><span class="phase-num">M1</span><h2>الكونيكت <span class="pill warn">نص مبني</span></h2></header>
@@ -381,8 +368,13 @@
   <h3><span class="step-no">M4.4</span>قاعدة التصنيف — والـTankenquote معلّقة عليها</h3>
   <p><code>'Other'</code> sentinel ما بينخزّن، والنص الحر بينزل بـ<code>description</code>. و<code>'Tanken'</code> هي اللي بتحدّد فواتير الـ<strong>Tankenquote</strong>. القاعدة تنكتب مع اختبار: وارد مقبول بـ<code>Tanken</code> لازم يطلّع صف بيحسب بالنسبة. <span class="ref">[13]</span></p>
 
-  <h3><span class="step-no">M4.5</span>كم بتضل الصورة محفوظة</h3>
-  <p>الصور محفوظة <strong>على الطرفين</strong>، على VPS واحد قرصه الجذري انقاس عند ٢١ GB فاضي ومشارَك مع قواعد ونسخ المنتجين. قاعدة احتفاظ تنتحدّد هون: الكائن عندنا بينمحى بعد N يوم من القبول أو الرفض، ونسخة Reidey بتنمحى لما سحب الحالة يرجع حالة نهائية. <span class="ref">[45]</span></p>
+  <h3><span class="step-no">M4.5</span>كم بتضل الصورة محفوظة <span class="pill ok">مجاب · 09.10</span></h3>
+  <p><strong>قرار المالك: الصورة تضلّ دائماً.</strong> ولا قاعدة احتفاظ، ولا محو بعد القرار، على الطرفين.</p>
+  <p>والقياس بيسند القرار: القرص <strong>788 GB فاضي من 1007</strong> (الـ٢١ GB اللي كانت مكتوبة هون رقم قديم، قِسته من جديد 09.10.2026)، و١٠٠٠ بيليج بالشهر بـ3 MB ≈ <strong>3 GB بالسنة</strong>. فالكلفة مش القرص.</p>
+  <div class="crit-box">
+    <p style="margin:.2em 0"><strong>الكلفة الحقيقية هي النسخة الاحتياطية، وهي مفتوحة.</strong> النسخة اليومية (<code>/etc/cron.daily/ya-mobility-backup</code>، 06:25، ٤٤ نسخة محفوظة) هي <code>pg_dump</code> لخمس سكيمات <strong>منها <code>storage</code> — يعني صفوف الملفات، مش الملفات نفسها</strong>. البايتات بالـvolume <code>ya-mobility_storage-data</code> و<strong>ولا إشي بينسخه</strong>.</p>
+    <p style="margin:.5em 0 .2em">فلو ضاع الـvolume: <code>storage.objects</code> بترجع كاملة، وكل صورة بترجّع 404، و<code>receipts.document_path</code> مؤشّر على لا شيء — و«الصورة تضلّ دائماً» بتصير غير صحيحة بلا ما حدا يلاحظ. الحل رخيص (<code>tar</code> للـvolume جنب الـdump) <strong>وهو تغيير على الهوست، فمستني قرار المالك</strong>.</p>
+  </div>
 </section>
 
 <section class="phase" id="m5">
