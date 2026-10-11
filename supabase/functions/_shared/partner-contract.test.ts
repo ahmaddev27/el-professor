@@ -126,14 +126,24 @@ describe("Reidey's receipt answer, through our parser", () => {
       .toEqual({ ok: false, problem: 'invalid_amount' })
   })
 
-  // The controller omits `document` when the disk does not have the file.
-  it('refuses a receipt whose photo was absent from the answer', () => {
+  // Flipped on 11.10.2026. Reidey omits `document` for two different reasons
+  // now: the driver's app read the receipt on the phone and sent no photo at
+  // all, or the file named in the row is not on the disk. This parser cannot
+  // tell them apart and no longer tries — the first is the normal case since
+  // 10.10.2026, and refusing it refused every current submission.
+  //
+  // The second is not lost: the row then names no file, and the reviewer's
+  // screen shows that as "arrived without a photo". What it does NOT show is
+  // a file it could not render, which still blocks accepting.
+  it('accepts a receipt whose answer carried no photo', () => {
     const { document: _omitted, ...withoutPhoto } = receiptAnswer.data
     const unwrapped = readSubmissionAnswer({ data: withoutPhoto }, 'receipt')
     expect(unwrapped.ok).toBe(true)
     if (!unwrapped.ok) return
-    expect(parseReceiptSubmission(unwrapped.payload))
-      .toEqual({ ok: false, problem: 'document_missing' })
+    const parsed = parseReceiptSubmission(unwrapped.payload)
+    expect(parsed.ok).toBe(true)
+    if (!parsed.ok) return
+    expect(parsed.value.document).toBeNull()
   })
 
   // And a photo that is there but is not an image: their validator admits

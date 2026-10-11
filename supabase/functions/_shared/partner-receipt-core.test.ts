@@ -50,11 +50,25 @@ describe('parseReceiptSubmission', () => {
     },
   )
 
-  // The audit's blocker: a category and an amount and no photo at all.
-  it('refuses a submission with NO PHOTO — the audit blocker', () => {
+  // Flipped on 11.10.2026 with the owner's decision of the 10th: a driver
+  // sends the figures, not the document. This was the audit's blocker and the
+  // reasoning behind it still holds — nothing downstream can check a figure
+  // against a receipt nobody has — which is why the app will not send a field
+  // its rules were unsure about until the driver confirms it by hand. The
+  // evidence moved; it was not dropped.
+  it('accepts a submission with no photo, and says so with a null', () => {
     const body: Record<string, unknown> = { ...good }
     delete body.document
-    expect(parseReceiptSubmission(body)).toEqual({ ok: false, problem: 'document_missing' })
+    const parsed = parseReceiptSubmission(body)
+    expect(parsed.ok).toBe(true)
+    if (!parsed.ok) return
+    expect(parsed.value.document).toBeNull()
+  })
+
+  it('still refuses a photo that IS sent and cannot be opened', () => {
+    // Optional does not mean unchecked: a file nobody can render is worse than
+    // no file, because the reviewer is shown something and learns nothing.
+    expect(parseReceiptSubmission({ ...good, document: 'not base64 at all !!' }).ok).toBe(false)
   })
 
   it('refuses a photo that does not decode', () => {

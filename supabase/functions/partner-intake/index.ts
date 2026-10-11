@@ -122,18 +122,25 @@ async function recordSubmission(
       }
     }
     const receipt = parsed.value
-    const key = documentKey(companyId, receipt.external_submission_id, receipt.document.extension)
 
-    // The photo FIRST, because a submission row that names a file nobody stored
-    // is the state the whole slice exists to prevent: the reviewer sees a Beleg
-    // and cannot open it. `upsert` so a retry overwrites its own object rather
-    // than failing on a name it chose.
-    const stored = await admin.storage.from('documents').upload(
-      key,
-      receipt.document.bytes,
-      { contentType: receipt.document.contentType, upsert: true },
-    )
-    if (stored.error) return { status: 500, body: { ok: false, reason: 'storage_failed' } }
+    // The photo FIRST when there is one, because a submission row that names a
+    // file nobody stored is the state the whole slice exists to prevent: the
+    // reviewer sees a Beleg and cannot open it. `upsert` so a retry overwrites
+    // its own object rather than failing on a name it chose.
+    //
+    // A current app sends no photo at all, and then the row names no file — the
+    // reviewer's screen tells that apart from a file it could not render, and
+    // only the second blocks accepting.
+    let key: string | null = null
+    if (receipt.document !== null) {
+      key = documentKey(companyId, receipt.external_submission_id, receipt.document.extension)
+      const stored = await admin.storage.from('documents').upload(
+        key,
+        receipt.document.bytes,
+        { contentType: receipt.document.contentType, upsert: true },
+      )
+      if (stored.error) return { status: 500, body: { ok: false, reason: 'storage_failed' } }
+    }
 
     const put = await admin.rpc('partner_receipt_submission_record', {
       p_company_id: companyId,
