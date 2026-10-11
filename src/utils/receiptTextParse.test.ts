@@ -133,6 +133,50 @@ describe('an invoice over a thousand euros', () => {
   })
 })
 
+describe('the fuel figures', () => {
+  it('reads litres and the unit price written as `41,47 L   EUR/L 1,789`', () => {
+    const r = parseReceiptText(FUEL)
+    expect(r.litres).toBe(41.47)
+    expect(r.pricePerLitre).toBe(1.789)
+  })
+
+  it('reads them written as `Menge: 35.39 Liter` and `Einzelpreis 1,559`', () => {
+    // The shape of a real Star Tankstelle receipt, and the one whose total
+    // came out as 8,80 before the rows were rebuilt from the OCR coordinates.
+    const r = parseReceiptText(`Star Tankstelle
+50937 Koeln
+Datum 10.10.2026
+Diesel
+Menge: 35.39 Liter
+Einzelpreis 1,559
+TOTAL 55,11 EUR`)
+    expect(r.amount).toBe(55.11)
+    expect(r.litres).toBe(35.39)
+    expect(r.pricePerLitre).toBe(1.559)
+  })
+
+  it('leaves both undefined on a receipt that is not fuel', () => {
+    const r = parseReceiptText(WASH)
+    expect(r.litres).toBeUndefined()
+    expect(r.pricePerLitre).toBeUndefined()
+  })
+
+  it('does not read the TOTAL as a unit price', () => {
+    // 74,24 is far outside any pump price, and a figure outside the band is
+    // dropped rather than offered: a wrong number in the form is worse than
+    // an empty one the driver fills in.
+    expect(parseReceiptText('Gesamtbetrag 74,24 EUR/L').pricePerLitre).toBeUndefined()
+  })
+
+  it('does not read a tanker-sized quantity', () => {
+    expect(parseReceiptText('Menge 9999,00 Liter').litres).toBeUndefined()
+  })
+
+  it('does not take a fraction of a litre for a fill', () => {
+    expect(parseReceiptText('0,41 L').litres).toBeUndefined()
+  })
+})
+
 describe('text with nothing in it', () => {
   it('answers an empty result rather than throwing', () => {
     const r = parseReceiptText('')
