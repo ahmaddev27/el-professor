@@ -305,9 +305,9 @@ DECLARE v_n int;
 BEGIN
   PERFORM _ra_rec(26, 'the door is not executable by anon or authenticated',
     (has_function_privilege('anon',
-       'public.partner_receipt_submission_record(uuid,text,text,text,date,text,text,text,text,text,text,text,boolean,boolean,jsonb)', 'EXECUTE')::int
+       'public.partner_receipt_submission_record(uuid,text,text,text,date,text,text,text,text,text,text,text,boolean,boolean,jsonb,text,text,text,text)', 'EXECUTE')::int
      + has_function_privilege('authenticated',
-       'public.partner_receipt_submission_record(uuid,text,text,text,date,text,text,text,text,text,text,text,boolean,boolean,jsonb)', 'EXECUTE')::int)::text,
+       'public.partner_receipt_submission_record(uuid,text,text,text,date,text,text,text,text,text,text,text,boolean,boolean,jsonb,text,text,text,text)', 'EXECUTE')::int)::text,
     '0');
 
   PERFORM _ra_rec(27, 'and the two decisions are not executable by anon',

@@ -3,12 +3,23 @@
  *
  * Imports nothing from Deno, `npm:` or `jsr:`, so vitest loads it.
  *
- * ## The photo is the point, and it is checked here
+ * ## The photo is OPTIONAL since 11.10.2026, and this is where that was missed
  *
- * The audit's blocker was that a submission could carry a category and an
- * amount and no photo at all. The database now refuses to ACCEPT such a row
- * (`document_missing`), and this refuses to RECORD one — so a driver learns at
- * the moment they submit rather than days later when a reviewer cannot act.
+ * It used to be the point: a submission could carry a category and an amount
+ * and no photo at all, so the database refused to accept one and this refused
+ * to record one. The owner reversed that on 10.10.2026 — a driver's app reads
+ * the receipt on the phone and the image stays there — and `20261010100000`
+ * opened the database door.
+ *
+ * **Nothing arrived for another five hours, because this check stands in FRONT
+ * of that door.** The door was measured open by calling the RPC directly,
+ * which is precisely the test that skips the guard before it; and the recorded
+ * reason read `document_missing` either way, so the measurement confirmed the
+ * wrong half. A probe that bypasses a guard is not a probe.
+ *
+ * A photo that IS sent is still stored and still checked exactly as before —
+ * size, type, and whether the declared type matches the bytes. An older app
+ * build sends one. What is gone is requiring it to exist.
  *
  * ## Why base64 and not a URL
  *
@@ -75,7 +86,8 @@ export interface ReceiptSubmissionInput {
   captured_at: string | null
   confirmed_by_driver: boolean
   read_by_agent: boolean
-  document: { bytes: Uint8Array; contentType: string; extension: string }
+  /** Null when the driver's app read the receipt and kept the image. */
+  document: { bytes: Uint8Array; contentType: string; extension: string } | null
 }
 
 export type ReceiptParseResult =
@@ -177,24 +189,29 @@ export function parseReceiptSubmission(body: unknown): ReceiptParseResult {
     return { ok: false, problem: 'invalid_postal_code' }
   }
 
-  // The photo. A Beleg without one is a claim about a receipt.
+  // The photo, when there is one. A build of 10.10.2026 or later sends none.
+  // One that arrives is checked exactly as before: a photo nobody can open is
+  // worse than no photo, so an unreadable or oversized one is still a refusal.
+  let document: { bytes: Uint8Array; contentType: string; extension: string } | null = null
   const encoded = text(b.document)
-  if (encoded === null) return { ok: false, problem: 'document_missing' }
-  const bytes = decodeDocument(encoded)
-  if (bytes === null || bytes.length === 0) {
-    return { ok: false, problem: 'document_unreadable' }
-  }
-  if (bytes.length > MAX_DOCUMENT_BYTES) {
-    return { ok: false, problem: 'document_too_large' }
-  }
-  const sniffed = sniffDocument(bytes)
-  if (sniffed === null) return { ok: false, problem: 'document_type_unsupported' }
-  const declared = text(b.content_type)
-  // A declared type that disagrees with the bytes is refused rather than
-  // trusted: the key carries the extension and a browser renders what the
-  // extension promises.
-  if (declared !== null && declared.toLowerCase() !== sniffed) {
-    return { ok: false, problem: 'document_type_unsupported' }
+  if (encoded !== null) {
+    const bytes = decodeDocument(encoded)
+    if (bytes === null || bytes.length === 0) {
+      return { ok: false, problem: 'document_unreadable' }
+    }
+    if (bytes.length > MAX_DOCUMENT_BYTES) {
+      return { ok: false, problem: 'document_too_large' }
+    }
+    const sniffed = sniffDocument(bytes)
+    if (sniffed === null) return { ok: false, problem: 'document_type_unsupported' }
+    const declared = text(b.content_type)
+    // A declared type that disagrees with the bytes is refused rather than
+    // trusted: the key carries the extension and a browser renders what the
+    // extension promises.
+    if (declared !== null && declared.toLowerCase() !== sniffed) {
+      return { ok: false, problem: 'document_type_unsupported' }
+    }
+    document = { bytes, contentType: sniffed, extension: MIME_EXTENSION[sniffed] }
   }
 
   return {
@@ -212,7 +229,7 @@ export function parseReceiptSubmission(body: unknown): ReceiptParseResult {
       captured_at: text(b.captured_at),
       confirmed_by_driver: b.confirmed_by_driver === true,
       read_by_agent: b.read_by_agent === true,
-      document: { bytes, contentType: sniffed, extension: MIME_EXTENSION[sniffed] },
+      document,
     },
   }
 }

@@ -22,6 +22,10 @@ export interface OcrResult {
   city?: string;
   category?: string;
   merchantName?: string;
+  /** Litres filled. Only a fuel receipt has one. */
+  litres?: number;
+  /** Price per litre, in euros. Only a fuel receipt has one. */
+  pricePerLitre?: number;
   // Confidence metadata for UI highlighting
   amountConfidence?: number;   // 0-100
   dateConfidence?: number;     // 0-100
@@ -611,6 +615,81 @@ function parseMerchantName(lines: string[]): string | undefined {
   return meaningful[0] || undefined;
 }
 
+// ── Fuel quantity and unit price ─────────────────────────────────
+
+/**
+ * A number with either decimal separator and up to four places: a litre count
+ * reads `41,47` and a unit price `1,789`.
+ */
+const FUEL_NUM = String.raw`\d{1,4}[.,]\d{1,4}`;
+
+/** `41,47 L`, `35.39 Liter`, `41,47 ltr` — the unit follows the number. */
+const LITRES_AFTER_RE = new RegExp(String.raw`(${FUEL_NUM})\s*(?:liter|ltr|l)\b`, "i");
+
+/** `Menge 41,47` — the label precedes it. A few characters of punctuation or
+ *  spacing may sit between, never another digit. */
+const LITRES_LABEL_RE = new RegExp(String.raw`\bmenge\b\D{0,4}(${FUEL_NUM})`, "i");
+
+/** `EUR/L 1,789`, `Preis/L 1,789`, `Einzelpreis 1,789`. */
+const PRICE_AFTER_LABEL_RE = new RegExp(
+  String.raw`(?:eur\s*\/\s*l|€\s*\/\s*l|preis\s*\/\s*l|eur\s*pro\s*l|einzelpreis)\D{0,4}(${FUEL_NUM})`,
+  "i",
+);
+
+/** `1,789 EUR/L` — the same thing written the other way round. */
+const PRICE_BEFORE_LABEL_RE = new RegExp(
+  String.raw`(${FUEL_NUM})\s*(?:eur\s*\/\s*l|€\s*\/\s*l|eur\s*pro\s*l)`,
+  "i",
+);
+
+/**
+ * Plausibility, because these figures are read off a photograph and then
+ * shown to a driver as fact.
+ *
+ * A car tank holds 35-70 litres and a transporter up to a few hundred; below
+ * one litre is a misread, not a fill. German pump prices have sat between
+ * roughly 1,20 and 2,30 EUR for years, and the band here is deliberately
+ * wider than any plausible market move — it is there to reject a MISREADING
+ * (a total taken for a unit price), not to predict fuel prices. A figure
+ * outside either band is dropped rather than offered, because a wrong number
+ * in the form is worse than an empty one the driver fills in.
+ */
+const LITRES_MIN = 1;
+const LITRES_MAX = 500;
+const PRICE_PER_LITRE_MIN = 0.5;
+const PRICE_PER_LITRE_MAX = 5;
+
+function parseFuelNumber(raw: string): number | null {
+  const n = Number(raw.replace(",", "."));
+  return Number.isFinite(n) ? n : null;
+}
+
+/** Litres filled, or undefined when no line says so plausibly. */
+function parseLitres(lines: string[]): number | undefined {
+  for (const line of lines) {
+    for (const re of [LITRES_LABEL_RE, LITRES_AFTER_RE]) {
+      const m = line.match(re);
+      if (!m) continue;
+      const n = parseFuelNumber(m[1]);
+      if (n !== null && n >= LITRES_MIN && n <= LITRES_MAX) return n;
+    }
+  }
+  return undefined;
+}
+
+/** Price per litre, or undefined when no line says so plausibly. */
+function parsePricePerLitre(lines: string[]): number | undefined {
+  for (const line of lines) {
+    for (const re of [PRICE_AFTER_LABEL_RE, PRICE_BEFORE_LABEL_RE]) {
+      const m = line.match(re);
+      if (!m) continue;
+      const n = parseFuelNumber(m[1]);
+      if (n !== null && n >= PRICE_PER_LITRE_MIN && n <= PRICE_PER_LITRE_MAX) return n;
+    }
+  }
+  return undefined;
+}
+
 // ── The one entry point ────────────────────────────────────
 
 /** Read a receipt's fields out of the text an OCR engine produced. */
@@ -670,6 +749,9 @@ export function parseReceiptText(text: string): OcrResult {
   result.receiptNumber = parseReceiptNumber(fullText);
   result.category = parseCategory(fullText);
   result.merchantName = parseMerchantName(lines);
+  // Only a fuel receipt has these; both stay undefined on anything else.
+  result.litres = parseLitres(lines);
+  result.pricePerLitre = parsePricePerLitre(lines);
 
   // Debug: include rejected candidates too (up to 8 total per field)
   result.plzCandidates = plzCandidates

@@ -199,3 +199,37 @@ export function readPendingAnswer(answer: unknown): string[] {
  * worker's lifetime. Pressing again continues.
  */
 export const CATCHUP_MAX = 25
+
+/**
+ * Which refusals mean the LINK is broken, and which mean ONE submission is.
+ *
+ * **Measured on 11.10.2026, and the reason this function exists.** A receipt
+ * the door refused on its own data (`document_missing`) stamped the whole
+ * connection `failed`. From then on every submission from that fleet was
+ * answered `invalid_request`, because the door looks the connection up before
+ * it looks at anything else — so one bad receipt closed the company, and the
+ * driver's app went on offering the section because Reidey's side still had a
+ * live token and could not see our status.
+ *
+ * It is an ALLOW-LIST, and that direction is deliberate: a reason nobody has
+ * classified yet leaves the connection alone. The failure that costs a fleet
+ * its ingestion is marking a working link broken, not the reverse — a genuinely
+ * broken link announces itself on the very next pull, where a wrongly closed
+ * one stays closed until somebody reads the database.
+ *
+ * Everything here is a failure to TALK to the partner or to use our own stored
+ * token. Everything else — a date that will not parse, an amount that is not a
+ * number, a submission Reidey no longer has, a storage write that failed — is
+ * about one item, and the link is fine.
+ */
+export const CONNECTION_LEVEL_REASONS: ReadonlySet<string> = new Set([
+  'token_rejected',      // 401/403: Reidey refused the token we hold
+  'partner_unavailable', // no answer at all, or a 5xx
+  'seal_key_missing',    // we cannot open our own sealed token
+  'seal_unreadable',
+  'not_connected',       // there is no connection to pull with
+])
+
+export function connectionIsBroken(reason: string | null): boolean {
+  return reason !== null && CONNECTION_LEVEL_REASONS.has(reason)
+}
