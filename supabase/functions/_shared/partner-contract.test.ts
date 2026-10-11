@@ -35,7 +35,7 @@
 import { describe, expect, it } from 'vitest'
 import { parseReceiptSubmission } from './partner-receipt-core'
 import { parseNoteSubmission } from './partner-intake-core'
-import { parseRing, readPendingAnswer, readSubmissionAnswer } from './partner-doorbell-core'
+import { connectionIsBroken, parseRing, readPendingAnswer, readSubmissionAnswer } from './partner-doorbell-core'
 
 /** 'JPEGBYTES' is what Reidey's own test writes to the fake disk. */
 const JPEG_BASE64 = 'Qk0='
@@ -271,5 +271,42 @@ describe("Reidey's ring, through our parser", () => {
     expect(Object.keys(ring).sort()).toEqual(
       ['fleet', 'kind', 'partner', 'subject', 'submission'],
     )
+  })
+})
+
+// ── Which refusals close a connection, and which close one receipt ──────────
+//
+// Measured on 11.10.2026: a receipt the door refused on its own data
+// (`document_missing`) stamped the whole connection `failed`, and from then on
+// every submission from that fleet was answered `invalid_request`. One bad
+// receipt closed the company, in silence, for four hours.
+
+describe('connectionIsBroken', () => {
+  it('is true only for a failure to talk to the partner or use our own token', () => {
+    for (const reason of ['token_rejected', 'partner_unavailable', 'seal_key_missing', 'seal_unreadable', 'not_connected']) {
+      expect(connectionIsBroken(reason)).toBe(true)
+    }
+  })
+
+  it('is FALSE for every refusal about one submission', () => {
+    // The whole point: these must leave the fleet's ingestion working.
+    for (const reason of [
+      'document_missing', 'invalid_date', 'invalid_amount', 'invalid_request',
+      'driver_not_linked', 'submission_not_found', 'storage_failed',
+      'unknown_kind', 'invalid_body', 'server_error',
+    ]) {
+      expect(connectionIsBroken(reason)).toBe(false)
+    }
+  })
+
+  it('leaves an unclassified reason alone', () => {
+    // An allow-list on purpose. A wrongly closed link stays closed until
+    // somebody reads the database; a genuinely broken one announces itself on
+    // the very next pull.
+    expect(connectionIsBroken('something_nobody_has_seen_yet')).toBe(false)
+  })
+
+  it('treats success as not broken', () => {
+    expect(connectionIsBroken(null)).toBe(false)
   })
 })

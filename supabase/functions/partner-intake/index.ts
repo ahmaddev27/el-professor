@@ -74,6 +74,7 @@ import {
   receiptProblemIsFinal,
 } from '../_shared/partner-receipt-core.ts'
 import {
+  connectionIsBroken,
   CATCHUP_MAX,
   parseCatchUp,
   parseRing,
@@ -368,7 +369,18 @@ Deno.serve(async (req: Request) => {
 
     if (ring) {
       const answer = await ingest(ring.submission, ring.subject)
-      await stamp(answer.body.ok === true ? null : String(answer.body.reason ?? 'failed'))
+      const reason = answer.body.ok === true ? null : String(answer.body.reason ?? 'failed')
+      // A refusal is recorded, always. Silence was how the first real failure
+      // went unnoticed: no log here, no row there, and the driver's app said
+      // nothing — it took reading three databases to find it.
+      if (reason !== null) {
+        console.error(JSON.stringify({
+          fn: 'partner-intake', step: 'ingest_refused',
+          company: companyId, submission: ring.submission, subject: ring.subject,
+          reason, connection_broken: connectionIsBroken(reason),
+        }))
+      }
+      await stamp(connectionIsBroken(reason) ? reason : null)
       return respond(answer.body, answer.status)
     }
 
