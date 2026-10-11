@@ -96,10 +96,14 @@ VALUES ('4b000000-0000-4000-8000-000000000001', 'c0000000-0000-4000-8000-0000000
 DO $$
 DECLARE v_co constant text := 'c0000000-0000-4000-8000-00000000000a';
 BEGIN
-  PERFORM _ra_rec(1, 'a Beleg with no document is refused at the door',
+  -- Flipped on 10.10.2026. It recorded a refusal, and the owner reversed the
+  -- rule it was measuring: a driver sends the figures, their app reads the
+  -- receipt on the phone, and the image never travels. A door that refused a
+  -- documentless Beleg would refuse every submission a current app makes.
+  PERFORM _ra_rec(1, 'a Beleg with no document is recorded, not refused',
     _ra_call(format($q$SELECT partner_receipt_submission_record(%L, 'reidey', 'ra-nodoc', 'ra-1',
-      '2026-10-07', 'Tanken', NULL, '41.47')::text$q$, v_co)),
-    'ERR 22023 document_missing');
+      '2026-10-07', 'Tanken', NULL, '41.47') ->> 'status'$q$, v_co)),
+    'pending');
 
   PERFORM _ra_rec(2, 'and one with no date',
     _ra_call(format($q$SELECT partner_receipt_submission_record(%L, 'reidey', 'ra-nodate', 'ra-1',
@@ -176,16 +180,21 @@ BEGIN
           '2026-10-07', 'Tanken', 41.47, 'bar');
 
   PERFORM _ra_as(v_admin);
-  PERFORM _ra_rec(11, 'a Beleg with NO PHOTO cannot be accepted',
-    _ra_call($q$SELECT partner_receipt_accept('4c000000-0000-4000-8000-000000000001')::text$q$),
-    'ERR P0001 document_missing');
+  -- Flipped with probe 1, and for the same decision.
+  PERFORM _ra_rec(11, 'a Beleg with NO PHOTO is accepted',
+    _ra_call($q$SELECT partner_receipt_accept('4c000000-0000-4000-8000-000000000001') ->> 'ok'$q$),
+    'true');
   PERFORM _ra_reset();
 
-  PERFORM _ra_rec(12, 'so no receipts row was written for it',
+  -- And the receipts row it wrote carries NO document path. That is the whole
+  -- of what the reversal costs, stated as an assertion rather than as prose:
+  -- a Beleg in the books with nothing behind it but what a driver typed.
+  PERFORM _ra_rec(12, 'and its receipts row carries no document path',
     (SELECT count(*)::text FROM receipts WHERE description = 'Tanken'
        AND company_id = 'c0000000-0000-4000-8000-00000000000a'
-       AND driver_name = 'Omar Khalil'),
-    '0');
+       AND driver_name = 'Omar Khalil'
+       AND document_path IS NULL),
+    '1');
 
   -- An unlinked driver is the other refusal, and it must not be confused with
   -- the first: the repairs are different screens.

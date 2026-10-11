@@ -435,9 +435,17 @@ export function PartnerReceiptInbox({ companyId, connection, onDecided }: Partne
       : []),
   ], [status, t]);
 
+  // The document is OPTIONAL since 10.10.2026: a partner driver reads the
+  // receipt on their own phone and the image stays there, so a submission with
+  // no document is a normal one and `absent` must not block the button.
+  //
+  // `failed` still does, and the distinction is the point: `absent` means there
+  // is no document, while `failed` means there IS one and the reviewer cannot
+  // see it. Accepting the second would be approving a figure against evidence
+  // nobody looked at, which is worse than approving it against none.
   const canAccept = open !== null
     && open.status === 'pending'
-    && document.kind === 'ready'
+    && (document.kind === 'ready' || document.kind === 'absent')
     && open.drivers?.name !== undefined;
 
   return (
@@ -575,8 +583,13 @@ export function PartnerReceiptInbox({ companyId, connection, onDecided }: Partne
                 {document.kind === 'loading' && (
                   <div className="h-64 animate-pulse rounded-surface bg-sunken" />
                 )}
+                {/* Caution, not critical: this is the normal shape now, and
+                    a red box on every submission teaches people to ignore red
+                    boxes. It still says plainly what is missing, because the
+                    figures below have nothing behind them but the driver's
+                    own confirmation on their phone. */}
                 {document.kind === 'absent' && (
-                  <Alert tone="critical" title={t('partner.belege.photoMissing')}>
+                  <Alert tone="caution" title={t('partner.belege.photoMissing')}>
                     {t('partner.belege.photoMissingBody')}
                   </Alert>
                 )}
@@ -642,10 +655,10 @@ export function PartnerReceiptInbox({ companyId, connection, onDecided }: Partne
                   <X aria-hidden />
                   {t('partner.inbox.action.reject')}
                 </Button>
-                {/* Accept needs the photo on screen and a driver this company
-                    linked. Both are refusals of the database's own
-                    (`document_missing`, `driver_not_linked`); withholding the
-                    button means the reviewer reads why instead of a toast. */}
+                {/* Accept needs a driver this company linked, and a photo on
+                    screen WHEN there is one to show. `driver_not_linked` is
+                    still the database's own refusal; withholding the button
+                    means the reviewer reads why instead of a toast. */}
                 <Button
                   onClick={() => { if (open) void accept(open); }}
                   disabled={busy || !canAccept}
