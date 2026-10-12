@@ -59,6 +59,20 @@ const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/
 const WIRE_AMOUNT = /^\d{1,8}(\.\d{1,2})?$/
 const PLZ = /^\d{5}$/
 
+/**
+ * The odometer's bounds, and the range's, as whole kilometres.
+ *
+ * They are the CHECK constraints of `20261012100000`, deliberately to the
+ * digit: a figure this door lets through must be one the column accepts, or
+ * the submission dies on a 23514 carrying a constraint name instead of a
+ * reason the driver can be told. The app's own rule is stricter still (four to
+ * seven digits), because it is choosing what to show a driver rather than
+ * refusing the impossible.
+ */
+const ODOMETER_MIN_KM = 100
+const ODOMETER_MAX_KM = 10000000
+const RANGE_MAX_KM = 2000
+
 export type ReceiptProblem =
   | 'invalid_body'
   | 'invalid_request'
@@ -73,6 +87,8 @@ export type ReceiptProblem =
   | 'invalid_time'
   | 'invalid_litres'
   | 'invalid_price_per_litre'
+  | 'invalid_odometer'
+  | 'invalid_range'
   | 'invalid_payment_method'
   | 'subject_missing'
 
@@ -94,6 +110,11 @@ export interface ReceiptSubmissionInput {
    *  and a float here would round a unit price on its way through. */
   litres: string | null
   price_per_litre: string | null
+  /** Whole kilometres, as strings for the same reason as the litres: the
+   *  columns are integers, and both are read off a photograph of the cluster
+   *  that never leaves the phone. */
+  odometer_km: string | null
+  range_km: string | null
   captured_at: string | null
   confirmed_by_driver: boolean
   read_by_agent: boolean
@@ -214,6 +235,50 @@ export function parseReceiptSubmission(body: unknown): ReceiptParseResult {
     return { ok: false, problem: 'invalid_price_per_litre' }
   }
 
+  // The odometer and the range left, on a refuel. Whole kilometres only: a
+  // cluster shows no decimal, so a dot here is a misread and not a
+  // measurement. Both are bounded here rather than left to the column, so an
+  // impossible figure is refused by name instead of by constraint.
+  //
+  // A value that is PRESENT but not a string is refused rather than read as
+  // absent, and only these two fields do that. Everywhere else `text()`
+  // answering null is harmless - the column is optional and the figure was
+  // never promised.
+  //
+  // The odometer is different because of WHERE it is required. The app demands
+  // the cluster photo and the figure on a `Tanken` Beleg; this door cannot,
+  // and `20261012100000` says so in as many words - a Beleg that is not a
+  // refuel carries neither, and a build older than 12.10.2026 carries neither
+  // on any Beleg. So nothing downstream would notice the loss, and `text()`'s
+  // null would turn a partner's unquoted number into exactly that: a figure
+  // gone with a 200 on both sides. Reidey's validator pins a string
+  // (`['nullable', 'string', 'integer', ...]`) and `partner-contract.test.ts`
+  // holds both halves; this is the wall behind them.
+  for (const field of ['odometer_km', 'range_km'] as const) {
+    const raw = b[field]
+    if (raw !== undefined && raw !== null && typeof raw !== 'string') {
+      return {
+        ok: false,
+        problem: field === 'odometer_km' ? 'invalid_odometer' : 'invalid_range',
+      }
+    }
+  }
+  const odometer = text(b.odometer_km)
+  if (odometer !== null) {
+    const n = Number(odometer)
+    if (!/^\d{1,8}$/.test(odometer) || n < ODOMETER_MIN_KM || n > ODOMETER_MAX_KM) {
+      return { ok: false, problem: 'invalid_odometer' }
+    }
+  }
+  const range = text(b.range_km)
+  if (range !== null) {
+    const n = Number(range)
+    // Zero is a real reading: a car driven to empty shows it.
+    if (!/^\d{1,4}$/.test(range) || n > RANGE_MAX_KM) {
+      return { ok: false, problem: 'invalid_range' }
+    }
+  }
+
   const postalCode = text(b.postal_code)
   if (postalCode !== null && !PLZ.test(postalCode)) {
     return { ok: false, problem: 'invalid_postal_code' }
@@ -261,6 +326,8 @@ export function parseReceiptSubmission(body: unknown): ReceiptParseResult {
       receipt_time: receiptTime,
       litres,
       price_per_litre: pricePerLitre,
+      odometer_km: odometer,
+      range_km: range,
       captured_at: text(b.captured_at),
       confirmed_by_driver: b.confirmed_by_driver === true,
       read_by_agent: b.read_by_agent === true,
@@ -279,6 +346,9 @@ const FINAL: ReadonlySet<ReceiptProblem> = new Set<ReceiptProblem>([
   'document_missing', 'document_too_large', 'document_type_unsupported',
   'document_unreadable', 'invalid_amount', 'invalid_category', 'invalid_date',
   'invalid_postal_code', 'invalid_payment_method', 'subject_missing',
+  // A malformed figure does not become well formed on a retry, and the app has
+  // already discarded the photo it read them from by the time it sends.
+  'invalid_odometer', 'invalid_range',
 ])
 
 export function receiptProblemIsFinal(problem: ReceiptProblem): boolean {

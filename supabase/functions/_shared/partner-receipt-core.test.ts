@@ -325,3 +325,74 @@ describe('the receipt fields beyond the amount', () => {
     expect(r.value.merchant_name).toBeNull()
   })
 })
+// -- The odometer, required with a refuel since 11.10.2026 -------------------
+//
+// The figure is read on the phone from a photo of the cluster that stays
+// there, so nobody downstream can check it against anything. That is why the
+// reading rule abstains rather than guessing, and why this door's bounds are
+// the COLUMN's bounds to the digit: past here there is no second reader, only
+// a constraint whose name means nothing to a driver.
+
+describe('the odometer and the range', () => {
+  const withOdo = (extra: Record<string, unknown>) => ({ ...good, ...extra })
+
+  it('carries both whole figures through as strings', () => {
+    const r = parseReceiptSubmission(withOdo({ odometer_km: '25382', range_km: '277' }))
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.value.odometer_km).toBe('25382')
+    expect(r.value.range_km).toBe('277')
+  })
+
+  it('refuses a decimal odometer, because a cluster shows none', () => {
+    // A dot here is a misread of the consumption figure or the clock, not a
+    // measurement; the column is an integer and would truncate it silently.
+    expect(parseReceiptSubmission(withOdo({ odometer_km: '25382.0' })))
+      .toEqual({ ok: false, problem: 'invalid_odometer' })
+    expect(parseReceiptSubmission(withOdo({ range_km: '27.7' })))
+      .toEqual({ ok: false, problem: 'invalid_range' })
+  })
+
+  it('holds the column`s floor and ceiling, to the digit', () => {
+    // 20261012100000: odometer_km BETWEEN 100 AND 10000000.
+    expect(parseReceiptSubmission(withOdo({ odometer_km: '99' })))
+      .toEqual({ ok: false, problem: 'invalid_odometer' })
+    expect(parseReceiptSubmission(withOdo({ odometer_km: '100' })).ok).toBe(true)
+    expect(parseReceiptSubmission(withOdo({ odometer_km: '10000000' })).ok).toBe(true)
+    expect(parseReceiptSubmission(withOdo({ odometer_km: '10000001' })))
+      .toEqual({ ok: false, problem: 'invalid_odometer' })
+  })
+
+  it('takes a range of zero and refuses one no car holds', () => {
+    // Driven to empty is a real reading, and the one a fleet most wants to
+    // see. 2000 km of range is not a range.
+    expect(parseReceiptSubmission(withOdo({ range_km: '0' })).ok).toBe(true)
+    expect(parseReceiptSubmission(withOdo({ range_km: '2000' })).ok).toBe(true)
+    expect(parseReceiptSubmission(withOdo({ range_km: '2001' })))
+      .toEqual({ ok: false, problem: 'invalid_range' })
+  })
+
+  it('refuses a unit, a sign and a separator rather than reading round them', () => {
+    for (const bad of ['25382 km', '-25382', '25.382', '2 5382', 'km']) {
+      expect(parseReceiptSubmission(withOdo({ odometer_km: bad })))
+        .toEqual({ ok: false, problem: 'invalid_odometer' })
+    }
+  })
+
+  it('leaves both null when the partner sends neither', () => {
+    // A Beleg that is not a refuel has neither, and an app build older than
+    // 12.10.2026 sends neither on any Beleg at all.
+    const r = parseReceiptSubmission(good)
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.value.odometer_km).toBeNull()
+    expect(r.value.range_km).toBeNull()
+  })
+
+  it('calls both refusals final, so the partner`s queue stops', () => {
+    // A figure that is the wrong shape is the wrong shape for ever: the app
+    // has discarded the photo it read it from before the request leaves.
+    expect(receiptProblemIsFinal('invalid_odometer')).toBe(true)
+    expect(receiptProblemIsFinal('invalid_range')).toBe(true)
+  })
+})

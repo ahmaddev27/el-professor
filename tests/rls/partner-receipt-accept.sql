@@ -305,9 +305,9 @@ DECLARE v_n int;
 BEGIN
   PERFORM _ra_rec(26, 'the door is not executable by anon or authenticated',
     (has_function_privilege('anon',
-       'public.partner_receipt_submission_record(uuid,text,text,text,date,text,text,text,text,text,text,text,boolean,boolean,jsonb,text,text,text,text)', 'EXECUTE')::int
+       'public.partner_receipt_submission_record(uuid,text,text,text,date,text,text,text,text,text,text,text,boolean,boolean,jsonb,text,text,text,text,text,text,text)', 'EXECUTE')::int
      + has_function_privilege('authenticated',
-       'public.partner_receipt_submission_record(uuid,text,text,text,date,text,text,text,text,text,text,text,boolean,boolean,jsonb,text,text,text,text)', 'EXECUTE')::int)::text,
+       'public.partner_receipt_submission_record(uuid,text,text,text,date,text,text,text,text,text,text,text,boolean,boolean,jsonb,text,text,text,text,text,text,text)', 'EXECUTE')::int)::text,
     '0');
 
   PERFORM _ra_rec(27, 'and the two decisions are not executable by anon',
@@ -328,6 +328,106 @@ BEGIN
      AND cmd IN ('INSERT', 'DELETE');
   PERFORM _ra_rec(29, 'the submission table still has no INSERT and no DELETE policy',
     v_n::text, '0');
+END $$;
+
+-- ─── 7. the seven fields, and the column behind them ───────────────────────
+--
+--  Four columns arrived on 11.10.2026 (merchant, time, litres, unit price) and
+--  two on 12.10.2026 (the odometer and the range left), on the submission AND
+--  on `receipts` — the point being that they reach the Steuerberater, so a
+--  figure that stops at the review screen answers nobody. 11.10 shipped with
+--  no kit file at all, which is why this section covers both rounds together.
+--
+--  And probes 31 and 33 are why that matters. The `city` column had existed
+--  since 20261005140000 with NO WRITER AT ALL: the door parsed it, Reidey sent
+--  it, and the accept copied `v_row.city` into `receipts` in good faith - a
+--  column that was always NULL. Nothing failed, nothing logged, and the field
+--  the owner asked for on 11.10 stopped at the review screen's own table.
+--  20261012100000 appends `p_city`; these two probes are what would have
+--  caught it, which is the argument for a kit file per round.
+--
+--  Probe 33 is the one worth reading twice. The edge function bounds both
+--  figures before they ever get here, so this probe asks the OTHER question:
+--  with that guard bypassed — which is exactly what a direct RPC call is — does
+--  the column still refuse? A rule enforced in one TypeScript function is lost
+--  silently by the next writer, and the CHECK is what survives them.
+
+DO $$
+DECLARE
+  v_co    constant text := 'c0000000-0000-4000-8000-00000000000a';
+  v_admin constant uuid := 'a0000000-0000-4000-8000-000000000001';
+  v_id    uuid;
+BEGIN
+  PERFORM _ra_rec(30, 'a Beleg carrying all eight extra fields is recorded pending',
+    _ra_call(format($q$SELECT partner_receipt_submission_record(%L, 'reidey', 'ra-seven', 'ra-1',
+      '2026-10-07', 'Tanken', NULL, '41.47', 'bar', '10115',
+      'c0000000-0000-4000-8000-00000000000a/partner/ra-seven.jpg',
+      NULL, true, false, NULL,
+      'ARAL Tankstelle', '14:32', '41.47', '1.789', '25382', '277', 'Berlin') ->> 'status'$q$, v_co)),
+    'pending');
+
+  PERFORM _ra_rec(31, 'and the submission row holds every one of them',
+    (SELECT merchant_name || ' / ' || receipt_time::text || ' / ' || litres::text
+            || ' / ' || price_per_litre::text || ' / ' || odometer_km::text
+            || ' / ' || range_km::text || ' / ' || city
+       FROM partner_receipt_submissions
+      WHERE company_id = v_co::uuid AND external_submission_id = 'ra-seven'),
+    'ARAL Tankstelle / 14:32:00 / 41.47 / 1.789 / 25382 / 277 / Berlin');
+
+  SELECT id INTO v_id FROM partner_receipt_submissions
+   WHERE company_id = v_co::uuid AND external_submission_id = 'ra-seven';
+
+  PERFORM _ra_as(v_admin);
+  PERFORM _ra_rec(32, 'accepting it is one transaction and answers ok',
+    _ra_call(format($q$SELECT partner_receipt_accept(%L) ->> 'ok'$q$, v_id)), 'true');
+  PERFORM _ra_reset();
+
+  -- The whole reason these are columns and not a review-screen detail: the
+  -- Beleg the accountant reads has to carry them.
+  PERFORM _ra_rec(33, 'and the receipts row carries all eight, the city included',
+    (SELECT r.merchant_name || ' / ' || r.receipt_time::text || ' / ' || r.litres::text
+            || ' / ' || r.price_per_litre::text || ' / ' || r.odometer_km::text
+            || ' / ' || r.range_km::text || ' / ' || r.city
+       FROM receipts r
+       JOIN partner_receipt_submissions s ON s.receipt_id = r.id
+      WHERE s.id = v_id),
+    'ARAL Tankstelle / 14:32:00 / 41.47 / 1.789 / 25382 / 277 / Berlin');
+
+  -- With the edge function's bound bypassed, the column is the wall. 100 is
+  -- the floor and 10000000 the ceiling (20261012100000); a three-digit value
+  -- is the range or a trip meter, the exact confusion the app's rule refuses.
+  PERFORM _ra_rec(34, 'an odometer under the floor is refused by the column itself',
+    _ra_call(format($q$SELECT partner_receipt_submission_record(%L, 'reidey', 'ra-odo-low', 'ra-1',
+      '2026-10-07', 'Tanken', NULL, '41.47', 'bar', NULL, NULL,
+      NULL, true, false, NULL, NULL, NULL, NULL, NULL, '99', NULL)::text$q$, v_co)),
+    'ERR 23514%', true);
+
+  PERFORM _ra_rec(35, 'and a range no car holds, likewise',
+    _ra_call(format($q$SELECT partner_receipt_submission_record(%L, 'reidey', 'ra-range-high', 'ra-1',
+      '2026-10-07', 'Tanken', NULL, '41.47', 'bar', NULL, NULL,
+      NULL, true, false, NULL, NULL, NULL, NULL, NULL, '25382', '9000')::text$q$, v_co)),
+    'ERR 23514%', true);
+
+  -- Zero is a real reading - a car driven to empty shows it - and a `> 0`
+  -- bound copied from the litres would have refused exactly that case.
+  PERFORM _ra_rec(36, 'a range of zero is a reading, not an error',
+    _ra_call(format($q$SELECT partner_receipt_submission_record(%L, 'reidey', 'ra-range-zero', 'ra-1',
+      '2026-10-07', 'Tanken', NULL, '41.47', 'bar', NULL, NULL,
+      NULL, true, false, NULL, NULL, NULL, NULL, NULL, '25382', '0') ->> 'status'$q$, v_co)),
+    'pending');
+
+  -- A Beleg that is not a refuel has neither, and an app build older than
+  -- 12.10.2026 sends neither on any Beleg: a NOT NULL would refuse both.
+  PERFORM _ra_rec(37, 'a Beleg with neither figure is recorded, not refused',
+    _ra_call(format($q$SELECT partner_receipt_submission_record(%L, 'reidey', 'ra-nofuel', 'ra-1',
+      '2026-10-07', 'Autowäsche', NULL, '60.00') ->> 'status'$q$, v_co)),
+    'pending');
+
+  PERFORM _ra_rec(38, 'and both read NULL rather than zero',
+    (SELECT coalesce(odometer_km::text, 'null') || ' / ' || coalesce(range_km::text, 'null')
+       FROM partner_receipt_submissions
+      WHERE company_id = v_co::uuid AND external_submission_id = 'ra-nofuel'),
+    'null / null');
 END $$;
 
 -- ─── the verdict ────────────────────────────────────────────────────────────

@@ -6502,4 +6502,14 @@ export const de = {
   'shiftrec.vehicles.noneSelected':        'Wählen Sie mindestens ein Fahrzeug.',
   'shiftrec.vehicles.stats':               '{rides} Fahrten · {hours} h/Monat · {rate}/h',
   'shiftrec.vehicles.title':               'Fahrzeuge',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'partner.belege.fuelFromPhone': 'Vom Fahrer in der App erfasst, aus einem Foto des Kombiinstruments, das auf dem Gerät bleibt. Die Zahlen sind nicht gegengeprüft.',
+  'partner.belege.fuelHeading':   'Tankdaten',
+  'partner.belege.litres':        'Liter',
+  'partner.belege.merchant':      'Beleg von',
+  'partner.belege.odometer':      'Kilometerstand',
+  'partner.belege.pricePerLitre': 'Preis pro Liter',
+  'partner.belege.rangeLeft':     'Restreichweite',
+  'partner.belege.receiptTime':   'Uhrzeit auf dem Beleg',
 } as const;

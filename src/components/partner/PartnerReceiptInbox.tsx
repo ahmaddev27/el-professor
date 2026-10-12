@@ -63,6 +63,7 @@ import {
   TabsTrigger,
   cn,
   formatEuro,
+  formatNumber,
   type DataTableColumn,
 } from '../ui';
 import { controlFrameClass } from '../ui/Input';
@@ -79,6 +80,18 @@ interface Submission {
   amount: number;
   payment_method: string;
   postal_code: string | null;
+  /** What the Beleg itself says, beyond the amount (20261011100000). `city`
+   *  travelled from the app for a day before 20261012100000 gave it a writer,
+   *  so rows submitted on 11.10.2026 carry NULL and show a dash. */
+  merchant_name: string | null;
+  city: string | null;
+  receipt_time: string | null;
+  /** A refuel's own figures. `numeric` arrives as a JSON number; `time` as
+   *  `HH:MM:SS`, which is trimmed for display and never for storage. */
+  litres: number | null;
+  price_per_litre: number | null;
+  odometer_km: number | null;
+  range_km: number | null;
   document_path: string | null;
   status: SubmissionStatus;
   rejected_reason: string | null;
@@ -92,10 +105,30 @@ interface Submission {
 /** Long enough to look at a receipt, short enough not to be a shareable link. */
 const SIGNED_URL_TTL_SECONDS = 300;
 
+/**
+ * `HH:MM:SS` from a `time` column as `HH:MM`.
+ *
+ * Display only. The stored value keeps its seconds, because this is the clock
+ * time printed on the Beleg and trimming it in the column would be a change to
+ * the record rather than to how it reads.
+ */
+function clockTime(value: string | null): string | null {
+  if (value === null) return null;
+  const match = /^(\d{2}):(\d{2})/.exec(value);
+  return match === null ? null : `${match[1]}:${match[2]}`;
+}
+
+/** Whether a submission carries any of the four figures a refuel brings. */
+function hasFuelFigures(row: Submission): boolean {
+  return row.litres !== null || row.price_per_litre !== null
+    || row.odometer_km !== null || row.range_km !== null;
+}
+
 const COLUMNS = 'id, external_submission_id, driver_id, receipt_date, category, '
   + 'description, amount, payment_method, postal_code, document_path, status, '
   + 'rejected_reason, receipt_id, status_pushed_at, submitted_at, '
-  + 'confirmed_by_driver, drivers(name)';
+  + 'confirmed_by_driver, merchant_name, city, receipt_time, litres, '
+  + 'price_per_litre, odometer_km, range_km, drivers(name)';
 
 /**
  * The four categories the Beleg screen stores literally, against the labels it
@@ -366,6 +399,11 @@ export function PartnerReceiptInbox({ companyId, connection, onDecided }: Partne
       cell: row => (
         <div className="grid grid-cols-1">
           <span>{subject(row)}</span>
+          {/* Where it is from, under what it is: the category alone does not
+              tell two refuels apart, and this is the line a reviewer scans. */}
+          {row.merchant_name !== null && (
+            <span className="truncate text-xs text-fg-muted">{row.merchant_name}</span>
+          )}
           {/* The date moves into the first cell below `sm`, where the row has
               to hold two 40 px actions beside it. */}
           <span className="tabular-nums text-xs text-fg-muted sm:hidden">
@@ -568,7 +606,74 @@ export function PartnerReceiptInbox({ companyId, connection, onDecided }: Partne
                   <dt className="text-fg-muted">{t('partner.belege.postalCode')}</dt>
                   <dd className="tabular-nums">{open.postal_code || '—'}</dd>
                 </div>
+                {/* Where it is from, which city, and the clock time on the
+                    Beleg. Always shown, never only when filled: a dash is an
+                    answer, and a row that disappears reads as a screen that
+                    does not know the field exists. */}
+                <div className="grid grid-cols-1">
+                  <dt className="text-fg-muted">{t('partner.belege.merchant')}</dt>
+                  <dd>{open.merchant_name || '—'}</dd>
+                </div>
+                <div className="grid grid-cols-1">
+                  <dt className="text-fg-muted">{t('rec.city')}</dt>
+                  <dd>{open.city || '—'}</dd>
+                </div>
+                <div className="grid grid-cols-1">
+                  <dt className="text-fg-muted">{t('partner.belege.receiptTime')}</dt>
+                  <dd className="tabular-nums">{clockTime(open.receipt_time) || '—'}</dd>
+                </div>
               </dl>
+
+              {/* The refuel's own figures, and only on a Beleg that has any:
+                  a car wash has no litres, and four dashes there would invite
+                  a reviewer to look for a number that was never claimed. */}
+              {hasFuelFigures(open) && (
+                <div className="grid grid-cols-1 gap-2">
+                  <span className="text-sm text-fg-muted">
+                    {t('partner.belege.fuelHeading')}
+                  </span>
+                  <dl className="grid grid-cols-1 gap-x-4 gap-y-2 text-sm sm:grid-cols-2">
+                    <div className="grid grid-cols-1">
+                      <dt className="text-fg-muted">{t('partner.belege.litres')}</dt>
+                      <dd className="tabular-nums">
+                        {open.litres === null ? '—' : `${formatNumber(open.litres, 2)} l`}
+                      </dd>
+                    </div>
+                    {/* Three places, because `1,789` is a real pump price and
+                        `1,79` is a different number. */}
+                    <div className="grid grid-cols-1">
+                      <dt className="text-fg-muted">{t('partner.belege.pricePerLitre')}</dt>
+                      <dd className="tabular-nums">
+                        {open.price_per_litre === null
+                          ? '—'
+                          : `${formatNumber(open.price_per_litre, 3)} €/l`}
+                      </dd>
+                    </div>
+                    <div className="grid grid-cols-1">
+                      <dt className="text-fg-muted">{t('partner.belege.odometer')}</dt>
+                      <dd className="tabular-nums">
+                        {open.odometer_km === null
+                          ? '—'
+                          : `${formatNumber(open.odometer_km)} km`}
+                      </dd>
+                    </div>
+                    {/* The range stands in for the fuel gauge, which is a bar
+                        of lit blocks that nothing reads. */}
+                    <div className="grid grid-cols-1">
+                      <dt className="text-fg-muted">{t('partner.belege.rangeLeft')}</dt>
+                      <dd className="tabular-nums">
+                        {open.range_km === null ? '—' : `${formatNumber(open.range_km)} km`}
+                      </dd>
+                    </div>
+                  </dl>
+                  {/* These four were read by the phone from a photo that stays
+                      on the phone, so the reviewer is told what they are
+                      looking at rather than left to assume they were checked. */}
+                  <p className="text-xs text-fg-muted">
+                    {t('partner.belege.fuelFromPhone')}
+                  </p>
+                </div>
+              )}
 
               {/* `bar` is the one that moves what the driver owes, so the sheet
                   says so rather than leaving it to the reviewer's memory. */}
