@@ -25,7 +25,7 @@ A React SPA on a self-hosted Supabase stack (PostgreSQL, Auth, Storage, Edge Fun
 
 ## Status
 
-> Last update: **08.10.2026**. A step counts once it is merged into `staging` and verified there.
+> Last update: **12.10.2026**. A step counts once it is merged into `staging` and verified there.
 
 `▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰` **46 of 46 steps · 100%**
 
