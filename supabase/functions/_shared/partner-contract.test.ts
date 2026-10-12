@@ -55,6 +55,17 @@ const receiptAnswer = {
     description: null,
     payment_method: 'bar',
     postal_code: '10115',
+    // The five of 11.10.2026 and the two of 12.10.2026, all strings: this
+    // payload is merged VERBATIM (`array_merge((array) $row->payload, ...)`),
+    // so whatever shape their validator admits is the shape we read. Theirs
+    // pins a string on all seven.
+    merchant_name: 'ARAL Tankstelle',
+    city: 'Berlin',
+    receipt_time: '14:32',
+    litres: '41.47',
+    price_per_litre: '1.789',
+    odometer_km: '25382',
+    range_km: '277',
     // merged by submission()
     kind: 'receipt',
     subject: 'receipt',
@@ -102,6 +113,32 @@ describe("Reidey's receipt answer, through our parser", () => {
     expect(parsed.value.receipt_date).toBe('2026-10-07')
     expect(parsed.value.external_driver_id).toBe('41')
     expect(parsed.value.document.contentType).toBe('image/jpeg')
+    expect(parsed.value.merchant_name).toBe('ARAL Tankstelle')
+    expect(parsed.value.city).toBe('Berlin')
+    expect(parsed.value.receipt_time).toBe('14:32')
+    expect(parsed.value.litres).toBe('41.47')
+    expect(parsed.value.price_per_litre).toBe('1.789')
+    expect(parsed.value.odometer_km).toBe('25382')
+    expect(parsed.value.range_km).toBe('277')
+  })
+
+  // The odometer is the one MANDATORY figure on a refuel, and the one whose
+  // drift would otherwise be invisible: their rule is `['nullable', 'string',
+  // 'integer', ...]`, and `integer` alone would admit `25382` unquoted. A
+  // reader built on `text()` answers null for that, so the submission would be
+  // recorded WITHOUT the odometer, 201 there and 200 here, with nothing to see
+  // afterwards - the figure is read from a photo the phone has discarded.
+  it('breaks loudly if they stop quoting the odometer', () => {
+    for (const [field, problem] of [
+      ['odometer_km', 'invalid_odometer'],
+      ['range_km', 'invalid_range'],
+    ] as const) {
+      const drifted = { data: { ...receiptAnswer.data, [field]: 25382 } }
+      const unwrapped = readSubmissionAnswer(drifted, 'receipt')
+      expect(unwrapped.ok).toBe(true)
+      if (!unwrapped.ok) return
+      expect(parseReceiptSubmission(unwrapped.payload)).toEqual({ ok: false, problem })
+    }
   })
 
   // `(string) $row->driver_id` in the controller. Without the cast it is a PHP

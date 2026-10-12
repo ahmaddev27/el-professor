@@ -157,6 +157,8 @@ async function recordSubmission(
       p_receipt_time: receipt.receipt_time,
       p_litres: receipt.litres,
       p_price_per_litre: receipt.price_per_litre,
+      p_odometer_km: receipt.odometer_km,
+      p_range_km: receipt.range_km,
       p_document_path: key,
       p_captured_at: receipt.captured_at,
       p_confirmed_by_driver: receipt.confirmed_by_driver,
