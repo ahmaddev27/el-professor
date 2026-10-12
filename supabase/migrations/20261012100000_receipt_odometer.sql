@@ -21,8 +21,25 @@
 --  is wider than the rule: it refuses the impossible, the rule chooses what to
 --  show a driver.
 --
---  Nothing is required. A Beleg that is not a refuel has neither, and an older
---  app build sends neither - a NOT NULL here would refuse both.
+--  Nothing is required, and nothing here can be. The app demands the photo and
+--  the figure on a `Tanken` Beleg, and the server cannot see an app: a Beleg
+--  that is not a refuel has neither, and a build older than 12.10.2026 sends
+--  neither on any Beleg at all, so a NOT NULL would refuse both.
+--
+--  AND IT CLOSES A HOLE 20261011100000 LEFT. `city` has been a column on
+--  `partner_receipt_submissions` since 20261005140000 and **nothing has ever
+--  written it**. The door parses it, Reidey sends it, and
+--  `partner_receipt_accept` faithfully copies `v_row.city` into `receipts` -
+--  a column that is always NULL. So the field the owner asked for on 11.10
+--  reached the review screen's own table and stopped. `p_city` is appended
+--  here rather than in a migration of its own because this one is unreleased
+--  and already rewrites the same two bodies; a second splice of the same
+--  function in the same release is a needless risk.
+--
+--  Every new parameter goes at the END of the list, as 20261011100000's did,
+--  so that an existing positional call keeps its meaning - `city` therefore
+--  sits after the odometer, which reads oddly and is correct.
+--  `tests/fixtures/seed-partner-demo.sql` is such a caller, with 15 of them.
 -- ════════════════════════════════════════════════════════════════════════════
 
 ALTER TABLE public.partner_receipt_submissions
@@ -83,7 +100,8 @@ BEGIN
   v_old := 'p_price_per_litre text DEFAULT NULL::text)';
   v_new := 'p_price_per_litre text DEFAULT NULL::text, '
         || 'p_odometer_km text DEFAULT NULL::text, '
-        || 'p_range_km text DEFAULT NULL::text)';
+        || 'p_range_km text DEFAULT NULL::text, '
+        || 'p_city text DEFAULT NULL::text)';
   IF (length(v_def) - length(replace(v_def, v_old, ''))) / length(v_old) <> 1 THEN
     RAISE EXCEPTION 'the parameter anchor is not unique';
   END IF;
@@ -91,7 +109,7 @@ BEGIN
 
   v_old := 'merchant_name, receipt_time, litres, price_per_litre)';
   v_new := 'merchant_name, receipt_time, litres, price_per_litre,'
-        || E'\n          odometer_km, range_km)';
+        || E'\n          odometer_km, range_km, city)';
   IF (length(v_def) - length(replace(v_def, v_old, ''))) / length(v_old) <> 1 THEN
     RAISE EXCEPTION 'the insert column anchor is not unique';
   END IF;
@@ -100,7 +118,8 @@ BEGIN
   v_old := '          nullif(btrim(coalesce(p_price_per_litre, '''')), '''')::numeric(6,3))';
   v_new := '          nullif(btrim(coalesce(p_price_per_litre, '''')), '''')::numeric(6,3),' || E'\n'
         || '          nullif(btrim(coalesce(p_odometer_km, '''')), '''')::integer,' || E'\n'
-        || '          nullif(btrim(coalesce(p_range_km, '''')), '''')::integer)';
+        || '          nullif(btrim(coalesce(p_range_km, '''')), '''')::integer,' || E'\n'
+        || '          nullif(btrim(coalesce(p_city, '''')), ''''))';
   IF (length(v_def) - length(replace(v_def, v_old, ''))) / length(v_old) <> 1 THEN
     RAISE EXCEPTION 'the insert values anchor is not unique';
   END IF;
@@ -116,10 +135,10 @@ $do$;
 
 REVOKE ALL ON FUNCTION public.partner_receipt_submission_record(
   uuid, text, text, text, date, text, text, text, text, text, text, text, boolean, boolean, jsonb,
-  text, text, text, text, text, text) FROM PUBLIC, anon, authenticated;
+  text, text, text, text, text, text, text) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.partner_receipt_submission_record(
   uuid, text, text, text, date, text, text, text, text, text, text, text, boolean, boolean, jsonb,
-  text, text, text, text, text, text) TO service_role;
+  text, text, text, text, text, text, text) TO service_role;
 
 -- ─── accepting carries them into the Beleg ──────────────────────────────────
 
@@ -198,7 +217,8 @@ BEGIN
    WHERE n.nspname = 'public' AND p.proname = 'partner_receipt_accept';
 
   FOREACH v_frag IN ARRAY ARRAY[
-    'p_odometer_km', 'p_range_km', 'p_merchant_name', 'p_litres', 'p_price_per_litre',
+    'p_odometer_km', 'p_range_km', 'p_city',
+    'p_merchant_name', 'p_litres', 'p_price_per_litre',
     'invalid_request', 'invalid_date', 'invalid_amount',
     'public.partner_driver_links',
     'ON CONFLICT (company_id, partner, external_submission_id) DO NOTHING',
@@ -210,7 +230,7 @@ BEGIN
   END LOOP;
 
   FOREACH v_frag IN ARRAY ARRAY[
-    'v_row.odometer_km', 'v_row.range_km', 'v_row.merchant_name', 'v_row.litres',
+    'v_row.odometer_km', 'v_row.range_km', 'v_row.city', 'v_row.merchant_name', 'v_row.litres',
     'not_authorized', 'current_role_permits', 'get_active_company_id',
     'submission_not_found', 'already_reviewed', 'driver_not_linked', 'driver_not_found',
     'date_missing', 'FOR UPDATE', 'receipt_number_next', 'INSERT INTO public.receipts',
@@ -229,8 +249,8 @@ BEGIN
     RAISE EXCEPTION 'the splice lost: %', array_to_string(v_miss, ', ');
   END IF;
 
-  IF has_function_privilege('anon', 'public.partner_receipt_submission_record(uuid, text, text, text, date, text, text, text, text, text, text, text, boolean, boolean, jsonb, text, text, text, text, text, text)', 'EXECUTE')
-     OR has_function_privilege('authenticated', 'public.partner_receipt_submission_record(uuid, text, text, text, date, text, text, text, text, text, text, text, boolean, boolean, jsonb, text, text, text, text, text, text)', 'EXECUTE') THEN
+  IF has_function_privilege('anon', 'public.partner_receipt_submission_record(uuid, text, text, text, date, text, text, text, text, text, text, text, boolean, boolean, jsonb, text, text, text, text, text, text, text)', 'EXECUTE')
+     OR has_function_privilege('authenticated', 'public.partner_receipt_submission_record(uuid, text, text, text, date, text, text, text, text, text, text, text, boolean, boolean, jsonb, text, text, text, text, text, text, text)', 'EXECUTE') THEN
     RAISE EXCEPTION 'the new signature is executable by an API role';
   END IF;
 END;

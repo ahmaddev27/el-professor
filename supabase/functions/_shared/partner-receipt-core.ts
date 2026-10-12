@@ -243,9 +243,15 @@ export function parseReceiptSubmission(body: unknown): ReceiptParseResult {
   // A value that is PRESENT but not a string is refused rather than read as
   // absent, and only these two fields do that. Everywhere else `text()`
   // answering null is harmless - the column is optional and the figure was
-  // never promised. The odometer is the one field the owner made MANDATORY on
-  // a refuel, so `text()`'s null would turn a partner's unquoted number into
-  // silent loss with a 200 on both sides. Reidey's validator pins a string
+  // never promised.
+  //
+  // The odometer is different because of WHERE it is required. The app demands
+  // the cluster photo and the figure on a `Tanken` Beleg; this door cannot,
+  // and `20261012100000` says so in as many words - a Beleg that is not a
+  // refuel carries neither, and a build older than 12.10.2026 carries neither
+  // on any Beleg. So nothing downstream would notice the loss, and `text()`'s
+  // null would turn a partner's unquoted number into exactly that: a figure
+  // gone with a 200 on both sides. Reidey's validator pins a string
   // (`['nullable', 'string', 'integer', ...]`) and `partner-contract.test.ts`
   // holds both halves; this is the wall behind them.
   for (const field of ['odometer_km', 'range_km'] as const) {

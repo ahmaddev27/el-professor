@@ -159,6 +159,10 @@ async function recordSubmission(
       p_price_per_litre: receipt.price_per_litre,
       p_odometer_km: receipt.odometer_km,
       p_range_km: receipt.range_km,
+      // Parsed since 11.10.2026 and stored nowhere until 20261012100000: the
+      // column had existed since 20261005140000 with no writer, and the accept
+      // was copying a NULL into `receipts.city` in good faith.
+      p_city: receipt.city,
       p_document_path: key,
       p_captured_at: receipt.captured_at,
       p_confirmed_by_driver: receipt.confirmed_by_driver,
