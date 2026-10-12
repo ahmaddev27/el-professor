@@ -70,6 +70,9 @@ export type ReceiptProblem =
   | 'invalid_category'
   | 'invalid_date'
   | 'invalid_postal_code'
+  | 'invalid_time'
+  | 'invalid_litres'
+  | 'invalid_price_per_litre'
   | 'invalid_payment_method'
   | 'subject_missing'
 
@@ -83,6 +86,14 @@ export interface ReceiptSubmissionInput {
   amount: string
   payment_method: 'bar' | 'uberweisung'
   postal_code: string | null
+  /** Where the Beleg is from, and the clock time printed on it. */
+  merchant_name: string | null
+  city: string | null
+  receipt_time: string | null
+  /** Fuel only. Plain decimals with a dot, as strings: the column is numeric
+   *  and a float here would round a unit price on its way through. */
+  litres: string | null
+  price_per_litre: string | null
   captured_at: string | null
   confirmed_by_driver: boolean
   read_by_agent: boolean
@@ -184,6 +195,25 @@ export function parseReceiptSubmission(body: unknown): ReceiptParseResult {
     return { ok: false, problem: 'invalid_payment_method' }
   }
 
+  // `HH:MM`, with the hour checked: `25:00` is not a time, and a parser that
+  // accepts it moves the entry into the next day.
+  const receiptTime = text(b.receipt_time)
+  if (receiptTime !== null && !/^([01]\d|2[0-3]):[0-5]\d$/.test(receiptTime)) {
+    return { ok: false, problem: 'invalid_time' }
+  }
+
+  // Both fuel figures travel as plain decimals with a dot, like the amount,
+  // and for the same reason: `parseDisplayAmount` reads `1.234` as 1.23 and
+  // answers 0 for what it cannot read, and these reach an accountant.
+  const litres = text(b.litres)
+  if (litres !== null && !/^\d{1,8}(\.\d{1,2})?$/.test(litres)) {
+    return { ok: false, problem: 'invalid_litres' }
+  }
+  const pricePerLitre = text(b.price_per_litre)
+  if (pricePerLitre !== null && !/^\d{1,8}(\.\d{1,3})?$/.test(pricePerLitre)) {
+    return { ok: false, problem: 'invalid_price_per_litre' }
+  }
+
   const postalCode = text(b.postal_code)
   if (postalCode !== null && !PLZ.test(postalCode)) {
     return { ok: false, problem: 'invalid_postal_code' }
@@ -226,6 +256,11 @@ export function parseReceiptSubmission(body: unknown): ReceiptParseResult {
       amount,
       payment_method: method,
       postal_code: postalCode,
+      merchant_name: text(b.merchant_name),
+      city: text(b.city),
+      receipt_time: receiptTime,
+      litres,
+      price_per_litre: pricePerLitre,
       captured_at: text(b.captured_at),
       confirmed_by_driver: b.confirmed_by_driver === true,
       read_by_agent: b.read_by_agent === true,
