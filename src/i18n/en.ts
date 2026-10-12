@@ -6446,4 +6446,14 @@ export const en: PartialDictionary = {
   'shiftrec.vehicles.noneSelected':        'Select at least one vehicle.',
   'shiftrec.vehicles.stats':               '{rides} rides · {hours} h/month · {rate}/h',
   'shiftrec.vehicles.title':               'Vehicles',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'partner.belege.fuelFromPhone': 'Entered by the driver in the app, from a photo of the instrument cluster that stays on the device. The figures are not cross-checked.',
+  'partner.belege.fuelHeading':   'Refuel figures',
+  'partner.belege.litres':        'Litres',
+  'partner.belege.merchant':      'Receipt from',
+  'partner.belege.odometer':      'Odometer',
+  'partner.belege.pricePerLitre': 'Price per litre',
+  'partner.belege.rangeLeft':     'Range left',
+  'partner.belege.receiptTime':   'Time printed on the receipt',
 };
