@@ -257,3 +257,71 @@ describe('receiptProblemIsFinal', () => {
     expect(receiptProblemIsFinal('invalid_body')).toBe(false)
   })
 })
+
+// ── The five fields the owner asked for on 11.10.2026 ───────────────────────
+//
+// Litres and the unit price are required on `Tanken` ONLY, and that rule lives
+// in the driver's app: a car wash has neither, and demanding them here would
+// refuse every receipt that is not a refuel. What this parser owes is the
+// SHAPE — one wire format, checked, never coerced.
+
+describe('the receipt fields beyond the amount', () => {
+  const withFields = (extra: Record<string, unknown>) => ({ ...good, ...extra })
+
+  it('carries the merchant, the city and the time through', () => {
+    const r = parseReceiptSubmission(withFields({
+      merchant_name: 'ARAL Tankstelle', city: 'Berlin', receipt_time: '14:32',
+    }))
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.value.merchant_name).toBe('ARAL Tankstelle')
+    expect(r.value.city).toBe('Berlin')
+    expect(r.value.receipt_time).toBe('14:32')
+  })
+
+  it('takes litres with two places and a unit price with three', () => {
+    const r = parseReceiptSubmission(withFields({ litres: '41.47', price_per_litre: '1.789' }))
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.value.litres).toBe('41.47')
+    expect(r.value.price_per_litre).toBe('1.789')
+  })
+
+  it('refuses German formatting rather than coercing it', () => {
+    // `parseDisplayAmount` reads `1.234` as 1.23 and answers 0 for what it
+    // cannot read. None of that may happen to a figure an accountant reads.
+    expect(parseReceiptSubmission(withFields({ litres: '41,47' })))
+      .toEqual({ ok: false, problem: 'invalid_litres' })
+    expect(parseReceiptSubmission(withFields({ price_per_litre: '1,789' })))
+      .toEqual({ ok: false, problem: 'invalid_price_per_litre' })
+  })
+
+  it('refuses a unit price with four places and litres with three', () => {
+    expect(parseReceiptSubmission(withFields({ price_per_litre: '1.7891' })))
+      .toEqual({ ok: false, problem: 'invalid_price_per_litre' })
+    expect(parseReceiptSubmission(withFields({ litres: '41.473' })))
+      .toEqual({ ok: false, problem: 'invalid_litres' })
+  })
+
+  it('checks the HOUR of the time, not just its shape', () => {
+    // `25:00` parses to 1500 minutes in a naive reader and walks the entry
+    // into the next day. It is not a time, and it is refused as one.
+    expect(parseReceiptSubmission(withFields({ receipt_time: '25:00' })))
+      .toEqual({ ok: false, problem: 'invalid_time' })
+    expect(parseReceiptSubmission(withFields({ receipt_time: '14:60' })))
+      .toEqual({ ok: false, problem: 'invalid_time' })
+    expect(parseReceiptSubmission(withFields({ receipt_time: '23:59' })).ok).toBe(true)
+  })
+
+  it('leaves all five null when the partner sends none of them', () => {
+    // An older Reidey build sends nothing here, and nothing must not become
+    // an empty string: the columns are numeric and a time.
+    const r = parseReceiptSubmission(good)
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.value.litres).toBeNull()
+    expect(r.value.price_per_litre).toBeNull()
+    expect(r.value.receipt_time).toBeNull()
+    expect(r.value.merchant_name).toBeNull()
+  })
+})
