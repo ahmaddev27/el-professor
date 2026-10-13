@@ -220,15 +220,15 @@ describe("Reidey's note answer, through our parser", () => {
   })
 
   /*
-    The three absence types, and WHERE they are refused — measured, because the
+    The three absence types, and WHERE the list is kept — measured, because the
     first version of this test asserted the wrong layer and failed.
 
-    `parseNoteSubmission` ACCEPTS `sick`, `vacation` and `off`: the seven-type
-    allow-list lives in `partner_note_submission_record`
-    (`c_transferable`, 20261007110000), so the wall is the database's and the
-    refusal arrives as a hint the function maps. Reidey's own validator offers
-    only the seven, so none of them is ever sent — but if one were, it would be
-    stored by nobody and refused with a reason, not silently dropped here.
+    `parseNoteSubmission` ACCEPTS `sick`, `vacation` and `off`: the allow-list
+    lives in `partner_note_submission_record` (`c_transferable`). Until
+    13.10.2026 it held seven types and refused these three; the owner reversed
+    that (20261013120000) and it holds ten. The division is unchanged and is the
+    point: the parser never knows the list, so a type the database does not know
+    is refused with a reason there, not silently dropped here.
 
     Do not "fix" this by adding the list to the parser as well: two copies of a
     closed vocabulary drift, and the one that decides is the one in the
@@ -239,7 +239,7 @@ describe("Reidey's note answer, through our parser", () => {
     const unwrapped = readSubmissionAnswer(drifted, 'note')
     expect(unwrapped.ok).toBe(true)
     if (!unwrapped.ok) return
-    // Accepted here, refused by the database. The division is the point.
+    // Accepted here; whether the database admits it is the database's call.
     expect(parseNoteSubmission(unwrapped.payload).ok).toBe(true)
   })
 })

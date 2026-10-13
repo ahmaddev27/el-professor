@@ -39,6 +39,8 @@ export type IntakeReason =
   | 'invalid_request'
   | 'note_type_not_transferable'
   | 'unknown_note_type'
+  | 'vehicle_required'
+  | 'invalid_vehicle_plate'
   | 'invalid_start_time'
   | 'invalid_end_time'
   | 'invalid_range'
@@ -56,6 +58,9 @@ export interface NoteSubmissionInput {
   is_full_day: boolean
   start_time: string | null
   end_time: string | null
+  /** The plate from the partner's fleet list. Required by the database for the
+   *  incident types, so it is read here and judged there. */
+  vehicle_plate: string | null
 }
 
 export type ParseResult =
@@ -143,6 +148,10 @@ export function parseNoteSubmission(body: unknown): ParseResult {
     }
   }
 
+  if (b.vehicle_plate !== undefined && b.vehicle_plate !== null && typeof b.vehicle_plate !== 'string') {
+    return { ok: false, reason: 'invalid_request', field: 'vehicle_plate' }
+  }
+
   if (b.is_full_day !== undefined && b.is_full_day !== null && typeof b.is_full_day !== 'boolean') {
     return { ok: false, reason: 'invalid_request', field: 'is_full_day' }
   }
@@ -160,6 +169,7 @@ export function parseNoteSubmission(body: unknown): ParseResult {
       is_full_day: b.is_full_day === true,
       start_time: text(b.start_time),
       end_time: text(b.end_time),
+      vehicle_plate: text(b.vehicle_plate),
     },
   }
 }
@@ -168,6 +178,8 @@ export function parseNoteSubmission(body: unknown): ParseResult {
 const FINAL_REASONS: ReadonlySet<string> = new Set([
   'note_type_not_transferable',
   'unknown_note_type',
+  'vehicle_required',
+  'invalid_vehicle_plate',
   'invalid_start_time',
   'invalid_end_time',
   'invalid_range',
