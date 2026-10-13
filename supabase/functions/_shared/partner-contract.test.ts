@@ -226,7 +226,7 @@ describe("Reidey's note answer, through our parser", () => {
     `parseNoteSubmission` ACCEPTS `sick`, `vacation` and `off`: the allow-list
     lives in `partner_note_submission_record` (`c_transferable`). Until
     13.10.2026 it held seven types and refused these three; the owner reversed
-    that (20261013120000) and it holds ten. The division is unchanged and is the
+    that (20261013130000) and it holds ten. The division is unchanged and is the
     point: the parser never knows the list, so a type the database does not know
     is refused with a reason there, not silently dropped here.
 

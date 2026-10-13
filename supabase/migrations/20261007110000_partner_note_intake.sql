@@ -16,7 +16,7 @@
 --
 --  SUPERSEDED 13.10.2026: the owner reversed this section after being told
 --  plainly that a named employee's sickness would cross between two products.
---  All ten types cross now, still by allow-list; 20261013120000 records the
+--  All ten types cross now, still by allow-list; 20261013130000 records the
 --  decision. What follows is the reasoning of 06.10.2026, kept as written.
 --
 --  ── 1. Only seven of the ten types may cross, and that is a decision ────────

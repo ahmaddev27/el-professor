@@ -17,7 +17,7 @@
 --
 --    1. The door admits TEN note types by an allow-list. Since 13.10.2026 that
 --       includes `sick`, `vacation` and `off` (the owner reversed his decision
---       of 06.10.2026 after being told what it means; 20261013120000 records
+--       of 06.10.2026 after being told what it means; 20261013130000 records
 --       it), and probes 1 to 3 assert that they cross AND derive
 --       exclude_from_plan, which is why they were turned round rather than
 --       deleted: a removal nobody asserts comes back the next time someone
