@@ -9,6 +9,23 @@ export interface Receipt {
   city?: string;
   createdBy?: string;
   paymentMethod?: 'bar' | 'uberweisung';
+  /**
+   * What the Beleg itself says, filled when it came from the driver app
+   * (20261011100000, 20261012100000). All optional: a Beleg entered by hand
+   * has none of them, and an absent figure is not a zero.
+   */
+  merchantName?: string;
+  /** `HH:MM:SS`, the time printed on the Beleg. */
+  receiptTime?: string;
+  litres?: number;
+  pricePerLitre?: number;
+  odometerKm?: number;
+  rangeKm?: number;
+  /**
+   * The driver's name when the Beleg came from the driver app, which has no
+   * user behind it: `createdBy` is then absent and this is who uploaded it.
+   */
+  submittedByName?: string;
 }
 
 export interface ReceiptFormData {
