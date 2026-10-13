@@ -65,14 +65,33 @@ interface LinkRow {
   drivers: { name: string } | { name: string }[] | null
 }
 
-/** A partner refusal's stable reason, only when it is a plain snake_case code. */
-async function refusalReason(answer: Response): Promise<string | null> {
+/**
+ * A partner refusal's stable reason, and the sentence beside it.
+ *
+ * The reason alone was not enough to act on. `uber_error` is Reidey's catch-all
+ * for "Uber answered, accepted the session, and returned something other than
+ * 2xx / 401 / 403" — a 400 and a 429 arrive under the same word, and they are
+ * different problems with different fixes. Reidey already puts the status in
+ * its `message` ("Fleet Hub answered 400."); it was this function that dropped
+ * it on the floor, so the screen could only show a code nobody can act on.
+ *
+ * The detail is capped and stripped of control characters: it is a sentence
+ * from another product and it ends up in a toast.
+ */
+async function refusalReason(
+  answer: Response,
+): Promise<{ reason: string | null; detail: string | null }> {
   try {
-    const body = (await answer.json()) as { reason?: unknown }
-    return typeof body?.reason === 'string' && /^[a-z][a-z0-9_]{0,59}$/.test(body.reason)
+    const body = (await answer.json()) as { reason?: unknown; message?: unknown }
+    const reason = typeof body?.reason === 'string' && /^[a-z][a-z0-9_]{0,59}$/.test(body.reason)
       ? body.reason : null
+    const detail = typeof body?.message === 'string'
+      // eslint-disable-next-line no-control-regex
+      ? body.message.replace(/[\u0000-\u001f]/g, ' ').trim().slice(0, 200) || null
+      : null
+    return { reason, detail }
   } catch {
-    return null
+    return { reason: null, detail: null }
   }
 }
 
@@ -197,9 +216,14 @@ Deno.serve(async (req: Request) => {
       if (!answer.ok) {
         // Reidey's refusals carry a stable reason; pass THAT through (and only
         // if it is the agreed shape) so the screen can name it.
-        const partnerReason = await refusalReason(answer)
-        if (partnerReason) {
-          return respond({ ok: false, reason: 'partner_refused', partner_reason: partnerReason }, 200)
+        const refusal = await refusalReason(answer)
+        if (refusal.reason) {
+          return respond({
+            ok: false,
+            reason: 'partner_refused',
+            partner_reason: refusal.reason,
+            partner_detail: refusal.detail,
+          }, 200)
         }
         return respond({ ok: false, reason: 'partner_unavailable' }, 502)
       }

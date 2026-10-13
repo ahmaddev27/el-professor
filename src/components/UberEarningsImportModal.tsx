@@ -175,14 +175,26 @@ function UberEarningsImportModal({ isOpen, onClose, onImported }: Props) {
     try {
       const { data, error } = await supabase.functions.invoke('uber-earnings-pull', { body: { from, to } });
       if (mine !== generation.current) return;
-      const body = data as { reason?: string; partner_reason?: string } | null;
+      const body = data as
+        { reason?: string; partner_reason?: string; partner_detail?: string } | null;
       const reason = error ? await failureReason(error) : body?.reason ?? null;
       const read = error || reason ? null : readPullAnswer(data);
       if (!read) {
         const partnerReason = reason === 'partner_refused' ? body?.partner_reason ?? '' : '';
+        // A reason we have no sentence for is shown with Reidey's own — `uber_error`
+        // is its catch-all for "Uber answered with something other than 2xx, 401
+        // or 403", so a 400 and a 429 arrive under one word and need different
+        // fixes. The status is in that sentence, and showing the code alone left
+        // nothing to act on.
+        const named = partnerReason !== '' && PARTNER_REASON_KEYS[partnerReason] !== undefined;
+        const detail = !named ? (body?.partner_detail ?? '').trim() : '';
         setProblem(
           reason === 'partner_refused'
-            ? t(PARTNER_REASON_KEYS[partnerReason] ?? 'inc.uber.err.partner.generic', { reason: partnerReason })
+            ? named
+              ? t(PARTNER_REASON_KEYS[partnerReason]!)
+              : detail !== ''
+                ? t('inc.uber.err.partner.detail', { reason: partnerReason, detail })
+                : t('inc.uber.err.partner.generic', { reason: partnerReason })
             : t(reason && PULL_REASON_KEYS[reason] ? PULL_REASON_KEYS[reason] : 'inc.uber.err.generic'),
         );
         setStage('range');

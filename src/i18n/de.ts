@@ -6482,4 +6482,7 @@ export const de = {
   'inc.uber.manualBody':        'Der Import ändert oder löscht sie nicht. Beide Einträge bleiben bestehen, und die Beträge addieren sich: Umsatz, Aktionen, Trinkgeld, Bargeld und damit die Gehaltsgrundlage. Wurden dieselben Beträge schon erfasst, werden sie doppelt gezählt. Prüfe das vor dem Import.',
   'inc.uber.manualItem':        '{name} · {week} ({from} – {to}) · Einträge: {count}',
   'inc.uber.manualTitle':       'Achtung: für diese Wochen gibt es schon von Hand erfasste Einträge',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'inc.uber.err.partner.detail': 'Reidey hat die Anfrage abgelehnt ({reason}): {detail} Es wurde nichts übernommen.',
 } as const;
