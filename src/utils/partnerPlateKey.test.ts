@@ -29,7 +29,7 @@ const NO_VEHICLE: Array<string | null> = [
 ]
 
 const migration = readFileSync(
-  new URL('../../supabase/migrations/20261013120000_partner_note_all_types_and_vehicle.sql', import.meta.url),
+  new URL('../../supabase/migrations/20261013130000_partner_note_all_types_and_vehicle.sql', import.meta.url),
   'utf8',
 )
 
