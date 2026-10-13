@@ -108,7 +108,7 @@ COMMENT ON COLUMN public.partner_note_submissions.vehicle_plate IS
   'The plate the driver''s app sent, exactly as it arrived (trimmed). The raw '
   'record: the resolved vehicle lives on driver_notes.car_id, and when no car '
   'of the company carries this plate that stays NULL and this column is the '
-  'only trace of which vehicle the driver meant (20261013120000).';
+  'only trace of which vehicle the driver meant (20261013130000).';
 
 -- ─── 2. the plate key, twin of the browser's normalise ──────────────────────
 --
@@ -182,7 +182,7 @@ BEGIN
         || '  -- of is refused, never stored and treated as neutral.' || E'\n'
         || '  c_transferable constant text[] :=' || E'\n'
         || '    ARRAY[''general'', ''other'', ''blitzer'', ''accident'', ''kontrolle'', ''breakdown'', ''wait''];';
-  v_new := '  -- All ten may cross (owner, 13.10.2026; see the header of 20261013120000).' || E'\n'
+  v_new := '  -- All ten may cross (owner, 13.10.2026; see the header of 20261013130000).' || E'\n'
         || '  -- Still an allow-list: a type this build has not heard of is refused,' || E'\n'
         || '  -- never stored and treated as neutral.' || E'\n'
         || '  c_transferable constant text[] :=' || E'\n'

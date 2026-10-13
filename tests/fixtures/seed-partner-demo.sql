@@ -46,7 +46,7 @@ SELECT public.partner_note_submission_record(
   'ef01545b-c9a2-6550-7b26-1851d1618173', 'reidey', 'demo-notiz-0001', 'demo-41',
   'breakdown', 'Panne auf der A100, Abschleppdienst gerufen.',
   '2026-10-07', '2026-10-07', false, '08:15', '10:40', NULL,
-  -- An incident type must name the vehicle (20261013120000). Not a car of the
+  -- An incident type must name the vehicle (20261013130000). Not a car of the
   -- demo company, so this also shows the unresolved case: the note is recorded
   -- with no car and the plate stays on the submission.
   'B-DM 1001') AS notiz;
