@@ -22,6 +22,12 @@
 --    §5  a rejection leaves the photo in place: a rejected Beleg is still a
 --        record of what was claimed.
 
+--  13.10.2026 (20261013100000): there is no review. A Beleg from a LINKED driver
+--  is a receipts row the moment the door records it, with nobody accepting it;
+--  one from a driver nobody has linked is recorded and waits for the link. The
+--  probes below measure that. The four review functions still exist (nothing
+--  was dropped) and sections 2, 4 and 5 say what each does now.
+
 BEGIN;
 
 -- ─── helpers ────────────────────────────────────────────────────────────────
@@ -103,7 +109,7 @@ BEGIN
   PERFORM _ra_rec(1, 'a Beleg with no document is recorded, not refused',
     _ra_call(format($q$SELECT partner_receipt_submission_record(%L, 'reidey', 'ra-nodoc', 'ra-1',
       '2026-10-07', 'Tanken', NULL, '41.47') ->> 'status'$q$, v_co)),
-    'pending');
+    'accepted');
 
   PERFORM _ra_rec(2, 'and one with no date',
     _ra_call(format($q$SELECT partner_receipt_submission_record(%L, 'reidey', 'ra-nodate', 'ra-1',
@@ -120,7 +126,7 @@ BEGIN
       '2026-10-07', 'Tanken', NULL, '-5.00', 'bar', NULL, 'k/partner/x.jpg')::text$q$, v_co)),
     'ERR 22023 invalid_amount');
 
-  PERFORM _ra_rec(5, 'a complete Beleg arrives pending, with the driver resolved from our link',
+  PERFORM _ra_rec(5, 'a complete Beleg arrives with the driver resolved from our link',
     _ra_call(format($q$SELECT partner_receipt_submission_record(%L, 'reidey', 'ra-ok', 'ra-1',
       '2026-10-07', 'Tanken', NULL, '41.47', 'bar', '10115',
       'c0000000-0000-4000-8000-00000000000a/partner/ra-ok.jpg') ->> 'driver_id'$q$, v_co)),
@@ -163,56 +169,35 @@ BEGIN
   PERFORM _ra_reset();
 END $$;
 
--- ─── 3. no photo, no Beleg — the audit's blocker ───────────────────────────
+-- ─── 3. the arrival writes the Beleg; an unlinked driver waits ─────────────
 
 DO $$
-DECLARE
-  v_admin constant uuid := 'a0000000-0000-4000-8000-000000000001';
-  v_id uuid;
 BEGIN
-  -- A submission with no document, written past the door the way a row from
-  -- before this migration would look.
-  INSERT INTO partner_receipt_submissions
-         (id, company_id, partner, external_submission_id, external_driver_id,
-          driver_id, receipt_date, category, amount, payment_method)
-  VALUES ('4c000000-0000-4000-8000-000000000001', 'c0000000-0000-4000-8000-00000000000a',
-          'reidey', 'ra-legacy', 'ra-1', '4a000000-0000-4000-8000-000000000001',
-          '2026-10-07', 'Tanken', 41.47, 'bar');
-
-  PERFORM _ra_as(v_admin);
-  -- Flipped with probe 1, and for the same decision.
-  PERFORM _ra_rec(11, 'a Beleg with NO PHOTO is accepted',
-    _ra_call($q$SELECT partner_receipt_accept('4c000000-0000-4000-8000-000000000001') ->> 'ok'$q$),
-    'true');
-  PERFORM _ra_reset();
-
-  -- And the receipts row it wrote carries NO document path. That is the whole
-  -- of what the reversal costs, stated as an assertion rather than as prose:
-  -- a Beleg in the books with nothing behind it but what a driver typed.
-  PERFORM _ra_rec(12, 'and its receipts row carries no document path',
+  -- Flipped on 10.10.2026 for the door; the same decision reaches the Beleg.
+  -- The receipts row carries NO document path - a Beleg in the books with
+  -- nothing behind it but what the driver's app read and he confirmed.
+  PERFORM _ra_rec(11, 'a documentless Beleg from a linked driver became a Beleg on arrival',
     (SELECT count(*)::text FROM receipts WHERE description = 'Tanken'
        AND company_id = 'c0000000-0000-4000-8000-00000000000a'
        AND driver_name = 'Omar Khalil'
        AND document_path IS NULL),
     '1');
 
-  -- An unlinked driver is the other refusal, and it must not be confused with
-  -- the first: the repairs are different screens.
-  INSERT INTO partner_receipt_submissions
-         (id, company_id, partner, external_submission_id, external_driver_id,
-          receipt_date, category, amount, document_path)
-  VALUES ('4c000000-0000-4000-8000-000000000002', 'c0000000-0000-4000-8000-00000000000a',
-          'reidey', 'ra-nodriver', 'ra-nobody', '2026-10-07', 'Tanken', 10.00,
-          'c0000000-0000-4000-8000-00000000000a/partner/ra-nodriver.jpg');
+  PERFORM _ra_rec(12, 'and its submission names it, with nobody having reviewed it',
+    (SELECT status || ' / ' || CASE WHEN receipt_id IS NULL THEN 'null' ELSE 'named' END
+            || ' / ' || coalesce(reviewed_by::text, 'no reviewer')
+       FROM partner_receipt_submissions WHERE external_submission_id = 'ra-nodoc'),
+    'accepted / named / no reviewer');
 
-  PERFORM _ra_as(v_admin);
-  PERFORM _ra_rec(13, 'and one whose driver is not linked is refused differently',
-    _ra_call($q$SELECT partner_receipt_accept('4c000000-0000-4000-8000-000000000002')::text$q$),
-    'ERR P0001 driver_not_linked');
-  PERFORM _ra_reset();
+  -- The edge. A Beleg belongs to a driver by NAME, an unlinked partner driver
+  -- has none, and linking is a human act. Recorded, not applied.
+  PERFORM _ra_rec(13, 'a Beleg whose driver is not linked is recorded and NOT applied',
+    (SELECT status || ' / ' || CASE WHEN receipt_id IS NULL THEN 'no Beleg' ELSE 'named' END
+       FROM partner_receipt_submissions WHERE external_submission_id = 'ra-unlinked'),
+    'pending / no Beleg');
 END $$;
 
--- ─── 4. the accept: our name, our number ────────────────────────────────────
+-- ─── 4. the arrival: our name, our number, our author ──────────────────────
 
 DO $$
 DECLARE
@@ -220,15 +205,11 @@ DECLARE
   v_id      uuid;
   v_receipt uuid;
 BEGIN
-  SELECT id INTO v_id FROM partner_receipt_submissions WHERE external_submission_id = 'ra-ok';
+  SELECT id, receipt_id INTO v_id, v_receipt
+    FROM partner_receipt_submissions WHERE external_submission_id = 'ra-ok';
 
-  PERFORM _ra_as(v_admin);
-  PERFORM _ra_rec(14, 'a complete Beleg is accepted',
-    _ra_call(format($q$SELECT partner_receipt_accept(%L) ->> 'ok'$q$, v_id)),
-    'true');
-  PERFORM _ra_reset();
-
-  SELECT receipt_id INTO v_receipt FROM partner_receipt_submissions WHERE id = v_id;
+  PERFORM _ra_rec(14, 'a complete Beleg is a Beleg the moment it is recorded',
+    CASE WHEN v_receipt IS NULL THEN 'no Beleg' ELSE 'Beleg' END, 'Beleg');
 
   -- `receipts` has no driver_id at all; every read joins on this text.
   PERFORM _ra_rec(15, 'the receipts row carries OUR driver row''s name, character for character',
@@ -250,21 +231,41 @@ BEGIN
        FROM receipts WHERE id = v_receipt),
     'Tanken / 41.47 / bar');
 
-  PERFORM _ra_rec(19, 'and the submission names its Beleg',
+  PERFORM _ra_rec(19, 'and the submission is accepted and names its Beleg',
     (SELECT status || ' / ' || CASE WHEN receipt_id IS NULL THEN 'null' ELSE 'named' END
        FROM partner_receipt_submissions WHERE id = v_id),
     'accepted / named');
 
+  -- The retired accept. Nothing was dropped, and it can do nothing to an
+  -- applied row.
   PERFORM _ra_as(v_admin);
-  PERFORM _ra_rec(20, 'accepting it twice is refused',
+  PERFORM _ra_rec(20, 'the retired accept refuses an applied Beleg',
     _ra_call(format($q$SELECT partner_receipt_accept(%L)::text$q$, v_id)),
     'ERR P0001 already_reviewed');
   PERFORM _ra_reset();
 
-  PERFORM _ra_rec(21, 'so there is exactly one Beleg, not two',
+  -- probe 6 retried this very submission at the door.
+  PERFORM _ra_rec(21, 'so there is exactly one Beleg, not two, after the retry',
     (SELECT count(*)::text FROM receipts WHERE document_path =
       'c0000000-0000-4000-8000-00000000000a/partner/ra-ok.jpg'),
     '1');
+
+  -- The owner's ask of 13.10.2026: "Created by" is the driver. There is no
+  -- user behind a driver, so both user columns are NULL and the name travels
+  -- in its own column, OUR row's name.
+  PERFORM _ra_rec(39, 'the author is the driver''s name, with no user behind it',
+    (SELECT coalesce(user_id::text, 'no user') || ' / ' || coalesce(created_by, 'no user')
+            || ' / ' || coalesce(submitted_by_name, 'null')
+       FROM receipts WHERE id = v_receipt),
+    'no user / no user / Omar Khalil');
+
+  PERFORM _ra_rec(40, 'two arrivals drew two different Belegnummern',
+    (SELECT count(DISTINCT receipt_number)::text FROM receipts
+      WHERE company_id = 'c0000000-0000-4000-8000-00000000000a'
+        AND submitted_by_name = 'Omar Khalil'),
+    (SELECT count(*)::text FROM receipts
+      WHERE company_id = 'c0000000-0000-4000-8000-00000000000a'
+        AND submitted_by_name = 'Omar Khalil'));
 END $$;
 
 -- ─── 5. the reject keeps the record ────────────────────────────────────────
@@ -355,16 +356,15 @@ END $$;
 DO $$
 DECLARE
   v_co    constant text := 'c0000000-0000-4000-8000-00000000000a';
-  v_admin constant uuid := 'a0000000-0000-4000-8000-000000000001';
   v_id    uuid;
 BEGIN
-  PERFORM _ra_rec(30, 'a Beleg carrying all eight extra fields is recorded pending',
+  PERFORM _ra_rec(30, 'a Beleg carrying all eight extra fields is recorded and accepted',
     _ra_call(format($q$SELECT partner_receipt_submission_record(%L, 'reidey', 'ra-seven', 'ra-1',
       '2026-10-07', 'Tanken', NULL, '41.47', 'bar', '10115',
       'c0000000-0000-4000-8000-00000000000a/partner/ra-seven.jpg',
       NULL, true, false, NULL,
       'ARAL Tankstelle', '14:32', '41.47', '1.789', '25382', '277', 'Berlin') ->> 'status'$q$, v_co)),
-    'pending');
+    'accepted');
 
   PERFORM _ra_rec(31, 'and the submission row holds every one of them',
     (SELECT merchant_name || ' / ' || receipt_time::text || ' / ' || litres::text
@@ -377,10 +377,8 @@ BEGIN
   SELECT id INTO v_id FROM partner_receipt_submissions
    WHERE company_id = v_co::uuid AND external_submission_id = 'ra-seven';
 
-  PERFORM _ra_as(v_admin);
-  PERFORM _ra_rec(32, 'accepting it is one transaction and answers ok',
-    _ra_call(format($q$SELECT partner_receipt_accept(%L) ->> 'ok'$q$, v_id)), 'true');
-  PERFORM _ra_reset();
+  PERFORM _ra_rec(32, 'it is applied in the same transaction as the arrival',
+    (SELECT status FROM partner_receipt_submissions WHERE id = v_id), 'accepted');
 
   -- The whole reason these are columns and not a review-screen detail: the
   -- Beleg the accountant reads has to carry them.
@@ -414,14 +412,14 @@ BEGIN
     _ra_call(format($q$SELECT partner_receipt_submission_record(%L, 'reidey', 'ra-range-zero', 'ra-1',
       '2026-10-07', 'Tanken', NULL, '41.47', 'bar', NULL, NULL,
       NULL, true, false, NULL, NULL, NULL, NULL, NULL, '25382', '0') ->> 'status'$q$, v_co)),
-    'pending');
+    'accepted');
 
   -- A Beleg that is not a refuel has neither, and an app build older than
   -- 12.10.2026 sends neither on any Beleg: a NOT NULL would refuse both.
   PERFORM _ra_rec(37, 'a Beleg with neither figure is recorded, not refused',
     _ra_call(format($q$SELECT partner_receipt_submission_record(%L, 'reidey', 'ra-nofuel', 'ra-1',
       '2026-10-07', 'Autowäsche', NULL, '60.00') ->> 'status'$q$, v_co)),
-    'pending');
+    'accepted');
 
   PERFORM _ra_rec(38, 'and both read NULL rather than zero',
     (SELECT coalesce(odometer_km::text, 'null') || ' / ' || coalesce(range_km::text, 'null')

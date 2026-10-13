@@ -13,8 +13,11 @@
   published on this box, which is shared with ridy).
 */
 /*
-  Two waiting submissions for DEMO Monatsplanung GmbH on STAGING, so the review
-  tab can be tried before Reidey is deployed.
+  Two submissions for DEMO Monatsplanung GmbH on STAGING, so the Belege and
+  Notizen lists can be tried before Reidey is deployed. Since 20261013100000
+  there is no review tab: the driver is linked below, so both arrive already
+  accepted - one Beleg in the Belege list and one note in the Notizen list,
+  each with the driver as its author.
 
   Written through the two `*_submission_record` doors rather than by INSERT, so
   the demo rows pass exactly the validation a real submission passes — a seed

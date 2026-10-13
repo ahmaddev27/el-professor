@@ -119,6 +119,13 @@ INSERT INTO partner_receipt_submissions
 VALUES ('1d000000-0000-4000-8000-000000000001', 'c0000000-0000-4000-8000-00000000000a',
         'reidey', 'lr-rec-1', 'lr-1', 'Tanken');
 
+-- A dated, complete Beleg on lr-1: this one CAN become a Beleg on the confirm.
+INSERT INTO partner_receipt_submissions
+       (id, company_id, partner, external_submission_id, external_driver_id,
+        receipt_date, category, amount, payment_method)
+VALUES ('1d000000-0000-4000-8000-000000000002', 'c0000000-0000-4000-8000-00000000000a',
+        'reidey', 'lr-rec-2', 'lr-1', DATE '2026-10-01', 'Tanken', 12.50, 'bar');
+
 -- ─── 1. the argument contract and the lookups ───────────────────────────────
 
 DO $$
@@ -212,6 +219,21 @@ BEGIN
     (SELECT coalesce(driver_id::text, 'null') FROM partner_note_submissions
       WHERE id = '1c000000-0000-4000-8000-000000000002'),
     'null');
+
+  -- 13.10.2026: confirming the link applies what was waiting, Belege included.
+  PERFORM _lr_rec(26, 'the dated Beleg that was waiting became a Beleg, with OUR driver name',
+    (SELECT r.driver_name || ' / ' || r.expense::text || ' / '
+            || coalesce(r.created_by, 'no user') || ' / ' || coalesce(r.submitted_by_name, 'null')
+       FROM partner_receipt_submissions s JOIN receipts r ON r.id = s.receipt_id
+      WHERE s.id = '1d000000-0000-4000-8000-000000000002' AND s.status = 'accepted'),
+    'Ours / 12.50 / no user / Ours');
+
+  -- The same link reaches a submission that cannot be a Beleg yet: no date, and
+  -- receipts.date is NOT NULL. It waits, it is not invented a date.
+  PERFORM _lr_rec(27, 'a Beleg with no date stays pending rather than being given one',
+    (SELECT status || ' / ' || (receipt_id IS NULL)::text FROM partner_receipt_submissions
+      WHERE id = '1d000000-0000-4000-8000-000000000001'),
+    'pending / true');
 END $$;
 
 -- ─── 4. one driver, one link per partner ────────────────────────────────────
@@ -246,22 +268,24 @@ BEGIN
   PERFORM _lr_reset();
 END $$;
 
--- ─── 5. M2 and M3 meet: the note becomes acceptable ────────────────────────
+-- ─── 5. M2 and M3 meet: the link applies what was waiting ──────────────────
+--
+--  Until 13.10.2026 a person pressed "Übernehmen" on the note once its driver
+--  was linked. There is no review now: confirming the link IS the moment the
+--  waiting note becomes a driver_notes row, in the same call, with no accept.
 
 DO $$
 DECLARE
   v_admin constant uuid := 'a0000000-0000-4000-8000-000000000001';
   v_note  uuid;
 BEGIN
-  PERFORM _lr_as(v_admin);
-
-  PERFORM _lr_rec(17, 'the note is acceptable now that its driver is linked',
-    _lr_call($q$SELECT partner_note_accept('1c000000-0000-4000-8000-000000000001') ->> 'ok'$q$),
-    'true');
-  PERFORM _lr_reset();
-
   SELECT driver_note_id INTO v_note FROM partner_note_submissions
    WHERE id = '1c000000-0000-4000-8000-000000000001';
+
+  PERFORM _lr_rec(17, 'the note was applied by the confirm itself, with no accept',
+    (SELECT status || ' / ' || (driver_note_id IS NOT NULL)::text FROM partner_note_submissions
+      WHERE id = '1c000000-0000-4000-8000-000000000001'),
+    'accepted / true');
 
   PERFORM _lr_rec(18, 'and the driver_notes row names the driver a PERSON chose',
     (SELECT driver_id::text || ' / ' || note_planning_behavior FROM driver_notes WHERE id = v_note),

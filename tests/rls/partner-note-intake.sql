@@ -5,6 +5,12 @@
 --  `20261007110000`'s three functions. The matrix says who may call them; this
 --  file says what they do, which is the half a principal grid cannot see.
 --
+--  Since 13.10.2026 there is no review: a note from a linked driver is a
+--  driver_notes row the moment it arrives (20261013100000), and one from a
+--  driver nobody has linked is recorded and waits for the link. Sections 5 to 7
+--  measure that; the four review functions are retired from the screen but
+--  still exist, and the probes say what each of them does now.
+--
 --  Eight sections, and the ones worth reading first are 1, 4 and 5:
 --
 --    1. The door admits SEVEN note types and refuses the other three by an
@@ -14,7 +20,7 @@
 --    4. A retry returns the DECISION a human already made. This is the property
 --       `ON CONFLICT DO NOTHING` buys and `DO UPDATE` would destroy, and it is
 --       invisible in any test that submits each id once.
---    5. The accept DERIVES the planning behaviour from the type. Taking the
+--    5. The arrival DERIVES the planning behaviour from the type. Taking the
 --       partner's word for it is how a `sick` note carrying `neutral` reaches
 --       the planner and fails to exclude the driver -- the defect the pairing
 --       function exists to prevent.
@@ -141,9 +147,9 @@ BEGIN
     _pn_call(format($q$SELECT partner_note_submission_record(%L, 'reidey', 'pn-s4', 'pn-linked', 'krank')::text$q$, v_co)),
     'ERR 22023 note_type_not_transferable');
 
-  PERFORM _pn_rec(5, 'a general note is admitted and arrives pending',
+  PERFORM _pn_rec(5, 'a general note from a linked driver is admitted and arrives accepted',
     _pn_call(format($q$SELECT partner_note_submission_record(%L, 'reidey', 'pn-ok1', 'pn-linked', 'general', 'Hallo') ->> 'status'$q$, v_co)),
-    'pending');
+    'accepted');
 
   PERFORM _pn_rec(6, 'and so is each of the other six',
     (SELECT count(*)::text FROM (
@@ -151,7 +157,7 @@ BEGIN
          $q$SELECT partner_note_submission_record(%L, 'reidey', 'pn-t-%s', 'pn-linked', %L) ->> 'status'$q$,
          v_co, t, t)) AS r
          FROM unnest(ARRAY['other','blitzer','accident','kontrolle','breakdown','wait']) AS t
-     ) x WHERE x.r = 'pending'),
+     ) x WHERE x.r = 'accepted'),
     '6');
 END $$;
 
@@ -175,7 +181,7 @@ BEGIN
 
   PERFORM _pn_rec(9, 'the last minute of the day is accepted',
     _pn_call(format($q$SELECT partner_note_submission_record(%L, 'reidey', 'pn-v3', 'pn-linked', 'general', 'x', NULL, NULL, false, '23:59', '23:59') ->> 'status'$q$, v_co)),
-    'pending');
+    'accepted');
 
   PERFORM _pn_rec(10, 'an end time out of range is refused on its own',
     _pn_call(format($q$SELECT partner_note_submission_record(%L, 'reidey', 'pn-v4', 'pn-linked', 'general', 'x', NULL, NULL, false, '08:00', '24:00')::text$q$, v_co)),
@@ -191,7 +197,7 @@ BEGIN
 
   PERFORM _pn_rec(13, 'exactly 366 days is accepted, so probe 12 measured the bound',
     _pn_call(format($q$SELECT partner_note_submission_record(%L, 'reidey', 'pn-v7', 'pn-linked', 'general', 'x', '2026-01-01', '2027-01-02') ->> 'status'$q$, v_co)),
-    'pending');
+    'accepted');
 END $$;
 
 -- ─── 3. the driver comes from our link, never from the request ──────────────
@@ -244,8 +250,11 @@ BEGIN
   -- The one that matters: judge it, then retry.
   SELECT id INTO v_id FROM partner_note_submissions
    WHERE company_id = v_co::uuid AND external_submission_id = 'pn-ok1';
+  -- It arrived accepted, so it names its note; a rejected row may not
+  -- (partner_note_submissions_accepted_has_note).
   UPDATE partner_note_submissions
-     SET status = 'rejected', rejected_reason = 'mx', reviewed_at = now()
+     SET status = 'rejected', rejected_reason = 'mx', reviewed_at = now(),
+         driver_note_id = NULL
    WHERE id = v_id;
 
   PERFORM _pn_rec(20, 'a retry after a human judged it returns THAT decision',
@@ -253,7 +262,7 @@ BEGIN
     'rejected');
 END $$;
 
--- ─── 5. the accept: the derived behaviour, and the unlinked driver ──────────
+-- ─── 5. the arrival: derived behaviour, our name, and the unlinked driver ───
 
 DO $$
 DECLARE
@@ -272,21 +281,21 @@ BEGIN
   SELECT id INTO v_unlinked FROM partner_note_submissions
    WHERE company_id = v_co::uuid AND external_submission_id = 'pn-d2';
 
-  PERFORM _pn_as(v_admin);
+  -- The edge: no confirmed link means no driver_id, driver_notes.driver_id is
+  -- NOT NULL, and linking is a human act. Recorded, not applied.
+  PERFORM _pn_rec(21, 'a note whose driver is not linked is recorded and NOT applied',
+    (SELECT status || ' / ' || coalesce(driver_note_id::text, 'no note')
+       FROM partner_note_submissions WHERE id = v_unlinked),
+    'pending / no note');
 
-  PERFORM _pn_rec(21, 'a submission whose driver is not linked cannot be accepted',
-    _pn_call(format($q$SELECT partner_note_accept(%L)::text$q$, v_unlinked)),
-    'ERR P0001 driver_not_linked');
-
-  PERFORM _pn_rec(22, 'and the accept of a linked one succeeds',
-    _pn_call(format($q$SELECT partner_note_accept(%L) ->> 'ok'$q$, v_linked)),
-    'true');
-
-  PERFORM _pn_reset();
+  PERFORM _pn_rec(22, 'a linked driver''s note is accepted on arrival, with nobody reviewing',
+    (SELECT status || ' / ' || coalesce(reviewed_by::text, 'no reviewer')
+       FROM partner_note_submissions WHERE id = v_linked),
+    'accepted / no reviewer');
 
   SELECT driver_note_id INTO v_note FROM partner_note_submissions WHERE id = v_linked;
 
-  PERFORM _pn_rec(23, 'the submission now names its note',
+  PERFORM _pn_rec(23, 'the submission names its note',
     CASE WHEN v_note IS NULL THEN 'null' ELSE 'named' END, 'named');
 
   PERFORM _pn_rec(24, 'and the note carries the DERIVED behaviour, not a sent one',
@@ -301,10 +310,30 @@ BEGIN
     (SELECT note_text FROM driver_notes WHERE id = v_note),
     'Blitzer A100');
 
+  -- The owner's ask of 13.10.2026: the author is the driver, and it is OUR
+  -- row's name. There is no user, so created_by is NULL and the CHECK that
+  -- forbids an authorless note is what makes that legal.
+  PERFORM _pn_rec(38, 'the author is our driver row''s name, with no user behind it',
+    (SELECT coalesce(created_by::text, 'no user') || ' / ' || coalesce(submitted_by_name, 'null')
+       FROM driver_notes WHERE id = v_note),
+    'no user / Linked Partner Driver');
+
+  -- A retry of an applied note must not write a second note.
+  PERFORM _pn_call(format($q$SELECT partner_note_submission_record(%L, 'reidey', 'pn-a1', 'pn-linked', 'blitzer', 'Blitzer A100')::text$q$, v_co));
+  PERFORM _pn_rec(39, 'a retry of an applied note writes no second note',
+    (SELECT count(*)::text FROM driver_notes
+      WHERE company_id = v_co::uuid AND note_text = 'Blitzer A100'),
+    '1');
+
+  -- The retired functions still exist (nothing was dropped). Neither can do
+  -- anything to an applied row, and the accept still cannot invent a driver.
   PERFORM _pn_as(v_admin);
-  PERFORM _pn_rec(27, 'accepting it a second time is refused',
+  PERFORM _pn_rec(27, 'the retired accept refuses an applied note',
     _pn_call(format($q$SELECT partner_note_accept(%L)::text$q$, v_linked)),
     'ERR P0001 already_reviewed');
+  PERFORM _pn_rec(40, 'and still refuses an unlinked one rather than invent a driver',
+    _pn_call(format($q$SELECT partner_note_accept(%L)::text$q$, v_unlinked)),
+    'ERR P0001 driver_not_linked');
   PERFORM _pn_reset();
 END $$;
 
@@ -316,7 +345,9 @@ DECLARE
   v_admin constant uuid := 'a0000000-0000-4000-8000-000000000001';
   v_id uuid;
 BEGIN
-  PERFORM _pn_call(format($q$SELECT partner_note_submission_record(%L, 'reidey', 'pn-r1', 'pn-linked', 'wait', 'Wartezeit')::text$q$, v_co));
+  -- Unlinked on purpose: a linked driver's note would already be accepted, and
+  -- the reject only ever has a pending row to act on.
+  PERFORM _pn_call(format($q$SELECT partner_note_submission_record(%L, 'reidey', 'pn-r1', 'pn-unknown', 'wait', 'Wartezeit')::text$q$, v_co));
   SELECT id INTO v_id FROM partner_note_submissions
    WHERE company_id = v_co::uuid AND external_submission_id = 'pn-r1';
 
@@ -370,9 +401,11 @@ BEGIN
   -- The control: without it probe 32 would pass for a fixture that is simply
   -- unacceptable to everyone.
   PERFORM _pn_as(v_editor);
-  PERFORM _pn_rec(34, 'an editor, who holds the notes page, may',
-    _pn_call(format($q$SELECT partner_note_accept(%L) ->> 'ok'$q$, v_id)),
-    'true');
+  -- The note is already applied, so a permitted caller is told that, not that
+  -- it lacks the right: the two answers differ, which is the whole probe.
+  PERFORM _pn_rec(34, 'an editor, who holds the notes page, passes the gate',
+    _pn_call(format($q$SELECT partner_note_accept(%L)::text$q$, v_id)),
+    'ERR P0001 already_reviewed');
   PERFORM _pn_reset();
 END $$;
 
