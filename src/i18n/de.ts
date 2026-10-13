@@ -17,7 +17,7 @@ export const de = {
   'nav.cars':               'Fahrzeuge',
   'nav.umsaetze':           'Umsätze',
   'nav.fixkosten':          'Fixkosten',
-  'nav.bargeldbestand':     'Bargeldbestand',
+  'nav.bargeldbestand':     'Kassenbuch',     // statutory term, kept German
   'nav.werkstatt':          'Werkstatt',
   'nav.abrechnung':         'Abrechnung',
   'nav.notes':              'Notizen',
@@ -2636,7 +2636,7 @@ export const de = {
   'users.page.accounting.desc':            'Wochen- und Monatsabrechnung',
   'users.page.cars':                       'Autos',
   'users.page.cars.desc':                  'Fahrzeugverwaltung',
-  'users.page.cashBalance':                'Bargeldbestand',
+  'users.page.cashBalance':                'Kassenbuch',
   'users.page.cashBalance.desc':           'Bargeldbestand der Fahrer',
   'users.page.documents':                  'Dokumente',
   'users.page.documents.desc':             'Dokumente verwalten und erzeugen',

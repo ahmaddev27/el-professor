@@ -19,7 +19,7 @@ export const en: PartialDictionary = {
   'nav.cars':               'Vehicles',
   'nav.umsaetze':           'Revenue',
   'nav.fixkosten':          'Fixed costs',
-  'nav.bargeldbestand':     'Cash balance',
+  'nav.bargeldbestand':     'Kassenbuch',     // statutory term, kept German
   'nav.werkstatt':          'Werkstatt',     // statutory term, kept German
   'nav.abrechnung':         'Abrechnung',    // statutory term, kept German
   'nav.notes':              'Notes',
@@ -2603,7 +2603,7 @@ export const en: PartialDictionary = {
   'users.page.accounting.desc':            'Weekly and monthly Abrechnung',
   'users.page.cars':                       'Cars',
   'users.page.cars.desc':                  'Vehicle management',
-  'users.page.cashBalance':                'Cash balance',
+  'users.page.cashBalance':                'Kassenbuch',
   'users.page.cashBalance.desc':           'Cash held by drivers',
   'users.page.documents':                  'Documents',
   'users.page.documents.desc':             'Document management and generation',
