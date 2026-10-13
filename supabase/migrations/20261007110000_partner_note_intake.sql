@@ -14,6 +14,11 @@
 --  because it must write `driver_notes` and set `driver_note_id` in one
 --  transaction -- the accepted-has-note CHECK admits no window between them.
 --
+--  SUPERSEDED 13.10.2026: the owner reversed this section after being told
+--  plainly that a named employee's sickness would cross between two products.
+--  All ten types cross now, still by allow-list; 20261013120000 records the
+--  decision. What follows is the reasoning of 06.10.2026, kept as written.
+--
 --  ── 1. Only seven of the ten types may cross, and that is a decision ────────
 --
 --  `sick`, `vacation` and `off` are refused outright (`note_type_not_

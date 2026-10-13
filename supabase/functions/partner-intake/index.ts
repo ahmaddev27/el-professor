@@ -210,6 +210,7 @@ async function recordSubmission(
     p_is_full_day: note.is_full_day,
     p_start_time: note.start_time,
     p_end_time: note.end_time,
+    p_vehicle_plate: note.vehicle_plate,
     // What arrived, kept verbatim for the reviewer and for a later dispute. It
     // is the payload, not our reading of it.
     p_raw_payload: payload,

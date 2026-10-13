@@ -74,8 +74,23 @@ describe('parseNoteSubmission', () => {
         is_full_day: false,
         start_time: null,
         end_time: null,
+        vehicle_plate: null,
       },
     })
+  })
+
+  it('reads the vehicle plate, trimmed, and leaves judging it to the database', () => {
+    const result = parseNoteSubmission({ ...good, vehicle_plate: '  B-XX 1234 ' })
+    expect(result.ok && result.value.vehicle_plate).toBe('B-XX 1234')
+    // Whether a blank plate is acceptable depends on the note type, which only
+    // the database derives: a blank one is read as absent, not refused here.
+    const blank = parseNoteSubmission({ ...good, vehicle_plate: '   ' })
+    expect(blank.ok && blank.value.vehicle_plate).toBeNull()
+  })
+
+  it('refuses a plate that is not text', () => {
+    expect(parseNoteSubmission({ ...good, vehicle_plate: 1234 }))
+      .toEqual({ ok: false, reason: 'invalid_request', field: 'vehicle_plate' })
   })
 
   it.each(['partner', 'external_submission_id', 'external_driver_id', 'note_type'])(
@@ -137,9 +152,10 @@ describe('parseNoteSubmission', () => {
   })
 
   it('does NOT judge the note type: the allow-list lives in one place', () => {
-    // A refused type must reach the database and be refused there, so there is
+    // An unknown type must reach the database and be refused there, so there is
     // only ever one list to keep. If this ever starts failing because the parser
-    // learned the list, two places can now disagree.
+    // learned the list, two places can now disagree. (`sick` is on the list
+    // since 13.10.2026; the point stands for any type.)
     const result = parseNoteSubmission({ ...good, note_type: 'sick' })
     expect(result.ok).toBe(true)
   })
@@ -155,6 +171,8 @@ describe('answerForHint', () => {
   it.each([
     'note_type_not_transferable',
     'unknown_note_type',
+    'vehicle_required',
+    'invalid_vehicle_plate',
     'invalid_start_time',
     'invalid_end_time',
     'invalid_range',
