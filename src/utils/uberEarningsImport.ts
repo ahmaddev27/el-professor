@@ -258,3 +258,63 @@ export function blockingEarners(
     ...unlinked.map(u => ({ name: u.name, kind: 'unlinked_here' as const, externalDriverId: u.externalDriverId })),
   ];
 }
+
+/** An income row already in the table, as far as the preview needs it. */
+export interface ExistingIncome {
+  driver_name: string;
+  date: string;
+  type: string;
+  amount: number;
+  source: string | null;
+  source_period_start: string | null;
+  source_period_end: string | null;
+}
+
+export interface ExistingInWeek {
+  /** OUR driver's name: the text income rows are joined on. */
+  driverName: string;
+  segment: WeekSegment;
+  manualCount: number;
+  importedCount: number;
+}
+
+/**
+ * Income that already stands for a driver and a business week this import would
+ * write, WHATEVER its source. Two different things come out and must never be
+ * confused, because a driver's pay rides on the difference:
+ *
+ * - `manualCount`: rows somebody typed. The import does not refuse them; both
+ *   sets stand and every figure becomes their sum. A warning, not a block.
+ * - `importedCount`: rows of an earlier import whose days overlap. The database
+ *   refuses these (`already_imported`); the preview says so before the click.
+ *
+ * Matching is the product's own: the stored `driver_name` against OUR driver's
+ * name with `===`, since `income` has no driver_id.
+ */
+export function findExistingIncome(
+  weeks: readonly WeekEarnings[], links: DriverLinks, existing: readonly ExistingIncome[],
+): ExistingInWeek[] {
+  const found: ExistingInWeek[] = [];
+  for (const { segment, drivers } of weeks) {
+    for (const d of drivers) {
+      const link = links[d.externalDriverId];
+      if (!link || rowsForDriver(d, segment, 1).length === 0) continue;
+      let manualCount = 0;
+      let importedCount = 0;
+      for (const row of existing) {
+        if (row.driver_name !== link.driverName) continue;
+        if (row.source === UBER_SOURCE) {
+          const start = row.source_period_start ?? row.date;
+          const end = row.source_period_end ?? row.date;
+          if (start <= segment.to && end >= segment.from) importedCount += 1;
+        } else if (row.date >= segment.from && row.date <= segment.to) {
+          manualCount += 1;
+        }
+      }
+      if (manualCount + importedCount > 0) {
+        found.push({ driverName: link.driverName, segment, manualCount, importedCount });
+      }
+    }
+  }
+  return found;
+}

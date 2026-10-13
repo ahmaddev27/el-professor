@@ -10,6 +10,7 @@ import {
 import {
   blockingEarners,
   buildImportRows,
+  findExistingIncome,
   findUnlinked,
   importDescription,
   readPullAnswer,
@@ -259,5 +260,39 @@ describe('readPullAnswer: the screen trusts the function\'s reply only in full s
     expect(readPullAnswer(neg)).toBeNull();
     const across = good(); (across.weeks[0] as { to: string }).to = '2026-10-12';
     expect(readPullAnswer(across)).toBeNull();
+  });
+});
+
+describe('findExistingIncome: typed rows warn, imported rows refuse', () => {
+  const links = { '139': { driverId: 'd-1', driverName: 'Ahmed Hemaid' } };
+  const w = week('2026-10-06', '2026-10-11', '2026-10-05', [driverWire()]);
+  const row = (over: Partial<import('./uberEarningsImport').ExistingIncome> = {}) => ({
+    driver_name: 'Ahmed Hemaid', date: '2026-10-07', type: 'umsatz', amount: 100,
+    source: null, source_period_start: null, source_period_end: null, ...over,
+  });
+  it('a hand-entered row in the week is reported as manual, naming driver and week', () => {
+    expect(findExistingIncome([w], links, [row(), row({ type: 'bargeld' })])).toEqual([
+      { driverName: 'Ahmed Hemaid', segment: w.segment, manualCount: 2, importedCount: 0 },
+    ]);
+  });
+  it('nothing is reported for another driver, another week or another spelling', () => {
+    expect(findExistingIncome([w], links, [
+      row({ driver_name: 'Someone Else' }), row({ date: '2026-10-12' }), row({ driver_name: 'ahmed hemaid' }),
+    ])).toEqual([]);
+  });
+  it('an earlier import that overlaps by its period is imported, not manual, even dated before the range', () => {
+    const imported = row({ source: 'uber', date: '2026-10-04', source_period_start: '2026-10-04', source_period_end: '2026-10-08' });
+    expect(findExistingIncome([w], links, [imported])).toEqual([
+      { driverName: 'Ahmed Hemaid', segment: w.segment, manualCount: 0, importedCount: 1 },
+    ]);
+  });
+  it('both at once are counted apart', () => {
+    const imported = row({ source: 'uber', source_period_start: '2026-10-06', source_period_end: '2026-10-11' });
+    expect(findExistingIncome([w], links, [row(), imported])[0]).toMatchObject({ manualCount: 1, importedCount: 1 });
+  });
+  it('a driver the import would write nothing for is not warned about', () => {
+    const idle = week('2026-10-06', '2026-10-11', '2026-10-05',
+      [driverWire({ fare: '0.00', tips: '0.00', cash: '0.00', trips: null })]);
+    expect(findExistingIncome([idle], links, [row()])).toEqual([]);
   });
 });

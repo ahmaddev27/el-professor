@@ -6459,9 +6459,6 @@ export const de = {
   'inc.uber.to':                     'Bis',
   'inc.uber.uberName':               'Uber: {name}',
   'inc.uber.unlinked':               'Nicht verknüpft',
-  'inc.uber.unlinkedBody':           'Diese Uber-Fahrer sind mit keinem Fahrer deiner Firma verknüpft. Bestätige zuerst die Verknüpfung; es wird nichts importiert, solange einer fehlt.',
-  'inc.uber.unlinkedItem':           '{name} (Reidey-ID {id})',
-  'inc.uber.unlinkedTitle':          'Der Import ist gesperrt: Fahrer ohne bestätigte Verknüpfung',
   'inc.uber.weeksCount.one':         'Der Zeitraum umfasst {count} Woche.',
   'inc.uber.weeksCount.other':       'Der Zeitraum umfasst {count} Wochen.',
 
@@ -6476,4 +6473,13 @@ export const de = {
   'inc.uber.err.partner.too_many_pages':   'Der Zeitraum enthält bei Uber zu viele Einträge für einen Abruf. Bitte einen kürzeren Zeitraum wählen.',
   'inc.uber.err.partner.uber_session_rejected': 'Uber hat die gespeicherte Anmeldung von Reidey abgelehnt. Sie muss dort erneuert werden.',
   'inc.uber.err.partner.unreadable_amount': 'Uber hat einen Betrag geliefert, den Reidey nicht eindeutig lesen kann. Es wurde nichts übernommen.',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'inc.uber.existingUnchecked': 'Bestehende Einträge konnten nicht vollständig geprüft werden. Ob für diese Wochen schon Beträge erfasst sind, ist unbekannt; es könnte doppelt gezählt werden.',
+  'inc.uber.importedBody':      'Für diese Fahrer und Wochen liegt schon ein Uber-Import vor. Die Datenbank lässt keinen zweiten zu; es wird nichts geschrieben. Wähle einen Zeitraum ohne diese Wochen.',
+  'inc.uber.importedItem':      '{name} · {week} ({from} – {to}) · Einträge: {count}',
+  'inc.uber.importedTitle':     'Bereits importiert: dieser Import wird abgelehnt',
+  'inc.uber.manualBody':        'Der Import ändert oder löscht sie nicht. Beide Einträge bleiben bestehen, und die Beträge addieren sich: Umsatz, Aktionen, Trinkgeld, Bargeld und damit die Gehaltsgrundlage. Wurden dieselben Beträge schon erfasst, werden sie doppelt gezählt. Prüfe das vor dem Import.',
+  'inc.uber.manualItem':        '{name} · {week} ({from} – {to}) · Einträge: {count}',
+  'inc.uber.manualTitle':       'Achtung: für diese Wochen gibt es schon von Hand erfasste Einträge',
 } as const;

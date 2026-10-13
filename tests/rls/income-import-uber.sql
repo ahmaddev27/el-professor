@@ -144,6 +144,12 @@ BEGIN
   INSERT INTO partner_driver_links (company_id, partner, external_driver_id, status, proposed_name)
   VALUES (co_a, 'reidey', '1003', 'pending', 'Pending Person');
 
+  -- A row somebody typed, for section 6. It goes in HERE, before any support
+  -- context is opened below: once one has been, the transaction-local write
+  -- flag is still set and a plain owner INSERT into income is refused.
+  INSERT INTO income (description, amount, type, driver_name, date, company_id)
+  VALUES ('Woche 1 - von Hand', 100, 'umsatz', 'Omar Khalil', '2026-11-03', co_a);
+
   -- A platform account with a sign-in session of its own, for the context probes.
   INSERT INTO auth.users (id, email, email_confirmed_at)
   VALUES ('1f000000-0000-4000-8000-0000000000e1', 'ui-staff@test.invalid', now());
@@ -370,6 +376,27 @@ BEGIN
     'ERR 23505 already_imported');
   PERFORM _ui_rec(39, '...and the first row of that call did not survive it',
     (SELECT count(*)::text FROM income WHERE source = 'uber'), v_before::text);
+END $$;
+
+-- ─── 6. typed rows are not refused: both sets stand ────────────────────────
+--
+-- The screen WARNS about hand-entered rows for the same driver and week and does
+-- not block (the owner may have typed only part of it). That only holds if the
+-- database does not refuse them either, and that both sets then really exist.
+
+DO $$
+DECLARE
+  admin_a constant uuid := 'a0000000-0000-4000-8000-000000000001';
+BEGIN
+  PERFORM _ui_rec(40, 'an import over a week that already holds a typed row is NOT refused',
+    _ui_call(admin_a, _ui_import(jsonb_build_array(
+      _ui_row('1002', 'umsatz', '50.00', '2026-11-02', '2026-11-08', 1)))) :: text,
+    '{"ok": true, "drivers": 1, "inserted": 1}');
+
+  PERFORM _ui_rec(41, 'and both stand: the typed row untouched, the imported one beside it',
+    (SELECT string_agg(coalesce(source, 'manual') || ':' || amount::text, ' ' ORDER BY amount DESC)
+       FROM income WHERE driver_name = 'Omar Khalil' AND date BETWEEN '2026-11-02' AND '2026-11-08'),
+    'manual:100 uber:50.00');
 END $$;
 
 -- ─── the verdict ────────────────────────────────────────────────────────────

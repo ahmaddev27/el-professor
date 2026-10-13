@@ -6403,9 +6403,6 @@ export const en: PartialDictionary = {
   'inc.uber.to':                     'To',
   'inc.uber.uberName':               'Uber: {name}',
   'inc.uber.unlinked':               'Not linked',
-  'inc.uber.unlinkedBody':           'These Uber drivers are not linked to any driver of your company. Confirm the link first; nothing is imported while one is missing.',
-  'inc.uber.unlinkedItem':           '{name} (Reidey ID {id})',
-  'inc.uber.unlinkedTitle':          'Import blocked: drivers without a confirmed link',
   'inc.uber.weeksCount.one':         'The period covers {count} week.',
   'inc.uber.weeksCount.other':       'The period covers {count} weeks.',
 
@@ -6420,4 +6417,13 @@ export const en: PartialDictionary = {
   'inc.uber.err.partner.too_many_pages':   'The period holds too many entries at Uber for one request. Please choose a shorter period.',
   'inc.uber.err.partner.uber_session_rejected': 'Uber rejected Reidey\'s stored sign-in. It has to be renewed there.',
   'inc.uber.err.partner.unreadable_amount': 'Uber returned an amount Reidey cannot read unambiguously. Nothing was taken over.',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'inc.uber.existingUnchecked': 'Existing entries could not be checked completely. Whether amounts were already entered for these weeks is unknown; they might be counted twice.',
+  'inc.uber.importedBody':      'An Uber import already exists for these drivers and weeks. The database does not allow a second one; nothing is written. Choose a period without these weeks.',
+  'inc.uber.importedItem':      '{name} · {week} ({from} – {to}) · entries: {count}',
+  'inc.uber.importedTitle':     'Already imported: this import will be refused',
+  'inc.uber.manualBody':        'The import does not change or delete them. Both sets stay, and the amounts add up: revenue, promotions, tips, cash and with them the salary basis. If the same amounts were already entered, they are counted twice. Check before importing.',
+  'inc.uber.manualItem':        '{name} · {week} ({from} – {to}) · entries: {count}',
+  'inc.uber.manualTitle':       'Warning: entries typed by hand already exist for these weeks',
 };

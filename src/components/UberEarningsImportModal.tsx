@@ -5,15 +5,17 @@ import { supabase } from '../lib/supabase';
 import { useToast } from '../contexts/ToastContext';
 import { useTranslation } from '../contexts/LanguageContext';
 import type { TranslationKey } from '../i18n';
-import { splitIntoBusinessWeeks, type UnmatchedEarner } from '../../supabase/functions/_shared/uber-earnings-core';
+import { addDaysIso, splitIntoBusinessWeeks, type UnmatchedEarner } from '../../supabase/functions/_shared/uber-earnings-core';
 import {
   blockingEarners,
   buildImportRows,
+  findExistingIncome,
   findUnlinked,
   readPullAnswer,
   summarizeByDriver,
   weekNumberOf,
   type DriverLinks,
+  type ExistingIncome,
   type DriverPreview,
   type WeekEarnings,
 } from '../utils/uberEarningsImport';
@@ -49,6 +51,34 @@ interface Pulled {
   weeks: WeekEarnings[];
   links: DriverLinks;
   unmatched: UnmatchedEarner[];
+  /** Income already in the table around the range, whatever its source. */
+  existing: ExistingIncome[];
+  /** False when the lookup failed or hit the row cap: "none found" would be a claim. */
+  existingComplete: boolean;
+}
+
+// PostgREST answers at most this many rows; reaching it means the list may be cut.
+const EXISTING_ROW_CAP = 1000;
+
+/**
+ * One round trip for the whole range: every income row of the linked drivers
+ * from six days before the range (an earlier import can overlap it by its
+ * period) to its end. Matching per driver and week happens in the browser.
+ */
+async function loadExistingIncome(
+  from: string, to: string, links: DriverLinks,
+): Promise<{ rows: ExistingIncome[]; complete: boolean }> {
+  const names = [...new Set(Object.values(links).map(l => l.driverName))];
+  if (names.length === 0) return { rows: [], complete: true };
+  const { data, error } = await supabase
+    .from('income')
+    .select('driver_name, date, type, amount, source, source_period_start, source_period_end')
+    .gte('date', addDaysIso(from, -6))
+    .lte('date', to)
+    .in('driver_name', names)
+    .limit(EXISTING_ROW_CAP);
+  if (error || !data) return { rows: [], complete: false };
+  return { rows: data as ExistingIncome[], complete: data.length < EXISTING_ROW_CAP };
 }
 
 // Reidey's own stable refusal reasons, named. Anything else is shown with its
@@ -121,6 +151,12 @@ function UberEarningsImportModal({ isOpen, onClose, onImported }: Props) {
   const unlinked = useMemo(() => (pulled ? findUnlinked(pulled.weeks, pulled.links) : []), [pulled]);
   // Both causes stop the import and both are named: an earner Reidey cannot
   // place, and a Reidey driver nobody here has linked.
+  const existingByWeek = useMemo(
+    () => (pulled ? findExistingIncome(pulled.weeks, pulled.links, pulled.existing) : []),
+    [pulled],
+  );
+  const manualWeeks = existingByWeek.filter(e => e.manualCount > 0);
+  const importedWeeks = existingByWeek.filter(e => e.importedCount > 0);
   const blocking = useMemo(() => blockingEarners(unlinked, pulled?.unmatched ?? []), [unlinked, pulled]);
   const preview = useMemo(() => (pulled ? summarizeByDriver(pulled.weeks, pulled.links) : []), [pulled]);
 
@@ -152,7 +188,9 @@ function UberEarningsImportModal({ isOpen, onClose, onImported }: Props) {
         setStage('range');
         return;
       }
-      setPulled(read);
+      const existing = await loadExistingIncome(from, to, read.links);
+      if (mine !== generation.current) return;
+      setPulled({ ...read, existing: existing.rows, existingComplete: existing.complete });
       setStage('preview');
     } catch {
       if (mine !== generation.current) return;
@@ -238,9 +276,16 @@ function UberEarningsImportModal({ isOpen, onClose, onImported }: Props) {
     },
   ];
 
+  const existingVars = (e: { driverName: string; segment: WeekEarnings['segment'] }, count: number) => ({
+    name: e.driverName,
+    week: t('inc.weekLabel', { week: weekNumberOf(e.segment) }),
+    from: formatDate(e.segment.from),
+    to: formatDate(e.segment.to),
+    count: String(count),
+  });
   const weekLines = pulled?.weeks.map(w => `${t('inc.weekLabel', { week: weekNumberOf(w.segment) })}: ${formatDate(w.segment.from)} – ${formatDate(w.segment.to)}`) ?? [];
   const busy = stage === 'pulling' || stage === 'importing';
-  const canConfirm = stage === 'preview' && rows.length > 0 && blocking.length === 0;
+  const canConfirm = stage === 'preview' && rows.length > 0 && blocking.length === 0 && importedWeeks.length === 0;
 
   return (
     <Dialog open={isOpen} onOpenChange={open => { if (!open && !busy) close(); }}>
@@ -289,6 +334,33 @@ function UberEarningsImportModal({ isOpen, onClose, onImported }: Props) {
                   ))}
                 </ul>
               </Alert>
+            )}
+            {importedWeeks.length > 0 && (
+              <Alert tone="critical" title={t('inc.uber.importedTitle')}>
+                <p>{t('inc.uber.importedBody')}</p>
+                <ul className="mt-2 list-disc pl-5">
+                  {importedWeeks.map(e => (
+                    <li key={`i-${e.driverName}-${e.segment.from}`}>
+                      {t('inc.uber.importedItem', existingVars(e, e.importedCount))}
+                    </li>
+                  ))}
+                </ul>
+              </Alert>
+            )}
+            {manualWeeks.length > 0 && (
+              <Alert tone="caution" title={t('inc.uber.manualTitle')}>
+                <p>{t('inc.uber.manualBody')}</p>
+                <ul className="mt-2 list-disc pl-5">
+                  {manualWeeks.map(e => (
+                    <li key={`m-${e.driverName}-${e.segment.from}`}>
+                      {t('inc.uber.manualItem', existingVars(e, e.manualCount))}
+                    </li>
+                  ))}
+                </ul>
+              </Alert>
+            )}
+            {!pulled.existingComplete && (
+              <Alert tone="caution">{t('inc.uber.existingUnchecked')}</Alert>
             )}
             {blocking.length === 0 && rows.length === 0 && (
               <Alert tone="caution">{t('inc.uber.nothingToImport')}</Alert>
