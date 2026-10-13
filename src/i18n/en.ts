@@ -6426,4 +6426,7 @@ export const en: PartialDictionary = {
   'inc.uber.manualBody':        'The import does not change or delete them. Both sets stay, and the amounts add up: revenue, promotions, tips, cash and with them the salary basis. If the same amounts were already entered, they are counted twice. Check before importing.',
   'inc.uber.manualItem':        '{name} · {week} ({from} – {to}) · entries: {count}',
   'inc.uber.manualTitle':       'Warning: entries typed by hand already exist for these weeks',
+
+  // ── Added by scripts/i18n-merge.mjs ──────────────────────────────────────
+  'inc.uber.err.partner.detail': 'Reidey refused the request ({reason}): {detail} Nothing was taken over.',
 };
